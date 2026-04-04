@@ -181,6 +181,14 @@ MIN_PORT_STATION_GAP: float = 16.0
 STATION_ELBOW_TOLERANCE: float = 12.0
 """Tolerance for station-as-elbow detection."""
 
+MAX_PORT_ALIGN_BBOX_EXPANSION_FRAC: float = 0.5
+"""Maximum bbox expansion for port alignment, as a fraction of section bbox_h.
+
+When aligning an entry port Y with the source exit port Y, the source Y
+may fall outside the entry section's bounding box (because the source
+section has more tracks).  Allow the bbox to expand up to this fraction
+of its height to accommodate the aligned port."""
+
 # ---------------------------------------------------------------------------
 # Labels
 # ---------------------------------------------------------------------------

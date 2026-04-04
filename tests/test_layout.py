@@ -715,6 +715,58 @@ def test_straight_diamond_inter_section_port_alignment():
     )
 
 
+def test_mismatched_tracks_port_alignment():
+    """Entry port Y aligns with source exit port Y when track counts differ (#165)."""
+    graph = parse_metro_mermaid(
+        "%%metro line: a | Alpha | #0570b0\n"
+        "%%metro line: b | Beta | #2db572\n"
+        "%%metro line: c | Gamma | #e31a1c\n"
+        "%%metro line: d | Delta | #ff7f00\n"
+        "%%metro line: e | Epsilon | #6a3d9a\n"
+        "graph LR\n"
+        "    subgraph wide [Wide Section]\n"
+        "        w1[Start]\n"
+        "        w2a[Path A]\n"
+        "        w2b[Path B]\n"
+        "        w2c[Path C]\n"
+        "        w2d[Path D]\n"
+        "        w2e[Path E]\n"
+        "        w3[Merge]\n"
+        "        w1 -->|a| w2a\n"
+        "        w1 -->|b| w2b\n"
+        "        w1 -->|c| w2c\n"
+        "        w1 -->|d| w2d\n"
+        "        w1 -->|e| w2e\n"
+        "        w2a -->|a| w3\n"
+        "        w2b -->|b| w3\n"
+        "        w2c -->|c| w3\n"
+        "        w2d -->|d| w3\n"
+        "        w2e -->|e| w3\n"
+        "    end\n"
+        "    subgraph narrow [Narrow Section]\n"
+        "        n1[Receive]\n"
+        "        n2[Output]\n"
+        "        n1 -->|a,b,c,d,e| n2\n"
+        "    end\n"
+        "    w3 -->|a,b,c,d,e| n1\n"
+    )
+    compute_layout(graph)
+
+    # Find exit port of wide section and entry port of narrow section
+    wide_exit_ports = graph.sections["wide"].exit_ports
+    narrow_entry_ports = graph.sections["narrow"].entry_ports
+    assert wide_exit_ports and narrow_entry_ports
+
+    exit_y = graph.stations[wide_exit_ports[0]].y
+    entry_y = graph.stations[narrow_entry_ports[0]].y
+
+    # Ports should be at the same Y (horizontal inter-section line)
+    assert abs(exit_y - entry_y) < 5.0, (
+        f"Exit port at y={exit_y} and entry port at y={entry_y} should align "
+        f"for horizontal inter-section connection (delta={abs(exit_y - entry_y):.1f})"
+    )
+
+
 def test_label_text_width_single_line():
     assert label_text_width("Hello") == 5 * CHAR_WIDTH
 

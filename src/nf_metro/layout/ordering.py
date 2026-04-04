@@ -108,6 +108,7 @@ def assign_tracks(
                     G,
                     tracks,
                     straight_diamonds=graph.diamond_style == "straight",
+                    layer_idx=layer_idx,
                 )
                 for n in nodes:
                     layer_occupancy[layer_idx][n] = tracks[n]
@@ -372,6 +373,7 @@ def _place_fan_out(
     tracks: dict[str, float],
     *,
     straight_diamonds: bool = False,
+    layer_idx: int = -1,
 ) -> None:
     """Place multiple nodes in the same layer+line, centered around an anchor.
 
@@ -381,6 +383,10 @@ def _place_fan_out(
     When *straight_diamonds* is True, diamond (fork-join) patterns use
     asymmetric placement: the first node stays at the anchor
     (straight-through) and only the alternative branch(es) fan out below.
+
+    When *layer_idx* is 1, predecessors are at the entry layer (layer 0),
+    so asymmetric (downward) placement is used to keep the entry station
+    at the top of the section (#165).
     """
     # Compute barycenters for ordering
     bary: dict[str, float] = {}
@@ -426,9 +432,18 @@ def _place_fan_out(
             tracks[node] = pred_snap[node]
         return
 
+    # Use asymmetric (downward) placement when:
+    # - straight diamonds with diamond fan-out, OR
+    # - predecessors are at the entry layer (layer 0), so the entry
+    #   station stays at the top of the section (#165).
+    use_asymmetric = False
     if straight_diamonds and _is_diamond_fanout(nodes, G):
-        # Diamond: first node stays at anchor (straight-through),
-        # alternative branches fan out below.
+        use_asymmetric = True
+    elif layer_idx == 1:
+        use_asymmetric = True
+
+    if use_asymmetric:
+        # First node stays at anchor, others fan out below.
         tracks[nodes[0]] = anchor
         for i, node in enumerate(nodes[1:], 1):
             tracks[node] = anchor + i * fan_spacing

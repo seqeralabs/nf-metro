@@ -26,6 +26,7 @@ from nf_metro.layout.constants import (
     LABEL_OFFSET,
     LABEL_PAD,
     LINE_GAP,
+    MAX_PORT_ALIGN_BBOX_EXPANSION_FRAC,
     MIN_PORT_STATION_GAP,
     ROW_GAP,
     SECTION_GAP,
@@ -1196,13 +1197,19 @@ def _align_lr_entry_port(
         if entry_section.grid_row != src_section.grid_row:
             break
 
-        # Skip alignment if source Y is outside entry section bbox
+        # Skip alignment if source Y is too far outside entry section bbox.
+        # Allow moderate expansion so ports align when adjacent sections
+        # have different track counts (#165).
         entry_station = graph.stations.get(port_id)
         if entry_station:
             bbox_top = entry_section.bbox_y
             bbox_bot = entry_section.bbox_y + entry_section.bbox_h
-            if not (bbox_top <= src_y <= bbox_bot):
+            max_expand = entry_section.bbox_h * MAX_PORT_ALIGN_BBOX_EXPANSION_FRAC
+            if src_y < bbox_top - max_expand or src_y > bbox_bot + max_expand:
                 break
+            # Expand bbox to contain aligned port if needed
+            if src_y < bbox_top or src_y > bbox_bot:
+                _expand_bbox_for_y(entry_section, src_y)
 
         target_y = src_y
 
