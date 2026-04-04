@@ -119,7 +119,7 @@ DEBUG_STROKE_WIDTH: float = 1.5
 # ---------------------------------------------------------------------------
 # Section box
 # ---------------------------------------------------------------------------
-SECTION_BOX_RADIUS: int = 12
+SECTION_BOX_RADIUS: int = 8
 """Corner radius for section bounding box rectangles."""
 
 SECTION_STROKE_WIDTH: float = 1.0
