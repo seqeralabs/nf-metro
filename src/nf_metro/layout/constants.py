@@ -67,14 +67,6 @@ PLACEMENT_Y_GAP: float = 70.0
 PORT_MIN_GAP: float = 15.0
 """Minimum spacing between adjacent ports on a section boundary."""
 
-MIN_INTER_SECTION_GAP: float = 40.0
-"""Minimum physical gap between adjacent section bboxes.
-
-Ensures the gap midpoint is at least 2*CURVE_RADIUS from each section
-edge, giving enough horizontal run for smooth curves at bypass route
-corners.  Value: 40px (4 * 10px CURVE_RADIUS).
-"""
-
 SECTION_HEADER_PROTRUSION: float = 26.0
 """Distance the section header protrudes above bbox_y.
 
@@ -98,6 +90,14 @@ DIAGONAL_RUN: float = 30.0
 
 CURVE_RADIUS: float = 10.0
 """Default corner radius for routed paths."""
+
+MIN_INTER_SECTION_GAP: float = 4 * CURVE_RADIUS
+"""Minimum physical gap between adjacent section bboxes.
+
+Ensures the gap midpoint is at least 2*CURVE_RADIUS from each section
+edge, giving enough horizontal run for smooth curves at bypass route
+corners.  Derived as 4 * CURVE_RADIUS.
+"""
 
 OFFSET_STEP: float = 3.0
 """Per-line offset increment for parallel lines in bundles."""

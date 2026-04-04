@@ -4,6 +4,8 @@ Centralizes magic numbers from svg.py, legend.py, animate.py, and icons.py.
 Theme-dependent values remain in style.py.
 """
 
+from nf_metro.layout.constants import CURVE_RADIUS
+
 # ---------------------------------------------------------------------------
 # Canvas
 # ---------------------------------------------------------------------------
@@ -52,8 +54,10 @@ LEGEND_BORDER_RADIUS: int = 6
 # ---------------------------------------------------------------------------
 # SVG drawing
 # ---------------------------------------------------------------------------
-SVG_CURVE_RADIUS: float = 10.0
-"""Default corner radius for edge path smoothing."""
+SVG_CURVE_RADIUS: float = CURVE_RADIUS
+"""Default corner radius for edge path smoothing.
+
+Derived from the layout CURVE_RADIUS so routing and rendering agree."""
 
 SECTION_NUM_CIRCLE_R: int = 8
 """Radius of section number circle background (small variant)."""
@@ -89,8 +93,10 @@ ICON_BBOX_MARGIN: float = 2.0
 # ---------------------------------------------------------------------------
 # Animation
 # ---------------------------------------------------------------------------
-ANIMATION_CURVE_RADIUS: float = 10.0
-"""Default curve radius for animation motion paths."""
+ANIMATION_CURVE_RADIUS: float = CURVE_RADIUS
+"""Default curve radius for animation motion paths.
+
+Derived from the layout CURVE_RADIUS for consistency."""
 
 MIN_ANIMATION_DURATION: float = 2.0
 """Minimum duration in seconds for ball animation."""
