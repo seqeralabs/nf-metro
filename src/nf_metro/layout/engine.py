@@ -244,8 +244,8 @@ def _compute_section_layout(
 
     Pass A - Port initialisation & section geometry:
       Phase 5:  Port positioning on section boundaries
-      Phase 6:  Shift LR/RL perp-entry internal stations (X only)
-      Phase 7:  Align entry ports to incoming source Y/X
+      Phase 6:  Align entry ports to incoming source Y/X
+      Phase 7:  Shift LR/RL perp-entry internal stations (X only)
       Phase 8:  Align fold-section exit ports (may push target sections)
       Phase 9:  Top-align sections within each grid row
 
@@ -329,9 +329,10 @@ def _compute_section_layout(
         _guard_section_bboxes_positive(graph, "after Phase 4")
 
     # ---- Pass A: Port initialisation & section geometry adjustments ------
-    # Position ports on bbox edges, shift internal stations, align entry
-    # and fold-exit ports, then top-align sections.  Top-align runs last
-    # in this pass so it corrects any bbox shifts from fold-exit alignment.
+    # Position ports on bbox edges, align entry ports, shift internal
+    # stations for perp entries, align fold exits, then top-align.
+    # Top-align runs last so it corrects any bbox shifts from fold-exit
+    # alignment.
 
     # Phase 5: Position ports on section boundaries (after bbox is in global coords)
     for sec_id, section in graph.sections.items():
@@ -340,16 +341,17 @@ def _compute_section_layout(
     if validate:
         _guard_ports_on_boundaries(graph, "after Phase 5")
 
-    # Phase 6: Shift internal stations in LR/RL sections with
-    # perpendicular (TOP/BOTTOM) entry away from the port.  Needs port X
-    # from Phase 5; only moves internal station X, not ports or bboxes.
-    _shift_lr_perp_entry_stations(graph, x_spacing)
-
-    # Phase 7: Align LEFT/RIGHT entry ports with their incoming
+    # Phase 6: Align LEFT/RIGHT entry ports with their incoming
     # connection's Y so inter-section horizontal runs are straight.
     # Uses _resolve_source_xy() to derive junction coordinates
     # on-the-fly, removing the dependency on pre-positioned junctions.
     _align_entry_ports(graph)
+
+    # Phase 7: Shift internal stations in LR/RL sections with
+    # perpendicular (TOP/BOTTOM) entry away from the port.  Needs the
+    # aligned port X from Phase 6; only moves internal station X, not
+    # ports or bboxes.
+    _shift_lr_perp_entry_stations(graph, x_spacing)
 
     # Phase 8: Align LEFT/RIGHT exit ports on row-spanning (fold)
     # sections with their target's Y so the exit is at the return row.
@@ -366,7 +368,7 @@ def _compute_section_layout(
     if validate:
         _guard_ports_on_boundaries(graph, "after top-align")
 
-    # ---- Pass B: Port alignment (single pass) --------------------------
+    # ---- Pass B: Downstream alignment (single pass) --------------------
     # Downstream alignment and terminus spacing run on finalised section
     # geometry (after top-align), so they don't need re-running.
 
