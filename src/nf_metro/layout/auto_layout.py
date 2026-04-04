@@ -13,7 +13,7 @@ __all__ = ["infer_section_layout"]
 
 from collections import defaultdict, deque
 
-from nf_metro.parser.model import MetroGraph, PortSide
+from nf_metro.parser.model import MetroGraph, PortSide, SectionDAG
 
 
 def infer_section_layout(graph: MetroGraph, max_station_columns: int = 15) -> None:
@@ -27,9 +27,13 @@ def infer_section_layout(graph: MetroGraph, max_station_columns: int = 15) -> No
     layer count across sections in a row exceeds this threshold.
     """
     if len(graph.sections) <= 1:
+        graph.section_dag = SectionDAG(successors={}, predecessors={}, edge_lines={})
         return
 
     successors, predecessors, edge_lines = _build_section_dag(graph)
+    graph.section_dag = SectionDAG(
+        successors=successors, predecessors=predecessors, edge_lines=edge_lines
+    )
 
     # Only run grid/direction/port inference if there are inter-section edges
     if not successors and not predecessors:

@@ -6,6 +6,25 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
+@dataclass
+class SectionDAG:
+    """Section-level dependency graph built from inter-section edges.
+
+    Built once during auto-layout (before _resolve_sections rewrites edges
+    through ports and junctions) and stored on MetroGraph for reuse by
+    section_placement and other layout phases.
+    """
+
+    successors: dict[str, set[str]]
+    predecessors: dict[str, set[str]]
+    edge_lines: dict[tuple[str, str], set[str]]
+
+    @property
+    def section_edges(self) -> set[tuple[str, str]]:
+        """All (src_section, tgt_section) pairs."""
+        return set(self.edge_lines.keys())
+
+
 class PortSide(Enum):
     """Side of a section boundary where a port is located."""
 
@@ -140,6 +159,8 @@ class MetroGraph:
     compact_offsets: bool = False
     legend_position: str = "bottom"
     logo_path: str = ""
+    # Section dependency graph (populated by auto_layout)
+    section_dag: SectionDAG | None = None
     # Section IDs that had explicit %%metro direction: directives
     _explicit_directions: set[str] = field(default_factory=set)
     # Pending terminus designations: station_id -> list of extension labels

@@ -1,8 +1,9 @@
 """Section meta-graph layout: place sections on the canvas.
 
-Builds a DAG of sections from inter-section edges, uses topological
-layering for column assignment and row stacking within columns.
-Grid overrides can pin sections to specific positions.
+Uses the section DAG (built once by auto_layout and stored on
+MetroGraph) for topological layering of column assignment and
+row stacking within columns.  Grid overrides can pin sections
+to specific positions.
 """
 
 from __future__ import annotations
@@ -24,36 +25,6 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
 )
 from nf_metro.parser.model import MetroGraph, PortSide, Section
-
-
-def _build_section_dag(
-    graph: MetroGraph,
-) -> set[tuple[str, str]]:
-    """Build section dependency edges from graph edges, traversing junctions."""
-    section_edges: set[tuple[str, str]] = set()
-
-    junction_ids = set(graph.junctions)
-    junction_targets: dict[str, set[str]] = defaultdict(set)
-    junction_sources: dict[str, set[str]] = defaultdict(set)
-
-    for edge in graph.edges:
-        src_sec = graph.section_for_station(edge.source)
-        tgt_sec = graph.section_for_station(edge.target)
-
-        if edge.target in junction_ids and src_sec:
-            junction_sources[edge.target].add(src_sec)
-        elif edge.source in junction_ids and tgt_sec:
-            junction_targets[edge.source].add(tgt_sec)
-        elif src_sec and tgt_sec and src_sec != tgt_sec:
-            section_edges.add((src_sec, tgt_sec))
-
-    for jid in junction_ids:
-        for src_sec in junction_sources.get(jid, set()):
-            for tgt_sec in junction_targets.get(jid, set()):
-                if src_sec != tgt_sec:
-                    section_edges.add((src_sec, tgt_sec))
-
-    return section_edges
 
 
 def _assign_grid_layout(
@@ -327,7 +298,7 @@ def place_sections(
     if not graph.sections:
         return
 
-    section_edges = _build_section_dag(graph)
+    section_edges = graph.section_dag.section_edges
     col_assign, row_assign = _assign_grid_layout(graph, section_edges)
     min_col, max_col = _compute_section_offsets(
         graph, col_assign, row_assign, section_x_gap, section_y_gap
