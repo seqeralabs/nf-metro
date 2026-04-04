@@ -445,8 +445,14 @@ def check_edge_section_crossing(
                     continue
 
                 if _segment_crosses_bbox(
-                    x1, y1, x2, y2,
-                    sec.bbox_x, sec.bbox_y, sec.bbox_w, sec.bbox_h,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    sec.bbox_x,
+                    sec.bbox_y,
+                    sec.bbox_w,
+                    sec.bbox_h,
                     margin=margin,
                 ):
                     violations.append(
