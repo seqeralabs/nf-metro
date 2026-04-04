@@ -601,3 +601,28 @@ def test_parse_no_file_icon_not_terminus():
     graph = parse_metro_mermaid(text)
     assert not graph.stations["a"].is_terminus
     assert graph.stations["a"].terminus_labels == []
+
+
+def test_no_duplicate_edges_after_resolve_sections():
+    """Multiple inter-section edges to the same section should not create
+    duplicate (source, target, line_id) triples after _resolve_sections."""
+    text = (
+        "%%metro line: asm | Assembly | #0570b0\n"
+        "graph LR\n"
+        "    subgraph sec1 [Source]\n"
+        "        %%metro exit: right | asm\n"
+        "        a[A]\n"
+        "    end\n"
+        "    subgraph sec2 [Target]\n"
+        "        %%metro entry: left | asm\n"
+        "        b[B]\n"
+        "        c[C]\n"
+        "    end\n"
+        "    a -->|asm| b\n"
+        "    a -->|asm| c\n"
+    )
+    graph = parse_metro_mermaid(text)
+    edge_keys = [(e.source, e.target, e.line_id) for e in graph.edges]
+    assert len(edge_keys) == len(set(edge_keys)), (
+        f"Duplicate edges found: {[k for k in edge_keys if edge_keys.count(k) > 1]}"
+    )

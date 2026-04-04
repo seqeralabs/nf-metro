@@ -675,7 +675,17 @@ def _rewrite_edges_with_junctions(
                         )
                     )
 
-    graph.edges = new_edges
+    # Deduplicate edges by (source, target, line_id) - multiple original
+    # inter-section edges targeting different stations in the same section
+    # can produce identical port-to-port or junction-to-port edges.
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[Edge] = []
+    for edge in new_edges:
+        key = (edge.source, edge.target, edge.line_id)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(edge)
+    graph.edges = deduped
     graph._invalidate_edge_caches()
 
 
