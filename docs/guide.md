@@ -146,34 +146,27 @@ When optional processing steps mean the **same line** can reach a destination fr
 %%metro style: dark
 %%metro line: main | Main | #0570b0
 %%metro line: aux | Auxiliary | #2db572
-%%metro line_order: span
 
 graph LR
     subgraph source [Source]
-        %%metro exit: right | main,aux
         s1[Produce]
         s2[Prepare]
         s1 -->|main,aux| s2
     end
 
     subgraph step_a [Step A]
-        %%metro entry: left | main
-        %%metro exit: right | main
         a1[Process A]
         a2[Refine A]
         a1 -->|main| a2
     end
 
     subgraph step_b [Step B]
-        %%metro entry: left | main
-        %%metro exit: right | main
         b1[Process B]
         b2[Refine B]
         b1 -->|main| b2
     end
 
     subgraph sink [Sink]
-        %%metro entry: left | main,aux
         t1[Collect]
         t2[Report]
         t1 -->|main,aux| t2
