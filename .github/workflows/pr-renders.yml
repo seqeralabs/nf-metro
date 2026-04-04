@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: pr-renders-${{ github.event.number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   render-diff:
