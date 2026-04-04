@@ -2006,6 +2006,7 @@ def _insert_entry_pass_throughs(
                         target=pass_id,
                         line_id=line_id,
                     )
+            graph._invalidate_edge_caches()
 
 
 def _insert_exit_bypass_stations(
@@ -2131,6 +2132,7 @@ def _insert_exit_bypass_stations(
                 )
                 break
 
+    graph._invalidate_edge_caches()
     return None if inserted_any else layers
 
 

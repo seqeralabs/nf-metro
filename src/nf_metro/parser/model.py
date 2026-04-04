@@ -144,6 +144,14 @@ class MetroGraph:
     _explicit_directions: set[str] = field(default_factory=set)
     # Pending terminus designations: station_id -> list of extension labels
     _pending_terminus: dict[str, list[str]] = field(default_factory=dict)
+    # Lazy cache for station_lines(); invalidated on edge mutation
+    _station_lines_cache: dict[str, list[str]] | None = field(
+        default=None, repr=False
+    )
+
+    def _invalidate_edge_caches(self) -> None:
+        """Reset caches that depend on the edge list."""
+        self._station_lines_cache = None
 
     def add_line(self, line: MetroLine) -> None:
         self.lines[line.id] = line
@@ -159,6 +167,7 @@ class MetroGraph:
 
     def add_edge(self, edge: Edge) -> None:
         self.edges.append(edge)
+        self._invalidate_edge_caches()
 
     def add_section(self, section: Section) -> None:
         self.sections[section.id] = section
@@ -182,12 +191,23 @@ class MetroGraph:
                 section.exit_ports.append(port.id)
 
     def station_lines(self, station_id: str) -> list[str]:
-        """Return line IDs that pass through a station."""
-        line_ids = set()
-        for edge in self.edges:
-            if edge.source == station_id or edge.target == station_id:
-                line_ids.add(edge.line_id)
-        return sorted(line_ids)
+        """Return sorted line IDs that pass through a station.
+
+        Uses a lazily-built cache that indexes all edges by their
+        source and target stations.  The cache is invalidated
+        whenever edges are added or replaced.
+        """
+        if self._station_lines_cache is None:
+            from collections import defaultdict
+
+            idx: dict[str, set[str]] = defaultdict(set)
+            for e in self.edges:
+                idx[e.source].add(e.line_id)
+                idx[e.target].add(e.line_id)
+            self._station_lines_cache = {
+                sid: sorted(lids) for sid, lids in idx.items()
+            }
+        return self._station_lines_cache.get(station_id, [])
 
     def line_stations(self, line_id: str) -> list[str]:
         """Return station IDs on a line, in edge order."""

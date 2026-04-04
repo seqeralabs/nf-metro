@@ -676,6 +676,7 @@ def _rewrite_edges_with_junctions(
                     )
 
     graph.edges = new_edges
+    graph._invalidate_edge_caches()
 
 
 def _create_ports_and_junctions(
