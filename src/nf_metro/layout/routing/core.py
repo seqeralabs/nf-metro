@@ -1308,42 +1308,38 @@ def _route_diagonal(
 # ---------------------------------------------------------------------------
 
 
-def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None:
-    """Shift diagonals so bubble stations sit centred on their flat segments.
+@dataclass
+class _BubbleCtx:
+    """Pre-computed indexes for bubble-centering logic."""
 
-    A "bubble station" branches off the trunk at a different Y, with a
-    diagonal on each side.  The fork/join bias in ``_route_diagonal``
-    keeps diagonals symmetric at the shared station but leaves the bubble
-    station off-centre.  This pass detects such stations and shifts both
-    adjacent diagonals by the same amount to equalise the flat runs.
+    # Fork/join adjacency from the full edge list
+    all_sources: dict[str, set[str]]
+    all_targets: dict[str, set[str]]
+    # 4-point diagonal routes indexed by station
+    incoming: dict[str, list[RoutedPath]]
+    outgoing: dict[str, list[RoutedPath]]
+    # 2-point flat routes indexed by station
+    flat_incoming: dict[str, list[RoutedPath]]
+    flat_outgoing: dict[str, list[RoutedPath]]
+    # Physically distinct diagonal convergence/divergence points
+    diag_in_sources: dict[str, set[str]]
+    diag_out_targets: dict[str, set[str]]
+    # Snapshot of station X before any moves
+    original_x: dict[str, float]
 
-    Skips stations whose neighbouring diagonal endpoints are bundle
-    convergence/divergence points (multiple diagonal routes arriving or
-    departing), since shifting individual diagonals in a bundle would
-    break the visual alignment of parallel return paths.
-    """
-    # Identify fork/join stations from the full graph (all edge types, not
-    # just 4-point diagonals).  A fork has multiple targets, a join has
-    # multiple sources.  These must NOT be recentred as bubble stations.
+
+def _build_bubble_ctx(routes: list[RoutedPath], graph: MetroGraph) -> _BubbleCtx:
+    """Build indexes for bubble-station centering."""
     all_sources: dict[str, set[str]] = defaultdict(set)
     all_targets: dict[str, set[str]] = defaultdict(set)
     for edge in graph.edges:
         all_targets[edge.source].add(edge.target)
         all_sources[edge.target].add(edge.source)
 
-    # Index 4-point diagonal routes by their source and target station IDs.
-    # 4-point routes have the shape: [flat, diag_start, diag_end, flat].
     incoming: dict[str, list[RoutedPath]] = defaultdict(list)
     outgoing: dict[str, list[RoutedPath]] = defaultdict(list)
-
-    # Index 2-point flat routes (simple horizontal connections).
     flat_incoming: dict[str, list[RoutedPath]] = defaultdict(list)
     flat_outgoing: dict[str, list[RoutedPath]] = defaultdict(list)
-
-    # Count how many *physically distinct* diagonal routes converge on /
-    # diverge from each station.  Multiple lines sharing the same edge
-    # (same source+target) produce duplicate RoutedPaths with identical
-    # geometry; count those as one to avoid over-triggering bundle guards.
     diag_in_sources: dict[str, set[str]] = defaultdict(set)
     diag_out_targets: dict[str, set[str]] = defaultdict(set)
 
@@ -1354,7 +1350,6 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
             continue
         if len(rp.points) != 4:
             continue
-        # Verify it really has a diagonal (Y changes between points 1 and 2)
         if abs(rp.points[1][1] - rp.points[2][1]) < COORD_TOLERANCE_FINE:
             continue
         incoming[rp.edge.target].append(rp)
@@ -1362,40 +1357,58 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
         diag_in_sources[rp.edge.target].add(rp.edge.source)
         diag_out_targets[rp.edge.source].add(rp.edge.target)
 
-    # Record original X for each station so we can detect which ones moved.
-    original_x: dict[str, float] = {
-        sid: s.x for sid, s in graph.stations.items() if not s.is_port
-    }
+    original_x = {sid: s.x for sid, s in graph.stations.items() if not s.is_port}
 
-    # First pass collects station-move candidates; second pass applies
-    # them only when all column companions agree on the shift.
+    return _BubbleCtx(
+        all_sources=all_sources,
+        all_targets=all_targets,
+        incoming=incoming,
+        outgoing=outgoing,
+        flat_incoming=flat_incoming,
+        flat_outgoing=flat_outgoing,
+        diag_in_sources=diag_in_sources,
+        diag_out_targets=diag_out_targets,
+        original_x=original_x,
+    )
+
+
+def _collect_centering_candidates(
+    graph: MetroGraph, ctx: _BubbleCtx
+) -> dict[str, tuple]:
+    """First pass: shift simple diagonals and collect station-move candidates.
+
+    For stations with a single diagonal on each side and no bundle
+    conflicts, shifts both diagonals to equalise the flat runs.
+    For more complex cases (shared bundles, flat+diagonal mixes),
+    collects a station-move candidate for the second pass.
+    """
     station_move_candidates: dict[str, tuple] = {}
+
+    def _is_internal(sid: str) -> bool:
+        st = graph.stations.get(sid)
+        return st is not None and not st.is_port and not st.is_hidden
 
     for sid, station in graph.stations.items():
         if station.is_port or station.is_hidden:
             continue
 
-        in_routes = incoming.get(sid, [])
-        out_routes = outgoing.get(sid, [])
-        flat_in = flat_incoming.get(sid, [])
-        flat_out = flat_outgoing.get(sid, [])
+        in_routes = ctx.incoming.get(sid, [])
+        out_routes = ctx.outgoing.get(sid, [])
+        flat_in = ctx.flat_incoming.get(sid, [])
+        flat_out = ctx.flat_outgoing.get(sid, [])
 
         is_fork_join = (
-            len(all_targets.get(sid, set())) > 1 or len(all_sources.get(sid, set())) > 1
+            len(ctx.all_targets.get(sid, set())) > 1
+            or len(ctx.all_sources.get(sid, set())) > 1
         )
 
         # Determine which routes bound the station's flat segment.
-        # Case 1: diagonal in + diagonal out (classic bubble)
-        # Case 2: flat in + diagonal out (e.g., file icon -> station -> hub)
-        # Case 3: diagonal in + flat out
         in_rp = None
         out_rp = None
         flat_in_rp = None
         flat_out_rp = None
 
         # Count physically distinct edges (unique source-target pairs).
-        # Multiple lines on the same edge create duplicate RoutedPaths
-        # with identical geometry; treat those as one for centering logic.
         n_unique_in = len(set((rp.edge.source, rp.edge.target) for rp in in_routes))
         n_unique_out = len(set((rp.edge.source, rp.edge.target) for rp in out_routes))
         n_unique_flat_in = len(set((rp.edge.source, rp.edge.target) for rp in flat_in))
@@ -1413,16 +1426,11 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
                 or (n_unique_in >= 1 and n_unique_flat_in >= 1)
             )
         ):
-            # Multiple physically distinct routes on one or both sides
-            # (e.g. multi-line station near an exit port).  Force
-            # station-move path by setting multi_diag flag.
             in_rp = in_routes[0] if in_routes else None
             flat_in_rp = flat_in[0] if (not in_routes and flat_in) else None
             out_rp = out_routes[0]
             multi_diag = True
         elif is_fork_join:
-            # Skip fork/join stations for single-diagonal centering -
-            # they sit at the trunk, not on a bubble.
             continue
         elif n_unique_in == 1 and n_unique_out == 1:
             in_rp = in_routes[0]
@@ -1436,31 +1444,23 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
         else:
             continue
 
-        # Check if either neighbouring endpoint is a bundle convergence or
-        # divergence point.  Shifting one diagonal in a bundle of parallel
-        # return paths would misalign them visually.
-        # Exception: port stations are invisible, so convergence/divergence
-        # at a port doesn't affect visual alignment.
+        # Check bundle convergence/divergence at neighbours.
         shared_source = False
         shared_target = False
         if out_rp:
             out_tgt = graph.stations.get(out_rp.edge.target)
-            if len(diag_in_sources.get(out_rp.edge.target, set())) > 1 and not (
+            if len(ctx.diag_in_sources.get(out_rp.edge.target, set())) > 1 and not (
                 out_tgt and out_tgt.is_port
             ):
                 shared_target = True
         if in_rp:
             in_src = graph.stations.get(in_rp.edge.source)
-            if len(diag_out_targets.get(in_rp.edge.source, set())) > 1 and not (
+            if len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1 and not (
                 in_src and in_src.is_port
             ):
                 shared_source = True
 
-        # Determine the X extent of the flat segment at station Y.
-        # For diagonal routes: incoming ends at points[2], outgoing starts at points[1].
-        # For flat routes: incoming ends at points[-1], outgoing starts at points[0].
-        # For multi-diagonal: use the closest endpoint (max of incoming,
-        # min of outgoing) to get the narrowest flat segment.
+        # Determine X extent of the flat segment at station Y.
         if multi_diag:
             in_xs = [r.points[2][0] for r in in_routes]
             in_xs += [r.points[0][0] for r in flat_in]
@@ -1481,7 +1481,6 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
         in_flat = station.x - in_diag_end_x
         out_flat = out_diag_start_x - station.x
 
-        # Skip if flats are already balanced or negligible
         if abs(in_flat) < 1 or abs(out_flat) < 1:
             continue
         if abs(in_flat - out_flat) < 1:
@@ -1489,14 +1488,7 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
 
         has_flat_side = flat_in_rp is not None or flat_out_rp is not None
 
-        # Guard: skip centering entirely when a flat connection goes
-        # to/from an internal (non-port, non-hidden) station.  That
-        # means the station sits on a horizontal trunk run and moving
-        # it would misalign it from its grid position.
-        def _is_internal(sid: str) -> bool:
-            st = graph.stations.get(sid)
-            return st is not None and not st.is_port and not st.is_hidden
-
+        # Guard: skip when a flat connection goes to/from an internal station.
         if has_flat_side or multi_diag:
             flat_to_internal = False
             if flat_in_rp and _is_internal(flat_in_rp.edge.source):
@@ -1514,8 +1506,6 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
                 continue
 
         if shared_source or shared_target or has_flat_side or multi_diag:
-            # Move the station itself to the centre of its flat
-            # segment rather than shifting individual diagonals.
             new_x = (in_diag_end_x + out_diag_start_x) / 2
             station_move_candidates[sid] = (
                 new_x,
@@ -1526,52 +1516,46 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
             )
             continue
 
-        # Shift both diagonals by the same amount to equalise the flats.
-        # Positive shift moves diagonals toward the station's right.
+        # Simple case: shift both diagonals to equalise the flats.
         shift = (in_flat - out_flat) / 2
 
-        # Guard: if the shift exceeds the shorter flat, the diagonal
-        # would be pushed backward past the source or target station.
         if abs(shift) > min(abs(in_flat), abs(out_flat)):
             continue
 
-        # Guard: don't shift when the outgoing diagonal converges at a
-        # bundle point or the incoming diverges from one.  Shifting one
-        # diagonal in a convergence/divergence bundle desynchronizes it
-        # with the others, even when the convergence point is an
-        # invisible port.
-        if out_rp and len(diag_in_sources.get(out_rp.edge.target, set())) > 1:
+        # Guard: don't shift in convergence/divergence bundles.
+        if out_rp and len(ctx.diag_in_sources.get(out_rp.edge.target, set())) > 1:
             continue
-        if in_rp and len(diag_out_targets.get(in_rp.edge.source, set())) > 1:
+        if in_rp and len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1:
             continue
 
-        # Shift all incoming diagonals (multiple routes may share the
-        # same physical edge across different metro lines).
         for rp in in_routes:
             rp.points[1] = (rp.points[1][0] + shift, rp.points[1][1])
             rp.points[2] = (rp.points[2][0] + shift, rp.points[2][1])
-
-        # Shift all outgoing diagonals.
         for rp in out_routes:
             rp.points[1] = (rp.points[1][0] + shift, rp.points[1][1])
             rp.points[2] = (rp.points[2][0] + shift, rp.points[2][1])
 
-    # ------------------------------------------------------------------
-    # Second pass: apply station-move candidates, but only when all
-    # column companions (visible stations at the same original X in
-    # the same section) also want to move.  If any companion is absent
-    # from the candidate list (e.g. fastp doesn't want centering while
-    # trimgalore does), skip the move to preserve column alignment.
-    # When all companions are candidates (e.g. VB 9-tool fan), all
-    # move together.
-    # ------------------------------------------------------------------
+    return station_move_candidates
+
+
+def _apply_station_moves(
+    graph: MetroGraph,
+    candidates: dict[str, tuple],
+    original_x: dict[str, float],
+) -> None:
+    """Second pass: apply station-move candidates with companion consensus.
+
+    Only moves a station when all column companions (visible stations at
+    the same original X in the same section) are also candidates.  This
+    preserves column alignment when only some stations want to centre.
+    """
     for sid, (
         new_x,
         in_routes,
         flat_in,
         out_routes,
         flat_out,
-    ) in station_move_candidates.items():
+    ) in candidates.items():
         station = graph.stations[sid]
         if abs(new_x - station.x) > 0.5:
             ox = original_x.get(sid, station.x)
@@ -1589,13 +1573,7 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
                 if abs(other.y - station.y) > 1:
                     companions.append(other_sid)
             if companions:
-                # Block if any companion is NOT also a move candidate.
-                # That companion won't shift, so moving this station
-                # would break column alignment.
-                any_non_candidate = any(
-                    c not in station_move_candidates for c in companions
-                )
-                if any_non_candidate:
+                if any(c not in candidates for c in companions):
                     continue
 
         station.x = new_x
@@ -1608,10 +1586,17 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
         for r in flat_out:
             r.points[0] = (new_x, r.points[0][1])
 
-    # Post-pass: align uncentered stations to their centered siblings.
-    # Group stations by (section, original_x).  Only drag unmoved stations
-    # when a clear majority (>50%) of the group already moved to the same X,
-    # avoiding false alignment of independent tracks that happen to share X.
+
+def _align_uncentered_siblings(
+    routes: list[RoutedPath],
+    graph: MetroGraph,
+    original_x: dict[str, float],
+) -> None:
+    """Post-pass: drag unmoved stations to match their centered siblings.
+
+    Groups stations by (section, original_x).  Only drags unmoved stations
+    when a clear majority (>50%) of the group already moved to the same X.
+    """
     col_groups: dict[tuple[str | None, float], list[str]] = defaultdict(list)
     for sid, s in graph.stations.items():
         if s.is_port or s.is_hidden:
@@ -1653,6 +1638,31 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
             for rp in routes_by_tgt.get(sid, []):
                 if abs(rp.points[-1][0] - old_x) < 0.5:
                     rp.points[-1] = (target_x, rp.points[-1][1])
+
+
+def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None:
+    """Shift diagonals so bubble stations sit centred on their flat segments.
+
+    A "bubble station" branches off the trunk at a different Y, with a
+    diagonal on each side.  The fork/join bias in ``_route_diagonal``
+    keeps diagonals symmetric at the shared station but leaves the bubble
+    station off-centre.  This pass detects such stations and shifts both
+    adjacent diagonals by the same amount to equalise the flat runs.
+
+    Runs in three phases:
+
+    1. **Candidate collection** - identifies stations needing centering;
+       shifts simple diagonals directly, collects complex cases as
+       station-move candidates.
+    2. **Station moves** - applies moves only when all column companions
+       also want to move (preserving column alignment).
+    3. **Sibling alignment** - drags remaining unmoved stations to match
+       the majority of their centered column group.
+    """
+    ctx = _build_bubble_ctx(routes, graph)
+    candidates = _collect_centering_candidates(graph, ctx)
+    _apply_station_moves(graph, candidates, ctx.original_x)
+    _align_uncentered_siblings(routes, graph, ctx.original_x)
 
 
 # ---------------------------------------------------------------------------
