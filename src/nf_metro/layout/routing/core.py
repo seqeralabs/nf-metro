@@ -724,16 +724,11 @@ def _route_bypass(
     ekey = (edge.source, edge.target, edge.line_id)
     g1_j, g1_n, g2_j, g2_n = ctx.bypass_gap_idx.get(ekey, (0, 1, 0, 1))
 
-    # Bypass routes use a small vertical nest offset (1px) to keep
-    # lines visually distinct on the horizontal trunk without creating
-    # a visible gap at the concentric curves.  The primary per-line
-    # separation comes from gap1_extra / gap2_extra X offsets.
     fan = ctx.junction_fan_info.get(ekey)
-    nest_step = 1.0
     if fan is not None:
-        nest_offset = g2_j * nest_step
+        nest_offset = g2_j * ctx.offset_step
     else:
-        nest_offset = max(i, g2_j) * nest_step
+        nest_offset = max(i, g2_j) * ctx.offset_step
     base_y = bypass_bottom_y(graph, src_col, tgt_col, BYPASS_CLEARANCE, src_row=src_row)
     by = base_y + nest_offset
 
