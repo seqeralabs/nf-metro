@@ -823,32 +823,55 @@ def _inter_row_channel_y(
         return ty + HEADER_CLEARANCE + max_r
 
 
-def _resolve_section(graph: MetroGraph, station: Station):
+def _resolve_section(
+    graph: MetroGraph,
+    station: Station,
+    prefer_upstream: bool = True,
+):
     """Resolve a station's section, tracing through junctions if needed.
 
-    For junctions (section_id is None), traces edges to find a connected
-    port's section.  Prefers exit-port connections (incoming edges) so
-    the junction resolves to the *upstream* section.
+    For stations with a ``section_id``, returns that section directly.
+    For junctions (``section_id is None``), traces edges to find a
+    connected port's section.
+
+    When *prefer_upstream* is True (default), incoming edges are checked
+    first so the junction resolves to the upstream section.  When False,
+    both directions are scanned in a single pass with no preference.
     """
     if station.section_id:
         return graph.sections.get(station.section_id)
-    # Junction: prefer the section connected via an incoming edge
-    # (exit_port -> junction), i.e. the upstream section.
-    for e in graph.edges:
-        if e.target == station.id:
-            other = graph.stations.get(e.source)
-            if other and other.section_id:
-                sec = graph.sections.get(other.section_id)
-                if sec:
-                    return sec
-    # Fall back to outgoing edges
-    for e in graph.edges:
-        if e.source == station.id:
-            other = graph.stations.get(e.target)
-            if other and other.section_id:
-                sec = graph.sections.get(other.section_id)
-                if sec:
-                    return sec
+
+    if prefer_upstream:
+        # Check incoming edges first (upstream preference)
+        for e in graph.edges:
+            if e.target == station.id:
+                other = graph.stations.get(e.source)
+                if other and other.section_id:
+                    sec = graph.sections.get(other.section_id)
+                    if sec:
+                        return sec
+        # Fall back to outgoing edges
+        for e in graph.edges:
+            if e.source == station.id:
+                other = graph.stations.get(e.target)
+                if other and other.section_id:
+                    sec = graph.sections.get(other.section_id)
+                    if sec:
+                        return sec
+    else:
+        # Scan both directions in one pass (no preference)
+        for e in graph.edges:
+            other_id = None
+            if e.source == station.id:
+                other_id = e.target
+            elif e.target == station.id:
+                other_id = e.source
+            if other_id:
+                other = graph.stations.get(other_id)
+                if other and other.section_id:
+                    sec = graph.sections.get(other.section_id)
+                    if sec:
+                        return sec
     return None
 
 
@@ -1670,43 +1693,13 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
 # ---------------------------------------------------------------------------
 
 
-def _resolve_junction_section(
-    graph: MetroGraph,
-    station: Station,
-    junction_ids: set[str],
-):
-    """Find the section associated with a station, tracing through junctions.
-
-    Ports have a section_id directly.  Junctions trace through edges to
-    find a connected port's section.  Shared by col/row resolution and
-    ``_resolve_section``.
-    """
-    if station.section_id:
-        return graph.sections.get(station.section_id)
-
-    if station.id in junction_ids:
-        for e in graph.edges:
-            other_id = None
-            if e.source == station.id:
-                other_id = e.target
-            elif e.target == station.id:
-                other_id = e.source
-            if other_id:
-                other = graph.stations.get(other_id)
-                if other and other.section_id:
-                    sec = graph.sections.get(other.section_id)
-                    if sec:
-                        return sec
-    return None
-
-
 def _resolve_section_col(
     graph: MetroGraph,
     station: Station,
     junction_ids: set[str],
 ) -> int | None:
     """Resolve the grid column for a port or junction station."""
-    sec = _resolve_junction_section(graph, station, junction_ids)
+    sec = _resolve_section(graph, station, prefer_upstream=False)
     if sec and sec.grid_col >= 0:
         return sec.grid_col
     return None
@@ -1718,7 +1711,7 @@ def _resolve_section_row(
     junction_ids: set[str],
 ) -> int | None:
     """Resolve the grid row for a port or junction station."""
-    sec = _resolve_junction_section(graph, station, junction_ids)
+    sec = _resolve_section(graph, station, prefer_upstream=False)
     if sec and sec.grid_row >= 0:
         return sec.grid_row
     return None
