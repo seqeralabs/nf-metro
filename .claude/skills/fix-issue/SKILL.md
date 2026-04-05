@@ -5,7 +5,7 @@ description: End-to-end workflow for fixing GitHub issues on the nf-metro repo. 
 
 # Fix Issue
 
-Structured workflow for fixing nf-metro GitHub issues in an isolated worktree. Delegates visual regression checking to the companion `/render-topologies` skill.
+Structured workflow for fixing nf-metro GitHub issues in an isolated worktree.
 
 ## Phase 1: Understand the Issue
 
@@ -27,14 +27,6 @@ git worktree add /tmp/nf-metro-fix-<N> -b fix/<N>-<slug> origin/main
 ulimit -n 1000000 && export CONDA_OVERRIDE_OSX=15.0 && /opt/homebrew/bin/micromamba create -n nf-metro-fix-<N> python=3.11 cairo -y
 source ~/.local/bin/mm-activate nf-metro-fix-<N>
 pip install -e "/tmp/nf-metro-fix-<N>[docs]"
-
-# Baseline environment (shared across issues, create only if missing)
-if [ ! -d "/Users/jonathan.manning/micromamba/envs/nf-metro-main" ]; then
-  ulimit -n 1000000 && export CONDA_OVERRIDE_OSX=15.0 && /opt/homebrew/bin/micromamba create -n nf-metro-main python=3.11 cairo -y
-fi
-cd /Users/jonathan.manning/projects/nf-metro && git checkout main && git pull origin main
-source ~/.local/bin/mm-activate nf-metro-main
-pip install -e "/Users/jonathan.manning/projects/nf-metro[docs]"
 ```
 
 All subsequent work happens inside `/tmp/nf-metro-fix-<N>`.
@@ -51,43 +43,36 @@ Fix any failures before proceeding.
 
 ## Phase 4: Visual Review
 
-### 4a: Motivating example before/after
+### Primary method: CI render preview (recommended)
 
-If the issue references a specific `.mmd` file, render from both environments:
-
-```bash
-# Before (main, unmodified)
-source ~/.local/bin/mm-activate nf-metro-main
-python -m nf_metro render <file.mmd> -o /tmp/<name>_before.svg
-python -c "import cairosvg; cairosvg.svg2png(url='/tmp/<name>_before.svg', write_to='/tmp/<name>_before.png', scale=2)"
-
-# After (worktree with fix)
-source ~/.local/bin/mm-activate nf-metro-fix-<N>
-cd /tmp/nf-metro-fix-<N> && python -m nf_metro render <file.mmd> -o /tmp/<name>_after.svg
-python -c "import cairosvg; cairosvg.svg2png(url='/tmp/<name>_after.svg', write_to='/tmp/<name>_after.png', scale=2)"
-
-open /tmp/<name>_before.png /tmp/<name>_after.png
-```
-
-Each env must point at a **different source directory** (main repo vs worktree). Do NOT use `git stash` to switch within one env - Python's bytecode cache serves stale code.
-
-**STOP and ask the user to review.** If identical or non-reproducing, discuss before proceeding.
-
-### 4b: Full regression check (handled by CI)
-
-The PR render preview workflow (`.github/workflows/pr-renders.yml`) automatically renders all gallery examples on both the PR branch and base, generates a visual diff page, and posts a sticky comment on the PR with the preview link:
+Push the branch and create a PR. The CI workflow (`.github/workflows/pr-renders.yml`) automatically renders all gallery examples on both the PR branch and base, generates a before/after visual diff page, and posts a sticky comment on the PR with the preview link:
 
 ```
 https://pinin4fjords.github.io/nf-metro/_pr/<PR_NUMBER>/
 ```
 
-This replaces the local `/render-topologies` step for most cases. After creating the PR in Phase 5, wait for the CI to post the preview link, then ask the user to review it.
+This is the authoritative visual review. After creating the PR in Phase 5, point the user to the render preview link for review.
 
-For **pre-push confidence** (before the PR exists), you can still run `/render-topologies` locally. This is optional but useful when the change is risky or the user wants early feedback.
+### Optional: quick local render of a single file
+
+For a fast sanity check of one specific `.mmd` file before pushing, render it locally:
+
+```bash
+source ~/.local/bin/mm-activate nf-metro-fix-<N>
+cd /tmp/nf-metro-fix-<N> && python -m nf_metro render <file.mmd> -o /tmp/<name>.svg
+python -c "import cairosvg; cairosvg.svg2png(url='/tmp/<name>.svg', write_to='/tmp/<name>.png', scale=2)"
+open /tmp/<name>.png
+```
+
+This is useful for quick iteration but does not replace the full CI gallery review.
+
+### Optional: local before/after comparison
+
+If you need a before/after comparison before pushing (e.g. risky change, user wants early feedback), use the `/render-topologies` skill.
 
 ## Phase 5: Commit and PR
 
-Once the user approves:
+Once tests pass:
 
 ```bash
 cd /tmp/nf-metro-fix-<N>
@@ -107,6 +92,8 @@ EOF
 )"
 ```
 
+After CI posts the render preview link, ask the user to review it.
+
 ## Phase 6: Cleanup
 
 Offer to clean up (only if user agrees):
@@ -116,5 +103,3 @@ cd /Users/jonathan.manning/projects/nf-metro
 git worktree remove /tmp/nf-metro-fix-<N>
 /opt/homebrew/bin/micromamba env remove -n nf-metro-fix-<N> -y
 ```
-
-The `nf-metro-main` env is shared across issues - do NOT delete it.

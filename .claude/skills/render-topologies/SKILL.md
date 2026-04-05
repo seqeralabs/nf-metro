@@ -1,13 +1,18 @@
 ---
 name: render-topologies
-description: Render all gallery examples to PNG, pixel-diff against main, and open only changed renders as BEFORE/AFTER pairs in Preview. Uses the same build_gallery.py script as the CI PR render preview, so local and CI results match. Use after layout or rendering changes to check for visual regressions before pushing. Companion to the fix-issue skill.
+description: Local visual regression check for layout or rendering changes. Renders all gallery examples, pixel-diffs against main, and opens changed renders as BEFORE/AFTER pairs. In most cases the CI render preview on a PR is sufficient - use this skill only for pre-push confidence on risky changes or when the user explicitly asks for a local diff.
 disable-model-invocation: true
 allowed-tools: Bash(rm -rf *), Bash(python *), Bash(open *), Bash(cd *), Bash(git *), Bash(source *), Bash(pip *), Bash(cp *)
 ---
 
 # Render Topologies
 
-Pixel-diff all gallery renders between the current branch and `origin/main`. Uses `scripts/build_gallery.py` (the same script CI runs), so local results match the PR render preview. Opens only changed renders as numbered BEFORE/AFTER pairs in Preview.
+Local pixel-diff of all gallery renders between the current branch and `origin/main`. Uses `scripts/build_gallery.py` (the same script CI runs), so local results match the PR render preview.
+
+**In most cases you don't need this.** Push to a PR and review the CI-generated render preview at `https://pinin4fjords.github.io/nf-metro/_pr/<PR_NUMBER>/` instead. Use this skill only when:
+- You want pre-push confidence before creating a PR
+- The user explicitly asks for a local visual comparison
+- You're iterating on a change and want fast feedback without pushing
 
 ## Step 1: Detect context
 
@@ -115,8 +120,6 @@ for i, name in enumerate(changed):
 # Open all pairs sorted so BEFORE/AFTER interleave correctly (skip if zero changed)
 ls /tmp/[0-9][0-9]_*_BEFORE.png /tmp/[0-9][0-9]_*_AFTER.png | sort | xargs open -a Preview
 ```
-
-The numbered prefixes (`01_`, `02_`, ...) ensure Preview orders them correctly when using arrow keys: `01_foo_BEFORE.png`, `02_foo_AFTER.png`, `03_bar_BEFORE.png`, `04_bar_AFTER.png`, etc.
 
 ## Step 5: Report
 

@@ -115,7 +115,17 @@ Edges support comma-separated line IDs: `a -->|line1,line2,line3| b` creates one
 
 When fixing routing or alignment issues, do NOT "solve" a kink by moving a port to match a station's coordinate. That creates a station-as-elbow violation where the line visually passes through the station marker. Instead, accept small offsets between ports and stations and handle them via routing (near-vertical drops, gentle curves, etc.).
 
-## Rendering the rnaseq Example to PNG
+## Visual Review
+
+**Primary method**: Push to a PR. The CI workflow (`.github/workflows/pr-renders.yml`) renders all gallery examples on both the PR branch and base, generates a before/after visual diff, and posts a preview link:
+
+```
+https://pinin4fjords.github.io/nf-metro/_pr/<PR_NUMBER>/
+```
+
+This is the authoritative visual review and should be used for all layout or rendering changes.
+
+**Quick local render** (for fast iteration before pushing):
 
 ```bash
 source ~/.local/bin/mm-activate nf-metro
