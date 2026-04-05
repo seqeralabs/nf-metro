@@ -84,6 +84,12 @@ def cli() -> None:
     "Use --no-straight-diamonds for symmetric fan-out.",
 )
 @click.option(
+    "--center-ports/--no-center-ports",
+    default=False,
+    help="Centre inter-section ports on the shorter of the two connected "
+    "sections, so lines enter/exit at the visual midpoint.",
+)
+@click.option(
     "--section-x-gap",
     type=float,
     default=None,
@@ -121,6 +127,7 @@ def render(
     logo: Path | None,
     line_order: str | None,
     straight_diamonds: bool,
+    center_ports: bool,
     section_x_gap: float | None,
     section_y_gap: float | None,
     from_nextflow: bool,
@@ -147,6 +154,9 @@ def render(
 
     if not straight_diamonds:
         graph.diamond_style = "symmetric"
+
+    if center_ports:
+        graph.center_ports = True
 
     if logo is not None:
         graph.logo_path = str(logo)

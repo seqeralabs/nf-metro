@@ -157,6 +157,7 @@ class MetroGraph:
     line_order: str = "definition"  # "definition" or "span"
     diamond_style: str = "straight"  # "straight" or "symmetric"
     compact_offsets: bool = False
+    center_ports: bool = False
     legend_position: str = "bottom"
     logo_path: str = ""
     # Section dependency graph (populated by auto_layout)
