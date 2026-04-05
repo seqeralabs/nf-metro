@@ -3,6 +3,7 @@
 
 Usage:
     python scripts/build_gallery.py
+    python scripts/build_gallery.py --debug   # include debug overlay
 """
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ from nf_metro.layout.engine import compute_layout  # noqa: E402
 from nf_metro.parser.mermaid import parse_metro_mermaid  # noqa: E402
 from nf_metro.render.svg import render_svg  # noqa: E402
 from nf_metro.themes import THEMES  # noqa: E402
+
+DEBUG_RENDERS = "--debug" in sys.argv
 
 EXAMPLES_DIR = project_root / "examples"
 NEXTFLOW_FIXTURES_DIR = project_root / "tests" / "fixtures" / "nextflow"
@@ -165,7 +168,7 @@ def render_mmd(mmd_path: Path, svg_path: Path) -> None:
     compute_layout(graph)
     theme_name = graph.style if graph.style in THEMES else "nfcore"
     theme = THEMES[theme_name]
-    svg_str = render_svg(graph, theme)
+    svg_str = render_svg(graph, theme, debug=DEBUG_RENDERS)
     svg_path.write_text(svg_str)
 
 
@@ -304,7 +307,7 @@ def render_nextflow_examples() -> None:
             graph = parse_metro_mermaid(converted)
             compute_layout(graph)
             theme = THEMES[graph.style if graph.style in THEMES else "nfcore"]
-            svg_str = render_svg(graph, theme)
+            svg_str = render_svg(graph, theme, debug=DEBUG_RENDERS)
             svg_path.write_text(svg_str)
             _manifest[svg_path.name] = section
             print(f"  nf_{mmd_path.stem}: OK")

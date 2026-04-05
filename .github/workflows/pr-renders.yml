@@ -36,7 +36,7 @@ jobs:
         run: pip install -e ".[docs]"
 
       - name: Render gallery (PR branch)
-        run: python scripts/build_gallery.py
+        run: python scripts/build_gallery.py --debug
 
       - name: Save PR renders
         run: |
@@ -54,7 +54,7 @@ jobs:
         run: pip install -e ".[docs]"
 
       - name: Render gallery (base branch)
-        run: python scripts/build_gallery.py
+        run: python scripts/build_gallery.py --debug
 
       - name: Save base renders
         run: |
