@@ -46,7 +46,7 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "rnaseq_auto",
         EXAMPLES_DIR,
         "Demonstrates fully auto-inferred layout: no `%%metro grid:` directives "
-        "needed. See [nf-core Pipelines](../pipelines/) for the full pipeline gallery.",
+        "needed. See [nf-core Pipelines](../pipelines/index.md) for the full gallery.",
     ),
     (
         "rnaseq_sections",
@@ -397,8 +397,8 @@ def build_pipelines_page() -> None:
         "Real-world pipelines rendered with nf-metro. These are maintained as "
         "`.mmd` files alongside the pipeline source code and rendered automatically.",
         "",
-        "See the [Gallery](../gallery/) for layout pattern examples and the "
-        "[Guide](../guide/) for how to write your own.",
+        "See the [Gallery](../gallery/index.md) for layout pattern examples and the "
+        "[Guide](../guide.md) for how to write your own.",
         "",
     ]
 

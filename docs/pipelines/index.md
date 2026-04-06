@@ -2,7 +2,7 @@
 
 Real-world pipelines rendered with nf-metro. These are maintained as `.mmd` files alongside the pipeline source code and rendered automatically.
 
-See the [Gallery](../gallery/) for layout pattern examples and the [Guide](../guide/) for how to write your own.
+See the [Gallery](../gallery/index.md) for layout pattern examples and the [Guide](../guide.md) for how to write your own.
 
 ## [nf-core/rnaseq](https://github.com/nf-core/rnaseq)
 
