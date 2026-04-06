@@ -315,3 +315,84 @@ def test_render_multi_icon_fixture():
     assert "H5AD" in svg
     root = ET.fromstring(svg)
     assert root.tag.endswith("svg") or "svg" in root.tag
+
+
+def test_render_files_icon():
+    """%%metro files: directive renders stacked file icons."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro files: reads_in | FASTQ\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    assert "FASTQ" in svg
+    root = ET.fromstring(svg)
+    assert root.tag.endswith("svg") or "svg" in root.tag
+
+
+def test_render_folder_icon():
+    """%%metro dir: directive renders folder icon."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro dir: output | Results\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        trim[Trim]\n"
+        "        output[ ]\n"
+        "        trim -->|main| output\n"
+        "    end\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    assert "Results" in svg
+    root = ET.fromstring(svg)
+    assert root.tag.endswith("svg") or "svg" in root.tag
+
+
+def test_render_mixed_icon_types():
+    """Mixed file/files/dir icons all render."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: src | FASTA\n"
+        "%%metro files: paired | FASTQ\n"
+        "%%metro dir: out | Results\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        src[ ]\n"
+        "        paired[ ]\n"
+        "        step[Step]\n"
+        "        out[ ]\n"
+        "        src -->|main| step\n"
+        "        paired -->|main| step\n"
+        "        step -->|main| out\n"
+        "    end\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    assert "FASTA" in svg
+    assert "FASTQ" in svg
+    assert "Results" in svg
+    root = ET.fromstring(svg)
+    assert root.tag.endswith("svg") or "svg" in root.tag
+
+
+def test_render_icon_type_guide_fixtures():
+    """Guide examples for files and dir icons render without errors."""
+    from pathlib import Path
+
+    examples = Path(__file__).parent.parent / "examples" / "guide"
+    for fname in ("05c_files_icon.mmd", "05d_folder_icon.mmd"):
+        fpath = examples / fname
+        assert fpath.exists(), f"Missing fixture: {fpath}"
+        text = fpath.read_text()
+        graph = parse_metro_mermaid(text)
+        compute_layout(graph)
+        svg = render_svg(graph, NFCORE_THEME)
+        root = ET.fromstring(svg)
+        assert root.tag.endswith("svg") or "svg" in root.tag
