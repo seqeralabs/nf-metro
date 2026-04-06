@@ -525,13 +525,11 @@ def _would_collide(
 
 
 def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> None:
-    """Snap offsets for same-section edges where endpoints share base Y.
+    """Snap offsets for same-section, same-Y edges so segments stay flat.
 
     Only processes edges where both endpoints belong to the same
-    section. Inter-section offset mismatches are handled by routing
-    (L-shaped paths with vertical segments), so they must not be
-    reconciled here - doing so cascades offsets across section
-    boundaries and breaks per-section reindexing.
+    section. Inter-section reconciliation cascades offsets across
+    section boundaries and breaks per-section reindexing.
 
     For each qualifying edge, tries snapping both stations to the
     larger-magnitude offset first, then the smaller. A candidate is
@@ -542,8 +540,6 @@ def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> 
     Iterates until stable, since fixing one edge can propagate
     through port -> station chains within the same section.
     """
-    # Pre-filter to edges where both endpoints share the same Y and
-    # section. These properties are immutable during reconciliation.
     candidates = [
         edge
         for edge in ctx.graph.edges
@@ -599,6 +595,53 @@ def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> 
             break
 
 
+def _propagate_inter_section_offsets(ctx: _OffsetCtx) -> None:
+    """Match entry port offsets to their upstream source at the same Y.
+
+    For inter-section edges where both endpoints share the same base Y,
+    set the target's offset to match the source's, then propagate into
+    the target section so downstream same-Y stations also adapt.
+    """
+    graph = ctx.graph
+    for edge in graph.edges:
+        src = graph.stations[edge.source]
+        tgt = graph.stations[edge.target]
+        if abs(src.y - tgt.y) > 0.1:
+            continue
+        if _same_section(graph, edge.source, edge.target):
+            continue
+        lid = edge.line_id
+        src_off = ctx.offsets.get((edge.source, lid), 0.0)
+        tgt_off = ctx.offsets.get((edge.target, lid), 0.0)
+        if src_off == tgt_off:
+            continue
+        # Set the entry port to match upstream.
+        ctx.offsets[(edge.target, lid)] = src_off
+        # Propagate into the target section: follow same-Y, same-line
+        # edges from the entry port, shifting each station to match.
+        visited: set[str] = {edge.target}
+        frontier = [edge.target]
+        while frontier:
+            node = frontier.pop()
+            node_off = ctx.offsets.get((node, lid), 0.0)
+            for e2 in graph.edges:
+                if e2.line_id != lid or e2.source != node:
+                    continue
+                next_id = e2.target
+                if next_id in visited:
+                    continue
+                nxt = graph.stations[next_id]
+                if abs(nxt.y - src.y) > 0.1:
+                    continue
+                if not _same_section(graph, edge.target, next_id):
+                    continue
+                next_off = ctx.offsets.get((next_id, lid), 0.0)
+                if next_off != node_off:
+                    ctx.offsets[(next_id, lid)] = node_off
+                visited.add(next_id)
+                frontier.append(next_id)
+
+
 def compute_station_offsets(
     graph: MetroGraph,
     offset_step: float = OFFSET_STEP,
@@ -610,7 +653,7 @@ def compute_station_offsets(
     bundles across all sections - when a line splits off and later
     rejoins, it returns to its reserved slot rather than shifting.
 
-    Runs in seven phases:
+    Runs in eight phases:
 
     1. **Base offsets** - global priority (or compact-mode) assignment.
     2. **Section-local re-indexing** - closes priority gaps within
@@ -623,7 +666,9 @@ def compute_station_offsets(
     6. **Entry port offsets** - TOP entry override for TB BOTTOM exits,
        LR/RL exit-to-entry propagation, compact entry separation.
     7. **Horizontal reconciliation** - snaps mismatched offsets on
-       same-Y edges to eliminate almost-horizontal slopes.
+       same-Y, same-section edges to eliminate almost-horizontal slopes.
+    8. **Inter-section propagation** - one-way propagation of upstream
+       offsets to downstream entry ports at the same Y.
 
     Returns dict mapping (station_id, line_id) -> y_offset.
     """
@@ -635,4 +680,5 @@ def compute_station_offsets(
     _propagate_to_junctions(ctx)
     _compute_entry_port_offsets(ctx)
     _reconcile_horizontal_offsets(ctx)
+    _propagate_inter_section_offsets(ctx)
     return ctx.offsets

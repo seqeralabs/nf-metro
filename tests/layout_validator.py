@@ -12,7 +12,6 @@ from enum import Enum
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.parser.model import MetroGraph, PortSide
-from nf_metro.render.svg import apply_route_offsets
 
 
 class Severity(Enum):
@@ -717,59 +716,56 @@ def check_station_as_elbow(
 
 def check_almost_horizontal_edges(
     graph: MetroGraph,
-    slope_threshold: float = 0.1,
-    min_dx: float = 10.0,
+    y_tolerance: float = 0.1,
+    offset_tolerance: float = 0.1,
     _precomputed: tuple[dict[tuple[str, str], float], list[RoutedPath]] | None = None,
 ) -> list[Violation]:
-    """Check for almost-horizontal edge segments after offset application.
+    """Check that same-Y edges have matching per-line offsets.
 
-    Only checks intra-section edges (both endpoints in the same section).
-    Inter-section edges are routed with L-shaped paths that absorb offset
-    mismatches via vertical segments, so slopes there are expected.
-
-    Flags segments where abs(dy) > 0.5 AND abs(dx) > abs(dy) / slope_threshold,
-    i.e. a shallow slope that should be perfectly flat.
+    For every edge where both endpoints share the same base Y (within
+    *y_tolerance*), the per-line offset must also match (within
+    *offset_tolerance*). A mismatch produces a sloped segment that
+    should be perfectly flat. This applies to all edges, both within
+    and between sections.
     """
     violations: list[Violation] = []
 
     if _precomputed is not None:
-        offsets, routes = _precomputed
+        offsets, _routes = _precomputed
     else:
         try:
             offsets = compute_station_offsets(graph)
-            routes = route_edges(graph, station_offsets=offsets)
         except Exception:
             return violations
 
-    for route in routes:
-        if route.is_inter_section:
+    for edge in graph.edges:
+        src = graph.stations[edge.source]
+        tgt = graph.stations[edge.target]
+        if abs(src.y - tgt.y) > y_tolerance:
             continue
-        pts = apply_route_offsets(route, offsets)
-        for k in range(len(pts) - 1):
-            x1, y1 = pts[k]
-            x2, y2 = pts[k + 1]
-            dx = abs(x2 - x1)
-            dy = abs(y2 - y1)
-            if dy > 0.5 and dx >= min_dx and dx > dy / slope_threshold:
-                violations.append(
-                    Violation(
-                        check="almost_horizontal_edge",
-                        severity=Severity.WARNING,
-                        message=(
-                            f"Edge {route.edge.source}->{route.edge.target} "
-                            f"(line={route.line_id}) segment {k} is almost "
-                            f"horizontal: dx={dx:.1f}, dy={dy:.1f} "
-                            f"(slope={dy / dx:.4f})"
-                        ),
-                        context={
-                            "source": route.edge.source,
-                            "target": route.edge.target,
-                            "line": route.line_id,
-                            "segment": k,
-                            "dx": dx,
-                            "dy": dy,
-                        },
-                    )
+        lid = edge.line_id
+        src_off = offsets.get((edge.source, lid), 0.0)
+        tgt_off = offsets.get((edge.target, lid), 0.0)
+        if abs(src_off - tgt_off) > offset_tolerance:
+            violations.append(
+                Violation(
+                    check="almost_horizontal_edge",
+                    severity=Severity.ERROR,
+                    message=(
+                        f"Edge {edge.source}->{edge.target} "
+                        f"(line={lid}) has offset mismatch at "
+                        f"same Y={src.y:.0f}: "
+                        f"src_off={src_off:.1f}, "
+                        f"tgt_off={tgt_off:.1f}"
+                    ),
+                    context={
+                        "source": edge.source,
+                        "target": edge.target,
+                        "line": lid,
+                        "src_offset": src_off,
+                        "tgt_offset": tgt_off,
+                    },
                 )
+            )
 
     return violations

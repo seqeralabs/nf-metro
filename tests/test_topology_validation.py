@@ -90,8 +90,7 @@ class TestTopologyValidation:
 
     def test_no_almost_horizontal_edges(self, topology_graph):
         violations = check_almost_horizontal_edges(topology_graph)
-        warnings = [v for v in violations if v.severity == Severity.WARNING]
-        assert not warnings, "\n".join(v.message for v in warnings)
+        assert not violations, "\n".join(v.message for v in violations)
 
     def test_all_stations_have_coordinates(self, topology_graph):
         """Every real station should have been assigned non-default coords."""
