@@ -1,0 +1,25 @@
+%%metro title: Folder Icons
+%%metro style: dark
+%%metro file: reads_in | FASTQ
+%%metro dir: results_out | Results
+%%metro line: main | Main | #4CAF50
+%%metro line: qc | Quality Control | #2196F3
+
+graph LR
+    subgraph analysis [Analysis]
+        reads_in[ ]
+        trim[Trimming]
+        align[Alignment]
+        quant[Quantification]
+        reads_in -->|main,qc| trim
+        trim -->|main| align
+        align -->|main| quant
+    end
+
+    subgraph reporting [Reporting]
+        multiqc[MultiQC]
+        results_out[ ]
+        trim -->|qc| multiqc
+        quant -->|qc| multiqc
+        multiqc -->|qc| results_out
+    end

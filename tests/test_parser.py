@@ -627,6 +627,102 @@ def test_parse_no_file_icon_not_terminus():
     assert graph.stations["a"].terminus_labels == []
 
 
+def test_parse_files_directive():
+    """%%metro files: directive produces terminus with 'files' icon type."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro files: reads_in | FASTQ\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    st = graph.stations["reads_in"]
+    assert st.is_terminus
+    assert st.terminus_labels == ["FASTQ"]
+    assert st.terminus_icon_types == ["files"]
+
+
+def test_parse_dir_directive():
+    """%%metro dir: directive produces terminus with 'dir' icon type."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro dir: output | Results\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        trim[Trim]\n"
+        "        output[ ]\n"
+        "        trim -->|main| output\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    st = graph.stations["output"]
+    assert st.is_terminus
+    assert st.terminus_labels == ["Results"]
+    assert st.terminus_icon_types == ["dir"]
+
+
+def test_parse_mixed_icon_types():
+    """Different directives on different stations produce correct types."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: src | FASTQ\n"
+        "%%metro files: paired | FASTQ\n"
+        "%%metro dir: out | Results\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        src[ ]\n"
+        "        paired[ ]\n"
+        "        step[Step]\n"
+        "        out[ ]\n"
+        "        src -->|main| step\n"
+        "        paired -->|main| step\n"
+        "        step -->|main| out\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.stations["src"].terminus_icon_types == ["file"]
+    assert graph.stations["paired"].terminus_icon_types == ["files"]
+    assert graph.stations["out"].terminus_icon_types == ["dir"]
+
+
+def test_parse_files_comma_separated():
+    """Comma-separated labels in %%metro files: share the same icon type."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro files: reads_in | FASTQ, BAM\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    st = graph.stations["reads_in"]
+    assert st.terminus_labels == ["FASTQ", "BAM"]
+    assert st.terminus_icon_types == ["files", "files"]
+
+
+def test_parse_file_icon_type_default():
+    """%%metro file: directive defaults to 'file' icon type."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: reads_in | FASTQ\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.stations["reads_in"].terminus_icon_types == ["file"]
+
+
 def test_parse_legend_min_height():
     text = "%%metro legend_min_height: 72\ngraph LR\n"
     graph = parse_metro_mermaid(text)

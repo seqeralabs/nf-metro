@@ -36,6 +36,11 @@ class PortSide(Enum):
 
 VALID_LINE_STYLES = ("solid", "dashed", "dotted")
 
+ICON_TYPE_FILE = "file"
+ICON_TYPE_FILES = "files"
+ICON_TYPE_DIR = "dir"
+VALID_ICON_TYPES = (ICON_TYPE_FILE, ICON_TYPE_FILES, ICON_TYPE_DIR)
+
 
 @dataclass
 class MetroLine:
@@ -57,6 +62,7 @@ class Station:
     is_port: bool = False
     is_hidden: bool = False
     terminus_labels: list[str] = field(default_factory=list)
+    terminus_icon_types: list[str] = field(default_factory=list)
     # Populated by layout engine
     x: float = 0.0
     y: float = 0.0
@@ -169,8 +175,8 @@ class MetroGraph:
     section_dag: SectionDAG | None = None
     # Section IDs that had explicit %%metro direction: directives
     _explicit_directions: set[str] = field(default_factory=set)
-    # Pending terminus designations: station_id -> list of extension labels
-    _pending_terminus: dict[str, list[str]] = field(default_factory=dict)
+    # Pending terminus designations: station_id -> list of (label, icon_type)
+    _pending_terminus: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
     # Lazy cache for station_lines(); invalidated on edge mutation
     _station_lines_cache: dict[str, list[str]] | None = field(default=None, repr=False)
     # Grid alignment metadata (populated by Phase 2.5 _align_row_y_grids)

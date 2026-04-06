@@ -12,6 +12,7 @@ import re
 import warnings
 
 from nf_metro.parser.model import (
+    VALID_ICON_TYPES,
     VALID_LINE_STYLES,
     Edge,
     MetroGraph,
@@ -159,10 +160,11 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
         _resolve_sections(graph)
 
     # Apply pending terminus designations
-    for station_id, ext_labels in graph._pending_terminus.items():
+    for station_id, entries in graph._pending_terminus.items():
         station = graph.stations.get(station_id)
         if station:
-            station.terminus_labels = ext_labels
+            station.terminus_labels = [label for label, _ in entries]
+            station.terminus_icon_types = [icon_type for _, icon_type in entries]
 
     return graph
 
@@ -233,13 +235,16 @@ def _parse_directive(
         pos = content[len("legend:") :].strip().lower()
         if pos in ("bl", "br", "tl", "tr", "bottom", "right", "none"):
             graph.legend_position = pos
-    elif content.startswith("file:"):
-        parts = content[len("file:") :].strip().split("|")
+    elif ":" in content and content.split(":", 1)[0] in VALID_ICON_TYPES:
+        icon_type, rest = content.split(":", 1)
+        parts = rest.strip().split("|")
         if len(parts) >= 2:
             station_id = parts[0].strip()
             raw_labels = parts[1].strip()
             labels = [s.strip() for s in raw_labels.split(",") if s.strip()]
-            graph._pending_terminus.setdefault(station_id, []).extend(labels)
+            graph._pending_terminus.setdefault(station_id, []).extend(
+                (label, icon_type) for label in labels
+            )
 
 
 def _parse_port_hint(

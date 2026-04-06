@@ -195,6 +195,15 @@ ICON_FOLD_CREASE_RATIO: float = 0.6
 ICON_TEXT_OFFSET_RATIO: float = 0.15
 """Vertical text offset as a fraction of icon height."""
 
+FILES_ICON_OFFSET_RATIO: float = 0.15
+"""Offset of the back page as a fraction of icon width/height (stacked files icon)."""
+
+FOLDER_TAB_HEIGHT_RATIO: float = 0.2
+"""Height of the folder tab as a fraction of total icon height."""
+
+FOLDER_TAB_WIDTH_RATIO: float = 0.4
+"""Width of the folder tab as a fraction of total icon width."""
+
 # ---------------------------------------------------------------------------
 # Animation styling
 # ---------------------------------------------------------------------------

@@ -291,6 +291,8 @@ These are automatically rewritten into port-to-port connections with junction st
 | `%%metro legend: <position>` | Global | Legend position: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, `none` |
 | `%%metro line_order: <strategy>` | Global | Line ordering for track assignment: `definition` (default) or `span` (longest-spanning lines get inner tracks) |
 | `%%metro file: <station> \| <label>` | Global | Mark a station as a file terminus with a document icon |
+| `%%metro files: <station> \| <label>` | Global | Mark a station with a stacked-documents icon (e.g. paired files) |
+| `%%metro dir: <station> \| <label>` | Global | Mark a station with a folder icon (e.g. output directory) |
 | `%%metro compact_offsets: true` | Global | Use compact per-station offsets instead of global line-priority slots (better for dense maps with few lines) |
 | `%%metro legend_min_height: <pixels>` | Global | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 | `%%metro entry: <side> \| <lines>` | Section | Entry port hint |

@@ -300,6 +300,28 @@ The FASTQ icon at the start of the Analysis section shows the pipeline input. Th
 
 For a complex real-world example using file icons, see [`examples/rnaseq_sections.mmd`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/rnaseq_sections.mmd).
 
+### Paired/multiple files
+
+When a station represents paired input files (e.g. paired-end FASTQ reads), use `%%metro files:` instead of `%%metro file:`. This renders a stacked-documents icon to visually distinguish it from a single file:
+
+```text
+%%metro files: reads_in | FASTQ
+```
+
+![Paired file icons example](assets/renders/05c_files_icon.svg)
+
+### Folder icons
+
+For stations that represent a directory of output files rather than a single file, use `%%metro dir:`:
+
+```text
+%%metro dir: results_out | Results
+```
+
+![Folder icons example](assets/renders/05d_folder_icon.svg)
+
+All three directives (`file:`, `files:`, `dir:`) work the same way: pair a station ID with a label, give the station a blank label (`[ ]`), and connect it with normal edges. The only difference is the rendered icon shape.
+
 ## 6. Hidden stations
 
 Sometimes you need a branching or merging point in the graph that doesn't represent a real pipeline step. For example, lines might diverge at a point where no tool is actually run. Adding a visible station there clutters the diagram with a meaningless marker.
@@ -396,6 +418,8 @@ These go at the top of the file, before `graph LR`.
 | `%%metro legend: <position>` | Legend position: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, or `none` |
 | `%%metro line_order: <strategy>` | Line ordering for track assignment: `definition` (default, preserves `.mmd` order) or `span` (longest-spanning lines get inner tracks) |
 | `%%metro file: <station> \| <label>` | Mark a station as a file terminus with a document icon |
+| `%%metro files: <station> \| <label>` | Mark a station with a stacked-documents icon (e.g. paired files) |
+| `%%metro dir: <station> \| <label>` | Mark a station with a folder icon (e.g. output directory) |
 | `%%metro compact_offsets: true` | Compact line offsets within stations (see below) |
 | `%%metro legend_min_height: <pixels>` | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 

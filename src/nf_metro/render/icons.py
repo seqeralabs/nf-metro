@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-__all__ = ["render_file_icon"]
+__all__ = ["render_file_icon", "render_files_icon", "render_folder_icon"]
 
 import drawsvg as draw
 
 from nf_metro.render.constants import (
+    FILES_ICON_OFFSET_RATIO,
+    FOLDER_TAB_HEIGHT_RATIO,
+    FOLDER_TAB_WIDTH_RATIO,
     ICON_FOLD_CREASE_RATIO,
     ICON_FOLD_OVERLAY_OPACITY,
     ICON_TEXT_OFFSET_RATIO,
@@ -105,6 +108,153 @@ def render_file_icon(
     # Extension label centered in the body (shifted down slightly to
     # account for fold taking up top-right space)
     text_y = cy + f * ICON_TEXT_OFFSET_RATIO
+    d.append(
+        draw.Text(
+            label,
+            font_size,
+            cx,
+            text_y,
+            fill=font_color,
+            font_family=font_family,
+            font_weight="bold",
+            text_anchor="middle",
+            dy=TEXT_VCENTER_DY,
+        )
+    )
+
+
+def render_files_icon(
+    d: draw.Drawing,
+    cx: float,
+    cy: float,
+    width: float,
+    height: float,
+    fold_size: float,
+    fill: str,
+    stroke: str,
+    stroke_width: float,
+    corner_radius: float,
+    label: str,
+    font_size: float,
+    font_color: str,
+    font_family: str,
+) -> None:
+    """Render a stacked-files icon (two overlapping documents).
+
+    The icon is centered on (cx, cy). A slightly offset back page is drawn
+    first, then a front page (identical to the single file icon) on top.
+    """
+    off = width * FILES_ICON_OFFSET_RATIO
+
+    # Back page (offset up-left)
+    render_file_icon(
+        d,
+        cx=cx - off,
+        cy=cy - off,
+        width=width,
+        height=height,
+        fold_size=fold_size,
+        fill=fill,
+        stroke=stroke,
+        stroke_width=stroke_width,
+        corner_radius=corner_radius,
+        label="",
+        font_size=font_size,
+        font_color=font_color,
+        font_family=font_family,
+    )
+
+    # Front page (main position)
+    render_file_icon(
+        d,
+        cx=cx + off,
+        cy=cy + off,
+        width=width,
+        height=height,
+        fold_size=fold_size,
+        fill=fill,
+        stroke=stroke,
+        stroke_width=stroke_width,
+        corner_radius=corner_radius,
+        label=label,
+        font_size=font_size,
+        font_color=font_color,
+        font_family=font_family,
+    )
+
+
+def render_folder_icon(
+    d: draw.Drawing,
+    cx: float,
+    cy: float,
+    width: float,
+    height: float,
+    fill: str,
+    stroke: str,
+    stroke_width: float,
+    corner_radius: float,
+    label: str,
+    font_size: float,
+    font_color: str,
+    font_family: str,
+) -> None:
+    """Render a folder icon with a tab on the top-left.
+
+    The icon is centered on (cx, cy). The shape is a rectangle with a
+    smaller tab rectangle protruding from the top-left corner.
+    """
+    hw = width / 2
+    hh = height / 2
+    r = corner_radius
+
+    tab_h = height * FOLDER_TAB_HEIGHT_RATIO
+    tab_w = width * FOLDER_TAB_WIDTH_RATIO
+
+    # The body sits below the tab
+    body_top = cy - hh + tab_h
+    x0 = cx - hw
+    x1 = cx + hw
+    y1 = cy + hh
+
+    # Tab shape (top-left rectangle with rounded top corners)
+    tab = draw.Path(
+        fill=fill,
+        stroke=stroke,
+        stroke_width=stroke_width,
+        stroke_linejoin="round",
+    )
+    tab_top = cy - hh
+    tab_right = x0 + tab_w
+    tab.M(x0 + r, tab_top)
+    tab.L(tab_right - r, tab_top)
+    tab.Q(tab_right, tab_top, tab_right, tab_top + r)
+    tab.L(tab_right, body_top)
+    tab.L(x0, body_top)
+    tab.L(x0, tab_top + r)
+    tab.Q(x0, tab_top, x0 + r, tab_top)
+    tab.Z()
+    d.append(tab)
+
+    # Body rectangle (rounded bottom corners + top-right corner)
+    body = draw.Path(
+        fill=fill,
+        stroke=stroke,
+        stroke_width=stroke_width,
+        stroke_linejoin="round",
+    )
+    body.M(x0, body_top)
+    body.L(x1 - r, body_top)
+    body.Q(x1, body_top, x1, body_top + r)
+    body.L(x1, y1 - r)
+    body.Q(x1, y1, x1 - r, y1)
+    body.L(x0 + r, y1)
+    body.Q(x0, y1, x0, y1 - r)
+    body.L(x0, body_top)
+    body.Z()
+    d.append(body)
+
+    # Label centered in the body
+    text_y = (body_top + y1) / 2
     d.append(
         draw.Text(
             label,

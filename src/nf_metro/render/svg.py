@@ -13,7 +13,15 @@ from nf_metro.layout.constants import LABEL_LINE_HEIGHT
 from nf_metro.layout.labels import LabelPlacement, place_labels
 from nf_metro.layout.routing import RoutedPath, compute_station_offsets, route_edges
 from nf_metro.layout.routing.corners import resolve_curve_radii
-from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import (
+    ICON_TYPE_DIR,
+    ICON_TYPE_FILE,
+    ICON_TYPE_FILES,
+    MetroGraph,
+    PortSide,
+    Section,
+    Station,
+)
 from nf_metro.render.constants import (
     CANVAS_PADDING,
     DEBUG_DIAMOND_RADIUS,
@@ -28,6 +36,7 @@ from nf_metro.render.constants import (
     DEBUG_WAYPOINT_COLOR,
     DEBUG_WAYPOINT_RADIUS,
     FALLBACK_LINE_COLOR,
+    FILES_ICON_OFFSET_RATIO,
     ICON_BBOX_MARGIN,
     ICON_CLEARANCE_MARGIN,
     ICON_INTER_GAP,
@@ -51,7 +60,11 @@ from nf_metro.render.constants import (
     WATERMARK_PADDING_RATIO,
     WATERMARK_Y_INSET,
 )
-from nf_metro.render.icons import render_file_icon
+from nf_metro.render.icons import (
+    render_file_icon,
+    render_files_icon,
+    render_folder_icon,
+)
 from nf_metro.render.legend import compute_legend_dimensions, render_legend
 from nf_metro.render.style import Theme
 
@@ -235,6 +248,12 @@ def _compute_icon_obstacles(
         icon_gap = r + ICON_STATION_GAP
         total_w = n * theme.terminus_width + (n - 1) * ICON_INTER_GAP
 
+        # Stacked-files icons extend beyond nominal size by the offset
+        has_stacked = ICON_TYPE_FILES in (station.terminus_icon_types or [])
+        stacked_pad = (
+            theme.terminus_width * FILES_ICON_OFFSET_RATIO if has_stacked else 0.0
+        )
+
         line_offs = [
             station_offsets.get((station.id, lid), 0.0)
             for lid in graph.station_lines(station.id)
@@ -244,14 +263,14 @@ def _compute_icon_obstacles(
         icon_cy = station.y + (min_off + max_off) / 2
 
         if icons_go_right:
-            x_min = station.x + icon_gap
-            x_max = x_min + total_w
+            x_min = station.x + icon_gap - stacked_pad
+            x_max = x_min + total_w + 2 * stacked_pad
         else:
-            x_max = station.x - icon_gap
-            x_min = x_max - total_w
+            x_max = station.x - icon_gap + stacked_pad
+            x_min = x_max - total_w - 2 * stacked_pad
 
-        y_min = icon_cy - theme.terminus_height / 2
-        y_max = icon_cy + theme.terminus_height / 2
+        y_min = icon_cy - theme.terminus_height / 2 - stacked_pad
+        y_max = icon_cy + theme.terminus_height / 2 + stacked_pad
 
         obstacles.append(
             (
@@ -826,7 +845,13 @@ def _render_terminus_icons(
 
     icon_cy = station.y + (min_off + max_off) / 2
 
+    icon_types = station.terminus_icon_types or [ICON_TYPE_FILE] * len(
+        station.terminus_labels
+    )
+
     for i, label in enumerate(station.terminus_labels):
+        icon_type = icon_types[i] if i < len(icon_types) else ICON_TYPE_FILE
+
         if icons_go_right:
             icon_cx = base_cx + i * icon_step
         else:
@@ -841,13 +866,12 @@ def _render_terminus_icons(
                 section.bbox_x + icon_half_w + ICON_BBOX_MARGIN,
                 min(icon_cx, icon_right),
             )
-        render_file_icon(
-            d,
+
+        common = dict(
             cx=icon_cx,
             cy=icon_cy,
             width=theme.terminus_width,
             height=theme.terminus_height,
-            fold_size=theme.terminus_fold_size,
             fill=theme.terminus_fill or theme.station_fill,
             stroke=theme.terminus_stroke or theme.station_stroke,
             stroke_width=theme.terminus_stroke_width,
@@ -857,6 +881,13 @@ def _render_terminus_icons(
             font_color=TERMINUS_FONT_COLOR,
             font_family=theme.label_font_family,
         )
+
+        if icon_type == ICON_TYPE_DIR:
+            render_folder_icon(d, **common)
+        elif icon_type == ICON_TYPE_FILES:
+            render_files_icon(d, **common, fold_size=theme.terminus_fold_size)
+        else:
+            render_file_icon(d, **common, fold_size=theme.terminus_fold_size)
 
 
 def _render_labels(

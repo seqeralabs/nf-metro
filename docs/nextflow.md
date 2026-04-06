@@ -335,6 +335,11 @@ The FASTQ icon at the start of Pre-processing and the FASTA icon at the start of
 
 For a more complex example with multiple file icons, see the nf-core/rnaseq diagram at [`examples/rnaseq_sections.mmd`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/rnaseq_sections.mmd), which uses FASTQ input icons and HTML report output icons across several sections.
 
+Two additional icon variants are available for common Nextflow patterns:
+
+- **`%%metro files:`** renders a stacked-documents icon, useful for paired-end reads or multi-file inputs (e.g. `%%metro files: reads_in | FASTQ`)
+- **`%%metro dir:`** renders a folder icon, useful for directory outputs like `publishDir` results (e.g. `%%metro dir: results_out | Results`)
+
 ## How the converter works
 
 Nextflow's `-with-dag` output contains three types of nodes: processes (the actual pipeline steps), channels/values (data plumbing), and operators (Nextflow internals like `mix` and `collect`). Here is the raw DAG for the flat pipeline example:
