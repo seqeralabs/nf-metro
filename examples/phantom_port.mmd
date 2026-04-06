@@ -1,0 +1,53 @@
+%%metro title: Phantom port
+%%metro style: dark
+%%metro line: a | Line A | #FF9800
+%%metro line: b | Line B | #4CAF50
+%%metro line: c | Line C | #2196F3
+%%metro line: d | Line D | #E91E63
+%%metro line: e | Line E | #CDDC39
+%%metro line: report | Report | #9C27B0
+
+graph LR
+    subgraph input [Input]
+        src[Source]
+        reporter[Reporter]
+    end
+
+    subgraph tall [Tall Section]
+        w1[Tool 1]
+        w2[Tool 2]
+        w3[Tool 3]
+        w4[Tool 4]
+        w5[Tool 5]
+    end
+
+    subgraph qc [QC]
+        collect[Collect]
+    end
+
+    subgraph output [Output]
+        out[Results]
+    end
+
+    src -->|a| w1
+    src -->|b| w2
+    src -->|c| w3
+    src -->|d| w4
+    src -->|e| w5
+
+    %% Report enters from input (top) AND from all tools in tall
+    reporter -->|report| collect
+    w1 -->|report| collect
+    w2 -->|report| collect
+    w3 -->|report| collect
+    w4 -->|report| collect
+    w5 -->|report| collect
+
+    %% Tool lines go to output (far), creating bypass
+    w1 -->|a| out
+    w2 -->|b| out
+    w3 -->|c| out
+    w4 -->|d| out
+    w5 -->|e| out
+
+    collect -->|report| out
