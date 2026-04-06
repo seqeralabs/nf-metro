@@ -546,14 +546,23 @@ def _route_inter_section(
             vx = sx - ctx.curve_radius - ctx.offset_step + delta
 
         # If the channel would cut through the source section's
-        # interior, delegate to the standard L-shape which places the
-        # channel in the inter-column gap via inter_column_channel_x.
+        # interior, delegate to the standard L-shape routed to the
+        # entry port (if this is a merge target) so the second curve
+        # turns in the natural direction.  Skip the merge->entry edge
+        # to avoid a redundant stub.
         src_sec = _resolve_section(graph, src, prefer_upstream=True)
         if (
             src_sec
             and src_sec.bbox_w > 0
             and src_sec.bbox_x < vx < src_sec.bbox_x + src_sec.bbox_w
         ):
+            ep_id = ctx.merge.entry_port_for.get(edge.target)
+            ep = graph.stations.get(ep_id) if ep_id else None
+            if ep:
+                for e2 in graph.edges:
+                    if e2.source == edge.target and e2.target == ep_id:
+                        ctx.skip_edges.add((e2.source, e2.target, e2.line_id))
+                return _route_l_shape(edge, src, ep, i, n, ctx)
             return _route_l_shape(edge, src, tgt, i, n, ctx)
 
         return RoutedPath(
