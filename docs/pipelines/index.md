@@ -16,52 +16,107 @@ RNA-seq analysis with multiple aligner and quantification routes (STAR/RSEM, STA
     %%metro title: nf-core/rnaseq
     %%metro logo: examples/nf-core-rnaseq_logo_dark.png
     %%metro style: dark
+    %%metro file: fastq_in | FASTQ
+    %%metro file: report_final | HTML
+    %%metro file: report_quant | HTML
+    %%metro file: report_bowtie2 | HTML
     %%metro line: star_rsem | Aligner: STAR, Quantification: RSEM | #0570b0
     %%metro line: star_salmon | Aligner: STAR, Quantification: Salmon (default) | #2db572
     %%metro line: hisat2 | Aligner: HISAT2, Quantification: None | #f5c542
+    %%metro line: bowtie2_salmon | Aligner: Bowtie2, Quantification: Salmon | #ff8c00
     %%metro line: pseudo_salmon | Pseudo-aligner: Salmon, Quantification: Salmon | #e63946
     %%metro line: pseudo_kallisto | Pseudo-aligner: Kallisto, Quantification: Kallisto | #7b2d3b
     %%metro legend: bl
     
     graph LR
         subgraph preprocessing [Pre-processing]
-            cat_fastq[cat fastq]
+            %%metro exit: right | star_salmon, star_rsem, hisat2, bowtie2_salmon
+            %%metro exit: bottom | pseudo_salmon, pseudo_kallisto
+            fastq_in[ ]
+            cat_fastq[cat FASTQ]
             fastqc_raw[FastQC]
-            infer_strandedness[infer strandedness]
-            umi_tools_extract[UMI-tools extract]
-            fastp[FastP]
+            infer_strandedness[Infer Strand.]
+            umi_tools_extract[UMI-tools Extract]
+            fastp[fastp]
             trimgalore[Trim Galore!]
             fastqc_trimmed[FastQC]
             bbsplit[BBSplit]
             sortmerna[SortMeRNA]
+            ribodetector[RiboDetector]
+            fastqc_filtered[FastQC]
     
-            cat_fastq -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| fastqc_raw
-            fastqc_raw -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| infer_strandedness
-            infer_strandedness -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| umi_tools_extract
+            fastq_in -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| cat_fastq
+            cat_fastq -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| fastqc_raw
+            fastqc_raw -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| infer_strandedness
+            infer_strandedness -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| umi_tools_extract
     
-            umi_tools_extract -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| fastp
-            umi_tools_extract -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| trimgalore
-            fastp -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| fastqc_trimmed
-            trimgalore -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| fastqc_trimmed
+            umi_tools_extract -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| fastp
+            umi_tools_extract -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| trimgalore
+            fastp -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| fastqc_trimmed
+            trimgalore -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| fastqc_trimmed
     
-            fastqc_trimmed -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| bbsplit
-            bbsplit -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| sortmerna
+            fastqc_trimmed -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| bbsplit
+            fastqc_trimmed -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| sortmerna
+            fastqc_trimmed -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| ribodetector
+            bbsplit -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| fastqc_filtered
+            sortmerna -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| fastqc_filtered
+            ribodetector -->|pseudo_salmon,pseudo_kallisto,star_salmon,star_rsem,hisat2,bowtie2_salmon| fastqc_filtered
         end
     
         subgraph genome_align [Genome alignment & quantification]
+            %%metro entry: left | star_salmon, star_rsem, hisat2, bowtie2_salmon
+            %%metro exit: right | star_salmon, star_rsem
+            %%metro exit: right | hisat2
             star[STAR]
             hisat2_align[HISAT2]
+            bowtie2_align[Bowtie2]
             rsem[RSEM]
             salmon_quant[Salmon]
-            umi_tools_dedup[UMI-tools dedup]
+            umi_tools_dedup[UMI-tools Dedup]
+            tximport_ga[tximport]
+            summarized_exp_ga[Sum. Exp.]
+            multiqc_bowtie2[MultiQC]
+            report_bowtie2[ ]
+            _h1[hidden]
+            _h2[hidden]
+            _h3[hidden]
     
-            star -->|star_rsem| rsem
-            star -->|star_salmon| umi_tools_dedup
-            umi_tools_dedup -->|star_salmon| salmon_quant
+            star -->|star_rsem,star_salmon| umi_tools_dedup
             hisat2_align -->|hisat2| umi_tools_dedup
+            bowtie2_align -->|bowtie2_salmon| umi_tools_dedup
+            umi_tools_dedup -->|star_rsem| rsem
+            umi_tools_dedup -->|star_salmon| salmon_quant
+            umi_tools_dedup -->|hisat2| _h1
+            _h1 -->|hisat2| _h2
+            _h2 -->|hisat2| _h3
+            salmon_quant -->|star_salmon| tximport_ga
+            rsem -->|star_rsem| tximport_ga
+            tximport_ga -->|star_salmon,star_rsem| summarized_exp_ga
+            umi_tools_dedup -->|bowtie2_salmon| salmon_quant
+            salmon_quant -->|bowtie2_salmon| multiqc_bowtie2
+            multiqc_bowtie2 -->|bowtie2_salmon| report_bowtie2
+        end
+    
+        subgraph pseudo_align [Pseudo-alignment & quantification]
+            %%metro entry: left | pseudo_salmon, pseudo_kallisto
+            salmon_pseudo[Salmon]
+            kallisto[Kallisto]
+            tximport_pa[tximport]
+            summarized_exp_pa[Sum. Exp.]
+            multiqc_quant[MultiQC]
+            report_quant[ ]
+    
+            salmon_pseudo -->|pseudo_salmon| tximport_pa
+            kallisto -->|pseudo_kallisto| tximport_pa
+            tximport_pa -->|pseudo_salmon,pseudo_kallisto| summarized_exp_pa
+            summarized_exp_pa -->|pseudo_salmon,pseudo_kallisto| multiqc_quant
+            multiqc_quant -->|pseudo_salmon,pseudo_kallisto| report_quant
         end
     
         subgraph postprocessing [Post-processing]
+            %%metro direction: TB
+            %%metro entry: left | star_salmon, star_rsem, hisat2
+            %%metro exit: bottom | star_salmon, star_rsem, hisat2
             samtools[SAMtools]
             picard[Picard]
             bedtools[BEDTools]
@@ -74,40 +129,40 @@ RNA-seq analysis with multiple aligner and quantification routes (STAR/RSEM, STA
             bedgraph -->|star_salmon,star_rsem,hisat2| stringtie
         end
     
-        subgraph pseudo_align [Pseudo-alignment & quantification]
-            salmon_pseudo[Salmon]
-            kallisto[Kallisto]
-            multiqc_pseudo[MultiQC]
-    
-            salmon_pseudo -->|pseudo_salmon| multiqc_pseudo
-            kallisto -->|pseudo_kallisto| multiqc_pseudo
-        end
-    
         subgraph qc_report [Quality control & reporting]
+            %%metro direction: RL
+            %%metro entry: top | star_salmon, star_rsem, hisat2
             rseqc[RSeQC]
             preseq[Preseq]
             qualimap[Qualimap]
             dupradar[dupRadar]
+            featurecounts[featureCounts]
             deseq2_pca[DESeq2 PCA]
             kraken2[Kraken2/Bracken]
+            sylph[Sylph]
             multiqc_final[MultiQC]
+            report_final[ ]
     
             rseqc -->|star_salmon,star_rsem,hisat2| preseq
             preseq -->|star_salmon,star_rsem,hisat2| qualimap
             qualimap -->|star_salmon,star_rsem,hisat2| dupradar
-            dupradar -->|star_salmon,star_rsem,hisat2| deseq2_pca
+            dupradar -->|star_salmon,star_rsem,hisat2| featurecounts
+            featurecounts -->|star_salmon,star_rsem,hisat2| deseq2_pca
             deseq2_pca -->|star_salmon,star_rsem,hisat2| kraken2
+            deseq2_pca -->|star_salmon,star_rsem,hisat2| sylph
             kraken2 -->|star_salmon,star_rsem,hisat2| multiqc_final
+            sylph -->|star_salmon,star_rsem,hisat2| multiqc_final
+            multiqc_final -->|star_salmon,star_rsem,hisat2| report_final
         end
     
         %% Inter-section edges
-        sortmerna -->|star_salmon,star_rsem| star
-        sortmerna -->|hisat2| hisat2_align
-        sortmerna -->|pseudo_salmon| salmon_pseudo
-        sortmerna -->|pseudo_kallisto| kallisto
-        salmon_quant -->|star_salmon| samtools
-        rsem -->|star_rsem| samtools
-        umi_tools_dedup -->|hisat2| samtools
+        fastqc_filtered -->|star_salmon,star_rsem| star
+        fastqc_filtered -->|hisat2| hisat2_align
+        fastqc_filtered -->|bowtie2_salmon| bowtie2_align
+        fastqc_filtered -->|pseudo_salmon| salmon_pseudo
+        fastqc_filtered -->|pseudo_kallisto| kallisto
+        summarized_exp_ga -->|star_salmon,star_rsem| samtools
+        _h3 -->|hisat2| samtools
         stringtie -->|star_salmon,star_rsem,hisat2| rseqc
     ```
 
@@ -204,7 +259,7 @@ HLA typing from FASTQ or BAM inputs via OptiType and HLA-HD.
     ```text
     %%metro title: nf-core/hlatyping
     %%metro style: dark
-    %%metro logo: examples/nf-core-hlatyping_logo_dark.png
+    %%metro logo: docs/images/nf-core-hlatyping_logo_dark.png
     %%metro file: fastq_in | FASTQ
     %%metro file: bam_in | BAM
     %%metro file: report_tsv | TSV
@@ -212,7 +267,6 @@ HLA typing from FASTQ or BAM inputs via OptiType and HLA-HD.
     %%metro line: fastq | FASTQ | #2db572
     %%metro line: bam | BAM | #e6842a
     %%metro legend: bl
-    %%metro legend_min_height: 72
     
     graph LR
         subgraph preprocessing [Pre-processing]
@@ -220,12 +274,14 @@ HLA typing from FASTQ or BAM inputs via OptiType and HLA-HD.
             fastq_in[ ]
             bam_in[ ]
             cat_fastq[cat FASTQ]
+            _fastq_delay[ ]
             check_paired[Check Paired]
             collatefastq[BAM to FASTQ]
             fastqc[FastQC]
     
             fastq_in -->|fastq| cat_fastq
-            cat_fastq -->|fastq| fastqc
+            cat_fastq -->|fastq| _fastq_delay
+            _fastq_delay -->|fastq| fastqc
             bam_in -->|bam| check_paired
             check_paired -->|bam| collatefastq
             collatefastq -->|bam| fastqc
@@ -239,31 +295,31 @@ HLA typing from FASTQ or BAM inputs via OptiType and HLA-HD.
             optitype_run[OptiType]
             _hlahd_delay[ ]
             hlahd_run[HLA-HD]
+            _hlahd_delay2[ ]
+            _merge1[ ]
     
             yara_index -->|fastq,bam| yara_mapper
             yara_mapper -->|fastq,bam| optitype_run
+            optitype_run -->|fastq,bam| _merge1
             _hlahd_delay -->|fastq,bam| hlahd_run
+            hlahd_run -->|fastq,bam| _hlahd_delay2
+            _hlahd_delay2 -->|fastq,bam| _merge1
         end
     
         subgraph reporting [Reporting]
             %%metro entry: left | fastq, bam
-            _branch2[ ]
-            _tsv_delay[ ]
             report_tsv[ ]
             multiqc[MultiQC]
             report_html[ ]
     
-            _branch2 -->|fastq,bam| _tsv_delay
-            _tsv_delay -->|fastq,bam| report_tsv
-            _branch2 -->|fastq,bam| multiqc
             multiqc -->|fastq,bam| report_html
         end
     
         %% Inter-section edges
         fastqc -->|fastq,bam| yara_index
         fastqc -->|fastq,bam| _hlahd_delay
-        optitype_run -->|fastq,bam| _branch2
-        hlahd_run -->|fastq,bam| _branch2
+        _merge1 -->|fastq,bam| report_tsv
+        _merge1 -->|fastq,bam| multiqc
     ```
 
 ## [nf-core/variantprioritization](https://github.com/nf-core/variantprioritization)
