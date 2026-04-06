@@ -181,3 +181,30 @@ def test_bypass_routing_around_intervening_sections():
         f"No waypoint below intervening sections (bottom={max_section_bottom}). "
         f"Waypoint Ys: {waypoint_ys}"
     )
+
+
+def test_exit_only_line_above_trunk():
+    """Exit-only lines should get offsets above trunk lines when exit port is above.
+
+    In variant_calling_tuned, the QC line only exits the Variant Calling
+    section (no entry port). The exit port is above the feeding station
+    (bcftools). The QC line's offset at bcftools should be above (lower
+    than) the main line's offset so it flows upward without crossing.
+
+    Regression test for #125.
+    """
+    from pathlib import Path
+
+    mmd_path = Path(__file__).parent.parent / "examples" / "variant_calling_tuned.mmd"
+    graph = parse_metro_mermaid(mmd_path.read_text())
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+
+    main_offset = offsets[("bcftools", "main")]
+    qc_offset = offsets[("bcftools", "qc")]
+
+    assert qc_offset < main_offset, (
+        f"QC offset ({qc_offset}) should be below main offset "
+        f"({main_offset}) at bcftools to avoid crossing "
+        f"(exit port is above)"
+    )
