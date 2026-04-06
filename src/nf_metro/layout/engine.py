@@ -1232,9 +1232,13 @@ def _adjust_lr_entry_inset(
         }
         if len(targets) > 1:
             entry_inset = x_spacing * EXIT_GAP_MULTIPLIER
-            # Shift stations away from the entry edge to make room
+            # For single-layer sections the asymmetry is very visible,
+            # so split the inset between both sides to keep stations
+            # visually centered (same logic as _adjust_lr_exit_gap).
+            n_layers = len({s.layer for s in sub.stations.values()})
+            shift = entry_inset / 2 if n_layers <= 1 else entry_inset
             for s in sub.stations.values():
-                s.x += entry_inset
+                s.x += shift
             section.bbox_w += entry_inset
             return
 
