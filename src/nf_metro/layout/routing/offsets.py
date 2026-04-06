@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 
 from nf_metro.layout.constants import OFFSET_STEP
@@ -497,6 +498,187 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
                                     ctx.offsets[(edge.source, lid)] = off
 
 
+def _compact_station_gaps(ctx: _OffsetCtx) -> None:
+    """Close offset gaps at stations where intermediate lines are absent.
+
+    When a station carries two non-adjacent lines (e.g. star_salmon and
+    bowtie2_salmon with hisat2 absent), the gap for the missing line is
+    wasted space.  This phase detects such gaps and compacts the offsets
+    so present lines use consecutive slots.
+
+    To avoid near-diagonal edges (lines transitioning between stations
+    on the same base Y with different offsets), the compaction is
+    propagated along same-Y edges within the section.  The entire
+    compaction is abandoned if propagation would hit a station where
+    the reordering conflicts with existing offset assignments (e.g. a
+    multi-line hub where swapping slots would collide).
+
+    Only triggers when gaps are actually found; no-op otherwise.
+    """
+    if ctx.compact:
+        return
+
+    graph = ctx.graph
+
+    # Bidirectional same-Y adjacency per section.  Both directions are
+    # needed so propagation can walk upstream and downstream from the seed.
+    # Uses direct section_id comparison (excludes junctions, which have
+    # section_id=None and are handled by port/junction offset phases).
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]] = {}
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if not src or not tgt:
+            continue
+        if not src.section_id or src.section_id != tgt.section_id:
+            continue
+        if abs(src.y - tgt.y) > 0.1:
+            continue
+        sec_id = src.section_id
+        if sec_id not in same_y_adj:
+            same_y_adj[sec_id] = {}
+        same_y_adj[sec_id].setdefault(edge.source, []).append(
+            (edge.target, edge.line_id)
+        )
+        same_y_adj[sec_id].setdefault(edge.target, []).append(
+            (edge.source, edge.line_id)
+        )
+
+    # Pre-build layer index per section for same-layer checks
+    sec_layer_stations: dict[str, dict[int, list[str]]] = {}
+    for sid, st in graph.stations.items():
+        if st.section_id and not st.is_port:
+            sec_layer_stations.setdefault(st.section_id, {}).setdefault(
+                st.layer, []
+            ).append(sid)
+
+    for sec_id, section in graph.sections.items():
+        sec_stations = [
+            sid for sid in section.station_ids if not graph.stations[sid].is_port
+        ]
+        if not sec_stations:
+            continue
+
+        # Prevent a later seed from re-processing stations already
+        # touched by an earlier compaction in this section.
+        already_compacted: set[str] = set()
+
+        for seed_sid in sec_stations:
+            if seed_sid in already_compacted:
+                continue
+            seed_lines = graph.station_lines(seed_sid)
+            if len(seed_lines) < 2:
+                continue
+
+            current = {lid: ctx.offsets.get((seed_sid, lid), 0.0) for lid in seed_lines}
+            sorted_by_off = sorted(current.items(), key=lambda x: x[1])
+            base_off = sorted_by_off[0][1]
+            expected = [
+                base_off + i * ctx.offset_step for i in range(len(sorted_by_off))
+            ]
+            actual = [off for _, off in sorted_by_off]
+            if actual == expected:
+                continue
+
+            compacted: dict[str, float] = {}
+            for i, (lid, _) in enumerate(sorted_by_off):
+                compacted[lid] = base_off + i * ctx.offset_step
+
+            changed_lids = {
+                lid for lid in seed_lines if abs(compacted[lid] - current[lid]) > 0.001
+            }
+            if not changed_lids:
+                continue
+
+            # BFS to collect all stations needing consistent updates.
+            # Map: station_id -> {line_id: new_offset}
+            pending: dict[str, dict[str, float]] = {seed_sid: compacted}
+            visited: set[tuple[str, str]] = set()
+            queue: deque[tuple[str, str]] = deque(
+                (seed_sid, lid) for lid in changed_lids
+            )
+            safe = True
+            max_steps = len(sec_stations) * len(graph.lines)
+
+            while queue and safe and max_steps > 0:
+                max_steps -= 1
+                cur_sid, lid = queue.popleft()
+                if (cur_sid, lid) in visited:
+                    continue
+                visited.add((cur_sid, lid))
+
+                new_off = pending[cur_sid][lid]
+
+                adj = same_y_adj.get(sec_id, {}).get(cur_sid, [])
+                for nbr_sid, edge_lid in adj:
+                    if edge_lid != lid:
+                        continue
+                    if (nbr_sid, lid) in visited:
+                        continue
+
+                    # Read pending value if a prior BFS step already
+                    # scheduled a change, otherwise use current offset.
+                    nbr_cur = pending.get(nbr_sid, {}).get(
+                        lid, ctx.offsets.get((nbr_sid, lid), 0.0)
+                    )
+                    if abs(nbr_cur - new_off) < 0.001:
+                        continue
+
+                    nbr_lines = graph.station_lines(nbr_sid)
+
+                    # Bail if a visible same-layer peer also carries
+                    # this line - compaction can't guarantee consistency
+                    # without cascading into unrelated stations.
+                    nbr_st = graph.stations[nbr_sid]
+                    layer_peers = sec_layer_stations.get(sec_id, {}).get(
+                        nbr_st.layer, []
+                    )
+                    for peer_sid in layer_peers:
+                        if peer_sid == nbr_sid:
+                            continue
+                        if graph.stations[peer_sid].is_hidden:
+                            continue
+                        if lid in graph.station_lines(peer_sid):
+                            safe = False
+                            break
+                    if not safe:
+                        break
+
+                    if len(nbr_lines) == 1:
+                        pending.setdefault(nbr_sid, {})[lid] = new_off
+                        queue.append((nbr_sid, lid))
+                        continue
+
+                    # Check for collision with another line's offset
+                    collision_lid = None
+                    for other_lid in nbr_lines:
+                        if other_lid == lid:
+                            continue
+                        other_off = pending.get(nbr_sid, {}).get(
+                            other_lid,
+                            ctx.offsets.get((nbr_sid, other_lid), 0.0),
+                        )
+                        if abs(other_off - new_off) < 0.001:
+                            collision_lid = other_lid
+                            break
+
+                    nbr_pending = pending.setdefault(nbr_sid, {})
+                    nbr_pending[lid] = new_off
+                    queue.append((nbr_sid, lid))
+                    if collision_lid is not None:
+                        # Swap: move collider to the slot we're vacating
+                        nbr_pending[collision_lid] = nbr_cur
+                        queue.append((nbr_sid, collision_lid))
+
+            if not safe or max_steps <= 0:
+                continue
+
+            for sid, line_offsets in pending.items():
+                for lid, off in line_offsets.items():
+                    ctx.offsets[(sid, lid)] = off
+                already_compacted.add(sid)
+
+
 def _same_section(graph: MetroGraph, id_a: str, id_b: str) -> bool:
     """Check if two stations/ports belong to the same section."""
     sa = graph.stations[id_a]
@@ -610,19 +792,22 @@ def compute_station_offsets(
     bundles across all sections - when a line splits off and later
     rejoins, it returns to its reserved slot rather than shifting.
 
-    Runs in seven phases:
+    Runs in eight phases:
 
     1. **Base offsets** - global priority (or compact-mode) assignment.
     2. **Section-local re-indexing** - closes priority gaps within
        sections and applies reconvergence ordering (non-compact only).
     3. **Compact section consistency** - ensures entry lines have
        consistent offsets across multi-line stations (compact only).
-    4. **Exit port offsets** - TB reversed offsets and LR/RL spatial
+    4. **Station gap compaction** - closes per-station offset gaps
+       where intermediate lines are absent, propagating along same-Y
+       edges with conservative safety checks (non-compact only).
+    5. **Exit port offsets** - TB reversed offsets and LR/RL spatial
        Y ordering with hub propagation.
-    5. **Junction inheritance** - copies exit port offsets to junctions.
-    6. **Entry port offsets** - TOP entry override for TB BOTTOM exits,
+    6. **Junction inheritance** - copies exit port offsets to junctions.
+    7. **Entry port offsets** - TOP entry override for TB BOTTOM exits,
        LR/RL exit-to-entry propagation, compact entry separation.
-    7. **Horizontal reconciliation** - snaps mismatched offsets on
+    8. **Horizontal reconciliation** - snaps mismatched offsets on
        same-Y edges to eliminate almost-horizontal slopes.
 
     Returns dict mapping (station_id, line_id) -> y_offset.
@@ -631,6 +816,7 @@ def compute_station_offsets(
     _compute_base_offsets(ctx)
     _reindex_section_local(ctx)
     _apply_compact_section_consistency(ctx)
+    _compact_station_gaps(ctx)
     _compute_exit_port_offsets(ctx)
     _propagate_to_junctions(ctx)
     _compute_entry_port_offsets(ctx)
