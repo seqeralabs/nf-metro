@@ -224,6 +224,118 @@ def _reindex_section_local(ctx: _OffsetCtx) -> None:
                     ctx.offsets[(sid_s, lid)] = p * ctx.offset_step
 
 
+def _reorder_exit_only_lines(ctx: _OffsetCtx) -> None:
+    """Reorder offsets for lines that only exit a section (no entry port).
+
+    When a line diverges from the trunk at an internal station and exits
+    through a port above or below, the line's offset at the divergence
+    point should match the exit direction.  Without this, the global line
+    ordering may place the exiting line on the opposite side, forcing a
+    visual crossing at the divergence station.
+
+    For LR/RL sections: if the exit port Y is above (lower than) the
+    feeding station Y, the exit-only line should get a lower offset
+    (above) than entry lines.  If below, it stays below.
+    """
+    if ctx.compact:
+        return
+
+    graph = ctx.graph
+
+    for sec_id, section in graph.sections.items():
+        if section.direction not in ("LR", "RL"):
+            continue
+
+        # Collect lines present at entry and exit ports
+        entry_lines: set[str] = set()
+        for pid in section.entry_ports:
+            entry_lines |= set(graph.station_lines(pid))
+
+        exit_lines: set[str] = set()
+        exit_port_info: dict[str, float] = {}  # line_id -> exit port Y
+        for pid in section.exit_ports:
+            port_st = graph.stations.get(pid)
+            if not port_st:
+                continue
+            for lid in graph.station_lines(pid):
+                exit_lines.add(lid)
+                exit_port_info[lid] = port_st.y
+
+        # Find exit-only lines (exit but don't enter)
+        exit_only = exit_lines - entry_lines
+        if not exit_only:
+            continue
+
+        # For each exit-only line, find the feeding station Y
+        # (the internal station that connects to the exit port)
+        exit_only_above: list[str] = []
+        exit_only_below: list[str] = []
+        for lid in exit_only:
+            port_y = exit_port_info.get(lid)
+            if port_y is None:
+                continue
+            # Find feeding stations for this line's exit
+            feeder_ys: list[float] = []
+            for pid in section.exit_ports:
+                for edge in graph.edges:
+                    if edge.target == pid and edge.line_id == lid:
+                        src_st = graph.stations.get(edge.source)
+                        if src_st and not src_st.is_port:
+                            feeder_ys.append(src_st.y)
+            if not feeder_ys:
+                continue
+            avg_feeder_y = sum(feeder_ys) / len(feeder_ys)
+            if port_y < avg_feeder_y:
+                # Exit port is above feeding station -> line should be above
+                exit_only_above.append(lid)
+            else:
+                exit_only_below.append(lid)
+
+        if not exit_only_above and not exit_only_below:
+            continue
+
+        # Collect all lines present in the section
+        sec_present: set[str] = set()
+        for sid_s, station in graph.stations.items():
+            if station.section_id == sec_id:
+                sec_present |= set(graph.station_lines(sid_s))
+
+        # Build new ordering: exit-only-above lines first, then
+        # remaining lines in global priority order, then exit-only-below
+        remaining = sorted(
+            sec_present - set(exit_only_above) - set(exit_only_below),
+            key=lambda lid: ctx.line_priority.get(lid, 0),
+        )
+        above_sorted = sorted(
+            exit_only_above, key=lambda lid: ctx.line_priority.get(lid, 0)
+        )
+        below_sorted = sorted(
+            exit_only_below, key=lambda lid: ctx.line_priority.get(lid, 0)
+        )
+        new_order = above_sorted + remaining + below_sorted
+
+        # Check if this differs from the current ordering
+        current_ordered = sorted(
+            sec_present, key=lambda lid: ctx.line_priority.get(lid, 0)
+        )
+        if new_order == current_ordered:
+            continue
+
+        # Apply new offsets
+        new_local = {lid: i for i, lid in enumerate(new_order)}
+        local_max = len(new_order) - 1
+        reverse = sec_id in ctx.reversed_sections
+        for sid_s, station in graph.stations.items():
+            if station.section_id != sec_id:
+                continue
+            for lid in graph.station_lines(sid_s):
+                p = new_local.get(lid, 0)
+                if reverse:
+                    ctx.offsets[(sid_s, lid)] = (local_max - p) * ctx.offset_step
+                else:
+                    ctx.offsets[(sid_s, lid)] = p * ctx.offset_step
+
+
 def _apply_compact_section_consistency(ctx: _OffsetCtx) -> None:
     """Ensure multi-line entry ports have consistent offsets (compact only).
 
@@ -610,11 +722,14 @@ def compute_station_offsets(
     bundles across all sections - when a line splits off and later
     rejoins, it returns to its reserved slot rather than shifting.
 
-    Runs in seven phases:
+    Runs in eight phases:
 
     1. **Base offsets** - global priority (or compact-mode) assignment.
     2. **Section-local re-indexing** - closes priority gaps within
        sections and applies reconvergence ordering (non-compact only).
+    2b. **Exit-direction reordering** - reorders exit-only lines so
+        their offset matches the exit port direction (above/below),
+        preventing crossings at the divergence station.
     3. **Compact section consistency** - ensures entry lines have
        consistent offsets across multi-line stations (compact only).
     4. **Exit port offsets** - TB reversed offsets and LR/RL spatial
@@ -630,6 +745,7 @@ def compute_station_offsets(
     ctx = _build_offset_ctx(graph, offset_step)
     _compute_base_offsets(ctx)
     _reindex_section_local(ctx)
+    _reorder_exit_only_lines(ctx)
     _apply_compact_section_consistency(ctx)
     _compute_exit_port_offsets(ctx)
     _propagate_to_junctions(ctx)
