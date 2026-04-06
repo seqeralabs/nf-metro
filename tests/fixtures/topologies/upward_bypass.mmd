@@ -1,0 +1,54 @@
+%%metro title: Upward Bypass Test
+%%metro style: dark
+%%metro line: a | Line A | #FF9800
+%%metro line: b | Line B | #4CAF50
+%%metro line: c | Line C | #2196F3
+%%metro line: d | Line D | #E91E63
+%%metro line: e | Line E | #9C27B0
+%%metro line: f | Line F | #00BCD4
+%%metro line: g | Line G | #CDDC39
+
+graph LR
+    subgraph input [Input]
+        hub[Hub]
+    end
+
+    subgraph wide [Wide Fan-out]
+        w1[Tool 1]
+        w2[Tool 2]
+        w3[Tool 3]
+        w4[Tool 4]
+        w5[Tool 5]
+        w6[Tool 6]
+        w7[Tool 7]
+    end
+
+    subgraph adjacent [Adjacent]
+        adj[Collect]
+    end
+
+    subgraph far [Far Target]
+        out[Output]
+    end
+
+    hub -->|a| w1
+    hub -->|b| w2
+    hub -->|c| w3
+    hub -->|d| w4
+    hub -->|e| w5
+    hub -->|f| w6
+    hub -->|g| w7
+
+    %% Adjacent (L-shape)
+    w1 -->|a| adj
+
+    %% Bypass: bottom of wide -> far (skipping adjacent)
+    w1 -->|a| out
+    w2 -->|b| out
+    w3 -->|c| out
+    w4 -->|d| out
+    w5 -->|e| out
+    w6 -->|f| out
+    w7 -->|g| out
+
+    adj -->|a| out

@@ -45,6 +45,14 @@ def _load_and_layout(path: Path, max_station_columns: int = 15):
     return graph
 
 
+def _compute_routes(graph):
+    """Compute station offsets and route all edges."""
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+    offsets = compute_station_offsets(graph)
+    return route_edges(graph, station_offsets=offsets)
+
+
 # --- Parametrized validation across all topologies ---
 
 
@@ -639,20 +647,10 @@ class TestMergeJunctions:
 class TestMergeRouting:
     """Tests for merge trunk/branch routing patterns (#207)."""
 
-    @staticmethod
-    def _routes(graph):
-        from nf_metro.layout.routing import (
-            compute_station_offsets,
-            route_edges,
-        )
-
-        offsets = compute_station_offsets(graph)
-        return route_edges(graph, station_offsets=offsets)
-
     def test_trunk_reaches_entry_port(self):
         """Trunk route's last point should match the entry port."""
         graph = _load_and_layout(GENOMEASSEMBLY_FILE)
-        routes = self._routes(graph)
+        routes = _compute_routes(graph)
         merge_ids = {j for j in graph.junctions if j.startswith("__merge_")}
         for r in routes:
             if r.edge.target in merge_ids and len(r.points) == 6:
@@ -672,7 +670,7 @@ class TestMergeRouting:
     def test_branch_is_4_point_descent(self):
         """Branch routes should be 4-point L-shape descents."""
         graph = _load_and_layout(GENOMEASSEMBLY_FILE)
-        routes = self._routes(graph)
+        routes = _compute_routes(graph)
         merge_ids = {j for j in graph.junctions if j.startswith("__merge_")}
         for r in routes:
             if r.edge.target in merge_ids and len(r.points) != 6 and len(r.points) != 2:
@@ -684,7 +682,7 @@ class TestMergeRouting:
     def test_no_backward_segments(self):
         """No merge route should have backward (decreasing X) segments."""
         graph = _load_and_layout(GENOMEASSEMBLY_FILE)
-        routes = self._routes(graph)
+        routes = _compute_routes(graph)
         merge_ids = {j for j in graph.junctions if j.startswith("__merge_")}
         for r in routes:
             if r.edge.target not in merge_ids:
@@ -703,7 +701,7 @@ class TestMergeRouting:
         from nf_metro.layout.constants import OFFSET_STEP
 
         graph = _load_and_layout(GENOMEASSEMBLY_FILE)
-        routes = self._routes(graph)
+        routes = _compute_routes(graph)
         # Collect all horizontal segments per line for inter-section
         # bypass routes.  Bypass segments are horizontal runs that sit
         # between the source and target section Y ranges (i.e. below
@@ -724,6 +722,77 @@ class TestMergeRouting:
             min_gap = min(abs(a - h) for a in a_ys for h in h_ys if abs(a - h) > 0)
             assert min_gap == OFFSET_STEP, (
                 f"Bypass bundle gap {min_gap}px, expected {OFFSET_STEP}px"
+            )
+
+
+class TestUpwardBypass:
+    """Regression tests for upward bypass routes (#240).
+
+    When a bypass source is below the trunk (bottom of a tall section
+    bypassing a shorter neighbour), the gap1 vertical goes UP.  The
+    fan-path direction must match the L-shape sibling so they share
+    consistent positions at the first corner, and the r2 override must
+    account for the reversed gap1 direction.
+    """
+
+    UPWARD_BYPASS_FILE = TOPOLOGIES_DIR / "upward_bypass.mmd"
+
+    @pytest.fixture(scope="class")
+    def routes(self):
+        graph = _load_and_layout(self.UPWARD_BYPASS_FILE)
+        return _compute_routes(graph)
+
+    @pytest.fixture(scope="class")
+    def bypass_routes(self, routes):
+        return [r for r in routes if len(r.points) == 6 and r.curve_radii]
+
+    def test_fan_positions_consistent(self, routes):
+        """L-shape and bypass from the same junction share gap1 X."""
+        a_gap1_xs = set()
+        for r in routes:
+            if r.line_id != "a" or not r.is_inter_section:
+                continue
+            if len(r.points) >= 4:
+                a_gap1_xs.add(round(r.points[1][0], 1))
+        assert len(a_gap1_xs) == 1, (
+            f"Line 'a' L-shape and bypass have different gap1 X: {a_gap1_xs}"
+        )
+
+    def test_corner1_concentricity(self, bypass_routes):
+        """All bypass curves at corner 1 should start at the same X."""
+        xs = {round(r.points[1][0] - r.curve_radii[0], 1) for r in bypass_routes}
+        assert len(xs) == 1, f"Corner 1 start X not constant: {xs}"
+
+    def test_corner2_concentricity(self, bypass_routes):
+        """All bypass lines should start their trunk horizontal at the same X."""
+        xs = {round(r.points[1][0] + r.curve_radii[1], 1) for r in bypass_routes}
+        assert len(xs) == 1, f"Corner 2 start X not constant: {xs}"
+
+    def test_corner3_concentricity(self, bypass_routes):
+        """All bypass lines should end their trunk horizontal at the same X."""
+        xs = {round(r.points[3][0] - r.curve_radii[2], 1) for r in bypass_routes}
+        assert len(xs) == 1, f"Corner 3 end X not constant: {xs}"
+
+    def test_corner4_concentricity(self, bypass_routes):
+        """All bypass lines should reach the target at the same X."""
+        xs = {round(r.points[3][0] + r.curve_radii[3], 1) for r in bypass_routes}
+        assert len(xs) == 1, f"Corner 4 target X not constant: {xs}"
+
+    def test_no_line_crossings_on_segments(self, bypass_routes):
+        """Lines should maintain monotonic ordering on each segment."""
+        bypasses = sorted(bypass_routes, key=lambda r: r.line_id)
+        for seg_idx, coord_idx, name in [
+            (1, 0, "gap1_x"),
+            (2, 1, "trunk_y"),
+            (3, 0, "gap2_x"),
+        ]:
+            vals = [r.points[seg_idx][coord_idx] for r in bypasses]
+            is_mono = all(vals[i] <= vals[i + 1] for i in range(len(vals) - 1)) or all(
+                vals[i] >= vals[i + 1] for i in range(len(vals) - 1)
+            )
+            assert is_mono, (
+                f"{name} not monotonic: "
+                f"{[(r.line_id, vals[i]) for i, r in enumerate(bypasses)]}"
             )
 
 

@@ -60,6 +60,7 @@ def validate_layout(graph: MetroGraph) -> list[Violation]:
         violations.extend(
             check_almost_horizontal_edges(graph, _precomputed=precomputed)
         )
+    violations.extend(check_single_layer_centering(graph))
     violations.extend(check_station_as_elbow(graph))
     return violations
 
@@ -602,6 +603,63 @@ def check_bypass_section_clearance(
                             },
                         )
                     )
+
+    return violations
+
+
+def check_single_layer_centering(
+    graph: MetroGraph, tolerance: float = 5.0
+) -> list[Violation]:
+    """Check that single-layer sections have stations centered in bbox.
+
+    For LR/RL sections where all internal stations share the same layer
+    (single column of stations), the station X should be approximately
+    at the horizontal center of the section bounding box.  A drift
+    indicates asymmetric bbox expansion without recentering.
+    """
+    violations: list[Violation] = []
+    junction_ids = set(graph.junctions)
+
+    for sec_id, section in graph.sections.items():
+        if section.bbox_w == 0 or section.direction not in ("LR", "RL"):
+            continue
+
+        # Collect internal (non-port, non-junction) stations
+        internals = [
+            st
+            for sid, st in graph.stations.items()
+            if st.section_id == sec_id and not st.is_port and sid not in junction_ids
+        ]
+        if not internals:
+            continue
+
+        # Only check single-layer sections (all stations at same X)
+        xs = [st.x for st in internals]
+        if max(xs) - min(xs) > tolerance:
+            continue
+
+        station_x = sum(xs) / len(xs)
+        bbox_center = section.bbox_x + section.bbox_w / 2
+        offset = abs(station_x - bbox_center)
+
+        if offset > tolerance:
+            violations.append(
+                Violation(
+                    check="single_layer_centering",
+                    severity=Severity.WARNING,
+                    message=(
+                        f"Section {sec_id!r}: single-layer stations at "
+                        f"x={station_x:.1f} are {offset:.1f}px from "
+                        f"bbox center ({bbox_center:.1f})"
+                    ),
+                    context={
+                        "section": sec_id,
+                        "station_x": station_x,
+                        "bbox_center": bbox_center,
+                        "offset": offset,
+                    },
+                )
+            )
 
     return violations
 

@@ -46,6 +46,7 @@ Test fixtures and infrastructure for stress-testing the auto-layout engine again
 | `fold_fan_across.mmd` | 7 | 3 | Fan-out/fan-in across fold boundary, rowspan optimization |
 | `fold_double.mmd` | 10 | 2 | Double fold serpentine (LR -> RL -> LR), col_step zigzag |
 | `fold_stacked_branch.mmd` | 8 | 3 | Stacked sections near fold, post-fold branching, TB fan-out |
+| `upward_bypass.mmd` | 4 | 7 | Tall section bypass where trunk is above source (upward gap1) |
 
 All use auto-layout (no `%%metro grid:` directives). These are intended to eventually move to `examples/` once visually polished.
 

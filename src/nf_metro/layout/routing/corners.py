@@ -249,13 +249,15 @@ def bypass_radii(
     going_right: bool,
     offset_step: float = OFFSET_STEP,
     base_radius: float = CURVE_RADIUS,
+    gap1_going_down: bool = True,
+    gap2_going_down: bool = False,
 ) -> tuple[float, float, float, float, float, float]:
     """Compute deltas and radii for a U-shaped bypass route.
 
-    A bypass is two back-to-back L-shapes: gap1 (going down, corners 1-2)
-    and gap2 (going up, corners 3-4).  This function wraps two
-    ``l_shape_radii`` calls so that all four corners satisfy the same
-    ``delta + r = const`` concentricity invariant used everywhere else.
+    A bypass is two back-to-back L-shapes with corners 1-2 at gap1 and
+    corners 3-4 at gap2.  This function wraps two ``l_shape_radii``
+    calls so that all four corners satisfy the same ``delta + r = const``
+    concentricity invariant used everywhere else.
 
     Parameters
     ----------
@@ -268,6 +270,14 @@ def bypass_radii(
         Left-going bypasses mirror the inside/outside assignment.
     offset_step, base_radius : float
         Passed through to ``l_shape_radii``.
+    gap1_going_down : bool
+        Vertical direction at gap1.  ``True`` when the trunk is below
+        the source (standard case), ``False`` when the source is below
+        the trunk (e.g. bottom of a tall section bypassing a shorter
+        neighbour).
+    gap2_going_down : bool
+        Vertical direction at gap2.  Almost always ``False`` (trunk
+        below target).
 
     Returns
     -------
@@ -276,27 +286,26 @@ def bypass_radii(
     delta2 : float
         X offset from gap2 channel center for this line.
     r1, r2, r3, r4 : float
-        Corner radii (1: horiz->vert-down, 2: vert-down->horiz,
-        3: horiz->vert-up, 4: vert-up->horiz).
+        Corner radii at each of the four corners.
     """
     # For left-going bypasses, reverse indices so the outside/inside
     # assignment matches the mirrored corner geometry.
     g1_idx = g1_i if going_right else g1_n - 1 - g1_i
     g2_idx = g2_i if going_right else g2_n - 1 - g2_i
 
-    # Gap1: going-down L-shape (corners 1 and 2)
+    # Gap1 L-shape (corners 1 and 2)
     delta1, r1, r2 = l_shape_radii(
         g1_idx,
         g1_n,
-        going_down=True,
+        going_down=gap1_going_down,
         offset_step=offset_step,
         base_radius=base_radius,
     )
-    # Gap2: going-up L-shape (corners 3 and 4)
+    # Gap2 L-shape (corners 3 and 4)
     delta2, r3, r4 = l_shape_radii(
         g2_idx,
         g2_n,
-        going_down=False,
+        going_down=gap2_going_down,
         offset_step=offset_step,
         base_radius=base_radius,
     )

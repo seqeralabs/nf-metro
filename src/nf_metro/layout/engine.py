@@ -631,15 +631,12 @@ def _align_row_y_grids(
         # e.g. bench_hub with 6 lines) don't represent inter-track
         # crowding and should not inflate spacing for the entire row.
         #
-        # Station radius for spacing calculations (see layout/constants.py).
-
         max_lines = 0
         for sec_id in sec_ids:
             sub = section_subgraphs[sec_id]
             _, _multi_ys = _classify_multi_station_ys(sub)
-            _crowd_ys = _multi_ys or set(s.y for s in sub.stations.values())
             for st in sub.stations.values():
-                if not st.is_port and st.y in _crowd_ys:
+                if not st.is_port and st.y in _multi_ys:
                     max_lines = max(max_lines, len(graph.station_lines(st.id)))
         min_track_gap = (
             (max_lines - 1) * OFFSET_STEP
@@ -1232,9 +1229,13 @@ def _adjust_lr_entry_inset(
         }
         if len(targets) > 1:
             entry_inset = x_spacing * EXIT_GAP_MULTIPLIER
-            # Shift stations away from the entry edge to make room
+            # For single-layer sections the asymmetry is very visible,
+            # so split the inset between both sides to keep stations
+            # visually centered (same logic as _adjust_lr_exit_gap).
+            n_layers = len({s.layer for s in sub.stations.values()})
+            shift = entry_inset / 2 if n_layers <= 1 else entry_inset
             for s in sub.stations.values():
-                s.x += entry_inset
+                s.x += shift
             section.bbox_w += entry_inset
             return
 

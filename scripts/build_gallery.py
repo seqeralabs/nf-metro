@@ -135,6 +135,17 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         TOPOLOGIES_DIR,
         "Stacked analysis sections feeding through a fold into branching targets.",
     ),
+    # --- Offset and bypass ---
+    (
+        "mismatched_tracks",
+        TOPOLOGIES_DIR,
+        "Lines with mismatched track counts at shared stations.",
+    ),
+    (
+        "upward_bypass",
+        TOPOLOGIES_DIR,
+        "Tall section bypass where the trunk is above the source (upward gap1).",
+    ),
 ]
 
 # Category headers inserted before specific entries

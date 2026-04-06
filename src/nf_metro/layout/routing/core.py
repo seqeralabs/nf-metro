@@ -731,18 +731,6 @@ def _route_bypass(
 
     fan = ctx.junction_fan_info.get(ekey)
 
-    # Radii and per-line deltas via the same l_shape_radii logic used
-    # for all other concentric corners.
-    delta1, delta2, r1, _, r3, r4 = bypass_radii(
-        g1_j,
-        g1_n,
-        g2_j,
-        g2_n,
-        going_right=going_right,
-        offset_step=ctx.offset_step,
-        base_radius=ctx.curve_radius,
-    )
-
     # Per-line trunk Y keeps lines visually separate on the horizontal.
     if fan is not None:
         nest_offset = g2_j * ctx.offset_step
@@ -759,14 +747,36 @@ def _route_bypass(
         src_row=src_row,
         cross_row=cross_row,
     )
+
+    # Determine actual vertical direction at each gap from the geometry.
+    # Gap1 goes from source Y to trunk Y; gap2 from trunk Y to target Y.
+    # Normally gap1 goes down and gap2 goes up, but when the source is
+    # below the trunk (bottom of a tall section bypassing a shorter
+    # neighbour), gap1 also goes up.
+    gap1_going_down = base_y > sy
+    gap2_going_down = ty > base_y
+
+    # Radii and per-line deltas via the same l_shape_radii logic used
+    # for all other concentric corners.
+    delta1, delta2, r1, _, r3, r4 = bypass_radii(
+        g1_j,
+        g1_n,
+        g2_j,
+        g2_n,
+        going_right=going_right,
+        offset_step=ctx.offset_step,
+        base_radius=ctx.curve_radius,
+        gap1_going_down=gap1_going_down,
+        gap2_going_down=gap2_going_down,
+    )
     by = base_y + nest_offset
 
-    # Override r2 so corner 2 concentricity matches the trunk Y ordering:
-    # by - r2 = base_y - base_radius (constant across all lines).
+    # Override r2 so all trunk horizontals begin at the same X
+    # (gap1_x + r2 = constant across all lines in the bundle).
     r2 = corner_radius(
         nest_offset,
-        0,
-        outside=True,
+        (g2_n - 1) * ctx.offset_step,
+        outside=gap1_going_down,
         base_radius=ctx.curve_radius,
     )
 
@@ -783,7 +793,7 @@ def _route_bypass(
             fan_delta, r1, _ = l_shape_radii(
                 ui,
                 un,
-                going_down=True,
+                going_down=gap1_going_down,
                 offset_step=ctx.offset_step,
                 base_radius=ctx.curve_radius,
             )
@@ -815,7 +825,7 @@ def _route_bypass(
             fan_delta, r1, _ = l_shape_radii(
                 ui,
                 un,
-                going_down=True,
+                going_down=gap1_going_down,
                 offset_step=ctx.offset_step,
                 base_radius=ctx.curve_radius,
             )

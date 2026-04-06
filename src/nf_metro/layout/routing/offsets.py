@@ -104,9 +104,36 @@ def _compute_base_offsets(ctx: _OffsetCtx) -> None:
 
     In compact mode, only allocates slots for the max lines on either
     side of each station.  In non-compact mode, uses global priority
-    directly.
+    directly.  Single-line non-port stations that are the sole occupant
+    of their Y row within their section get offset 0 to stay on-grid.
     """
     graph = ctx.graph
+
+    # Pre-compute which single-line stations should get offset 0.
+    # In pure fan-out sections (all non-port stations carry a single
+    # line), priority offsets are meaningless - there are no multi-line
+    # bundles to separate - and they just push station markers off the
+    # layout grid.  In mixed sections (some multi-line stations),
+    # priority offsets maintain visual consistency with the routing.
+    #
+    # Additional guard: stations sharing a Y row with another single-
+    # line station keep priority offsets to stay visually distinct.
+    sec_has_multi: dict[str | None, bool] = {}
+    sec_y_candidates: dict[tuple[str | None, float], list[str]] = {}
+    for sid_s, st in graph.stations.items():
+        if st.is_port:
+            continue
+        if len(graph.station_lines(sid_s)) > 1:
+            sec_has_multi[st.section_id] = True
+        else:
+            bucket_y = round(st.y / _SAME_Y_TOLERANCE) * _SAME_Y_TOLERANCE
+            sec_y_candidates.setdefault((st.section_id, bucket_y), []).append(sid_s)
+    y_solo = {
+        sids[0]
+        for (sec_id, _), sids in sec_y_candidates.items()
+        if len(sids) == 1 and not sec_has_multi.get(sec_id)
+    }
+
     for sid in graph.stations:
         lines = graph.station_lines(sid)
         if not lines:
@@ -135,11 +162,15 @@ def _compute_base_offsets(ctx: _OffsetCtx) -> None:
                         ctx.offsets[(sid, lid)] = (local_max - idx) * ctx.offset_step
                     else:
                         ctx.offsets[(sid, lid)] = idx * ctx.offset_step
+        elif sid in y_solo:
+            for lid in lines:
+                ctx.offsets[(sid, lid)] = 0.0
         else:
             for lid in lines:
                 p = ctx.line_priority.get(lid, 0)
                 if reverse:
-                    ctx.offsets[(sid, lid)] = (ctx.max_priority - p) * ctx.offset_step
+                    val = (ctx.max_priority - p) * ctx.offset_step
+                    ctx.offsets[(sid, lid)] = val
                 else:
                     ctx.offsets[(sid, lid)] = p * ctx.offset_step
 
@@ -504,6 +535,19 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
             key=lambda lid: (line_avg_y[lid], ctx.line_priority.get(lid, 0)),
         )
         spatial_offs = {lid: i * ctx.offset_step for i, lid in enumerate(sorted_lines)}
+
+        # Centre offsets on the feeder closest to the port's own Y.
+        # Without this, reconciliation snaps same-Y stations to the
+        # port's non-zero spatial offset, pushing them off-grid.
+        # Ties broken by lowest spatial offset to avoid negative shifts.
+        port_y = graph.stations[port_id].y
+        anchor_line = min(
+            line_avg_y,
+            key=lambda lid: (abs(line_avg_y[lid] - port_y), spatial_offs[lid]),
+        )
+        anchor_off = spatial_offs[anchor_line]
+        spatial_offs = {lid: off - anchor_off for lid, off in spatial_offs.items()}
+
         for lid, off in spatial_offs.items():
             ctx.offsets[(port_id, lid)] = off
 
