@@ -546,23 +546,23 @@ def _route_inter_section(
             vx = sx - ctx.curve_radius - ctx.offset_step + delta
 
         # If the channel would cut through the source section's
-        # interior, skip this handler and fall through to the standard
-        # L-shape which routes via the inter-column channel gap.
-        intrudes = False
+        # interior, delegate to the standard L-shape which places the
+        # channel in the inter-column gap via inter_column_channel_x.
         src_sec = _resolve_section(graph, src, prefer_upstream=True)
-        if src_sec and src_sec.bbox_w > 0:
-            left = src_sec.bbox_x
-            right = src_sec.bbox_x + src_sec.bbox_w
-            intrudes = left < vx < right
+        if (
+            src_sec
+            and src_sec.bbox_w > 0
+            and src_sec.bbox_x < vx < src_sec.bbox_x + src_sec.bbox_w
+        ):
+            return _route_l_shape(edge, src, tgt, i, n, ctx)
 
-        if not intrudes:
-            return RoutedPath(
-                edge=edge,
-                line_id=edge.line_id,
-                points=[(sx, sy), (vx, sy), (vx, ty), (tx, ty)],
-                is_inter_section=True,
-                curve_radii=[r_first, r_second],
-            )
+        return RoutedPath(
+            edge=edge,
+            line_id=edge.line_id,
+            points=[(sx, sy), (vx, sy), (vx, ty), (tx, ty)],
+            is_inter_section=True,
+            curve_radii=[r_first, r_second],
+        )
 
     # RIGHT entry port with source to the LEFT: wrap the vertical
     # channel around the right side of the target section so the route
