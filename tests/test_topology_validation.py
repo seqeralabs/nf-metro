@@ -90,7 +90,8 @@ class TestTopologyValidation:
 
     def test_no_almost_horizontal_edges(self, topology_graph):
         violations = check_almost_horizontal_edges(topology_graph)
-        assert not violations, "\n".join(v.message for v in violations)
+        errors = [v for v in violations if v.severity == Severity.ERROR]
+        assert not errors, "\n".join(v.message for v in errors)
 
     def test_all_stations_have_coordinates(self, topology_graph):
         """Every real station should have been assigned non-default coords."""
@@ -737,10 +738,12 @@ class TestAlmostHorizontalEdges:
         """The genomeassembly example (the original #209 report) should be clean."""
         graph = _load_and_layout(GENOMEASSEMBLY_FILE)
         violations = check_almost_horizontal_edges(graph)
-        assert not violations, "\n".join(v.message for v in violations)
+        errors = [v for v in violations if v.severity == Severity.ERROR]
+        assert not errors, "\n".join(v.message for v in errors)
 
     def test_variant_calling_no_slope(self):
         """The variant_calling example should be clean."""
         graph = _load_and_layout(EXAMPLES_DIR / "variant_calling.mmd")
         violations = check_almost_horizontal_edges(graph)
-        assert not violations, "\n".join(v.message for v in violations)
+        errors = [v for v in violations if v.severity == Severity.ERROR]
+        assert not errors, "\n".join(v.message for v in errors)

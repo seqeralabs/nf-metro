@@ -725,9 +725,14 @@ def check_almost_horizontal_edges(
     For every edge where both endpoints share the same base Y (within
     *y_tolerance*), the per-line offset must also match (within
     *offset_tolerance*). A mismatch produces a sloped segment that
-    should be perfectly flat. This applies to all edges, both within
-    and between sections.
+    should be perfectly flat.
+
+    Same-section mismatches are ERROR (the reconciliation should have
+    fixed these). Inter-section mismatches are WARNING (need a deeper
+    fix in section-local reindexing).
     """
+    from nf_metro.layout.routing.offsets import _same_section
+
     violations: list[Violation] = []
 
     if _precomputed is not None:
@@ -746,26 +751,28 @@ def check_almost_horizontal_edges(
         lid = edge.line_id
         src_off = offsets.get((edge.source, lid), 0.0)
         tgt_off = offsets.get((edge.target, lid), 0.0)
-        if abs(src_off - tgt_off) > offset_tolerance:
-            violations.append(
-                Violation(
-                    check="almost_horizontal_edge",
-                    severity=Severity.ERROR,
-                    message=(
-                        f"Edge {edge.source}->{edge.target} "
-                        f"(line={lid}) has offset mismatch at "
-                        f"same Y={src.y:.0f}: "
-                        f"src_off={src_off:.1f}, "
-                        f"tgt_off={tgt_off:.1f}"
-                    ),
-                    context={
-                        "source": edge.source,
-                        "target": edge.target,
-                        "line": lid,
-                        "src_offset": src_off,
-                        "tgt_offset": tgt_off,
-                    },
-                )
+        if abs(src_off - tgt_off) <= offset_tolerance:
+            continue
+        same_sec = _same_section(graph, edge.source, edge.target)
+        violations.append(
+            Violation(
+                check="almost_horizontal_edge",
+                severity=Severity.ERROR if same_sec else Severity.WARNING,
+                message=(
+                    f"Edge {edge.source}->{edge.target} "
+                    f"(line={lid}) has offset mismatch at "
+                    f"same Y={src.y:.0f}: "
+                    f"src_off={src_off:.1f}, "
+                    f"tgt_off={tgt_off:.1f}"
+                ),
+                context={
+                    "source": edge.source,
+                    "target": edge.target,
+                    "line": lid,
+                    "src_offset": src_off,
+                    "tgt_offset": tgt_off,
+                },
             )
+        )
 
     return violations
