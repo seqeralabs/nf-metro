@@ -540,35 +540,29 @@ def _route_inter_section(
             base_radius=ctx.curve_radius,
         )
         # Push channel away from target into the inter-column gap.
-        # Default: move away from target (opposite sign of dx).
         if dx < 0:
             vx = sx + ctx.curve_radius + ctx.offset_step + delta
         else:
             vx = sx - ctx.curve_radius - ctx.offset_step + delta
 
-        # Guard: if the chosen channel falls inside the source section's
-        # bounding box, route via the target's X instead.  This produces
-        # a short horizontal run into the inter-section gap followed by
-        # a smooth vertical drop to the target.
+        # If the channel would cut through the source section's
+        # interior, skip this handler and fall through to the standard
+        # L-shape which routes via the inter-column channel gap.
+        intrudes = False
         src_sec = _resolve_section(graph, src, prefer_upstream=True)
         if src_sec and src_sec.bbox_w > 0:
             left = src_sec.bbox_x
             right = src_sec.bbox_x + src_sec.bbox_w
-            if left < vx < right:
-                return RoutedPath(
-                    edge=edge,
-                    line_id=edge.line_id,
-                    points=[(sx, sy), (tx, sy), (tx, ty)],
-                    is_inter_section=True,
-                    curve_radii=[r_first],
-                )
-        return RoutedPath(
-            edge=edge,
-            line_id=edge.line_id,
-            points=[(sx, sy), (vx, sy), (vx, ty), (tx, ty)],
-            is_inter_section=True,
-            curve_radii=[r_first, r_second],
-        )
+            intrudes = left < vx < right
+
+        if not intrudes:
+            return RoutedPath(
+                edge=edge,
+                line_id=edge.line_id,
+                points=[(sx, sy), (vx, sy), (vx, ty), (tx, ty)],
+                is_inter_section=True,
+                curve_radii=[r_first, r_second],
+            )
 
     # RIGHT entry port with source to the LEFT: wrap the vertical
     # channel around the right side of the target section so the route
