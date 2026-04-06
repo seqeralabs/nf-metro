@@ -204,11 +204,18 @@ PIPELINE_ENTRIES: list[tuple[str, str, str, str]] = [
         "purging, polishing, scaffolding, and QC.",
     ),
     (
-        "funcprofiler",
-        "nf-core/funcprofiler",
+        "funcprofiler_upstream",
+        "nf-core/funcprofiler (upstream)",
         "https://github.com/nf-core/funcprofiler",
-        "Functional profiling of metagenomic samples with HUMAnN, "
-        "DIAMOND, RGI, mifaser, eggNOG-mapper, and more.",
+        "Upstream .mmd with a separate line per profiling tool (11 lines). "
+        "Exposes routing issues with large bundles exiting a single port.",
+    ),
+    (
+        "funcprofiler",
+        "nf-core/funcprofiler (simplified)",
+        "https://github.com/nf-core/funcprofiler",
+        "Simplified to 3 lines: profiling, QC, and database prep. "
+        "Same topology, cleaner routing.",
     ),
 ]
 
@@ -217,14 +224,16 @@ PIPELINE_ENTRIES: list[tuple[str, str, str, str]] = [
 _manifest: dict[str, str] = {}
 
 
-def render_mmd(mmd_path: Path, svg_path: Path) -> None:
+def render_mmd(
+    mmd_path: Path, svg_path: Path, *, debug: bool = DEBUG_RENDERS
+) -> None:
     """Parse, layout, and render a .mmd file to SVG."""
     text = mmd_path.read_text()
     graph = parse_metro_mermaid(text)
     compute_layout(graph)
     theme_name = graph.style if graph.style in THEMES else "nfcore"
     theme = THEMES[theme_name]
-    svg_str = render_svg(graph, theme, debug=DEBUG_RENDERS)
+    svg_str = render_svg(graph, theme, debug=debug)
     svg_path.write_text(svg_str)
 
 
@@ -422,7 +431,7 @@ def build_pipelines_page() -> None:
             continue
 
         try:
-            render_mmd(mmd_path, svg_path)
+            render_mmd(mmd_path, svg_path, debug=True)
             status = "OK"
         except Exception as e:
             status = f"FAIL: {e}"

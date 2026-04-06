@@ -708,16 +708,16 @@ Genome assembly from long reads and Hi-C data through purging, polishing, scaffo
         yahs -->|assemblies| asmstats
     ```
 
-## [nf-core/funcprofiler](https://github.com/nf-core/funcprofiler)
+## [nf-core/funcprofiler (upstream)](https://github.com/nf-core/funcprofiler)
 
-Functional profiling of metagenomic samples with HUMAnN, DIAMOND, RGI, mifaser, eggNOG-mapper, and more.
+Upstream .mmd with a separate line per profiling tool (11 lines). Exposes routing issues with large bundles exiting a single port.
 
-![nf-core/funcprofiler](../assets/renders/pipeline_funcprofiler.svg)
+![nf-core/funcprofiler (upstream)](../assets/renders/pipeline_funcprofiler_upstream.svg)
 
 ??? note "Mermaid source"
 
     ```text
-    %%metro title: nf-core/funcprofiler
+    %%metro title: nf-core/funcprofiler (upstream)
     %%metro style: dark
     %%metro line: qc | Preprocessing & QC | #4CAF50
     %%metro line: concat | Merge & Concat | #2196F3
@@ -798,4 +798,91 @@ Functional profiling of metagenomic samples with HUMAnN, DIAMOND, RGI, mifaser, 
         mifaser -->|mifaser| output
         diamond -->|diamond| output
         eggnog_mapper -->|eggnog| output
+    ```
+
+## [nf-core/funcprofiler (simplified)](https://github.com/nf-core/funcprofiler)
+
+Simplified to 3 lines: profiling, QC, and database prep. Same topology, cleaner routing.
+
+![nf-core/funcprofiler (simplified)](../assets/renders/pipeline_funcprofiler.svg)
+
+??? note "Mermaid source"
+
+    ```text
+    %%metro title: nf-core/funcprofiler
+    %%metro style: dark
+    %%metro line: profiling | Functional Profiling | #FF9800
+    %%metro line: qc | Preprocessing & QC | #4CAF50
+    %%metro line: db | Database Prep | #607D8B
+    %%metro legend: bl
+    %%metro compact_offsets: true
+    
+    graph LR
+        subgraph input [Input & Preprocessing]
+            %%metro exit: right | profiling, qc, db
+            input_short([Short Read\nFASTQ])
+            input_dbs([Input\nDatabases])
+            sr_qc[Preprocess]
+            merge[Merge Runs]
+    
+            input_short -->|qc| sr_qc
+            sr_qc -->|profiling| merge
+        end
+    
+        subgraph profiling [Functional Profiling]
+            %%metro entry: left | profiling, db
+            %%metro exit: right | profiling, qc
+            humann3[HUMAnN v3]
+            humann4[HUMAnN v4]
+            fmhfunprofiler[FMH FunProfiler]
+            RGI[RGI]
+            mifaser[mifaser]
+            diamond[DIAMOND]
+            eggnog_mapper[eggNOG-mapper]
+        end
+    
+        subgraph reporting [Reporting]
+            %%metro entry: left | profiling, qc
+            multiqc[MultiQC]
+            output([Results\nDirectory])
+    
+            multiqc -->|qc| output
+        end
+    
+        %% DB Prep: databases feed all profiling tools
+        input_dbs -->|db| humann3
+        input_dbs -->|db| humann4
+        input_dbs -->|db| fmhfunprofiler
+        input_dbs -->|db| RGI
+        input_dbs -->|db| mifaser
+        input_dbs -->|db| diamond
+        input_dbs -->|db| eggnog_mapper
+    
+        %% Profiling fan-out from merge
+        merge -->|profiling| humann3
+        merge -->|profiling| humann4
+        merge -->|profiling| fmhfunprofiler
+        merge -->|profiling| RGI
+        merge -->|profiling| mifaser
+        merge -->|profiling| diamond
+        merge -->|profiling| eggnog_mapper
+    
+        %% QC reporting
+        sr_qc -->|qc| multiqc
+        humann3 -->|qc| multiqc
+        humann4 -->|qc| multiqc
+        fmhfunprofiler -->|qc| multiqc
+        RGI -->|qc| multiqc
+        mifaser -->|qc| multiqc
+        diamond -->|qc| multiqc
+        eggnog_mapper -->|qc| multiqc
+    
+        %% Profiling results to output
+        humann3 -->|profiling| output
+        humann4 -->|profiling| output
+        fmhfunprofiler -->|profiling| output
+        RGI -->|profiling| output
+        mifaser -->|profiling| output
+        diamond -->|profiling| output
+        eggnog_mapper -->|profiling| output
     ```
