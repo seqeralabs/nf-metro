@@ -278,6 +278,9 @@ def _compute_section_layout(
     # Phase 3: Place sections on the canvas
     place_sections(graph, section_x_gap, section_y_gap)
 
+    # Phase 3a: Renumber sections by visual reading order (row, col)
+    _renumber_sections_by_grid(graph)
+
     # Phase 3b: Adapt x/y_offset for left/top overshoot.
     # Section bboxes extend left of the local origin by at least
     # section_x_padding; x_offset normally absorbs this with margin to
@@ -419,6 +422,98 @@ def _compute_section_layout(
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
         _guard_stations_in_sections(graph, "after Phase 12 (final)")
         _guard_ports_on_boundaries(graph, "after Phase 12 (final)")
+
+
+def _renumber_sections_by_grid(graph: MetroGraph) -> None:
+    """Renumber sections by visual reading order.
+
+    Groups sections into flow sweeps separated by fold boundaries:
+    each left-to-right (or right-to-left) run is one sweep, with
+    TB fold sections belonging to the sweep they terminate.  Within
+    each sweep, sections are numbered by (grid_col, grid_row) so
+    columns go left-to-right and stacked sections go top-to-bottom.
+    All numbers in sweep N+1 are greater than those in sweep N.
+    """
+    from collections import deque
+
+    import networkx as nx
+
+    dag = nx.DiGraph()
+    for sid in graph.sections:
+        dag.add_node(sid)
+    if graph.section_dag:
+        for src, tgt in graph.section_dag.section_edges:
+            if src in graph.sections and tgt in graph.sections:
+                dag.add_edge(src, tgt)
+
+    secs = graph.sections
+
+    def _is_direction_change(src: str, tgt: str) -> bool:
+        """True when flow direction reverses between two sections."""
+        sd, td = secs[src].direction, secs[tgt].direction
+        # TB->LR/RL: only counts if the TB's predecessors flowed
+        # the opposite way (i.e. TB is a fold boundary).
+        if sd == "TB" and td in ("LR", "RL"):
+            for pred in dag.predecessors(src):
+                pd = secs[pred].direction
+                if pd in ("LR", "RL") and pd != td:
+                    return True
+            return False
+        if sd in ("LR", "RL") and td in ("LR", "RL") and sd != td:
+            return True
+        return False
+
+    sweep: dict[str, int] = {}
+    roots = [n for n in dag.nodes() if dag.in_degree(n) == 0]
+    q: deque[str] = deque()
+    for r in roots:
+        sweep[r] = 0
+        q.append(r)
+
+    while q:
+        node = q.popleft()
+        for succ in dag.successors(node):
+            new_depth = sweep[node]
+            if _is_direction_change(node, succ):
+                new_depth = sweep[node] + 1
+            if succ not in sweep or new_depth < sweep[succ]:
+                sweep[succ] = new_depth
+                q.append(succ)
+
+    for sid in graph.sections:
+        if sid not in sweep:
+            sweep[sid] = 0
+
+    # Disconnected components: number each flow fully before the next,
+    # ordered by the root's grid_row so top flows come first.
+    comp_idx: dict[str, int] = {}
+    for rank, comp in enumerate(
+        sorted(
+            nx.weakly_connected_components(dag),
+            key=lambda c: min(graph.sections[sid].grid_row for sid in c),
+        )
+    ):
+        for sid in comp:
+            comp_idx[sid] = rank
+
+    # Determine flow direction for each sweep: RL sweeps number
+    # columns right-to-left (descending grid_col) to match the flow.
+    sweep_is_rl: dict[int, bool] = {}
+    for sid, s in graph.sections.items():
+        sw = sweep[sid]
+        if sw not in sweep_is_rl and s.direction == "RL":
+            sweep_is_rl[sw] = True
+        elif sw not in sweep_is_rl and s.direction == "LR":
+            sweep_is_rl[sw] = False
+
+    def _sort_key(s):
+        sw = sweep[s.id]
+        col = -s.grid_col if sweep_is_rl.get(sw, False) else s.grid_col
+        return (comp_idx.get(s.id, 0), sw, col, s.grid_row)
+
+    sorted_sections = sorted(graph.sections.values(), key=_sort_key)
+    for i, section in enumerate(sorted_sections, start=1):
+        section.number = i
 
 
 def _grid_group_section_ids(graph: MetroGraph) -> set[str]:
