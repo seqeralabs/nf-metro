@@ -875,9 +875,7 @@ def check_inter_section_line_crossings(
             continue
         if src.section_id == tgt.section_id:
             continue
-        groups.setdefault((src.section_id, tgt.section_id), []).append(
-            (edge, src, tgt)
-        )
+        groups.setdefault((src.section_id, tgt.section_id), []).append((edge, src, tgt))
 
     seen: set[tuple[str, str, str, str]] = set()
     for (src_sec, tgt_sec), edges in groups.items():
