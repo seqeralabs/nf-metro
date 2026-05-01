@@ -15,9 +15,11 @@ from layout_validator import (
     check_coordinate_sanity,
     check_edge_section_crossing,
     check_edge_waypoints,
+    check_excessive_column_gaps,
     check_exit_port_feeder_alignment,
     check_intra_section_chain_alignment,
     check_port_boundary,
+    check_route_segment_crossings,
     check_section_overlap,
     check_single_segment_diagonals,
     check_station_containment,
@@ -217,6 +219,49 @@ class TestFuncprofilerUpstreamDefects:
         assert port_pair_present, (
             f"expected QC -> Output single-diagonal port hop; got {flagged}"
         )
+
+
+# --- Failing regression: variant_calling ---
+#
+# variant_calling.mmd has three confirmed visible defects (verified
+# manually with the user as part of validator development):
+#
+# 1. Section 2 (Alignment) chain alignment - bwa_index, bwa_mem,
+#    samtools_sort, samtools_index alternate rows in a 4-station zigzag
+#    on the Main line, with no structural reason. Catches a layout
+#    placement that should put consecutive same-line stations on the
+#    same track.
+# 2. Section 3 (Variant Calling) excessive column gap - GATK
+#    HaplotypeCaller and DeepVariant share column x=772 but are 80px
+#    apart with one empty grid row between them.
+# 3. Section 1 -> Section 2/4 inter-section line crossing - Main and
+#    QC Reporting both fan out from junction __junction_6 and cross at
+#    (216,123) on the way to their respective targets.
+#
+# These tests fail until the layout engine is fixed. Once each is
+# resolved, the corresponding assertion will start passing.
+
+VARIANT_CALLING_FILE = EXAMPLES_DIR / "variant_calling.mmd"
+
+
+class TestVariantCallingDefects:
+    """Fail loudly for known variant_calling layout defects."""
+
+    @pytest.fixture
+    def graph(self):
+        return _load_and_layout(VARIANT_CALLING_FILE)
+
+    def test_no_intra_section_chain_misalignment(self, graph):
+        v = check_intra_section_chain_alignment(graph)
+        assert not v, "\n".join(vi.message for vi in v)
+
+    def test_no_excessive_column_gaps(self, graph):
+        v = check_excessive_column_gaps(graph)
+        assert not v, "\n".join(vi.message for vi in v)
+
+    def test_no_route_segment_crossings(self, graph):
+        v = check_route_segment_crossings(graph)
+        assert not v, "\n".join(vi.message for vi in v)
 
 
 # --- Regression guard: rnaseq example ---
