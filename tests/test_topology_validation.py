@@ -15,8 +15,11 @@ from layout_validator import (
     check_coordinate_sanity,
     check_edge_section_crossing,
     check_edge_waypoints,
+    check_exit_port_feeder_alignment,
+    check_intra_section_chain_alignment,
     check_port_boundary,
     check_section_overlap,
+    check_single_segment_diagonals,
     check_station_containment,
     validate_layout,
 )
@@ -101,6 +104,29 @@ class TestTopologyValidation:
         warnings = [v for v in violations if v.severity == Severity.WARNING]
         assert not warnings, "\n".join(v.message for v in warnings)
 
+    def test_intra_section_chain_alignment_no_errors(self, topology_graph):
+        """Same-line same-section consecutive stations should align (warning).
+
+        Multi-line hubs legitimately centre across tracks so routing absorbs
+        moderate offsets via L-shapes; failures here are upgraded only when
+        the engine emits ERROR severity (currently never - kept as a guard
+        against future tightening).
+        """
+        violations = check_intra_section_chain_alignment(topology_graph)
+        errors = [v for v in violations if v.severity == Severity.ERROR]
+        assert not errors, "\n".join(v.message for v in errors)
+
+    def test_exit_port_feeder_alignment_no_errors(self, topology_graph):
+        """Exit ports should align with at least one feeder (warning).
+
+        Multi-feeder fan-ins legitimately misalign all-but-one feeder.
+        ERROR severity is reserved for future tightening; CI gate is on
+        errors only.
+        """
+        violations = check_exit_port_feeder_alignment(topology_graph)
+        errors = [v for v in violations if v.severity == Severity.ERROR]
+        assert not errors, "\n".join(v.message for v in errors)
+
     def test_all_stations_have_coordinates(self, topology_graph):
         """Every real station should have been assigned non-default coords."""
         for sid, station in topology_graph.stations.items():
@@ -112,6 +138,85 @@ class TestTopologyValidation:
             assert station.x != 0 or station.y != 0, (
                 f"Station '{sid}' still at origin (0,0)"
             )
+
+
+# --- Layout-quality warning reporter ---
+#
+# The intra-section-chain and exit-port-feeder validators emit WARNING-level
+# violations because legitimate fork-join layouts also produce them. Tests
+# above gate CI on ERRORs only. This block prints the warning count per
+# fixture so CI logs surface candidates for layout improvement without
+# failing the build.
+
+
+def _layout_quality_warning_count(graph) -> tuple[int, int, int]:
+    chain = check_intra_section_chain_alignment(graph)
+    port = check_exit_port_feeder_alignment(graph)
+    diag = check_single_segment_diagonals(graph)
+    return (
+        sum(1 for v in chain if v.severity == Severity.WARNING),
+        sum(1 for v in port if v.severity == Severity.WARNING),
+        sum(1 for v in diag if v.severity == Severity.WARNING),
+    )
+
+
+@pytest.mark.parametrize("path", TOPOLOGY_FILES, ids=TOPOLOGY_IDS)
+def test_layout_quality_warnings_report(path, capsys):
+    """Report warning counts for each topology - never fails."""
+    graph = _load_and_layout(path)
+    chain_warns, port_warns, diag_warns = _layout_quality_warning_count(graph)
+    if chain_warns or port_warns or diag_warns:
+        with capsys.disabled():
+            print(
+                f"\n  {path.stem}: "
+                f"intra_section_chain_alignment={chain_warns}, "
+                f"exit_port_feeder_alignment={port_warns}, "
+                f"single_segment_diagonals={diag_warns}"
+            )
+
+
+# --- Positive-control regression: funcprofiler_upstream ---
+#
+# This fixture is a known-bad layout used as a stress test for the new
+# validators. The asserts below pin the *current* defect set so the test
+# fails (loudly) whenever the layout improves OR regresses, prompting a
+# baseline update or a fix. When the underlying engine bug is fixed and
+# violations drop to zero, replace the lower bounds with `== 0`.
+
+FUNCPROFILER_FIXTURE = TOPOLOGIES_DIR / "funcprofiler_upstream.mmd"
+
+
+@pytest.mark.skipif(
+    not FUNCPROFILER_FIXTURE.exists(), reason="funcprofiler_upstream fixture absent"
+)
+class TestFuncprofilerUpstreamDefects:
+    """Lock in the funcprofiler_upstream layout defects the validators detect.
+
+    The fixture is a real upstream pipeline with 11 lines and 7 parallel
+    profiling tools. It currently exhibits intra-section diagonals (the
+    sr_qc -> merge concat edge in the Input section) that the engine
+    cannot resolve without the in-flight funcprofiler-fix work.
+    """
+
+    @pytest.fixture
+    def graph(self):
+        return _load_and_layout(FUNCPROFILER_FIXTURE)
+
+    def test_validator_detects_single_segment_diagonals(self, graph):
+        """The reporting line crossing from Quality Check to Output renders
+        as a single straight diagonal between the two ports; confirm the
+        detector picks it up. (The intra-section sr_qc -> merge diagonal
+        only appears under the in-flight funcprofiler-fix branch's
+        exit-port snapping; main code routes it as an L-shape.)
+        """
+        violations = check_single_segment_diagonals(graph)
+        flagged = {(v.context["source"], v.context["target"]) for v in violations}
+        port_pair_present = any(
+            "QC__exit" in s and "Output__entry" in t for s, t in flagged
+        )
+        assert port_pair_present, (
+            f"expected QC -> Output single-diagonal port hop; got {flagged}"
+        )
 
 
 # --- Regression guard: rnaseq example ---

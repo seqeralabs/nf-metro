@@ -62,6 +62,13 @@ def validate_layout(graph: MetroGraph) -> list[Violation]:
         )
     violations.extend(check_single_layer_centering(graph))
     violations.extend(check_station_as_elbow(graph))
+    violations.extend(check_intra_section_chain_alignment(graph))
+    violations.extend(check_exit_port_feeder_alignment(graph))
+    violations.extend(check_inter_section_line_crossings(graph))
+    if precomputed is not None:
+        violations.extend(
+            check_single_segment_diagonals(graph, _precomputed=precomputed)
+        )
     return violations
 
 
@@ -828,5 +835,392 @@ def check_almost_horizontal_edges(
                         },
                     )
                 )
+
+    return violations
+
+
+def check_inter_section_line_crossings(
+    graph: MetroGraph, tolerance: float = 2.0
+) -> list[Violation]:
+    """Flag pairs of lines that cross on the curve between two sections.
+
+    Lines leaving the same source section bound for the same target
+    section should preserve their top-to-bottom order: the line that
+    exits higher should also enter higher. When two lines swap order
+    between exit and entry, their connecting curves cross each other
+    visually for no structural reason - one or both lines were placed
+    sub-optimally on a side of the gap.
+
+    Compares pairs of inter-section edges that share (source_section,
+    target_section). For each pair (a, b), if `a` exits above `b` but
+    enters below `b` (or vice versa), the two curves cross and a
+    violation is emitted.
+
+    The check works on edges before port resolution would mask the
+    issue: it uses the source station's Y for "exit" and the target
+    station's Y for "entry", ignoring intermediate ports / junctions.
+    """
+    violations: list[Violation] = []
+
+    # Group inter-section edges by (source_section, target_section).
+    groups: dict[tuple[str, str], list] = {}
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if src is None or tgt is None:
+            continue
+        if src.is_port or tgt.is_port:
+            continue
+        if src.section_id is None or tgt.section_id is None:
+            continue
+        if src.section_id == tgt.section_id:
+            continue
+        groups.setdefault((src.section_id, tgt.section_id), []).append(
+            (edge, src, tgt)
+        )
+
+    seen: set[tuple[str, str, str, str]] = set()
+    for (src_sec, tgt_sec), edges in groups.items():
+        if len(edges) < 2:
+            continue
+        for i in range(len(edges)):
+            for j in range(i + 1, len(edges)):
+                a_edge, a_src, a_tgt = edges[i]
+                b_edge, b_src, b_tgt = edges[j]
+                if a_edge.line_id == b_edge.line_id:
+                    continue
+                d_src = a_src.y - b_src.y
+                d_tgt = a_tgt.y - b_tgt.y
+                if abs(d_src) <= tolerance or abs(d_tgt) <= tolerance:
+                    continue
+                if (d_src > 0) == (d_tgt > 0):
+                    continue
+                key = (a_edge.line_id, b_edge.line_id, src_sec, tgt_sec)
+                if key in seen or key[:2][::-1] + key[2:] in seen:
+                    continue
+                seen.add(key)
+                violations.append(
+                    Violation(
+                        check="inter_section_line_crossing",
+                        severity=Severity.WARNING,
+                        message=(
+                            f"Lines '{a_edge.line_id}' and '{b_edge.line_id}' "
+                            f"swap top-bottom order between sections "
+                            f"'{src_sec}' and '{tgt_sec}': "
+                            f"{a_edge.line_id} exits at y={a_src.y:.0f} "
+                            f"(vs {b_src.y:.0f}) but enters at y={a_tgt.y:.0f} "
+                            f"(vs {b_tgt.y:.0f}); curves cross unnecessarily"
+                        ),
+                        context={
+                            "line_a": a_edge.line_id,
+                            "line_b": b_edge.line_id,
+                            "src_section": src_sec,
+                            "tgt_section": tgt_sec,
+                            "a_src_y": a_src.y,
+                            "a_tgt_y": a_tgt.y,
+                            "b_src_y": b_src.y,
+                            "b_tgt_y": b_tgt.y,
+                        },
+                    )
+                )
+
+    return violations
+
+
+def check_single_segment_diagonals(
+    graph: MetroGraph,
+    min_dx: float = 5.0,
+    min_dy: float = 5.0,
+    _precomputed: tuple[dict[tuple[str, str], float], list[RoutedPath]] | None = None,
+) -> list[Violation]:
+    """Flag routed edges that are a single straight diagonal segment.
+
+    A 1:1 chain edge whose post-offset path consists of a single point pair
+    with non-trivial dx and dy renders as one straight slope between the
+    source and target pills. The line should instead step between tracks
+    via an L-shape or S-curve: a horizontal exit segment, a 45 degree
+    corner transition, then a horizontal entry segment.
+
+    Multi-segment paths are exempt because their endpoint segments may
+    legitimately be 45 degree corners as part of an L-shape, with the
+    surrounding axis-aligned segments providing the visual cleanness.
+    Sub-threshold deltas (default 5px) are ignored to filter out
+    sub-pixel offset jitter that the renderer rounds away.
+
+    This complements check_almost_horizontal_edges, which targets shallow
+    slopes that *should* be flat; this check targets visibly diagonal
+    single segments that should be broken into S-shapes.
+    """
+    violations: list[Violation] = []
+
+    if _precomputed is not None:
+        offsets, routes = _precomputed
+    else:
+        try:
+            offsets = compute_station_offsets(graph)
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:
+            return violations
+
+    for route in routes:
+        pts = apply_route_offsets(route, offsets)
+        if len(pts) != 2:
+            continue
+        x1, y1 = pts[0]
+        x2, y2 = pts[1]
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        if dx > min_dx and dy > min_dy:
+            violations.append(
+                Violation(
+                    check="single_segment_diagonal",
+                    severity=Severity.WARNING,
+                    message=(
+                        f"Edge {route.edge.source}->{route.edge.target} "
+                        f"(line={route.line_id}) renders as a single straight "
+                        f"diagonal: ({x1:.0f},{y1:.0f})->({x2:.0f},{y2:.0f}), "
+                        f"dx={dx:.0f}, dy={dy:.0f}. Should be an L-shape or "
+                        f"S-curve with axis-aligned endpoint segments"
+                    ),
+                    context={
+                        "source": route.edge.source,
+                        "target": route.edge.target,
+                        "line": route.line_id,
+                        "dx": dx,
+                        "dy": dy,
+                    },
+                )
+            )
+
+    return violations
+
+
+def check_intra_section_chain_alignment(
+    graph: MetroGraph, tolerance: float = 2.0
+) -> list[Violation]:
+    """Check that consecutive same-line stations within a section share a track.
+
+    Within an LR section, two non-port stations connected by an edge on the
+    same metro line should sit at the same Y (the line's track), so the
+    intra-section edge runs horizontally. Within a TB section the same
+    invariant applies on the X axis.
+
+    Diagonal intra-section edges typically arise when one endpoint is a
+    multi-line hub centred across many tracks while the other sits on a
+    single track. Routing produces an L-shape with corners that often
+    looks fine, so this is a WARNING rather than an ERROR - it surfaces
+    candidates for layout improvement (e.g. funcprofiler MERGE_RUNS
+    pulling above the concat track) without blocking renders that absorb
+    the offset cleanly.
+
+    Multi-line hubs (stations carrying more than one metro line, e.g.
+    variantbenchmarking's Liftover where test and truth converge) sit at
+    a centroid Y dictated by the multiple lines they carry, so a 1:1
+    chain edge into such a hub legitimately has a Y mismatch.
+    Cross-line fan-in / fan-out hubs (umi_dedup-style convergence
+    points) likewise sit at centroid Y and are excluded by the distinct-
+    neighbour count.
+
+    Terminus stations (file icons for inputs / outputs) are skipped
+    because they conventionally sit at section edges, not aligned with
+    interior tracks; routing absorbs the icon-to-station Y delta as a
+    smooth S-curve.
+
+    The variant_calling bwa_index -> bwa_mem case is the canonical
+    target: both stations carry only the Main line in a 4-station
+    zigzag where the layout could simply place them on the same row.
+    The flagged edge has no structural excuse for the Y delta.
+
+    Inter-section edges, port endpoints, and the perpendicular axis are
+    not checked here (other validators cover those cases).
+    """
+    violations: list[Violation] = []
+
+    # Per-station distinct *non-port* neighbour sets across all lines.
+    # Ports are routing artefacts that shouldn't excuse a structural
+    # misalignment between two real stations.
+    out_neighbours: dict[str, set[str]] = {}
+    in_neighbours: dict[str, set[str]] = {}
+    for e in graph.edges:
+        src_st = graph.stations.get(e.source)
+        tgt_st = graph.stations.get(e.target)
+        if tgt_st is not None and not tgt_st.is_port:
+            out_neighbours.setdefault(e.source, set()).add(e.target)
+        if src_st is not None and not src_st.is_port:
+            in_neighbours.setdefault(e.target, set()).add(e.source)
+
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if src is None or tgt is None:
+            continue
+        if src.is_port or tgt.is_port:
+            continue
+        if src.is_terminus or tgt.is_terminus:
+            continue
+        if src.section_id is None or src.section_id != tgt.section_id:
+            continue
+        section = graph.sections.get(src.section_id)
+        if section is None:
+            continue
+
+        # Skip multi-line hubs: the endpoint's Y is dictated by the
+        # other lines passing through it, not by this edge.
+        if len(graph.station_lines(edge.source)) > 1:
+            continue
+        if len(graph.station_lines(edge.target)) > 1:
+            continue
+
+        # Skip cross-line fan-in / fan-out hubs: same logic at the
+        # neighbour level (multiple sources / targets across all lines).
+        if len(out_neighbours.get(edge.source, ())) > 1:
+            continue
+        if len(in_neighbours.get(edge.target, ())) > 1:
+            continue
+
+        # Skip pre-terminus targets: a station whose only follow-on is
+        # a terminus (file icon) is at the tail of the chain and
+        # conventionally sits at the section's output edge.
+        tgt_outs = out_neighbours.get(edge.target, set())
+        if len(tgt_outs) == 1:
+            next_st = graph.stations.get(next(iter(tgt_outs)))
+            if next_st is not None and next_st.is_terminus:
+                continue
+
+        if section.direction in ("LR", "RL"):
+            delta = abs(src.y - tgt.y)
+            axis = "y"
+            src_coord, tgt_coord = src.y, tgt.y
+        elif section.direction == "TB":
+            delta = abs(src.x - tgt.x)
+            axis = "x"
+            src_coord, tgt_coord = src.x, tgt.x
+        else:
+            continue
+
+        if delta > tolerance:
+            violations.append(
+                Violation(
+                    check="intra_section_chain_alignment",
+                    severity=Severity.WARNING,
+                    message=(
+                        f"Edge {edge.source}->{edge.target} "
+                        f"(line={edge.line_id}) within section "
+                        f"'{src.section_id}' ({section.direction}) is "
+                        f"diagonal: |d{axis}|={delta:.1f}px "
+                        f"(src={src_coord:.1f}, tgt={tgt_coord:.1f}); "
+                        f"both endpoints share a line and a section so the "
+                        f"edge should be axis-aligned"
+                    ),
+                    context={
+                        "source": edge.source,
+                        "target": edge.target,
+                        "line": edge.line_id,
+                        "section": src.section_id,
+                        "direction": section.direction,
+                        "axis": axis,
+                        "delta": delta,
+                    },
+                )
+            )
+
+    return violations
+
+
+def check_exit_port_feeder_alignment(
+    graph: MetroGraph, tolerance: float = 2.0
+) -> list[Violation]:
+    """Check that section exit ports align with their internal feeder station.
+
+    For each exit port P, every internal (non-port, non-junction) station
+    inside the same section that has an edge directly into P should share
+    P's perpendicular coordinate (Y for LR/RL sections, X for TB). This
+    keeps the connecting segment axis-aligned and avoids kinks in the
+    horizontal exit run.
+
+    Multi-feeder fan-ins inherently misalign all but one feeder, so this
+    check fires only when the port matches *none* of its feeders - i.e.
+    the engine missed a free alignment, not when geometry forced a fan-in
+    L-shape. When it fires, every misaligned feeder is reported so the
+    failure mode is fully visible.
+
+    Junction stations (auto-inserted for fan-outs/fan-ins) are excluded
+    because they are routing artefacts that adopt the port's coordinate
+    by construction.
+    """
+    violations: list[Violation] = []
+    junction_ids = set(graph.junctions)
+
+    # Build feeder mapping: port_id -> [(station_id, station)]
+    feeders: dict[str, list[tuple[str, object]]] = {}
+    for edge in graph.edges:
+        if edge.target not in graph.ports:
+            continue
+        src = graph.stations.get(edge.source)
+        if src is None or src.is_port or edge.source in junction_ids:
+            continue
+        port = graph.ports[edge.target]
+        if port.is_entry:
+            continue
+        if src.section_id != port.section_id:
+            continue
+        feeders.setdefault(edge.target, []).append((edge.source, src))
+
+    for port_id, feeder_list in feeders.items():
+        port = graph.ports[port_id]
+        port_station = graph.stations.get(port_id)
+        if port_station is None:
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is None:
+            continue
+
+        if section.direction in ("LR", "RL"):
+            axis = "y"
+            port_coord = port_station.y
+        elif section.direction == "TB":
+            axis = "x"
+            port_coord = port_station.x
+        else:
+            continue
+
+        # Compute deltas; only emit if no feeder aligns within tolerance.
+        deltas: list[tuple[str, object, float]] = []
+        any_aligned = False
+        for st_id, st in feeder_list:
+            st_coord = st.y if axis == "y" else st.x
+            delta = abs(port_coord - st_coord)
+            deltas.append((st_id, st, delta))
+            if delta <= tolerance:
+                any_aligned = True
+
+        if any_aligned:
+            continue
+
+        for st_id, st, delta in deltas:
+            st_coord = st.y if axis == "y" else st.x
+            violations.append(
+                Violation(
+                    check="exit_port_feeder_alignment",
+                    severity=Severity.WARNING,
+                    message=(
+                        f"Exit port '{port_id}' ({port.side.value}, "
+                        f"{axis}={port_coord:.1f}) is misaligned with "
+                        f"feeder station '{st_id}' ({axis}={st_coord:.1f}) "
+                        f"in section '{port.section_id}': "
+                        f"|d{axis}|={delta:.1f}px - port aligns with no "
+                        f"feeder, every exit segment will kink"
+                    ),
+                    context={
+                        "port": port_id,
+                        "station": st_id,
+                        "section": port.section_id,
+                        "axis": axis,
+                        "delta": delta,
+                        "port_coord": port_coord,
+                        "station_coord": st_coord,
+                    },
+                )
+            )
 
     return violations
