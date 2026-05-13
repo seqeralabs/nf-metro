@@ -869,6 +869,95 @@ def test_straight_diamond_merge_returns_to_trunk():
     assert graph.stations["d"].y == graph.stations["a"].y
 
 
+def _terminal_full_bundle_text():
+    """Two full-bundle terminal stations fed from upstream methods.
+
+    Reproduces the Reporting-style topology: a terminal section (no
+    exit ports) where two stations both carry the full bundle and both
+    receive from the same upstream branches.
+    """
+    return (
+        "%%metro line: L1 | Line1 | #ff0000\n"
+        "%%metro line: L2 | Line2 | #00ff00\n"
+        "graph LR\n"
+        "    subgraph methods [Methods]\n"
+        "        m1[M1]\n"
+        "        m2[M2]\n"
+        "    end\n"
+        "    subgraph report [Report]\n"
+        "        a[A]\n"
+        "        b[B]\n"
+        "    end\n"
+        "    m1 -->|L1,L2| a\n"
+        "    m2 -->|L1,L2| a\n"
+        "    m1 -->|L1,L2| b\n"
+        "    m2 -->|L1,L2| b\n"
+    )
+
+
+def test_full_bundle_column_fans_around_trunk_with_center_ports():
+    """Terminal section's full-bundle column fans symmetrically when --center-ports is on."""
+    graph = parse_metro_mermaid(_terminal_full_bundle_text())
+    graph.center_ports = True
+    compute_layout(graph, y_spacing=50.0)
+    ay = graph.stations["a"].y
+    by = graph.stations["b"].y
+    assert ay != by, "a and b should not share Y after fan"
+    # Symmetric around the section trunk Y (here derived from the LR port).
+    mid = (ay + by) / 2
+    assert abs((by - mid) - (mid - ay)) < 1e-6, (
+        f"a and b should be symmetric around trunk Y: a={ay}, b={by}, mid={mid}"
+    )
+    assert abs(abs(by - ay) - 100.0) < 1e-6, (
+        f"a and b should be 2*y_spacing apart: |b-a|={abs(by-ay)}"
+    )
+
+
+def test_full_bundle_column_no_op_without_center_ports():
+    """The new fan-out only fires when --center-ports is enabled."""
+    graph = parse_metro_mermaid(_terminal_full_bundle_text())
+    graph.center_ports = False
+    compute_layout(graph, y_spacing=50.0)
+    # Without center_ports, a and b should sit on adjacent tracks (1 step apart).
+    delta = abs(graph.stations["b"].y - graph.stations["a"].y)
+    assert delta == pytest.approx(50.0), (
+        f"Without center_ports, a/b should be 1 y_spacing apart: delta={delta}"
+    )
+
+
+def test_full_bundle_column_skips_non_terminal_section():
+    """The fan-out leaves non-terminal sections untouched."""
+    text = (
+        "%%metro line: L1 | Line1 | #ff0000\n"
+        "%%metro line: L2 | Line2 | #00ff00\n"
+        "graph LR\n"
+        "    subgraph upstream [Upstream]\n"
+        "        u[U]\n"
+        "    end\n"
+        "    subgraph middle [Middle]\n"
+        "        a[A]\n"
+        "        b[B]\n"
+        "    end\n"
+        "    subgraph downstream [Downstream]\n"
+        "        d[D]\n"
+        "    end\n"
+        "    u -->|L1,L2| a\n"
+        "    u -->|L1,L2| b\n"
+        "    a -->|L1,L2| d\n"
+        "    b -->|L1,L2| d\n"
+    )
+    graph = parse_metro_mermaid(text)
+    graph.center_ports = True
+    compute_layout(graph, y_spacing=50.0)
+    # `middle` has exit ports so the new fan-out should NOT fire.
+    # Verify that a and b sit on adjacent track slots, not flanking a
+    # vacant trunk row.
+    delta = abs(graph.stations["b"].y - graph.stations["a"].y)
+    assert delta == pytest.approx(50.0), (
+        f"Non-terminal middle should keep tight spacing: delta={delta}"
+    )
+
+
 def test_cli_straight_diamonds_default(tmp_path):
     """--straight-diamonds is on by default."""
     from click.testing import CliRunner
