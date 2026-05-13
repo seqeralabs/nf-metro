@@ -113,7 +113,6 @@ def assign_tracks(
                     tracks,
                     straight_diamonds=graph.diamond_style == "straight",
                     layer_idx=layer_idx if entry_top else -1,
-                    graph=graph,
                 )
                 for n in nodes:
                     layer_occupancy[layer_idx][n] = tracks[n]
@@ -313,19 +312,8 @@ def _place_single_node(
         # base track so the main bundle stays compact and downstream
         # stations don't zigzag between the merged and base positions.
         if len(preds) > 1:
-            pred_line_sets = [set(graph.station_lines(p)) for p in preds]
-            max_pred_lines = max(len(pls) for pls in pred_line_sets)
+            max_pred_lines = max(len(set(graph.station_lines(p))) for p in preds)
             if len(node_lines) > max_pred_lines:
-                return base
-
-            # Trunk junction: at least one predecessor already carries the
-            # full node-line bundle, so side branches (subset preds) merge
-            # into the existing trunk here.  Anchor on the trunk's primary
-            # line track instead of the predecessor centroid so the bundle
-            # stays straight through the junction.
-            if len(node_lines) >= 2 and any(
-                pls == node_lines for pls in pred_line_sets
-            ):
                 return base
 
         # Diamond merge: when straight diamonds are active, snap the
@@ -381,30 +369,6 @@ def _is_diamond_fanout(nodes: list[str], G: nx.DiGraph) -> bool:
     return len(common_succs) > 0
 
 
-def _trunk_fanout_node(
-    nodes: list[str], graph: MetroGraph | None
-) -> str | None:
-    """Return the unique fan-out node carrying a strict superset of all siblings.
-
-    When one sibling's line set strictly contains every other sibling's
-    line set, it represents the trunk bundle while the others are
-    branches.  Anchoring the trunk keeps the bundle straight through
-    the fan-out.  Returns ``None`` if no such unique trunk exists.
-    """
-    if graph is None or len(nodes) < 2:
-        return None
-    line_sets = [(n, set(graph.station_lines(n))) for n in nodes]
-    trunk = None
-    for cand, cand_lines in line_sets:
-        if all(
-            other_lines < cand_lines for other, other_lines in line_sets if other != cand
-        ):
-            if trunk is not None:
-                return None
-            trunk = cand
-    return trunk
-
-
 def _place_fan_out(
     nodes: list[str],
     base: float,
@@ -414,7 +378,6 @@ def _place_fan_out(
     *,
     straight_diamonds: bool = False,
     layer_idx: int = -1,
-    graph: MetroGraph | None = None,
 ) -> None:
     """Place multiple nodes in the same layer+line, centered around an anchor.
 
@@ -485,17 +448,7 @@ def _place_fan_out(
     elif layer_idx == 1 and n == 2:
         use_asymmetric = True
 
-    # Trunk-anchored placement: when one node carries a strict superset
-    # of every sibling's line set, it's the bundle trunk.  Pin it at
-    # anchor and fan the side branches below so the trunk stays straight
-    # through the junction.
-    trunk_node = _trunk_fanout_node(nodes, graph)
-    if trunk_node is not None:
-        tracks[trunk_node] = anchor
-        others = [n for n in nodes if n != trunk_node]
-        for i, node in enumerate(others, 1):
-            tracks[node] = anchor + i * fan_spacing
-    elif use_asymmetric:
+    if use_asymmetric:
         # First node stays at anchor, others fan out below.
         tracks[nodes[0]] = anchor
         for i, node in enumerate(nodes[1:], 1):
