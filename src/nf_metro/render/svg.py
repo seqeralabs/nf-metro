@@ -40,6 +40,7 @@ from nf_metro.render.constants import (
     ICON_BBOX_MARGIN,
     ICON_CLEARANCE_MARGIN,
     ICON_INTER_GAP,
+    ICON_NAME_GAP,
     ICON_STATION_GAP,
     LEGEND_GAP,
     LEGEND_INSET,
@@ -271,6 +272,11 @@ def _compute_icon_obstacles(
 
         y_min = icon_cy - theme.terminus_height / 2 - stacked_pad
         y_max = icon_cy + theme.terminus_height / 2 + stacked_pad
+
+        # Extend the obstacle downward to cover any caption text rendered
+        # below the icon, so neighbouring labels keep their distance.
+        if any(station.terminus_names or []):
+            y_max += ICON_NAME_GAP + theme.label_font_size
 
         obstacles.append(
             (
@@ -848,9 +854,11 @@ def _render_terminus_icons(
     icon_types = station.terminus_icon_types or [ICON_TYPE_FILE] * len(
         station.terminus_labels
     )
+    names = station.terminus_names or [""] * len(station.terminus_labels)
 
     for i, label in enumerate(station.terminus_labels):
         icon_type = icon_types[i] if i < len(icon_types) else ICON_TYPE_FILE
+        name = names[i] if i < len(names) else ""
 
         if icons_go_right:
             icon_cx = base_cx + i * icon_step
@@ -888,6 +896,26 @@ def _render_terminus_icons(
             render_files_icon(d, **common, fold_size=theme.terminus_fold_size)
         else:
             render_file_icon(d, **common, fold_size=theme.terminus_fold_size)
+
+        # Optional caption rendered below the icon so the type chip
+        # inside the icon stays readable.
+        if name:
+            caption_y = (
+                icon_cy + theme.terminus_height / 2 + ICON_NAME_GAP
+            )
+            d.append(
+                draw.Text(
+                    name,
+                    theme.label_font_size,
+                    icon_cx,
+                    caption_y,
+                    fill=theme.label_color,
+                    font_family=theme.label_font_family,
+                    font_weight=theme.label_font_weight,
+                    text_anchor="middle",
+                    dominant_baseline="hanging",
+                )
+            )
 
 
 def _render_labels(

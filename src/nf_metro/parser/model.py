@@ -67,6 +67,10 @@ class Station:
     off_track: bool = False
     terminus_labels: list[str] = field(default_factory=list)
     terminus_icon_types: list[str] = field(default_factory=list)
+    # Optional human-readable names for each terminus icon, rendered as a
+    # caption outside the icon (e.g. "Samples" below a CSV file icon).
+    # Parallel list to terminus_labels; empty string means no caption.
+    terminus_names: list[str] = field(default_factory=list)
     # Populated by layout engine
     x: float = 0.0
     y: float = 0.0

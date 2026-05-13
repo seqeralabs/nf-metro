@@ -771,6 +771,58 @@ def test_parse_file_icon_type_default():
     assert graph.stations["reads_in"].terminus_icon_types == ["file"]
 
 
+def test_parse_file_icon_with_name():
+    """Optional third field on %%metro file: sets a caption name."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: reads_in | CSV | Samples\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    st = graph.stations["reads_in"]
+    assert st.terminus_labels == ["CSV"]
+    assert st.terminus_names == ["Samples"]
+
+
+def test_parse_file_icon_without_name_empty():
+    """Without the optional name field, terminus_names is empty string."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: reads_in | CSV\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.stations["reads_in"].terminus_names == [""]
+
+
+def test_parse_file_icon_name_applies_to_all_comma_labels():
+    """The optional name applies to every comma-separated label."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: reads_in | FASTQ, BAM | Reads\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    st = graph.stations["reads_in"]
+    assert st.terminus_labels == ["FASTQ", "BAM"]
+    assert st.terminus_names == ["Reads", "Reads"]
+
+
 def test_parse_legend_min_height():
     text = "%%metro legend_min_height: 72\ngraph LR\n"
     graph = parse_metro_mermaid(text)

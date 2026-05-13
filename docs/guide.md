@@ -322,6 +322,17 @@ For stations that represent a directory of output files rather than a single fil
 
 All three directives (`file:`, `files:`, `dir:`) work the same way: pair a station ID with a label, give the station a blank label (`[ ]`), and connect it with normal edges. The only difference is the rendered icon shape.
 
+### Naming an icon
+
+The label inside an icon is meant for a short type chip (e.g. `CSV`, `FASTQ`). To attach a human-readable name without overlapping the chip, add an optional third field to the directive:
+
+```text
+%%metro file: samples_in | CSV | Samples
+%%metro file: contrasts_in | YAML | Contrasts
+```
+
+The name is rendered as a caption directly below the icon. If multiple labels are listed (`FASTQ, BAM`), the same name applies to all of them.
+
 ## 6. Hidden stations
 
 Sometimes you need a branching or merging point in the graph that doesn't represent a real pipeline step. For example, lines might diverge at a point where no tool is actually run. Adding a visible station there clutters the diagram with a meaningless marker.
@@ -417,9 +428,9 @@ These go at the top of the file, before `graph LR`.
 | `%%metro grid: <section> \| <col>,<row>[,<rowspan>[,<colspan>]]` | Pin a section to a grid position |
 | `%%metro legend: <position>` | Legend position: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, or `none` |
 | `%%metro line_order: <strategy>` | Line ordering for track assignment: `definition` (default, preserves `.mmd` order) or `span` (longest-spanning lines get inner tracks) |
-| `%%metro file: <station> \| <label>` | Mark a station as a file terminus with a document icon |
-| `%%metro files: <station> \| <label>` | Mark a station with a stacked-documents icon (e.g. paired files) |
-| `%%metro dir: <station> \| <label>` | Mark a station with a folder icon (e.g. output directory) |
+| `%%metro file: <station> \| <label> [\| <name>]` | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon. |
+| `%%metro files: <station> \| <label> [\| <name>]` | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption. |
+| `%%metro dir: <station> \| <label> [\| <name>]` | Mark a station with a folder icon (e.g. output directory). Optional `name` caption. |
 | `%%metro compact_offsets: true` | Compact line offsets within stations (see below) |
 | `%%metro legend_min_height: <pixels>` | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 
