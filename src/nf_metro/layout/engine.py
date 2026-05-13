@@ -416,6 +416,14 @@ def _compute_section_layout(
     # bbox tops within each row stay flush after port-terminus spacing.
     _top_align_row_sections(graph)
 
+    # Phase 11d: When --center-ports is on, shift each row's trunk
+    # bundle down to the vertical centre of the smallest section in
+    # the row.  Without this, the bundle (and its inter-section ports)
+    # sits at the top of every section, kinking each time the trunk
+    # crosses a port that has already been pulled to the section mid
+    # by Phase 10's per-pair centring.
+    _shift_row_trunks_to_smallest_center(graph)
+
     # ---- Pass C: Junction positioning (single pass) --------------------
     # All port positions are now final; position junctions once.
 
@@ -2301,6 +2309,121 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
 
         if abs(port_st.y - target_y) >= 1.0:
             port_st.y = target_y
+
+
+def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
+    """Return the Y of the trunk bundle through *section*, if one exists.
+
+    The trunk is the run of internal stations whose line set matches
+    the full bundle of lines crossing the section's LEFT/RIGHT ports.
+    Returns the trunk Y nearest the LEFT/RIGHT port average (upstream
+    terminus icons may also carry the full bundle but sit above the
+    actual through-trunk).
+    """
+    bundle: set[str] = set()
+    port_ys: list[float] = []
+    for pid in list(section.entry_ports) + list(section.exit_ports):
+        port = graph.ports.get(pid)
+        if not port or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        for edge in graph.edges:
+            if edge.source == pid or edge.target == pid:
+                bundle.add(edge.line_id)
+        port_st = graph.stations.get(pid)
+        if port_st is not None:
+            port_ys.append(port_st.y)
+    if not bundle:
+        return None
+    port_ids = set(section.entry_ports) | set(section.exit_ports)
+    trunk_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if sid not in port_ids
+        and sid in graph.stations
+        and not graph.stations[sid].is_port
+        and set(graph.station_lines(sid)) == bundle
+    ]
+    if not trunk_ys:
+        return None
+    if port_ys:
+        ref = sum(port_ys) / len(port_ys)
+        return min(trunk_ys, key=lambda y: abs(y - ref))
+    return min(trunk_ys)
+
+
+def _shift_row_trunks_to_smallest_center(graph: MetroGraph) -> None:
+    """Shift each row's trunk + ports to the smallest section's centre.
+
+    Active only when ``graph.center_ports`` is True.  Within a grid
+    row, the trunk currently sits at whichever track the per-section
+    ordering picked -- typically the top -- and Phase 5/10 anchor the
+    inter-section ports to that track, pinning the bundle to the top
+    of taller sections.
+
+    This phase recomputes a row target Y as the vertical centre of
+    the smallest section in the row (or the deepest existing trunk Y
+    when that lies below the centre, so no section needs to lift its
+    trunk above the bbox top), then shifts every station and port in
+    each row-mate section down by ``target - section_trunk_y``.
+    Section bbox_h grows by the same delta; lower rows are pushed
+    down cumulatively so row bands stay non-overlapping.
+    """
+    if not graph.center_ports:
+        return
+    grid_group_secs = _grid_group_section_ids(graph)
+    if not grid_group_secs:
+        return
+
+    row_sections: dict[int, list[Section]] = defaultdict(list)
+    for section in graph.sections.values():
+        if (
+            section.id in grid_group_secs
+            and section.direction in ("LR", "RL")
+            and section.grid_row >= 0
+        ):
+            row_sections[section.grid_row].append(section)
+
+    row_growth: dict[int, float] = {}
+    for row, sections in row_sections.items():
+        if len(sections) < 2:
+            continue
+        trunks = {s.id: _section_trunk_y(graph, s) for s in sections}
+        trunks = {sid: y for sid, y in trunks.items() if y is not None}
+        if len(trunks) < 2:
+            continue
+        smallest = min(sections, key=lambda s: s.bbox_h)
+        target = max(smallest.bbox_y + smallest.bbox_h / 2, max(trunks.values()))
+        max_delta = 0.0
+        for section in sections:
+            t = trunks.get(section.id)
+            if t is None:
+                continue
+            delta = target - t
+            if delta < 1.0:
+                continue
+            for sid in section.station_ids:
+                st = graph.stations.get(sid)
+                if st is not None:
+                    st.y += delta
+            section.bbox_h += delta
+            max_delta = max(max_delta, delta)
+        if max_delta > 0:
+            row_growth[row] = max_delta
+
+    if not row_growth:
+        return
+    for sec_row in {s.grid_row for s in graph.sections.values() if s.grid_row >= 0}:
+        push = sum(g for r, g in row_growth.items() if r < sec_row)
+        if push <= 0:
+            continue
+        for section in graph.sections.values():
+            if section.grid_row != sec_row:
+                continue
+            section.bbox_y += push
+            for sid in section.station_ids:
+                st = graph.stations.get(sid)
+                if st is not None:
+                    st.y += push
 
 
 def _resolve_downstream_entry_y(
