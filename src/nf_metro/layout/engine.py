@@ -416,6 +416,12 @@ def _compute_section_layout(
     # bbox tops within each row stay flush after port-terminus spacing.
     _top_align_row_sections(graph)
 
+    # Phase 11d: When --center-ports is on, fan each row-mate section
+    # symmetrically around the smallest section's vertical centre.
+    # Trunk stations land on the shared target Y; side stations split
+    # above/below so sections don't leave empty space above the trunk.
+    _redistribute_row_symmetric(graph, y_spacing)
+
     # ---- Pass C: Junction positioning (single pass) --------------------
     # All port positions are now final; position junctions once.
 
@@ -912,6 +918,135 @@ def _top_align_row_sections(graph: MetroGraph) -> None:
                     if station:
                         station.y -= delta
                 section.bbox_y -= delta
+
+
+def _redistribute_row_symmetric(graph: MetroGraph, y_spacing: float) -> None:
+    """Fan each row-mate section symmetrically around a shared trunk Y.
+
+    Active when ``graph.center_ports`` is True.  For every grid row with
+    at least two LR/RL sections, this phase picks a target trunk Y --
+    the vertical centre of the smallest section in the row -- and
+    redistributes each row-mate section's internal stations so each
+    column is balanced above and below that trunk.
+
+    Within a column, a unique trunk station (line set equals the full
+    bundle crossing the section's LEFT/RIGHT ports) is pinned at the
+    target Y and side stations fan around it in alternating slots
+    ``+1, -1, +2, -2, ...`` at ``y_spacing`` pitch.  Columns without a
+    unique trunk centre all stations symmetrically.  Entry/exit ports
+    on LEFT/RIGHT sides are snapped to the target Y so inter-section
+    lines stay horizontal.  Section bboxes are recomputed and the row
+    is equalised so headers align.
+
+    No-op when ``--no-center-ports`` is set; the default PR #262 trunk
+    behaviour is preserved.
+    """
+    if not graph.center_ports:
+        return
+    grid_sec_ids = _grid_group_section_ids(graph)
+    if not grid_sec_ids:
+        return
+
+    row_sections: dict[int, list[Section]] = defaultdict(list)
+    for section in graph.sections.values():
+        if (
+            section.id in grid_sec_ids
+            and section.direction in ("LR", "RL")
+            and section.grid_row >= 0
+            and section.bbox_h > 0
+        ):
+            row_sections[section.grid_row].append(section)
+
+    grid_info = graph._row_y_grid_info
+    rows_touched: set[int] = set()
+    for row, sections in row_sections.items():
+        if len(sections) < 2:
+            continue
+        smallest = min(sections, key=lambda s: s.bbox_h)
+        target_y = smallest.bbox_y + smallest.bbox_h / 2
+
+        for section in sections:
+            bundle = _section_bundle(graph, section)
+            port_ids = set(section.entry_ports) | set(section.exit_ports)
+            cols: dict[float, list[str]] = defaultdict(list)
+            for sid in section.station_ids:
+                if sid in port_ids:
+                    continue
+                st = graph.stations.get(sid)
+                if st is None:
+                    continue
+                cols[round(st.x, 3)].append(sid)
+
+            for sids in cols.values():
+                if not sids:
+                    continue
+                lines_by_sid = {s: set(graph.station_lines(s)) for s in sids}
+                trunk_sids = [s for s in sids if lines_by_sid[s] == bundle]
+                if len(trunk_sids) == 1 and len(sids) > 1:
+                    trunk_sid = trunk_sids[0]
+                    side_sids = [s for s in sids if s != trunk_sid]
+                    side_sids.sort(key=lambda s: graph.stations[s].y)
+                    graph.stations[trunk_sid].y = target_y
+                    for i, sid in enumerate(side_sids, 1):
+                        k = (i + 1) // 2
+                        sign = 1 if (i % 2 == 1) else -1
+                        graph.stations[sid].y = target_y + sign * k * y_spacing
+                else:
+                    sids_sorted = sorted(sids, key=lambda s: graph.stations[s].y)
+                    n = len(sids_sorted)
+                    for i, sid in enumerate(sids_sorted):
+                        offset = (i - (n - 1) / 2.0) * y_spacing
+                        graph.stations[sid].y = target_y + offset
+
+            for pid in port_ids:
+                port = graph.ports.get(pid)
+                port_st = graph.stations.get(pid)
+                if port is None or port_st is None:
+                    continue
+                if port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                    continue
+                port_st.y = target_y
+
+        rows_touched.add(row)
+
+    if not rows_touched:
+        return
+
+    _recompute_grid_group_bboxes(graph)
+
+    for row in rows_touched:
+        sections = row_sections[row]
+        info = grid_info.get(row, {})
+        pad = info.get("max_y_pad", y_spacing)
+        non_port_ys: list[float] = []
+        for section in sections:
+            port_ids = set(section.entry_ports) | set(section.exit_ports)
+            for sid in section.station_ids:
+                if sid in port_ids:
+                    continue
+                st = graph.stations.get(sid)
+                if st is not None:
+                    non_port_ys.append(st.y)
+        if not non_port_ys:
+            continue
+        row_top = min(non_port_ys) - pad
+        row_bot = max(non_port_ys) + pad
+        for section in sections:
+            section.bbox_y = row_top
+            section.bbox_h = row_bot - row_top
+
+
+def _section_bundle(graph: MetroGraph, section: Section) -> set[str]:
+    """Return the set of line IDs crossing a section's LEFT/RIGHT ports."""
+    bundle: set[str] = set()
+    for pid in list(section.entry_ports) + list(section.exit_ports):
+        port = graph.ports.get(pid)
+        if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        for edge in graph.edges:
+            if edge.source == pid or edge.target == pid:
+                bundle.add(edge.line_id)
+    return bundle
 
 
 def _layout_single_section(
