@@ -257,6 +257,8 @@ def _compute_section_layout(
 
     Pass C - Junction positioning (single pass):
       Phase 12: Position junction stations in inter-section gaps
+      Phase 13: Lift off-track stations above section's top track
+      Phase 13a: Re-align bbox tops within each row (bbox-only)
     """
     from nf_metro.layout.section_placement import place_sections, position_ports
 
@@ -436,6 +438,13 @@ def _compute_section_layout(
     # Phase 13: Lift off_track stations above their section's top track.
     # Runs last so it operates on finalised station Ys and bboxes.
     _lift_off_track_stations(graph, y_spacing, section_y_padding)
+
+    # Phase 13a: Re-align bbox tops within each grid row after off-track
+    # lifting expanded some sections upward.  Unlike Phase 9/11c which
+    # shifts stations with the bbox, this only grows the bbox upward so
+    # the empty input-band space lines up across the row.  Station Ys
+    # in unlifted sections are preserved.
+    _top_align_row_bboxes_only(graph)
 
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
@@ -927,6 +936,49 @@ def _top_align_row_sections(graph: MetroGraph) -> None:
                     if station:
                         station.y -= delta
                 section.bbox_y -= delta
+
+
+def _top_align_row_bboxes_only(graph: MetroGraph) -> None:
+    """Align bbox tops within each row by growing bboxes upward.
+
+    Unlike ``_top_align_row_sections`` (which shifts stations together
+    with their bbox), this phase only moves ``bbox_y`` and grows
+    ``bbox_h`` so the section background extends upward to match the
+    row's topmost bbox.  Station, port and junction Ys inside the
+    section are left in place, producing empty space at the top of
+    sections that didn't have off-track inputs to lift.
+
+    Used after ``_lift_off_track_stations`` so off-track expansion in
+    one section doesn't leave other row-mates with misaligned bbox
+    tops.  Same contiguous-column-group logic as ``_top_align_row``
+    callers above.
+    """
+    row_sections: dict[int, list[Section]] = defaultdict(list)
+    for section in graph.sections.values():
+        if section.bbox_h > 0 and section.grid_row >= 0:
+            row_sections[section.grid_row].append(section)
+
+    for sections in row_sections.values():
+        if len(sections) < 2:
+            continue
+        sections_by_col = sorted(sections, key=lambda s: s.grid_col)
+        groups: list[list[Section]] = [[sections_by_col[0]]]
+        for s in sections_by_col[1:]:
+            if s.grid_col - groups[-1][-1].grid_col <= 1:
+                groups[-1].append(s)
+            else:
+                groups.append([s])
+
+        for group in groups:
+            if len(group) < 2:
+                continue
+            min_top = min(s.bbox_y for s in group)
+            for section in group:
+                delta = section.bbox_y - min_top
+                if delta <= 0:
+                    continue
+                section.bbox_y = min_top
+                section.bbox_h += delta
 
 
 def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
