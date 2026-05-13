@@ -311,7 +311,10 @@ def render_svg(
     # before section boxes are drawn and canvas bounds are computed.
     icon_obstacles = _compute_icon_obstacles(graph, theme, station_offsets)
     labels = place_labels(
-        graph, station_offsets=station_offsets, icon_obstacles=icon_obstacles
+        graph,
+        station_offsets=station_offsets,
+        icon_obstacles=icon_obstacles,
+        routes=routes,
     )
 
     max_x, max_y = _compute_canvas_bounds(graph, routes, debug)
