@@ -1000,6 +1000,11 @@ def _layout_single_section(
             station.x = station.layer * x_spacing + layer_extra.get(station.layer, 0)
             station.y = track_rank[station.track] * effective_y_spacing
 
+    # Resolve same-cell station collisions: two stations on the same line
+    # priority can land on identical (x,y) when the track allocator collapses
+    # distinct line tracks at a layer with only one occupant per line.
+    _resolve_station_collisions(sub, section, x_spacing, effective_y_spacing)
+
     # Normalize Y so minimum is 0 (raw tracks can be negative)
     _normalize_min(sub, axis="y")
 
@@ -1034,6 +1039,59 @@ def _layout_single_section(
     _adjust_terminus_icon_clearance(sub, section, graph)
 
     return sub
+
+
+def _resolve_station_collisions(
+    sub: MetroGraph,
+    section: Section,
+    x_spacing: float,
+    y_spacing: float,
+) -> None:
+    """Push stations apart when track compaction collides them in the same cell.
+
+    The track allocator can return identical track values for two stations on
+    different lines when each is the sole occupant of its line at a given
+    layer (e.g. side-by-side terminus branches). After coordinate assignment
+    they end up at the same (x, y), causing visual overlap. This pass detects
+    such collisions and shifts the later-defined station along the section's
+    secondary axis by one spacing unit, repeating until the cell is unique.
+    """
+    if section.direction == "TB":
+        primary, secondary, primary_step, step = "y", "x", y_spacing, x_spacing
+    else:
+        primary, secondary, primary_step, step = "x", "y", x_spacing, y_spacing
+
+    EPS = 0.5
+    real = [s for s in sub.stations.values() if not s.is_port and not s.is_hidden]
+    real.sort(key=lambda s: (getattr(s, primary), getattr(s, secondary)))
+
+    # Group stations by primary-axis bucket (layer column for LR/RL,
+    # row for TB).  Use the primary-axis step size; the bucket spans a
+    # half-step either side of a layer centre so off-grid layer_extra
+    # offsets stay in the same bucket as their layer peers.
+    by_primary: dict[float, list] = {}
+    for s in real:
+        bucket = round(getattr(s, primary) / max(primary_step, 1.0))
+        by_primary.setdefault(bucket, []).append(s)
+
+    for stations in by_primary.values():
+        if len(stations) < 2:
+            continue
+        # Sort by current secondary coord, then station definition order
+        # (insertion order in sub.stations) as a stable tiebreaker so the
+        # earlier-defined station keeps its slot.
+        order = {sid: i for i, sid in enumerate(sub.stations)}
+        stations.sort(
+            key=lambda s: (getattr(s, secondary), order.get(s.id, 0))
+        )
+        used: list[float] = []
+        for s in stations:
+            pos = getattr(s, secondary)
+            while any(abs(pos - u) < step - EPS for u in used):
+                pos += step
+            if pos != getattr(s, secondary):
+                setattr(s, secondary, pos)
+            used.append(pos)
 
 
 def _multiline_track_spacing(sub: MetroGraph, y_spacing: float) -> float:
