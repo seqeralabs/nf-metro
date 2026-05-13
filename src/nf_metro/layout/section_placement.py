@@ -673,16 +673,25 @@ def _position_ports_on_boundary(
         if not station:
             continue
 
-        connected = _find_connected_internal_coord(pid, section, graph, free_axis)
+        port = graph.ports.get(pid)
+        # LEFT/RIGHT exit ports prefer the downstream bundle Y so the
+        # inter-section run stays horizontal; fall back to the local
+        # internal-station average for entry ports and fan-in exits.
+        anchor: float | None = None
+        if free_axis == "y" and port is not None and not port.is_entry:
+            anchor = _find_downstream_bundle_y(pid, section, graph)
+        if anchor is None:
+            anchor = _find_connected_internal_coord(
+                pid, section, graph, free_axis
+            )
         if free_axis == "y":
             default = section.bbox_y + section.bbox_h / 2
         else:
             default = section.bbox_x + section.bbox_w / 2
 
         setattr(station, fixed_axis, fixed_coord)
-        setattr(station, free_axis, connected if connected is not None else default)
+        setattr(station, free_axis, anchor if anchor is not None else default)
 
-        port = graph.ports.get(pid)
         if port:
             port.x = station.x
             port.y = station.y
@@ -701,6 +710,89 @@ def _position_ports_on_boundary(
         span_start=span_start,
         span_end=span_end,
     )
+
+
+def _find_downstream_bundle_y(
+    exit_port_id: str,
+    section: Section,
+    graph: MetroGraph,
+) -> float | None:
+    """Find the Y where this exit port's bundle materialises downstream.
+
+    Traces forward to the downstream entry ports (direct or via a
+    fan-out junction) and resolves the Y of the topmost internal
+    station each one feeds when the fan-out is a parallel bundle
+    (every internal station carries the same line set).  Returns the
+    bundle Y when all same-row downstream entries agree and the value
+    fits inside this section's bbox, otherwise None so the caller can
+    fall back to the local-internal centre.
+    """
+    junction_ids = set(graph.junctions)
+    same_row = section.grid_row
+
+    # Fan-in exits stay centred: 2+ distinct internal source Ys means
+    # the visual convergence is meaningful and downstream anchoring
+    # would collapse the bundle onto one source.
+    internal_ids = (
+        set(section.station_ids) - set(section.entry_ports) - set(section.exit_ports)
+    )
+    src_ys: set[float] = set()
+    for edge in graph.edges:
+        if edge.target == exit_port_id and edge.source in internal_ids:
+            st = graph.stations.get(edge.source)
+            if st and not st.is_port:
+                src_ys.add(round(st.y, 1))
+    if len(src_ys) >= 2:
+        return None
+
+    entry_ids: list[str] = []
+    for edge in graph.edges:
+        if edge.source != exit_port_id:
+            continue
+        tgt = edge.target
+        if tgt in graph.ports and graph.ports[tgt].is_entry:
+            entry_ids.append(tgt)
+        elif tgt in junction_ids:
+            for e2 in graph.edges:
+                if e2.source == tgt and e2.target in graph.ports and (
+                    graph.ports[e2.target].is_entry
+                ):
+                    entry_ids.append(e2.target)
+    if not entry_ids:
+        return None
+
+    candidates: list[float] = []
+    for eid in entry_ids:
+        ep = graph.ports.get(eid)
+        if not ep:
+            continue
+        ds = graph.sections.get(ep.section_id)
+        if not ds or ds.grid_row != same_row:
+            continue
+        ds_internal = (
+            set(ds.station_ids) - set(ds.entry_ports) - set(ds.exit_ports)
+        )
+        targets: dict[str, set[str]] = {}
+        for edge in graph.edges:
+            if edge.source != eid or edge.target not in ds_internal:
+                continue
+            st = graph.stations.get(edge.target)
+            if st and not st.is_port:
+                targets.setdefault(edge.target, set()).add(edge.line_id)
+        if not targets:
+            continue
+        line_sets = list(targets.values())
+        if any(ls != line_sets[0] for ls in line_sets[1:]):
+            # Branch fan-out: different stations carry different lines.
+            return None
+        candidates.append(min(graph.stations[sid].y for sid in targets))
+
+    if not candidates or max(candidates) - min(candidates) > 1.0:
+        return None
+    target_y = candidates[0]
+    if not (section.bbox_y <= target_y <= section.bbox_y + section.bbox_h):
+        return None
+    return target_y
 
 
 def _find_connected_internal_coord(
