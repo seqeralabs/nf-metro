@@ -411,6 +411,11 @@ def _compute_section_layout(
     # padding around the final non-port station range.
     _recompute_grid_group_bboxes(graph)
 
+    # Phase 11c: Re-run top-align after Phase 11 may have shifted
+    # individual section bbox_y values (via _expand_bbox_for_y) so
+    # bbox tops within each row stay flush after port-terminus spacing.
+    _top_align_row_sections(graph)
+
     # ---- Pass C: Junction positioning (single pass) --------------------
     # All port positions are now final; position junctions once.
 
