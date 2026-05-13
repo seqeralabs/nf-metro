@@ -416,6 +416,12 @@ def _compute_section_layout(
     # bbox tops within each row stay flush after port-terminus spacing.
     _top_align_row_sections(graph)
 
+    # Phase 11d: When --center-ports is on, redistribute fan-out siblings
+    # of a section's trunk junction symmetrically around the trunk Y.
+    # Scoped to fan-out side branches only: linear chains, fan-in
+    # structures, and file inputs are left in place.
+    _redistribute_fanout_siblings(graph, y_spacing)
+
     # ---- Pass C: Junction positioning (single pass) --------------------
     # All port positions are now final; position junctions once.
 
@@ -912,6 +918,94 @@ def _top_align_row_sections(graph: MetroGraph) -> None:
                     if station:
                         station.y -= delta
                 section.bbox_y -= delta
+
+
+def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:
+    """Return the set of line IDs crossing a section's LEFT/RIGHT ports."""
+    bundle: set[str] = set()
+    for pid in list(section.entry_ports) + list(section.exit_ports):
+        port = graph.ports.get(pid)
+        if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        for edge in graph.edges:
+            if edge.source == pid or edge.target == pid:
+                bundle.add(edge.line_id)
+    return bundle
+
+
+def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
+    """Symmetrically distribute fan-out siblings around a trunk junction.
+
+    Active when ``graph.center_ports`` is True.  For each LR/RL section
+    in the grid, iterate by column: a column qualifies as a fan-out
+    junction when it has exactly one station whose line set equals the
+    section's full LEFT/RIGHT bundle (the trunk junction) AND at least
+    one sibling whose line set is a strict subset of the bundle.
+
+    In those columns, the trunk station is pinned at its current Y and
+    the strict-subset siblings are redistributed in alternating slots
+    ``+1, -1, +2, -2, ...`` at ``y_spacing`` pitch above and below it.
+
+    Strict scoping: only stations in a trunk-junction column AND with
+    a strict-subset line set are moved.  File inputs, processing
+    chains, fan-in stations, columns without a unique trunk, and
+    siblings carrying the full bundle (linear pass-throughs) are left
+    in place so non-fan-out topologies keep their natural Y ordering.
+
+    No-op when ``--no-center-ports`` is set, when a section has no
+    qualifying trunk-junction column, or when there are no
+    strict-subset siblings.
+    """
+    if not graph.center_ports:
+        return
+    grid_sec_ids = _grid_group_section_ids(graph)
+    if not grid_sec_ids:
+        return
+
+    for section in graph.sections.values():
+        if (
+            section.id not in grid_sec_ids
+            or section.direction not in ("LR", "RL")
+            or section.bbox_h <= 0
+        ):
+            continue
+        bundle = _section_bundle_lines(graph, section)
+        if not bundle:
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+
+        # Group non-port stations by column x.
+        cols: dict[float, list[str]] = defaultdict(list)
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None:
+                continue
+            cols[round(st.x, 3)].append(sid)
+
+        for sids in cols.values():
+            # Identify trunk station in this column: lines == bundle, unique.
+            trunks = [s for s in sids if set(graph.station_lines(s)) == bundle]
+            if len(trunks) != 1:
+                continue
+            trunk_sid = trunks[0]
+            trunk_y = graph.stations[trunk_sid].y
+            # Fan-out siblings: strict subset of bundle (skip full-bundle
+            # pass-throughs and orphan stations with no lines).
+            siblings = [
+                s for s in sids
+                if s != trunk_sid
+                and set(graph.station_lines(s))
+                and set(graph.station_lines(s)) < bundle
+            ]
+            if not siblings:
+                continue
+            siblings.sort(key=lambda s: graph.stations[s].y)
+            for i, sid in enumerate(siblings, 1):
+                k = (i + 1) // 2
+                sign = 1 if (i % 2 == 1) else -1
+                graph.stations[sid].y = trunk_y + sign * k * y_spacing
 
 
 def _layout_single_section(
