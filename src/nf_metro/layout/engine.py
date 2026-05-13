@@ -1443,9 +1443,59 @@ def _fan_free_content_upward(
         trunk_candidates.sort(key=lambda s: graph.stations[s].y)
         pinned = trunk_candidates[0]
         anchor_y = graph.stations[pinned].y
-        to_lift = trunk_candidates[1 : 1 + slots]
+        to_lift = [
+            sid for sid in trunk_candidates[1 : 1 + slots]
+            if not _lift_would_cause_uturn(graph, sid, section.id, anchor_y)
+        ]
         for i, sid in enumerate(to_lift, 1):
             graph.stations[sid].y = anchor_y - i * y_spacing
+
+
+def _lift_would_cause_uturn(
+    graph: MetroGraph, station_id: str, section_id: str, anchor_y: float
+) -> bool:
+    """Return True when lifting *station_id* above ``anchor_y`` would
+    force its incoming bundle to make a U-turn.
+
+    A station U-turns when every external feeder sits at Y >= anchor_y:
+    the line bundle has to climb from the section's entry port (anchored
+    at the row's trunk Y) up to the lifted station, then back down to
+    rejoin the trunk for downstream stations.  When two or more feeders
+    share that situation, the upward climb visibly bends the bundle
+    against the trunk and may cross sibling routes that stay at trunk Y.
+
+    Returns False when there's no risk (no feeders, single feeder, or
+    any feeder sits above the anchor giving the bundle a reason to climb).
+    """
+    junction_ids = set(graph.junctions)
+    seen: set[str] = set()
+    feeder_ys: list[float] = []
+
+    def _collect(node_id: str) -> None:
+        for edge in graph.edges:
+            if edge.target != node_id:
+                continue
+            src_id = edge.source
+            if src_id in seen:
+                continue
+            seen.add(src_id)
+            if src_id in junction_ids:
+                _collect(src_id)
+                continue
+            src = graph.stations.get(src_id)
+            if src is None:
+                continue
+            if src.is_port:
+                _collect(src_id)
+                continue
+            if src.section_id == section_id:
+                continue
+            feeder_ys.append(src.y)
+
+    _collect(station_id)
+    if len(feeder_ys) < 2:
+        return False
+    return all(y >= anchor_y - 0.5 for y in feeder_ys)
 
 
 def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:

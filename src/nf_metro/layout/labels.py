@@ -408,6 +408,7 @@ def place_labels(
     label_offset: float = LABEL_OFFSET,
     station_offsets: dict[tuple[str, str], float] | None = None,
     icon_obstacles: list[tuple[float, float, float, float]] | None = None,
+    routes: list | None = None,
 ) -> list[LabelPlacement]:
     """Place horizontal labels alternating above/below stations.
 
@@ -701,6 +702,9 @@ def place_labels(
 
     _stagger_stacked_labels(placements, sorted_stations, graph)
 
+    if routes:
+        _avoid_diagonal_routes(placements, graph, routes, station_offsets)
+
     return [p for p in placements if p.obstacle_bbox is None]
 
 
@@ -761,6 +765,106 @@ def _stagger_stacked_labels(
             if _has_collision(trial, siblings):
                 continue
             placement.x = trial.x
+
+
+def _segment_intersects_bbox(
+    x1: float, y1: float, x2: float, y2: float,
+    bbox: tuple[float, float, float, float],
+) -> bool:
+    """Liang-Barsky test: True iff segment touches/crosses *bbox*."""
+    bx_min, by_min, bx_max, by_max = bbox
+    if max(x1, x2) < bx_min or min(x1, x2) > bx_max:
+        return False
+    if max(y1, y2) < by_min or min(y1, y2) > by_max:
+        return False
+    dx, dy = x2 - x1, y2 - y1
+    t_min, t_max = 0.0, 1.0
+    for p, q in ((-dx, x1 - bx_min), (dx, bx_max - x1),
+                 (-dy, y1 - by_min), (dy, by_max - y1)):
+        if abs(p) < 1e-9:
+            if q < 0:
+                return False
+            continue
+        t = q / p
+        if p < 0 and t > t_min:
+            t_min = t
+        elif p > 0 and t < t_max:
+            t_max = t
+        if t_min > t_max:
+            return False
+    return True
+
+
+def _avoid_diagonal_routes(
+    placements: list[LabelPlacement],
+    graph: MetroGraph,
+    routes: list,
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> None:
+    """Flip labels overlapping a non-horizontal route segment.
+
+    Trunk segments are horizontal by design so labels offset above or
+    below them clear naturally.  Diagonal segments (trunk-to-fan
+    transitions, off-track entries) can land on top of a label and need
+    explicit avoidance: flip the label to the opposite side of its
+    station when the flipped position is free of label and route
+    collisions; otherwise leave it.
+    """
+    diag: list[tuple[float, float, float, float]] = []
+    for route in routes:
+        pts = list(getattr(route, "points", []))
+        if station_offsets and not getattr(route, "offsets_applied", False) and pts:
+            so = station_offsets.get((route.edge.source, route.line_id), 0.0)
+            to = station_offsets.get((route.edge.target, route.line_id), 0.0)
+            pts[0] = (pts[0][0], pts[0][1] + so)
+            pts[-1] = (pts[-1][0], pts[-1][1] + to)
+        for i in range(len(pts) - 1):
+            (x1, y1), (x2, y2) = pts[i], pts[i + 1]
+            dx, dy = x2 - x1, y2 - y1
+            if abs(dy) < max(abs(dx), 1.0) * 0.05:
+                continue  # ~horizontal; not a label obstacle.
+            diag.append((x1, y1, x2, y2))
+    if not diag:
+        return
+
+    m = LABEL_MARGIN
+
+    def hits(box: tuple[float, float, float, float]) -> bool:
+        padded = (box[0] - m, box[1] - m, box[2] + m, box[3] + m)
+        return any(_segment_intersects_bbox(*s, padded) for s in diag)
+
+    for placement in [p for p in placements if p.obstacle_bbox is None]:
+        if placement.dominant_baseline or placement.angle:
+            continue
+        if not hits(_label_bbox(placement)):
+            continue
+        station = graph.stations.get(placement.station_id)
+        if station is None:
+            continue
+        if station_offsets:
+            offs = [
+                station_offsets.get((station.id, lid), 0.0)
+                for lid in graph.station_lines(station.id)
+            ]
+            min_off, max_off = (min(offs), max(offs)) if offs else (0.0, 0.0)
+        else:
+            min_off = max_off = 0.0
+        if placement.above:
+            gap = max((station.y + min_off) - placement.y, LABEL_OFFSET)
+            trial = LabelPlacement(
+                station_id=placement.station_id, text=placement.text,
+                x=placement.x, y=station.y + max_off + gap, above=False,
+            )
+        else:
+            gap = max(placement.y - (station.y + max_off), LABEL_OFFSET)
+            trial = LabelPlacement(
+                station_id=placement.station_id, text=placement.text,
+                x=placement.x, y=station.y + min_off - gap, above=True,
+            )
+        siblings = [p for p in placements if p is not placement]
+        if _has_collision(trial, siblings) or hits(_label_bbox(trial)):
+            continue
+        placement.x, placement.y, placement.above = trial.x, trial.y, trial.above
 
 
 def _clamp_label_vertical(

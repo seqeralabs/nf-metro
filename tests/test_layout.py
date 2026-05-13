@@ -793,6 +793,50 @@ def test_is_diamond_fanout():
     assert _is_diamond_fanout(["b", "c"], G2) is False
 
 
+def test_lift_would_cause_uturn_skips_when_feeders_below_anchor():
+    """A trunk candidate with all-below feeders should NOT be lifted."""
+    from nf_metro.layout.engine import _lift_would_cause_uturn
+    from nf_metro.parser.model import Edge, MetroGraph, Station
+
+    g = MetroGraph()
+    g.stations["f1"] = Station(id="f1", label="F1", x=0, y=200, section_id="upstream")
+    g.stations["f2"] = Station(id="f2", label="F2", x=0, y=250, section_id="upstream")
+    g.stations["cand"] = Station(id="cand", label="C", x=100, y=200, section_id="ds")
+    g.edges = [
+        Edge(source="f1", target="cand", line_id="L1"),
+        Edge(source="f2", target="cand", line_id="L2"),
+    ]
+    assert _lift_would_cause_uturn(g, "cand", "ds", anchor_y=200) is True
+
+
+def test_lift_would_cause_uturn_allows_when_feeder_above():
+    """When at least one feeder sits above anchor_y, lifting is safe."""
+    from nf_metro.layout.engine import _lift_would_cause_uturn
+    from nf_metro.parser.model import Edge, MetroGraph, Station
+
+    g = MetroGraph()
+    g.stations["f1"] = Station(id="f1", label="F1", x=0, y=100, section_id="upstream")
+    g.stations["f2"] = Station(id="f2", label="F2", x=0, y=250, section_id="upstream")
+    g.stations["cand"] = Station(id="cand", label="C", x=100, y=200, section_id="ds")
+    g.edges = [
+        Edge(source="f1", target="cand", line_id="L1"),
+        Edge(source="f2", target="cand", line_id="L2"),
+    ]
+    assert _lift_would_cause_uturn(g, "cand", "ds", anchor_y=200) is False
+
+
+def test_lift_would_cause_uturn_ignores_single_feeder():
+    """A single external feeder is not enough to flag a U-turn."""
+    from nf_metro.layout.engine import _lift_would_cause_uturn
+    from nf_metro.parser.model import Edge, MetroGraph, Station
+
+    g = MetroGraph()
+    g.stations["f1"] = Station(id="f1", label="F1", x=0, y=250, section_id="upstream")
+    g.stations["cand"] = Station(id="cand", label="C", x=100, y=200, section_id="ds")
+    g.edges = [Edge(source="f1", target="cand", line_id="L1")]
+    assert _lift_would_cause_uturn(g, "cand", "ds", anchor_y=200) is False
+
+
 def test_straight_diamond_top_branch_stays_flat():
     """With diamond_style='straight', the top branch of a diamond stays on the trunk."""
     graph = parse_metro_mermaid(_diamond_section_text())
