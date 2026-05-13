@@ -467,6 +467,13 @@ def _compute_section_layout(
     # padding by more than one ``y_spacing`` slot.
     _fan_free_content_upward(graph, section_y_padding, y_spacing)
 
+    # Phase 13e: Snap all station/port Ys to a per-section y_spacing
+    # grid.  Trunk-Y align, port-snap, and the row compaction/fan
+    # phases compute shifts that don't respect the grid pitch, leaving
+    # coordinates at fractional Ys (e.g. 298.785 when the pitch is 55).
+    # This final pass restores clean grid positions before validation.
+    _snap_all_y_to_grid(graph, y_spacing)
+
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
@@ -1496,6 +1503,96 @@ def _lift_would_cause_uturn(
     if len(feeder_ys) < 2:
         return False
     return all(y >= anchor_y - 0.5 for y in feeder_ys)
+
+
+def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
+    """Snap every station and port Y to the nearest row-wide grid slot.
+
+    Earlier phases (``_align_row_trunk_ys``, port-snap, downstream
+    alignment) compute shifts that don't respect the grid pitch, so
+    stations can land at fractional Ys (e.g. ``298.785`` when the pitch
+    is 55).  This final pass restores a clean grid by:
+
+    1. Grouping sections by row.  Sections sharing a row from
+       ``_align_row_y_grids`` use the row's ``slot_spacing`` as pitch
+       and snap to a single origin so trunks stay co-linear across the
+       row.  Sections without a row grid entry are treated as their
+       own one-section group at the input ``y_spacing``.
+    2. Finding the group's grid origin as the mode of ``y % pitch``
+       across ALL non-port, on-track stations in the group.  Using a
+       global mode prevents per-section origins from drifting (which
+       would kink the trunk between sections).
+    3. Snapping every station and LEFT/RIGHT port in the group to the
+       nearest ``origin + n * pitch``, bounded by half a pitch so
+       adjacency cannot flip.
+
+    Groups with no on-grid majority are left untouched.
+    """
+    if y_spacing <= 0:
+        return
+    # Build {group_key: (pitch, [section_ids])}.  Row-grid groups key
+    # by row id; ungrouped sections each become their own group.
+    groups: dict[object, tuple[float, list[str]]] = {}
+    grouped_ids: set[str] = set()
+    for row, info in (graph._row_y_grid_info or {}).items():
+        pitch = info.get("slot_spacing", y_spacing)
+        sec_ids = list(info.get("section_ids", []))
+        groups[("row", row)] = (pitch, sec_ids)
+        grouped_ids.update(sec_ids)
+    for section in graph.sections.values():
+        if section.id not in grouped_ids:
+            groups[("solo", section.id)] = (y_spacing, [section.id])
+
+    for pitch, sec_ids in groups.values():
+        half = pitch / 2.0
+        # Collect non-port, on-track station Ys across the whole group
+        # to estimate the row's shared grid offset.  Off-track stations
+        # were deliberately lifted by Phase 13 and must not pull origin.
+        residues: Counter[float] = Counter()
+        per_section_ports: dict[str, set[str]] = {}
+        for sec_id in sec_ids:
+            section = graph.sections.get(sec_id)
+            if section is None or section.bbox_h <= 0:
+                continue
+            port_ids = set(section.entry_ports) | set(section.exit_ports)
+            per_section_ports[sec_id] = port_ids
+            for sid in section.station_ids:
+                if sid in port_ids:
+                    continue
+                st = graph.stations.get(sid)
+                if st is None or getattr(st, "off_track", False):
+                    continue
+                residues[round(st.y % pitch, 3)] += 1
+        if not residues:
+            continue
+        origin_r, top = residues.most_common(1)[0]
+        if top < 2 and len(residues) > 1:
+            continue
+
+        def _snap(y: float, origin: float = origin_r, p: float = pitch,
+                  h: float = half) -> float:
+            snapped = origin + round((y - origin) / p) * p
+            return snapped if abs(snapped - y) <= h + 1e-6 else y
+
+        for sec_id, port_ids in per_section_ports.items():
+            section = graph.sections.get(sec_id)
+            if section is None:
+                continue
+            for sid in section.station_ids:
+                if sid in port_ids:
+                    continue
+                st = graph.stations.get(sid)
+                if st is None or getattr(st, "off_track", False):
+                    continue
+                st.y = _snap(st.y)
+            for pid in port_ids:
+                port = graph.ports.get(pid)
+                port_st = graph.stations.get(pid)
+                if port is None or port_st is None:
+                    continue
+                if port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                    continue
+                port_st.y = _snap(port_st.y)
 
 
 def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:
