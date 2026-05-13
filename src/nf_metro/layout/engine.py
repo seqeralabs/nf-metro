@@ -427,6 +427,12 @@ def _compute_section_layout(
     # structures, and file inputs are left in place.
     _redistribute_fanout_siblings(graph, y_spacing)
 
+    # Phase 11e: Snap all station/port Ys to a per-section y_spacing
+    # grid.  Trunk-Y align and port-snap shifts can land coordinates at
+    # fractional Ys (e.g. 298.785 when the pitch is 55); this final pass
+    # restores clean grid positions before junctions are placed.
+    _snap_all_y_to_grid(graph, y_spacing)
+
     # ---- Pass C: Junction positioning (single pass) --------------------
     # All port positions are now final; position junctions once.
 
@@ -1057,6 +1063,82 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                                 target_aligned = True
                     if len(connected_ys) < 2 and target_aligned:
                         _set_port_y(graph, pid, target_y)
+
+
+def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
+    """Snap every station and port Y to the nearest per-section grid slot.
+
+    Earlier phases (``_align_row_trunk_ys``, port-snap, downstream
+    alignment) compute shifts that don't respect the grid pitch, so
+    stations can land at fractional Ys (e.g. ``298.785`` when the pitch
+    is 55).  This final pass restores a clean grid by:
+
+    1. Choosing the per-section pitch: the row's ``slot_spacing`` from
+       ``_align_row_y_grids`` if the section participates in a row
+       grid group, otherwise the input ``y_spacing``.
+    2. Finding the section's grid origin as the mode of ``y % pitch``
+       for its non-port stations.  This is robust to a handful of
+       off-grid outliers as long as most stations were already on-grid.
+    3. Snapping every station and port in the section to the nearest
+       ``origin + n * pitch``, bounded by half a pitch so adjacency
+       cannot flip.
+
+    Sections with no on-grid majority are left untouched.
+    """
+    if y_spacing <= 0:
+        return
+    # Map section id -> slot_spacing from the row grid info, if any.
+    sec_to_pitch: dict[str, float] = {}
+    for info in (graph._row_y_grid_info or {}).values():
+        slot = info.get("slot_spacing", y_spacing)
+        for sec_id in info.get("section_ids", []):
+            sec_to_pitch[sec_id] = slot
+
+    for section in graph.sections.values():
+        if section.bbox_h <= 0:
+            continue
+        pitch = sec_to_pitch.get(section.id, y_spacing)
+        half = pitch / 2.0
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        # Collect non-port station Ys to estimate the section's grid offset.
+        residues: Counter[float] = Counter()
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None:
+                continue
+            residues[round(st.y % pitch, 3)] += 1
+        if not residues:
+            continue
+        # Mode of the modular residues gives the section grid origin.
+        origin_r, top = residues.most_common(1)[0]
+        # Require either a majority on-grid or a sole station; otherwise
+        # the origin guess is unreliable.
+        if top < 2 and len(residues) > 1:
+            continue
+
+        def _snap(y: float, origin: float = origin_r, p: float = pitch,
+                  h: float = half) -> float:
+            snapped = origin + round((y - origin) / p) * p
+            return snapped if abs(snapped - y) <= h + 1e-6 else y
+
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is not None:
+                st.y = _snap(st.y)
+        # Only LEFT/RIGHT ports have Y as a free coordinate; TOP/BOTTOM
+        # ports must stay on the bbox edge they were placed on.
+        for pid in port_ids:
+            port = graph.ports.get(pid)
+            port_st = graph.stations.get(pid)
+            if port is None or port_st is None:
+                continue
+            if port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                continue
+            port_st.y = _snap(port_st.y)
 
 
 def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:
