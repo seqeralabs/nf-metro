@@ -2264,9 +2264,24 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
         if len(unique_source_ys) >= 3 and (
             unique_source_ys[-1] - unique_source_ys[0] > 1.0
         ):
-            # 3+ sources at distinct Y values: this is a fan-in merge.
-            # Keep the centered midpoint so lines converge symmetrically.
-            continue
+            # 3+ sources at distinct Y values is normally a fan-in merge
+            # and the centered midpoint preserves the convergence visual.
+            # Exception: when the exit carries a multi-line bundle (every
+            # source contributes the full line set) and one source Y
+            # matches the downstream entry, the sources are parallel-
+            # redundant rather than truly merging.  Snap to that source Y
+            # so the inter-section run stays horizontal.
+            exit_lines = {
+                e.line_id for e in graph.edges if e.target == port_id
+            }
+            if (
+                len(exit_lines) >= 2
+                and ds_y is not None
+                and any(abs(y - ds_y) < 1.0 for y in unique_source_ys)
+            ):
+                target_y = next(y for y in unique_source_ys if abs(y - ds_y) < 1.0)
+            else:
+                continue
         elif len(unique_source_ys) == 2 and (
             unique_source_ys[-1] - unique_source_ys[0] > 1.0
         ):
