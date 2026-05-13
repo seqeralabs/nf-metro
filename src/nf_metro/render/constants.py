@@ -91,6 +91,9 @@ ICON_STATION_GAP: float = 6.0
 ICON_BBOX_MARGIN: float = 2.0
 """Margin around icon bounding box for clamping."""
 
+ICON_NAME_GAP: float = 4.0
+"""Gap between the bottom of a terminus icon and its name caption."""
+
 # ---------------------------------------------------------------------------
 # Animation
 # ---------------------------------------------------------------------------
