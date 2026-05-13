@@ -479,6 +479,14 @@ def _compute_section_layout(
     # This final pass restores clean grid positions before validation.
     _snap_all_y_to_grid(graph, y_spacing)
 
+    # Phase 13f: Re-anchor off-track inputs to their consumer's final
+    # (snapped) Y.  Phase 13's lift placed them relative to pre-snap
+    # consumer Ys; snapping the consumer to the grid can shift it by
+    # up to half a pitch, which would collapse the y_spacing gap above
+    # off-track.  Recomputing here pins each off-track at
+    # consumer.y - n*y_spacing on the final grid.
+    _reanchor_off_track_to_consumer(graph, y_spacing)
+
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
@@ -1151,19 +1159,14 @@ def _compact_row_content_to_bbox_top(
 
     Two-step compaction within each grid row's contiguous column run:
 
-    1. Per section, compute the allowable upward shift of on-track
-       content:
-
-       * bounded above by ``min(on_track_y) - bbox_y - section_y_padding``
-         so on-track content stays inside the bbox padding zone;
-       * bounded above by ``min(on_track_y) - max(off_track_y) - y_spacing_floor``
-         so on-track content stays clear of any lifted off-track band.
-
-       The uniform shift applied to the group is the minimum allowable
-       shift across same-row sections; that preserves the trunk-Y
-       alignment established by Phase 11ca.  Only on-track stations
-       and ports move; off-track stations stay anchored to the lifted
-       band Phase 13 placed them on.
+    1. Per section, compute the allowable upward shift bounded by
+       ``min(content_y) - bbox_y - section_y_padding`` so the topmost
+       station (on-track or off-track) stays inside the bbox padding
+       zone.  The uniform shift applied to the group is the minimum
+       allowable shift across same-row sections; that preserves the
+       trunk-Y alignment established by Phase 11ca.  Both on-track and
+       off-track stations move together so the gap between each
+       off-track input and its consumer is preserved.
     2. Shrink each section's ``bbox_h`` so the bottom slack matches
        ``section_y_padding`` (clamped so ports inside the section stay
        within the bbox).
@@ -1173,36 +1176,11 @@ def _compact_row_content_to_bbox_top(
     the rowspan was already consumed by earlier placement phases and no
     downstream phase relies on the inflated height.
     """
-
-    def _is_off_track(sid: str) -> bool:
-        st = graph.stations.get(sid)
-        return bool(st and getattr(st, "off_track", False))
-
     row_sections: dict[int, list[Section]] = defaultdict(list)
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.grid_row < 0:
             continue
         row_sections[section.grid_row].append(section)
-
-    # Minimum clearance between the off-track lift band and any
-    # on-track content shifted upward toward it.  Phase 13 installs a
-    # full ``y_spacing`` gap; compaction may shrink it to roughly one
-    # station-row's worth of clearance so labels still avoid the
-    # topmost line track.
-    off_track_gap = max(FONT_HEIGHT + STATION_RADIUS_APPROX * 2, y_spacing / 2)
-    # Captioned off-track icons (PR #269) render a smaller label line
-    # under the icon body; that text needs to clear the topmost line
-    # track too, so the gap below a captioned bottom-of-band station is
-    # widened by the (scaled) caption extent.
-    from nf_metro.render.constants import ICON_NAME_FONT_SCALE, ICON_NAME_GAP
-
-    captioned_extra = (
-        FONT_HEIGHT * ICON_NAME_FONT_SCALE + ICON_NAME_GAP
-    )
-
-    def _has_caption(sid: str) -> bool:
-        st = graph.stations.get(sid)
-        return bool(st and st.terminus_names and any(st.terminus_names))
 
     for sections in row_sections.values():
         if not sections:
@@ -1226,43 +1204,25 @@ def _compact_row_content_to_bbox_top(
         for group in groups:
             allowed_shifts: list[float] = []
             for section in group:
-                on_track_ys = [
+                # Use all real (non-port) stations as the top reference so
+                # off-track inputs lifted above their consumers also stay
+                # inside the bbox padding zone.  Off-track stations now
+                # move together with on-track during compaction.
+                content_ys = [
                     graph.stations[sid].y
                     for sid in section.station_ids
                     if sid in graph.stations
                     and not graph.stations[sid].is_port
-                    and not _is_off_track(sid)
                 ]
-                if not on_track_ys:
+                if not content_ys:
                     continue
-                on_track_min = min(on_track_ys)
-                shift = on_track_min - section.bbox_y - section_y_padding
-                off_track_ys = [
-                    graph.stations[sid].y
-                    for sid in section.station_ids
-                    if sid in graph.stations and _is_off_track(sid)
-                ]
-                if off_track_ys:
-                    gap = off_track_gap
-                    bottom_off_y = max(off_track_ys)
-                    bottom_off_ids = [
-                        sid
-                        for sid in section.station_ids
-                        if sid in graph.stations
-                        and _is_off_track(sid)
-                        and abs(graph.stations[sid].y - bottom_off_y) < 0.5
-                    ]
-                    if any(_has_caption(sid) for sid in bottom_off_ids):
-                        gap += captioned_extra
-                    clear_shift = on_track_min - bottom_off_y - gap
-                    shift = min(shift, clear_shift)
+                content_min = min(content_ys)
+                shift = content_min - section.bbox_y - section_y_padding
                 allowed_shifts.append(max(0.0, shift))
             delta = min(allowed_shifts) if allowed_shifts else 0.0
             if delta >= 0.5:
                 for section in group:
                     for sid in section.station_ids:
-                        if _is_off_track(sid):
-                            continue
                         st = graph.stations.get(sid)
                         if st:
                             st.y -= delta
@@ -1452,6 +1412,16 @@ def _fan_free_content_upward(
         ]
         if len(trunk_candidates) < 2:
             continue
+        # Skip if every station in the entry column carries the full
+        # bundle (no unique trunk): ``_redistribute_full_bundle_columns``
+        # has already symmetrically fanned them around the section's
+        # port Y and we must not collapse that into a one-sided stack.
+        entry_col_all = [
+            sid for sid in internal_ids
+            if round(graph.stations[sid].x, 3) == entry_x
+        ]
+        if len(trunk_candidates) == len(entry_col_all) and graph.center_ports:
+            continue
         trunk_candidates.sort(key=lambda s: graph.stations[s].y)
         pinned = trunk_candidates[0]
         anchor_y = graph.stations[pinned].y
@@ -1552,7 +1522,9 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
         half = pitch / 2.0
         # Collect non-port, on-track station Ys across the whole group
         # to estimate the row's shared grid offset.  Off-track stations
-        # were deliberately lifted by Phase 13 and must not pull origin.
+        # were lifted by Phase 13 relative to their consumers; they
+        # snap to the same grid (so the y_spacing gap above the
+        # consumer is preserved) but don't influence the origin.
         residues: Counter[float] = Counter()
         per_section_ports: dict[str, set[str]] = {}
         for sec_id in sec_ids:
@@ -1587,7 +1559,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
                 if sid in port_ids:
                     continue
                 st = graph.stations.get(sid)
-                if st is None or getattr(st, "off_track", False):
+                if st is None:
                     continue
                 st.y = _snap(st.y)
             for pid in port_ids:
@@ -1689,20 +1661,21 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
 
 
 def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
-    """Fan a terminal section's full-bundle column around the trunk Y.
+    """Fan a full-bundle column around the trunk Y.
 
-    Active when ``graph.center_ports`` is True.  Handles the
-    Reporting-style case where a *terminal* section (no exit ports)
-    holds a column of two or more full-bundle stations with no unique
-    trunk junction, so the existing fan-out logic skips it.  Stations
-    are placed symmetrically around a trunk Y derived from other
+    Active when ``graph.center_ports`` is True.  Handles columns of
+    two or more full-bundle stations with no unique trunk junction
+    (so ``_redistribute_fanout_siblings`` skips them).  Stations are
+    placed symmetrically around a trunk Y derived from other
     full-bundle stations in the section (or the LR port Y).
 
     Even count leaves the trunk row empty (``trunk_y ± s, ± 2s, ...``);
     odd count keeps a middle station at ``trunk_y`` with the rest
-    flanking.  Non-terminal sections are left untouched so the
-    Differential symfan, Functional method bank, file inputs and
-    fan-in chains keep their natural Y ordering.
+    flanking.  Fires on both terminal (Reporting-style) and
+    non-terminal (Functional-style) sections; the strict
+    "every station in the column carries the full bundle" gate keeps
+    file inputs, fan-in chains and method banks with strict-subset
+    lines untouched.
     """
     if not graph.center_ports:
         return
@@ -1715,7 +1688,6 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
             section.id not in grid_sec_ids
             or section.direction not in ("LR", "RL")
             or section.bbox_h <= 0
-            or section.exit_ports
         ):
             continue
         bundle = _section_bundle_lines(graph, section)
@@ -1727,36 +1699,50 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
         for sid in section.station_ids:
             if sid in port_ids:
                 continue
-            if (st := graph.stations.get(sid)) is not None:
-                cols[round(st.x, 3)].append(sid)
+            st = graph.stations.get(sid)
+            if st is None or st.off_track:
+                # Off-track inputs (file icons) are placed later by
+                # ``_lift_off_track_stations`` and must not occupy a
+                # column slot in the fan-out logic.
+                continue
+            cols[round(st.x, 3)].append(sid)
 
         full_by_col = {
             x: [s for s in sids if set(graph.station_lines(s)) == bundle]
             for x, sids in cols.items()
         }
+        # Snapshot pre-fan Ys so iteration order of columns doesn't
+        # drift the trunk reference: a later column must not see an
+        # earlier column's already-fanned positions.
+        pre_fan_y = {sid: graph.stations[sid].y for sids in cols.values() for sid in sids}
+        port_ys = [
+            graph.ports[pid].y for pid in port_ids
+            if graph.ports.get(pid) is not None
+            and graph.ports[pid].side in (PortSide.LEFT, PortSide.RIGHT)
+        ]
 
         for x, full in full_by_col.items():
             # Fire only when every column station carries the full bundle
             # and there are >=2 (so no unique trunk station exists).
             if len(full) < 2 or len(full) != len(cols[x]):
                 continue
-            others = sorted(
-                graph.stations[s].y
-                for ox, sids in full_by_col.items() if ox != x
-                for s in sids
-            )
-            if others:
-                trunk_y = others[len(others) // 2]
-            else:
-                port_ys = [
-                    graph.ports[pid].y for pid in port_ids
-                    if graph.ports.get(pid) is not None
-                    and graph.ports[pid].side in (PortSide.LEFT, PortSide.RIGHT)
-                ]
-                if not port_ys:
-                    continue
+            # Trunk Y is the section's LR port Y when available (the
+            # inter-section bundle line) so all full-bundle columns
+            # in the section share a single trunk reference.  Falls
+            # back to the median pre-fan Y of full-bundle stations in
+            # other columns when the section has no LR ports.
+            if port_ys:
                 trunk_y = sum(port_ys) / len(port_ys)
-            full.sort(key=lambda s: graph.stations[s].y)
+            else:
+                others = sorted(
+                    pre_fan_y[s]
+                    for ox, sids in full_by_col.items() if ox != x
+                    for s in sids
+                )
+                if not others:
+                    continue
+                trunk_y = others[len(others) // 2]
+            full.sort(key=lambda s: pre_fan_y[s])
             n = len(full)
             # Even: offsets -n//2..-1, 1..n//2 (skipping 0).
             # Odd:  offsets -(n//2)..n//2 inclusive (0 = trunk_y).
@@ -4000,27 +3986,19 @@ def _compute_fork_join_gaps(
     return layer_extra
 
 
-def _lift_off_track_stations(
+def _off_track_groups(
     graph: MetroGraph,
-    y_spacing: float,
-    section_y_padding: float,
-) -> None:
-    """Lift off_track stations above their section's topmost line track.
+) -> dict[str, tuple[str, dict[str, list[Station]]]]:
+    """Group off-track stations by section and consumer.
 
-    Off-track stations are file-input nodes that should not consume a
-    line-track Y slot.  This phase moves each marked station's Y to a
-    new "input band" above the topmost non-off-track station in its
-    section, then expands the section bbox upward to fit them.  When
-    multiple off-track stations sit at the same X (the normal case for
-    sources stacked on layer 0), they are spread horizontally along
-    the band so file icons don't overlap.
-
-    Same-section ports already at the top edge are shifted with the
-    bbox so their entry coordinates remain on the boundary.
+    Returns a mapping ``section_id -> (fallback_consumer_id, groups)``
+    where ``groups`` maps consumer-station-id (or ``""`` for inputs with
+    no same-section consumer) to a list of off-track stations feeding
+    that consumer.  ``fallback_consumer_id`` is the topmost on-track
+    station in the section, used as the anchor for the ``""`` bucket.
     """
     junction_ids = set(graph.junctions)
 
-    # Group off_track stations by section
     by_section: dict[str, list[Station]] = defaultdict(list)
     for sid, st in graph.stations.items():
         if not st.off_track or st.is_port or sid in junction_ids:
@@ -4029,60 +4007,114 @@ def _lift_off_track_stations(
             continue
         by_section[st.section_id].append(st)
 
-    # Band step matches y_spacing so each input gets a full slot
-    # (matches original station spacing, leaving room for label text).
-    # Inputs stay at their original X (layer 0 for sources) but stack
-    # vertically in a band above the topmost line track so file icons
-    # no longer share Y with the study-type lanes.
-    BAND_STEP = y_spacing
+    consumer_of: dict[str, str] = {}
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if src is None or tgt is None:
+            continue
+        if not src.off_track or src.is_port or src.id in junction_ids:
+            continue
+        if tgt.is_port or tgt.id in junction_ids or tgt.off_track:
+            continue
+        if src.section_id != tgt.section_id:
+            continue
+        consumer_of.setdefault(src.id, tgt.id)
 
+    result: dict[str, tuple[str, dict[str, list[Station]]]] = {}
     for sec_id, off_stations in by_section.items():
         section = graph.sections.get(sec_id)
         if not section:
             continue
-
-        # Topmost Y of non-off-track real stations in the section
-        anchor_ys = [
-            graph.stations[sid].y
+        anchor_pairs = [
+            (graph.stations[sid].y, sid)
             for sid in section.station_ids
             if sid in graph.stations
             and not graph.stations[sid].is_port
             and not graph.stations[sid].off_track
             and sid not in junction_ids
         ]
-        if not anchor_ys:
+        if not anchor_pairs:
             continue
-        top_y = min(anchor_ys)
-
-        # Group inputs by X column (layer): each column gets its own
-        # vertical stack within the input band, preserving original
-        # Y order so e.g. Samples ends up above Contrasts above Matrix.
-        by_col: dict[float, list[Station]] = defaultdict(list)
+        fallback_id = min(anchor_pairs)[1]
+        groups: dict[str, list[Station]] = defaultdict(list)
         for st in off_stations:
-            by_col[round(st.x, 1)].append(st)
-        for stations in by_col.values():
-            stations.sort(key=lambda s: s.y)
+            groups[consumer_of.get(st.id, "")].append(st)
+        result[sec_id] = (fallback_id, groups)
+    return result
 
-        # Lowest slot in the band sits one y_spacing above top_y so
-        # there's room for the icon plus clearance from the topmost
-        # line track.  Higher slots stack upward in BAND_STEP units.
-        max_per_col = max(len(v) for v in by_col.values())
-        band_bottom = top_y - y_spacing
-        band_top = band_bottom - (max_per_col - 1) * BAND_STEP
 
-        for stations in by_col.values():
-            n = len(stations)
-            # Distribute n stations across the band, topmost first
-            for i, st in enumerate(stations):
-                st.y = band_top + i * BAND_STEP
+def _place_off_track_above_consumers(
+    graph: MetroGraph,
+    y_spacing: float,
+    section_id: str,
+    fallback_consumer_id: str,
+    by_consumer: dict[str, list[Station]],
+) -> float | None:
+    """Place each off-track input ``n*y_spacing`` above its consumer.
 
-        # Expand section bbox upward so the band + label clearance
-        # fits inside the section box.
-        new_bbox_top = band_top - section_y_padding
+    Multiple inputs feeding the same consumer stack upward in
+    ``y_spacing`` steps.  Returns the smallest assigned Y (topmost
+    lifted station), or ``None`` when no stations were placed.
+    """
+    highest_y: float | None = None
+    for consumer_id, stations in by_consumer.items():
+        anchor_id = consumer_id if consumer_id else fallback_consumer_id
+        anchor = graph.stations.get(anchor_id)
+        if anchor is None:
+            continue
+        consumer_y = anchor.y
+        # Preserve original Y order: input closest to the top stays
+        # topmost in the stack.
+        stations.sort(key=lambda s: s.y)
+        n = len(stations)
+        for i, st in enumerate(stations):
+            st.y = consumer_y - (n - i) * y_spacing
+            if highest_y is None or st.y < highest_y:
+                highest_y = st.y
+    return highest_y
+
+
+def _lift_off_track_stations(
+    graph: MetroGraph,
+    y_spacing: float,
+    section_y_padding: float,
+) -> None:
+    """Lift off_track stations to the row above their consumer station.
+
+    Off-track stations are file-input nodes that should not consume a
+    line-track Y slot.  Each marked station is placed one ``y_spacing``
+    row above its consumer (the on-track station it feeds), so the
+    input sits adjacent to where its data is read rather than at a
+    uniform top-of-section band.  When several off-track inputs feed
+    the same consumer, they stack upward in ``y_spacing`` steps.
+
+    If an off-track station has no on-track consumer in the same
+    section, it falls back to the section's topmost on-track station
+    as its anchor.  After placement, the section bbox grows upward to
+    fit the highest lifted input, and same-section TOP ports are
+    nudged back to the new top edge.
+    """
+    groups = _off_track_groups(graph)
+    if not groups:
+        return
+
+    for sec_id, (fallback_id, by_consumer) in groups.items():
+        section = graph.sections.get(sec_id)
+        if section is None:
+            continue
+        highest_y = _place_off_track_above_consumers(
+            graph, y_spacing, sec_id, fallback_id, by_consumer
+        )
+        if highest_y is None:
+            continue
+
+        # Expand section bbox upward so the highest lifted input + its
+        # label clearance fits inside the section box.
+        new_bbox_top = highest_y - section_y_padding
         if new_bbox_top < section.bbox_y:
-            delta = section.bbox_y - new_bbox_top
+            section.bbox_h += section.bbox_y - new_bbox_top
             section.bbox_y = new_bbox_top
-            section.bbox_h += delta
             # Shift TOP ports back to the (new) top edge so they stay
             # on the boundary.  BOTTOM ports stay put because bbox_h
             # only grew upward.
@@ -4094,9 +4126,6 @@ def _lift_off_track_stations(
                 if port.side == PortSide.TOP:
                     port_st.y = section.bbox_y
                     port.y = port_st.y
-
-    if not by_section:
-        return
 
     # Phase 3b ran before our lift, so y_offset doesn't account for the
     # new bbox tops.  Shift the whole graph down so the topmost section
@@ -4112,3 +4141,25 @@ def _lift_off_track_stations(
             section.bbox_y += shift
         for port in graph.ports.values():
             port.y += shift
+
+
+def _reanchor_off_track_to_consumer(graph: MetroGraph, y_spacing: float) -> None:
+    """Re-place off-track inputs relative to consumer Ys after final snap.
+
+    Phase 13 placed each off-track input at ``consumer.y - n*y_spacing``
+    using the consumer's pre-snap Y.  Later phases (compaction, grid
+    snap) may shift the consumer to land on the section's row grid,
+    which changes the absolute Y of every consumer by up to half a
+    pitch.  This pass re-pins each off-track at the same offset
+    relative to the consumer's final snapped Y so the visible gap
+    stays at exactly one (or n) ``y_spacing`` slots.
+
+    Bboxes that were grown upward in Phase 13 to fit the lifted band
+    are left as-is: the row-bbox alignment downstream phases performed
+    already accounted for the lifted height.
+    """
+    groups = _off_track_groups(graph)
+    for sec_id, (fallback_id, by_consumer) in groups.items():
+        _place_off_track_above_consumers(
+            graph, y_spacing, sec_id, fallback_id, by_consumer
+        )

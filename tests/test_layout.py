@@ -925,8 +925,8 @@ def test_full_bundle_column_no_op_without_center_ports():
     )
 
 
-def test_full_bundle_column_skips_non_terminal_section():
-    """The fan-out leaves non-terminal sections untouched."""
+def test_full_bundle_column_fans_non_terminal_section():
+    """Non-terminal full-bundle columns also fan around the trunk Y."""
     text = (
         "%%metro line: L1 | Line1 | #ff0000\n"
         "%%metro line: L2 | Line2 | #00ff00\n"
@@ -949,12 +949,86 @@ def test_full_bundle_column_skips_non_terminal_section():
     graph = parse_metro_mermaid(text)
     graph.center_ports = True
     compute_layout(graph, y_spacing=50.0)
-    # `middle` has exit ports so the new fan-out should NOT fire.
-    # Verify that a and b sit on adjacent track slots, not flanking a
-    # vacant trunk row.
-    delta = abs(graph.stations["b"].y - graph.stations["a"].y)
-    assert delta == pytest.approx(50.0), (
-        f"Non-terminal middle should keep tight spacing: delta={delta}"
+    # `middle` has exit ports but its column carries only full-bundle
+    # stations with no unique trunk, so the symfan should fire and the
+    # pair should flank a vacant trunk row.
+    ay = graph.stations["a"].y
+    by = graph.stations["b"].y
+    delta = abs(by - ay)
+    assert delta == pytest.approx(100.0), (
+        f"Non-terminal full-bundle column should flank trunk: delta={delta}"
+    )
+    mid = (ay + by) / 2
+    assert abs((by - mid) - (mid - ay)) < 1e-6, (
+        f"a and b should be symmetric around trunk Y: a={ay}, b={by}, mid={mid}"
+    )
+
+
+def test_off_track_input_sits_adjacent_to_its_consumer():
+    """Each off-track input lands one y_spacing above its consumer.
+
+    When two off-track inputs in the same section feed different
+    consumer stations, they should sit at distinct Ys derived from
+    their respective consumers, not stack at a uniform top-of-section
+    band.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: in_a, in_b\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        in_a[A]\n"
+        "        in_b[B]\n"
+        "        upper[Upper]\n"
+        "        lower[Lower]\n"
+        "        upper -->|main| lower\n"
+        "        in_a -->|main| upper\n"
+        "        in_b -->|main| lower\n"
+        "    end\n"
+    )
+    compute_layout(graph, x_spacing=70, y_spacing=55)
+    upper_y = graph.stations["upper"].y
+    lower_y = graph.stations["lower"].y
+    in_a_y = graph.stations["in_a"].y
+    in_b_y = graph.stations["in_b"].y
+    # Each input sits one row above its respective consumer.
+    assert in_a_y == pytest.approx(upper_y - 55), (
+        f"in_a y={in_a_y} should be upper_y - y_spacing = {upper_y - 55}"
+    )
+    assert in_b_y == pytest.approx(lower_y - 55), (
+        f"in_b y={in_b_y} should be lower_y - y_spacing = {lower_y - 55}"
+    )
+    # Inputs sit at different Ys (not a uniform band).
+    assert in_a_y != in_b_y
+
+
+def test_multiple_off_track_inputs_share_consumer_stack_above_it():
+    """Multiple off-track inputs feeding one consumer stack above it."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: in_a, in_b\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        in_a[A]\n"
+        "        in_b[B]\n"
+        "        mid[Mid]\n"
+        "        sink[Sink]\n"
+        "        mid -->|main| sink\n"
+        "        in_a -->|main| mid\n"
+        "        in_b -->|main| mid\n"
+        "    end\n"
+    )
+    compute_layout(graph, x_spacing=70, y_spacing=55)
+    mid_y = graph.stations["mid"].y
+    in_a_y = graph.stations["in_a"].y
+    in_b_y = graph.stations["in_b"].y
+    # The two inputs stack above mid at 1*step and 2*step respectively.
+    ys = sorted([in_a_y, in_b_y])
+    assert ys[0] == pytest.approx(mid_y - 110), (
+        f"topmost input should be 2*y_spacing above consumer: {ys[0]} vs {mid_y - 110}"
+    )
+    assert ys[1] == pytest.approx(mid_y - 55), (
+        f"second input should be 1*y_spacing above consumer: {ys[1]} vs {mid_y - 55}"
     )
 
 
