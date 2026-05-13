@@ -134,6 +134,126 @@ def test_compute_layout_off_track_bbox_contains_stations():
         )
 
 
+def test_compute_layout_rowspan_section_compacts_content():
+    """Row-spanning sections get their content compacted to the bbox top.
+
+    Without this, a rowspan>1 section gets bbox-top-aligned to taller
+    same-row neighbours but its own content stays anchored further
+    down, leaving a large empty band above the first row.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro grid: tall | 0,0,2,1\n"
+        "%%metro grid: short | 1,0,1,1\n"
+        "%%metro grid: low | 1,1,1,1\n"
+        "%%metro off_track: ofs\n"
+        "graph LR\n"
+        "    subgraph tall [Tall]\n"
+        "        a[A]\n"
+        "        a_out[Aout]\n"
+        "        a -->|main| a_out\n"
+        "    end\n"
+        "    subgraph short [Short]\n"
+        "        ofs[Off]\n"
+        "        b[B]\n"
+        "        ofs -->|main| b\n"
+        "    end\n"
+        "    subgraph low [Low]\n"
+        "        c[C]\n"
+        "    end\n"
+        "    a_out -->|main| b\n"
+    )
+    compute_layout(graph, x_spacing=70, y_spacing=55)
+    tall = graph.sections["tall"]
+    a_y = graph.stations["a"].y
+    # Empty band above first content should be at most one station row.
+    assert a_y - tall.bbox_y < 55, (
+        f"tall section has {a_y - tall.bbox_y:.1f}px empty space above its "
+        f"first station (>= y_spacing of 55)"
+    )
+
+
+def test_compute_layout_off_track_terminus_does_not_kink_port():
+    """Off-track sources don't push inter-section ports away from trunk.
+
+    A captioned/uncaptioned off-track station at the top of the
+    downstream section's input band must not be treated as a terminus
+    when spacing the inter-section entry port: otherwise the port
+    (and its upstream partner via junction propagation) gets shoved
+    above the on-track row and the inter-section bundle takes a
+    detour.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: extra\n"
+        "graph LR\n"
+        "    subgraph up [Up]\n"
+        "        u1[U1]\n"
+        "        u_exit[Exit]\n"
+        "        u1 -->|main| u_exit\n"
+        "    end\n"
+        "    subgraph down [Down]\n"
+        "        extra[Extra]\n"
+        "        d1[D1]\n"
+        "        extra -->|main| d1\n"
+        "    end\n"
+        "    u_exit -->|main| d1\n"
+    )
+    compute_layout(graph, x_spacing=70, y_spacing=55)
+    # Entry and exit ports between up and down should align with each
+    # other on the inter-section bundle.
+    up_exit_y = graph.stations[graph.sections["up"].exit_ports[0]].y
+    down_entry_y = graph.stations[graph.sections["down"].entry_ports[0]].y
+    assert abs(up_exit_y - down_entry_y) < 0.5, (
+        f"inter-section ports misaligned: up_exit_y={up_exit_y:.1f} "
+        f"down_entry_y={down_entry_y:.1f}"
+    )
+    # The down entry port should be at the on-track trunk Y, not lifted
+    # away above (i.e. not within the off-track band).
+    d1_y = graph.stations["d1"].y
+    assert abs(down_entry_y - d1_y) < 0.5, (
+        f"down entry port y={down_entry_y:.1f} does not match the on-track "
+        f"trunk station d1 at y={d1_y:.1f}; off-track 'extra' incorrectly "
+        f"pushed the port"
+    )
+
+
+def test_compute_layout_captioned_off_track_clears_line_bundle():
+    """Captioned off-track icons keep clearance from the line bundle.
+
+    The optional caption rendered under a file/files/dir icon extends
+    one extra label line below the station Y, so compaction must
+    preserve enough gap that the caption text doesn't end up
+    overlapping the topmost on-track row after content is shifted up.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro file: net_in | TSV | Network\n"
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: net_in\n"
+        "graph LR\n"
+        "    subgraph up [Up]\n"
+        "        u1[U1]\n"
+        "    end\n"
+        "    subgraph s [S]\n"
+        "        net_in[ ]\n"
+        "        gsea[GSEA]\n"
+        "        next[Next]\n"
+        "        net_in -->|main| gsea\n"
+        "        gsea -->|main| next\n"
+        "    end\n"
+        "    u1 -->|main| gsea\n"
+    )
+    compute_layout(graph, x_spacing=70, y_spacing=55)
+    net_y = graph.stations["net_in"].y
+    gsea_y = graph.stations["gsea"].y
+    # Need room for the icon body half (~16px) + caption gap + font
+    # line.  Use 30px as a conservative lower bound.
+    assert gsea_y - net_y >= 30, (
+        f"caption clearance too tight: gsea_y={gsea_y:.1f} net_in_y={net_y:.1f} "
+        f"(gap={gsea_y - net_y:.1f}px, need >=30)"
+    )
+
+
 # --- Section-first layout tests ---
 
 
