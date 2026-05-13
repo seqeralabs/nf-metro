@@ -84,6 +84,56 @@ def test_compute_layout_branching():
     assert graph.stations["b"].track != graph.stations["c"].track
 
 
+def test_compute_layout_off_track_lifts_above_topmost():
+    """off_track stations end up above the section's topmost line track."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: src\n"
+        "graph LR\n"
+        "    subgraph sec1 [Section]\n"
+        "        src[Input]\n"
+        "        mid[Middle]\n"
+        "        sink[Sink]\n"
+        "        src -->|main| mid\n"
+        "        mid -->|main| sink\n"
+        "    end\n"
+    )
+    compute_layout(graph, x_spacing=100, y_spacing=50)
+    src_y = graph.stations["src"].y
+    mid_y = graph.stations["mid"].y
+    sink_y = graph.stations["sink"].y
+    # src is off-track so it sits above the lowest of the on-track Ys
+    assert src_y < mid_y
+    assert src_y < sink_y
+    # Section bbox grew upward to fit it
+    sec = graph.sections["sec1"]
+    assert sec.bbox_y <= src_y
+
+
+def test_compute_layout_off_track_bbox_contains_stations():
+    """Lifted off_track stations stay inside their section's bbox."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: a, b\n"
+        "graph LR\n"
+        "    subgraph sec1 [Section]\n"
+        "        a[A]\n"
+        "        b[B]\n"
+        "        mid[Mid]\n"
+        "        a -->|main| mid\n"
+        "        b -->|main| mid\n"
+        "    end\n"
+    )
+    compute_layout(graph, x_spacing=100, y_spacing=50)
+    sec = graph.sections["sec1"]
+    for sid in ("a", "b"):
+        st = graph.stations[sid]
+        assert sec.bbox_y <= st.y <= sec.bbox_y + sec.bbox_h, (
+            f"{sid} at y={st.y} outside bbox "
+            f"y={sec.bbox_y}..{sec.bbox_y + sec.bbox_h}"
+        )
+
+
 # --- Section-first layout tests ---
 
 

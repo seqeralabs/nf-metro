@@ -428,6 +428,10 @@ def _compute_section_layout(
     # Phase 12: Position junction stations in the inter-section gap.
     _position_junctions(graph)
 
+    # Phase 13: Lift off_track stations above their section's top track.
+    # Runs last so it operates on finalised station Ys and bboxes.
+    _lift_off_track_stations(graph, y_spacing, section_y_padding)
+
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
@@ -3230,3 +3234,117 @@ def _compute_fork_join_gaps(
             cumulative += layer_gap.get(layer, base_gap)
 
     return layer_extra
+
+
+def _lift_off_track_stations(
+    graph: MetroGraph,
+    y_spacing: float,
+    section_y_padding: float,
+) -> None:
+    """Lift off_track stations above their section's topmost line track.
+
+    Off-track stations are file-input nodes that should not consume a
+    line-track Y slot.  This phase moves each marked station's Y to a
+    new "input band" above the topmost non-off-track station in its
+    section, then expands the section bbox upward to fit them.  When
+    multiple off-track stations sit at the same X (the normal case for
+    sources stacked on layer 0), they are spread horizontally along
+    the band so file icons don't overlap.
+
+    Same-section ports already at the top edge are shifted with the
+    bbox so their entry coordinates remain on the boundary.
+    """
+    junction_ids = set(graph.junctions)
+
+    # Group off_track stations by section
+    by_section: dict[str, list[Station]] = defaultdict(list)
+    for sid, st in graph.stations.items():
+        if not st.off_track or st.is_port or sid in junction_ids:
+            continue
+        if not st.section_id:
+            continue
+        by_section[st.section_id].append(st)
+
+    # Band step matches y_spacing so each input gets a full slot
+    # (matches original station spacing, leaving room for label text).
+    # Inputs stay at their original X (layer 0 for sources) but stack
+    # vertically in a band above the topmost line track so file icons
+    # no longer share Y with the study-type lanes.
+    BAND_STEP = y_spacing
+
+    for sec_id, off_stations in by_section.items():
+        section = graph.sections.get(sec_id)
+        if not section:
+            continue
+
+        # Topmost Y of non-off-track real stations in the section
+        anchor_ys = [
+            graph.stations[sid].y
+            for sid in section.station_ids
+            if sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not graph.stations[sid].off_track
+            and sid not in junction_ids
+        ]
+        if not anchor_ys:
+            continue
+        top_y = min(anchor_ys)
+
+        # Group inputs by X column (layer): each column gets its own
+        # vertical stack within the input band, preserving original
+        # Y order so e.g. Samples ends up above Contrasts above Matrix.
+        by_col: dict[float, list[Station]] = defaultdict(list)
+        for st in off_stations:
+            by_col[round(st.x, 1)].append(st)
+        for stations in by_col.values():
+            stations.sort(key=lambda s: s.y)
+
+        # Lowest slot in the band sits one y_spacing above top_y so
+        # there's room for the icon plus clearance from the topmost
+        # line track.  Higher slots stack upward in BAND_STEP units.
+        max_per_col = max(len(v) for v in by_col.values())
+        band_bottom = top_y - y_spacing
+        band_top = band_bottom - (max_per_col - 1) * BAND_STEP
+
+        for stations in by_col.values():
+            n = len(stations)
+            # Distribute n stations across the band, topmost first
+            for i, st in enumerate(stations):
+                st.y = band_top + i * BAND_STEP
+
+        # Expand section bbox upward so the band + label clearance
+        # fits inside the section box.
+        new_bbox_top = band_top - section_y_padding
+        if new_bbox_top < section.bbox_y:
+            delta = section.bbox_y - new_bbox_top
+            section.bbox_y = new_bbox_top
+            section.bbox_h += delta
+            # Shift TOP ports back to the (new) top edge so they stay
+            # on the boundary.  BOTTOM ports stay put because bbox_h
+            # only grew upward.
+            for pid in section.entry_ports + section.exit_ports:
+                port = graph.ports.get(pid)
+                port_st = graph.stations.get(pid)
+                if not port or not port_st:
+                    continue
+                if port.side == PortSide.TOP:
+                    port_st.y = section.bbox_y
+                    port.y = port_st.y
+
+    if not by_section:
+        return
+
+    # Phase 3b ran before our lift, so y_offset doesn't account for the
+    # new bbox tops.  Shift the whole graph down so the topmost section
+    # sits inside the canvas with the standard margin.
+    min_top = min(
+        s.bbox_y for s in graph.sections.values() if s.bbox_h > 0
+    )
+    if min_top < section_y_padding:
+        shift = section_y_padding - min_top
+        for st in graph.stations.values():
+            st.y += shift
+        for section in graph.sections.values():
+            section.bbox_y += shift
+        for port in graph.ports.values():
+            port.y += shift

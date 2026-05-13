@@ -168,6 +168,54 @@ def test_ignores_comments():
     assert len(graph.edges) == 1
 
 
+def test_parse_off_track_single():
+    """%%metro off_track: marks a single station as off-track."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: samples_in\n"
+        "graph LR\n"
+        "    samples_in[Samples]\n"
+        "    samples_in -->|main| validator\n"
+        "    validator[Validate]\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.stations["samples_in"].off_track is True
+    assert graph.stations["validator"].off_track is False
+
+
+def test_parse_off_track_multiple():
+    """%%metro off_track: accepts a comma-separated list."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: a, b, c\n"
+        "graph LR\n"
+        "    a -->|main| d\n"
+        "    b -->|main| d\n"
+        "    c -->|main| d\n"
+        "    d[Sink]\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.stations["a"].off_track is True
+    assert graph.stations["b"].off_track is True
+    assert graph.stations["c"].off_track is True
+    assert graph.stations["d"].off_track is False
+
+
+def test_parse_off_track_unknown_id_ignored():
+    """Unknown station ids in %%metro off_track: silently skip."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: a, missing\n"
+        "graph LR\n"
+        "    a[A]\n"
+        "    a -->|main| b\n"
+        "    b[B]\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.stations["a"].off_track is True
+    assert "missing" not in graph.stations
+
+
 # --- Subgraph (first-class section) tests ---
 
 
