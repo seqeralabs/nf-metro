@@ -319,6 +319,35 @@ def test_render_file_icon_with_name_caption():
     assert root.tag.endswith("svg") or "svg" in root.tag
 
 
+def test_caption_font_smaller_than_label_font():
+    """Caption renders smaller than the station label to fit the icon."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: reads_in | CSV | LongCaptionName\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    label_size = NFCORE_THEME.label_font_size
+    # The caption text must reference a font-size strictly smaller than
+    # the theme label_font_size (60% of it, per ICON_NAME_FONT_SCALE).
+    import re
+
+    caption_matches = re.findall(
+        r'font-size="([0-9.]+)"[^>]*>LongCaptionName', svg
+    )
+    assert caption_matches, "Caption text not found in SVG"
+    caption_size = float(caption_matches[0])
+    assert caption_size < label_size, (
+        f"Caption font ({caption_size}) should be < label font ({label_size})"
+    )
+
+
 def test_render_file_icon_no_name_no_caption():
     """When no name is provided, no caption text appears in the SVG."""
     graph = parse_metro_mermaid(

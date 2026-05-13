@@ -452,6 +452,21 @@ def _compute_section_layout(
     # heights shrink correspondingly so the empty top space disappears.
     _compact_row_content_to_bbox_top(graph, section_y_padding, y_spacing)
 
+    # Phase 13c: Snap inter-section LR/RL port pairs to a common Y so
+    # the trunk bundle stays perfectly horizontal across boundaries.
+    # Picks the downstream entry port's Y as the anchor since it sits
+    # on the row's aligned trunk grid.  Junctions are re-positioned
+    # afterwards because Phase 12 fixed their Y to the old exit port Y.
+    if _snap_inter_section_port_pairs(graph):
+        _position_junctions(graph)
+
+    # Phase 13d: Fan a section's free content upward when the row's
+    # compaction left visible empty space at the bbox top.  Only fires
+    # for sections whose internal stations have no upward dependency
+    # (no off-track band) and whose trunk Y sits below the bbox top
+    # padding by more than one ``y_spacing`` slot.
+    _fan_free_content_upward(graph, section_y_padding, y_spacing)
+
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
@@ -1163,11 +1178,15 @@ def _compact_row_content_to_bbox_top(
     # station-row's worth of clearance so labels still avoid the
     # topmost line track.
     off_track_gap = max(FONT_HEIGHT + STATION_RADIUS_APPROX * 2, y_spacing / 2)
-    # Captioned off-track icons (PR #269) render a label line under the
-    # icon body; that text needs to clear the topmost line track too,
-    # so the gap below a captioned bottom-of-band station is widened
-    # by the caption extent.
-    captioned_extra = FONT_HEIGHT + STATION_RADIUS_APPROX * 2
+    # Captioned off-track icons (PR #269) render a smaller label line
+    # under the icon body; that text needs to clear the topmost line
+    # track too, so the gap below a captioned bottom-of-band station is
+    # widened by the (scaled) caption extent.
+    from nf_metro.render.constants import ICON_NAME_FONT_SCALE, ICON_NAME_GAP
+
+    captioned_extra = (
+        FONT_HEIGHT * ICON_NAME_FONT_SCALE + ICON_NAME_GAP
+    )
 
     def _has_caption(sid: str) -> bool:
         st = graph.stations.get(sid)
@@ -1260,6 +1279,173 @@ def _compact_row_content_to_bbox_top(
                 new_h = desired_bot - section.bbox_y
                 if new_h < section.bbox_h - 0.5:
                     section.bbox_h = max(0.0, new_h)
+
+
+def _snap_inter_section_port_pairs(graph: MetroGraph) -> bool:
+    """Snap exit/entry port pairs in the same row to a shared Y.
+
+    For each LEFT/RIGHT exit port that connects (directly or via a
+    junction) to a same-row LEFT/RIGHT entry port, picks the entry's Y
+    as the shared anchor.  This eliminates the small Y kinks left by
+    sections whose trunk Y couldn't be aligned via Phase 11ca (e.g.
+    row-spanning sections that the trunk aligner skips); the inside-
+    section link from the internal source to the port may bend by a
+    pixel or two but the inter-section bundle stays perfectly
+    horizontal.
+
+    Fan-in exits (two or more distinct internal source Ys) are skipped
+    so the visual convergence into a single port stays meaningful.
+
+    Returns True when at least one port was moved (caller may need to
+    re-run junction positioning to pick up the new exit-port Y).
+
+    Scoped to pipelines that use explicit ``%%metro grid:`` directives;
+    auto-layout pipelines keep their existing inter-section routing so
+    line-offset ordering tests stay stable.
+    """
+    if not getattr(graph, "_explicit_grid", None):
+        return False
+    junction_ids = set(graph.junctions)
+    moved = False
+
+    for port_id, port in graph.ports.items():
+        if port.is_entry:
+            continue
+        if port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is None or section.direction not in ("LR", "RL"):
+            continue
+        port_st = graph.stations.get(port_id)
+        if port_st is None:
+            continue
+
+        # Find downstream entry port(s) in the same row.
+        targets: list[float] = []
+        for edge in graph.edges:
+            if edge.source != port_id:
+                continue
+            entry_candidates: list[str] = []
+            tgt_port = graph.ports.get(edge.target)
+            if tgt_port and tgt_port.is_entry:
+                entry_candidates.append(edge.target)
+            elif edge.target in junction_ids:
+                for e2 in graph.edges:
+                    if e2.source != edge.target:
+                        continue
+                    tp2 = graph.ports.get(e2.target)
+                    if tp2 and tp2.is_entry:
+                        entry_candidates.append(e2.target)
+            for eid in entry_candidates:
+                ep = graph.ports.get(eid)
+                if ep is None or ep.side not in (PortSide.LEFT, PortSide.RIGHT):
+                    continue
+                ds_sec = graph.sections.get(ep.section_id)
+                if ds_sec is None or ds_sec.grid_row != section.grid_row:
+                    continue
+                ep_st = graph.stations.get(eid)
+                if ep_st is not None:
+                    targets.append(ep_st.y)
+        if not targets:
+            continue
+        target_y = min(targets, key=lambda y: abs(y - port_st.y))
+        if abs(port_st.y - target_y) < 0.5:
+            continue
+
+        # Skip fan-in exits: multiple distinct internal source Ys
+        # signal a meaningful convergence; keep the centred midpoint.
+        port_set = set(section.entry_ports) | set(section.exit_ports)
+        src_ys: set[float] = set()
+        for edge in graph.edges:
+            if edge.target != port_id:
+                continue
+            src = graph.stations.get(edge.source)
+            if src and not src.is_port and edge.source not in port_set:
+                src_ys.add(round(src.y, 1))
+        if len(src_ys) >= 2:
+            continue
+
+        _set_port_y(graph, port_id, target_y)
+        moved = True
+
+    return moved
+
+
+def _fan_free_content_upward(
+    graph: MetroGraph, section_y_padding: float, y_spacing: float
+) -> None:
+    """Fill empty top space by fanning trunk-candidate siblings up.
+
+    When ``_compact_row_content_to_bbox_top`` is bounded by a row-mate
+    section (e.g. one with off-track inputs), other sections in the
+    group may keep visible empty space above their topmost station.
+    For each LR/RL section with no off-track stations and at least one
+    ``y_spacing`` slot of top slack, redistribute the section's
+    trunk-candidate siblings (stations carrying the full bundle in the
+    same entry column) into the empty top space.
+
+    The topmost trunk candidate stays pinned (preserves the row trunk
+    Y); the rest are stacked above it at ``y_spacing`` pitch.  Stations
+    in later columns are not moved here so downstream chains keep their
+    relative position to the trunk station they branch from.
+
+    Scoped to pipelines using explicit ``%%metro grid:`` directives so
+    the auto-layout path is unaffected.
+    """
+    if not getattr(graph, "_explicit_grid", None):
+        return
+    for section in graph.sections.values():
+        if (
+            section.bbox_h <= 0
+            or section.direction not in ("LR", "RL")
+        ):
+            continue
+        if any(
+            getattr(graph.stations.get(sid), "off_track", False)
+            for sid in section.station_ids
+        ):
+            continue
+        port_set = set(section.entry_ports) | set(section.exit_ports)
+        internal_ids = [
+            sid for sid in section.station_ids
+            if sid not in port_set and sid in graph.stations
+            and not graph.stations[sid].is_port
+        ]
+        if not internal_ids:
+            continue
+        ys = [graph.stations[sid].y for sid in internal_ids]
+        top_y = min(ys)
+        slack = top_y - section.bbox_y - section_y_padding
+        if slack < y_spacing - 0.5:
+            continue
+        slots = int(slack // y_spacing)
+        if slots <= 0:
+            continue
+
+        bundle = _section_bundle_lines(graph, section)
+        if not bundle:
+            continue
+
+        # Trunk candidates: stations in the entry column carrying the
+        # full bundle.  Sort by current Y; topmost stays pinned, others
+        # stack above at y_spacing pitch.
+        xs = sorted({round(graph.stations[sid].x, 3) for sid in internal_ids})
+        if not xs:
+            continue
+        entry_x = xs[0] if section.direction == "LR" else xs[-1]
+        trunk_candidates = [
+            sid for sid in internal_ids
+            if round(graph.stations[sid].x, 3) == entry_x
+            and set(graph.station_lines(sid)) == bundle
+        ]
+        if len(trunk_candidates) < 2:
+            continue
+        trunk_candidates.sort(key=lambda s: graph.stations[s].y)
+        pinned = trunk_candidates[0]
+        anchor_y = graph.stations[pinned].y
+        to_lift = trunk_candidates[1 : 1 + slots]
+        for i, sid in enumerate(to_lift, 1):
+            graph.stations[sid].y = anchor_y - i * y_spacing
 
 
 def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:

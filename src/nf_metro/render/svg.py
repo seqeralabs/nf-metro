@@ -40,6 +40,7 @@ from nf_metro.render.constants import (
     ICON_BBOX_MARGIN,
     ICON_CLEARANCE_MARGIN,
     ICON_INTER_GAP,
+    ICON_NAME_FONT_SCALE,
     ICON_NAME_GAP,
     ICON_STATION_GAP,
     LEGEND_GAP,
@@ -276,7 +277,7 @@ def _compute_icon_obstacles(
         # Extend the obstacle downward to cover any caption text rendered
         # below the icon, so neighbouring labels keep their distance.
         if any(station.terminus_names or []):
-            y_max += ICON_NAME_GAP + theme.label_font_size
+            y_max += ICON_NAME_GAP + theme.label_font_size * ICON_NAME_FONT_SCALE
 
         obstacles.append(
             (
@@ -903,11 +904,26 @@ def _render_terminus_icons(
             caption_y = (
                 icon_cy + theme.terminus_height / 2 + ICON_NAME_GAP
             )
+            caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
+            caption_cx = icon_cx
+            if section and section.bbox_w > 0:
+                # Estimate caption width and clamp so it stays inside the
+                # section bbox right edge (and left edge for symmetry).
+                approx_w = len(name) * caption_font_size * 0.55
+                left_bound = (
+                    section.bbox_x + approx_w / 2 + ICON_BBOX_MARGIN
+                )
+                right_bound = (
+                    section.bbox_x + section.bbox_w
+                    - approx_w / 2 - ICON_BBOX_MARGIN
+                )
+                if right_bound > left_bound:
+                    caption_cx = max(left_bound, min(caption_cx, right_bound))
             d.append(
                 draw.Text(
                     name,
-                    theme.label_font_size,
-                    icon_cx,
+                    caption_font_size,
+                    caption_cx,
                     caption_y,
                     fill=theme.label_color,
                     font_family=theme.label_font_family,

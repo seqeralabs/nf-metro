@@ -318,6 +318,7 @@ def _parse_grid_directive(content: str, graph: MetroGraph) -> None:
     except ValueError:
         return
     graph.grid_overrides[section_id] = (col, row, rowspan, colspan)
+    graph._explicit_grid.add(section_id)
 
 
 # Regex patterns for node shapes

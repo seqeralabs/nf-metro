@@ -172,6 +172,11 @@ class MetroGraph:
     ports: dict[str, Port] = field(default_factory=dict)
     junctions: list[str] = field(default_factory=list)
     grid_overrides: dict[str, tuple[int, int, int, int]] = field(default_factory=dict)
+    # Section IDs that received an explicit %%metro grid: directive (i.e.
+    # the user laid out the grid manually, as opposed to auto_layout
+    # filling in the placement).  Used to gate alignment polish passes
+    # that would distort auto-layout pipelines.
+    _explicit_grid: set[str] = field(default_factory=set)
     line_order: str = "definition"  # "definition" or "span"
     diamond_style: str = "straight"  # "straight" or "symmetric"
     compact_offsets: bool = False

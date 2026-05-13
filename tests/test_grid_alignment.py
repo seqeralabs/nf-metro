@@ -363,3 +363,52 @@ class TestVariantbenchmarkingSpacing:
         assert len(layer1) >= 2
         xs = [s.x for s in layer1]
         assert max(xs) - min(xs) < 2.0, f"layer-1 X spread: {xs}"
+
+
+# ---------------------------------------------------------------------------
+# Inter-section port pair snap (final-polish phase 13c)
+# ---------------------------------------------------------------------------
+
+
+class TestInterSectionPortSnap:
+    """Exit port Y snaps to downstream entry Y in explicit-grid pipelines."""
+
+    def test_snap_aligns_rowspan_neighbour_to_row_trunk(self):
+        """With explicit grid, an LR exit port whose section's trunk Y
+        differs from a same-row downstream entry snaps to the entry Y."""
+        mmd = (
+            "%%metro line: main | Main | #ff0000\n"
+            "%%metro grid: a | 0,0,2,1\n"
+            "%%metro grid: b | 1,0\n"
+            "graph LR\n"
+            "    subgraph a [A]\n"
+            "        a1[A1]\n"
+            "        a2[A2]\n"
+            "        a1 -->|main| a2\n"
+            "    end\n"
+            "    subgraph b [B]\n"
+            "        b1[B1]\n"
+            "        b2[B2]\n"
+            "        b1 -->|main| b2\n"
+            "    end\n"
+            "    a2 -->|main| b1\n"
+        )
+        g = parse_metro_mermaid(mmd)
+        compute_layout(g)
+        a_exit = next(
+            g.stations[pid]
+            for pid in g.sections["a"].exit_ports
+        )
+        b_entry = next(
+            g.stations[pid]
+            for pid in g.sections["b"].entry_ports
+        )
+        assert abs(a_exit.y - b_entry.y) < 1.0, (
+            f"a exit y={a_exit.y} != b entry y={b_entry.y}"
+        )
+
+    def test_auto_layout_unaffected(self):
+        """The snap stays off for purely auto-layout pipelines."""
+        g = _load("variant_calling_tuned")
+        # Without any %%metro grid: directive, no explicit_grid entries.
+        assert not g._explicit_grid
