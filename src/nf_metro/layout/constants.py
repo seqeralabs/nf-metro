@@ -53,7 +53,7 @@ SECTION_GAP: float = 3.0
 SECTION_X_PADDING: float = 50.0
 """Horizontal padding around section content."""
 
-SECTION_Y_PADDING: float = 35.0
+SECTION_Y_PADDING: float = 50.0
 """Vertical padding around section content."""
 
 SECTION_X_GAP: float = 50.0
