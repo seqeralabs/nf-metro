@@ -416,6 +416,11 @@ def _compute_section_layout(
     # bbox tops within each row stay flush after port-terminus spacing.
     _top_align_row_sections(graph)
 
+    # Phase 11ca: Align trunk Ys across same-row sections.  Shifts
+    # content downward in shallower sections so the inter-section bundle
+    # passes through at a single Y per row.  Bbox tops are preserved.
+    _align_row_trunk_ys(graph)
+
     # Phase 11d: When --center-ports is on, redistribute fan-out siblings
     # of a section's trunk junction symmetrically around the trunk Y.
     # Scoped to fan-out side branches only: linear chains, fan-in
@@ -922,6 +927,136 @@ def _top_align_row_sections(graph: MetroGraph) -> None:
                     if station:
                         station.y -= delta
                 section.bbox_y -= delta
+
+
+def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
+    """Topmost Y of a full-bundle internal station connected to an LR port.
+
+    This Y is what neighbouring sections must line up with for the row
+    bundle to flow horizontally.  Returns ``None`` when no full-bundle
+    internal station is directly connected to any LR port.
+    """
+    if section.direction not in ("LR", "RL"):
+        return None
+    bundle = _section_bundle_lines(graph, section)
+    if not bundle:
+        return None
+    port_ids = set(section.entry_ports) | set(section.exit_ports)
+    internal_ids = set(section.station_ids) - port_ids
+    trunk_ys: set[float] = set()
+    for pid in port_ids:
+        p = graph.ports.get(pid)
+        if p is None or p.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        for edge in graph.edges:
+            other_id = (
+                edge.target if edge.source == pid and edge.target in internal_ids
+                else edge.source if edge.target == pid and edge.source in internal_ids
+                else None
+            )
+            if other_id is None:
+                continue
+            st = graph.stations.get(other_id)
+            if st and not st.is_port and set(graph.station_lines(other_id)) == bundle:
+                trunk_ys.add(round(st.y, 3))
+    return min(trunk_ys) if trunk_ys else None
+
+
+def _align_row_trunk_ys(graph: MetroGraph) -> None:
+    """Shift sections vertically so trunk Ys align within each grid row.
+
+    Sections in a row's contiguous column run whose trunk Y sits above
+    the row's deepest trunk shift down to match.  Bbox tops are
+    preserved (heights grow downward).  Row-spanning sections
+    (grid_row_span > 1) are skipped to avoid disturbing cross-row
+    vertical relationships.
+    """
+    row_sections: dict[int, list[Section]] = defaultdict(list)
+    for section in graph.sections.values():
+        if (
+            section.bbox_h <= 0
+            or section.grid_row < 0
+            or section.direction not in ("LR", "RL")
+            or section.grid_row_span > 1
+        ):
+            continue
+        row_sections[section.grid_row].append(section)
+
+    for sections in row_sections.values():
+        if len(sections) < 2:
+            continue
+        sections_by_col = sorted(sections, key=lambda s: s.grid_col)
+        groups: list[list[Section]] = [[sections_by_col[0]]]
+        for s in sections_by_col[1:]:
+            if s.grid_col - groups[-1][-1].grid_col <= 1:
+                groups[-1].append(s)
+            else:
+                groups.append([s])
+
+        for group in groups:
+            if len(group) < 2:
+                continue
+            trunks = {
+                s.id: t
+                for s in group
+                if (t := _section_trunk_y(graph, s)) is not None
+            }
+            if len(trunks) < 2:
+                continue
+            target_y = max(trunks.values())
+            shifted: set[str] = set()
+            for section in group:
+                ty = trunks.get(section.id)
+                if ty is None:
+                    continue
+                delta = target_y - ty
+                if delta < 0.5:
+                    continue
+                for sid in section.station_ids:
+                    st = graph.stations.get(sid)
+                    if st:
+                        st.y += delta
+                    port = graph.ports.get(sid)
+                    if port:
+                        port.y += delta
+                section.bbox_h += delta
+                shifted.add(section.id)
+
+            # Re-snap each shifted section's LR ports to target_y when
+            # they have a single internal station at target_y.  Skip
+            # ports with 2+ distinct internal Ys (fan-in centering).
+            for section in group:
+                if section.id not in shifted:
+                    continue
+                port_set = set(section.entry_ports) | set(section.exit_ports)
+                internal_ids = set(section.station_ids) - port_set
+                for pid in port_set:
+                    p = graph.ports.get(pid)
+                    port_st = graph.stations.get(pid)
+                    if (
+                        p is None
+                        or port_st is None
+                        or p.side not in (PortSide.LEFT, PortSide.RIGHT)
+                        or abs(port_st.y - target_y) < 0.5
+                    ):
+                        continue
+                    connected_ys: set[float] = set()
+                    target_aligned = False
+                    for edge in graph.edges:
+                        other_id = (
+                            edge.target if edge.source == pid and edge.target in internal_ids
+                            else edge.source if edge.target == pid and edge.source in internal_ids
+                            else None
+                        )
+                        if other_id is None:
+                            continue
+                        st = graph.stations.get(other_id)
+                        if st and not st.is_port:
+                            connected_ys.add(round(st.y, 1))
+                            if abs(st.y - target_y) < 0.5:
+                                target_aligned = True
+                    if len(connected_ys) < 2 and target_aligned:
+                        _set_port_y(graph, pid, target_y)
 
 
 def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:
