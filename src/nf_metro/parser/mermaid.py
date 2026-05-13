@@ -166,6 +166,12 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
             station.terminus_labels = [label for label, _ in entries]
             station.terminus_icon_types = [icon_type for _, icon_type in entries]
 
+    # Apply pending off-track marks
+    for station_id in graph._pending_off_track:
+        station = graph.stations.get(station_id)
+        if station:
+            station.off_track = True
+
     return graph
 
 
@@ -235,6 +241,9 @@ def _parse_directive(
         pos = content[len("legend:") :].strip().lower()
         if pos in ("bl", "br", "tl", "tr", "bottom", "right", "none"):
             graph.legend_position = pos
+    elif content.startswith("off_track:"):
+        ids = [s.strip() for s in content[len("off_track:") :].split(",")]
+        graph._pending_off_track.extend(sid for sid in ids if sid)
     elif ":" in content and content.split(":", 1)[0] in VALID_ICON_TYPES:
         icon_type, rest = content.split(":", 1)
         parts = rest.strip().split("|")

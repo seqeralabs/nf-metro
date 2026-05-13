@@ -61,6 +61,10 @@ class Station:
     section_id: str | None = None
     is_port: bool = False
     is_hidden: bool = False
+    # When True, the station is lifted above the section's top track in a
+    # final layout phase.  Used for file-input nodes that would otherwise
+    # consume a line-track Y slot.
+    off_track: bool = False
     terminus_labels: list[str] = field(default_factory=list)
     terminus_icon_types: list[str] = field(default_factory=list)
     # Populated by layout engine
@@ -177,6 +181,8 @@ class MetroGraph:
     _explicit_directions: set[str] = field(default_factory=set)
     # Pending terminus designations: station_id -> list of (label, icon_type)
     _pending_terminus: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
+    # Pending off-track marks: station_ids to lift above section top track
+    _pending_off_track: list[str] = field(default_factory=list)
     # Lazy cache for station_lines(); invalidated on edge mutation
     _station_lines_cache: dict[str, list[str]] | None = field(default=None, repr=False)
     # Grid alignment metadata (populated by Phase 2.5 _align_row_y_grids)
