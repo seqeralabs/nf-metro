@@ -1832,12 +1832,22 @@ def _route_diagonal(
     # from V (fork).  Without this, P fork-bias pushes the diagonal
     # next to P and the bypass line runs parallel below the trunk for
     # the entire span between P and T.
+    #
+    # Use ``MIN_STRAIGHT_EDGE`` for the V-side flat (not the port-based
+    # ``CURVE_RADIUS + MIN_STRAIGHT_PORT``) so the two halves of the
+    # U-shape have matching flat lengths at V: P -> V's tgt_min and
+    # V -> T's src_min both come out to MIN_STRAIGHT_EDGE.  Otherwise
+    # if the far endpoint of either half is a port, that half gets
+    # min_straight=15 while the other gets 10, yielding an asymmetric
+    # U with a visible kink.
     if tgt.is_hidden and edge.target.startswith("__bypass_"):
         is_fork_flag = False
         is_join_flag = True
+        tgt_min = MIN_STRAIGHT_EDGE
     elif src.is_hidden and edge.source.startswith("__bypass_"):
         is_fork_flag = True
         is_join_flag = False
+        src_min = MIN_STRAIGHT_EDGE
 
     diag_start_x, diag_end_x = _compute_diagonal_placement(
         sx,
@@ -1895,6 +1905,14 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
 
     for rp in routes:
         if not _is_diagonal_route(rp):
+            continue
+        # Skip bypass V hops: the two legs (P -> V and V -> T) are
+        # spread independently and the V-side MIN_STRAIGHT_EDGE bound
+        # forces asymmetric clamping, producing a visible kink at V.
+        # Bypass V routes are short and the perpendicular separation
+        # from per-line Y offsets alone is sufficient for visibility.
+        if (rp.edge.source.startswith("__bypass_")
+                or rp.edge.target.startswith("__bypass_")):
             continue
         if rp.edge.source in ctx.fork_stations:
             fork_groups[rp.edge.source].append(rp)

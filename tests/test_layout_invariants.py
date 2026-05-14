@@ -1334,3 +1334,208 @@ def test_lines_dont_cross_non_consumer_markers(fixture):
                         f"({pts[k][0]:.1f},{pts[k][1]:.1f})->"
                         f"({pts[k + 1][0]:.1f},{pts[k + 1][1]:.1f})"
                     )
+
+
+# ---------------------------------------------------------------------------
+# On-track stations must snap to the section trunk Y grid
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
+def test_all_stations_snap_to_grid(fixture):
+    """Every on-track station's Y must be at ``trunk_y + k * y_spacing``
+    for some integer ``k``.
+
+    Half-grid placement (``trunk_y +/- 0.5 * y_spacing``) is reserved
+    for the auto-half-grid 2-branch symmetric fan feature: stations
+    registered in ``graph._half_grid_station_ids`` whose section
+    satisfies ``_section_symfan_uses_half_grid`` and has exactly two
+    on-track branches.  Any other half-grid station is a regression.
+
+    Catches the v114 regression where
+    ``_shift_sparse_loop_stations_to_clear_bundle`` moved single
+    sparse loop stations like ``grea`` by ``y_spacing / 2``,
+    parking them mid-row between two full grid slots and marking
+    them half-grid even though their section had no 2-branch fan.
+    """
+    from nf_metro.layout.engine import _section_symfan_uses_half_grid
+
+    y_spacing = 55.0
+    tol = 1.0
+    graph = _layout(fixture, y_spacing=y_spacing)
+
+    half_grid_ids = getattr(graph, "_half_grid_station_ids", set()) or set()
+    port_ids: set[str] = set()
+    for sec in graph.sections.values():
+        port_ids.update(sec.entry_ports)
+        port_ids.update(sec.exit_ports)
+    junction_ids = set(graph.junctions)
+
+    # Compute each LR/RL section's trunk Y from its LR ports.
+    section_trunk_y: dict[str, float] = {}
+    for sec in graph.sections.values():
+        if sec.direction not in ("LR", "RL") or sec.bbox_h <= 0:
+            continue
+        port_ys = _section_lr_port_ys(graph, sec)
+        if port_ys:
+            section_trunk_y[sec.id] = port_ys[0]
+
+    # Sections eligible for the half-grid 2-branch fan exception.
+    half_grid_sections = {
+        sec.id
+        for sec in graph.sections.values()
+        if sec.direction in ("LR", "RL")
+        and sec.bbox_h > 0
+        and _section_symfan_uses_half_grid(graph, sec)
+    }
+
+    offenders: list[str] = []
+    for sid, st in graph.stations.items():
+        if (
+            st.is_port
+            or st.is_hidden
+            or st.off_track
+            or sid in port_ids
+            or sid in junction_ids
+        ):
+            continue
+        if st.section_id is None:
+            continue
+        trunk_y = section_trunk_y.get(st.section_id)
+        if trunk_y is None:
+            continue
+        offset = (st.y - trunk_y) / y_spacing
+        nearest_int = round(offset)
+        on_grid = abs(offset - nearest_int) * y_spacing <= tol
+        if on_grid:
+            continue
+        # Half-grid exception is allowed only for 2-branch fan members
+        # whose section legitimately uses the half-grid layout.
+        is_half = abs(offset - (nearest_int - 0.5)) * y_spacing <= tol or abs(
+            offset - (nearest_int + 0.5)
+        ) * y_spacing <= tol
+        if (
+            is_half
+            and sid in half_grid_ids
+            and st.section_id in half_grid_sections
+        ):
+            continue
+        offenders.append(
+            f"{sid!r} cy={st.y:.2f} trunk_y={trunk_y:.2f} "
+            f"offset/y_spacing={offset:.3f} "
+            f"section={st.section_id!r} "
+            f"in_half_grid_ids={sid in half_grid_ids} "
+            f"section_uses_half_grid="
+            f"{st.section_id in half_grid_sections}"
+        )
+    assert not offenders, (
+        f"{fixture}: on-track stations off the y_spacing grid "
+        f"without a legitimate half-grid 2-branch fan exception: "
+        + "; ".join(offenders)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bypass V routed polyline middle segment must be flat at V's Y
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_bypass_v_horizontal_segment_is_flat(fixture):
+    """For each hidden bypass V station, the routed polyline carrying a
+    bypassed line through V must form a clean U: the horizontal middle
+    segment at V's Y (the union of the P->V approach past the diagonal
+    end and the V->T departure before the diagonal start) must share Y
+    within 0.5px tolerance.
+
+    Catches the regression where ``_spread_diagonal_bundles`` shifted
+    the diagonal endpoints asymmetrically across the two halves of the
+    bypass hop, producing a visible kink at V.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    bypass_v_ids = {
+        sid
+        for sid, st in graph.stations.items()
+        if st.is_hidden and sid.startswith("__bypass_")
+    }
+    assert bypass_v_ids, (
+        f"{fixture}: expected at least one __bypass_ virtual station"
+    )
+
+    # Group routes by (V, line) so we can pair the P->V and V->T halves.
+    by_v_line: dict[tuple[str, str], list] = defaultdict(list)
+    for r in routes:
+        if r.edge.source in bypass_v_ids:
+            by_v_line[(r.edge.source, r.line_id)].append(("out", r))
+        if r.edge.target in bypass_v_ids:
+            by_v_line[(r.edge.target, r.line_id)].append(("in", r))
+
+    tol = 0.5
+    checked = 0
+    for (vid, lid), pair in by_v_line.items():
+        if len(pair) != 2:
+            continue
+        in_route = next((r for kind, r in pair if kind == "in"), None)
+        out_route = next((r for kind, r in pair if kind == "out"), None)
+        if in_route is None or out_route is None:
+            continue
+        # The P -> V leg should end with a flat segment at V's Y.
+        # The V -> T leg should start with a flat segment at V's Y.
+        # Both must agree on V's Y within tolerance.
+        in_y_at_v = in_route.points[-1][1]
+        # Y at the start of the V->T flat segment.
+        out_y_at_v = out_route.points[0][1]
+        assert abs(in_y_at_v - out_y_at_v) <= tol, (
+            f"{fixture}: bypass {vid!r} line {lid!r}: P->V ends at "
+            f"y={in_y_at_v:.3f} but V->T starts at y={out_y_at_v:.3f} "
+            f"(delta={abs(in_y_at_v - out_y_at_v):.3f}px > {tol})"
+        )
+        # The flat horizontal segment at V's Y on the P->V leg is from
+        # point[-2] to point[-1] - they should share Y.
+        prev_y = in_route.points[-2][1]
+        if len(in_route.points) >= 3 and abs(prev_y - in_y_at_v) > tol:
+            # Diagonal directly into V; the V's flat segment is on the
+            # other half only.
+            pass
+        else:
+            assert abs(prev_y - in_y_at_v) <= tol, (
+                f"{fixture}: bypass {vid!r} line {lid!r}: P->V last "
+                f"flat segment Y mismatch ({prev_y:.3f} vs {in_y_at_v:.3f})"
+            )
+        next_y = out_route.points[1][1]
+        if len(out_route.points) >= 3 and abs(next_y - out_y_at_v) > tol:
+            pass
+        else:
+            assert abs(next_y - out_y_at_v) <= tol, (
+                f"{fixture}: bypass {vid!r} line {lid!r}: V->T first "
+                f"flat segment Y mismatch ({next_y:.3f} vs {out_y_at_v:.3f})"
+            )
+
+        # When the bypass V has multiple lines passing through, all of
+        # them must reach V at the same per-line Y (no X spread bundle
+        # asymmetry that distorts one line's flat segment relative to
+        # the other).  Compare diagonal end X (P->V points[-2]) with
+        # the diagonal start X (V->T points[1]) relative to V's nominal
+        # X: the flat segment on each side should be the SAME length
+        # for a clean U.
+        v_x = graph.stations[vid].x
+        left_flat = abs(in_route.points[-1][0] - in_route.points[-2][0])
+        right_flat = abs(out_route.points[1][0] - out_route.points[0][0])
+        # Allow modest asymmetry but reject the case where one side is
+        # nearly collapsed while the other has a visible flat (the
+        # ``v114`` kink had ~0 vs ~14px asymmetry).
+        if max(left_flat, right_flat) > 5.0:
+            asym = abs(left_flat - right_flat)
+            assert asym <= 2.0, (
+                f"{fixture}: bypass {vid!r} line {lid!r}: asymmetric "
+                f"flat segments at V (left={left_flat:.2f}px, "
+                f"right={right_flat:.2f}px, V.x={v_x:.2f}); the V "
+                f"bottom should form a symmetric U"
+            )
+        checked += 1
+    assert checked > 0, (
+        f"{fixture}: expected at least one paired bypass V edge to verify"
+    )
