@@ -1546,6 +1546,87 @@ def test_bypass_v_horizontal_segment_is_flat(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Bypass V must sit on a visible horizontal flat segment, not at a corner
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_bypass_v_has_horizontal_segment(fixture):
+    """Each hidden bypass V station must sit in the middle of a clearly
+    visible horizontal flat segment, matching how regular fork/join
+    stations present a horizontal run through their X.
+
+    Stronger than ``test_bypass_v_horizontal_segment_is_flat``: that
+    test only checks the polyline flat at V's Y is flat in Y, which is
+    trivially true even when the flat is zero pixels long because the
+    two halves of the U meet at V's X.  Here we assert the polyline
+    flat reaches V from at least ``MIN_STATION_FLAT_LENGTH`` pixels
+    away (in run-axis X) on each side, so that after the curve corner
+    consumes ``CURVE_RADIUS`` pixels, a visible flat of
+    ``MIN_STATION_FLAT_LENGTH - CURVE_RADIUS`` pixels remains on each
+    side of V (matching e.g. propd / dream / DESeq2).
+    """
+    from nf_metro.layout.constants import MIN_STATION_FLAT_LENGTH
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    bypass_v_ids = {
+        sid
+        for sid, st in graph.stations.items()
+        if st.is_hidden and sid.startswith("__bypass_")
+    }
+    assert bypass_v_ids, (
+        f"{fixture}: expected at least one __bypass_ virtual station"
+    )
+
+    by_v_line: dict[tuple[str, str], list] = defaultdict(list)
+    for r in routes:
+        if r.edge.source in bypass_v_ids:
+            by_v_line[(r.edge.source, r.line_id)].append(("out", r))
+        if r.edge.target in bypass_v_ids:
+            by_v_line[(r.edge.target, r.line_id)].append(("in", r))
+
+    tol = 0.5
+    checked = 0
+    for (vid, lid), pair in by_v_line.items():
+        if len(pair) != 2:
+            continue
+        in_route = next((r for kind, r in pair if kind == "in"), None)
+        out_route = next((r for kind, r in pair if kind == "out"), None)
+        if in_route is None or out_route is None:
+            continue
+
+        # P -> V: last two polyline points (-2, -1) form the flat
+        # segment landing at V.  Its length is what reaches V in X
+        # before the curve corner consumes CURVE_RADIUS pixels.
+        left_flat = abs(in_route.points[-1][0] - in_route.points[-2][0])
+        # V -> T: first two polyline points form the flat leaving V.
+        right_flat = abs(out_route.points[1][0] - out_route.points[0][0])
+
+        assert left_flat >= MIN_STATION_FLAT_LENGTH - tol, (
+            f"{fixture}: bypass {vid!r} line {lid!r}: P->V flat segment "
+            f"too short to render a visible horizontal run through V "
+            f"(left_flat={left_flat:.2f}px, "
+            f"MIN_STATION_FLAT_LENGTH={MIN_STATION_FLAT_LENGTH}px); "
+            f"V would sit at the curve apex instead of on a visible "
+            f"horizontal flat like regular stations"
+        )
+        assert right_flat >= MIN_STATION_FLAT_LENGTH - tol, (
+            f"{fixture}: bypass {vid!r} line {lid!r}: V->T flat segment "
+            f"too short to render a visible horizontal run through V "
+            f"(right_flat={right_flat:.2f}px, "
+            f"MIN_STATION_FLAT_LENGTH={MIN_STATION_FLAT_LENGTH}px)"
+        )
+        checked += 1
+
+    assert checked > 0, (
+        f"{fixture}: expected at least one paired bypass V edge to verify"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Loop-column stations share X (trunk + off-trunk siblings co-aligned)
 # ---------------------------------------------------------------------------
 
