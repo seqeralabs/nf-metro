@@ -763,3 +763,134 @@ def test_terminus_not_directly_after_diagonal(fixture):
                     f"(dx={dx:.1f}, dy={dy:.1f})"
                 )
                 break
+
+
+# ---------------------------------------------------------------------------
+# Non-consumed lines bypass intermediate stations via a virtual station
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_non_consumed_lines_route_via_virtual_station(fixture):
+    """A line not consumed by station S must not enter S's marker bbox
+    and, when it would otherwise cross S's column, must be routed
+    through an invisible (``is_hidden``) virtual station in the same
+    section.
+
+    Mirrors the v104 terminus-convergence pattern applied to bypassing:
+    inserting a hidden station in S's column at a separate trunk-Y row
+    forces the layout to allocate the bypass a parallel-branch track,
+    so the path uses the existing fan-out / fan-in primitives.
+    """
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+    from nf_metro.render.svg import apply_route_offsets
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    # Identify the bypass case in this fixture: ``annotate`` in the
+    # ``differential`` section consumes only rnaseq+affy but maxquant
+    # and geo travel from limma to differential's exit port, so they
+    # would otherwise route past annotate.  After v110, those lines
+    # must enter a hidden station in the same section.
+    bypass_station_ids = {
+        sid
+        for sid, st in graph.stations.items()
+        if st.is_hidden and sid.startswith("__bypass_")
+    }
+    assert bypass_station_ids, (
+        f"{fixture}: expected at least one __bypass_ hidden station "
+        "from _insert_bypass_stations"
+    )
+
+    # For each bypass station, the section_id should be a real
+    # (visible) section and the virtual station should not have a
+    # rendered marker.  Test by inspecting station attributes.
+    for vsid in bypass_station_ids:
+        vstation = graph.stations[vsid]
+        assert vstation.is_hidden, f"{vsid} should be is_hidden"
+        assert not vstation.label, f"{vsid} should have no label"
+        assert vstation.section_id is not None, f"{vsid} needs section_id"
+
+    # For the specific differential-section case, verify the maxquant
+    # and geo lines are routed via a hidden bypass station and the
+    # paths' rendered Y at annotate's X does NOT enter annotate's bbox.
+    annotate = graph.stations.get("annotate")
+    assert annotate is not None, "fixture must contain ``annotate`` station"
+
+    diff_bypass = [
+        sid for sid in bypass_station_ids if graph.stations[sid].section_id
+        == annotate.section_id
+    ]
+    assert diff_bypass, (
+        f"{fixture}: expected a bypass virtual station in "
+        f"section {annotate.section_id}"
+    )
+
+    # The two bypassing lines (maxquant, geo) should each have edges
+    # ending at and starting from the same hidden bypass station.
+    bypass_predecessors_for = {
+        v: {e.source for e in graph.edges if e.target == v}
+        for v in diff_bypass
+    }
+    bypass_successors_for = {
+        v: {e.target for e in graph.edges if e.source == v}
+        for v in diff_bypass
+    }
+    bypass_lines_for = {
+        v: {e.line_id for e in graph.edges if e.source == v}
+        for v in diff_bypass
+    }
+    # At least one bypass virtual station should carry the
+    # non-consumed lines and chain limma -> V -> exit_port.
+    found_bypass_for_lines = False
+    for v in diff_bypass:
+        if {"maxquant", "geo"}.issubset(bypass_lines_for[v]):
+            assert "limma" in bypass_predecessors_for[v]
+            assert any(
+                "exit" in succ for succ in bypass_successors_for[v]
+            ), (
+                f"{v}: expected an exit-port successor, "
+                f"got {bypass_successors_for[v]}"
+            )
+            found_bypass_for_lines = True
+            break
+    assert found_bypass_for_lines, (
+        f"{fixture}: expected a bypass V carrying maxquant and geo from "
+        f"limma to the differential exit port"
+    )
+
+    # Rendered routes for the bypassing lines must not cross annotate's
+    # bbox.  Use a half-bbox approximation centered at annotate (x, y).
+    HALF_H = 14.0  # pill half-height plus slack
+    HALF_W = 14.0  # marker half-width plus slack
+    ann_cx = annotate.x
+    ann_cy = annotate.y
+    rendered = [apply_route_offsets(r, offsets) for r in routes]
+    for ri, r in enumerate(routes):
+        # Only interested in lines NOT consumed by annotate.
+        if r.line_id not in {"maxquant", "geo"}:
+            continue
+        # Skip routes whose endpoints don't span past annotate.
+        if r.edge.source == "annotate" or r.edge.target == "annotate":
+            continue
+        pts = rendered[ri]
+        for i in range(len(pts) - 1):
+            x1, y1 = pts[i]
+            x2, y2 = pts[i + 1]
+            xlo, xhi = (x1, x2) if x1 <= x2 else (x2, x1)
+            if xhi < ann_cx - HALF_W or xlo > ann_cx + HALF_W:
+                continue
+            # Linearly interpolate Y at ann_cx along this segment.
+            if abs(x2 - x1) < 1e-6:
+                seg_y = (y1 + y2) / 2
+            else:
+                t = (ann_cx - x1) / (x2 - x1)
+                t = max(0.0, min(1.0, t))
+                seg_y = y1 + t * (y2 - y1)
+            assert abs(seg_y - ann_cy) > HALF_H, (
+                f"{fixture}: line {r.line_id} enters annotate marker "
+                f"bbox at x={ann_cx:.1f}, y={seg_y:.1f} (annotate "
+                f"cy={ann_cy:.1f})"
+            )
