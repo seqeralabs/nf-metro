@@ -808,35 +808,6 @@ def _render_stations(
             _render_terminus_icons(d, station, graph, theme, r, min_off, max_off)
 
 
-def caption_aware_icon_step(
-    names: list[str],
-    name_widths: list[float],
-    terminus_width: float,
-) -> float:
-    """Return the horizontal centre-to-centre step for adjacent icons.
-
-    The default step is ``terminus_width + ICON_INTER_GAP``.  When two
-    adjacent icons both carry a caption whose estimated width would
-    overrun that step (causing captions to overlap on the same row),
-    widen the step so the wider of the two captions fits with a small
-    visual gap on each side.  The widened step is shared by every icon
-    in the row, keeping spacing uniform.
-    """
-    default_step = terminus_width + ICON_INTER_GAP
-    required = default_step
-    for i in range(len(names) - 1):
-        if not names[i] or not names[i + 1]:
-            continue
-        pair_max = max(name_widths[i], name_widths[i + 1])
-        # Allow a small gap each side of the wider caption before its
-        # neighbour caption starts.  ICON_INTER_GAP gives us a uniform
-        # min visual breathing room.
-        needed = pair_max + ICON_INTER_GAP
-        if needed > required:
-            required = needed
-    return required
-
-
 def _render_terminus_icons(
     d: draw.Drawing,
     station: Station,
@@ -866,6 +837,7 @@ def _render_terminus_icons(
     # Place icons on the "outside" of the flow
     icon_gap = r + ICON_STATION_GAP
     icon_half_w = theme.terminus_width / 2
+    icon_step = theme.terminus_width + ICON_INTER_GAP
     section_dir = section.direction if section else "LR"
 
     # Determine direction: icons extend leftward for sources (LR/TB)
@@ -875,6 +847,12 @@ def _render_terminus_icons(
     else:
         icons_go_right = not is_source
 
+    # Base X for the first (nearest) icon center
+    if icons_go_right:
+        base_cx = station.x + icon_gap + icon_half_w
+    else:
+        base_cx = station.x - icon_gap - icon_half_w
+
     icon_cy = station.y + (min_off + max_off) / 2
 
     icon_types = station.terminus_icon_types or [ICON_TYPE_FILE] * len(
@@ -882,22 +860,23 @@ def _render_terminus_icons(
     )
     names = station.terminus_names or [""] * len(station.terminus_labels)
 
-    # Compute per-icon X step.  When adjacent captions would overlap
-    # at the default step, widen it so both fit on the same row.
+    # Pre-compute caption font size so adjacent-icon caption overlap
+    # can be detected before icons are emitted.  Captions sitting at
+    # the same Y overlap when their estimated widths exceed icon_step;
+    # in that case, every other caption is dropped to the next row.
     caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
     name_widths = [
         len(n) * caption_font_size * 0.55 if n else 0.0
         for n in names
     ]
-    icon_step = caption_aware_icon_step(
-        names, name_widths, theme.terminus_width
-    )
-
-    # Base X for the first (nearest) icon center
-    if icons_go_right:
-        base_cx = station.x + icon_gap + icon_half_w
-    else:
-        base_cx = station.x - icon_gap - icon_half_w
+    stagger_captions = False
+    for i in range(len(names) - 1):
+        if not names[i] or not names[i + 1]:
+            continue
+        max_w = max(name_widths[i], name_widths[i + 1])
+        if max_w > icon_step - 2.0:
+            stagger_captions = True
+            break
 
     for i, label in enumerate(station.terminus_labels):
         icon_type = icon_types[i] if i < len(icon_types) else ICON_TYPE_FILE
@@ -946,6 +925,12 @@ def _render_terminus_icons(
             caption_y = (
                 icon_cy + theme.terminus_height / 2 + ICON_NAME_GAP
             )
+            # When adjacent icon captions would overlap horizontally
+            # (their estimated width exceeds the per-icon X step), drop
+            # odd-indexed captions to a second row so each name is
+            # legible.
+            if stagger_captions and i % 2 == 1:
+                caption_y += caption_font_size * 1.4
             caption_cx = icon_cx
             if section and section.bbox_w > 0:
                 # Estimate caption width and clamp so it stays inside the
