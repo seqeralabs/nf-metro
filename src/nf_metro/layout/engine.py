@@ -2174,6 +2174,12 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
     - Target label clearance at the join station.
     - ``DIAGONAL_RUN`` length for the 45-degree transition.
 
+    A second pass aligns trunk-Y stations that share the same
+    ``(predecessor, successor)`` column with off-trunk siblings (e.g.
+    ``limma`` shares its column with ``DESeq2``, ``dream`` and
+    ``propd``) so column-mates land at the same X regardless of
+    whether they sit on or off the trunk row.
+
     No-op for any station that doesn't form a clean two-edge loop, and
     skipped when shifting would leave fewer than ``DIAGONAL_RUN`` worth
     of horizontal room on either side.
@@ -2200,6 +2206,8 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
     # the noise where the layer-X placement already reads as centred.
     min_recenter_delta = DIAGONAL_RUN / 3.0
 
+    # Pass 1: re-centre off-trunk loop side stations using the diagonal
+    # corner geometry.
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
@@ -2289,6 +2297,142 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
             if abs(midpoint - st.x) < min_recenter_delta:
                 continue
             st.x = midpoint
+
+    # Pass 2: align all loop-column-mate stations (including the
+    # trunk-row station and any off-trunk siblings whose multi-edge
+    # topology disqualified them from pass 1) to a single column X.
+    # After pass 1, the "clean" side stations (one trunk-Y in, one
+    # trunk-Y out, station off-trunk) sit at the loop's geometric
+    # midpoint and define the column's X.  Without pass 2 the trunk
+    # station on the same loop column was left at its raw layer X
+    # (e.g. ``limma`` at 629.4 vs ``propd``/``dream``/``DESeq2`` at
+    # 648.6 in the differentialabundance section).
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        # Determine the section's trunk Y from a horizontal port.
+        trunk_y: float | None = None
+        for pid in section.entry_ports + section.exit_ports:
+            ps = graph.stations.get(pid)
+            port = graph.ports.get(pid)
+            if (
+                ps is not None
+                and port is not None
+                and port.side in (PortSide.LEFT, PortSide.RIGHT)
+            ):
+                trunk_y = ps.y
+                break
+        if trunk_y is None:
+            continue
+
+        # Helper: visible trunk-Y predecessor/successor X-extent for a
+        # station.  Returns ``None`` when the station has no trunk-Y
+        # neighbour on one side, or when any visible neighbour sits
+        # OFF the trunk row (off-track inputs like ``gmt_in`` would
+        # otherwise pull the station's X away from the column).
+        def _column_key(sid: str) -> tuple[float, float] | None:
+            pred_x: float | None = None
+            succ_x: float | None = None
+            for e in in_by_tgt.get(sid, []):
+                p = graph.stations.get(e.source)
+                if p is None or p.is_hidden:
+                    continue
+                if abs(p.y - trunk_y) > 0.5:
+                    # Off-trunk predecessor (e.g. off-track input):
+                    # this station is anchored to that input, not to
+                    # the loop column.
+                    return None
+                if (
+                    pred_x is None
+                    or (section.direction == "LR" and p.x > pred_x)
+                    or (section.direction == "RL" and p.x < pred_x)
+                ):
+                    pred_x = p.x
+            for e in out_by_src.get(sid, []):
+                t = graph.stations.get(e.target)
+                if t is None or t.is_hidden:
+                    continue
+                if abs(t.y - trunk_y) > 0.5:
+                    return None
+                if (
+                    succ_x is None
+                    or (section.direction == "LR" and t.x < succ_x)
+                    or (section.direction == "RL" and t.x > succ_x)
+                ):
+                    succ_x = t.x
+            if pred_x is None or succ_x is None:
+                return None
+            return (round(pred_x, 3), round(succ_x, 3))
+
+        # Group section stations by loop column key.
+        columns: dict[tuple[float, float], list[str]] = defaultdict(list)
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            key = _column_key(sid)
+            if key is None:
+                continue
+            # Station must sit strictly between its trunk-Y neighbours
+            # for the column to be a meaningful horizontal extent.
+            pred_x, succ_x = key
+            lo, hi = min(pred_x, succ_x), max(pred_x, succ_x)
+            if not (lo < st.x < hi):
+                continue
+            columns[key].append(sid)
+
+        for key, members in columns.items():
+            if len(members) < 2:
+                continue
+            # Find the trunk-Y station(s) in this column -- they're
+            # what pass-2 fixes.  Off-trunk siblings already got
+            # their proper column X from pass-1.
+            trunk_members: list[str] = []
+            anchor_xs: list[float] = []
+            for sid in members:
+                st = graph.stations[sid]
+                if abs(st.y - trunk_y) <= 0.5:
+                    trunk_members.append(sid)
+                    continue
+                # Anchor candidate: must have a single visible
+                # trunk-Y predecessor edge and single visible trunk-Y
+                # successor edge.  This matches pass-1's
+                # ``len(ins) == 1 and len(outs) == 1`` filter so the
+                # anchor X is exactly what pass-1 placed at the loop
+                # midpoint, not a raw layer X from a multi-edge
+                # sibling pass-1 skipped.
+                visible_ins = [
+                    e for e in in_by_tgt.get(sid, [])
+                    if (
+                        (gs := graph.stations.get(e.source)) is not None
+                        and not gs.is_hidden
+                    )
+                ]
+                visible_outs = [
+                    e for e in out_by_src.get(sid, [])
+                    if (
+                        (gs := graph.stations.get(e.target)) is not None
+                        and not gs.is_hidden
+                    )
+                ]
+                if len(visible_ins) == 1 and len(visible_outs) == 1:
+                    anchor_xs.append(st.x)
+            if not trunk_members or not anchor_xs:
+                continue
+            target_x = sum(anchor_xs) / len(anchor_xs)
+            pred_x, succ_x = key
+            lo, hi = min(pred_x, succ_x), max(pred_x, succ_x)
+            if not (lo <= target_x <= hi):
+                continue
+            # Snap each trunk-Y column member to the anchor X.  The
+            # off-trunk siblings retain their pass-1 placement, so
+            # the column ends up with the trunk station co-aligned
+            # with its loop midpoint.
+            for sid in trunk_members:
+                graph.stations[sid].x = target_x
 
 
 def _shift_sparse_loop_stations_to_clear_bundle(
