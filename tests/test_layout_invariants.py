@@ -1693,3 +1693,136 @@ def test_loop_column_stations_share_x(fixture):
         f"{fixture}: expected at least one loop column with multiple "
         f"members to verify"
     )
+
+
+# ---------------------------------------------------------------------------
+# Section bbox bottom padding (Phase 13k post-shift padding)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
+def test_section_bbox_has_bottom_padding(fixture):
+    """Each section's bbox bottom must sit at least ``section_y_padding``
+    below the centre Y of its lowest internal station.
+
+    The codebase convention (see ``_shrink_bboxes_to_content_bottom``)
+    measures bottom padding from the station's centre Y, not its marker
+    edge, so the invariant is ``bbox_bot >= max(station.y) +
+    section_y_padding``.
+
+    ``_shift_sparse_loop_stations_to_clear_bundle`` (Phase 13k) can
+    move a sparse loop station like ``grea`` further down without
+    restoring this padding.  Catches the v116 regression where
+    section 3's bbox sat ~5px below ``grea``'s centre instead of
+    ``section_y_padding`` (50px).
+    """
+    from nf_metro.layout.constants import SECTION_Y_PADDING
+
+    graph = _layout(fixture)
+    tol = 1.0
+
+    offenders: list[str] = []
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0:
+            continue
+        port_ids = set(sec.entry_ports) | set(sec.exit_ports)
+        internal_ys = [
+            graph.stations[sid].y
+            for sid in sec.station_ids
+            if sid in graph.stations
+            and sid not in port_ids
+            and not graph.stations[sid].is_hidden
+        ]
+        if not internal_ys:
+            continue
+        lowest_marker_cy = max(internal_ys)
+        bbox_bot = sec.bbox_y + sec.bbox_h
+        gap = bbox_bot - lowest_marker_cy
+        if gap + tol < SECTION_Y_PADDING:
+            offenders.append(
+                f"section {sec.id!r}: bbox bot={bbox_bot:.1f}, "
+                f"lowest marker cy={lowest_marker_cy:.1f}, "
+                f"gap={gap:.1f} < section_y_padding={SECTION_Y_PADDING}"
+            )
+
+    assert not offenders, (
+        f"{fixture}: section bbox bottoms must sit at least "
+        f"section_y_padding below the lowest station centre: "
+        + "; ".join(offenders)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Inter-row gap accommodates grown bboxes from Phase 13k shifts
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_row_gap_accommodates_bypass(fixture):
+    """The vertical gap between row ``r`` sections' bbox bottoms and
+    row ``r + 1`` sections' bbox tops must be at least
+    ``section_y_gap`` for every column-overlapping pair.
+
+    When ``_shift_sparse_loop_stations_to_clear_bundle`` grows an
+    upper-row section's bbox downward (e.g. section 3 in the
+    differentialabundance pipeline, around ``grea``), the row offset
+    computed by ``_compute_section_offsets`` from the pre-shift bbox
+    height is no longer enough; the lower row must be pushed down so
+    routing has room between the new bbox bottom and the next row's
+    header.  Catches the v116 regression where section 4 (plots) sat
+    only ~40px below section 3's grown bbox bottom.
+
+    Tested at ``y_spacing=55`` because the production render uses that
+    pitch; the default ``y_spacing=40`` happens to leave the bbox
+    growth absorbed by row-0's taller rowspan section, hiding the
+    regression.
+    """
+    from nf_metro.layout.constants import SECTION_Y_GAP
+
+    graph = _layout(fixture, y_spacing=55)
+    tol = 1.0
+
+    by_row: dict[int, list] = defaultdict(list)
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0:
+            continue
+        by_row[sec.grid_row + sec.grid_row_span - 1].append(sec)
+    starting_at: dict[int, list] = defaultdict(list)
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0:
+            continue
+        starting_at[sec.grid_row].append(sec)
+
+    def _cols_overlap(a, b) -> bool:
+        a_start = a.grid_col
+        a_end = a_start + a.grid_col_span - 1
+        b_start = b.grid_col
+        b_end = b_start + b.grid_col_span - 1
+        return not (a_end < b_start or b_end < a_start)
+
+    offenders: list[str] = []
+    if not by_row:
+        return
+    max_row = max(by_row)
+    for r in range(max_row):
+        upper = by_row.get(r, [])
+        lower = starting_at.get(r + 1, [])
+        for us in upper:
+            for ls in lower:
+                if not _cols_overlap(us, ls):
+                    continue
+                upper_bot = us.bbox_y + us.bbox_h
+                lower_top = ls.bbox_y
+                gap = lower_top - upper_bot
+                if gap + tol < SECTION_Y_GAP:
+                    offenders.append(
+                        f"rows {r}->{r + 1} col-overlap "
+                        f"{us.id!r} (bot={upper_bot:.1f}) -> "
+                        f"{ls.id!r} (top={lower_top:.1f}): "
+                        f"gap={gap:.1f} < section_y_gap={SECTION_Y_GAP}"
+                    )
+
+    assert not offenders, (
+        f"{fixture}: row gap must be >= section_y_gap for every "
+        f"column-overlapping pair: " + "; ".join(offenders)
+    )
