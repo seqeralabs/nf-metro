@@ -1889,11 +1889,16 @@ def _balance_section_content_around_trunk(
             # above-marker label without forcing the bbox to expand
             # upward (which would break row-mate bbox alignment).
             # Stations with empty labels (file icons whose names sit
-            # below) don't need the extra clearance.
+            # below) don't need the extra clearance, but every station
+            # still needs marker/icon half-height clearance so the
+            # marker stays inside the bbox.
             st = graph.stations.get(candidate)
             has_above_label = bool(st and st.label and st.label.strip())
             label_clearance = y_spacing / 2 if has_above_label else 0.0
-            min_y = section.bbox_y + label_clearance
+            # Off-track file icons reach ~16 px above centre; on-track
+            # markers reach ~9.5 px.  Use the wider reach when relevant.
+            marker_clearance = 16.0 if (st and st.off_track) else 9.5
+            min_y = section.bbox_y + max(label_clearance, marker_clearance)
             if new_y < min_y - 0.5:
                 # No room for a new top slot.  Try a SWAP: take the
                 # topmost above-trunk station's Y for the candidate,
