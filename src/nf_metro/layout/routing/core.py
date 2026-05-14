@@ -22,11 +22,14 @@ from nf_metro.layout.constants import (
     FOLD_MARGIN,
     HEADER_CLEARANCE,
     JUNCTION_MARGIN,
+    MARKER_BYPASS_CORNER_GAP,
     MERGE_ROUTE_MARGIN,
     MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
     OFFSET_STEP,
     STATION_MOVE_TOLERANCE,
+    STATION_RADIUS_APPROX,
+    Y_SPACING,
 )
 from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.routing.common import (
@@ -168,6 +171,7 @@ def route_edges(
 
     _center_bubble_stations(routes, graph)
     _spread_diagonal_bundles(routes, ctx)
+    _bypass_non_consuming_stations(routes, ctx)
 
     return routes
 
@@ -2566,3 +2570,441 @@ def _compute_junction_fan_info(
             )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Post-processing: bypass non-consuming stations
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _MarkerBBox:
+    """Rendered marker bbox for an on-track station.
+
+    All values are in render-space (post-offset) coordinates.
+    """
+
+    sid: str
+    cy: float
+    half_h: float
+    cx: float
+    half_w: float
+    consumed: frozenset[str]
+    section_id: str | None
+
+
+def _build_marker_bboxes(
+    graph: MetroGraph,
+    junction_ids: set[str],
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> dict[str, _MarkerBBox]:
+    """Compute rendered marker bboxes and consumed-line sets per station.
+
+    The bbox spans the visible marker pill: width = 2*STATION_RADIUS_APPROX
+    horizontally, height = bundle_span + 2*STATION_RADIUS_APPROX vertically.
+
+    Skipped:
+      * ports, hidden, off-track stations.
+      * Junction stations (virtual, not rendered as markers).
+      * TB-vertical stations (their bundle spreads along X, not Y).
+      * Blank terminus stations (rendered as a separate file icon).
+
+    Consumed lines are derived from inbound edge line IDs - the lines
+    that actually terminate at the station as a stop.
+    """
+    consumed_by: dict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges:
+        if edge.target in graph.stations:
+            consumed_by[edge.target].add(edge.line_id)
+
+    r = STATION_RADIUS_APPROX
+    bboxes: dict[str, _MarkerBBox] = {}
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or st.off_track:
+            continue
+        if sid in junction_ids:
+            continue
+        if st.is_terminus and not st.label.strip():
+            continue
+        sec = graph.sections.get(st.section_id) if st.section_id else None
+        if sec is not None and sec.direction == "TB":
+            continue
+
+        lines = graph.station_lines(sid)
+        if station_offsets:
+            line_offs = [station_offsets.get((sid, lid), 0.0) for lid in lines]
+        else:
+            line_offs = [0.0]
+        if not line_offs:
+            line_offs = [0.0]
+        min_off = min(line_offs)
+        max_off = max(line_offs)
+        span = max_off - min_off
+        cy = st.y + (min_off + max_off) / 2
+        bboxes[sid] = _MarkerBBox(
+            sid=sid,
+            cy=cy,
+            half_h=span / 2 + r,
+            cx=st.x,
+            half_w=r,
+            consumed=frozenset(consumed_by.get(sid, set())),
+            section_id=st.section_id,
+        )
+    return bboxes
+
+
+def _render_y_at_point(
+    rp: RoutedPath,
+    idx: int,
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> float:
+    """Rendered Y of point *idx* on route *rp*.
+
+    Mirrors ``apply_route_offsets``: endpoint Ys get the endpoint offset,
+    intermediate points get whichever endpoint offset is closer to the
+    original Y.
+    """
+    if rp.offsets_applied or station_offsets is None:
+        return rp.points[idx][1]
+    src_off = station_offsets.get((rp.edge.source, rp.line_id), 0.0)
+    tgt_off = station_offsets.get((rp.edge.target, rp.line_id), 0.0)
+    orig_sy = rp.points[0][1]
+    orig_ty = rp.points[-1][1]
+    y = rp.points[idx][1]
+    if idx == 0:
+        return y + src_off
+    if idx == len(rp.points) - 1:
+        return y + tgt_off
+    if abs(y - orig_sy) <= abs(y - orig_ty):
+        return y + src_off
+    return y + tgt_off
+
+
+def _detour_row_is_blocked(
+    bboxes: dict[str, _MarkerBBox],
+    station_sid: str,
+    detour_y: float,
+    x_lo: float,
+    x_hi: float,
+    y_pitch: float,
+) -> bool:
+    """True if another station's marker bbox sits on the detour row in [x_lo, x_hi]."""
+    # A row is "blocked" if any OTHER station's marker center sits within
+    # half a pitch of detour_y and overlaps the X range of the detour.
+    row_tol = y_pitch * 0.5
+    for sid, bb in bboxes.items():
+        if sid == station_sid:
+            continue
+        if bb.cx + bb.half_w < x_lo - COORD_TOLERANCE:
+            continue
+        if bb.cx - bb.half_w > x_hi + COORD_TOLERANCE:
+            continue
+        if abs(bb.cy - detour_y) <= row_tol - COORD_TOLERANCE_FINE:
+            return True
+    return False
+
+
+def _bypass_non_consuming_stations(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Reroute horizontal segments that pass through non-consuming stations.
+
+    Structural rule: lines passing through a station's column that the
+    station doesn't consume must visually route AROUND the station's
+    marker, shifting a full grid row above or below the trunk (not a
+    small nudge).  This preserves the bundle's relative spacing through
+    the detour by shifting all bypassing lines on the same side together.
+
+    Geometry
+    --------
+    Per ``(station, direction)`` group of bypassing line segments:
+
+    1.  Pick a detour side (above / below).  Default to whichever side
+        has clear grid space on the target row; prefer "below" when both
+        sides are clear.
+    2.  Shift detour_y by exactly ``y_spacing`` from each segment's
+        current Y (one full grid row offset).
+    3.  Position the U-turn diverge X at
+        ``station.cx - direction * (r + corner_gap + curve_radius)`` and
+        the re-converge X mirrored on the other side.
+    4.  Build per-line concentric corner offsets using ``bypass_radii``
+        so the inner/outer corner radii nest cleanly.
+
+    Routes whose paths are rewritten are tagged ``offsets_applied=True``
+    because the new points are computed in render-space.
+    """
+    graph = ctx.graph
+    station_offsets = ctx.station_offsets
+    bboxes = _build_marker_bboxes(graph, ctx.junction_ids, station_offsets)
+    if not bboxes:
+        return
+
+    # Resolve the layout's grid pitch.  Stored on the graph by
+    # compute_layout; fall back to the module default if route_edges
+    # was invoked standalone (tests without compute_layout).
+    y_pitch = graph._y_spacing or Y_SPACING
+
+    # Render-space coordinates for every route point.  Collision
+    # detection runs in this frame so we don't double-apply offsets.
+    rendered_pts: list[list[tuple[float, float]]] = [
+        [
+            (rp.points[i][0], _render_y_at_point(rp, i, station_offsets))
+            for i in range(len(rp.points))
+        ]
+        for rp in routes
+    ]
+
+    # For each (station, direction), collect bypassing crossings.
+    # Key: (sid, direction)
+    Candidates = dict[tuple[str, int], list[tuple[int, int, float]]]
+    candidates: Candidates = defaultdict(list)
+
+    visual_margin = 2.0
+    for ri, rp in enumerate(routes):
+        pts = rendered_pts[ri]
+        endpoint_ids = {rp.edge.source, rp.edge.target}
+        for si in range(len(pts) - 1):
+            p1, p2 = pts[si], pts[si + 1]
+            x1, y1 = p1
+            x2, y2 = p2
+            if abs(y2 - y1) > COORD_TOLERANCE:
+                continue
+            if abs(x2 - x1) < COORD_TOLERANCE_FINE:
+                continue
+            seg_y = (y1 + y2) / 2
+            direction = 1 if x2 > x1 else -1
+            xlo, xhi = (x1, x2) if direction > 0 else (x2, x1)
+            for sid, bb in bboxes.items():
+                if sid in endpoint_ids:
+                    continue
+                if rp.line_id in bb.consumed:
+                    continue
+                if bb.cx <= xlo + COORD_TOLERANCE_FINE:
+                    continue
+                if bb.cx >= xhi - COORD_TOLERANCE_FINE:
+                    continue
+                candidates[(sid, direction)].append((ri, si, seg_y))
+
+    if not candidates:
+        return
+
+    # detour_plan: (route_idx, seg_idx) -> list of (cx, detour_y, side, group_key)
+    # group_key lets us order bypass corners and compute concentric radii.
+    DetourEntry = tuple[float, float, str, tuple[str, int]]
+    detour_plan: dict[tuple[int, int], list[DetourEntry]] = defaultdict(list)
+    # group_lines: group_key -> ordered list of (route_idx, seg_idx, orig_y)
+    # used downstream to compute per-line corner positions and radii.
+    group_lines: dict[tuple[str, int], list[tuple[int, int, float]]] = {}
+    # group_side: group_key -> "above" or "below".
+    group_side: dict[tuple[str, int], str] = {}
+
+    for (sid, direction), entries in candidates.items():
+        bb = bboxes[sid]
+        bbox_top_strict = bb.cy - bb.half_h - visual_margin
+        bbox_bot_strict = bb.cy + bb.half_h + visual_margin
+
+        # Only trigger the detour when at least one non-consumed line
+        # actually intersects the marker bbox (within visual margin).
+        crossers = [e for e in entries if bbox_top_strict <= e[2] <= bbox_bot_strict]
+        if not crossers:
+            continue
+
+        # Determine xlo/xhi range for the detour-row collision check.
+        # Use the corner zone: from diverge-X to reconverge-X, i.e. a
+        # window of ~2 * (r + corner_gap + curve_radius) around bb.cx.
+        corner_half_w = (
+            STATION_RADIUS_APPROX + MARKER_BYPASS_CORNER_GAP + ctx.curve_radius
+        )
+        det_xlo = bb.cx - corner_half_w
+        det_xhi = bb.cx + corner_half_w
+
+        # Choose side: prefer the side with a clear detour row.
+        below_y = bb.cy + y_pitch
+        above_y = bb.cy - y_pitch
+        below_blocked = _detour_row_is_blocked(
+            bboxes, sid, below_y, det_xlo, det_xhi, y_pitch
+        )
+        above_blocked = _detour_row_is_blocked(
+            bboxes, sid, above_y, det_xlo, det_xhi, y_pitch
+        )
+        if not below_blocked and not above_blocked:
+            # Prefer below: in the DA pipeline lines tend to fan above
+            # the trunk for inputs and below for sinks; pushing detours
+            # below keeps the section header zone clear.
+            side = "below"
+        elif not below_blocked:
+            side = "below"
+        elif not above_blocked:
+            side = "above"
+        else:
+            # Both blocked - fall back to below.  In practice the live
+            # pipelines we target have one clear side; leave the
+            # escalation path to a future layout-engine extension.
+            side = "below"
+
+        # Bypass every non-consumed candidate so the bundle stays
+        # visually parallel through the detour (lines on the chosen
+        # side AND in-bbox crossers shift together).
+        bypass: list[tuple[int, int, float]] = []
+        if side == "below":
+            for ri, si, seg_y in entries:
+                if seg_y > bbox_top_strict:
+                    bypass.append((ri, si, seg_y))
+        else:
+            for ri, si, seg_y in entries:
+                if seg_y < bbox_bot_strict:
+                    bypass.append((ri, si, seg_y))
+
+        if not bypass:
+            continue
+
+        # Group key encodes "this station, this direction" so all
+        # bypassing lines through the same marker share corner geometry.
+        gkey = (sid, direction)
+        group_lines[gkey] = bypass
+        group_side[gkey] = side
+
+        for ri, si, seg_y in bypass:
+            # Detour shifts the line by exactly one grid pitch.  All
+            # lines in the group shift by the same delta so the bundle
+            # parallel spacing is preserved through the detour.
+            shift = y_pitch if side == "below" else -y_pitch
+            dy = seg_y + shift
+            detour_plan[(ri, si)].append((bb.cx, dy, side, gkey))
+
+    if not detour_plan:
+        return
+
+    # Per route, sort entries on each segment by direction so the corners
+    # are inserted in path order.
+    by_route: dict[int, dict[int, list[DetourEntry]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for (ri, si), entries in detour_plan.items():
+        pts = rendered_pts[ri]
+        p1, p2 = pts[si], pts[si + 1]
+        direction = 1 if p2[0] > p1[0] else -1
+        entries.sort(key=lambda e: e[0] * direction)
+        by_route[ri][si] = entries
+
+    # Pre-compute per-line bundle index within each group so corner
+    # radii nest concentrically.  ``l_shape_radii(i, n, going_down=True)``
+    # assigns i=0 to the line that ends up RIGHTMOST in the vertical
+    # channel after a RIGHT->DOWN turn, which corresponds to the line
+    # whose original Y was SMALLEST (furthest from the detour row when
+    # detouring below).  Mirror for "above".
+    bundle_pos: dict[tuple[int, int, tuple[str, int]], tuple[int, int]] = {}
+    for gkey, members in group_lines.items():
+        side = group_side[gkey]
+        # Sort so members FURTHEST from the detour row come first.
+        # That puts the outermost-radius line at i=0, matching the
+        # concentric-corner convention in l_shape_radii / bypass_radii.
+        if side == "below":
+            ordered = sorted(members, key=lambda m: m[2])
+        else:
+            ordered = sorted(members, key=lambda m: -m[2])
+        n = len(ordered)
+        for idx, (ri, si, _y) in enumerate(ordered):
+            bundle_pos[(ri, si, gkey)] = (idx, n)
+
+    for ri, seg_map in by_route.items():
+        rp = routes[ri]
+        pts = rendered_pts[ri]
+        new_pts: list[tuple[float, float]] = [pts[0]]
+        new_radii: list[float] = []
+        # Carry over original interior corner radii.  The renderer
+        # treats curve_radii[k] as the radius at intermediate point
+        # k+1.  When we insert detours we splice in 4 new radii per
+        # detour around the existing ones.
+        orig_radii = rp.curve_radii
+        # Existing radius for the interior point at index `i` (1-based
+        # in the path) is orig_radii[i-1] if available, else default.
+        def _orig_radius_for_point(i: int) -> float:
+            if orig_radii is not None and 0 <= i - 1 < len(orig_radii):
+                return orig_radii[i - 1]
+            return ctx.curve_radius
+
+        for si in range(len(pts) - 1):
+            p1, p2 = pts[si], pts[si + 1]
+            seg_y = (p1[1] + p2[1]) / 2
+            detours = seg_map.get(si)
+            # We may need to insert a corner radius for the interior
+            # point pts[si+1] (the join with the NEXT segment) at the
+            # end of this iteration.  Track whether it was already
+            # added via a detour's reconverge.
+            last_x = p1[0]
+
+            if detours:
+                direction = 1 if p2[0] > p1[0] else -1
+                for cx, dy, side, gkey in detours:
+                    g_i, g_n = bundle_pos[(ri, si, gkey)]
+                    # bypass_radii returns per-line delta1/delta2 and
+                    # 4 corner radii.  delta1/delta2 nudge the
+                    # vertical-channel X per line so all corners share
+                    # a common center -> concentric arcs.
+                    going_right = direction > 0
+                    # Gap1 goes "down" when the detour is below the
+                    # trunk, "up" when above.
+                    gap1_going_down = side == "below"
+                    gap2_going_down = not gap1_going_down
+                    d1, d2, r1, r2, r3, r4 = bypass_radii(
+                        g_i,
+                        g_n,
+                        g_i,
+                        g_n,
+                        going_right,
+                        offset_step=OFFSET_STEP,
+                        base_radius=ctx.curve_radius,
+                        gap1_going_down=gap1_going_down,
+                        gap2_going_down=gap2_going_down,
+                    )
+                    # Diverge / reconverge X centers (channel centers).
+                    corner_half = (
+                        STATION_RADIUS_APPROX
+                        + MARKER_BYPASS_CORNER_GAP
+                        + ctx.curve_radius
+                    )
+                    x_pre_center = cx - direction * corner_half
+                    x_post_center = cx + direction * corner_half
+                    # Per-line offsets within the bundle channel.
+                    x_pre = x_pre_center + d1
+                    x_post = x_post_center + d2
+
+                    # Guard against degenerate ordering when adjacent
+                    # detours overlap or the segment is too short.
+                    if direction > 0:
+                        x_pre = max(x_pre, last_x + COORD_TOLERANCE_FINE)
+                        x_post = min(x_post, p2[0] - COORD_TOLERANCE_FINE)
+                    else:
+                        x_pre = min(x_pre, last_x - COORD_TOLERANCE_FINE)
+                        x_post = max(x_post, p2[0] + COORD_TOLERANCE_FINE)
+
+                    # Insert the 4 detour corners.  Radii r1..r4 line
+                    # up with the 4 new intermediate points we add.
+                    new_pts.append((x_pre, seg_y))
+                    new_radii.append(r1)
+                    new_pts.append((x_pre, dy))
+                    new_radii.append(r2)
+                    new_pts.append((x_post, dy))
+                    new_radii.append(r3)
+                    new_pts.append((x_post, seg_y))
+                    new_radii.append(r4)
+                    last_x = x_post
+
+            new_pts.append(p2)
+            # If si+1 was an interior point (not the final endpoint),
+            # carry over its original radius.
+            if si + 1 < len(pts) - 1:
+                new_radii.append(_orig_radius_for_point(si + 1))
+
+        rp.points = new_pts
+        rp.offsets_applied = True
+        # Trim/grow new_radii to match (len(new_pts) - 2).
+        target_n = max(0, len(new_pts) - 2)
+        if len(new_radii) < target_n:
+            new_radii.extend(
+                [ctx.curve_radius] * (target_n - len(new_radii))
+            )
+        elif len(new_radii) > target_n:
+            new_radii = new_radii[:target_n]
+        rp.curve_radii = new_radii

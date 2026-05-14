@@ -763,3 +763,149 @@ def test_terminus_not_directly_after_diagonal(fixture):
                     f"(dx={dx:.1f}, dy={dy:.1f})"
                 )
                 break
+
+
+# ---------------------------------------------------------------------------
+# Lines passing through a non-consuming station's column must detour a
+# full grid row (~y_spacing), not just nudge around the marker.
+# ---------------------------------------------------------------------------
+
+
+def _render_y_at_x(pts: list[tuple[float, float]], x: float) -> float | None:
+    """Y of a polyline at the given X, or None if X is outside its span."""
+    for i in range(len(pts) - 1):
+        x1, y1 = pts[i]
+        x2, y2 = pts[i + 1]
+        xlo, xhi = (x1, x2) if x1 <= x2 else (x2, x1)
+        if xlo - 1e-6 <= x <= xhi + 1e-6:
+            # Linear interp along the segment.
+            if abs(x2 - x1) < 1e-6:
+                return (y1 + y2) / 2
+            frac = (x - x1) / (x2 - x1)
+            return y1 + frac * (y2 - y1)
+    return None
+
+
+@pytest.mark.parametrize(
+    "fixture,y_spacing",
+    [
+        ("da_pipeline.mmd", 55.0),
+        ("rnaseq_sections.mmd", 55.0),
+    ],
+)
+def test_lines_bypass_non_consumers_at_full_grid_row(fixture, y_spacing):
+    """A line whose route crosses a non-consuming station's X must
+    visually clear the marker bbox AND sit at least a full grid row
+    (~y_spacing) away from the trunk at that X.
+
+    This catches v107 baseline where ``maxquant`` and ``geo`` lines
+    passed straight through ``Annotate results`` (and earlier, through
+    ``grea``), violating the structural rule that lines route AROUND
+    non-consuming stations rather than THROUGH them.  v105's 5px nudge
+    cleared the marker but didn't reach a full row; v108 shifts by
+    exactly ``y_spacing``.
+    """
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+    from nf_metro.layout.routing.core import _build_marker_bboxes
+    from nf_metro.render.svg import apply_route_offsets
+
+    # Threshold for "a full grid row": 0.9 * y_spacing absorbs slight
+    # sub-pixel jitter from the line-bundle spacing within the row.
+    FULL_ROW = 0.9 * y_spacing
+
+    graph = _layout(fixture, y_spacing=y_spacing)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    # Junction set: any station listed in graph.junctions.
+    junction_ids = set(graph.junctions)
+    bboxes = _build_marker_bboxes(graph, junction_ids, offsets)
+
+    # Build per-line trunk-Y lookup per station: the average rendered Y
+    # of CONSUMED lines at the station's X.  Lines bypassing must sit
+    # at least FULL_ROW away from this trunk Y.
+    rendered: list[list[tuple[float, float]]] = [
+        apply_route_offsets(r, offsets) for r in routes
+    ]
+
+    violations: list[str] = []
+    # "Near the station's row" Y-band: routes whose Y at bb.cx falls
+    # within this band are considered the trunk passing through the
+    # station's row; routes outside it are in a different row entirely
+    # (e.g. cross-section bundles in a lower row that happen to share
+    # an X column with this station).
+    NEAR_ROW = y_spacing * 0.6
+    for sid, bb in bboxes.items():
+        trunk_ys: list[float] = []
+        crossing_lines: list[tuple[str, int, float]] = []
+        for ri, r in enumerate(routes):
+            if r.edge.source == sid or r.edge.target == sid:
+                continue
+            pts = rendered[ri]
+            # Find a horizontal segment crossing bb.cx near bb.cy.
+            seg_y_at_cx: float | None = None
+            for i in range(len(pts) - 1):
+                x1, y1 = pts[i]
+                x2, y2 = pts[i + 1]
+                xlo, xhi = (x1, x2) if x1 <= x2 else (x2, x1)
+                if not (xlo - 1e-6 <= bb.cx <= xhi + 1e-6):
+                    continue
+                if abs(y2 - y1) > 1.0:
+                    continue
+                seg_y = (y1 + y2) / 2
+                if abs(seg_y - bb.cy) > NEAR_ROW:
+                    continue  # Different grid row entirely
+                seg_y_at_cx = seg_y
+                break
+            if seg_y_at_cx is None:
+                continue
+            if r.line_id in bb.consumed:
+                trunk_ys.append(seg_y_at_cx)
+            else:
+                crossing_lines.append((r.line_id, ri, seg_y_at_cx))
+
+        if not crossing_lines:
+            continue
+
+        # Trunk Y: average of consumed lines' rendered Ys at bb.cx, or
+        # fall back to the marker center if no consumed line crosses.
+        if trunk_ys:
+            trunk_y = sum(trunk_ys) / len(trunk_ys)
+        else:
+            trunk_y = bb.cy
+
+        bbox_top = bb.cy - bb.half_h - 0.5
+        bbox_bot = bb.cy + bb.half_h + 0.5
+        # A non-consumed line is considered "in the trunk band" if its
+        # rendered Y at the station X is within the marker bbox extent
+        # plus one OFFSET_STEP slot of slack.  Such a line was at risk
+        # of crossing the marker pre-bypass and must therefore be
+        # detoured a full grid row away (v108 invariant).  Lines that
+        # are already clear (e.g. above an off-track station or below
+        # a low feeder) are unaffected.
+        trunk_band_top = trunk_y - bb.half_h - 4.0
+        trunk_band_bot = trunk_y + bb.half_h + 4.0
+
+        for line_id, ri, y_at in crossing_lines:
+            # Rule 1: line must clear the marker bbox itself.
+            if bbox_top <= y_at <= bbox_bot:
+                violations.append(
+                    f"{fixture}: line {line_id} crosses non-consuming "
+                    f"station {sid} marker bbox at "
+                    f"(x={bb.cx:.1f}, y={y_at:.1f}) "
+                    f"[bbox y-range {bbox_top:.1f}..{bbox_bot:.1f}]"
+                )
+                continue
+            # Rule 2: when the line would otherwise sit in the trunk
+            # band (the v107 "passes through marker" case), it must
+            # have been detoured a full grid row away.
+            if trunk_band_top <= y_at <= trunk_band_bot:
+                if abs(y_at - trunk_y) < FULL_ROW:
+                    violations.append(
+                        f"{fixture}: line {line_id} at non-consuming "
+                        f"station {sid} (trunk y={trunk_y:.1f}) sits at "
+                        f"y={y_at:.1f}, gap={abs(y_at - trunk_y):.1f} < "
+                        f"{FULL_ROW:.1f} (full grid row)"
+                    )
+
+    assert not violations, "Bypass violations:\n  " + "\n  ".join(violations)

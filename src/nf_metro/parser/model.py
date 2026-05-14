@@ -196,6 +196,9 @@ class MetroGraph:
     _station_lines_cache: dict[str, list[str]] | None = field(default=None, repr=False)
     # Grid alignment metadata (populated by Phase 2.5 _align_row_y_grids)
     _row_y_grid_info: dict = field(default_factory=dict, repr=False)
+    # Grid pitch used by compute_layout; read by routing to size detours
+    # that bypass non-consuming stations (one full row offset).
+    _y_spacing: float = 0.0
 
     def _invalidate_edge_caches(self) -> None:
         """Reset caches that depend on the edge list."""

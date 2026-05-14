@@ -147,6 +147,15 @@ BYPASS_CLEARANCE: float = 25.0
 BYPASS_NEST_STEP: float = 8.0
 """Per-line vertical offset for stacking multiple bypass routes."""
 
+MARKER_BYPASS_CORNER_GAP: float = 2.0
+"""Horizontal clearance between a non-consuming station's marker edge and
+the start of the U-turn corner arc.
+
+The detour's diverge X is placed ``STATION_RADIUS_APPROX +
+MARKER_BYPASS_CORNER_GAP + CURVE_RADIUS`` from the station center so the
+corner arc clears the marker pill without grazing it.
+"""
+
 HEADER_CLEARANCE: float = 30.0
 """Clearance above/below section headers for inter-row routing channels.
 

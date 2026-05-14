@@ -136,6 +136,55 @@ def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _guard_no_marker_bbox_crossings(graph: MetroGraph, phase: str) -> None:
+    """After edge routing: a routed line must not pass through the
+    marker bbox of a station that doesn't consume that line.
+
+    Routes a copy of the edges with finalised station offsets and walks
+    every horizontal segment; flags any segment whose rendered Y falls
+    inside a non-consuming station's marker bbox.  This catches drift
+    where a downstream layout phase shifts a station onto an active
+    bundle Y, or where the bypass post-pass misses a corner case.
+    """
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+    from nf_metro.layout.routing.core import _build_marker_bboxes
+    from nf_metro.render.svg import apply_route_offsets
+
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    junction_ids = set(graph.junctions)
+    bboxes = _build_marker_bboxes(graph, junction_ids, offsets)
+    if not bboxes:
+        return
+    margin = 1.0
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        endpoints = {r.edge.source, r.edge.target}
+        for i in range(len(pts) - 1):
+            x1, y1 = pts[i]
+            x2, y2 = pts[i + 1]
+            if abs(y2 - y1) > 1.0:
+                continue
+            seg_y = (y1 + y2) / 2
+            xlo, xhi = (x1, x2) if x1 <= x2 else (x2, x1)
+            for sid, bb in bboxes.items():
+                if sid in endpoints:
+                    continue
+                if r.line_id in bb.consumed:
+                    continue
+                if bb.cx <= xlo + 1e-3 or bb.cx >= xhi - 1e-3:
+                    continue
+                top = bb.cy - bb.half_h - margin
+                bot = bb.cy + bb.half_h + margin
+                if top <= seg_y <= bot:
+                    raise PhaseInvariantError(
+                        f"{phase}: line {r.line_id!r} crosses "
+                        f"non-consuming station {sid!r} at "
+                        f"(x={bb.cx:.1f}, y={seg_y:.1f}) "
+                        f"[bbox y-range {top:.1f}..{bot:.1f}]"
+                    )
+
+
 def compute_layout(
     graph: MetroGraph,
     x_spacing: float = X_SPACING,
@@ -156,6 +205,10 @@ def compute_layout(
     key phases.  Violations raise ``PhaseInvariantError`` instead of
     silently producing broken layouts.
     """
+    # Record the grid pitch on the graph so the routing layer can size
+    # full-row detours around non-consuming stations.
+    graph._y_spacing = y_spacing
+
     # Optionally reorder lines by section span before layout.
     # Must happen here (on the full graph) before section subgraphs are
     # built, since subgraphs share graph.lines via reference.
@@ -556,6 +609,7 @@ def _compute_section_layout(
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
         _guard_stations_in_sections(graph, "after Phase 12 (final)")
         _guard_ports_on_boundaries(graph, "after Phase 12 (final)")
+        _guard_no_marker_bbox_crossings(graph, "after edge routing")
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
