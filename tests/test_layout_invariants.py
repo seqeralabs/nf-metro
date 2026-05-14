@@ -1252,3 +1252,87 @@ def test_loop_recenter_only_for_pure_side_branches(fixture):
         f"{fixture}: expected at least one off-trunk loop side station "
         "paired with an on-trunk co-looper"
     )
+
+
+# ---------------------------------------------------------------------------
+# v114: Lines never cross a non-consumer station's marker bbox
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"]
+)
+def test_lines_dont_cross_non_consumer_markers(fixture):
+    """No rendered line segment may pass through the marker bbox of
+    any station that neither consumes nor produces that line.
+
+    Complements ``test_no_station_or_icon_overlap`` (which catches
+    marker/marker collisions) with the symmetric line/marker check
+    that catches the "breeze-past" pattern: a sparse-consumer
+    station S sharing a Y row with a busier sibling whose inbound
+    bundle traverses S's column.  Pre-v114 ``grea`` (rnaseq-only)
+    sat at the same Y as ``decoupler`` (full bundle), so the lines
+    flowing from the section entry to decoupler crossed grea's
+    marker on the way in.
+
+    Iterates every (station, route) pair and asserts no segment of
+    the route's rendered polyline intersects the station's marker
+    bbox when the line is not part of the station's consumed or
+    produced set.
+    """
+    from nf_metro.layout.engine import _station_marker_bbox
+    from nf_metro.render.svg import apply_route_offsets
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    consumed_by: dict[str, set[str]] = defaultdict(set)
+    produced_by: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        consumed_by[e.target].add(e.line_id)
+        produced_by[e.source].add(e.line_id)
+
+    def _seg_crosses_bbox(
+        p1: tuple[float, float],
+        p2: tuple[float, float],
+        bbox: tuple[float, float, float, float],
+    ) -> bool:
+        x1, y1 = p1
+        x2, y2 = p2
+        bx1, by1, bx2, by2 = bbox
+        if max(x1, x2) < bx1 or min(x1, x2) > bx2:
+            return False
+        if max(y1, y2) < by1 or min(y1, y2) > by2:
+            return False
+        for k in range(21):
+            f = k / 20.0
+            x = x1 + f * (x2 - x1)
+            y = y1 + f * (y2 - y1)
+            if bx1 <= x <= bx2 and by1 <= y <= by2:
+                return True
+        return False
+
+    for sid, st in graph.stations.items():
+        bbox = _station_marker_bbox(graph, sid, offsets=offsets)
+        if bbox is None:
+            continue
+        station_lines = consumed_by.get(sid, set()) | produced_by.get(sid, set())
+        for r in routes:
+            if r.line_id in station_lines:
+                continue
+            if r.edge.source == sid or r.edge.target == sid:
+                continue
+            pts = apply_route_offsets(r, offsets)
+            for k in range(len(pts) - 1):
+                if _seg_crosses_bbox(pts[k], pts[k + 1], bbox):
+                    raise AssertionError(
+                        f"{fixture}: line {r.line_id!r} on edge "
+                        f"{r.edge.source!r} -> {r.edge.target!r} "
+                        f"crosses non-consumer station {sid!r} "
+                        f"marker bbox "
+                        f"({bbox[0]:.1f},{bbox[1]:.1f})-"
+                        f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
+                        f"({pts[k][0]:.1f},{pts[k][1]:.1f})->"
+                        f"({pts[k + 1][0]:.1f},{pts[k + 1][1]:.1f})"
+                    )
