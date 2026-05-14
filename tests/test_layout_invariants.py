@@ -909,3 +909,59 @@ def test_lines_bypass_non_consumers_at_full_grid_row(fixture, y_spacing):
                     )
 
     assert not violations, "Bypass violations:\n  " + "\n  ".join(violations)
+
+
+# ---------------------------------------------------------------------------
+# Station markers and off-track file icons must never overlap
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"]
+)
+def test_no_station_or_icon_overlap(fixture):
+    """No two station markers (incl. off-track file icons) may share a
+    bounding-box footprint.  Each station / off-track input renders a
+    pill-shaped marker centred at ``(station.x, station.y + offset_mid)``;
+    if two such pills overlap, the rendered SVG shows one station hidden
+    behind another - the v106 regression where the auto-balance pass
+    lifted ``grea`` into the slot already occupied by the off-track
+    ``gmt_in`` icon in section 3 (Functional enrichment).
+
+    Iterates every pair of station marker bboxes and asserts they do
+    not overlap (sub-pixel tolerance).
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    radius = 5.0  # matches nfcore theme station_radius; pill width = 10px
+    junction_ids = set(graph.junctions)
+    boxes: list[tuple[str, tuple[float, float, float, float]]] = []
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or sid in junction_ids:
+            continue
+        line_offs = [
+            offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)
+        ] or [0.0]
+        min_off, max_off = min(line_offs), max(line_offs)
+        cy = st.y + (min_off + max_off) / 2
+        w = 2 * radius
+        h = (max_off - min_off) + 2 * radius
+        boxes.append(
+            (sid, (st.x - w / 2, cy - h / 2, st.x + w / 2, cy + h / 2))
+        )
+
+    tol = 0.5
+    for i, (s1, (x1, y1, X1, Y1)) in enumerate(boxes):
+        for s2, (x2, y2, X2, Y2) in boxes[i + 1:]:
+            overlap = (
+                x1 < X2 - tol
+                and x2 < X1 - tol
+                and y1 < Y2 - tol
+                and y2 < Y1 - tol
+            )
+            assert not overlap, (
+                f"{fixture}: marker overlap between {s1!r} "
+                f"bbox=({x1:.1f},{y1:.1f},{X1:.1f},{Y1:.1f}) "
+                f"and {s2!r} "
+                f"bbox=({x2:.1f},{y2:.1f},{X2:.1f},{Y2:.1f})"
+            )
