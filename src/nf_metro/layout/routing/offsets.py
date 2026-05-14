@@ -518,15 +518,41 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
             continue
         if port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
-        line_ys: dict[str, list[float]] = {}
+        # Collect (feeder_id, y) per line.  When a single full-bundle
+        # feeder carries every port line, side-branch feeders that only
+        # contribute a subset must not pull their line's "average Y"
+        # off the trunk: the kink belongs at the side branch, not at
+        # the bundle's exit.
+        line_feeders: dict[str, list[tuple[str, float]]] = {}
         for edge in graph.edges:
             if edge.target == port_id:
                 src_st = graph.stations.get(edge.source)
                 if src_st and not src_st.is_port:
-                    line_ys.setdefault(edge.line_id, []).append(src_st.y)
-        if len(line_ys) < 2:
+                    line_feeders.setdefault(edge.line_id, []).append(
+                        (edge.source, src_st.y)
+                    )
+        if len(line_feeders) < 2:
             continue
-        line_avg_y = {lid: sum(ys) / len(ys) for lid, ys in line_ys.items()}
+        port_lines = set(line_feeders.keys())
+        trunk_feeder_id: str | None = None
+        for sid in {fid for entries in line_feeders.values() for fid, _ in entries}:
+            if port_lines.issubset(set(graph.station_lines(sid))):
+                trunk_feeder_id = sid
+                break
+        if trunk_feeder_id is not None:
+            trunk_y = graph.stations[trunk_feeder_id].y
+            line_avg_y = {}
+            for lid, entries in line_feeders.items():
+                trunk_ys = [y for fid, y in entries if fid == trunk_feeder_id]
+                if trunk_ys:
+                    line_avg_y[lid] = trunk_ys[0]
+                else:
+                    line_avg_y[lid] = trunk_y
+        else:
+            line_avg_y = {
+                lid: sum(y for _, y in entries) / len(entries)
+                for lid, entries in line_feeders.items()
+            }
         unique_ys = set(line_avg_y.values())
         if len(unique_ys) < 2:
             continue
