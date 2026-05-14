@@ -1186,20 +1186,33 @@ def _compact_row_content_to_bbox_top(
         if not sections:
             continue
         sections_by_col = sorted(sections, key=lambda s: s.grid_col)
-        # Build contiguous-column groups, but rowspan>1 sections trunk
-        # at a Y of their own (no horizontal bundle shared with row
-        # mates) so each one shifts independently.
+        # Build contiguous-column groups.  A rowspan>1 section is only
+        # isolated from row mates when its trunk Y differs from theirs
+        # (no shared horizontal bundle); when its trunk aligns with the
+        # row's trunk, compact must group it with neighbours so the
+        # shared bundle stays straight.
+        def _trunk_or_none(s: Section) -> float | None:
+            return _section_trunk_y(graph, s)
+
         groups: list[list[Section]] = [[sections_by_col[0]]]
         for s in sections_by_col[1:]:
             prev = groups[-1][-1]
-            if (
-                s.grid_col - prev.grid_col <= 1
-                and s.grid_row_span <= 1
-                and prev.grid_row_span <= 1
-            ):
-                groups[-1].append(s)
-            else:
+            adjacent = s.grid_col - prev.grid_col <= 1
+            if not adjacent:
                 groups.append([s])
+                continue
+            spans = s.grid_row_span > 1 or prev.grid_row_span > 1
+            if spans:
+                s_t = _trunk_or_none(s)
+                p_t = _trunk_or_none(prev)
+                aligned = (
+                    s_t is not None and p_t is not None
+                    and abs(s_t - p_t) < 0.5
+                )
+                if not aligned:
+                    groups.append([s])
+                    continue
+            groups[-1].append(s)
 
         for group in groups:
             allowed_shifts: list[float] = []
