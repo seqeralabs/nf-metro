@@ -472,6 +472,13 @@ def _compute_section_layout(
     # padding by more than one ``y_spacing`` slot.
     _fan_free_content_upward(graph, section_y_padding, y_spacing)
 
+    # Phase 13d2: Companion to 13d for source-stack sections.  When the
+    # entry column has a single full-bundle trunk plus subset-bundle
+    # source inputs (file icons with no inbound edges), lift the
+    # nearest-to-trunk sources into the empty top band so the section
+    # is bottom- and top-weighted instead of stacked below the trunk.
+    _fan_source_inputs_upward(graph, section_y_padding, y_spacing)
+
     # Phase 13e: Snap all station/port Ys to a per-section y_spacing
     # grid.  Trunk-Y align, port-snap, and the row compaction/fan
     # phases compute shifts that don't respect the grid pitch, leaving
@@ -1444,6 +1451,129 @@ def _fan_free_content_upward(
         ]
         for i, sid in enumerate(to_lift, 1):
             graph.stations[sid].y = anchor_y - i * y_spacing
+
+
+def _fan_source_inputs_upward(
+    graph: MetroGraph, section_y_padding: float, y_spacing: float
+) -> None:
+    """Fill empty top space by lifting source-input chains above the trunk.
+
+    Companion to ``_fan_free_content_upward`` for sections whose entry
+    column contains a single full-bundle trunk station plus subset-bundle
+    sources (file inputs with no inbound edges).  The trunk-candidate
+    path skips these (it requires >=2 full-bundle candidates), leaving
+    every source stacked at or below the trunk and the bbox top empty.
+
+    For each qualifying LR/RL grid section, sort sources by current Y
+    (closest to trunk first) and lift up to ``slack // y_spacing`` of
+    them above the trunk at ``y_spacing`` pitch.  Each lifted source
+    drags its linear consumer chain (one inbound edge, identical line
+    set, strictly inside the section) so per-line tracks stay straight.
+
+    Scoped to explicit ``%%metro grid:`` pipelines so the auto-layout
+    path is unaffected.  U-turn risk is nil because sources have no
+    upstream feeders by definition.
+    """
+    if not getattr(graph, "_explicit_grid", None):
+        return
+    for section in graph.sections.values():
+        if (
+            section.bbox_h <= 0
+            or section.direction not in ("LR", "RL")
+        ):
+            continue
+        if any(
+            getattr(graph.stations.get(sid), "off_track", False)
+            for sid in section.station_ids
+        ):
+            continue
+        port_set = set(section.entry_ports) | set(section.exit_ports)
+        internal_ids = [
+            sid for sid in section.station_ids
+            if sid not in port_set and sid in graph.stations
+            and not graph.stations[sid].is_port
+        ]
+        if not internal_ids:
+            continue
+        bundle = _section_bundle_lines(graph, section)
+        if not bundle:
+            continue
+
+        xs = sorted({round(graph.stations[sid].x, 3) for sid in internal_ids})
+        entry_x = xs[0] if section.direction == "LR" else xs[-1]
+        entry_col = [
+            sid for sid in internal_ids
+            if round(graph.stations[sid].x, 3) == entry_x
+        ]
+        trunks = [
+            s for s in entry_col
+            if set(graph.station_lines(s)) == bundle
+        ]
+        if len(trunks) != 1:
+            continue
+        trunk_sid = trunks[0]
+        trunk_y = graph.stations[trunk_sid].y
+
+        # Sources: entry-column siblings of the trunk with no inbound
+        # edges and a strict-subset line set.  These are file-input
+        # icons (or input-only stations) that carry one or two lines.
+        sources = [
+            s for s in entry_col
+            if s != trunk_sid
+            and set(graph.station_lines(s))
+            and set(graph.station_lines(s)) < bundle
+            and not any(e.target == s for e in graph.edges)
+            and graph.stations[s].y > trunk_y - 0.5
+        ]
+        if len(sources) < 2:
+            continue
+
+        # Cap the lift so the topmost lifted station stays inside the
+        # bbox with a quarter-slot margin.  ``section_y_padding`` is
+        # ignored here because compaction already pulled row mates as
+        # tight as their off-track inputs allow; further padding would
+        # strand empty top space that this phase is meant to fill.
+        top_margin = y_spacing / 4
+        slack = trunk_y - section.bbox_y - top_margin
+        slots = int((slack + 0.5) // y_spacing)
+        if slots < 1:
+            continue
+        # Lift at most floor(n_sources / 2) so a majority of sources
+        # stay at or below the trunk.  Keeps the bottom-heavy ordering
+        # when only a couple of sources can fit above.
+        n_lift = min(slots, max(0, len(sources) // 2))
+        if n_lift == 0:
+            continue
+
+        sources.sort(key=lambda s: graph.stations[s].y)
+        section_internal_set = set(internal_ids)
+        for i, src in enumerate(sources[:n_lift], 1):
+            new_y = trunk_y - i * y_spacing
+            delta = new_y - graph.stations[src].y
+            if abs(delta) < 0.5:
+                continue
+            graph.stations[src].y = new_y
+            # Walk a strictly linear consumer chain: each step requires
+            # a single inbound edge from the previous link, an identical
+            # line set, and section-internal placement.  Stop on fan-in
+            # (consumer has another feeder) or line-set change.
+            cur = src
+            while True:
+                # De-dup parallel edges by target/source: each (src,tgt)
+                # pair may have one edge per line.
+                outs = {e.target for e in graph.edges if e.source == cur}
+                if len(outs) != 1:
+                    break
+                nxt = next(iter(outs))
+                if nxt not in section_internal_set:
+                    break
+                in_srcs = {e.source for e in graph.edges if e.target == nxt}
+                if len(in_srcs) != 1:
+                    break
+                if set(graph.station_lines(nxt)) != set(graph.station_lines(src)):
+                    break
+                graph.stations[nxt].y += delta
+                cur = nxt
 
 
 def _lift_would_cause_uturn(
