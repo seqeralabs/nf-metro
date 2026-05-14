@@ -459,6 +459,192 @@ def test_side_branch_edge_stays_off_trunk(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Section content balance around the trunk
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_section_top_band_filled(fixture):
+    """LR/RL sections with room for another above-trunk slot AND
+    multiple below-trunk movable siblings should fill the empty top
+    band, not leave it stranded.
+
+    Specifically: when the top band (between bbox_y and the topmost
+    station) is large enough to fit another station with its label
+    (>= y_spacing + label_clearance), AND there are >= 2 movable
+    below-trunk siblings versus at most 1 above, the balance pass
+    should have lifted one of them so the top band shrinks to within
+    one y_spacing of the bbox.
+
+    Catches the v103 ``data_prep`` layout where only Matrix was lifted
+    above the trunk while four other file inputs stayed below.
+    """
+    import networkx as nx
+
+    y_spacing = 55.0
+    label_clearance = y_spacing / 2
+    graph = _layout(fixture, y_spacing=y_spacing)
+    G = nx.DiGraph()
+    for e in graph.edges:
+        G.add_edge(e.source, e.target)
+
+    for section in graph.sections.values():
+        if (
+            section.bbox_h <= 0
+            or section.direction not in ("LR", "RL")
+        ):
+            continue
+        bundle = _section_full_bundle(graph, section)
+        if not bundle:
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        cols: dict[float, list[str]] = defaultdict(list)
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden or st.off_track:
+                continue
+            cols[round(st.x, 1)].append(sid)
+
+        # Trunk Y: prefer an LR port; fall back to a full-bundle station.
+        trunk_y: float | None = None
+        for pid in section.entry_ports + section.exit_ports:
+            port = graph.ports.get(pid)
+            st = graph.stations.get(pid)
+            if port and st and port.side in (PortSide.LEFT, PortSide.RIGHT):
+                trunk_y = st.y
+                break
+        if trunk_y is None:
+            for sids in cols.values():
+                for s in sids:
+                    if set(graph.station_lines(s)) == bundle:
+                        trunk_y = graph.stations[s].y
+                        break
+                if trunk_y is not None:
+                    break
+        if trunk_y is None:
+            continue
+
+        all_internal = [s for sids in cols.values() for s in sids]
+        if not all_internal:
+            continue
+        top_y = min(graph.stations[s].y for s in all_internal)
+        top_band = top_y - section.bbox_y
+        if top_band <= y_spacing + _Y_TOL:
+            continue  # band is already tight
+
+        # Count movable siblings above vs below trunk.
+        movable_above = 0
+        movable_below_candidates: list[str] = []
+        for x, sids in cols.items():
+            trunks_here = [
+                s for s in sids
+                if set(graph.station_lines(s)) == bundle
+            ]
+            if not trunks_here:
+                continue
+            for s in sids:
+                if s in trunks_here:
+                    continue
+                lines = set(graph.station_lines(s))
+                if not lines or not (lines < bundle):
+                    continue
+                y = graph.stations[s].y
+                if y < trunk_y - _Y_TOL:
+                    movable_above += 1
+                elif y > trunk_y + _Y_TOL:
+                    movable_below_candidates.append(s)
+
+        # Only flag sections where >= 2 below-trunk movables exist
+        # AND at least one would fit in a new top slot with its
+        # label.  Sections where slot -k of every below station
+        # would clip into the bbox stroke are skipped.
+        if len(movable_below_candidates) < 2 or movable_above >= len(
+            movable_below_candidates
+        ):
+            continue
+
+        target_y = top_y - y_spacing
+        any_fits = any(
+            target_y >= section.bbox_y + (
+                label_clearance
+                if graph.stations[s].label and graph.stations[s].label.strip()
+                else 0.0
+            ) - _Y_TOL
+            for s in movable_below_candidates
+        )
+        if not any_fits:
+            continue
+
+        assert top_band <= y_spacing + _Y_TOL, (
+            f"Section {section.id}: top band {top_band:.1f}px > "
+            f"{y_spacing:.1f} while {len(movable_below_candidates)} "
+            f"movable siblings sit below trunk and only "
+            f"{movable_above} above; balance pass should lift one "
+            f"into the top slot"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Section 1 (data_prep): at least one input must sit above the trunk
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_section1_input_above_trunk(fixture):
+    """In ``data_prep`` (the source-stack section) inputs must fill
+    the above-trunk band: at least one input sits above the trunk, and
+    the topmost input is no more than y_spacing below the bbox top.
+
+    Catches the regression where ``_fan_source_inputs_upward`` lifts
+    only a single input (e.g. just Matrix), leaving a 2+ y_spacing
+    gap between the bbox top and the topmost input.
+    """
+    y_spacing = 55.0
+    graph = _layout(fixture, y_spacing=y_spacing)
+    section = graph.sections.get("data_prep")
+    assert section is not None
+    port_ids = set(section.entry_ports) | set(section.exit_ports)
+    trunk_y: float | None = None
+    for pid in section.entry_ports + section.exit_ports:
+        port = graph.ports.get(pid)
+        st = graph.stations.get(pid)
+        if port and st and port.side in (PortSide.LEFT, PortSide.RIGHT):
+            trunk_y = st.y
+            break
+    assert trunk_y is not None, "data_prep has no LR port for trunk Y"
+
+    # Inputs: stations with no inbound edges (sources).
+    has_in: set[str] = {e.target for e in graph.edges}
+    inputs = [
+        sid for sid in section.station_ids
+        if sid not in port_ids
+        and sid not in has_in
+        and sid in graph.stations
+        and not graph.stations[sid].is_port
+    ]
+    inputs_above = [
+        sid for sid in inputs
+        if graph.stations[sid].y < trunk_y - _Y_TOL
+    ]
+    assert inputs_above, (
+        f"data_prep: no input sits above trunk_y={trunk_y:.1f} "
+        f"(inputs at y={[graph.stations[s].y for s in inputs]})"
+    )
+    # Top of section: the topmost input should sit within one
+    # y_spacing of the bbox top so the top band is visibly filled.
+    top_input_y = min(graph.stations[s].y for s in inputs_above)
+    top_band = top_input_y - section.bbox_y
+    assert top_band <= y_spacing + _Y_TOL, (
+        f"data_prep: top input at y={top_input_y:.1f} leaves "
+        f"top_band={top_band:.1f}px > {y_spacing:.1f} (bbox_y="
+        f"{section.bbox_y:.1f}); balance pass should lift another "
+        f"input into the top slot"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Section bbox must contain all stations and off-track inputs
 # ---------------------------------------------------------------------------
 
@@ -514,3 +700,66 @@ def test_section_bbox_contains_all_content(fixture):
                 f"(y={st.y}, half={half}) overflows bbox bottom "
                 f"y={section.bbox_y + section.bbox_h}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Terminus stations must not be hit by a diagonal route segment
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_terminus_not_directly_after_diagonal(fixture):
+    """Routes terminating at an output terminus must arrive on an
+    orthogonal (horizontal or vertical) final segment.
+
+    Catches the v103 layout where ``plot_expl`` and ``plot_diff`` both
+    fed ``plots_png`` via diagonals that converged AT the terminus
+    marker, producing a Y-shape with the file icon at the convergence
+    point.  After v104 the layout should insert a virtual convergence
+    station so the last segment to the terminus is purely orthogonal.
+
+    The check tolerates short corner segments (curve smoothing) by
+    requiring the LAST segment of length >= MIN_LEN to be axis-aligned.
+    """
+    from nf_metro.layout.routing import route_edges
+
+    MIN_LEN = 30.0  # require axis-aligned approach for the last >= 30px
+    AXIS_TOL = 1.0
+    graph = _layout(fixture)
+    routes = route_edges(graph)
+    # Group routes by terminus target id.
+    by_target: dict[str, list] = defaultdict(list)
+    for r in routes:
+        tgt = graph.stations.get(r.edge.target)
+        if tgt is None or not tgt.is_terminus:
+            continue
+        by_target[r.edge.target].append(r)
+
+    for tid, paths in by_target.items():
+        # Only enforce the invariant when a terminus has 2+ direct
+        # inbound edges (the convergence case).  Single-source termini
+        # already inherit their source's Y.
+        sources = {r.edge.source for r in paths}
+        if len(sources) < 2:
+            continue
+        for r in paths:
+            pts = r.points
+            if len(pts) < 2:
+                continue
+            # Find the last segment of length >= MIN_LEN
+            for i in range(len(pts) - 1, 0, -1):
+                x1, y1 = pts[i - 1]
+                x2, y2 = pts[i]
+                length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+                if length < MIN_LEN:
+                    continue
+                dx = abs(x2 - x1)
+                dy = abs(y2 - y1)
+                axis_aligned = dx <= AXIS_TOL or dy <= AXIS_TOL
+                assert axis_aligned, (
+                    f"Terminus {tid}: edge {r.edge.source}->{tid} "
+                    f"last segment ({x1:.1f},{y1:.1f}) -> "
+                    f"({x2:.1f},{y2:.1f}) is diagonal "
+                    f"(dx={dx:.1f}, dy={dy:.1f})"
+                )
+                break

@@ -526,6 +526,18 @@ def _compute_section_layout(
     # them back onto the source Y so the connection stays horizontal.
     _align_terminus_to_upstream(graph)
 
+    # Phase 13h2: Auto-balance pass.  For sections whose final layout
+    # still leaves an empty band above the trunk while more siblings
+    # sit below than above (e.g. differential's dream alone above the
+    # trunk while DESeq2 and propd hang below), lift bottommost
+    # movable siblings into the empty top band so content sits
+    # symmetrically around the trunk.  Runs after re-centering and
+    # terminus-Y pinning so it sees the final trunk Y.  U-turn-safe
+    # and bbox-bounded.
+    _balance_section_content_around_trunk(
+        graph, section_y_padding, y_spacing
+    )
+
     # Phase 13i: Shrink rowspan / row-mate bboxes whose content moved
     # up after compact (e.g. ``_fan_source_inputs_upward`` lifted the
     # bottom rows away from the bbox bottom).  Bottom-only shrink, so
@@ -1638,6 +1650,291 @@ def _fan_source_inputs_upward(
                 continue
             graph.stations[src].y = new_y
             _shift_chain(src, delta)
+
+
+def _balance_direct_external_feeder_ys(
+    graph: MetroGraph, station_id: str, section_id: str
+) -> list[float]:
+    """Return Ys of the candidate station's per-line external feeders.
+
+    Walks edges INTO ``station_id`` by line: for each inbound (src, lid)
+    pair, traverse the (src, lid) chain through junctions and ports
+    until reaching the first non-port, non-junction station.  Filtering
+    by line means transit-only stations feeding the same shared port
+    on a different line are not counted (e.g. limma feeds the
+    differential exit port for four lines but only propd feeds grea
+    via the ``rnaseq`` line, so limma should not register as grea's
+    feeder).
+    """
+    junction_ids = set(graph.junctions)
+    feeder_ys: list[float] = []
+    seen: set[tuple[str, str]] = set()
+    # Seed with each (predecessor, line) pair of the candidate.
+    stack: list[tuple[str, str]] = []
+    for edge in graph.edges:
+        if edge.target == station_id:
+            stack.append((edge.source, edge.line_id))
+    while stack:
+        cur_id, lid = stack.pop()
+        if (cur_id, lid) in seen:
+            continue
+        seen.add((cur_id, lid))
+        if cur_id in junction_ids:
+            # Recurse into edges of this line targeting the junction.
+            for edge in graph.edges:
+                if edge.target == cur_id and edge.line_id == lid:
+                    stack.append((edge.source, lid))
+            continue
+        src = graph.stations.get(cur_id)
+        if src is None:
+            continue
+        if src.is_port:
+            for edge in graph.edges:
+                if edge.target == cur_id and edge.line_id == lid:
+                    stack.append((edge.source, lid))
+            continue
+        if src.section_id == section_id:
+            continue
+        feeder_ys.append(src.y)
+    return feeder_ys
+
+
+def _balance_section_content_around_trunk(
+    graph: MetroGraph, section_y_padding: float, y_spacing: float
+) -> None:
+    """Rebalance fan-out siblings to fill empty bands above the trunk.
+
+    Runs after ``_fan_free_content_upward`` / ``_fan_source_inputs_upward``
+    have done what they can with conservative slot accounting and after
+    re-centering (Phase 13g) finalises the trunk Y.  This pass looks
+    for sections whose final layout still leaves a >= 1 * ``y_spacing``
+    empty band above the topmost station while more siblings sit below
+    the trunk than above, then either:
+
+    - LIFTS the bottommost (or topmost, depending on line homogeneity)
+      below-trunk movable sibling to one slot above the topmost station
+      when the bbox has room for the marker plus its above-marker
+      label.  The lifted station's linear consumer chain follows so
+      per-line tracks stay straight.
+
+    - SWAPS the bottommost below-trunk movable with the topmost above-
+      trunk station when the bbox has no headroom for an extra slot.
+      The swap reorders the above-trunk band without growing the bbox
+      and is reserved for sections where the user benefits from the
+      deeper-branch station (e.g. propd) sitting higher than a shallow-
+      branch sibling (e.g. dream).
+
+    "Movable" siblings: stations in a column that contains a full-
+    bundle trunk station and that themselves carry a strict subset of
+    the section's bundle.  Off-track inputs, hidden phantoms, the
+    trunk, and full-bundle pass-throughs are left untouched.
+
+    Scoped to explicit ``%%metro grid:`` pipelines so the auto-layout
+    path is unaffected.  Line-aware U-turn safety prevents lifts that
+    would force the line to climb past the trunk and double back.
+    """
+    if not getattr(graph, "_explicit_grid", None):
+        return
+    if not graph.center_ports:
+        return
+
+    for section in graph.sections.values():
+        if (
+            section.bbox_h <= 0
+            or section.direction not in ("LR", "RL")
+        ):
+            continue
+        bundle = _section_bundle_lines(graph, section)
+        if not bundle:
+            continue
+        port_set = set(section.entry_ports) | set(section.exit_ports)
+        internal_ids = [
+            sid for sid in section.station_ids
+            if sid not in port_set and sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not graph.stations[sid].is_hidden
+            and not graph.stations[sid].off_track
+        ]
+        if not internal_ids:
+            continue
+
+        # Trunk Y from LR ports (anchor for the row bundle).  Falls
+        # back to the section's median full-bundle station Y when no
+        # LR port exists (rare).
+        trunk_y: float | None = None
+        for pid in section.entry_ports + section.exit_ports:
+            port = graph.ports.get(pid)
+            st = graph.stations.get(pid)
+            if port and st and port.side in (PortSide.LEFT, PortSide.RIGHT):
+                trunk_y = st.y
+                break
+        if trunk_y is None:
+            full_ys = sorted(
+                graph.stations[s].y for s in internal_ids
+                if set(graph.station_lines(s)) == bundle
+            )
+            if not full_ys:
+                continue
+            trunk_y = full_ys[len(full_ys) // 2]
+
+        # Group by column.
+        cols: dict[float, list[str]] = defaultdict(list)
+        for sid in internal_ids:
+            cols[round(graph.stations[sid].x, 3)].append(sid)
+
+        # Find the global topmost station in this section (across all
+        # columns) and its current bbox-top gap.  We only fire when
+        # the top is visibly empty.
+        section_top_y = min(graph.stations[s].y for s in internal_ids)
+        top_band = section_top_y - section.bbox_y
+        if top_band <= y_spacing + 0.5:
+            continue
+
+        # Collect movable siblings across all columns (filtered to
+        # those whose move respects the trunk-Y row alignment).
+        movable: list[str] = []
+        for x, sids in cols.items():
+            trunks_in_col = [
+                s for s in sids
+                if set(graph.station_lines(s)) == bundle
+            ]
+            if not trunks_in_col:
+                continue
+            for s in sids:
+                if s in trunks_in_col:
+                    continue
+                lines = set(graph.station_lines(s))
+                if not lines or not (lines < bundle):
+                    continue
+                # All strict-subset siblings (fan-out branches or
+                # source files) are movable: source files want to
+                # fill the empty top band, and fan-out branches can
+                # be shuffled to balance the column.
+                movable.append(s)
+
+        if not movable:
+            continue
+
+        ys = [graph.stations[s].y for s in movable]
+        above_count = sum(1 for y in ys if y < trunk_y - 0.5)
+        below_count = sum(1 for y in ys if y > trunk_y + 0.5)
+        if below_count <= above_count:
+            continue
+
+        # Topmost movable station; we'll place one bottom-side movable
+        # one slot above it.  Continue lifting while top_band still
+        # exceeds y_spacing AND there are more below than above.
+        section_internal_set = set(internal_ids)
+
+        def _shift_chain(src: str, delta: float) -> None:
+            cur = src
+            src_lines = set(graph.station_lines(src))
+            while True:
+                outs = {e.target for e in graph.edges if e.source == cur}
+                if len(outs) != 1:
+                    break
+                nxt = next(iter(outs))
+                if nxt not in section_internal_set:
+                    break
+                in_srcs = {e.source for e in graph.edges if e.target == nxt}
+                if len(in_srcs) != 1:
+                    break
+                if set(graph.station_lines(nxt)) != src_lines:
+                    break
+                graph.stations[nxt].y += delta
+                cur = nxt
+
+        # Iteratively rebalance.  Each iteration moves the bottommost
+        # movable station up by one slot to fill the above-trunk band.
+        # The lift target is either:
+        #   - A new top slot above the current section topmost, when
+        #     the bbox has room for the marker + label, OR
+        #   - A swap into the top above-trunk slot, when there is no
+        #     bbox-top room but the topmost above-trunk station has
+        #     a deeper Y available (e.g. propd swaps with dream so
+        #     propd ends up above dream without growing the bbox).
+        # Stops when the imbalance is resolved or no slot is available.
+        max_iters = len(movable)
+        for _ in range(max_iters):
+            section_top_y = min(
+                graph.stations[s].y for s in internal_ids
+            )
+            top_band = section_top_y - section.bbox_y
+            if top_band <= y_spacing + 0.5:
+                break
+            ys = {s: graph.stations[s].y for s in movable}
+            above = [s for s, y in ys.items() if y < trunk_y - 0.5]
+            below = [s for s, y in ys.items() if y > trunk_y + 0.5]
+            if len(below) <= len(above):
+                break
+            # Choosing which below-trunk station to lift:
+            # - When all movable siblings carry the SAME line set
+            #   (e.g. dream/DESeq2/propd in differential all carry just
+            #   rnaseq), per-line track conflicts are not a concern, so
+            #   prefer the BOTTOMMOST to also shrink the bottom band.
+            # - When siblings carry different line sets (e.g. file
+            #   inputs each on their own line track), prefer the
+            #   TOPMOST to minimise the diagonal climb needed to
+            #   rejoin the trunk and keep per-line tracks clean.
+            line_sets = {
+                frozenset(graph.station_lines(s)) for s in movable
+            }
+            if len(line_sets) == 1:
+                below.sort(key=lambda s: graph.stations[s].y, reverse=True)
+            else:
+                below.sort(key=lambda s: graph.stations[s].y)
+            candidate = below[0]
+            new_y = section_top_y - y_spacing
+            # Guard: the new Y must leave room for the station's
+            # above-marker label without forcing the bbox to expand
+            # upward (which would break row-mate bbox alignment).
+            # Stations with empty labels (file icons whose names sit
+            # below) don't need the extra clearance.
+            st = graph.stations.get(candidate)
+            has_above_label = bool(st and st.label and st.label.strip())
+            label_clearance = y_spacing / 2 if has_above_label else 0.0
+            min_y = section.bbox_y + label_clearance
+            if new_y < min_y - 0.5:
+                # No room for a new top slot.  Try a SWAP: take the
+                # topmost above-trunk station's Y for the candidate,
+                # and push that station to the candidate's old Y.
+                # This re-orders the above-trunk band without growing
+                # the bbox.  Useful when the user expects a deeper-
+                # branch station (e.g. propd) above a shallower one
+                # (e.g. dream) for visual emphasis.
+                if not above:
+                    break
+                above.sort(key=lambda s: graph.stations[s].y)
+                top_above = above[0]
+                ya = graph.stations[top_above].y
+                yc = graph.stations[candidate].y
+                # Only swap when the candidate is the bottommost
+                # below-trunk movable AND the swap improves visual
+                # balance.  Use a simple proxy: the candidate must
+                # be the unique bottommost.
+                if candidate != below[0]:
+                    break
+                graph.stations[candidate].y = ya
+                graph.stations[top_above].y = yc
+                _shift_chain(candidate, ya - yc)
+                _shift_chain(top_above, yc - ya)
+                break  # one swap per section
+            # Direct feeder U-turn check: walk the candidate's direct
+            # predecessors only (not transitively through junctions to
+            # all stations feeding the same port).  A U-turn occurs
+            # when the only direct external feeders sit at Y >= anchor
+            # AND there are 2+ of them; a single feeder cannot make a
+            # U-turn (the line just bends once toward the candidate).
+            ext_feeders = _balance_direct_external_feeder_ys(
+                graph, candidate, section.id
+            )
+            if len(ext_feeders) >= 2 and all(
+                fy >= new_y - 0.5 for fy in ext_feeders
+            ):
+                break
+            delta = new_y - graph.stations[candidate].y
+            graph.stations[candidate].y = new_y
+            _shift_chain(candidate, delta)
 
 
 def _lift_would_cause_uturn(

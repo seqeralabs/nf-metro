@@ -157,6 +157,7 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
         from nf_metro.layout.auto_layout import infer_section_layout
 
         infer_section_layout(graph, max_station_columns=max_station_columns)
+        _insert_terminus_convergence_stations(graph)
         _resolve_sections(graph)
 
     # Apply pending terminus designations
@@ -462,6 +463,88 @@ def _create_implicit_section(graph: MetroGraph) -> None:
         s.section_id = "__implicit__"
         implicit.station_ids.append(s.id)
     graph.add_section(implicit)
+
+
+def _insert_terminus_convergence_stations(graph: MetroGraph) -> None:
+    """Insert virtual convergence stations before multi-source termini.
+
+    When a terminus station (a file/files/dir output) has 2+ direct
+    inbound edges from distinct sources, the layout typically places
+    the sources at different Ys and routes diagonals into the terminus
+    marker, producing a Y-shaped converge AT the icon.  Inserting a
+    hidden convergence station between the sources and the terminus
+    forces the layout to allocate a column for the converge, so the
+    diagonals meet there and the final segment to the terminus marker
+    is a clean horizontal/vertical line.
+
+    The convergence station inherits the terminus's section.  It is
+    marked ``is_hidden`` so the renderer skips its label and marker.
+    For each inbound edge ``source -> terminus`` carrying line ``L``,
+    the edge is replaced with ``source -> converge`` followed by a
+    single ``converge -> terminus`` edge per distinct line.
+    """
+    pending_terminus = graph._pending_terminus
+    if not pending_terminus:
+        return
+
+    new_stations: list[Station] = []
+    new_edges: list[Edge] = []
+    edges_to_remove: set[int] = set()
+    converge_count = 0
+
+    for terminus_id in list(pending_terminus.keys()):
+        # Find direct inbound edges and their sources.
+        inbound: list[tuple[int, Edge]] = []
+        for i, edge in enumerate(graph.edges):
+            if edge.target == terminus_id:
+                inbound.append((i, edge))
+        if not inbound:
+            continue
+        sources = {e.source for _, e in inbound}
+        if len(sources) < 2:
+            continue
+
+        terminus = graph.stations.get(terminus_id)
+        if terminus is None:
+            continue
+
+        converge_count += 1
+        converge_id = f"__converge_{terminus_id}_{converge_count}"
+        new_stations.append(
+            Station(
+                id=converge_id,
+                label="",
+                section_id=terminus.section_id,
+                is_hidden=True,
+            )
+        )
+
+        # Replace each ``src -> terminus (line)`` with
+        # ``src -> converge (line)`` and add ``converge -> terminus (line)``.
+        seen_lines: set[str] = set()
+        for idx, edge in inbound:
+            edges_to_remove.add(idx)
+            new_edges.append(
+                Edge(source=edge.source, target=converge_id, line_id=edge.line_id)
+            )
+            if edge.line_id not in seen_lines:
+                seen_lines.add(edge.line_id)
+                new_edges.append(
+                    Edge(source=converge_id, target=terminus_id, line_id=edge.line_id)
+                )
+
+    if not new_stations:
+        return
+
+    for st in new_stations:
+        graph.register_station(st)
+
+    if edges_to_remove:
+        graph.edges = [
+            e for i, e in enumerate(graph.edges) if i not in edges_to_remove
+        ]
+    for edge in new_edges:
+        graph.add_edge(edge)
 
 
 def _resolve_sections(graph: MetroGraph) -> None:
