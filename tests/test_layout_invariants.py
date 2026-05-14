@@ -1543,3 +1543,153 @@ def test_bypass_v_horizontal_segment_is_flat(fixture):
     assert checked > 0, (
         f"{fixture}: expected at least one paired bypass V edge to verify"
     )
+
+
+# ---------------------------------------------------------------------------
+# Loop-column stations share X (trunk + off-trunk siblings co-aligned)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_loop_column_stations_share_x(fixture):
+    """Every station in a loop column (defined by its trunk-Y
+    horizontal extent) must share an X with the column's other clean
+    members.
+
+    A "loop column" groups stations within an LR/RL section by the
+    pair ``(rightmost trunk-Y predecessor X, leftmost trunk-Y
+    successor X)``.  A station counts as a column member when:
+
+    - all its visible predecessors and successors sit on the
+      section's trunk Y (no off-track inputs that would pull its X
+      away from the column), and
+    - either it has a single inbound edge and a single outbound
+      edge (a "clean" off-trunk side station, mirrored at the loop
+      midpoint by ``_recenter_loop_side_stations`` pass 1), or it
+      sits ON the trunk row (the column's trunk station, which pass
+      2 snaps onto the clean-sibling midpoint).
+
+    Catches the v115 regression where ``limma`` sat at the raw
+    layer X (e.g. 629.4) while its off-trunk siblings ``propd``,
+    ``dream`` and ``DESeq2`` had been recentered to the column
+    midpoint (~648.6).
+    """
+    from nf_metro.parser.model import PortSide
+
+    graph = _layout(fixture)
+
+    in_by_tgt: dict[str, list] = defaultdict(list)
+    out_by_src: dict[str, list] = defaultdict(list)
+    for e in graph.edges:
+        in_by_tgt[e.target].append(e)
+        out_by_src[e.source].append(e)
+
+    checked_columns = 0
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0 or sec.direction not in ("LR", "RL"):
+            continue
+        trunk_y: float | None = None
+        for pid in sec.entry_ports + sec.exit_ports:
+            ps = graph.stations.get(pid)
+            port = graph.ports.get(pid)
+            if (
+                ps is not None
+                and port is not None
+                and port.side in (PortSide.LEFT, PortSide.RIGHT)
+            ):
+                trunk_y = ps.y
+                break
+        if trunk_y is None:
+            continue
+        port_ids = set(sec.entry_ports) | set(sec.exit_ports)
+
+        # Group eligible stations by (pred_x, succ_x).
+        columns: dict[tuple[float, float], list[str]] = defaultdict(list)
+        for sid in sec.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            visible_ins = [
+                e for e in in_by_tgt.get(sid, [])
+                if (
+                    (gs := graph.stations.get(e.source)) is not None
+                    and not gs.is_hidden
+                )
+            ]
+            visible_outs = [
+                e for e in out_by_src.get(sid, [])
+                if (
+                    (gs := graph.stations.get(e.target)) is not None
+                    and not gs.is_hidden
+                )
+            ]
+            # All visible neighbours must be on trunk Y; otherwise an
+            # off-track input anchors this station elsewhere.
+            ok = True
+            for e in visible_ins:
+                if abs(graph.stations[e.source].y - trunk_y) > 0.5:
+                    ok = False
+                    break
+            if not ok:
+                continue
+            for e in visible_outs:
+                if abs(graph.stations[e.target].y - trunk_y) > 0.5:
+                    ok = False
+                    break
+            if not ok:
+                continue
+            if not visible_ins or not visible_outs:
+                continue
+            # Eligibility: clean side station (1 edge in, 1 edge out
+            # AND off-trunk) OR trunk-Y station.
+            on_trunk = abs(st.y - trunk_y) <= 0.5
+            clean_side = (
+                not on_trunk
+                and len(visible_ins) == 1
+                and len(visible_outs) == 1
+            )
+            if not (on_trunk or clean_side):
+                continue
+            # Column key: rightmost trunk-Y predecessor X (LR), or
+            # leftmost (RL); leftmost trunk-Y successor X (LR), or
+            # rightmost (RL).
+            if sec.direction == "LR":
+                pred_x = max(
+                    graph.stations[e.source].x for e in visible_ins
+                )
+                succ_x = min(
+                    graph.stations[e.target].x for e in visible_outs
+                )
+            else:
+                pred_x = min(
+                    graph.stations[e.source].x for e in visible_ins
+                )
+                succ_x = max(
+                    graph.stations[e.target].x for e in visible_outs
+                )
+            # Station must sit strictly between its trunk-Y
+            # neighbours.
+            lo, hi = min(pred_x, succ_x), max(pred_x, succ_x)
+            if not (lo < st.x < hi):
+                continue
+            columns[(round(pred_x, 3), round(succ_x, 3))].append(sid)
+
+        for key, members in columns.items():
+            if len(members) < 2:
+                continue
+            xs = [graph.stations[sid].x for sid in members]
+            spread = max(xs) - min(xs)
+            assert spread <= 1.0, (
+                f"{fixture}: section {sec.id!r} loop column {key}: "
+                f"members {[(sid, round(graph.stations[sid].x, 2)) for sid in members]} "
+                f"span {spread:.2f}px (>1px); trunk + clean siblings "
+                f"should share X"
+            )
+            checked_columns += 1
+
+    assert checked_columns >= 1, (
+        f"{fixture}: expected at least one loop column with multiple "
+        f"members to verify"
+    )
