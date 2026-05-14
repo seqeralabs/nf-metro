@@ -999,3 +999,258 @@ def test_bypass_avoids_off_track_inputs(fixture):
                 f"{sid!r} at ({st.x:.1f},{st.y:.1f}); dy={dy:.1f} "
                 f"< MIN_CLEARANCE={MIN_CLEARANCE}"
             )
+
+
+# ---------------------------------------------------------------------------
+# v113: Bypass virtual stations use standard routing primitives
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_bypass_virtual_station_uses_standard_routing(fixture):
+    """Edges touching a bypass virtual station are routed identically
+    to any other fan-out branch.
+
+    v110 introduced ``__bypass_*`` virtual stations.  v111 added a
+    bypass-specific routing override in ``_route_diagonal`` that biased
+    the diagonal toward the virtual station; v113 removes that override
+    so the virtual station participates in the standard fork/join
+    placement primitives.  This test asserts both edges of every
+    bypass loop (``P -> V`` and ``V -> T``) produce a four-point
+    diagonal path with curve-radius corners - the same shape any
+    regular fan-out branch produces.
+    """
+    from nf_metro.layout.constants import CURVE_RADIUS
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    bypass_ids = {
+        sid
+        for sid, st in graph.stations.items()
+        if st.is_hidden and sid.startswith("__bypass_")
+    }
+    if not bypass_ids:
+        pytest.skip(f"{fixture}: no bypass virtual stations")
+
+    diagonal_routes = 0
+    for rp in routes:
+        if not (rp.edge.source in bypass_ids or rp.edge.target in bypass_ids):
+            continue
+        # Both bypass edges should be standard 4-point diagonals:
+        # (sx,sy) -> (diag_start_x,sy) -> (diag_end_x,ty) -> (tx,ty).
+        assert len(rp.points) == 4, (
+            f"bypass edge {rp.edge.source}->{rp.edge.target} should be a "
+            f"4-point diagonal, got {len(rp.points)} points"
+        )
+        sx, sy = rp.points[0]
+        x1, y1 = rp.points[1]
+        x2, y2 = rp.points[2]
+        tx, ty = rp.points[3]
+        # First/last segments must be horizontal at endpoints' Y.
+        assert abs(y1 - sy) < 0.5 and abs(y2 - ty) < 0.5, (
+            f"bypass edge {rp.edge.source}->{rp.edge.target} should have "
+            "horizontal entry/exit; got non-horizontal end segment"
+        )
+        # The diagonal X span must equal abs(dy) for a 45-degree run
+        # (within rounding).  CURVE_RADIUS corners trim each end so
+        # the actual diagonal_run = dy when measured between mids.
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        assert dx >= CURVE_RADIUS - 0.5 and dy >= CURVE_RADIUS - 0.5, (
+            f"bypass edge {rp.edge.source}->{rp.edge.target} should have "
+            f"a non-degenerate diagonal transition; dx={dx:.1f} dy={dy:.1f}"
+        )
+        diagonal_routes += 1
+
+    assert diagonal_routes >= 2, (
+        f"{fixture}: expected at least 2 bypass-touching routes "
+        f"(P->V and V->T); got {diagonal_routes}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# v113: Section 1 below-trunk content has no empty row directly below trunk
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_section1_below_trunk_compact(fixture):
+    """The first below-trunk content row should sit directly below the
+    trunk (no empty row gap).
+
+    Section 1 (Data import and preparation) has below-trunk inputs
+    (affy_load, proteus, GEOquery) that previously sat one ``y_spacing``
+    slot below the trunk row, leaving an empty row between Samples/
+    Contrasts and affy_load.  v113 compacts the below-trunk stack so
+    the first row is at ``trunk_y + y_spacing``.
+    """
+    graph = _layout(fixture)
+    sec = graph.sections.get("data_prep")
+    assert sec is not None, "fixture must contain data_prep section"
+    y_spacing = 55.0
+
+    # Trunk Y: take the LR entry port station's Y (the section's
+    # inter-section bundle anchor).
+    trunk_y: float | None = None
+    for pid in list(sec.entry_ports) + list(sec.exit_ports):
+        port = graph.ports.get(pid)
+        ps = graph.stations.get(pid)
+        if port and ps and port.side in (PortSide.LEFT, PortSide.RIGHT):
+            trunk_y = ps.y
+            break
+    assert trunk_y is not None, "data_prep must have an LR port"
+
+    below_ys = [
+        graph.stations[sid].y
+        for sid in sec.station_ids
+        if sid in graph.stations
+        and not graph.stations[sid].is_port
+        and not graph.stations[sid].is_hidden
+        and graph.stations[sid].y > trunk_y + 0.5
+    ]
+    assert below_ys, "data_prep should have below-trunk content"
+    top_below = min(below_ys)
+    gap = top_below - trunk_y
+    assert gap < y_spacing + 5.0, (
+        f"first below-trunk content row should sit at trunk_y+y_spacing="
+        f"{trunk_y + y_spacing:.1f}; got top below at {top_below:.1f} "
+        f"(gap {gap:.1f} > {y_spacing + 5.0:.1f})"
+    )
+
+
+# ---------------------------------------------------------------------------
+# v113: Fan-out side stations are centred on their loop midpoint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_fan_station_centered_on_loop(fixture):
+    """Each fan-out side station should sit at the midpoint of its
+    loop's horizontal run.
+
+    A fan-out side station is fed by one on-trunk predecessor and
+    feeds one on-trunk successor, both at the same trunk Y.  v113
+    repositions such stations to the midpoint of the two diagonal
+    corner Xs so they're not biased toward the fork side.
+    """
+    from nf_metro.layout.constants import (
+        CURVE_RADIUS,
+        DIAGONAL_RUN,
+        MIN_STRAIGHT_EDGE,
+        MIN_STRAIGHT_PORT,
+    )
+    from nf_metro.layout.labels import label_text_width
+
+    graph = _layout(fixture)
+
+    # Index edges for loop detection.
+    out_by_src: dict[str, list] = defaultdict(list)
+    in_by_tgt: dict[str, list] = defaultdict(list)
+    for e in graph.edges:
+        out_by_src[e.source].append(e)
+        in_by_tgt[e.target].append(e)
+
+    fork_t: dict[str, set] = defaultdict(set)
+    join_s: dict[str, set] = defaultdict(set)
+    for e in graph.edges:
+        fork_t[e.source].add(e.target)
+        join_s[e.target].add(e.source)
+    fork_stations = {sid for sid, t in fork_t.items() if len(t) > 1}
+    join_stations = {sid for sid, s in join_s.items() if len(s) > 1}
+
+    def _corner(a, b, role: str) -> float:
+        sx, tx = a.x, b.x
+        sign = 1.0 if tx > sx else -1.0
+        src_min = (
+            CURVE_RADIUS + MIN_STRAIGHT_PORT if a.is_port else MIN_STRAIGHT_EDGE
+        )
+        tgt_min = (
+            CURVE_RADIUS + MIN_STRAIGHT_PORT if b.is_port else MIN_STRAIGHT_EDGE
+        )
+        if a.id in fork_stations and a.label.strip():
+            src_min = max(src_min, label_text_width(a.label) / 2)
+        if b.id in join_stations and b.label.strip():
+            tgt_min = max(tgt_min, label_text_width(b.label) / 2)
+        half_diag = DIAGONAL_RUN / 2
+        if a.id in fork_stations:
+            mid = sx + sign * (src_min + half_diag)
+        elif b.id in join_stations:
+            mid = tx - sign * (tgt_min + half_diag)
+        else:
+            mid = (sx + tx) / 2.0
+        diag_start = mid - sign * half_diag
+        diag_end = mid + sign * half_diag
+        return diag_end if role == "src" else diag_start
+
+    checked = 0
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden:
+            continue
+        ins = in_by_tgt.get(sid, [])
+        outs = out_by_src.get(sid, [])
+        if len(ins) != 1 or len(outs) != 1:
+            continue
+        src = graph.stations.get(ins[0].source)
+        tgt = graph.stations.get(outs[0].target)
+        if src is None or tgt is None:
+            continue
+        if abs(src.y - tgt.y) > 0.5 or abs(st.y - src.y) < 0.5:
+            continue
+        if not (
+            (src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)
+        ):
+            continue
+        cl = _corner(src, st, role="src")
+        cr = _corner(st, tgt, role="tgt")
+        midpoint = (cl + cr) / 2.0
+        # Allow a small tolerance for grid-snap interactions and
+        # subsequent shrink/tighten passes.
+        assert abs(st.x - midpoint) <= 2.0, (
+            f"loop side station {sid!r} should sit at midpoint "
+            f"{midpoint:.1f} of corners ({cl:.1f}, {cr:.1f}); "
+            f"got x={st.x:.1f} (delta={st.x - midpoint:+.1f})"
+        )
+        checked += 1
+    assert checked >= 1, (
+        f"{fixture}: expected at least one loop side station to test"
+    )
+
+
+# ---------------------------------------------------------------------------
+# v113: Section bbox height matches actual content extent
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_section_bbox_matches_content_extent(fixture):
+    """Each LR/RL section's bbox should hug its content top/bottom.
+
+    The Plots section (a 2-branch symfan placed on half-pitch offsets
+    by v110) had a bbox top one full ``y_spacing`` above its content,
+    leaving empty space.  v113 shrinks the bbox top for half-grid
+    sections so the gap from bbox top to first station equals exactly
+    ``section_y_padding``.
+    """
+    from nf_metro.layout.constants import SECTION_Y_PADDING
+
+    graph = _layout(fixture)
+    # Section 4 in da_pipeline is the plots section, alone in row 1.
+    sec = graph.sections.get("plots")
+    assert sec is not None, "fixture must contain plots section"
+    assert sec.bbox_h > 0
+    content_ys = [
+        graph.stations[sid].y
+        for sid in sec.station_ids
+        if sid in graph.stations
+        and not graph.stations[sid].is_port
+        and not graph.stations[sid].is_hidden
+    ]
+    assert content_ys, "plots section should have content stations"
+    top_gap = min(content_ys) - sec.bbox_y
+    # Allow padding +/- 1 px slack for float rounding.
+    assert abs(top_gap - SECTION_Y_PADDING) <= 1.0, (
+        f"plots section top gap should equal SECTION_Y_PADDING="
+        f"{SECTION_Y_PADDING}; got {top_gap:.1f}"
+    )
