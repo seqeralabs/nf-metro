@@ -29,6 +29,8 @@ from nf_metro.layout.constants import (
     LINE_GAP,
     MAX_PORT_ALIGN_BBOX_EXPANSION_FRAC,
     MIN_PORT_STATION_GAP,
+    MIN_STRAIGHT_EDGE,
+    MIN_STRAIGHT_PORT,
     OFFSET_STEP,
     ROW_GAP,
     SECTION_GAP,
@@ -547,7 +549,7 @@ def _compute_section_layout(
     # alone.  Runs before ``_snap_all_y_to_grid`` so the snap-to-row-
     # grid pass doesn't immediately undo the compaction.
     if graph.center_ports:
-        _apply_half_grid_2branch_symfan(graph, y_spacing)
+        _apply_half_grid_2branch_symfan(graph, y_spacing, section_y_padding)
 
     # Phase 13e: Snap all station/port Ys to a per-section y_spacing
     # grid.  Trunk-Y align, port-snap, and the row compaction/fan
@@ -607,6 +609,16 @@ def _compute_section_layout(
     _balance_section_content_around_trunk(
         graph, section_y_padding, y_spacing
     )
+
+    # Phase 13h3: Recenter fan-out side stations on their loop midpoint.
+    # The layer-based X assignment places off-trunk siblings (e.g. propd,
+    # dream, DESeq2 fanned off limma between section entry and annotate
+    # results) at a fixed offset from the section entry that ignores how
+    # far the join's diagonal-back corner reaches.  Asymmetric corners
+    # leave the station visibly off-centre on its horizontal loop run.
+    # Reposition each side station to the midpoint of the two diagonal
+    # corner Xs derived from the actual routing geometry.
+    _recenter_loop_side_stations(graph)
 
     # Phase 13i: Shrink rowspan / row-mate bboxes whose content moved
     # up after compact (e.g. ``_fan_source_inputs_upward`` lifted the
@@ -2044,6 +2056,250 @@ def _balance_section_content_around_trunk(
             graph.stations[candidate].y = new_y
             _shift_chain(candidate, delta)
 
+        # Below-trunk compaction: when the first row below the trunk is
+        # empty but content sits two or more slots below, lift all
+        # below-trunk stations up by one ``y_spacing`` so they pack
+        # against the trunk row.  Honours the existing column-occupied
+        # guard so off-track icons and marker clearance aren't violated.
+        _compact_below_trunk_band(
+            graph, section, trunk_y, y_spacing, section_internal_set
+        )
+
+
+def _compact_below_trunk_band(
+    graph: MetroGraph,
+    section: Section,
+    trunk_y: float,
+    y_spacing: float,
+    section_internal_set: set[str],
+) -> None:
+    """Shift the entire below-trunk stack up by one y_spacing slot.
+
+    Fires when the first below-trunk slot (``trunk_y + y_spacing``) is
+    empty for non-port, non-hidden content while there is at least one
+    station two or more slots below the trunk.  All non-port, non-hidden
+    stations strictly below the trunk are shifted up by ``y_spacing``,
+    including off-track inputs and their consumers.  The bbox is left
+    alone: bottom shrink in :func:`_shrink_bboxes_to_content_bottom`
+    will collapse the freed bottom space afterward.
+
+    Symmetric counterpart to the above-trunk auto-balance: lift the
+    bottom stack against the trunk when there's wasted space, instead
+    of leaving an empty row directly below the trunk.
+    """
+    if y_spacing <= 0:
+        return
+    movables: list[str] = []
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or st.is_hidden:
+            continue
+        if st.y > trunk_y + 0.5:
+            movables.append(sid)
+    if not movables:
+        return
+    # Is there an empty row right below trunk?  Define "empty" as: no
+    # station at trunk_y + y_spacing within half a slot.
+    first_row_y = trunk_y + y_spacing
+    has_first_row = any(
+        abs(graph.stations[s].y - first_row_y) < y_spacing / 2 - 0.5
+        for s in movables
+    )
+    if has_first_row:
+        return
+    # Confirm there's content further below (otherwise nothing to lift).
+    deeper = [
+        s for s in movables
+        if graph.stations[s].y >= trunk_y + 1.5 * y_spacing
+    ]
+    if not deeper:
+        return
+    # Collision check: ensure shifting up by y_spacing doesn't collide
+    # with any non-moving station in the same column.  Build a set of
+    # non-moving Ys per column.
+    cols_nonmovable: dict[float, set[float]] = defaultdict(set)
+    movable_set = set(movables)
+    for sid in section.station_ids:
+        if sid in movable_set:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.is_hidden:
+            continue
+        cols_nonmovable[round(st.x, 3)].add(round(st.y, 3))
+    for sid in movables:
+        st = graph.stations[sid]
+        new_y = st.y - y_spacing
+        col_x = round(st.x, 3)
+        if any(abs(oy - new_y) < y_spacing / 2 - 0.5
+               for oy in cols_nonmovable.get(col_x, set())):
+            return  # collision; abort
+    # Apply uniform shift to every below-trunk movable.
+    for sid in movables:
+        graph.stations[sid].y -= y_spacing
+
+
+def _recenter_loop_side_stations(graph: MetroGraph) -> None:
+    """Reposition fan-out side stations on the centre of their loop run.
+
+    A "loop side station" is an off-trunk station fed by exactly one
+    on-trunk predecessor and feeding exactly one on-trunk successor,
+    forming a diamond loop with the trunk.  ``propd``, ``dream`` and
+    ``DESeq2`` in the differential section are the canonical example:
+    each takes the trunk bundle into limma's column, runs horizontally
+    off the trunk for one slot, then rejoins limma's outgoing trunk at
+    ``annotate``.
+
+    Layer-based X placement puts these stations at ``layer * x_spacing``
+    relative to the section's entry, ignoring asymmetry in the routing
+    diagonals.  When the source-side diagonal is shorter than the
+    target-side diagonal (e.g. wide join-station labels widen the
+    target-side gap), the side station appears visibly biased toward
+    the source.  Recompute its X as the midpoint of the loop's two
+    diagonal corner Xs so it sits centred on the horizontal run.
+
+    Honours the same constraints as the routing pass:
+    - ``MIN_STRAIGHT_PORT`` / ``MIN_STRAIGHT_EDGE`` at endpoints.
+    - Source label clearance at the fork station.
+    - Target label clearance at the join station.
+    - ``DIAGONAL_RUN`` length for the 45-degree transition.
+
+    No-op for any station that doesn't form a clean two-edge loop, and
+    skipped when shifting would leave fewer than ``DIAGONAL_RUN`` worth
+    of horizontal room on either side.
+    """
+    # Index edges by source/target for O(1) loop detection.
+    out_by_src: dict[str, list[Edge]] = defaultdict(list)
+    in_by_tgt: dict[str, list[Edge]] = defaultdict(list)
+    for e in graph.edges:
+        out_by_src[e.source].append(e)
+        in_by_tgt[e.target].append(e)
+
+    # Fork/join detection: a station is a fork when it has multiple
+    # distinct successors; a join when it has multiple distinct
+    # predecessors.  Used to mirror routing's label-clearance logic.
+    fork_targets: dict[str, set[str]] = defaultdict(set)
+    join_sources: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        fork_targets[e.source].add(e.target)
+        join_sources[e.target].add(e.source)
+    fork_stations = {sid for sid, t in fork_targets.items() if len(t) > 1}
+    join_stations = {sid for sid, s in join_sources.items() if len(s) > 1}
+
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        # Each side station: not a port, not hidden, has exactly one
+        # incoming edge and one outgoing edge, both endpoints sit on
+        # the section trunk Y (single source / single target on-trunk).
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            ins = in_by_tgt.get(sid, [])
+            outs = out_by_src.get(sid, [])
+            if len(ins) != 1 or len(outs) != 1:
+                continue
+            src_id = ins[0].source
+            tgt_id = outs[0].target
+            src = graph.stations.get(src_id)
+            tgt = graph.stations.get(tgt_id)
+            if src is None or tgt is None:
+                continue
+            # Side station must sit OFF the trunk Y of its source and
+            # target (a vertical hop is needed at both endpoints).
+            if abs(src.y - tgt.y) > 0.5:
+                # Source and target aren't on the same trunk row, so
+                # this isn't a simple horizontal loop side station.
+                continue
+            trunk_y = src.y
+            if abs(st.y - trunk_y) < 0.5:
+                continue  # Already on trunk, no loop.
+            # Both endpoints must lie strictly to opposite sides of the
+            # side station (a real horizontal loop, not a U-turn).
+            if not (
+                (src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)
+            ):
+                continue
+            # Compute the two diagonal corner Xs using routing's
+            # placement rule (see _compute_diagonal_placement).
+            corner_left = _loop_corner_x(
+                src, st, fork_stations, join_stations, role="src"
+            )
+            corner_right = _loop_corner_x(
+                st, tgt, fork_stations, join_stations, role="tgt"
+            )
+            if corner_left is None or corner_right is None:
+                continue
+            # Ensure room on both sides for the horizontal run after
+            # the new midpoint.  Skip if the move would push the
+            # station past either corner.
+            midpoint = (corner_left + corner_right) / 2.0
+            if not (
+                min(corner_left, corner_right) <= midpoint
+                <= max(corner_left, corner_right)
+            ):
+                continue
+            st.x = midpoint
+
+
+def _loop_corner_x(
+    a: Station,
+    b: Station,
+    fork_stations: set[str],
+    join_stations: set[str],
+    role: str,
+) -> float | None:
+    """Compute the diagonal corner X for a single edge a->b.
+
+    Mirrors ``_compute_diagonal_placement`` in
+    ``layout/routing/core.py``: places the diagonal centred near the
+    fork (when a is a fork station) or near the join (when b is a
+    join station), with MIN_STRAIGHT endpoint clearance and optional
+    label clearance.  Returns the corner X on the side opposite to
+    ``role``: ``role='src'`` returns the corner near b (target side
+    of edge a->b, i.e. the LEFT corner of the loop b is part of);
+    ``role='tgt'`` returns the corner near a (source side of edge
+    a->b, i.e. the RIGHT corner of the loop a is part of).
+    """
+    sx, _ = a.x, a.y
+    tx, _ = b.x, b.y
+    if abs(tx - sx) < 1e-6:
+        return None
+    sign = 1.0 if tx > sx else -1.0
+    src_min = (
+        CURVE_RADIUS + MIN_STRAIGHT_PORT if a.is_port else MIN_STRAIGHT_EDGE
+    )
+    tgt_min = (
+        CURVE_RADIUS + MIN_STRAIGHT_PORT if b.is_port else MIN_STRAIGHT_EDGE
+    )
+    # Label clearance at fork/join stations (per _route_diagonal).
+    if a.id in fork_stations and a.label.strip():
+        src_min = max(src_min, label_text_width(a.label) / 2)
+    if b.id in join_stations and b.label.strip():
+        tgt_min = max(tgt_min, label_text_width(b.label) / 2)
+    half_diag = DIAGONAL_RUN / 2
+    is_fork = a.id in fork_stations
+    is_join = b.id in join_stations
+    if is_fork:
+        mid = sx + sign * (src_min + half_diag)
+    elif is_join:
+        mid = tx - sign * (tgt_min + half_diag)
+    else:
+        mid = (sx + tx) / 2.0
+    # Clamp to keep minimum straight endpoint runs.
+    if sign > 0:
+        diag_start = max(mid - half_diag, sx + src_min)
+        diag_end = min(mid + half_diag, tx - tgt_min)
+    else:
+        diag_start = min(mid - sign * half_diag, sx - src_min)
+        diag_end = max(mid + sign * half_diag, tx + tgt_min)
+    # role='src' returns the END of the diagonal (corner near b),
+    # role='tgt' returns the START of the diagonal (corner near a).
+    return diag_end if role == "src" else diag_start
+
 
 def _lift_would_cause_uturn(
     graph: MetroGraph, station_id: str, section_id: str, anchor_y: float
@@ -2307,7 +2563,7 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
 
 
 def _apply_half_grid_2branch_symfan(
-    graph: MetroGraph, y_spacing: float
+    graph: MetroGraph, y_spacing: float, section_y_padding: float = SECTION_Y_PADDING
 ) -> None:
     """Compact 2-branch symfan sections onto half-pitch offsets.
 
@@ -2393,6 +2649,25 @@ def _apply_half_grid_2branch_symfan(
         branches[0].y = trunk_y - 0.5 * y_spacing
         branches[1].y = trunk_y + 0.5 * y_spacing
         graph._half_grid_station_ids.update(b.id for b in branches)
+
+        # Half-grid branches consume half a y_spacing above and below
+        # the trunk instead of a full slot.  Shrink the bbox top to match
+        # the new compact extent.  All real (non-port) content sits
+        # between branches[0].y and branches[1].y, so the bbox top
+        # should be branches[0].y - section_y_padding.  Preserve the
+        # current padding by computing it from existing bbox geometry.
+        content_ys = [
+            graph.stations[sid].y
+            for sid in section.station_ids
+            if sid in graph.stations
+            and not graph.stations[sid].is_port
+        ]
+        if content_ys:
+            new_top = min(content_ys) - section_y_padding
+            delta = new_top - section.bbox_y
+            if delta > 0.5:
+                section.bbox_y = new_top
+                section.bbox_h = max(0.0, section.bbox_h - delta)
 
 
 def _section_symfan_uses_half_grid(
