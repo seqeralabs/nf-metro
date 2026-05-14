@@ -630,22 +630,34 @@ def _render_edges(
 ) -> None:
     """Render metro line edges with smooth curves at direction changes."""
 
-    # Sort routes by effective Y of the source point (highest Y first) so
-    # lines are drawn bottom-to-top.  This ensures each interior line in a
-    # bundle only loses one boundary edge to its neighbor rather than having
-    # a line drawn first get painted over on both sides.
-    def _sort_key(route: RoutedPath) -> float:
-        if route.offsets_applied:
-            return -route.points[0][1]
-        src_off = station_offsets.get((route.edge.source, route.line_id), 0.0)
-        return -(route.points[0][1] + src_off)
+    # Render routes grouped by metro line so paths sharing a line ID are
+    # contiguous in document order.  Later document elements paint on top of
+    # earlier ones, so any pair of overlapping segments belonging to lines A
+    # and B has the same relative paint order at every overlap.  Within a
+    # line, edges are kept in graph-edge order for stable diffs.
+    #
+    # Lines are emitted in REVERSE definition order, so the first-defined
+    # metro line is painted last and therefore appears on top everywhere it
+    # overlaps other lines.
+    line_priority = {lid: i for i, lid in enumerate(graph.lines)}
+    # Lines absent from graph.lines (defensive) sort to the back (painted
+    # last); among themselves they retain their incoming order via the
+    # secondary key.
+    indexed_routes = list(enumerate(routes))
 
-    routes = sorted(routes, key=_sort_key)
+    def _sort_key(item: tuple[int, RoutedPath]) -> tuple[int, int]:
+        idx, route = item
+        prio = line_priority.get(route.line_id, -1)
+        # Negate prio so higher-priority (earlier defined) lines come LAST.
+        return (-prio, idx)
+
+    routes = [r for _, r in sorted(indexed_routes, key=_sort_key)]
 
     for route in routes:
         line = graph.lines.get(route.line_id)
         color = line.color if line else FALLBACK_LINE_COLOR
         style_kw = _line_style_kwargs(line.style) if line else {}
+        class_name = f"metro-line-{route.line_id}"
 
         pts = apply_route_offsets(route, station_offsets)
 
@@ -659,6 +671,7 @@ def _render_edges(
                     stroke=color,
                     stroke_width=theme.line_width,
                     stroke_linecap="round",
+                    class_=class_name,
                     **style_kw,
                 )
             )
@@ -669,6 +682,7 @@ def _render_edges(
                 fill="none",
                 stroke_linecap="round",
                 stroke_linejoin="round",
+                class_=class_name,
                 **style_kw,
             )
             path.M(*pts[0])
