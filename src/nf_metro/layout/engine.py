@@ -506,6 +506,18 @@ def _compute_section_layout(
     if graph.center_ports:
         _recenter_full_bundle_columns(graph, y_spacing)
 
+    # Phase 13h: After fan-re-centering, single-station downstream
+    # columns (e.g. terminus file icons) may have stayed at their
+    # pre-fan Y while their sole upstream moved to the trunk.  Pin
+    # them back onto the source Y so the connection stays horizontal.
+    _align_terminus_to_upstream(graph)
+
+    # Phase 13i: Shrink rowspan / row-mate bboxes whose content moved
+    # up after compact (e.g. ``_fan_source_inputs_upward`` lifted the
+    # bottom rows away from the bbox bottom).  Bottom-only shrink, so
+    # trunk alignment is unaffected.
+    _shrink_bboxes_to_content_bottom(graph, section_y_padding)
+
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
@@ -2054,6 +2066,82 @@ def _recenter_full_bundle_columns(
                 graph.stations[sid].y = anchor_y + off * y_spacing
 
 
+def _shrink_bboxes_to_content_bottom(
+    graph: MetroGraph, section_y_padding: float
+) -> None:
+    """Bottom-only bbox shrink after late content lifts.
+
+    ``_compact_row_content_to_bbox_top`` shrinks the bottom slack to
+    ``section_y_padding`` once, but later phases
+    (``_fan_source_inputs_upward``, ``_recenter_full_bundle_columns``)
+    can pull content further up, leaving fresh empty space below the
+    last station.  Re-shrink each section's ``bbox_h`` so the bottom
+    sits ``section_y_padding`` below the bottom-most station/port.
+    Station Ys are unchanged, so trunk alignment is preserved.
+    """
+    for section in graph.sections.values():
+        if section.bbox_h <= 0:
+            continue
+        content_max_ys = [
+            graph.stations[sid].y
+            for sid in section.station_ids
+            if sid in graph.stations
+            and not graph.stations[sid].is_port
+        ]
+        port_max_ys = [
+            graph.stations[sid].y
+            for sid in section.station_ids
+            if sid in graph.stations and graph.stations[sid].is_port
+        ]
+        if not content_max_ys:
+            continue
+        desired_bot = max(content_max_ys) + section_y_padding
+        if port_max_ys:
+            desired_bot = max(desired_bot, max(port_max_ys))
+        new_h = desired_bot - section.bbox_y
+        if new_h < section.bbox_h - 0.5:
+            section.bbox_h = max(0.0, new_h)
+
+
+def _align_terminus_to_upstream(graph: MetroGraph) -> None:
+    """Pin a single downstream terminus to its sole upstream's Y.
+
+    After ``_recenter_full_bundle_columns`` re-pitches fanned columns,
+    a single-station downstream column (e.g. a ``file`` terminus
+    consuming the fanned station's output) can be left at its pre-fan Y,
+    so the connecting line and the icon caption drift away from the
+    source station.  When the downstream station has exactly one in-
+    section predecessor, snap it back onto the source's Y so its file
+    icon sits level with the station it follows.
+    """
+    for section in graph.sections.values():
+        if section.direction not in ("LR", "RL"):
+            continue
+        sec_sids = set(section.station_ids)
+        for sid in section.station_ids:
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.off_track:
+                continue
+            # Scope: terminus stations only (those carrying file icons),
+            # since their visual is anchored to their source by a short
+            # straight line and a side-by-side icon.  Avoids touching
+            # ordinary chain stations that may participate in trunk
+            # alignment or port routing.
+            if not st.is_terminus:
+                continue
+            preds = {
+                e.source for e in graph.edges
+                if e.target == sid and e.source in sec_sids
+                and not graph.stations[e.source].is_port
+            }
+            if len(preds) != 1:
+                continue
+            src = graph.stations[next(iter(preds))]
+            if abs(src.y - st.y) < 0.5:
+                continue
+            st.y = src.y
+
+
 def _layout_single_section(
     graph: MetroGraph,
     section: Section,
@@ -2541,16 +2629,43 @@ def _adjust_lr_label_clearance(
             section.bbox_w = label_right - section.bbox_x
 
 
-def _terminus_icon_clearance(n_icons: int) -> float:
+def _terminus_icon_clearance(
+    n_icons: int,
+    names: list[str] | None = None,
+) -> float:
     """Compute clearance needed for *n_icons* file icons side-by-side.
 
     The base ``TERMINUS_ICON_CLEARANCE`` covers one icon (station_radius +
-    gap + icon_width + margin).  Each additional icon adds icon_width + inter-
-    icon gap.
+    gap + icon_width + margin).  Each additional icon adds the per-icon
+    centre-to-centre step.
+
+    When *names* is supplied, the step is widened to fit adjacent
+    captions on the same row (mirrors ``caption_aware_icon_step`` in
+    the renderer).  Without names, the default ``ICON_INTER_GAP`` step
+    is used.
     """
     if n_icons <= 1:
         return TERMINUS_ICON_CLEARANCE
-    extra = (n_icons - 1) * (TERMINUS_WIDTH + ICON_INTER_GAP)
+    step = TERMINUS_WIDTH + ICON_INTER_GAP
+    if names:
+        # Caption font is computed in render at theme.label_font_size *
+        # ICON_NAME_FONT_SCALE; layout doesn't know the theme so use
+        # the default label size (14px, matches built-in themes) as a
+        # heuristic.  Slight over-budget is harmless: bbox just gets a
+        # few extra px of right padding.
+        from nf_metro.render.constants import ICON_NAME_FONT_SCALE
+        caption_font_size = 14.0 * ICON_NAME_FONT_SCALE
+        for i in range(len(names) - 1):
+            if not names[i] or not names[i + 1]:
+                continue
+            pair_max = max(
+                len(names[i]) * caption_font_size * 0.55,
+                len(names[i + 1]) * caption_font_size * 0.55,
+            )
+            needed = pair_max + ICON_INTER_GAP
+            if needed > step:
+                step = needed
+    extra = (n_icons - 1) * step
     return TERMINUS_ICON_CLEARANCE + extra
 
 
@@ -2571,7 +2686,7 @@ def _adjust_terminus_icon_clearance(
             continue
 
         n_icons = len(station.terminus_labels)
-        needed = _terminus_icon_clearance(n_icons)
+        needed = _terminus_icon_clearance(n_icons, station.terminus_names)
 
         # Determine source vs sink from the full graph's edges
         is_source = not any(e.target == station.id for e in graph.edges)
@@ -4017,6 +4132,8 @@ def _build_section_subgraph(graph: MetroGraph, section: Section) -> MetroGraph:
                     section_id=station.section_id,
                     is_port=False,
                     terminus_labels=list(station.terminus_labels),
+                    terminus_icon_types=list(station.terminus_icon_types),
+                    terminus_names=list(station.terminus_names),
                 )
             )
             real_station_ids.add(sid)
