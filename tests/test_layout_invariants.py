@@ -950,3 +950,52 @@ def test_no_station_or_icon_overlap(fixture):
                 f"and {s2!r} "
                 f"bbox=({x2:.1f},{y2:.1f},{X2:.1f},{Y2:.1f})"
             )
+
+
+# ---------------------------------------------------------------------------
+# Bypass virtual stations must clear off-track input rows
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+def test_bypass_avoids_off_track_inputs(fixture):
+    """Each ``__bypass_`` virtual station must sit at a Y that clears
+    every off-track input icon in its section.
+
+    v110 inserted bypass virtual stations to push non-consumed lines off
+    the trunk, but the chosen bypass row could coincide with an off-
+    track input's Y, producing a marker collision (e.g. ``grea`` lifted
+    to ``gmt_in``'s y=100 in the v106 regression).  Asserting a minimum
+    Y separation between each bypass V and every off-track icon in the
+    same section locks the clearance.
+    """
+    graph = _layout(fixture)
+    # Marker clearance: off-track icons render at ~10 px tall, bypass
+    # virtual stations contribute to line-bundle routing whose track
+    # half-width is one ``offset_step`` (~3 px) plus the marker radius
+    # (~5 px).  ``y_spacing`` (55 px) is the natural row pitch; we
+    # require strictly less than one full row, ie ~12 px or more.
+    MIN_CLEARANCE = 12.0
+    bypass_ids = [
+        sid for sid, st in graph.stations.items()
+        if st.is_hidden and sid.startswith("__bypass_")
+    ]
+    if not bypass_ids:
+        pytest.skip(f"{fixture}: no bypass virtual stations")
+    for vsid in bypass_ids:
+        v = graph.stations[vsid]
+        for sid, st in graph.stations.items():
+            if sid == vsid or not st.off_track:
+                continue
+            if st.section_id != v.section_id:
+                continue
+            # Different column: clearance not required.
+            if abs(st.x - v.x) > 0.5:
+                continue
+            dy = abs(st.y - v.y)
+            assert dy >= MIN_CLEARANCE, (
+                f"{fixture}: bypass V {vsid!r} at "
+                f"({v.x:.1f},{v.y:.1f}) too close to off-track input "
+                f"{sid!r} at ({st.x:.1f},{st.y:.1f}); dy={dy:.1f} "
+                f"< MIN_CLEARANCE={MIN_CLEARANCE}"
+            )
