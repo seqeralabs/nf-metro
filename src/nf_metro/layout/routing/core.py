@@ -2724,11 +2724,17 @@ def _bypass_non_consuming_stations(
         sides are clear.
     2.  Shift detour_y by exactly ``y_spacing`` from each segment's
         current Y (one full grid row offset).
-    3.  Position the U-turn diverge X at
-        ``station.cx - direction * (r + corner_gap + curve_radius)`` and
-        the re-converge X mirrored on the other side.
+    3.  Diverge with a DIAGONAL from the trunk Y to the detour Y at
+        ``x_diverge_start = cx - direction * (r + corner_gap +
+        curve_radius + diag_run)``, reaching the detour-row corner at
+        ``x_diverge_end = cx - direction * (r + corner_gap +
+        curve_radius)``.  Run horizontally along the detour row, then
+        re-converge symmetrically on the other side of the marker.
+        This matches the visual language of the trunk fan-out (no
+        vertical U-turn segments anywhere on the metro map).
     4.  Build per-line concentric corner offsets using ``bypass_radii``
-        so the inner/outer corner radii nest cleanly.
+        so the inner/outer corner radii nest cleanly at all four
+        corners of the fork-diverge / fork-converge pair.
 
     Routes whose paths are rewritten are tagged ``offsets_applied=True``
     because the new points are computed in render-space.
@@ -2958,7 +2964,8 @@ def _bypass_non_consuming_stations(
                         gap1_going_down=gap1_going_down,
                         gap2_going_down=gap2_going_down,
                     )
-                    # Diverge / reconverge X centers (channel centers).
+                    # Diverge / reconverge X centers (channel centers
+                    # for the detour-row inner corners).
                     corner_half = (
                         STATION_RADIUS_APPROX
                         + MARKER_BYPASS_CORNER_GAP
@@ -2970,26 +2977,69 @@ def _bypass_non_consuming_stations(
                     x_pre = x_pre_center + d1
                     x_post = x_post_center + d2
 
+                    # Diagonal fork: instead of a vertical U-turn segment
+                    # at x_pre/x_post, splay the trunk-Y end of each
+                    # corner outward by ``diag_run`` so the segment
+                    # between trunk Y and detour Y is a diagonal (matching
+                    # the trunk fan-out's visual language).  ``diag_run``
+                    # is bounded by the available horizontal slack on
+                    # each side so adjacent detours / segment endpoints
+                    # don't collide.
+                    dy_abs = abs(dy - seg_y)
+                    # Aim for a ~45-degree diagonal, but cap by the
+                    # available horizontal headroom so the diagonal
+                    # stays inside the segment span.
+                    if direction > 0:
+                        pre_headroom = max(0.0, x_pre - last_x - COORD_TOLERANCE_FINE)
+                        post_headroom = max(0.0, p2[0] - x_post - COORD_TOLERANCE_FINE)
+                    else:
+                        pre_headroom = max(0.0, last_x - x_pre - COORD_TOLERANCE_FINE)
+                        post_headroom = max(0.0, x_post - p2[0] - COORD_TOLERANCE_FINE)
+                    diag_pre = min(dy_abs, pre_headroom)
+                    diag_post = min(dy_abs, post_headroom)
+                    # Diverge start sits ``diag_pre`` upstream of the
+                    # inside corner at (x_pre, dy); converge end sits
+                    # ``diag_post`` downstream of (x_post, dy).
+                    x_diverge_start = x_pre - direction * diag_pre
+                    x_converge_end = x_post + direction * diag_post
+
                     # Guard against degenerate ordering when adjacent
                     # detours overlap or the segment is too short.
                     if direction > 0:
-                        x_pre = max(x_pre, last_x + COORD_TOLERANCE_FINE)
-                        x_post = min(x_post, p2[0] - COORD_TOLERANCE_FINE)
+                        x_diverge_start = max(
+                            x_diverge_start, last_x + COORD_TOLERANCE_FINE
+                        )
+                        x_pre = max(x_pre, x_diverge_start + COORD_TOLERANCE_FINE)
+                        x_converge_end = min(
+                            x_converge_end, p2[0] - COORD_TOLERANCE_FINE
+                        )
+                        x_post = min(x_post, x_converge_end - COORD_TOLERANCE_FINE)
                     else:
-                        x_pre = min(x_pre, last_x - COORD_TOLERANCE_FINE)
-                        x_post = max(x_post, p2[0] + COORD_TOLERANCE_FINE)
+                        x_diverge_start = min(
+                            x_diverge_start, last_x - COORD_TOLERANCE_FINE
+                        )
+                        x_pre = min(x_pre, x_diverge_start - COORD_TOLERANCE_FINE)
+                        x_converge_end = max(
+                            x_converge_end, p2[0] + COORD_TOLERANCE_FINE
+                        )
+                        x_post = max(x_post, x_converge_end + COORD_TOLERANCE_FINE)
 
                     # Insert the 4 detour corners.  Radii r1..r4 line
                     # up with the 4 new intermediate points we add.
-                    new_pts.append((x_pre, seg_y))
+                    # Diagonal-fork geometry (no vertical segments):
+                    #   (x_diverge_start, seg_y)  - outer corner of fan-out
+                    #   (x_pre,           dy)     - inner corner on detour row
+                    #   (x_post,          dy)     - inner corner on detour row
+                    #   (x_converge_end,  seg_y)  - outer corner of fan-in
+                    new_pts.append((x_diverge_start, seg_y))
                     new_radii.append(r1)
                     new_pts.append((x_pre, dy))
                     new_radii.append(r2)
                     new_pts.append((x_post, dy))
                     new_radii.append(r3)
-                    new_pts.append((x_post, seg_y))
+                    new_pts.append((x_converge_end, seg_y))
                     new_radii.append(r4)
-                    last_x = x_post
+                    last_x = x_converge_end
 
             new_pts.append(p2)
             # If si+1 was an interior point (not the final endpoint),

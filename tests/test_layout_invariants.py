@@ -965,3 +965,106 @@ def test_no_station_or_icon_overlap(fixture):
                 f"and {s2!r} "
                 f"bbox=({x2:.1f},{y2:.1f},{X2:.1f},{Y2:.1f})"
             )
+
+
+# ---------------------------------------------------------------------------
+# Bypass routes around non-consuming stations must use diagonal forks, not
+# vertical U-turn segments.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "fixture,y_spacing",
+    [
+        ("da_pipeline.mmd", 55.0),
+        ("rnaseq_sections.mmd", 55.0),
+    ],
+)
+def test_bypass_uses_diagonal_forks_not_verticals(fixture, y_spacing):
+    """A line detouring around a non-consuming station's marker must
+    do so with DIAGONAL fork-out / fork-in segments matching the trunk
+    fan-out's visual language.  Strictly-vertical U-turn segments (dx
+    near zero) on the bypass detour are forbidden because they're
+    alien to the metro-map style used everywhere else.
+
+    Pinpoints bypass detour segments by reading the marker bboxes:
+    a bypass segment is one whose Y deviates ~y_spacing from the trunk
+    Y at the bbox column, AND whose midpoint X sits within the bbox's
+    immediate horizontal vicinity (the corner-clearance zone around
+    the marker).  Within that zone, any non-horizontal segment must
+    have |dy| / |dx| <= 3 (diagonal, not vertical).
+    """
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+    from nf_metro.layout.routing.core import _build_marker_bboxes
+    from nf_metro.render.svg import apply_route_offsets
+
+    graph = _layout(fixture, y_spacing=y_spacing)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    junction_ids = set(graph.junctions)
+    bboxes = _build_marker_bboxes(graph, junction_ids, offsets)
+
+    # The corner-clearance zone extends ~3.5 * y_spacing horizontally
+    # either side of the marker centre (allows diag_run + corner +
+    # offset slack).  Segments outside this zone aren't bypass detours;
+    # they're trunk fans, inter-section L-shapes, or normal routing.
+    HALF_ZONE = y_spacing * 3.5
+    # "Near vertical" threshold: anything steeper than 3:1 reads as a
+    # vertical line.  Trunk fan-outs are ~1:1 (45 deg) or shallower.
+    MAX_SLOPE = 3.0
+    # Only check segments whose dy is at least half a grid pitch:
+    # short corner-rounded segments aren't a concern here.
+    MIN_DY = y_spacing * 0.4
+
+    violations: list[str] = []
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        endpoints = {r.edge.source, r.edge.target}
+        for i in range(1, len(pts)):
+            x1, y1 = pts[i - 1]
+            x2, y2 = pts[i]
+            dx = x2 - x1
+            dy = y2 - y1
+            if abs(dy) < MIN_DY:
+                continue
+            mid_x = (x1 + x2) / 2
+            mid_y = (y1 + y2) / 2
+            # Is this segment inside the corner-clearance zone of some
+            # non-consuming station's bbox, AND between the bbox's Y
+            # row and the detour row (one y_spacing offset)?
+            in_bypass_zone = False
+            for sid, bb in bboxes.items():
+                if sid in endpoints:
+                    continue
+                if r.line_id in bb.consumed:
+                    continue
+                if abs(mid_x - bb.cx) > HALF_ZONE:
+                    continue
+                # Y must straddle the trunk Y (bb.cy) and the detour
+                # row (~one y_spacing offset).  Loose vertical bounds:
+                # |mid_y - bb.cy| within 1.3 * y_spacing.
+                if abs(mid_y - bb.cy) > y_spacing * 1.3:
+                    continue
+                # The endpoints of this segment must straddle two
+                # distinct horizontal levels separated by ~y_spacing.
+                if abs(abs(dy) - y_spacing) > y_spacing * 0.4:
+                    continue
+                in_bypass_zone = True
+                break
+            if not in_bypass_zone:
+                continue
+            # Bypass segment found: must be diagonal, not near-vertical.
+            slope = abs(dy) / max(abs(dx), 1e-6)
+            if abs(dx) < 1e-6 or slope > MAX_SLOPE:
+                violations.append(
+                    f"{fixture}: route {r.line_id} edge "
+                    f"{r.edge.source}->{r.edge.target} has near-vertical "
+                    f"bypass segment ({x1:.1f},{y1:.1f}) -> "
+                    f"({x2:.1f},{y2:.1f}) dx={dx:.1f}, dy={dy:.1f} "
+                    f"slope={slope:.2f}"
+                )
+
+    assert not violations, (
+        "Bypass uses vertical U-turn (should use diagonal forks):\n  "
+        + "\n  ".join(violations)
+    )

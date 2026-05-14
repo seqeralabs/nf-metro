@@ -37,8 +37,8 @@ graph LR
         mq_in[ ]
         geo_in[ ]
         gtf_to_table[GTF to table]
-        affy_load[Affy load]
-        proteus[Proteus]
+        affy_load[affy load]
+        proteus[proteus]
         geoquery[GEOquery]
         validator[Validate]
         matrix_filter[Filter matrix]
@@ -87,7 +87,7 @@ graph LR
 
     subgraph reporting [Reporting]
         %%metro entry: left | rnaseq, affy, maxquant, geo
-        shinyngs[Shiny app]
+        shinyngs[shinyngs]
         quarto[Quarto report]
         bundle[Zip bundle]
         shiny_html[ ]
@@ -119,7 +119,7 @@ graph LR
     limma -->|rnaseq,affy,maxquant,geo| gsea
     limma -->|rnaseq,affy,maxquant,geo| gprofiler2
     limma -->|rnaseq,affy,maxquant,geo| decoupler
-    propd -->|rnaseq| grea
+    limma -->|rnaseq| grea
     %% Section 2 -> Section 4 (plots are parallel, both from differential trunk)
     limma -->|rnaseq,affy,maxquant,geo| plot_expl
     limma -->|rnaseq,affy,maxquant,geo| plot_diff
