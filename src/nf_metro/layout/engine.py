@@ -505,6 +505,13 @@ def _compute_section_layout(
     # column.
     if graph.center_ports:
         _recenter_full_bundle_columns(graph, y_spacing)
+        # Re-anchor off-track inputs again: ``_recenter`` moves
+        # their consumers to the final trunk-anchored Y, which can
+        # leave the off-track icon stranded at the old consumer Y
+        # (overlapping the consumer station instead of sitting one
+        # row above it).  This second reanchor uses each consumer's
+        # post-recenter Y as the new anchor.
+        _reanchor_off_track_to_consumer(graph, y_spacing)
 
     # Phase 13h: After fan-re-centering, single-station downstream
     # columns (e.g. terminus file icons) may have stayed at their
@@ -1797,12 +1804,15 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
     siblings carrying the full bundle (linear pass-throughs) are left
     in place so non-fan-out topologies keep their natural Y ordering.
 
-    Additionally, a sibling is only redistributed when it shares an
-    upstream predecessor with the trunk station.  This excludes
-    columns of source stations (file inputs) that happen to sit in a
-    column with a full-bundle station: with no shared upstream
-    junction, they aren't fan-out branches and must stay on their
+    Additionally, a sibling is only redistributed when it has at
+    least one predecessor in the edge graph.  This excludes columns
+    of source stations (file inputs, in-degree 0) that happen to sit
+    in a column with a full-bundle station: with no upstream
+    producer, they aren't fan-out branches and must stay on their
     per-line track Y so they line up with their downstream consumers.
+    Siblings fed by a different predecessor than the trunk (but still
+    fed by something) are real fan-out branches arriving via separate
+    upstream methods and DO participate in the symmetric fan.
 
     No-op when ``--no-center-ports`` is set, when a section has no
     qualifying trunk-junction column, or when there are no
@@ -1832,13 +1842,16 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
             continue
         port_ids = set(section.entry_ports) | set(section.exit_ports)
 
-        # Group non-port stations by column x.
+        # Group non-port, on-track stations by column x.  Off-track
+        # stations (file inputs lifted above their consumer) are placed
+        # by ``_lift_off_track_stations`` and must not occupy a column
+        # slot here.
         cols: dict[float, list[str]] = defaultdict(list)
         for sid in section.station_ids:
             if sid in port_ids:
                 continue
             st = graph.stations.get(sid)
-            if st is None:
+            if st is None or st.off_track:
                 continue
             cols[round(st.x, 3)].append(sid)
 
@@ -1849,22 +1862,21 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
                 continue
             trunk_sid = trunks[0]
             trunk_y = graph.stations[trunk_sid].y
-            trunk_preds = (
-                set(G.predecessors(trunk_sid)) if trunk_sid in G else set()
-            )
             # Fan-out siblings: strict subset of bundle (skip full-bundle
             # pass-throughs and orphan stations with no lines).  Require
-            # a shared predecessor with the trunk so source stations
-            # (file inputs with no inbound edges) stay on their per-line
-            # track Y instead of being pulled to a uniform fan around
-            # an unrelated trunk.
+            # at least one predecessor so source stations (file inputs
+            # with no inbound edges) stay on their per-line track Y
+            # instead of being pulled to a uniform fan around an
+            # unrelated trunk.  Siblings whose predecessor differs
+            # from the trunk's are still real fan-out branches (e.g.
+            # methods fed by separate upstream stations within the
+            # same upstream section) and DO participate.
             siblings = [
                 s for s in sids
                 if s != trunk_sid
                 and set(graph.station_lines(s))
                 and set(graph.station_lines(s)) < bundle
-                and trunk_preds
-                and (set(G.predecessors(s)) if s in G else set()) & trunk_preds
+                and (s in G and any(True for _ in G.predecessors(s)))
             ]
             if not siblings:
                 continue
@@ -1878,25 +1890,40 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
 def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
     """Fan a full-bundle column around the trunk Y.
 
-    Active when ``graph.center_ports`` is True.  Handles columns of
-    two or more full-bundle stations with no unique trunk junction
-    (so ``_redistribute_fanout_siblings`` skips them).  Stations are
-    placed symmetrically around a trunk Y derived from other
-    full-bundle stations in the section (or the LR port Y).
+    Active when ``graph.center_ports`` is True.  Handles columns where
+    every on-track station carries the full section bundle (so no
+    unique trunk junction exists for ``_redistribute_fanout_siblings``
+    to anchor on).  Stations are placed symmetrically around a trunk Y
+    derived from the section's LR ports (or other full-bundle stations).
+
+    A relaxed mode also fires when the column has at least one
+    full-bundle station AND every non-full column-mate is a
+    strict-subset sibling with a predecessor (i.e. a real fan-out
+    branch arriving via a separate upstream method, not a source
+    file).  In that mixed-bundle case every column-mate participates
+    in the symmetric fan, so a minor side branch (e.g. a single-line
+    method joining three full-bundle methods) slots into the
+    arrangement instead of stranding at the bottom of the section.
 
     Even count leaves the trunk row empty (``trunk_y ± s, ± 2s, ...``);
     odd count keeps a middle station at ``trunk_y`` with the rest
     flanking.  Fires on both terminal (Reporting-style) and
-    non-terminal (Functional-style) sections; the strict
-    "every station in the column carries the full bundle" gate keeps
-    file inputs, fan-in chains and method banks with strict-subset
-    lines untouched.
+    non-terminal (Functional-style) sections; columns containing a
+    non-full, predecessorless station (a source file with no inbound
+    edges) are left untouched so file-input stacks keep their per-line
+    track Y.
     """
     if not graph.center_ports:
         return
     grid_sec_ids = _grid_group_section_ids(graph)
     if not grid_sec_ids:
         return
+
+    import networkx as nx
+
+    G = nx.DiGraph()
+    for edge in graph.edges:
+        G.add_edge(edge.source, edge.target)
 
     for section in graph.sections.values():
         if (
@@ -1922,6 +1949,9 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
                 continue
             cols[round(st.x, 3)].append(sid)
 
+        def _has_pred(sid: str) -> bool:
+            return sid in G and next(iter(G.predecessors(sid)), None) is not None
+
         full_by_col = {
             x: [s for s in sids if set(graph.station_lines(s)) == bundle]
             for x, sids in cols.items()
@@ -1936,11 +1966,49 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
             and graph.ports[pid].side in (PortSide.LEFT, PortSide.RIGHT)
         ]
 
-        for x, full in full_by_col.items():
-            # Fire only when every column station carries the full bundle
-            # and there are >=2 (so no unique trunk station exists).
-            if len(full) < 2 or len(full) != len(cols[x]):
+        # A column participates in the section-wide symfan when it has
+        # at least one full-bundle station to anchor on AND any other
+        # column-mates are non-source subset siblings (real fan-out
+        # branches with predecessors, not file inputs).  Source files
+        # in a column with a full-bundle station leave it ineligible
+        # so they stay on their per-line track Y.
+        col_eligible: dict[float, list[str]] = {}
+        for x, sids in cols.items():
+            full = full_by_col[x]
+            non_full = [s for s in sids if s not in full]
+            ok = bool(full) and all(
+                set(graph.station_lines(s))
+                and set(graph.station_lines(s)) < bundle
+                and _has_pred(s)
+                for s in non_full
+            )
+            if ok and len(sids) >= 2:
+                col_eligible[x] = sids
+        # Suppress the column when at least one full-bundle column-mate
+        # would otherwise be the unique trunk for a SINGLE sibling and
+        # there's no other full-bundle column in the section to fix
+        # the row-wide anchor (handed off to fanout_siblings instead).
+        # In practice we still fire whenever another column has >=2
+        # full-bundle stations, so all full-bundle columns share a
+        # consistent trunk_y.
+        any_all_full_col = any(
+            len(full_by_col[x]) >= 2 and len(full_by_col[x]) == len(cols[x])
+            for x in cols
+        )
+
+        for x, sids in col_eligible.items():
+            full = full_by_col[x]
+            non_full = [s for s in sids if s not in full]
+            # Strict all-full columns always fire (the original
+            # behaviour).  Mixed columns (full + non-source siblings)
+            # only fire when another column in the section is
+            # all-full, so we have a consistent trunk_y for the row
+            # and don't accidentally fan single trunk + 1 sibling
+            # cases that belong to ``_redistribute_fanout_siblings``.
+            all_full = not non_full
+            if not all_full and not any_all_full_col:
                 continue
+            participants = list(sids)
             # Trunk Y is the section's LR port Y when available (the
             # inter-section bundle line) so all full-bundle columns
             # in the section share a single trunk reference.  Falls
@@ -1957,15 +2025,15 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
                 if not others:
                     continue
                 trunk_y = others[len(others) // 2]
-            full.sort(key=lambda s: pre_fan_y[s])
-            n = len(full)
+            participants.sort(key=lambda s: pre_fan_y[s])
+            n = len(participants)
             # Even: offsets -n//2..-1, 1..n//2 (skipping 0).
             # Odd:  offsets -(n//2)..n//2 inclusive (0 = trunk_y).
             if n % 2 == 0:
                 offsets = list(range(-(n // 2), 0)) + list(range(1, n // 2 + 1))
             else:
                 offsets = list(range(-(n // 2), n // 2 + 1))
-            for sid, off in zip(full, offsets):
+            for sid, off in zip(participants, offsets):
                 graph.stations[sid].y = trunk_y + off * y_spacing
 
 
@@ -1995,6 +2063,12 @@ def _recenter_full_bundle_columns(
     if not grid_sec_ids:
         return
 
+    import networkx as nx
+
+    G = nx.DiGraph()
+    for edge in graph.edges:
+        G.add_edge(edge.source, edge.target)
+
     for section in graph.sections.values():
         if (
             section.id not in grid_sec_ids
@@ -2015,6 +2089,9 @@ def _recenter_full_bundle_columns(
             if st is None or st.off_track:
                 continue
             cols[round(st.x, 3)].append(sid)
+
+        def _has_pred(sid: str) -> bool:
+            return sid in G and next(iter(G.predecessors(sid)), None) is not None
 
         full_by_col = {
             x: [s for s in sids if set(graph.station_lines(s)) == bundle]
@@ -2060,16 +2137,37 @@ def _recenter_full_bundle_columns(
                     continue
                 anchor_y = sorted(all_full)[len(all_full) // 2]
 
+        # Mirror the gate from ``_redistribute_full_bundle_columns``:
+        # strict (all column-mates full) always fires; mixed (full +
+        # non-source siblings) fires only when another column has
+        # >=2 all-full stations, so we don't accidentally pull
+        # fanout_siblings columns onto a different anchor.
+        any_all_full_col = any(
+            len(full_by_col[x]) >= 2 and len(full_by_col[x]) == len(cols[x])
+            for x in cols
+        )
+
         for x, full in full_by_col.items():
-            if len(full) < 2 or len(full) != len(cols[x]):
+            non_full = [s for s in cols[x] if s not in full]
+            mixed_ok = bool(full) and non_full and all(
+                set(graph.station_lines(s))
+                and set(graph.station_lines(s)) < bundle
+                and _has_pred(s)
+                for s in non_full
+            )
+            all_full = len(full) >= 2 and len(full) == len(cols[x])
+            if not (all_full or (mixed_ok and any_all_full_col)):
                 continue
-            full.sort(key=lambda s: graph.stations[s].y)
-            n = len(full)
+            participants = list(full) + (non_full if mixed_ok else [])
+            if len(participants) < 2:
+                continue
+            participants.sort(key=lambda s: graph.stations[s].y)
+            n = len(participants)
             if n % 2 == 0:
                 offsets = list(range(-(n // 2), 0)) + list(range(1, n // 2 + 1))
             else:
                 offsets = list(range(-(n // 2), n // 2 + 1))
-            for sid, off in zip(full, offsets):
+            for sid, off in zip(participants, offsets):
                 graph.stations[sid].y = anchor_y + off * y_spacing
 
 
