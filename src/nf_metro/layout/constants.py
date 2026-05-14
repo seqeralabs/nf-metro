@@ -147,6 +147,24 @@ BYPASS_CLEARANCE: float = 25.0
 BYPASS_NEST_STEP: float = 8.0
 """Per-line vertical offset for stacking multiple bypass routes."""
 
+MARKER_BYPASS_CLEARANCE: float = 5.0
+"""Vertical clearance between a routed line and a non-consuming station's
+marker bbox when the line bypasses the station.
+
+Lines passing through a station's column that the station doesn't consume
+must visually route AROUND the station's marker (above or below).  This
+constant sets the gap between the rerouted line and the marker edge.
+"""
+
+MARKER_BYPASS_DIVERGE: float = 14.0
+"""Horizontal distance from a non-consuming station's center where a
+bypassing line diverges/re-converges with the trunk.
+
+Must be large enough that the resulting corner radii don't collide with
+the station marker.  ~CURVE_RADIUS + station radius gives clean rounded
+detours.
+"""
+
 HEADER_CLEARANCE: float = 30.0
 """Clearance above/below section headers for inter-row routing channels.
 

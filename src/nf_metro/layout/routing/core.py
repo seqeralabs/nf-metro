@@ -22,11 +22,14 @@ from nf_metro.layout.constants import (
     FOLD_MARGIN,
     HEADER_CLEARANCE,
     JUNCTION_MARGIN,
+    MARKER_BYPASS_CLEARANCE,
+    MARKER_BYPASS_DIVERGE,
     MERGE_ROUTE_MARGIN,
     MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
     OFFSET_STEP,
     STATION_MOVE_TOLERANCE,
+    STATION_RADIUS_APPROX,
 )
 from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.routing.common import (
@@ -167,6 +170,7 @@ def route_edges(
 
     _center_bubble_stations(routes, graph)
     _spread_diagonal_bundles(routes, ctx)
+    _bypass_non_consuming_stations(routes, ctx)
 
     return routes
 
@@ -2475,3 +2479,322 @@ def _compute_junction_fan_info(
             )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Post-processing: bypass non-consuming stations
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _MarkerBBox:
+    """Rendered marker bbox for an on-track station."""
+
+    cy: float
+    half_h: float
+    cx: float
+    half_w: float
+    consumed: frozenset[str]
+
+
+def _build_marker_bboxes(
+    graph: MetroGraph,
+    junction_ids: set[str],
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> dict[str, _MarkerBBox]:
+    """Compute rendered marker bboxes and consumed-line sets per station.
+
+    Skips ports, junctions, off-track stations, and hidden stations.
+    The bbox is the rendered marker pill: width = 2*STATION_RADIUS_APPROX,
+    height = bundle_span + 2*STATION_RADIUS_APPROX.
+
+    Consumed lines are derived from inbound edge line_ids (the lines that
+    actually terminate at or pass through the station as a stop).
+    """
+    consumed_by: dict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges:
+        if edge.target in graph.stations:
+            consumed_by[edge.target].add(edge.line_id)
+
+    r = STATION_RADIUS_APPROX
+    bboxes: dict[str, _MarkerBBox] = {}
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or st.off_track:
+            continue
+        if sid in junction_ids:
+            continue
+        # Skip blank terminus stations - their visual marker is a separate
+        # filled rect and they sit at line endpoints, not pass-through.
+        if st.is_terminus and not st.label.strip():
+            continue
+        # Skip TB-vertical stations: their bundle spreads horizontally
+        # (along X), not vertically.  The bbox-collision model below
+        # assumes a vertical-pill marker.
+        if st.section_id:
+            sec = graph.sections.get(st.section_id)
+            if sec and sec.direction == "TB":
+                continue
+
+        lines = graph.station_lines(sid)
+        if station_offsets:
+            line_offs = [station_offsets.get((sid, lid), 0.0) for lid in lines]
+        else:
+            line_offs = [0.0]
+        if not line_offs:
+            line_offs = [0.0]
+        min_off = min(line_offs)
+        max_off = max(line_offs)
+        span = max_off - min_off
+        cy = st.y + (min_off + max_off) / 2
+        bboxes[sid] = _MarkerBBox(
+            cy=cy,
+            half_h=span / 2 + r,
+            cx=st.x,
+            half_w=r,
+            consumed=frozenset(consumed_by.get(sid, set())),
+        )
+    return bboxes
+
+
+def _route_endpoint_ids(rp: RoutedPath) -> set[str]:
+    """Stations that are endpoints of the route (source or target).
+
+    These are skipped during collision detection so a route doesn't try
+    to bypass its own source or target marker.
+    """
+    return {rp.edge.source, rp.edge.target}
+
+
+def _segment_y_at_x(
+    p1: tuple[float, float], p2: tuple[float, float], x: float
+) -> float | None:
+    """Y value of segment (p1, p2) at x, or None if x is outside the span."""
+    x1, y1 = p1
+    x2, y2 = p2
+    xlo, xhi = (x1, x2) if x1 <= x2 else (x2, x1)
+    if x < xlo - COORD_TOLERANCE_FINE or x > xhi + COORD_TOLERANCE_FINE:
+        return None
+    if abs(x2 - x1) < COORD_TOLERANCE_FINE:
+        return (y1 + y2) / 2
+    frac = (x - x1) / (x2 - x1)
+    return y1 + frac * (y2 - y1)
+
+
+def _bypass_non_consuming_stations(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Reroute horizontal segments that pass through non-consuming stations.
+
+    Structural rule: lines passing through a station's column that the
+    station doesn't consume must visually route AROUND the station's
+    marker (above or below), not THROUGH it.
+
+    Two-phase processing:
+
+    1.  Per station, find all horizontal segments crossing its column.
+        Partition them by direction into "candidates".  When at least
+        one non-consumed candidate's seg_y falls within the marker
+        bbox (plus a small visual margin), every non-consumed
+        candidate on that side of the bbox is bypassed.  This keeps
+        the bundle's trunk ordering intact through the detour: lines
+        below the bbox stay below, lines above stay above, and
+        bbox-internal lines route to the appropriate side.
+    2.  Pick a uniform shift per (station, direction, side) group so
+        bypassed lines maintain their relative spacing - the bypass
+        line nearest the marker lands at ``bbox_edge + clearance``;
+        others shift by the same delta.
+
+    Routes are tagged ``offsets_applied=True`` after rewriting because
+    detour points are computed in render-space.
+    """
+    graph = ctx.graph
+    station_offsets = ctx.station_offsets
+    bboxes = _build_marker_bboxes(graph, ctx.junction_ids, station_offsets)
+    if not bboxes:
+        return
+
+    # Per-route rendered point cache.  All collision detection works
+    # in this coordinate frame so we don't double-apply offsets.
+    rendered_pts: list[list[tuple[float, float]]] = [
+        [
+            (rp.points[i][0], _render_y_at_point(rp, i, station_offsets))
+            for i in range(len(rp.points))
+        ]
+        for rp in routes
+    ]
+
+    # For each station, collect candidate (route, segment, seg_y) crossings.
+    # Key: (sid, direction)
+    Candidates = dict[tuple[str, int], list[tuple[int, int, float]]]
+    candidates: Candidates = defaultdict(list)
+
+    visual_margin = 2.0
+    for ri, rp in enumerate(routes):
+        pts = rendered_pts[ri]
+        endpoint_ids = _route_endpoint_ids(rp)
+        for si in range(len(pts) - 1):
+            p1, p2 = pts[si], pts[si + 1]
+            x1, y1 = p1
+            x2, y2 = p2
+            if abs(y2 - y1) > COORD_TOLERANCE:
+                continue
+            if abs(x2 - x1) < COORD_TOLERANCE_FINE:
+                continue
+            seg_y = (y1 + y2) / 2
+            direction = 1 if x2 > x1 else -1
+            xlo, xhi = (x1, x2) if direction > 0 else (x2, x1)
+            for sid, bb in bboxes.items():
+                if sid in endpoint_ids:
+                    continue
+                if rp.line_id in bb.consumed:
+                    continue
+                if bb.cx <= xlo + COORD_TOLERANCE_FINE:
+                    continue
+                if bb.cx >= xhi - COORD_TOLERANCE_FINE:
+                    continue
+                candidates[(sid, direction)].append((ri, si, seg_y))
+
+    if not candidates:
+        return
+
+    # For each (station, direction), decide who bypasses on which side.
+    # A station-direction group triggers bypass when any non-consumed
+    # candidate's seg_y crosses the bbox interior (within visual margin).
+    # Once triggered, every candidate on that side bypasses so the
+    # bundle stays visually parallel through the detour.
+    #
+    # Mapping: (route_idx, seg_idx) -> list[(cx, detour_y, side)]
+    detour_plan: dict[tuple[int, int], list[tuple[float, float, str]]] = (
+        defaultdict(list)
+    )
+
+    for (sid, direction), entries in candidates.items():
+        bb = bboxes[sid]
+        bbox_top_strict = bb.cy - bb.half_h - visual_margin
+        bbox_bot_strict = bb.cy + bb.half_h + visual_margin
+
+        # Detect bbox-crossers: lines whose seg_y is within the marker
+        # (or its visual margin).  If none collide, no bypass is needed.
+        crossers = [e for e in entries if bbox_top_strict <= e[2] <= bbox_bot_strict]
+        if not crossers:
+            continue
+
+        # Decide bypass side based on where crossers sit relative to
+        # the bbox centre.  Lines slightly below the centre go below;
+        # slightly above go above.  Ties prefer "below" (consumed lines
+        # in our test pipelines tend to be at or near the marker top).
+        below_count = sum(1 for _, _, y in crossers if y >= bb.cy)
+        above_count = len(crossers) - below_count
+        below_side_wins = below_count >= above_count
+
+        # Bypass every non-consumed candidate on the chosen side, not
+        # just the crossers.  This preserves the bundle's relative
+        # ordering through the detour: lines already on the chosen
+        # side shift by the same delta as the crossers, so the bundle
+        # stays visually parallel and a non-colliding line below the
+        # bbox can't end up sandwiched above a colliding line that was
+        # pushed down past it.
+        bypass_below: list[tuple[int, int, float]] = []
+        bypass_above: list[tuple[int, int, float]] = []
+        if below_side_wins:
+            for ri, si, seg_y in entries:
+                if seg_y > bbox_top_strict:
+                    # In-bbox or below the bbox: route around below.
+                    bypass_below.append((ri, si, seg_y))
+        else:
+            for ri, si, seg_y in entries:
+                if seg_y < bbox_bot_strict:
+                    bypass_above.append((ri, si, seg_y))
+
+        if bypass_below:
+            # Topmost bypass line lands at ``bbox_bot + clearance``;
+            # other bypass lines shift by the same delta so the
+            # relative spacing is preserved.
+            top_y = min(y for _, _, y in bypass_below)
+            anchor_y = bb.cy + bb.half_h + MARKER_BYPASS_CLEARANCE
+            shift = max(0.0, anchor_y - top_y)
+            if shift > COORD_TOLERANCE_FINE:
+                for ri, si, seg_y in bypass_below:
+                    detour_plan[(ri, si)].append(
+                        (bb.cx, seg_y + shift, "below")
+                    )
+
+        if bypass_above:
+            bot_y = max(y for _, _, y in bypass_above)
+            anchor_y = bb.cy - bb.half_h - MARKER_BYPASS_CLEARANCE
+            shift = min(0.0, anchor_y - bot_y)
+            if abs(shift) > COORD_TOLERANCE_FINE:
+                for ri, si, seg_y in bypass_above:
+                    detour_plan[(ri, si)].append(
+                        (bb.cx, seg_y + shift, "above")
+                    )
+
+    # Group detour entries by route, then by segment index.
+    by_route: dict[int, dict[int, list[tuple[float, float, str]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for (ri, si), entries in detour_plan.items():
+        pts = rendered_pts[ri]
+        p1, p2 = pts[si], pts[si + 1]
+        direction = 1 if p2[0] > p1[0] else -1
+        entries.sort(key=lambda e: e[0] * direction)
+        by_route[ri][si] = entries
+
+    for ri, seg_map in by_route.items():
+        rp = routes[ri]
+        pts = rendered_pts[ri]
+        new_pts: list[tuple[float, float]] = [pts[0]]
+        for si in range(len(pts) - 1):
+            p1, p2 = pts[si], pts[si + 1]
+            seg_y = (p1[1] + p2[1]) / 2
+            detours = seg_map.get(si)
+            if detours:
+                direction = 1 if p2[0] > p1[0] else -1
+                last_x = p1[0]
+                for cx, dy, _side in detours:
+                    x_pre = cx - direction * MARKER_BYPASS_DIVERGE
+                    x_post = cx + direction * MARKER_BYPASS_DIVERGE
+                    if direction > 0:
+                        x_pre = max(x_pre, last_x + COORD_TOLERANCE_FINE)
+                        x_post = min(x_post, p2[0] - COORD_TOLERANCE_FINE)
+                    else:
+                        x_pre = min(x_pre, last_x - COORD_TOLERANCE_FINE)
+                        x_post = max(x_post, p2[0] + COORD_TOLERANCE_FINE)
+                    new_pts.append((x_pre, seg_y))
+                    new_pts.append((x_pre, dy))
+                    new_pts.append((x_post, dy))
+                    new_pts.append((x_post, seg_y))
+                    last_x = x_post
+            new_pts.append(p2)
+        rp.points = new_pts
+        rp.offsets_applied = True
+        rp.curve_radii = None
+
+
+def _render_y_at_point(
+    rp: RoutedPath,
+    idx: int,
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> float:
+    """Rendered Y of point *idx* on route *rp*.
+
+    Mirrors ``apply_route_offsets``: endpoint Ys get the endpoint offset,
+    intermediate points get whichever endpoint offset is closer to the
+    original Y.
+    """
+    if rp.offsets_applied or station_offsets is None:
+        return rp.points[idx][1]
+    src_off = station_offsets.get((rp.edge.source, rp.line_id), 0.0)
+    tgt_off = station_offsets.get((rp.edge.target, rp.line_id), 0.0)
+    orig_sy = rp.points[0][1]
+    orig_ty = rp.points[-1][1]
+    y = rp.points[idx][1]
+    if idx == 0:
+        return y + src_off
+    if idx == len(rp.points) - 1:
+        return y + tgt_off
+    if abs(y - orig_sy) <= abs(y - orig_ty):
+        return y + src_off
+    return y + tgt_off
+
+

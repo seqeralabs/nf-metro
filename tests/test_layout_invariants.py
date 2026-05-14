@@ -18,8 +18,9 @@ from pathlib import Path
 
 import pytest
 
+from nf_metro.layout.constants import STATION_RADIUS_APPROX
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets
+from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, PortSide
 
@@ -324,3 +325,139 @@ def test_no_kink_at_section_boundary(fixture):
                         f"Row {row}: exit port {pid} cy={exit_cy} != "
                         f"entry port {npid} cy={entry_cy}"
                     )
+
+
+# ---------------------------------------------------------------------------
+# Lines must route around non-consuming stations
+# ---------------------------------------------------------------------------
+
+
+def _render_y_at_point(rp, idx, station_offsets):
+    """Rendered Y of a route waypoint (mirror of ``apply_route_offsets``)."""
+    if rp.offsets_applied:
+        return rp.points[idx][1]
+    src_off = station_offsets.get((rp.edge.source, rp.line_id), 0.0)
+    tgt_off = station_offsets.get((rp.edge.target, rp.line_id), 0.0)
+    orig_sy = rp.points[0][1]
+    orig_ty = rp.points[-1][1]
+    y = rp.points[idx][1]
+    if idx == 0:
+        return y + src_off
+    if idx == len(rp.points) - 1:
+        return y + tgt_off
+    if abs(y - orig_sy) <= abs(y - orig_ty):
+        return y + src_off
+    return y + tgt_off
+
+
+def _route_y_at_x(rp, station_offsets, x_target: float) -> list[float]:
+    """All rendered Y values where route *rp* crosses ``x_target``.
+
+    Returns the empty list when the route doesn't span ``x_target``.
+    A route can cross the same X coordinate multiple times when it has
+    a U-shaped detour, so the result is a list.
+    """
+    pts = rp.points
+    if len(pts) < 2:
+        return []
+    rendered = [(pts[i][0], _render_y_at_point(rp, i, station_offsets))
+                for i in range(len(pts))]
+    ys: list[float] = []
+    for i in range(len(rendered) - 1):
+        x1, y1 = rendered[i]
+        x2, y2 = rendered[i + 1]
+        xlo, xhi = (x1, x2) if x1 <= x2 else (x2, x1)
+        if x_target < xlo - 0.01 or x_target > xhi + 0.01:
+            continue
+        if abs(x2 - x1) < 0.001:
+            ys.append((y1 + y2) / 2)
+        else:
+            frac = (x_target - x1) / (x2 - x1)
+            ys.append(y1 + frac * (y2 - y1))
+    return ys
+
+
+def _consumed_lines(graph: MetroGraph, sid: str) -> set[str]:
+    """Lines the station consumes (taken from inbound edge labels)."""
+    return {e.line_id for e in graph.edges if e.target == sid}
+
+
+def _on_track_internal_stations(graph: MetroGraph) -> list[str]:
+    """IDs of stations whose markers can collide with bypass lines.
+
+    Excludes ports, junctions, off-track inputs, hidden stations, blank
+    terminus stations (rendered as separate rectangles, not pills), and
+    stations inside TB sections (their pills are horizontal, not vertical).
+    """
+    junction_ids = set(graph.junctions)
+    result: list[str] = []
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or st.off_track:
+            continue
+        if sid in junction_ids:
+            continue
+        if st.is_terminus and not st.label.strip():
+            continue
+        if st.section_id:
+            sec = graph.sections.get(st.section_id)
+            if sec and sec.direction == "TB":
+                continue
+        result.append(sid)
+    return result
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
+def test_lines_route_around_non_consuming_stations(fixture):
+    """A line whose trajectory passes through a station's column must
+    not visually intersect that station's marker unless the station
+    consumes the line.  Lines that don't terminate at or stop at the
+    station must diverge before its column and re-converge after.
+
+    Regression test for v104b's annotate/grea bypass bug: the trunk
+    edge from limma to the differential exit port (and through the
+    functional section) carried all 4 lines straight across, visually
+    passing through ``annotate`` (which consumes only rnaseq + affy)
+    and ``grea`` (which consumes only rnaseq).
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    # Slight tolerance so a route just-touching the bbox edge passes.
+    edge_tolerance = 0.5
+
+    violations: list[str] = []
+    for sid in _on_track_internal_stations(graph):
+        st = graph.stations[sid]
+        lines = graph.station_lines(sid)
+        line_offs = [offsets.get((sid, lid), 0.0) for lid in lines]
+        if not line_offs:
+            line_offs = [0.0]
+        min_off = min(line_offs)
+        max_off = max(line_offs)
+        cx = st.x
+        cy = st.y + (min_off + max_off) / 2
+        half_h = (max_off - min_off) / 2 + STATION_RADIUS_APPROX
+        bbox_top = cy - half_h
+        bbox_bot = cy + half_h
+        consumed = _consumed_lines(graph, sid)
+
+        for rp in routes:
+            if rp.line_id in consumed:
+                continue
+            # Routes whose source or target is the station are
+            # endpoints; they may legitimately enter the marker.
+            if sid in (rp.edge.source, rp.edge.target):
+                continue
+            for y in _route_y_at_x(rp, offsets, cx):
+                if bbox_top + edge_tolerance < y < bbox_bot - edge_tolerance:
+                    violations.append(
+                        f"{rp.edge.source}->{rp.edge.target} "
+                        f"line={rp.line_id} crosses {sid} at "
+                        f"y={y:.2f} (bbox=[{bbox_top:.2f}, {bbox_bot:.2f}])"
+                    )
+
+    assert not violations, (
+        f"{fixture}: {len(violations)} non-consuming station crossings:\n"
+        + "\n".join(violations[:20])
+    )
