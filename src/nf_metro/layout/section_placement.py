@@ -24,6 +24,7 @@ from nf_metro.layout.constants import (
     PLACEMENT_Y_GAP,
     PORT_MIN_GAP,
     SECTION_HEADER_PROTRUSION,
+    SECTION_X_PADDING,
 )
 from nf_metro.parser.model import MetroGraph, PortSide, Section
 
@@ -131,12 +132,20 @@ def _compute_section_offsets(
         min_col = min(min_col, col)
         max_col = max(max_col, col + cspan - 1)
 
-    # Max width per column (only from single-column sections)
+    # Max width per column (only from single-column sections).
+    # Use the right reach from offset_x (bbox_x + bbox_w) re-anchored to the
+    # standard left edge (-SECTION_X_PADDING) so that sections whose bbox_x
+    # was pushed further left by terminus-icon clearance don't inflate the
+    # column.  The leftward overhang lands left of offset_x and is later
+    # absorbed by the global x_offset bump in Phase 3b of compute_layout.
+    def _effective_width(section: Section) -> float:
+        return section.bbox_x + section.bbox_w + SECTION_X_PADDING
+
     col_widths: dict[int, float] = defaultdict(float)
     for sid, section in graph.sections.items():
         if section.grid_col_span == 1:
             col = col_assign.get(sid, 0)
-            col_widths[col] = max(col_widths[col], section.bbox_w)
+            col_widths[col] = max(col_widths[col], _effective_width(section))
 
     for c in range(min_col, max_col + 1):
         if c not in col_widths:
@@ -150,8 +159,9 @@ def _compute_section_offsets(
         start_col = col_assign.get(sid, 0)
         spanned = sum(col_widths[c] for c in range(start_col, start_col + cspan))
         spanned += (cspan - 1) * section_x_gap
-        if section.bbox_w > spanned:
-            deficit = section.bbox_w - spanned
+        eff_w = _effective_width(section)
+        if eff_w > spanned:
+            deficit = eff_w - spanned
             col_widths[start_col + cspan - 1] += deficit
 
     # Cumulative x offsets
