@@ -494,6 +494,18 @@ def _compute_section_layout(
     # consumer.y - n*y_spacing on the final grid.
     _reanchor_off_track_to_consumer(graph, y_spacing)
 
+    # Phase 13g: Re-center full-bundle columns around the row's final
+    # trunk Y.  ``_redistribute_full_bundle_columns`` runs early when
+    # only local port Ys are available; for terminal sections whose
+    # port Y differs from the row's eventual trunk Y, the symmetric
+    # fan ends up offset from the trunk row (e.g. Reporting's Shiny at
+    # the trunk row, Quarto two slots below, instead of one above and
+    # one below).  This re-center uses the final inter-section bundle
+    # Y as the anchor so the trunk row stays empty in each fanned
+    # column.
+    if graph.center_ports:
+        _recenter_full_bundle_columns(graph, y_spacing)
+
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
@@ -1547,17 +1559,14 @@ def _fan_source_inputs_upward(
 
         sources.sort(key=lambda s: graph.stations[s].y)
         section_internal_set = set(internal_ids)
-        for i, src in enumerate(sources[:n_lift], 1):
-            new_y = trunk_y - i * y_spacing
-            delta = new_y - graph.stations[src].y
-            if abs(delta) < 0.5:
-                continue
-            graph.stations[src].y = new_y
+
+        def _shift_chain(src: str, delta: float) -> None:
             # Walk a strictly linear consumer chain: each step requires
             # a single inbound edge from the previous link, an identical
             # line set, and section-internal placement.  Stop on fan-in
             # (consumer has another feeder) or line-set change.
             cur = src
+            src_lines = set(graph.station_lines(src))
             while True:
                 # De-dup parallel edges by target/source: each (src,tgt)
                 # pair may have one edge per line.
@@ -1570,10 +1579,32 @@ def _fan_source_inputs_upward(
                 in_srcs = {e.source for e in graph.edges if e.target == nxt}
                 if len(in_srcs) != 1:
                     break
-                if set(graph.station_lines(nxt)) != set(graph.station_lines(src)):
+                if set(graph.station_lines(nxt)) != src_lines:
                     break
                 graph.stations[nxt].y += delta
                 cur = nxt
+
+        for i, src in enumerate(sources[:n_lift], 1):
+            new_y = trunk_y - i * y_spacing
+            delta = new_y - graph.stations[src].y
+            if abs(delta) < 0.5:
+                continue
+            graph.stations[src].y = new_y
+            _shift_chain(src, delta)
+
+        # Compact the remaining below-trunk sources upward to fill the
+        # rows their predecessors vacated.  Without this step, lifted
+        # sources leave a multi-slot gap between the trunk and the
+        # first below-trunk source (e.g. trunk -> empty -> empty -> Affy
+        # row when GTF and Matrix were lifted).  Place the i-th
+        # below-trunk source at ``trunk_y + i * y_spacing``.
+        for i, src in enumerate(sources[n_lift:], 1):
+            new_y = trunk_y + i * y_spacing
+            delta = new_y - graph.stations[src].y
+            if abs(delta) < 0.5:
+                continue
+            graph.stations[src].y = new_y
+            _shift_chain(src, delta)
 
 
 def _lift_would_cause_uturn(
@@ -1917,6 +1948,110 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
                 offsets = list(range(-(n // 2), n // 2 + 1))
             for sid, off in zip(full, offsets):
                 graph.stations[sid].y = trunk_y + off * y_spacing
+
+
+def _recenter_full_bundle_columns(
+    graph: MetroGraph, y_spacing: float
+) -> None:
+    """Re-fan full-bundle station columns around the row's final trunk Y.
+
+    Late-pass companion to ``_redistribute_full_bundle_columns``.  The
+    early pass uses the section's local LR port Y as the symmetric
+    centre, which becomes stale when subsequent phases shift the
+    section relative to the row trunk (e.g. terminal sections whose
+    sole LR port doesn't match the bundle line entering from upstream).
+
+    For each LR/RL grid section, locate the inter-section bundle Y by
+    looking at LR port-connected internal stations in OTHER columns
+    (single-station columns whose Y is therefore the natural trunk).
+    Then re-distribute each column of >=2 full-bundle stations around
+    that anchor at ``y_spacing`` pitch, preserving the order produced
+    by the first pass.
+
+    No-op when the existing layout is already symmetric around the
+    anchor; bbox heights are not adjusted because earlier compaction
+    already sized the band to fit two slots either side of the trunk.
+    """
+    grid_sec_ids = _grid_group_section_ids(graph)
+    if not grid_sec_ids:
+        return
+
+    for section in graph.sections.values():
+        if (
+            section.id not in grid_sec_ids
+            or section.direction not in ("LR", "RL")
+            or section.bbox_h <= 0
+        ):
+            continue
+        bundle = _section_bundle_lines(graph, section)
+        if not bundle:
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+
+        cols: dict[float, list[str]] = defaultdict(list)
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.off_track:
+                continue
+            cols[round(st.x, 3)].append(sid)
+
+        full_by_col = {
+            x: [s for s in sids if set(graph.station_lines(s)) == bundle]
+            for x, sids in cols.items()
+        }
+
+        # Trunk anchor: prefer the row's actual bundle line Y, which is
+        # the entry port station's Y after row alignment.  Falls back
+        # to a single-station full-bundle column (natural pass-through)
+        # or the median Y when neither is available.
+        anchor_y: float | None = None
+        for pid in section.entry_ports:
+            p = graph.ports.get(pid)
+            ps = graph.stations.get(pid)
+            if p is None or ps is None:
+                continue
+            if p.side in (PortSide.LEFT, PortSide.RIGHT):
+                anchor_y = ps.y
+                break
+        if anchor_y is None:
+            for pid in section.exit_ports:
+                p = graph.ports.get(pid)
+                ps = graph.stations.get(pid)
+                if p is None or ps is None:
+                    continue
+                if p.side in (PortSide.LEFT, PortSide.RIGHT):
+                    anchor_y = ps.y
+                    break
+        if anchor_y is None:
+            single_ys = [
+                graph.stations[full[0]].y
+                for full in full_by_col.values()
+                if len(full) == 1
+            ]
+            if single_ys:
+                anchor_y = sorted(single_ys)[len(single_ys) // 2]
+            else:
+                all_full = [
+                    graph.stations[s].y
+                    for full in full_by_col.values() for s in full
+                ]
+                if not all_full:
+                    continue
+                anchor_y = sorted(all_full)[len(all_full) // 2]
+
+        for x, full in full_by_col.items():
+            if len(full) < 2 or len(full) != len(cols[x]):
+                continue
+            full.sort(key=lambda s: graph.stations[s].y)
+            n = len(full)
+            if n % 2 == 0:
+                offsets = list(range(-(n // 2), 0)) + list(range(1, n // 2 + 1))
+            else:
+                offsets = list(range(-(n // 2), n // 2 + 1))
+            for sid, off in zip(full, offsets):
+                graph.stations[sid].y = anchor_y + off * y_spacing
 
 
 def _layout_single_section(
