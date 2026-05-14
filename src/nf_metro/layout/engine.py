@@ -1937,22 +1937,10 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
         ]
 
         for x, full in full_by_col.items():
-            # Fire when the column is a fan-out group: every station in
-            # it has at least one inbound edge (so it's not a column of
-            # source file inputs whose per-line tracks must be
-            # preserved), AND there's at least one full-bundle anchor
-            # plus another column-mate.  Subset-bundle siblings
-            # (single-line side branches) are fanned alongside so the
-            # whole column distributes symmetrically around the trunk.
-            if not full or len(cols[x]) < 2:
+            # Fire only when every column station carries the full bundle
+            # and there are >=2 (so no unique trunk station exists).
+            if len(full) < 2 or len(full) != len(cols[x]):
                 continue
-            if not all(
-                any(e.target == s for e in graph.edges) for s in cols[x]
-            ):
-                continue
-            # When every station carries the full bundle (no subset
-            # siblings), fall through to the original symmetric fan
-            # behaviour.  Mixed columns (full + subset) ride together.
             # Trunk Y is the section's LR port Y when available (the
             # inter-section bundle line) so all full-bundle columns
             # in the section share a single trunk reference.  Falls
@@ -1969,15 +1957,15 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
                 if not others:
                     continue
                 trunk_y = others[len(others) // 2]
-            members = sorted(cols[x], key=lambda s: pre_fan_y[s])
-            n = len(members)
+            full.sort(key=lambda s: pre_fan_y[s])
+            n = len(full)
             # Even: offsets -n//2..-1, 1..n//2 (skipping 0).
             # Odd:  offsets -(n//2)..n//2 inclusive (0 = trunk_y).
             if n % 2 == 0:
                 offsets = list(range(-(n // 2), 0)) + list(range(1, n // 2 + 1))
             else:
                 offsets = list(range(-(n // 2), n // 2 + 1))
-            for sid, off in zip(members, offsets):
+            for sid, off in zip(full, offsets):
                 graph.stations[sid].y = trunk_y + off * y_spacing
 
 
@@ -2073,24 +2061,15 @@ def _recenter_full_bundle_columns(
                 anchor_y = sorted(all_full)[len(all_full) // 2]
 
         for x, full in full_by_col.items():
-            # Mirror the relaxed gate of the early pass: fire when the
-            # column is a fan-out group (every station has an inbound
-            # edge) with at least one full-bundle anchor plus another
-            # column-mate.  Subset-bundle siblings (single-line side
-            # branches) ride along symmetrically.
-            if not full or len(cols[x]) < 2:
+            if len(full) < 2 or len(full) != len(cols[x]):
                 continue
-            if not all(
-                any(e.target == s for e in graph.edges) for s in cols[x]
-            ):
-                continue
-            members = sorted(cols[x], key=lambda s: graph.stations[s].y)
-            n = len(members)
+            full.sort(key=lambda s: graph.stations[s].y)
+            n = len(full)
             if n % 2 == 0:
                 offsets = list(range(-(n // 2), 0)) + list(range(1, n // 2 + 1))
             else:
                 offsets = list(range(-(n // 2), n // 2 + 1))
-            for sid, off in zip(members, offsets):
+            for sid, off in zip(full, offsets):
                 graph.stations[sid].y = anchor_y + off * y_spacing
 
 

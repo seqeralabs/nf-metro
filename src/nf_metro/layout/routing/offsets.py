@@ -526,19 +526,7 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
                     line_ys.setdefault(edge.line_id, []).append(src_st.y)
         if len(line_ys) < 2:
             continue
-        # Per-line representative Y for spatial sorting: pick each line's
-        # feeder closest to the port's own Y (with min-Y tiebreak).  This
-        # ignores lone off-trunk minor feeders (e.g. a single-line side
-        # branch joining at the exit port) that would otherwise drag the
-        # line's representative Y and reorder the bundle.  Reordering the
-        # bundle when the dominant trunk feeder sits at port_y forces
-        # horizontal-reconcile to shift the trunk station's offsets,
-        # producing a visible kink at the section boundary.
-        port_y = graph.stations[port_id].y
-        line_avg_y: dict[str, float] = {
-            lid: min(ys, key=lambda y: (abs(y - port_y), y))
-            for lid, ys in line_ys.items()
-        }
+        line_avg_y = {lid: sum(ys) / len(ys) for lid, ys in line_ys.items()}
         unique_ys = set(line_avg_y.values())
         if len(unique_ys) < 2:
             continue
@@ -552,6 +540,7 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         # Without this, reconciliation snaps same-Y stations to the
         # port's non-zero spatial offset, pushing them off-grid.
         # Ties broken by lowest spatial offset to avoid negative shifts.
+        port_y = graph.stations[port_id].y
         anchor_line = min(
             line_avg_y,
             key=lambda lid: (abs(line_avg_y[lid] - port_y), spatial_offs[lid]),
