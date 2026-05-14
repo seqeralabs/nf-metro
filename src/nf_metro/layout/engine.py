@@ -479,6 +479,16 @@ def _compute_section_layout(
     # is bottom- and top-weighted instead of stacked below the trunk.
     _fan_source_inputs_upward(graph, section_y_padding, y_spacing)
 
+    # Phase 13d3: For sections that contain exactly a 2-branch
+    # symmetric fan (and no off-track or other constraining content),
+    # collapse the fan onto half-pitch offsets so the section consumes
+    # one vertical grid unit instead of two.  Marks the branch stations
+    # in ``_half_grid_station_ids`` so the next snap pass leaves them
+    # alone.  Runs before ``_snap_all_y_to_grid`` so the snap-to-row-
+    # grid pass doesn't immediately undo the compaction.
+    if graph.center_ports:
+        _apply_half_grid_2branch_symfan(graph, y_spacing)
+
     # Phase 13e: Snap all station/port Ys to a per-section y_spacing
     # grid.  Trunk-Y align, port-snap, and the row compaction/fan
     # phases compute shifts that don't respect the grid pitch, leaving
@@ -2036,6 +2046,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
         # consumer is preserved) but don't influence the origin.
         residues: Counter[float] = Counter()
         per_section_ports: dict[str, set[str]] = {}
+        half_grid_ids = getattr(graph, "_half_grid_station_ids", set()) or set()
         for sec_id in sec_ids:
             section = graph.sections.get(sec_id)
             if section is None or section.bbox_h <= 0:
@@ -2044,6 +2055,10 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
             per_section_ports[sec_id] = port_ids
             for sid in section.station_ids:
                 if sid in port_ids:
+                    continue
+                if sid in half_grid_ids:
+                    # Half-grid stations sit at origin + 0.5 * pitch by
+                    # design; don't let them shift the row's grid origin.
                     continue
                 st = graph.stations.get(sid)
                 if st is None or getattr(st, "off_track", False):
@@ -2066,6 +2081,8 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
                 continue
             for sid in section.station_ids:
                 if sid in port_ids:
+                    continue
+                if sid in half_grid_ids:
                     continue
                 st = graph.stations.get(sid)
                 if st is None:
@@ -2196,6 +2213,151 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
                 graph.stations[sid].y = trunk_y + sign * k * y_spacing
 
 
+def _apply_half_grid_2branch_symfan(
+    graph: MetroGraph, y_spacing: float
+) -> None:
+    """Compact 2-branch symfan sections onto half-pitch offsets.
+
+    For every section that satisfies ``_section_symfan_uses_half_grid``
+    (exactly two on-track non-terminus branch stations sharing a column,
+    no off-track inputs), this places the two branches at
+    ``trunk_y +/- 0.5 * y_spacing`` regardless of what the per-column
+    redistribute passes did.
+
+    Why a dedicated phase: ``_redistribute_full_bundle_columns`` and
+    ``_recenter_full_bundle_columns`` gate on ``_grid_group_section_ids``
+    (sections that share a row with at least one other section), so a
+    section sitting alone on its row never participates.  The 2-branch
+    symfan case is well-defined regardless of row membership, so this
+    phase fires on the section directly.
+
+    Trunk anchor preference (in order):
+      1. LR/RL entry port Y (the inter-section bundle line).
+      2. LR/RL exit port Y.
+      3. Midpoint of the two branch stations' current Ys.
+
+    The branches are marked in ``_half_grid_station_ids`` so the
+    subsequent ``_snap_all_y_to_grid`` pass leaves their half-pitch
+    offsets intact (and ignores them when computing the row grid
+    origin).
+    """
+    if y_spacing <= 0:
+        return
+    for section in graph.sections.values():
+        if (
+            section.bbox_h <= 0
+            or section.direction not in ("LR", "RL")
+        ):
+            continue
+        if not _section_symfan_uses_half_grid(graph, section):
+            continue
+
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        branches: list[Station] = []
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if (
+                st is None
+                or st.is_port
+                or st.is_hidden
+                or st.off_track
+                or st.is_terminus
+            ):
+                continue
+            branches.append(st)
+        if len(branches) != 2:
+            continue
+
+        # Trunk Y from LR/RL ports (preferred) or the branches' midpoint.
+        trunk_y: float | None = None
+        for pid in section.entry_ports:
+            p = graph.ports.get(pid)
+            ps = graph.stations.get(pid)
+            if (
+                p is not None
+                and ps is not None
+                and p.side in (PortSide.LEFT, PortSide.RIGHT)
+            ):
+                trunk_y = ps.y
+                break
+        if trunk_y is None:
+            for pid in section.exit_ports:
+                p = graph.ports.get(pid)
+                ps = graph.stations.get(pid)
+                if (
+                    p is not None
+                    and ps is not None
+                    and p.side in (PortSide.LEFT, PortSide.RIGHT)
+                ):
+                    trunk_y = ps.y
+                    break
+        if trunk_y is None:
+            trunk_y = (branches[0].y + branches[1].y) / 2.0
+
+        branches.sort(key=lambda s: s.y)
+        branches[0].y = trunk_y - 0.5 * y_spacing
+        branches[1].y = trunk_y + 0.5 * y_spacing
+        graph._half_grid_station_ids.update(b.id for b in branches)
+
+
+def _section_symfan_uses_half_grid(
+    graph: MetroGraph, section: Section
+) -> bool:
+    """Return True when a section's symfan should use half-pitch offsets.
+
+    Trigger conditions (must all hold):
+      - Section has exactly two real "branch" stations: on-track,
+        non-port, non-hidden, non-terminus internal stations sharing
+        a single X column.  Terminus icons (file outputs) and hidden
+        convergence stations are excluded - they're downstream join
+        points that don't constrain symfan spacing.
+      - No off-track stations exist in the section (no input rows
+        sitting in the participants' Y band).
+      - The section has no other columns with multiple branch stations
+        (this is the only fan, so the section height is bounded by
+        these two stations).
+
+    When the trigger fires the two branch stations are placed at
+    ``trunk_y +/- 0.5 * y_spacing`` instead of the default
+    ``trunk_y +/- 1 * y_spacing``, so the section needs only one
+    vertical grid unit instead of two.
+
+    Trunk Y itself is unchanged.  The branches sit at half-pitch
+    relative to the row grid; ``_snap_all_y_to_grid`` skips them via
+    ``graph._half_grid_station_ids``.
+    """
+    port_ids = set(section.entry_ports) | set(section.exit_ports)
+    branches: list[Station] = []
+    has_off_track = False
+    by_col: dict[float, int] = defaultdict(int)
+    for sid in section.station_ids:
+        if sid in port_ids:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or st.is_hidden:
+            continue
+        if st.off_track:
+            has_off_track = True
+            continue
+        if st.is_terminus:
+            # Terminus icons (file outputs) sit downstream of the fan
+            # and are not symfan participants.
+            continue
+        branches.append(st)
+        by_col[round(st.x, 3)] += 1
+    if has_off_track or len(branches) != 2:
+        return False
+    if abs(branches[0].x - branches[1].x) >= 0.5:
+        return False
+    # No other column may have a multi-branch population (would force
+    # full-grid height anyway).  With exactly two branches sharing one
+    # column this is implicit, but the check is cheap and future-proofs
+    # the trigger when terminus filtering changes.
+    return all(count <= 2 for count in by_col.values())
+
+
 def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
     """Fan a full-bundle column around the trunk Y.
 
@@ -2305,6 +2467,7 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
             for x in cols
         )
 
+        half_grid = _section_symfan_uses_half_grid(graph, section)
         for x, sids in col_eligible.items():
             full = full_by_col[x]
             non_full = [s for s in sids if s not in full]
@@ -2336,6 +2499,14 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
                 trunk_y = others[len(others) // 2]
             participants.sort(key=lambda s: pre_fan_y[s])
             n = len(participants)
+            # 2-branch symfan in an isolated section: place at half-
+            # pitch around the trunk so the section only consumes one
+            # vertical grid unit instead of two.
+            if half_grid and n == 2:
+                graph.stations[participants[0]].y = trunk_y - 0.5 * y_spacing
+                graph.stations[participants[1]].y = trunk_y + 0.5 * y_spacing
+                graph._half_grid_station_ids.update(participants)
+                continue
             # Even: offsets -n//2..-1, 1..n//2 (skipping 0).
             # Odd:  offsets -(n//2)..n//2 inclusive (0 = trunk_y).
             if n % 2 == 0:
@@ -2456,6 +2627,7 @@ def _recenter_full_bundle_columns(
             for x in cols
         )
 
+        half_grid = _section_symfan_uses_half_grid(graph, section)
         for x, full in full_by_col.items():
             non_full = [s for s in cols[x] if s not in full]
             mixed_ok = bool(full) and non_full and all(
@@ -2472,6 +2644,14 @@ def _recenter_full_bundle_columns(
                 continue
             participants.sort(key=lambda s: graph.stations[s].y)
             n = len(participants)
+            # 2-branch symfan in an isolated section: place at half-
+            # pitch around the trunk so the section only consumes one
+            # vertical grid unit instead of two.
+            if half_grid and n == 2:
+                graph.stations[participants[0]].y = anchor_y - 0.5 * y_spacing
+                graph.stations[participants[1]].y = anchor_y + 0.5 * y_spacing
+                graph._half_grid_station_ids.update(participants)
+                continue
             if n % 2 == 0:
                 offsets = list(range(-(n // 2), 0)) + list(range(1, n // 2 + 1))
             else:
