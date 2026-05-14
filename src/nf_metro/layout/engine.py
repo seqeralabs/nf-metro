@@ -2440,18 +2440,19 @@ def _shift_sparse_loop_stations_to_clear_bundle(
                     break
             if sibling is None:
                 continue
-            # Shift S half a ``y_spacing`` further FROM the trunk on
+            # Shift S one full ``y_spacing`` further FROM the trunk on
             # the side S is already on.  This lifts S clear of the
             # busier sibling's bundle Y range (which is centred at
             # the row Y with up to ``max_offset`` of extra height for
-            # the line stack).  Shifting TOWARD the trunk would just
-            # leave S on the same diagonal the bundle takes from
-            # off-track inputs above the row.
-            shift = y_spacing / 2.0 if dy > 0 else -y_spacing / 2.0
+            # the line stack).  A half-pitch shift would leave S on a
+            # half-grid Y; the half-grid offset is reserved for the
+            # 2-branch symmetric fan case, so single sparse-loop
+            # stations must land on a full grid row.
+            shift = y_spacing if dy > 0 else -y_spacing
             new_y = st.y + shift
-            # Grow the section bbox downward / upward if the half-pitch
-            # shift pushes S past the current bbox edge.  Without this
-            # the validator would fire on bbox-overflow.
+            # Grow the section bbox downward / upward if the shift
+            # pushes S past the current bbox edge.  Without this the
+            # validator would fire on bbox-overflow.
             sec_top = section.bbox_y
             sec_bottom = section.bbox_y + section.bbox_h
             if new_y < sec_top + 5:
@@ -2462,9 +2463,6 @@ def _shift_sparse_loop_stations_to_clear_bundle(
                 grow = new_y - (sec_bottom - 5)
                 section.bbox_h += grow
             st.y = new_y
-            # Mark S as half-grid so any subsequent snap pass leaves
-            # the half-pitch offset intact.
-            graph._half_grid_station_ids.add(sid)
 
 
 def _loop_corner_x(
