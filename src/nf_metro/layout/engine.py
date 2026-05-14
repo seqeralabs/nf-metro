@@ -2637,11 +2637,15 @@ def _push_lower_rows_after_bbox_grow(
     closer than ``section_y_gap`` from the new bbox bottom.
 
     For each row ``r >= 1``, measure the deficit between the lowest
-    bbox bottom of sections ending at row ``r - 1`` plus
-    ``section_y_gap`` and the topmost bbox top of sections starting
-    at row ``r``.  If positive, shift row ``r`` and below downward by
-    that deficit (sections + their stations + their ports).  Junctions
-    live in inter-section space and are reproduced by routing.
+    bbox bottom of sections ending at row ``r - 1`` and the top of
+    sections at row ``r``, but only count pairs whose column spans
+    overlap.  Two sections that share a vertical edge in column space
+    must keep ``section_y_gap`` between them; sections in different
+    columns can sit with smaller (or no) vertical separation without
+    visual interference.  If a positive deficit remains, shift row
+    ``r`` and below downward by that deficit (sections + stations +
+    ports).  Junctions live in inter-section space and are reproduced
+    by routing.
     """
     if not graph.sections:
         return
@@ -2655,6 +2659,13 @@ def _push_lower_rows_after_bbox_grow(
         s.grid_row + s.grid_row_span - 1 for s in graph.sections.values()
     )
 
+    def _cols_overlap(a: Section, b: Section) -> bool:
+        a_start = a.grid_col
+        a_end = a_start + a.grid_col_span - 1
+        b_start = b.grid_col
+        b_end = b_start + b.grid_col_span - 1
+        return not (a_end < b_start or b_end < a_start)
+
     for r in range(1, max_row + 1):
         lower = sections_by_row_start.get(r, [])
         if not lower:
@@ -2665,9 +2676,22 @@ def _push_lower_rows_after_bbox_grow(
         ]
         if not ending_at_prev:
             continue
-        max_above_bot = max(s.bbox_y + s.bbox_h for s in ending_at_prev)
-        current_top = min(s.bbox_y for s in lower if s.bbox_h > 0)
-        deficit = (max_above_bot + section_y_gap) - current_top
+        # Only consider column-overlapping (upper, lower) pairs for
+        # deficit computation: a tall upper-row bbox that lives in a
+        # different column from the lower-row content does not need
+        # additional vertical clearance to satisfy the row gap.
+        deficit = 0.0
+        for us in ending_at_prev:
+            for ls in lower:
+                if ls.bbox_h <= 0:
+                    continue
+                if not _cols_overlap(us, ls):
+                    continue
+                upper_bot = us.bbox_y + us.bbox_h
+                lower_top = ls.bbox_y
+                d = (upper_bot + section_y_gap) - lower_top
+                if d > deficit:
+                    deficit = d
         if deficit <= 0.5:
             continue
 
