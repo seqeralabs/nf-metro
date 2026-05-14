@@ -136,6 +136,66 @@ def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _station_marker_bbox(
+    graph: MetroGraph, sid: str, offsets: dict | None = None, radius: float = 5.0
+) -> tuple[float, float, float, float] | None:
+    """Compute the rendered marker / icon bbox for ``sid``.
+
+    Mirrors the renderer in ``nf_metro.render.svg``: each on-track and
+    off-track station gets a pill of width ``2 * radius`` and height
+    ``span + 2 * radius`` (span = max line offset - min line offset),
+    centred at ``(station.x, station.y + (min_off + max_off) / 2)``.
+
+    Returns ``(x_min, y_min, x_max, y_max)`` or ``None`` for stations
+    that have no rendered marker (ports, hidden nodes, junctions).
+    """
+    from nf_metro.layout.routing import compute_station_offsets
+
+    st = graph.stations.get(sid)
+    if st is None or st.is_port or st.is_hidden:
+        return None
+    if sid in graph.junctions:
+        return None
+    if offsets is None:
+        offsets = compute_station_offsets(graph)
+    line_offs = [offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)]
+    if not line_offs:
+        line_offs = [0.0]
+    min_off, max_off = min(line_offs), max(line_offs)
+    cy = st.y + (min_off + max_off) / 2
+    w = 2 * radius
+    h = (max_off - min_off) + 2 * radius
+    return (st.x - w / 2, cy - h / 2, st.x + w / 2, cy + h / 2)
+
+
+def _guard_no_station_overlap(graph: MetroGraph, phase: str) -> None:
+    """Final-phase: no two station markers (incl. off-track file icons)
+    may overlap at render time.
+
+    A collision between markers / icons produces an unreadable rendering
+    where one station hides another.  Catches the regression where the
+    auto-balance pass lifts an internal station into a slot already
+    occupied by an off-track input icon.
+    """
+    from nf_metro.layout.routing import compute_station_offsets
+
+    offsets = compute_station_offsets(graph)
+    boxes: list[tuple[str, tuple[float, float, float, float]]] = []
+    for sid in graph.stations:
+        b = _station_marker_bbox(graph, sid, offsets=offsets)
+        if b is not None:
+            boxes.append((sid, b))
+    tol = 0.5
+    for i, (s1, (x1, y1, X1, Y1)) in enumerate(boxes):
+        for s2, (x2, y2, X2, Y2) in boxes[i + 1:]:
+            if x1 < X2 - tol and x2 < X1 - tol and y1 < Y2 - tol and y2 < Y1 - tol:
+                raise PhaseInvariantError(
+                    f"{phase}: position clash: {s1!r} at "
+                    f"({(x1 + X1) / 2:.1f},{(y1 + Y1) / 2:.1f}) overlaps "
+                    f"{s2!r} at ({(x2 + X2) / 2:.1f},{(y2 + Y2) / 2:.1f})"
+                )
+
+
 def compute_layout(
     graph: MetroGraph,
     x_spacing: float = X_SPACING,
@@ -566,6 +626,7 @@ def _compute_section_layout(
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
         _guard_stations_in_sections(graph, "after Phase 12 (final)")
         _guard_ports_on_boundaries(graph, "after Phase 12 (final)")
+        _guard_no_station_overlap(graph, "after Phase 12 (final)")
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
@@ -1864,6 +1925,23 @@ def _balance_section_content_around_trunk(
         #     a deeper Y available (e.g. propd swaps with dream so
         #     propd ends up above dream without growing the bbox).
         # Stops when the imbalance is resolved or no slot is available.
+        # Collect the Y of every other station in the section (including
+        # off-track inputs whose icons reserve a grid slot).  The lift
+        # target column must avoid these Ys or the lifted marker overlaps
+        # an existing marker / file icon at render time.
+        def _column_occupied_ys(col_x: float, skip_sid: str) -> list[float]:
+            occ: list[float] = []
+            for sid2 in section.station_ids:
+                if sid2 == skip_sid:
+                    continue
+                st2 = graph.stations.get(sid2)
+                if st2 is None or st2.is_port or st2.is_hidden:
+                    continue
+                if abs(st2.x - col_x) > 0.5:
+                    continue
+                occ.append(st2.y)
+            return occ
+
         max_iters = len(movable)
         for _ in range(max_iters):
             section_top_y = min(
@@ -1893,8 +1971,23 @@ def _balance_section_content_around_trunk(
                 below.sort(key=lambda s: graph.stations[s].y, reverse=True)
             else:
                 below.sort(key=lambda s: graph.stations[s].y)
-            candidate = below[0]
+            # Find the first below-trunk candidate whose lift Y does
+            # not collide with another station/icon already occupying
+            # the same column at the lift target.  Off-track icons
+            # placed by ``_lift_off_track_stations`` reserve a slot
+            # in their column (e.g. ``gmt_in`` at the top of section
+            # 3) and the auto-balance must respect that.
+            candidate = None
             new_y = section_top_y - y_spacing
+            for cand in below:
+                col_x = graph.stations[cand].x
+                occ = _column_occupied_ys(col_x, cand)
+                if any(abs(oy - new_y) < y_spacing - 0.5 for oy in occ):
+                    continue
+                candidate = cand
+                break
+            if candidate is None:
+                break
             # Guard: the new Y must leave room for the station's
             # above-marker label without forcing the bbox to expand
             # upward (which would break row-mate bbox alignment).
