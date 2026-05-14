@@ -1831,6 +1831,19 @@ def _route_diagonal(
     is_fork_flag = edge.source in ctx.fork_stations and not is_side_branch
     is_join_flag = edge.target in ctx.join_stations or is_side_branch
 
+    # Bypass virtual stations: concentrate the diagonal near V so the
+    # bypass hop only spans V's column instead of routing parallel for
+    # the whole section.  P -> V biases toward V (join); V -> T biases
+    # from V (fork).  Without this, P fork-bias pushes the diagonal
+    # next to P and the bypass line runs parallel below the trunk for
+    # the entire span between P and T.
+    if tgt.is_hidden and edge.target.startswith("__bypass_"):
+        is_fork_flag = False
+        is_join_flag = True
+    elif src.is_hidden and edge.source.startswith("__bypass_"):
+        is_fork_flag = True
+        is_join_flag = False
+
     diag_start_x, diag_end_x = _compute_diagonal_placement(
         sx,
         tx,

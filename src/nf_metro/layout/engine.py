@@ -198,6 +198,84 @@ def _guard_no_station_overlap(graph: MetroGraph, phase: str) -> None:
                 )
 
 
+def _guard_no_line_crosses_non_consumer(
+    graph: MetroGraph, phase: str
+) -> None:
+    """Final-phase: no rendered line segment may pass through a
+    station marker whose station neither consumes nor produces that
+    line.
+
+    Complements ``_guard_no_station_overlap``: station/station marker
+    overlap catches one class of clash; this catches the other --
+    a line bundle routed at a Y that crosses an off-trunk station's
+    marker bbox while bypassing it (the "breeze-past" pattern).
+    A common trigger is a sparse single-line consumer (e.g. ``grea``
+    in the differential-functional section, consuming only rnaseq)
+    sharing its trunk-Y row with a busier sibling whose inbound
+    bundle traverses the sparse consumer's column.
+    """
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+    from nf_metro.render.svg import apply_route_offsets
+
+    offsets = compute_station_offsets(graph)
+    try:
+        routes = route_edges(graph, station_offsets=offsets)
+    except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+        return
+
+    consumed_by: dict[str, set[str]] = {}
+    produced_by: dict[str, set[str]] = {}
+    for e in graph.edges:
+        consumed_by.setdefault(e.target, set()).add(e.line_id)
+        produced_by.setdefault(e.source, set()).add(e.line_id)
+
+    def _segment_crosses_bbox(
+        p1: tuple[float, float],
+        p2: tuple[float, float],
+        bbox: tuple[float, float, float, float],
+    ) -> bool:
+        x1, y1 = p1
+        x2, y2 = p2
+        bx1, by1, bx2, by2 = bbox
+        if max(x1, x2) < bx1 or min(x1, x2) > bx2:
+            return False
+        if max(y1, y2) < by1 or min(y1, y2) > by2:
+            return False
+        # Sample 20 points along the segment.  Routing waypoints are
+        # axis-aligned or 45-degree so this is exact at the resolution
+        # of the marker bbox (10 px wide).
+        for k in range(21):
+            f = k / 20.0
+            x = x1 + f * (x2 - x1)
+            y = y1 + f * (y2 - y1)
+            if bx1 <= x <= bx2 and by1 <= y <= by2:
+                return True
+        return False
+
+    for sid, st in graph.stations.items():
+        bbox = _station_marker_bbox(graph, sid, offsets=offsets)
+        if bbox is None:
+            continue
+        station_lines = consumed_by.get(sid, set()) | produced_by.get(sid, set())
+        for r in routes:
+            if r.line_id in station_lines:
+                continue
+            if r.edge.source == sid or r.edge.target == sid:
+                continue
+            pts = apply_route_offsets(r, offsets)
+            for k in range(len(pts) - 1):
+                if _segment_crosses_bbox(pts[k], pts[k + 1], bbox):
+                    raise PhaseInvariantError(
+                        f"{phase}: line {r.line_id!r} on edge "
+                        f"{r.edge.source!r} -> {r.edge.target!r} "
+                        f"crosses non-consumer station {sid!r} "
+                        f"marker bbox ({bbox[0]:.1f},{bbox[1]:.1f})-"
+                        f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
+                        f"({pts[k][0]:.1f},{pts[k][1]:.1f})->"
+                        f"({pts[k + 1][0]:.1f},{pts[k + 1][1]:.1f})"
+                    )
+
+
 def compute_layout(
     graph: MetroGraph,
     x_spacing: float = X_SPACING,
@@ -633,12 +711,21 @@ def _compute_section_layout(
     # claim; multi-row layouts with content-filled rows are untouched.
     _tighten_lower_rows_after_shrink(graph, section_y_gap)
 
+    # Phase 13k: Shift sparse loop-side stations (e.g. ``grea`` -- one
+    # incoming, one outgoing, single-line consumer) onto a half-grid Y
+    # when sharing the full-row Y with a busier sibling whose inbound
+    # bundle would otherwise cross the sparse station's marker bbox.
+    _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing)
+
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
         _guard_stations_in_sections(graph, "after Phase 12 (final)")
         _guard_ports_on_boundaries(graph, "after Phase 12 (final)")
         _guard_no_station_overlap(graph, "after Phase 12 (final)")
+        _guard_no_line_crosses_non_consumer(
+            graph, "after Phase 12 (final)"
+        )
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
@@ -2243,6 +2330,141 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
             ):
                 continue
             st.x = midpoint
+
+
+def _shift_sparse_loop_stations_to_clear_bundle(
+    graph: MetroGraph, y_spacing: float
+) -> None:
+    """Shift single-line loop side stations onto a half-pitch Y when
+    their full-row Y collides with a busier sibling's inbound bundle.
+
+    The bypass virtual station mechanism (``_insert_bypass_stations``)
+    covers the pred -> exit_port case (e.g. ``annotate`` between limma
+    and the section exit).  It does not cover the case where a sparse
+    consumer S sits in the same section column band as a busier
+    sibling T and shares S's row Y, so the lines bound for T cross S's
+    marker bbox on the way in (the ``grea`` / ``decoupler`` pattern).
+
+    For each loop side station S in an LR/RL section -- one incoming
+    edge, one outgoing edge, both endpoints on the section trunk Y --
+    that:
+
+      * consumes strictly fewer lines than at least one same-row
+        sibling T in the same section, and
+      * shares the same Y row as that sibling,
+
+    shift S vertically by half a ``y_spacing`` away from the trunk
+    (i.e. ``trunk_y +- y_spacing / 2`` on the side S is already on)
+    so its marker bbox sits clear of the sibling's bundle Y range.
+    The shift is reverted if it would push S above or below the
+    section bbox.
+    """
+    if y_spacing <= 0:
+        return
+
+    in_by_tgt: dict[str, list[Edge]] = defaultdict(list)
+    out_by_src: dict[str, list[Edge]] = defaultdict(list)
+    for e in graph.edges:
+        in_by_tgt[e.target].append(e)
+        out_by_src[e.source].append(e)
+
+    consumed_by: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        consumed_by[e.target].add(e.line_id)
+
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        # Trunk Y from the LR/RL ports.
+        trunk_y: float | None = None
+        for pid in section.entry_ports + section.exit_ports:
+            port = graph.ports.get(pid)
+            ps = graph.stations.get(pid)
+            if (
+                port is not None
+                and ps is not None
+                and port.side in (PortSide.LEFT, PortSide.RIGHT)
+            ):
+                trunk_y = ps.y
+                break
+        if trunk_y is None:
+            continue
+
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if (
+                st is None
+                or st.is_port
+                or st.is_hidden
+                or st.off_track
+            ):
+                continue
+            ins = in_by_tgt.get(sid, [])
+            outs = out_by_src.get(sid, [])
+            if len(ins) != 1 or len(outs) != 1:
+                continue
+            src = graph.stations.get(ins[0].source)
+            tgt = graph.stations.get(outs[0].target)
+            if src is None or tgt is None:
+                continue
+            if abs(src.y - trunk_y) > 0.5 or abs(tgt.y - trunk_y) > 0.5:
+                continue
+            # S must sit clearly off the trunk and share its Y row
+            # with a same-section sibling whose inbound bundle is
+            # busier than S's.
+            dy = st.y - trunk_y
+            if abs(dy) < 0.5:
+                continue
+            s_lines = consumed_by.get(sid, set())
+            sibling: Station | None = None
+            for sib_id in section.station_ids:
+                if sib_id == sid or sib_id in port_ids:
+                    continue
+                sib = graph.stations.get(sib_id)
+                if (
+                    sib is None
+                    or sib.is_port
+                    or sib.is_hidden
+                    or sib.off_track
+                    or sib.is_terminus
+                ):
+                    continue
+                if abs(sib.y - st.y) > 0.5:
+                    continue
+                sib_lines = consumed_by.get(sib_id, set())
+                if len(sib_lines) > len(s_lines):
+                    sibling = sib
+                    break
+            if sibling is None:
+                continue
+            # Shift S half a ``y_spacing`` further FROM the trunk on
+            # the side S is already on.  This lifts S clear of the
+            # busier sibling's bundle Y range (which is centred at
+            # the row Y with up to ``max_offset`` of extra height for
+            # the line stack).  Shifting TOWARD the trunk would just
+            # leave S on the same diagonal the bundle takes from
+            # off-track inputs above the row.
+            shift = y_spacing / 2.0 if dy > 0 else -y_spacing / 2.0
+            new_y = st.y + shift
+            # Grow the section bbox downward / upward if the half-pitch
+            # shift pushes S past the current bbox edge.  Without this
+            # the validator would fire on bbox-overflow.
+            sec_top = section.bbox_y
+            sec_bottom = section.bbox_y + section.bbox_h
+            if new_y < sec_top + 5:
+                grow = sec_top + 5 - new_y
+                section.bbox_y -= grow
+                section.bbox_h += grow
+            elif new_y > sec_bottom - 5:
+                grow = new_y - (sec_bottom - 5)
+                section.bbox_h += grow
+            st.y = new_y
+            # Mark S as half-grid so any subsequent snap pass leaves
+            # the half-pitch offset intact.
+            graph._half_grid_station_ids.add(sid)
 
 
 def _loop_corner_x(
