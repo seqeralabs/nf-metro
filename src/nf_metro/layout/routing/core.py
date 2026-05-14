@@ -106,7 +106,6 @@ class _RoutingCtx:
     curve_radius: float
     skip_edges: set[_EdgeKey] = field(default_factory=set)
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
-    section_trunk_y: dict[str, float] = field(default_factory=dict)
     merge: _MergeRouting = field(
         default_factory=lambda: _MergeRouting(
             junctions=set(),
@@ -366,12 +365,6 @@ def _build_routing_context(
     # Merge routing classification
     merge = _classify_merge_edges(graph, junction_ids, join_sources, fork_targets)
 
-    # Section trunk Ys: the dominant on-track Y per LR/RL section, used
-    # to detect side-branch ascents (a below-trunk station feeding the
-    # trunk bundle).  Routing such edges with a late diagonal keeps the
-    # side-branch line on its own track until the section boundary.
-    section_trunk_y = _compute_section_trunk_ys(graph)
-
     # Bundle assignments and bypass gap indices
     line_priority = {lid: i for i, lid in enumerate(graph.lines.keys())}
     bundle_info = compute_bundle_info(
@@ -403,37 +396,8 @@ def _build_routing_context(
         curve_radius=curve_radius,
         junction_fan_info=junction_fan_info,
         skip_edges=merge.skip_edges,
-        section_trunk_y=section_trunk_y,
         merge=merge,
     )
-
-
-def _compute_section_trunk_ys(graph: MetroGraph) -> dict[str, float]:
-    """Return a mapping ``section_id -> trunk_y`` for LR/RL sections.
-
-    The trunk Y is the Y of the section's exit/entry ports, which
-    coincides with the dominant on-track bundle level.  Returns an
-    empty mapping for sections without horizontal ports.
-    """
-    result: dict[str, float] = {}
-    for sec_id, section in graph.sections.items():
-        if section.direction not in ("LR", "RL"):
-            continue
-        port_ys: list[float] = []
-        for pid in list(section.entry_ports) + list(section.exit_ports):
-            port = graph.ports.get(pid)
-            if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
-                continue
-            port_st = graph.stations.get(pid)
-            if port_st is None:
-                continue
-            port_ys.append(port_st.y)
-        if port_ys:
-            # Use the median to ignore outliers; all LR ports in a section
-            # typically share the same Y after alignment.
-            port_ys.sort()
-            result[sec_id] = port_ys[len(port_ys) // 2]
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1748,53 +1712,6 @@ def _route_intra_section(
     return _route_diagonal(edge, src, tgt, ctx)
 
 
-def _is_side_branch_ascent(
-    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
-) -> bool:
-    """Return True for a side-branch edge climbing to the section trunk.
-
-    A side-branch ascent edge starts at a non-port internal station
-    sitting off the section's trunk Y, with target either an exit port
-    of the same section or another internal station on the trunk Y.
-    Visually we want the line to stay on the side-branch track until
-    just before the target, so the bundle ordering inside the section
-    stays meaningful (the side-branch line does not appear to merge
-    with the main trunk bundle mid-section).
-
-    Only fires for non-port sources with a single outgoing line set
-    that exits the section via a shared exit port or feeds the trunk
-    bundle's join station.
-    """
-    if src.is_port or src.section_id is None:
-        return False
-    sec_id = src.section_id
-    trunk_y = ctx.section_trunk_y.get(sec_id)
-    if trunk_y is None:
-        return False
-    # Source must sit clearly off the trunk Y (at least a quarter slot).
-    if abs(src.y - trunk_y) < ctx.offset_step * 2:
-        return False
-    # Target must sit at or very close to trunk Y (the bundle level).
-    if abs(tgt.y - trunk_y) >= ctx.offset_step * 2:
-        return False
-    # Target must be in the same section or an exit port of this section.
-    tgt_port = ctx.graph.ports.get(edge.target)
-    same_sec = tgt.section_id == sec_id and not tgt.is_port
-    is_exit_port = (
-        tgt_port is not None
-        and not tgt_port.is_entry
-        and tgt_port.section_id == sec_id
-    )
-    if not (same_sec or is_exit_port):
-        return False
-    # Side branch carries a single line set (typical fanout slot).  Skip
-    # multi-line trunks that happen to sit below trunk Y momentarily.
-    src_lines = ctx.graph.station_lines(edge.source)
-    if len(src_lines) > 1:
-        return False
-    return True
-
-
 def _route_diagonal(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -1823,22 +1740,14 @@ def _route_diagonal(
         src_min = min_straight
         tgt_min = min_straight
 
-    # Side-branch ascents: override the fork bias so the diagonal lands
-    # near the target.  The side-branch line then stays on its own track
-    # from the source until the section boundary, instead of merging
-    # with the main trunk bundle mid-section.
-    is_side_branch = _is_side_branch_ascent(edge, src, tgt, ctx)
-    is_fork_flag = edge.source in ctx.fork_stations and not is_side_branch
-    is_join_flag = edge.target in ctx.join_stations or is_side_branch
-
     diag_start_x, diag_end_x = _compute_diagonal_placement(
         sx,
         tx,
         ctx.diagonal_run,
         src_min,
         tgt_min,
-        is_fork_flag,
-        is_join_flag,
+        edge.source in ctx.fork_stations,
+        edge.target in ctx.join_stations,
     )
 
     return RoutedPath(

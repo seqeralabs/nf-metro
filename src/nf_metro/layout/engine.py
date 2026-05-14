@@ -491,9 +491,8 @@ def _compute_section_layout(
     # consumer Ys; snapping the consumer to the grid can shift it by
     # up to half a pitch, which would collapse the y_spacing gap above
     # off-track.  Recomputing here pins each off-track at
-    # consumer.y - n*y_spacing on the final grid and grows the bbox
-    # upward if the new position rises above the padding zone.
-    _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
+    # consumer.y - n*y_spacing on the final grid.
+    _reanchor_off_track_to_consumer(graph, y_spacing)
 
     # Phase 13g: Re-center full-bundle columns around the row's final
     # trunk Y.  ``_redistribute_full_bundle_columns`` runs early when
@@ -511,14 +510,8 @@ def _compute_section_layout(
         # leave the off-track icon stranded at the old consumer Y
         # (overlapping the consumer station instead of sitting one
         # row above it).  This second reanchor uses each consumer's
-        # post-recenter Y as the new anchor and grows the section
-        # bbox upward when the lifted band moves above its current top.
-        _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
-        # Re-run the row top-align: a reanchor-driven bbox grow leaves
-        # the section's bbox above its row mates'.  Pull row mates'
-        # bbox tops up to match so the section row stays flush along
-        # its top edge.
-        _top_align_row_bboxes_only(graph)
+        # post-recenter Y as the new anchor.
+        _reanchor_off_track_to_consumer(graph, y_spacing)
 
     # Phase 13h: After fan-re-centering, single-station downstream
     # columns (e.g. terminus file icons) may have stayed at their
@@ -4738,64 +4731,23 @@ def _lift_off_track_stations(
             port.y += shift
 
 
-def _reanchor_off_track_to_consumer(
-    graph: MetroGraph,
-    y_spacing: float,
-    section_y_padding: float = SECTION_Y_PADDING,
-) -> None:
+def _reanchor_off_track_to_consumer(graph: MetroGraph, y_spacing: float) -> None:
     """Re-place off-track inputs relative to consumer Ys after final snap.
 
     Phase 13 placed each off-track input at ``consumer.y - n*y_spacing``
     using the consumer's pre-snap Y.  Later phases (compaction, grid
-    snap, fan re-centering) may shift the consumer, which would
-    collapse or shrink the gap between the off-track input and its
-    consumer.  This pass re-pins each off-track at
-    ``consumer.y - n*y_spacing`` on the consumer's final snapped Y.
+    snap) may shift the consumer to land on the section's row grid,
+    which changes the absolute Y of every consumer by up to half a
+    pitch.  This pass re-pins each off-track at the same offset
+    relative to the consumer's final snapped Y so the visible gap
+    stays at exactly one (or n) ``y_spacing`` slots.
 
-    Bboxes were grown in Phase 13 based on the off-track positions at
-    the time.  If a re-anchor moves an off-track above the current bbox
-    top minus padding, expand the bbox upward so the lifted input still
-    sits inside the section's padding zone.  Same-section TOP ports
-    follow the new top edge.  When the growth pushes any section bbox
-    above the canvas top margin, shift the whole graph down so the
-    topmost section keeps its ``section_y_padding`` margin from the
-    canvas edge (mirrors the safeguard in ``_lift_off_track_stations``).
+    Bboxes that were grown upward in Phase 13 to fit the lifted band
+    are left as-is: the row-bbox alignment downstream phases performed
+    already accounted for the lifted height.
     """
     groups = _off_track_groups(graph)
-    grew = False
     for sec_id, (fallback_id, by_consumer) in groups.items():
-        highest_y = _place_off_track_above_consumers(
+        _place_off_track_above_consumers(
             graph, y_spacing, sec_id, fallback_id, by_consumer
         )
-        if highest_y is None:
-            continue
-        section = graph.sections.get(sec_id)
-        if section is None:
-            continue
-        desired_top = highest_y - section_y_padding
-        if desired_top < section.bbox_y - 0.5:
-            section.bbox_h += section.bbox_y - desired_top
-            section.bbox_y = desired_top
-            grew = True
-            for pid in section.entry_ports + section.exit_ports:
-                port = graph.ports.get(pid)
-                port_st = graph.stations.get(pid)
-                if not port or not port_st:
-                    continue
-                if port.side == PortSide.TOP:
-                    port_st.y = section.bbox_y
-                    port.y = port_st.y
-
-    if grew:
-        min_top = min(
-            (s.bbox_y for s in graph.sections.values() if s.bbox_h > 0),
-            default=section_y_padding,
-        )
-        if min_top < section_y_padding:
-            shift = section_y_padding - min_top
-            for st in graph.stations.values():
-                st.y += shift
-            for section in graph.sections.values():
-                section.bbox_y += shift
-            for port in graph.ports.values():
-                port.y += shift
