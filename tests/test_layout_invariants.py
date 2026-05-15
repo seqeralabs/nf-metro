@@ -69,7 +69,11 @@ def _section_lr_port_ys(graph: MetroGraph, section) -> list[float]:
     return ys
 
 
-def _section_trunk_marker_cy(graph: MetroGraph, section) -> float | None:
+def _section_trunk_marker_cy(
+    graph: MetroGraph,
+    section,
+    offsets: dict[tuple[str, str], float],
+) -> float | None:
     """Render-time cy of the trunk station that anchors the row bundle.
 
     The trunk station is the one whose marker the inter-section bundle
@@ -87,7 +91,6 @@ def _section_trunk_marker_cy(graph: MetroGraph, section) -> float | None:
     bundle = _section_full_bundle(graph, section)
     if not bundle:
         return None
-    offsets = compute_station_offsets(graph)
     port_set = set(section.entry_ports) | set(section.exit_ports)
     best: tuple[float, float] | None = None  # (distance, cy)
     for sid in section.station_ids:
@@ -145,11 +148,12 @@ def test_row_trunk_marker_cy_consistent(fixture):
     on the section's exit port.
     """
     graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
     rows = _row_lr_sections(graph)
     for row, sections in rows.items():
         cys: list[tuple[str, float]] = []
         for sec in sections:
-            cy = _section_trunk_marker_cy(graph, sec)
+            cy = _section_trunk_marker_cy(graph, sec, offsets)
             if cy is not None:
                 cys.append((sec.id, cy))
         if len(cys) < 2:
@@ -203,12 +207,12 @@ def test_symfan_pairs_share_y(fixture):
     empty.
     """
     graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
     for sec in graph.sections.values():
         cols = _section_fan_columns(graph, sec)
-        trunk_cy = _section_trunk_marker_cy(graph, sec)
+        trunk_cy = _section_trunk_marker_cy(graph, sec, offsets)
         if trunk_cy is None:
             continue
-        offsets = compute_station_offsets(graph)
         for x, sids in cols.items():
             if len(sids) != 2:
                 continue  # Only assert on pairs; 3+ has its own ordering
