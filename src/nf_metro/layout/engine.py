@@ -2283,7 +2283,42 @@ def _shrink_bboxes_to_content_bottom(
     last station.  Re-shrink each section's ``bbox_h`` so the bottom
     sits ``section_y_padding`` below the bottom-most station/port.
     Station Ys are unchanged, so trunk alignment is preserved.
+
+    Never trims past the maximum bbox bottom of any row-mate.  A
+    row-mate is any other section whose bbox vertical range overlaps
+    this section's bbox vertical range, OR which shares at least one
+    grid-row index (accounting for ``grid_row_span``).  Trimming below
+    such a row-mate's bottom would undo intentional bottom alignment
+    performed by ``_align_tb_section_bbox_bottoms`` (Phase 13f) or by
+    row-spanning TB sections that share a visual bottom edge with
+    row-mates one or more grid rows lower.
     """
+
+    def _row_mate_bottoms(section: Section) -> list[float]:
+        my_grid_top = section.grid_row if section.grid_row >= 0 else None
+        my_grid_bot = (
+            section.grid_row + max(1, section.grid_row_span)
+            if section.grid_row >= 0
+            else None
+        )
+        my_y_top = section.bbox_y
+        my_y_bot = section.bbox_y + section.bbox_h
+        out: list[float] = []
+        for other in graph.sections.values():
+            if other.id == section.id or other.bbox_h <= 0:
+                continue
+            o_y_top = other.bbox_y
+            o_y_bot = other.bbox_y + other.bbox_h
+            y_overlap = o_y_top < my_y_bot and o_y_bot > my_y_top
+            grid_overlap = False
+            if my_grid_top is not None and other.grid_row >= 0:
+                o_grid_top = other.grid_row
+                o_grid_bot = other.grid_row + max(1, other.grid_row_span)
+                grid_overlap = o_grid_top < my_grid_bot and o_grid_bot > my_grid_top
+            if y_overlap or grid_overlap:
+                out.append(o_y_bot)
+        return out
+
     for section in graph.sections.values():
         if section.bbox_h <= 0:
             continue
@@ -2302,6 +2337,9 @@ def _shrink_bboxes_to_content_bottom(
         desired_bot = max(content_max_ys) + section_y_padding
         if port_max_ys:
             desired_bot = max(desired_bot, max(port_max_ys))
+        mate_bots = _row_mate_bottoms(section)
+        if mate_bots:
+            desired_bot = max(desired_bot, max(mate_bots))
         new_h = desired_bot - section.bbox_y
         if new_h < section.bbox_h - 0.5:
             section.bbox_h = max(0.0, new_h)

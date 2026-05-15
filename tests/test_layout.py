@@ -361,6 +361,56 @@ def test_section_content_y_stable_under_neutral_layout():
     )
 
 
+def test_rowspan_trim_doesnt_misalign_tb_bbox_bottom():
+    """``_shrink_bboxes_to_content_bottom`` (Phase 13j) must not undo
+    ``_align_tb_section_bbox_bottoms`` (Phase 13f), nor trim a
+    row-spanning TB section's bbox bottom above a known row-mate it
+    visually shares a bottom edge with.
+
+    Anchored on the two fixtures where this regression was first
+    observed:
+
+    - ``fold_double``: section #4 (TB ``calling``) feeds into RL row
+      ``hard_filter`` (#5); their bbox bottoms must match.  Section
+      #8 (TB ``integration``) feeds into LR row ``reporting`` (#9);
+      their bbox bottoms must match too.
+    - ``04_directions``: section #4 (TB ``postprocessing``,
+      ``grid_row_span=2``) shares a bottom edge with ``reporting``
+      (#5) one grid row below.
+    """
+    root = Path(__file__).parent.parent
+
+    def _bots(graph, *sids):
+        return {
+            sid: graph.sections[sid].bbox_y + graph.sections[sid].bbox_h for sid in sids
+        }
+
+    fold = parse_metro_mermaid(
+        (root / "examples/topologies/fold_double.mmd").read_text()
+    )
+    compute_layout(fold)
+    fb = _bots(fold, "calling", "hard_filter", "integration", "reporting")
+    assert fb["calling"] >= fb["hard_filter"] - 0.5, (
+        f"fold_double: calling (TB #4) bbox bottom {fb['calling']:.1f} above "
+        f"row-mate hard_filter (#5) bottom {fb['hard_filter']:.1f}"
+    )
+    assert fb["integration"] >= fb["reporting"] - 0.5, (
+        f"fold_double: integration (TB #8) bbox bottom {fb['integration']:.1f} "
+        f"above row-mate reporting (#9) bottom {fb['reporting']:.1f}"
+    )
+
+    directions = parse_metro_mermaid(
+        (root / "examples/guide/04_directions.mmd").read_text()
+    )
+    compute_layout(directions)
+    db = _bots(directions, "postprocessing", "reporting")
+    assert db["postprocessing"] >= db["reporting"] - 0.5, (
+        f"04_directions: postprocessing (TB #4) bbox bottom "
+        f"{db['postprocessing']:.1f} above row-mate reporting (#5) bottom "
+        f"{db['reporting']:.1f}"
+    )
+
+
 # --- Section-first layout tests ---
 
 
