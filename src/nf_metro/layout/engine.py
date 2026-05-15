@@ -5094,6 +5094,46 @@ def _bump_off_track_clear_of_trunks(
     return y
 
 
+def _grow_section_bbox_upward(
+    graph: MetroGraph, section, new_bbox_top: float
+) -> None:
+    """Expand a section's bbox upward to *new_bbox_top* and pull TOP ports.
+
+    BOTTOM ports stay put because the bbox only grows upward.
+    """
+    section.bbox_h += section.bbox_y - new_bbox_top
+    section.bbox_y = new_bbox_top
+    for pid in section.entry_ports + section.exit_ports:
+        port = graph.ports.get(pid)
+        port_st = graph.stations.get(pid)
+        if not port or not port_st:
+            continue
+        if port.side == PortSide.TOP:
+            port_st.y = section.bbox_y
+            port.y = port_st.y
+
+
+def _shift_graph_into_canvas(graph: MetroGraph, section_y_padding: float) -> None:
+    """Shift the whole graph down if the topmost section is above the canvas.
+
+    Keeps the topmost section's ``section_y_padding`` margin from the
+    canvas edge.  No-op when all sections already sit inside.
+    """
+    min_top = min(
+        (s.bbox_y for s in graph.sections.values() if s.bbox_h > 0),
+        default=section_y_padding,
+    )
+    if min_top >= section_y_padding:
+        return
+    shift = section_y_padding - min_top
+    for st in graph.stations.values():
+        st.y += shift
+    for section in graph.sections.values():
+        section.bbox_y += shift
+    for port in graph.ports.values():
+        port.y += shift
+
+
 def _lift_off_track_stations(
     graph: MetroGraph,
     y_spacing: float,
@@ -5127,37 +5167,13 @@ def _lift_off_track_stations(
         )
         if highest_y is None:
             continue
-
-        # Expand section bbox upward so the highest lifted input + its
-        # label clearance fits inside the section box.
         new_bbox_top = highest_y - section_y_padding
         if new_bbox_top < section.bbox_y:
-            section.bbox_h += section.bbox_y - new_bbox_top
-            section.bbox_y = new_bbox_top
-            # Shift TOP ports back to the (new) top edge so they stay
-            # on the boundary.  BOTTOM ports stay put because bbox_h
-            # only grew upward.
-            for pid in section.entry_ports + section.exit_ports:
-                port = graph.ports.get(pid)
-                port_st = graph.stations.get(pid)
-                if not port or not port_st:
-                    continue
-                if port.side == PortSide.TOP:
-                    port_st.y = section.bbox_y
-                    port.y = port_st.y
+            _grow_section_bbox_upward(graph, section, new_bbox_top)
 
     # Phase 3b ran before our lift, so y_offset doesn't account for the
-    # new bbox tops.  Shift the whole graph down so the topmost section
-    # sits inside the canvas with the standard margin.
-    min_top = min(s.bbox_y for s in graph.sections.values() if s.bbox_h > 0)
-    if min_top < section_y_padding:
-        shift = section_y_padding - min_top
-        for st in graph.stations.values():
-            st.y += shift
-        for section in graph.sections.values():
-            section.bbox_y += shift
-        for port in graph.ports.values():
-            port.y += shift
+    # new bbox tops.
+    _shift_graph_into_canvas(graph, section_y_padding)
 
 
 def _reanchor_off_track_to_consumer(
@@ -5196,28 +5212,8 @@ def _reanchor_off_track_to_consumer(
             continue
         desired_top = highest_y - section_y_padding
         if desired_top < section.bbox_y - 0.5:
-            section.bbox_h += section.bbox_y - desired_top
-            section.bbox_y = desired_top
+            _grow_section_bbox_upward(graph, section, desired_top)
             grew = True
-            for pid in section.entry_ports + section.exit_ports:
-                port = graph.ports.get(pid)
-                port_st = graph.stations.get(pid)
-                if not port or not port_st:
-                    continue
-                if port.side == PortSide.TOP:
-                    port_st.y = section.bbox_y
-                    port.y = port_st.y
 
     if grew:
-        min_top = min(
-            (s.bbox_y for s in graph.sections.values() if s.bbox_h > 0),
-            default=section_y_padding,
-        )
-        if min_top < section_y_padding:
-            shift = section_y_padding - min_top
-            for st in graph.stations.values():
-                st.y += shift
-            for section in graph.sections.values():
-                section.bbox_y += shift
-            for port in graph.ports.values():
-                port.y += shift
+        _shift_graph_into_canvas(graph, section_y_padding)

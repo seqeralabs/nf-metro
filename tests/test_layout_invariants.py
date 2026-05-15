@@ -461,14 +461,10 @@ def test_side_branch_edge_stays_off_trunk(fixture):
 # ---------------------------------------------------------------------------
 
 
-def _icon_half_height(graph: MetroGraph) -> float:
-    """Vertical reach of a file-input icon above/below its centre.
-
-    Mirrors the renderer's terminus icon height (32 px default).  Used
-    to verify the section bbox encloses off-track icon tops.
-    """
-    # Default terminus_height in Theme is 32 px; half = 16.
-    return 16.0
+# Default terminus icon and station marker half-heights from the theme,
+# used to verify section bboxes enclose every station's vertical reach.
+_ICON_HALF_HEIGHT = 16.0
+_MARKER_HALF_HEIGHT = 9.5
 
 
 @pytest.mark.parametrize(
@@ -487,8 +483,6 @@ def test_section_bbox_contains_all_content(fixture):
     """
     graph = _layout(fixture)
     junction_ids = set(graph.junctions)
-    icon_half = _icon_half_height(graph)
-    marker_half = 9.5  # station marker height / 2
 
     for sec_id, section in graph.sections.items():
         if section.bbox_h <= 0:
@@ -497,9 +491,7 @@ def test_section_bbox_contains_all_content(fixture):
             st = graph.stations.get(sid)
             if st is None or st.is_port or sid in junction_ids:
                 continue
-            # Use icon half-height for off-track (file-input) stations,
-            # marker half-height otherwise.
-            half = icon_half if st.off_track else marker_half
+            half = _ICON_HALF_HEIGHT if st.off_track else _MARKER_HALF_HEIGHT
             top = st.y - half
             bot = st.y + half
             assert top >= section.bbox_y - 0.5, (

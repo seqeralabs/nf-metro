@@ -1771,13 +1771,11 @@ def _is_side_branch_ascent(
     trunk_y = ctx.section_trunk_y.get(sec_id)
     if trunk_y is None:
         return False
-    # Source must sit clearly off the trunk Y (at least a quarter slot).
-    if abs(src.y - trunk_y) < ctx.offset_step * 2:
-        return False
-    # Target must sit at or very close to trunk Y (the bundle level).
-    if abs(tgt.y - trunk_y) >= ctx.offset_step * 2:
-        return False
-    # Target must be in the same section or an exit port of this section.
+    trunk_tol = ctx.offset_step * 2
+    if abs(src.y - trunk_y) < trunk_tol:
+        return False  # source is on the trunk; not a side branch
+    if abs(tgt.y - trunk_y) >= trunk_tol:
+        return False  # target is not on the trunk bundle
     tgt_port = ctx.graph.ports.get(edge.target)
     same_sec = tgt.section_id == sec_id and not tgt.is_port
     is_exit_port = (
@@ -1787,10 +1785,9 @@ def _is_side_branch_ascent(
     )
     if not (same_sec or is_exit_port):
         return False
-    # Side branch carries a single line set (typical fanout slot).  Skip
-    # multi-line trunks that happen to sit below trunk Y momentarily.
-    src_lines = ctx.graph.station_lines(edge.source)
-    if len(src_lines) > 1:
+    # Multi-line trunks may momentarily dip below trunk Y; only single-line
+    # exits count as a side branch slot.
+    if len(ctx.graph.station_lines(edge.source)) > 1:
         return False
     return True
 
