@@ -1535,8 +1535,10 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
             continue
         port_set = set(section.entry_ports) | set(section.exit_ports)
         internal_ids = [
-            sid for sid in section.station_ids
-            if sid not in port_set and sid in graph.stations
+            sid
+            for sid in section.station_ids
+            if sid not in port_set
+            and sid in graph.stations
             and not graph.stations[sid].is_port
         ]
         if not internal_ids:
@@ -1548,19 +1550,17 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         xs = sorted({round(graph.stations[sid].x, 3) for sid in internal_ids})
         entry_x = xs[0] if section.direction == "LR" else xs[-1]
         entry_col = [
-            sid for sid in internal_ids
-            if round(graph.stations[sid].x, 3) == entry_x
+            sid for sid in internal_ids if round(graph.stations[sid].x, 3) == entry_x
         ]
-        trunks = [
-            s for s in entry_col if set(graph.station_lines(s)) == bundle
-        ]
+        trunks = [s for s in entry_col if set(graph.station_lines(s)) == bundle]
         if len(trunks) != 1:
             continue
         trunk_sid = trunks[0]
         trunk_y = graph.stations[trunk_sid].y
 
         sources = [
-            s for s in entry_col
+            s
+            for s in entry_col
             if s != trunk_sid
             and graph.station_lines(s)
             and set(graph.station_lines(s)) < bundle
