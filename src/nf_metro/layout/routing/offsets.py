@@ -552,6 +552,15 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
             }
         unique_ys = set(line_avg_y.values())
         if len(unique_ys) < 2:
+            if trunk_feeder_id is not None:
+                # Trunk feeder anchors all lines to one Y. Inherit its
+                # per-line offsets so the port keeps the trunk's bundle
+                # ordering instead of falling to definition order at
+                # reconcile time.
+                for lid in line_feeders:
+                    ctx.offsets[(port_id, lid)] = ctx.offsets.get(
+                        (trunk_feeder_id, lid), 0.0
+                    )
             continue
         sorted_lines = sorted(
             line_avg_y,
