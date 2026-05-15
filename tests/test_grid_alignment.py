@@ -794,3 +794,46 @@ class TestGridSnapExclusions:
                         f"snap should have aligned the hub with the section's "
                         f"row grid to avoid a section-boundary kink"
                     )
+
+    def test_non_anchor_fork_station_still_column_centred(self):
+        """Stations with 2+ outbound edges that are NOT true divergence
+        anchors must remain in their natural column.
+
+        The relaxed ``flat_to_internal`` guard in
+        ``_collect_centering_candidates`` only exempts true fork
+        divergence hubs from chain-internal treatment.  A station with
+        multiple outbound edges to the same target, only port targets,
+        or all targets on one side of its Y is NOT a hub and must
+        still be treated as a chain predecessor so its neighbour
+        retains its column position.
+
+        Specifically this guards against the regression where
+        ``scaffolding_bwamem2``/``scaffolding_minimap2`` (genomeassembly,
+        both fan into ``yahs``), ``salmon_quant`` (rnaseq_auto, single
+        outbound to a port), and ``samtools_index`` (variant_calling,
+        single outbound to a port) drift away from their natural
+        column when downstream centring is incorrectly enabled.
+        """
+        from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+        # (example, station_id, expected_x).  Expected Xs are the
+        # natural column positions observed before the PR #276
+        # divergence-anchor work over-broadened the guard relaxation.
+        cases = [
+            ("genomeassembly", "scaffolding_bwamem2", 911.0),
+            ("genomeassembly", "scaffolding_minimap2", 911.0),
+            ("rnaseq_auto", "salmon_quant", 1089.5),
+            ("variant_calling", "samtools_index", 560.5),
+            ("variant_calling_tuned", "samtools_index", 704.5),
+        ]
+        for example, sid, expected_x in cases:
+            g = _load(example)
+            station_offsets = compute_station_offsets(g)
+            route_edges(g, station_offsets=station_offsets)
+            st = g.stations.get(sid)
+            assert st is not None, f"{example}: station {sid} not found"
+            assert abs(st.x - expected_x) < 0.5, (
+                f"{example}: {sid} x={st.x} drifted from natural column "
+                f"x={expected_x}; non-anchor fork station was incorrectly "
+                f"pulled out of chain-internal centring treatment"
+            )

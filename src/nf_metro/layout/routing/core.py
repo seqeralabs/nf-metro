@@ -1893,10 +1893,18 @@ class _BubbleCtx:
     diag_out_targets: dict[str, set[str]]
     # Snapshot of station X before any moves
     original_x: dict[str, float]
+    # True fan-out divergence hubs (matches engine._divergence_target_ys):
+    # >= 2 outbound real-station targets at distinct Ys, with at least one
+    # above and one below the station's own Y.
+    divergence_anchors: set[str]
 
 
 def _build_bubble_ctx(routes: list[RoutedPath], graph: MetroGraph) -> _BubbleCtx:
     """Build indexes for bubble-station centering."""
+    # Imported here to avoid a top-level cycle (engine does not depend on
+    # routing, so this one-way import is safe).
+    from nf_metro.layout.engine import _divergence_target_ys
+
     all_sources: dict[str, set[str]] = defaultdict(set)
     all_targets: dict[str, set[str]] = defaultdict(set)
     for edge in graph.edges:
@@ -1934,6 +1942,7 @@ def _build_bubble_ctx(routes: list[RoutedPath], graph: MetroGraph) -> _BubbleCtx
         diag_in_sources=diag_in_sources,
         diag_out_targets=diag_out_targets,
         original_x=original_x,
+        divergence_anchors=_divergence_target_ys(graph),
     )
 
 
@@ -1953,17 +1962,29 @@ def _collect_centering_candidates(
         st = graph.stations.get(sid)
         return st is not None and not st.is_port and not st.is_hidden
 
-    def _is_chain_internal(sid: str) -> bool:
-        """Internal station that acts as a flat-chain predecessor.
+    def _is_chain_predecessor(sid: str) -> bool:
+        """Internal upstream station that acts as a flat-chain predecessor.
 
-        A fork divergence hub (>= 2 outbound real targets) is excluded:
-        its flat-side connection to one branch is incidental (induced by
-        grid snap), not a topological chain.  Treating such a hub as a
-        chain predecessor would block the branch's column from centring.
+        When a station being considered for centring has a flat-side
+        connection coming FROM ``sid``, this predicate decides whether
+        ``sid`` should block centring.  Normal internal stations do
+        block it.  A true fan-out divergence hub (matching
+        ``engine._divergence_target_ys``: >= 2 outbound real-station
+        targets at distinct Ys, with at least one above and one below
+        the hub's own Y) is exempt: its flat-side connection to one
+        branch is incidental (induced by grid snapping the hub onto
+        that branch's track), not a topological chain.  Without this
+        exemption the branch's column would fail to centre.
+
+        Exemption applies only to the upstream/source side of a flat
+        connection.  Downstream chain predecessors (an anchor sitting
+        as the target of a flat connection from the station being
+        centred) reflect a natural same-Y chain, not a snap artefact,
+        and are still treated as chain-internal.
         """
         if not _is_internal(sid):
             return False
-        return len(ctx.all_targets.get(sid, set())) < 2
+        return sid not in ctx.divergence_anchors
 
     for sid, station in graph.stations.items():
         if station.is_port or station.is_hidden:
@@ -2066,20 +2087,24 @@ def _collect_centering_candidates(
         has_flat_side = flat_in_rp is not None or flat_out_rp is not None
 
         # Guard: skip when a flat connection goes to/from an internal
-        # chain station (excluding fork divergence hubs whose flat
-        # connections are incidental rather than topological chains).
+        # chain station.  Upstream sources may be fork-hub-exempted (a
+        # snap-induced flat from a true divergence anchor does not
+        # represent a real chain).  Downstream targets are checked
+        # strictly: a same-Y predecessor->successor pair on a downstream
+        # internal station is a natural chain regardless of whether the
+        # successor happens to be a divergence anchor.
         if has_flat_side or multi_diag:
             flat_to_internal = False
-            if flat_in_rp and _is_chain_internal(flat_in_rp.edge.source):
+            if flat_in_rp and _is_chain_predecessor(flat_in_rp.edge.source):
                 flat_to_internal = True
-            if flat_out_rp and _is_chain_internal(flat_out_rp.edge.target):
+            if flat_out_rp and _is_internal(flat_out_rp.edge.target):
                 flat_to_internal = True
             if multi_diag:
                 for r in flat_in:
-                    if _is_chain_internal(r.edge.source):
+                    if _is_chain_predecessor(r.edge.source):
                         flat_to_internal = True
                 for r in flat_out:
-                    if _is_chain_internal(r.edge.target):
+                    if _is_internal(r.edge.target):
                         flat_to_internal = True
             if flat_to_internal:
                 continue
