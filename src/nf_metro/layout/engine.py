@@ -5949,9 +5949,25 @@ def _place_off_track_above_consumers(
     """Place each off-track input ``n*y_spacing`` above its consumer.
 
     Multiple inputs feeding the same consumer stack upward in
-    ``y_spacing`` steps.  Returns the smallest assigned Y (topmost
-    lifted station), or ``None`` when no stations were placed.
+    ``y_spacing`` steps.  When the natural ``consumer_y - k*y_spacing``
+    slot would put the icon on top of another trunk station's line band
+    in the same column (e.g. ``net_in`` at the gsea-trunk Y when
+    decoupler sits one slot below gsea at non-savepoint params), the
+    slot is bumped upward by additional ``y_spacing`` steps until the
+    icon's vertical bbox clears every line-bearing track in its column
+    and every sibling off-track already placed in the same column.
+
+    Returns the smallest assigned Y (topmost lifted station), or
+    ``None`` when no stations were placed.
     """
+    section = graph.sections.get(section_id)
+    sec_dir = section.direction if section is not None else "LR"
+    junction_ids = set(graph.junctions)
+
+    # Track already-placed off-track Ys per column so a bumped icon
+    # doesn't crash into a sibling off-track already at the desired Y.
+    used_ys_per_col: dict[float, list[float]] = defaultdict(list)
+
     highest_y: float | None = None
     for consumer_id, stations in by_consumer.items():
         anchor_id = consumer_id if consumer_id else fallback_consumer_id
@@ -5964,10 +5980,122 @@ def _place_off_track_above_consumers(
         stations.sort(key=lambda s: s.y)
         n = len(stations)
         for i, st in enumerate(stations):
-            st.y = consumer_y - (n - i) * y_spacing
+            base_step = n - i
+            candidate_y = consumer_y - base_step * y_spacing
+            if section is not None and sec_dir in ("LR", "RL"):
+                candidate_y = _bump_off_track_clear_of_trunks(
+                    graph,
+                    st,
+                    candidate_y,
+                    y_spacing,
+                    section,
+                    junction_ids,
+                    sibling_ys=used_ys_per_col[round(st.x, 1)],
+                )
+            st.y = candidate_y
+            used_ys_per_col[round(st.x, 1)].append(st.y)
             if highest_y is None or st.y < highest_y:
                 highest_y = st.y
     return highest_y
+
+
+def _bump_off_track_clear_of_trunks(
+    graph: MetroGraph,
+    off_st: Station,
+    candidate_y: float,
+    y_spacing: float,
+    section: Section,
+    junction_ids: set[str],
+    sibling_ys: list[float] | None = None,
+) -> float:
+    """Return ``candidate_y`` raised so the off-track icon clears any
+    trunk line track passing through the icon's X column.
+
+    The renderer places an off-track icon at the station's Y with file-
+    icon half-height ~16 px; a trunk station's line tracks run at
+    ``trunk.y + offset(line)`` for each line on the trunk.  When a
+    trunk station downstream of the icon (LR: higher X; RL: lower X)
+    has tracks at Y values inside ``[candidate_y - icon_half,
+    candidate_y + icon_half]``, the segment from the section's entry
+    port to that trunk crosses the icon.  Bump up by ``y_spacing``
+    steps until the band clears.
+
+    ``sibling_ys`` is a list of Ys already taken by other off-track
+    inputs in the same column - the bump must also clear those (within
+    one ``y_spacing`` slot) so two icons don't end up in the same row.
+
+    Capped at six steps to avoid runaway lifts.
+    """
+    if y_spacing <= 0:
+        return candidate_y
+
+    # Match the renderer's terminus icon height (32 px default; half=16)
+    # and add a small margin so the icon's stroke doesn't touch a track.
+    ICON_HALF = 16.0
+    MARGIN = 2.0
+    # Limit lift attempts so a pathological column doesn't pull the
+    # icon off-canvas.
+    MAX_STEPS = 6
+
+    # Find trunk stations in the same section whose row-bundle crosses
+    # the icon's X column.
+    trunk_offsets_at_x: list[float] = []
+    for sid in section.station_ids:
+        st2 = graph.stations.get(sid)
+        if st2 is None or st2.is_port or st2.is_hidden:
+            continue
+        if st2.id == off_st.id or sid in junction_ids:
+            continue
+        if st2.off_track or st2.is_terminus:
+            continue
+        # Only stations on the OTHER side of the icon (i.e. the trunk
+        # the entry port feeds) have tracks crossing the icon's column.
+        if section.direction == "LR" and st2.x <= off_st.x + 0.5:
+            continue
+        if section.direction == "RL" and st2.x >= off_st.x - 0.5:
+            continue
+        # Collect the line-track band Y range at the icon's column.
+        # Tracks run horizontally so each line's Y here equals
+        # st2.y + offset(line); offsets aren't computed at this phase
+        # but they're bounded by ``(n_lines - 1) * OFFSET_STEP`` total
+        # spread (centred on st2.y).  Use line-track extents only - no
+        # marker radius - because the icon is at a different X from st2
+        # so st2's pill doesn't intersect the icon's column.
+        lines = graph.station_lines(sid)
+        n_lines = len(lines)
+        if n_lines == 0:
+            continue
+        half_span = (n_lines - 1) * OFFSET_STEP / 2
+        trunk_offsets_at_x.append(st2.y - half_span)
+        trunk_offsets_at_x.append(st2.y + half_span)
+
+    sib_ys = list(sibling_ys or [])
+
+    if not trunk_offsets_at_x and not sib_ys:
+        return candidate_y
+
+    def _overlaps(y: float) -> bool:
+        top = y - ICON_HALF - MARGIN
+        bot = y + ICON_HALF + MARGIN
+        for tl_y_lo, tl_y_hi in zip(
+            trunk_offsets_at_x[::2], trunk_offsets_at_x[1::2]
+        ):
+            if not (bot < tl_y_lo or tl_y_hi < top):
+                return True
+        # Sibling clearance: keep at least 2 * ICON_HALF + MARGIN between
+        # icon centres in the same column so the icon bboxes don't
+        # touch.
+        for sy in sib_ys:
+            if abs(sy - y) < 2 * ICON_HALF + MARGIN:
+                return True
+        return False
+
+    y = candidate_y
+    steps = 0
+    while _overlaps(y) and steps < MAX_STEPS:
+        y -= y_spacing
+        steps += 1
+    return y
 
 
 def _lift_off_track_stations(
