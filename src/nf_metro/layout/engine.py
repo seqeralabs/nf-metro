@@ -446,6 +446,12 @@ def _compute_section_layout(
     # in unlifted sections are preserved.
     _top_align_row_bboxes_only(graph)
 
+    # Phase 13b: Compact row-mate sections so content sits just inside
+    # the bbox top edge.  Shifts an entire row's column group up by the
+    # smallest above-content slack, preserving trunk alignment.  Bbox
+    # heights shrink correspondingly so the empty top space disappears.
+    _compact_row_content_to_bbox_top(graph, section_y_padding, y_spacing)
+
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
@@ -1134,6 +1140,117 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                                 target_aligned = True
                     if len(connected_ys) < 2 and target_aligned:
                         _set_port_y(graph, pid, target_y)
+
+
+def _classify_section_station_ys(
+    graph: MetroGraph, section: Section
+) -> tuple[list[float], list[float], list[float]]:
+    """Return (on_track_ys, off_track_ys, port_ys) for a section's stations."""
+    on_track: list[float] = []
+    off_track: list[float] = []
+    ports: list[float] = []
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is None:
+            continue
+        if st.is_port:
+            ports.append(st.y)
+        elif getattr(st, "off_track", False):
+            off_track.append(st.y)
+        else:
+            on_track.append(st.y)
+    return on_track, off_track, ports
+
+
+def _compact_row_content_to_bbox_top(
+    graph: MetroGraph, section_y_padding: float, y_spacing: float
+) -> None:
+    """Pull row-mate sections up and shrink bottoms so content fits snugly.
+
+    Two-step compaction within each grid row's contiguous column run:
+
+    1. Per section, compute the allowable upward shift of on-track
+       content:
+
+       * bounded above by ``min(on_track_y) - bbox_y - section_y_padding``
+         so on-track content stays inside the bbox padding zone;
+       * bounded above by ``min(on_track_y) - max(off_track_y) - y_spacing_floor``
+         so on-track content stays clear of any lifted off-track band.
+
+       The uniform shift applied to the group is the minimum allowable
+       shift across same-row sections; that preserves the trunk-Y
+       alignment established by Phase 11ca.  Only on-track stations
+       and ports move; off-track stations stay anchored to the lifted
+       band Phase 13 placed them on.
+    2. Shrink each section's ``bbox_h`` so the bottom slack matches
+       ``section_y_padding`` (clamped so ports inside the section stay
+       within the bbox).
+
+    Sections with ``grid_row_span > 1`` are excluded because their
+    content spans multiple rows and the per-row frame doesn't apply.
+    """
+    row_sections: dict[int, list[Section]] = defaultdict(list)
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.grid_row < 0 or section.grid_row_span > 1:
+            continue
+        row_sections[section.grid_row].append(section)
+
+    # Minimum clearance between the off-track lift band and any
+    # on-track content shifted upward toward it.  Phase 13 installs a
+    # full ``y_spacing`` gap; compaction may shrink it to roughly one
+    # station-row's worth of clearance so labels still avoid the
+    # topmost line track.
+    off_track_gap = max(FONT_HEIGHT + STATION_RADIUS_APPROX * 2, y_spacing / 2)
+
+    for sections in row_sections.values():
+        sections_by_col = sorted(sections, key=lambda s: s.grid_col)
+        groups: list[list[Section]] = [[sections_by_col[0]]]
+        for s in sections_by_col[1:]:
+            if s.grid_col - groups[-1][-1].grid_col <= 1:
+                groups[-1].append(s)
+            else:
+                groups.append([s])
+
+        for group in groups:
+            classified = {s.id: _classify_section_station_ys(graph, s) for s in group}
+
+            allowed_shifts: list[float] = []
+            for section in group:
+                on_track_ys, off_track_ys, _ = classified[section.id]
+                if not on_track_ys:
+                    continue
+                on_track_min = min(on_track_ys)
+                shift = on_track_min - section.bbox_y - section_y_padding
+                if off_track_ys:
+                    shift = min(shift, on_track_min - max(off_track_ys) - off_track_gap)
+                allowed_shifts.append(max(0.0, shift))
+            delta = min(allowed_shifts) if allowed_shifts else 0.0
+
+            if delta >= 0.5:
+                for section in group:
+                    for sid in section.station_ids:
+                        st = graph.stations.get(sid)
+                        if st is None or getattr(st, "off_track", False):
+                            continue
+                        st.y -= delta
+                        port = graph.ports.get(sid)
+                        if port:
+                            port.y -= delta
+                    section.bbox_h = max(0.0, section.bbox_h - delta)
+
+            for section in group:
+                on_track_ys, off_track_ys, port_ys = _classify_section_station_ys(
+                    graph, section
+                )
+                content_ys = on_track_ys + off_track_ys
+                if not content_ys:
+                    continue
+                desired_bot = max(content_ys) + section_y_padding
+                if port_ys:
+                    desired_bot = max(desired_bot, max(port_ys))
+                new_h = desired_bot - section.bbox_y
+                if new_h < section.bbox_h - 0.5:
+                    section.bbox_h = max(0.0, new_h)
 
 
 def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:
