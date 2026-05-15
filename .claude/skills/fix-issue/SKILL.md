@@ -15,7 +15,7 @@ Structured workflow for fixing nf-metro GitHub issues in an isolated worktree.
 - micromamba: `/opt/homebrew/bin/micromamba` (macOS Apple Silicon codesign
   workaround). On other platforms, just `micromamba` if it's on PATH.
 
-## Phase 1: Understand the Issue
+## Step 1: Understand the Issue
 
 ```bash
 gh issue view <N> --repo pinin4fjords/nf-metro
@@ -23,7 +23,7 @@ gh issue view <N> --repo pinin4fjords/nf-metro
 
 Summarize the problem and proposed approach. Wait for user confirmation before proceeding.
 
-## Phase 2: Worktree + Environment Setup
+## Step 2: Worktree + Environment Setup
 
 ```bash
 # Worktree
@@ -39,7 +39,7 @@ pip install -e "/tmp/nf-metro-fix-<N>[docs]"
 
 All subsequent work happens inside `/tmp/nf-metro-fix-<N>`.
 
-## Phase 3: Implement the Fix
+## Step 3: Implement the Fix
 
 The shell cwd resets after each Bash call. Always chain `cd` into the worktree:
 
@@ -49,7 +49,7 @@ source ~/.local/bin/mm-activate nf-metro-fix-<N> && cd /tmp/nf-metro-fix-<N> && 
 
 Fix any failures before proceeding.
 
-## Phase 4: Visual Review
+## Step 4: Visual Review
 
 ### Primary method: CI render preview (recommended)
 
@@ -78,7 +78,7 @@ This is useful for quick iteration but does not replace the full CI gallery revi
 
 If you need a before/after comparison before pushing (e.g. risky change, user wants early feedback), use the `/render-topologies` skill.
 
-## Phase 5: Commit and PR
+## Step 5: Commit and PR
 
 Once tests pass:
 
@@ -102,7 +102,7 @@ EOF
 
 After CI posts the render preview link, ask the user to review it.
 
-## Phase 6: Cleanup
+## Step 6: Cleanup
 
 Offer to clean up (only if user agrees):
 
