@@ -481,76 +481,6 @@ def _apply_compact_section_consistency(ctx: _OffsetCtx) -> None:
                 ctx.offsets[(sid_s, slines[0])] = sec_offs[slines[0]]
 
 
-def _lines_continuing_to_consumer(graph: MetroGraph, port_id: str) -> set[str]:
-    """Return line IDs that continue from ``port_id`` to its closest
-    downstream consumer.
-
-    Walks outbound edges from ``port_id`` through any chained junctions
-    (stations in ``graph.junctions``) until reaching nodes that are
-    not junctions.  Among those terminal candidates, picks the one
-    closest to ``port_id`` along its exit direction (smallest forward
-    distance in the port's side direction, min Y delta as a tiebreaker)
-    and returns the set of line IDs whose forward walks land on it.
-
-    Lines reaching no non-junction node are excluded.
-    """
-    port_st = graph.stations.get(port_id)
-    port_obj = graph.ports.get(port_id)
-    if not port_st or not port_obj:
-        return set()
-
-    junctions = set(graph.junctions)
-    out_by_source: dict[str, list[tuple[str, str]]] = {}
-    for edge in graph.edges:
-        out_by_source.setdefault(edge.source, []).append((edge.target, edge.line_id))
-
-    line_terminal: dict[str, str] = {}
-    for start_tgt, start_lid in out_by_source.get(port_id, []):
-        node = start_tgt
-        seen: set[str] = {port_id}
-        while node in junctions and node not in seen:
-            seen.add(node)
-            nxt = None
-            for tgt, lid in out_by_source.get(node, []):
-                if lid == start_lid:
-                    nxt = tgt
-                    break
-            if nxt is None:
-                node = None
-                break
-            node = nxt
-        if node is None or node in junctions:
-            continue
-        line_terminal[start_lid] = node
-
-    if not line_terminal:
-        return set()
-
-    side = port_obj.side
-    px, py = port_st.x, port_st.y
-
-    def _forward_key(target_id: str) -> tuple[float, float]:
-        tst = graph.stations.get(target_id)
-        if not tst:
-            return (float("inf"), float("inf"))
-        if side == PortSide.RIGHT:
-            dist = tst.x - px
-        elif side == PortSide.LEFT:
-            dist = px - tst.x
-        elif side == PortSide.BOTTOM:
-            dist = tst.y - py
-        elif side == PortSide.TOP:
-            dist = py - tst.y
-        else:
-            dist = abs(tst.x - px) + abs(tst.y - py)
-        if dist < 0:
-            dist = float("inf")
-        return (dist, abs(tst.y - py))
-
-    closest_target = min(set(line_terminal.values()), key=_forward_key)
-    return {lid for lid, tgt in line_terminal.items() if tgt == closest_target}
-
-
 def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
     """Compute exit port offsets for TB and LR/RL sections.
 
@@ -623,32 +553,14 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         unique_ys = set(line_avg_y.values())
         if len(unique_ys) < 2:
             if trunk_feeder_id is not None:
-                through_lines = _lines_continuing_to_consumer(graph, port_id)
-                trunk_offs = {
-                    lid: ctx.offsets.get((trunk_feeder_id, lid), 0.0)
-                    for lid in line_feeders
-                }
-                if not through_lines or through_lines >= set(line_feeders):
-                    # No fan-out at the port: every line continues to a
-                    # single downstream consumer, so keep the trunk's
-                    # bundle ordering rather than inverting it.
-                    for lid in line_feeders:
-                        ctx.offsets[(port_id, lid)] = trunk_offs[lid]
-                else:
-                    # Fan-out: order by downstream consumer. The lines
-                    # continuing to the closest consumer occupy the top
-                    # slots (preserving the trunk's relative ordering);
-                    # remaining lines fan outward by descending trunk
-                    # offset so the diverging lines slot below the
-                    # through-bundle.
-                    def _key(lid: str) -> tuple[int, float]:
-                        if lid in through_lines:
-                            return (0, trunk_offs[lid])
-                        return (1, -trunk_offs[lid])
-
-                    ordered = sorted(line_feeders, key=_key)
-                    for i, lid in enumerate(ordered):
-                        ctx.offsets[(port_id, lid)] = i * ctx.offset_step
+                # Trunk feeder anchors all lines to one Y. Inherit its
+                # per-line offsets so the port keeps the trunk's bundle
+                # ordering instead of falling to definition order at
+                # reconcile time.
+                for lid in line_feeders:
+                    ctx.offsets[(port_id, lid)] = ctx.offsets.get(
+                        (trunk_feeder_id, lid), 0.0
+                    )
             continue
         sorted_lines = sorted(
             line_avg_y,
