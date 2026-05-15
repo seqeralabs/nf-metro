@@ -950,8 +950,10 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
             continue
         for edge in graph.edges:
             other_id = (
-                edge.target if edge.source == pid and edge.target in internal_ids
-                else edge.source if edge.target == pid and edge.source in internal_ids
+                edge.target
+                if edge.source == pid and edge.target in internal_ids
+                else edge.source
+                if edge.target == pid and edge.source in internal_ids
                 else None
             )
             if other_id is None:
@@ -997,9 +999,7 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
             if len(group) < 2:
                 continue
             trunks = {
-                s.id: t
-                for s in group
-                if (t := _section_trunk_y(graph, s)) is not None
+                s.id: t for s in group if (t := _section_trunk_y(graph, s)) is not None
             }
             if len(trunks) < 2:
                 continue
@@ -1044,8 +1044,10 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                     target_aligned = False
                     for edge in graph.edges:
                         other_id = (
-                            edge.target if edge.source == pid and edge.target in internal_ids
-                            else edge.source if edge.target == pid and edge.source in internal_ids
+                            edge.target
+                            if edge.source == pid and edge.target in internal_ids
+                            else edge.source
+                            if edge.target == pid and edge.source in internal_ids
                             else None
                         )
                         if other_id is None:
