@@ -998,6 +998,15 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
         for group in groups:
             if len(group) < 2:
                 continue
+            # Only realign when every LR-bearing section in the group
+            # shares the same bundle.  Differing bundles mean the row
+            # has no single trunk crossing all sections, so forcing a
+            # common Y just shifts content downward without any
+            # geometric gain.
+            bundles = [_section_bundle_lines(graph, s) for s in group]
+            non_empty = [b for b in bundles if b]
+            if not non_empty or any(b != non_empty[0] for b in non_empty):
+                continue
             trunks = {
                 s.id: t for s in group if (t := _section_trunk_y(graph, s)) is not None
             }
