@@ -1081,9 +1081,7 @@ def _resolve_station_collisions(
         # (insertion order in sub.stations) as a stable tiebreaker so the
         # earlier-defined station keeps its slot.
         order = {sid: i for i, sid in enumerate(sub.stations)}
-        stations.sort(
-            key=lambda s: (getattr(s, secondary), order.get(s.id, 0))
-        )
+        stations.sort(key=lambda s: (getattr(s, secondary), order.get(s.id, 0)))
         used: list[float] = []
         for s in stations:
             pos = getattr(s, secondary)
