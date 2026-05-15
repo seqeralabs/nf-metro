@@ -253,6 +253,114 @@ def test_compute_layout_captioned_off_track_clears_line_bundle():
     )
 
 
+def test_no_upward_inter_section_route_across_rowspan_neighbour():
+    """Inter-section bundles must not detour upward over rowspan neighbours.
+
+    Repro of the PR #271 regression on 04_directions / rnaseq_auto /
+    fold_fan_across: a TB-direction grid section with grid_row_span>1
+    sat next to row-mate LR sections.  Compaction lifted the TB
+    section's entry port upward (out of trunk Y) so the inter-section
+    bundle had to route upward across the section gap rather than
+    continuing horizontally along the row-mate trunk Y.
+
+    For every cross-section port-to-port edge that bridges adjacent
+    grid columns within the same grid row, the route's vertical
+    deflection at the boundary (exit_y - entry_y) must be bounded:
+    the bundle may step down to reach a target below it, but it
+    cannot step UP across the gap by more than one ``y_spacing`` --
+    that's the visible "lines route up unnecessarily" pattern.
+
+    Skips edges where the target is below the source (no upward
+    detour) and edges where the source section spans multiple grid
+    rows in its TB direction (which legitimately drops content down).
+    """
+    text = Path(__file__).parent.parent.joinpath("examples/guide/04_directions.mmd")
+    graph = parse_metro_mermaid(text.read_text())
+    y_spacing = 40.0
+    compute_layout(graph, y_spacing=y_spacing)
+
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if src is None or tgt is None:
+            continue
+        if not (src.is_port and tgt.is_port):
+            continue
+        ssec = graph.sections.get(src.section_id)
+        tsec = graph.sections.get(tgt.section_id)
+        if ssec is None or tsec is None or ssec is tsec:
+            continue
+        # Only check adjacent same-row neighbours (where the trunk Y is
+        # expected to flow horizontally).  Skip TB rowspan source
+        # sections because they legitimately drop content down across
+        # multiple grid rows.
+        if ssec.grid_row != tsec.grid_row or abs(ssec.grid_col - tsec.grid_col) > 1:
+            continue
+        if ssec.direction == "TB" and ssec.grid_row_span > 1:
+            continue
+        # Upward detour: src.y > tgt.y means the bundle has to climb
+        # from exit to entry across the gap.  Anything bigger than a
+        # half-spacing rounds up to "visibly kinked upward".
+        upward = src.y - tgt.y
+        threshold = y_spacing / 2
+        assert upward <= threshold, (
+            f"edge {edge.source}->{edge.target} routes upward by {upward:.1f}px "
+            f"between adjacent same-row sections {ssec.id}->{tsec.id} "
+            f"(exit_y={src.y:.1f}, entry_y={tgt.y:.1f}, "
+            f"threshold={threshold}); "
+            f"inter-section bundle should stay roughly horizontal"
+        )
+
+
+def test_section_content_y_stable_under_neutral_layout():
+    """TB rowspan>1 content must keep its natural Y under compaction.
+
+    Sanity check for the PR #271 regression: when a TB section spans
+    multiple grid rows, its content stations occupy a vertical column
+    spanning the row range.  Compaction must NOT lift the column up to
+    the bbox top, because doing so:
+
+      1. moves the LAST TB station above the bottom-row trunk Y where
+         it should align with the row-mate entry port,
+      2. forces the row-0 row-mates to route their bundle upward to
+         meet the TB section's lifted entry.
+
+    Uses the 04_directions fixture (TB rowspan=2 postprocessing
+    section).  The TB section's middle/last stations should stay at
+    their natural rowspan-aligned Ys: the column's Y span must match
+    the row trunk-Y span (top row trunk Y to bottom row trunk Y),
+    not be compacted to the bbox top.
+    """
+    text = Path(__file__).parent.parent.joinpath("examples/guide/04_directions.mmd")
+    graph = parse_metro_mermaid(text.read_text())
+    y_spacing = 40.0
+    compute_layout(graph, y_spacing=y_spacing)
+    post = graph.sections["postprocessing"]
+    assert post.grid_row_span == 2, "fixture invariant: postprocessing rowspan=2"
+    assert post.direction == "TB", "fixture invariant: postprocessing TB"
+    # rna_analysis (row 0) and dna_analysis (row 1) are the LR
+    # row-mates that share the inter-section bundle with postprocessing.
+    row0_trunk = graph.stations["star"].y  # rna_analysis row 0 trunk
+    row1_trunk = graph.stations["bwa"].y  # dna_analysis row 1 trunk
+    # The last TB station (bedtools) lands at the bottom of the column;
+    # natural placement puts it at or below the row 1 trunk Y so the
+    # inter-section bundle from row 0 to postprocessing.last doesn't
+    # have to route upward.  Compaction lifts bedtools above row 1
+    # trunk Y, which is the visible regression.
+    bedtools_y = graph.stations["bedtools"].y
+    # Tolerance: bedtools may be slightly above row 1 trunk by less
+    # than y_spacing/2 due to bbox padding accounting, but anything
+    # more than y_spacing above is the compaction regression.
+    above_row1 = row1_trunk - bedtools_y
+    assert above_row1 <= y_spacing, (
+        f"TB rowspan section's bottom station shifted upward: "
+        f"bedtools.y={bedtools_y:.1f} row1_trunk={row1_trunk:.1f} "
+        f"(row0_trunk={row0_trunk:.1f}, y_spacing={y_spacing}); "
+        f"bedtools is {above_row1:.1f}px above row1_trunk -- "
+        f"compaction lifted TB content above its natural row span"
+    )
+
+
 # --- Section-first layout tests ---
 
 

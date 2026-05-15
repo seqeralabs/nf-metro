@@ -1186,14 +1186,18 @@ def _compact_row_content_to_bbox_top(
        ``section_y_padding`` (clamped so ports inside the section stay
        within the bbox).
 
-    Row-spanning sections (``grid_row_span > 1``) are included so their
-    content is compacted to their bbox top and the bbox shrinks to fit;
-    the rowspan was already consumed by earlier placement phases and no
-    downstream phase relies on the inflated height.
+    Row-spanning sections (``grid_row_span > 1``) are excluded.  Their
+    extra height is consumed by either (a) TB content flowing down to
+    the next spanned row, or (b) LR trunk-Y alignment with the spanned
+    rows.  Compacting them would yank stations above the inter-section
+    bundle Y of the rowspan-1 cohort and force the next section's
+    entry port to route upward to reach the new content Y.
     """
     row_sections: dict[int, list[Section]] = defaultdict(list)
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.grid_row < 0:
+            continue
+        if section.grid_row_span > 1:
             continue
         row_sections[section.grid_row].append(section)
 
