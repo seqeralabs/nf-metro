@@ -30,11 +30,11 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _Y_TOL = 1.0
 
 
-def _layout(fixture: str, **kwargs) -> MetroGraph:
+def _layout(fixture: str, *, center_ports: bool = True, **kwargs) -> MetroGraph:
     """Parse a fixture file and run the full layout pipeline."""
     text = (FIXTURES / fixture).read_text()
     graph = parse_metro_mermaid(text)
-    graph.center_ports = True
+    graph.center_ports = center_ports
     compute_layout(graph, **kwargs)
     return graph
 
@@ -659,21 +659,56 @@ def _icon_half_height(graph: MetroGraph) -> float:
     return 16.0
 
 
+_PARAM_SETS = [
+    pytest.param(
+        {"center_ports": True, "y_spacing": 55, "x_spacing": 70},
+        id="savepoint-cp",
+    ),
+    pytest.param(
+        {"center_ports": False, "y_spacing": 40, "x_spacing": 60},
+        id="default-no-cp",
+    ),
+]
+
+
 @pytest.mark.parametrize(
-    "fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"]
+    "fixture,params",
+    [
+        # Existing coverage: both fixtures at default params.
+        pytest.param("da_pipeline.mmd", {}, id="da-default"),
+        pytest.param("rnaseq_sections.mmd", {}, id="rnaseq-default"),
+        # New: DA fixture at the savepoint and bad-param sets where the
+        # icon-vs-bbox-top overflow appears.  rnaseq is excluded at non-
+        # default params because it has a separate pre-existing fastp
+        # marker-above-bbox issue tracked elsewhere.
+        pytest.param(
+            "da_pipeline.mmd",
+            {"center_ports": True, "y_spacing": 55, "x_spacing": 70},
+            id="da-savepoint-cp",
+        ),
+        pytest.param(
+            "da_pipeline.mmd",
+            {"center_ports": False, "y_spacing": 40, "x_spacing": 60},
+            id="da-default-no-cp",
+        ),
+    ],
 )
-def test_section_bbox_contains_all_content(fixture):
+def test_section_bbox_contains_all_content(fixture, params):
     """Every section's bbox must contain its on-track stations and any
-    off-track input icons.  Catches the regression where an off-track
-    input is re-anchored above the section's bbox top so the icon
-    spills outside the section background.
+    off-track / terminus icons.  Catches regressions where an icon
+    (off-track input or single-icon terminus) is placed near the bbox
+    top so the icon spills above the section background, e.g. the bad-
+    params section 1 where ``gtf_in`` lands at ``y = bbox_y + 2`` and
+    the 32 px file icon extends 14 px above the bbox top.
 
     Margin: on-track station markers reach ~9.5 px above the centre,
-    file-input icons reach ~16 px above the centre.  We assert
+    file icons reach ``terminus_height / 2 = 16`` px above the centre
+    (both off-track inputs and on-track terminus stations render the
+    same icon at ``station.y + bundle_mid``).  We assert
     ``station.y - reach >= bbox_y - 0.5`` (sub-pixel tolerance) and
     ``station.y + reach <= bbox_y + bbox_h + 0.5``.
     """
-    graph = _layout(fixture)
+    graph = _layout(fixture, **params)
     junction_ids = set(graph.junctions)
     icon_half = _icon_half_height(graph)
     marker_half = 9.5  # station marker height / 2
@@ -685,9 +720,10 @@ def test_section_bbox_contains_all_content(fixture):
             st = graph.stations.get(sid)
             if st is None or st.is_port or sid in junction_ids:
                 continue
-            # Use icon half-height for off-track (file-input) stations,
-            # marker half-height otherwise.
-            half = icon_half if st.off_track else marker_half
+            # Icon half-height for any station rendered with a file
+            # icon (off-track input or terminus); marker half otherwise.
+            uses_icon = st.off_track or st.is_terminus
+            half = icon_half if uses_icon else marker_half
             top = st.y - half
             bot = st.y + half
             assert top >= section.bbox_y - 0.5, (
@@ -1907,3 +1943,241 @@ def test_row_gap_accommodates_bypass(fixture):
         f"{fixture}: row gap must be >= section_y_gap for every "
         f"column-overlapping pair: " + "; ".join(offenders)
     )
+
+
+# ---------------------------------------------------------------------------
+# Icons and station markers must not be crossed by unrelated line tracks
+# ---------------------------------------------------------------------------
+
+# Param sets used by the param-robust invariants below.  Existing
+# invariants stay on the default (savepoint-cp) set; the param-robust
+# tests run on both so a regression visible only at non-savepoint
+# spacing is still caught.
+_DA_PARAM_SETS = [
+    pytest.param(
+        {"center_ports": True, "y_spacing": 55, "x_spacing": 70},
+        id="savepoint-cp",
+    ),
+    pytest.param(
+        {"center_ports": False, "y_spacing": 40, "x_spacing": 60},
+        id="default-no-cp",
+    ),
+]
+
+
+def _icon_x_extent(graph: MetroGraph, station, section) -> tuple[float, float]:
+    """Approximate the icon's rendered X span for an off-track or
+    single-icon terminus station.  Mirrors the renderer:
+    icon_cx = station.x +/- (radius + ICON_STATION_GAP + width/2).
+    """
+    # Defaults from render.style: station_radius=5, icon_gap=5,
+    # terminus_width=28.  Match the renderer's icon placement (source
+    # icons go left, sinks go right in LR; flipped in RL).
+    r = 5.0
+    icon_gap = 5.0
+    icon_half_w = 14.0
+    icon_step = icon_gap + r + icon_half_w
+    is_source = not any(e.target == station.id for e in graph.edges)
+    if section.direction == "RL":
+        icons_go_right = is_source
+    else:
+        icons_go_right = not is_source
+    if icons_go_right:
+        cx = station.x + icon_step
+    else:
+        cx = station.x - icon_step
+    return cx - icon_half_w, cx + icon_half_w
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+@pytest.mark.parametrize("params", _DA_PARAM_SETS)
+def test_no_icon_overlaps_line_path(fixture, params):
+    """An off-track / single-icon terminus's rendered file icon must
+    not be crossed by routed line segments.
+
+    The renderer places file icons offset from the station pill;
+    when the icon sits where an unrelated line's routed polyline
+    passes through, the rendered SVG shows the track crossing the
+    icon - the bad-params section 3 regression where ``net_in``'s
+    icon (y=132.5..164.5, x=960..988) is crossed by trunk lines
+    running at y=143..149 from the section entry port to ``gsea``.
+
+    Uses the actual routed paths (``route_edges``) so we measure the
+    same geometry the renderer emits, not a guess at trunk extents.
+    Lines that this station itself emits or consumes (its own routes)
+    are excluded because they LEGITIMATELY enter the icon column.
+    """
+    from nf_metro.layout.routing import route_edges
+    graph = _layout(fixture, **params)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    icon_half = _icon_half_height(graph)
+    XY_TOL = 1.0
+
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden:
+            continue
+        icon_count = len(st.terminus_labels or [])
+        if not (st.off_track or (st.is_terminus and icon_count == 1)):
+            continue
+        section = graph.sections.get(st.section_id)
+        if section is None or section.direction not in ("LR", "RL"):
+            continue
+        icon_top = st.y - icon_half
+        icon_bot = st.y + icon_half
+        icon_xl, icon_xr = _icon_x_extent(graph, st, section)
+
+        for r in routes:
+            if r.edge.source == sid or r.edge.target == sid:
+                continue  # icon's own connection
+            src = graph.stations.get(r.edge.source)
+            tgt = graph.stations.get(r.edge.target)
+            if src is None or tgt is None:
+                continue
+            # Confine to routes whose endpoints are in the same section
+            # as the icon (cross-section routes pass through inter-section
+            # gaps, not inside the section).
+            src_sec = src.section_id
+            tgt_sec = tgt.section_id
+            if st.section_id not in (src_sec, tgt_sec):
+                continue
+            pts = r.points
+            for i in range(len(pts) - 1):
+                x1, y1 = pts[i]
+                x2, y2 = pts[i + 1]
+                # We care about horizontal-ish segments that cross the
+                # icon X span at a Y inside the icon bbox.  Skip strictly
+                # vertical segments (they may legitimately go around).
+                if abs(x2 - x1) < 1e-3:
+                    continue
+                # Segment X range.
+                xlo, xhi = (x1, x2) if x1 <= x2 else (x2, x1)
+                if xhi < icon_xl + XY_TOL or xlo > icon_xr - XY_TOL:
+                    continue
+                # Interpolate Y at the icon-overlap X midpoint.
+                xmid = max(xlo, icon_xl + XY_TOL)
+                xmid = min(xmid, icon_xr - XY_TOL)
+                if abs(x2 - x1) < 1e-6:
+                    seg_y = (y1 + y2) / 2
+                else:
+                    t = (xmid - x1) / (x2 - x1)
+                    t = max(0.0, min(1.0, t))
+                    seg_y = y1 + t * (y2 - y1)
+                if icon_top + XY_TOL <= seg_y <= icon_bot - XY_TOL:
+                    raise AssertionError(
+                        f"{fixture} [{params}]: icon for station "
+                        f"{sid!r} (y={st.y:.1f}, "
+                        f"bbox y={icon_top:.1f}..{icon_bot:.1f}, "
+                        f"x={icon_xl:.1f}..{icon_xr:.1f}) is "
+                        f"crossed by route {r.edge.source}->{r.edge.target} "
+                        f"line {r.line_id!r} at seg "
+                        f"({x1:.1f},{y1:.1f})->({x2:.1f},{y2:.1f}) "
+                        f"crossing at y={seg_y:.1f}"
+                    )
+
+
+# ---------------------------------------------------------------------------
+# Fan-out branches in the same column must land at distinct Y rows
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+@pytest.mark.parametrize("params", _DA_PARAM_SETS)
+def test_fanout_branches_at_distinct_y(fixture, params):
+    """When a station fans out to multiple in-section successors at the
+    same X column, each branch must land at a distinct Y.
+
+    Catches the bad-params reporting regression where Quarto fans out
+    to both ``bundle`` (chain continues to ``bundle_zip``) and
+    ``report_html`` (terminus).  ``_align_terminus_to_upstream`` pinned
+    ``report_html`` back to Quarto's Y while ``bundle`` was already at
+    that Y, so the report_html terminus icon overlapped ``bundle``'s
+    station marker at the same (x, y) point.
+    """
+    graph = _layout(fixture, **params)
+    # Group same-section, same-source successors by their X column.
+    by_source_col: dict[tuple[str, float], list[str]] = defaultdict(list)
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if src is None or tgt is None:
+            continue
+        if src.is_port or tgt.is_port or tgt.is_hidden:
+            continue
+        if src.section_id != tgt.section_id:
+            continue
+        by_source_col[(edge.source, round(tgt.x, 1))].append(edge.target)
+    for (src_id, col_x), targets in by_source_col.items():
+        unique_targets = list(dict.fromkeys(targets))
+        if len(unique_targets) < 2:
+            continue
+        ys = [
+            (tid, graph.stations[tid].y) for tid in unique_targets
+        ]
+        for i, (t1, y1) in enumerate(ys):
+            for t2, y2 in ys[i + 1:]:
+                assert abs(y1 - y2) > _Y_TOL, (
+                    f"{fixture} [{params}]: fan-out from {src_id!r} to "
+                    f"{t1!r} (y={y1}) and {t2!r} (y={y2}) at column "
+                    f"x={col_x} - both land at the same Y row"
+                )
+
+
+# ---------------------------------------------------------------------------
+# Bypass clearance vs lower-section header
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+@pytest.mark.parametrize("params", _DA_PARAM_SETS)
+def test_bypass_clearance_from_lower_section(fixture, params):
+    """A bypass virtual station that sits below a section's bbox bottom
+    must leave at least ``SECTION_Y_GAP`` of clearance to the lower
+    section's bbox top.
+
+    Catches the param-dependent regression where the bypass routing
+    grows the upper section's effective extent (via bypass Y) below
+    bbox_bottom, but the lower row was placed using only the bbox-bottom
+    geometry.  The lower section's header then visually crowds the
+    bypass V.
+    """
+    from nf_metro.layout.constants import SECTION_Y_GAP
+
+    graph = _layout(fixture, **params)
+    bypass_stations = [
+        st for sid, st in graph.stations.items()
+        if st.is_hidden and sid.startswith("__bypass_")
+    ]
+    if not bypass_stations:
+        pytest.skip(f"{fixture}: no bypass virtual stations")
+
+    tol = 1.0
+    for v in bypass_stations:
+        v_sec = graph.sections.get(v.section_id)
+        if v_sec is None or v_sec.bbox_h <= 0:
+            continue
+        v_sec_bot = v_sec.bbox_y + v_sec.bbox_h
+        # Effective "lowest extent" of the upper section is the larger of
+        # the bbox bottom and the bypass V's Y.
+        effective_bot = max(v_sec_bot, v.y)
+        # Find sections in the row immediately below this section, in
+        # overlapping columns.
+        v_end_row = v_sec.grid_row + v_sec.grid_row_span - 1
+        for ls in graph.sections.values():
+            if ls.bbox_h <= 0:
+                continue
+            if ls.grid_row != v_end_row + 1:
+                continue
+            # Column overlap test.
+            a_s, a_e = v_sec.grid_col, v_sec.grid_col + v_sec.grid_col_span - 1
+            b_s, b_e = ls.grid_col, ls.grid_col + ls.grid_col_span - 1
+            if a_e < b_s or b_e < a_s:
+                continue
+            gap = ls.bbox_y - effective_bot
+            assert gap + tol >= SECTION_Y_GAP, (
+                f"{fixture} [{params}]: bypass V at y={v.y:.1f} in "
+                f"section {v_sec.id!r} (bot={v_sec_bot:.1f}) "
+                f"crowds lower section {ls.id!r} (top={ls.bbox_y:.1f}); "
+                f"effective_bot={effective_bot:.1f}, gap={gap:.1f} "
+                f"< SECTION_Y_GAP={SECTION_Y_GAP}"
+            )
