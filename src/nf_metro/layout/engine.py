@@ -1648,14 +1648,19 @@ def _resolve_source_section_id(
 
 
 def _resolve_source_xy(
-    graph: MetroGraph, edge_source: str, junction_ids: set[str]
+    graph: MetroGraph,
+    edge_source: str,
+    junction_ids: set[str],
+    _seen: set[str] | None = None,
 ) -> tuple[float, float] | None:
     """Return effective (x, y) for an edge source.
 
     For port stations, returns coordinates directly.  For junctions,
     derives coordinates from the feeding exit port, mirroring
     ``_position_junctions`` logic so that entry-port alignment does
-    not depend on junctions being pre-positioned.
+    not depend on junctions being pre-positioned.  Recurses through
+    chained junctions (junction-to-junction edges) to find the
+    underlying exit port.
     """
     src = graph.stations.get(edge_source)
     if not src:
@@ -1663,9 +1668,19 @@ def _resolve_source_xy(
     if edge_source not in junction_ids:
         return src.x, src.y
 
+    if _seen is None:
+        _seen = set()
+    if edge_source in _seen:
+        return src.x, src.y
+    _seen.add(edge_source)
+
     # Junction: find the feeding exit port and compute placement.
+    chained: list[str] = []
     for e in graph.edges:
         if e.target != edge_source:
+            continue
+        if e.source in junction_ids:
+            chained.append(e.source)
             continue
         exit_st = graph.stations.get(e.source)
         if not exit_st or not exit_st.is_port:
@@ -1681,6 +1696,12 @@ def _resolve_source_xy(
             return exit_st.x - JUNCTION_MARGIN, exit_st.y
         else:
             return exit_st.x + JUNCTION_MARGIN, exit_st.y
+
+    # Recurse through chained junctions to find the underlying exit port.
+    for js in chained:
+        resolved = _resolve_source_xy(graph, js, junction_ids, _seen)
+        if resolved is not None and resolved != (0.0, 0.0):
+            return resolved
 
     # Fallback: use junction station's current coordinates.
     return src.x, src.y
