@@ -1,12 +1,15 @@
 ---
 name: pipeline-metro-diagram
-description: Author and iterate on an nf-metro diagram for an nf-core (or any Nextflow) pipeline. Use whenever the user wants to create a new metro map for a pipeline, set up the `assets/metro_map.mmd` + `docs/dev/metro_map.md` scaffolding, or iterate on an existing pipeline mmd to improve fidelity to the workflow code or visual clarity. Trigger on phrases like "make a metro map for pipeline X", "create an nf-metro diagram for Y", "set up nf-metro on my pipeline", "iterate on the mmd for pipeline Z", "the metro map for funcscan doesn't match the workflow", or any request that involves writing pipeline-level `.mmd` files (as opposed to gallery / fixture rendering, which is `render-topologies`).
+description: Author the mmd content for a pipeline metro map and drive fixes to nf-metro itself when a new pipeline exposes layout bugs. Use whenever the user is iterating on a pipeline's .mmd to improve fidelity to the workflow code or visual clarity, OR when the diagram is correct but nf-metro produces a bad layout that needs a code fix in nf-metro. Trigger on phrases like "make a metro map for pipeline X", "iterate on the mmd for pipeline Z", "the metro map for funcscan doesn't match the workflow", or "nf-metro is producing a kink/overlap/breeze-past on my pipeline diagram". For the mechanical pipeline-repo setup (assets/, docs/dev/metro_map.md, render commands, README swap), see the separate `pipeline-metro-setup` skill. For nf-metro's own gallery regression testing, see `render-topologies`.
 ---
 
-# Authoring a Pipeline Metro Map
+# Authoring a Pipeline Metro Map and Driving nf-metro Fixes From It
 
-Captures the workflow for designing, drafting, and iterating on an nf-metro
-`assets/metro_map.mmd` for a real Nextflow pipeline (typically nf-core).
+Captures the workflow for designing the mmd content for a Nextflow pipeline
+metro map, and for fixing nf-metro itself when the new pipeline exposes a
+layout case nf-metro hasn't seen before. Out of scope: pipeline-repo
+mechanical setup (file paths, render commands, README) — see the
+`pipeline-metro-setup` skill.
 
 ## Scope and relation to other skills
 
@@ -119,31 +122,14 @@ see `docs/guide.md` in this repo for the full directive reference.
 Render, inspect, edit. Repeat until the diagram both *matches the pipeline*
 and *reads cleanly*.
 
-### Render command
+### Render iteratively while drafting
 
-Start with rnaseq-style params (the canonical nf-core baseline). Use the
-`--debug` flag on early iterations to see grid lines and bbox boundaries —
-this exposes most layout problems instantly.
+Render the mmd often while editing. Use `--debug` on early iterations to see
+grid lines and bbox boundaries — this exposes most layout problems instantly.
 
-```bash
-nf-metro render assets/metro_map.mmd \
-  -o /tmp/out.svg \
-  --theme light --x-spacing 60 --y-spacing 40 --debug
-```
-
-For a more visually relaxed diagram (or one with many fan-outs / sections
-that crowd at the default spacing), use the savepoint-quality params:
-
-```bash
-nf-metro render assets/metro_map.mmd \
-  -o /tmp/out.svg \
-  --theme light --x-spacing 70 --y-spacing 55 \
-  --no-straight-diamonds --line-order definition --center-ports
-```
-
-`--line-order definition` keeps lines stacked in the order they appear in the
-`%%metro line:` directives, which usually reads more naturally than the
-default heuristic.
+Param choice for iteration is its own topic — see the `pipeline-metro-setup`
+skill for the canonical nf-core param baselines and when to override them.
+For pure mmd authoring, any consistent param set works.
 
 ### What to look for in each render
 
@@ -212,20 +198,19 @@ Captured from real authoring sessions:
 - **Stacking labels**: when many stations share the same X coordinate, their
   labels stack. This is often fine and reads cleaner than staggered placement.
 
-## Quick reference: the differentialabundance map
+## Quick reference: the differentialabundance mmd
 
-A worked example sits at
-`~/projects/differentialabundance-metro/assets/metro_map.mmd` with the
-rendered images alongside in `docs/images/`. It exercises:
+A worked-example mmd is in the differentialabundance pipeline repo. It
+exercises:
 
-- 4 study-type lines (rnaseq, affy, maxquant, geo)
+- 4 study-type lines (rnaseq, affy, maxquant, geo) with distinct colours
 - 5 sections with explicit `%%metro grid:` placement
-- A 2-row rowspan on `data_prep` to balance against two half-height sections
+- A 2-row rowspan on the data-import section to balance against two
+  half-height sections
 - File-input stations with `%%metro file:` and `%%metro off_track:` for
   optional inputs
-- `--line-order definition` and `--center-ports` for the savepoint render
 
-Use it as a template for a new pipeline with multiple study-type branches.
+Useful as a template for a new pipeline with multiple study-type branches.
 
 ---
 
@@ -375,11 +360,8 @@ PR may only become visible later. The triage workflow:
    commit on its branch), not as a top-of-stack bolt-on PR.
 4. Re-vet the modified PR + all downstream PRs to confirm no new issues.
 
-## Step 11: Set up the new pipeline to ship the map
+## Once the diagram reads right
 
-Once the mmd reads right, replicate the nf-core/rnaseq tooling pattern in
-the pipeline repo (`assets/metro_map.mmd`, `docs/dev/metro_map.md`, the
-docs/images outputs, the pip install line). That's a separate skill —
-see the `pipeline-metro-setup` skill in this repo for the template and
-the bridge pattern (pinning to a named branch of your nf-metro fork while
-your fix chain is in flight).
+Hand off to the `pipeline-metro-setup` skill for wiring the rendered map
+into the pipeline repo (file layout, render commands, README swap,
+CHANGELOG entry, install-line pinning while a fix chain is in flight).
