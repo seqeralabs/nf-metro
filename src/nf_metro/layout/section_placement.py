@@ -681,9 +681,7 @@ def _position_ports_on_boundary(
         if free_axis == "y" and port is not None and not port.is_entry:
             anchor = _find_downstream_bundle_y(pid, section, graph)
         if anchor is None:
-            anchor = _find_connected_internal_coord(
-                pid, section, graph, free_axis
-            )
+            anchor = _find_connected_internal_coord(pid, section, graph, free_axis)
         if free_axis == "y":
             default = section.bbox_y + section.bbox_h / 2
         else:
@@ -776,9 +774,7 @@ def _find_downstream_bundle_y(
         ds = sections.get(ep.section_id)
         if not ds or ds.grid_row != same_row:
             continue
-        ds_internal = (
-            set(ds.station_ids) - set(ds.entry_ports) - set(ds.exit_ports)
-        )
+        ds_internal = set(ds.station_ids) - set(ds.entry_ports) - set(ds.exit_ports)
         targets: dict[str, set[str]] = {}
         for edge in edges_by_source.get(eid, ()):
             if edge.target not in ds_internal:
