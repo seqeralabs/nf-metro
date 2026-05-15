@@ -2113,6 +2113,13 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
     source station.  When the downstream station has exactly one in-
     section predecessor, snap it back onto the source's Y so its file
     icon sits level with the station it follows.
+
+    Skips the pin when the target Y is already occupied by a sibling
+    in the same X column: when a source fans out to a chain station
+    (``bundle -> bundle_zip``) AND a terminus (``report_html``), pulling
+    the terminus to the source's Y collides with the chain station that
+    sits there.  Leaving the terminus at its grid Y preserves visual
+    separation; the diagonal connector to the source is acceptable.
     """
     for section in graph.sections.values():
         if section.direction not in ("LR", "RL"):
@@ -2138,6 +2145,23 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
                 continue
             src = graph.stations[next(iter(preds))]
             if abs(src.y - st.y) < 0.5:
+                continue
+            # Collision check: another non-port, non-hidden station in
+            # the same column already at src.y means pinning would put
+            # ``st`` on top of it.
+            collision = False
+            for sib_sid in section.station_ids:
+                if sib_sid == sid:
+                    continue
+                sib = graph.stations.get(sib_sid)
+                if sib is None or sib.is_port or sib.is_hidden:
+                    continue
+                if abs(sib.x - st.x) > 0.5:
+                    continue
+                if abs(sib.y - src.y) < 0.5:
+                    collision = True
+                    break
+            if collision:
                 continue
             st.y = src.y
 
