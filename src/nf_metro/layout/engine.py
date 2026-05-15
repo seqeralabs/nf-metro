@@ -63,6 +63,10 @@ Tests pass ``validate=True`` to catch cross-phase corruption that would
 otherwise only surface as subtle visual defects.
 """
 
+_ICON_HALF: float = 16.0
+"""Half-height of a terminus file icon, used as vertical clearance when
+lifting source stations toward a section's bbox top."""
+
 
 class PhaseInvariantError(Exception):
     """Raised when a layout phase produces invalid intermediate state."""
@@ -477,7 +481,7 @@ def _compute_section_layout(
     # source inputs (file icons with no inbound edges), lift the
     # nearest-to-trunk sources into the empty top band so the section
     # is bottom- and top-weighted instead of stacked below the trunk.
-    _fan_source_inputs_upward(graph, section_y_padding, y_spacing)
+    _fan_source_inputs_upward(graph, y_spacing)
 
     # Phase 13e: Snap all station/port Ys to a per-section y_spacing
     # grid.  Trunk-Y align, port-snap, and the row compaction/fan
@@ -1491,9 +1495,7 @@ def _fan_free_content_upward(
             graph.stations[sid].y = anchor_y - i * y_spacing
 
 
-def _fan_source_inputs_upward(
-    graph: MetroGraph, section_y_padding: float, y_spacing: float
-) -> None:
+def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
     """Fill empty top space by lifting source-input chains above the trunk.
 
     Companion to ``_fan_free_content_upward`` for sections whose entry
@@ -1514,11 +1516,17 @@ def _fan_source_inputs_upward(
     """
     if not getattr(graph, "_explicit_grid", None):
         return
+
+    # Reverse-adjacency built once: avoids scanning graph.edges for every
+    # source candidate's "no inbound edges" check.
+    in_edges: dict[str, set[str]] = {}
+    out_edges: dict[str, set[str]] = {}
+    for e in graph.edges:
+        in_edges.setdefault(e.target, set()).add(e.source)
+        out_edges.setdefault(e.source, set()).add(e.target)
+
     for section in graph.sections.values():
-        if (
-            section.bbox_h <= 0
-            or section.direction not in ("LR", "RL")
-        ):
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
         if any(
             getattr(graph.stations.get(sid), "off_track", False)
@@ -1544,78 +1552,60 @@ def _fan_source_inputs_upward(
             if round(graph.stations[sid].x, 3) == entry_x
         ]
         trunks = [
-            s for s in entry_col
-            if set(graph.station_lines(s)) == bundle
+            s for s in entry_col if set(graph.station_lines(s)) == bundle
         ]
         if len(trunks) != 1:
             continue
         trunk_sid = trunks[0]
         trunk_y = graph.stations[trunk_sid].y
 
-        # Sources: entry-column siblings of the trunk with no inbound
-        # edges and a strict-subset line set.  These are file-input
-        # icons (or input-only stations) that carry one or two lines.
         sources = [
             s for s in entry_col
             if s != trunk_sid
-            and set(graph.station_lines(s))
+            and graph.station_lines(s)
             and set(graph.station_lines(s)) < bundle
-            and not any(e.target == s for e in graph.edges)
+            and not in_edges.get(s)
             and graph.stations[s].y > trunk_y - 0.5
         ]
         if len(sources) < 2:
             continue
 
-        # Cap the lift so the topmost lifted station stays inside the
-        # bbox with a quarter-slot margin.  ``section_y_padding`` is
-        # ignored here because compaction already pulled row mates as
-        # tight as their off-track inputs allow; further padding would
-        # strand empty top space that this phase is meant to fill.
-        # When the lifted source is rendered with a file icon (any
-        # terminus station), reserve an additional icon_half so the
-        # icon's vertical extent fits inside the bbox.
-        ICON_HALF = 16.0
-        any_terminus = any(
-            graph.stations[s].is_terminus for s in sources
-        )
-        top_margin = y_spacing / 4 + (ICON_HALF if any_terminus else 0.0)
+        # Reserve icon_half when any source renders as a file icon so the
+        # icon's vertical extent stays inside the bbox.
+        any_terminus = any(graph.stations[s].is_terminus for s in sources)
+        top_margin = y_spacing / 4 + (_ICON_HALF if any_terminus else 0.0)
         slack = trunk_y - section.bbox_y - top_margin
         slots = int((slack + 0.5) // y_spacing)
         if slots < 1:
             continue
-        # Lift at most floor(n_sources / 2) so a majority of sources
-        # stay at or below the trunk.  Keeps the bottom-heavy ordering
-        # when only a couple of sources can fit above.
-        n_lift = min(slots, max(0, len(sources) // 2))
+        # Keep at least half the sources at or below the trunk so the
+        # section stays bottom-weighted when only a couple fit above.
+        n_lift = min(slots, len(sources) // 2)
         if n_lift == 0:
             continue
 
         sources.sort(key=lambda s: graph.stations[s].y)
-        section_internal_set = set(internal_ids)
+        internal_set = set(internal_ids)
         for i, src in enumerate(sources[:n_lift], 1):
             new_y = trunk_y - i * y_spacing
             delta = new_y - graph.stations[src].y
             if abs(delta) < 0.5:
                 continue
             graph.stations[src].y = new_y
-            # Walk a strictly linear consumer chain: each step requires
-            # a single inbound edge from the previous link, an identical
-            # line set, and section-internal placement.  Stop on fan-in
-            # (consumer has another feeder) or line-set change.
+            # Drag a strictly linear consumer chain so per-line tracks
+            # stay straight from icon to trunk junction.
             cur = src
+            src_lines = set(graph.station_lines(src))
             while True:
-                # De-dup parallel edges by target/source: each (src,tgt)
-                # pair may have one edge per line.
-                outs = {e.target for e in graph.edges if e.source == cur}
+                outs = out_edges.get(cur, set())
                 if len(outs) != 1:
                     break
                 nxt = next(iter(outs))
-                if nxt not in section_internal_set:
+                if nxt not in internal_set:
                     break
-                in_srcs = {e.source for e in graph.edges if e.target == nxt}
-                if len(in_srcs) != 1:
+                if len(in_edges.get(nxt, set())) != 1:
                     break
-                if set(graph.station_lines(nxt)) != set(graph.station_lines(src)):
+                if set(graph.station_lines(nxt)) != src_lines:
                     break
                 graph.stations[nxt].y += delta
                 cur = nxt
