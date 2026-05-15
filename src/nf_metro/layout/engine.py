@@ -2352,9 +2352,7 @@ def _shrink_bboxes_to_content_bottom(
             section.bbox_h = max(0.0, new_h)
 
 
-def _tighten_lower_rows_after_shrink(
-    graph: MetroGraph, section_y_gap: float
-) -> None:
+def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) -> None:
     """Pull lower-row sections up to close slack left by rowspan claims.
 
     ``_compute_section_offsets`` sizes ``row_heights[r]`` from pre-shrink
