@@ -1003,7 +1003,7 @@ def _terminal_full_bundle_text():
 
 
 def test_full_bundle_column_fans_around_trunk_with_center_ports():
-    """Terminal section's full-bundle column fans symmetrically when --center-ports is on."""
+    """Terminal section's full-bundle column fans symmetrically with --center-ports."""
     graph = parse_metro_mermaid(_terminal_full_bundle_text())
     graph.center_ports = True
     compute_layout(graph, y_spacing=50.0)
@@ -1016,7 +1016,7 @@ def test_full_bundle_column_fans_around_trunk_with_center_ports():
         f"a and b should be symmetric around trunk Y: a={ay}, b={by}, mid={mid}"
     )
     assert abs(abs(by - ay) - 100.0) < 1e-6, (
-        f"a and b should be 2*y_spacing apart: |b-a|={abs(by-ay)}"
+        f"a and b should be 2*y_spacing apart: |b-a|={abs(by - ay)}"
     )
 
 
