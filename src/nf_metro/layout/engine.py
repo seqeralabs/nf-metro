@@ -1874,23 +1874,23 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
                 continue
             trunk_sid = trunks[0]
             trunk_y = graph.stations[trunk_sid].y
-            trunk_preds = (
-                set(G.predecessors(trunk_sid)) if trunk_sid in G else set()
-            )
+            trunk_preds = set(G.predecessors(trunk_sid)) if trunk_sid in G else set()
+            if not trunk_preds:
+                # No shared predecessor possible: source-station columns
+                # stay on their per-line track Y rather than being pulled
+                # into a uniform fan around an unrelated trunk.
+                continue
             # Fan-out siblings: strict subset of bundle (skip full-bundle
-            # pass-throughs and orphan stations with no lines).  Require
-            # a shared predecessor with the trunk so source stations
-            # (file inputs with no inbound edges) stay on their per-line
-            # track Y instead of being pulled to a uniform fan around
-            # an unrelated trunk.
+            # pass-throughs and orphan stations with no lines), and must
+            # share a predecessor with the trunk.
             siblings = [
                 s
                 for s in sids
                 if s != trunk_sid
                 and set(graph.station_lines(s))
                 and set(graph.station_lines(s)) < bundle
-                and trunk_preds
-                and (set(G.predecessors(s)) if s in G else set()) & trunk_preds
+                and s in G
+                and not trunk_preds.isdisjoint(G.predecessors(s))
             ]
             if not siblings:
                 continue
