@@ -18,8 +18,10 @@ from pathlib import Path
 
 import pytest
 
+from nf_metro.convert import convert_nextflow_dag, is_nextflow_dag
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets
+from nf_metro.layout.routing.offsets import _lines_continuing_to_consumer
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, PortSide
 
@@ -33,6 +35,8 @@ _Y_TOL = 1.0
 def _layout(fixture: str, **kwargs) -> MetroGraph:
     """Parse a fixture file and run the full layout pipeline."""
     text = (FIXTURES / fixture).read_text()
+    if is_nextflow_dag(text):
+        text = convert_nextflow_dag(text)
     graph = parse_metro_mermaid(text)
     graph.center_ports = True
     compute_layout(graph, **kwargs)
@@ -322,3 +326,74 @@ def test_no_kink_at_section_boundary(fixture):
                         f"Row {row}: exit port {pid} cy={exit_cy} != "
                         f"entry port {npid} cy={entry_cy}"
                     )
+
+
+# ---------------------------------------------------------------------------
+# Collapsed-bundle exit port ordering must match the downstream consumer
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    ["nextflow/with_subworkflows.mmd", "nextflow/variant_calling.mmd"],
+)
+def test_collapsed_bundle_port_matches_downstream_ordering(fixture):
+    """Multi-line LR/RL exit ports fed by a single trunk feeder must order
+    their lines so that the lines continuing to the closest downstream
+    consumer occupy the top offset slots.
+
+    Before this invariant, the port inherited the trunk feeder's bundle
+    ordering verbatim, which produced a vertical kink between the port
+    and a downstream entry port whose own ordering put a different line
+    on top (e.g. samtools_sort in nf_with_subworkflows: trunk had
+    alignment_reporting=0/main=3 but the next entry port wanted main=0).
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+
+    checked = 0
+    for port_id, port_obj in graph.ports.items():
+        if port_obj.is_entry:
+            continue
+        if port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        feeder_lines: dict[str, set[str]] = {}
+        for edge in graph.edges:
+            if edge.target != port_id:
+                continue
+            src = graph.stations.get(edge.source)
+            if not src or src.is_port:
+                continue
+            feeder_lines.setdefault(edge.source, set()).add(edge.line_id)
+        port_lines = set(graph.station_lines(port_id))
+        if len(port_lines) < 2:
+            continue
+        # Collapsed bundle: at least one feeder station carries every
+        # line, so the bundle is anchored to a single trunk Y at the
+        # port even if side branches also feed in.
+        trunk_feeders = [
+            sid for sid, lids in feeder_lines.items() if port_lines <= lids
+        ]
+        if not trunk_feeders:
+            continue
+        through = _lines_continuing_to_consumer(graph, port_id)
+        if not through or through >= port_lines:
+            # No fan-out at this port: trunk ordering is the right answer.
+            trunk = trunk_feeders[0]
+            for lid in port_lines:
+                assert offsets[(port_id, lid)] == offsets.get((trunk, lid), 0.0), (
+                    f"{fixture}: port {port_id} line {lid} should inherit "
+                    f"trunk feeder {trunk} offset"
+                )
+            checked += 1
+            continue
+        max_through = max(offsets[(port_id, lid)] for lid in through)
+        for lid in port_lines - through:
+            assert offsets[(port_id, lid)] > max_through, (
+                f"{fixture}: port {port_id} through-line offsets "
+                f"{[(t, offsets[(port_id, t)]) for t in through]} should be "
+                f"above diverging line {lid} offset {offsets[(port_id, lid)]}"
+            )
+        checked += 1
+
+    assert checked, f"{fixture}: no collapsed-bundle ports found to check"
