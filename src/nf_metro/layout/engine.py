@@ -516,6 +516,18 @@ def _compute_section_layout(
     if graph.center_ports:
         _recenter_full_bundle_columns(graph, y_spacing)
 
+    # Phase 13i: After fan-re-centering, single-station downstream
+    # columns (e.g. terminus file icons) may have stayed at their
+    # pre-fan Y while their sole upstream moved to the trunk.  Pin
+    # them back onto the source Y so the connection stays horizontal.
+    _align_terminus_to_upstream(graph)
+
+    # Phase 13j: Shrink rowspan / row-mate bboxes whose content moved
+    # up after compact (e.g. ``_fan_source_inputs_upward`` lifted the
+    # bottom rows away from the bbox bottom).  Bottom-only shrink, so
+    # trunk alignment is unaffected.
+    _shrink_bboxes_to_content_bottom(graph, section_y_padding)
+
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
@@ -2257,6 +2269,97 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
             )
             for sid, off in zip(full, offsets):
                 graph.stations[sid].y = anchor_y + off * y_spacing
+
+
+def _shrink_bboxes_to_content_bottom(
+    graph: MetroGraph, section_y_padding: float
+) -> None:
+    """Bottom-only bbox shrink after late content lifts.
+
+    ``_compact_row_content_to_bbox_top`` shrinks the bottom slack to
+    ``section_y_padding`` once, but later phases
+    (``_fan_source_inputs_upward``, ``_recenter_full_bundle_columns``)
+    can pull content further up, leaving fresh empty space below the
+    last station.  Re-shrink each section's ``bbox_h`` so the bottom
+    sits ``section_y_padding`` below the bottom-most station/port.
+    Station Ys are unchanged, so trunk alignment is preserved.
+    """
+    for section in graph.sections.values():
+        if section.bbox_h <= 0:
+            continue
+        content_max_ys = [
+            graph.stations[sid].y
+            for sid in section.station_ids
+            if sid in graph.stations and not graph.stations[sid].is_port
+        ]
+        port_max_ys = [
+            graph.stations[sid].y
+            for sid in section.station_ids
+            if sid in graph.stations and graph.stations[sid].is_port
+        ]
+        if not content_max_ys:
+            continue
+        desired_bot = max(content_max_ys) + section_y_padding
+        if port_max_ys:
+            desired_bot = max(desired_bot, max(port_max_ys))
+        new_h = desired_bot - section.bbox_y
+        if new_h < section.bbox_h - 0.5:
+            section.bbox_h = max(0.0, new_h)
+
+
+def _align_terminus_to_upstream(graph: MetroGraph) -> None:
+    """Pin a single downstream terminus to its sole upstream's Y.
+
+    After ``_recenter_full_bundle_columns`` re-pitches fanned columns,
+    a single-station downstream column (e.g. a ``file`` terminus
+    consuming the fanned station's output) can be left at its pre-fan Y,
+    so the connecting line and the icon caption drift away from the
+    source station.  When the downstream station has exactly one in-
+    section predecessor, snap it back onto the source's Y so its file
+    icon sits level with the station it follows.
+
+    Skips the pin when the target Y is already occupied by a sibling
+    in the same X column: when a source fans out to a chain station
+    (``bundle -> bundle_zip``) AND a terminus (``report_html``), pulling
+    the terminus to the source's Y collides with the chain station that
+    sits there.  Leaving the terminus at its grid Y preserves visual
+    separation; the diagonal connector to the source is acceptable.
+    """
+    for section in graph.sections.values():
+        if section.direction not in ("LR", "RL"):
+            continue
+        sec_sids = set(section.station_ids)
+        for sid in section.station_ids:
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.off_track:
+                continue
+            if not st.is_terminus:
+                continue
+            preds = {
+                e.source for e in graph.edges
+                if e.target == sid and e.source in sec_sids
+                and not graph.stations[e.source].is_port
+            }
+            if len(preds) != 1:
+                continue
+            src = graph.stations[next(iter(preds))]
+            if abs(src.y - st.y) < 0.5:
+                continue
+            collision = False
+            for sib_sid in section.station_ids:
+                if sib_sid == sid:
+                    continue
+                sib = graph.stations.get(sib_sid)
+                if sib is None or sib.is_port or sib.is_hidden:
+                    continue
+                if abs(sib.x - st.x) > 0.5:
+                    continue
+                if abs(sib.y - src.y) < 0.5:
+                    collision = True
+                    break
+            if collision:
+                continue
+            st.y = src.y
 
 
 def _layout_single_section(
@@ -4294,6 +4397,8 @@ def _build_section_subgraph(graph: MetroGraph, section: Section) -> MetroGraph:
                     section_id=station.section_id,
                     is_port=False,
                     terminus_labels=list(station.terminus_labels),
+                    terminus_icon_types=list(station.terminus_icon_types),
+                    terminus_names=list(station.terminus_names),
                 )
             )
             real_station_ids.add(sid)
