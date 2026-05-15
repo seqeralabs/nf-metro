@@ -173,6 +173,12 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
         if station:
             station.off_track = True
 
+    # Apply pending off-track marks
+    for station_id in graph._pending_off_track:
+        station = graph.stations.get(station_id)
+        if station:
+            station.off_track = True
+
     return graph
 
 
