@@ -535,7 +535,11 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         port_lines = set(line_feeders.keys())
         all_feeders = {fid for entries in line_feeders.values() for fid, _ in entries}
         trunk_feeder_id = next(
-            (sid for sid in all_feeders if port_lines.issubset(graph.station_lines(sid))),
+            (
+                sid
+                for sid in all_feeders
+                if port_lines.issubset(graph.station_lines(sid))
+            ),
             None,
         )
         if trunk_feeder_id is not None:

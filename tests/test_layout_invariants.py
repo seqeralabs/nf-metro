@@ -133,9 +133,7 @@ def _section_full_bundle(graph: MetroGraph, section) -> set[str] | None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"]
-)
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
 def test_row_trunk_marker_cy_consistent(fixture):
     """All same-row LR sections must render their trunk marker at the
     same cy.  Inter-section bundles run horizontally between sections
@@ -309,21 +307,17 @@ def test_no_kink_at_section_boundary(fixture):
                 if not exit_lines:
                     continue
                 exit_offs = [offsets.get((pid, lid), 0.0) for lid in exit_lines]
-                exit_cy = graph.stations[pid].y + (
-                    min(exit_offs) + max(exit_offs)
-                ) / 2
+                exit_cy = graph.stations[pid].y + (min(exit_offs) + max(exit_offs)) / 2
                 # Matching entry port of next section
                 for npid in nxt.entry_ports:
                     nport = graph.ports.get(npid)
                     if nport is None or nport.side != PortSide.LEFT:
                         continue
                     entry_lines = graph.station_lines(npid)
-                    entry_offs = [
-                        offsets.get((npid, lid), 0.0) for lid in entry_lines
-                    ]
-                    entry_cy = graph.stations[npid].y + (
-                        min(entry_offs) + max(entry_offs)
-                    ) / 2
+                    entry_offs = [offsets.get((npid, lid), 0.0) for lid in entry_lines]
+                    entry_cy = (
+                        graph.stations[npid].y + (min(entry_offs) + max(entry_offs)) / 2
+                    )
                     assert abs(exit_cy - entry_cy) < _Y_TOL, (
                         f"Row {row}: exit port {pid} cy={exit_cy} != "
                         f"entry port {npid} cy={entry_cy}"
