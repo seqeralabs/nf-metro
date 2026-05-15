@@ -2365,57 +2365,51 @@ def _tighten_lower_rows_after_shrink(
     section "filling" row ``r`` was the rowspanned one (whose own bbox
     now ends well above the row bottom).
 
-    For each row ``r >= 1``, this measures the slack between row ``r``'s
+    For each row ``r >= 1``, this measures the gap between row ``r``'s
     current top and the max bbox bottom of sections that *end* at row
     ``r - 1`` (single-row sections in row ``r - 1`` plus rowspan
     sections that terminate there).  Rowspan sections that *extend
     into* row ``r`` are excluded: their bbox bottom is now content-
     bounded, not row-bounded, so they no longer constrain row ``r``'s
-    top.  Sections in row ``r`` and below are shifted up by that slack
-    (minus ``section_y_gap``) along with their stations and ports.
-    Junctions live in inter-section space and routing recomputes after
-    layout, so their positions are left alone.
+    top.  Any slack beyond ``section_y_gap`` is closed by shifting
+    sections in row ``r`` and below (along with their stations and
+    ports) upward by that amount.  Junctions live in inter-section
+    space and routing recomputes after layout, so their positions are
+    left alone.
     """
     if not graph.sections:
         return
 
-    sections_by_row_start: dict[int, list[Section]] = defaultdict(list)
+    sections_by_start_row: dict[int, list[Section]] = defaultdict(list)
+    sections_by_end_row: dict[int, list[Section]] = defaultdict(list)
     for s in graph.sections.values():
-        sections_by_row_start[s.grid_row].append(s)
-    if not sections_by_row_start:
+        if s.bbox_h <= 0:
+            continue
+        sections_by_start_row[s.grid_row].append(s)
+        sections_by_end_row[s.grid_row + s.grid_row_span - 1].append(s)
+    if not sections_by_start_row:
         return
-    max_row = max(
-        s.grid_row + s.grid_row_span - 1 for s in graph.sections.values()
-    )
+    max_row = max(sections_by_end_row)
 
     for r in range(1, max_row + 1):
-        lower = sections_by_row_start.get(r, [])
-        if not lower:
-            continue
-        ending_at_prev = [
-            s for s in graph.sections.values()
-            if s.grid_row + s.grid_row_span - 1 == r - 1 and s.bbox_h > 0
-        ]
-        if not ending_at_prev:
+        lower = sections_by_start_row.get(r, [])
+        ending_at_prev = sections_by_end_row.get(r - 1, [])
+        if not lower or not ending_at_prev:
             continue
         max_above_bot = max(s.bbox_y + s.bbox_h for s in ending_at_prev)
-        current_top = min(s.bbox_y for s in lower if s.bbox_h > 0)
+        current_top = min(s.bbox_y for s in lower)
         slack = current_top - (max_above_bot + section_y_gap)
         if slack <= 0.5:
             continue
 
-        shifted_section_ids = {
-            sid for sid, s in graph.sections.items() if s.grid_row >= r
-        }
-        for sid in shifted_section_ids:
-            graph.sections[sid].bbox_y -= slack
-        shifted_station_ids = set()
-        for sid in shifted_section_ids:
-            shifted_station_ids.update(graph.sections[sid].station_ids)
-        for stid in shifted_station_ids:
-            st = graph.stations.get(stid)
-            if st is not None:
-                st.y -= slack
+        for s in graph.sections.values():
+            if s.grid_row < r:
+                continue
+            s.bbox_y -= slack
+            for stid in s.station_ids:
+                st = graph.stations.get(stid)
+                if st is not None:
+                    st.y -= slack
 
 
 def _align_terminus_to_upstream(graph: MetroGraph) -> None:
