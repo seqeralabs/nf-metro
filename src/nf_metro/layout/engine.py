@@ -1257,7 +1257,6 @@ def _compact_row_content_to_bbox_top(
                 groups.append([s])
 
         for group in groups:
-            classified = {s.id: _classify_section_station_ys(graph, s) for s in group}
 
             allowed_shifts: list[float] = []
             for section in group:
@@ -1268,8 +1267,7 @@ def _compact_row_content_to_bbox_top(
                 content_ys = [
                     graph.stations[sid].y
                     for sid in section.station_ids
-                    if sid in graph.stations
-                    and not graph.stations[sid].is_port
+                    if sid in graph.stations and not graph.stations[sid].is_port
                 ]
                 if not content_ys:
                     continue
@@ -1469,8 +1467,7 @@ def _fan_free_content_upward(
         # has already symmetrically fanned them around the section's
         # port Y and we must not collapse that into a one-sided stack.
         entry_col_all = [
-            sid for sid in internal_ids
-            if round(graph.stations[sid].x, 3) == entry_x
+            sid for sid in internal_ids if round(graph.stations[sid].x, 3) == entry_x
         ]
         if len(trunk_candidates) == len(entry_col_all) and graph.center_ports:
             continue
@@ -1936,9 +1933,12 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
         # Snapshot pre-fan Ys so iteration order of columns doesn't
         # drift the trunk reference: a later column must not see an
         # earlier column's already-fanned positions.
-        pre_fan_y = {sid: graph.stations[sid].y for sids in cols.values() for sid in sids}
+        pre_fan_y = {
+            sid: graph.stations[sid].y for sids in cols.values() for sid in sids
+        }
         port_ys = [
-            graph.ports[pid].y for pid in port_ids
+            graph.ports[pid].y
+            for pid in port_ids
             if graph.ports.get(pid) is not None
             and graph.ports[pid].side in (PortSide.LEFT, PortSide.RIGHT)
         ]
@@ -1958,7 +1958,8 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
             else:
                 others = sorted(
                     pre_fan_y[s]
-                    for ox, sids in full_by_col.items() if ox != x
+                    for ox, sids in full_by_col.items()
+                    if ox != x
                     for s in sids
                 )
                 if not others:
@@ -4478,9 +4479,7 @@ def _bump_off_track_clear_of_trunks(
     def _overlaps(y: float) -> bool:
         top = y - ICON_HALF - MARGIN
         bot = y + ICON_HALF + MARGIN
-        for tl_y_lo, tl_y_hi in zip(
-            trunk_offsets_at_x[::2], trunk_offsets_at_x[1::2]
-        ):
+        for tl_y_lo, tl_y_hi in zip(trunk_offsets_at_x[::2], trunk_offsets_at_x[1::2]):
             if not (bot < tl_y_lo or tl_y_hi < top):
                 return True
         # Sibling clearance: keep at least 2 * ICON_HALF + MARGIN between
