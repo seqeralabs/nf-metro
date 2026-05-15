@@ -900,9 +900,7 @@ def _render_terminus_icons(
         # Optional caption rendered below the icon so the type chip
         # inside the icon stays readable.
         if name:
-            caption_y = (
-                icon_cy + theme.terminus_height / 2 + ICON_NAME_GAP
-            )
+            caption_y = icon_cy + theme.terminus_height / 2 + ICON_NAME_GAP
             d.append(
                 draw.Text(
                     name,
