@@ -129,8 +129,7 @@ def test_compute_layout_off_track_bbox_contains_stations():
     for sid in ("a", "b"):
         st = graph.stations[sid]
         assert sec.bbox_y <= st.y <= sec.bbox_y + sec.bbox_h, (
-            f"{sid} at y={st.y} outside bbox "
-            f"y={sec.bbox_y}..{sec.bbox_y + sec.bbox_h}"
+            f"{sid} at y={st.y} outside bbox y={sec.bbox_y}..{sec.bbox_y + sec.bbox_h}"
         )
 
 

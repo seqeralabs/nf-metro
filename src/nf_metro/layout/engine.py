@@ -977,7 +977,6 @@ def _row_contiguous_column_groups(
     return result
 
 
-
 def _top_align_row_bboxes_only(graph: MetroGraph) -> None:
     """Align bbox tops within each row by growing bboxes upward.
 
@@ -1161,7 +1160,6 @@ def _classify_section_station_ys(
         else:
             on_track.append(st.y)
     return on_track, off_track, ports
-
 
 
 def _compact_row_content_to_bbox_top(

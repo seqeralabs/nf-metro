@@ -736,7 +736,6 @@ def _find_downstream_bundle_y(
     for edge in graph.edges:
         edges_by_source.setdefault(edge.source, []).append(edge)
 
-
     # Fan-in exits stay centred: 2+ distinct internal source Ys means
     # the visual convergence is meaningful and downstream anchoring
     # would collapse the bundle onto one source.
