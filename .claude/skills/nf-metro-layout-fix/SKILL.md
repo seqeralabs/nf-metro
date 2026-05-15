@@ -123,50 +123,31 @@ When dispatching agents to do nf-metro work, include in their brief: "you
 must add an invariant test that fails on the bug AND a matching runtime
 validator. Both are mandatory; the fix is not complete without them."
 
-## Step 4: Managing the PR chain back to nf-metro main
+## Step 4: Shipping the chain back to main
 
-Layout fixes accumulate into a stack of PRs against nf-metro `main`. The
-chain pattern:
+Layout fixes accumulate into a stack of PRs against nf-metro `main`: the
+bottom-of-chain PR is based on `main`, each subsequent PR is based on its
+predecessor's branch, and bases auto-retarget as each PR merges.
 
-- The bottom-of-chain PR is based on `main`.
-- Each subsequent PR is based on the previous PR's branch.
-- As each merges, the next PR's base auto-updates to `main`.
+The actual per-PR shipping workflow — worktree setup, reverting
+known-rejected commits, `/simplify` as a separate commit, gallery diff vs
+`main`, classifying every changed example, sweeping narrative comments,
+rewriting the description to be standalone, triggering CI, and the exact
+after-merge cleanup order (re-target children **before** deleting the
+merged branch) — lives in the `pr-chain-vet` skill. Reach for that one
+when you're walking the chain into `main` one PR at a time.
 
-### Strict rules
+A few rules live here as well because they shape how the fixes are written
+in the first place, not just how they're shipped:
 
-- **NO force-pushes.** Every change to a PR is an additive commit. To undo
-  an earlier commit, append a `git revert <hash>` — don't rewrite history.
-- **Each PR must be vetted before review.** The vetting workflow:
-  1. Render the gallery on the PR HEAD.
-  2. Diff against the parent (the prior PR's HEAD, or `main` for the bottom
-     of the chain).
-  3. Inspect every changed example visually. Classify deltas.
-  4. For each detrimental, append a fix commit.
-  5. Run the simplify skill (`/simplify`) on the changed code; commit as a
-     separate refactor commit.
-  6. Sweep narrative comments off the PR. Keep the CI render-preview
-     comment.
-  7. Rewrite the PR description to be standalone: explain the net diff vs
-     `main` without referencing the chain or in-flight history.
-  8. Ensure CI's render-preview workflow ran on the latest commit (append
-     `git commit --allow-empty -m "chore: trigger CI"` if needed).
-
-### After merge
-
-- Delete the remote branch (`gh api -X DELETE
-  repos/<owner>/<repo>/git/refs/heads/<branch>`).
-- Delete the local branch and worktree.
-- Re-target the next PR's base to `main`.
-
-## Step 5: Reconciling stack regressions
-
-When the chain is built progressively, a regression introduced by an early
-PR may only become visible later. The triage workflow:
-
-1. After all fixes land in the savepoint, render every PR's tip (rebased onto
-   main individually) and diff against main.
-2. Classify each PR's effect as I / N / D.
-3. For each detrimental, identify the **earliest** PR where the issue first
-   appears. The fix should be folded back into that PR (as an additive
-   commit on its branch), not as a top-of-stack bolt-on PR.
-4. Re-vet the modified PR + all downstream PRs to confirm no new issues.
+- **No force-pushes.** Every change to a PR is an additive commit. To undo
+  something already in the branch, append a `git revert <hash>` — don't
+  rewrite history.
+- **One concern per commit.** The fix, the `/simplify` pass, and any
+  follow-on detrimental cleanup land as separate commits so each can be
+  read on its own.
+- **Reconciling stack regressions: fold fixes into the earliest PR where
+  the issue first appears,** not as a bolt-on top-of-stack PR. A regression
+  introduced by an early PR may only become visible later in the chain;
+  when that happens, append the fix commit to the offending PR's branch
+  and re-vet that PR plus everything downstream.
