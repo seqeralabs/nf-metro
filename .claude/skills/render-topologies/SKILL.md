@@ -9,6 +9,13 @@ allowed-tools: Bash(rm -rf *), Bash(python *), Bash(open *), Bash(cd *), Bash(gi
 
 Local pixel-diff of all gallery renders between the current branch and `origin/main`. Uses `scripts/build_gallery.py` (the same script CI runs), so local results match the PR render preview.
 
+**Conventions** (substitute if your setup differs):
+- Local nf-metro checkout: `~/projects/nf-metro`
+- Baseline env: `nf-metro-main`; branch env: `nf-metro` (or `nf-metro-fix-<N>` in worktree mode)
+- CI render preview is published at the upstream's GitHub Pages site
+  (`pinin4fjords.github.io/nf-metro/_pr/<N>/`); if you ship from a fork
+  with Pages enabled, the URL will track your fork's owner
+
 **In most cases you don't need this.** Push to a PR and review the CI-generated render preview at `https://pinin4fjords.github.io/nf-metro/_pr/<PR_NUMBER>/` instead. Use this skill only when:
 - You want pre-push confidence before creating a PR
 - The user explicitly asks for a local visual comparison
@@ -19,16 +26,16 @@ Local pixel-diff of all gallery renders between the current branch and `origin/m
 Determine the working mode:
 
 - **Worktree mode**: A worktree exists at `/tmp/nf-metro-fix-<N>` with a matching `nf-metro-fix-<N>` env. Use the worktree path and env for branch renders.
-- **Standalone mode**: Working from the main repo at `/Users/jonathan.manning/projects/nf-metro`. Use the `nf-metro` env for branch renders. Stash or commit any uncommitted changes first.
+- **Standalone mode**: Working from the main repo at `~/projects/nf-metro`. Use the `nf-metro` env for branch renders. Stash or commit any uncommitted changes first.
 
 ## Step 2: Render baseline from main
 
 Update the main repo checkout and render using the shared `nf-metro-main` baseline environment. Install with `[docs]` extras (same as CI).
 
 ```bash
-cd /Users/jonathan.manning/projects/nf-metro && git fetch origin main && git checkout main && git pull origin main
-source ~/.local/bin/mm-activate nf-metro-main && pip install -e "/Users/jonathan.manning/projects/nf-metro[docs]" -q
-cd /Users/jonathan.manning/projects/nf-metro && python scripts/build_gallery.py
+cd ~/projects/nf-metro && git fetch origin main && git checkout main && git pull origin main
+source ~/.local/bin/mm-activate nf-metro-main && pip install -e "$HOME/projects/nf-metro[docs]" -q
+cd ~/projects/nf-metro && python scripts/build_gallery.py
 # SVGs are in docs/assets/renders/ → copy to a baseline dir
 rm -rf /tmp/nf_metro_renders_main && mkdir -p /tmp/nf_metro_renders_main
 cp docs/assets/renders/*.svg /tmp/nf_metro_renders_main/
@@ -52,7 +59,7 @@ Switch back to the branch first (standalone mode) or use the worktree path:
 
 ```bash
 # Standalone: switch back to the branch
-cd /Users/jonathan.manning/projects/nf-metro && git checkout <branch-name>
+cd ~/projects/nf-metro && git checkout <branch-name>
 source ~/.local/bin/mm-activate nf-metro && pip install -e ".[docs]" -q
 python scripts/build_gallery.py
 rm -rf /tmp/nf_metro_renders_branch && mkdir -p /tmp/nf_metro_renders_branch

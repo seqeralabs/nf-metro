@@ -7,6 +7,14 @@ description: End-to-end workflow for fixing GitHub issues on the nf-metro repo. 
 
 Structured workflow for fixing nf-metro GitHub issues in an isolated worktree.
 
+**Conventions** (substitute if your setup differs):
+- Local nf-metro checkout: `~/projects/nf-metro`
+- Issues + PRs target the canonical upstream `pinin4fjords/nf-metro`. If
+  you're working from a fork, resolve the owner with
+  `gh repo view --json owner -q .owner.login`.
+- micromamba: `/opt/homebrew/bin/micromamba` (macOS Apple Silicon codesign
+  workaround). On other platforms, just `micromamba` if it's on PATH.
+
 ## Phase 1: Understand the Issue
 
 ```bash
@@ -19,7 +27,7 @@ Summarize the problem and proposed approach. Wait for user confirmation before p
 
 ```bash
 # Worktree
-cd /Users/jonathan.manning/projects/nf-metro
+cd ~/projects/nf-metro
 git fetch origin main
 git worktree add /tmp/nf-metro-fix-<N> -b fix/<N>-<slug> origin/main
 
@@ -99,7 +107,7 @@ After CI posts the render preview link, ask the user to review it.
 Offer to clean up (only if user agrees):
 
 ```bash
-cd /Users/jonathan.manning/projects/nf-metro
+cd ~/projects/nf-metro
 git worktree remove /tmp/nf-metro-fix-<N>
 /opt/homebrew/bin/micromamba env remove -n nf-metro-fix-<N> -y
 ```
