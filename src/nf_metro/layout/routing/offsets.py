@@ -943,6 +943,94 @@ def _would_collide(
     )
 
 
+def _align_junction_to_entry_port(ctx: _OffsetCtx) -> None:
+    """Resolve same-Y junction-to-entry-port slants left by Path 2.
+
+    When the exit-port phase inherits its trunk feeder's bundle ordering
+    (collapsed-bundle case), the junction downstream inherits the same
+    ordering. If that junction then feeds a single LR/RL entry port at
+    the same base Y with offsets already computed by entry-port phase,
+    a small per-line offset mismatch becomes a visible diagonal between
+    the junction and the entry port.
+
+    For each junction where every outbound non-junction target is an
+    entry port at the junction's own base Y, and every junction line
+    maps to a single such target with a known offset, snap the junction
+    offsets to the target offsets. If the swap matches the feeding
+    exit port's lines exactly, mirror the change there too so the
+    10-px exit-to-junction segment stays horizontal.
+    """
+    graph = ctx.graph
+    for jid in graph.junctions:
+        j_st = graph.stations[jid]
+        j_lines = list(graph.station_lines(jid))
+        if len(j_lines) < 2:
+            continue
+        line_to_target: dict[str, str] = {}
+        ok = True
+        for lid in j_lines:
+            targets: list[str] = []
+            for edge in graph.edges:
+                if edge.source == jid and edge.line_id == lid:
+                    targets.append(edge.target)
+            if len(targets) != 1:
+                ok = False
+                break
+            tgt_id = targets[0]
+            tgt_st = graph.stations.get(tgt_id)
+            tgt_port = graph.ports.get(tgt_id)
+            if not tgt_st or not tgt_port or not tgt_port.is_entry:
+                ok = False
+                break
+            if tgt_port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                ok = False
+                break
+            if abs(tgt_st.y - j_st.y) > _SAME_Y_TOLERANCE:
+                ok = False
+                break
+            if (tgt_id, lid) not in ctx.offsets:
+                ok = False
+                break
+            line_to_target[lid] = tgt_id
+        if not ok or len(line_to_target) != len(j_lines):
+            continue
+
+        desired = {lid: ctx.offsets[(line_to_target[lid], lid)] for lid in j_lines}
+        if len(set(desired.values())) != len(desired):
+            continue
+        current = {lid: ctx.offsets.get((jid, lid), 0.0) for lid in j_lines}
+        if all(
+            abs(desired[lid] - current[lid]) <= _OFFSET_EQ_TOLERANCE for lid in j_lines
+        ):
+            continue
+
+        feeding_exit: str | None = None
+        single_exit = True
+        for edge in graph.edges:
+            if edge.target != jid:
+                continue
+            src_port = graph.ports.get(edge.source)
+            if src_port and not src_port.is_entry:
+                if feeding_exit is None:
+                    feeding_exit = edge.source
+                elif feeding_exit != edge.source:
+                    single_exit = False
+                    break
+            else:
+                single_exit = False
+                break
+
+        for lid, off in desired.items():
+            ctx.offsets[(jid, lid)] = off
+        if single_exit and feeding_exit is not None:
+            exit_lines = set(graph.station_lines(feeding_exit))
+            if exit_lines == set(j_lines):
+                exit_st = graph.stations[feeding_exit]
+                if abs(exit_st.y - j_st.y) <= _SAME_Y_TOLERANCE:
+                    for lid, off in desired.items():
+                        ctx.offsets[(feeding_exit, lid)] = off
+
+
 def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> None:
     """Snap offsets for same-section edges where endpoints share base Y.
 
@@ -1062,5 +1150,6 @@ def compute_station_offsets(
     _compute_exit_port_offsets(ctx)
     _propagate_to_junctions(ctx)
     _compute_entry_port_offsets(ctx)
+    _align_junction_to_entry_port(ctx)
     _reconcile_horizontal_offsets(ctx)
     return ctx.offsets
