@@ -613,3 +613,30 @@ class TestGridSnapExclusions:
             f"fastqc y={fastqc.y} and sort_bam y={sort_bam.y} "
             f"(midpoint={midpoint})"
         )
+
+    def test_tb_section_bbox_aligns_with_row_lr_neighbours(self):
+        """TB section bbox bottom must align with its downstream LR
+        target's bbox bottom so the inter-section exit line sits inside
+        the box rather than along the edge.
+
+        In ``fold_double``:
+          * calling (TB row 0) -> hard_filter (LR row 1) bbox bottoms align
+          * integration (TB row 1) -> reporting (LR row 2) bbox bottoms align
+        """
+        g = _load_topology("fold_double")
+        calling = g.sections["calling"]
+        hard_filter = g.sections["hard_filter"]
+        calling_bot = calling.bbox_y + calling.bbox_h
+        hard_filter_bot = hard_filter.bbox_y + hard_filter.bbox_h
+        assert abs(calling_bot - hard_filter_bot) < 1.0, (
+            f"calling bbox bottom {calling_bot} != hard_filter bottom "
+            f"{hard_filter_bot}; TB exit line sits at section edge"
+        )
+        integration = g.sections["integration"]
+        reporting = g.sections["reporting"]
+        integration_bot = integration.bbox_y + integration.bbox_h
+        reporting_bot = reporting.bbox_y + reporting.bbox_h
+        assert abs(integration_bot - reporting_bot) < 1.0, (
+            f"integration bbox bottom {integration_bot} != reporting "
+            f"bottom {reporting_bot}; TB exit line sits at section edge"
+        )

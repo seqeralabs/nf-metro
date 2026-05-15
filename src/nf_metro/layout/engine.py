@@ -474,6 +474,12 @@ def _compute_section_layout(
     # This final pass restores clean grid positions before validation.
     _snap_all_y_to_grid(graph, y_spacing)
 
+    # Phase 13f: Grow TB-section bbox bottoms so they align with the
+    # downstream LR section's bbox bottom.  Without this the TB
+    # section's bbox ends right at the inter-section exit port Y,
+    # making the line look pinned to the section edge.
+    _align_tb_section_bbox_bottoms(graph)
+
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
@@ -3369,6 +3375,76 @@ def _resolve_tb_exit_y(
             exit_section.bbox_h = desired_bot - exit_section.bbox_y
 
     return tgt_y
+
+
+def _align_tb_section_bbox_bottoms(graph: MetroGraph) -> None:
+    """Extend each TB-section's bbox bottom to match its downstream
+    target section's bbox bottom.
+
+    A TB (fold) section's exit port sits at the Y of the downstream
+    LR/RL section's entry port (placed by ``_resolve_tb_exit_y``).
+    When the TB section's bbox bottom equals its exit-port Y, the
+    inter-section line runs flush against the section edge.
+
+    For every TB section with an LR/RL exit, find the target sections
+    its exit ports feed into (directly or via a junction) and grow the
+    TB section's ``bbox_h`` so its bottom reaches the maximum of those
+    targets' bbox bottoms.  Bbox tops are preserved; only ``bbox_h``
+    grows.
+
+    Skipped for TB sections with BOTTOM-side exit ports (TB->TB flow)
+    so the bottom-edge port placement invariant continues to hold.
+    """
+    junction_ids = set(graph.junctions)
+
+    def _downstream_section_ids(tb_section: Section) -> set[str]:
+        out: set[str] = set()
+        for pid in tb_section.exit_ports:
+            for edge in graph.edges:
+                if edge.source != pid:
+                    continue
+                candidates: list[str] = []
+                if edge.target in junction_ids:
+                    for e2 in graph.edges:
+                        if e2.source == edge.target:
+                            candidates.append(e2.target)
+                else:
+                    candidates.append(edge.target)
+                for tid in candidates:
+                    tport = graph.ports.get(tid)
+                    if tport is None:
+                        continue
+                    tsec = graph.sections.get(tport.section_id)
+                    if tsec is None or tsec.id == tb_section.id:
+                        continue
+                    out.add(tsec.id)
+        return out
+
+    for section in list(graph.sections.values()):
+        if section.direction != "TB" or section.bbox_h <= 0:
+            continue
+        exit_sides = {
+            graph.ports[pid].side for pid in section.exit_ports if pid in graph.ports
+        }
+        if not exit_sides & {PortSide.LEFT, PortSide.RIGHT}:
+            continue
+        if PortSide.BOTTOM in exit_sides:
+            continue
+        target_ids = _downstream_section_ids(section)
+        if not target_ids:
+            continue
+        target_bots = [
+            graph.sections[tid].bbox_y + graph.sections[tid].bbox_h
+            for tid in target_ids
+            if tid in graph.sections and graph.sections[tid].bbox_h > 0
+        ]
+        if not target_bots:
+            continue
+        desired_bot = max(target_bots)
+        current_bot = section.bbox_y + section.bbox_h
+        if desired_bot - current_bot <= 0.5:
+            continue
+        section.bbox_h = desired_bot - section.bbox_y
 
 
 def _clamp_tb_entry_port(
