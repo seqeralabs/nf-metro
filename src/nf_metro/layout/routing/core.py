@@ -1953,6 +1953,18 @@ def _collect_centering_candidates(
         st = graph.stations.get(sid)
         return st is not None and not st.is_port and not st.is_hidden
 
+    def _is_chain_internal(sid: str) -> bool:
+        """Internal station that acts as a flat-chain predecessor.
+
+        A fork divergence hub (>= 2 outbound real targets) is excluded:
+        its flat-side connection to one branch is incidental (induced by
+        grid snap), not a topological chain.  Treating such a hub as a
+        chain predecessor would block the branch's column from centring.
+        """
+        if not _is_internal(sid):
+            return False
+        return len(ctx.all_targets.get(sid, set())) < 2
+
     for sid, station in graph.stations.items():
         if station.is_port or station.is_hidden:
             continue
@@ -2053,19 +2065,21 @@ def _collect_centering_candidates(
 
         has_flat_side = flat_in_rp is not None or flat_out_rp is not None
 
-        # Guard: skip when a flat connection goes to/from an internal station.
+        # Guard: skip when a flat connection goes to/from an internal
+        # chain station (excluding fork divergence hubs whose flat
+        # connections are incidental rather than topological chains).
         if has_flat_side or multi_diag:
             flat_to_internal = False
-            if flat_in_rp and _is_internal(flat_in_rp.edge.source):
+            if flat_in_rp and _is_chain_internal(flat_in_rp.edge.source):
                 flat_to_internal = True
-            if flat_out_rp and _is_internal(flat_out_rp.edge.target):
+            if flat_out_rp and _is_chain_internal(flat_out_rp.edge.target):
                 flat_to_internal = True
             if multi_diag:
                 for r in flat_in:
-                    if _is_internal(r.edge.source):
+                    if _is_chain_internal(r.edge.source):
                         flat_to_internal = True
                 for r in flat_out:
-                    if _is_internal(r.edge.target):
+                    if _is_chain_internal(r.edge.target):
                         flat_to_internal = True
             if flat_to_internal:
                 continue

@@ -1558,7 +1558,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
        nearest ``origin + n * pitch``, bounded by half a pitch so
        adjacency cannot flip.
 
-    Three exclusions preserve deliberate non-grid Ys:
+    Two exclusions preserve deliberate non-grid Ys:
 
     * LR/RL exit ports on TB-direction sections were placed by
       ``_resolve_tb_exit_y`` at the receiving section's entry-port Y
@@ -1567,12 +1567,13 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     * Stations that act as a convergence point for two or more inbound
       sources at different Ys (fan-in midpoint) carry geometric meaning
       that snapping destroys.
-    * Stations that act as a divergence point for two or more outbound
-      targets at different Ys, with the station's Y strictly between
-      a target above and a target below.  Snapping such a fan-out hub
-      onto one of its target tracks converts the diagonal route to
-      that target into a flat one, which downstream X-centring treats
-      as a chain predecessor and skips centring the target's column.
+
+    Fan-out divergence hubs (stations whose Y sits strictly between
+    targets above and below) are snapped to grid like other stations.
+    The downstream column-centring pass identifies the snap-induced
+    flat connection from such a fork hub to one of its targets and
+    declines to treat it as a chain predecessor, so the target column
+    still centres.
 
     Groups with no on-grid majority are left untouched.
     """
@@ -1582,7 +1583,10 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     # converges (recorded pre-snap so the midpoint can be restored
     # after sources move).
     convergence_sources = _convergence_source_ys(graph)
-    divergence_anchors = _divergence_target_ys(graph)
+    # Divergence anchors (fan-out hubs sitting between target Ys) are
+    # snapped to grid like everyone else: the routing column-centring
+    # pass treats their incidental flat connection (induced by snap)
+    # as non-chain so the target column still centres correctly.
     groups: dict[object, tuple[float, list[str]]] = {}
     grouped_ids: set[str] = set()
     for row, info in (graph._row_y_grid_info or {}).items():
@@ -1636,8 +1640,6 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
                     continue
                 if sid in convergence_sources:
                     continue
-                if sid in divergence_anchors:
-                    continue
                 st.y = _snap(st.y)
             for pid in port_ids:
                 port = graph.ports.get(pid)
@@ -1651,8 +1653,6 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
                 if is_tb_section and not port.is_entry:
                     continue
                 if pid in convergence_sources:
-                    continue
-                if pid in divergence_anchors:
                     continue
                 port_st.y = _snap(port_st.y)
 

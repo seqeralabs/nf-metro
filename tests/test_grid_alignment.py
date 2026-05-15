@@ -665,16 +665,23 @@ class TestGridSnapExclusions:
                     f"({x_before} -> {x_after}); snap must be Y-only"
                 )
 
-    def test_divergence_anchor_preserved_in_variantbenchmarking(self):
-        """A fan-out hub between targets above and below stays off-grid.
+    def test_divergence_anchor_snaps_and_column_still_centres(self):
+        """A fan-out hub between targets above and below snaps to grid;
+        the target column still centres.
 
-        ``bench_hub`` in variantbenchmarking sits at the entry-port Y of
-        the benchmarking section, between the Truvari (top) and
-        Intersection (bottom) target tracks.  Snapping it onto any
-        target track converts that diagonal route to a flat one and
-        causes the downstream column-centring pass to abandon the move
-        for the entire column (truvari, svanalyzer, ... 9 stations stay
-        at x=1140 instead of the centred 1170.5).
+        ``bench_hub`` in variantbenchmarking sits between the Truvari
+        (top) and Intersection (bottom) target tracks.  Pre-snap it
+        lives at the midpoint of the section's entry/exit ports
+        (~515.0), which is off the row's Y grid and produces a visible
+        diagonal kink on the inter-section route entering the
+        benchmarking section.  Snapping the hub to the nearest grid Y
+        (493.8, on SVanalyzer's track) eliminates the kink.
+
+        Snapping does make the hub->svanalyzer route flat, which
+        previously caused the column-centring pass to bail out via the
+        ``flat_to_internal`` guard.  The routing layer now treats fork
+        divergence hubs as non-chain predecessors for that check, so
+        the 9-station Benchmarking column still centres at x=1170.5.
         """
         g = _load("variantbenchmarking")
         hub = g.stations["bench_hub"]
@@ -687,22 +694,103 @@ class TestGridSnapExclusions:
         assert any(ty > hub.y + 0.5 for ty in target_ys), (
             "bench_hub should have at least one target below it"
         )
-        assert round(hub.y, 1) not in target_ys, (
-            f"bench_hub y={hub.y} coincides with a target track "
-            f"({sorted(target_ys)}); snap should have preserved it"
+        # Hub is now on grid (snapped to SVanalyzer's track).
+        row1 = g._row_y_grid_info[1]
+        pitch = row1["slot_spacing"]
+        origin = 23.8  # row 1 origin residue
+        rem = round(hub.y % pitch, 3)
+        assert abs(rem - origin) < 0.5, (
+            f"bench_hub y={hub.y} should be on the row 1 grid "
+            f"(pitch={pitch}, origin={origin}, residue={rem})"
         )
-        # The full pipeline (layout + routing) should centre the
-        # truvari column at x=1170.5, not at the raw column X of 1140.
-        # When bench_hub gets snapped onto a target track, the route to
-        # that target becomes flat and downstream column centring
-        # refuses to move the column.
+        # The full pipeline (layout + routing) should still centre the
+        # truvari column at x=1170.5.  The flat hub->svanalyzer route is
+        # detected as fork-hub-flat (incidental, snap-induced) and the
+        # column-centring pass proceeds.
         from nf_metro.layout.routing import compute_station_offsets, route_edges
 
         station_offsets = compute_station_offsets(g)
         route_edges(g, station_offsets=station_offsets)
         truvari = g.stations["truvari"]
         assert abs(truvari.x - 1170.5) < 0.5, (
-            f"truvari x={truvari.x} expected ~1170.5 (centred column); "
-            f"the snap collapsed bench_hub onto svanalyzer's track and "
-            f"broke companion-consensus centring"
+            f"truvari x={truvari.x} expected ~1170.5 (centred column)"
         )
+
+    def test_section_entry_hub_on_grid(self):
+        """Hub stations adjacent to an LR/RL section's entry/exit port
+        must sit on the row Y grid.
+
+        A hub that touches an LR/RL port carries the inter-section
+        trunk into or out of the section.  If the hub Y differs from
+        the port Y (and the port is on grid), the route bends at the
+        section boundary - a visible kink.  Snapping the hub to the
+        same grid as the port (and the rest of the row) keeps the
+        trunk straight.
+        """
+        from nf_metro.parser.model import PortSide
+
+        for name in ("variantbenchmarking", "rnaseq_sections"):
+            g = _load(name)
+            for sec in g.sections.values():
+                if sec.direction not in ("LR", "RL"):
+                    continue
+                row = sec.grid_row
+                row_info = (g._row_y_grid_info or {}).get(row)
+                if row_info is None or sec.id not in row_info.get("section_ids", []):
+                    continue
+                pitch = row_info["slot_spacing"]
+                # Recover the row's origin residue from on-grid LR/RL
+                # port Ys.  Ports in the row are placed on the grid by
+                # the snap so their residue identifies the origin.
+                residues = []
+                for pid in sec.entry_ports + sec.exit_ports:
+                    p = g.ports.get(pid)
+                    if p is None or p.side not in (PortSide.LEFT, PortSide.RIGHT):
+                        continue
+                    pst = g.stations.get(pid)
+                    if pst is None:
+                        continue
+                    residues.append(round(pst.y % pitch, 3))
+                if not residues:
+                    continue
+                origin = residues[0]
+                # Identify hub stations adjacent to an LR/RL port.  A
+                # hub here is a non-port station with at least one
+                # edge directly to or from such a port and at least
+                # two distinct outbound real targets at different Ys
+                # (a fork divergence anchor).
+                port_ids = set(sec.entry_ports) | set(sec.exit_ports)
+                for sid in sec.station_ids:
+                    if sid in port_ids:
+                        continue
+                    st = g.stations.get(sid)
+                    if st is None or st.is_port:
+                        continue
+                    adj_port = False
+                    for edge in g.edges:
+                        if (edge.source == sid and edge.target in port_ids) or (
+                            edge.target == sid and edge.source in port_ids
+                        ):
+                            adj_port = True
+                            break
+                    if not adj_port:
+                        continue
+                    out_ys = {
+                        round(g.stations[e.target].y, 3)
+                        for e in g.edges
+                        if e.source == sid and e.target in g.stations
+                    }
+                    if len(out_ys) < 2:
+                        continue
+                    rem = round(st.y % pitch, 3)
+                    diffs = [
+                        abs(rem - origin),
+                        abs(rem - origin - pitch),
+                        abs(rem - origin + pitch),
+                    ]
+                    assert min(diffs) < 0.5, (
+                        f"{name}/{sec.id}: hub {sid} y={st.y} off grid "
+                        f"(pitch={pitch}, origin={origin}, residue={rem}); "
+                        f"snap should have aligned the hub with the section's "
+                        f"row grid to avoid a section-boundary kink"
+                    )
