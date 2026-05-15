@@ -1552,10 +1552,24 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
        nearest ``origin + n * pitch``, bounded by half a pitch so
        adjacency cannot flip.
 
+    Two exclusions preserve deliberate non-grid Ys:
+
+    * LR/RL exit ports on TB-direction sections were placed by
+      ``_resolve_tb_exit_y`` at the receiving section's entry-port Y
+      (in a different row).  Snapping them to the TB's own row grid
+      reintroduces the kink the alignment removed.
+    * Stations that act as a convergence point for two or more inbound
+      sources at different Ys (fan-in midpoint) carry geometric meaning
+      that snapping destroys.
+
     Groups with no on-grid majority are left untouched.
     """
     if y_spacing <= 0:
         return
+    # Map each convergence station/port to the set of source Ys it
+    # converges (recorded pre-snap so the midpoint can be restored
+    # after sources move).
+    convergence_sources = _convergence_source_ys(graph)
     groups: dict[object, tuple[float, list[str]]] = {}
     grouped_ids: set[str] = set()
     for row, info in (graph._row_y_grid_info or {}).items():
@@ -1600,11 +1614,14 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
             section = graph.sections.get(sec_id)
             if section is None:
                 continue
+            is_tb_section = section.direction == "TB"
             for sid in section.station_ids:
                 if sid in port_ids:
                     continue
                 st = graph.stations.get(sid)
                 if st is None or getattr(st, "off_track", False):
+                    continue
+                if sid in convergence_sources:
                     continue
                 st.y = _snap(st.y)
             for pid in port_ids:
@@ -1614,7 +1631,80 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
                     continue
                 if port.side not in (PortSide.LEFT, PortSide.RIGHT):
                     continue
+                # TB exit ports are anchored to the downstream entry-port
+                # Y by _resolve_tb_exit_y; preserve that alignment.
+                if is_tb_section and not port.is_entry:
+                    continue
+                if pid in convergence_sources:
+                    continue
                 port_st.y = _snap(port_st.y)
+
+    # Restore convergence midpoints after snap: if a convergence
+    # target's source Ys moved during snap, re-place the target at the
+    # new midpoint so a fan-in still visually converges symmetrically.
+    for target_id, src_ids in convergence_sources.items():
+        st = graph.stations.get(target_id)
+        if st is None or getattr(st, "off_track", False):
+            continue
+        # Convergence sources whose snap displaced them away from their
+        # original Y may break the midpoint relationship; recompute
+        # from the post-snap source coordinates.
+        new_src_ys = [graph.stations[sid].y for sid in src_ids if sid in graph.stations]
+        if len(set(round(y, 3) for y in new_src_ys)) < 2:
+            continue
+        midpoint = (max(new_src_ys) + min(new_src_ys)) / 2.0
+        st.y = midpoint
+
+
+def _convergence_source_ys(graph: MetroGraph) -> dict[str, list[str]]:
+    """Return {target_id: [source_station_ids]} for fan-in convergences.
+
+    A station/port qualifies as a convergence target when it has two or
+    more inbound real-station predecessors at distinct Ys and the
+    target's own Y is the midpoint of those sources' Ys.  Snapping such
+    a target to a grid slot pulls it off the midpoint, forcing a
+    formerly-symmetric merge into an asymmetric one.
+
+    Walks one step back through junctions to identify the real
+    predecessors so fan-in via a single junction is still detected.
+    """
+    junction_ids = set(graph.junctions)
+    inbound: dict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges:
+        src_id = edge.source
+        if src_id in junction_ids:
+            for e2 in graph.edges:
+                if e2.target != src_id:
+                    continue
+                pre = graph.stations.get(e2.source)
+                if pre is None or pre.is_port:
+                    continue
+                inbound[edge.target].add(e2.source)
+        else:
+            src = graph.stations.get(src_id)
+            if src is None or src.is_port:
+                continue
+            inbound[edge.target].add(src_id)
+
+    convergence: dict[str, list[str]] = {}
+    for target_id, src_ids in inbound.items():
+        if len(src_ids) < 2:
+            continue
+        st = graph.stations.get(target_id)
+        if st is None:
+            continue
+        src_ys = sorted({round(graph.stations[sid].y, 3) for sid in src_ids})
+        if len(src_ys) < 2:
+            continue
+        midpoint = (src_ys[0] + src_ys[-1]) / 2.0
+        # Treat as a convergence only when the target sits at the
+        # midpoint of the source Y range (within a small tolerance).
+        # Stations that just happen to receive multiple inbound edges
+        # but sit on a single track (e.g. fan-in to the existing trunk)
+        # are excluded so they remain on-grid.
+        if abs(st.y - midpoint) < 1.0:
+            convergence[target_id] = sorted(src_ids)
+    return convergence
 
 
 def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:

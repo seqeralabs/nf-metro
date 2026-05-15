@@ -518,3 +518,98 @@ class TestInterSectionPortSnap:
         g = _load("variant_calling_tuned")
         # Without any %%metro grid: directive, no explicit_grid entries.
         assert not g._explicit_grid
+
+
+# ---------------------------------------------------------------------------
+# Grid-snap exclusions for TB exits, convergence ports, and TB bbox bottoms
+# (PR #276 regression fixes)
+# ---------------------------------------------------------------------------
+
+
+TOPOLOGY_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "topologies"
+NEXTFLOW_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "nextflow"
+
+
+def _load_topology(name: str):
+    text = (TOPOLOGY_FIXTURES / f"{name}.mmd").read_text()
+    g = parse_metro_mermaid(text)
+    compute_layout(g)
+    return g
+
+
+def _load_nextflow(name: str):
+    from nf_metro.convert import convert_nextflow_dag
+
+    text = (NEXTFLOW_FIXTURES / f"{name}.mmd").read_text()
+    text = convert_nextflow_dag(text)
+    g = parse_metro_mermaid(text)
+    compute_layout(g)
+    return g
+
+
+class TestGridSnapExclusions:
+    """Regressions for PR #276 grid-snap side effects."""
+
+    def test_tb_section_exit_y_not_snapped(self):
+        """TB-section LR/RL exit ports must align with their downstream
+        target's entry-port Y, not be snapped to the TB's own grid.
+
+        In ``fold_double`` the TB sections ``calling`` and ``integration``
+        feed an LR/RL section in the row below.  ``_resolve_tb_exit_y``
+        places the exit port at the downstream entry's Y (e.g. 330 for
+        ``calling`` -> ``hard_filter``).  The grid snap must leave that Y
+        alone so the inter-section line stays straight.
+        """
+        g = _load_topology("fold_double")
+        # calling (TB row 0) -> hard_filter (RL row 1)
+        calling_exits = [g.stations[pid] for pid in g.sections["calling"].exit_ports]
+        hard_filter_entries = [
+            g.stations[pid] for pid in g.sections["hard_filter"].entry_ports
+        ]
+        assert calling_exits and hard_filter_entries
+        for ex in calling_exits:
+            ey = min(
+                (en.y for en in hard_filter_entries),
+                key=lambda y: abs(y - ex.y),
+            )
+            assert abs(ex.y - ey) < 0.5, (
+                f"TB calling exit y={ex.y} != hard_filter entry y={ey}"
+            )
+        # integration (TB row 1) -> reporting (LR row 2)
+        integration_exits = [
+            g.stations[pid] for pid in g.sections["integration"].exit_ports
+        ]
+        reporting_entries = [
+            g.stations[pid] for pid in g.sections["reporting"].entry_ports
+        ]
+        for ex in integration_exits:
+            ey = min(
+                (en.y for en in reporting_entries),
+                key=lambda y: abs(y - ex.y),
+            )
+            assert abs(ex.y - ey) < 0.5, (
+                f"TB integration exit y={ex.y} != reporting entry y={ey}"
+            )
+
+    def test_convergence_port_y_is_midpoint(self):
+        """Stations that converge two upstream sources at different Ys
+        should sit at the midpoint of those Ys, not snap to grid.
+
+        ``flat_pipeline`` joins Fastqc (top track) and Sort Bam (bottom
+        track) at MULTIQC.  The MULTIQC station should be at the
+        midpoint of those source Ys; snapping it to Fastqc's Y would
+        force the lower line to fan up to reach it.
+        """
+        g = _load_nextflow("flat_pipeline")
+        st_by_label = {
+            (s.label or "").lower(): s for s in g.stations.values() if not s.is_port
+        }
+        fastqc = st_by_label["fastqc"]
+        sort_bam = st_by_label["sort bam"]
+        multiqc = st_by_label["multiqc"]
+        midpoint = (fastqc.y + sort_bam.y) / 2.0
+        assert abs(multiqc.y - midpoint) < 1.0, (
+            f"multiqc y={multiqc.y} should be midpoint of "
+            f"fastqc y={fastqc.y} and sort_bam y={sort_bam.y} "
+            f"(midpoint={midpoint})"
+        )
