@@ -18,9 +18,12 @@ result.
 
 - **`pipeline-metro-diagram`** (separate skill, nf-metro repo) authors the
   `.mmd` content - which lines and stations to draw, how to model branches,
-  how to iterate on fidelity, and how to fix nf-metro layout bugs the new
-  pipeline exposes. Reach for that one when the question is "what does the
-  diagram show?".
+  how to iterate on fidelity to the pipeline. Reach for that one when the
+  question is "what does the diagram show?".
+- **`nf-metro-layout-fix`** (separate skill, nf-metro repo) covers code-level
+  fixes to nf-metro itself when the mmd is correct but the engine produces a
+  bad layout. Stage 2 Case B (named-branch pin on a fork) is the bridge
+  developers use while a fix chain over there is in flight.
 - **`render-topologies`** (in this repo) is nf-metro's own gallery regression
   harness. Unrelated to pipeline-repo work.
 
@@ -185,11 +188,6 @@ Then:
 The CHANGELOG entry is the only narrative artifact users see. Keep it one
 line - they'll see the new diagram themselves.
 
-## Reference template
-
-`references/dev-doc-template.md` is the drop-in `docs/dev/metro_map.md`.
-Read it when filling in Stage 3.
-
 ## Verifying the result
 
 After running the three render commands:
@@ -203,23 +201,23 @@ After running the three render commands:
    `file`, or just opening it - the resolution shows in the title bar of
    most image viewers).
 4. Confirm trailing newlines: `tail -c1 docs/images/*.svg | xxd` should
-   show `0a` for each file. The `sed -i '' -e '$a\'` step in the template
-   normalises this; if your platform's `sed` differs (GNU vs BSD), adjust
-   accordingly. Linux: `sed -i -e '$a\'`. macOS: `sed -i '' -e '$a\'`.
+   show `0a` for each file. The template's `sed -i '' -e '$a\'` step
+   normalises this on macOS; on Linux, drop the empty string argument
+   (`sed -i -e '$a\'`). Mention the platform difference when handing the
+   template over.
 
-If the user is on Linux, the BSD-flavoured `sed -i ''` in the template
-needs to drop the empty string argument. Mention this when handing the
-template over.
+## Reference: worked examples
 
-## Reference: the rnaseq and differentialabundance setups
+Two pipelines ship complete nf-metro setups to use as references:
 
-Two worked examples sit in:
-
-- `~/projects/rnaseq` - canonical setup, rnaseq-default render params,
-  released nf-metro version pin.
-- `~/projects/differentialabundance-metro` - same layout, savepoint render
+- **`nf-core/rnaseq`** - canonical setup, rnaseq-default render params,
+  released nf-metro version pin. Match this if your pipeline fits the
+  linear / short-fan baseline.
+- **`nf-core/differentialabundance`** - same file layout, savepoint render
   params (`--x-spacing 70 --y-spacing 55 --center-ports --line-order
-  definition`), pinned to a fork branch while the fix chain is in flight.
+  definition`), pinned to a fork branch while a fix chain is in flight
+  against nf-metro `main`. Match this if your pipeline has multi-branch /
+  fan-heavy topology.
 
 Both ship the same five files (`assets/metro_map.mmd`,
 `docs/dev/metro_map.md`, three images in `docs/images/`). When in doubt,
