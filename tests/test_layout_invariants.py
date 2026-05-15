@@ -395,10 +395,13 @@ def test_side_branch_edge_stays_off_trunk(fixture):
         for edge in outbound[sid]:
             # Find the matching routed path
             rp = next(
-                (r for r in routes
-                 if r.edge.source == edge.source
-                 and r.edge.target == edge.target
-                 and r.edge.line_id == edge.line_id),
+                (
+                    r
+                    for r in routes
+                    if r.edge.source == edge.source
+                    and r.edge.target == edge.target
+                    and r.edge.line_id == edge.line_id
+                ),
                 None,
             )
             if rp is None or len(rp.points) < 2:
@@ -407,9 +410,7 @@ def test_side_branch_edge_stays_off_trunk(fixture):
             if tgt is None:
                 continue
             tgt_port = graph.ports.get(edge.target)
-            same_sec_target = (
-                tgt.section_id == sec.id and not tgt.is_port
-            )
+            same_sec_target = tgt.section_id == sec.id and not tgt.is_port
             is_exit_port = (
                 tgt_port is not None
                 and not tgt_port.is_entry
@@ -451,9 +452,7 @@ def test_side_branch_edge_stays_off_trunk(fixture):
                 f"section={sec.id})"
             )
             asserted += 1
-    assert asserted > 0, (
-        f"{fixture}: no side-branch single-line exits found to test"
-    )
+    assert asserted > 0, f"{fixture}: no side-branch single-line exits found to test"
 
 
 # ---------------------------------------------------------------------------
@@ -467,9 +466,7 @@ _ICON_HALF_HEIGHT = 16.0
 _MARKER_HALF_HEIGHT = 9.5
 
 
-@pytest.mark.parametrize(
-    "fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"]
-)
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
 def test_section_bbox_contains_all_content(fixture):
     """Every section's bbox must contain its on-track stations and any
     off-track input icons.  Catches the regression where an off-track

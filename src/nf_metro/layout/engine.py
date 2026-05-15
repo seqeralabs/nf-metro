@@ -5094,9 +5094,7 @@ def _bump_off_track_clear_of_trunks(
     return y
 
 
-def _grow_section_bbox_upward(
-    graph: MetroGraph, section, new_bbox_top: float
-) -> None:
+def _grow_section_bbox_upward(graph: MetroGraph, section, new_bbox_top: float) -> None:
     """Expand a section's bbox upward to *new_bbox_top* and pull TOP ports.
 
     BOTTOM ports stay put because the bbox only grows upward.

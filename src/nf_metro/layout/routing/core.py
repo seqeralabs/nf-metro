@@ -1779,9 +1779,7 @@ def _is_side_branch_ascent(
     tgt_port = ctx.graph.ports.get(edge.target)
     same_sec = tgt.section_id == sec_id and not tgt.is_port
     is_exit_port = (
-        tgt_port is not None
-        and not tgt_port.is_entry
-        and tgt_port.section_id == sec_id
+        tgt_port is not None and not tgt_port.is_entry and tgt_port.section_id == sec_id
     )
     if not (same_sec or is_exit_port):
         return False
