@@ -178,9 +178,7 @@ class TestAvoidDiagonalRoutes:
         g.stations["a"] = Station(id="a", label="A", x=100, y=200)
         # Label placed above the station (y_max = 195) right where a
         # diagonal route segment crosses.
-        placement = LabelPlacement(
-            station_id="a", text="A", x=100, y=195, above=True
-        )
+        placement = LabelPlacement(station_id="a", text="A", x=100, y=195, above=True)
         # Diagonal segment passes through the label area above.
         route = _FakeRoute(points=[(50, 250), (150, 150)])
         _avoid_diagonal_routes([placement], g, [route], None)
@@ -191,9 +189,7 @@ class TestAvoidDiagonalRoutes:
     def test_horizontal_segment_ignored(self):
         g = MetroGraph()
         g.stations["a"] = Station(id="a", label="A", x=100, y=200)
-        placement = LabelPlacement(
-            station_id="a", text="A", x=100, y=195, above=True
-        )
+        placement = LabelPlacement(station_id="a", text="A", x=100, y=195, above=True)
         # Pure horizontal segment crossing the label area.
         route = _FakeRoute(points=[(0, 195), (200, 195)])
         _avoid_diagonal_routes([placement], g, [route], None)
@@ -205,9 +201,7 @@ class TestAvoidDiagonalRoutes:
     def test_no_route_collision_no_flip(self):
         g = MetroGraph()
         g.stations["a"] = Station(id="a", label="A", x=100, y=200)
-        placement = LabelPlacement(
-            station_id="a", text="A", x=100, y=195, above=True
-        )
+        placement = LabelPlacement(station_id="a", text="A", x=100, y=195, above=True)
         # Diagonal far away from the label.
         route = _FakeRoute(points=[(500, 500), (600, 600)])
         _avoid_diagonal_routes([placement], g, [route], None)
