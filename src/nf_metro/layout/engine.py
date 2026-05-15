@@ -1469,7 +1469,8 @@ def _fan_free_content_upward(
         pinned = trunk_candidates[0]
         anchor_y = graph.stations[pinned].y
         to_lift = [
-            sid for sid in trunk_candidates[1 : 1 + slots]
+            sid
+            for sid in trunk_candidates[1 : 1 + slots]
             if not _lift_would_cause_uturn(graph, sid, section.id, anchor_y)
         ]
         for i, sid in enumerate(to_lift, 1):
