@@ -3340,9 +3340,7 @@ def _lift_off_track_stations(
     # Phase 3b ran before our lift, so y_offset doesn't account for the
     # new bbox tops.  Shift the whole graph down so the topmost section
     # sits inside the canvas with the standard margin.
-    min_top = min(
-        s.bbox_y for s in graph.sections.values() if s.bbox_h > 0
-    )
+    min_top = min(s.bbox_y for s in graph.sections.values() if s.bbox_h > 0)
     if min_top < section_y_padding:
         shift = section_y_padding - min_top
         for st in graph.stations.values():
