@@ -2336,8 +2336,10 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
             if not st.is_terminus:
                 continue
             preds = {
-                e.source for e in graph.edges
-                if e.target == sid and e.source in sec_sids
+                e.source
+                for e in graph.edges
+                if e.target == sid
+                and e.source in sec_sids
                 and not graph.stations[e.source].is_port
             }
             if len(preds) != 1:
