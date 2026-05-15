@@ -1257,7 +1257,6 @@ def _compact_row_content_to_bbox_top(
                 groups.append([s])
 
         for group in groups:
-
             allowed_shifts: list[float] = []
             for section in group:
                 # Use all real (non-port) stations as the top reference so
