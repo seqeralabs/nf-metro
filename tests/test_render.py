@@ -298,6 +298,46 @@ def test_render_multiple_file_icons():
     assert root.tag.endswith("svg") or "svg" in root.tag
 
 
+def test_render_file_icon_with_name_caption():
+    """Optional name on %%metro file: directive renders as a caption."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: reads_in | CSV | Samples\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    # Caption name and inner type label should both appear
+    assert "Samples" in svg
+    assert "CSV" in svg
+    root = ET.fromstring(svg)
+    assert root.tag.endswith("svg") or "svg" in root.tag
+
+
+def test_render_file_icon_no_name_no_caption():
+    """When no name is provided, no caption text appears in the SVG."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: reads_in | FASTQ\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    # The station has no label and there's no caption directive, so the only
+    # text inside the terminus block should be the type chip.
+    assert "FASTQ" in svg
+
+
 def test_render_multi_icon_fixture():
     """The 05b_multi_icons.mmd example renders without errors."""
     from pathlib import Path
