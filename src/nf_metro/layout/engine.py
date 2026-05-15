@@ -1558,7 +1558,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
        nearest ``origin + n * pitch``, bounded by half a pitch so
        adjacency cannot flip.
 
-    Two exclusions preserve deliberate non-grid Ys:
+    Three exclusions preserve deliberate non-grid Ys:
 
     * LR/RL exit ports on TB-direction sections were placed by
       ``_resolve_tb_exit_y`` at the receiving section's entry-port Y
@@ -1567,6 +1567,12 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     * Stations that act as a convergence point for two or more inbound
       sources at different Ys (fan-in midpoint) carry geometric meaning
       that snapping destroys.
+    * Stations that act as a divergence point for two or more outbound
+      targets at different Ys, with the station's Y strictly between
+      a target above and a target below.  Snapping such a fan-out hub
+      onto one of its target tracks converts the diagonal route to
+      that target into a flat one, which downstream X-centring treats
+      as a chain predecessor and skips centring the target's column.
 
     Groups with no on-grid majority are left untouched.
     """
@@ -1576,6 +1582,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     # converges (recorded pre-snap so the midpoint can be restored
     # after sources move).
     convergence_sources = _convergence_source_ys(graph)
+    divergence_anchors = _divergence_target_ys(graph)
     groups: dict[object, tuple[float, list[str]]] = {}
     grouped_ids: set[str] = set()
     for row, info in (graph._row_y_grid_info or {}).items():
@@ -1629,6 +1636,8 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
                     continue
                 if sid in convergence_sources:
                     continue
+                if sid in divergence_anchors:
+                    continue
                 st.y = _snap(st.y)
             for pid in port_ids:
                 port = graph.ports.get(pid)
@@ -1642,6 +1651,8 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
                 if is_tb_section and not port.is_entry:
                     continue
                 if pid in convergence_sources:
+                    continue
+                if pid in divergence_anchors:
                     continue
                 port_st.y = _snap(port_st.y)
 
@@ -1711,6 +1722,61 @@ def _convergence_source_ys(graph: MetroGraph) -> dict[str, list[str]]:
         if abs(st.y - midpoint) < 1.0:
             convergence[target_id] = sorted(src_ids)
     return convergence
+
+
+def _divergence_target_ys(graph: MetroGraph) -> set[str]:
+    """Return station/port ids that are fan-out divergence anchors.
+
+    A station/port qualifies as a divergence anchor when it has two or
+    more outbound real-station successors at distinct Ys and the
+    station's own Y lies strictly between at least one successor above
+    and one successor below.  Snapping such a hub onto one of those
+    successor tracks converts that outbound diagonal into a flat
+    segment, which the downstream routing centring pass treats as a
+    chain predecessor and consequently refuses to centre the
+    successor's column.
+
+    Walks one step forward through junctions to identify the real
+    successors so fan-out via a single junction is still detected.
+    """
+    junction_ids = set(graph.junctions)
+    outbound: dict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges:
+        tgt_id = edge.target
+        if tgt_id in junction_ids:
+            for e2 in graph.edges:
+                if e2.source != tgt_id:
+                    continue
+                post = graph.stations.get(e2.target)
+                if post is None or post.is_port:
+                    continue
+                outbound[edge.source].add(e2.target)
+        else:
+            tgt = graph.stations.get(tgt_id)
+            if tgt is None or tgt.is_port:
+                continue
+            outbound[edge.source].add(tgt_id)
+
+    anchors: set[str] = set()
+    for src_id, tgt_ids in outbound.items():
+        if len(tgt_ids) < 2:
+            continue
+        st = graph.stations.get(src_id)
+        if st is None:
+            continue
+        tgt_ys = sorted({round(graph.stations[sid].y, 3) for sid in tgt_ids})
+        if len(tgt_ys) < 2:
+            continue
+        # Only treat as an anchor when the station sits strictly between
+        # at least one outbound target above and one below.  Hubs sitting
+        # at or beyond either extreme can snap freely - the snap won't
+        # collapse a diagonal onto a target track.
+        sy = st.y
+        has_below = any(ty < sy - 0.5 for ty in tgt_ys)
+        has_above = any(ty > sy + 0.5 for ty in tgt_ys)
+        if has_below and has_above:
+            anchors.add(src_id)
+    return anchors
 
 
 def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:

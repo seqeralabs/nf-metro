@@ -640,3 +640,69 @@ class TestGridSnapExclusions:
             f"integration bbox bottom {integration_bot} != reporting "
             f"bottom {reporting_bot}; TB exit line sits at section edge"
         )
+
+    def test_grid_snap_does_not_mutate_x(self):
+        """``_snap_all_y_to_grid`` must not move any station's X position.
+
+        The snap is a Y-only operation; mutating X would shift columns
+        and break downstream routing centring.  This guards against
+        accidental ``station.x = ...`` assignments inside the snap.
+        """
+        from nf_metro.layout.engine import _snap_all_y_to_grid
+
+        for name in ("variantbenchmarking", "rnaseq_sections", "fold_double"):
+            if name == "fold_double":
+                g = _load_topology(name)
+            else:
+                g = _load(name)
+            # Capture x before invoking the snap again on an already-laid graph.
+            before = {sid: s.x for sid, s in g.stations.items()}
+            _snap_all_y_to_grid(g, y_spacing=40.0)
+            for sid, x_before in before.items():
+                x_after = g.stations[sid].x
+                assert x_before == x_after, (
+                    f"{name}: station {sid} x changed during grid snap "
+                    f"({x_before} -> {x_after}); snap must be Y-only"
+                )
+
+    def test_divergence_anchor_preserved_in_variantbenchmarking(self):
+        """A fan-out hub between targets above and below stays off-grid.
+
+        ``bench_hub`` in variantbenchmarking sits at the entry-port Y of
+        the benchmarking section, between the Truvari (top) and
+        Intersection (bottom) target tracks.  Snapping it onto any
+        target track converts that diagonal route to a flat one and
+        causes the downstream column-centring pass to abandon the move
+        for the entire column (truvari, svanalyzer, ... 9 stations stay
+        at x=1140 instead of the centred 1170.5).
+        """
+        g = _load("variantbenchmarking")
+        hub = g.stations["bench_hub"]
+        target_ys = {
+            round(g.stations[e.target].y, 1) for e in g.edges if e.source == "bench_hub"
+        }
+        assert any(ty < hub.y - 0.5 for ty in target_ys), (
+            "bench_hub should have at least one target above it"
+        )
+        assert any(ty > hub.y + 0.5 for ty in target_ys), (
+            "bench_hub should have at least one target below it"
+        )
+        assert round(hub.y, 1) not in target_ys, (
+            f"bench_hub y={hub.y} coincides with a target track "
+            f"({sorted(target_ys)}); snap should have preserved it"
+        )
+        # The full pipeline (layout + routing) should centre the
+        # truvari column at x=1170.5, not at the raw column X of 1140.
+        # When bench_hub gets snapped onto a target track, the route to
+        # that target becomes flat and downstream column centring
+        # refuses to move the column.
+        from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+        station_offsets = compute_station_offsets(g)
+        route_edges(g, station_offsets=station_offsets)
+        truvari = g.stations["truvari"]
+        assert abs(truvari.x - 1170.5) < 0.5, (
+            f"truvari x={truvari.x} expected ~1170.5 (centred column); "
+            f"the snap collapsed bench_hub onto svanalyzer's track and "
+            f"broke companion-consensus centring"
+        )
