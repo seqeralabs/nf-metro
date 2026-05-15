@@ -2260,11 +2260,14 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
         if not section or section.direction not in ("LR", "RL"):
             continue
 
-        # Collect all internal stations that feed into this exit port.
+        # Collect internal sources that feed this exit port and the
+        # line ids carried by the exit edges in a single edge pass.
         source_ys: list[float] = []
+        exit_lines: set[str] = set()
         for edge in graph.edges:
             if edge.target != port_id:
                 continue
+            exit_lines.add(edge.line_id)
             src = graph.stations.get(edge.source)
             if src and not src.is_port and src.section_id == section.id:
                 source_ys.append(src.y)
@@ -2272,53 +2275,33 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
         if not source_ys:
             continue
 
-        # Resolve downstream entry port Y for reference.
         ds_y = _resolve_downstream_entry_y(graph, port_id, junction_ids)
 
-        # If the port already aligns with the downstream entry,
-        # don't move it - the straight connection is correct even
-        # if the internal source is at a different Y.
+        # Already aligned with downstream entry: straight run is correct
+        # even if internal sources sit at a different Y.
         if ds_y is not None and abs(port_st.y - ds_y) < 1.0:
             continue
 
         unique_source_ys = sorted(set(source_ys))
-        if len(unique_source_ys) >= 3 and (
-            unique_source_ys[-1] - unique_source_ys[0] > 1.0
-        ):
-            # 3+ sources at distinct Y values is normally a fan-in merge
-            # and the centered midpoint preserves the convergence visual.
-            # Exception: when the exit carries a multi-line bundle (every
-            # source contributes the full line set) and one source Y
-            # matches the downstream entry, the sources are parallel-
-            # redundant rather than truly merging.  Snap to that source Y
-            # so the inter-section run stays horizontal.
-            exit_lines = {
-                e.line_id for e in graph.edges if e.target == port_id
-            }
-            if (
-                len(exit_lines) >= 2
-                and ds_y is not None
-                and any(abs(y - ds_y) < 1.0 for y in unique_source_ys)
-            ):
-                target_y = next(y for y in unique_source_ys if abs(y - ds_y) < 1.0)
-            else:
-                continue
-        elif len(unique_source_ys) == 2 and (
-            unique_source_ys[-1] - unique_source_ys[0] > 1.0
-        ):
-            # 2 sources at different Y values.  If one matches the
-            # downstream entry, snap to create a straight inter-section
-            # line.  Otherwise keep centered.
-            if ds_y is not None:
-                matching = [y for y in unique_source_ys if abs(y - ds_y) < 1.0]
-                if matching:
-                    target_y = matching[0]
-                else:
-                    continue
-            else:
-                continue
-        else:
+        spread = unique_source_ys[-1] - unique_source_ys[0]
+        n_unique = len(unique_source_ys)
+
+        if n_unique == 1 or spread <= 1.0:
             target_y = source_ys[0]
+        else:
+            # Multi-Y sources: snap onto the source that aligns with the
+            # downstream entry so the inter-section run stays horizontal.
+            # For 3+ sources this overrides the default centered merge
+            # only when the exit carries a multi-line bundle (parallel-
+            # redundant rather than a true fan-in).
+            if ds_y is None or (n_unique >= 3 and len(exit_lines) < 2):
+                continue
+            match = next(
+                (y for y in unique_source_ys if abs(y - ds_y) < 1.0), None
+            )
+            if match is None:
+                continue
+            target_y = match
 
         if abs(port_st.y - target_y) >= 1.0:
             port_st.y = target_y
