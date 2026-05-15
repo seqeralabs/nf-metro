@@ -904,21 +904,16 @@ def _render_terminus_icons(
         # Optional caption rendered below the icon so the type chip
         # inside the icon stays readable.
         if name:
-            caption_y = (
-                icon_cy + theme.terminus_height / 2 + ICON_NAME_GAP
-            )
+            caption_y = icon_cy + theme.terminus_height / 2 + ICON_NAME_GAP
             caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
             caption_cx = icon_cx
             if section and section.bbox_w > 0:
                 # Estimate caption width and clamp so it stays inside the
                 # section bbox right edge (and left edge for symmetry).
                 approx_w = len(name) * caption_font_size * 0.55
-                left_bound = (
-                    section.bbox_x + approx_w / 2 + ICON_BBOX_MARGIN
-                )
+                left_bound = section.bbox_x + approx_w / 2 + ICON_BBOX_MARGIN
                 right_bound = (
-                    section.bbox_x + section.bbox_w
-                    - approx_w / 2 - ICON_BBOX_MARGIN
+                    section.bbox_x + section.bbox_w - approx_w / 2 - ICON_BBOX_MARGIN
                 )
                 if right_bound > left_bound:
                     caption_cx = max(left_bound, min(caption_cx, right_bound))
