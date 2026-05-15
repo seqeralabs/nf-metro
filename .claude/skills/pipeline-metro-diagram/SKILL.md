@@ -1,28 +1,32 @@
 ---
 name: pipeline-metro-diagram
-description: Author the mmd content for a pipeline metro map and drive fixes to nf-metro itself when a new pipeline exposes layout bugs. Use whenever the user is iterating on a pipeline's .mmd to improve fidelity to the workflow code or visual clarity, OR when the diagram is correct but nf-metro produces a bad layout that needs a code fix in nf-metro. Trigger on phrases like "make a metro map for pipeline X", "iterate on the mmd for pipeline Z", "the metro map for funcscan doesn't match the workflow", or "nf-metro is producing a kink/overlap/breeze-past on my pipeline diagram". For the mechanical pipeline-repo setup (assets/, docs/dev/metro_map.md, render commands, README swap), see the separate `pipeline-metro-setup` skill. For nf-metro's own gallery regression testing, see `render-topologies`.
+description: Author the mmd content for a pipeline's metro map - turn the pipeline's workflow code into a faithful, readable metro diagram. Use whenever the user is iterating on a pipeline's .mmd to improve fidelity to the workflow code, visual clarity, or layout params. Trigger on phrases like "make a metro map for pipeline X", "iterate on the mmd for pipeline Z", "the metro map for funcscan doesn't match the workflow", or "this station shouldn't be on the rnaseq line". Covers studying the workflow to model lines/stations/branches, deciding line and section structure, `%%metro file:` and `%%metro off_track:` directives, the render-inspect-edit iteration loop, common pitfalls (breeze-past, fan asymmetry, section-boundary kinks), and the "is it mmd or nf-metro?" triage. When the diagnosis lands on nf-metro itself producing a bad layout for a correct mmd, hand off to the `nf-metro-layout-fix` skill. For the mechanical pipeline-repo setup (assets/, docs/dev/metro_map.md, render commands, README swap), see `pipeline-metro-setup`. For nf-metro's own gallery regression testing, see `render-topologies`.
 ---
 
-# Authoring a Pipeline Metro Map and Driving nf-metro Fixes From It
+# Authoring a Pipeline Metro Map
 
 Captures the workflow for designing the mmd content for a Nextflow pipeline
-metro map, and for fixing nf-metro itself when the new pipeline exposes a
-layout case nf-metro hasn't seen before. Out of scope: pipeline-repo
-mechanical setup (file paths, render commands, README) — see the
-`pipeline-metro-setup` skill.
+metro map: turning the pipeline's workflow code into a faithful, readable
+metro diagram. Out of scope: pipeline-repo mechanical setup (file paths,
+render commands, README) — see the `pipeline-metro-setup` skill. Out of
+scope too: code-level fixes to nf-metro itself when a correct mmd still
+renders badly — see the `nf-metro-layout-fix` skill.
 
 ## Scope and relation to other skills
 
 This skill is about **upstream authoring** — turning a pipeline's workflow code
 into a metro map that lives in the pipeline repo. It is distinct from:
 
+- **pipeline-metro-setup**: the mechanical pipeline-repo wiring (assets/,
+  docs/dev/metro_map.md, render commands, CHANGELOG). Hand off there once the
+  diagram reads right.
+- **nf-metro-layout-fix**: code-level changes to nf-metro itself when the mmd
+  is correct but the engine produces a bad layout. Reach for that path only
+  after you've ruled out mmd mistakes (see Step 5 below).
 - **render-topologies** (in this repo): regression-tests nf-metro itself by
   rendering all gallery fixtures and pixel-diffing against `origin/main`. Use
   that one when you've changed nf-metro's layout/render code, not when you're
   drafting a pipeline diagram.
-- **nf-metro layout debugging**: when the mmd is correct but nf-metro itself
-  produces a bad layout. Reach for that path only after you've ruled out mmd
-  mistakes (see step 5 below).
 
 ## When to use this skill
 
@@ -162,9 +166,10 @@ If a render looks bad, **first check the mmd**:
   with the lines that actually cross those section boundaries?
 
 If the mmd is correct but nf-metro still produces a bad layout, that's a
-nf-metro bug. The rest of this skill (Steps 8–11) is the workflow for fixing
-those bugs without regressing the renders for other pipelines that already
-ship a metro diagram.
+nf-metro bug. Hand off to the `nf-metro-layout-fix` skill, which captures
+the savepoint pattern, the invariant-test-then-fix-then-runtime-validator
+loop, gallery vetting against `origin/main`, and the additive-commits-only
+PR chain rules for nf-metro changes.
 
 ### Tradeoffs
 
@@ -211,154 +216,6 @@ exercises:
   optional inputs
 
 Useful as a template for a new pipeline with multiple study-type branches.
-
----
-
-## Step 8: When nf-metro itself needs to change
-
-A new pipeline often exposes layout cases nf-metro hasn't seen before. The
-goal of this section is to fix those without breaking renders for pipelines
-that already ship a metro map.
-
-### Make a save point first
-
-Before touching nf-metro, tag the current state of the pipeline's render as
-"good enough":
-
-```bash
-# In the pipeline repo
-git tag pipeline-render-baseline <commit>
-
-# In nf-metro
-git tag <pipeline>-render-savepoint <commit>
-git push origin <pipeline>-render-savepoint
-```
-
-Treat the savepoint as immutable. Every later step measures regressions
-against it. If the iteration goes off the rails, you can return to this tag
-and start over with a different approach.
-
-### Per-fix iteration loop
-
-For each layout issue:
-
-1. **Reproduce minimally.** Render the pipeline mmd with `--debug` and the
-   exact params it ships with. Capture the SVG. Identify the offending
-   coordinates by parsing the SVG (`<rect>` station markers, `<path>` edge
-   data) — visual inspection alone is unreliable for sub-pixel issues.
-
-2. **Form a hypothesis.** What in `src/nf_metro/layout/engine.py` (or
-   `routing/core.py`, `parser/mermaid.py`) is producing the wrong output?
-   The engine is a long pipeline of phases; the bug is almost always in a
-   specific phase rather than across many.
-
-3. **Add an invariant test first, then fix.** Each layout invariant should
-   fail on the bug case and pass after the fix. Examples from prior sessions:
-   - `test_row_trunk_marker_cy_consistent` (trunk Y consistent across
-     same-row sections)
-   - `test_no_station_or_icon_overlap` (no two station/icon bboxes intersect)
-   - `test_lines_dont_cross_non_consumer_markers` (no line passes through a
-     station that doesn't consume it)
-   - `test_all_stations_snap_to_grid` (with explicit exceptions for half-grid
-     2-branch fans)
-   - `test_bypass_v_has_horizontal_segment` (virtual bypass stations have a
-     visible flat segment ≥ 20 px)
-   - `test_section_bbox_contains_all_content` (no station/icon overflows its
-     section's bbox)
-   - `test_no_kink_at_section_boundary` (inter-section trunk Ys match)
-   - `test_loop_column_stations_share_x` (column-mate stations share X)
-
-   Parametrize each invariant over multiple fixture mmds AND multiple render
-   parameter sets (savepoint params, rnaseq defaults, no-center-ports). A
-   bug that only manifests at non-default params has bitten us before.
-
-4. **Verify against the gallery.** After every fix, run `python
-   scripts/build_gallery.py --debug` and `build_render_diff.py` against
-   `origin/main`. If any existing example shifts visually, classify the
-   shift:
-
-   - **Improvement / neutral**: fine.
-   - **Detrimental** (new crossings, mad routing, bbox overflow, label
-     overlap, station collisions, broken trunk alignment, breeze-past): the
-     fix needs to become conditional. Don't ship the fix in its current
-     form.
-
-5. **Convert "fix it everywhere" to "fix it conditionally" when needed.** A
-   common failure mode: a fix that works for the new pipeline introduces
-   spurious work for renders that didn't need it. Examples:
-   - Bbox padding change that grows row gaps even where no bypass routing
-     occurs → restrict to column-overlapping section pairs only.
-   - Bypass V flat-segment minimum that pushes 4 unrelated gallery examples
-     vertically → only enforce when there's horizontal headroom.
-
-   The pattern: identify the precise topological precondition that makes
-   the fix needed, and gate the new behaviour on that precondition.
-
-6. **Add a runtime validator (not just a test).** End users running
-   `nf-metro render` should see a clear error if the layout violates an
-   invariant — not produce a silently broken render. Add a
-   `_guard_<name>` function called from `compute_layout`'s `validate` block
-   that raises `PhaseInvariantError` with the offending coordinates.
-
-### The "improvement ratchet"
-
-Every regression we identify adds an invariant before its fix lands. The
-test suite grows monotonically. Later PRs can't accidentally re-introduce
-problems that earlier PRs solved. This is the only way the engine — built
-as a long sequence of mutating phases — stays sustainable across many
-pipelines.
-
-When dispatching agents to do nf-metro work, include in their brief: "you
-must add an invariant test that fails on the bug AND a matching runtime
-validator. Both are mandatory; the fix is not complete without them."
-
-## Step 9: Managing the PR chain back to nf-metro main
-
-Layout fixes accumulate into a stack of PRs against nf-metro `main`. The
-chain pattern:
-
-- The bottom-of-chain PR is based on `main`.
-- Each subsequent PR is based on the previous PR's branch.
-- As each merges, the next PR's base auto-updates to `main`.
-
-### Strict rules
-
-- **NO force-pushes.** Every change to a PR is an additive commit. To undo
-  an earlier commit, append a `git revert <hash>` — don't rewrite history.
-- **Each PR must be vetted before review.** The vetting workflow:
-  1. Render the gallery on the PR HEAD.
-  2. Diff against the parent (the prior PR's HEAD, or `main` for the bottom
-     of the chain).
-  3. Inspect every changed example visually. Classify deltas.
-  4. For each detrimental, append a fix commit.
-  5. Run the simplify skill (`/simplify`) on the changed code; commit as a
-     separate refactor commit.
-  6. Sweep narrative comments off the PR. Keep the CI render-preview
-     comment.
-  7. Rewrite the PR description to be standalone: explain the net diff vs
-     `main` without referencing the chain or in-flight history.
-  8. Ensure CI's render-preview workflow ran on the latest commit (append
-     `git commit --allow-empty -m "chore: trigger CI"` if needed).
-
-### After merge
-
-- Delete the remote branch (`gh api -X DELETE
-  repos/<owner>/<repo>/git/refs/heads/<branch>`).
-- Delete the local branch and worktree.
-- Re-target the next PR's base to `main`.
-
-## Step 10: Reconciling stack regressions
-
-When the chain is built progressively, a regression introduced by an early
-PR may only become visible later. The triage workflow:
-
-1. After all fixes land in the savepoint, render every PR's tip (rebased onto
-   main individually) and diff against main.
-2. Classify each PR's effect as I / N / D.
-3. For each detrimental, identify the **earliest** PR where the issue first
-   appears. The fix should be folded back into that PR (as an additive
-   commit on its branch), not as a top-of-stack bolt-on PR.
-4. Re-vet the modified PR + all downstream PRs to confirm no new issues.
 
 ## Once the diagram reads right
 
