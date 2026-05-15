@@ -1,0 +1,26 @@
+%%metro title: Trunk align - matching bundle
+%%metro style: dark
+%%metro line: a | Line A | #ff0000
+%%metro line: b | Line B | #00ff00
+%%metro grid: secA | 0,0
+%%metro grid: secB | 1,0
+%%metro grid: secC | 2,0
+
+graph LR
+    subgraph secA [Section A]
+        a_main[A main]
+    end
+    subgraph secB [Section B]
+        b_above1[B above 1]
+        b_above2[B above 2]
+        b_main[B main]
+        b_above1 -->|a| b_main
+        b_above2 -->|b| b_main
+    end
+    subgraph secC [Section C]
+        c_main[C main]
+    end
+    a_main -->|a| b_main
+    a_main -->|b| b_main
+    b_main -->|a| c_main
+    b_main -->|b| c_main
