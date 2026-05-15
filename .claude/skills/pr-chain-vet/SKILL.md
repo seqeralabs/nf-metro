@@ -152,14 +152,18 @@ outcome - skip the commit and move on.
 
 ## Step 5: Render the gallery on PR HEAD
 
+`scripts/build_gallery.py` writes SVGs to `docs/assets/renders/`. Copy
+them to a stable per-PR temp directory so the diff in Step 7 is
+reproducible across iterations:
+
 ```bash
+python scripts/build_gallery.py --debug
 mkdir -p /tmp/gallery-pr<N>
-python scripts/build_gallery.py --debug --out /tmp/gallery-pr<N>
+cp docs/assets/renders/*.svg /tmp/gallery-pr<N>/
 ```
 
-Capture into a stable temporary directory so the diff in Step 7 is
-reproducible. The `--debug` flag draws grid lines and bbox boundaries -
-they make most layout regressions visible at a glance.
+The `--debug` flag draws grid lines and bbox boundaries — they make most
+layout regressions visible at a glance.
 
 ## Step 6: Render the gallery on main (if not cached)
 
@@ -167,8 +171,9 @@ they make most layout regressions visible at a glance.
 # In a separate worktree on main
 git -C /tmp/nf-metro-main fetch origin main
 git -C /tmp/nf-metro-main checkout origin/main
+cd /tmp/nf-metro-main && python scripts/build_gallery.py --debug
 mkdir -p /tmp/gallery-main
-python -C /tmp/nf-metro-main scripts/build_gallery.py --debug --out /tmp/gallery-main
+cp /tmp/nf-metro-main/docs/assets/renders/*.svg /tmp/gallery-main/
 ```
 
 If you already rendered main during a previous PR's vetting pass and `main`
@@ -177,13 +182,16 @@ loop.
 
 ## Step 7: Diff and open the report
 
+`build_render_diff.py` takes an output **directory** and writes
+`index.html` inside it:
+
 ```bash
 python scripts/build_render_diff.py \
   /tmp/gallery-main \
   /tmp/gallery-pr<N> \
-  /tmp/diff-pr<N>.html \
+  /tmp/diff-pr<N> \
   --pr <N>
-open /tmp/diff-pr<N>.html
+open /tmp/diff-pr<N>/index.html
 ```
 
 The diff report renders side-by-side SVGs and flags pixel-level changes.
