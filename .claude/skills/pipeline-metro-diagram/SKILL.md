@@ -189,38 +189,7 @@ documentation. Sensible simplifications (e.g. combining two trivially similar
 inputs onto one line, eliding a one-off helper module) are fine — note them
 in the dev doc so a future maintainer knows the simplification was deliberate.
 
-## Step 6: Setting up the pipeline repo
-
-Mirror the nf-core/rnaseq pattern:
-
-- `assets/metro_map.mmd` — the source.
-- `docs/dev/metro_map.md` — the regeneration instructions.
-- `docs/images/nf-core-<name>_metro_map.png` — the rendered PNG used in
-  documentation.
-- `docs/images/nf-core-<name>_metro_map.svg` — the static SVG.
-- `docs/images/nf-core-<name>_metro_map_animated.svg` — the animated SVG used
-  in the README.
-
-Use `pip install 'nf-metro>=X.Y.Z' cairosvg` (pin to the minimum version that
-has the features you use). The dev doc should include three blocks:
-
-1. Static SVG render with `nf-metro render ... -o ... .svg`.
-2. PNG conversion via `cairosvg.svg2png(... output_width=2265)`.
-3. Animated SVG render with the same params plus `--animate`.
-
-End with the trailing-newline fix that pre-commit requires:
-
-```bash
-for f in docs/images/nf-core-<name>_metro_map.svg \
-         docs/images/nf-core-<name>_metro_map_animated.svg; do
-  sed -i '' -e '$a\' "$f"
-done
-```
-
-See [`references/pipeline-setup.md`](references/pipeline-setup.md) for the
-full template you can paste into a pipeline's `docs/dev/metro_map.md`.
-
-## Step 7: Common patterns and pitfalls
+## Step 6: Common patterns and pitfalls
 
 Captured from real authoring sessions:
 
@@ -406,21 +375,11 @@ PR may only become visible later. The triage workflow:
    commit on its branch), not as a top-of-stack bolt-on PR.
 4. Re-vet the modified PR + all downstream PRs to confirm no new issues.
 
-## Step 11: Setting up the new pipeline to consume your fixes
+## Step 11: Set up the new pipeline to ship the map
 
-While the PR chain is in flight, the new pipeline doesn't have access to the
-fixes via `pip install nf-metro` (the released version is older). The bridge:
-
-1. Push the savepoint as a named branch on your nf-metro fork:
-   ```bash
-   git push origin <savepoint-tag>:refs/heads/<pipeline-name>
-   ```
-2. Pin the pipeline's `docs/dev/metro_map.md` install line to that branch:
-   ```bash
-   pip install 'git+https://github.com/<owner>/nf-metro.git@<pipeline-name>' cairosvg
-   ```
-3. When the PR chain merges to nf-metro `main` and a new release is cut,
-   the pipeline's dev doc can switch back to `pip install 'nf-metro>=X.Y.Z'`.
-
-This pattern lets the pipeline's metro map ship immediately with the
-fixes, without waiting for upstream release cycles.
+Once the mmd reads right, replicate the nf-core/rnaseq tooling pattern in
+the pipeline repo (`assets/metro_map.mmd`, `docs/dev/metro_map.md`, the
+docs/images outputs, the pip install line). That's a separate skill —
+see the `pipeline-metro-setup` skill in this repo for the template and
+the bridge pattern (pinning to a named branch of your nf-metro fork while
+your fix chain is in flight).
