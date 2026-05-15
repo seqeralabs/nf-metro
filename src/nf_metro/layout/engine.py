@@ -3310,7 +3310,6 @@ def _lift_off_track_stations(
         band_top = band_bottom - (max_per_col - 1) * BAND_STEP
 
         for stations in by_col.values():
-            n = len(stations)
             # Distribute n stations across the band, topmost first
             for i, st in enumerate(stations):
                 st.y = band_top + i * BAND_STEP
