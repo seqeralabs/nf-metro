@@ -938,6 +938,39 @@ def _top_align_row_sections(graph: MetroGraph) -> None:
                 section.bbox_y -= delta
 
 
+def _row_contiguous_column_groups(
+    graph: MetroGraph,
+) -> list[list[Section]]:
+    """Group laid-out sections by grid row into contiguous column runs.
+
+    Each returned group has at least 2 sections sitting in adjacent
+    grid columns (gap <= 1) within the same row.  Sections with no
+    bbox or unassigned row are skipped, matching the precondition
+    used by the row-alignment callers in this module.
+    """
+    by_row: dict[int, list[Section]] = defaultdict(list)
+    for section in graph.sections.values():
+        if section.bbox_h > 0 and section.grid_row >= 0:
+            by_row[section.grid_row].append(section)
+
+    result: list[list[Section]] = []
+    for row in by_row.values():
+        if len(row) < 2:
+            continue
+        row_sorted = sorted(row, key=lambda s: s.grid_col)
+        group = [row_sorted[0]]
+        for s in row_sorted[1:]:
+            if s.grid_col - group[-1].grid_col <= 1:
+                group.append(s)
+            else:
+                if len(group) >= 2:
+                    result.append(group)
+                group = [s]
+        if len(group) >= 2:
+            result.append(group)
+    return result
+
+
 def _top_align_row_bboxes_only(graph: MetroGraph) -> None:
     """Align bbox tops within each row by growing bboxes upward.
 
@@ -950,35 +983,16 @@ def _top_align_row_bboxes_only(graph: MetroGraph) -> None:
 
     Used after ``_lift_off_track_stations`` so off-track expansion in
     one section doesn't leave other row-mates with misaligned bbox
-    tops.  Same contiguous-column-group logic as ``_top_align_row``
-    callers above.
+    tops.
     """
-    row_sections: dict[int, list[Section]] = defaultdict(list)
-    for section in graph.sections.values():
-        if section.bbox_h > 0 and section.grid_row >= 0:
-            row_sections[section.grid_row].append(section)
-
-    for sections in row_sections.values():
-        if len(sections) < 2:
-            continue
-        sections_by_col = sorted(sections, key=lambda s: s.grid_col)
-        groups: list[list[Section]] = [[sections_by_col[0]]]
-        for s in sections_by_col[1:]:
-            if s.grid_col - groups[-1][-1].grid_col <= 1:
-                groups[-1].append(s)
-            else:
-                groups.append([s])
-
-        for group in groups:
-            if len(group) < 2:
+    for group in _row_contiguous_column_groups(graph):
+        min_top = min(s.bbox_y for s in group)
+        for section in group:
+            delta = section.bbox_y - min_top
+            if delta <= 0:
                 continue
-            min_top = min(s.bbox_y for s in group)
-            for section in group:
-                delta = section.bbox_y - min_top
-                if delta <= 0:
-                    continue
-                section.bbox_y = min_top
-                section.bbox_h += delta
+            section.bbox_y = min_top
+            section.bbox_h += delta
 
 
 def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
