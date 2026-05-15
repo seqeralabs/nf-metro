@@ -998,7 +998,8 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
             # Fan-out siblings: strict subset of bundle (skip full-bundle
             # pass-throughs and orphan stations with no lines).
             siblings = [
-                s for s in sids
+                s
+                for s in sids
                 if s != trunk_sid
                 and set(graph.station_lines(s))
                 and set(graph.station_lines(s)) < bundle
@@ -1161,27 +1162,27 @@ def _resolve_station_collisions(
 
     EPS = 0.5
     real = [s for s in sub.stations.values() if not s.is_port and not s.is_hidden]
-    real.sort(key=lambda s: (getattr(s, primary), getattr(s, secondary)))
+    if len(real) < 2:
+        return
 
     # Group stations by primary-axis bucket (layer column for LR/RL,
     # row for TB).  Use the primary-axis step size; the bucket spans a
     # half-step either side of a layer centre so off-grid layer_extra
     # offsets stay in the same bucket as their layer peers.
+    primary_step_norm = max(primary_step, 1.0)
     by_primary: dict[float, list] = {}
     for s in real:
-        bucket = round(getattr(s, primary) / max(primary_step, 1.0))
+        bucket = round(getattr(s, primary) / primary_step_norm)
         by_primary.setdefault(bucket, []).append(s)
+
+    # Stable tiebreaker so the earlier-defined station keeps its slot
+    # when two share a secondary coord (insertion order in sub.stations).
+    order = {sid: i for i, sid in enumerate(sub.stations)}
 
     for stations in by_primary.values():
         if len(stations) < 2:
             continue
-        # Sort by current secondary coord, then station definition order
-        # (insertion order in sub.stations) as a stable tiebreaker so the
-        # earlier-defined station keeps its slot.
-        order = {sid: i for i, sid in enumerate(sub.stations)}
-        stations.sort(
-            key=lambda s: (getattr(s, secondary), order.get(s.id, 0))
-        )
+        stations.sort(key=lambda s: (getattr(s, secondary), order.get(s.id, 0)))
         used: list[float] = []
         for s in stations:
             pos = getattr(s, secondary)
@@ -1746,14 +1747,19 @@ def _resolve_source_section_id(
 
 
 def _resolve_source_xy(
-    graph: MetroGraph, edge_source: str, junction_ids: set[str]
+    graph: MetroGraph,
+    edge_source: str,
+    junction_ids: set[str],
+    _seen: set[str] | None = None,
 ) -> tuple[float, float] | None:
     """Return effective (x, y) for an edge source.
 
     For port stations, returns coordinates directly.  For junctions,
     derives coordinates from the feeding exit port, mirroring
     ``_position_junctions`` logic so that entry-port alignment does
-    not depend on junctions being pre-positioned.
+    not depend on junctions being pre-positioned.  Recurses through
+    chained junctions (junction-to-junction edges) to find the
+    underlying exit port.
     """
     src = graph.stations.get(edge_source)
     if not src:
@@ -1761,9 +1767,19 @@ def _resolve_source_xy(
     if edge_source not in junction_ids:
         return src.x, src.y
 
+    if _seen is None:
+        _seen = set()
+    if edge_source in _seen:
+        return src.x, src.y
+    _seen.add(edge_source)
+
     # Junction: find the feeding exit port and compute placement.
+    chained: list[str] = []
     for e in graph.edges:
         if e.target != edge_source:
+            continue
+        if e.source in junction_ids:
+            chained.append(e.source)
             continue
         exit_st = graph.stations.get(e.source)
         if not exit_st or not exit_st.is_port:
@@ -1779,6 +1795,12 @@ def _resolve_source_xy(
             return exit_st.x - JUNCTION_MARGIN, exit_st.y
         else:
             return exit_st.x + JUNCTION_MARGIN, exit_st.y
+
+    # Recurse through chained junctions to find the underlying exit port.
+    for js in chained:
+        resolved = _resolve_source_xy(graph, js, junction_ids, _seen)
+        if resolved is not None and resolved != (0.0, 0.0):
+            return resolved
 
     # Fallback: use junction station's current coordinates.
     return src.x, src.y
@@ -2337,11 +2359,14 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
         if not section or section.direction not in ("LR", "RL"):
             continue
 
-        # Collect all internal stations that feed into this exit port.
+        # Collect internal sources that feed this exit port and the
+        # line ids carried by the exit edges in a single edge pass.
         source_ys: list[float] = []
+        exit_lines: set[str] = set()
         for edge in graph.edges:
             if edge.target != port_id:
                 continue
+            exit_lines.add(edge.line_id)
             src = graph.stations.get(edge.source)
             if src and not src.is_port and src.section_id == section.id:
                 source_ys.append(src.y)
@@ -2349,53 +2374,31 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
         if not source_ys:
             continue
 
-        # Resolve downstream entry port Y for reference.
         ds_y = _resolve_downstream_entry_y(graph, port_id, junction_ids)
 
-        # If the port already aligns with the downstream entry,
-        # don't move it - the straight connection is correct even
-        # if the internal source is at a different Y.
+        # Already aligned with downstream entry: straight run is correct
+        # even if internal sources sit at a different Y.
         if ds_y is not None and abs(port_st.y - ds_y) < 1.0:
             continue
 
         unique_source_ys = sorted(set(source_ys))
-        if len(unique_source_ys) >= 3 and (
-            unique_source_ys[-1] - unique_source_ys[0] > 1.0
-        ):
-            # 3+ sources at distinct Y values is normally a fan-in merge
-            # and the centered midpoint preserves the convergence visual.
-            # Exception: when the exit carries a multi-line bundle (every
-            # source contributes the full line set) and one source Y
-            # matches the downstream entry, the sources are parallel-
-            # redundant rather than truly merging.  Snap to that source Y
-            # so the inter-section run stays horizontal.
-            exit_lines = {
-                e.line_id for e in graph.edges if e.target == port_id
-            }
-            if (
-                len(exit_lines) >= 2
-                and ds_y is not None
-                and any(abs(y - ds_y) < 1.0 for y in unique_source_ys)
-            ):
-                target_y = next(y for y in unique_source_ys if abs(y - ds_y) < 1.0)
-            else:
-                continue
-        elif len(unique_source_ys) == 2 and (
-            unique_source_ys[-1] - unique_source_ys[0] > 1.0
-        ):
-            # 2 sources at different Y values.  If one matches the
-            # downstream entry, snap to create a straight inter-section
-            # line.  Otherwise keep centered.
-            if ds_y is not None:
-                matching = [y for y in unique_source_ys if abs(y - ds_y) < 1.0]
-                if matching:
-                    target_y = matching[0]
-                else:
-                    continue
-            else:
-                continue
-        else:
+        spread = unique_source_ys[-1] - unique_source_ys[0]
+        n_unique = len(unique_source_ys)
+
+        if n_unique == 1 or spread <= 1.0:
             target_y = source_ys[0]
+        else:
+            # Multi-Y sources: snap onto the source that aligns with the
+            # downstream entry so the inter-section run stays horizontal.
+            # For 3+ sources this overrides the default centered merge
+            # only when the exit carries a multi-line bundle (parallel-
+            # redundant rather than a true fan-in).
+            if ds_y is None or (n_unique >= 3 and len(exit_lines) < 2):
+                continue
+            match = next((y for y in unique_source_ys if abs(y - ds_y) < 1.0), None)
+            if match is None:
+                continue
+            target_y = match
 
         if abs(port_st.y - target_y) >= 1.0:
             port_st.y = target_y
