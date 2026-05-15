@@ -2351,11 +2351,15 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
 
         for x, full in full_by_col.items():
             non_full = [s for s in cols[x] if s not in full]
-            mixed_ok = bool(full) and non_full and all(
-                set(graph.station_lines(s))
-                and set(graph.station_lines(s)) < bundle
-                and _has_pred(s)
-                for s in non_full
+            mixed_ok = (
+                bool(full)
+                and non_full
+                and all(
+                    set(graph.station_lines(s))
+                    and set(graph.station_lines(s)) < bundle
+                    and _has_pred(s)
+                    for s in non_full
+                )
             )
             all_full = len(full) >= 2 and len(full) == len(cols[x])
             if not (all_full or (mixed_ok and any_all_full_col)):
