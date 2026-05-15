@@ -422,7 +422,6 @@ def _compute_section_layout(
     # structures, and file inputs are left in place.
     _redistribute_fanout_siblings(graph, y_spacing)
 
-
     # ---- Pass C: Junction positioning (single pass) --------------------
     # All port positions are now final; position junctions once.
 
@@ -995,7 +994,8 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
             # Fan-out siblings: strict subset of bundle (skip full-bundle
             # pass-throughs and orphan stations with no lines).
             siblings = [
-                s for s in sids
+                s
+                for s in sids
                 if s != trunk_sid
                 and set(graph.station_lines(s))
                 and set(graph.station_lines(s)) < bundle
