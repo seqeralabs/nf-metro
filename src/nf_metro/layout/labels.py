@@ -700,71 +700,10 @@ def place_labels(
 
         placements.append(candidate)
 
-    _stagger_stacked_labels(placements, sorted_stations, graph)
-
     if routes:
         _avoid_diagonal_routes(placements, graph, routes, station_offsets)
 
     return [p for p in placements if p.obstacle_bbox is None]
-
-
-def _stagger_stacked_labels(
-    placements: list[LabelPlacement],
-    sorted_stations: list,
-    graph: MetroGraph,
-) -> None:
-    """Diagonally stagger labels of vertically stacked same-X stations.
-
-    When two stations in the same section share an X column and sit on
-    adjacent (or nearby) Y tracks, their centered labels appear stacked
-    in the same vertical line - visually crowded even when bboxes don't
-    overlap.  Shifting the upper label slightly leftward and the lower
-    rightward (or vice versa) decorrelates the visual centerlines.
-
-    Only applied when the shift won't introduce a label-label collision
-    and when both labels are short enough that the shift remains within
-    a single character width (subtle, but visible).
-    """
-    placement_by_sid = {p.station_id: p for p in placements if p.obstacle_bbox is None}
-
-    col_groups: dict[tuple[str | None, float], list] = {}
-    for s in sorted_stations:
-        if s.id not in placement_by_sid:
-            continue
-        col_groups.setdefault((s.section_id, round(s.x, 1)), []).append(s)
-
-    step = CHAR_WIDTH * 0.7
-    others = [p for p in placements if p.obstacle_bbox is not None]
-
-    for (sec_id, _x), group in col_groups.items():
-        if sec_id is None or len(group) < 2:
-            continue
-        group.sort(key=lambda s: s.y)
-        n = len(group)
-        for idx, st in enumerate(group):
-            shift = (idx - (n - 1) / 2.0) * step
-            if abs(shift) < 0.5:
-                continue
-            placement = placement_by_sid[st.id]
-            # Skip TB-section labels (anchored end/start, not centered).
-            if placement.text_anchor != "middle":
-                continue
-            trial = LabelPlacement(
-                station_id=placement.station_id,
-                text=placement.text,
-                x=placement.x + shift,
-                y=placement.y,
-                above=placement.above,
-                angle=placement.angle,
-                text_anchor=placement.text_anchor,
-                dominant_baseline=placement.dominant_baseline,
-            )
-            siblings = [
-                p for p in placements if p is not placement and p.obstacle_bbox is None
-            ] + others
-            if _has_collision(trial, siblings):
-                continue
-            placement.x = trial.x
 
 
 def _segment_intersects_bbox(
