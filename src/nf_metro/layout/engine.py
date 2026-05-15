@@ -1067,9 +1067,9 @@ def _resolve_station_collisions(
         return
 
     # Group stations by primary-axis bucket (layer column for LR/RL,
-    # row for TB).  The bucket spans a half-step either side of a layer
-    # centre so off-grid layer_extra offsets stay in the same bucket as
-    # their layer peers.
+    # row for TB).  Use the primary-axis step size; the bucket spans a
+    # half-step either side of a layer centre so off-grid layer_extra
+    # offsets stay in the same bucket as their layer peers.
     primary_step_norm = max(primary_step, 1.0)
     by_primary: dict[float, list] = {}
     for s in real:
