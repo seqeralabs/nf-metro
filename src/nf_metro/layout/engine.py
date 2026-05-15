@@ -1590,8 +1590,9 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
         if top < 2 and len(residues) > 1:
             continue
 
-        def _snap(y: float, origin: float = origin_r, p: float = pitch,
-                  h: float = half) -> float:
+        def _snap(
+            y: float, origin: float = origin_r, p: float = pitch, h: float = half
+        ) -> float:
             snapped = origin + round((y - origin) / p) * p
             return snapped if abs(snapped - y) <= h + 1e-6 else y
 
