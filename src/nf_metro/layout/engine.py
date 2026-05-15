@@ -1533,7 +1533,14 @@ def _fan_source_inputs_upward(
         # ignored here because compaction already pulled row mates as
         # tight as their off-track inputs allow; further padding would
         # strand empty top space that this phase is meant to fill.
-        top_margin = y_spacing / 4
+        # When the lifted source is rendered with a file icon (any
+        # terminus station), reserve an additional icon_half so the
+        # icon's vertical extent fits inside the bbox.
+        ICON_HALF = 16.0
+        any_terminus = any(
+            graph.stations[s].is_terminus for s in sources
+        )
+        top_margin = y_spacing / 4 + (ICON_HALF if any_terminus else 0.0)
         slack = trunk_y - section.bbox_y - top_margin
         slots = int((slack + 0.5) // y_spacing)
         if slots < 1:
