@@ -1063,27 +1063,27 @@ def _resolve_station_collisions(
 
     EPS = 0.5
     real = [s for s in sub.stations.values() if not s.is_port and not s.is_hidden]
-    real.sort(key=lambda s: (getattr(s, primary), getattr(s, secondary)))
+    if len(real) < 2:
+        return
 
     # Group stations by primary-axis bucket (layer column for LR/RL,
-    # row for TB).  Use the primary-axis step size; the bucket spans a
-    # half-step either side of a layer centre so off-grid layer_extra
-    # offsets stay in the same bucket as their layer peers.
+    # row for TB).  The bucket spans a half-step either side of a layer
+    # centre so off-grid layer_extra offsets stay in the same bucket as
+    # their layer peers.
+    primary_step_norm = max(primary_step, 1.0)
     by_primary: dict[float, list] = {}
     for s in real:
-        bucket = round(getattr(s, primary) / max(primary_step, 1.0))
+        bucket = round(getattr(s, primary) / primary_step_norm)
         by_primary.setdefault(bucket, []).append(s)
+
+    # Stable tiebreaker so the earlier-defined station keeps its slot
+    # when two share a secondary coord (insertion order in sub.stations).
+    order = {sid: i for i, sid in enumerate(sub.stations)}
 
     for stations in by_primary.values():
         if len(stations) < 2:
             continue
-        # Sort by current secondary coord, then station definition order
-        # (insertion order in sub.stations) as a stable tiebreaker so the
-        # earlier-defined station keeps its slot.
-        order = {sid: i for i, sid in enumerate(sub.stations)}
-        stations.sort(
-            key=lambda s: (getattr(s, secondary), order.get(s.id, 0))
-        )
+        stations.sort(key=lambda s: (getattr(s, secondary), order.get(s.id, 0)))
         used: list[float] = []
         for s in stations:
             pos = getattr(s, secondary)
