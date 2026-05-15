@@ -132,12 +132,10 @@ def _compute_section_offsets(
         min_col = min(min_col, col)
         max_col = max(max_col, col + cspan - 1)
 
-    # Max width per column (only from single-column sections).
-    # Use the right reach from offset_x (bbox_x + bbox_w) re-anchored to the
-    # standard left edge (-SECTION_X_PADDING) so that sections whose bbox_x
-    # was pushed further left by terminus-icon clearance don't inflate the
-    # column.  The leftward overhang lands left of offset_x and is later
-    # absorbed by the global x_offset bump in Phase 3b of compute_layout.
+    # Right reach re-anchored to the standard left edge so that bbox_x
+    # pushed further left (e.g. by terminus-icon clearance) doesn't
+    # inflate the column.  Phase 3b of compute_layout absorbs the
+    # leftward overhang via a global x_offset bump.
     def _effective_width(section: Section) -> float:
         return section.bbox_x + section.bbox_w + SECTION_X_PADDING
 
