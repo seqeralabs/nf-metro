@@ -1,6 +1,6 @@
 ---
 name: nf-metro-layout-fix
-description: Drive code-level fixes to nf-metro when a real pipeline render exposes a layout bug that isn't a mmd mistake, without regressing pipelines that already ship metro maps. Use when working in nf-metro's src/ (layout engine, routing, parser) to fix kinks, station overlaps, breeze-past, asymmetric fans, bypass routing, or bbox overflow on a real pipeline diagram. Covers the savepoint tag pattern, the invariant-test-first-then-fix-then-runtime-validator loop, gallery regression vetting with build_gallery and build_render_diff, converting global fixes to conditional ones so other renders aren't pushed around, and the additive-commits-only PR chain workflow. For authoring the mmd content itself (deciding lines, stations, sections), see the `pipeline-metro-diagram` skill. For routine gallery regression testing of nf-metro, see `render-topologies`.
+description: Drive code-level fixes to nf-metro when a real pipeline render exposes a layout bug that isn't a mmd mistake, without regressing pipelines that already ship metro maps. Use when working in nf-metro's src/ (layout engine, routing, parser) to fix kinks, station overlaps, breeze-past, asymmetric fans, bypass routing, or bbox overflow on a real pipeline diagram. Covers the savepoint tag pattern, the invariant-test-first-then-fix-then-runtime-validator loop, gallery regression vetting with build_gallery and build_render_diff, converting global fixes to conditional ones so other renders aren't pushed around, and the additive-commits-only PR chain rule. For the per-PR vetting workflow (reconcile vs main, /simplify, render+diff, sweep comments, rewrite description, trigger CI, post-merge cleanup), see the `pr-chain-vet` skill. For authoring the mmd content itself (deciding lines, stations, sections), see the `pipeline-metro-diagram` skill. For routine gallery regression testing of nf-metro, see `render-topologies`.
 ---
 
 # Fixing nf-metro Layout Bugs Surfaced by a Real Pipeline Render
@@ -132,31 +132,17 @@ chain pattern:
 - Each subsequent PR is based on the previous PR's branch.
 - As each merges, the next PR's base auto-updates to `main`.
 
-### Strict rules
+The chain-level rule that matters here: **no force-pushes**. Every change
+to a PR in the chain is an additive commit; to undo something already in a
+branch, append a `git revert <hash>`. Rewrites break GitHub review threads
+and silently destroy other people's local state.
 
-- **NO force-pushes.** Every change to a PR is an additive commit. To undo
-  an earlier commit, append a `git revert <hash>` — don't rewrite history.
-- **Each PR must be vetted before review.** The vetting workflow:
-  1. Render the gallery on the PR HEAD.
-  2. Diff against the parent (the prior PR's HEAD, or `main` for the bottom
-     of the chain).
-  3. Inspect every changed example visually. Classify deltas.
-  4. For each detrimental, append a fix commit.
-  5. Run the simplify skill (`/simplify`) on the changed code; commit as a
-     separate refactor commit.
-  6. Sweep narrative comments off the PR. Keep the CI render-preview
-     comment.
-  7. Rewrite the PR description to be standalone: explain the net diff vs
-     `main` without referencing the chain or in-flight history.
-  8. Ensure CI's render-preview workflow ran on the latest commit (append
-     `git commit --allow-empty -m "chore: trigger CI"` if needed).
-
-### After merge
-
-- Delete the remote branch (`gh api -X DELETE
-  repos/<owner>/<repo>/git/refs/heads/<branch>`).
-- Delete the local branch and worktree.
-- Re-target the next PR's base to `main`.
+For the per-PR work of taking one PR from the chain and making it
+mergeable - reconciling against `main`, the `/simplify` pass, gallery
+render+diff, classifying deltas, sweeping narrative comments, rewriting
+the description, triggering CI, and the post-merge re-target/delete order -
+see the `pr-chain-vet` skill. It's the operational counterpart to the
+authoring concerns this skill covers.
 
 ## Step 5: Reconciling stack regressions
 
