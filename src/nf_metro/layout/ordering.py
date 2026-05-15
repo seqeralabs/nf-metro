@@ -381,9 +381,7 @@ def _is_diamond_fanout(nodes: list[str], G: nx.DiGraph) -> bool:
     return len(common_succs) > 0
 
 
-def _trunk_fanout_node(
-    nodes: list[str], graph: MetroGraph | None
-) -> str | None:
+def _trunk_fanout_node(nodes: list[str], graph: MetroGraph | None) -> str | None:
     """Return the unique fan-out node carrying a strict superset of all siblings.
 
     When one sibling's line set strictly contains every other sibling's
@@ -397,7 +395,9 @@ def _trunk_fanout_node(
     # check only that candidate against the rest.
     line_sets = [(n, set(graph.station_lines(n))) for n in nodes]
     trunk, trunk_lines = max(line_sets, key=lambda nl: len(nl[1]))
-    if all(other_lines < trunk_lines for other, other_lines in line_sets if other != trunk):
+    if all(
+        other_lines < trunk_lines for other, other_lines in line_sets if other != trunk
+    ):
         return trunk
     return None
 
