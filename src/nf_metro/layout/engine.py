@@ -2296,9 +2296,7 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
             # redundant rather than a true fan-in).
             if ds_y is None or (n_unique >= 3 and len(exit_lines) < 2):
                 continue
-            match = next(
-                (y for y in unique_source_ys if abs(y - ds_y) < 1.0), None
-            )
+            match = next((y for y in unique_source_ys if abs(y - ds_y) < 1.0), None)
             if match is None:
                 continue
             target_y = match
