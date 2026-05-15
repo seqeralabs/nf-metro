@@ -452,7 +452,6 @@ def _compute_section_layout(
     # heights shrink correspondingly so the empty top space disappears.
     _compact_row_content_to_bbox_top(graph, section_y_padding, y_spacing)
 
-
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
@@ -978,7 +977,6 @@ def _row_contiguous_column_groups(
     return result
 
 
-
 def _top_align_row_bboxes_only(graph: MetroGraph) -> None:
     """Align bbox tops within each row by growing bboxes upward.
 
@@ -1144,6 +1142,26 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                         _set_port_y(graph, pid, target_y)
 
 
+def _classify_section_station_ys(
+    graph: MetroGraph, section: Section
+) -> tuple[list[float], list[float], list[float]]:
+    """Return (on_track_ys, off_track_ys, port_ys) for a section's stations."""
+    on_track: list[float] = []
+    off_track: list[float] = []
+    ports: list[float] = []
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is None:
+            continue
+        if st.is_port:
+            ports.append(st.y)
+        elif getattr(st, "off_track", False):
+            off_track.append(st.y)
+        else:
+            on_track.append(st.y)
+    return on_track, off_track, ports
+
+
 def _compact_row_content_to_bbox_top(
     graph: MetroGraph, section_y_padding: float, y_spacing: float
 ) -> None:
@@ -1171,18 +1189,9 @@ def _compact_row_content_to_bbox_top(
     Sections with ``grid_row_span > 1`` are excluded because their
     content spans multiple rows and the per-row frame doesn't apply.
     """
-
-    def _is_off_track(sid: str) -> bool:
-        st = graph.stations.get(sid)
-        return bool(st and getattr(st, "off_track", False))
-
     row_sections: dict[int, list[Section]] = defaultdict(list)
     for section in graph.sections.values():
-        if (
-            section.bbox_h <= 0
-            or section.grid_row < 0
-            or section.grid_row_span > 1
-        ):
+        if section.bbox_h <= 0 or section.grid_row < 0 or section.grid_row_span > 1:
             continue
         row_sections[section.grid_row].append(section)
 
@@ -1194,8 +1203,6 @@ def _compact_row_content_to_bbox_top(
     off_track_gap = max(FONT_HEIGHT + STATION_RADIUS_APPROX * 2, y_spacing / 2)
 
     for sections in row_sections.values():
-        if not sections:
-            continue
         sections_by_col = sorted(sections, key=lambda s: s.grid_col)
         groups: list[list[Section]] = [[sections_by_col[0]]]
         for s in sections_by_col[1:]:
@@ -1205,59 +1212,42 @@ def _compact_row_content_to_bbox_top(
                 groups.append([s])
 
         for group in groups:
+            classified = {s.id: _classify_section_station_ys(graph, s) for s in group}
+
             allowed_shifts: list[float] = []
             for section in group:
-                on_track_ys = [
-                    graph.stations[sid].y
-                    for sid in section.station_ids
-                    if sid in graph.stations
-                    and not graph.stations[sid].is_port
-                    and not _is_off_track(sid)
-                ]
+                on_track_ys, off_track_ys, _ = classified[section.id]
                 if not on_track_ys:
                     continue
                 on_track_min = min(on_track_ys)
                 shift = on_track_min - section.bbox_y - section_y_padding
-                off_track_ys = [
-                    graph.stations[sid].y
-                    for sid in section.station_ids
-                    if sid in graph.stations and _is_off_track(sid)
-                ]
                 if off_track_ys:
-                    clear_shift = on_track_min - max(off_track_ys) - off_track_gap
-                    shift = min(shift, clear_shift)
+                    shift = min(shift, on_track_min - max(off_track_ys) - off_track_gap)
                 allowed_shifts.append(max(0.0, shift))
             delta = min(allowed_shifts) if allowed_shifts else 0.0
+
             if delta >= 0.5:
                 for section in group:
                     for sid in section.station_ids:
-                        if _is_off_track(sid):
-                            continue
                         st = graph.stations.get(sid)
-                        if st:
-                            st.y -= delta
+                        if st is None or getattr(st, "off_track", False):
+                            continue
+                        st.y -= delta
                         port = graph.ports.get(sid)
                         if port:
                             port.y -= delta
                     section.bbox_h = max(0.0, section.bbox_h - delta)
 
             for section in group:
-                content_max_ys = [
-                    graph.stations[sid].y
-                    for sid in section.station_ids
-                    if sid in graph.stations
-                    and not graph.stations[sid].is_port
-                ]
-                port_max_ys = [
-                    graph.stations[sid].y
-                    for sid in section.station_ids
-                    if sid in graph.stations and graph.stations[sid].is_port
-                ]
-                if not content_max_ys:
+                on_track_ys, off_track_ys, port_ys = _classify_section_station_ys(
+                    graph, section
+                )
+                content_ys = on_track_ys + off_track_ys
+                if not content_ys:
                     continue
-                desired_bot = max(content_max_ys) + section_y_padding
-                if port_max_ys:
-                    desired_bot = max(desired_bot, max(port_max_ys))
+                desired_bot = max(content_ys) + section_y_padding
+                if port_ys:
+                    desired_bot = max(desired_bot, max(port_ys))
                 new_h = desired_bot - section.bbox_y
                 if new_h < section.bbox_h - 0.5:
                     section.bbox_h = max(0.0, new_h)
