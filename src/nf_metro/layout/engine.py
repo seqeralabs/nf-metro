@@ -1234,39 +1234,29 @@ def _compact_row_content_to_bbox_top(
             continue
         row_sections[section.grid_row].append(section)
 
+    def _shares_bundle(a: Section, b: Section) -> bool:
+        if a.grid_row_span <= 1 and b.grid_row_span <= 1:
+            return True
+        a_t = _section_trunk_y(graph, a)
+        b_t = _section_trunk_y(graph, b)
+        return a_t is not None and b_t is not None and abs(a_t - b_t) < 0.5
+
     for sections in row_sections.values():
         if not sections:
             continue
         sections_by_col = sorted(sections, key=lambda s: s.grid_col)
-        # Build contiguous-column groups.  A rowspan>1 section is only
-        # isolated from row mates when its trunk Y differs from theirs
-        # (no shared horizontal bundle); when its trunk aligns with the
-        # row's trunk, compact must group it with neighbours so the
-        # shared bundle stays straight.
         groups: list[list[Section]] = [[sections_by_col[0]]]
         for s in sections_by_col[1:]:
             prev = groups[-1][-1]
-            adjacent = s.grid_col - prev.grid_col <= 1
-            if not adjacent:
+            if s.grid_col - prev.grid_col <= 1 and _shares_bundle(prev, s):
+                groups[-1].append(s)
+            else:
                 groups.append([s])
-                continue
-            spans = s.grid_row_span > 1 or prev.grid_row_span > 1
-            if spans:
-                s_t = _section_trunk_y(graph, s)
-                p_t = _section_trunk_y(graph, prev)
-                aligned = (
-                    s_t is not None and p_t is not None
-                    and abs(s_t - p_t) < 0.5
-                )
-                if not aligned:
-                    groups.append([s])
-                    continue
-            groups[-1].append(s)
 
         for group in groups:
             # An isolated rowspan section has no shared bundle to keep
             # straight; compacting it alone yanks its content above the
-            # rowspan-1 cohort's trunk Y.  Leave it untouched.
+            # rowspan-1 cohort's trunk Y.
             if len(group) == 1 and group[0].grid_row_span > 1:
                 continue
             allowed_shifts: list[float] = []
