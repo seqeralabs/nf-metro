@@ -591,15 +591,26 @@ def _equalize_fork_groups(
         # stays centred on the trunk feeding the fork.  Anchor key:
         # most lines first (the in-column trunk), then closest to the
         # mean predecessor track, then lowest current track.
+        #
+        # Source columns (no predecessors) have no trunk to centre on;
+        # fall back to top-anchored distribution from the group's lowest
+        # track so hidden hubs and exit ports stay at the section top
+        # rather than drifting to the column centre.
         pred_tracks = [
             tracks[p] for sid in group for p in G.predecessors(sid) if p in tracks
         ]
-        pred_mean = sum(pred_tracks) / len(pred_tracks) if pred_tracks else None
+
+        if not pred_tracks:
+            base_track = tracks[group[0]]
+            for i, sid in enumerate(group):
+                tracks[sid] = base_track + i * line_gap
+            continue
+
+        pred_mean = sum(pred_tracks) / len(pred_tracks)
 
         def _anchor_key(sid: str) -> tuple:
             t = tracks[sid]
-            pred_dist = abs(t - pred_mean) if pred_mean is not None else 0.0
-            return (-len(graph.station_lines(sid)), pred_dist, t)
+            return (-len(graph.station_lines(sid)), abs(t - pred_mean), t)
 
         anchor_idx = min(range(len(group)), key=lambda i: _anchor_key(group[i]))
         anchor_track = tracks[group[anchor_idx]]
