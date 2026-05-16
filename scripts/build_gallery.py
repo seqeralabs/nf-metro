@@ -64,6 +64,11 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         EXAMPLES_DIR,
         "Same nf-core/differentialabundance map at default (uncentered) layout — useful for spotting regressions that only show with default port placement.",
     ),
+    (
+        "genomeassembly_staggered",
+        EXAMPLES_DIR,
+        "sanger-tol/genomeassembly with explicit `%%metro grid:` directives stacking each section in its own grid row. Regression fixture for #250 (cross-column junction routes were going backward in X).",
+    ),
     # --- Simple topologies ---
     (
         "single_section",
