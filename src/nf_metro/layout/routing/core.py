@@ -2107,10 +2107,6 @@ def _collect_centering_candidates(
 
         in_routes = ctx.incoming.get(sid, [])
         out_routes = ctx.outgoing.get(sid, [])
-        if sid.startswith("__bypass_") or sid == "quant":
-            print(
-                f"DBG entry {sid}: in_routes={len(in_routes)} out_routes={len(out_routes)} flat_in={len(ctx.flat_incoming.get(sid, []))} flat_out={len(ctx.flat_outgoing.get(sid, []))}"
-            )
         flat_in = ctx.flat_incoming.get(sid, [])
         flat_out = ctx.flat_outgoing.get(sid, [])
 
@@ -2230,10 +2226,6 @@ def _collect_centering_candidates(
 
         if shared_source or shared_target or has_flat_side or multi_diag:
             new_x = (in_diag_end_x + out_diag_start_x) / 2
-            if "__bypass" in sid or sid in ("quant", "search"):
-                print(
-                    f"DBG cand {sid}: cur_x={station.x} new_x={new_x} in_end={in_diag_end_x} out_start={out_diag_start_x}"
-                )
             station_move_candidates[sid] = (
                 new_x,
                 in_routes,
