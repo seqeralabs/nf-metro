@@ -2662,3 +2662,101 @@ def test_grid_snap_does_not_mutate_x(fixture):
         if abs(st1.x - st2.x) > 0.5:
             offenders.append(f"{sid!r} run1.x={st1.x:.2f} != run2.x={st2.x:.2f}")
     assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
+
+
+# ---------------------------------------------------------------------------
+# LR routes do not go backwards (#250)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_routes_dont_loop_backwards(fixture):
+    """Cross-column routes must not contain a segment that reverses
+    the route's overall X direction.  Catches issue #250's "pinwheel"
+    artefact: a junction at the boundary of one column exits going +x
+    then immediately turns -x to curve down into the next column's
+    section.
+
+    Same-column near-vertical routes are exempt: when source and
+    target share a grid column with tiny dx, the routing engine
+    legitimately wraps the channel beyond the column to enter from the
+    appropriate side.  Routes touching TB/BT sections are also exempt
+    (those route in either X direction internally).
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    offenders: list[str] = []
+    for r in routes:
+        pts = r.points
+        if len(pts) < 2:
+            continue
+        src_st = graph.stations.get(r.edge.source)
+        tgt_st = graph.stations.get(r.edge.target)
+        src_sec = (
+            graph.sections.get(src_st.section_id)
+            if src_st and src_st.section_id
+            else None
+        )
+        tgt_sec = (
+            graph.sections.get(tgt_st.section_id)
+            if tgt_st and tgt_st.section_id
+            else None
+        )
+        if (src_sec and src_sec.direction in ("TB", "BT")) or (
+            tgt_sec and tgt_sec.direction in ("TB", "BT")
+        ):
+            continue
+        src_col = _resolve_section_col_for_station(graph, src_st)
+        tgt_col = _resolve_section_col_for_station(graph, tgt_st)
+        if src_col is not None and tgt_col is not None and src_col == tgt_col:
+            continue
+        overall_dx = pts[-1][0] - pts[0][0]
+        if abs(overall_dx) < 1.0:
+            continue
+        # Final-segment reversal is legitimate: a route arriving at an
+        # entry port on the opposite side from its overall direction
+        # must curve back to enter (RL section's right-entry, LR
+        # section's right-entry from below, etc.).  Only check segments
+        # before the final approach.
+        check_until = len(pts) - 1 if len(pts) >= 3 else len(pts)
+        for j in range(1, check_until):
+            seg_dx = pts[j][0] - pts[j - 1][0]
+            if overall_dx > 0 and seg_dx < -0.5:
+                offenders.append(
+                    f"{r.edge.source} -> {r.edge.target} (line={r.line_id}, "
+                    f"overall +x): "
+                    f"{tuple(round(c, 1) for c in pts[j - 1])} -> "
+                    f"{tuple(round(c, 1) for c in pts[j])}"
+                )
+                break
+            if overall_dx < 0 and seg_dx > 0.5:
+                offenders.append(
+                    f"{r.edge.source} -> {r.edge.target} (line={r.line_id}, "
+                    f"overall -x): "
+                    f"{tuple(round(c, 1) for c in pts[j - 1])} -> "
+                    f"{tuple(round(c, 1) for c in pts[j])}"
+                )
+                break
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
+
+
+def _resolve_section_col_for_station(graph, station):
+    """Resolve a station's grid column.  For ports, use the section.
+    For junctions, follow an incoming edge back to a real station.
+    """
+    if station is None:
+        return None
+    if station.section_id:
+        sec = graph.sections.get(station.section_id)
+        if sec and sec.grid_col >= 0:
+            return sec.grid_col
+    if station.id in graph.junctions:
+        for e in graph.edges:
+            if e.target == station.id:
+                pred = graph.stations.get(e.source)
+                if pred and pred.section_id:
+                    sec = graph.sections.get(pred.section_id)
+                    if sec and sec.grid_col >= 0:
+                        return sec.grid_col
+    return None

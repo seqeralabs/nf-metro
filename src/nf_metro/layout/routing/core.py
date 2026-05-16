@@ -564,10 +564,28 @@ def _route_inter_section(
     # which is back inside the section).  Instead, route the channel
     # further into the inter-column gap (away from the target) so the
     # line continues in the junction's natural direction before dropping.
+    # Only fires for true same-column cases: both source and target
+    # belong to the same grid column (so the "wrong side" intrudes into
+    # their shared column).  When source and target sit in different
+    # columns the standard L-shape naturally drops in the inter-column
+    # gap and going "away from target" would route backward through a
+    # neighbouring section.
+    src_col_for_special = (
+        _resolve_section_col(graph, src, ctx.junction_ids)
+        if edge.source in ctx.junction_ids
+        else None
+    )
+    tgt_col_for_special = _resolve_section_col(graph, tgt, ctx.junction_ids)
+    same_col_special = (
+        src_col_for_special is not None
+        and tgt_col_for_special is not None
+        and src_col_for_special == tgt_col_for_special
+    )
     if (
         edge.source in ctx.junction_ids
         and abs(dx) <= JUNCTION_MARGIN + COORD_TOLERANCE
         and abs(dy) > abs(dx) * 3
+        and same_col_special
     ):
         delta, r_first, r_second = l_shape_radii(
             i,
