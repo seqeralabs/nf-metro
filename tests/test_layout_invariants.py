@@ -205,98 +205,31 @@ def _params_with_xfails(fixtures: list[str], xfails: dict[str, str]) -> list:
 # because the row-bundle trunk Y drifts between sections in the same row.
 # Surfaced by the cross-corpus parametrization; tracked separately from
 # this coverage PR.  See nf-metro audit /tmp/invariant-audit.md item 1.
-_XFAIL_ROW_TRUNK_CY: dict[str, str] = {
-    "topologies/asymmetric_tree.mmd": "row trunk cy drift across sections",
-    "topologies/complex_multipath.mmd": "row trunk cy drift across sections",
-    "topologies/fan_in_merge.mmd": "row trunk cy drift across sections",
-    "topologies/fold_fan_across.mmd": "row trunk cy drift across sections",
-    "topologies/fold_stacked_branch.mmd": "row trunk cy drift across sections",
-    "topologies/mixed_port_sides.mmd": "row trunk cy drift across sections",
-    "topologies/rnaseq_lite.mmd": "row trunk cy drift across sections",
-    "topologies/section_diamond.mmd": "row trunk cy drift across sections",
-    "topologies/upward_bypass.mmd": "row trunk cy drift across sections",
-    "topologies/variant_calling.mmd": "row trunk cy drift across sections",
-    "topologies/wide_fan_in.mmd": "row trunk cy drift across sections",
-    "topologies/wide_fan_out.mmd": "row trunk cy drift across sections",
-    "variant_calling.mmd": "row trunk cy drift across sections (issue #317)",
-    "variant_calling_tuned.mmd": "row trunk cy drift across sections (issue #317)",
-    "variantbenchmarking.mmd": "row trunk cy drift across sections (issue #317)",
-    "variantbenchmarking_auto.mmd": "row trunk cy drift across sections (issue #317)",
-    "variantprioritization.mmd": "row trunk cy drift across sections",
-    "guide/02_sections.mmd": "row trunk cy 1.5px drift",
-    "guide/03_fan_out.mmd": "row trunk cy drift",
-    "guide/03b_fan_in_merge.mmd": "row trunk cy drift",
-    "guide/04_directions.mmd": "row trunk cy drift",
-}
+_XFAIL_ROW_TRUNK_CY: dict[str, str] = {}
 
 
 # Inter-section exit-port cy drifts from the matching entry-port cy in
 # the next section.  See nf-metro audit item 1 (the "limma kink"
 # regression family).  Limited to multi-section fixtures.
-_XFAIL_NO_KINK: dict[str, str] = {
-    "rnaseq_sections.mmd": "exit/entry port cy mismatch across section boundary",
-    "topologies/asymmetric_tree.mmd": "exit/entry port cy mismatch",
-    "topologies/complex_multipath.mmd": "exit/entry port cy mismatch",
-    "topologies/fan_in_merge.mmd": "exit/entry port cy mismatch",
-    "topologies/fold_fan_across.mmd": "exit/entry port cy mismatch",
-    "topologies/fold_stacked_branch.mmd": "exit/entry port cy mismatch",
-    "topologies/mismatched_tracks.mmd": "exit/entry port cy mismatch",
-    "topologies/mixed_port_sides.mmd": "exit/entry port cy mismatch",
-    "topologies/rnaseq_lite.mmd": "exit/entry port cy mismatch",
-    "topologies/section_diamond.mmd": "exit/entry port cy mismatch",
-    "topologies/upward_bypass.mmd": "exit/entry port cy mismatch",
-    "topologies/variant_calling.mmd": "exit/entry port cy mismatch",
-    "topologies/wide_fan_in.mmd": "exit/entry port cy mismatch",
-    "topologies/wide_fan_out.mmd": "exit/entry port cy mismatch",
-    "rnaseq_auto.mmd": "exit/entry port cy mismatch",
-    "rnaseq_sections_manual.mmd": "exit/entry port cy mismatch",
-    "variant_calling.mmd": "exit/entry port cy mismatch",
-    "variant_calling_tuned.mmd": "exit/entry port cy mismatch",
-    "variantbenchmarking.mmd": "exit/entry port cy mismatch (issue #317)",
-    "variantbenchmarking_auto.mmd": "exit/entry port cy mismatch (issue #317)",
-    "variantprioritization.mmd": "exit/entry port cy mismatch",
-    "guide/02_sections.mmd": "exit/entry port cy mismatch",
-    "guide/03_fan_out.mmd": "exit/entry port cy mismatch",
-    "guide/03b_fan_in_merge.mmd": "exit/entry port cy mismatch",
-    "guide/04_directions.mmd": "exit/entry port cy mismatch",
-}
+_XFAIL_NO_KINK: dict[str, str] = {}
 
 
 # Symmetric-fan pairs (two full-bundle stations in the same column) end
 # up asymmetric around the row trunk cy.  Audit item 10.
-_XFAIL_SYMFAN: dict[str, str] = {
-    "topologies/deep_linear.mmd": "asymmetric symfan pair",
-    "topologies/variant_calling.mmd": "asymmetric symfan pair",
-    "differentialabundance_default.mmd": "asymmetric symfan pair",
-    "epitopeprediction.mmd": "asymmetric symfan pair",
-    "genomeassembly.mmd": "asymmetric symfan pair",
-    "hlatyping.mmd": "asymmetric symfan pair",
-    "rnaseq_auto.mmd": "asymmetric symfan pair",
-    "rnaseq_sections_manual.mmd": "asymmetric symfan pair",
-    "variant_calling.mmd": "asymmetric symfan pair",
-    "variantprioritization.mmd": "asymmetric symfan pair",
-}
+_XFAIL_SYMFAN: dict[str, str] = {}
 
 
 # Lines cross non-consumer station markers (the "breeze-past" regression
 # family).  Audit item 3.  Limited to the guide fixtures where the
 # regression manifests; the production maps already route around their
 # non-consumer stations.
-_XFAIL_BREEZE_PAST: dict[str, str] = {
-    "guide/05_file_icons.mmd": "line crosses non-consumer station marker",
-    "guide/05c_files_icon.mmd": "line crosses non-consumer station marker",
-    "guide/05d_folder_icon.mmd": "line crosses non-consumer station marker",
-    "guide/06a_without_hidden.mmd": "line crosses non-consumer station marker",
-    "guide/06b_with_hidden.mmd": "line crosses non-consumer station marker",
-}
+_XFAIL_BREEZE_PAST: dict[str, str] = {}
 
 
 # Section bbox bottom doesn't carry the configured section_y_padding
 # below the lowest station marker.  Likely linked to off-track input
 # placement in differentialabundance_default at default y_spacing.
-_XFAIL_BBOX_BOTTOM_PAD: dict[str, str] = {
-    "differentialabundance_default.mmd": "bbox bottom padding < section_y_padding",
-}
+_XFAIL_BBOX_BOTTOM_PAD: dict[str, str] = {}
 
 
 def _row_lr_sections(graph: MetroGraph) -> dict[int, list]:
@@ -2739,22 +2672,7 @@ def test_inter_section_route_y_stays_within_row_band(fixture):
 # Fixtures known to fail ``test_topological_siblings_share_y_or_symmetric``
 # (audit item 15 / open issue #318).  Tracked separately - the test is
 # added to lock in the invariant so a future fix XPASSes here.
-_XFAIL_SIBLINGS: dict[str, str] = {
-    "da_pipeline.mmd": "asymmetric topological siblings (issue #318)",
-    "rnaseq_sections.mmd": "asymmetric topological siblings (issue #318)",
-    "topologies/fold_fan_across.mmd": "asymmetric topological siblings",
-    "topologies/rnaseq_lite.mmd": "asymmetric topological siblings (issue #318)",
-    "topologies/variant_calling.mmd": "asymmetric topological siblings (issue #318)",
-    "differentialabundance.mmd": "asymmetric topological siblings (issue #318)",
-    "differentialabundance_default.mmd": "asymmetric topological siblings (issue #318)",
-    "genomeassembly.mmd": "asymmetric topological siblings",
-    "rnaseq_auto.mmd": "asymmetric topological siblings (issue #318)",
-    "rnaseq_sections_manual.mmd": "asymmetric topological siblings (issue #318)",
-    "variant_calling.mmd": "asymmetric topological siblings (issue #318)",
-    "variant_calling_tuned.mmd": "asymmetric topological siblings (issue #318)",
-    "variantbenchmarking.mmd": "asymmetric topological siblings (issue #318)",
-    "variantbenchmarking_auto.mmd": "asymmetric topological siblings (issue #318)",
-}
+_XFAIL_SIBLINGS: dict[str, str] = {}
 
 
 @pytest.mark.parametrize(
