@@ -85,9 +85,10 @@ def cli() -> None:
 )
 @click.option(
     "--center-ports/--no-center-ports",
-    default=False,
+    default=None,
     help="Centre inter-section ports on the shorter of the two connected "
-    "sections, so lines enter/exit at the visual midpoint.",
+    "sections, so lines enter/exit at the visual midpoint. When unset, "
+    "the value of the %%metro center_ports: directive (if any) is used.",
 )
 @click.option(
     "--section-x-gap",
@@ -127,7 +128,7 @@ def render(
     logo: Path | None,
     line_order: str | None,
     straight_diamonds: bool,
-    center_ports: bool,
+    center_ports: bool | None,
     section_x_gap: float | None,
     section_y_gap: float | None,
     from_nextflow: bool,
@@ -155,8 +156,8 @@ def render(
     if not straight_diamonds:
         graph.diamond_style = "symmetric"
 
-    if center_ports:
-        graph.center_ports = True
+    if center_ports is not None:
+        graph.center_ports = center_ports
 
     if logo is not None:
         graph.logo_path = str(logo)

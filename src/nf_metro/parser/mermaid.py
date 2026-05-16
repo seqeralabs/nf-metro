@@ -233,6 +233,9 @@ def _parse_directive(
     elif content.startswith("compact_offsets:"):
         val = content[len("compact_offsets:") :].strip().lower()
         graph.compact_offsets = val in ("true", "yes", "1")
+    elif content.startswith("center_ports:"):
+        val = content[len("center_ports:") :].strip().lower()
+        graph.center_ports = val in ("true", "yes", "1")
     elif content.startswith("legend_min_height:"):
         try:
             graph.legend_min_height = float(
