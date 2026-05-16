@@ -61,6 +61,11 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         EXAMPLES_DIR,
         "nf-core/variantprioritization with cross-row bypass routing.",
     ),
+    (
+        "differentialabundance",
+        EXAMPLES_DIR,
+        "nf-core/differentialabundance with four input lines, off-track gene-set inputs, and a bypass-heavy reporting row.",
+    ),
     # --- Simple topologies ---
     (
         "single_section",
