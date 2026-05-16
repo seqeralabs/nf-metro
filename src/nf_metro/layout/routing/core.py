@@ -2100,11 +2100,17 @@ def _collect_centering_candidates(
         return sid not in ctx.divergence_anchors
 
     for sid, station in graph.stations.items():
-        if station.is_port or station.is_hidden:
+        if station.is_port:
+            continue
+        if station.is_hidden and not sid.startswith("__bypass_"):
             continue
 
         in_routes = ctx.incoming.get(sid, [])
         out_routes = ctx.outgoing.get(sid, [])
+        if sid.startswith("__bypass_") or sid == "quant":
+            print(
+                f"DBG entry {sid}: in_routes={len(in_routes)} out_routes={len(out_routes)} flat_in={len(ctx.flat_incoming.get(sid, []))} flat_out={len(ctx.flat_outgoing.get(sid, []))}"
+            )
         flat_in = ctx.flat_incoming.get(sid, [])
         flat_out = ctx.flat_outgoing.get(sid, [])
 
@@ -2224,6 +2230,10 @@ def _collect_centering_candidates(
 
         if shared_source or shared_target or has_flat_side or multi_diag:
             new_x = (in_diag_end_x + out_diag_start_x) / 2
+            if "__bypass" in sid or sid in ("quant", "search"):
+                print(
+                    f"DBG cand {sid}: cur_x={station.x} new_x={new_x} in_end={in_diag_end_x} out_start={out_diag_start_x}"
+                )
             station_move_candidates[sid] = (
                 new_x,
                 in_routes,
@@ -2239,11 +2249,14 @@ def _collect_centering_candidates(
         if abs(shift) > min(abs(in_flat), abs(out_flat)):
             continue
 
-        # Guard: don't shift in convergence/divergence bundles.
-        if out_rp and len(ctx.diag_in_sources.get(out_rp.edge.target, set())) > 1:
-            continue
-        if in_rp and len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1:
-            continue
+        # Guard: don't shift in convergence/divergence bundles.  Bypass
+        # V helpers have no marker so the convergence-guard doesn't apply.
+        is_bypass_v = sid.startswith("__bypass_")
+        if not is_bypass_v:
+            if out_rp and len(ctx.diag_in_sources.get(out_rp.edge.target, set())) > 1:
+                continue
+            if in_rp and len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1:
+                continue
 
         for rp in in_routes:
             rp.points[1] = (rp.points[1][0] + shift, rp.points[1][1])
@@ -2274,7 +2287,11 @@ def _apply_station_moves(
         flat_out,
     ) in candidates.items():
         station = graph.stations[sid]
-        if abs(new_x - station.x) > STATION_MOVE_TOLERANCE:
+        # Hidden bypass V helpers have no marker, so column alignment
+        # with visible companions isn't a visible concern - centre them
+        # without requiring companion consensus.
+        skip_companion_check = sid.startswith("__bypass_")
+        if not skip_companion_check and abs(new_x - station.x) > STATION_MOVE_TOLERANCE:
             ox = original_x.get(sid, station.x)
             companions = []
             for other_sid, other_ox in original_x.items():
