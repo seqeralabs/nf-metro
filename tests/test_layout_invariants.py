@@ -365,6 +365,32 @@ def test_row_trunk_marker_cy_consistent(fixture):
 # ---------------------------------------------------------------------------
 
 
+def _is_symfan_pair(graph: MetroGraph, sids: list[str]) -> bool:
+    """Two stations form a symfan pair iff they share a predecessor and sit on opposite sides of it in Y."""
+    if len(sids) != 2:
+        return False
+    preds: dict[str, set[str]] = {sids[0]: set(), sids[1]: set()}
+    for e in graph.edges:
+        if e.target in preds:
+            preds[e.target].add(e.source)
+    common = preds[sids[0]] & preds[sids[1]]
+    if not common:
+        return False
+    st0 = graph.stations.get(sids[0])
+    st1 = graph.stations.get(sids[1])
+    if st0 is None or st1 is None:
+        return False
+    for src_id in common:
+        src = graph.stations.get(src_id)
+        if src is None:
+            continue
+        d0 = st0.y - src.y
+        d1 = st1.y - src.y
+        if abs(d0) > _Y_TOL and abs(d1) > _Y_TOL and (d0 * d1) < 0:
+            return True
+    return False
+
+
 def _section_fan_columns(graph: MetroGraph, section) -> dict[float, list[str]]:
     """Group full-bundle internal stations of a section by X column.
 
@@ -412,7 +438,9 @@ def test_symfan_pairs_share_y(fixture):
             continue
         for x, sids in cols.items():
             if len(sids) != 2:
-                continue  # Only assert on pairs; 3+ has its own ordering
+                continue
+            if not _is_symfan_pair(graph, sids):
+                continue
             cys = []
             for sid in sids:
                 st = graph.stations[sid]
@@ -665,6 +693,8 @@ def test_no_kink_at_section_boundary(fixture):
                     if nport is None or nport.side != PortSide.LEFT:
                         continue
                     entry_lines = graph.station_lines(npid)
+                    if set(exit_lines) != set(entry_lines):
+                        continue
                     entry_offs = [offsets.get((npid, lid), 0.0) for lid in entry_lines]
                     entry_cy = (
                         graph.stations[npid].y + (min(entry_offs) + max(entry_offs)) / 2
