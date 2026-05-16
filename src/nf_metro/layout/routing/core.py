@@ -168,6 +168,7 @@ def route_edges(
             routes.append(result)
 
     _center_bubble_stations(routes, graph)
+    _align_topological_siblings(routes, graph)
     _spread_diagonal_bundles(routes, ctx)
 
     return routes
@@ -2385,6 +2386,80 @@ def _align_uncentered_siblings(
         for sid in unmoved:
             old_x = graph.stations[sid].x
             graph.stations[sid].x = target_x
+            for rp in routes_by_src.get(sid, []):
+                if abs(rp.points[0][0] - old_x) < STATION_MOVE_TOLERANCE:
+                    rp.points[0] = (target_x, rp.points[0][1])
+            for rp in routes_by_tgt.get(sid, []):
+                if abs(rp.points[-1][0] - old_x) < STATION_MOVE_TOLERANCE:
+                    rp.points[-1] = (target_x, rp.points[-1][1])
+
+
+def _align_topological_siblings(
+    routes: list[RoutedPath], graph: MetroGraph
+) -> None:
+    """Snap topologically equivalent siblings to a shared X.
+
+    Two stations are *topological siblings* when they share the same
+    predecessors, successors, line set, and section.  Such stations are
+    structurally interchangeable and should align on a common column,
+    but ``_center_bubble_stations`` shifts each one to the midpoint of
+    its own diagonals, which can produce different X values when the
+    surrounding route geometry is asymmetric (e.g. one sibling sits on
+    the entry port's Y so its incoming run is flat, while the other has
+    a diagonal entry consuming X).  Aligning them post-bubble keeps
+    column alignment without giving up the bubble centering for
+    non-sibling cases.
+
+    The chosen X is the average of the candidate Xs in the class.
+    Route endpoints touching the moved stations are updated to match.
+    """
+    preds: dict[str, set[str]] = defaultdict(set)
+    succs: dict[str, set[str]] = defaultdict(set)
+    line_ids: dict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges:
+        succs[edge.source].add(edge.target)
+        preds[edge.target].add(edge.source)
+        line_ids[edge.source].add(edge.line_id)
+        line_ids[edge.target].add(edge.line_id)
+
+    # TB sections use X as the track (parallel-lane) axis, so structural
+    # siblings there must occupy distinct Xs -- only LR/RL apply.
+    groups: dict[tuple, list[str]] = defaultdict(list)
+    for sid, station in graph.stations.items():
+        if station.is_port or station.is_hidden:
+            continue
+        if not preds.get(sid) and not succs.get(sid):
+            continue
+        sec = graph.sections.get(station.section_id) if station.section_id else None
+        if sec is None or sec.direction not in ("LR", "RL"):
+            continue
+        key = (
+            station.section_id,
+            frozenset(preds.get(sid, set())),
+            frozenset(succs.get(sid, set())),
+            frozenset(line_ids.get(sid, set())),
+        )
+        groups[key].append(sid)
+
+    routes_by_src: dict[str, list[RoutedPath]] = defaultdict(list)
+    routes_by_tgt: dict[str, list[RoutedPath]] = defaultdict(list)
+    for rp in routes:
+        routes_by_src[rp.edge.source].append(rp)
+        routes_by_tgt[rp.edge.target].append(rp)
+
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        xs = [graph.stations[sid].x for sid in members]
+        if max(xs) - min(xs) <= STATION_MOVE_TOLERANCE:
+            continue
+        target_x = sum(xs) / len(xs)
+        for sid in members:
+            station = graph.stations[sid]
+            old_x = station.x
+            if abs(old_x - target_x) <= STATION_MOVE_TOLERANCE:
+                continue
+            station.x = target_x
             for rp in routes_by_src.get(sid, []):
                 if abs(rp.points[0][0] - old_x) < STATION_MOVE_TOLERANCE:
                     rp.points[0] = (target_x, rp.points[0][1])
