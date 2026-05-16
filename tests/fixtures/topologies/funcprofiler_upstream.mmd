@@ -1,0 +1,82 @@
+%%metro title: nf-core/funcprofiler (upstream)
+%%metro style: dark
+%%metro line: qc | Preprocessing & QC | #4CAF50
+%%metro line: concat | Merge & Concat | #2196F3
+%%metro line: db | Database Prep | #607D8B
+%%metro line: humann3 | HUMAnN v3 | #FF9800
+%%metro line: humann4 | HUMAnN v4 | #FF5722
+%%metro line: fmhfunprofiler | FMH FunProfiler | #E91E63
+%%metro line: rgi | RGI | #CDDC39
+%%metro line: mifaser | mifaser | #00BCD4
+%%metro line: diamond | DIAMOND | #9C27B0
+%%metro line: eggnog | eggNOG-mapper | #3F51B5
+%%metro line: multiqc | Reporting | #795548
+%%metro compact_offsets: true
+
+graph LR
+    subgraph input[Input]
+        input_short([Short Reads])
+        input_dbs([Input Databases])
+        sr_qc(Preprocess)
+        merge(MERGE_RUNS)
+    end
+
+    subgraph profiling[Functional Profiling]
+        humann3(HUMAnN v3)
+        humann4(HUMAnN v4)
+        fmhfunprofiler(FMH FunProfiler)
+        RGI(RGI)
+        mifaser(mifaser)
+        diamond(DIAMOND)
+        eggnog_mapper(eggNOG-mapper)
+    end
+
+    subgraph QC[Quality Check]
+        multiqc(MultiQC)
+    end
+
+    subgraph Output[Output]
+        output([Results Directory])
+    end
+
+    %% DB Prep
+    input_dbs -->|db| humann3
+    input_dbs -->|db| humann4
+    input_dbs -->|db| fmhfunprofiler
+    input_dbs -->|db| RGI
+    input_dbs -->|db| mifaser
+    input_dbs -->|db| diamond
+    input_dbs -->|db| eggnog_mapper
+
+    %% Preprocessing
+    input_short -->|qc| sr_qc
+    sr_qc -->|concat| merge
+
+    %% Profiling split
+    merge -->|humann3| humann3
+    merge -->|humann4| humann4
+    merge -->|fmhfunprofiler| fmhfunprofiler
+    merge -->|rgi| RGI
+    merge -->|mifaser| mifaser
+    merge -->|diamond| diamond
+    merge -->|eggnog| eggnog_mapper
+
+    %% Reporting
+    sr_qc -->|multiqc| multiqc
+    humann3 -->|multiqc| multiqc
+    humann4 -->|multiqc| multiqc
+    fmhfunprofiler -->|multiqc| multiqc
+    RGI -->|multiqc| multiqc
+    mifaser -->|multiqc| multiqc
+    diamond -->|multiqc| multiqc
+    eggnog_mapper -->|multiqc| multiqc
+
+    %% Output
+    multiqc -->|multiqc| output
+    humann3 -->|humann3| output
+    humann4 -->|humann4| output
+    fmhfunprofiler -->|fmhfunprofiler| output
+    RGI -->|rgi| output
+    mifaser -->|mifaser| output
+    diamond -->|diamond| output
+    eggnog_mapper -->|eggnog| output
