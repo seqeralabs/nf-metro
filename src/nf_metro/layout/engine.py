@@ -678,9 +678,11 @@ def _compute_section_layout(
     # the trunk bundle stays perfectly horizontal across boundaries.
     # Picks the downstream entry port's Y as the anchor since it sits
     # on the row's aligned trunk grid.  Junctions are re-positioned
-    # afterwards because Phase 12 fixed their Y to the old exit port Y.
-    if _snap_inter_section_port_pairs(graph):
-        _position_junctions(graph)
+    # afterwards: Phase 12 fixed their Y to the pre-compaction exit
+    # port Y, and either the snap pass or ``_compact_row_content_to_bbox_top``
+    # may have moved the exit port since then.
+    _snap_inter_section_port_pairs(graph)
+    _position_junctions(graph)
 
     # Phase 13d: Fan a section's free content upward when the row's
     # compaction left visible empty space at the bbox top.  Only fires
