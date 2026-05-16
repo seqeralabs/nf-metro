@@ -541,9 +541,7 @@ def _insert_terminus_convergence_stations(graph: MetroGraph) -> None:
         graph.register_station(st)
 
     if edges_to_remove:
-        graph.edges = [
-            e for i, e in enumerate(graph.edges) if i not in edges_to_remove
-        ]
+        graph.edges = [e for i, e in enumerate(graph.edges) if i not in edges_to_remove]
     for edge in new_edges:
         graph.add_edge(edge)
 
@@ -772,9 +770,7 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
         graph.register_station(st)
 
     if edges_to_remove:
-        graph.edges = [
-            e for i, e in enumerate(graph.edges) if i not in edges_to_remove
-        ]
+        graph.edges = [e for i, e in enumerate(graph.edges) if i not in edges_to_remove]
     for edge in new_edges:
         graph.add_edge(edge)
 

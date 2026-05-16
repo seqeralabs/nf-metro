@@ -69,7 +69,11 @@ def _section_lr_port_ys(graph: MetroGraph, section) -> list[float]:
     return ys
 
 
-def _section_trunk_marker_cy(graph: MetroGraph, section) -> float | None:
+def _section_trunk_marker_cy(
+    graph: MetroGraph,
+    section,
+    offsets: dict[tuple[str, str], float],
+) -> float | None:
     """Render-time cy of the trunk station that anchors the row bundle.
 
     The trunk station is the one whose marker the inter-section bundle
@@ -87,7 +91,6 @@ def _section_trunk_marker_cy(graph: MetroGraph, section) -> float | None:
     bundle = _section_full_bundle(graph, section)
     if not bundle:
         return None
-    offsets = compute_station_offsets(graph)
     port_set = set(section.entry_ports) | set(section.exit_ports)
     best: tuple[float, float] | None = None  # (distance, cy)
     for sid in section.station_ids:
@@ -130,9 +133,7 @@ def _section_full_bundle(graph: MetroGraph, section) -> set[str] | None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"]
-)
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
 def test_row_trunk_marker_cy_consistent(fixture):
     """All same-row LR sections must render their trunk marker at the
     same cy.  Inter-section bundles run horizontally between sections
@@ -145,11 +146,12 @@ def test_row_trunk_marker_cy_consistent(fixture):
     on the section's exit port.
     """
     graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
     rows = _row_lr_sections(graph)
     for row, sections in rows.items():
         cys: list[tuple[str, float]] = []
         for sec in sections:
-            cy = _section_trunk_marker_cy(graph, sec)
+            cy = _section_trunk_marker_cy(graph, sec, offsets)
             if cy is not None:
                 cys.append((sec.id, cy))
         if len(cys) < 2:
@@ -203,12 +205,12 @@ def test_symfan_pairs_share_y(fixture):
     empty.
     """
     graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
     for sec in graph.sections.values():
         cols = _section_fan_columns(graph, sec)
-        trunk_cy = _section_trunk_marker_cy(graph, sec)
+        trunk_cy = _section_trunk_marker_cy(graph, sec, offsets)
         if trunk_cy is None:
             continue
-        offsets = compute_station_offsets(graph)
         for x, sids in cols.items():
             if len(sids) != 2:
                 continue  # Only assert on pairs; 3+ has its own ordering
@@ -305,21 +307,17 @@ def test_no_kink_at_section_boundary(fixture):
                 if not exit_lines:
                     continue
                 exit_offs = [offsets.get((pid, lid), 0.0) for lid in exit_lines]
-                exit_cy = graph.stations[pid].y + (
-                    min(exit_offs) + max(exit_offs)
-                ) / 2
+                exit_cy = graph.stations[pid].y + (min(exit_offs) + max(exit_offs)) / 2
                 # Matching entry port of next section
                 for npid in nxt.entry_ports:
                     nport = graph.ports.get(npid)
                     if nport is None or nport.side != PortSide.LEFT:
                         continue
                     entry_lines = graph.station_lines(npid)
-                    entry_offs = [
-                        offsets.get((npid, lid), 0.0) for lid in entry_lines
-                    ]
-                    entry_cy = graph.stations[npid].y + (
-                        min(entry_offs) + max(entry_offs)
-                    ) / 2
+                    entry_offs = [offsets.get((npid, lid), 0.0) for lid in entry_lines]
+                    entry_cy = (
+                        graph.stations[npid].y + (min(entry_offs) + max(entry_offs)) / 2
+                    )
                     assert abs(exit_cy - entry_cy) < _Y_TOL, (
                         f"Row {row}: exit port {pid} cy={exit_cy} != "
                         f"entry port {npid} cy={entry_cy}"
@@ -397,10 +395,13 @@ def test_side_branch_edge_stays_off_trunk(fixture):
         for edge in outbound[sid]:
             # Find the matching routed path
             rp = next(
-                (r for r in routes
-                 if r.edge.source == edge.source
-                 and r.edge.target == edge.target
-                 and r.edge.line_id == edge.line_id),
+                (
+                    r
+                    for r in routes
+                    if r.edge.source == edge.source
+                    and r.edge.target == edge.target
+                    and r.edge.line_id == edge.line_id
+                ),
                 None,
             )
             if rp is None or len(rp.points) < 2:
@@ -409,9 +410,7 @@ def test_side_branch_edge_stays_off_trunk(fixture):
             if tgt is None:
                 continue
             tgt_port = graph.ports.get(edge.target)
-            same_sec_target = (
-                tgt.section_id == sec.id and not tgt.is_port
-            )
+            same_sec_target = tgt.section_id == sec.id and not tgt.is_port
             is_exit_port = (
                 tgt_port is not None
                 and not tgt_port.is_entry
@@ -453,13 +452,60 @@ def test_side_branch_edge_stays_off_trunk(fixture):
                 f"section={sec.id})"
             )
             asserted += 1
-    assert asserted > 0, (
-        f"{fixture}: no side-branch single-line exits found to test"
-    )
+    assert asserted > 0, f"{fixture}: no side-branch single-line exits found to test"
 
 
 # ---------------------------------------------------------------------------
-# Section content balance around the trunk
+# Section bbox must contain all stations and off-track inputs
+# ---------------------------------------------------------------------------
+
+
+# Default terminus icon and station marker half-heights from the theme,
+# used to verify section bboxes enclose every station's vertical reach.
+_ICON_HALF_HEIGHT = 16.0
+_MARKER_HALF_HEIGHT = 9.5
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
+def test_section_bbox_contains_all_content(fixture):
+    """Every section's bbox must contain its on-track stations and any
+    off-track input icons.  Catches the regression where an off-track
+    input is re-anchored above the section's bbox top so the icon
+    spills outside the section background.
+
+    Margin: on-track station markers reach ~9.5 px above the centre,
+    file-input icons reach ~16 px above the centre.  We assert
+    ``station.y - reach >= bbox_y - 0.5`` (sub-pixel tolerance) and
+    ``station.y + reach <= bbox_y + bbox_h + 0.5``.
+    """
+    graph = _layout(fixture)
+    junction_ids = set(graph.junctions)
+
+    for sec_id, section in graph.sections.items():
+        if section.bbox_h <= 0:
+            continue
+        for sid in section.station_ids:
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or sid in junction_ids:
+                continue
+            half = _ICON_HALF_HEIGHT if st.off_track else _MARKER_HALF_HEIGHT
+            top = st.y - half
+            bot = st.y + half
+            assert top >= section.bbox_y - 0.5, (
+                f"Section {sec_id}: station {sid} top={top} "
+                f"(y={st.y}, half={half}) overflows bbox top "
+                f"y={section.bbox_y}"
+            )
+            assert bot <= section.bbox_y + section.bbox_h + 0.5, (
+                f"Section {sec_id}: station {sid} bottom={bot} "
+                f"(y={st.y}, half={half}) overflows bbox bottom "
+                f"y={section.bbox_y + section.bbox_h}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Sections with empty above-trunk bands but multiple movable siblings below
+# should auto-balance so the top band shrinks to one y_spacing
 # ---------------------------------------------------------------------------
 
 
@@ -468,31 +514,13 @@ def test_section_top_band_filled(fixture):
     """LR/RL sections with room for another above-trunk slot AND
     multiple below-trunk movable siblings should fill the empty top
     band, not leave it stranded.
-
-    Specifically: when the top band (between bbox_y and the topmost
-    station) is large enough to fit another station with its label
-    (>= y_spacing + label_clearance), AND there are >= 2 movable
-    below-trunk siblings versus at most 1 above, the balance pass
-    should have lifted one of them so the top band shrinks to within
-    one y_spacing of the bbox.
-
-    Catches the v103 ``data_prep`` layout where only Matrix was lifted
-    above the trunk while four other file inputs stayed below.
     """
-    import networkx as nx
-
     y_spacing = 55.0
     label_clearance = y_spacing / 2
     graph = _layout(fixture, y_spacing=y_spacing)
-    G = nx.DiGraph()
-    for e in graph.edges:
-        G.add_edge(e.source, e.target)
 
     for section in graph.sections.values():
-        if (
-            section.bbox_h <= 0
-            or section.direction not in ("LR", "RL")
-        ):
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
         bundle = _section_full_bundle(graph, section)
         if not bundle:
@@ -507,7 +535,6 @@ def test_section_top_band_filled(fixture):
                 continue
             cols[round(st.x, 1)].append(sid)
 
-        # Trunk Y: prefer an LR port; fall back to a full-bundle station.
         trunk_y: float | None = None
         for pid in section.entry_ports + section.exit_ports:
             port = graph.ports.get(pid)
@@ -532,16 +559,12 @@ def test_section_top_band_filled(fixture):
         top_y = min(graph.stations[s].y for s in all_internal)
         top_band = top_y - section.bbox_y
         if top_band <= y_spacing + _Y_TOL:
-            continue  # band is already tight
+            continue
 
-        # Count movable siblings above vs below trunk.
         movable_above = 0
         movable_below_candidates: list[str] = []
-        for x, sids in cols.items():
-            trunks_here = [
-                s for s in sids
-                if set(graph.station_lines(s)) == bundle
-            ]
+        for _x, sids in cols.items():
+            trunks_here = [s for s in sids if set(graph.station_lines(s)) == bundle]
             if not trunks_here:
                 continue
             for s in sids:
@@ -556,10 +579,6 @@ def test_section_top_band_filled(fixture):
                 elif y > trunk_y + _Y_TOL:
                     movable_below_candidates.append(s)
 
-        # Only flag sections where >= 2 below-trunk movables exist
-        # AND at least one would fit in a new top slot with its
-        # label.  Sections where slot -k of every below station
-        # would clip into the bbox stroke are skipped.
         if len(movable_below_candidates) < 2 or movable_above >= len(
             movable_below_candidates
         ):
@@ -567,11 +586,14 @@ def test_section_top_band_filled(fixture):
 
         target_y = top_y - y_spacing
         any_fits = any(
-            target_y >= section.bbox_y + (
+            target_y
+            >= section.bbox_y
+            + (
                 label_clearance
                 if graph.stations[s].label and graph.stations[s].label.strip()
                 else 0.0
-            ) - _Y_TOL
+            )
+            - _Y_TOL
             for s in movable_below_candidates
         )
         if not any_fits:
@@ -596,10 +618,6 @@ def test_section1_input_above_trunk(fixture):
     """In ``data_prep`` (the source-stack section) inputs must fill
     the above-trunk band: at least one input sits above the trunk, and
     the topmost input is no more than y_spacing below the bbox top.
-
-    Catches the regression where ``_fan_source_inputs_upward`` lifts
-    only a single input (e.g. just Matrix), leaving a 2+ y_spacing
-    gap between the bbox top and the topmost input.
     """
     y_spacing = 55.0
     graph = _layout(fixture, y_spacing=y_spacing)
@@ -615,25 +633,20 @@ def test_section1_input_above_trunk(fixture):
             break
     assert trunk_y is not None, "data_prep has no LR port for trunk Y"
 
-    # Inputs: stations with no inbound edges (sources).
     has_in: set[str] = {e.target for e in graph.edges}
     inputs = [
-        sid for sid in section.station_ids
+        sid
+        for sid in section.station_ids
         if sid not in port_ids
         and sid not in has_in
         and sid in graph.stations
         and not graph.stations[sid].is_port
     ]
-    inputs_above = [
-        sid for sid in inputs
-        if graph.stations[sid].y < trunk_y - _Y_TOL
-    ]
+    inputs_above = [sid for sid in inputs if graph.stations[sid].y < trunk_y - _Y_TOL]
     assert inputs_above, (
         f"data_prep: no input sits above trunk_y={trunk_y:.1f} "
         f"(inputs at y={[graph.stations[s].y for s in inputs]})"
     )
-    # Top of section: the topmost input should sit within one
-    # y_spacing of the bbox top so the top band is visibly filled.
     top_input_y = min(graph.stations[s].y for s in inputs_above)
     top_band = top_input_y - section.bbox_y
     assert top_band <= y_spacing + _Y_TOL, (
@@ -645,64 +658,6 @@ def test_section1_input_above_trunk(fixture):
 
 
 # ---------------------------------------------------------------------------
-# Section bbox must contain all stations and off-track inputs
-# ---------------------------------------------------------------------------
-
-
-def _icon_half_height(graph: MetroGraph) -> float:
-    """Vertical reach of a file-input icon above/below its centre.
-
-    Mirrors the renderer's terminus icon height (32 px default).  Used
-    to verify the section bbox encloses off-track icon tops.
-    """
-    # Default terminus_height in Theme is 32 px; half = 16.
-    return 16.0
-
-
-@pytest.mark.parametrize(
-    "fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"]
-)
-def test_section_bbox_contains_all_content(fixture):
-    """Every section's bbox must contain its on-track stations and any
-    off-track input icons.  Catches the regression where an off-track
-    input is re-anchored above the section's bbox top so the icon
-    spills outside the section background.
-
-    Margin: on-track station markers reach ~9.5 px above the centre,
-    file-input icons reach ~16 px above the centre.  We assert
-    ``station.y - reach >= bbox_y - 0.5`` (sub-pixel tolerance) and
-    ``station.y + reach <= bbox_y + bbox_h + 0.5``.
-    """
-    graph = _layout(fixture)
-    junction_ids = set(graph.junctions)
-    icon_half = _icon_half_height(graph)
-    marker_half = 9.5  # station marker height / 2
-
-    for sec_id, section in graph.sections.items():
-        if section.bbox_h <= 0:
-            continue
-        for sid in section.station_ids:
-            st = graph.stations.get(sid)
-            if st is None or st.is_port or sid in junction_ids:
-                continue
-            # Use icon half-height for off-track (file-input) stations,
-            # marker half-height otherwise.
-            half = icon_half if st.off_track else marker_half
-            top = st.y - half
-            bot = st.y + half
-            assert top >= section.bbox_y - 0.5, (
-                f"Section {sec_id}: station {sid} top={top} "
-                f"(y={st.y}, half={half}) overflows bbox top "
-                f"y={section.bbox_y}"
-            )
-            assert bot <= section.bbox_y + section.bbox_h + 0.5, (
-                f"Section {sec_id}: station {sid} bottom={bot} "
-                f"(y={st.y}, half={half}) overflows bbox bottom "
-                f"y={section.bbox_y + section.bbox_h}"
-            )
-
-
-# ---------------------------------------------------------------------------
 # Terminus stations must not be hit by a diagonal route segment
 # ---------------------------------------------------------------------------
 
@@ -711,23 +666,11 @@ def test_section_bbox_contains_all_content(fixture):
 def test_terminus_not_directly_after_diagonal(fixture):
     """Routes terminating at an output terminus must arrive on an
     orthogonal (horizontal or vertical) final segment.
-
-    Catches the v103 layout where ``plot_expl`` and ``plot_diff`` both
-    fed ``plots_png`` via diagonals that converged AT the terminus
-    marker, producing a Y-shape with the file icon at the convergence
-    point.  After v104 the layout should insert a virtual convergence
-    station so the last segment to the terminus is purely orthogonal.
-
-    The check tolerates short corner segments (curve smoothing) by
-    requiring the LAST segment of length >= MIN_LEN to be axis-aligned.
     """
-    from nf_metro.layout.routing import route_edges
-
-    MIN_LEN = 30.0  # require axis-aligned approach for the last >= 30px
+    MIN_LEN = 30.0
     AXIS_TOL = 1.0
     graph = _layout(fixture)
     routes = route_edges(graph)
-    # Group routes by terminus target id.
     by_target: dict[str, list] = defaultdict(list)
     for r in routes:
         tgt = graph.stations.get(r.edge.target)
@@ -736,9 +679,6 @@ def test_terminus_not_directly_after_diagonal(fixture):
         by_target[r.edge.target].append(r)
 
     for tid, paths in by_target.items():
-        # Only enforce the invariant when a terminus has 2+ direct
-        # inbound edges (the convergence case).  Single-source termini
-        # already inherit their source's Y.
         sources = {r.edge.source for r in paths}
         if len(sources) < 2:
             continue
@@ -746,7 +686,6 @@ def test_terminus_not_directly_after_diagonal(fixture):
             pts = r.points
             if len(pts) < 2:
                 continue
-            # Find the last segment of length >= MIN_LEN
             for i in range(len(pts) - 1, 0, -1):
                 x1, y1 = pts[i - 1]
                 x2, y2 = pts[i]
@@ -763,6 +702,40 @@ def test_terminus_not_directly_after_diagonal(fixture):
                     f"(dx={dx:.1f}, dy={dy:.1f})"
                 )
                 break
+
+
+# ---------------------------------------------------------------------------
+# Station markers and off-track file icons must never overlap
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
+def test_no_station_or_icon_overlap(fixture):
+    """No two station marker bboxes (including off-track file icons)
+    may overlap; otherwise one station hides another in the rendered
+    SVG."""
+    from nf_metro.layout.engine import _station_marker_bbox
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    boxes: list[tuple[str, tuple[float, float, float, float]]] = []
+    for sid in graph.stations:
+        b = _station_marker_bbox(graph, sid, offsets=offsets)
+        if b is not None:
+            boxes.append((sid, b))
+
+    tol = 0.5
+    for i, (s1, (x1, y1, X1, Y1)) in enumerate(boxes):
+        for s2, (x2, y2, X2, Y2) in boxes[i + 1 :]:
+            overlap = (
+                x1 < X2 - tol and x2 < X1 - tol and y1 < Y2 - tol and y2 < Y1 - tol
+            )
+            assert not overlap, (
+                f"{fixture}: marker overlap between {s1!r} "
+                f"bbox=({x1:.1f},{y1:.1f},{X1:.1f},{Y1:.1f}) "
+                f"and {s2!r} "
+                f"bbox=({x2:.1f},{y2:.1f},{X2:.1f},{Y2:.1f})"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -893,62 +866,6 @@ def test_non_consumed_lines_route_via_virtual_station(fixture):
                 f"{fixture}: line {r.line_id} enters annotate marker "
                 f"bbox at x={ann_cx:.1f}, y={seg_y:.1f} (annotate "
                 f"cy={ann_cy:.1f})"
-            )
-
-
-# ---------------------------------------------------------------------------
-# Station markers and off-track file icons must never overlap
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"]
-)
-def test_no_station_or_icon_overlap(fixture):
-    """No two station markers (incl. off-track file icons) may share a
-    bounding-box footprint.  Each station / off-track input renders a
-    pill-shaped marker centred at ``(station.x, station.y + offset_mid)``;
-    if two such pills overlap, the rendered SVG shows one station hidden
-    behind another - the v106 regression where the auto-balance pass
-    lifted ``grea`` into the slot already occupied by the off-track
-    ``gmt_in`` icon in section 3 (Functional enrichment).
-
-    Iterates every pair of station marker bboxes and asserts they do
-    not overlap (sub-pixel tolerance).
-    """
-    graph = _layout(fixture)
-    offsets = compute_station_offsets(graph)
-    radius = 5.0  # matches nfcore theme station_radius; pill width = 10px
-    junction_ids = set(graph.junctions)
-    boxes: list[tuple[str, tuple[float, float, float, float]]] = []
-    for sid, st in graph.stations.items():
-        if st.is_port or st.is_hidden or sid in junction_ids:
-            continue
-        line_offs = [
-            offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)
-        ] or [0.0]
-        min_off, max_off = min(line_offs), max(line_offs)
-        cy = st.y + (min_off + max_off) / 2
-        w = 2 * radius
-        h = (max_off - min_off) + 2 * radius
-        boxes.append(
-            (sid, (st.x - w / 2, cy - h / 2, st.x + w / 2, cy + h / 2))
-        )
-
-    tol = 0.5
-    for i, (s1, (x1, y1, X1, Y1)) in enumerate(boxes):
-        for s2, (x2, y2, X2, Y2) in boxes[i + 1:]:
-            overlap = (
-                x1 < X2 - tol
-                and x2 < X1 - tol
-                and y1 < Y2 - tol
-                and y2 < Y1 - tol
-            )
-            assert not overlap, (
-                f"{fixture}: marker overlap between {s1!r} "
-                f"bbox=({x1:.1f},{y1:.1f},{X1:.1f},{Y1:.1f}) "
-                f"and {s2!r} "
-                f"bbox=({x2:.1f},{y2:.1f},{X2:.1f},{Y2:.1f})"
             )
 
 
