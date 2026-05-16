@@ -793,27 +793,24 @@ def test_non_consumed_lines_route_via_virtual_station(fixture):
     assert annotate is not None, "fixture must contain ``annotate`` station"
 
     diff_bypass = [
-        sid for sid in bypass_station_ids if graph.stations[sid].section_id
-        == annotate.section_id
+        sid
+        for sid in bypass_station_ids
+        if graph.stations[sid].section_id == annotate.section_id
     ]
     assert diff_bypass, (
-        f"{fixture}: expected a bypass virtual station in "
-        f"section {annotate.section_id}"
+        f"{fixture}: expected a bypass virtual station in section {annotate.section_id}"
     )
 
     # The two bypassing lines (maxquant, geo) should each have edges
     # ending at and starting from the same hidden bypass station.
     bypass_predecessors_for = {
-        v: {e.source for e in graph.edges if e.target == v}
-        for v in diff_bypass
+        v: {e.source for e in graph.edges if e.target == v} for v in diff_bypass
     }
     bypass_successors_for = {
-        v: {e.target for e in graph.edges if e.source == v}
-        for v in diff_bypass
+        v: {e.target for e in graph.edges if e.source == v} for v in diff_bypass
     }
     bypass_lines_for = {
-        v: {e.line_id for e in graph.edges if e.source == v}
-        for v in diff_bypass
+        v: {e.line_id for e in graph.edges if e.source == v} for v in diff_bypass
     }
     # At least one bypass virtual station should carry the
     # non-consumed lines and chain limma -> V -> exit_port.
@@ -821,11 +818,8 @@ def test_non_consumed_lines_route_via_virtual_station(fixture):
     for v in diff_bypass:
         if {"maxquant", "geo"}.issubset(bypass_lines_for[v]):
             assert "limma" in bypass_predecessors_for[v]
-            assert any(
-                "exit" in succ for succ in bypass_successors_for[v]
-            ), (
-                f"{v}: expected an exit-port successor, "
-                f"got {bypass_successors_for[v]}"
+            assert any("exit" in succ for succ in bypass_successors_for[v]), (
+                f"{v}: expected an exit-port successor, got {bypass_successors_for[v]}"
             )
             found_bypass_for_lines = True
             break
@@ -894,7 +888,8 @@ def test_bypass_avoids_off_track_inputs(fixture):
     # require strictly less than one full row, ie ~12 px or more.
     MIN_CLEARANCE = 12.0
     bypass_ids = [
-        sid for sid, st in graph.stations.items()
+        sid
+        for sid, st in graph.stations.items()
         if st.is_hidden and sid.startswith("__bypass_")
     ]
     if not bypass_ids:
