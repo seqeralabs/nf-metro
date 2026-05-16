@@ -1657,10 +1657,11 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> bool:
 
     Scoped to pipelines that use explicit ``%%metro grid:`` directives;
     auto-layout pipelines keep their existing inter-section routing so
-    line-offset ordering tests stay stable.
+    line-offset ordering tests stay stable.  The fan-in entry-port snap
+    branch below runs unconditionally because it only moves the entry
+    port (not the exit), preserving the auto-layout fan-in convergence.
     """
-    if not getattr(graph, "_explicit_grid", None):
-        return False
+    explicit_grid = bool(getattr(graph, "_explicit_grid", None))
     junction_ids = set(graph.junctions)
     moved = False
 
@@ -1708,8 +1709,10 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> bool:
         if abs(port_st.y - target_y) < 0.5:
             continue
 
-        # Skip fan-in exits: multiple distinct internal source Ys
-        # signal a meaningful convergence; keep the centred midpoint.
+        # Fan-in exits (multiple distinct internal source Ys) want to
+        # keep their centred-midpoint convergence Y, so don't move the
+        # exit port itself.  Instead, snap the downstream entry port
+        # to the exit port's Y so the inter-section trunk stays flat.
         port_set = set(section.entry_ports) | set(section.exit_ports)
         src_ys: set[float] = set()
         for edge in graph.edges:
@@ -1719,8 +1722,36 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> bool:
             if src and not src.is_port and edge.source not in port_set:
                 src_ys.add(round(src.y, 1))
         if len(src_ys) >= 2:
+            for edge in graph.edges:
+                if edge.source != port_id:
+                    continue
+                entry_candidates: list[str] = []
+                tgt_port = graph.ports.get(edge.target)
+                if tgt_port and tgt_port.is_entry:
+                    entry_candidates.append(edge.target)
+                elif edge.target in junction_ids:
+                    for e2 in graph.edges:
+                        if e2.source != edge.target:
+                            continue
+                        tp2 = graph.ports.get(e2.target)
+                        if tp2 and tp2.is_entry:
+                            entry_candidates.append(e2.target)
+                for eid in entry_candidates:
+                    ep = graph.ports.get(eid)
+                    if ep is None or ep.side not in (PortSide.LEFT, PortSide.RIGHT):
+                        continue
+                    ds_sec = graph.sections.get(ep.section_id)
+                    if ds_sec is None or ds_sec.grid_row != section.grid_row:
+                        continue
+                    ep_st = graph.stations.get(eid)
+                    if ep_st is None or abs(ep_st.y - port_st.y) < 0.5:
+                        continue
+                    _set_port_y(graph, eid, port_st.y)
+                    moved = True
             continue
 
+        if not explicit_grid:
+            continue
         _set_port_y(graph, port_id, target_y)
         moved = True
 
