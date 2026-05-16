@@ -19,7 +19,6 @@ from nf_metro.layout.constants import (
     EXIT_GAP_MULTIPLIER,
     FONT_HEIGHT,
     GUARD_TOLERANCE,
-    ICON_INTER_GAP,
     JUNCTION_MARGIN,
     LABEL_BBOX_MARGIN,
     LABEL_LINE_HEIGHT,
@@ -29,6 +28,8 @@ from nf_metro.layout.constants import (
     LINE_GAP,
     MAX_PORT_ALIGN_BBOX_EXPANSION_FRAC,
     MIN_PORT_STATION_GAP,
+    MIN_STRAIGHT_EDGE,
+    MIN_STRAIGHT_PORT,
     OFFSET_STEP,
     ROW_GAP,
     SECTION_GAP,
@@ -138,6 +139,133 @@ def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
                 f"{phase}: section {sid!r} has negative bbox "
                 f"(w={sec.bbox_w:.1f}, h={sec.bbox_h:.1f})"
             )
+
+
+def _station_marker_bbox(
+    graph: MetroGraph,
+    sid: str,
+    offsets: dict | None = None,
+    radius: float = STATION_RADIUS_APPROX,
+) -> tuple[float, float, float, float] | None:
+    """Rendered marker / icon bbox for ``sid``, or ``None`` for ports,
+    hidden stations, and junctions.
+
+    Mirrors the pill geometry used by ``nf_metro.render.svg``: width
+    ``2 * radius``, height ``(max_off - min_off) + 2 * radius``, centred
+    at ``(station.x, station.y + (min_off + max_off) / 2)``.
+    """
+    from nf_metro.layout.routing import compute_station_offsets
+
+    st = graph.stations.get(sid)
+    if st is None or st.is_port or st.is_hidden or sid in graph.junctions:
+        return None
+    if offsets is None:
+        offsets = compute_station_offsets(graph)
+    line_offs = [offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)] or [
+        0.0
+    ]
+    min_off, max_off = min(line_offs), max(line_offs)
+    cy = st.y + (min_off + max_off) / 2
+    half_h = (max_off - min_off) / 2 + radius
+    return (st.x - radius, cy - half_h, st.x + radius, cy + half_h)
+
+
+def _guard_no_station_overlap(graph: MetroGraph, phase: str) -> None:
+    """Final-phase: no two station marker bboxes may overlap at render
+    time, else one station hides another in the SVG."""
+    from nf_metro.layout.routing import compute_station_offsets
+
+    offsets = compute_station_offsets(graph)
+    boxes: list[tuple[str, tuple[float, float, float, float]]] = []
+    for sid in graph.stations:
+        b = _station_marker_bbox(graph, sid, offsets=offsets)
+        if b is not None:
+            boxes.append((sid, b))
+    tol = 0.5
+    for i, (s1, (x1, y1, X1, Y1)) in enumerate(boxes):
+        for s2, (x2, y2, X2, Y2) in boxes[i + 1 :]:
+            if x1 < X2 - tol and x2 < X1 - tol and y1 < Y2 - tol and y2 < Y1 - tol:
+                raise PhaseInvariantError(
+                    f"{phase}: position clash: {s1!r} at "
+                    f"({(x1 + X1) / 2:.1f},{(y1 + Y1) / 2:.1f}) overlaps "
+                    f"{s2!r} at ({(x2 + X2) / 2:.1f},{(y2 + Y2) / 2:.1f})"
+                )
+
+
+def _guard_no_line_crosses_non_consumer(graph: MetroGraph, phase: str) -> None:
+    """Final-phase: no rendered line segment may pass through a
+    station marker whose station neither consumes nor produces that
+    line.
+
+    Complements ``_guard_no_station_overlap``: station/station marker
+    overlap catches one class of clash; this catches the other --
+    a line bundle routed at a Y that crosses an off-trunk station's
+    marker bbox while bypassing it (the "breeze-past" pattern).
+    A common trigger is a sparse single-line consumer (e.g. ``grea``
+    in the differential-functional section, consuming only rnaseq)
+    sharing its trunk-Y row with a busier sibling whose inbound
+    bundle traverses the sparse consumer's column.
+    """
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+    from nf_metro.render.svg import apply_route_offsets
+
+    offsets = compute_station_offsets(graph)
+    try:
+        routes = route_edges(graph, station_offsets=offsets)
+    except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+        return
+
+    consumed_by: dict[str, set[str]] = {}
+    produced_by: dict[str, set[str]] = {}
+    for e in graph.edges:
+        consumed_by.setdefault(e.target, set()).add(e.line_id)
+        produced_by.setdefault(e.source, set()).add(e.line_id)
+
+    def _segment_crosses_bbox(
+        p1: tuple[float, float],
+        p2: tuple[float, float],
+        bbox: tuple[float, float, float, float],
+    ) -> bool:
+        x1, y1 = p1
+        x2, y2 = p2
+        bx1, by1, bx2, by2 = bbox
+        if max(x1, x2) < bx1 or min(x1, x2) > bx2:
+            return False
+        if max(y1, y2) < by1 or min(y1, y2) > by2:
+            return False
+        # Sample 20 points along the segment.  Routing waypoints are
+        # axis-aligned or 45-degree so this is exact at the resolution
+        # of the marker bbox (10 px wide).
+        for k in range(21):
+            f = k / 20.0
+            x = x1 + f * (x2 - x1)
+            y = y1 + f * (y2 - y1)
+            if bx1 <= x <= bx2 and by1 <= y <= by2:
+                return True
+        return False
+
+    for sid, st in graph.stations.items():
+        bbox = _station_marker_bbox(graph, sid, offsets=offsets)
+        if bbox is None:
+            continue
+        station_lines = consumed_by.get(sid, set()) | produced_by.get(sid, set())
+        for r in routes:
+            if r.line_id in station_lines:
+                continue
+            if r.edge.source == sid or r.edge.target == sid:
+                continue
+            pts = apply_route_offsets(r, offsets)
+            for k in range(len(pts) - 1):
+                if _segment_crosses_bbox(pts[k], pts[k + 1], bbox):
+                    raise PhaseInvariantError(
+                        f"{phase}: line {r.line_id!r} on edge "
+                        f"{r.edge.source!r} -> {r.edge.target!r} "
+                        f"crosses non-consumer station {sid!r} "
+                        f"marker bbox ({bbox[0]:.1f},{bbox[1]:.1f})-"
+                        f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
+                        f"({pts[k][0]:.1f},{pts[k][1]:.1f})->"
+                        f"({pts[k + 1][0]:.1f},{pts[k + 1][1]:.1f})"
+                    )
 
 
 def compute_layout(
@@ -483,6 +611,16 @@ def _compute_section_layout(
     # is bottom- and top-weighted instead of stacked below the trunk.
     _fan_source_inputs_upward(graph, y_spacing)
 
+    # Phase 13d3: For sections that contain exactly a 2-branch
+    # symmetric fan (and no off-track or other constraining content),
+    # collapse the fan onto half-pitch offsets so the section consumes
+    # one vertical grid unit instead of two.  Marks the branch stations
+    # in ``_half_grid_station_ids`` so the next snap pass leaves them
+    # alone.  Runs before ``_snap_all_y_to_grid`` so the snap-to-row-
+    # grid pass doesn't immediately undo the compaction.
+    if graph.center_ports:
+        _apply_half_grid_2branch_symfan(graph, y_spacing, section_y_padding)
+
     # Phase 13e: Snap all station/port Ys to a per-section y_spacing
     # grid.  Trunk-Y align, port-snap, and the row compaction/fan
     # phases compute shifts that don't respect the grid pitch, leaving
@@ -501,8 +639,9 @@ def _compute_section_layout(
     # consumer Ys; snapping the consumer to the grid can shift it by
     # up to half a pitch, which would collapse the y_spacing gap above
     # off-track.  Recomputing here pins each off-track at
-    # consumer.y - n*y_spacing on the final grid.
-    _reanchor_off_track_to_consumer(graph, y_spacing)
+    # consumer.y - n*y_spacing on the final grid and grows the bbox
+    # upward if the new position rises above the padding zone.
+    _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
 
     # Phase 13h: Re-center full-bundle columns around the row's final
     # trunk Y.  ``_redistribute_full_bundle_columns`` runs early when
@@ -515,6 +654,19 @@ def _compute_section_layout(
     # column.
     if graph.center_ports:
         _recenter_full_bundle_columns(graph, y_spacing)
+        # Re-anchor off-track inputs again: ``_recenter`` moves
+        # their consumers to the final trunk-anchored Y, which can
+        # leave the off-track icon stranded at the old consumer Y
+        # (overlapping the consumer station instead of sitting one
+        # row above it).  This second reanchor uses each consumer's
+        # post-recenter Y as the new anchor and grows the section
+        # bbox upward when the lifted band moves above its current top.
+        _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
+        # Re-run the row top-align: a reanchor-driven bbox grow leaves
+        # the section's bbox above its row mates'.  Pull row mates'
+        # bbox tops up to match so the section row stays flush along
+        # its top edge.
+        _top_align_row_bboxes_only(graph)
 
     # Phase 13i: After fan-re-centering, single-station downstream
     # columns (e.g. terminus file icons) may have stayed at their
@@ -522,17 +674,56 @@ def _compute_section_layout(
     # them back onto the source Y so the connection stays horizontal.
     _align_terminus_to_upstream(graph)
 
+    # Phase 13i2: Auto-balance pass.  For sections whose final layout
+    # still leaves an empty band above the trunk while more siblings
+    # sit below than above, lift bottommost movable siblings into the
+    # empty top band so content sits symmetrically around the trunk.
+    # Runs after re-centering and terminus-Y pinning so it sees the
+    # final trunk Y.  U-turn-safe and bbox-bounded.
+    _balance_section_content_around_trunk(graph, section_y_padding, y_spacing)
+
+    # Phase 13h3: Recenter fan-out side stations on their loop midpoint.
+    # The layer-based X assignment places off-trunk siblings (e.g. propd,
+    # dream, DESeq2 fanned off limma between section entry and annotate
+    # results) at a fixed offset from the section entry that ignores how
+    # far the join's diagonal-back corner reaches.  Asymmetric corners
+    # leave the station visibly off-centre on its horizontal loop run.
+    # Reposition each side station to the midpoint of the two diagonal
+    # corner Xs derived from the actual routing geometry.
+    _recenter_loop_side_stations(graph)
+
     # Phase 13j: Shrink rowspan / row-mate bboxes whose content moved
     # up after compact (e.g. ``_fan_source_inputs_upward`` lifted the
     # bottom rows away from the bbox bottom).  Bottom-only shrink, so
     # trunk alignment is unaffected.
     _shrink_bboxes_to_content_bottom(graph, section_y_padding)
 
+    # Phase 13k: Close vertical slack that the pre-shrink row-height
+    # estimate (in ``_compute_section_offsets``) left between row ``r``
+    # and row ``r + 1`` once 13j has collapsed bboxes to their content.
+    # Only fires when a rowspan section's content fell short of its row
+    # claim; multi-row layouts with content-filled rows are untouched.
+    _tighten_lower_rows_after_shrink(graph, section_y_gap)
+
+    # Phase 13k: Shift sparse loop-side stations (e.g. ``grea`` -- one
+    # incoming, one outgoing, single-line consumer) onto a half-grid Y
+    # when sharing the full-row Y with a busier sibling whose inbound
+    # bundle would otherwise cross the sparse station's marker bbox.
+    _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
+
+    # Phase 13l: When Phase 13k grew a section's bbox downward, push
+    # sections in lower rows down so they don't crowd the grown bbox.
+    # ``_tighten_lower_rows_after_shrink`` only closes slack (pulls
+    # rows up); the inverse push happens here.
+    _push_lower_rows_after_bbox_grow(graph, section_y_gap)
+
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
         _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
         _guard_stations_in_sections(graph, "after Phase 12 (final)")
         _guard_ports_on_boundaries(graph, "after Phase 12 (final)")
+        _guard_no_station_overlap(graph, "after Phase 12 (final)")
+        _guard_no_line_crosses_non_consumer(graph, "after Phase 12 (final)")
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
@@ -1655,6 +1846,853 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
             _shift_chain(src, delta)
 
 
+def _balance_direct_external_feeder_ys(
+    graph: MetroGraph, station_id: str, section_id: str
+) -> list[float]:
+    """Return Ys of the candidate station's per-line external feeders.
+
+    Walks edges INTO ``station_id`` by line: for each inbound (src, lid)
+    pair, traverse the (src, lid) chain through junctions and ports
+    until reaching the first non-port, non-junction station.  Filtering
+    by line means transit-only stations feeding the same shared port
+    on a different line are not counted.
+    """
+    junction_ids = set(graph.junctions)
+    feeder_ys: list[float] = []
+    seen: set[tuple[str, str]] = set()
+    stack: list[tuple[str, str]] = []
+    for edge in graph.edges:
+        if edge.target == station_id:
+            stack.append((edge.source, edge.line_id))
+    while stack:
+        cur_id, lid = stack.pop()
+        if (cur_id, lid) in seen:
+            continue
+        seen.add((cur_id, lid))
+        if cur_id in junction_ids:
+            for edge in graph.edges:
+                if edge.target == cur_id and edge.line_id == lid:
+                    stack.append((edge.source, lid))
+            continue
+        src = graph.stations.get(cur_id)
+        if src is None:
+            continue
+        if src.is_port:
+            for edge in graph.edges:
+                if edge.target == cur_id and edge.line_id == lid:
+                    stack.append((edge.source, lid))
+            continue
+        if src.section_id == section_id:
+            continue
+        feeder_ys.append(src.y)
+    return feeder_ys
+
+
+def _balance_section_content_around_trunk(
+    graph: MetroGraph, section_y_padding: float, y_spacing: float
+) -> None:
+    """Rebalance fan-out siblings to fill empty bands above the trunk.
+
+    Runs after fan-upward and re-centering finalises the trunk Y.
+    For sections whose final layout still leaves a >= 1 * ``y_spacing``
+    empty band above the topmost station while more siblings sit below
+    the trunk than above, either:
+
+    - LIFTS the bottommost (or topmost, depending on line homogeneity)
+      below-trunk movable sibling to one slot above the topmost station
+      when the bbox has room for the marker plus its above-marker
+      label.  The lifted station's linear consumer chain follows so
+      per-line tracks stay straight.
+
+    - SWAPS the bottommost below-trunk movable with the topmost above-
+      trunk station when the bbox has no headroom for an extra slot.
+
+    Scoped to explicit ``%%metro grid:`` pipelines.  Line-aware U-turn
+    safety prevents lifts that would force the line to climb past the
+    trunk and double back.
+    """
+    if not getattr(graph, "_explicit_grid", None):
+        return
+    if not graph.center_ports:
+        return
+
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        bundle = _section_bundle_lines(graph, section)
+        if not bundle:
+            continue
+        port_set = set(section.entry_ports) | set(section.exit_ports)
+        internal_ids = [
+            sid
+            for sid in section.station_ids
+            if sid not in port_set
+            and sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not graph.stations[sid].is_hidden
+            and not graph.stations[sid].off_track
+        ]
+        if not internal_ids:
+            continue
+
+        trunk_y: float | None = None
+        for pid in section.entry_ports + section.exit_ports:
+            port = graph.ports.get(pid)
+            st = graph.stations.get(pid)
+            if port and st and port.side in (PortSide.LEFT, PortSide.RIGHT):
+                trunk_y = st.y
+                break
+        if trunk_y is None:
+            full_ys = sorted(
+                graph.stations[s].y
+                for s in internal_ids
+                if set(graph.station_lines(s)) == bundle
+            )
+            if not full_ys:
+                continue
+            trunk_y = full_ys[len(full_ys) // 2]
+
+        cols: dict[float, list[str]] = defaultdict(list)
+        for sid in internal_ids:
+            cols[round(graph.stations[sid].x, 3)].append(sid)
+
+        section_top_y = min(graph.stations[s].y for s in internal_ids)
+        top_band = section_top_y - section.bbox_y
+        if top_band <= y_spacing + 0.5:
+            continue
+
+        movable: list[str] = []
+        for x, sids in cols.items():
+            trunks_in_col = [s for s in sids if set(graph.station_lines(s)) == bundle]
+            if not trunks_in_col:
+                continue
+            for s in sids:
+                if s in trunks_in_col:
+                    continue
+                lines = set(graph.station_lines(s))
+                if not lines or not (lines < bundle):
+                    continue
+                movable.append(s)
+
+        if not movable:
+            continue
+
+        ys = [graph.stations[s].y for s in movable]
+        above_count = sum(1 for y in ys if y < trunk_y - 0.5)
+        below_count = sum(1 for y in ys if y > trunk_y + 0.5)
+        if below_count <= above_count:
+            continue
+
+        section_internal_set = set(internal_ids)
+
+        def _shift_chain(src: str, delta: float) -> None:
+            cur = src
+            src_lines = set(graph.station_lines(src))
+            while True:
+                outs = {e.target for e in graph.edges if e.source == cur}
+                if len(outs) != 1:
+                    break
+                nxt = next(iter(outs))
+                if nxt not in section_internal_set:
+                    break
+                in_srcs = {e.source for e in graph.edges if e.target == nxt}
+                if len(in_srcs) != 1:
+                    break
+                if set(graph.station_lines(nxt)) != src_lines:
+                    break
+                graph.stations[nxt].y += delta
+                cur = nxt
+
+        # Ys of every other station (incl. off-track icons) at ``col_x``.
+        # Lift candidates must avoid these slots or the lifted marker
+        # overlaps an existing marker / icon at render time.
+        def _column_occupied_ys(col_x: float, skip_sid: str) -> list[float]:
+            occ: list[float] = []
+            for sid2 in section.station_ids:
+                if sid2 == skip_sid:
+                    continue
+                st2 = graph.stations.get(sid2)
+                if st2 is None or st2.is_port or st2.is_hidden:
+                    continue
+                if abs(st2.x - col_x) > 0.5:
+                    continue
+                occ.append(st2.y)
+            return occ
+
+        max_iters = len(movable)
+        for _ in range(max_iters):
+            section_top_y = min(graph.stations[s].y for s in internal_ids)
+            top_band = section_top_y - section.bbox_y
+            if top_band <= y_spacing + 0.5:
+                break
+            ys = {s: graph.stations[s].y for s in movable}
+            above = [s for s, y in ys.items() if y < trunk_y - 0.5]
+            below = [s for s, y in ys.items() if y > trunk_y + 0.5]
+            if len(below) <= len(above):
+                break
+            line_sets = {frozenset(graph.station_lines(s)) for s in movable}
+            if len(line_sets) == 1:
+                below.sort(key=lambda s: graph.stations[s].y, reverse=True)
+            else:
+                below.sort(key=lambda s: graph.stations[s].y)
+            # First below-trunk candidate whose lift Y doesn't collide
+            # with another station/icon already occupying the same column.
+            candidate = None
+            new_y = section_top_y - y_spacing
+            for cand in below:
+                col_x = graph.stations[cand].x
+                occ = _column_occupied_ys(col_x, cand)
+                if any(abs(oy - new_y) < y_spacing - 0.5 for oy in occ):
+                    continue
+                candidate = cand
+                break
+            if candidate is None:
+                break
+            st = graph.stations.get(candidate)
+            has_above_label = bool(st and st.label and st.label.strip())
+            label_clearance = y_spacing / 2 if has_above_label else 0.0
+            # Off-track file icons reach ~16 px above centre; on-track
+            # markers reach ~9.5 px.  Use the wider reach when relevant.
+            marker_clearance = 16.0 if (st and st.off_track) else 9.5
+            min_y = section.bbox_y + max(label_clearance, marker_clearance)
+            if new_y < min_y - 0.5:
+                if not above:
+                    break
+                above.sort(key=lambda s: graph.stations[s].y)
+                top_above = above[0]
+                ya = graph.stations[top_above].y
+                yc = graph.stations[candidate].y
+                if candidate != below[0]:
+                    break
+                graph.stations[candidate].y = ya
+                graph.stations[top_above].y = yc
+                _shift_chain(candidate, ya - yc)
+                _shift_chain(top_above, yc - ya)
+                break
+            ext_feeders = _balance_direct_external_feeder_ys(
+                graph, candidate, section.id
+            )
+            if len(ext_feeders) >= 2 and all(fy >= new_y - 0.5 for fy in ext_feeders):
+                break
+            delta = new_y - graph.stations[candidate].y
+            graph.stations[candidate].y = new_y
+            _shift_chain(candidate, delta)
+
+        # Below-trunk compaction: when the first row below the trunk is
+        # empty but content sits two or more slots below, lift all
+        # below-trunk stations up by one ``y_spacing`` so they pack
+        # against the trunk row.  Honours the existing column-occupied
+        # guard so off-track icons and marker clearance aren't violated.
+        _compact_below_trunk_band(graph, section, trunk_y, y_spacing)
+
+
+def _compact_below_trunk_band(
+    graph: MetroGraph,
+    section: Section,
+    trunk_y: float,
+    y_spacing: float,
+) -> None:
+    """Shift the entire below-trunk stack up by one y_spacing slot.
+
+    Fires when the first below-trunk slot (``trunk_y + y_spacing``) is
+    empty for non-port, non-hidden content while there is at least one
+    station two or more slots below the trunk.  All non-port, non-hidden
+    stations strictly below the trunk are shifted up by ``y_spacing``,
+    including off-track inputs and their consumers.  The bbox is left
+    alone: bottom shrink in :func:`_shrink_bboxes_to_content_bottom`
+    will collapse the freed bottom space afterward.
+
+    Symmetric counterpart to the above-trunk auto-balance: lift the
+    bottom stack against the trunk when there's wasted space, instead
+    of leaving an empty row directly below the trunk.
+    """
+    if y_spacing <= 0:
+        return
+    movables: list[str] = []
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or st.is_hidden:
+            continue
+        if st.y > trunk_y + 0.5:
+            movables.append(sid)
+    if not movables:
+        return
+    # Is there an empty row right below trunk?  Define "empty" as: no
+    # station at trunk_y + y_spacing within half a slot.
+    first_row_y = trunk_y + y_spacing
+    has_first_row = any(
+        abs(graph.stations[s].y - first_row_y) < y_spacing / 2 - 0.5 for s in movables
+    )
+    if has_first_row:
+        return
+    # Confirm there's content further below (otherwise nothing to lift).
+    deeper = [s for s in movables if graph.stations[s].y >= trunk_y + 1.5 * y_spacing]
+    if not deeper:
+        return
+    # Collision check: ensure shifting up by y_spacing doesn't collide
+    # with any non-moving station in the same column.  Build a set of
+    # non-moving Ys per column.
+    cols_nonmovable: dict[float, set[float]] = defaultdict(set)
+    movable_set = set(movables)
+    for sid in section.station_ids:
+        if sid in movable_set:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.is_hidden:
+            continue
+        cols_nonmovable[round(st.x, 3)].add(round(st.y, 3))
+    for sid in movables:
+        st = graph.stations[sid]
+        new_y = st.y - y_spacing
+        col_x = round(st.x, 3)
+        if any(
+            abs(oy - new_y) < y_spacing / 2 - 0.5
+            for oy in cols_nonmovable.get(col_x, set())
+        ):
+            return  # collision; abort
+    # Apply uniform shift to every below-trunk movable.
+    for sid in movables:
+        graph.stations[sid].y -= y_spacing
+
+
+def _recenter_loop_side_stations(graph: MetroGraph) -> None:
+    """Reposition fan-out side stations on the centre of their loop run.
+
+    A "loop side station" is an off-trunk station fed by exactly one
+    on-trunk predecessor and feeding exactly one on-trunk successor,
+    forming a diamond loop with the trunk.  ``propd``, ``dream`` and
+    ``DESeq2`` in the differential section are the canonical example:
+    each takes the trunk bundle into limma's column, runs horizontally
+    off the trunk for one slot, then rejoins limma's outgoing trunk at
+    ``annotate``.
+
+    Layer-based X placement puts these stations at ``layer * x_spacing``
+    relative to the section's entry, ignoring asymmetry in the routing
+    diagonals.  When the source-side diagonal is shorter than the
+    target-side diagonal (e.g. wide join-station labels widen the
+    target-side gap), the side station appears visibly biased toward
+    the source.  Recompute its X as the midpoint of the loop's two
+    diagonal corner Xs so it sits centred on the horizontal run.
+
+    Honours the same constraints as the routing pass:
+    - ``MIN_STRAIGHT_PORT`` / ``MIN_STRAIGHT_EDGE`` at endpoints.
+    - Source label clearance at the fork station.
+    - Target label clearance at the join station.
+    - ``DIAGONAL_RUN`` length for the 45-degree transition.
+
+    A second pass aligns trunk-Y stations that share the same
+    ``(predecessor, successor)`` column with off-trunk siblings (e.g.
+    ``limma`` shares its column with ``DESeq2``, ``dream`` and
+    ``propd``) so column-mates land at the same X regardless of
+    whether they sit on or off the trunk row.
+
+    No-op for any station that doesn't form a clean two-edge loop, and
+    skipped when shifting would leave fewer than ``DIAGONAL_RUN`` worth
+    of horizontal room on either side.
+    """
+    # Index edges by source/target for O(1) loop detection.
+    # Single pass: index edges by endpoint and accumulate distinct
+    # successors/predecessors for fork/join detection (mirroring
+    # routing's label-clearance logic).
+    out_by_src: dict[str, list[Edge]] = defaultdict(list)
+    in_by_tgt: dict[str, list[Edge]] = defaultdict(list)
+    fork_targets: dict[str, set[str]] = defaultdict(set)
+    join_sources: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        out_by_src[e.source].append(e)
+        in_by_tgt[e.target].append(e)
+        fork_targets[e.source].add(e.target)
+        join_sources[e.target].add(e.source)
+    fork_stations = {sid for sid, t in fork_targets.items() if len(t) > 1}
+    join_stations = {sid for sid, s in join_sources.items() if len(s) > 1}
+
+    # Minimum recenter delta below which we'd be moving the station
+    # without enough visual benefit to justify breaking any incidental
+    # column alignment with stacked siblings.  Anything smaller is in
+    # the noise where the layer-X placement already reads as centred.
+    min_recenter_delta = DIAGONAL_RUN / 3.0
+
+    # Pass 1: re-centre off-trunk loop side stations using the diagonal
+    # corner geometry.
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        # Each side station: not a port, not hidden, has exactly one
+        # incoming edge and one outgoing edge, both endpoints sit on
+        # the section trunk Y (single source / single target on-trunk).
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            ins = in_by_tgt.get(sid, [])
+            outs = out_by_src.get(sid, [])
+            if len(ins) != 1 or len(outs) != 1:
+                continue
+            src_id = ins[0].source
+            tgt_id = outs[0].target
+            src = graph.stations.get(src_id)
+            tgt = graph.stations.get(tgt_id)
+            if src is None or tgt is None:
+                continue
+            # Side station must sit OFF the trunk Y of its source and
+            # target (a vertical hop is needed at both endpoints).
+            if abs(src.y - tgt.y) > 0.5:
+                # Source and target aren't on the same trunk row, so
+                # this isn't a simple horizontal loop side station.
+                continue
+            trunk_y = src.y
+            if abs(st.y - trunk_y) < 0.5:
+                continue  # Already on trunk, no loop.
+            # Both endpoints must lie strictly to opposite sides of the
+            # side station (a real horizontal loop, not a U-turn).
+            if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
+                continue
+            # Require at least one OFF-TRUNK sibling sharing the same
+            # single src and tgt: this is what makes the station part
+            # of a genuine parallel fan-out where the column is owned
+            # by the loop, not by an unrelated trunk station that just
+            # happens to share the layer-X.  Single side branches (e.g.
+            # ``search`` paired with the trunk continuation ``align``)
+            # carry no fan, and recentering them off the column where
+            # the trunk station sits visibly breaks the layout.
+            has_off_trunk_sibling = False
+            for other_sid in section.station_ids:
+                if other_sid == sid:
+                    continue
+                other = graph.stations.get(other_sid)
+                if other is None or other.is_port or other.is_hidden:
+                    continue
+                if abs(other.y - trunk_y) < 0.5:
+                    continue  # on-trunk co-loopers don't establish a fan
+                other_ins = in_by_tgt.get(other_sid, [])
+                other_outs = out_by_src.get(other_sid, [])
+                other_srcs = {e.source for e in other_ins}
+                other_tgts = {e.target for e in other_outs}
+                if other_srcs == {src_id} and other_tgts == {tgt_id}:
+                    has_off_trunk_sibling = True
+                    break
+            if not has_off_trunk_sibling:
+                continue
+            # Compute the two diagonal corner Xs using routing's
+            # placement rule (see _compute_diagonal_placement).
+            corner_left = _loop_corner_x(
+                src, st, fork_stations, join_stations, role="src"
+            )
+            corner_right = _loop_corner_x(
+                st, tgt, fork_stations, join_stations, role="tgt"
+            )
+            if corner_left is None or corner_right is None:
+                continue
+            # Ensure room on both sides for the horizontal run after
+            # the new midpoint.  Skip if the move would push the
+            # station past either corner.
+            midpoint = (corner_left + corner_right) / 2.0
+            if not (
+                min(corner_left, corner_right)
+                <= midpoint
+                <= max(corner_left, corner_right)
+            ):
+                continue
+            # Skip moves smaller than the minimum visual-benefit
+            # threshold: they trade an imperceptible re-centre for a
+            # visible column break against on-trunk co-loopers (e.g.
+            # rnaseq_lite ``star_align`` ↔ ``hisat_align``).
+            if abs(midpoint - st.x) < min_recenter_delta:
+                continue
+            st.x = midpoint
+
+    # Pass 2: snap loop-column-mate stations (trunk-row station and any
+    # off-trunk siblings whose multi-edge topology disqualified them
+    # from pass 1) to the column X defined by pass-1's clean siblings.
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        # Determine the section's trunk Y from a horizontal port.
+        trunk_y: float | None = None
+        for pid in section.entry_ports + section.exit_ports:
+            ps = graph.stations.get(pid)
+            port = graph.ports.get(pid)
+            if (
+                ps is not None
+                and port is not None
+                and port.side in (PortSide.LEFT, PortSide.RIGHT)
+            ):
+                trunk_y = ps.y
+                break
+        if trunk_y is None:
+            continue
+
+        # Visible trunk-Y predecessor/successor X-extent for a station.
+        # Returns ``None`` when the station has no trunk-Y neighbour on
+        # one side, or when any visible neighbour sits off the trunk
+        # row (off-track inputs anchor the station elsewhere).
+        def _column_key(sid: str) -> tuple[float, float] | None:
+            pred_x: float | None = None
+            succ_x: float | None = None
+            for e in in_by_tgt.get(sid, []):
+                p = graph.stations.get(e.source)
+                if p is None or p.is_hidden:
+                    continue
+                if abs(p.y - trunk_y) > 0.5:
+                    return None
+                if (
+                    pred_x is None
+                    or (section.direction == "LR" and p.x > pred_x)
+                    or (section.direction == "RL" and p.x < pred_x)
+                ):
+                    pred_x = p.x
+            for e in out_by_src.get(sid, []):
+                t = graph.stations.get(e.target)
+                if t is None or t.is_hidden:
+                    continue
+                if abs(t.y - trunk_y) > 0.5:
+                    return None
+                if (
+                    succ_x is None
+                    or (section.direction == "LR" and t.x < succ_x)
+                    or (section.direction == "RL" and t.x > succ_x)
+                ):
+                    succ_x = t.x
+            if pred_x is None or succ_x is None:
+                return None
+            return (round(pred_x, 3), round(succ_x, 3))
+
+        columns: dict[tuple[float, float], list[str]] = defaultdict(list)
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            key = _column_key(sid)
+            if key is None:
+                continue
+            # Station must sit strictly between its trunk-Y neighbours
+            # for the column to be a meaningful horizontal extent.
+            pred_x, succ_x = key
+            lo, hi = min(pred_x, succ_x), max(pred_x, succ_x)
+            if not (lo < st.x < hi):
+                continue
+            columns[key].append(sid)
+
+        for key, members in columns.items():
+            if len(members) < 2:
+                continue
+            trunk_members: list[str] = []
+            anchor_xs: list[float] = []
+            for sid in members:
+                st = graph.stations[sid]
+                if abs(st.y - trunk_y) <= 0.5:
+                    trunk_members.append(sid)
+                    continue
+                # Anchor X must come from a station pass-1 already
+                # placed at the loop midpoint; restrict to the same
+                # single-in/single-out filter pass-1 uses.
+                visible_ins = [
+                    e
+                    for e in in_by_tgt.get(sid, [])
+                    if (
+                        (gs := graph.stations.get(e.source)) is not None
+                        and not gs.is_hidden
+                    )
+                ]
+                visible_outs = [
+                    e
+                    for e in out_by_src.get(sid, [])
+                    if (
+                        (gs := graph.stations.get(e.target)) is not None
+                        and not gs.is_hidden
+                    )
+                ]
+                if len(visible_ins) == 1 and len(visible_outs) == 1:
+                    anchor_xs.append(st.x)
+            if not trunk_members or not anchor_xs:
+                continue
+            target_x = sum(anchor_xs) / len(anchor_xs)
+            pred_x, succ_x = key
+            lo, hi = min(pred_x, succ_x), max(pred_x, succ_x)
+            if not (lo <= target_x <= hi):
+                continue
+            for sid in trunk_members:
+                graph.stations[sid].x = target_x
+
+
+def _shift_sparse_loop_stations_to_clear_bundle(
+    graph: MetroGraph,
+    y_spacing: float,
+    section_y_padding: float = SECTION_Y_PADDING,
+) -> None:
+    """Shift single-line loop side stations onto a half-pitch Y when
+    their full-row Y collides with a busier sibling's inbound bundle.
+
+    The bypass virtual station mechanism (``_insert_bypass_stations``)
+    covers the pred -> exit_port case (e.g. ``annotate`` between limma
+    and the section exit).  It does not cover the case where a sparse
+    consumer S sits in the same section column band as a busier
+    sibling T and shares S's row Y, so the lines bound for T cross S's
+    marker bbox on the way in (the ``grea`` / ``decoupler`` pattern).
+
+    For each loop side station S in an LR/RL section -- one incoming
+    edge, one outgoing edge, both endpoints on the section trunk Y --
+    that:
+
+      * consumes strictly fewer lines than at least one same-row
+        sibling T in the same section, and
+      * shares the same Y row as that sibling,
+
+    shift S vertically by half a ``y_spacing`` away from the trunk
+    (i.e. ``trunk_y +- y_spacing / 2`` on the side S is already on)
+    so its marker bbox sits clear of the sibling's bundle Y range.
+    The shift is reverted if it would push S above or below the
+    section bbox.
+    """
+    if y_spacing <= 0:
+        return
+
+    in_by_tgt: dict[str, list[Edge]] = defaultdict(list)
+    out_by_src: dict[str, list[Edge]] = defaultdict(list)
+    for e in graph.edges:
+        in_by_tgt[e.target].append(e)
+        out_by_src[e.source].append(e)
+
+    consumed_by: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        consumed_by[e.target].add(e.line_id)
+
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        # Trunk Y from the LR/RL ports.
+        trunk_y: float | None = None
+        for pid in section.entry_ports + section.exit_ports:
+            port = graph.ports.get(pid)
+            ps = graph.stations.get(pid)
+            if (
+                port is not None
+                and ps is not None
+                and port.side in (PortSide.LEFT, PortSide.RIGHT)
+            ):
+                trunk_y = ps.y
+                break
+        if trunk_y is None:
+            continue
+
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden or st.off_track:
+                continue
+            ins = in_by_tgt.get(sid, [])
+            outs = out_by_src.get(sid, [])
+            if len(ins) != 1 or len(outs) != 1:
+                continue
+            src = graph.stations.get(ins[0].source)
+            tgt = graph.stations.get(outs[0].target)
+            if src is None or tgt is None:
+                continue
+            if abs(src.y - trunk_y) > 0.5 or abs(tgt.y - trunk_y) > 0.5:
+                continue
+            # S must sit clearly off the trunk and share its Y row
+            # with a same-section sibling whose inbound bundle is
+            # busier than S's.
+            dy = st.y - trunk_y
+            if abs(dy) < 0.5:
+                continue
+            s_lines = consumed_by.get(sid, set())
+            sibling: Station | None = None
+            for sib_id in section.station_ids:
+                if sib_id == sid or sib_id in port_ids:
+                    continue
+                sib = graph.stations.get(sib_id)
+                if (
+                    sib is None
+                    or sib.is_port
+                    or sib.is_hidden
+                    or sib.off_track
+                    or sib.is_terminus
+                ):
+                    continue
+                if abs(sib.y - st.y) > 0.5:
+                    continue
+                sib_lines = consumed_by.get(sib_id, set())
+                if len(sib_lines) > len(s_lines):
+                    sibling = sib
+                    break
+            if sibling is None:
+                continue
+            # Shift S one full ``y_spacing`` further FROM the trunk on
+            # the side S is already on.  This lifts S clear of the
+            # busier sibling's bundle Y range (which is centred at
+            # the row Y with up to ``max_offset`` of extra height for
+            # the line stack).  A half-pitch shift would leave S on a
+            # half-grid Y; the half-grid offset is reserved for the
+            # 2-branch symmetric fan case, so single sparse-loop
+            # stations must land on a full grid row.
+            shift = y_spacing if dy > 0 else -y_spacing
+            new_y = st.y + shift
+            # Grow the section bbox so the standard ``section_y_padding``
+            # sits between the shifted station's marker edge and the
+            # bbox edge.  The earlier ``+ STATION_RADIUS_APPROX`` -only
+            # buffer kept the validator happy but left the bbox flush
+            # against the station marker, breaking the visual padding
+            # invariant other sections satisfy after
+            # ``_shrink_bboxes_to_content_bottom``.
+            edge_pad = STATION_RADIUS_APPROX + section_y_padding
+            sec_top = section.bbox_y
+            sec_bottom = section.bbox_y + section.bbox_h
+            if new_y < sec_top + edge_pad:
+                grow = sec_top + edge_pad - new_y
+                section.bbox_y -= grow
+                section.bbox_h += grow
+            elif new_y > sec_bottom - edge_pad:
+                grow = new_y - (sec_bottom - edge_pad)
+                section.bbox_h += grow
+            st.y = new_y
+
+
+def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> None:
+    """Push lower-row sections down when an upper-row bbox grows.
+
+    ``_shift_sparse_loop_stations_to_clear_bundle`` (Phase 13k) can
+    grow a section's ``bbox_h`` downward when shifting a sparse loop
+    station like ``grea`` past the original bbox bottom.  Row offsets
+    were fixed earlier by ``_compute_section_offsets`` from pre-shift
+    bbox heights, so the section below the grown one ends up sitting
+    closer than ``section_y_gap`` from the new bbox bottom.
+
+    For each row ``r >= 1``, measure the deficit between the lowest
+    bbox bottom of sections ending at row ``r - 1`` and the top of
+    sections at row ``r``, but only count pairs whose column spans
+    overlap.  Two sections that share a vertical edge in column space
+    must keep ``section_y_gap`` between them; sections in different
+    columns can sit with smaller (or no) vertical separation without
+    visual interference.  If a positive deficit remains, shift row
+    ``r`` and below downward by that deficit (sections + stations +
+    ports).  Junctions live in inter-section space and are reproduced
+    by routing.
+    """
+    if not graph.sections:
+        return
+
+    sections_by_row_start: dict[int, list[Section]] = defaultdict(list)
+    for s in graph.sections.values():
+        sections_by_row_start[s.grid_row].append(s)
+    if not sections_by_row_start:
+        return
+    max_row = max(s.grid_row + s.grid_row_span - 1 for s in graph.sections.values())
+
+    def _cols_overlap(a: Section, b: Section) -> bool:
+        a_start = a.grid_col
+        a_end = a_start + a.grid_col_span - 1
+        b_start = b.grid_col
+        b_end = b_start + b.grid_col_span - 1
+        return not (a_end < b_start or b_end < a_start)
+
+    for r in range(1, max_row + 1):
+        lower = sections_by_row_start.get(r, [])
+        if not lower:
+            continue
+        ending_at_prev = [
+            s
+            for s in graph.sections.values()
+            if s.grid_row + s.grid_row_span - 1 == r - 1 and s.bbox_h > 0
+        ]
+        if not ending_at_prev:
+            continue
+        # Only consider column-overlapping (upper, lower) pairs for
+        # deficit computation: a tall upper-row bbox that lives in a
+        # different column from the lower-row content does not need
+        # additional vertical clearance to satisfy the row gap.
+        deficit = 0.0
+        for us in ending_at_prev:
+            for ls in lower:
+                if ls.bbox_h <= 0:
+                    continue
+                if not _cols_overlap(us, ls):
+                    continue
+                upper_bot = us.bbox_y + us.bbox_h
+                lower_top = ls.bbox_y
+                d = (upper_bot + section_y_gap) - lower_top
+                if d > deficit:
+                    deficit = d
+        if deficit <= 0.5:
+            continue
+
+        shifted_section_ids = {
+            sid for sid, s in graph.sections.items() if s.grid_row >= r
+        }
+        for sid in shifted_section_ids:
+            graph.sections[sid].bbox_y += deficit
+        shifted_station_ids = set()
+        for sid in shifted_section_ids:
+            shifted_station_ids.update(graph.sections[sid].station_ids)
+        for stid in shifted_station_ids:
+            st = graph.stations.get(stid)
+            if st is not None:
+                st.y += deficit
+            port = graph.ports.get(stid)
+            if port is not None:
+                port.y += deficit
+
+
+def _loop_corner_x(
+    a: Station,
+    b: Station,
+    fork_stations: set[str],
+    join_stations: set[str],
+    role: str,
+) -> float | None:
+    """Compute the diagonal corner X for a single edge a->b.
+
+    Mirrors ``_compute_diagonal_placement`` in
+    ``layout/routing/core.py``: places the diagonal centred near the
+    fork (when a is a fork station) or near the join (when b is a
+    join station), with MIN_STRAIGHT endpoint clearance and optional
+    label clearance.  Returns the corner X on the side opposite to
+    ``role``: ``role='src'`` returns the corner near b (target side
+    of edge a->b, i.e. the LEFT corner of the loop b is part of);
+    ``role='tgt'`` returns the corner near a (source side of edge
+    a->b, i.e. the RIGHT corner of the loop a is part of).
+    """
+    sx, _ = a.x, a.y
+    tx, _ = b.x, b.y
+    if abs(tx - sx) < 1e-6:
+        return None
+    sign = 1.0 if tx > sx else -1.0
+    src_min = CURVE_RADIUS + MIN_STRAIGHT_PORT if a.is_port else MIN_STRAIGHT_EDGE
+    tgt_min = CURVE_RADIUS + MIN_STRAIGHT_PORT if b.is_port else MIN_STRAIGHT_EDGE
+    # Label clearance at fork/join stations (per _route_diagonal).
+    if a.id in fork_stations and a.label.strip():
+        src_min = max(src_min, label_text_width(a.label) / 2)
+    if b.id in join_stations and b.label.strip():
+        tgt_min = max(tgt_min, label_text_width(b.label) / 2)
+    half_diag = DIAGONAL_RUN / 2
+    is_fork = a.id in fork_stations
+    is_join = b.id in join_stations
+    if is_fork:
+        mid = sx + sign * (src_min + half_diag)
+    elif is_join:
+        mid = tx - sign * (tgt_min + half_diag)
+    else:
+        mid = (sx + tx) / 2.0
+    # Clamp to keep minimum straight endpoint runs.
+    if sign > 0:
+        diag_start = max(mid - half_diag, sx + src_min)
+        diag_end = min(mid + half_diag, tx - tgt_min)
+    else:
+        diag_start = min(mid - sign * half_diag, sx - src_min)
+        diag_end = max(mid + sign * half_diag, tx + tgt_min)
+    # role='src' returns the END of the diagonal (corner near b),
+    # role='tgt' returns the START of the diagonal (corner near a).
+    return diag_end if role == "src" else diag_start
+
+
 def _lift_would_cause_uturn(
     graph: MetroGraph, station_id: str, section_id: str, anchor_y: float
 ) -> bool:
@@ -1772,6 +2810,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
         # consumer is preserved) but don't influence the origin.
         residues: Counter[float] = Counter()
         per_section_ports: dict[str, set[str]] = {}
+        half_grid_ids = getattr(graph, "_half_grid_station_ids", set()) or set()
         for sec_id in sec_ids:
             section = graph.sections.get(sec_id)
             if section is None or section.bbox_h <= 0:
@@ -1780,6 +2819,10 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
             per_section_ports[sec_id] = port_ids
             for sid in section.station_ids:
                 if sid in port_ids:
+                    continue
+                if sid in half_grid_ids:
+                    # Half-grid stations sit at origin + 0.5 * pitch by
+                    # design; don't let them shift the row's grid origin.
                     continue
                 st = graph.stations.get(sid)
                 if st is None or getattr(st, "off_track", False):
@@ -1804,6 +2847,8 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
             is_tb_section = section.direction == "TB"
             for sid in section.station_ids:
                 if sid in port_ids:
+                    continue
+                if sid in half_grid_ids:
                     continue
                 st = graph.stations.get(sid)
                 if st is None:
@@ -1995,12 +3040,15 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
     siblings carrying the full bundle (linear pass-throughs) are left
     in place so non-fan-out topologies keep their natural Y ordering.
 
-    Additionally, a sibling is only redistributed when it shares an
-    upstream predecessor with the trunk station.  This excludes
-    columns of source stations (file inputs) that happen to sit in a
-    column with a full-bundle station: with no shared upstream
-    junction, they aren't fan-out branches and must stay on their
+    Additionally, a sibling is only redistributed when it has at
+    least one predecessor in the edge graph.  This excludes columns
+    of source stations (file inputs, in-degree 0) that happen to sit
+    in a column with a full-bundle station: with no upstream
+    producer, they aren't fan-out branches and must stay on their
     per-line track Y so they line up with their downstream consumers.
+    Siblings fed by a different predecessor than the trunk (but still
+    fed by something) are real fan-out branches arriving via separate
+    upstream methods and DO participate in the symmetric fan.
 
     No-op when ``--no-center-ports`` is set, when a section has no
     qualifying trunk-junction column, or when there are no
@@ -2030,13 +3078,16 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
             continue
         port_ids = set(section.entry_ports) | set(section.exit_ports)
 
-        # Group non-port stations by column x.
+        # Group non-port, on-track stations by column x.  Off-track
+        # stations (file inputs lifted above their consumer) are placed
+        # by ``_lift_off_track_stations`` and must not occupy a column
+        # slot here.
         cols: dict[float, list[str]] = defaultdict(list)
         for sid in section.station_ids:
             if sid in port_ids:
                 continue
             st = graph.stations.get(sid)
-            if st is None:
+            if st is None or st.off_track:
                 continue
             cols[round(st.x, 3)].append(sid)
 
@@ -2047,23 +3098,22 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
                 continue
             trunk_sid = trunks[0]
             trunk_y = graph.stations[trunk_sid].y
-            trunk_preds = set(G.predecessors(trunk_sid)) if trunk_sid in G else set()
-            if not trunk_preds:
-                # No shared predecessor possible: source-station columns
-                # stay on their per-line track Y rather than being pulled
-                # into a uniform fan around an unrelated trunk.
-                continue
             # Fan-out siblings: strict subset of bundle (skip full-bundle
-            # pass-throughs and orphan stations with no lines), and must
-            # share a predecessor with the trunk.
+            # pass-throughs and orphan stations with no lines).  Require
+            # at least one predecessor so source stations (file inputs
+            # with no inbound edges) stay on their per-line track Y
+            # instead of being pulled to a uniform fan around an
+            # unrelated trunk.  Siblings whose predecessor differs
+            # from the trunk's are still real fan-out branches (e.g.
+            # methods fed by separate upstream stations within the
+            # same upstream section) and DO participate.
             siblings = [
                 s
                 for s in sids
                 if s != trunk_sid
                 and set(graph.station_lines(s))
                 and set(graph.station_lines(s)) < bundle
-                and s in G
-                and not trunk_preds.isdisjoint(G.predecessors(s))
+                and (s in G and any(True for _ in G.predecessors(s)))
             ]
             if not siblings:
                 continue
@@ -2074,28 +3124,201 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
                 graph.stations[sid].y = trunk_y + sign * k * y_spacing
 
 
+def _apply_half_grid_2branch_symfan(
+    graph: MetroGraph, y_spacing: float, section_y_padding: float = SECTION_Y_PADDING
+) -> None:
+    """Compact 2-branch symfan sections onto half-pitch offsets.
+
+    For every section that satisfies ``_section_symfan_uses_half_grid``
+    (exactly two on-track non-terminus branch stations sharing a column,
+    no off-track inputs), this places the two branches at
+    ``trunk_y +/- 0.5 * y_spacing`` regardless of what the per-column
+    redistribute passes did.
+
+    Why a dedicated phase: ``_redistribute_full_bundle_columns`` and
+    ``_recenter_full_bundle_columns`` gate on ``_grid_group_section_ids``
+    (sections that share a row with at least one other section), so a
+    section sitting alone on its row never participates.  The 2-branch
+    symfan case is well-defined regardless of row membership, so this
+    phase fires on the section directly.
+
+    Trunk anchor preference (in order):
+      1. LR/RL entry port Y (the inter-section bundle line).
+      2. LR/RL exit port Y.
+      3. Midpoint of the two branch stations' current Ys.
+
+    The branches are marked in ``_half_grid_station_ids`` so the
+    subsequent ``_snap_all_y_to_grid`` pass leaves their half-pitch
+    offsets intact (and ignores them when computing the row grid
+    origin).
+    """
+    if y_spacing <= 0:
+        return
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        if not _section_symfan_uses_half_grid(graph, section):
+            continue
+
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        branches: list[Station] = []
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if (
+                st is None
+                or st.is_port
+                or st.is_hidden
+                or st.off_track
+                or st.is_terminus
+            ):
+                continue
+            branches.append(st)
+        if len(branches) != 2:
+            continue
+
+        # Trunk Y from LR/RL ports (preferred) or the branches' midpoint.
+        trunk_y: float | None = None
+        for pid in section.entry_ports:
+            p = graph.ports.get(pid)
+            ps = graph.stations.get(pid)
+            if (
+                p is not None
+                and ps is not None
+                and p.side in (PortSide.LEFT, PortSide.RIGHT)
+            ):
+                trunk_y = ps.y
+                break
+        if trunk_y is None:
+            for pid in section.exit_ports:
+                p = graph.ports.get(pid)
+                ps = graph.stations.get(pid)
+                if (
+                    p is not None
+                    and ps is not None
+                    and p.side in (PortSide.LEFT, PortSide.RIGHT)
+                ):
+                    trunk_y = ps.y
+                    break
+        if trunk_y is None:
+            trunk_y = (branches[0].y + branches[1].y) / 2.0
+
+        branches.sort(key=lambda s: s.y)
+        branches[0].y = trunk_y - 0.5 * y_spacing
+        branches[1].y = trunk_y + 0.5 * y_spacing
+        graph._half_grid_station_ids.update(b.id for b in branches)
+
+        # Half-grid branches consume half a y_spacing above and below
+        # the trunk instead of a full slot.  Shrink the bbox top to match
+        # the new compact extent.  All real (non-port) content sits
+        # between branches[0].y and branches[1].y, so the bbox top
+        # should be branches[0].y - section_y_padding.  Preserve the
+        # current padding by computing it from existing bbox geometry.
+        content_ys = [
+            graph.stations[sid].y
+            for sid in section.station_ids
+            if sid in graph.stations and not graph.stations[sid].is_port
+        ]
+        if content_ys:
+            new_top = min(content_ys) - section_y_padding
+            delta = new_top - section.bbox_y
+            if delta > 0.5:
+                section.bbox_y = new_top
+                section.bbox_h = max(0.0, section.bbox_h - delta)
+
+
+def _section_symfan_uses_half_grid(graph: MetroGraph, section: Section) -> bool:
+    """Return True when a section's symfan should use half-pitch offsets.
+
+    Trigger conditions (must all hold):
+      - Section has exactly two real "branch" stations: on-track,
+        non-port, non-hidden, non-terminus internal stations sharing
+        a single X column.  Terminus icons (file outputs) and hidden
+        convergence stations are excluded - they're downstream join
+        points that don't constrain symfan spacing.
+      - No off-track stations exist in the section (no input rows
+        sitting in the participants' Y band).
+      - The section has no other columns with multiple branch stations
+        (this is the only fan, so the section height is bounded by
+        these two stations).
+
+    When the trigger fires the two branch stations are placed at
+    ``trunk_y +/- 0.5 * y_spacing`` instead of the default
+    ``trunk_y +/- 1 * y_spacing``, so the section needs only one
+    vertical grid unit instead of two.
+
+    Trunk Y itself is unchanged.  The branches sit at half-pitch
+    relative to the row grid; ``_snap_all_y_to_grid`` skips them via
+    ``graph._half_grid_station_ids``.
+    """
+    port_ids = set(section.entry_ports) | set(section.exit_ports)
+    branches: list[Station] = []
+    has_off_track = False
+    by_col: dict[float, int] = defaultdict(int)
+    for sid in section.station_ids:
+        if sid in port_ids:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or st.is_hidden:
+            continue
+        if st.off_track:
+            has_off_track = True
+            continue
+        if st.is_terminus:
+            # Terminus icons (file outputs) sit downstream of the fan
+            # and are not symfan participants.
+            continue
+        branches.append(st)
+        by_col[round(st.x, 3)] += 1
+    if has_off_track or len(branches) != 2:
+        return False
+    if abs(branches[0].x - branches[1].x) >= 0.5:
+        return False
+    # No other column may have a multi-branch population (would force
+    # full-grid height anyway).  With exactly two branches sharing one
+    # column this is implicit, but the check is cheap and future-proofs
+    # the trigger when terminus filtering changes.
+    return all(count <= 2 for count in by_col.values())
+
+
 def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
     """Fan a full-bundle column around the trunk Y.
 
-    Active when ``graph.center_ports`` is True.  Handles columns of
-    two or more full-bundle stations with no unique trunk junction
-    (so ``_redistribute_fanout_siblings`` skips them).  Stations are
-    placed symmetrically around a trunk Y derived from other
-    full-bundle stations in the section (or the LR port Y).
+    Active when ``graph.center_ports`` is True.  Handles columns where
+    every on-track station carries the full section bundle (so no
+    unique trunk junction exists for ``_redistribute_fanout_siblings``
+    to anchor on).  Stations are placed symmetrically around a trunk Y
+    derived from the section's LR ports (or other full-bundle stations).
+
+    A relaxed mode also fires when the column has at least one
+    full-bundle station AND every non-full column-mate is a
+    strict-subset sibling with a predecessor (i.e. a real fan-out
+    branch arriving via a separate upstream method, not a source
+    file).  In that mixed-bundle case every column-mate participates
+    in the symmetric fan, so a minor side branch (e.g. a single-line
+    method joining three full-bundle methods) slots into the
+    arrangement instead of stranding at the bottom of the section.
 
     Even count leaves the trunk row empty (``trunk_y ± s, ± 2s, ...``);
     odd count keeps a middle station at ``trunk_y`` with the rest
     flanking.  Fires on both terminal (Reporting-style) and
-    non-terminal (Functional-style) sections; the strict
-    "every station in the column carries the full bundle" gate keeps
-    file inputs, fan-in chains and method banks with strict-subset
-    lines untouched.
+    non-terminal (Functional-style) sections; columns containing a
+    non-full, predecessorless station (a source file with no inbound
+    edges) are left untouched so file-input stacks keep their per-line
+    track Y.
     """
     if not graph.center_ports:
         return
     grid_sec_ids = _grid_group_section_ids(graph)
     if not grid_sec_ids:
         return
+
+    import networkx as nx
+
+    G = nx.DiGraph()
+    for edge in graph.edges:
+        G.add_edge(edge.source, edge.target)
 
     for section in graph.sections.values():
         if (
@@ -2120,6 +3343,10 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
                 # column slot in the fan-out logic.
                 continue
             cols[round(st.x, 3)].append(sid)
+
+        def _has_pred(sid: str) -> bool:
+            return sid in G and next(iter(G.predecessors(sid)), None) is not None
+
         full_by_col = {
             x: [s for s in sids if set(graph.station_lines(s)) == bundle]
             for x, sids in cols.items()
@@ -2137,11 +3364,49 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
             and graph.ports[pid].side in (PortSide.LEFT, PortSide.RIGHT)
         ]
 
-        for x, full in full_by_col.items():
-            # Fire only when every column station carries the full bundle
-            # and there are >=2 (so no unique trunk station exists).
-            if len(full) < 2 or len(full) != len(cols[x]):
+        # A column participates in the section-wide symfan when it has
+        # at least one full-bundle station to anchor on AND any other
+        # column-mates are non-source subset siblings (real fan-out
+        # branches with predecessors, not file inputs).  Source files
+        # in a column with a full-bundle station leave it ineligible
+        # so they stay on their per-line track Y.
+        col_eligible: dict[float, list[str]] = {}
+        for x, sids in cols.items():
+            full = full_by_col[x]
+            non_full = [s for s in sids if s not in full]
+            ok = bool(full) and all(
+                set(graph.station_lines(s))
+                and set(graph.station_lines(s)) < bundle
+                and _has_pred(s)
+                for s in non_full
+            )
+            if ok and len(sids) >= 2:
+                col_eligible[x] = sids
+        # Suppress the column when at least one full-bundle column-mate
+        # would otherwise be the unique trunk for a SINGLE sibling and
+        # there's no other full-bundle column in the section to fix
+        # the row-wide anchor (handed off to fanout_siblings instead).
+        # In practice we still fire whenever another column has >=2
+        # full-bundle stations, so all full-bundle columns share a
+        # consistent trunk_y.
+        any_all_full_col = any(
+            len(full_by_col[x]) >= 2 and len(full_by_col[x]) == len(cols[x])
+            for x in cols
+        )
+
+        for x, sids in col_eligible.items():
+            full = full_by_col[x]
+            non_full = [s for s in sids if s not in full]
+            # Strict all-full columns always fire (the original
+            # behaviour).  Mixed columns (full + non-source siblings)
+            # only fire when another column in the section is
+            # all-full, so we have a consistent trunk_y for the row
+            # and don't accidentally fan single trunk + 1 sibling
+            # cases that belong to ``_redistribute_fanout_siblings``.
+            all_full = not non_full
+            if not all_full and not any_all_full_col:
                 continue
+            participants = list(sids)
             # Trunk Y is the section's LR port Y when available (the
             # inter-section bundle line) so all full-bundle columns
             # in the section share a single trunk reference.  Falls
@@ -2159,17 +3424,15 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
                 if not others:
                     continue
                 trunk_y = others[len(others) // 2]
-            full.sort(key=lambda s: pre_fan_y[s])
-            n = len(full)
-            half = n // 2
-            # Even count skips the trunk row (offset 0); odd count seats one
-            # station on it so the fan stays symmetric around trunk_y.
-            offsets = (
-                [*range(-half, 0), *range(1, half + 1)]
-                if n % 2 == 0
-                else list(range(-half, half + 1))
-            )
-            for sid, off in zip(full, offsets):
+            participants.sort(key=lambda s: pre_fan_y[s])
+            n = len(participants)
+            # Even: offsets -n//2..-1, 1..n//2 (skipping 0).
+            # Odd:  offsets -(n//2)..n//2 inclusive (0 = trunk_y).
+            if n % 2 == 0:
+                offsets = list(range(-(n // 2), 0)) + list(range(1, n // 2 + 1))
+            else:
+                offsets = list(range(-(n // 2), n // 2 + 1))
+            for sid, off in zip(participants, offsets):
                 graph.stations[sid].y = trunk_y + off * y_spacing
 
 
@@ -2197,6 +3460,12 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
     if not grid_sec_ids:
         return
 
+    import networkx as nx
+
+    G = nx.DiGraph()
+    for edge in graph.edges:
+        G.add_edge(edge.source, edge.target)
+
     for section in graph.sections.values():
         if (
             section.id not in grid_sec_ids
@@ -2217,6 +3486,9 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
             if st is None or st.off_track:
                 continue
             cols[round(st.x, 3)].append(sid)
+
+        def _has_pred(sid: str) -> bool:
+            return sid in G and next(iter(G.predecessors(sid)), None) is not None
 
         full_by_col = {
             x: [s for s in sids if set(graph.station_lines(s)) == bundle]
@@ -2256,18 +3528,41 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
         if anchor_y is None:
             continue
 
+        # Mirror the gate from ``_redistribute_full_bundle_columns``:
+        # strict (all column-mates full) always fires; mixed (full +
+        # non-source siblings) fires only when another column has
+        # >=2 all-full stations, so we don't accidentally pull
+        # fanout_siblings columns onto a different anchor.
+        any_all_full_col = any(
+            len(full_by_col[x]) >= 2 and len(full_by_col[x]) == len(cols[x])
+            for x in cols
+        )
+
         for x, full in full_by_col.items():
-            if len(full) < 2 or len(full) != len(cols[x]):
-                continue
-            full.sort(key=lambda s: graph.stations[s].y)
-            n = len(full)
-            half = n // 2
-            offsets = (
-                [*range(-half, 0), *range(1, half + 1)]
-                if n % 2 == 0
-                else list(range(-half, half + 1))
+            non_full = [s for s in cols[x] if s not in full]
+            mixed_ok = (
+                bool(full)
+                and non_full
+                and all(
+                    set(graph.station_lines(s))
+                    and set(graph.station_lines(s)) < bundle
+                    and _has_pred(s)
+                    for s in non_full
+                )
             )
-            for sid, off in zip(full, offsets):
+            all_full = len(full) >= 2 and len(full) == len(cols[x])
+            if not (all_full or (mixed_ok and any_all_full_col)):
+                continue
+            participants = list(full) + (non_full if mixed_ok else [])
+            if len(participants) < 2:
+                continue
+            participants.sort(key=lambda s: graph.stations[s].y)
+            n = len(participants)
+            if n % 2 == 0:
+                offsets = list(range(-(n // 2), 0)) + list(range(1, n // 2 + 1))
+            else:
+                offsets = list(range(-(n // 2), n // 2 + 1))
+            for sid, off in zip(participants, offsets):
                 graph.stations[sid].y = anchor_y + off * y_spacing
 
 
@@ -2343,6 +3638,64 @@ def _shrink_bboxes_to_content_bottom(
         new_h = desired_bot - section.bbox_y
         if new_h < section.bbox_h - 0.5:
             section.bbox_h = max(0.0, new_h)
+
+
+def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) -> None:
+    """Pull lower-row sections up to close slack left by rowspan claims.
+
+    ``_compute_section_offsets`` sizes ``row_heights[r]`` from pre-shrink
+    bbox heights, and a rowspan section that ends at row ``r`` inflates
+    the height further to fit its (then-tall) bbox.  After
+    ``_shrink_bboxes_to_content_bottom`` collapses bbox bottoms to
+    actual content, row ``r+1`` sits below empty space when the only
+    section "filling" row ``r`` was the rowspanned one (whose own bbox
+    now ends well above the row bottom).
+
+    For each row ``r >= 1``, this measures the gap between row ``r``'s
+    current top and the max bbox bottom of sections that *end* at row
+    ``r - 1`` (single-row sections in row ``r - 1`` plus rowspan
+    sections that terminate there).  Rowspan sections that *extend
+    into* row ``r`` are excluded: their bbox bottom is now content-
+    bounded, not row-bounded, so they no longer constrain row ``r``'s
+    top.  Any slack beyond ``section_y_gap`` is closed by shifting
+    sections in row ``r`` and below (along with their stations and
+    ports) upward by that amount.  Junctions live in inter-section
+    space and routing recomputes after layout, so their positions are
+    left alone.
+    """
+    if not graph.sections:
+        return
+
+    sections_by_start_row: dict[int, list[Section]] = defaultdict(list)
+    sections_by_end_row: dict[int, list[Section]] = defaultdict(list)
+    for s in graph.sections.values():
+        if s.bbox_h <= 0:
+            continue
+        sections_by_start_row[s.grid_row].append(s)
+        sections_by_end_row[s.grid_row + s.grid_row_span - 1].append(s)
+    if not sections_by_start_row:
+        return
+    max_row = max(sections_by_end_row)
+
+    for r in range(1, max_row + 1):
+        lower = sections_by_start_row.get(r, [])
+        ending_at_prev = sections_by_end_row.get(r - 1, [])
+        if not lower or not ending_at_prev:
+            continue
+        max_above_bot = max(s.bbox_y + s.bbox_h for s in ending_at_prev)
+        current_top = min(s.bbox_y for s in lower)
+        slack = current_top - (max_above_bot + section_y_gap)
+        if slack <= 0.5:
+            continue
+
+        for s in graph.sections.values():
+            if s.grid_row < r:
+                continue
+            s.bbox_y -= slack
+            for stid in s.station_ids:
+                st = graph.stations.get(stid)
+                if st is not None:
+                    st.y -= slack
 
 
 def _align_terminus_to_upstream(graph: MetroGraph) -> None:
@@ -2889,16 +4242,33 @@ def _adjust_lr_label_clearance(
             section.bbox_w = label_right - section.bbox_x
 
 
-def _terminus_icon_clearance(n_icons: int) -> float:
+def _terminus_icon_clearance(
+    n_icons: int,
+    names: list[str] | None = None,
+) -> float:
     """Compute clearance needed for *n_icons* file icons side-by-side.
 
     The base ``TERMINUS_ICON_CLEARANCE`` covers one icon (station_radius +
-    gap + icon_width + margin).  Each additional icon adds icon_width + inter-
-    icon gap.
+    gap + icon_width + margin).  Each additional icon adds the per-icon
+    centre-to-centre step computed by the renderer's
+    ``caption_aware_icon_step`` -- widened when adjacent captions would
+    overrun the default ``ICON_INTER_GAP`` step.
+
+    Layout doesn't know the theme, so caption widths are estimated
+    using the default label size (14px, matches built-in themes).
+    Slight over-budget is harmless: bbox just gets a few extra px of
+    right padding.
     """
     if n_icons <= 1:
         return TERMINUS_ICON_CLEARANCE
-    extra = (n_icons - 1) * (TERMINUS_WIDTH + ICON_INTER_GAP)
+    from nf_metro.render.constants import ICON_NAME_FONT_SCALE
+    from nf_metro.render.svg import caption_aware_icon_step
+
+    safe_names = names or [""] * n_icons
+    caption_font_size = 14.0 * ICON_NAME_FONT_SCALE
+    name_widths = [len(n) * caption_font_size * 0.55 if n else 0.0 for n in safe_names]
+    step = caption_aware_icon_step(safe_names, name_widths, TERMINUS_WIDTH)
+    extra = (n_icons - 1) * step
     return TERMINUS_ICON_CLEARANCE + extra
 
 
@@ -2919,7 +4289,7 @@ def _adjust_terminus_icon_clearance(
             continue
 
         n_icons = len(station.terminus_labels)
-        needed = _terminus_icon_clearance(n_icons)
+        needed = _terminus_icon_clearance(n_icons, station.terminus_names)
 
         # Determine source vs sink from the full graph's edges
         is_source = not any(e.target == station.id for e in graph.edges)
@@ -4923,6 +6293,44 @@ def _bump_off_track_clear_of_trunks(
     return y
 
 
+def _grow_section_bbox_upward(graph: MetroGraph, section, new_bbox_top: float) -> None:
+    """Expand a section's bbox upward to *new_bbox_top* and pull TOP ports.
+
+    BOTTOM ports stay put because the bbox only grows upward.
+    """
+    section.bbox_h += section.bbox_y - new_bbox_top
+    section.bbox_y = new_bbox_top
+    for pid in section.entry_ports + section.exit_ports:
+        port = graph.ports.get(pid)
+        port_st = graph.stations.get(pid)
+        if not port or not port_st:
+            continue
+        if port.side == PortSide.TOP:
+            port_st.y = section.bbox_y
+            port.y = port_st.y
+
+
+def _shift_graph_into_canvas(graph: MetroGraph, section_y_padding: float) -> None:
+    """Shift the whole graph down if the topmost section is above the canvas.
+
+    Keeps the topmost section's ``section_y_padding`` margin from the
+    canvas edge.  No-op when all sections already sit inside.
+    """
+    min_top = min(
+        (s.bbox_y for s in graph.sections.values() if s.bbox_h > 0),
+        default=section_y_padding,
+    )
+    if min_top >= section_y_padding:
+        return
+    shift = section_y_padding - min_top
+    for st in graph.stations.values():
+        st.y += shift
+    for section in graph.sections.values():
+        section.bbox_y += shift
+    for port in graph.ports.values():
+        port.y += shift
+
+
 def _lift_off_track_stations(
     graph: MetroGraph,
     y_spacing: float,
@@ -4956,56 +6364,53 @@ def _lift_off_track_stations(
         )
         if highest_y is None:
             continue
-
-        # Expand section bbox upward so the highest lifted input + its
-        # label clearance fits inside the section box.
         new_bbox_top = highest_y - section_y_padding
         if new_bbox_top < section.bbox_y:
-            section.bbox_h += section.bbox_y - new_bbox_top
-            section.bbox_y = new_bbox_top
-            # Shift TOP ports back to the (new) top edge so they stay
-            # on the boundary.  BOTTOM ports stay put because bbox_h
-            # only grew upward.
-            for pid in section.entry_ports + section.exit_ports:
-                port = graph.ports.get(pid)
-                port_st = graph.stations.get(pid)
-                if not port or not port_st:
-                    continue
-                if port.side == PortSide.TOP:
-                    port_st.y = section.bbox_y
-                    port.y = port_st.y
+            _grow_section_bbox_upward(graph, section, new_bbox_top)
 
     # Phase 3b ran before our lift, so y_offset doesn't account for the
-    # new bbox tops.  Shift the whole graph down so the topmost section
-    # sits inside the canvas with the standard margin.
-    min_top = min(s.bbox_y for s in graph.sections.values() if s.bbox_h > 0)
-    if min_top < section_y_padding:
-        shift = section_y_padding - min_top
-        for st in graph.stations.values():
-            st.y += shift
-        for section in graph.sections.values():
-            section.bbox_y += shift
-        for port in graph.ports.values():
-            port.y += shift
+    # new bbox tops.
+    _shift_graph_into_canvas(graph, section_y_padding)
 
 
-def _reanchor_off_track_to_consumer(graph: MetroGraph, y_spacing: float) -> None:
+def _reanchor_off_track_to_consumer(
+    graph: MetroGraph,
+    y_spacing: float,
+    section_y_padding: float = SECTION_Y_PADDING,
+) -> None:
     """Re-place off-track inputs relative to consumer Ys after final snap.
 
     Phase 13 placed each off-track input at ``consumer.y - n*y_spacing``
     using the consumer's pre-snap Y.  Later phases (compaction, grid
-    snap) may shift the consumer to land on the section's row grid,
-    which changes the absolute Y of every consumer by up to half a
-    pitch.  This pass re-pins each off-track at the same offset
-    relative to the consumer's final snapped Y so the visible gap
-    stays at exactly one (or n) ``y_spacing`` slots.
+    snap, fan re-centering) may shift the consumer, which would
+    collapse or shrink the gap between the off-track input and its
+    consumer.  This pass re-pins each off-track at
+    ``consumer.y - n*y_spacing`` on the consumer's final snapped Y.
 
-    Bboxes that were grown upward in Phase 13 to fit the lifted band
-    are left as-is: the row-bbox alignment downstream phases performed
-    already accounted for the lifted height.
+    Bboxes were grown in Phase 13 based on the off-track positions at
+    the time.  If a re-anchor moves an off-track above the current bbox
+    top minus padding, expand the bbox upward so the lifted input still
+    sits inside the section's padding zone.  Same-section TOP ports
+    follow the new top edge.  When the growth pushes any section bbox
+    above the canvas top margin, shift the whole graph down so the
+    topmost section keeps its ``section_y_padding`` margin from the
+    canvas edge (mirrors the safeguard in ``_lift_off_track_stations``).
     """
     groups = _off_track_groups(graph)
+    grew = False
     for sec_id, (fallback_id, by_consumer) in groups.items():
-        _place_off_track_above_consumers(
+        highest_y = _place_off_track_above_consumers(
             graph, y_spacing, sec_id, fallback_id, by_consumer
         )
+        if highest_y is None:
+            continue
+        section = graph.sections.get(sec_id)
+        if section is None:
+            continue
+        desired_top = highest_y - section_y_padding
+        if desired_top < section.bbox_y - 0.5:
+            _grow_section_bbox_upward(graph, section, desired_top)
+            grew = True
+
+    if grew:
+        _shift_graph_into_canvas(graph, section_y_padding)

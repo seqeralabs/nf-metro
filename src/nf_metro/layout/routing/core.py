@@ -23,6 +23,7 @@ from nf_metro.layout.constants import (
     HEADER_CLEARANCE,
     JUNCTION_MARGIN,
     MERGE_ROUTE_MARGIN,
+    MIN_STATION_FLAT_LENGTH,
     MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
     OFFSET_STEP,
@@ -106,6 +107,7 @@ class _RoutingCtx:
     curve_radius: float
     skip_edges: set[_EdgeKey] = field(default_factory=set)
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
+    section_trunk_y: dict[str, float] = field(default_factory=dict)
     merge: _MergeRouting = field(
         default_factory=lambda: _MergeRouting(
             junctions=set(),
@@ -365,6 +367,12 @@ def _build_routing_context(
     # Merge routing classification
     merge = _classify_merge_edges(graph, junction_ids, join_sources, fork_targets)
 
+    # Section trunk Ys: the dominant on-track Y per LR/RL section, used
+    # to detect side-branch ascents (a below-trunk station feeding the
+    # trunk bundle).  Routing such edges with a late diagonal keeps the
+    # side-branch line on its own track until the section boundary.
+    section_trunk_y = _compute_section_trunk_ys(graph)
+
     # Bundle assignments and bypass gap indices
     line_priority = {lid: i for i, lid in enumerate(graph.lines.keys())}
     bundle_info = compute_bundle_info(
@@ -396,8 +404,37 @@ def _build_routing_context(
         curve_radius=curve_radius,
         junction_fan_info=junction_fan_info,
         skip_edges=merge.skip_edges,
+        section_trunk_y=section_trunk_y,
         merge=merge,
     )
+
+
+def _compute_section_trunk_ys(graph: MetroGraph) -> dict[str, float]:
+    """Return a mapping ``section_id -> trunk_y`` for LR/RL sections.
+
+    The trunk Y is the Y of the section's exit/entry ports, which
+    coincides with the dominant on-track bundle level.  Returns an
+    empty mapping for sections without horizontal ports.
+    """
+    result: dict[str, float] = {}
+    for sec_id, section in graph.sections.items():
+        if section.direction not in ("LR", "RL"):
+            continue
+        port_ys: list[float] = []
+        for pid in list(section.entry_ports) + list(section.exit_ports):
+            port = graph.ports.get(pid)
+            if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                continue
+            port_st = graph.stations.get(pid)
+            if port_st is None:
+                continue
+            port_ys.append(port_st.y)
+        if port_ys:
+            # Use the median to ignore outliers; all LR ports in a section
+            # typically share the same Y after alignment.
+            port_ys.sort()
+            result[sec_id] = port_ys[len(port_ys) // 2]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1712,6 +1749,48 @@ def _route_intra_section(
     return _route_diagonal(edge, src, tgt, ctx)
 
 
+def _is_side_branch_ascent(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> bool:
+    """Return True for a side-branch edge climbing to the section trunk.
+
+    A side-branch ascent edge starts at a non-port internal station
+    sitting off the section's trunk Y, with target either an exit port
+    of the same section or another internal station on the trunk Y.
+    Visually we want the line to stay on the side-branch track until
+    just before the target, so the bundle ordering inside the section
+    stays meaningful (the side-branch line does not appear to merge
+    with the main trunk bundle mid-section).
+
+    Only fires for non-port sources with a single outgoing line set
+    that exits the section via a shared exit port or feeds the trunk
+    bundle's join station.
+    """
+    if src.is_port or src.section_id is None:
+        return False
+    sec_id = src.section_id
+    trunk_y = ctx.section_trunk_y.get(sec_id)
+    if trunk_y is None:
+        return False
+    trunk_tol = ctx.offset_step * 2
+    if abs(src.y - trunk_y) < trunk_tol:
+        return False  # source is on the trunk; not a side branch
+    if abs(tgt.y - trunk_y) >= trunk_tol:
+        return False  # target is not on the trunk bundle
+    tgt_port = ctx.graph.ports.get(edge.target)
+    same_sec = tgt.section_id == sec_id and not tgt.is_port
+    is_exit_port = (
+        tgt_port is not None and not tgt_port.is_entry and tgt_port.section_id == sec_id
+    )
+    if not (same_sec or is_exit_port):
+        return False
+    # Multi-line trunks may momentarily dip below trunk Y; only single-line
+    # exits count as a side branch slot.
+    if len(ctx.graph.station_lines(edge.source)) > 1:
+        return False
+    return True
+
+
 def _route_diagonal(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -1740,14 +1819,52 @@ def _route_diagonal(
         src_min = min_straight
         tgt_min = min_straight
 
+    # Side-branch ascents: override the fork bias so the diagonal lands
+    # near the target.  The side-branch line then stays on its own track
+    # from the source until the section boundary, instead of merging
+    # with the main trunk bundle mid-section.
+    is_side_branch = _is_side_branch_ascent(edge, src, tgt, ctx)
+    is_fork_flag = edge.source in ctx.fork_stations and not is_side_branch
+    is_join_flag = edge.target in ctx.join_stations or is_side_branch
+
+    # Bypass virtual stations: concentrate the diagonal near V so the
+    # bypass hop only spans V's column instead of routing parallel for
+    # the whole section.  P -> V biases toward V (join); V -> T biases
+    # from V (fork).  Without this, P fork-bias pushes the diagonal
+    # next to P and the bypass line runs parallel below the trunk for
+    # the entire span between P and T.
+    #
+    # The V-side flat must be at least ``CURVE_RADIUS +
+    # MIN_STATION_FLAT_LENGTH`` so that, after the corner curve consumes
+    # ``CURVE_RADIUS`` pixels of the flat, a visible horizontal segment
+    # of ``MIN_STATION_FLAT_LENGTH`` pixels remains on each side of V.
+    # The two halves (P -> V's tgt_min and V -> T's src_min) use the
+    # same value so the U at V stays symmetric.  If horizontal room
+    # between the real endpoint and V is too narrow to also fit the
+    # diagonal_run and the far-end minimum, fall back to
+    # ``MIN_STRAIGHT_EDGE`` to preserve the diagonal.
+    v_flat = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH
+    if tgt.is_hidden and edge.target.startswith("__bypass_"):
+        is_fork_flag = False
+        is_join_flag = True
+        tgt_min = v_flat
+        if src_min + tgt_min + ctx.diagonal_run > abs(dx):
+            tgt_min = MIN_STRAIGHT_EDGE
+    elif src.is_hidden and edge.source.startswith("__bypass_"):
+        is_fork_flag = True
+        is_join_flag = False
+        src_min = v_flat
+        if src_min + tgt_min + ctx.diagonal_run > abs(dx):
+            src_min = MIN_STRAIGHT_EDGE
+
     diag_start_x, diag_end_x = _compute_diagonal_placement(
         sx,
         tx,
         ctx.diagonal_run,
         src_min,
         tgt_min,
-        edge.source in ctx.fork_stations,
-        edge.target in ctx.join_stations,
+        is_fork_flag,
+        is_join_flag,
     )
 
     return RoutedPath(
@@ -1796,6 +1913,15 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
 
     for rp in routes:
         if not _is_diagonal_route(rp):
+            continue
+        # Skip bypass V hops: the two legs (P -> V and V -> T) are
+        # spread independently and the V-side MIN_STRAIGHT_EDGE bound
+        # forces asymmetric clamping, producing a visible kink at V.
+        # Bypass V routes are short and the perpendicular separation
+        # from per-line Y offsets alone is sufficient for visibility.
+        if rp.edge.source.startswith("__bypass_") or rp.edge.target.startswith(
+            "__bypass_"
+        ):
             continue
         if rp.edge.source in ctx.fork_stations:
             fork_groups[rp.edge.source].append(rp)

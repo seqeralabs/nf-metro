@@ -39,6 +39,26 @@ def test_parse_line_order_invalid_ignored():
     assert graph.line_order == "definition"
 
 
+def test_center_ports_directive_default():
+    text = "graph LR\n"
+    graph = parse_metro_mermaid(text)
+    assert graph.center_ports is False
+
+
+@pytest.mark.parametrize("value", ["true", "True", "TRUE", "yes", "1"])
+def test_center_ports_directive_parsed_truthy(value):
+    text = f"%%metro center_ports: {value}\ngraph LR\n"
+    graph = parse_metro_mermaid(text)
+    assert graph.center_ports is True
+
+
+@pytest.mark.parametrize("value", ["false", "False", "no", "0", "anything"])
+def test_center_ports_directive_parsed_falsy(value):
+    text = f"%%metro center_ports: {value}\ngraph LR\n"
+    graph = parse_metro_mermaid(text)
+    assert graph.center_ports is False
+
+
 def test_parse_lines():
     text = (
         "%%metro line: main | Main Line | #ff0000\n"

@@ -141,6 +141,17 @@ MIN_STRAIGHT_PORT: float = 5.0
 MIN_STRAIGHT_EDGE: float = 10.0
 """Minimum straight track for non-port edges."""
 
+MIN_STATION_FLAT_LENGTH: float = 20.0
+"""Minimum length of the visible horizontal flat segment THROUGH a station.
+
+A station sitting on the polyline corner where two paths meet would
+otherwise have its flat fully consumed by the curve corner (CURVE_RADIUS
+pixels each side).  This constant ensures the flat segment around a
+visible station, measured as the polyline run reaching the station X,
+exceeds the curve radius by a meaningful amount so a visible flat is
+drawn through the station (matching how regular fork/join stations
+present a clear horizontal segment through their X coordinate)."""
+
 BYPASS_CLEARANCE: float = 25.0
 """Vertical clearance below the lowest intervening section for bypass routes."""
 

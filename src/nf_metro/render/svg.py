@@ -630,22 +630,19 @@ def _render_edges(
 ) -> None:
     """Render metro line edges with smooth curves at direction changes."""
 
-    # Sort routes by effective Y of the source point (highest Y first) so
-    # lines are drawn bottom-to-top.  This ensures each interior line in a
-    # bundle only loses one boundary edge to its neighbor rather than having
-    # a line drawn first get painted over on both sides.
-    def _sort_key(route: RoutedPath) -> float:
-        if route.offsets_applied:
-            return -route.points[0][1]
-        src_off = station_offsets.get((route.edge.source, route.line_id), 0.0)
-        return -(route.points[0][1] + src_off)
-
-    routes = sorted(routes, key=_sort_key)
+    # Group routes by metro line so each line's paths are contiguous in
+    # document order, then any two lines have the same relative paint order
+    # at every overlap.  Reverse-of-definition order makes the first-defined
+    # line paint last (on top everywhere).  Unknown line_ids sort to the
+    # back (painted last); Python's stable sort preserves within-group order.
+    line_priority = {lid: i for i, lid in enumerate(graph.lines)}
+    routes = sorted(routes, key=lambda r: -line_priority.get(r.line_id, -1))
 
     for route in routes:
         line = graph.lines.get(route.line_id)
         color = line.color if line else FALLBACK_LINE_COLOR
         style_kw = _line_style_kwargs(line.style) if line else {}
+        class_name = f"metro-line-{route.line_id}"
 
         pts = apply_route_offsets(route, station_offsets)
 
@@ -659,6 +656,7 @@ def _render_edges(
                     stroke=color,
                     stroke_width=theme.line_width,
                     stroke_linecap="round",
+                    class_=class_name,
                     **style_kw,
                 )
             )
@@ -669,6 +667,7 @@ def _render_edges(
                 fill="none",
                 stroke_linecap="round",
                 stroke_linejoin="round",
+                class_=class_name,
                 **style_kw,
             )
             path.M(*pts[0])
@@ -808,6 +807,35 @@ def _render_stations(
             _render_terminus_icons(d, station, graph, theme, r, min_off, max_off)
 
 
+def caption_aware_icon_step(
+    names: list[str],
+    name_widths: list[float],
+    terminus_width: float,
+) -> float:
+    """Return the horizontal centre-to-centre step for adjacent icons.
+
+    The default step is ``terminus_width + ICON_INTER_GAP``.  When two
+    adjacent icons both carry a caption whose estimated width would
+    overrun that step (causing captions to overlap on the same row),
+    widen the step so the wider of the two captions fits with a small
+    visual gap on each side.  The widened step is shared by every icon
+    in the row, keeping spacing uniform.
+    """
+    default_step = terminus_width + ICON_INTER_GAP
+    required = default_step
+    for i in range(len(names) - 1):
+        if not names[i] or not names[i + 1]:
+            continue
+        pair_max = max(name_widths[i], name_widths[i + 1])
+        # Allow a small gap each side of the wider caption before its
+        # neighbour caption starts.  ICON_INTER_GAP gives us a uniform
+        # min visual breathing room.
+        needed = pair_max + ICON_INTER_GAP
+        if needed > required:
+            required = needed
+    return required
+
+
 def _render_terminus_icons(
     d: draw.Drawing,
     station: Station,
@@ -837,7 +865,6 @@ def _render_terminus_icons(
     # Place icons on the "outside" of the flow
     icon_gap = r + ICON_STATION_GAP
     icon_half_w = theme.terminus_width / 2
-    icon_step = theme.terminus_width + ICON_INTER_GAP
     section_dir = section.direction if section else "LR"
 
     # Determine direction: icons extend leftward for sources (LR/TB)
@@ -847,12 +874,6 @@ def _render_terminus_icons(
     else:
         icons_go_right = not is_source
 
-    # Base X for the first (nearest) icon center
-    if icons_go_right:
-        base_cx = station.x + icon_gap + icon_half_w
-    else:
-        base_cx = station.x - icon_gap - icon_half_w
-
     icon_cy = station.y + (min_off + max_off) / 2
 
     icon_types = station.terminus_icon_types or [ICON_TYPE_FILE] * len(
@@ -860,12 +881,21 @@ def _render_terminus_icons(
     )
     names = station.terminus_names or [""] * len(station.terminus_labels)
 
-    # Pre-compute caption font size so adjacent-icon caption overlap
-    # can be detected before icons are emitted.  Captions sitting at
-    # the same Y overlap when their estimated widths exceed icon_step;
-    # in that case, every other caption is dropped to the next row.
+    # Compute per-icon X step.  When adjacent captions would overlap
+    # at the default step, widen it so both fit on the same row.
     caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
     name_widths = [len(n) * caption_font_size * 0.55 if n else 0.0 for n in names]
+    icon_step = caption_aware_icon_step(names, name_widths, theme.terminus_width)
+
+    # Base X for the first (nearest) icon center
+    if icons_go_right:
+        base_cx = station.x + icon_gap + icon_half_w
+    else:
+        base_cx = station.x - icon_gap - icon_half_w
+
+    # Captions sitting at the same Y overlap when their estimated
+    # widths exceed icon_step; in that case, every other caption is
+    # dropped to the next row.
     stagger_captions = False
     for i in range(len(names) - 1):
         if not names[i] or not names[i + 1]:
