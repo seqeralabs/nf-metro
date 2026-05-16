@@ -2394,9 +2394,7 @@ def _align_uncentered_siblings(
                     rp.points[-1] = (target_x, rp.points[-1][1])
 
 
-def _align_topological_siblings(
-    routes: list[RoutedPath], graph: MetroGraph
-) -> None:
+def _align_topological_siblings(routes: list[RoutedPath], graph: MetroGraph) -> None:
     """Snap topologically equivalent siblings to a shared X.
 
     Two stations are *topological siblings* when they share the same
