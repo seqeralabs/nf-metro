@@ -17,6 +17,14 @@ The 5 fixtures are:
   to reporting crosses ``quant``'s marker as the fan-up to trunk
   begins past ``quant``'s column.
 * ``examples/guide/06b_with_hidden.mmd`` -- same pattern as 06a.
+
+A second set of tests guards the over-trigger side: the bypass insertion
+should NOT fire for multi-trunk sections (``rnaseq_auto``'s
+``genome_align``, ``epitopeprediction``'s ``input_processing``) or for
+single-trunk sections whose only consumed line is a local spur
+(``with_subworkflows``'s ``samtools_index``).  Those fixtures'
+routing engine already clears the markers via track consolidation, and
+adding a V there inflates section height without visual benefit.
 """
 
 from __future__ import annotations
@@ -108,3 +116,24 @@ def test_guide_lines_dont_cross_non_consumer_markers(fixture):
                         f"({pts[k][0]:.1f},{pts[k][1]:.1f})->"
                         f"({pts[k + 1][0]:.1f},{pts[k + 1][1]:.1f})"
                     )
+
+
+# Fixtures whose section topology already provides a parallel track
+# for the bypassing line (multi-trunk sections, or single-trunk
+# sections whose only consumed line at S is a local spur).  The
+# bypass insertion must not fire on these - it would only inflate
+# section height or push a row down without visual benefit.
+_BYPASS_QUIET_FIXTURES = [
+    "examples/rnaseq_auto.mmd",
+    "examples/epitopeprediction.mmd",
+]
+
+
+@pytest.mark.parametrize("rel_path", _BYPASS_QUIET_FIXTURES)
+def test_no_bypass_inserted_for_quiet_fixtures(rel_path):
+    text = (Path(__file__).resolve().parent.parent / rel_path).read_text()
+    graph = parse_metro_mermaid(text)
+    bypass_ids = [sid for sid in graph.stations if sid.startswith("__bypass_")]
+    assert bypass_ids == [], (
+        f"{rel_path}: expected no bypass stations, got {bypass_ids}"
+    )

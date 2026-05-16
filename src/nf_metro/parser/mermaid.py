@@ -552,7 +552,7 @@ def _insert_terminus_convergence_stations(graph: MetroGraph) -> None:
 def _insert_bypass_stations(graph: MetroGraph) -> None:
     """Insert virtual stations so non-consumed lines bypass intermediate stops.
 
-    When a station S sits in the layer-path between any in-section
+    When a station S sits in the layer-path between an in-section
     source P and an exit port, lines flowing ``P -> exit_port`` that S
     neither consumes nor produces would otherwise route through S's
     column and crash into the marker.  Inserting a hidden virtual
@@ -560,25 +560,45 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
     a column-mate to fan the bypassing lines around S, using the same
     parallel-branch primitives the rest of the section uses.
 
-    Detection (per section, longest-path layers within the subgraph):
+    The trigger only fires when the routing engine genuinely needs the
+    helper - otherwise V's add tracks that inflate section height
+    without visual benefit.  The three discriminants are:
 
-      * For each non-port, non-hidden, non-terminus station S, compute
-        ``station_lines(S)`` = lines S consumes (inbound) or produces
-        (outbound).
-      * For every in-section ``P -> exit_port`` edge with line L not in
-        ``station_lines(S)`` and ``layer(P) < layer(S) < layer(exit)``,
-        L is a bypassing line.
-      * Group bypassing edges by P so all of P's lines that need to
-        skip S share a single ``V``.
+    1. *Section topology*.  Single-trunk sections (one head station at
+       the lowest non-port layer, e.g. the 05/06 guide family) funnel
+       every line through a shared trunk and can't escape S's marker
+       without help.  Multi-trunk sections (rnaseq_auto's
+       ``genome_align``, epitopeprediction's ``input_processing``,
+       etc.) already place each inbound line on its own parallel track
+       from the entry, so the routing engine clears the marker via
+       track consolidation - bypass would only over-detour the line.
+       In multi-trunk sections we still allow bypass at fan-in
+       convergence points (S with >=2 in-section predecessors, e.g.
+       differentialabundance's ``annotate``) where the line bundle
+       genuinely loses its parallel-track headroom past S.
 
-    Rewrite (per bypassing P, S group):
-      * Add ``V`` (``id=f"__bypass_{S}_{P}_{n}"``, ``is_hidden=True``).
-      * For each bypassed line L, replace ``P -> exit_port (L)`` with
-        ``P -> V (L)`` + ``V -> exit_port (L)``.
+    2. *Trunk consumption*.  S must consume at least one line that
+       also flows through some other in-section edge.  A station whose
+       only consumed line is a local spur (e.g. nf_with_subworkflows's
+       ``samtools_index`` taking a single ``spur`` line straight from
+       ``samtools_sort``) sits off-trunk; bypass would snap it back to
+       the trunk Y and open a vertical gap.
 
-    The virtual station inherits S's section so it participates in
-    section layout / fan / symfan with the same primitives the rest
-    of the section uses.
+    3. *Candidate predecessors*.  In single-trunk sections we scan all
+       lower-layer in-section stations P (siblings and direct preds
+       alike) because the bypass line may originate from either side of
+       the trunk.  In multi-trunk fan-in sections we restrict to S's
+       direct predecessors P -> S, since unrelated lines have their own
+       track already.
+
+    Rewrite (per bypassing ``(P, S)`` group):
+
+    * Add ``V`` (``id=f"__bypass_{S}_{P}_{n}"``, ``is_hidden=True``,
+      same section as S).
+    * For each bypassed edge ``P -> exit_port (L)`` (L not in S's
+      consumed-or-produced line set, ``layer(P) < layer(S) <
+      layer(exit)``), replace with ``P -> V (L)`` + ``V -> exit_port
+      (L)``.
     """
     if not graph.sections:
         return
@@ -633,6 +653,41 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
                 if sec_layers.get(pid, 0) <= internal_max:
                     sec_layers[pid] = internal_max + 1
 
+        # Sections fall into two regimes that need different bypass
+        # triggers:
+        #
+        # 1. Single-trunk sections (the 05 file-icon family, 06 branch
+        #    family) funnel their inbound lines through one head
+        #    station, so all lines share a track until the layout fans
+        #    them out.  Non-consumed lines that pass through an
+        #    intermediate marker collide with it because there's no
+        #    parallel track available - bypass V's are the only escape.
+        # 2. Multi-trunk sections (e.g. rnaseq_auto's genome_align,
+        #    epitopeprediction's input_processing) already give each
+        #    inbound line its own track from the section entry.  The
+        #    routing engine clears non-consumer markers via track
+        #    consolidation without help, and adding a bypass V would
+        #    inflate section height without visual benefit - EXCEPT
+        #    when the bypass target is a fan-in convergence point
+        #    (e.g. da_pipeline's `annotate`) where the bundle of lines
+        #    converging at S genuinely loses its parallel-track
+        #    headroom past S.
+        entry_port_ids = set(section.entry_ports)
+        internal_ids = [
+            sid
+            for sid in station_ids
+            if sid not in exit_port_ids
+            and sid not in entry_port_ids
+            and sid in sec_layers
+        ]
+        if not internal_ids:
+            continue
+        min_internal_layer = min(sec_layers[sid] for sid in internal_ids)
+        head_count = sum(
+            1 for sid in internal_ids if sec_layers[sid] == min_internal_layer
+        )
+        single_trunk_section = head_count <= 1
+
         for sid in section.station_ids:
             station = graph.stations.get(sid)
             if station is None or station.is_port or station.is_hidden:
@@ -645,8 +700,46 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
                 continue
             s_lines = set(graph.station_lines(sid))
 
+            in_section_preds: set[str] = {
+                edge.source
+                for edge in graph.edges
+                if edge.target == sid and edge.source in station_ids
+            }
+            # In multi-trunk sections, only fan-in convergence points
+            # (S has >=2 in-section predecessors) need bypass help, and
+            # only from a direct predecessor of S - other lines already
+            # have their own parallel tracks.
+            if not single_trunk_section and len(in_section_preds) < 2:
+                continue
+
+            # Skip stations that only consume a spur line - the bypass
+            # would snap S's spur track to the section trunk Y, opening
+            # an unnecessary vertical gap to S.  A consumed line is
+            # "trunk" when it has at least one in-section edge that
+            # doesn't touch S.
+            consumed_lines = {
+                edge.line_id
+                for edge in graph.edges
+                if edge.target == sid and edge.source in station_ids
+            }
+            trunk_lines = {
+                edge.line_id
+                for edge in graph.edges
+                if edge.source in station_ids
+                and edge.target in station_ids
+                and edge.source != sid
+                and edge.target != sid
+            }
+            if consumed_lines and not (consumed_lines & trunk_lines):
+                continue
+
+            if single_trunk_section:
+                candidate_preds: set[str] = set(station_ids)
+            else:
+                candidate_preds = in_section_preds
+
             bypass_by_pred: dict[str, list[tuple[int, Edge]]] = {}
-            for pred_id in station_ids:
+            for pred_id in candidate_preds:
                 if pred_id == sid:
                     continue
                 pred_layer = sec_layers.get(pred_id)
