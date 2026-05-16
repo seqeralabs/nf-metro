@@ -587,10 +587,36 @@ def _equalize_fork_groups(
             if max(spacings) - min(spacings) < 0.01:
                 continue
 
-        # Compact to consecutive positions starting from the lowest track
-        base_track = tracks[group[0]]
+        # Choose an anchor and distribute siblings as signed offsets
+        # around it so the column stays centred on the trunk feeding it
+        # rather than walking downward from the topmost member.
+        #
+        # Anchor preference:
+        #   1. The column member carrying the most lines (this is the
+        #      "in-column trunk" used by `_redistribute_fanout_siblings`
+        #      and similar phases).
+        #   2. Tie-break: the member whose current track is closest to
+        #      the average track of the group's predecessor(s) -- the
+        #      "natural" trunk Y feeding the fork.
+        #   3. Final tie-break: the member at the lowest current track,
+        #      preserving the prior behaviour for fully symmetric cases.
+        preds_union: set[str] = set()
+        for sid in group:
+            preds_union.update(G.predecessors(sid))
+        pred_tracks = [tracks[p] for p in preds_union if p in tracks]
+        pred_anchor = sum(pred_tracks) / len(pred_tracks) if pred_tracks else None
+
+        def _anchor_key(sid: str) -> tuple:
+            nlines = len(graph.station_lines(sid))
+            pred_dist = (
+                abs(tracks[sid] - pred_anchor) if pred_anchor is not None else 0.0
+            )
+            return (-nlines, pred_dist, tracks[sid])
+
+        anchor_idx = min(range(len(group)), key=lambda i: _anchor_key(group[i]))
+        anchor_track = tracks[group[anchor_idx]]
         for i, sid in enumerate(group):
-            tracks[sid] = base_track + i * line_gap
+            tracks[sid] = anchor_track + (i - anchor_idx) * line_gap
 
 
 def _reorder_by_span(graph: MetroGraph, line_order: list[str]) -> list[str]:
