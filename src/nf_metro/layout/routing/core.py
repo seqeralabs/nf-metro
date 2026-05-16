@@ -1772,26 +1772,21 @@ def _is_side_branch_ascent(
     trunk_y = ctx.section_trunk_y.get(sec_id)
     if trunk_y is None:
         return False
-    # Source must sit clearly off the trunk Y (at least a quarter slot).
-    if abs(src.y - trunk_y) < ctx.offset_step * 2:
-        return False
-    # Target must sit at or very close to trunk Y (the bundle level).
-    if abs(tgt.y - trunk_y) >= ctx.offset_step * 2:
-        return False
-    # Target must be in the same section or an exit port of this section.
+    trunk_tol = ctx.offset_step * 2
+    if abs(src.y - trunk_y) < trunk_tol:
+        return False  # source is on the trunk; not a side branch
+    if abs(tgt.y - trunk_y) >= trunk_tol:
+        return False  # target is not on the trunk bundle
     tgt_port = ctx.graph.ports.get(edge.target)
     same_sec = tgt.section_id == sec_id and not tgt.is_port
     is_exit_port = (
-        tgt_port is not None
-        and not tgt_port.is_entry
-        and tgt_port.section_id == sec_id
+        tgt_port is not None and not tgt_port.is_entry and tgt_port.section_id == sec_id
     )
     if not (same_sec or is_exit_port):
         return False
-    # Side branch carries a single line set (typical fanout slot).  Skip
-    # multi-line trunks that happen to sit below trunk Y momentarily.
-    src_lines = ctx.graph.station_lines(edge.source)
-    if len(src_lines) > 1:
+    # Multi-line trunks may momentarily dip below trunk Y; only single-line
+    # exits count as a side branch slot.
+    if len(ctx.graph.station_lines(edge.source)) > 1:
         return False
     return True
 
@@ -1843,15 +1838,11 @@ def _route_diagonal(
     # MIN_STATION_FLAT_LENGTH`` so that, after the corner curve consumes
     # ``CURVE_RADIUS`` pixels of the flat, a visible horizontal segment
     # of ``MIN_STATION_FLAT_LENGTH`` pixels remains on each side of V.
-    # Without this, ``MIN_STRAIGHT_EDGE`` (=10) equalled ``CURVE_RADIUS``
-    # and the curve corners on the two halves met exactly at V.x, giving
-    # zero visible flat THROUGH V and producing a kink rather than a
-    # station-like horizontal run.  The two halves (P -> V's tgt_min and
-    # V -> T's src_min) use the same value so the U at V stays
-    # symmetric.  If the horizontal room between the real endpoint and
-    # V is too narrow to also fit the diagonal_run and the far-end
-    # minimum, fall back to ``MIN_STRAIGHT_EDGE`` to preserve the
-    # diagonal.
+    # The two halves (P -> V's tgt_min and V -> T's src_min) use the
+    # same value so the U at V stays symmetric.  If horizontal room
+    # between the real endpoint and V is too narrow to also fit the
+    # diagonal_run and the far-end minimum, fall back to
+    # ``MIN_STRAIGHT_EDGE`` to preserve the diagonal.
     v_flat = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH
     if tgt.is_hidden and edge.target.startswith("__bypass_"):
         is_fork_flag = False
@@ -1928,8 +1919,9 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
         # forces asymmetric clamping, producing a visible kink at V.
         # Bypass V routes are short and the perpendicular separation
         # from per-line Y offsets alone is sufficient for visibility.
-        if (rp.edge.source.startswith("__bypass_")
-                or rp.edge.target.startswith("__bypass_")):
+        if rp.edge.source.startswith("__bypass_") or rp.edge.target.startswith(
+            "__bypass_"
+        ):
             continue
         if rp.edge.source in ctx.fork_stations:
             fork_groups[rp.edge.source].append(rp)
@@ -2027,10 +2019,18 @@ class _BubbleCtx:
     diag_out_targets: dict[str, set[str]]
     # Snapshot of station X before any moves
     original_x: dict[str, float]
+    # True fan-out divergence hubs (matches engine._divergence_target_ys):
+    # >= 2 outbound real-station targets at distinct Ys, with at least one
+    # above and one below the station's own Y.
+    divergence_anchors: set[str]
 
 
 def _build_bubble_ctx(routes: list[RoutedPath], graph: MetroGraph) -> _BubbleCtx:
     """Build indexes for bubble-station centering."""
+    # Imported here to avoid a top-level cycle (engine does not depend on
+    # routing, so this one-way import is safe).
+    from nf_metro.layout.engine import _divergence_target_ys
+
     all_sources: dict[str, set[str]] = defaultdict(set)
     all_targets: dict[str, set[str]] = defaultdict(set)
     for edge in graph.edges:
@@ -2068,6 +2068,7 @@ def _build_bubble_ctx(routes: list[RoutedPath], graph: MetroGraph) -> _BubbleCtx
         diag_in_sources=diag_in_sources,
         diag_out_targets=diag_out_targets,
         original_x=original_x,
+        divergence_anchors=_divergence_target_ys(graph),
     )
 
 
@@ -2086,6 +2087,30 @@ def _collect_centering_candidates(
     def _is_internal(sid: str) -> bool:
         st = graph.stations.get(sid)
         return st is not None and not st.is_port and not st.is_hidden
+
+    def _is_chain_predecessor(sid: str) -> bool:
+        """Internal upstream station that acts as a flat-chain predecessor.
+
+        When a station being considered for centring has a flat-side
+        connection coming FROM ``sid``, this predicate decides whether
+        ``sid`` should block centring.  Normal internal stations do
+        block it.  A true fan-out divergence hub (matching
+        ``engine._divergence_target_ys``: >= 2 outbound real-station
+        targets at distinct Ys, with at least one above and one below
+        the hub's own Y) is exempt: its flat-side connection to one
+        branch is incidental (induced by grid snapping the hub onto
+        that branch's track), not a topological chain.  Without this
+        exemption the branch's column would fail to centre.
+
+        Exemption applies only to the upstream/source side of a flat
+        connection.  Downstream chain predecessors (an anchor sitting
+        as the target of a flat connection from the station being
+        centred) reflect a natural same-Y chain, not a snap artefact,
+        and are still treated as chain-internal.
+        """
+        if not _is_internal(sid):
+            return False
+        return sid not in ctx.divergence_anchors
 
     for sid, station in graph.stations.items():
         if station.is_port or station.is_hidden:
@@ -2187,16 +2212,22 @@ def _collect_centering_candidates(
 
         has_flat_side = flat_in_rp is not None or flat_out_rp is not None
 
-        # Guard: skip when a flat connection goes to/from an internal station.
+        # Guard: skip when a flat connection goes to/from an internal
+        # chain station.  Upstream sources may be fork-hub-exempted (a
+        # snap-induced flat from a true divergence anchor does not
+        # represent a real chain).  Downstream targets are checked
+        # strictly: a same-Y predecessor->successor pair on a downstream
+        # internal station is a natural chain regardless of whether the
+        # successor happens to be a divergence anchor.
         if has_flat_side or multi_diag:
             flat_to_internal = False
-            if flat_in_rp and _is_internal(flat_in_rp.edge.source):
+            if flat_in_rp and _is_chain_predecessor(flat_in_rp.edge.source):
                 flat_to_internal = True
             if flat_out_rp and _is_internal(flat_out_rp.edge.target):
                 flat_to_internal = True
             if multi_diag:
                 for r in flat_in:
-                    if _is_internal(r.edge.source):
+                    if _is_chain_predecessor(r.edge.source):
                         flat_to_internal = True
                 for r in flat_out:
                     if _is_internal(r.edge.target):

@@ -518,11 +518,10 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
             continue
         if port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
-        # Collect (feeder_id, y) per line.  When a single full-bundle
-        # feeder carries every port line, side-branch feeders that only
-        # contribute a subset must not pull their line's "average Y"
-        # off the trunk: the kink belongs at the side branch, not at
-        # the bundle's exit.
+        # When a single full-bundle feeder carries every port line, side-
+        # branch feeders that only contribute a subset must not pull their
+        # line's "average Y" off the trunk: the kink belongs at the side
+        # branch, not at the bundle's exit.
         line_feeders: dict[str, list[tuple[str, float]]] = {}
         for edge in graph.edges:
             if edge.target == port_id:
@@ -534,20 +533,18 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         if len(line_feeders) < 2:
             continue
         port_lines = set(line_feeders.keys())
-        trunk_feeder_id: str | None = None
-        for sid in {fid for entries in line_feeders.values() for fid, _ in entries}:
-            if port_lines.issubset(set(graph.station_lines(sid))):
-                trunk_feeder_id = sid
-                break
+        all_feeders = {fid for entries in line_feeders.values() for fid, _ in entries}
+        trunk_feeder_id = next(
+            (
+                sid
+                for sid in all_feeders
+                if port_lines.issubset(graph.station_lines(sid))
+            ),
+            None,
+        )
         if trunk_feeder_id is not None:
             trunk_y = graph.stations[trunk_feeder_id].y
-            line_avg_y = {}
-            for lid, entries in line_feeders.items():
-                trunk_ys = [y for fid, y in entries if fid == trunk_feeder_id]
-                if trunk_ys:
-                    line_avg_y[lid] = trunk_ys[0]
-                else:
-                    line_avg_y[lid] = trunk_y
+            line_avg_y = {lid: trunk_y for lid in line_feeders}
         else:
             line_avg_y = {
                 lid: sum(y for _, y in entries) / len(entries)
@@ -555,6 +552,15 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
             }
         unique_ys = set(line_avg_y.values())
         if len(unique_ys) < 2:
+            if trunk_feeder_id is not None:
+                # Trunk feeder anchors all lines to one Y. Inherit its
+                # per-line offsets so the port keeps the trunk's bundle
+                # ordering instead of falling to definition order at
+                # reconcile time.
+                for lid in line_feeders:
+                    ctx.offsets[(port_id, lid)] = ctx.offsets.get(
+                        (trunk_feeder_id, lid), 0.0
+                    )
             continue
         sorted_lines = sorted(
             line_avg_y,
@@ -937,6 +943,94 @@ def _would_collide(
     )
 
 
+def _align_junction_to_entry_port(ctx: _OffsetCtx) -> None:
+    """Resolve same-Y junction-to-entry-port slants left by Path 2.
+
+    When the exit-port phase inherits its trunk feeder's bundle ordering
+    (collapsed-bundle case), the junction downstream inherits the same
+    ordering. If that junction then feeds a single LR/RL entry port at
+    the same base Y with offsets already computed by entry-port phase,
+    a small per-line offset mismatch becomes a visible diagonal between
+    the junction and the entry port.
+
+    For each junction where every outbound non-junction target is an
+    entry port at the junction's own base Y, and every junction line
+    maps to a single such target with a known offset, snap the junction
+    offsets to the target offsets. If the swap matches the feeding
+    exit port's lines exactly, mirror the change there too so the
+    10-px exit-to-junction segment stays horizontal.
+    """
+    graph = ctx.graph
+    for jid in graph.junctions:
+        j_st = graph.stations[jid]
+        j_lines = list(graph.station_lines(jid))
+        if len(j_lines) < 2:
+            continue
+        line_to_target: dict[str, str] = {}
+        ok = True
+        for lid in j_lines:
+            targets: list[str] = []
+            for edge in graph.edges:
+                if edge.source == jid and edge.line_id == lid:
+                    targets.append(edge.target)
+            if len(targets) != 1:
+                ok = False
+                break
+            tgt_id = targets[0]
+            tgt_st = graph.stations.get(tgt_id)
+            tgt_port = graph.ports.get(tgt_id)
+            if not tgt_st or not tgt_port or not tgt_port.is_entry:
+                ok = False
+                break
+            if tgt_port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                ok = False
+                break
+            if abs(tgt_st.y - j_st.y) > _SAME_Y_TOLERANCE:
+                ok = False
+                break
+            if (tgt_id, lid) not in ctx.offsets:
+                ok = False
+                break
+            line_to_target[lid] = tgt_id
+        if not ok or len(line_to_target) != len(j_lines):
+            continue
+
+        desired = {lid: ctx.offsets[(line_to_target[lid], lid)] for lid in j_lines}
+        if len(set(desired.values())) != len(desired):
+            continue
+        current = {lid: ctx.offsets.get((jid, lid), 0.0) for lid in j_lines}
+        if all(
+            abs(desired[lid] - current[lid]) <= _OFFSET_EQ_TOLERANCE for lid in j_lines
+        ):
+            continue
+
+        feeding_exit: str | None = None
+        single_exit = True
+        for edge in graph.edges:
+            if edge.target != jid:
+                continue
+            src_port = graph.ports.get(edge.source)
+            if src_port and not src_port.is_entry:
+                if feeding_exit is None:
+                    feeding_exit = edge.source
+                elif feeding_exit != edge.source:
+                    single_exit = False
+                    break
+            else:
+                single_exit = False
+                break
+
+        for lid, off in desired.items():
+            ctx.offsets[(jid, lid)] = off
+        if single_exit and feeding_exit is not None:
+            exit_lines = set(graph.station_lines(feeding_exit))
+            if exit_lines == set(j_lines):
+                exit_st = graph.stations[feeding_exit]
+                if abs(exit_st.y - j_st.y) <= _SAME_Y_TOLERANCE:
+                    for lid, off in desired.items():
+                        ctx.offsets[(feeding_exit, lid)] = off
+
+
 def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> None:
     """Snap offsets for same-section edges where endpoints share base Y.
 
@@ -1056,5 +1150,6 @@ def compute_station_offsets(
     _compute_exit_port_offsets(ctx)
     _propagate_to_junctions(ctx)
     _compute_entry_port_offsets(ctx)
+    _align_junction_to_entry_port(ctx)
     _reconcile_horizontal_offsets(ctx)
     return ctx.offsets
