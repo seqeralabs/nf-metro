@@ -262,21 +262,12 @@ def _section_lr_port_ys(graph: MetroGraph, section) -> list[float]:
     return ys
 
 
-def _section_trunk_marker_cy(
+def _section_trunk_info(
     graph: MetroGraph,
     section,
     offsets: dict[tuple[str, str], float],
-) -> float | None:
-    """Render-time cy of the trunk station that anchors the row bundle.
-
-    The trunk station is the one whose marker the inter-section bundle
-    passes through.  We approximate it as the full-bundle internal
-    station whose marker centre (station.y + (min_off + max_off) / 2)
-    is closest to the section's LR port Y.
-
-    Returns ``None`` when no full-bundle station exists internally
-    (e.g. a section whose bundle exits via a non-trunk station).
-    """
+) -> tuple[float, float, float] | None:
+    """Return ``(cy, y_min, y_max)`` of the trunk station, or ``None``."""
     port_ys = _section_lr_port_ys(graph, section)
     if not port_ys:
         return None
@@ -285,7 +276,7 @@ def _section_trunk_marker_cy(
     if not bundle:
         return None
     port_set = set(section.entry_ports) | set(section.exit_ports)
-    best: tuple[float, float] | None = None  # (distance, cy)
+    best: tuple[float, float, float, float] | None = None
     for sid in section.station_ids:
         if sid in port_set:
             continue
@@ -298,11 +289,24 @@ def _section_trunk_marker_cy(
         line_offs = [offsets.get((sid, lid), 0.0) for lid in lines]
         if not line_offs:
             continue
+        y_min = st.y + min(line_offs)
+        y_max = st.y + max(line_offs)
         cy = st.y + (min(line_offs) + max(line_offs)) / 2
         dist = abs(cy - port_y)
         if best is None or dist < best[0]:
-            best = (dist, cy)
-    return best[1] if best is not None else None
+            best = (dist, cy, y_min, y_max)
+    if best is None:
+        return None
+    return (best[1], best[2], best[3])
+
+
+def _section_trunk_marker_cy(
+    graph: MetroGraph,
+    section,
+    offsets: dict[tuple[str, str], float],
+) -> float | None:
+    info = _section_trunk_info(graph, section, offsets)
+    return info[0] if info is not None else None
 
 
 def _section_full_bundle(graph: MetroGraph, section) -> set[str] | None:
@@ -345,19 +349,57 @@ def test_row_trunk_marker_cy_consistent(fixture):
     offsets = compute_station_offsets(graph)
     rows = _row_lr_sections(graph)
     for row, sections in rows.items():
-        cys: list[tuple[str, float]] = []
+        info: dict[str, tuple[float, float, float, set[str]]] = {}
         for sec in sections:
-            cy = _section_trunk_marker_cy(graph, sec, offsets)
-            if cy is not None:
-                cys.append((sec.id, cy))
-        if len(cys) < 2:
+            trunk = _section_trunk_info(graph, sec, offsets)
+            bundle = _section_full_bundle(graph, sec)
+            if trunk is None or not bundle:
+                continue
+            cy, y_min, y_max = trunk
+            info[sec.id] = (cy, y_min, y_max, bundle)
+        if len(info) < 2:
             continue
-        target = cys[0][1]
-        for sid, cy in cys[1:]:
-            assert abs(cy - target) < _Y_TOL, (
-                f"Row {row}: section {sid} trunk cy={cy} drifts from "
-                f"{cys[0][0]} cy={target}"
-            )
+
+        def _same_row(a: str, b: str) -> bool:
+            cy_a, lo_a, hi_a, bun_a = info[a]
+            cy_b, lo_b, hi_b, bun_b = info[b]
+            bands_overlap = min(hi_a, hi_b) - max(lo_a, lo_b) >= -_Y_TOL
+            return bands_overlap and bun_a == bun_b
+
+        parent: dict[str, str] = {sid: sid for sid in info}
+
+        def _find(x: str) -> str:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def _union(x: str, y: str) -> None:
+            rx, ry = _find(x), _find(y)
+            if rx != ry:
+                parent[rx] = ry
+
+        ids = list(info)
+        for i, a in enumerate(ids):
+            for b in ids[i + 1 :]:
+                if _same_row(a, b):
+                    _union(a, b)
+
+        groups: dict[str, list[str]] = defaultdict(list)
+        for sid in ids:
+            groups[_find(sid)].append(sid)
+
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            anchor = members[0]
+            target = info[anchor][0]
+            for sid in members[1:]:
+                cy = info[sid][0]
+                assert abs(cy - target) < _Y_TOL, (
+                    f"Row {row}: section {sid} trunk cy={cy} drifts from "
+                    f"{anchor} cy={target}"
+                )
 
 
 # ---------------------------------------------------------------------------
