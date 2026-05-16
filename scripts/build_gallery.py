@@ -213,20 +213,6 @@ PIPELINE_ENTRIES: list[tuple[str, str, str, str]] = [
         "Genome assembly from long reads and Hi-C data through "
         "purging, polishing, scaffolding, and QC.",
     ),
-    (
-        "funcprofiler_upstream",
-        "nf-core/funcprofiler (upstream)",
-        "https://github.com/nf-core/funcprofiler",
-        "Upstream .mmd with a separate line per profiling tool (11 lines). "
-        "Exposes routing issues with large bundles exiting a single port.",
-    ),
-    (
-        "funcprofiler",
-        "nf-core/funcprofiler (simplified)",
-        "https://github.com/nf-core/funcprofiler",
-        "Simplified to 3 lines: profiling, QC, and database prep. "
-        "Same topology, cleaner routing.",
-    ),
 ]
 
 # Manifest mapping SVG filename -> section for the render diff page.
