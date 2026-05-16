@@ -83,15 +83,18 @@ def _section_trunk_marker_cy(
     section,
     offsets: dict[tuple[str, str], float],
 ) -> float | None:
-    """Render-time cy of the trunk station that anchors the row bundle.
+    """Render-time cy of the trunk that anchors the row bundle.
 
-    The trunk station is the one whose marker the inter-section bundle
-    passes through.  We approximate it as the full-bundle internal
-    station whose marker centre (station.y + (min_off + max_off) / 2)
-    is closest to the section's LR port Y.
+    The trunk passes through the section's LR port Y.  When a
+    full-bundle internal station sits on the trunk (within a small
+    tolerance of port Y), return that station's marker centre.
+    Otherwise return port Y itself: the trunk bundle still passes
+    through the section at port Y even when no station is anchored
+    to it (e.g. when post-layout label clearance moved the previous
+    on-trunk station off the bundle line).
 
-    Returns ``None`` when no full-bundle station exists internally
-    (e.g. a section whose bundle exits via a non-trunk station).
+    Returns ``None`` when the section has no LR ports or no full
+    bundle is defined.
     """
     port_ys = _section_lr_port_ys(graph, section)
     if not port_ys:
@@ -118,7 +121,31 @@ def _section_trunk_marker_cy(
         dist = abs(cy - port_y)
         if best is None or dist < best[0]:
             best = (dist, cy)
-    return best[1] if best is not None else None
+    if best is None:
+        return None
+    if best[0] > _Y_TOL:
+        # A full-bundle station exists but no longer sits on the
+        # trunk (e.g. post-layout label clearance moved it off the
+        # bundle line).  Fall back to the trunk cy derived from the
+        # section's LR port, taking the port's offset_mid into
+        # account so it matches the offset-adjusted marker cys of
+        # the on-bundle stations.
+        for pid in list(section.entry_ports) + list(section.exit_ports):
+            port = graph.ports.get(pid)
+            st = graph.stations.get(pid)
+            if (
+                port is None
+                or st is None
+                or port.side not in (PortSide.LEFT, PortSide.RIGHT)
+            ):
+                continue
+            port_lines = list(graph.station_lines(pid))
+            if not port_lines:
+                continue
+            port_offs = [offsets.get((pid, lid), 0.0) for lid in port_lines]
+            return st.y + (min(port_offs) + max(port_offs)) / 2
+        return port_y
+    return best[1]
 
 
 def _section_full_bundle(graph: MetroGraph, section) -> set[str] | None:
@@ -291,71 +318,135 @@ def test_off_track_inputs_above_consumer(fixture):
     "example",
     ["differentialabundance.mmd", "differentialabundance_default.mmd"],
 )
-def test_stacked_file_icons_label_clearance(example):
-    """Two vertically-adjacent file-input stations sharing a column must
-    sit far enough apart that the upper station's under-icon caption
-    doesn't crash into the top edge of the lower icon.
+def test_no_label_overlaps_adjacent_element_in_column(example):
+    """No vertically-adjacent element pair sharing a column may overlap.
 
-    The default station pitch (``y_spacing`` ~ 40 px) is shorter than
-    the captioned icon's vertical extent (~icon_height + caption_gap +
-    caption_font_height = 32 + 4 + ~8 = 44 px).  Catches the regression
-    where stacked source inputs in DA section 1 (Samples/Contrasts,
-    Matrix, GTF, CEL, MaxQuant, GEO ID) have their captions visibly
-    overlapping the next icon.
+    "Element" here means a station marker plus its associated text:
+    file icons carry an under-icon caption, regular stations carry
+    above/below name labels.  The rendered bbox of one element's text
+    must not intrude into the next element's marker bbox in the same
+    column.
+
+    Three distinct cases are exercised by the DA fixtures:
+
+    * **Section 1 stacked file inputs** (Phase 13m): consecutive
+      source-icon stations in column ``x = 133.6`` (Matrix, Contrasts,
+      GTF, ...) -- the upper icon's caption must clear the lower
+      icon's top edge.
+    * **Section 3 gprofiler2 + Network** (Phase 13n): the gprofiler2
+      station's below-marker name label sits directly above the
+      Network file-icon, so the label's bottom must clear the
+      icon's top.
+    * **Section 5 Zip bundle + Shiny / Report** (Phase 13n): the
+      Zip bundle station's name label and the captions of the file
+      icons above and below it share a column.
     """
     from nf_metro.layout.constants import (
+        FONT_HEIGHT,
         ICON_CAPTION_FONT_HEIGHT,
         ICON_CAPTION_GAP,
         ICON_HALF_HEIGHT,
         ICON_STACK_LABEL_CLEARANCE,
+        STATION_RADIUS_APPROX,
     )
-
-    required_pitch = (
-        2 * ICON_HALF_HEIGHT
-        + ICON_CAPTION_GAP
-        + ICON_CAPTION_FONT_HEIGHT
-        + ICON_STACK_LABEL_CLEARANCE
-    )
+    from nf_metro.layout.labels import place_labels
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
 
     graph = _layout_example(example)
     junction_ids = set(graph.junctions)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    # Mirror render's icon-obstacle list so label placement matches
+    # the rendered output (icons block label slots).
+    icon_obstacles: list[tuple[float, float, float, float]] = []
+    for st in graph.stations.values():
+        if not st.is_terminus or st.is_hidden:
+            continue
+        lines = list(graph.station_lines(st.id))
+        line_offs = [offsets.get((st.id, lid), 0.0) for lid in lines] or [0.0]
+        cy = st.y + (min(line_offs) + max(line_offs)) / 2
+        names = st.terminus_names or []
+        cap = ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT if any(names) else 0.0
+        icon_obstacles.append(
+            (
+                st.x - 14.0,
+                cy - ICON_HALF_HEIGHT,
+                st.x + 14.0,
+                cy + ICON_HALF_HEIGHT + cap,
+            )
+        )
+    placements = {
+        p.station_id: p
+        for p in place_labels(
+            graph,
+            station_offsets=offsets,
+            icon_obstacles=icon_obstacles,
+            routes=routes,
+        )
+    }
 
-    def _has_caption(station) -> bool:
-        if not station.is_terminus:
-            return False
-        return any(bool(n) for n in (station.terminus_names or []))
+    def _icon_offset_mid(sid: str) -> float:
+        lines = list(graph.station_lines(sid))
+        if not lines:
+            return 0.0
+        offs = [offsets.get((sid, lid), 0.0) for lid in lines]
+        return (min(offs) + max(offs)) / 2
 
-    # Group captioned terminus stations by section + column.
+    def _extents(st) -> tuple[float, float]:
+        if st.is_terminus:
+            cy = st.y + _icon_offset_mid(st.id)
+            top = cy - ICON_HALF_HEIGHT
+            bot = cy + ICON_HALF_HEIGHT
+            if any(bool(n) for n in (st.terminus_names or [])):
+                bot += ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT
+            return top, bot
+        top = st.y - STATION_RADIUS_APPROX
+        bot = st.y + STATION_RADIUS_APPROX
+        if not st.label.strip():
+            return top, bot
+        lp = placements.get(st.id)
+        if lp is None:
+            return top, bot
+        if lp.above:
+            top = min(top, lp.y - FONT_HEIGHT)
+        else:
+            bot = max(bot, lp.y + FONT_HEIGHT)
+        return top, bot
+
     by_col: dict[tuple[str, float], list[str]] = defaultdict(list)
     for sid, st in graph.stations.items():
-        if (
-            st.is_port
-            or sid in junction_ids
-            or st.section_id is None
-            or not _has_caption(st)
-        ):
+        if st.is_port or sid in junction_ids or st.section_id is None:
+            continue
+        sec = graph.sections.get(st.section_id)
+        if sec is None or sec.direction not in ("LR", "RL"):
             continue
         by_col[(st.section_id, round(st.x, 1))].append(sid)
 
-    tested = False
+    tested_pairs = 0
     for (sec_id, col_x), sids in by_col.items():
         if len(sids) < 2:
             continue
-        tested = True
         sids.sort(key=lambda s: graph.stations[s].y)
         for upper_id, lower_id in zip(sids, sids[1:]):
             upper = graph.stations[upper_id]
             lower = graph.stations[lower_id]
-            gap = lower.y - upper.y
-            assert gap + _Y_TOL >= required_pitch, (
+            _, upper_bot = _extents(upper)
+            lower_top, _ = _extents(lower)
+            gap = lower_top - upper_bot
+            assert gap + _Y_TOL >= ICON_STACK_LABEL_CLEARANCE, (
                 f"{example} section {sec_id} col x={col_x}: "
-                f"file-icon pair {upper_id} (y={upper.y}) -> "
-                f"{lower_id} (y={lower.y}) gap={gap:.2f} px "
-                f"< required {required_pitch:.2f} px "
-                f"(2*icon_half + caption_gap + caption_font + clearance)"
+                f"pair {upper_id} (y={upper.y}, bot_extent={upper_bot:.2f}) "
+                f"-> {lower_id} (y={lower.y}, top_extent={lower_top:.2f}) "
+                f"gap={gap:.2f} < required clearance "
+                f"{ICON_STACK_LABEL_CLEARANCE} px"
             )
+            tested_pairs += 1
 
-    assert tested, f"{example}: no captioned file-icon column with two icons"
+    # DA pipeline definitely has column pairs in every section.
+    assert tested_pairs >= 3, (
+        f"{example}: expected at least 3 vertically-adjacent pairs "
+        f"across sections, only checked {tested_pairs}"
+    )
 
 
 # ---------------------------------------------------------------------------
