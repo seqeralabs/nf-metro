@@ -790,6 +790,13 @@ def _compute_section_layout(
     # claim; multi-row layouts with content-filled rows are untouched.
     _tighten_lower_rows_after_shrink(graph, section_y_gap)
 
+    # Phase 13ka: Pull a section's single-line off-trunk passthrough
+    # stations back onto the trunk Y so the line runs straight through
+    # the section instead of dipping down to the off-track station and
+    # climbing back up to the trunk port (closes #317).  Nudges X by a
+    # half-pitch when another station already sits at the snapped X.
+    _snap_single_line_branch_to_trunk(graph, x_spacing)
+
     # Phase 13k: Shift sparse loop-side stations (e.g. ``grea`` -- one
     # incoming, one outgoing, single-line consumer) onto a half-grid Y
     # when sharing the full-row Y with a busier sibling whose inbound
@@ -2511,6 +2518,169 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 continue
             for sid in trunk_members:
                 graph.stations[sid].x = target_x
+
+
+def _snap_single_line_branch_to_trunk(
+    graph: MetroGraph,
+    x_spacing: float,
+) -> None:
+    """Pull single-line off-trunk passthrough stations back onto the
+    section trunk Y so the line runs straight through the section.
+
+    Targets stations S in an LR/RL section where:
+
+      * S is the only station of its single line in the section
+        (the line passes through S only),
+      * S has exactly one same-line predecessor and one same-line
+        successor, both at the section trunk Y, and
+      * S currently sits off the trunk Y.
+
+    Such a station was placed off-trunk by the fan-out track allocator
+    (e.g. ``gatk4_conc`` in benchmarking) but its line has no other
+    stop in the section, so visually the line dips down to S and back
+    up to the trunk port for no payload reason.  Snapping S to the
+    trunk Y straightens the line; the marker is nudged half a
+    ``x_spacing`` step toward the predecessor to clear any same-row
+    sibling already sitting at S's X.
+    """
+    if not graph.sections:
+        return
+
+    in_by_tgt: dict[str, list[Edge]] = defaultdict(list)
+    out_by_src: dict[str, list[Edge]] = defaultdict(list)
+    for e in graph.edges:
+        in_by_tgt[e.target].append(e)
+        out_by_src[e.source].append(e)
+
+    # Stations per (section, line) where the station carries that line
+    # exclusively.  Hub stations carrying multi-line bundles are
+    # excluded so the "only stop of this line in the section" check
+    # fires for a single-line side branch fanned off a multi-line hub.
+    sec_line_stations: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for sid, st in graph.stations.items():
+        if not st.section_id or st.is_port or st.is_hidden:
+            continue
+        lines = graph.station_lines(sid)
+        if len(lines) != 1:
+            continue
+        sec_line_stations[(st.section_id, lines[0])].append(sid)
+
+    half_step = x_spacing / 2.0
+
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+
+        trunk_y: float | None = None
+        for pid in section.entry_ports + section.exit_ports:
+            port = graph.ports.get(pid)
+            ps = graph.stations.get(pid)
+            if (
+                port is not None
+                and ps is not None
+                and port.side in (PortSide.LEFT, PortSide.RIGHT)
+            ):
+                trunk_y = ps.y
+                break
+        if trunk_y is None:
+            continue
+
+        def _at_trunk(st: Station) -> bool:
+            return abs(st.y - trunk_y) <= 0.5  # noqa: B023 - trunk_y captured intentionally
+
+        candidates: list[tuple[Station, float]] = []
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden or st.off_track:
+                continue
+            if _at_trunk(st):
+                continue
+            lines = graph.station_lines(sid)
+            if len(lines) != 1:
+                continue
+            (lid,) = lines
+            if len(sec_line_stations.get((section.id, lid), [])) != 1:
+                continue
+            ins = in_by_tgt.get(sid, [])
+            outs = out_by_src.get(sid, [])
+            if len(ins) != 1 or len(outs) != 1:
+                continue
+            src = graph.stations.get(ins[0].source)
+            tgt = graph.stations.get(outs[0].target)
+            if src is None or tgt is None or not _at_trunk(src) or not _at_trunk(tgt):
+                continue
+            # A busier (multi-line) non-hub sibling already on the
+            # trunk row would have its outbound bundle crossing the
+            # candidate's marker after the snap (the grea case in
+            # da_pipeline).  Off-track source stations count because
+            # their outbound edges still traverse the trunk row.
+            pred_succ = {ins[0].source, outs[0].target}
+            if any(
+                (sib_st := graph.stations.get(sib_sid)) is not None
+                and not sib_st.is_port
+                and not sib_st.is_hidden
+                and sib_sid not in port_ids
+                and sib_sid not in pred_succ
+                and _at_trunk(sib_st)
+                and len(graph.station_lines(sib_sid)) > 1
+                for sib_sid in section.station_ids
+            ):
+                continue
+            candidates.append((st, src.x))
+
+        if not candidates:
+            continue
+
+        # Skip when every off-trunk sibling is a candidate too: pulling
+        # all of them onto the trunk would collapse a fan-out diagram
+        # (e.g. mismatched_tracks's 5 parallel branches).
+        cand_sts = {id(c[0]) for c in candidates}
+        has_other_offtrunk = any(
+            id(st) not in cand_sts
+            and sid not in port_ids
+            and not st.is_port
+            and not st.is_hidden
+            and not st.off_track
+            and not _at_trunk(st)
+            for sid in section.station_ids
+            if (st := graph.stations.get(sid)) is not None
+        )
+        if not has_other_offtrunk:
+            continue
+
+        occupied: list[float] = [
+            st.x
+            for sid in section.station_ids
+            if sid not in port_ids
+            and (st := graph.stations.get(sid)) is not None
+            and id(st) not in cand_sts
+            and not st.is_port
+            and not st.is_hidden
+            and not st.off_track
+            and _at_trunk(st)
+        ]
+
+        # Stagger candidates around their current X by alternating
+        # half-pitch slots toward the predecessor until a free slot lands.
+        for st, src_x in candidates:
+            toward_pred = 1.0 if src_x > st.x else -1.0
+            target_x: float | None = None
+            for k in range(1, 8):
+                for sign in (toward_pred, -toward_pred):
+                    cand_x = st.x + sign * k * half_step
+                    if not any(abs(other_x - cand_x) < 1.0 for other_x in occupied):
+                        target_x = cand_x
+                        break
+                if target_x is not None:
+                    break
+            if target_x is None:
+                continue
+            st.x = target_x
+            st.y = trunk_y
+            occupied.append(target_x)
 
 
 def _shift_sparse_loop_stations_to_clear_bundle(
