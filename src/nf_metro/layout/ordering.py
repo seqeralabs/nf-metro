@@ -587,31 +587,19 @@ def _equalize_fork_groups(
             if max(spacings) - min(spacings) < 0.01:
                 continue
 
-        # Choose an anchor and distribute siblings as signed offsets
-        # around it so the column stays centred on the trunk feeding it
-        # rather than walking downward from the topmost member.
-        #
-        # Anchor preference:
-        #   1. The column member carrying the most lines (this is the
-        #      "in-column trunk" used by `_redistribute_fanout_siblings`
-        #      and similar phases).
-        #   2. Tie-break: the member whose current track is closest to
-        #      the average track of the group's predecessor(s) -- the
-        #      "natural" trunk Y feeding the fork.
-        #   3. Final tie-break: the member at the lowest current track,
-        #      preserving the prior behaviour for fully symmetric cases.
-        preds_union: set[str] = set()
-        for sid in group:
-            preds_union.update(G.predecessors(sid))
-        pred_tracks = [tracks[p] for p in preds_union if p in tracks]
-        pred_anchor = sum(pred_tracks) / len(pred_tracks) if pred_tracks else None
+        # Distribute as signed offsets around an anchor so the column
+        # stays centred on the trunk feeding the fork.  Anchor key:
+        # most lines first (the in-column trunk), then closest to the
+        # mean predecessor track, then lowest current track.
+        pred_tracks = [
+            tracks[p] for sid in group for p in G.predecessors(sid) if p in tracks
+        ]
+        pred_mean = sum(pred_tracks) / len(pred_tracks) if pred_tracks else None
 
         def _anchor_key(sid: str) -> tuple:
-            nlines = len(graph.station_lines(sid))
-            pred_dist = (
-                abs(tracks[sid] - pred_anchor) if pred_anchor is not None else 0.0
-            )
-            return (-nlines, pred_dist, tracks[sid])
+            t = tracks[sid]
+            pred_dist = abs(t - pred_mean) if pred_mean is not None else 0.0
+            return (-len(graph.station_lines(sid)), pred_dist, t)
 
         anchor_idx = min(range(len(group)), key=lambda i: _anchor_key(group[i]))
         anchor_track = tracks[group[anchor_idx]]
