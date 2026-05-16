@@ -653,25 +653,17 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
                 if sec_layers.get(pid, 0) <= internal_max:
                     sec_layers[pid] = internal_max + 1
 
-        # Sections fall into two regimes that need different bypass
-        # triggers:
-        #
-        # 1. Single-trunk sections (the 05 file-icon family, 06 branch
-        #    family) funnel their inbound lines through one head
-        #    station, so all lines share a track until the layout fans
-        #    them out.  Non-consumed lines that pass through an
-        #    intermediate marker collide with it because there's no
-        #    parallel track available - bypass V's are the only escape.
-        # 2. Multi-trunk sections (e.g. rnaseq_auto's genome_align,
-        #    epitopeprediction's input_processing) already give each
-        #    inbound line its own track from the section entry.  The
-        #    routing engine clears non-consumer markers via track
-        #    consolidation without help, and adding a bypass V would
-        #    inflate section height without visual benefit - EXCEPT
-        #    when the bypass target is a fan-in convergence point
-        #    (e.g. da_pipeline's `annotate`) where the bundle of lines
-        #    converging at S genuinely loses its parallel-track
-        #    headroom past S.
+        in_section_edges = [
+            e
+            for e in graph.edges
+            if e.source in station_ids and e.target in station_ids
+        ]
+        in_preds_by_target: dict[str, set[str]] = {}
+        consumed_lines_by_target: dict[str, set[str]] = {}
+        for e in in_section_edges:
+            in_preds_by_target.setdefault(e.target, set()).add(e.source)
+            consumed_lines_by_target.setdefault(e.target, set()).add(e.line_id)
+
         entry_port_ids = set(section.entry_ports)
         internal_ids = [
             sid
@@ -700,11 +692,7 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
                 continue
             s_lines = set(graph.station_lines(sid))
 
-            in_section_preds: set[str] = {
-                edge.source
-                for edge in graph.edges
-                if edge.target == sid and edge.source in station_ids
-            }
+            in_section_preds = in_preds_by_target.get(sid, set())
             # In multi-trunk sections, only fan-in convergence points
             # (S has >=2 in-section predecessors) need bypass help, and
             # only from a direct predecessor of S - other lines already
@@ -717,26 +705,16 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
             # an unnecessary vertical gap to S.  A consumed line is
             # "trunk" when it has at least one in-section edge that
             # doesn't touch S.
-            consumed_lines = {
-                edge.line_id
-                for edge in graph.edges
-                if edge.target == sid and edge.source in station_ids
-            }
+            consumed_lines = consumed_lines_by_target.get(sid, set())
             trunk_lines = {
-                edge.line_id
-                for edge in graph.edges
-                if edge.source in station_ids
-                and edge.target in station_ids
-                and edge.source != sid
-                and edge.target != sid
+                e.line_id
+                for e in in_section_edges
+                if e.source != sid and e.target != sid
             }
             if consumed_lines and not (consumed_lines & trunk_lines):
                 continue
 
-            if single_trunk_section:
-                candidate_preds: set[str] = set(station_ids)
-            else:
-                candidate_preds = in_section_preds
+            candidate_preds = station_ids if single_trunk_section else in_section_preds
 
             bypass_by_pred: dict[str, list[tuple[int, Edge]]] = {}
             for pred_id in candidate_preds:
