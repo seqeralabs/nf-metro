@@ -3661,15 +3661,18 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
 def _shrink_bboxes_to_content_bottom(
     graph: MetroGraph, section_y_padding: float
 ) -> None:
-    """Bottom-only bbox shrink after late content lifts.
+    """Resize bbox bottoms so they sit ``section_y_padding`` below content.
 
     ``_compact_row_content_to_bbox_top`` shrinks the bottom slack to
     ``section_y_padding`` once, but later phases
     (``_fan_source_inputs_upward``, ``_recenter_full_bundle_columns``)
     can pull content further up, leaving fresh empty space below the
-    last station.  Re-shrink each section's ``bbox_h`` so the bottom
-    sits ``section_y_padding`` below the bottom-most station/port.
-    Station Ys are unchanged, so trunk alignment is preserved.
+    last station; conversely ``_snap_all_y_to_grid`` can snap a station
+    downward, eating into the existing padding.  Re-size each section's
+    ``bbox_h`` so the bottom sits ``section_y_padding`` below the
+    bottom-most station/port -- shrinking when content rose, growing
+    when content snapped down.  Station Ys are unchanged, so trunk
+    alignment is preserved.
 
     Never trims past the maximum bbox bottom of any row-mate.  A
     row-mate is any other section whose bbox vertical range overlaps
@@ -3721,9 +3724,14 @@ def _shrink_bboxes_to_content_bottom(
         ]
         if not content_max_ys:
             continue
-        desired_bot = max(content_max_ys) + section_y_padding
+        content_bot = max(content_max_ys) + section_y_padding
         if port_max_ys:
-            desired_bot = max(desired_bot, max(port_max_ys))
+            content_bot = max(content_bot, max(port_max_ys))
+        current_bot = section.bbox_y + section.bbox_h
+        if content_bot > current_bot + 0.5:
+            section.bbox_h = content_bot - section.bbox_y
+            continue
+        desired_bot = content_bot
         mate_bots = _row_mate_bottoms(section)
         if mate_bots:
             desired_bot = max(desired_bot, max(mate_bots))
