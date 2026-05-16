@@ -408,7 +408,7 @@ def test_row_trunk_marker_cy_consistent(fixture):
 
 
 def _is_symfan_pair(graph: MetroGraph, sids: list[str]) -> bool:
-    """Two stations form a symfan pair iff they share a predecessor and sit on opposite sides of it in Y."""
+    """Share a predecessor and sit on opposite sides of it in Y."""
     if len(sids) != 2:
         return False
     preds: dict[str, set[str]] = {sids[0]: set(), sids[1]: set()}
