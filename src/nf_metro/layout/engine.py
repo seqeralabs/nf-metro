@@ -790,6 +790,13 @@ def _compute_section_layout(
     # claim; multi-row layouts with content-filled rows are untouched.
     _tighten_lower_rows_after_shrink(graph, section_y_gap)
 
+    # Phase 13ka: Pull single-line passthrough stations into the
+    # ``[min(pred.y, succ.y), max(pred.y, succ.y)]`` band so their
+    # route doesn't dive past the pred/succ Y range and climb back
+    # (closes #317).  Conservative gates preserve pure fan-out
+    # diagrams.
+    _snap_single_line_passthrough_to_band(graph, x_spacing)
+
     # Phase 13k: Shift sparse loop-side stations (e.g. ``grea`` -- one
     # incoming, one outgoing, single-line consumer) onto a half-grid Y
     # when sharing the full-row Y with a busier sibling whose inbound
@@ -2511,6 +2518,190 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 continue
             for sid in trunk_members:
                 graph.stations[sid].x = target_x
+
+
+def _snap_single_line_passthrough_to_band(
+    graph: MetroGraph,
+    x_spacing: float,
+) -> None:
+    """Pull a single-line passthrough station into its pred/succ Y band.
+
+    Targets stations S in an LR/RL section where:
+
+      * S carries exactly one line and is the only non-port stop of
+        that line in the section,
+      * S has exactly one same-section predecessor P and one same-
+        section successor T (the section's hub and exit port for a
+        typical fan-out branch), and
+      * S currently sits outside ``[min(P.y, T.y), max(P.y, T.y)]``.
+
+    Such a station was placed by the per-line track allocator at a Y
+    far from both P and T (e.g. ``gatk4_conc`` in variantbenchmarking,
+    sitting at y=742 between a hub at y=460 and an exit port at
+    y=507), forcing the route to dive down to S and climb back up for
+    no payload reason.  Snapping S into the band straightens the
+    route.
+
+    The candidate Y is chosen as the band endpoint closer to S's
+    current Y, then nudged toward the midpoint when neither endpoint
+    has a free slot in S's column.  The marker X is offset by a half
+    ``x_spacing`` step toward P when an on-band same-column sibling
+    would otherwise sit at the snapped (x, y).
+
+    Conservative gates:
+
+      * Skip when every off-band sibling is itself a candidate
+        (pure fan-out diagrams keep their parallel tracks).
+      * Skip when a busier multi-line non-hub sibling already sits
+        on the snap target Y in S's column (its bundle would route
+        through S's marker after the snap).
+    """
+    if not graph.sections:
+        return
+
+    in_by_tgt: dict[str, list[Edge]] = defaultdict(list)
+    out_by_src: dict[str, list[Edge]] = defaultdict(list)
+    for e in graph.edges:
+        in_by_tgt[e.target].append(e)
+        out_by_src[e.source].append(e)
+
+    # Single-line, non-port, non-hidden stops per (section, line).
+    # Hub markers (full-bundle) are implicitly excluded by the
+    # ``len(lines) == 1`` filter.
+    single_line_stops: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for sid, st in graph.stations.items():
+        if not st.section_id or st.is_port or st.is_hidden:
+            continue
+        lines = graph.station_lines(sid)
+        if len(lines) != 1:
+            continue
+        single_line_stops[(st.section_id, lines[0])].append(sid)
+
+    half_step = x_spacing / 2.0
+
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+
+        candidates: list[tuple[Station, float, float, float]] = []
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden or st.off_track:
+                continue
+            lines = graph.station_lines(sid)
+            if len(lines) != 1:
+                continue
+            (lid,) = lines
+            if len(single_line_stops.get((section.id, lid), [])) != 1:
+                continue
+            ins = in_by_tgt.get(sid, [])
+            outs = out_by_src.get(sid, [])
+            if len(ins) != 1 or len(outs) != 1:
+                continue
+            pred = graph.stations.get(ins[0].source)
+            succ = graph.stations.get(outs[0].target)
+            if pred is None or succ is None:
+                continue
+            band_lo = min(pred.y, succ.y)
+            band_hi = max(pred.y, succ.y)
+            if band_lo - 0.5 <= st.y <= band_hi + 0.5:
+                continue
+            candidates.append((st, band_lo, band_hi, pred.x))
+
+        if not candidates:
+            continue
+
+        # Skip when every off-band sibling is a candidate too: pulling
+        # all of them onto the band would collapse a fan-out diagram
+        # (e.g. mismatched_tracks's parallel branches).
+        cand_ids = {id(c[0]) for c in candidates}
+        has_other_off_band = False
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            sib_st = graph.stations.get(sid)
+            if (
+                sib_st is None
+                or sib_st.is_port
+                or sib_st.is_hidden
+                or sib_st.off_track
+                or id(sib_st) in cand_ids
+            ):
+                continue
+            # Off-band relative to ANY candidate's band suffices; the
+            # gate is that the section has non-candidate content
+            # outside a candidate's pred/succ band.
+            for _, lo, hi, _ in candidates:
+                if not (lo - 0.5 <= sib_st.y <= hi + 0.5):
+                    has_other_off_band = True
+                    break
+            if has_other_off_band:
+                break
+        if not has_other_off_band:
+            continue
+
+        # Collect on-band same-column occupancy so we can pick a
+        # collision-free snap Y for each candidate.
+        column_y_occupied: dict[float, list[float]] = defaultdict(list)
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            sib_st = graph.stations.get(sid)
+            if (
+                sib_st is None
+                or sib_st.is_port
+                or sib_st.is_hidden
+                or sib_st.off_track
+                or id(sib_st) in cand_ids
+            ):
+                continue
+            column_y_occupied[round(sib_st.x, 3)].append(sib_st.y)
+
+        for st, band_lo, band_hi, pred_x in candidates:
+            # Prefer the band endpoint closer to the station's
+            # current Y so the snap moves the marker as little as
+            # possible.
+            if abs(st.y - band_lo) <= abs(st.y - band_hi):
+                snap_y = band_lo
+            else:
+                snap_y = band_hi
+            col_xs = column_y_occupied.get(round(st.x, 3), [])
+            collides = any(abs(snap_y - y) < 1.0 for y in col_xs)
+            new_x = st.x
+            if collides:
+                # Nudge X by a half pitch toward the predecessor so
+                # the marker lands between the column and the hub.
+                toward_pred = 1.0 if pred_x > st.x else -1.0
+                new_x = st.x + toward_pred * half_step
+            # Final guard: a busier multi-line non-hub sibling on the
+            # snap row in the same column would have its bundle route
+            # through the snapped marker.  Skip the snap in that case.
+            blocked = False
+            for sib_sid in section.station_ids:
+                if sib_sid in port_ids:
+                    continue
+                sib = graph.stations.get(sib_sid)
+                if (
+                    sib is None
+                    or sib.is_port
+                    or sib.is_hidden
+                    or sib.off_track
+                    or id(sib) == id(st)
+                ):
+                    continue
+                if abs(sib.x - new_x) > 1.0 or abs(sib.y - snap_y) > 1.0:
+                    continue
+                if len(graph.station_lines(sib_sid)) > 1:
+                    blocked = True
+                    break
+            if blocked:
+                continue
+            st.x = new_x
+            st.y = snap_y
+            column_y_occupied.setdefault(round(new_x, 3), []).append(snap_y)
 
 
 def _shift_sparse_loop_stations_to_clear_bundle(
