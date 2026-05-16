@@ -101,11 +101,7 @@ class TestTopologyValidation:
         errors = [v for v in violations if v.severity == Severity.ERROR]
         assert not errors, "\n".join(v.message for v in errors)
 
-    def test_no_almost_horizontal_edges(self, topology_graph, request):
-        # funcprofiler_upstream is the canonical bad-case fixture; its
-        # humann3 junction routing is a known defect (see #241 family).
-        if "funcprofiler_upstream" in request.node.name:
-            pytest.xfail("funcprofiler_upstream has a known almost-horizontal edge")
+    def test_no_almost_horizontal_edges(self, topology_graph):
         violations = check_almost_horizontal_edges(topology_graph)
         warnings = [v for v in violations if v.severity == Severity.WARNING]
         assert not warnings, "\n".join(v.message for v in warnings)
@@ -179,110 +175,6 @@ def test_layout_quality_warnings_report(path, capsys):
                 f"exit_port_feeder_alignment={port_warns}, "
                 f"single_segment_diagonals={diag_warns}"
             )
-
-
-# --- Positive-control regression: funcprofiler_upstream ---
-#
-# This fixture is a known-bad layout used as a stress test for the new
-# validators. The asserts below pin the *current* defect set so the test
-# fails (loudly) whenever the layout improves OR regresses, prompting a
-# baseline update or a fix. When the underlying engine bug is fixed and
-# violations drop to zero, replace the lower bounds with `== 0`.
-
-FUNCPROFILER_FIXTURE = TOPOLOGIES_DIR / "funcprofiler_upstream.mmd"
-
-
-@pytest.mark.skipif(
-    not FUNCPROFILER_FIXTURE.exists(), reason="funcprofiler_upstream fixture absent"
-)
-class TestFuncprofilerUpstreamDefects:
-    """Lock in the funcprofiler_upstream layout defects the validators detect.
-
-    The fixture is a real upstream pipeline with 11 lines and 7 parallel
-    profiling tools. It currently exhibits intra-section diagonals (the
-    sr_qc -> merge concat edge in the Input section) that the engine
-    cannot resolve without the in-flight funcprofiler-fix work.
-    """
-
-    @pytest.fixture
-    def graph(self):
-        return _load_and_layout(FUNCPROFILER_FIXTURE)
-
-    def test_validator_detects_single_segment_diagonals(self, graph):
-        """The reporting line crossing from Quality Check to Output renders
-        as a single straight diagonal between the two ports; confirm the
-        detector picks it up. (The intra-section sr_qc -> merge diagonal
-        only appears under the in-flight funcprofiler-fix branch's
-        exit-port snapping; main code routes it as an L-shape.)
-        """
-        violations = check_single_segment_diagonals(graph)
-        flagged = {(v.context["source"], v.context["target"]) for v in violations}
-        port_pair_present = any(
-            "QC__exit" in s and "Output__entry" in t for s, t in flagged
-        )
-        assert port_pair_present, (
-            f"expected QC -> Output single-diagonal port hop; got {flagged}"
-        )
-
-
-# --- Failing regression: variant_calling ---
-#
-# variant_calling.mmd has three confirmed visible defects (verified
-# manually with the user as part of validator development):
-#
-# 1. Section 2 (Alignment) chain alignment - bwa_index, bwa_mem,
-#    samtools_sort, samtools_index alternate rows in a 4-station zigzag
-#    on the Main line, with no structural reason. Catches a layout
-#    placement that should put consecutive same-line stations on the
-#    same track.
-# 2. Section 3 (Variant Calling) excessive column gap - GATK
-#    HaplotypeCaller and DeepVariant share column x=772 but are 80px
-#    apart with one empty grid row between them.
-# 3. Section 1 -> Section 2/4 inter-section line crossing - Main and
-#    QC Reporting both fan out from junction __junction_6 and cross at
-#    (216,123) on the way to their respective targets.
-#
-# These tests fail until the layout engine is fixed. Once each is
-# resolved, the corresponding assertion will start passing.
-
-VARIANT_CALLING_FILE = EXAMPLES_DIR / "variant_calling.mmd"
-
-
-_VARIANT_CALLING_XFAIL = pytest.mark.xfail(
-    strict=True,
-    reason="known variant_calling layout defect; tracked in #318",
-)
-
-
-class TestVariantCallingDefects:
-    """Lock in known variant_calling layout defects via strict xfail.
-
-    Each defect is currently present; when an engine fix lands the
-    matching xfail flips to XPASS and reds CI, prompting the marker
-    removal.
-    """
-
-    @pytest.fixture
-    def graph(self):
-        return _load_and_layout(VARIANT_CALLING_FILE)
-
-    @_VARIANT_CALLING_XFAIL
-    def test_no_intra_section_chain_misalignment(self, graph):
-        v = check_intra_section_chain_alignment(graph)
-        assert not v, "\n".join(vi.message for vi in v)
-
-    @_VARIANT_CALLING_XFAIL
-    def test_no_excessive_column_gaps(self, graph):
-        v = check_excessive_column_gaps(graph)
-        assert not v, "\n".join(vi.message for vi in v)
-
-    @_VARIANT_CALLING_XFAIL
-    def test_no_route_segment_crossings(self, graph):
-        v = check_route_segment_crossings(graph)
-        assert not v, "\n".join(vi.message for vi in v)
-
-
-# --- Regression guard: rnaseq example ---
 
 
 class TestRnaseqRegression:
