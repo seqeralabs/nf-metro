@@ -1351,12 +1351,6 @@ def test_all_stations_snap_to_grid(fixture):
     registered in ``graph._half_grid_station_ids`` whose section
     satisfies ``_section_symfan_uses_half_grid`` and has exactly two
     on-track branches.  Any other half-grid station is a regression.
-
-    Catches the v114 regression where
-    ``_shift_sparse_loop_stations_to_clear_bundle`` moved single
-    sparse loop stations like ``grea`` by ``y_spacing / 2``,
-    parking them mid-row between two full grid slots and marking
-    them half-grid even though their section had no 2-branch fan.
     """
     from nf_metro.layout.engine import _section_symfan_uses_half_grid
 
@@ -1447,10 +1441,6 @@ def test_bypass_v_horizontal_segment_is_flat(fixture):
     segment at V's Y (the union of the P->V approach past the diagonal
     end and the V->T departure before the diagonal start) must share Y
     within 0.5px tolerance.
-
-    Catches the regression where ``_spread_diagonal_bundles`` shifted
-    the diagonal endpoints asymmetrically across the two halves of the
-    bypass hop, producing a visible kink at V.
     """
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
@@ -1525,8 +1515,7 @@ def test_bypass_v_horizontal_segment_is_flat(fixture):
         left_flat = abs(in_route.points[-1][0] - in_route.points[-2][0])
         right_flat = abs(out_route.points[1][0] - out_route.points[0][0])
         # Allow modest asymmetry but reject the case where one side is
-        # nearly collapsed while the other has a visible flat (the
-        # ``v114`` kink had ~0 vs ~14px asymmetry).
+        # nearly collapsed while the other has a visible flat.
         if max(left_flat, right_flat) > 5.0:
             asym = abs(left_flat - right_flat)
             assert asym <= 2.0, (
