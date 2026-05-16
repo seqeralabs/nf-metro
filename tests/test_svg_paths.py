@@ -448,23 +448,23 @@ class TestQCountMatchesCorners:
 # ---------------------------------------------------------------------------
 
 
-def _parse_edge_paths_with_line(svg_str: str) -> list[str]:
-    """Return the metro-line class for each edge <path> in document order.
+_METRO_LINE_PREFIX = "metro-line-"
 
-    Edge paths are tagged ``class="metro-line-<id>"`` by ``_render_edges``.
-    Other paths in the document (section boxes, icons, debug overlays) are
-    filtered out so the returned list reflects edge-render order only.
+
+def _parse_edge_paths_with_line(svg_str: str) -> list[str]:
+    """Return the metro-line ID for each edge <path> in document order.
+
+    Edge paths are tagged ``class="metro-line-<id>"`` by ``_render_edges``;
+    other paths (section boxes, icons, debug overlays) lack that class and
+    are skipped.
     """
     root = ET.fromstring(svg_str)
     ns = {"svg": "http://www.w3.org/2000/svg"}
-    paths = root.findall(".//svg:path", ns)
-    result = []
-    for p in paths:
-        cls = p.get("class", "")
-        if not cls.startswith("metro-line-"):
-            continue
-        result.append(cls[len("metro-line-") :])
-    return result
+    return [
+        p.get("class", "")[len(_METRO_LINE_PREFIX) :]
+        for p in root.findall(".//svg:path", ns)
+        if p.get("class", "").startswith(_METRO_LINE_PREFIX)
+    ]
 
 
 class TestLineZOrderConsistent:
@@ -481,32 +481,21 @@ class TestLineZOrderConsistent:
 
     def _check(self, svg_str: str) -> None:
         line_ids = _parse_edge_paths_with_line(svg_str)
-        if not line_ids:
-            return
-
-        first_seen: dict[str, int] = {}
-        last_seen: dict[str, int] = {}
-        for i, lid in enumerate(line_ids):
-            first_seen.setdefault(lid, i)
-            last_seen[lid] = i
-
-        # Each line's first..last range may not contain any path belonging
-        # to a different line -- otherwise the block is not contiguous.
-        for lid, start in first_seen.items():
-            end = last_seen[lid]
-            interleaved = [
-                other
-                for other in line_ids[start : end + 1]
-                if other != lid
-            ]
-            assert not interleaved, (
-                f"Metro line '{lid}' paths are not contiguous: "
-                f"found {len(interleaved)} path(s) for other line(s) "
-                f"{sorted(set(interleaved))} between indices "
-                f"{start} and {end}. This causes inconsistent z-order: "
-                f"line '{lid}' will be above some lines in one bundle "
-                f"and below them in another."
-            )
+        # A line's paths are contiguous iff each line ID appears in at most
+        # one consecutive run.  Walk the sequence and record where each run
+        # starts; if we re-enter a line we've already left, it's interleaved.
+        finished: set[str] = set()
+        prev: str | None = None
+        for lid in line_ids:
+            if lid != prev and lid in finished:
+                assert False, (
+                    f"Metro line '{lid}' paths are not contiguous in "
+                    f"document order: {line_ids}. This causes inconsistent "
+                    f"z-order across the diagram."
+                )
+            if prev is not None and prev != lid:
+                finished.add(prev)
+            prev = lid
 
     def test_simple_bundle(self):
         # Two lines that share a bundle then diverge and re-merge.

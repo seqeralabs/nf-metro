@@ -630,28 +630,13 @@ def _render_edges(
 ) -> None:
     """Render metro line edges with smooth curves at direction changes."""
 
-    # Render routes grouped by metro line so paths sharing a line ID are
-    # contiguous in document order.  Later document elements paint on top of
-    # earlier ones, so any pair of overlapping segments belonging to lines A
-    # and B has the same relative paint order at every overlap.  Within a
-    # line, edges are kept in graph-edge order for stable diffs.
-    #
-    # Lines are emitted in REVERSE definition order, so the first-defined
-    # metro line is painted last and therefore appears on top everywhere it
-    # overlaps other lines.
+    # Group routes by metro line so each line's paths are contiguous in
+    # document order, then any two lines have the same relative paint order
+    # at every overlap.  Reverse-of-definition order makes the first-defined
+    # line paint last (on top everywhere).  Unknown line_ids sort to the
+    # back (painted last); Python's stable sort preserves within-group order.
     line_priority = {lid: i for i, lid in enumerate(graph.lines)}
-    # Lines absent from graph.lines (defensive) sort to the back (painted
-    # last); among themselves they retain their incoming order via the
-    # secondary key.
-    indexed_routes = list(enumerate(routes))
-
-    def _sort_key(item: tuple[int, RoutedPath]) -> tuple[int, int]:
-        idx, route = item
-        prio = line_priority.get(route.line_id, -1)
-        # Negate prio so higher-priority (earlier defined) lines come LAST.
-        return (-prio, idx)
-
-    routes = [r for _, r in sorted(indexed_routes, key=_sort_key)]
+    routes = sorted(routes, key=lambda r: -line_priority.get(r.line_id, -1))
 
     for route in routes:
         line = graph.lines.get(route.line_id)
