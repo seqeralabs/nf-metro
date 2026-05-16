@@ -21,9 +21,18 @@ from nf_metro.parser.model import Edge, MetroGraph, Section
 # patterns scattered across routing and layout modules.
 
 
-def _sections_in_col(graph: MetroGraph, col: int) -> list[Section]:
-    """Sections in a specific grid column with non-zero width."""
-    return [s for s in graph.sections.values() if s.grid_col == col and s.bbox_w > 0]
+def _sections_in_col(
+    graph: MetroGraph, col: int, row: int | None = None
+) -> list[Section]:
+    """Sections in a specific grid column with non-zero width.
+
+    When *row* is provided, the result is further narrowed to that row.
+    """
+    return [
+        s
+        for s in graph.sections.values()
+        if s.grid_col == col and s.bbox_w > 0 and (row is None or s.grid_row == row)
+    ]
 
 
 def _sections_in_row(graph: MetroGraph, row: int) -> list[Section]:
@@ -31,17 +40,33 @@ def _sections_in_row(graph: MetroGraph, row: int) -> list[Section]:
     return [s for s in graph.sections.values() if s.grid_row == row and s.bbox_h > 0]
 
 
-def col_right_edge(graph: MetroGraph, col: int, default: float = 0.0) -> float:
-    """Rightmost X extent of sections in *col*."""
-    secs = _sections_in_col(graph, col)
+def col_right_edge(
+    graph: MetroGraph, col: int, default: float = 0.0, row: int | None = None
+) -> float:
+    """Rightmost X extent of sections in *col*.
+
+    When *row* is provided, the lookup is narrowed to that row, falling
+    back to the full column when no section sits in (col, row).
+    """
+    secs = _sections_in_col(graph, col, row=row)
+    if not secs and row is not None:
+        secs = _sections_in_col(graph, col)
     if not secs:
         return default
     return max((s.bbox_x + s.bbox_w for s in secs), default=default)
 
 
-def col_left_edge(graph: MetroGraph, col: int, default: float = 0.0) -> float:
-    """Leftmost X extent of sections in *col*."""
-    secs = _sections_in_col(graph, col)
+def col_left_edge(
+    graph: MetroGraph, col: int, default: float = 0.0, row: int | None = None
+) -> float:
+    """Leftmost X extent of sections in *col*.
+
+    When *row* is provided, the lookup is narrowed to that row, falling
+    back to the full column when no section sits in (col, row).
+    """
+    secs = _sections_in_col(graph, col, row=row)
+    if not secs and row is not None:
+        secs = _sections_in_col(graph, col)
     return min((s.bbox_x for s in secs), default=default) if secs else default
 
 
@@ -59,11 +84,18 @@ def row_top_edge(graph: MetroGraph, row: int, default: float = 0.0) -> float:
     return min((s.bbox_y for s in secs), default=default) if secs else default
 
 
-def column_gap_midpoint(graph: MetroGraph, col_a: int, col_b: int) -> float:
-    """X midpoint of the gap between two columns."""
+def column_gap_midpoint(
+    graph: MetroGraph, col_a: int, col_b: int, row: int | None = None
+) -> float:
+    """X midpoint of the gap between two columns.
+
+    When *row* is provided, the column edges are computed from sections
+    in that row only so a wider section in another row can't pull the
+    midpoint off the row's natural inter-section gap.
+    """
     lo, hi = min(col_a, col_b), max(col_a, col_b)
-    right = col_right_edge(graph, lo)
-    left = col_left_edge(graph, hi, default=right)
+    right = col_right_edge(graph, lo, row=row)
+    left = col_left_edge(graph, hi, default=right, row=row)
     return (right + left) / 2
 
 
@@ -225,6 +257,10 @@ def inter_column_channel_x(
     Places the channel in the gap between columns so it doesn't pass
     through sibling sections stacked in the source's column. Falls
     back to near-source placement when section info is unavailable.
+
+    When src and tgt sit in the same grid row, the gap is computed
+    from same-row column edges so a wider section in another row
+    can't pull the channel off the row's natural inter-section gap.
     """
     src_sec = graph.sections.get(src.section_id) if src.section_id else None
     tgt_sec = graph.sections.get(tgt.section_id) if tgt.section_id else None
@@ -232,16 +268,19 @@ def inter_column_channel_x(
     if src_sec and tgt_sec and src_sec.grid_col != tgt_sec.grid_col:
         # Find the rightmost/leftmost edges of the source and target
         # columns (accounting for sibling sections that may be wider).
+        # For same-row bundles, narrow to that row so a taller off-row
+        # neighbour doesn't drag the channel across the gap.
         src_col = src_sec.grid_col
         tgt_col = tgt_sec.grid_col
+        row = src_sec.grid_row if src_sec.grid_row == tgt_sec.grid_row else None
 
         if dx > 0:
-            right = col_right_edge(graph, src_col, default=sx)
-            left = col_left_edge(graph, tgt_col, default=tx)
+            right = col_right_edge(graph, src_col, default=sx, row=row)
+            left = col_left_edge(graph, tgt_col, default=tx, row=row)
             return (right + left) / 2
         else:
-            left = col_left_edge(graph, src_col, default=sx)
-            right = col_right_edge(graph, tgt_col, default=tx)
+            left = col_left_edge(graph, src_col, default=sx, row=row)
+            right = col_right_edge(graph, tgt_col, default=tx, row=row)
             return (left + right) / 2
 
     # Fallback: place near source
@@ -273,13 +312,16 @@ def adjacent_column_gap_x(
     graph: MetroGraph,
     col_a: int,
     col_b: int,
+    row: int | None = None,
 ) -> float:
     """X midpoint between two adjacent columns.
 
     Finds the right edge of col_a and left edge of col_b (assuming
-    col_a < col_b) and returns the midpoint.
+    col_a < col_b) and returns the midpoint.  When *row* is provided,
+    the lookup is restricted to that row so off-row neighbours can't
+    drag the midpoint off the row's natural inter-section gap.
     """
-    return column_gap_midpoint(graph, col_a, col_b)
+    return column_gap_midpoint(graph, col_a, col_b, row=row)
 
 
 def bypass_bottom_y(

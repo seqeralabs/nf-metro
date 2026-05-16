@@ -823,6 +823,10 @@ def _route_bypass(
     half_g1 = (g1_n - 1) * ctx.offset_step / 2
     half_g2 = (g2_n - 1) * ctx.offset_step / 2
 
+    # Same-row bypasses pass src_row so off-row neighbours can't pull
+    # the gap channels off the row's natural inter-section gap.
+    gap_row = None if cross_row else src_row
+
     if going_right:
         if fan is not None:
             # Corner 1 uses unified fan indices for a shared first corner
@@ -839,7 +843,8 @@ def _route_bypass(
             gap1_x = fan_mid_x + fan_delta
         else:
             gap1_base = (
-                adjacent_column_gap_x(graph, src_col, src_col + 1) - base_bypass_offset
+                adjacent_column_gap_x(graph, src_col, src_col + 1, row=gap_row)
+                - base_bypass_offset
             )
             gap1_limit = sx + ctx.curve_radius
             if gap1_base - (g1_n - 1) * ctx.offset_step < gap1_limit:
@@ -849,7 +854,8 @@ def _route_bypass(
             gap1_x = gap1_mid + delta1
 
         gap2_base = (
-            adjacent_column_gap_x(graph, tgt_col - 1, tgt_col) + base_bypass_offset
+            adjacent_column_gap_x(graph, tgt_col - 1, tgt_col, row=gap_row)
+            + base_bypass_offset
         )
         gap2_limit = effective_tx - ctx.curve_radius
         if gap2_base + (g2_n - 1) * ctx.offset_step > gap2_limit:
@@ -871,7 +877,8 @@ def _route_bypass(
             gap1_x = fan_mid_x + fan_delta
         else:
             gap1_base = (
-                adjacent_column_gap_x(graph, src_col - 1, src_col) + base_bypass_offset
+                adjacent_column_gap_x(graph, src_col - 1, src_col, row=gap_row)
+                + base_bypass_offset
             )
             gap1_limit = sx - ctx.curve_radius
             if gap1_base + (g1_n - 1) * ctx.offset_step > gap1_limit:
@@ -881,7 +888,8 @@ def _route_bypass(
             gap1_x = gap1_mid + delta1
 
         gap2_base = (
-            adjacent_column_gap_x(graph, tgt_col, tgt_col + 1) - base_bypass_offset
+            adjacent_column_gap_x(graph, tgt_col, tgt_col + 1, row=gap_row)
+            - base_bypass_offset
         )
         gap2_limit = effective_tx + ctx.curve_radius
         if gap2_base - (g2_n - 1) * ctx.offset_step < gap2_limit:
