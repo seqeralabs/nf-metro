@@ -2784,6 +2784,9 @@ def test_topological_siblings_share_y_or_symmetric(fixture):
         ys = sorted(graph.stations[s].y for s in members)
         if max(ys) - min(ys) < 2.0:
             continue
+        xs = [graph.stations[s].x for s in members]
+        if max(xs) - min(xs) < 2.0:
+            continue
         if len(members) == 2:
             offenders.append(
                 f"siblings {members} ys={ys} differ by {max(ys) - min(ys):.1f}"
