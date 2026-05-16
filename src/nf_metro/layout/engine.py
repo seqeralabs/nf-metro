@@ -6102,9 +6102,7 @@ def _compute_fork_join_gaps(
     # V-only off-trunk peer (e.g. ``trim -> {align, V}`` in the 05 guide
     # family) does not.  When no V is involved, fall back to the original
     # peer-set track count so non-bypass topologies stay byte-identical.
-    visible_tracks = {
-        t for sid, t in tracks.items() if not sid.startswith("__bypass_")
-    }
+    visible_tracks = {t for sid, t in tracks.items() if not sid.startswith("__bypass_")}
     is_single_track = len(visible_tracks) <= 1
 
     def _has_bypass(ids):
