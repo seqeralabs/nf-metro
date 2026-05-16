@@ -1405,14 +1405,11 @@ def test_all_stations_snap_to_grid(fixture):
             continue
         # Half-grid exception is allowed only for 2-branch fan members
         # whose section legitimately uses the half-grid layout.
-        is_half = abs(offset - (nearest_int - 0.5)) * y_spacing <= tol or abs(
-            offset - (nearest_int + 0.5)
-        ) * y_spacing <= tol
-        if (
-            is_half
-            and sid in half_grid_ids
-            and st.section_id in half_grid_sections
-        ):
+        is_half = (
+            abs(offset - (nearest_int - 0.5)) * y_spacing <= tol
+            or abs(offset - (nearest_int + 0.5)) * y_spacing <= tol
+        )
+        if is_half and sid in half_grid_ids and st.section_id in half_grid_sections:
             continue
         offenders.append(
             f"{sid!r} cy={st.y:.2f} trunk_y={trunk_y:.2f} "
@@ -1451,9 +1448,7 @@ def test_bypass_v_horizontal_segment_is_flat(fixture):
         for sid, st in graph.stations.items()
         if st.is_hidden and sid.startswith("__bypass_")
     }
-    assert bypass_v_ids, (
-        f"{fixture}: expected at least one __bypass_ virtual station"
-    )
+    assert bypass_v_ids, f"{fixture}: expected at least one __bypass_ virtual station"
 
     # Group routes by (V, line) so we can pair the P->V and V->T halves.
     by_v_line: dict[tuple[str, str], list] = defaultdict(list)

@@ -1911,8 +1911,9 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
         # forces asymmetric clamping, producing a visible kink at V.
         # Bypass V routes are short and the perpendicular separation
         # from per-line Y offsets alone is sufficient for visibility.
-        if (rp.edge.source.startswith("__bypass_")
-                or rp.edge.target.startswith("__bypass_")):
+        if rp.edge.source.startswith("__bypass_") or rp.edge.target.startswith(
+            "__bypass_"
+        ):
             continue
         if rp.edge.source in ctx.fork_stations:
             fork_groups[rp.edge.source].append(rp)
