@@ -587,10 +587,31 @@ def _equalize_fork_groups(
             if max(spacings) - min(spacings) < 0.01:
                 continue
 
-        # Compact to consecutive positions starting from the lowest track
-        base_track = tracks[group[0]]
+        # Distribute as signed offsets around an anchor so the column
+        # stays centred on the trunk feeding the fork.  Anchor key:
+        # most lines first (the in-column trunk), then closest to the
+        # mean predecessor track, then lowest current track.  Source
+        # columns (no predecessors) have no trunk to centre on, so the
+        # anchor falls to group[0] (the topmost station), keeping
+        # hidden hubs and exit ports at the section top rather than
+        # drifting to the column centre.
+        pred_tracks = [
+            tracks[p] for sid in group for p in G.predecessors(sid) if p in tracks
+        ]
+        if pred_tracks:
+            pred_mean = sum(pred_tracks) / len(pred_tracks)
+
+            def _anchor_key(sid: str) -> tuple:
+                t = tracks[sid]
+                return (-len(graph.station_lines(sid)), abs(t - pred_mean), t)
+
+            anchor_idx = min(range(len(group)), key=lambda i: _anchor_key(group[i]))
+        else:
+            anchor_idx = 0
+
+        anchor_track = tracks[group[anchor_idx]]
         for i, sid in enumerate(group):
-            tracks[sid] = base_track + i * line_gap
+            tracks[sid] = anchor_track + (i - anchor_idx) * line_gap
 
 
 def _reorder_by_span(graph: MetroGraph, line_order: list[str]) -> list[str]:
