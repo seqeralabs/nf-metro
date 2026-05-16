@@ -542,9 +542,7 @@ def _compute_section_layout(
     # empty top band so content sits symmetrically around the trunk.
     # Runs after re-centering and terminus-Y pinning so it sees the
     # final trunk Y.  U-turn-safe and bbox-bounded.
-    _balance_section_content_around_trunk(
-        graph, section_y_padding, y_spacing
-    )
+    _balance_section_content_around_trunk(graph, section_y_padding, y_spacing)
 
     # Phase 13j: Shrink rowspan / row-mate bboxes whose content moved
     # up after compact (e.g. ``_fan_source_inputs_upward`` lifted the
@@ -1757,18 +1755,17 @@ def _balance_section_content_around_trunk(
         return
 
     for section in graph.sections.values():
-        if (
-            section.bbox_h <= 0
-            or section.direction not in ("LR", "RL")
-        ):
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
         bundle = _section_bundle_lines(graph, section)
         if not bundle:
             continue
         port_set = set(section.entry_ports) | set(section.exit_ports)
         internal_ids = [
-            sid for sid in section.station_ids
-            if sid not in port_set and sid in graph.stations
+            sid
+            for sid in section.station_ids
+            if sid not in port_set
+            and sid in graph.stations
             and not graph.stations[sid].is_port
             and not graph.stations[sid].is_hidden
             and not graph.stations[sid].off_track
@@ -1785,7 +1782,8 @@ def _balance_section_content_around_trunk(
                 break
         if trunk_y is None:
             full_ys = sorted(
-                graph.stations[s].y for s in internal_ids
+                graph.stations[s].y
+                for s in internal_ids
                 if set(graph.station_lines(s)) == bundle
             )
             if not full_ys:
@@ -1803,10 +1801,7 @@ def _balance_section_content_around_trunk(
 
         movable: list[str] = []
         for x, sids in cols.items():
-            trunks_in_col = [
-                s for s in sids
-                if set(graph.station_lines(s)) == bundle
-            ]
+            trunks_in_col = [s for s in sids if set(graph.station_lines(s)) == bundle]
             if not trunks_in_col:
                 continue
             for s in sids:
@@ -1848,9 +1843,7 @@ def _balance_section_content_around_trunk(
 
         max_iters = len(movable)
         for _ in range(max_iters):
-            section_top_y = min(
-                graph.stations[s].y for s in internal_ids
-            )
+            section_top_y = min(graph.stations[s].y for s in internal_ids)
             top_band = section_top_y - section.bbox_y
             if top_band <= y_spacing + 0.5:
                 break
@@ -1859,9 +1852,7 @@ def _balance_section_content_around_trunk(
             below = [s for s, y in ys.items() if y > trunk_y + 0.5]
             if len(below) <= len(above):
                 break
-            line_sets = {
-                frozenset(graph.station_lines(s)) for s in movable
-            }
+            line_sets = {frozenset(graph.station_lines(s)) for s in movable}
             if len(line_sets) == 1:
                 below.sort(key=lambda s: graph.stations[s].y, reverse=True)
             else:
@@ -1871,7 +1862,10 @@ def _balance_section_content_around_trunk(
             st = graph.stations.get(candidate)
             has_above_label = bool(st and st.label and st.label.strip())
             label_clearance = y_spacing / 2 if has_above_label else 0.0
-            min_y = section.bbox_y + label_clearance
+            # Off-track file icons reach ~16 px above centre; on-track
+            # markers reach ~9.5 px.  Use the wider reach when relevant.
+            marker_clearance = 16.0 if (st and st.off_track) else 9.5
+            min_y = section.bbox_y + max(label_clearance, marker_clearance)
             if new_y < min_y - 0.5:
                 if not above:
                     break
@@ -1889,9 +1883,7 @@ def _balance_section_content_around_trunk(
             ext_feeders = _balance_direct_external_feeder_ys(
                 graph, candidate, section.id
             )
-            if len(ext_feeders) >= 2 and all(
-                fy >= new_y - 0.5 for fy in ext_feeders
-            ):
+            if len(ext_feeders) >= 2 and all(fy >= new_y - 0.5 for fy in ext_feeders):
                 break
             delta = new_y - graph.stations[candidate].y
             graph.stations[candidate].y = new_y

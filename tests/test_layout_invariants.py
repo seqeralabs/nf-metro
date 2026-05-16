@@ -520,10 +520,7 @@ def test_section_top_band_filled(fixture):
     graph = _layout(fixture, y_spacing=y_spacing)
 
     for section in graph.sections.values():
-        if (
-            section.bbox_h <= 0
-            or section.direction not in ("LR", "RL")
-        ):
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
         bundle = _section_full_bundle(graph, section)
         if not bundle:
@@ -567,10 +564,7 @@ def test_section_top_band_filled(fixture):
         movable_above = 0
         movable_below_candidates: list[str] = []
         for _x, sids in cols.items():
-            trunks_here = [
-                s for s in sids
-                if set(graph.station_lines(s)) == bundle
-            ]
+            trunks_here = [s for s in sids if set(graph.station_lines(s)) == bundle]
             if not trunks_here:
                 continue
             for s in sids:
@@ -592,11 +586,14 @@ def test_section_top_band_filled(fixture):
 
         target_y = top_y - y_spacing
         any_fits = any(
-            target_y >= section.bbox_y + (
+            target_y
+            >= section.bbox_y
+            + (
                 label_clearance
                 if graph.stations[s].label and graph.stations[s].label.strip()
                 else 0.0
-            ) - _Y_TOL
+            )
+            - _Y_TOL
             for s in movable_below_candidates
         )
         if not any_fits:
@@ -638,16 +635,14 @@ def test_section1_input_above_trunk(fixture):
 
     has_in: set[str] = {e.target for e in graph.edges}
     inputs = [
-        sid for sid in section.station_ids
+        sid
+        for sid in section.station_ids
         if sid not in port_ids
         and sid not in has_in
         and sid in graph.stations
         and not graph.stations[sid].is_port
     ]
-    inputs_above = [
-        sid for sid in inputs
-        if graph.stations[sid].y < trunk_y - _Y_TOL
-    ]
+    inputs_above = [sid for sid in inputs if graph.stations[sid].y < trunk_y - _Y_TOL]
     assert inputs_above, (
         f"data_prep: no input sits above trunk_y={trunk_y:.1f} "
         f"(inputs at y={[graph.stations[s].y for s in inputs]})"
