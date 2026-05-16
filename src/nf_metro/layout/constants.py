@@ -263,6 +263,36 @@ Theme.terminus_width default).
 ICON_INTER_GAP: float = 4.0
 """Gap between adjacent file icons when a station has multiple icons."""
 
+ICON_STACK_LABEL_CLEARANCE: float = 2.0
+"""Vertical clearance between a captioned file icon and the next icon below.
+
+Two vertically-adjacent file-input stations whose icons carry under-icon
+captions need enough Y spacing for the upper caption to clear the lower
+icon.  The required centre-to-centre gap is
+
+    2 * icon_half + caption_gap + caption_font_height + clearance
+
+where ``clearance`` is this constant - the small extra cushion so the
+caption text doesn't visually crash into the icon stroke."""
+
+ICON_HALF_HEIGHT: float = 16.0
+"""Half-height of a terminus file icon for layout calculations.
+
+Must stay in sync with ``Theme.terminus_height / 2`` (default 32 / 2 = 16)."""
+
+ICON_CAPTION_GAP: float = 4.0
+"""Gap between the bottom of a terminus icon and its name caption.
+
+Layout-side mirror of ``render.constants.ICON_NAME_GAP`` so spacing
+calculations don't depend on the render layer."""
+
+ICON_CAPTION_FONT_HEIGHT: float = FONT_HEIGHT * 0.6
+"""Approximate caption font height for layout spacing calculations.
+
+The render side draws under-icon captions at ``label_font_size *
+ICON_NAME_FONT_SCALE``; using ``FONT_HEIGHT`` as an upper-bound for
+the theme label_font_size keeps the calculation theme-agnostic."""
+
 TERMINUS_ICON_CLEARANCE: float = 58.0
 """Minimum clearance from terminus station center to section bbox edge.
 

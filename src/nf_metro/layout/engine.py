@@ -19,6 +19,10 @@ from nf_metro.layout.constants import (
     EXIT_GAP_MULTIPLIER,
     FONT_HEIGHT,
     GUARD_TOLERANCE,
+    ICON_CAPTION_FONT_HEIGHT,
+    ICON_CAPTION_GAP,
+    ICON_HALF_HEIGHT,
+    ICON_STACK_LABEL_CLEARANCE,
     JUNCTION_MARGIN,
     LABEL_BBOX_MARGIN,
     LABEL_LINE_HEIGHT,
@@ -716,6 +720,13 @@ def _compute_section_layout(
     # ``_tighten_lower_rows_after_shrink`` only closes slack (pulls
     # rows up); the inverse push happens here.
     _push_lower_rows_after_bbox_grow(graph, section_y_gap)
+
+    # Phase 13m: Pad vertical spacing between stacked file-input icons
+    # whose under-icon captions would otherwise overlap the next icon
+    # below.  The default ``y_spacing`` grid (40 px) is smaller than a
+    # captioned icon's vertical extent (~44 px), so columns of source
+    # inputs in DA-style sections need a slightly wider pitch.
+    _pad_stacked_captioned_file_icons(graph, y_spacing, section_y_padding)
 
     if validate:
         _guard_coordinates_finite(graph, "after Phase 12 (final)")
@@ -6429,3 +6440,143 @@ def _reanchor_off_track_to_consumer(
 
     if grew:
         _shift_graph_into_canvas(graph, section_y_padding)
+
+
+def _required_captioned_icon_pitch(y_spacing: float) -> float:
+    """Minimum centre-to-centre Y gap between two captioned file icons.
+
+    Stacked file-input stations carrying under-icon captions need enough
+    Y separation for the upper caption text to clear the lower icon's
+    top edge.  The required pitch is
+
+        2 * icon_half + caption_gap + caption_font_height + clearance
+
+    floored at ``y_spacing`` so the existing grid pitch is honoured when
+    captions are short.
+    """
+    pitch = (
+        2 * ICON_HALF_HEIGHT
+        + ICON_CAPTION_GAP
+        + ICON_CAPTION_FONT_HEIGHT
+        + ICON_STACK_LABEL_CLEARANCE
+    )
+    return max(pitch, y_spacing)
+
+
+def _has_under_icon_caption(station: Station) -> bool:
+    """True if a terminus station renders a name caption under its icon."""
+    if not station.is_terminus:
+        return False
+    names = station.terminus_names or []
+    return any(bool(n) for n in names)
+
+
+def _pad_stacked_captioned_file_icons(
+    graph: MetroGraph,
+    y_spacing: float,
+    section_y_padding: float,
+) -> None:
+    """Pad vertical spacing between stacked file-input icons with captions.
+
+    The default station pitch (``y_spacing`` ~ 40 px) is smaller than the
+    extent of a captioned file icon (icon height 32 + caption gap 4 +
+    caption font ~8 = 44 px).  Two adjacent file-input stations in the
+    same column then have their upper caption visually crash into the
+    lower icon's top edge.
+
+    For each LR/RL section, find all internal source/terminus stations
+    with under-icon captions, group by column, sort each column by Y,
+    and walk pairs from top to bottom: when the gap is below the
+    required pitch, shift the lower station (and its linear consumer
+    chain inside the section) downward by the deficit so the chain's
+    horizontal alignment with the trunk row is preserved.  Cumulative
+    shifts propagate to subsequent stations in the column.
+
+    Grows the section bbox downward as needed so the displaced station
+    stays inside the section's padding zone.  Sections below in the
+    same grid layout are nudged down to keep clearance.
+    """
+    if not graph.sections:
+        return
+
+    pitch = _required_captioned_icon_pitch(y_spacing)
+    if pitch <= y_spacing + 0.5:
+        return
+
+    in_edges: dict[str, set[str]] = {}
+    out_edges: dict[str, set[str]] = {}
+    for e in graph.edges:
+        in_edges.setdefault(e.target, set()).add(e.source)
+        out_edges.setdefault(e.source, set()).add(e.target)
+
+    junction_ids = set(graph.junctions)
+    grew_sections: list[Section] = []
+
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        internal_ids = [
+            sid
+            for sid in section.station_ids
+            if sid in graph.stations
+            and not graph.stations[sid].is_port
+            and sid not in junction_ids
+        ]
+        if not internal_ids:
+            continue
+        internal_set = set(internal_ids)
+
+        # Group captioned terminus stations by column (rounded X).
+        cols: dict[float, list[str]] = defaultdict(list)
+        for sid in internal_ids:
+            st = graph.stations[sid]
+            if _has_under_icon_caption(st):
+                cols[round(st.x, 1)].append(sid)
+
+        def _shift_chain(src: str, delta: float) -> None:
+            cur = src
+            src_lines = set(graph.station_lines(src))
+            visited: set[str] = {src}
+            while True:
+                outs = out_edges.get(cur, set())
+                if len(outs) != 1:
+                    break
+                nxt = next(iter(outs))
+                if nxt in visited or nxt not in internal_set:
+                    break
+                if len(in_edges.get(nxt, set())) != 1:
+                    break
+                if set(graph.station_lines(nxt)) != src_lines:
+                    break
+                graph.stations[nxt].y += delta
+                visited.add(nxt)
+                cur = nxt
+
+        section_grew = False
+        for col_sids in cols.values():
+            if len(col_sids) < 2:
+                continue
+            col_sids.sort(key=lambda s: graph.stations[s].y)
+            for i in range(1, len(col_sids)):
+                upper = graph.stations[col_sids[i - 1]]
+                lower = graph.stations[col_sids[i]]
+                gap = lower.y - upper.y
+                deficit = pitch - gap
+                if deficit <= 0.5:
+                    continue
+                lower.y += deficit
+                _shift_chain(col_sids[i], deficit)
+                # Grow bbox if the shifted icon would now sit past the
+                # section's bottom padding line.
+                icon_bot = lower.y + ICON_HALF_HEIGHT
+                needed_bbox_bot = icon_bot + section_y_padding
+                cur_bbox_bot = section.bbox_y + section.bbox_h
+                if needed_bbox_bot > cur_bbox_bot:
+                    section.bbox_h = needed_bbox_bot - section.bbox_y
+                    section_grew = True
+
+        if section_grew:
+            grew_sections.append(section)
+
+    if grew_sections:
+        _push_lower_rows_after_bbox_grow(graph, SECTION_Y_GAP)

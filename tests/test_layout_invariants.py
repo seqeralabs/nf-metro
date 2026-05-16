@@ -283,6 +283,82 @@ def test_off_track_inputs_above_consumer(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Stacked file-input icons leave room for under-icon captions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "example",
+    ["differentialabundance.mmd", "differentialabundance_default.mmd"],
+)
+def test_stacked_file_icons_label_clearance(example):
+    """Two vertically-adjacent file-input stations sharing a column must
+    sit far enough apart that the upper station's under-icon caption
+    doesn't crash into the top edge of the lower icon.
+
+    The default station pitch (``y_spacing`` ~ 40 px) is shorter than
+    the captioned icon's vertical extent (~icon_height + caption_gap +
+    caption_font_height = 32 + 4 + ~8 = 44 px).  Catches the regression
+    where stacked source inputs in DA section 1 (Samples/Contrasts,
+    Matrix, GTF, CEL, MaxQuant, GEO ID) have their captions visibly
+    overlapping the next icon.
+    """
+    from nf_metro.layout.constants import (
+        ICON_CAPTION_FONT_HEIGHT,
+        ICON_CAPTION_GAP,
+        ICON_HALF_HEIGHT,
+        ICON_STACK_LABEL_CLEARANCE,
+    )
+
+    required_pitch = (
+        2 * ICON_HALF_HEIGHT
+        + ICON_CAPTION_GAP
+        + ICON_CAPTION_FONT_HEIGHT
+        + ICON_STACK_LABEL_CLEARANCE
+    )
+
+    graph = _layout_example(example)
+    junction_ids = set(graph.junctions)
+
+    def _has_caption(station) -> bool:
+        if not station.is_terminus:
+            return False
+        return any(bool(n) for n in (station.terminus_names or []))
+
+    # Group captioned terminus stations by section + column.
+    by_col: dict[tuple[str, float], list[str]] = defaultdict(list)
+    for sid, st in graph.stations.items():
+        if (
+            st.is_port
+            or sid in junction_ids
+            or st.section_id is None
+            or not _has_caption(st)
+        ):
+            continue
+        by_col[(st.section_id, round(st.x, 1))].append(sid)
+
+    tested = False
+    for (sec_id, col_x), sids in by_col.items():
+        if len(sids) < 2:
+            continue
+        tested = True
+        sids.sort(key=lambda s: graph.stations[s].y)
+        for upper_id, lower_id in zip(sids, sids[1:]):
+            upper = graph.stations[upper_id]
+            lower = graph.stations[lower_id]
+            gap = lower.y - upper.y
+            assert gap + _Y_TOL >= required_pitch, (
+                f"{example} section {sec_id} col x={col_x}: "
+                f"file-icon pair {upper_id} (y={upper.y}) -> "
+                f"{lower_id} (y={lower.y}) gap={gap:.2f} px "
+                f"< required {required_pitch:.2f} px "
+                f"(2*icon_half + caption_gap + caption_font + clearance)"
+            )
+
+    assert tested, f"{example}: no captioned file-icon column with two icons"
+
+
+# ---------------------------------------------------------------------------
 # Off-track icons ordered top-to-bottom by their consumer Y
 # ---------------------------------------------------------------------------
 
