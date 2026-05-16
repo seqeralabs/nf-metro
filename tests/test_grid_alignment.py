@@ -395,14 +395,8 @@ class TestInterSectionPortSnap:
         )
         g = parse_metro_mermaid(mmd)
         compute_layout(g)
-        a_exit = next(
-            g.stations[pid]
-            for pid in g.sections["a"].exit_ports
-        )
-        b_entry = next(
-            g.stations[pid]
-            for pid in g.sections["b"].entry_ports
-        )
+        a_exit = next(g.stations[pid] for pid in g.sections["a"].exit_ports)
+        b_entry = next(g.stations[pid] for pid in g.sections["b"].entry_ports)
         assert abs(a_exit.y - b_entry.y) < 1.0, (
             f"a exit y={a_exit.y} != b entry y={b_entry.y}"
         )
