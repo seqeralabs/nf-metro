@@ -1827,33 +1827,20 @@ def _route_diagonal(
     is_fork_flag = edge.source in ctx.fork_stations and not is_side_branch
     is_join_flag = edge.target in ctx.join_stations or is_side_branch
 
-    # Bypass virtual stations: concentrate the diagonal near V so the
-    # bypass hop only spans V's column instead of routing parallel for
-    # the whole section.  P -> V biases toward V (join); V -> T biases
-    # from V (fork).  Without this, P fork-bias pushes the diagonal
-    # next to P and the bypass line runs parallel below the trunk for
-    # the entire span between P and T.
-    #
-    # The V-side flat must be at least ``CURVE_RADIUS +
-    # MIN_STATION_FLAT_LENGTH`` so that, after the corner curve consumes
-    # ``CURVE_RADIUS`` pixels of the flat, a visible horizontal segment
-    # of ``MIN_STATION_FLAT_LENGTH`` pixels remains on each side of V.
-    # The two halves (P -> V's tgt_min and V -> T's src_min) use the
-    # same value so the U at V stays symmetric.  If horizontal room
-    # between the real endpoint and V is too narrow to also fit the
-    # diagonal_run and the far-end minimum, fall back to
-    # ``MIN_STRAIGHT_EDGE`` to preserve the diagonal.
-    v_flat = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH
+    # Bypass-V edges: bias the diagonal toward V on both halves with
+    # equal V-side flat reservations so V sits at the centre of the
+    # straight segment of the bypass loop.
+    v_flat_half = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
     if tgt.is_hidden and edge.target.startswith("__bypass_"):
         is_fork_flag = False
         is_join_flag = True
-        tgt_min = v_flat
+        tgt_min = v_flat_half
         if src_min + tgt_min + ctx.diagonal_run > abs(dx):
             tgt_min = MIN_STRAIGHT_EDGE
     elif src.is_hidden and edge.source.startswith("__bypass_"):
         is_fork_flag = True
         is_join_flag = False
-        src_min = v_flat
+        src_min = v_flat_half
         if src_min + tgt_min + ctx.diagonal_run > abs(dx):
             src_min = MIN_STRAIGHT_EDGE
 
