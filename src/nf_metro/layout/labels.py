@@ -707,7 +707,10 @@ def place_labels(
 
 
 def _segment_intersects_bbox(
-    x1: float, y1: float, x2: float, y2: float,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
     bbox: tuple[float, float, float, float],
 ) -> bool:
     """Liang-Barsky test: True iff segment touches/crosses *bbox*."""
@@ -718,8 +721,12 @@ def _segment_intersects_bbox(
         return False
     dx, dy = x2 - x1, y2 - y1
     t_min, t_max = 0.0, 1.0
-    for p, q in ((-dx, x1 - bx_min), (dx, bx_max - x1),
-                 (-dy, y1 - by_min), (dy, by_max - y1)):
+    for p, q in (
+        (-dx, x1 - bx_min),
+        (dx, bx_max - x1),
+        (-dy, y1 - by_min),
+        (dy, by_max - y1),
+    ):
         if abs(p) < 1e-9:
             if q < 0:
                 return False
@@ -791,14 +798,20 @@ def _avoid_diagonal_routes(
         if placement.above:
             gap = max((station.y + min_off) - placement.y, LABEL_OFFSET)
             trial = LabelPlacement(
-                station_id=placement.station_id, text=placement.text,
-                x=placement.x, y=station.y + max_off + gap, above=False,
+                station_id=placement.station_id,
+                text=placement.text,
+                x=placement.x,
+                y=station.y + max_off + gap,
+                above=False,
             )
         else:
             gap = max(placement.y - (station.y + max_off), LABEL_OFFSET)
             trial = LabelPlacement(
-                station_id=placement.station_id, text=placement.text,
-                x=placement.x, y=station.y + min_off - gap, above=True,
+                station_id=placement.station_id,
+                text=placement.text,
+                x=placement.x,
+                y=station.y + min_off - gap,
+                above=True,
             )
         siblings = [p for p in placements if p is not placement]
         if _has_collision(trial, siblings) or hits(_label_bbox(trial)):
