@@ -28,6 +28,15 @@ X_SPACING: float = 60.0
 Y_SPACING: float = 40.0
 """Vertical spacing between tracks."""
 
+MIN_Y_SPACING_FLOOR: float = 30.0
+"""Floor for auto-computed y_spacing.
+
+When ``compute_layout`` is called without an explicit ``y_spacing`` it
+calls ``compute_min_y_spacing`` to widen the grid for content-rich maps
+(captioned file icons, dense labels).  The result is clamped to at
+least this floor so simple maps don't collapse to an unreadably tight
+grid."""
+
 X_OFFSET: float = 80.0
 """Left padding from canvas edge to first layer."""
 

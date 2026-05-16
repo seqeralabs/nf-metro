@@ -45,8 +45,9 @@ def cli() -> None:
 @click.option(
     "--y-spacing",
     type=float,
-    default=40.0,
-    help="Vertical spacing between tracks (default: 40)",
+    default=None,
+    help="Vertical spacing between tracks (default: auto - derived from "
+    "the map's content so captioned icons and dense labels don't collide)",
 )
 @click.option(
     "--max-layers-per-row",
@@ -121,7 +122,7 @@ def render(
     width: int | None,
     height: int | None,
     x_spacing: float,
-    y_spacing: float,
+    y_spacing: float | None,
     max_layers_per_row: int | None,
     animate: bool,
     debug: bool,

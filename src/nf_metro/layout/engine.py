@@ -5,13 +5,14 @@ Section-first layout: sections are laid out independently, then placed on a meta
 
 from __future__ import annotations
 
-__all__ = ["PhaseInvariantError", "compute_layout"]
+__all__ = ["PhaseInvariantError", "compute_layout", "compute_min_y_spacing"]
 
 import math
 from collections import Counter, defaultdict
 
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
+    DESCENDER_CLEARANCE,
     DIAGONAL_RUN,
     ENTRY_SHIFT_LR,
     ENTRY_SHIFT_TB,
@@ -34,6 +35,7 @@ from nf_metro.layout.constants import (
     MIN_PORT_STATION_GAP,
     MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
+    MIN_Y_SPACING_FLOOR,
     OFFSET_STEP,
     ROW_GAP,
     SECTION_GAP,
@@ -272,10 +274,82 @@ def _guard_no_line_crosses_non_consumer(graph: MetroGraph, phase: str) -> None:
                     )
 
 
+def compute_min_y_spacing(
+    graph: MetroGraph, floor: float = MIN_Y_SPACING_FLOOR
+) -> float:
+    """Return the minimum global ``y_spacing`` the graph's content needs.
+
+    Scans every LR/RL section and asks, for any pair of stations that
+    could land in vertically-adjacent grid slots in the same column:
+    what centre-to-centre pitch is needed for their labels / captioned
+    file icons not to collide?
+
+    The four worst-case vertical extents considered are:
+
+    * captioned file-icon below the marker: ``ICON_HALF_HEIGHT +
+      ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT``
+    * captioned file-icon above the marker: ``ICON_HALF_HEIGHT``
+    * labeled station, label below: ``LABEL_OFFSET + FONT_HEIGHT +
+      DESCENDER_CLEARANCE``
+    * labeled station, label above: ``LABEL_OFFSET + FONT_HEIGHT +
+      DESCENDER_CLEARANCE``
+
+    Required pitch for two stacked elements is
+    ``upper.below_extent + lower.above_extent +
+    ICON_STACK_LABEL_CLEARANCE``.  We take the worst case across all
+    candidate pairs in every LR/RL section, then clamp to ``floor`` so
+    a label-light graph stays at the historical 30-40 px pitch.
+
+    Label-only stations alternate above/below within a column at the
+    default pitch, so they're not the binding constraint on their own.
+    Captioned file icons can't alternate (caption placement is fixed
+    under the icon), so the widening fires when icons enter the mix.
+
+    The result is applied uniformly to the whole render -- the grid
+    stays global, no per-section overrides.
+    """
+    icon_below = ICON_HALF_HEIGHT + ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT
+    icon_above = ICON_HALF_HEIGHT
+    label_extent = LABEL_OFFSET + FONT_HEIGHT + DESCENDER_CLEARANCE
+    clearance = ICON_STACK_LABEL_CLEARANCE
+
+    pitch_icon_icon = icon_above + icon_below + clearance
+    pitch_icon_over_label = icon_below + label_extent + clearance
+    pitch_label_over_icon = label_extent + icon_above + clearance
+
+    required = floor
+    if not graph.sections:
+        return required
+
+    for section in graph.sections.values():
+        if section.direction not in ("LR", "RL"):
+            continue
+        captioned = 0
+        labeled = 0
+        for sid in section.station_ids:
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            has_caption = st.is_terminus and any(
+                bool(n) for n in (st.terminus_names or [])
+            )
+            has_label = bool(st.label) and not st.is_terminus
+            if has_caption:
+                captioned += 1
+            elif has_label:
+                labeled += 1
+        if captioned >= 2:
+            required = max(required, pitch_icon_icon)
+        if captioned >= 1 and labeled >= 1:
+            required = max(required, pitch_icon_over_label, pitch_label_over_icon)
+
+    return required
+
+
 def compute_layout(
     graph: MetroGraph,
     x_spacing: float = X_SPACING,
-    y_spacing: float = Y_SPACING,
+    y_spacing: float | None = None,
     x_offset: float = X_OFFSET,
     y_offset: float = Y_OFFSET,
     row_gap: float = ROW_GAP,
@@ -288,10 +362,17 @@ def compute_layout(
 ) -> None:
     """Compute layout positions for all stations in the graph.
 
+    When ``y_spacing`` is ``None`` (the default) it is derived from the
+    graph's content via ``compute_min_y_spacing`` so renders adapt to
+    captioned icons and labelled stations automatically.  Pass an
+    explicit numeric value to override.
+
     When *validate* is True, phase-boundary invariant checks run after
     key phases.  Violations raise ``PhaseInvariantError`` instead of
     silently producing broken layouts.
     """
+    if y_spacing is None:
+        y_spacing = compute_min_y_spacing(graph)
     # Optionally reorder lines by section span before layout.
     # Must happen here (on the full graph) before section subgraphs are
     # built, since subgraphs share graph.lines via reference.

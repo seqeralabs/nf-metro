@@ -2033,3 +2033,89 @@ def test_row_gap_accommodates_bypass(fixture):
         f"{fixture}: row gap must be >= section_y_gap for every "
         f"column-overlapping pair: " + "; ".join(offenders)
     )
+
+
+# ---------------------------------------------------------------------------
+# Auto y_spacing must fit the worst-case content in every LR/RL section
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "example",
+    [
+        "differentialabundance.mmd",
+        "differentialabundance_default.mmd",
+        "rnaseq_auto.mmd",
+        "rnaseq_sections.mmd",
+        "variantprioritization.mmd",
+        "genomeassembly.mmd",
+    ],
+)
+def test_auto_y_spacing_fits_content(example):
+    """With the engine's auto-derived ``y_spacing``, no two on-track
+    stations in the same LR/RL section column may stack tighter than the
+    chosen pitch.
+
+    Captioned file-icon stations sit at fixed offsets relative to their
+    station marker (caption below the icon, icon centred on the marker)
+    so the row pitch must accommodate the worst stacking case; the
+    invariant fails if any captioned station's caption would overlap
+    the next station's icon or label.
+
+    Also verifies that ``compute_min_y_spacing`` is not below the floor
+    and that the historical default-content cases (small simple maps)
+    don't widen unnecessarily.
+    """
+    from nf_metro.layout.constants import MIN_Y_SPACING_FLOOR
+    from nf_metro.layout.engine import compute_min_y_spacing
+
+    graph = _layout_example(example)  # y_spacing=None -> auto
+
+    y_spacing = compute_min_y_spacing(graph)
+    assert y_spacing >= MIN_Y_SPACING_FLOOR, (
+        f"{example}: auto y_spacing {y_spacing:.2f} below floor {MIN_Y_SPACING_FLOOR}"
+    )
+
+    # No two on-track stations in the same section column may sit
+    # tighter than the chosen pitch.
+    port_ids: set[str] = set()
+    for sec in graph.sections.values():
+        port_ids.update(sec.entry_ports)
+        port_ids.update(sec.exit_ports)
+    junction_ids = set(graph.junctions)
+
+    by_section_x: dict[tuple[str, float], list[tuple[float, str]]] = defaultdict(list)
+    for sid, st in graph.stations.items():
+        if (
+            st.is_port
+            or st.is_hidden
+            or st.off_track
+            or sid in port_ids
+            or sid in junction_ids
+            or st.section_id is None
+        ):
+            continue
+        sec = graph.sections.get(st.section_id)
+        if sec is None or sec.direction not in ("LR", "RL"):
+            continue
+        by_section_x[(st.section_id, round(st.x, 1))].append((st.y, sid))
+
+    tol = 1.0
+    offenders: list[str] = []
+    for (sec_id, xx), entries in by_section_x.items():
+        entries.sort()
+        for i in range(len(entries) - 1):
+            y1, s1 = entries[i]
+            y2, s2 = entries[i + 1]
+            gap = y2 - y1
+            if gap + tol < y_spacing:
+                offenders.append(
+                    f"sec={sec_id} x={xx} {s1}@{y1:.1f} -> {s2}@{y2:.1f} "
+                    f"gap={gap:.2f} < y_spacing={y_spacing:.2f}"
+                )
+
+    assert not offenders, (
+        f"{example}: stations stacked tighter than auto y_spacing "
+        f"({y_spacing:.2f}); each pair would risk caption/label "
+        f"overlap: " + "; ".join(offenders)
+    )
