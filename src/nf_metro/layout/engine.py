@@ -141,46 +141,37 @@ def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
 
 
 def _station_marker_bbox(
-    graph: MetroGraph, sid: str, offsets: dict | None = None, radius: float = 5.0
+    graph: MetroGraph,
+    sid: str,
+    offsets: dict | None = None,
+    radius: float = STATION_RADIUS_APPROX,
 ) -> tuple[float, float, float, float] | None:
-    """Compute the rendered marker / icon bbox for ``sid``.
+    """Rendered marker / icon bbox for ``sid``, or ``None`` for ports,
+    hidden stations, and junctions.
 
-    Mirrors the renderer in ``nf_metro.render.svg``: each on-track and
-    off-track station gets a pill of width ``2 * radius`` and height
-    ``span + 2 * radius`` (span = max line offset - min line offset),
-    centred at ``(station.x, station.y + (min_off + max_off) / 2)``.
-
-    Returns ``(x_min, y_min, x_max, y_max)`` or ``None`` for stations
-    that have no rendered marker (ports, hidden nodes, junctions).
+    Mirrors the pill geometry used by ``nf_metro.render.svg``: width
+    ``2 * radius``, height ``(max_off - min_off) + 2 * radius``, centred
+    at ``(station.x, station.y + (min_off + max_off) / 2)``.
     """
     from nf_metro.layout.routing import compute_station_offsets
 
     st = graph.stations.get(sid)
-    if st is None or st.is_port or st.is_hidden:
-        return None
-    if sid in graph.junctions:
+    if st is None or st.is_port or st.is_hidden or sid in graph.junctions:
         return None
     if offsets is None:
         offsets = compute_station_offsets(graph)
-    line_offs = [offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)]
-    if not line_offs:
-        line_offs = [0.0]
+    line_offs = [
+        offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)
+    ] or [0.0]
     min_off, max_off = min(line_offs), max(line_offs)
     cy = st.y + (min_off + max_off) / 2
-    w = 2 * radius
-    h = (max_off - min_off) + 2 * radius
-    return (st.x - w / 2, cy - h / 2, st.x + w / 2, cy + h / 2)
+    half_h = (max_off - min_off) / 2 + radius
+    return (st.x - radius, cy - half_h, st.x + radius, cy + half_h)
 
 
 def _guard_no_station_overlap(graph: MetroGraph, phase: str) -> None:
-    """Final-phase: no two station markers (incl. off-track file icons)
-    may overlap at render time.
-
-    A collision between markers / icons produces an unreadable rendering
-    where one station hides another.  Catches the regression where the
-    auto-balance pass lifts an internal station into a slot already
-    occupied by an off-track input icon.
-    """
+    """Final-phase: no two station marker bboxes may overlap at render
+    time, else one station hides another in the SVG."""
     from nf_metro.layout.routing import compute_station_offsets
 
     offsets = compute_station_offsets(graph)
@@ -1902,10 +1893,9 @@ def _balance_section_content_around_trunk(
                 graph.stations[nxt].y += delta
                 cur = nxt
 
-        # Collect the Y of every other station in the section (including
-        # off-track inputs whose icons reserve a grid slot).  The lift
-        # target column must avoid these Ys or the lifted marker overlaps
-        # an existing marker / file icon at render time.
+        # Ys of every other station (incl. off-track icons) at ``col_x``.
+        # Lift candidates must avoid these slots or the lifted marker
+        # overlaps an existing marker / icon at render time.
         def _column_occupied_ys(col_x: float, skip_sid: str) -> list[float]:
             occ: list[float] = []
             for sid2 in section.station_ids:
@@ -1935,12 +1925,8 @@ def _balance_section_content_around_trunk(
                 below.sort(key=lambda s: graph.stations[s].y, reverse=True)
             else:
                 below.sort(key=lambda s: graph.stations[s].y)
-            # Find the first below-trunk candidate whose lift Y does
-            # not collide with another station/icon already occupying
-            # the same column at the lift target.  Off-track icons
-            # placed by ``_lift_off_track_stations`` reserve a slot
-            # in their column (e.g. ``gmt_in`` at the top of section
-            # 3) and the auto-balance must respect that.
+            # First below-trunk candidate whose lift Y doesn't collide
+            # with another station/icon already occupying the same column.
             candidate = None
             new_y = section_top_y - y_spacing
             for cand in below:

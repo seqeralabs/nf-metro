@@ -713,35 +713,18 @@ def test_terminus_not_directly_after_diagonal(fixture):
     "fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"]
 )
 def test_no_station_or_icon_overlap(fixture):
-    """No two station markers (incl. off-track file icons) may share a
-    bounding-box footprint.  Each station / off-track input renders a
-    pill-shaped marker centred at ``(station.x, station.y + offset_mid)``;
-    if two such pills overlap, the rendered SVG shows one station hidden
-    behind another - the v106 regression where the auto-balance pass
-    lifted ``grea`` into the slot already occupied by the off-track
-    ``gmt_in`` icon in section 3 (Functional enrichment).
+    """No two station marker bboxes (including off-track file icons)
+    may overlap; otherwise one station hides another in the rendered
+    SVG."""
+    from nf_metro.layout.engine import _station_marker_bbox
 
-    Iterates every pair of station marker bboxes and asserts they do
-    not overlap (sub-pixel tolerance).
-    """
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
-    radius = 5.0  # matches nfcore theme station_radius; pill width = 10px
-    junction_ids = set(graph.junctions)
     boxes: list[tuple[str, tuple[float, float, float, float]]] = []
-    for sid, st in graph.stations.items():
-        if st.is_port or st.is_hidden or sid in junction_ids:
-            continue
-        line_offs = [
-            offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)
-        ] or [0.0]
-        min_off, max_off = min(line_offs), max(line_offs)
-        cy = st.y + (min_off + max_off) / 2
-        w = 2 * radius
-        h = (max_off - min_off) + 2 * radius
-        boxes.append(
-            (sid, (st.x - w / 2, cy - h / 2, st.x + w / 2, cy + h / 2))
-        )
+    for sid in graph.stations:
+        b = _station_marker_bbox(graph, sid, offsets=offsets)
+        if b is not None:
+            boxes.append((sid, b))
 
     tol = 0.5
     for i, (s1, (x1, y1, X1, Y1)) in enumerate(boxes):
