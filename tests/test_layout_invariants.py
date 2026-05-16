@@ -25,17 +25,61 @@ from nf_metro.parser.model import MetroGraph, PortSide
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Tolerance for "same Y" assertions.  The grid pitch defaults to 55px;
 # 1px slack absorbs sub-pixel rounding from fan-recenter phases.
 _Y_TOL = 1.0
 
 
+def _resolve_fixture(name: str) -> Path:
+    """Resolve a fixture name to a concrete .mmd path.
+
+    Accepts:
+      - bare basenames (legacy: ``da_pipeline.mmd``) which resolve under
+        ``tests/fixtures/`` for backwards compatibility, then fall back
+        to ``examples/`` and its subdirs.
+      - paths relative to either ``tests/fixtures/`` or ``examples/``
+        (e.g. ``topologies/upward_bypass.mmd``).
+      - paths relative to the repo root.
+    """
+    p = Path(name)
+    candidates = [
+        FIXTURES / p,
+        EXAMPLES / p,
+        EXAMPLES / "topologies" / p,
+        EXAMPLES / "guide" / p,
+        FIXTURES / "topologies" / p,
+        REPO_ROOT / p,
+    ]
+    for c in candidates:
+        if c.is_file():
+            return c
+    raise FileNotFoundError(
+        f"Could not find fixture {name!r} under tests/fixtures or examples"
+    )
+
+
 def _layout(fixture: str, **kwargs) -> MetroGraph:
-    """Parse a fixture file and run the full layout pipeline."""
-    text = (FIXTURES / fixture).read_text()
+    """Parse a fixture file and run the full layout pipeline.
+
+    ``fixture`` may be a name under ``tests/fixtures/`` (legacy) or a
+    name under ``examples/`` and its subdirs (``topologies/``, ``guide/``).
+    Pass ``center_ports=False`` to opt out of the centre-ports default
+    that the older fixtures relied on; tests over the full example
+    corpus should not override it because example files declare the
+    directive directly.
+    """
+    path = _resolve_fixture(fixture)
+    text = path.read_text()
     graph = parse_metro_mermaid(text)
-    graph.center_ports = True
+    # Legacy fixtures under tests/fixtures/ were authored before the
+    # parser parsed center_ports directly; preserve their implicit
+    # center_ports=True default.  Examples set the directive in-file.
+    if path.is_relative_to(FIXTURES) and "center_ports" not in kwargs:
+        graph.center_ports = True
+    elif "center_ports" in kwargs:
+        graph.center_ports = kwargs.pop("center_ports")
     compute_layout(graph, **kwargs)
     return graph
 
@@ -46,6 +90,209 @@ def _layout_example(name: str, **kwargs) -> MetroGraph:
     graph = parse_metro_mermaid(text)
     compute_layout(graph, **kwargs)
     return graph
+
+
+# ---------------------------------------------------------------------------
+# Fixture discovery helpers for full-corpus parametrization
+# ---------------------------------------------------------------------------
+
+
+def _discover_fixtures() -> list[str]:
+    """Return all ``%%metro``-format .mmd files under tests/fixtures and
+    examples, addressable via :func:`_resolve_fixture`.
+
+    Excludes Nextflow-format flowcharts under ``tests/fixtures/nextflow/``
+    (those are parser inputs, not layout inputs) and any file lacking a
+    ``%%metro`` directive.
+    """
+    roots = [
+        (FIXTURES, ""),
+        (FIXTURES / "topologies", "topologies/"),
+        (EXAMPLES, ""),
+        (EXAMPLES / "topologies", "topologies/"),
+        (EXAMPLES / "guide", "guide/"),
+    ]
+    seen: set[str] = set()
+    result: list[str] = []
+    for root, prefix in roots:
+        if not root.exists():
+            continue
+        for p in sorted(root.glob("*.mmd")):
+            text = p.read_text(errors="ignore")
+            if "%%metro" not in text:
+                continue
+            # Address all examples paths through the ``examples`` resolver
+            # without the leading ``examples/`` so tests can pick up either
+            # the legacy fixtures or the examples corpus uniformly.
+            rel = prefix + p.name
+            if rel in seen:
+                continue
+            seen.add(rel)
+            result.append(rel)
+    return result
+
+
+ALL_FIXTURES = _discover_fixtures()
+
+
+def _fixture_text(name: str) -> str:
+    """Return raw text of a fixture for precondition filtering."""
+    return _resolve_fixture(name).read_text()
+
+
+def _fixtures_with(predicate) -> list[str]:
+    """Return the subset of ``ALL_FIXTURES`` for which ``predicate(text)``
+    is truthy.  Used to narrow parametrization to fixtures that satisfy
+    an invariant's precondition (e.g. fixtures declaring off-track inputs).
+    """
+    return [f for f in ALL_FIXTURES if predicate(_fixture_text(f))]
+
+
+_FIXTURES_WITH_OFF_TRACK = _fixtures_with(lambda t: "off_track:" in t)
+_FIXTURES_MULTI_SECTION = _fixtures_with(lambda t: t.count("subgraph") >= 2)
+
+
+def _fixtures_with_bypass() -> list[str]:
+    """Return fixtures whose layout produces at least one ``__bypass_``
+    hidden virtual station.  Computed by running layout once per fixture
+    at import time; cached at module level so the test parametrization
+    doesn't repeat the work.
+    """
+    out: list[str] = []
+    for name in ALL_FIXTURES:
+        try:
+            g = _layout(name)
+        except Exception:
+            continue
+        if any(
+            st.is_hidden and sid.startswith("__bypass_")
+            for sid, st in g.stations.items()
+        ):
+            out.append(name)
+    return out
+
+
+_FIXTURES_WITH_BYPASS = _fixtures_with_bypass()
+
+
+# Pre-existing layout regressions surfaced by parametrizing single-fixture
+# invariants over the full corpus.  Each entry pins a fixture/invariant
+# pair as ``xfail(strict=False)`` so the bug is documented in code while
+# the coverage extension still ships green.  When the underlying bug is
+# fixed the entry becomes XPASS and can be removed.
+_XFAIL_KEY = "xfail"
+
+
+def _fp(name: str, fail_reason: str | None = None):
+    """Return a ``pytest.param`` for ``name`` with optional xfail marker."""
+    if fail_reason is None:
+        return pytest.param(name, id=name)
+    return pytest.param(
+        name, id=name, marks=pytest.mark.xfail(reason=fail_reason, strict=False)
+    )
+
+
+def _params_with_xfails(fixtures: list[str], xfails: dict[str, str]) -> list:
+    """Return a parametrize list mixing plain fixtures and xfail-marked ones."""
+    return [_fp(f, xfails.get(f)) for f in fixtures]
+
+
+# Fixture entries known to fail ``test_row_trunk_marker_cy_consistent``
+# because the row-bundle trunk Y drifts between sections in the same row.
+# Surfaced by the cross-corpus parametrization; tracked separately from
+# this coverage PR.  See nf-metro audit /tmp/invariant-audit.md item 1.
+_XFAIL_ROW_TRUNK_CY: dict[str, str] = {
+    "topologies/asymmetric_tree.mmd": "row trunk cy drift across sections",
+    "topologies/complex_multipath.mmd": "row trunk cy drift across sections",
+    "topologies/fan_in_merge.mmd": "row trunk cy drift across sections",
+    "topologies/fold_fan_across.mmd": "row trunk cy drift across sections",
+    "topologies/fold_stacked_branch.mmd": "row trunk cy drift across sections",
+    "topologies/mixed_port_sides.mmd": "row trunk cy drift across sections",
+    "topologies/rnaseq_lite.mmd": "row trunk cy drift across sections",
+    "topologies/section_diamond.mmd": "row trunk cy drift across sections",
+    "topologies/upward_bypass.mmd": "row trunk cy drift across sections",
+    "topologies/variant_calling.mmd": "row trunk cy drift across sections",
+    "topologies/wide_fan_in.mmd": "row trunk cy drift across sections",
+    "topologies/wide_fan_out.mmd": "row trunk cy drift across sections",
+    "variant_calling.mmd": "row trunk cy drift across sections (issue #317)",
+    "variant_calling_tuned.mmd": "row trunk cy drift across sections (issue #317)",
+    "variantbenchmarking.mmd": "row trunk cy drift across sections (issue #317)",
+    "variantbenchmarking_auto.mmd": "row trunk cy drift across sections (issue #317)",
+    "variantprioritization.mmd": "row trunk cy drift across sections",
+    "guide/02_sections.mmd": "row trunk cy 1.5px drift",
+    "guide/03_fan_out.mmd": "row trunk cy drift",
+    "guide/03b_fan_in_merge.mmd": "row trunk cy drift",
+    "guide/04_directions.mmd": "row trunk cy drift",
+}
+
+
+# Inter-section exit-port cy drifts from the matching entry-port cy in
+# the next section.  See nf-metro audit item 1 (the "limma kink"
+# regression family).  Limited to multi-section fixtures.
+_XFAIL_NO_KINK: dict[str, str] = {
+    "rnaseq_sections.mmd": "exit/entry port cy mismatch across section boundary",
+    "topologies/asymmetric_tree.mmd": "exit/entry port cy mismatch",
+    "topologies/complex_multipath.mmd": "exit/entry port cy mismatch",
+    "topologies/fan_in_merge.mmd": "exit/entry port cy mismatch",
+    "topologies/fold_fan_across.mmd": "exit/entry port cy mismatch",
+    "topologies/fold_stacked_branch.mmd": "exit/entry port cy mismatch",
+    "topologies/mismatched_tracks.mmd": "exit/entry port cy mismatch",
+    "topologies/mixed_port_sides.mmd": "exit/entry port cy mismatch",
+    "topologies/rnaseq_lite.mmd": "exit/entry port cy mismatch",
+    "topologies/section_diamond.mmd": "exit/entry port cy mismatch",
+    "topologies/upward_bypass.mmd": "exit/entry port cy mismatch",
+    "topologies/variant_calling.mmd": "exit/entry port cy mismatch",
+    "topologies/wide_fan_in.mmd": "exit/entry port cy mismatch",
+    "topologies/wide_fan_out.mmd": "exit/entry port cy mismatch",
+    "rnaseq_auto.mmd": "exit/entry port cy mismatch",
+    "rnaseq_sections_manual.mmd": "exit/entry port cy mismatch",
+    "variant_calling.mmd": "exit/entry port cy mismatch",
+    "variant_calling_tuned.mmd": "exit/entry port cy mismatch",
+    "variantbenchmarking.mmd": "exit/entry port cy mismatch (issue #317)",
+    "variantbenchmarking_auto.mmd": "exit/entry port cy mismatch (issue #317)",
+    "variantprioritization.mmd": "exit/entry port cy mismatch",
+    "guide/02_sections.mmd": "exit/entry port cy mismatch",
+    "guide/03_fan_out.mmd": "exit/entry port cy mismatch",
+    "guide/03b_fan_in_merge.mmd": "exit/entry port cy mismatch",
+    "guide/04_directions.mmd": "exit/entry port cy mismatch",
+}
+
+
+# Symmetric-fan pairs (two full-bundle stations in the same column) end
+# up asymmetric around the row trunk cy.  Audit item 10.
+_XFAIL_SYMFAN: dict[str, str] = {
+    "topologies/deep_linear.mmd": "asymmetric symfan pair",
+    "topologies/variant_calling.mmd": "asymmetric symfan pair",
+    "differentialabundance_default.mmd": "asymmetric symfan pair",
+    "epitopeprediction.mmd": "asymmetric symfan pair",
+    "genomeassembly.mmd": "asymmetric symfan pair",
+    "hlatyping.mmd": "asymmetric symfan pair",
+    "rnaseq_auto.mmd": "asymmetric symfan pair",
+    "rnaseq_sections_manual.mmd": "asymmetric symfan pair",
+    "variant_calling.mmd": "asymmetric symfan pair",
+    "variantprioritization.mmd": "asymmetric symfan pair",
+}
+
+
+# Lines cross non-consumer station markers (the "breeze-past" regression
+# family).  Audit item 3.  Limited to the guide fixtures where the
+# regression manifests; the production maps already route around their
+# non-consumer stations.
+_XFAIL_BREEZE_PAST: dict[str, str] = {
+    "guide/05_file_icons.mmd": "line crosses non-consumer station marker",
+    "guide/05c_files_icon.mmd": "line crosses non-consumer station marker",
+    "guide/05d_folder_icon.mmd": "line crosses non-consumer station marker",
+    "guide/06a_without_hidden.mmd": "line crosses non-consumer station marker",
+    "guide/06b_with_hidden.mmd": "line crosses non-consumer station marker",
+}
+
+
+# Section bbox bottom doesn't carry the configured section_y_padding
+# below the lowest station marker.  Likely linked to off-track input
+# placement in differentialabundance_default at default y_spacing.
+_XFAIL_BBOX_BOTTOM_PAD: dict[str, str] = {
+    "differentialabundance_default.mmd": "bbox bottom padding < section_y_padding",
+}
 
 
 def _row_lr_sections(graph: MetroGraph) -> dict[int, list]:
@@ -142,7 +389,10 @@ def _section_full_bundle(graph: MetroGraph, section) -> set[str] | None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(_FIXTURES_MULTI_SECTION, _XFAIL_ROW_TRUNK_CY),
+)
 def test_row_trunk_marker_cy_consistent(fixture):
     """All same-row LR sections must render their trunk marker at the
     same cy.  Inter-section bundles run horizontally between sections
@@ -201,7 +451,10 @@ def _section_fan_columns(graph: MetroGraph, section) -> dict[float, list[str]]:
     return {x: sids for x, sids in cols.items() if len(sids) >= 2}
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_SYMFAN),
+)
 def test_symfan_pairs_share_y(fixture):
     """When a section has exactly two full-bundle stations in the same
     column (a classic symmetric-fan pair such as Reporting's Shiny app
@@ -244,7 +497,7 @@ def test_symfan_pairs_share_y(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK)
 def test_off_track_inputs_above_consumer(fixture):
     """Off-track input stations (declared via ``%%metro off_track:``)
     must sit at least one ``y_spacing`` slot above their on-track
@@ -436,7 +689,10 @@ def test_off_track_icons_ordered_by_consumer_y(example):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(_FIXTURES_MULTI_SECTION, _XFAIL_NO_KINK),
+)
 def test_no_kink_at_section_boundary(fixture):
     """Adjacent same-row LR sections must agree on the rendered cy
     of the row bundle's pass-through stations.  This catches the
@@ -624,19 +880,33 @@ _ICON_HALF_HEIGHT = 16.0
 _MARKER_HALF_HEIGHT = 9.5
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
-def test_section_bbox_contains_all_content(fixture):
+# Parameter sets the bbox-contains-content invariant runs at across the
+# full corpus.  Limited to ``default`` (each fixture's authored
+# directives) because the savepoint-cp param set triggers a pre-existing
+# fastp-above-bbox regression in rnaseq_sections that is tracked
+# separately; the DA-specific parametrization below covers the
+# savepoint-cp + default-no-cp variants on da_pipeline.mmd.
+_BBOX_PARAM_SETS = [
+    pytest.param({}, id="default"),
+]
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+@pytest.mark.parametrize("params", _BBOX_PARAM_SETS)
+def test_section_bbox_contains_all_content(fixture, params):
     """Every section's bbox must contain its on-track stations and any
-    off-track input icons.  Catches the regression where an off-track
-    input is re-anchored above the section's bbox top so the icon
-    spills outside the section background.
+    off-track / terminus icons.  Catches regressions where an icon
+    (off-track input or single-icon terminus) is placed near the bbox
+    top so the icon spills outside the section background.
 
     Margin: on-track station markers reach ~9.5 px above the centre,
-    file-input icons reach ~16 px above the centre.  We assert
+    file icons reach ``terminus_height / 2 = 16`` px above the centre
+    (both off-track inputs and on-track terminus stations render the
+    same icon at ``station.y + bundle_mid``).  We assert
     ``station.y - reach >= bbox_y - 0.5`` (sub-pixel tolerance) and
     ``station.y + reach <= bbox_y + bbox_h + 0.5``.
     """
-    graph = _layout(fixture)
+    graph = _layout(fixture, **params)
     junction_ids = set(graph.junctions)
 
     for sec_id, section in graph.sections.items():
@@ -646,7 +916,10 @@ def test_section_bbox_contains_all_content(fixture):
             st = graph.stations.get(sid)
             if st is None or st.is_port or sid in junction_ids:
                 continue
-            half = _ICON_HALF_HEIGHT if st.off_track else _MARKER_HALF_HEIGHT
+            # File icons are used for off-track inputs and for terminus
+            # stations rendered with a file icon (single named output).
+            uses_icon = st.off_track or st.is_terminus
+            half = _ICON_HALF_HEIGHT if uses_icon else _MARKER_HALF_HEIGHT
             top = st.y - half
             bot = st.y + half
             assert top >= section.bbox_y - 0.5, (
@@ -820,7 +1093,7 @@ def test_section1_input_above_trunk(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_terminus_not_directly_after_diagonal(fixture):
     """Routes terminating at an output terminus must arrive on an
     orthogonal (horizontal or vertical) final segment.
@@ -867,7 +1140,7 @@ def test_terminus_not_directly_after_diagonal(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_no_station_or_icon_overlap(fixture):
     """No two station marker bboxes (including off-track file icons)
     may overlap; otherwise one station hides another in the rendered
@@ -1026,7 +1299,7 @@ def test_non_consumed_lines_route_via_virtual_station(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_BYPASS)
 def test_bypass_avoids_off_track_inputs(fixture):
     """Each ``__bypass_`` virtual station must sit at a Y that clears
     every off-track input icon in its section.
@@ -1076,7 +1349,7 @@ def test_bypass_avoids_off_track_inputs(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_BYPASS)
 def test_bypass_virtual_station_uses_standard_routing(fixture):
     """Edges touching a bypass virtual station are routed identically
     to any other fan-out branch.
@@ -1417,7 +1690,10 @@ def test_loop_recenter_only_for_pure_side_branches(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_BREEZE_PAST),
+)
 def test_lines_dont_cross_non_consumer_markers(fixture):
     """No rendered line segment may pass through the marker bbox of
     any station that neither consumes nor produces that line.
@@ -1499,7 +1775,7 @@ def test_lines_dont_cross_non_consumer_markers(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_all_stations_snap_to_grid(fixture):
     """Every on-track station's Y must be at ``trunk_y + k * y_spacing``
     for some integer ``k``.
@@ -1589,7 +1865,7 @@ def test_all_stations_snap_to_grid(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_BYPASS)
 def test_bypass_v_horizontal_segment_is_flat(fixture):
     """For each hidden bypass V station, the routed polyline carrying a
     bypassed line through V must form a clean U: the horizontal middle
@@ -1688,7 +1964,7 @@ def test_bypass_v_horizontal_segment_is_flat(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd"])
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_BYPASS)
 def test_bypass_v_has_horizontal_segment(fixture):
     """Each hidden bypass V station must sit in the middle of a clearly
     visible horizontal flat segment, matching how regular fork/join
@@ -1908,7 +2184,10 @@ def test_loop_column_stations_share_x(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_BBOX_BOTTOM_PAD),
+)
 def test_section_bbox_has_bottom_padding(fixture):
     """Each section's bbox bottom must sit at least ``section_y_padding``
     below the centre Y of its lowest internal station.
@@ -2119,3 +2398,438 @@ def test_auto_y_spacing_fits_content(example):
         f"({y_spacing:.2f}); each pair would risk caption/label "
         f"overlap: " + "; ".join(offenders)
     )
+
+
+# ---------------------------------------------------------------------------
+# Off-track / single-icon terminus icons must not be crossed by routed paths
+# ---------------------------------------------------------------------------
+
+
+def _icon_half_height_default() -> float:
+    """Vertical reach (half-height) of a file-input icon.  Mirrors the
+    renderer's default ``terminus_height`` of 32 px.
+    """
+    return 16.0
+
+
+def _icon_x_extent(graph: MetroGraph, station, section) -> tuple[float, float]:
+    """Approximate the rendered X span of an off-track / single-icon
+    terminus station's file icon.  Mirrors the renderer placement:
+    ``icon_cx = station.x +/- (radius + ICON_STATION_GAP + width/2)``.
+    """
+    r = 5.0  # station_radius
+    icon_gap = 5.0  # ICON_STATION_GAP
+    icon_half_w = 14.0  # terminus_width / 2 = 28 / 2
+    icon_step = icon_gap + r + icon_half_w
+    is_source = not any(e.target == station.id for e in graph.edges)
+    if section.direction == "RL":
+        icons_go_right = is_source
+    else:
+        icons_go_right = not is_source
+    cx = station.x + icon_step if icons_go_right else station.x - icon_step
+    return cx - icon_half_w, cx + icon_half_w
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_no_icon_overlaps_line_path(fixture):
+    """A station's rendered file icon must not be crossed by routed line
+    segments belonging to lines the station neither produces nor consumes.
+
+    The renderer offsets file icons from the station pill; when the icon
+    sits where an unrelated line's routed polyline passes through, the
+    rendered SVG shows a track crossing the icon.  Catches the DA-render
+    section 3 bad-params regression where the network icon was crossed
+    by trunk lines heading from the entry port to ``gsea``.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    icon_half = _icon_half_height_default()
+    XY_TOL = 1.0
+
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden:
+            continue
+        icon_count = len(st.terminus_labels or [])
+        if not (st.off_track or (st.is_terminus and icon_count == 1)):
+            continue
+        section = graph.sections.get(st.section_id)
+        if section is None or section.direction not in ("LR", "RL"):
+            continue
+        icon_top = st.y - icon_half
+        icon_bot = st.y + icon_half
+        icon_xl, icon_xr = _icon_x_extent(graph, st, section)
+
+        for r in routes:
+            # The icon's own routes legitimately enter the icon column.
+            if r.edge.source == sid or r.edge.target == sid:
+                continue
+            src = graph.stations.get(r.edge.source)
+            tgt = graph.stations.get(r.edge.target)
+            if src is None or tgt is None:
+                continue
+            # Only consider routes that traverse the icon's section.
+            if st.section_id not in (src.section_id, tgt.section_id):
+                continue
+            pts = r.points
+            for i in range(len(pts) - 1):
+                x1, y1 = pts[i]
+                x2, y2 = pts[i + 1]
+                # Skip strictly vertical segments (they may legitimately
+                # route around the icon).
+                if abs(x2 - x1) < 1e-3:
+                    continue
+                xlo, xhi = (x1, x2) if x1 <= x2 else (x2, x1)
+                if xhi < icon_xl + XY_TOL or xlo > icon_xr - XY_TOL:
+                    continue
+                xmid = max(xlo, icon_xl + XY_TOL)
+                xmid = min(xmid, icon_xr - XY_TOL)
+                if abs(x2 - x1) < 1e-6:
+                    seg_y = (y1 + y2) / 2
+                else:
+                    t = (xmid - x1) / (x2 - x1)
+                    t = max(0.0, min(1.0, t))
+                    seg_y = y1 + t * (y2 - y1)
+                if icon_top + XY_TOL <= seg_y <= icon_bot - XY_TOL:
+                    raise AssertionError(
+                        f"{fixture}: icon for station {sid!r} "
+                        f"(y={st.y:.1f}, "
+                        f"bbox y={icon_top:.1f}..{icon_bot:.1f}, "
+                        f"x={icon_xl:.1f}..{icon_xr:.1f}) crossed by "
+                        f"route {r.edge.source}->{r.edge.target} line "
+                        f"{r.line_id!r} at seg "
+                        f"({x1:.1f},{y1:.1f})->({x2:.1f},{y2:.1f}) "
+                        f"crossing y={seg_y:.1f}"
+                    )
+
+
+# ---------------------------------------------------------------------------
+# Fan-out branches in the same column must land at distinct Y rows
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_fanout_branches_at_distinct_y(fixture):
+    """When a station fans out to multiple in-section successors at the
+    same X column, each branch must land at a distinct Y row.
+
+    Catches the DA-render Reporting regression where Quarto fanned out
+    to ``bundle`` and ``report_html`` at the same Y, so the report_html
+    terminus icon overlapped ``bundle``'s station marker.
+    """
+    graph = _layout(fixture)
+    by_source_col: dict[tuple[str, float], list[str]] = defaultdict(list)
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if src is None or tgt is None:
+            continue
+        if src.is_port or tgt.is_port or tgt.is_hidden:
+            continue
+        if src.section_id != tgt.section_id:
+            continue
+        by_source_col[(edge.source, round(tgt.x, 1))].append(edge.target)
+    for (src_id, col_x), targets in by_source_col.items():
+        unique_targets = list(dict.fromkeys(targets))
+        if len(unique_targets) < 2:
+            continue
+        ys = [(tid, graph.stations[tid].y) for tid in unique_targets]
+        for i, (t1, y1) in enumerate(ys):
+            for t2, y2 in ys[i + 1 :]:
+                assert abs(y1 - y2) > _Y_TOL, (
+                    f"{fixture}: fan-out from {src_id!r} to {t1!r} "
+                    f"(y={y1}) and {t2!r} (y={y2}) at column x={col_x} - "
+                    f"both land at the same Y row"
+                )
+
+
+# ---------------------------------------------------------------------------
+# Bypass V clearance from the next-row section header
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_BYPASS)
+def test_bypass_clearance_from_lower_section(fixture):
+    """A bypass virtual station that sits below its section's bbox bottom
+    must leave at least ``SECTION_Y_GAP`` of clearance to the lower
+    section's bbox top.
+
+    Catches the param-dependent regression where bypass routing grows
+    the upper section's effective extent (via bypass Y) below
+    ``bbox_bottom``, but the lower row was placed using only the
+    ``bbox_bottom`` geometry, so the lower section's header visually
+    crowds the bypass V.
+    """
+    from nf_metro.layout.constants import SECTION_Y_GAP
+
+    graph = _layout(fixture)
+    bypass_stations = [
+        st
+        for sid, st in graph.stations.items()
+        if st.is_hidden and sid.startswith("__bypass_")
+    ]
+    if not bypass_stations:
+        pytest.skip(f"{fixture}: no bypass virtual stations")
+    tol = 1.0
+    for v in bypass_stations:
+        v_sec = graph.sections.get(v.section_id)
+        if v_sec is None or v_sec.bbox_h <= 0:
+            continue
+        v_sec_bot = v_sec.bbox_y + v_sec.bbox_h
+        effective_bot = max(v_sec_bot, v.y)
+        v_end_row = v_sec.grid_row + v_sec.grid_row_span - 1
+        for ls in graph.sections.values():
+            if ls.bbox_h <= 0:
+                continue
+            if ls.grid_row != v_end_row + 1:
+                continue
+            a_s = v_sec.grid_col
+            a_e = a_s + v_sec.grid_col_span - 1
+            b_s = ls.grid_col
+            b_e = b_s + ls.grid_col_span - 1
+            if a_e < b_s or b_e < a_s:
+                continue
+            gap = ls.bbox_y - effective_bot
+            assert gap + tol >= SECTION_Y_GAP, (
+                f"{fixture}: bypass V at y={v.y:.1f} in section "
+                f"{v_sec.id!r} (bot={v_sec_bot:.1f}) crowds lower "
+                f"section {ls.id!r} (top={ls.bbox_y:.1f}); "
+                f"effective_bot={effective_bot:.1f}, gap={gap:.1f} "
+                f"< SECTION_Y_GAP={SECTION_Y_GAP}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Section entry hubs must sit on the row Y grid (audit item 12)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_section_entry_hub_on_grid(fixture):
+    """Section entry/exit hub stations (``_hub`` suffix) must sit on the
+    row's Y grid (integer or half-integer multiple of ``y_spacing``
+    relative to the section's trunk Y).
+
+    The existing ``test_stations_on_grid`` invariant explicitly exempts
+    hubs.  This is the corresponding affirmative check: replace the
+    blanket exemption with a real assertion so off-grid hubs surface
+    as failures instead of being silently allowed.
+    """
+    y_spacing = 55.0
+    tol = 1.0
+    graph = _layout(fixture, y_spacing=y_spacing)
+
+    section_trunk_y: dict[str, float] = {}
+    for sec in graph.sections.values():
+        if sec.direction not in ("LR", "RL") or sec.bbox_h <= 0:
+            continue
+        for pid in list(sec.entry_ports) + list(sec.exit_ports):
+            port = graph.ports.get(pid)
+            st = graph.stations.get(pid)
+            if port and st and port.side in (PortSide.LEFT, PortSide.RIGHT):
+                section_trunk_y[sec.id] = st.y
+                break
+
+    offenders: list[str] = []
+    for sid, st in graph.stations.items():
+        if "_hub" not in sid:
+            continue
+        if st.section_id is None:
+            continue
+        trunk_y = section_trunk_y.get(st.section_id)
+        if trunk_y is None:
+            continue
+        offset = (st.y - trunk_y) / y_spacing
+        nearest_int = round(offset)
+        on_grid = abs(offset - nearest_int) * y_spacing <= tol
+        is_half = (
+            abs(offset - (nearest_int - 0.5)) * y_spacing <= tol
+            or abs(offset - (nearest_int + 0.5)) * y_spacing <= tol
+        )
+        if not (on_grid or is_half):
+            offenders.append(
+                f"{sid!r} cy={st.y:.2f} trunk_y={trunk_y:.2f} "
+                f"offset/y_spacing={offset:.3f} "
+                f"section={st.section_id!r}"
+            )
+    assert not offenders, (
+        f"{fixture}: hub stations off the y_spacing grid: " + "; ".join(offenders)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Inter-section routes between same-row sections stay in the row's Y band
+# (audit items 6 and 18 / issue #317)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_inter_section_route_y_stays_within_row_band(fixture):
+    """Inter-section routes whose endpoints both sit in grid row R must
+    keep all waypoint Ys within a one-row vertical band centered on R.
+
+    Catches the variantbenchmarking case (issue #317) where 3-4 and 4-5
+    inter-section bands dipped 250+ px through the lower-row Y band.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    # Compute Y bounds per grid row from rowspan=1 sections.
+    row_band: dict[int, tuple[float, float]] = {}
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0 or sec.grid_row_span != 1:
+            continue
+        cur = row_band.get(sec.grid_row)
+        top = sec.bbox_y
+        bot = sec.bbox_y + sec.bbox_h
+        if cur is None:
+            row_band[sec.grid_row] = (top, bot)
+        else:
+            row_band[sec.grid_row] = (min(cur[0], top), max(cur[1], bot))
+
+    # Slack: one y_spacing for diagonal corner approach.
+    SLACK = 60.0
+
+    offenders: list[str] = []
+    for r in routes:
+        src = graph.stations.get(r.edge.source)
+        tgt = graph.stations.get(r.edge.target)
+        if src is None or tgt is None:
+            continue
+        if src.section_id is None or tgt.section_id is None:
+            continue
+        if src.section_id == tgt.section_id:
+            continue
+        sec_a = graph.sections.get(src.section_id)
+        sec_b = graph.sections.get(tgt.section_id)
+        if sec_a is None or sec_b is None:
+            continue
+        if sec_a.grid_row != sec_b.grid_row:
+            continue
+        if sec_a.grid_row_span != 1 or sec_b.grid_row_span != 1:
+            continue
+        band = row_band.get(sec_a.grid_row)
+        if band is None:
+            continue
+        lo, hi = band[0] - SLACK, band[1] + SLACK
+        for _x, y in r.points:
+            if y < lo or y > hi:
+                offenders.append(
+                    f"route {r.edge.source}->{r.edge.target} "
+                    f"line {r.line_id!r} at y={y:.1f} outside "
+                    f"row-{sec_a.grid_row} band {lo:.1f}..{hi:.1f}"
+                )
+                break
+        if len(offenders) > 5:
+            break
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:5])
+
+
+# ---------------------------------------------------------------------------
+# Topologically-equivalent siblings share Y or sit symmetrically
+# (audit item 15 / issue #318)
+# ---------------------------------------------------------------------------
+
+
+# Fixtures known to fail ``test_topological_siblings_share_y_or_symmetric``
+# (audit item 15 / open issue #318).  Tracked separately - the test is
+# added to lock in the invariant so a future fix XPASSes here.
+_XFAIL_SIBLINGS: dict[str, str] = {
+    "da_pipeline.mmd": "asymmetric topological siblings (issue #318)",
+    "rnaseq_sections.mmd": "asymmetric topological siblings (issue #318)",
+    "topologies/fold_fan_across.mmd": "asymmetric topological siblings",
+    "topologies/rnaseq_lite.mmd": "asymmetric topological siblings (issue #318)",
+    "topologies/variant_calling.mmd": "asymmetric topological siblings (issue #318)",
+    "differentialabundance.mmd": "asymmetric topological siblings (issue #318)",
+    "differentialabundance_default.mmd": "asymmetric topological siblings (issue #318)",
+    "genomeassembly.mmd": "asymmetric topological siblings",
+    "rnaseq_auto.mmd": "asymmetric topological siblings (issue #318)",
+    "rnaseq_sections_manual.mmd": "asymmetric topological siblings (issue #318)",
+    "variant_calling.mmd": "asymmetric topological siblings (issue #318)",
+    "variant_calling_tuned.mmd": "asymmetric topological siblings (issue #318)",
+    "variantbenchmarking.mmd": "asymmetric topological siblings (issue #318)",
+    "variantbenchmarking_auto.mmd": "asymmetric topological siblings (issue #318)",
+}
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_SIBLINGS),
+)
+def test_topological_siblings_share_y_or_symmetric(fixture):
+    """Stations with identical ``(predecessor_set, successor_set,
+    line_set)`` should share Y, or for >= 3 members be symmetrically
+    distributed around their mean Y.
+
+    Catches issue #318: gatk and deepvariant have the same predecessors,
+    successors, and consumed lines but end up at different Ys when they
+    should be mirrored around the trunk.
+    """
+    graph = _layout(fixture)
+    preds: dict[str, set[str]] = defaultdict(set)
+    succs: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        preds[e.target].add(e.source)
+        succs[e.source].add(e.target)
+    classes: dict[tuple[frozenset[str], frozenset[str], frozenset[str]], list[str]] = (
+        defaultdict(list)
+    )
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or st.off_track:
+            continue
+        if not preds[sid] or not succs[sid]:
+            continue
+        line_set = frozenset(graph.station_lines(sid))
+        key = (frozenset(preds[sid]), frozenset(succs[sid]), line_set)
+        classes[key].append(sid)
+    offenders: list[str] = []
+    for _key, members in classes.items():
+        if len(members) < 2:
+            continue
+        ys = sorted(graph.stations[s].y for s in members)
+        if max(ys) - min(ys) < 2.0:
+            continue
+        if len(members) == 2:
+            offenders.append(
+                f"siblings {members} ys={ys} differ by {max(ys) - min(ys):.1f}"
+            )
+        else:
+            mean_y = sum(ys) / len(ys)
+            symmetric = True
+            for y in ys:
+                mirror = 2 * mean_y - y
+                if not any(abs(other - mirror) < 2.0 for other in ys):
+                    symmetric = False
+                    break
+            if not symmetric:
+                offenders.append(
+                    f"siblings {members} ys={ys} not symmetric around mean {mean_y:.1f}"
+                )
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
+
+
+# ---------------------------------------------------------------------------
+# Layout is deterministic in X (audit item 11)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_grid_snap_does_not_mutate_x(fixture):
+    """Re-running the full layout pipeline on the same fixture must
+    produce identical station X coordinates.
+
+    The grid-snap phase is supposed to act on Y only; a regression where
+    it (or any subsequent phase) introduced non-determinism into X would
+    surface here as a per-station mismatch between the two runs.
+    """
+    g1 = _layout(fixture)
+    g2 = _layout(fixture)
+    offenders: list[str] = []
+    for sid, st1 in g1.stations.items():
+        st2 = g2.stations.get(sid)
+        if st2 is None:
+            continue
+        if abs(st1.x - st2.x) > 0.5:
+            offenders.append(f"{sid!r} run1.x={st1.x:.2f} != run2.x={st2.x:.2f}")
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
