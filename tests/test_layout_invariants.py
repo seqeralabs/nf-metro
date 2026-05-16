@@ -1158,3 +1158,97 @@ def test_section_bbox_matches_content_extent(fixture):
         f"plots section top gap should equal SECTION_Y_PADDING="
         f"{SECTION_Y_PADDING}; got {top_gap:.1f}"
     )
+
+
+# ---------------------------------------------------------------------------
+# v113 follow-up: recenter only applies to true loop side-branches.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "topologies/rnaseq_lite.mmd",
+        "topologies/mismatched_tracks.mmd",
+        "topologies/variant_calling.mmd",
+    ],
+)
+def test_loop_recenter_only_for_pure_side_branches(fixture):
+    """Loop side stations that share their X with an on-trunk co-looper
+    must keep that column.
+
+    ``_recenter_loop_side_stations`` moves a side station to the
+    midpoint of its loop's diagonal corners.  That's a win for true
+    fan-out side stations with their own off-trunk siblings (DA's
+    deseq2/dream around limma), but breaks visible column alignment
+    when the on-trunk member of the same loop sits at the same X
+    (e.g. rnaseq_lite ``star_align`` ↔ ``hisat_align``, mismatched
+    tracks ``t_a`` ↔ ``t_b``).  The narrowed pass leaves those
+    side stations alone so the on-trunk and off-trunk siblings stay
+    column-aligned.
+    """
+    graph = _layout(fixture)
+
+    out_by_src: dict[str, list] = defaultdict(list)
+    in_by_tgt: dict[str, list] = defaultdict(list)
+    for e in graph.edges:
+        out_by_src[e.source].append(e)
+        in_by_tgt[e.target].append(e)
+
+    checked = 0
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            ins = in_by_tgt.get(sid, [])
+            outs = out_by_src.get(sid, [])
+            if len(ins) != 1 or len(outs) != 1:
+                continue
+            src = graph.stations.get(ins[0].source)
+            tgt = graph.stations.get(outs[0].target)
+            if src is None or tgt is None:
+                continue
+            if abs(src.y - tgt.y) > 0.5:
+                continue
+            trunk_y = src.y
+            if abs(st.y - trunk_y) < 0.5:
+                continue
+            if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
+                continue
+            # Find any same-src/tgt sibling that sits on the trunk row.
+            # These on-trunk co-loopers anchor a column the off-trunk
+            # side station should share.
+            on_trunk_sibling_x: float | None = None
+            for other_sid in section.station_ids:
+                if other_sid == sid:
+                    continue
+                other = graph.stations.get(other_sid)
+                if other is None or other.is_port or other.is_hidden:
+                    continue
+                if abs(other.y - trunk_y) >= 0.5:
+                    continue  # off-trunk, ignore here
+                other_ins = in_by_tgt.get(other_sid, [])
+                other_outs = out_by_src.get(other_sid, [])
+                other_srcs = {e.source for e in other_ins}
+                other_tgts = {e.target for e in other_outs}
+                if other_srcs == {ins[0].source} and other_tgts == {outs[0].target}:
+                    on_trunk_sibling_x = other.x
+                    break
+            if on_trunk_sibling_x is None:
+                continue  # nothing to anchor against
+            assert abs(st.x - on_trunk_sibling_x) < 0.5, (
+                f"loop side station {sid!r} was recentered off the column "
+                f"of its on-trunk co-looper: x={st.x:.1f} vs co-looper "
+                f"x={on_trunk_sibling_x:.1f}"
+            )
+            checked += 1
+    assert checked >= 1, (
+        f"{fixture}: expected at least one off-trunk loop side station "
+        "paired with an on-trunk co-looper"
+    )

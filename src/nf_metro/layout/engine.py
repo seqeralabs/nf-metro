@@ -2112,6 +2112,12 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
     fork_stations = {sid for sid, t in fork_targets.items() if len(t) > 1}
     join_stations = {sid for sid, s in join_sources.items() if len(s) > 1}
 
+    # Minimum recenter delta below which we'd be moving the station
+    # without enough visual benefit to justify breaking any incidental
+    # column alignment with stacked siblings.  Anything smaller is in
+    # the noise where the layer-X placement already reads as centred.
+    min_recenter_delta = DIAGONAL_RUN / 3.0
+
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
@@ -2148,6 +2154,32 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
             # side station (a real horizontal loop, not a U-turn).
             if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
                 continue
+            # Require at least one OFF-TRUNK sibling sharing the same
+            # single src and tgt: this is what makes the station part
+            # of a genuine parallel fan-out where the column is owned
+            # by the loop, not by an unrelated trunk station that just
+            # happens to share the layer-X.  Single side branches (e.g.
+            # ``search`` paired with the trunk continuation ``align``)
+            # carry no fan, and recentering them off the column where
+            # the trunk station sits visibly breaks the layout.
+            has_off_trunk_sibling = False
+            for other_sid in section.station_ids:
+                if other_sid == sid:
+                    continue
+                other = graph.stations.get(other_sid)
+                if other is None or other.is_port or other.is_hidden:
+                    continue
+                if abs(other.y - trunk_y) < 0.5:
+                    continue  # on-trunk co-loopers don't establish a fan
+                other_ins = in_by_tgt.get(other_sid, [])
+                other_outs = out_by_src.get(other_sid, [])
+                other_srcs = {e.source for e in other_ins}
+                other_tgts = {e.target for e in other_outs}
+                if other_srcs == {src_id} and other_tgts == {tgt_id}:
+                    has_off_trunk_sibling = True
+                    break
+            if not has_off_trunk_sibling:
+                continue
             # Compute the two diagonal corner Xs using routing's
             # placement rule (see _compute_diagonal_placement).
             corner_left = _loop_corner_x(
@@ -2167,6 +2199,12 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 <= midpoint
                 <= max(corner_left, corner_right)
             ):
+                continue
+            # Skip moves smaller than the minimum visual-benefit
+            # threshold: they trade an imperceptible re-centre for a
+            # visible column break against on-trunk co-loopers (e.g.
+            # rnaseq_lite ``star_align`` ↔ ``hisat_align``).
+            if abs(midpoint - st.x) < min_recenter_delta:
                 continue
             st.x = midpoint
 
