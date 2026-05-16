@@ -4040,34 +4040,27 @@ def _terminus_icon_clearance(
 
     The base ``TERMINUS_ICON_CLEARANCE`` covers one icon (station_radius +
     gap + icon_width + margin).  Each additional icon adds the per-icon
-    centre-to-centre step.
+    centre-to-centre step computed by the renderer's
+    ``caption_aware_icon_step`` -- widened when adjacent captions would
+    overrun the default ``ICON_INTER_GAP`` step.
 
-    When *names* is supplied, the step is widened to fit adjacent
-    captions on the same row (mirrors ``caption_aware_icon_step`` in
-    the renderer).  Without names, the default ``ICON_INTER_GAP`` step
-    is used.
+    Layout doesn't know the theme, so caption widths are estimated
+    using the default label size (14px, matches built-in themes).
+    Slight over-budget is harmless: bbox just gets a few extra px of
+    right padding.
     """
     if n_icons <= 1:
         return TERMINUS_ICON_CLEARANCE
-    step = TERMINUS_WIDTH + ICON_INTER_GAP
-    if names:
-        # Caption font is computed in render at theme.label_font_size *
-        # ICON_NAME_FONT_SCALE; layout doesn't know the theme so use
-        # the default label size (14px, matches built-in themes) as a
-        # heuristic.  Slight over-budget is harmless: bbox just gets a
-        # few extra px of right padding.
-        from nf_metro.render.constants import ICON_NAME_FONT_SCALE
-        caption_font_size = 14.0 * ICON_NAME_FONT_SCALE
-        for i in range(len(names) - 1):
-            if not names[i] or not names[i + 1]:
-                continue
-            pair_max = max(
-                len(names[i]) * caption_font_size * 0.55,
-                len(names[i + 1]) * caption_font_size * 0.55,
-            )
-            needed = pair_max + ICON_INTER_GAP
-            if needed > step:
-                step = needed
+    from nf_metro.render.constants import ICON_NAME_FONT_SCALE
+    from nf_metro.render.svg import caption_aware_icon_step
+
+    safe_names = names or [""] * n_icons
+    caption_font_size = 14.0 * ICON_NAME_FONT_SCALE
+    name_widths = [
+        len(n) * caption_font_size * 0.55 if n else 0.0
+        for n in safe_names
+    ]
+    step = caption_aware_icon_step(safe_names, name_widths, TERMINUS_WIDTH)
     extra = (n_icons - 1) * step
     return TERMINUS_ICON_CLEARANCE + extra
 

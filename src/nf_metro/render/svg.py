@@ -899,19 +899,9 @@ def _render_terminus_icons(
     else:
         base_cx = station.x - icon_gap - icon_half_w
 
-    icon_cy = station.y + (min_off + max_off) / 2
-
-    icon_types = station.terminus_icon_types or [ICON_TYPE_FILE] * len(
-        station.terminus_labels
-    )
-    names = station.terminus_names or [""] * len(station.terminus_labels)
-
-    # Pre-compute caption font size so adjacent-icon caption overlap
-    # can be detected before icons are emitted.  Captions sitting at
-    # the same Y overlap when their estimated widths exceed icon_step;
-    # in that case, every other caption is dropped to the next row.
-    caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
-    name_widths = [len(n) * caption_font_size * 0.55 if n else 0.0 for n in names]
+    # Captions sitting at the same Y overlap when their estimated
+    # widths exceed icon_step; in that case, every other caption is
+    # dropped to the next row.
     stagger_captions = False
     for i in range(len(names) - 1):
         if not names[i] or not names[i + 1]:
