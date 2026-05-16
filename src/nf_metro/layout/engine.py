@@ -6165,8 +6165,23 @@ def _place_off_track_above_consumers(
     # doesn't crash into a sibling off-track already at the desired Y.
     used_ys_per_col: dict[float, list[float]] = defaultdict(list)
 
+    # Iterate consumers bottom-up (largest consumer Y first).  The
+    # bumping mechanism only pushes upward, so placing the bottommost
+    # consumer's icon first lets subsequent (higher-consumer) icons
+    # stack above it.  The resulting visual order matches the consumer
+    # Y order: an upper consumer gets an upper icon, a lower consumer
+    # gets a lower icon, regardless of edge declaration order in the mmd.
+    def _consumer_anchor_y(item: tuple[str, list[Station]]) -> float:
+        cid = item[0] if item[0] else fallback_consumer_id
+        a = graph.stations.get(cid)
+        return a.y if a is not None else 0.0
+
+    ordered_consumers = sorted(
+        by_consumer.items(), key=_consumer_anchor_y, reverse=True
+    )
+
     highest_y: float | None = None
-    for consumer_id, stations in by_consumer.items():
+    for consumer_id, stations in ordered_consumers:
         anchor_id = consumer_id if consumer_id else fallback_consumer_id
         anchor = graph.stations.get(anchor_id)
         if anchor is None:

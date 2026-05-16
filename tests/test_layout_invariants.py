@@ -24,6 +24,7 @@ from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, PortSide
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
 # Tolerance for "same Y" assertions.  The grid pitch defaults to 55px;
 # 1px slack absorbs sub-pixel rounding from fan-recenter phases.
@@ -35,6 +36,14 @@ def _layout(fixture: str, **kwargs) -> MetroGraph:
     text = (FIXTURES / fixture).read_text()
     graph = parse_metro_mermaid(text)
     graph.center_ports = True
+    compute_layout(graph, **kwargs)
+    return graph
+
+
+def _layout_example(name: str, **kwargs) -> MetroGraph:
+    """Parse an example file and run layout, honouring its own directives."""
+    text = (EXAMPLES / name).read_text()
+    graph = parse_metro_mermaid(text)
     compute_layout(graph, **kwargs)
     return graph
 
@@ -271,6 +280,79 @@ def test_off_track_inputs_above_consumer(fixture):
             f"Off-track {off_id} y={off_st.y} not above consumer "
             f"{consumer_id} y={cons_st.y}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Off-track icons ordered top-to-bottom by their consumer Y
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "example",
+    ["differentialabundance.mmd", "differentialabundance_default.mmd"],
+)
+def test_off_track_icons_ordered_by_consumer_y(example):
+    """Within a section, the Y order of off-track input icons must
+    match the Y order of their on-track consumers.
+
+    When several off-track inputs feed different consumers in the same
+    section, the icon for the upper consumer (smaller consumer Y) must
+    sit above the icon for the lower consumer.  Catches the regression
+    where placement followed mmd declaration order rather than consumer
+    position, leaving the network icon above the gene-sets icon even
+    though the network's consumer (decoupler) sits below the gene-sets
+    consumer (GSEA).
+    """
+    graph = _layout_example(example)
+    junction_ids = set(graph.junctions)
+
+    # Build off_track -> in-section consumer map from edges.
+    consumer_of: dict[str, str] = {}
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if (
+            src is None
+            or tgt is None
+            or not src.off_track
+            or src.is_port
+            or src.id in junction_ids
+            or tgt.is_port
+            or tgt.id in junction_ids
+            or tgt.off_track
+            or src.section_id != tgt.section_id
+        ):
+            continue
+        consumer_of.setdefault(src.id, tgt.id)
+
+    # Group off-track stations by section.
+    by_section: dict[str, list[str]] = defaultdict(list)
+    for off_id in consumer_of:
+        sid = graph.stations[off_id].section_id
+        if sid is not None:
+            by_section[sid].append(off_id)
+
+    # Need at least one section with two distinct consumers to test
+    # the ordering invariant.
+    tested = False
+    for sec_id, off_ids in by_section.items():
+        distinct_consumers = {consumer_of[o] for o in off_ids}
+        if len(distinct_consumers) < 2:
+            continue
+        tested = True
+        # Sort off-track stations by their own Y (top to bottom).
+        sorted_offs = sorted(off_ids, key=lambda o: graph.stations[o].y)
+        # The consumer Ys, in the same order, must be non-decreasing.
+        cons_ys = [graph.stations[consumer_of[o]].y for o in sorted_offs]
+        for i in range(len(cons_ys) - 1):
+            assert cons_ys[i] <= cons_ys[i + 1] + _Y_TOL, (
+                f"{example} section {sec_id}: off-track icon order "
+                f"does not match consumer Y order.  Icons (top->bottom): "
+                f"{[(o, graph.stations[o].y) for o in sorted_offs]}; "
+                f"their consumer Ys: {cons_ys}"
+            )
+
+    assert tested, f"{example}: no section with multiple off-track consumers"
 
 
 # ---------------------------------------------------------------------------
