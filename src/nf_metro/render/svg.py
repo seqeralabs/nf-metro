@@ -885,19 +885,26 @@ def _render_terminus_icons(
     # Compute per-icon X step.  When adjacent captions would overlap
     # at the default step, widen it so both fit on the same row.
     caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
-    name_widths = [
-        len(n) * caption_font_size * 0.55 if n else 0.0
-        for n in names
-    ]
-    icon_step = caption_aware_icon_step(
-        names, name_widths, theme.terminus_width
-    )
+    name_widths = [len(n) * caption_font_size * 0.55 if n else 0.0 for n in names]
+    icon_step = caption_aware_icon_step(names, name_widths, theme.terminus_width)
 
     # Base X for the first (nearest) icon center
     if icons_go_right:
         base_cx = station.x + icon_gap + icon_half_w
     else:
         base_cx = station.x - icon_gap - icon_half_w
+
+    # Captions sitting at the same Y overlap when their estimated
+    # widths exceed icon_step; in that case, every other caption is
+    # dropped to the next row.
+    stagger_captions = False
+    for i in range(len(names) - 1):
+        if not names[i] or not names[i + 1]:
+            continue
+        max_w = max(name_widths[i], name_widths[i + 1])
+        if max_w > icon_step - 2.0:
+            stagger_captions = True
+            break
 
     for i, label in enumerate(station.terminus_labels):
         icon_type = icon_types[i] if i < len(icon_types) else ICON_TYPE_FILE
@@ -943,20 +950,21 @@ def _render_terminus_icons(
         # Optional caption rendered below the icon so the type chip
         # inside the icon stays readable.
         if name:
-            caption_y = (
-                icon_cy + theme.terminus_height / 2 + ICON_NAME_GAP
-            )
+            caption_y = icon_cy + theme.terminus_height / 2 + ICON_NAME_GAP
+            # When adjacent icon captions would overlap horizontally
+            # (their estimated width exceeds the per-icon X step), drop
+            # odd-indexed captions to a second row so each name is
+            # legible.
+            if stagger_captions and i % 2 == 1:
+                caption_y += caption_font_size * 1.4
             caption_cx = icon_cx
             if section and section.bbox_w > 0:
                 # Estimate caption width and clamp so it stays inside the
                 # section bbox right edge (and left edge for symmetry).
                 approx_w = len(name) * caption_font_size * 0.55
-                left_bound = (
-                    section.bbox_x + approx_w / 2 + ICON_BBOX_MARGIN
-                )
+                left_bound = section.bbox_x + approx_w / 2 + ICON_BBOX_MARGIN
                 right_bound = (
-                    section.bbox_x + section.bbox_w
-                    - approx_w / 2 - ICON_BBOX_MARGIN
+                    section.bbox_x + section.bbox_w - approx_w / 2 - ICON_BBOX_MARGIN
                 )
                 if right_bound > left_bound:
                     caption_cx = max(left_bound, min(caption_cx, right_bound))

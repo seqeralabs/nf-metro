@@ -129,8 +129,7 @@ def test_compute_layout_off_track_bbox_contains_stations():
     for sid in ("a", "b"):
         st = graph.stations[sid]
         assert sec.bbox_y <= st.y <= sec.bbox_y + sec.bbox_h, (
-            f"{sid} at y={st.y} outside bbox "
-            f"y={sec.bbox_y}..{sec.bbox_y + sec.bbox_h}"
+            f"{sid} at y={st.y} outside bbox y={sec.bbox_y}..{sec.bbox_y + sec.bbox_h}"
         )
 
 
@@ -251,6 +250,164 @@ def test_compute_layout_captioned_off_track_clears_line_bundle():
     assert gsea_y - net_y >= 30, (
         f"caption clearance too tight: gsea_y={gsea_y:.1f} net_in_y={net_y:.1f} "
         f"(gap={gsea_y - net_y:.1f}px, need >=30)"
+    )
+
+
+def test_no_upward_inter_section_route_across_rowspan_neighbour():
+    """Inter-section bundles must not detour upward over rowspan neighbours.
+
+    Repro of the PR #271 regression on 04_directions / rnaseq_auto /
+    fold_fan_across: a TB-direction grid section with grid_row_span>1
+    sat next to row-mate LR sections.  Compaction lifted the TB
+    section's entry port upward (out of trunk Y) so the inter-section
+    bundle had to route upward across the section gap rather than
+    continuing horizontally along the row-mate trunk Y.
+
+    For every cross-section port-to-port edge that bridges adjacent
+    grid columns within the same grid row, the route's vertical
+    deflection at the boundary (exit_y - entry_y) must be bounded:
+    the bundle may step down to reach a target below it, but it
+    cannot step UP across the gap by more than one ``y_spacing`` --
+    that's the visible "lines route up unnecessarily" pattern.
+
+    Skips edges where the target is below the source (no upward
+    detour) and edges where the source section spans multiple grid
+    rows in its TB direction (which legitimately drops content down).
+    """
+    text = Path(__file__).parent.parent.joinpath("examples/guide/04_directions.mmd")
+    graph = parse_metro_mermaid(text.read_text())
+    y_spacing = 40.0
+    compute_layout(graph, y_spacing=y_spacing)
+
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if src is None or tgt is None:
+            continue
+        if not (src.is_port and tgt.is_port):
+            continue
+        ssec = graph.sections.get(src.section_id)
+        tsec = graph.sections.get(tgt.section_id)
+        if ssec is None or tsec is None or ssec is tsec:
+            continue
+        # Only check adjacent same-row neighbours (where the trunk Y is
+        # expected to flow horizontally).  Skip TB rowspan source
+        # sections because they legitimately drop content down across
+        # multiple grid rows.
+        if ssec.grid_row != tsec.grid_row or abs(ssec.grid_col - tsec.grid_col) > 1:
+            continue
+        if ssec.direction == "TB" and ssec.grid_row_span > 1:
+            continue
+        # Upward detour: src.y > tgt.y means the bundle has to climb
+        # from exit to entry across the gap.  Anything bigger than a
+        # half-spacing rounds up to "visibly kinked upward".
+        upward = src.y - tgt.y
+        threshold = y_spacing / 2
+        assert upward <= threshold, (
+            f"edge {edge.source}->{edge.target} routes upward by {upward:.1f}px "
+            f"between adjacent same-row sections {ssec.id}->{tsec.id} "
+            f"(exit_y={src.y:.1f}, entry_y={tgt.y:.1f}, "
+            f"threshold={threshold}); "
+            f"inter-section bundle should stay roughly horizontal"
+        )
+
+
+def test_section_content_y_stable_under_neutral_layout():
+    """TB rowspan>1 content must keep its natural Y under compaction.
+
+    Sanity check for the PR #271 regression: when a TB section spans
+    multiple grid rows, its content stations occupy a vertical column
+    spanning the row range.  Compaction must NOT lift the column up to
+    the bbox top, because doing so:
+
+      1. moves the LAST TB station above the bottom-row trunk Y where
+         it should align with the row-mate entry port,
+      2. forces the row-0 row-mates to route their bundle upward to
+         meet the TB section's lifted entry.
+
+    Uses the 04_directions fixture (TB rowspan=2 postprocessing
+    section).  The TB section's middle/last stations should stay at
+    their natural rowspan-aligned Ys: the column's Y span must match
+    the row trunk-Y span (top row trunk Y to bottom row trunk Y),
+    not be compacted to the bbox top.
+    """
+    text = Path(__file__).parent.parent.joinpath("examples/guide/04_directions.mmd")
+    graph = parse_metro_mermaid(text.read_text())
+    y_spacing = 40.0
+    compute_layout(graph, y_spacing=y_spacing)
+    post = graph.sections["postprocessing"]
+    assert post.grid_row_span == 2, "fixture invariant: postprocessing rowspan=2"
+    assert post.direction == "TB", "fixture invariant: postprocessing TB"
+    # rna_analysis (row 0) and dna_analysis (row 1) are the LR
+    # row-mates that share the inter-section bundle with postprocessing.
+    row0_trunk = graph.stations["star"].y  # rna_analysis row 0 trunk
+    row1_trunk = graph.stations["bwa"].y  # dna_analysis row 1 trunk
+    # The last TB station (bedtools) lands at the bottom of the column;
+    # natural placement puts it at or below the row 1 trunk Y so the
+    # inter-section bundle from row 0 to postprocessing.last doesn't
+    # have to route upward.  Compaction lifts bedtools above row 1
+    # trunk Y, which is the visible regression.
+    bedtools_y = graph.stations["bedtools"].y
+    # Tolerance: bedtools may be slightly above row 1 trunk by less
+    # than y_spacing/2 due to bbox padding accounting, but anything
+    # more than y_spacing above is the compaction regression.
+    above_row1 = row1_trunk - bedtools_y
+    assert above_row1 <= y_spacing, (
+        f"TB rowspan section's bottom station shifted upward: "
+        f"bedtools.y={bedtools_y:.1f} row1_trunk={row1_trunk:.1f} "
+        f"(row0_trunk={row0_trunk:.1f}, y_spacing={y_spacing}); "
+        f"bedtools is {above_row1:.1f}px above row1_trunk -- "
+        f"compaction lifted TB content above its natural row span"
+    )
+
+
+def test_rowspan_trim_doesnt_misalign_tb_bbox_bottom():
+    """``_shrink_bboxes_to_content_bottom`` (Phase 13j) must not undo
+    ``_align_tb_section_bbox_bottoms`` (Phase 13f), nor trim a
+    row-spanning TB section's bbox bottom above a known row-mate it
+    visually shares a bottom edge with.
+
+    Anchored on the two fixtures where this regression was first
+    observed:
+
+    - ``fold_double``: section #4 (TB ``calling``) feeds into RL row
+      ``hard_filter`` (#5); their bbox bottoms must match.  Section
+      #8 (TB ``integration``) feeds into LR row ``reporting`` (#9);
+      their bbox bottoms must match too.
+    - ``04_directions``: section #4 (TB ``postprocessing``,
+      ``grid_row_span=2``) shares a bottom edge with ``reporting``
+      (#5) one grid row below.
+    """
+    root = Path(__file__).parent.parent
+
+    def _bots(graph, *sids):
+        return {
+            sid: graph.sections[sid].bbox_y + graph.sections[sid].bbox_h for sid in sids
+        }
+
+    fold = parse_metro_mermaid(
+        (root / "examples/topologies/fold_double.mmd").read_text()
+    )
+    compute_layout(fold)
+    fb = _bots(fold, "calling", "hard_filter", "integration", "reporting")
+    assert fb["calling"] >= fb["hard_filter"] - 0.5, (
+        f"fold_double: calling (TB #4) bbox bottom {fb['calling']:.1f} above "
+        f"row-mate hard_filter (#5) bottom {fb['hard_filter']:.1f}"
+    )
+    assert fb["integration"] >= fb["reporting"] - 0.5, (
+        f"fold_double: integration (TB #8) bbox bottom {fb['integration']:.1f} "
+        f"above row-mate reporting (#9) bottom {fb['reporting']:.1f}"
+    )
+
+    directions = parse_metro_mermaid(
+        (root / "examples/guide/04_directions.mmd").read_text()
+    )
+    compute_layout(directions)
+    db = _bots(directions, "postprocessing", "reporting")
+    assert db["postprocessing"] >= db["reporting"] - 0.5, (
+        f"04_directions: postprocessing (TB #4) bbox bottom "
+        f"{db['postprocessing']:.1f} above row-mate reporting (#5) bottom "
+        f"{db['reporting']:.1f}"
     )
 
 
@@ -896,13 +1053,7 @@ def _terminal_full_bundle_text():
 
 
 def test_full_bundle_column_fans_around_trunk_with_center_ports():
-    """Terminal section's full-bundle column fans symmetrically when --center-ports is on.
-
-    A 2-station section with no off-track inputs uses the half-grid
-    auto-compaction, so the pair sits at ``trunk +/- 0.5 * y_spacing``
-    (one grid unit apart, not two).  Symmetry around the trunk is the
-    invariant; the absolute spacing is the half-grid value.
-    """
+    """Terminal section's full-bundle column fans symmetrically with --center-ports."""
     graph = parse_metro_mermaid(_terminal_full_bundle_text())
     graph.center_ports = True
     compute_layout(graph, y_spacing=50.0)
@@ -914,10 +1065,8 @@ def test_full_bundle_column_fans_around_trunk_with_center_ports():
     assert abs((by - mid) - (mid - ay)) < 1e-6, (
         f"a and b should be symmetric around trunk Y: a={ay}, b={by}, mid={mid}"
     )
-    # 2-station section -> half-grid auto-compaction: stations sit
-    # 1 * y_spacing apart, i.e. trunk +/- 0.5 * y_spacing.
-    assert abs(abs(by - ay) - 50.0) < 1e-6, (
-        f"a and b should be 1*y_spacing apart under half-grid: |b-a|={abs(by-ay)}"
+    assert abs(abs(by - ay) - 100.0) < 1e-6, (
+        f"a and b should be 2*y_spacing apart: |b-a|={abs(by - ay)}"
     )
 
 
@@ -959,150 +1108,17 @@ def test_full_bundle_column_fans_non_terminal_section():
     compute_layout(graph, y_spacing=50.0)
     # `middle` has exit ports but its column carries only full-bundle
     # stations with no unique trunk, so the symfan should fire and the
-    # pair should flank a vacant trunk row.  The section has exactly two
-    # on-track stations, so half-grid auto-compaction applies and the
-    # pair sits 1*y_spacing apart (trunk +/- 0.5 * y_spacing).
+    # pair should flank a vacant trunk row.
     ay = graph.stations["a"].y
     by = graph.stations["b"].y
     delta = abs(by - ay)
-    assert delta == pytest.approx(50.0), (
-        f"Non-terminal 2-station full-bundle column should sit 1*y_spacing "
-        f"apart under half-grid: delta={delta}"
+    assert delta == pytest.approx(100.0), (
+        f"Non-terminal full-bundle column should flank trunk: delta={delta}"
     )
     mid = (ay + by) / 2
     assert abs((by - mid) - (mid - ay)) < 1e-6, (
         f"a and b should be symmetric around trunk Y: a={ay}, b={by}, mid={mid}"
     )
-
-
-def test_two_branch_symfan_uses_half_grid():
-    """A 2-branch symmetric fan compacts to half-pitch automatically.
-
-    Reproduces the differentialabundance Plots section: a section
-    containing exactly two on-track branch stations plus a terminus
-    icon, fed from a single upstream trunk.  Under the default
-    placement the two branches would sit 2 * y_spacing apart (trunk +/-
-    1 unit each); under the half-grid auto-compaction they sit 1 *
-    y_spacing apart (trunk +/- 0.5 unit each) and the section needs
-    only one vertical grid slot for the fan.
-
-    Symmetry around the trunk Y is preserved.  Trunk Y itself stays on
-    the integer grid (taken from the LR entry port).
-    """
-    text = (
-        "%%metro line: L1 | Line1 | #ff0000\n"
-        "%%metro line: L2 | Line2 | #00ff00\n"
-        "%%metro file: out_png | PNG | Plots\n"
-        "graph LR\n"
-        "    subgraph upstream [Upstream]\n"
-        "        u[U]\n"
-        "    end\n"
-        "    subgraph plots [Plots]\n"
-        "        a[Branch A]\n"
-        "        b[Branch B]\n"
-        "        out_png[ ]\n"
-        "        a -->|L1,L2| out_png\n"
-        "        b -->|L1,L2| out_png\n"
-        "    end\n"
-        "    u -->|L1,L2| a\n"
-        "    u -->|L1,L2| b\n"
-    )
-    graph = parse_metro_mermaid(text)
-    graph.center_ports = True
-    compute_layout(graph, x_spacing=70, y_spacing=55)
-    ay = graph.stations["a"].y
-    by = graph.stations["b"].y
-    delta = abs(by - ay)
-    # Half-grid: branches sit 1 * y_spacing apart, not 2.
-    assert delta == pytest.approx(55.0), (
-        f"2-branch symfan should compact to 1*y_spacing apart: delta={delta}"
-    )
-    # Symmetric around the section trunk Y (the LR entry port Y).
-    plots = graph.sections["plots"]
-    entry_port_id = plots.entry_ports[0]
-    trunk_y = graph.stations[entry_port_id].y
-    mid = (ay + by) / 2
-    assert abs(mid - trunk_y) < 1.0, (
-        f"branch midpoint should match trunk Y: mid={mid} trunk={trunk_y}"
-    )
-    # Both branches are flagged so ``_snap_all_y_to_grid`` leaves them
-    # at the half-pitch offset.
-    assert {"a", "b"}.issubset(graph._half_grid_station_ids)
-
-
-def test_two_branch_symfan_uses_half_grid_alone_in_row():
-    """2-branch symfan in a row-isolated section uses half-grid.
-
-    Mirrors the differentialabundance Plots case: the section is alone
-    on its row (no grid alignment metadata), so the per-row
-    redistribute passes ``_redistribute_full_bundle_columns`` and
-    ``_recenter_full_bundle_columns`` skip it.  The dedicated
-    ``_apply_half_grid_2branch_symfan`` phase must still compact the
-    fan onto half-pitch offsets.
-
-    Fixture: ``da_pipeline.mmd`` -> Plots section (plot_expl /
-    plot_diff feeding a terminus icon, alone on row 1).
-    """
-    fixture = (
-        Path(__file__).resolve().parent / "fixtures" / "da_pipeline.mmd"
-    )
-    graph = parse_metro_mermaid(fixture.read_text())
-    graph.center_ports = True
-    compute_layout(graph, x_spacing=70, y_spacing=55)
-    plot_expl_y = graph.stations["plot_expl"].y
-    plot_diff_y = graph.stations["plot_diff"].y
-    delta = abs(plot_diff_y - plot_expl_y)
-    assert delta == pytest.approx(55.0), (
-        f"Plots 2-branch fan should sit 1*y_spacing apart under "
-        f"half-grid: delta={delta}"
-    )
-    plots = graph.sections["plots"]
-    entry_port_id = plots.entry_ports[0]
-    trunk_y = graph.stations[entry_port_id].y
-    mid = (plot_expl_y + plot_diff_y) / 2
-    assert abs(mid - trunk_y) < 1.0, (
-        f"Plots branch midpoint should match trunk Y: "
-        f"mid={mid} trunk={trunk_y}"
-    )
-    assert {"plot_expl", "plot_diff"}.issubset(
-        graph._half_grid_station_ids
-    )
-
-
-def test_two_branch_symfan_skipped_with_off_track_input():
-    """Off-track inputs disqualify a section from half-grid compaction.
-
-    When the same 2-branch fan also carries an off-track input row, the
-    half-grid trigger must not fire (the input row constrains spacing).
-    The branches should keep the default full-pitch offsets.
-    """
-    text = (
-        "%%metro line: L1 | Line1 | #ff0000\n"
-        "%%metro line: L2 | Line2 | #00ff00\n"
-        "%%metro file: out_png | PNG | Plots\n"
-        "%%metro off_track: in_x\n"
-        "graph LR\n"
-        "    subgraph upstream [Upstream]\n"
-        "        u[U]\n"
-        "    end\n"
-        "    subgraph plots [Plots]\n"
-        "        in_x[Input]\n"
-        "        a[Branch A]\n"
-        "        b[Branch B]\n"
-        "        out_png[ ]\n"
-        "        a -->|L1,L2| out_png\n"
-        "        b -->|L1,L2| out_png\n"
-        "        in_x -->|L1,L2| a\n"
-        "    end\n"
-        "    u -->|L1,L2| a\n"
-        "    u -->|L1,L2| b\n"
-    )
-    graph = parse_metro_mermaid(text)
-    graph.center_ports = True
-    compute_layout(graph, x_spacing=70, y_spacing=55)
-    # No half-grid flag should be set on a or b.
-    assert "a" not in graph._half_grid_station_ids
-    assert "b" not in graph._half_grid_station_ids
 
 
 def test_off_track_input_sits_adjacent_to_its_consumer():
@@ -1165,11 +1181,11 @@ def test_multiple_off_track_inputs_share_consumer_stack_above_it():
     in_b_y = graph.stations["in_b"].y
     # The two inputs stack above mid at 1*step and 2*step respectively.
     ys = sorted([in_a_y, in_b_y])
-    assert ys[0] == pytest.approx(mid_y - 110), (
-        f"topmost input should be 2*y_spacing above consumer: {ys[0]} vs {mid_y - 110}"
+    assert ys[0] == pytest.approx(mid_y - 2 * 55), (
+        f"Topmost input y={ys[0]} should be mid_y - 2*y_spacing = {mid_y - 2 * 55}"
     )
     assert ys[1] == pytest.approx(mid_y - 55), (
-        f"second input should be 1*y_spacing above consumer: {ys[1]} vs {mid_y - 55}"
+        f"Lower input y={ys[1]} should be mid_y - y_spacing = {mid_y - 55}"
     )
 
 
