@@ -1075,12 +1075,8 @@ def test_fan_station_centered_on_loop(fixture):
     def _corner(a, b, role: str) -> float:
         sx, tx = a.x, b.x
         sign = 1.0 if tx > sx else -1.0
-        src_min = (
-            CURVE_RADIUS + MIN_STRAIGHT_PORT if a.is_port else MIN_STRAIGHT_EDGE
-        )
-        tgt_min = (
-            CURVE_RADIUS + MIN_STRAIGHT_PORT if b.is_port else MIN_STRAIGHT_EDGE
-        )
+        src_min = CURVE_RADIUS + MIN_STRAIGHT_PORT if a.is_port else MIN_STRAIGHT_EDGE
+        tgt_min = CURVE_RADIUS + MIN_STRAIGHT_PORT if b.is_port else MIN_STRAIGHT_EDGE
         if a.id in fork_stations and a.label.strip():
             src_min = max(src_min, label_text_width(a.label) / 2)
         if b.id in join_stations and b.label.strip():
@@ -1110,9 +1106,7 @@ def test_fan_station_centered_on_loop(fixture):
             continue
         if abs(src.y - tgt.y) > 0.5 or abs(st.y - src.y) < 0.5:
             continue
-        if not (
-            (src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)
-        ):
+        if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
             continue
         cl = _corner(src, st, role="src")
         cr = _corner(st, tgt, role="tgt")
@@ -1125,9 +1119,7 @@ def test_fan_station_centered_on_loop(fixture):
             f"got x={st.x:.1f} (delta={st.x - midpoint:+.1f})"
         )
         checked += 1
-    assert checked >= 1, (
-        f"{fixture}: expected at least one loop side station to test"
-    )
+    assert checked >= 1, f"{fixture}: expected at least one loop side station to test"
 
 
 # ---------------------------------------------------------------------------

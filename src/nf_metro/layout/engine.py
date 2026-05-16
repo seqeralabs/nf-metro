@@ -2033,16 +2033,12 @@ def _compact_below_trunk_band(
     # station at trunk_y + y_spacing within half a slot.
     first_row_y = trunk_y + y_spacing
     has_first_row = any(
-        abs(graph.stations[s].y - first_row_y) < y_spacing / 2 - 0.5
-        for s in movables
+        abs(graph.stations[s].y - first_row_y) < y_spacing / 2 - 0.5 for s in movables
     )
     if has_first_row:
         return
     # Confirm there's content further below (otherwise nothing to lift).
-    deeper = [
-        s for s in movables
-        if graph.stations[s].y >= trunk_y + 1.5 * y_spacing
-    ]
+    deeper = [s for s in movables if graph.stations[s].y >= trunk_y + 1.5 * y_spacing]
     if not deeper:
         return
     # Collision check: ensure shifting up by y_spacing doesn't collide
@@ -2061,8 +2057,10 @@ def _compact_below_trunk_band(
         st = graph.stations[sid]
         new_y = st.y - y_spacing
         col_x = round(st.x, 3)
-        if any(abs(oy - new_y) < y_spacing / 2 - 0.5
-               for oy in cols_nonmovable.get(col_x, set())):
+        if any(
+            abs(oy - new_y) < y_spacing / 2 - 0.5
+            for oy in cols_nonmovable.get(col_x, set())
+        ):
             return  # collision; abort
     # Apply uniform shift to every below-trunk movable.
     for sid in movables:
@@ -2148,9 +2146,7 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 continue  # Already on trunk, no loop.
             # Both endpoints must lie strictly to opposite sides of the
             # side station (a real horizontal loop, not a U-turn).
-            if not (
-                (src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)
-            ):
+            if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
                 continue
             # Compute the two diagonal corner Xs using routing's
             # placement rule (see _compute_diagonal_placement).
@@ -2167,7 +2163,8 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
             # station past either corner.
             midpoint = (corner_left + corner_right) / 2.0
             if not (
-                min(corner_left, corner_right) <= midpoint
+                min(corner_left, corner_right)
+                <= midpoint
                 <= max(corner_left, corner_right)
             ):
                 continue
@@ -2198,12 +2195,8 @@ def _loop_corner_x(
     if abs(tx - sx) < 1e-6:
         return None
     sign = 1.0 if tx > sx else -1.0
-    src_min = (
-        CURVE_RADIUS + MIN_STRAIGHT_PORT if a.is_port else MIN_STRAIGHT_EDGE
-    )
-    tgt_min = (
-        CURVE_RADIUS + MIN_STRAIGHT_PORT if b.is_port else MIN_STRAIGHT_EDGE
-    )
+    src_min = CURVE_RADIUS + MIN_STRAIGHT_PORT if a.is_port else MIN_STRAIGHT_EDGE
+    tgt_min = CURVE_RADIUS + MIN_STRAIGHT_PORT if b.is_port else MIN_STRAIGHT_EDGE
     # Label clearance at fork/join stations (per _route_diagonal).
     if a.id in fork_stations and a.label.strip():
         src_min = max(src_min, label_text_width(a.label) / 2)
@@ -2692,10 +2685,7 @@ def _apply_half_grid_2branch_symfan(
     if y_spacing <= 0:
         return
     for section in graph.sections.values():
-        if (
-            section.bbox_h <= 0
-            or section.direction not in ("LR", "RL")
-        ):
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
         if not _section_symfan_uses_half_grid(graph, section):
             continue
@@ -2758,8 +2748,7 @@ def _apply_half_grid_2branch_symfan(
         content_ys = [
             graph.stations[sid].y
             for sid in section.station_ids
-            if sid in graph.stations
-            and not graph.stations[sid].is_port
+            if sid in graph.stations and not graph.stations[sid].is_port
         ]
         if content_ys:
             new_top = min(content_ys) - section_y_padding
@@ -2769,9 +2758,7 @@ def _apply_half_grid_2branch_symfan(
                 section.bbox_h = max(0.0, section.bbox_h - delta)
 
 
-def _section_symfan_uses_half_grid(
-    graph: MetroGraph, section: Section
-) -> bool:
+def _section_symfan_uses_half_grid(graph: MetroGraph, section: Section) -> bool:
     """Return True when a section's symfan should use half-pitch offsets.
 
     Trigger conditions (must all hold):
