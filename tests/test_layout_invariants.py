@@ -1353,7 +1353,6 @@ def test_bypass_avoids_off_track_inputs(fixture):
             )
 
 
-
 # ---------------------------------------------------------------------------
 # v113: Section 1 below-trunk content has no empty row directly below trunk
 # ---------------------------------------------------------------------------
@@ -1799,7 +1798,6 @@ def test_all_stations_snap_to_grid(fixture):
         f"without a legitimate half-grid 2-branch fan exception: "
         + "; ".join(offenders)
     )
-
 
 
 # ---------------------------------------------------------------------------
