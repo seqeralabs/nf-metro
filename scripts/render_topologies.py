@@ -33,10 +33,7 @@ def _collect_mmd_files() -> list[Path]:
     When two files have identical content, only the first is kept
     (sorted order means examples/ wins over tests/fixtures/).
     """
-    all_paths = sorted(
-        p for p in project_root.rglob("*.mmd")
-        if ".git" not in p.parts
-    )
+    all_paths = sorted(p for p in project_root.rglob("*.mmd") if ".git" not in p.parts)
     seen_hashes: dict[str, Path] = {}
     result: list[Path] = []
     for p in all_paths:
@@ -124,7 +121,8 @@ def main():
         help="Enable debug overlay",
     )
     parser.add_argument(
-        "--straight-diamonds", action="store_true",
+        "--straight-diamonds",
+        action="store_true",
         help="Keep top branch of diamond fork-joins on the main track",
     )
     args = parser.parse_args()
@@ -152,7 +150,9 @@ def main():
 
     for mmd_path in all_files:
         name, issues = render_file(
-            mmd_path, output_dir, debug=args.debug,
+            mmd_path,
+            output_dir,
+            debug=args.debug,
             straight_diamonds=args.straight_diamonds,
         )
         status = "OK" if not issues else "ISSUES"
