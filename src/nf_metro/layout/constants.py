@@ -28,7 +28,7 @@ X_SPACING: float = 60.0
 Y_SPACING: float = 40.0
 """Vertical spacing between tracks."""
 
-MIN_Y_SPACING_FLOOR: float = 30.0
+MIN_Y_SPACING_FLOOR: float = 40.0
 """Floor for auto-computed y_spacing.
 
 When ``compute_layout`` is called without an explicit ``y_spacing`` it

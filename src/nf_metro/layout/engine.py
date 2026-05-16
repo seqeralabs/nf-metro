@@ -298,7 +298,7 @@ def compute_min_y_spacing(
     ``upper.below_extent + lower.above_extent +
     ICON_STACK_LABEL_CLEARANCE``.  We take the worst case across all
     candidate pairs in every LR/RL section, then clamp to ``floor`` so
-    a label-light graph stays at the historical 30-40 px pitch.
+    a label-light graph stays at the historical default pitch.
 
     Label-only stations alternate above/below within a column at the
     default pitch, so they're not the binding constraint on their own.
