@@ -709,9 +709,7 @@ def _compute_section_layout(
     # incoming, one outgoing, single-line consumer) onto a half-grid Y
     # when sharing the full-row Y with a busier sibling whose inbound
     # bundle would otherwise cross the sparse station's marker bbox.
-    _shift_sparse_loop_stations_to_clear_bundle(
-        graph, y_spacing, section_y_padding
-    )
+    _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
 
     # Phase 13l: When Phase 13k grew a section's bbox downward, push
     # sections in lower rows down so they don't crowd the grown bbox.
@@ -2558,9 +2556,7 @@ def _shift_sparse_loop_stations_to_clear_bundle(
             st.y = new_y
 
 
-def _push_lower_rows_after_bbox_grow(
-    graph: MetroGraph, section_y_gap: float
-) -> None:
+def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> None:
     """Push lower-row sections down when an upper-row bbox grows.
 
     ``_shift_sparse_loop_stations_to_clear_bundle`` (Phase 13k) can
@@ -2589,9 +2585,7 @@ def _push_lower_rows_after_bbox_grow(
         sections_by_row_start[s.grid_row].append(s)
     if not sections_by_row_start:
         return
-    max_row = max(
-        s.grid_row + s.grid_row_span - 1 for s in graph.sections.values()
-    )
+    max_row = max(s.grid_row + s.grid_row_span - 1 for s in graph.sections.values())
 
     def _cols_overlap(a: Section, b: Section) -> bool:
         a_start = a.grid_col
@@ -2605,7 +2599,8 @@ def _push_lower_rows_after_bbox_grow(
         if not lower:
             continue
         ending_at_prev = [
-            s for s in graph.sections.values()
+            s
+            for s in graph.sections.values()
             if s.grid_row + s.grid_row_span - 1 == r - 1 and s.bbox_h > 0
         ]
         if not ending_at_prev:

@@ -1664,6 +1664,8 @@ def test_loop_column_stations_share_x(fixture):
     assert checked_columns >= 1, (
         f"{fixture}: expected at least one loop column with multiple members to verify"
     )
+
+
 # ---------------------------------------------------------------------------
 # Section bbox bottom padding (Phase 13k post-shift padding)
 # ---------------------------------------------------------------------------
@@ -1716,8 +1718,7 @@ def test_section_bbox_has_bottom_padding(fixture):
 
     assert not offenders, (
         f"{fixture}: section bbox bottoms must sit at least "
-        f"section_y_padding below the lowest station centre: "
-        + "; ".join(offenders)
+        f"section_y_padding below the lowest station centre: " + "; ".join(offenders)
     )
 
 
