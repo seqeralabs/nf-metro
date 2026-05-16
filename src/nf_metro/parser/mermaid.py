@@ -653,28 +653,61 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
             if s_layer is None:
                 continue
 
-            pred_ids: set[str] = {
+            direct_preds: set[str] = {
                 edge.source
                 for edge in graph.edges
                 if edge.target == sid and edge.source in station_ids
             }
 
-            for pred_id in pred_ids:
-                pred_layer = sec_layers.get(pred_id)
-                if pred_layer is None or pred_layer >= s_layer:
+            # Exit ports S itself feeds.  Siblings feeding the same port
+            # share a trunk with S past S's column.
+            s_exit_targets: set[str] = {
+                edge.target
+                for _, edge in edges_by_source.get(sid, [])
+                if edge.target in exit_port_ids
+            }
+
+            # Candidate upstream stations X: direct predecessors of S,
+            # plus any in-section non-port/non-hidden/non-terminus station
+            # one layer below S that feeds an exit port S also feeds.
+            candidate_xs: set[str] = set(direct_preds)
+            if s_exit_targets:
+                for other_sid in station_ids:
+                    if other_sid == sid or other_sid in direct_preds:
+                        continue
+                    other_st = graph.stations.get(other_sid)
+                    if other_st is None or other_st.is_port or other_st.is_hidden:
+                        continue
+                    if (
+                        other_st.is_terminus
+                        or other_sid in pending_terminus_ids
+                    ):
+                        continue
+                    other_layer = sec_layers.get(other_sid)
+                    if other_layer is None or other_layer != s_layer - 1:
+                        continue
+                    feeds_shared = any(
+                        edge.target in s_exit_targets
+                        for _, edge in edges_by_source.get(other_sid, [])
+                    )
+                    if feeds_shared:
+                        candidate_xs.add(other_sid)
+
+            for x_id in candidate_xs:
+                x_layer = sec_layers.get(x_id)
+                if x_layer is None or x_layer >= s_layer:
                     continue
 
-                # Require shared lines on P->exit and P->S so the bypass only
-                # fires when the non-consumed line would route at S's trunk Y.
-                # Without this guard, branch stations whose bypass line and
-                # consumed-line bundle never share a row get over-detoured.
-                p_exit_lines: dict[str, set[str]] = {}
-                for _, edge in edges_by_source.get(pred_id, []):
+                x_exit_lines: dict[str, set[str]] = {}
+                for _, edge in edges_by_source.get(x_id, []):
                     if edge.target in exit_port_ids:
-                        p_exit_lines.setdefault(edge.target, set()).add(edge.line_id)
+                        x_exit_lines.setdefault(edge.target, set()).add(edge.line_id)
+
+                x_consumed = consumed_by.get(x_id, set())
+                is_direct_pred = x_id in direct_preds
 
                 bypass_edges: list[tuple[int, Edge]] = []
-                for i, edge in edges_by_source.get(pred_id, []):
+                for i, edge in edges_by_source.get(x_id, []):
                     if edge.target == sid or edge.line_id in consumed:
                         continue
                     if edge.target not in exit_port_ids:
@@ -682,7 +715,14 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
                     t_layer = sec_layers.get(edge.target)
                     if t_layer is None or t_layer <= s_layer:
                         continue
-                    if not (p_exit_lines.get(edge.target, set()) & consumed):
+                    shared_with_consumed = bool(
+                        x_exit_lines.get(edge.target, set()) & consumed
+                    )
+                    shared_via_inbound = is_direct_pred and bool(x_consumed & consumed)
+                    sibling_trunk = (
+                        not is_direct_pred and edge.target in s_exit_targets
+                    )
+                    if not (shared_with_consumed or shared_via_inbound or sibling_trunk):
                         continue
                     bypass_edges.append((i, edge))
 
@@ -690,7 +730,7 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
                     continue
 
                 bypass_count += 1
-                v_id = f"__bypass_{sid}_{pred_id}_{bypass_count}"
+                v_id = f"__bypass_{sid}_{x_id}_{bypass_count}"
                 new_stations.append(
                     Station(
                         id=v_id,

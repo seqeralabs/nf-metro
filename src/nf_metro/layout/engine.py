@@ -405,6 +405,101 @@ def compute_layout(
         validate=validate,
     )
 
+    if _prune_useless_bypass_stations(graph):
+        _compute_section_layout(
+            graph,
+            x_spacing=x_spacing,
+            y_spacing=y_spacing,
+            x_offset=x_offset,
+            y_offset=y_offset,
+            section_x_padding=section_x_padding,
+            section_y_padding=section_y_padding,
+            section_x_gap=section_x_gap,
+            section_y_gap=section_y_gap,
+            validate=validate,
+        )
+
+
+def _prune_useless_bypass_stations(graph: MetroGraph) -> bool:
+    """Remove bypass virtual stations whose Y matches both X's and T's Y.
+
+    ``_insert_bypass_stations`` (in the parser) over-triggers based on
+    topology -- it doesn't know whether the section will actually have
+    multiple row tracks at layout time.  When the layout places the
+    bypass V at the same Y as its predecessor X and successor T, the
+    route through V is a flat horizontal pass-through that doesn't
+    deflect around the station S the bypass was meant to skip.  In
+    that case S already sits on a different row and the bypass is
+    superfluous -- inserting it disrupts downstream invariants
+    (kink-free port alignment, section bbox bottom padding, the v111
+    symmetric-U expectation for bypass routes) without changing the
+    rendered geometry.
+
+    Returns ``True`` if any station was removed (so the caller can
+    re-run layout to clean up positions).
+    """
+    bypass_ids = [
+        sid
+        for sid, st in graph.stations.items()
+        if st.is_hidden and sid.startswith("__bypass_")
+    ]
+    if not bypass_ids:
+        return False
+
+    in_edges: dict[str, list[tuple[int, Edge]]] = defaultdict(list)
+    out_edges: dict[str, list[tuple[int, Edge]]] = defaultdict(list)
+    for i, edge in enumerate(graph.edges):
+        in_edges[edge.target].append((i, edge))
+        out_edges[edge.source].append((i, edge))
+
+    tol = 0.5
+    useless: list[str] = []
+    for vid in bypass_ids:
+        v_y = graph.stations[vid].y
+        ins = in_edges.get(vid, [])
+        outs = out_edges.get(vid, [])
+        if not ins or not outs:
+            continue
+        if any(abs(graph.stations[e.source].y - v_y) > tol for _, e in ins):
+            continue
+        if any(abs(graph.stations[e.target].y - v_y) > tol for _, e in outs):
+            continue
+        useless.append(vid)
+
+    if not useless:
+        return False
+
+    # Reconstruct edges: for each useless V, splice X->V->T into X->T.
+    edge_remove: set[int] = set()
+    new_edges: list[Edge] = []
+    for vid in useless:
+        in_by_line: dict[str, str] = {}
+        for i, e in in_edges.get(vid, []):
+            edge_remove.add(i)
+            in_by_line[e.line_id] = e.source
+        for i, e in out_edges.get(vid, []):
+            edge_remove.add(i)
+            src = in_by_line.get(e.line_id)
+            if src is not None:
+                new_edges.append(Edge(source=src, target=e.target, line_id=e.line_id))
+
+    graph.edges = [
+        e for i, e in enumerate(graph.edges) if i not in edge_remove
+    ] + new_edges
+
+    useless_set = set(useless)
+    for vid in useless_set:
+        graph.stations.pop(vid, None)
+    for section in graph.sections.values():
+        if any(sid in useless_set for sid in section.station_ids):
+            section.station_ids = [
+                s for s in section.station_ids if s not in useless_set
+            ]
+
+    # Bust caches the engine may have built around the previous graph.
+    graph._invalidate_edge_caches()
+    return True
+
 
 def _compute_flat_layout(
     graph: MetroGraph,
@@ -1397,7 +1492,12 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
             if other_id is None:
                 continue
             st = graph.stations.get(other_id)
-            if st and not st.is_port and set(graph.station_lines(other_id)) == bundle:
+            if (
+                st
+                and not st.is_port
+                and not (st.is_hidden and other_id.startswith("__bypass_"))
+                and set(graph.station_lines(other_id)) == bundle
+            ):
                 trunk_ys.add(round(st.y, 3))
     return min(trunk_ys) if trunk_ys else None
 

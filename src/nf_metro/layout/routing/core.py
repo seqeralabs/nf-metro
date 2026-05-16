@@ -2258,6 +2258,15 @@ def _collect_centering_candidates(
             continue
         if in_rp and len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1:
             continue
+        # Guard: don't shift when an adjacent diagonal targets a hidden
+        # bypass V; the V-side flats are intentionally min-flat-clamped
+        # so the U at V stays symmetric.  Shifting search/V-source's
+        # diagonals here re-introduces V-side asymmetry that v111's
+        # bypass placement was designed to avoid.
+        if out_rp and out_rp.edge.target.startswith("__bypass_"):
+            continue
+        if in_rp and in_rp.edge.source.startswith("__bypass_"):
+            continue
 
         for rp in in_routes:
             rp.points[1] = (rp.points[1][0] + shift, rp.points[1][1])
