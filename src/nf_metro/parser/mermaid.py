@@ -587,10 +587,6 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
 
     pending_terminus_ids: set[str] = set(graph._pending_terminus.keys())
 
-    consumed_by: dict[str, set[str]] = {}
-    for edge in graph.edges:
-        consumed_by.setdefault(edge.target, set()).add(edge.line_id)
-
     edges_by_source: dict[str, list[tuple[int, Edge]]] = {}
     for i, edge in enumerate(graph.edges):
         edges_by_source.setdefault(edge.source, []).append((i, edge))
@@ -637,14 +633,6 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
                 if sec_layers.get(pid, 0) <= internal_max:
                     sec_layers[pid] = internal_max + 1
 
-        # Lines each station handles (consumes or produces) -- a line in
-        # this set never bypasses the station.
-        station_lines: dict[str, set[str]] = {}
-        for s2 in station_ids:
-            station_lines[s2] = consumed_by.get(s2, set()) | {
-                e.line_id for _, e in edges_by_source.get(s2, [])
-            }
-
         for sid in section.station_ids:
             station = graph.stations.get(sid)
             if station is None or station.is_port or station.is_hidden:
@@ -652,17 +640,11 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
             if station.is_terminus or sid in pending_terminus_ids:
                 continue
 
-            s_lines = station_lines.get(sid, set())
             s_layer = sec_layers.get(sid)
             if s_layer is None:
                 continue
+            s_lines = set(graph.station_lines(sid))
 
-            # A bypass is any in-section edge P -> exit_port carrying a
-            # line L that S neither consumes nor produces, where S's
-            # layer sits strictly between P and the exit port (so the
-            # straight P->exit route would traverse S's column).  Group
-            # bypassing edges by predecessor so all of one P's lines
-            # share a single virtual station.
             bypass_by_pred: dict[str, list[tuple[int, Edge]]] = {}
             for pred_id in station_ids:
                 if pred_id == sid:
