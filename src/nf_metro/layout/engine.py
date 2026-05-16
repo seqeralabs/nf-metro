@@ -160,9 +160,9 @@ def _station_marker_bbox(
         return None
     if offsets is None:
         offsets = compute_station_offsets(graph)
-    line_offs = [
-        offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)
-    ] or [0.0]
+    line_offs = [offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)] or [
+        0.0
+    ]
     min_off, max_off = min(line_offs), max(line_offs)
     cy = st.y + (min_off + max_off) / 2
     half_h = (max_off - min_off) / 2 + radius
@@ -182,7 +182,7 @@ def _guard_no_station_overlap(graph: MetroGraph, phase: str) -> None:
             boxes.append((sid, b))
     tol = 0.5
     for i, (s1, (x1, y1, X1, Y1)) in enumerate(boxes):
-        for s2, (x2, y2, X2, Y2) in boxes[i + 1:]:
+        for s2, (x2, y2, X2, Y2) in boxes[i + 1 :]:
             if x1 < X2 - tol and x2 < X1 - tol and y1 < Y2 - tol and y2 < Y1 - tol:
                 raise PhaseInvariantError(
                     f"{phase}: position clash: {s1!r} at "

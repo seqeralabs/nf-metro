@@ -709,9 +709,7 @@ def test_terminus_not_directly_after_diagonal(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"]
-)
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
 def test_no_station_or_icon_overlap(fixture):
     """No two station marker bboxes (including off-track file icons)
     may overlap; otherwise one station hides another in the rendered
@@ -728,12 +726,9 @@ def test_no_station_or_icon_overlap(fixture):
 
     tol = 0.5
     for i, (s1, (x1, y1, X1, Y1)) in enumerate(boxes):
-        for s2, (x2, y2, X2, Y2) in boxes[i + 1:]:
+        for s2, (x2, y2, X2, Y2) in boxes[i + 1 :]:
             overlap = (
-                x1 < X2 - tol
-                and x2 < X1 - tol
-                and y1 < Y2 - tol
-                and y2 < Y1 - tol
+                x1 < X2 - tol and x2 < X1 - tol and y1 < Y2 - tol and y2 < Y1 - tol
             )
             assert not overlap, (
                 f"{fixture}: marker overlap between {s1!r} "
