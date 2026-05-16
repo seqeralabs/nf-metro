@@ -1557,9 +1557,7 @@ def test_bypass_v_has_horizontal_segment(fixture):
         for sid, st in graph.stations.items()
         if st.is_hidden and sid.startswith("__bypass_")
     }
-    assert bypass_v_ids, (
-        f"{fixture}: expected at least one __bypass_ virtual station"
-    )
+    assert bypass_v_ids, f"{fixture}: expected at least one __bypass_ virtual station"
 
     by_v_line: dict[tuple[str, str], list] = defaultdict(list)
     for r in routes:
