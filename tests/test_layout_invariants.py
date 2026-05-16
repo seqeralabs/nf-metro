@@ -1592,14 +1592,16 @@ def test_loop_column_stations_share_x(fixture):
             if st is None or st.is_port or st.is_hidden:
                 continue
             visible_ins = [
-                e for e in in_by_tgt.get(sid, [])
+                e
+                for e in in_by_tgt.get(sid, [])
                 if (
                     (gs := graph.stations.get(e.source)) is not None
                     and not gs.is_hidden
                 )
             ]
             visible_outs = [
-                e for e in out_by_src.get(sid, [])
+                e
+                for e in out_by_src.get(sid, [])
                 if (
                     (gs := graph.stations.get(e.target)) is not None
                     and not gs.is_hidden
@@ -1626,9 +1628,7 @@ def test_loop_column_stations_share_x(fixture):
             # AND off-trunk) OR trunk-Y station.
             on_trunk = abs(st.y - trunk_y) <= 0.5
             clean_side = (
-                not on_trunk
-                and len(visible_ins) == 1
-                and len(visible_outs) == 1
+                not on_trunk and len(visible_ins) == 1 and len(visible_outs) == 1
             )
             if not (on_trunk or clean_side):
                 continue
@@ -1636,19 +1636,11 @@ def test_loop_column_stations_share_x(fixture):
             # leftmost (RL); leftmost trunk-Y successor X (LR), or
             # rightmost (RL).
             if sec.direction == "LR":
-                pred_x = max(
-                    graph.stations[e.source].x for e in visible_ins
-                )
-                succ_x = min(
-                    graph.stations[e.target].x for e in visible_outs
-                )
+                pred_x = max(graph.stations[e.source].x for e in visible_ins)
+                succ_x = min(graph.stations[e.target].x for e in visible_outs)
             else:
-                pred_x = min(
-                    graph.stations[e.source].x for e in visible_ins
-                )
-                succ_x = max(
-                    graph.stations[e.target].x for e in visible_outs
-                )
+                pred_x = min(graph.stations[e.source].x for e in visible_ins)
+                succ_x = max(graph.stations[e.target].x for e in visible_outs)
             # Station must sit strictly between its trunk-Y
             # neighbours.
             lo, hi = min(pred_x, succ_x), max(pred_x, succ_x)
@@ -1661,15 +1653,14 @@ def test_loop_column_stations_share_x(fixture):
                 continue
             xs = [graph.stations[sid].x for sid in members]
             spread = max(xs) - min(xs)
+            member_xs = [(sid, round(graph.stations[sid].x, 2)) for sid in members]
             assert spread <= 1.0, (
                 f"{fixture}: section {sec.id!r} loop column {key}: "
-                f"members {[(sid, round(graph.stations[sid].x, 2)) for sid in members]} "
-                f"span {spread:.2f}px (>1px); trunk + clean siblings "
-                f"should share X"
+                f"members {member_xs} span {spread:.2f}px (>1px); "
+                f"trunk + clean siblings should share X"
             )
             checked_columns += 1
 
     assert checked_columns >= 1, (
-        f"{fixture}: expected at least one loop column with multiple "
-        f"members to verify"
+        f"{fixture}: expected at least one loop column with multiple members to verify"
     )

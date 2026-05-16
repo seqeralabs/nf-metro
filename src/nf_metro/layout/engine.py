@@ -2387,14 +2387,16 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 # placed at the loop midpoint; restrict to the same
                 # single-in/single-out filter pass-1 uses.
                 visible_ins = [
-                    e for e in in_by_tgt.get(sid, [])
+                    e
+                    for e in in_by_tgt.get(sid, [])
                     if (
                         (gs := graph.stations.get(e.source)) is not None
                         and not gs.is_hidden
                     )
                 ]
                 visible_outs = [
-                    e for e in out_by_src.get(sid, [])
+                    e
+                    for e in out_by_src.get(sid, [])
                     if (
                         (gs := graph.stations.get(e.target)) is not None
                         and not gs.is_hidden
