@@ -816,7 +816,9 @@ def _find_connected_internal_coord(
     """Find the coordinate to align a port with its connected internal stations.
 
     Returns the average X or Y (determined by *axis*) of all connected
-    internal stations, or None if no connections found.
+    internal stations, or None if no connections found.  Bypass V
+    helpers (ids starting with ``__bypass_``) are skipped so the port
+    anchors to the visible trunk rather than an off-trunk routing aid.
     """
     internal_ids = (
         set(section.station_ids) - set(section.entry_ports) - set(section.exit_ports)
@@ -824,8 +826,12 @@ def _find_connected_internal_coord(
     vals: list[float] = []
     for edge in graph.edges:
         if edge.source == port_id and edge.target in internal_ids:
+            if edge.target.startswith("__bypass_"):
+                continue
             vals.append(getattr(graph.stations[edge.target], axis))
         if edge.target == port_id and edge.source in internal_ids:
+            if edge.source.startswith("__bypass_"):
+                continue
             vals.append(getattr(graph.stations[edge.source], axis))
     if vals:
         return sum(vals) / len(vals)

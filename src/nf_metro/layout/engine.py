@@ -939,9 +939,15 @@ def _classify_multi_station_ys(
 
 
 def _max_stations_per_layer(sub: MetroGraph) -> int:
-    """Return the maximum number of distinct Y positions at any single layer."""
+    """Return the maximum number of distinct Y positions at any single layer.
+
+    Bypass V helpers (ids starting with ``__bypass_``) are excluded -
+    they exist only for routing and must not inflate the row Y grid.
+    """
     layer_ys: dict[int, set[float]] = defaultdict(set)
     for s in sub.stations.values():
+        if s.id.startswith("__bypass_"):
+            continue
         layer_ys[s.layer].add(s.y)
     return max((len(ys) for ys in layer_ys.values()), default=1)
 
@@ -1365,7 +1371,9 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
 
     This Y is what neighbouring sections must line up with for the row
     bundle to flow horizontally.  Returns ``None`` when no full-bundle
-    internal station is directly connected to any LR port.
+    internal station is directly connected to any LR port.  Bypass V
+    helpers (ids starting with ``__bypass_``) are skipped - they exist
+    only for routing and must not anchor the row's trunk.
     """
     if section.direction not in ("LR", "RL"):
         return None
@@ -1390,7 +1398,12 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
             if other_id is None:
                 continue
             st = graph.stations.get(other_id)
-            if st and not st.is_port and set(graph.station_lines(other_id)) == bundle:
+            if (
+                st
+                and not st.is_port
+                and not other_id.startswith("__bypass_")
+                and set(graph.station_lines(other_id)) == bundle
+            ):
                 trunk_ys.add(round(st.y, 3))
     return min(trunk_ys) if trunk_ys else None
 
@@ -3953,9 +3966,18 @@ def _layout_single_section(
 
     # Compute section bounding box from real stations only.
     # Extra Y padding for multi-line labels (outermost stations' labels
-    # extend beyond the normal padding).
-    xs = [s.x for s in sub.stations.values()]
-    ys = [s.y for s in sub.stations.values()]
+    # extend beyond the normal padding).  Bypass V helpers (auto-inserted
+    # by the parser; ids start with ``__bypass_``) are pure routing aids
+    # with no rendered marker and must not inflate the section bbox -
+    # their off-trunk track would otherwise widen the section vertically
+    # and push downstream sections down.
+    real_for_bbox = [
+        s for s in sub.stations.values() if not s.id.startswith("__bypass_")
+    ]
+    if not real_for_bbox:
+        real_for_bbox = list(sub.stations.values())
+    xs = [s.x for s in real_for_bbox]
+    ys = [s.y for s in real_for_bbox]
     extra_label_h = _multiline_label_padding(sub)
     y_pad = section_y_padding + extra_label_h
     section.bbox_x = min(xs) - section_x_padding
@@ -6053,8 +6075,31 @@ def _compute_fork_join_gaps(
     # Join gaps are kept even in single-track sections because entry
     # ports are close to the first internal station, and the diagonal
     # from a different-Y entry needs the extra room.
-    all_section_tracks = set(tracks.values())
-    is_single_track = len(all_section_tracks) <= 1
+    # Bypass V helpers (id prefix ``__bypass_``) are routing-only.  A
+    # V on its own off-trunk track must not flip an otherwise
+    # single-track section into "multi-track" or contribute its track
+    # to a fork's target-track set, because that would manufacture a
+    # fork gap at the V's predecessor and shift visible stations
+    # rightward (see 05 guide fixtures).  Real visible fork signal is
+    # preserved by comparing visible-target tracks against the owner's
+    # own track.
+    visible_tracks = {
+        t for sid, t in tracks.items() if not sid.startswith("__bypass_")
+    }
+    is_single_track = len(visible_tracks) <= 1
+
+    def _visible_tracks_with_owner(ids, owner_sid):
+        owner_track = tracks.get(owner_sid)
+        result: set[float] = set()
+        if owner_track is not None:
+            result.add(owner_track)
+        for nid in ids:
+            if nid.startswith("__bypass_"):
+                continue
+            t = tracks.get(nid)
+            if t is not None:
+                result.add(t)
+        return result
 
     fork_layers: set[int] = set()
     for sid, targets in out_targets.items():
@@ -6063,7 +6108,7 @@ def _compute_fork_join_gaps(
                 if not is_single_track:
                     fork_layers.add(layers[sid])
             else:
-                target_tracks = {tracks[t] for t in targets}
+                target_tracks = _visible_tracks_with_owner(targets, sid)
                 if len(target_tracks) > 1:
                     fork_layers.add(layers[sid])
 
@@ -6073,7 +6118,7 @@ def _compute_fork_join_gaps(
             if any(s not in tracks for s in sources):
                 join_layers.add(layers[sid])
             else:
-                source_tracks = {tracks[s] for s in sources}
+                source_tracks = _visible_tracks_with_owner(sources, sid)
                 if len(source_tracks) > 1:
                     join_layers.add(layers[sid])
 
