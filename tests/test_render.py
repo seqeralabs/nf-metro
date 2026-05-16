@@ -338,9 +338,7 @@ def test_caption_font_smaller_than_label_font():
     # the theme label_font_size (60% of it, per ICON_NAME_FONT_SCALE).
     import re
 
-    caption_matches = re.findall(
-        r'font-size="([0-9.]+)"[^>]*>LongCaptionName', svg
-    )
+    caption_matches = re.findall(r'font-size="([0-9.]+)"[^>]*>LongCaptionName', svg)
     assert caption_matches, "Caption text not found in SVG"
     caption_size = float(caption_matches[0])
     assert caption_size < label_size, (

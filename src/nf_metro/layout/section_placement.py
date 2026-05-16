@@ -132,12 +132,10 @@ def _compute_section_offsets(
         min_col = min(min_col, col)
         max_col = max(max_col, col + cspan - 1)
 
-    # Max width per column (only from single-column sections).
-    # Use the right reach from offset_x (bbox_x + bbox_w) re-anchored to the
-    # standard left edge (-SECTION_X_PADDING) so that sections whose bbox_x
-    # was pushed further left by terminus-icon clearance don't inflate the
-    # column.  The leftward overhang lands left of offset_x and is later
-    # absorbed by the global x_offset bump in Phase 3b of compute_layout.
+    # Right reach re-anchored to the standard left edge so that bbox_x
+    # pushed further left (e.g. by terminus-icon clearance) doesn't
+    # inflate the column.  Phase 3b of compute_layout absorbs the
+    # leftward overhang via a global x_offset bump.
     def _effective_width(section: Section) -> float:
         return section.bbox_x + section.bbox_w + SECTION_X_PADDING
 
@@ -691,9 +689,7 @@ def _position_ports_on_boundary(
         if free_axis == "y" and port is not None and not port.is_entry:
             anchor = _find_downstream_bundle_y(pid, section, graph)
         if anchor is None:
-            anchor = _find_connected_internal_coord(
-                pid, section, graph, free_axis
-            )
+            anchor = _find_connected_internal_coord(pid, section, graph, free_axis)
         if free_axis == "y":
             default = section.bbox_y + section.bbox_h / 2
         else:
@@ -738,7 +734,15 @@ def _find_downstream_bundle_y(
     fall back to the local-internal centre.
     """
     junction_ids = set(graph.junctions)
+    ports = graph.ports
+    stations = graph.stations
+    sections = graph.sections
     same_row = section.grid_row
+
+    # Index edges by source once: every other lookup is by source.
+    edges_by_source: dict[str, list] = {}
+    for edge in graph.edges:
+        edges_by_source.setdefault(edge.source, []).append(edge)
 
     # Fan-in exits stay centred: 2+ distinct internal source Ys means
     # the visual convergence is meaningful and downstream anchoring
@@ -747,55 +751,53 @@ def _find_downstream_bundle_y(
         set(section.station_ids) - set(section.entry_ports) - set(section.exit_ports)
     )
     src_ys: set[float] = set()
-    for edge in graph.edges:
-        if edge.target == exit_port_id and edge.source in internal_ids:
-            st = graph.stations.get(edge.source)
+    for sid in internal_ids:
+        for edge in edges_by_source.get(sid, ()):
+            if edge.target != exit_port_id:
+                continue
+            st = stations.get(sid)
             if st and not st.is_port:
                 src_ys.add(round(st.y, 1))
-    if len(src_ys) >= 2:
-        return None
+                if len(src_ys) >= 2:
+                    return None
+                break
 
     entry_ids: list[str] = []
-    for edge in graph.edges:
-        if edge.source != exit_port_id:
-            continue
+    for edge in edges_by_source.get(exit_port_id, ()):
         tgt = edge.target
-        if tgt in graph.ports and graph.ports[tgt].is_entry:
+        if tgt in ports and ports[tgt].is_entry:
             entry_ids.append(tgt)
         elif tgt in junction_ids:
-            for e2 in graph.edges:
-                if e2.source == tgt and e2.target in graph.ports and (
-                    graph.ports[e2.target].is_entry
-                ):
+            for e2 in edges_by_source.get(tgt, ()):
+                if e2.target in ports and ports[e2.target].is_entry:
                     entry_ids.append(e2.target)
     if not entry_ids:
         return None
 
     candidates: list[float] = []
     for eid in entry_ids:
-        ep = graph.ports.get(eid)
+        ep = ports.get(eid)
         if not ep:
             continue
-        ds = graph.sections.get(ep.section_id)
+        ds = sections.get(ep.section_id)
         if not ds or ds.grid_row != same_row:
             continue
-        ds_internal = (
-            set(ds.station_ids) - set(ds.entry_ports) - set(ds.exit_ports)
-        )
+        ds_internal = set(ds.station_ids) - set(ds.entry_ports) - set(ds.exit_ports)
         targets: dict[str, set[str]] = {}
-        for edge in graph.edges:
-            if edge.source != eid or edge.target not in ds_internal:
+        for edge in edges_by_source.get(eid, ()):
+            if edge.target not in ds_internal:
                 continue
-            st = graph.stations.get(edge.target)
+            st = stations.get(edge.target)
             if st and not st.is_port:
                 targets.setdefault(edge.target, set()).add(edge.line_id)
         if not targets:
             continue
-        line_sets = list(targets.values())
-        if any(ls != line_sets[0] for ls in line_sets[1:]):
+        line_sets = iter(targets.values())
+        first = next(line_sets)
+        if any(ls != first for ls in line_sets):
             # Branch fan-out: different stations carry different lines.
             return None
-        candidates.append(min(graph.stations[sid].y for sid in targets))
+        candidates.append(min(stations[sid].y for sid in targets))
 
     if not candidates or max(candidates) - min(candidates) > 1.0:
         return None
