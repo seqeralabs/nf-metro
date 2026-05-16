@@ -6094,20 +6094,26 @@ def _compute_fork_join_gaps(
     # from a different-Y entry needs the extra room.
     # Bypass V helpers (id prefix ``__bypass_``) are routing-only.  A
     # V on its own off-trunk track must not flip an otherwise
-    # single-track section into "multi-track" or contribute its track
-    # to a fork's target-track set, because that would manufacture a
-    # fork gap at the V's predecessor and shift visible stations
-    # rightward (see 05 guide fixtures).  Real visible fork signal is
-    # preserved by comparing visible-target tracks against the owner's
-    # own track.
+    # single-track section into "multi-track", or it would turn
+    # port-bound divergences into fork gaps that shift visible stations
+    # rightward.  Specifically when a V is one of the fork/join peers:
+    # exclude its track AND fold the owner's own track into the visible
+    # set so that visible-vs-owner diagonals still trigger a gap, but a
+    # V-only off-trunk peer (e.g. ``trim -> {align, V}`` in the 05 guide
+    # family) does not.  When no V is involved, fall back to the original
+    # peer-set track count so non-bypass topologies stay byte-identical.
     visible_tracks = {
         t for sid, t in tracks.items() if not sid.startswith("__bypass_")
     }
     is_single_track = len(visible_tracks) <= 1
 
-    def _visible_tracks_with_owner(ids, owner_sid):
-        owner_track = tracks.get(owner_sid)
+    def _has_bypass(ids):
+        return any(nid.startswith("__bypass_") for nid in ids)
+
+    def _bypass_aware_tracks(ids, owner_sid):
+        """Visible peer tracks plus the owner's own track, V's removed."""
         result: set[float] = set()
+        owner_track = tracks.get(owner_sid)
         if owner_track is not None:
             result.add(owner_track)
         for nid in ids:
@@ -6125,7 +6131,10 @@ def _compute_fork_join_gaps(
                 if not is_single_track:
                     fork_layers.add(layers[sid])
             else:
-                target_tracks = _visible_tracks_with_owner(targets, sid)
+                if _has_bypass(targets):
+                    target_tracks = _bypass_aware_tracks(targets, sid)
+                else:
+                    target_tracks = {tracks[t] for t in targets}
                 if len(target_tracks) > 1:
                     fork_layers.add(layers[sid])
 
@@ -6135,7 +6144,10 @@ def _compute_fork_join_gaps(
             if any(s not in tracks for s in sources):
                 join_layers.add(layers[sid])
             else:
-                source_tracks = _visible_tracks_with_owner(sources, sid)
+                if _has_bypass(sources):
+                    source_tracks = _bypass_aware_tracks(sources, sid)
+                else:
+                    source_tracks = {tracks[s] for s in sources}
                 if len(source_tracks) > 1:
                     join_layers.add(layers[sid])
 
