@@ -441,3 +441,92 @@ class TestQCountMatchesCorners:
     def test_topology_fixtures(self, fixture):
         _, routes, offsets, svg = _layout_and_route_file(fixture)
         self._check(routes, offsets, svg)
+
+
+# ---------------------------------------------------------------------------
+# 7. Line z-order must be consistent across the whole diagram
+# ---------------------------------------------------------------------------
+
+
+_METRO_LINE_PREFIX = "metro-line-"
+
+
+def _parse_edge_paths_with_line(svg_str: str) -> list[str]:
+    """Return the metro-line ID for each edge <path> in document order.
+
+    Edge paths are tagged ``class="metro-line-<id>"`` by ``_render_edges``;
+    other paths (section boxes, icons, debug overlays) lack that class and
+    are skipped.
+    """
+    root = ET.fromstring(svg_str)
+    ns = {"svg": "http://www.w3.org/2000/svg"}
+    return [
+        p.get("class", "")[len(_METRO_LINE_PREFIX) :]
+        for p in root.findall(".//svg:path", ns)
+        if p.get("class", "").startswith(_METRO_LINE_PREFIX)
+    ]
+
+
+class TestLineZOrderConsistent:
+    """All edge <path> elements for a given metro line must be a single
+    contiguous block in document order.
+
+    SVG paints later elements on top of earlier ones.  If line A's paths are
+    interleaved with line B's, then in one bundle A may sit above B while in
+    another B sits above A -- the visual z-order of any pair of lines is
+    inconsistent across the diagram.  Keeping each line's paths contiguous
+    guarantees a single, global paint order: the line whose paths appear
+    last is on top everywhere it overlaps any other line.
+    """
+
+    def _check(self, svg_str: str) -> None:
+        line_ids = _parse_edge_paths_with_line(svg_str)
+        # A line's paths are contiguous iff each line ID appears in at most
+        # one consecutive run.  Walk the sequence and record where each run
+        # starts; if we re-enter a line we've already left, it's interleaved.
+        finished: set[str] = set()
+        prev: str | None = None
+        for lid in line_ids:
+            if lid != prev and lid in finished:
+                assert False, (
+                    f"Metro line '{lid}' paths are not contiguous in "
+                    f"document order: {line_ids}. This causes inconsistent "
+                    f"z-order across the diagram."
+                )
+            if prev is not None and prev != lid:
+                finished.add(prev)
+            prev = lid
+
+    def test_simple_bundle(self):
+        # Two lines that share a bundle then diverge and re-merge.
+        mmd = (
+            "%%metro line: a | A | #ff0000\n"
+            "%%metro line: b | B | #0000ff\n"
+            "graph LR\n"
+            "    s1 -->|a| j1\n"
+            "    s1 -->|b| j1\n"
+            "    j1 -->|a| t1\n"
+            "    j1 -->|b| t2\n"
+            "    t1 -->|a| j2\n"
+            "    t2 -->|b| j2\n"
+            "    j2 -->|a| e1\n"
+            "    j2 -->|b| e1\n"
+        )
+        _, _, _, svg = _layout_and_route(mmd)
+        self._check(svg)
+
+    def test_rnaseq_sections(self):
+        fixture = EXAMPLES_DIR / "rnaseq_sections.mmd"
+        if not fixture.exists():
+            pytest.skip(f"fixture not available: {fixture}")
+        _, _, _, svg = _layout_and_route_file(fixture)
+        self._check(svg)
+
+    @pytest.mark.parametrize(
+        "fixture",
+        sorted(TOPOLOGIES_DIR.glob("*.mmd")),
+        ids=lambda p: p.stem,
+    )
+    def test_topology_fixtures(self, fixture):
+        _, _, _, svg = _layout_and_route_file(fixture)
+        self._check(svg)

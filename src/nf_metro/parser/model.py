@@ -61,8 +61,16 @@ class Station:
     section_id: str | None = None
     is_port: bool = False
     is_hidden: bool = False
+    # When True, the station is lifted above the section's top track in a
+    # final layout phase.  Used for file-input nodes that would otherwise
+    # consume a line-track Y slot.
+    off_track: bool = False
     terminus_labels: list[str] = field(default_factory=list)
     terminus_icon_types: list[str] = field(default_factory=list)
+    # Optional human-readable names for each terminus icon, rendered as a
+    # caption outside the icon (e.g. "Samples" below a CSV file icon).
+    # Parallel list to terminus_labels; empty string means no caption.
+    terminus_names: list[str] = field(default_factory=list)
     # Populated by layout engine
     x: float = 0.0
     y: float = 0.0
@@ -164,6 +172,11 @@ class MetroGraph:
     ports: dict[str, Port] = field(default_factory=dict)
     junctions: list[str] = field(default_factory=list)
     grid_overrides: dict[str, tuple[int, int, int, int]] = field(default_factory=dict)
+    # Section IDs that received an explicit %%metro grid: directive (i.e.
+    # the user laid out the grid manually, as opposed to auto_layout
+    # filling in the placement).  Used to gate alignment polish passes
+    # that would distort auto-layout pipelines.
+    _explicit_grid: set[str] = field(default_factory=set)
     line_order: str = "definition"  # "definition" or "span"
     diamond_style: str = "straight"  # "straight" or "symmetric"
     compact_offsets: bool = False
@@ -177,10 +190,16 @@ class MetroGraph:
     _explicit_directions: set[str] = field(default_factory=set)
     # Pending terminus designations: station_id -> list of (label, icon_type)
     _pending_terminus: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
+    # Pending off-track marks: station_ids to lift above section top track
+    _pending_off_track: list[str] = field(default_factory=list)
     # Lazy cache for station_lines(); invalidated on edge mutation
     _station_lines_cache: dict[str, list[str]] | None = field(default=None, repr=False)
     # Grid alignment metadata (populated by Phase 2.5 _align_row_y_grids)
     _row_y_grid_info: dict = field(default_factory=dict, repr=False)
+    # Station IDs placed at half-pitch offsets relative to the row grid by the
+    # 2-branch symmetric-fan placement.  Tracked so that ``_snap_all_y_to_grid``
+    # leaves them alone (they intentionally sit on the half-grid).
+    _half_grid_station_ids: set[str] = field(default_factory=set, repr=False)
 
     def _invalidate_edge_caches(self) -> None:
         """Reset caches that depend on the edge list."""

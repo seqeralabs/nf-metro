@@ -53,6 +53,8 @@ packages = ["src/nf_metro"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
+xfail_strict = true
+addopts = "-rxX"
 
 [tool.ruff]
 target-version = "py310"

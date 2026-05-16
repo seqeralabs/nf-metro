@@ -84,6 +84,333 @@ def test_compute_layout_branching():
     assert graph.stations["b"].track != graph.stations["c"].track
 
 
+def test_compute_layout_off_track_lifts_above_topmost():
+    """off_track stations end up above the section's topmost line track."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: src\n"
+        "graph LR\n"
+        "    subgraph sec1 [Section]\n"
+        "        src[Input]\n"
+        "        mid[Middle]\n"
+        "        sink[Sink]\n"
+        "        src -->|main| mid\n"
+        "        mid -->|main| sink\n"
+        "    end\n"
+    )
+    compute_layout(graph, x_spacing=100, y_spacing=50)
+    src_y = graph.stations["src"].y
+    mid_y = graph.stations["mid"].y
+    sink_y = graph.stations["sink"].y
+    # src is off-track so it sits above the lowest of the on-track Ys
+    assert src_y < mid_y
+    assert src_y < sink_y
+    # Section bbox grew upward to fit it
+    sec = graph.sections["sec1"]
+    assert sec.bbox_y <= src_y
+
+
+def test_compute_layout_off_track_bbox_contains_stations():
+    """Lifted off_track stations stay inside their section's bbox."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: a, b\n"
+        "graph LR\n"
+        "    subgraph sec1 [Section]\n"
+        "        a[A]\n"
+        "        b[B]\n"
+        "        mid[Mid]\n"
+        "        a -->|main| mid\n"
+        "        b -->|main| mid\n"
+        "    end\n"
+    )
+    compute_layout(graph, x_spacing=100, y_spacing=50)
+    sec = graph.sections["sec1"]
+    for sid in ("a", "b"):
+        st = graph.stations[sid]
+        assert sec.bbox_y <= st.y <= sec.bbox_y + sec.bbox_h, (
+            f"{sid} at y={st.y} outside bbox y={sec.bbox_y}..{sec.bbox_y + sec.bbox_h}"
+        )
+
+
+def test_compute_layout_rowspan_section_compacts_content():
+    """Row-spanning sections get their content compacted to the bbox top.
+
+    Without this, a rowspan>1 section gets bbox-top-aligned to taller
+    same-row neighbours but its own content stays anchored further
+    down, leaving a large empty band above the first row.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro grid: tall | 0,0,2,1\n"
+        "%%metro grid: short | 1,0,1,1\n"
+        "%%metro grid: low | 1,1,1,1\n"
+        "%%metro off_track: ofs\n"
+        "graph LR\n"
+        "    subgraph tall [Tall]\n"
+        "        a[A]\n"
+        "        a_out[Aout]\n"
+        "        a -->|main| a_out\n"
+        "    end\n"
+        "    subgraph short [Short]\n"
+        "        ofs[Off]\n"
+        "        b[B]\n"
+        "        ofs -->|main| b\n"
+        "    end\n"
+        "    subgraph low [Low]\n"
+        "        c[C]\n"
+        "    end\n"
+        "    a_out -->|main| b\n"
+    )
+    compute_layout(graph, x_spacing=70, y_spacing=55)
+    tall = graph.sections["tall"]
+    a_y = graph.stations["a"].y
+    # Empty band above first content should be at most one station row.
+    assert a_y - tall.bbox_y < 55, (
+        f"tall section has {a_y - tall.bbox_y:.1f}px empty space above its "
+        f"first station (>= y_spacing of 55)"
+    )
+
+
+def test_compute_layout_off_track_terminus_does_not_kink_port():
+    """Off-track sources don't push inter-section ports away from trunk.
+
+    A captioned/uncaptioned off-track station at the top of the
+    downstream section's input band must not be treated as a terminus
+    when spacing the inter-section entry port: otherwise the port
+    (and its upstream partner via junction propagation) gets shoved
+    above the on-track row and the inter-section bundle takes a
+    detour.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: extra\n"
+        "graph LR\n"
+        "    subgraph up [Up]\n"
+        "        u1[U1]\n"
+        "        u_exit[Exit]\n"
+        "        u1 -->|main| u_exit\n"
+        "    end\n"
+        "    subgraph down [Down]\n"
+        "        extra[Extra]\n"
+        "        d1[D1]\n"
+        "        extra -->|main| d1\n"
+        "    end\n"
+        "    u_exit -->|main| d1\n"
+    )
+    compute_layout(graph, x_spacing=70, y_spacing=55)
+    # Entry and exit ports between up and down should align with each
+    # other on the inter-section bundle.
+    up_exit_y = graph.stations[graph.sections["up"].exit_ports[0]].y
+    down_entry_y = graph.stations[graph.sections["down"].entry_ports[0]].y
+    assert abs(up_exit_y - down_entry_y) < 0.5, (
+        f"inter-section ports misaligned: up_exit_y={up_exit_y:.1f} "
+        f"down_entry_y={down_entry_y:.1f}"
+    )
+    # The down entry port should be at the on-track trunk Y, not lifted
+    # away above (i.e. not within the off-track band).
+    d1_y = graph.stations["d1"].y
+    assert abs(down_entry_y - d1_y) < 0.5, (
+        f"down entry port y={down_entry_y:.1f} does not match the on-track "
+        f"trunk station d1 at y={d1_y:.1f}; off-track 'extra' incorrectly "
+        f"pushed the port"
+    )
+
+
+def test_compute_layout_captioned_off_track_clears_line_bundle():
+    """Captioned off-track icons keep clearance from the line bundle.
+
+    The optional caption rendered under a file/files/dir icon extends
+    one extra label line below the station Y, so compaction must
+    preserve enough gap that the caption text doesn't end up
+    overlapping the topmost on-track row after content is shifted up.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro file: net_in | TSV | Network\n"
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: net_in\n"
+        "graph LR\n"
+        "    subgraph up [Up]\n"
+        "        u1[U1]\n"
+        "    end\n"
+        "    subgraph s [S]\n"
+        "        net_in[ ]\n"
+        "        gsea[GSEA]\n"
+        "        next[Next]\n"
+        "        net_in -->|main| gsea\n"
+        "        gsea -->|main| next\n"
+        "    end\n"
+        "    u1 -->|main| gsea\n"
+    )
+    compute_layout(graph, x_spacing=70, y_spacing=55)
+    net_y = graph.stations["net_in"].y
+    gsea_y = graph.stations["gsea"].y
+    # Need room for the icon body half (~16px) + caption gap + font
+    # line.  Use 30px as a conservative lower bound.
+    assert gsea_y - net_y >= 30, (
+        f"caption clearance too tight: gsea_y={gsea_y:.1f} net_in_y={net_y:.1f} "
+        f"(gap={gsea_y - net_y:.1f}px, need >=30)"
+    )
+
+
+def test_no_upward_inter_section_route_across_rowspan_neighbour():
+    """Inter-section bundles must not detour upward over rowspan neighbours.
+
+    Repro of the PR #271 regression on 04_directions / rnaseq_auto /
+    fold_fan_across: a TB-direction grid section with grid_row_span>1
+    sat next to row-mate LR sections.  Compaction lifted the TB
+    section's entry port upward (out of trunk Y) so the inter-section
+    bundle had to route upward across the section gap rather than
+    continuing horizontally along the row-mate trunk Y.
+
+    For every cross-section port-to-port edge that bridges adjacent
+    grid columns within the same grid row, the route's vertical
+    deflection at the boundary (exit_y - entry_y) must be bounded:
+    the bundle may step down to reach a target below it, but it
+    cannot step UP across the gap by more than one ``y_spacing`` --
+    that's the visible "lines route up unnecessarily" pattern.
+
+    Skips edges where the target is below the source (no upward
+    detour) and edges where the source section spans multiple grid
+    rows in its TB direction (which legitimately drops content down).
+    """
+    text = Path(__file__).parent.parent.joinpath("examples/guide/04_directions.mmd")
+    graph = parse_metro_mermaid(text.read_text())
+    y_spacing = 40.0
+    compute_layout(graph, y_spacing=y_spacing)
+
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if src is None or tgt is None:
+            continue
+        if not (src.is_port and tgt.is_port):
+            continue
+        ssec = graph.sections.get(src.section_id)
+        tsec = graph.sections.get(tgt.section_id)
+        if ssec is None or tsec is None or ssec is tsec:
+            continue
+        # Only check adjacent same-row neighbours (where the trunk Y is
+        # expected to flow horizontally).  Skip TB rowspan source
+        # sections because they legitimately drop content down across
+        # multiple grid rows.
+        if ssec.grid_row != tsec.grid_row or abs(ssec.grid_col - tsec.grid_col) > 1:
+            continue
+        if ssec.direction == "TB" and ssec.grid_row_span > 1:
+            continue
+        # Upward detour: src.y > tgt.y means the bundle has to climb
+        # from exit to entry across the gap.  Anything bigger than a
+        # half-spacing rounds up to "visibly kinked upward".
+        upward = src.y - tgt.y
+        threshold = y_spacing / 2
+        assert upward <= threshold, (
+            f"edge {edge.source}->{edge.target} routes upward by {upward:.1f}px "
+            f"between adjacent same-row sections {ssec.id}->{tsec.id} "
+            f"(exit_y={src.y:.1f}, entry_y={tgt.y:.1f}, "
+            f"threshold={threshold}); "
+            f"inter-section bundle should stay roughly horizontal"
+        )
+
+
+def test_section_content_y_stable_under_neutral_layout():
+    """TB rowspan>1 content must keep its natural Y under compaction.
+
+    Sanity check for the PR #271 regression: when a TB section spans
+    multiple grid rows, its content stations occupy a vertical column
+    spanning the row range.  Compaction must NOT lift the column up to
+    the bbox top, because doing so:
+
+      1. moves the LAST TB station above the bottom-row trunk Y where
+         it should align with the row-mate entry port,
+      2. forces the row-0 row-mates to route their bundle upward to
+         meet the TB section's lifted entry.
+
+    Uses the 04_directions fixture (TB rowspan=2 postprocessing
+    section).  The TB section's middle/last stations should stay at
+    their natural rowspan-aligned Ys: the column's Y span must match
+    the row trunk-Y span (top row trunk Y to bottom row trunk Y),
+    not be compacted to the bbox top.
+    """
+    text = Path(__file__).parent.parent.joinpath("examples/guide/04_directions.mmd")
+    graph = parse_metro_mermaid(text.read_text())
+    y_spacing = 40.0
+    compute_layout(graph, y_spacing=y_spacing)
+    post = graph.sections["postprocessing"]
+    assert post.grid_row_span == 2, "fixture invariant: postprocessing rowspan=2"
+    assert post.direction == "TB", "fixture invariant: postprocessing TB"
+    # rna_analysis (row 0) and dna_analysis (row 1) are the LR
+    # row-mates that share the inter-section bundle with postprocessing.
+    row0_trunk = graph.stations["star"].y  # rna_analysis row 0 trunk
+    row1_trunk = graph.stations["bwa"].y  # dna_analysis row 1 trunk
+    # The last TB station (bedtools) lands at the bottom of the column;
+    # natural placement puts it at or below the row 1 trunk Y so the
+    # inter-section bundle from row 0 to postprocessing.last doesn't
+    # have to route upward.  Compaction lifts bedtools above row 1
+    # trunk Y, which is the visible regression.
+    bedtools_y = graph.stations["bedtools"].y
+    # Tolerance: bedtools may be slightly above row 1 trunk by less
+    # than y_spacing/2 due to bbox padding accounting, but anything
+    # more than y_spacing above is the compaction regression.
+    above_row1 = row1_trunk - bedtools_y
+    assert above_row1 <= y_spacing, (
+        f"TB rowspan section's bottom station shifted upward: "
+        f"bedtools.y={bedtools_y:.1f} row1_trunk={row1_trunk:.1f} "
+        f"(row0_trunk={row0_trunk:.1f}, y_spacing={y_spacing}); "
+        f"bedtools is {above_row1:.1f}px above row1_trunk -- "
+        f"compaction lifted TB content above its natural row span"
+    )
+
+
+def test_rowspan_trim_doesnt_misalign_tb_bbox_bottom():
+    """``_shrink_bboxes_to_content_bottom`` (Phase 13j) must not undo
+    ``_align_tb_section_bbox_bottoms`` (Phase 13f), nor trim a
+    row-spanning TB section's bbox bottom above a known row-mate it
+    visually shares a bottom edge with.
+
+    Anchored on the two fixtures where this regression was first
+    observed:
+
+    - ``fold_double``: section #4 (TB ``calling``) feeds into RL row
+      ``hard_filter`` (#5); their bbox bottoms must match.  Section
+      #8 (TB ``integration``) feeds into LR row ``reporting`` (#9);
+      their bbox bottoms must match too.
+    - ``04_directions``: section #4 (TB ``postprocessing``,
+      ``grid_row_span=2``) shares a bottom edge with ``reporting``
+      (#5) one grid row below.
+    """
+    root = Path(__file__).parent.parent
+
+    def _bots(graph, *sids):
+        return {
+            sid: graph.sections[sid].bbox_y + graph.sections[sid].bbox_h for sid in sids
+        }
+
+    fold = parse_metro_mermaid(
+        (root / "examples/topologies/fold_double.mmd").read_text()
+    )
+    compute_layout(fold)
+    fb = _bots(fold, "calling", "hard_filter", "integration", "reporting")
+    assert fb["calling"] >= fb["hard_filter"] - 0.5, (
+        f"fold_double: calling (TB #4) bbox bottom {fb['calling']:.1f} above "
+        f"row-mate hard_filter (#5) bottom {fb['hard_filter']:.1f}"
+    )
+    assert fb["integration"] >= fb["reporting"] - 0.5, (
+        f"fold_double: integration (TB #8) bbox bottom {fb['integration']:.1f} "
+        f"above row-mate reporting (#9) bottom {fb['reporting']:.1f}"
+    )
+
+    directions = parse_metro_mermaid(
+        (root / "examples/guide/04_directions.mmd").read_text()
+    )
+    compute_layout(directions)
+    db = _bots(directions, "postprocessing", "reporting")
+    assert db["postprocessing"] >= db["reporting"] - 0.5, (
+        f"04_directions: postprocessing (TB #4) bbox bottom "
+        f"{db['postprocessing']:.1f} above row-mate reporting (#5) bottom "
+        f"{db['reporting']:.1f}"
+    )
+
+
 # --- Section-first layout tests ---
 
 
@@ -623,6 +950,50 @@ def test_is_diamond_fanout():
     assert _is_diamond_fanout(["b", "c"], G2) is False
 
 
+def test_lift_would_cause_uturn_skips_when_feeders_below_anchor():
+    """A trunk candidate with all-below feeders should NOT be lifted."""
+    from nf_metro.layout.engine import _lift_would_cause_uturn
+    from nf_metro.parser.model import Edge, MetroGraph, Station
+
+    g = MetroGraph()
+    g.stations["f1"] = Station(id="f1", label="F1", x=0, y=200, section_id="upstream")
+    g.stations["f2"] = Station(id="f2", label="F2", x=0, y=250, section_id="upstream")
+    g.stations["cand"] = Station(id="cand", label="C", x=100, y=200, section_id="ds")
+    g.edges = [
+        Edge(source="f1", target="cand", line_id="L1"),
+        Edge(source="f2", target="cand", line_id="L2"),
+    ]
+    assert _lift_would_cause_uturn(g, "cand", "ds", anchor_y=200) is True
+
+
+def test_lift_would_cause_uturn_allows_when_feeder_above():
+    """When at least one feeder sits above anchor_y, lifting is safe."""
+    from nf_metro.layout.engine import _lift_would_cause_uturn
+    from nf_metro.parser.model import Edge, MetroGraph, Station
+
+    g = MetroGraph()
+    g.stations["f1"] = Station(id="f1", label="F1", x=0, y=100, section_id="upstream")
+    g.stations["f2"] = Station(id="f2", label="F2", x=0, y=250, section_id="upstream")
+    g.stations["cand"] = Station(id="cand", label="C", x=100, y=200, section_id="ds")
+    g.edges = [
+        Edge(source="f1", target="cand", line_id="L1"),
+        Edge(source="f2", target="cand", line_id="L2"),
+    ]
+    assert _lift_would_cause_uturn(g, "cand", "ds", anchor_y=200) is False
+
+
+def test_lift_would_cause_uturn_ignores_single_feeder():
+    """A single external feeder is not enough to flag a U-turn."""
+    from nf_metro.layout.engine import _lift_would_cause_uturn
+    from nf_metro.parser.model import Edge, MetroGraph, Station
+
+    g = MetroGraph()
+    g.stations["f1"] = Station(id="f1", label="F1", x=0, y=250, section_id="upstream")
+    g.stations["cand"] = Station(id="cand", label="C", x=100, y=200, section_id="ds")
+    g.edges = [Edge(source="f1", target="cand", line_id="L1")]
+    assert _lift_would_cause_uturn(g, "cand", "ds", anchor_y=200) is False
+
+
 def test_straight_diamond_top_branch_stays_flat():
     """With diamond_style='straight', the top branch of a diamond stays on the trunk."""
     graph = parse_metro_mermaid(_diamond_section_text())
@@ -653,6 +1024,169 @@ def test_straight_diamond_merge_returns_to_trunk():
     compute_layout(graph)
     # d (merge) should be at the same Y as a (trunk)
     assert graph.stations["d"].y == graph.stations["a"].y
+
+
+def _terminal_full_bundle_text():
+    """Two full-bundle terminal stations fed from upstream methods.
+
+    Reproduces the Reporting-style topology: a terminal section (no
+    exit ports) where two stations both carry the full bundle and both
+    receive from the same upstream branches.
+    """
+    return (
+        "%%metro line: L1 | Line1 | #ff0000\n"
+        "%%metro line: L2 | Line2 | #00ff00\n"
+        "graph LR\n"
+        "    subgraph methods [Methods]\n"
+        "        m1[M1]\n"
+        "        m2[M2]\n"
+        "    end\n"
+        "    subgraph report [Report]\n"
+        "        a[A]\n"
+        "        b[B]\n"
+        "    end\n"
+        "    m1 -->|L1,L2| a\n"
+        "    m2 -->|L1,L2| a\n"
+        "    m1 -->|L1,L2| b\n"
+        "    m2 -->|L1,L2| b\n"
+    )
+
+
+def test_full_bundle_column_fans_around_trunk_with_center_ports():
+    """Terminal section's full-bundle column fans symmetrically with --center-ports."""
+    graph = parse_metro_mermaid(_terminal_full_bundle_text())
+    graph.center_ports = True
+    compute_layout(graph, y_spacing=50.0)
+    ay = graph.stations["a"].y
+    by = graph.stations["b"].y
+    assert ay != by, "a and b should not share Y after fan"
+    # Symmetric around the section trunk Y (here derived from the LR port).
+    mid = (ay + by) / 2
+    assert abs((by - mid) - (mid - ay)) < 1e-6, (
+        f"a and b should be symmetric around trunk Y: a={ay}, b={by}, mid={mid}"
+    )
+    assert abs(abs(by - ay) - 100.0) < 1e-6, (
+        f"a and b should be 2*y_spacing apart: |b-a|={abs(by - ay)}"
+    )
+
+
+def test_full_bundle_column_no_op_without_center_ports():
+    """The new fan-out only fires when --center-ports is enabled."""
+    graph = parse_metro_mermaid(_terminal_full_bundle_text())
+    graph.center_ports = False
+    compute_layout(graph, y_spacing=50.0)
+    # Without center_ports, a and b should sit on adjacent tracks (1 step apart).
+    delta = abs(graph.stations["b"].y - graph.stations["a"].y)
+    assert delta == pytest.approx(50.0), (
+        f"Without center_ports, a/b should be 1 y_spacing apart: delta={delta}"
+    )
+
+
+def test_full_bundle_column_fans_non_terminal_section():
+    """Non-terminal full-bundle columns also fan around the trunk Y."""
+    text = (
+        "%%metro line: L1 | Line1 | #ff0000\n"
+        "%%metro line: L2 | Line2 | #00ff00\n"
+        "graph LR\n"
+        "    subgraph upstream [Upstream]\n"
+        "        u[U]\n"
+        "    end\n"
+        "    subgraph middle [Middle]\n"
+        "        a[A]\n"
+        "        b[B]\n"
+        "    end\n"
+        "    subgraph downstream [Downstream]\n"
+        "        d[D]\n"
+        "    end\n"
+        "    u -->|L1,L2| a\n"
+        "    u -->|L1,L2| b\n"
+        "    a -->|L1,L2| d\n"
+        "    b -->|L1,L2| d\n"
+    )
+    graph = parse_metro_mermaid(text)
+    graph.center_ports = True
+    compute_layout(graph, y_spacing=50.0)
+    # `middle` has exit ports but its column carries only full-bundle
+    # stations with no unique trunk, so the symfan should fire and the
+    # pair should flank a vacant trunk row.
+    ay = graph.stations["a"].y
+    by = graph.stations["b"].y
+    delta = abs(by - ay)
+    assert delta == pytest.approx(100.0), (
+        f"Non-terminal full-bundle column should flank trunk: delta={delta}"
+    )
+    mid = (ay + by) / 2
+    assert abs((by - mid) - (mid - ay)) < 1e-6, (
+        f"a and b should be symmetric around trunk Y: a={ay}, b={by}, mid={mid}"
+    )
+
+
+def test_off_track_input_sits_adjacent_to_its_consumer():
+    """Each off-track input lands one y_spacing above its consumer.
+
+    When two off-track inputs in the same section feed different
+    consumer stations, they should sit at distinct Ys derived from
+    their respective consumers, not stack at a uniform top-of-section
+    band.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: in_a, in_b\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        in_a[A]\n"
+        "        in_b[B]\n"
+        "        upper[Upper]\n"
+        "        lower[Lower]\n"
+        "        upper -->|main| lower\n"
+        "        in_a -->|main| upper\n"
+        "        in_b -->|main| lower\n"
+        "    end\n"
+    )
+    compute_layout(graph, x_spacing=70, y_spacing=55)
+    upper_y = graph.stations["upper"].y
+    lower_y = graph.stations["lower"].y
+    in_a_y = graph.stations["in_a"].y
+    in_b_y = graph.stations["in_b"].y
+    # Each input sits one row above its respective consumer.
+    assert in_a_y == pytest.approx(upper_y - 55), (
+        f"in_a y={in_a_y} should be upper_y - y_spacing = {upper_y - 55}"
+    )
+    assert in_b_y == pytest.approx(lower_y - 55), (
+        f"in_b y={in_b_y} should be lower_y - y_spacing = {lower_y - 55}"
+    )
+    # Inputs sit at different Ys (not a uniform band).
+    assert in_a_y != in_b_y
+
+
+def test_multiple_off_track_inputs_share_consumer_stack_above_it():
+    """Multiple off-track inputs feeding one consumer stack above it."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: in_a, in_b\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        in_a[A]\n"
+        "        in_b[B]\n"
+        "        mid[Mid]\n"
+        "        sink[Sink]\n"
+        "        mid -->|main| sink\n"
+        "        in_a -->|main| mid\n"
+        "        in_b -->|main| mid\n"
+        "    end\n"
+    )
+    compute_layout(graph, x_spacing=70, y_spacing=55)
+    mid_y = graph.stations["mid"].y
+    in_a_y = graph.stations["in_a"].y
+    in_b_y = graph.stations["in_b"].y
+    # The two inputs stack above mid at 1*step and 2*step respectively.
+    ys = sorted([in_a_y, in_b_y])
+    assert ys[0] == pytest.approx(mid_y - 2 * 55), (
+        f"Topmost input y={ys[0]} should be mid_y - 2*y_spacing = {mid_y - 2 * 55}"
+    )
+    assert ys[1] == pytest.approx(mid_y - 55), (
+        f"Lower input y={ys[1]} should be mid_y - y_spacing = {mid_y - 55}"
+    )
 
 
 def test_cli_straight_diamonds_default(tmp_path):

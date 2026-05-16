@@ -39,6 +39,26 @@ def test_parse_line_order_invalid_ignored():
     assert graph.line_order == "definition"
 
 
+def test_center_ports_directive_default():
+    text = "graph LR\n"
+    graph = parse_metro_mermaid(text)
+    assert graph.center_ports is False
+
+
+@pytest.mark.parametrize("value", ["true", "True", "TRUE", "yes", "1"])
+def test_center_ports_directive_parsed_truthy(value):
+    text = f"%%metro center_ports: {value}\ngraph LR\n"
+    graph = parse_metro_mermaid(text)
+    assert graph.center_ports is True
+
+
+@pytest.mark.parametrize("value", ["false", "False", "no", "0", "anything"])
+def test_center_ports_directive_parsed_falsy(value):
+    text = f"%%metro center_ports: {value}\ngraph LR\n"
+    graph = parse_metro_mermaid(text)
+    assert graph.center_ports is False
+
+
 def test_parse_lines():
     text = (
         "%%metro line: main | Main Line | #ff0000\n"
@@ -166,6 +186,54 @@ def test_ignores_comments():
     graph = parse_metro_mermaid(text)
     assert graph.title == "Test"
     assert len(graph.edges) == 1
+
+
+def test_parse_off_track_single():
+    """%%metro off_track: marks a single station as off-track."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: samples_in\n"
+        "graph LR\n"
+        "    samples_in[Samples]\n"
+        "    samples_in -->|main| validator\n"
+        "    validator[Validate]\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.stations["samples_in"].off_track is True
+    assert graph.stations["validator"].off_track is False
+
+
+def test_parse_off_track_multiple():
+    """%%metro off_track: accepts a comma-separated list."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: a, b, c\n"
+        "graph LR\n"
+        "    a -->|main| d\n"
+        "    b -->|main| d\n"
+        "    c -->|main| d\n"
+        "    d[Sink]\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.stations["a"].off_track is True
+    assert graph.stations["b"].off_track is True
+    assert graph.stations["c"].off_track is True
+    assert graph.stations["d"].off_track is False
+
+
+def test_parse_off_track_unknown_id_ignored():
+    """Unknown station ids in %%metro off_track: silently skip."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro off_track: a, missing\n"
+        "graph LR\n"
+        "    a[A]\n"
+        "    a -->|main| b\n"
+        "    b[B]\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.stations["a"].off_track is True
+    assert "missing" not in graph.stations
 
 
 # --- Subgraph (first-class section) tests ---
@@ -721,6 +789,58 @@ def test_parse_file_icon_type_default():
     )
     graph = parse_metro_mermaid(text)
     assert graph.stations["reads_in"].terminus_icon_types == ["file"]
+
+
+def test_parse_file_icon_with_name():
+    """Optional third field on %%metro file: sets a caption name."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: reads_in | CSV | Samples\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    st = graph.stations["reads_in"]
+    assert st.terminus_labels == ["CSV"]
+    assert st.terminus_names == ["Samples"]
+
+
+def test_parse_file_icon_without_name_empty():
+    """Without the optional name field, terminus_names is empty string."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: reads_in | CSV\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.stations["reads_in"].terminus_names == [""]
+
+
+def test_parse_file_icon_name_applies_to_all_comma_labels():
+    """The optional name applies to every comma-separated label."""
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: reads_in | FASTQ, BAM | Reads\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    st = graph.stations["reads_in"]
+    assert st.terminus_labels == ["FASTQ", "BAM"]
+    assert st.terminus_names == ["Reads", "Reads"]
 
 
 def test_parse_legend_min_height():

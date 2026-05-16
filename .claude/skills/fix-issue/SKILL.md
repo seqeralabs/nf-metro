@@ -1,13 +1,23 @@
 ---
 name: fix-issue
-description: End-to-end workflow for fixing GitHub issues on the nf-metro repo. Use when the user references a GitHub issue (by number, URL, or description) and wants it fixed. Handles worktree setup, environment creation, implementation, testing, visual review, and PR creation. Trigger on phrases like "fix issue #N", "address #N", "work on issue N", or any request to fix a bug or implement a feature that references an issue.
+description: End-to-end workflow for fixing GitHub issues on the nf-metro repo with diagnostic rigor. Use when the user references a GitHub issue (by number, URL, or description) and wants it fixed. Handles worktree setup, environment creation, diagnostic-first investigation, invariant-test-first implementation, runtime validators, /simplify pass, full-repo lint, visual review via render preview, narrow-the-fix iteration on regressions, additive-only PR hygiene (no force-push, no narrative comments), origin verification after every push, and PR creation. Trigger on phrases like "fix issue #N", "address #N", "work on issue N", or any request to fix a bug or implement a feature that references an issue. For shepherding a chain of already-existing PRs back to main, see `pr-chain-vet` instead.
 ---
 
 # Fix Issue
 
 Structured workflow for fixing nf-metro GitHub issues in an isolated worktree.
+Emphasises diagnostic-first investigation, invariant tests before code, and
+additive-only PR hygiene so a fix never silently regresses the gallery.
 
-## Phase 1: Understand the Issue
+**Conventions** (substitute if your setup differs):
+- Local nf-metro checkout: `~/projects/nf-metro`
+- Issues + PRs target the canonical upstream `pinin4fjords/nf-metro`. If
+  you're working from a fork, resolve the owner with
+  `gh repo view --json owner -q .owner.login`.
+- micromamba: `/opt/homebrew/bin/micromamba` (macOS Apple Silicon codesign
+  workaround). On other platforms, just `micromamba` if it's on PATH.
+
+## Step 1: Understand the Issue
 
 ```bash
 gh issue view <N> --repo pinin4fjords/nf-metro
@@ -15,11 +25,11 @@ gh issue view <N> --repo pinin4fjords/nf-metro
 
 Summarize the problem and proposed approach. Wait for user confirmation before proceeding.
 
-## Phase 2: Worktree + Environment Setup
+## Step 2: Worktree + Environment Setup
 
 ```bash
 # Worktree
-cd /Users/jonathan.manning/projects/nf-metro
+cd ~/projects/nf-metro
 git fetch origin main
 git worktree add /tmp/nf-metro-fix-<N> -b fix/<N>-<slug> origin/main
 
@@ -31,31 +41,109 @@ pip install -e "/tmp/nf-metro-fix-<N>[docs]"
 
 All subsequent work happens inside `/tmp/nf-metro-fix-<N>`.
 
-## Phase 3: Implement the Fix
+## Step 3: Diagnostic Before Fix
 
-The shell cwd resets after each Bash call. Always chain `cd` into the worktree:
+**Do not propose fixes from hypotheses.** Reproduce the symptom in numbers
+before writing any code:
 
-```bash
-source ~/.local/bin/mm-activate nf-metro-fix-<N> && cd /tmp/nf-metro-fix-<N> && ruff format src/ tests/ && ruff check src/ tests/ && pytest
+1. Render the affected example(s) on the current `main` (the before-state).
+2. Inspect the rendered SVG: read the actual coordinates / element
+   attributes that are wrong. Print them, log them, eyeball them.
+3. Restate the bug as "element X has property P=<observed>, expected
+   P=<target>" - a concrete numeric or structural claim. If you can't state
+   the bug this way, you don't understand it yet; keep digging.
+
+Only after the symptom is pinned down to specific numbers should you reason
+about which layout pass / function produced them.
+
+## Step 4: Write the Invariant Test FIRST
+
+Before any production code change:
+
+1. Write a test that encodes the invariant the bug violates (e.g. "no two
+   stations share a grid cell", "trunk centre is symmetric about the fan
+   midpoint"). Place it under `tests/`, ideally extending the layout
+   invariants suite.
+2. **Parametrise the test over multiple fixtures**, not a single `.mmd`.
+   The existing `test_layout_invariants.py` historically over-relies on
+   `da_pipeline.mmd`; new invariants should be exercised against several
+   gallery fixtures so they generalise.
+3. Run the test and **verify it fails on `main`**. If it passes, the test
+   doesn't actually encode the bug - rewrite it.
+4. Now write the fix.
+5. Re-run the test and verify it passes.
+
+This guarantees the test is meaningful (it caught the bug) and the fix is
+meaningful (the test now passes because of the fix, not coincidence).
+
+## Step 5: Add a Runtime Validator
+
+Where the invariant is about layout properties that could regress silently
+(overlap, off-grid placement, asymmetry, etc.), also add a `_guard_*`
+function and wire it into `compute_layout`'s validate block.
+
+Validators must **fail loudly** - raise with a clear, contextual error
+message. Silent warnings or `print()`s are not acceptable; they get
+ignored. The runtime check protects future changes; the unit test pins the
+current behaviour.
+
+## Step 6: /simplify Pass
+
+After the fix and tests are passing, invoke the `simplify` Skill on the
+changed code. Apply its suggestions and commit as a **separate** commit:
+
+```
+refactor: tighten <area> after fix for #<N>
 ```
 
-Fix any failures before proceeding.
+Keeping `fix:` and `refactor:` commits separate makes the fix itself easy
+to review and easy to revert in isolation if regressions surface.
 
-## Phase 4: Visual Review
+## Step 7: Whole-Repo Lint
 
-### Primary method: CI render preview (recommended)
+CI lint scans the entire repository, not just `src/` and `tests/`.
+Pre-existing mis-formats in scripts, docs config, etc. will trip CI on
+your PR even though they predate your change.
 
-Push the branch and create a PR. The CI workflow (`.github/workflows/pr-renders.yml`) automatically renders all gallery examples on both the PR branch and base, generates a before/after visual diff page, and posts a sticky comment on the PR with the preview link:
+```bash
+source ~/.local/bin/mm-activate nf-metro-fix-<N> && cd /tmp/nf-metro-fix-<N> && ruff format . && ruff check .
+```
+
+Run from the repo root, no path restriction. Fix or commit any deltas
+that appear (a separate `style: ruff format whole repo` commit is fine).
+Then run the test suite:
+
+```bash
+pytest
+```
+
+## Step 8: Visual Review via Render Preview
+
+### Primary method: CI render preview (authoritative)
+
+Push the branch and create a PR. The CI workflow
+(`.github/workflows/pr-renders.yml`) automatically renders all gallery
+examples on both the PR branch and base, generates a before/after visual
+diff page, and posts a sticky comment on the PR with the preview link:
 
 ```
 https://pinin4fjords.github.io/nf-metro/_pr/<PR_NUMBER>/
 ```
 
-This is the authoritative visual review. After creating the PR in Phase 5, point the user to the render preview link for review.
+### Render-preview verdict gating
+
+The sticky comment ends in a verdict line. Gate the next step on it:
+
+- **"No visual changes detected"** -> eligible for auto-merge under the
+  user's standing authorisation for no-change PRs. Proceed.
+- **"Ready for review"** (or any wording indicating visual deltas exist)
+  -> **STOP**. Surface the deltas to the user with one short line per
+  affected gallery example describing what changed (e.g.
+  `da_pipeline.mmd: trunk shifted 12px right`). Do not auto-merge.
 
 ### Optional: quick local render of a single file
 
-For a fast sanity check of one specific `.mmd` file before pushing, render it locally:
+For a fast sanity check of one specific `.mmd` file before pushing:
 
 ```bash
 source ~/.local/bin/mm-activate nf-metro-fix-<N>
@@ -64,42 +152,123 @@ python -c "import cairosvg; cairosvg.svg2png(url='/tmp/<name>.svg', write_to='/t
 open /tmp/<name>.png
 ```
 
-This is useful for quick iteration but does not replace the full CI gallery review.
+Useful for quick iteration but does not replace the full CI gallery
+review.
 
 ### Optional: local before/after comparison
 
-If you need a before/after comparison before pushing (e.g. risky change, user wants early feedback), use the `/render-topologies` skill.
+For a before/after sweep before pushing, use the `/render-topologies`
+skill.
 
-## Phase 5: Commit and PR
+## Step 9: Narrow Over-Applying Fixes
 
-Once tests pass:
+If the render preview shows the fix changed **more than the targeted
+example** unexpectedly, do not ship it as-is. For each affected example,
+classify the visual delta as one of:
+
+- **I** (improvement) - keep
+- **N** (neutral) - keep
+- **D** (detrimental) - must be narrowed
+
+For each detrimental delta, find the **precondition** that distinguishes
+the target case (where the fix helps) from the regressing case (where it
+hurts). Gate the fix on that precondition (e.g. a topology predicate, a
+config flag, a layout property test) so it only fires when applicable.
+Re-render and re-verify the verdict before merging.
+
+A fix that ships with even one unaddressed D-delta is not finished.
+
+## Step 10: Commit, Push, Verify Origin
+
+Open the PR:
 
 ```bash
 cd /tmp/nf-metro-fix-<N>
 gh pr create --repo pinin4fjords/nf-metro --base main --title "<title>" --body "$(cat <<'EOF'
 ## Summary
-<bullets>
+<bullets describing the aggregate diff against main, no narrative>
 
 Fixes #<N>
 
 ## Test plan
-- [ ] pytest passes
-- [ ] ruff check clean
+- [ ] pytest passes (including new invariant test)
+- [ ] ruff check + ruff format clean on whole repo
+- [ ] Runtime validator added (if applicable)
 - [ ] Visual review of [render preview](https://pinin4fjords.github.io/nf-metro/_pr/<PR_NUMBER>/)
+- [ ] Render-preview verdict: <No visual changes | deltas classified I/N>
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+Generated with Claude Code
 EOF
 )"
 ```
 
-After CI posts the render preview link, ask the user to review it.
-
-## Phase 6: Cleanup
-
-Offer to clean up (only if user agrees):
+After every `git push`, **verify origin HEAD matches local**:
 
 ```bash
-cd /Users/jonathan.manning/projects/nf-metro
-git worktree remove /tmp/nf-metro-fix-<N>
-/opt/homebrew/bin/micromamba env remove -n nf-metro-fix-<N> -y
+gh pr view <PR_NUMBER> --json headRefOid -q .headRefOid
+git rev-parse HEAD
 ```
+
+The two must match. Past agents have lost commits to silent push
+failures; do not skip this check.
+
+### Additive only - no force-push, ever
+
+The local pre-push hook blocks force-pushes for a reason. To undo
+anything, use `git revert <hash>` and push the revert as a new commit.
+Never rewrite shared history (no `--force`, no `--force-with-lease`, no
+interactive rebase on a pushed branch). This applies even when "it would
+be cleaner" - cleanliness is not worth the risk of an agent silently
+dropping work.
+
+### Narrative belongs in the PR description, not in comments
+
+Do not post explanatory comments on the PR walking through what changed,
+what was tried, or what was reverted. Edit the PR description instead:
+
+```bash
+gh pr edit <PR_NUMBER> --body-file /tmp/pr-body.md
+```
+
+The description should be a standalone summary of the current state of
+the diff against main - not a chronology of how the PR got there.
+
+If narrative comments already exist (yours or a prior agent's), sweep
+them via the GraphQL `deleteIssueComment` mutation. **Keep** the CI
+sticky render-preview comment.
+
+## Step 11: Drive End-to-End
+
+A fix-issue session is not done when `/simplify` returns control to the
+parent, or when the local tests pass. It is done when:
+
+1. Commits are pushed.
+2. Origin HEAD verified against local.
+3. CI is green on the final commit.
+4. Render-preview verdict is captured and gated on per Step 8.
+5. PR description is standalone (per Step 10).
+
+Do not hand back to the user partway through this list saying "the
+simplify pass is done" or "tests pass locally". Carry the work all the
+way to a reviewable PR.
+
+## Step 12: Post-Merge Cleanup
+
+Once the PR merges, do cleanup operations **in this order** to avoid
+GitHub auto-closing dependent PRs:
+
+1. **Retarget any child PRs** based on this branch over to `main` (or
+   the next-up base) **first**, via `gh pr edit <child> --base main`.
+   GitHub auto-closes PRs whose base branch is deleted; closed PRs whose
+   base ref no longer exists cannot be reopened without restoring the
+   deleted branch.
+2. Delete the **remote** branch: `git push origin --delete fix/<N>-<slug>`
+   (or via the GitHub UI's auto-delete on merge).
+3. Remove the local worktree: `git worktree remove /tmp/nf-metro-fix-<N>`.
+4. Delete the local branch: `git branch -D fix/<N>-<slug>`.
+5. Remove the conda env: `/opt/homebrew/bin/micromamba env remove -n nf-metro-fix-<N> -y`.
+
+Offer this cleanup to the user; only run it after they agree.
+
+For shepherding a whole stacked chain of PRs back into `main` (rather
+than a single issue fix), see `pr-chain-vet`.

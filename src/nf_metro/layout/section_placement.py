@@ -24,6 +24,7 @@ from nf_metro.layout.constants import (
     PLACEMENT_Y_GAP,
     PORT_MIN_GAP,
     SECTION_HEADER_PROTRUSION,
+    SECTION_X_PADDING,
 )
 from nf_metro.parser.model import MetroGraph, PortSide, Section
 
@@ -131,12 +132,18 @@ def _compute_section_offsets(
         min_col = min(min_col, col)
         max_col = max(max_col, col + cspan - 1)
 
-    # Max width per column (only from single-column sections)
+    # Right reach re-anchored to the standard left edge so that bbox_x
+    # pushed further left (e.g. by terminus-icon clearance) doesn't
+    # inflate the column.  Phase 3b of compute_layout absorbs the
+    # leftward overhang via a global x_offset bump.
+    def _effective_width(section: Section) -> float:
+        return section.bbox_x + section.bbox_w + SECTION_X_PADDING
+
     col_widths: dict[int, float] = defaultdict(float)
     for sid, section in graph.sections.items():
         if section.grid_col_span == 1:
             col = col_assign.get(sid, 0)
-            col_widths[col] = max(col_widths[col], section.bbox_w)
+            col_widths[col] = max(col_widths[col], _effective_width(section))
 
     for c in range(min_col, max_col + 1):
         if c not in col_widths:
@@ -150,8 +157,9 @@ def _compute_section_offsets(
         start_col = col_assign.get(sid, 0)
         spanned = sum(col_widths[c] for c in range(start_col, start_col + cspan))
         spanned += (cspan - 1) * section_x_gap
-        if section.bbox_w > spanned:
-            deficit = section.bbox_w - spanned
+        eff_w = _effective_width(section)
+        if eff_w > spanned:
+            deficit = eff_w - spanned
             col_widths[start_col + cspan - 1] += deficit
 
     # Cumulative x offsets
@@ -673,16 +681,23 @@ def _position_ports_on_boundary(
         if not station:
             continue
 
-        connected = _find_connected_internal_coord(pid, section, graph, free_axis)
+        port = graph.ports.get(pid)
+        # LEFT/RIGHT exit ports prefer the downstream bundle Y so the
+        # inter-section run stays horizontal; fall back to the local
+        # internal-station average for entry ports and fan-in exits.
+        anchor: float | None = None
+        if free_axis == "y" and port is not None and not port.is_entry:
+            anchor = _find_downstream_bundle_y(pid, section, graph)
+        if anchor is None:
+            anchor = _find_connected_internal_coord(pid, section, graph, free_axis)
         if free_axis == "y":
             default = section.bbox_y + section.bbox_h / 2
         else:
             default = section.bbox_x + section.bbox_w / 2
 
         setattr(station, fixed_axis, fixed_coord)
-        setattr(station, free_axis, connected if connected is not None else default)
+        setattr(station, free_axis, anchor if anchor is not None else default)
 
-        port = graph.ports.get(pid)
         if port:
             port.x = station.x
             port.y = station.y
@@ -703,6 +718,95 @@ def _position_ports_on_boundary(
     )
 
 
+def _find_downstream_bundle_y(
+    exit_port_id: str,
+    section: Section,
+    graph: MetroGraph,
+) -> float | None:
+    """Find the Y where this exit port's bundle materialises downstream.
+
+    Traces forward to the downstream entry ports (direct or via a
+    fan-out junction) and resolves the Y of the topmost internal
+    station each one feeds when the fan-out is a parallel bundle
+    (every internal station carries the same line set).  Returns the
+    bundle Y when all same-row downstream entries agree and the value
+    fits inside this section's bbox, otherwise None so the caller can
+    fall back to the local-internal centre.
+    """
+    junction_ids = set(graph.junctions)
+    ports = graph.ports
+    stations = graph.stations
+    sections = graph.sections
+    same_row = section.grid_row
+
+    # Index edges by source once: every other lookup is by source.
+    edges_by_source: dict[str, list] = {}
+    for edge in graph.edges:
+        edges_by_source.setdefault(edge.source, []).append(edge)
+
+    # Fan-in exits stay centred: 2+ distinct internal source Ys means
+    # the visual convergence is meaningful and downstream anchoring
+    # would collapse the bundle onto one source.
+    internal_ids = (
+        set(section.station_ids) - set(section.entry_ports) - set(section.exit_ports)
+    )
+    src_ys: set[float] = set()
+    for sid in internal_ids:
+        for edge in edges_by_source.get(sid, ()):
+            if edge.target != exit_port_id:
+                continue
+            st = stations.get(sid)
+            if st and not st.is_port:
+                src_ys.add(round(st.y, 1))
+                if len(src_ys) >= 2:
+                    return None
+                break
+
+    entry_ids: list[str] = []
+    for edge in edges_by_source.get(exit_port_id, ()):
+        tgt = edge.target
+        if tgt in ports and ports[tgt].is_entry:
+            entry_ids.append(tgt)
+        elif tgt in junction_ids:
+            for e2 in edges_by_source.get(tgt, ()):
+                if e2.target in ports and ports[e2.target].is_entry:
+                    entry_ids.append(e2.target)
+    if not entry_ids:
+        return None
+
+    candidates: list[float] = []
+    for eid in entry_ids:
+        ep = ports.get(eid)
+        if not ep:
+            continue
+        ds = sections.get(ep.section_id)
+        if not ds or ds.grid_row != same_row:
+            continue
+        ds_internal = set(ds.station_ids) - set(ds.entry_ports) - set(ds.exit_ports)
+        targets: dict[str, set[str]] = {}
+        for edge in edges_by_source.get(eid, ()):
+            if edge.target not in ds_internal:
+                continue
+            st = stations.get(edge.target)
+            if st and not st.is_port:
+                targets.setdefault(edge.target, set()).add(edge.line_id)
+        if not targets:
+            continue
+        line_sets = iter(targets.values())
+        first = next(line_sets)
+        if any(ls != first for ls in line_sets):
+            # Branch fan-out: different stations carry different lines.
+            return None
+        candidates.append(min(stations[sid].y for sid in targets))
+
+    if not candidates or max(candidates) - min(candidates) > 1.0:
+        return None
+    target_y = candidates[0]
+    if not (section.bbox_y <= target_y <= section.bbox_y + section.bbox_h):
+        return None
+    return target_y
+
+
 def _find_connected_internal_coord(
     port_id: str,
     section: Section,
@@ -712,7 +816,9 @@ def _find_connected_internal_coord(
     """Find the coordinate to align a port with its connected internal stations.
 
     Returns the average X or Y (determined by *axis*) of all connected
-    internal stations, or None if no connections found.
+    internal stations, or None if no connections found.  Bypass V
+    helpers (ids starting with ``__bypass_``) are skipped so the port
+    anchors to the visible trunk rather than an off-trunk routing aid.
     """
     internal_ids = (
         set(section.station_ids) - set(section.entry_ports) - set(section.exit_ports)
@@ -720,8 +826,12 @@ def _find_connected_internal_coord(
     vals: list[float] = []
     for edge in graph.edges:
         if edge.source == port_id and edge.target in internal_ids:
+            if edge.target.startswith("__bypass_"):
+                continue
             vals.append(getattr(graph.stations[edge.target], axis))
         if edge.target == port_id and edge.source in internal_ids:
+            if edge.source.startswith("__bypass_"):
+                continue
             vals.append(getattr(graph.stations[edge.source], axis))
     if vals:
         return sum(vals) / len(vals)

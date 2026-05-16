@@ -1,6 +1,13 @@
 """Tests for label placement helpers."""
 
-from nf_metro.layout.labels import _compute_port_label_preference
+from dataclasses import dataclass, field
+
+from nf_metro.layout.labels import (
+    LabelPlacement,
+    _avoid_diagonal_routes,
+    _compute_port_label_preference,
+    _segment_intersects_bbox,
+)
 from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Station
 
 
@@ -127,3 +134,76 @@ class TestComputePortLabelPreference:
         )
         pref = _compute_port_label_preference(g)
         assert pref["a"] is True  # both below -> prefer above
+
+
+@dataclass
+class _FakeEdge:
+    source: str = ""
+    target: str = ""
+
+
+@dataclass
+class _FakeRoute:
+    edge: _FakeEdge = field(default_factory=_FakeEdge)
+    line_id: str = "L1"
+    points: list = field(default_factory=list)
+    offsets_applied: bool = True
+
+
+class TestSegmentIntersectsBbox:
+    """Tests for _segment_intersects_bbox."""
+
+    def test_segment_inside_bbox(self):
+        assert _segment_intersects_bbox(5, 5, 10, 10, (0, 0, 20, 20))
+
+    def test_segment_crosses_bbox(self):
+        assert _segment_intersects_bbox(-5, 10, 25, 10, (0, 0, 20, 20))
+
+    def test_segment_outside_bbox(self):
+        assert not _segment_intersects_bbox(100, 100, 200, 200, (0, 0, 20, 20))
+
+    def test_diagonal_clips_corner(self):
+        assert _segment_intersects_bbox(0, 30, 30, 0, (10, 10, 20, 20))
+
+    def test_diagonal_misses_bbox(self):
+        # Diagonal passes well clear of the bbox.
+        assert not _segment_intersects_bbox(0, 0, 5, 5, (50, 50, 60, 60))
+
+
+class TestAvoidDiagonalRoutes:
+    """Tests for _avoid_diagonal_routes."""
+
+    def test_label_flipped_off_diagonal(self):
+        g = MetroGraph()
+        g.stations["a"] = Station(id="a", label="A", x=100, y=200)
+        # Label placed above the station (y_max = 195) right where a
+        # diagonal route segment crosses.
+        placement = LabelPlacement(station_id="a", text="A", x=100, y=195, above=True)
+        # Diagonal segment passes through the label area above.
+        route = _FakeRoute(points=[(50, 250), (150, 150)])
+        _avoid_diagonal_routes([placement], g, [route], None)
+        # Should have flipped to below.
+        assert placement.above is False
+        assert placement.y > 200
+
+    def test_horizontal_segment_ignored(self):
+        g = MetroGraph()
+        g.stations["a"] = Station(id="a", label="A", x=100, y=200)
+        placement = LabelPlacement(station_id="a", text="A", x=100, y=195, above=True)
+        # Pure horizontal segment crossing the label area.
+        route = _FakeRoute(points=[(0, 195), (200, 195)])
+        _avoid_diagonal_routes([placement], g, [route], None)
+        # Should not flip - horizontal trunk routes aren't treated as
+        # label obstacles.
+        assert placement.above is True
+        assert placement.y == 195
+
+    def test_no_route_collision_no_flip(self):
+        g = MetroGraph()
+        g.stations["a"] = Station(id="a", label="A", x=100, y=200)
+        placement = LabelPlacement(station_id="a", text="A", x=100, y=195, above=True)
+        # Diagonal far away from the label.
+        route = _FakeRoute(points=[(500, 500), (600, 600)])
+        _avoid_diagonal_routes([placement], g, [route], None)
+        assert placement.above is True
+        assert placement.y == 195

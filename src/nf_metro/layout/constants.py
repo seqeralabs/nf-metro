@@ -28,6 +28,15 @@ X_SPACING: float = 60.0
 Y_SPACING: float = 40.0
 """Vertical spacing between tracks."""
 
+MIN_Y_SPACING_FLOOR: float = 40.0
+"""Floor for auto-computed y_spacing.
+
+When ``compute_layout`` is called without an explicit ``y_spacing`` it
+calls ``compute_min_y_spacing`` to widen the grid for content-rich maps
+(captioned file icons, dense labels).  The result is clamped to at
+least this floor so simple maps don't collapse to an unreadably tight
+grid."""
+
 X_OFFSET: float = 80.0
 """Left padding from canvas edge to first layer."""
 
@@ -53,7 +62,7 @@ SECTION_GAP: float = 3.0
 SECTION_X_PADDING: float = 50.0
 """Horizontal padding around section content."""
 
-SECTION_Y_PADDING: float = 35.0
+SECTION_Y_PADDING: float = 50.0
 """Vertical padding around section content."""
 
 SECTION_X_GAP: float = 50.0
@@ -140,6 +149,17 @@ MIN_STRAIGHT_PORT: float = 5.0
 
 MIN_STRAIGHT_EDGE: float = 10.0
 """Minimum straight track for non-port edges."""
+
+MIN_STATION_FLAT_LENGTH: float = 20.0
+"""Minimum length of the visible horizontal flat segment THROUGH a station.
+
+A station sitting on the polyline corner where two paths meet would
+otherwise have its flat fully consumed by the curve corner (CURVE_RADIUS
+pixels each side).  This constant ensures the flat segment around a
+visible station, measured as the polyline run reaching the station X,
+exceeds the curve radius by a meaningful amount so a visible flat is
+drawn through the station (matching how regular fork/join stations
+present a clear horizontal segment through their X coordinate)."""
 
 BYPASS_CLEARANCE: float = 25.0
 """Vertical clearance below the lowest intervening section for bypass routes."""
@@ -251,6 +271,36 @@ Theme.terminus_width default).
 
 ICON_INTER_GAP: float = 4.0
 """Gap between adjacent file icons when a station has multiple icons."""
+
+ICON_STACK_LABEL_CLEARANCE: float = 2.0
+"""Vertical clearance between a captioned file icon and the next icon below.
+
+Two vertically-adjacent file-input stations whose icons carry under-icon
+captions need enough Y spacing for the upper caption to clear the lower
+icon.  The required centre-to-centre gap is
+
+    2 * icon_half + caption_gap + caption_font_height + clearance
+
+where ``clearance`` is this constant - the small extra cushion so the
+caption text doesn't visually crash into the icon stroke."""
+
+ICON_HALF_HEIGHT: float = 16.0
+"""Half-height of a terminus file icon for layout calculations.
+
+Must stay in sync with ``Theme.terminus_height / 2`` (default 32 / 2 = 16)."""
+
+ICON_CAPTION_GAP: float = 4.0
+"""Gap between the bottom of a terminus icon and its name caption.
+
+Layout-side mirror of ``render.constants.ICON_NAME_GAP`` so spacing
+calculations don't depend on the render layer."""
+
+ICON_CAPTION_FONT_HEIGHT: float = FONT_HEIGHT * 0.6
+"""Approximate caption font height for layout spacing calculations.
+
+The render side draws under-icon captions at ``label_font_size *
+ICON_NAME_FONT_SCALE``; using ``FONT_HEIGHT`` as an upper-bound for
+the theme label_font_size keeps the calculation theme-agnostic."""
 
 TERMINUS_ICON_CLEARANCE: float = 58.0
 """Minimum clearance from terminus station center to section bbox edge.
