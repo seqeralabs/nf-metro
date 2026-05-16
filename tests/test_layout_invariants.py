@@ -184,11 +184,15 @@ _XFAIL_KEY = "xfail"
 
 
 def _fp(name: str, fail_reason: str | None = None):
-    """Return a ``pytest.param`` for ``name`` with optional xfail marker."""
+    """Return a ``pytest.param`` for ``name`` with optional xfail marker.
+
+    Xfails are strict: an unexpected pass reds CI, forcing the marker to be
+    removed (i.e. the bug is sealed off and won't silently re-open).
+    """
     if fail_reason is None:
         return pytest.param(name, id=name)
     return pytest.param(
-        name, id=name, marks=pytest.mark.xfail(reason=fail_reason, strict=False)
+        name, id=name, marks=pytest.mark.xfail(reason=fail_reason, strict=True)
     )
 
 
