@@ -64,7 +64,12 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "differentialabundance",
         EXAMPLES_DIR,
-        "nf-core/differentialabundance with four input lines, off-track gene-set inputs, and a bypass-heavy reporting row.",
+        "nf-core/differentialabundance with four input lines, off-track gene-set inputs, and a bypass-heavy reporting row. Uses `%%metro center_ports: true`.",
+    ),
+    (
+        "differentialabundance_default",
+        EXAMPLES_DIR,
+        "Same nf-core/differentialabundance map at default (uncentered) layout — useful for spotting regressions that only show with default port placement.",
     ),
     # --- Simple topologies ---
     (
