@@ -1995,9 +1995,7 @@ def _balance_section_content_around_trunk(
         # below-trunk stations up by one ``y_spacing`` so they pack
         # against the trunk row.  Honours the existing column-occupied
         # guard so off-track icons and marker clearance aren't violated.
-        _compact_below_trunk_band(
-            graph, section, trunk_y, y_spacing, section_internal_set
-        )
+        _compact_below_trunk_band(graph, section, trunk_y, y_spacing)
 
 
 def _compact_below_trunk_band(
@@ -2005,7 +2003,6 @@ def _compact_below_trunk_band(
     section: Section,
     trunk_y: float,
     y_spacing: float,
-    section_internal_set: set[str],
 ) -> None:
     """Shift the entire below-trunk stack up by one y_spacing slot.
 
@@ -2102,18 +2099,16 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
     of horizontal room on either side.
     """
     # Index edges by source/target for O(1) loop detection.
+    # Single pass: index edges by endpoint and accumulate distinct
+    # successors/predecessors for fork/join detection (mirroring
+    # routing's label-clearance logic).
     out_by_src: dict[str, list[Edge]] = defaultdict(list)
     in_by_tgt: dict[str, list[Edge]] = defaultdict(list)
-    for e in graph.edges:
-        out_by_src[e.source].append(e)
-        in_by_tgt[e.target].append(e)
-
-    # Fork/join detection: a station is a fork when it has multiple
-    # distinct successors; a join when it has multiple distinct
-    # predecessors.  Used to mirror routing's label-clearance logic.
     fork_targets: dict[str, set[str]] = defaultdict(set)
     join_sources: dict[str, set[str]] = defaultdict(set)
     for e in graph.edges:
+        out_by_src[e.source].append(e)
+        in_by_tgt[e.target].append(e)
         fork_targets[e.source].add(e.target)
         join_sources[e.target].add(e.source)
     fork_stations = {sid for sid, t in fork_targets.items() if len(t) > 1}
