@@ -3964,26 +3964,30 @@ def _layout_single_section(
     # Ensure minimum inner extent so stations sit on visible track
     _enforce_min_extent(sub, section, x_spacing, y_spacing)
 
-    # Compute section bounding box from real stations only.
-    # Extra Y padding for multi-line labels (outermost stations' labels
-    # extend beyond the normal padding).  Bypass V helpers (auto-inserted
-    # by the parser; ids start with ``__bypass_``) are pure routing aids
-    # with no rendered marker and must not inflate the section bbox -
-    # their off-trunk track would otherwise widen the section vertically
-    # and push downstream sections down.
+    # Bypass V helpers (``__bypass_``) get reduced padding so the
+    # section grows enough to keep the diversion curve clear of the
+    # edge without absorbing the full station_y_padding (which would
+    # push downstream sections too far).
     real_for_bbox = [
         s for s in sub.stations.values() if not s.id.startswith("__bypass_")
     ]
     if not real_for_bbox:
         real_for_bbox = list(sub.stations.values())
+    bypass_v_ys = [s.y for s in sub.stations.values() if s.id.startswith("__bypass_")]
     xs = [s.x for s in real_for_bbox]
     ys = [s.y for s in real_for_bbox]
     extra_label_h = _multiline_label_padding(sub)
     y_pad = section_y_padding + extra_label_h
+    v_pad = section_y_padding / 2
+    y_min = min(ys)
+    y_max = max(ys)
+    if bypass_v_ys:
+        y_min = min(y_min, min(bypass_v_ys) + (y_pad - v_pad))
+        y_max = max(y_max, max(bypass_v_ys) - (y_pad - v_pad))
     section.bbox_x = min(xs) - section_x_padding
-    section.bbox_y = min(ys) - y_pad
+    section.bbox_y = y_min - y_pad
     section.bbox_w = (max(xs) - min(xs)) + section_x_padding * 2
-    section.bbox_h = (max(ys) - min(ys)) + y_pad * 2
+    section.bbox_h = (y_max - y_min) + y_pad * 2
 
     # Apply direction-specific bbox adjustments
     _adjust_tb_labels(sub, section, graph)
