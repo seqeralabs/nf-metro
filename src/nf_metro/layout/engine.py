@@ -2298,15 +2298,9 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 continue
             st.x = midpoint
 
-    # Pass 2: align all loop-column-mate stations (including the
-    # trunk-row station and any off-trunk siblings whose multi-edge
-    # topology disqualified them from pass 1) to a single column X.
-    # After pass 1, the "clean" side stations (one trunk-Y in, one
-    # trunk-Y out, station off-trunk) sit at the loop's geometric
-    # midpoint and define the column's X.  Without pass 2 the trunk
-    # station on the same loop column was left at its raw layer X
-    # (e.g. ``limma`` at 629.4 vs ``propd``/``dream``/``DESeq2`` at
-    # 648.6 in the differentialabundance section).
+    # Pass 2: snap loop-column-mate stations (trunk-row station and any
+    # off-trunk siblings whose multi-edge topology disqualified them
+    # from pass 1) to the column X defined by pass-1's clean siblings.
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
@@ -2326,11 +2320,10 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
         if trunk_y is None:
             continue
 
-        # Helper: visible trunk-Y predecessor/successor X-extent for a
-        # station.  Returns ``None`` when the station has no trunk-Y
-        # neighbour on one side, or when any visible neighbour sits
-        # OFF the trunk row (off-track inputs like ``gmt_in`` would
-        # otherwise pull the station's X away from the column).
+        # Visible trunk-Y predecessor/successor X-extent for a station.
+        # Returns ``None`` when the station has no trunk-Y neighbour on
+        # one side, or when any visible neighbour sits off the trunk
+        # row (off-track inputs anchor the station elsewhere).
         def _column_key(sid: str) -> tuple[float, float] | None:
             pred_x: float | None = None
             succ_x: float | None = None
@@ -2339,9 +2332,6 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 if p is None or p.is_hidden:
                     continue
                 if abs(p.y - trunk_y) > 0.5:
-                    # Off-trunk predecessor (e.g. off-track input):
-                    # this station is anchored to that input, not to
-                    # the loop column.
                     return None
                 if (
                     pred_x is None
@@ -2365,7 +2355,6 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 return None
             return (round(pred_x, 3), round(succ_x, 3))
 
-        # Group section stations by loop column key.
         columns: dict[tuple[float, float], list[str]] = defaultdict(list)
         for sid in section.station_ids:
             if sid in port_ids:
@@ -2387,9 +2376,6 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
         for key, members in columns.items():
             if len(members) < 2:
                 continue
-            # Find the trunk-Y station(s) in this column -- they're
-            # what pass-2 fixes.  Off-trunk siblings already got
-            # their proper column X from pass-1.
             trunk_members: list[str] = []
             anchor_xs: list[float] = []
             for sid in members:
@@ -2397,13 +2383,9 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 if abs(st.y - trunk_y) <= 0.5:
                     trunk_members.append(sid)
                     continue
-                # Anchor candidate: must have a single visible
-                # trunk-Y predecessor edge and single visible trunk-Y
-                # successor edge.  This matches pass-1's
-                # ``len(ins) == 1 and len(outs) == 1`` filter so the
-                # anchor X is exactly what pass-1 placed at the loop
-                # midpoint, not a raw layer X from a multi-edge
-                # sibling pass-1 skipped.
+                # Anchor X must come from a station pass-1 already
+                # placed at the loop midpoint; restrict to the same
+                # single-in/single-out filter pass-1 uses.
                 visible_ins = [
                     e for e in in_by_tgt.get(sid, [])
                     if (
@@ -2427,10 +2409,6 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
             lo, hi = min(pred_x, succ_x), max(pred_x, succ_x)
             if not (lo <= target_x <= hi):
                 continue
-            # Snap each trunk-Y column member to the anchor X.  The
-            # off-trunk siblings retain their pass-1 placement, so
-            # the column ends up with the trunk station co-aligned
-            # with its loop midpoint.
             for sid in trunk_members:
                 graph.stations[sid].x = target_x
 
