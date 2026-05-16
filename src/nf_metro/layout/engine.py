@@ -19,7 +19,6 @@ from nf_metro.layout.constants import (
     EXIT_GAP_MULTIPLIER,
     FONT_HEIGHT,
     GUARD_TOLERANCE,
-    ICON_INTER_GAP,
     JUNCTION_MARGIN,
     LABEL_BBOX_MARGIN,
     LABEL_LINE_HEIGHT,
@@ -193,9 +192,7 @@ def _guard_no_station_overlap(graph: MetroGraph, phase: str) -> None:
                 )
 
 
-def _guard_no_line_crosses_non_consumer(
-    graph: MetroGraph, phase: str
-) -> None:
+def _guard_no_line_crosses_non_consumer(graph: MetroGraph, phase: str) -> None:
     """Final-phase: no rendered line segment may pass through a
     station marker whose station neither consumes nor produces that
     line.
@@ -720,9 +717,7 @@ def _compute_section_layout(
         _guard_stations_in_sections(graph, "after Phase 12 (final)")
         _guard_ports_on_boundaries(graph, "after Phase 12 (final)")
         _guard_no_station_overlap(graph, "after Phase 12 (final)")
-        _guard_no_line_crosses_non_consumer(
-            graph, "after Phase 12 (final)"
-        )
+        _guard_no_line_crosses_non_consumer(graph, "after Phase 12 (final)")
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
@@ -2359,12 +2354,7 @@ def _shift_sparse_loop_stations_to_clear_bundle(
             if sid in port_ids:
                 continue
             st = graph.stations.get(sid)
-            if (
-                st is None
-                or st.is_port
-                or st.is_hidden
-                or st.off_track
-            ):
+            if st is None or st.is_port or st.is_hidden or st.off_track:
                 continue
             ins = in_by_tgt.get(sid, [])
             outs = out_by_src.get(sid, [])
@@ -4056,10 +4046,7 @@ def _terminus_icon_clearance(
 
     safe_names = names or [""] * n_icons
     caption_font_size = 14.0 * ICON_NAME_FONT_SCALE
-    name_widths = [
-        len(n) * caption_font_size * 0.55 if n else 0.0
-        for n in safe_names
-    ]
+    name_widths = [len(n) * caption_font_size * 0.55 if n else 0.0 for n in safe_names]
     step = caption_aware_icon_step(safe_names, name_widths, TERMINUS_WIDTH)
     extra = (n_icons - 1) * step
     return TERMINUS_ICON_CLEARANCE + extra

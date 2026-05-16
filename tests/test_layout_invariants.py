@@ -1259,9 +1259,7 @@ def test_loop_recenter_only_for_pure_side_branches(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"]
-)
+@pytest.mark.parametrize("fixture", ["da_pipeline.mmd", "rnaseq_sections.mmd"])
 def test_lines_dont_cross_non_consumer_markers(fixture):
     """No rendered line segment may pass through the marker bbox of
     any station that neither consumes nor produces that line.

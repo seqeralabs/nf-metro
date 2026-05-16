@@ -885,13 +885,8 @@ def _render_terminus_icons(
     # Compute per-icon X step.  When adjacent captions would overlap
     # at the default step, widen it so both fit on the same row.
     caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
-    name_widths = [
-        len(n) * caption_font_size * 0.55 if n else 0.0
-        for n in names
-    ]
-    icon_step = caption_aware_icon_step(
-        names, name_widths, theme.terminus_width
-    )
+    name_widths = [len(n) * caption_font_size * 0.55 if n else 0.0 for n in names]
+    icon_step = caption_aware_icon_step(names, name_widths, theme.terminus_width)
 
     # Base X for the first (nearest) icon center
     if icons_go_right:
