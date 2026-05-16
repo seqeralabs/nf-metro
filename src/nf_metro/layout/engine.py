@@ -405,101 +405,6 @@ def compute_layout(
         validate=validate,
     )
 
-    if _prune_useless_bypass_stations(graph):
-        _compute_section_layout(
-            graph,
-            x_spacing=x_spacing,
-            y_spacing=y_spacing,
-            x_offset=x_offset,
-            y_offset=y_offset,
-            section_x_padding=section_x_padding,
-            section_y_padding=section_y_padding,
-            section_x_gap=section_x_gap,
-            section_y_gap=section_y_gap,
-            validate=validate,
-        )
-
-
-def _prune_useless_bypass_stations(graph: MetroGraph) -> bool:
-    """Remove bypass virtual stations whose Y matches both X's and T's Y.
-
-    ``_insert_bypass_stations`` (in the parser) over-triggers based on
-    topology -- it doesn't know whether the section will actually have
-    multiple row tracks at layout time.  When the layout places the
-    bypass V at the same Y as its predecessor X and successor T, the
-    route through V is a flat horizontal pass-through that doesn't
-    deflect around the station S the bypass was meant to skip.  In
-    that case S already sits on a different row and the bypass is
-    superfluous -- inserting it disrupts downstream invariants
-    (kink-free port alignment, section bbox bottom padding, the v111
-    symmetric-U expectation for bypass routes) without changing the
-    rendered geometry.
-
-    Returns ``True`` if any station was removed (so the caller can
-    re-run layout to clean up positions).
-    """
-    bypass_ids = [
-        sid
-        for sid, st in graph.stations.items()
-        if st.is_hidden and sid.startswith("__bypass_")
-    ]
-    if not bypass_ids:
-        return False
-
-    in_edges: dict[str, list[tuple[int, Edge]]] = defaultdict(list)
-    out_edges: dict[str, list[tuple[int, Edge]]] = defaultdict(list)
-    for i, edge in enumerate(graph.edges):
-        in_edges[edge.target].append((i, edge))
-        out_edges[edge.source].append((i, edge))
-
-    tol = 0.5
-    useless: list[str] = []
-    for vid in bypass_ids:
-        v_y = graph.stations[vid].y
-        ins = in_edges.get(vid, [])
-        outs = out_edges.get(vid, [])
-        if not ins or not outs:
-            continue
-        if any(abs(graph.stations[e.source].y - v_y) > tol for _, e in ins):
-            continue
-        if any(abs(graph.stations[e.target].y - v_y) > tol for _, e in outs):
-            continue
-        useless.append(vid)
-
-    if not useless:
-        return False
-
-    # Reconstruct edges: for each useless V, splice X->V->T into X->T.
-    edge_remove: set[int] = set()
-    new_edges: list[Edge] = []
-    for vid in useless:
-        in_by_line: dict[str, str] = {}
-        for i, e in in_edges.get(vid, []):
-            edge_remove.add(i)
-            in_by_line[e.line_id] = e.source
-        for i, e in out_edges.get(vid, []):
-            edge_remove.add(i)
-            src = in_by_line.get(e.line_id)
-            if src is not None:
-                new_edges.append(Edge(source=src, target=e.target, line_id=e.line_id))
-
-    graph.edges = [
-        e for i, e in enumerate(graph.edges) if i not in edge_remove
-    ] + new_edges
-
-    useless_set = set(useless)
-    for vid in useless_set:
-        graph.stations.pop(vid, None)
-    for section in graph.sections.values():
-        if any(sid in useless_set for sid in section.station_ids):
-            section.station_ids = [
-                s for s in section.station_ids if s not in useless_set
-            ]
-
-    # Bust caches the engine may have built around the previous graph.
-    graph._invalidate_edge_caches()
-    return True
-
 
 def _compute_flat_layout(
     graph: MetroGraph,
@@ -773,9 +678,11 @@ def _compute_section_layout(
     # the trunk bundle stays perfectly horizontal across boundaries.
     # Picks the downstream entry port's Y as the anchor since it sits
     # on the row's aligned trunk grid.  Junctions are re-positioned
-    # afterwards because Phase 12 fixed their Y to the old exit port Y.
-    if _snap_inter_section_port_pairs(graph):
-        _position_junctions(graph)
+    # afterwards: Phase 12 fixed their Y to the pre-compaction exit
+    # port Y, and either the snap pass or ``_compact_row_content_to_bbox_top``
+    # may have moved the exit port since then.
+    _snap_inter_section_port_pairs(graph)
+    _position_junctions(graph)
 
     # Phase 13d: Fan a section's free content upward when the row's
     # compaction left visible empty space at the bbox top.  Only fires
@@ -1034,9 +941,15 @@ def _classify_multi_station_ys(
 
 
 def _max_stations_per_layer(sub: MetroGraph) -> int:
-    """Return the maximum number of distinct Y positions at any single layer."""
+    """Return the maximum number of distinct Y positions at any single layer.
+
+    Bypass V helpers (ids starting with ``__bypass_``) are excluded -
+    they exist only for routing and must not inflate the row Y grid.
+    """
     layer_ys: dict[int, set[float]] = defaultdict(set)
     for s in sub.stations.values():
+        if s.id.startswith("__bypass_"):
+            continue
         layer_ys[s.layer].add(s.y)
     return max((len(ys) for ys in layer_ys.values()), default=1)
 
@@ -1460,7 +1373,9 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
 
     This Y is what neighbouring sections must line up with for the row
     bundle to flow horizontally.  Returns ``None`` when no full-bundle
-    internal station is directly connected to any LR port.
+    internal station is directly connected to any LR port.  Bypass V
+    helpers (ids starting with ``__bypass_``) are skipped - they exist
+    only for routing and must not anchor the row's trunk.
     """
     if section.direction not in ("LR", "RL"):
         return None
@@ -1488,7 +1403,7 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
             if (
                 st
                 and not st.is_port
-                and not (st.is_hidden and other_id.startswith("__bypass_"))
+                and not other_id.startswith("__bypass_")
                 and set(graph.station_lines(other_id)) == bundle
             ):
                 trunk_ys.add(round(st.y, 3))
@@ -3761,18 +3676,15 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
 def _shrink_bboxes_to_content_bottom(
     graph: MetroGraph, section_y_padding: float
 ) -> None:
-    """Resize bbox bottoms so they sit ``section_y_padding`` below content.
+    """Bottom-only bbox shrink after late content lifts.
 
     ``_compact_row_content_to_bbox_top`` shrinks the bottom slack to
     ``section_y_padding`` once, but later phases
     (``_fan_source_inputs_upward``, ``_recenter_full_bundle_columns``)
     can pull content further up, leaving fresh empty space below the
-    last station; conversely ``_snap_all_y_to_grid`` can snap a station
-    downward, eating into the existing padding.  Re-size each section's
-    ``bbox_h`` so the bottom sits ``section_y_padding`` below the
-    bottom-most station/port -- shrinking when content rose, growing
-    when content snapped down.  Station Ys are unchanged, so trunk
-    alignment is preserved.
+    last station.  Re-shrink each section's ``bbox_h`` so the bottom
+    sits ``section_y_padding`` below the bottom-most station/port.
+    Station Ys are unchanged, so trunk alignment is preserved.
 
     Never trims past the maximum bbox bottom of any row-mate.  A
     row-mate is any other section whose bbox vertical range overlaps
@@ -3824,14 +3736,9 @@ def _shrink_bboxes_to_content_bottom(
         ]
         if not content_max_ys:
             continue
-        content_bot = max(content_max_ys) + section_y_padding
+        desired_bot = max(content_max_ys) + section_y_padding
         if port_max_ys:
-            content_bot = max(content_bot, max(port_max_ys))
-        current_bot = section.bbox_y + section.bbox_h
-        if content_bot > current_bot + 0.5:
-            section.bbox_h = content_bot - section.bbox_y
-            continue
-        desired_bot = content_bot
+            desired_bot = max(desired_bot, max(port_max_ys))
         mate_bots = _row_mate_bottoms(section)
         if mate_bots:
             desired_bot = max(desired_bot, max(mate_bots))
@@ -4059,17 +3966,30 @@ def _layout_single_section(
     # Ensure minimum inner extent so stations sit on visible track
     _enforce_min_extent(sub, section, x_spacing, y_spacing)
 
-    # Compute section bounding box from real stations only.
-    # Extra Y padding for multi-line labels (outermost stations' labels
-    # extend beyond the normal padding).
-    xs = [s.x for s in sub.stations.values()]
-    ys = [s.y for s in sub.stations.values()]
+    # Bypass V helpers (``__bypass_``) get reduced padding so the
+    # section grows enough to keep the diversion curve clear of the
+    # edge without absorbing the full station_y_padding (which would
+    # push downstream sections too far).
+    real_for_bbox = [
+        s for s in sub.stations.values() if not s.id.startswith("__bypass_")
+    ]
+    if not real_for_bbox:
+        real_for_bbox = list(sub.stations.values())
+    bypass_v_ys = [s.y for s in sub.stations.values() if s.id.startswith("__bypass_")]
+    xs = [s.x for s in real_for_bbox]
+    ys = [s.y for s in real_for_bbox]
     extra_label_h = _multiline_label_padding(sub)
     y_pad = section_y_padding + extra_label_h
+    v_pad = section_y_padding / 2
+    y_min = min(ys)
+    y_max = max(ys)
+    if bypass_v_ys:
+        y_min = min(y_min, min(bypass_v_ys) + (y_pad - v_pad))
+        y_max = max(y_max, max(bypass_v_ys) - (y_pad - v_pad))
     section.bbox_x = min(xs) - section_x_padding
-    section.bbox_y = min(ys) - y_pad
+    section.bbox_y = y_min - y_pad
     section.bbox_w = (max(xs) - min(xs)) + section_x_padding * 2
-    section.bbox_h = (max(ys) - min(ys)) + y_pad * 2
+    section.bbox_h = (y_max - y_min) + y_pad * 2
 
     # Apply direction-specific bbox adjustments
     _adjust_tb_labels(sub, section, graph)
@@ -4372,12 +4292,29 @@ def _adjust_lr_exit_gap(
 
     # Collect Y positions of internal stations that feed into flow-side
     # exit ports.  If they all share the same Y, no diagonal convergence
-    # is needed and the gap can be skipped.
+    # is needed and the gap can be skipped.  When the feeder is a bypass
+    # V helper (``__bypass_`` id), trace back to its visible predecessor
+    # so the diagonal at the V is collapsed back onto the predecessor's
+    # Y - the V exists only because the line couldn't cross a consumer
+    # marker, but the diagonal still terminates at a visible station.
     feeder_ys: set[float] = set()
     real_ids = set(sub.stations)
     for edge in graph.edges:
         if edge.target in flow_exit_port_ids and edge.source in real_ids:
-            feeder_ys.add(sub.stations[edge.source].y)
+            src_id = edge.source
+            if src_id.startswith("__bypass_"):
+                pred_y = None
+                for pe in graph.edges:
+                    if pe.target == src_id and pe.source in real_ids:
+                        ps = sub.stations.get(pe.source)
+                        if ps is not None and not pe.source.startswith("__bypass_"):
+                            pred_y = ps.y
+                            break
+                if pred_y is None:
+                    continue
+                feeder_ys.add(pred_y)
+            else:
+                feeder_ys.add(sub.stations[src_id].y)
 
     if len(feeder_ys) <= 1:
         return
@@ -6161,8 +6098,35 @@ def _compute_fork_join_gaps(
     # Join gaps are kept even in single-track sections because entry
     # ports are close to the first internal station, and the diagonal
     # from a different-Y entry needs the extra room.
-    all_section_tracks = set(tracks.values())
-    is_single_track = len(all_section_tracks) <= 1
+    # Bypass V helpers (id prefix ``__bypass_``) are routing-only.  A
+    # V on its own off-trunk track must not flip an otherwise
+    # single-track section into "multi-track", or it would turn
+    # port-bound divergences into fork gaps that shift visible stations
+    # rightward.  Specifically when a V is one of the fork/join peers:
+    # exclude its track AND fold the owner's own track into the visible
+    # set so that visible-vs-owner diagonals still trigger a gap, but a
+    # V-only off-trunk peer (e.g. ``trim -> {align, V}`` in the 05 guide
+    # family) does not.  When no V is involved, fall back to the original
+    # peer-set track count so non-bypass topologies stay byte-identical.
+    visible_tracks = {t for sid, t in tracks.items() if not sid.startswith("__bypass_")}
+    is_single_track = len(visible_tracks) <= 1
+
+    def _has_bypass(ids):
+        return any(nid.startswith("__bypass_") for nid in ids)
+
+    def _bypass_aware_tracks(ids, owner_sid):
+        """Visible peer tracks plus the owner's own track, V's removed."""
+        result: set[float] = set()
+        owner_track = tracks.get(owner_sid)
+        if owner_track is not None:
+            result.add(owner_track)
+        for nid in ids:
+            if nid.startswith("__bypass_"):
+                continue
+            t = tracks.get(nid)
+            if t is not None:
+                result.add(t)
+        return result
 
     fork_layers: set[int] = set()
     for sid, targets in out_targets.items():
@@ -6171,7 +6135,10 @@ def _compute_fork_join_gaps(
                 if not is_single_track:
                     fork_layers.add(layers[sid])
             else:
-                target_tracks = {tracks[t] for t in targets}
+                if _has_bypass(targets):
+                    target_tracks = _bypass_aware_tracks(targets, sid)
+                else:
+                    target_tracks = {tracks[t] for t in targets}
                 if len(target_tracks) > 1:
                     fork_layers.add(layers[sid])
 
@@ -6181,7 +6148,10 @@ def _compute_fork_join_gaps(
             if any(s not in tracks for s in sources):
                 join_layers.add(layers[sid])
             else:
-                source_tracks = {tracks[s] for s in sources}
+                if _has_bypass(sources):
+                    source_tracks = _bypass_aware_tracks(sources, sid)
+                else:
+                    source_tracks = {tracks[s] for s in sources}
                 if len(source_tracks) > 1:
                     join_layers.add(layers[sid])
 

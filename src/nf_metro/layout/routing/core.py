@@ -1827,33 +1827,20 @@ def _route_diagonal(
     is_fork_flag = edge.source in ctx.fork_stations and not is_side_branch
     is_join_flag = edge.target in ctx.join_stations or is_side_branch
 
-    # Bypass virtual stations: concentrate the diagonal near V so the
-    # bypass hop only spans V's column instead of routing parallel for
-    # the whole section.  P -> V biases toward V (join); V -> T biases
-    # from V (fork).  Without this, P fork-bias pushes the diagonal
-    # next to P and the bypass line runs parallel below the trunk for
-    # the entire span between P and T.
-    #
-    # The V-side flat must be at least ``CURVE_RADIUS +
-    # MIN_STATION_FLAT_LENGTH`` so that, after the corner curve consumes
-    # ``CURVE_RADIUS`` pixels of the flat, a visible horizontal segment
-    # of ``MIN_STATION_FLAT_LENGTH`` pixels remains on each side of V.
-    # The two halves (P -> V's tgt_min and V -> T's src_min) use the
-    # same value so the U at V stays symmetric.  If horizontal room
-    # between the real endpoint and V is too narrow to also fit the
-    # diagonal_run and the far-end minimum, fall back to
-    # ``MIN_STRAIGHT_EDGE`` to preserve the diagonal.
-    v_flat = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH
+    # Bypass-V edges: bias the diagonal toward V on both halves with
+    # equal V-side flat reservations so V sits at the centre of the
+    # straight segment of the bypass loop.
+    v_flat_half = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
     if tgt.is_hidden and edge.target.startswith("__bypass_"):
         is_fork_flag = False
         is_join_flag = True
-        tgt_min = v_flat
+        tgt_min = v_flat_half
         if src_min + tgt_min + ctx.diagonal_run > abs(dx):
             tgt_min = MIN_STRAIGHT_EDGE
     elif src.is_hidden and edge.source.startswith("__bypass_"):
         is_fork_flag = True
         is_join_flag = False
-        src_min = v_flat
+        src_min = v_flat_half
         if src_min + tgt_min + ctx.diagonal_run > abs(dx):
             src_min = MIN_STRAIGHT_EDGE
 
@@ -2113,7 +2100,9 @@ def _collect_centering_candidates(
         return sid not in ctx.divergence_anchors
 
     for sid, station in graph.stations.items():
-        if station.is_port or station.is_hidden:
+        if station.is_port:
+            continue
+        if station.is_hidden and not sid.startswith("__bypass_"):
             continue
 
         in_routes = ctx.incoming.get(sid, [])
@@ -2252,20 +2241,14 @@ def _collect_centering_candidates(
         if abs(shift) > min(abs(in_flat), abs(out_flat)):
             continue
 
-        # Guard: don't shift in convergence/divergence bundles.
-        if out_rp and len(ctx.diag_in_sources.get(out_rp.edge.target, set())) > 1:
-            continue
-        if in_rp and len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1:
-            continue
-        # Guard: don't shift when an adjacent diagonal targets a hidden
-        # bypass V; the V-side flats are intentionally min-flat-clamped
-        # so the U at V stays symmetric.  Shifting search/V-source's
-        # diagonals here re-introduces V-side asymmetry that v111's
-        # bypass placement was designed to avoid.
-        if out_rp and out_rp.edge.target.startswith("__bypass_"):
-            continue
-        if in_rp and in_rp.edge.source.startswith("__bypass_"):
-            continue
+        # Guard: don't shift in convergence/divergence bundles.  Bypass
+        # V helpers have no marker so the convergence-guard doesn't apply.
+        is_bypass_v = sid.startswith("__bypass_")
+        if not is_bypass_v:
+            if out_rp and len(ctx.diag_in_sources.get(out_rp.edge.target, set())) > 1:
+                continue
+            if in_rp and len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1:
+                continue
 
         for rp in in_routes:
             rp.points[1] = (rp.points[1][0] + shift, rp.points[1][1])
@@ -2296,7 +2279,11 @@ def _apply_station_moves(
         flat_out,
     ) in candidates.items():
         station = graph.stations[sid]
-        if abs(new_x - station.x) > STATION_MOVE_TOLERANCE:
+        # Hidden bypass V helpers have no marker, so column alignment
+        # with visible companions isn't a visible concern - centre them
+        # without requiring companion consensus.
+        skip_companion_check = sid.startswith("__bypass_")
+        if not skip_companion_check and abs(new_x - station.x) > STATION_MOVE_TOLERANCE:
             ox = original_x.get(sid, station.x)
             companions = []
             for other_sid, other_ox in original_x.items():

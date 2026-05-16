@@ -552,37 +552,53 @@ def _insert_terminus_convergence_stations(graph: MetroGraph) -> None:
 def _insert_bypass_stations(graph: MetroGraph) -> None:
     """Insert virtual stations so non-consumed lines bypass intermediate stops.
 
-    When a station S sits between a predecessor P and one or more
-    downstream targets, lines that flow ``P -> downstream`` but are
-    *not* consumed by S would otherwise route straight through S's
-    column at S's trunk Y, crashing into the marker.  By inserting a
-    hidden virtual station ``V`` in the same section at S's column
-    (i.e. one layer past P, same as S), the routing engine treats V
-    just like any other column-mate of S: the line gets a Y track of
-    its own and fans diagonally to/from the trunk exactly like a
-    regular parallel branch.
+    When a station S sits in the layer-path between an in-section
+    source P and an exit port, lines flowing ``P -> exit_port`` that S
+    neither consumes nor produces would otherwise route through S's
+    column and crash into the marker.  Inserting a hidden virtual
+    station ``V`` between P and the exit port gives the routing engine
+    a column-mate to fan the bypassing lines around S, using the same
+    parallel-branch primitives the rest of the section uses.
 
-    Detection (per section):
+    The trigger only fires when the routing engine genuinely needs the
+    helper - otherwise V's add tracks that inflate section height
+    without visual benefit.  The three discriminants are:
 
-      * Compute longest-path layers within the section subgraph.
-      * For each non-port station S in the section, gather
-        ``consumed_lines(S)`` = ``{e.line_id for e in inbound edges
-        to S}``.
-      * For each predecessor ``P -> S`` and each other outbound
-        edge ``P -> T`` (T != S), the lines on ``P -> T`` that are
-        *not* in ``consumed_lines(S)`` and whose path traverses S's
-        column (``layer(P) < layer(S) <= layer(T)``) are bypassers.
+    1. *Section topology*.  Single-trunk sections (one head station at
+       the lowest non-port layer, e.g. the 05/06 guide family) funnel
+       every line through a shared trunk and can't escape S's marker
+       without help.  Multi-trunk sections (rnaseq_auto's
+       ``genome_align``, epitopeprediction's ``input_processing``,
+       etc.) already place each inbound line on its own parallel track
+       from the entry, so the routing engine clears the marker via
+       track consolidation - bypass would only over-detour the line.
+       In multi-trunk sections we still allow bypass at fan-in
+       convergence points (S with >=2 in-section predecessors, e.g.
+       differentialabundance's ``annotate``) where the line bundle
+       genuinely loses its parallel-track headroom past S.
 
-    Rewrite:
-      * Add ``V`` (``id=f"__bypass_{S}_{P}"``, ``is_hidden=True``).
-      * For each bypassed line L, replace edge ``P -> T (L)`` with
-        ``P -> V (L)`` + ``V -> T (L)``.
+    2. *Trunk consumption*.  S must consume at least one line that
+       also flows through some other in-section edge.  A station whose
+       only consumed line is a local spur (e.g. nf_with_subworkflows's
+       ``samtools_index`` taking a single ``spur`` line straight from
+       ``samtools_sort``) sits off-trunk; bypass would snap it back to
+       the trunk Y and open a vertical gap.
 
-    The virtual station inherits S's section so it participates in
-    section layout / fan / symfan with the same primitives the rest
-    of the section uses.  Cross-section targets (where T is in a
-    different section) participate too because section resolution
-    happens after this pass.
+    3. *Candidate predecessors*.  In single-trunk sections we scan all
+       lower-layer in-section stations P (siblings and direct preds
+       alike) because the bypass line may originate from either side of
+       the trunk.  In multi-trunk fan-in sections we restrict to S's
+       direct predecessors P -> S, since unrelated lines have their own
+       track already.
+
+    Rewrite (per bypassing ``(P, S)`` group):
+
+    * Add ``V`` (``id=f"__bypass_{S}_{P}_{n}"``, ``is_hidden=True``,
+      same section as S).
+    * For each bypassed edge ``P -> exit_port (L)`` (L not in S's
+      consumed-or-produced line set, ``layer(P) < layer(S) <
+      layer(exit)``), replace with ``P -> V (L)`` + ``V -> exit_port
+      (L)``.
     """
     if not graph.sections:
         return
@@ -590,10 +606,6 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
     import networkx as nx
 
     pending_terminus_ids: set[str] = set(graph._pending_terminus.keys())
-
-    consumed_by: dict[str, set[str]] = {}
-    for edge in graph.edges:
-        consumed_by.setdefault(edge.target, set()).add(edge.line_id)
 
     edges_by_source: dict[str, list[tuple[int, Edge]]] = {}
     for i, edge in enumerate(graph.edges):
@@ -641,6 +653,33 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
                 if sec_layers.get(pid, 0) <= internal_max:
                     sec_layers[pid] = internal_max + 1
 
+        in_section_edges = [
+            e
+            for e in graph.edges
+            if e.source in station_ids and e.target in station_ids
+        ]
+        in_preds_by_target: dict[str, set[str]] = {}
+        consumed_lines_by_target: dict[str, set[str]] = {}
+        for e in in_section_edges:
+            in_preds_by_target.setdefault(e.target, set()).add(e.source)
+            consumed_lines_by_target.setdefault(e.target, set()).add(e.line_id)
+
+        entry_port_ids = set(section.entry_ports)
+        internal_ids = [
+            sid
+            for sid in station_ids
+            if sid not in exit_port_ids
+            and sid not in entry_port_ids
+            and sid in sec_layers
+        ]
+        if not internal_ids:
+            continue
+        min_internal_layer = min(sec_layers[sid] for sid in internal_ids)
+        head_count = sum(
+            1 for sid in internal_ids if sec_layers[sid] == min_internal_layer
+        )
+        single_trunk_section = head_count <= 1
+
         for sid in section.station_ids:
             station = graph.stations.get(sid)
             if station is None or station.is_port or station.is_hidden:
@@ -648,89 +687,55 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
             if station.is_terminus or sid in pending_terminus_ids:
                 continue
 
-            consumed = consumed_by.get(sid, set())
             s_layer = sec_layers.get(sid)
             if s_layer is None:
                 continue
+            s_lines = set(graph.station_lines(sid))
 
-            direct_preds: set[str] = {
-                edge.source
-                for edge in graph.edges
-                if edge.target == sid and edge.source in station_ids
+            in_section_preds = in_preds_by_target.get(sid, set())
+            # In multi-trunk sections, only fan-in convergence points
+            # (S has >=2 in-section predecessors) need bypass help, and
+            # only from a direct predecessor of S - other lines already
+            # have their own parallel tracks.
+            if not single_trunk_section and len(in_section_preds) < 2:
+                continue
+
+            # Skip stations that only consume a spur line - the bypass
+            # would snap S's spur track to the section trunk Y, opening
+            # an unnecessary vertical gap to S.  A consumed line is
+            # "trunk" when it has at least one in-section edge that
+            # doesn't touch S.
+            consumed_lines = consumed_lines_by_target.get(sid, set())
+            trunk_lines = {
+                e.line_id
+                for e in in_section_edges
+                if e.source != sid and e.target != sid
             }
+            if consumed_lines and not (consumed_lines & trunk_lines):
+                continue
 
-            # Exit ports S itself feeds.  Siblings feeding the same port
-            # share a trunk with S past S's column.
-            s_exit_targets: set[str] = {
-                edge.target
-                for _, edge in edges_by_source.get(sid, [])
-                if edge.target in exit_port_ids
-            }
+            candidate_preds = station_ids if single_trunk_section else in_section_preds
 
-            # Candidate upstream stations X: direct predecessors of S,
-            # plus any in-section non-port/non-hidden/non-terminus station
-            # one layer below S that feeds an exit port S also feeds.
-            candidate_xs: set[str] = set(direct_preds)
-            if s_exit_targets:
-                for other_sid in station_ids:
-                    if other_sid == sid or other_sid in direct_preds:
-                        continue
-                    other_st = graph.stations.get(other_sid)
-                    if other_st is None or other_st.is_port or other_st.is_hidden:
-                        continue
-                    if (
-                        other_st.is_terminus
-                        or other_sid in pending_terminus_ids
-                    ):
-                        continue
-                    other_layer = sec_layers.get(other_sid)
-                    if other_layer is None or other_layer != s_layer - 1:
-                        continue
-                    feeds_shared = any(
-                        edge.target in s_exit_targets
-                        for _, edge in edges_by_source.get(other_sid, [])
-                    )
-                    if feeds_shared:
-                        candidate_xs.add(other_sid)
-
-            for x_id in candidate_xs:
-                x_layer = sec_layers.get(x_id)
-                if x_layer is None or x_layer >= s_layer:
+            bypass_by_pred: dict[str, list[tuple[int, Edge]]] = {}
+            for pred_id in candidate_preds:
+                if pred_id == sid:
                     continue
-
-                x_exit_lines: dict[str, set[str]] = {}
-                for _, edge in edges_by_source.get(x_id, []):
-                    if edge.target in exit_port_ids:
-                        x_exit_lines.setdefault(edge.target, set()).add(edge.line_id)
-
-                x_consumed = consumed_by.get(x_id, set())
-                is_direct_pred = x_id in direct_preds
-
-                bypass_edges: list[tuple[int, Edge]] = []
-                for i, edge in edges_by_source.get(x_id, []):
-                    if edge.target == sid or edge.line_id in consumed:
-                        continue
+                pred_layer = sec_layers.get(pred_id)
+                if pred_layer is None or pred_layer >= s_layer:
+                    continue
+                for i, edge in edges_by_source.get(pred_id, []):
                     if edge.target not in exit_port_ids:
+                        continue
+                    if edge.line_id in s_lines:
                         continue
                     t_layer = sec_layers.get(edge.target)
                     if t_layer is None or t_layer <= s_layer:
                         continue
-                    shared_with_consumed = bool(
-                        x_exit_lines.get(edge.target, set()) & consumed
-                    )
-                    shared_via_inbound = is_direct_pred and bool(x_consumed & consumed)
-                    sibling_trunk = (
-                        not is_direct_pred and edge.target in s_exit_targets
-                    )
-                    if not (shared_with_consumed or shared_via_inbound or sibling_trunk):
-                        continue
-                    bypass_edges.append((i, edge))
+                    bypass_by_pred.setdefault(pred_id, []).append((i, edge))
 
-                if not bypass_edges:
-                    continue
-
+            for pred_id, bypass_edges in bypass_by_pred.items():
                 bypass_count += 1
-                v_id = f"__bypass_{sid}_{x_id}_{bypass_count}"
+                v_id = f"__bypass_{sid}_{pred_id}_{bypass_count}"
                 new_stations.append(
                     Station(
                         id=v_id,
