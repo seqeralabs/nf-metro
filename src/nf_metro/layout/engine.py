@@ -4286,12 +4286,29 @@ def _adjust_lr_exit_gap(
 
     # Collect Y positions of internal stations that feed into flow-side
     # exit ports.  If they all share the same Y, no diagonal convergence
-    # is needed and the gap can be skipped.
+    # is needed and the gap can be skipped.  When the feeder is a bypass
+    # V helper (``__bypass_`` id), trace back to its visible predecessor
+    # so the diagonal at the V is collapsed back onto the predecessor's
+    # Y - the V exists only because the line couldn't cross a consumer
+    # marker, but the diagonal still terminates at a visible station.
     feeder_ys: set[float] = set()
     real_ids = set(sub.stations)
     for edge in graph.edges:
         if edge.target in flow_exit_port_ids and edge.source in real_ids:
-            feeder_ys.add(sub.stations[edge.source].y)
+            src_id = edge.source
+            if src_id.startswith("__bypass_"):
+                pred_y = None
+                for pe in graph.edges:
+                    if pe.target == src_id and pe.source in real_ids:
+                        ps = sub.stations.get(pe.source)
+                        if ps is not None and not pe.source.startswith("__bypass_"):
+                            pred_y = ps.y
+                            break
+                if pred_y is None:
+                    continue
+                feeder_ys.add(pred_y)
+            else:
+                feeder_ys.add(sub.stations[src_id].y)
 
     if len(feeder_ys) <= 1:
         return
