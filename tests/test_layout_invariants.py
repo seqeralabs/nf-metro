@@ -2785,10 +2785,7 @@ def test_label_x_matches_segment_midpoint_on_horizontal_runs(fixture):
             if len(pts) < 2:
                 in_horizontal = False
                 break
-            if (
-                abs(pts[-2][1] - pts[-1][1]) > Y_TOL
-                or abs(pts[-1][1] - st.y) > Y_TOL
-            ):
+            if abs(pts[-2][1] - pts[-1][1]) > Y_TOL or abs(pts[-1][1] - st.y) > Y_TOL:
                 in_horizontal = False
                 break
         if not in_horizontal:
@@ -2799,10 +2796,7 @@ def test_label_x_matches_segment_midpoint_on_horizontal_runs(fixture):
             if len(pts) < 2:
                 out_horizontal = False
                 break
-            if (
-                abs(pts[0][1] - pts[1][1]) > Y_TOL
-                or abs(pts[0][1] - st.y) > Y_TOL
-            ):
+            if abs(pts[0][1] - pts[1][1]) > Y_TOL or abs(pts[0][1] - st.y) > Y_TOL:
                 out_horizontal = False
                 break
         if not out_horizontal:
@@ -2889,9 +2883,9 @@ def test_stack_station_xs_share_column(fixture):
         if sec.bbox_h <= 0:
             continue
         port_ids = set(sec.entry_ports) | set(sec.exit_ports)
-        groups: dict[
-            tuple[frozenset[str], frozenset[str], int], list[str]
-        ] = defaultdict(list)
+        groups: dict[tuple[frozenset[str], frozenset[str], int], list[str]] = (
+            defaultdict(list)
+        )
         for sid in sec.station_ids:
             if sid in port_ids:
                 continue

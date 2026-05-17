@@ -113,8 +113,10 @@ def _guard_stations_in_sections(graph: MetroGraph, phase: str) -> None:
         # Off-track inputs and terminus icons render at icon scale; on-track
         # markers render at station-pill scale.  Use the wider reach so the
         # guard catches icon spill-over above the bbox top.
-        half_h = ICON_HALF_HEIGHT if (st.off_track or st.is_terminus) else (
-            STATION_RADIUS_APPROX
+        half_h = (
+            ICON_HALF_HEIGHT
+            if (st.off_track or st.is_terminus)
+            else (STATION_RADIUS_APPROX)
         )
         top = st.y - half_h
         bottom = st.y + half_h
@@ -419,9 +421,7 @@ def _guard_row_trunk_cy_consistent(graph: MetroGraph, phase: str) -> None:
                     )
 
 
-def _guard_inter_section_routes_in_row_band(
-    graph: MetroGraph, phase: str
-) -> None:
+def _guard_inter_section_routes_in_row_band(graph: MetroGraph, phase: str) -> None:
     """After routing: inter-section routes whose endpoints both sit in
     grid row R must keep all waypoint Ys within a one-row band centered
     on R, plus ``Y_SPACING`` slack for diagonal corner approach.
@@ -481,9 +481,7 @@ def _guard_inter_section_routes_in_row_band(
                 )
 
 
-def _guard_off_track_inputs_above_consumer(
-    graph: MetroGraph, phase: str
-) -> None:
+def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> None:
     """After Phase 11 and final: off-track input stations must sit at
     least ``GUARD_TOLERANCE`` above (smaller Y than) their on-track
     consumer.
@@ -1138,9 +1136,7 @@ def _compute_section_layout(
         _guard_row_trunk_cy_consistent(graph, "after Phase 12 (final)")
         _guard_off_track_inputs_above_consumer(graph, "after Phase 12 (final)")
         _guard_station_x_column_drift(graph, "after Phase 12 (final)")
-        _guard_inter_section_routes_in_row_band(
-            graph, "after Phase 12 (final)"
-        )
+        _guard_inter_section_routes_in_row_band(graph, "after Phase 12 (final)")
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
