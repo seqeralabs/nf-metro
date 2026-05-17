@@ -1160,6 +1160,15 @@ def _compute_section_layout(
     # Phase 11da: Symmetrically fan a column of full-bundle stations
     # around the trunk Y when no unique trunk exists (e.g. Reporting's
     # Shiny app + Quarto report, both carrying the full bundle).
+    #
+    # Why both 11da and Phase 13h's recenter: 11da's symmetric layout
+    # is read by Phase 13's bbox-growth, compaction, and snap-to-grid
+    # passes (an empty trunk row in fanned columns lets 13b/13j shrink
+    # the section bbox to the compact extent).  Phase 13h then re-fans
+    # the same columns using the post-row-alignment trunk Y, which can
+    # have drifted from 11da's port-Y anchor.  Skipping 11da changes
+    # intermediate bbox sizes and is not empty-render-diff; the two
+    # passes are load-bearing in combination.
     _redistribute_full_bundle_columns(graph, y_spacing)
 
     # ---- Pass C: Junction positioning & Phase 13 finalisation ----------

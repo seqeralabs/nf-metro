@@ -326,16 +326,24 @@ bisection runner is `_run_phase13_guards`.
   structures, and file inputs are left in place.
 - **Invariants preserved**: Trunk station Y. Off-track stations.
 
-### Phase 11da: redistribute full-bundle columns (engine.py:650-653)
+### Phase 11da: redistribute full-bundle columns (engine.py)
 - **Purpose**: When a column has no unique trunk (every station
   carries the full bundle - e.g. Reporting's Shiny + Quarto),
   symmetrically fan stations around the local LR port Y. Gated on
   `center_ports`.
-- **Helper**: `_redistribute_full_bundle_columns` (engine.py:3424).
+- **Helper**: `_redistribute_full_bundle_columns`.
 - **Precondition**: Phase 11d ran.
 - **Postcondition**: Full-bundle columns sit symmetric around the
-  LR port Y. Re-centered later by Phase 13h once final trunk Y is
-  known.
+  LR port Y.
+- **Why both this and Phase 13h**: Phase 13h
+  (``_recenter_full_bundle_columns``) re-fans the same columns
+  using the final trunk Y, which can have drifted from 11da's
+  port-Y anchor.  Phase 11da's output is *not* redundant: the
+  intermediate symmetric layout is read by Phase 13's bbox-growth
+  and compaction passes (an empty trunk row in fanned columns lets
+  13b/13j shrink the section bbox to the compact extent).
+  Skipping 11da changes intermediate bbox sizes and is not empty-
+  render-diff -- the two passes are load-bearing in combination.
 - **Invariants preserved**: Other columns.
 
 ### Phase 12: position junctions (engine.py:658-659)
@@ -624,14 +632,8 @@ bisection runner is `_run_phase13_guards`.
 
 ## Unclear / structural-debt signals
 
-The following observations came up while writing this doc. Each one is
-a candidate for a follow-up cleanup PR. Items are removed as they are
-resolved; refer to the relevant tracking issue or PR for history.
-
-1. **Phase 11d/11da symmetrically fan content using a stale port Y**;
-   Phase 13h re-centers using the final trunk Y. The two-pass pattern
-   is necessary because Phase 11da runs before snap-to-grid, but it
-   means the early pass's output is partially-discarded work.
+No open signals at this time. Add new entries here when phase
+pre/postconditions reveal a candidate for cleanup.
 
 ## Adding a new phase: checklist
 
