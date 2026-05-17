@@ -2071,7 +2071,7 @@ def test_section_bbox_has_bottom_padding(fixture):
     edge, so the invariant is ``bbox_bot >= max(station.y) +
     section_y_padding``.
 
-    ``_shift_sparse_loop_stations_to_clear_bundle`` (Stage 6.14) can
+    ``_shift_and_propagate_loop_stations`` (Stage 6.14) can
     move a sparse loop station like ``grea`` further down without
     restoring this padding.  Catches the v116 regression where
     section 3's bbox sat ~5px below ``grea``'s centre instead of
@@ -2123,7 +2123,7 @@ def test_row_gap_accommodates_bypass(fixture):
     row ``r + 1`` sections' bbox tops must be at least
     ``section_y_gap`` for every column-overlapping pair.
 
-    When ``_shift_sparse_loop_stations_to_clear_bundle`` grows an
+    When ``_shift_and_propagate_loop_stations`` grows an
     upper-row section's bbox downward (e.g. section 3 in the
     differentialabundance pipeline, around ``grea``), the row offset
     computed by ``_compute_section_offsets`` from the pre-shift bbox

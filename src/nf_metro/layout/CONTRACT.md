@@ -56,7 +56,7 @@ Stages split into three regimes:
 | after final | bisection set (all unconditional) + off-track-above-consumer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
 Bisection checkpoints fire after every Pass C sub-stage (see the
-`# Stage 5.2:` through `# Stage 6.17:` comments in
+`# Stage 5.2:` through `# Stage 6.15:` comments in
 `_compute_section_layout`). Three guards
 hold continuously only from a specific checkpoint onward, and the
 bisection runner skips them earlier; see `_BISECTION_FIRST_VALID` in
@@ -66,7 +66,7 @@ bisection runner skips them earlier; see `_BISECTION_FIRST_VALID` in
 |---|---|---|
 | `_guard_stations_in_sections` | after Stage 5.3 | Stage 5.2's off-track lift moves stations above the section bbox; Stage 5.3 grows the bbox to enclose them. |
 | `_guard_no_station_overlap` | after Stage 6.6 | Stage 6.4's snap-to-grid can land an off-track terminus icon on its on-track column-mate's Y; Stage 6.6 re-anchors the off-track above its consumer. |
-| `_guard_no_line_crosses_non_consumer` | after Stage 6.15 | A sparse loop-side station sits on the trunk Y until Stage 6.15 shifts it to a half-grid offset; before that, sibling line bundles pass through its marker bbox. |
+| `_guard_no_line_crosses_non_consumer` | after Stage 6.14 | A sparse loop-side station sits on the trunk Y until Stage 6.14 shifts it to a half-grid offset; before that, sibling line bundles pass through its marker bbox. |
 
 Three further guards are excluded from the bisection set entirely
 (meaningful only at the final boundary); the `_run_pass_c_guards`
@@ -577,57 +577,51 @@ in pipeline order.
   `test_loop_recenter_only_for_pure_side_branches`,
   `test_loop_column_stations_share_x`.
 
-### Stage 6.13: shrink bbox to content bottom (engine.py:783-787)
+### Stage 6.13: shrink and tighten rows (engine.py:783-794)
 - **Purpose**: Shrink each section's bbox bottom to
-  `max_content_y + section_y_padding` after earlier phases lifted
-  bottom rows.
-- **Helper**: `_shrink_bboxes_to_content_bottom` (engine.py:3708).
+  `max_content_y + section_y_padding` (phase 1), then pull lower-row
+  sections up to close any vertical slack the shrink revealed
+  (phase 2).  Phase 1 handles bbox bottoms that drifted after earlier
+  passes lifted content; phase 2 handles the pre-shrink row-height
+  overestimate when a rowspan section collapses to less than its
+  row claim.  Phase 2 must run as a second pass over the graph so
+  every section's shrink is finalised before row-gap deficits are
+  measured.
+- **Helper**: `_shrink_and_tighten_rows` (orchestrates
+  `_shrink_bboxes_to_content_bottom` then
+  `_tighten_lower_rows_after_shrink`).
 - **Precondition**: All content Ys final.
 - **Postcondition**: Section bbox bottoms sit `section_y_padding`
-  below the deepest content. Trunk alignment unaffected (only bottom
-  shrinks).
-- **Invariants preserved**: Bbox tops. Station / port / junction Ys.
+  below the deepest content (trunk alignment unaffected -- only
+  bottom shrinks).  For each row pair, the row gap is `section_y_gap`
+  (no more, no less, except where rowspan sections filled their full
+  row claim).
+- **Invariants preserved**: Bbox tops. Within-row trunk Ys. Bbox
+  heights of upper rows.
 - **Related tests**: `test_section_bbox_has_bottom_padding`,
   `test_section_bbox_matches_content_extent`.
 
-### Stage 6.14: tighten lower rows after shrink (engine.py:789-794)
-- **Purpose**: Pull lower-row sections up to close vertical slack left
-  by the pre-shrink row-height estimate when rowspan sections
-  collapsed via Stage 6.13.
-- **Helper**: `_tighten_lower_rows_after_shrink` (engine.py:3802).
-- **Precondition**: Stage 6.13 shrank some rowspan sections.
-- **Postcondition**: For each row pair, the row gap is
-  `section_y_gap` (no more, no less, except where rowspan sections
-  filled their full row claim).
-- **Invariants preserved**: Within-row trunk Ys. Bbox heights of
-  upper rows.
-
-### Stage 6.15: shift sparse loop stations to clear bundle (engine.py:796-800)
+### Stage 6.14: shift and propagate loop stations (engine.py:796-806)
 - **Purpose**: Shift sparse loop-side stations (one inbound, one
   outbound, single-line consumer) onto a half-pitch Y when sharing
   the full-row Y with a busier sibling whose inbound bundle would
-  otherwise breeze-past the sparse station's marker.
-- **Helper**: `_shift_sparse_loop_stations_to_clear_bundle`
-  (engine.py:2563).
+  otherwise breeze-past the sparse station's marker.  When a shift
+  grows a section's bbox downward, push lower-row sections down
+  internally to restore `section_y_gap`.
+- **Helper**: `_shift_and_propagate_loop_stations`
+  (calls `_push_lower_rows_after_bbox_grow` when any bbox grew).
 - **Precondition**: Bundle Ys final.
 - **Postcondition**: Sparse single-line loop stations whose row Y
   conflicts with a busier sibling's bundle move to a half-pitch
-  offset. May grow bbox downward.
-- **Invariants preserved**: Busy sibling Y. Bundle Y.
+  offset (may grow bbox downward).  Row gaps preserved across any
+  bbox grow.
+- **Invariants preserved**: Busy sibling Y. Bundle Y. Within-row Ys
+  of unaffected sections.
 - **Related tests**: `test_lines_dont_cross_non_consumer_markers`,
-  `test_no_icon_overlaps_line_path`.
+  `test_no_icon_overlaps_line_path`,
+  `test_row_gap_accommodates_bypass`.
 
-### Stage 6.16: push lower rows after bbox grow (engine.py:802-806)
-- **Purpose**: Companion to Stage 6.15 - when Stage 6.15 grew a section's bbox
-  downward, push lower-row sections down to keep
-  `section_y_gap`.
-- **Helper**: `_push_lower_rows_after_bbox_grow` (engine.py:2698).
-- **Precondition**: Stage 6.15 may have grown some bboxes.
-- **Postcondition**: Row gaps preserved across the bbox grow.
-- **Invariants preserved**: Within-row Ys.
-- **Related tests**: `test_row_gap_accommodates_bypass`.
-
-### Stage 6.17: pad stacked captioned file icons (engine.py:808-813)
+### Stage 6.15: pad stacked captioned file icons (engine.py:808-813)
 - **Purpose**: Pad vertical spacing between stacked file-input icons
   whose under-icon captions would overlap the icon below at default
   `y_spacing`.
@@ -651,7 +645,7 @@ following before merging:
 
 1. **Stage tag**: pick the next sequential number within the
    appropriate stage (e.g. a new Stage 6.x sub-step gets the next
-   integer after Stage 6.17).  Historical note: the organic phase
+   integer after Stage 6.15).  Historical note: the organic phase
    suffix tree (`13d2`, `13k2`, the `Phase 13k` -> `Phase 13k2`
    rename in PR #342) is what the flat Stage.N scheme is designed to
    prevent.
