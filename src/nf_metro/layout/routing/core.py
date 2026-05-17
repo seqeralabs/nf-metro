@@ -564,22 +564,13 @@ def _route_inter_section(
     # columns the standard L-shape naturally drops in the inter-column
     # gap and going "away from target" would route backward through a
     # neighbouring section.
-    src_col_for_special = (
-        _resolve_section_col(graph, src)
-        if edge.source in ctx.junction_ids
-        else None
-    )
-    tgt_col_for_special = _resolve_section_col(graph, tgt)
-    same_col_special = (
-        src_col_for_special is not None
-        and tgt_col_for_special is not None
-        and src_col_for_special == tgt_col_for_special
-    )
     if (
         edge.source in ctx.junction_ids
         and abs(dx) <= JUNCTION_MARGIN + COORD_TOLERANCE
         and abs(dy) > abs(dx) * 3
-        and same_col_special
+        and (src_col_for_special := _resolve_section_col(graph, src)) is not None
+        and (tgt_col_for_special := _resolve_section_col(graph, tgt)) is not None
+        and src_col_for_special == tgt_col_for_special
     ):
         delta, r_first, r_second = l_shape_radii(
             i,

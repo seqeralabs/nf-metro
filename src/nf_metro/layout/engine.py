@@ -321,19 +321,8 @@ def _guard_row_trunk_cy_consistent(
 
         offsets = compute_station_offsets(graph)
 
-    def _section_full_bundle(sec) -> set[str]:
-        port_lines: set[str] = set()
-        has_lr_port = False
-        for pid in list(sec.entry_ports) + list(sec.exit_ports):
-            port = graph.ports.get(pid)
-            if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
-                continue
-            has_lr_port = True
-            port_lines.update(graph.station_lines(pid))
-        return port_lines if (has_lr_port and port_lines) else set()
-
     def _section_trunk_info(sec) -> tuple[float, float, float, set[str]] | None:
-        bundle = _section_full_bundle(sec)
+        bundle = _section_bundle_lines(graph, sec)
         if not bundle:
             return None
         port_ys: list[float] = []
@@ -770,8 +759,9 @@ def compute_min_y_spacing(
     clearance = ICON_STACK_LABEL_CLEARANCE
 
     pitch_icon_icon = icon_above + icon_below + clearance
+    # icon_over_label uses icon_below (the larger extent), so it
+    # subsumes the label-over-icon case which uses icon_above.
     pitch_icon_over_label = icon_below + label_extent + clearance
-    pitch_label_over_icon = label_extent + icon_above + clearance
 
     required = floor
     if not graph.sections:
@@ -797,7 +787,7 @@ def compute_min_y_spacing(
         if captioned >= 2:
             required = max(required, pitch_icon_icon)
         if captioned >= 1 and labeled >= 1:
-            required = max(required, pitch_icon_over_label, pitch_label_over_icon)
+            required = max(required, pitch_icon_over_label)
 
     return required
 
@@ -2213,7 +2203,7 @@ def _compact_row_content_to_bbox_top(
                     section.bbox_h = max(0.0, new_h)
 
 
-def _snap_inter_section_port_pairs(graph: MetroGraph) -> bool:
+def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
     """Snap exit/entry port pairs in the same row to a shared Y.
 
     For each LEFT/RIGHT exit port that connects (directly or via a
@@ -2239,7 +2229,6 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> bool:
     """
     explicit_grid = bool(graph._explicit_grid)
     junction_ids = set(graph.junctions)
-    moved = False
 
     for port_id, port in graph.ports.items():
         if port.is_entry:
@@ -2313,15 +2302,11 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> bool:
                     if ep_st is None or abs(ep_st.y - port_st.y) < 0.5:
                         continue
                     _set_port_y(graph, eid, port_st.y)
-                    moved = True
             continue
 
         if not explicit_grid:
             continue
         _set_port_y(graph, port_id, target_y)
-        moved = True
-
-    return moved
 
 
 def _fan_free_content_upward(
@@ -4886,10 +4871,10 @@ def _adjust_lr_exit_gap(
             src_id = edge.source
             if src_id.startswith("__bypass_"):
                 pred_y = None
-                for pe in graph.edges:
-                    if pe.target == src_id and pe.source in real_ids:
+                for pe in graph.edges_to(src_id):
+                    if pe.source in real_ids and not pe.source.startswith("__bypass_"):
                         ps = sub.stations.get(pe.source)
-                        if ps is not None and not pe.source.startswith("__bypass_"):
+                        if ps is not None:
                             pred_y = ps.y
                             break
                 if pred_y is None:
@@ -7212,12 +7197,6 @@ def _pad_stacked_captioned_file_icons(
     if pitch <= y_spacing + 0.5:
         return
 
-    in_edges: dict[str, set[str]] = {}
-    out_edges: dict[str, set[str]] = {}
-    for e in graph.edges:
-        in_edges.setdefault(e.target, set()).add(e.source)
-        out_edges.setdefault(e.source, set()).add(e.target)
-
     junction_ids = set(graph.junctions)
     grew_sections: list[Section] = []
 
@@ -7247,13 +7226,13 @@ def _pad_stacked_captioned_file_icons(
             src_lines = set(graph.station_lines(src))
             visited: set[str] = {src}
             while True:
-                outs = out_edges.get(cur, set())
+                outs = {e.target for e in graph.edges_from(cur)}
                 if len(outs) != 1:
                     break
                 nxt = next(iter(outs))
                 if nxt in visited or nxt not in internal_set:
                     break
-                if len(in_edges.get(nxt, set())) != 1:
+                if len({e.source for e in graph.edges_to(nxt)}) != 1:
                     break
                 if set(graph.station_lines(nxt)) != src_lines:
                     break
