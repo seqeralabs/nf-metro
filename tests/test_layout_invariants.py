@@ -2665,6 +2665,355 @@ def test_grid_snap_does_not_mutate_x(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Label X centred on horizontal route midpoint (audit item 4 / issue #318)
+# ---------------------------------------------------------------------------
+
+
+# Fixtures known to fail ``test_label_x_matches_segment_midpoint_on_horizontal_runs``
+# because at least one station whose immediate inbound/outbound segments are
+# horizontal has a label X that drifts from the predecessor/successor X
+# midpoint by more than the 3 px tolerance.  This is the liftover-off-centre
+# regression family from issue #318, surfaced here corpus-wide.  The drift
+# range across the corpus is ~3.6 to ~63 px; ~47 fixtures are affected.
+# Pinned as a single class so a future centering fix XPASSes across the
+# board; see also nf-metro audit /tmp/invariant-audit.md item 4 and #323.
+_XFAIL_LABEL_CENTER: dict[str, str] = {
+    f: "track-a: label X drifts from horizontal-run midpoint, see #323 / #318"
+    for f in (
+        "da_pipeline.mmd",
+        "genomeassembly_organellar.mmd",
+        "rnaseq_sections.mmd",
+        "topologies/fold_fan_across.mmd",
+        "topologies/funcprofiler_upstream.mmd",
+        "topologies/rnaseq_lite.mmd",
+        "topologies/variant_calling.mmd",
+        "differentialabundance.mmd",
+        "differentialabundance_default.mmd",
+        "epitopeprediction.mmd",
+        "genomeassembly.mmd",
+        "genomeassembly_staggered.mmd",
+        "hlatyping.mmd",
+        "rnaseq_auto.mmd",
+        "rnaseq_sections_manual.mmd",
+        "simple_pipeline.mmd",
+        "variant_calling.mmd",
+        "variant_calling_tuned.mmd",
+        "variantbenchmarking.mmd",
+        "variantbenchmarking_auto.mmd",
+        "variantprioritization.mmd",
+        "guide/01_minimal.mmd",
+        "guide/05b_multi_icons.mmd",
+        "guide/06a_without_hidden.mmd",
+    )
+}
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_LABEL_CENTER),
+)
+def test_label_x_matches_segment_midpoint_on_horizontal_runs(fixture):
+    """Labels on stations whose immediate route segments are horizontal
+    must sit at the geometric midpoint of those segments.
+
+    Precondition: station S is non-port, non-junction, non-off-track,
+    has at least one incoming and one outgoing route, every incoming
+    route enters at S.y horizontally (last segment is horizontal at
+    S.y within tolerance), and every outgoing route leaves at S.y
+    horizontally.  At least one predecessor and at least one successor
+    must be a real station (not a port/junction) bracketing S in X.
+
+    Invariant: ``label.x`` equals ``(max(left_pred.x) + min(right_succ.x)) / 2``
+    within 3 px, unless overridden by ``test_label_clamp_flips_when_overlapping_pill``
+    (which is the documented collision-clamping escape valve, evaluated by
+    its own dedicated test).
+
+    Closes #318's liftover-off-centre complaint when XPASSes.  Today
+    most fixtures xfail because station X is anchored to layer-based
+    column placement, not to the route's geometric midpoint - see
+    ``_XFAIL_LABEL_CENTER`` for the pinned list.
+    """
+    from nf_metro.layout.labels import place_labels
+
+    Y_TOL = 1.0
+    LABEL_TOL = 3.0
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    labels = place_labels(graph, station_offsets=offsets)
+    label_by_sid = {lp.station_id: lp for lp in labels}
+
+    in_routes: dict[str, list] = defaultdict(list)
+    out_routes: dict[str, list] = defaultdict(list)
+    for r in routes:
+        in_routes[r.edge.target].append(r)
+        out_routes[r.edge.source].append(r)
+
+    offenders: list[str] = []
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or sid in graph.junctions:
+            continue
+        if st.off_track:
+            continue
+        lp = label_by_sid.get(sid)
+        if lp is None:
+            continue
+        ins = in_routes.get(sid, [])
+        outs = out_routes.get(sid, [])
+        if not ins or not outs:
+            continue
+        # Both inbound and outbound segments at S must be horizontal at S.y.
+        in_horizontal = True
+        for r in ins:
+            pts = r.points
+            if len(pts) < 2:
+                in_horizontal = False
+                break
+            if (
+                abs(pts[-2][1] - pts[-1][1]) > Y_TOL
+                or abs(pts[-1][1] - st.y) > Y_TOL
+            ):
+                in_horizontal = False
+                break
+        if not in_horizontal:
+            continue
+        out_horizontal = True
+        for r in outs:
+            pts = r.points
+            if len(pts) < 2:
+                out_horizontal = False
+                break
+            if (
+                abs(pts[0][1] - pts[1][1]) > Y_TOL
+                or abs(pts[0][1] - st.y) > Y_TOL
+            ):
+                out_horizontal = False
+                break
+        if not out_horizontal:
+            continue
+        # Bracket S in X using real (non-port) predecessor/successor stations.
+        # Skip stations bracketed only by ports/junctions: those sit at section
+        # boundaries where the section_x_padding asymmetry produces small
+        # natural offsets that are not "off-centering" in the editorial sense.
+        in_real_xs: list[float] = []
+        for r in ins:
+            pst = graph.stations.get(r.edge.source)
+            if pst is None or pst.is_port or pst.is_hidden:
+                continue
+            in_real_xs.append(pst.x)
+        out_real_xs: list[float] = []
+        for r in outs:
+            tst = graph.stations.get(r.edge.target)
+            if tst is None or tst.is_port or tst.is_hidden:
+                continue
+            out_real_xs.append(tst.x)
+        left_candidates = [x for x in in_real_xs if x < st.x - 1.0]
+        right_candidates = [x for x in out_real_xs if x > st.x + 1.0]
+        if not left_candidates or not right_candidates:
+            continue
+        left = max(left_candidates)
+        right = min(right_candidates)
+        midpoint = (left + right) / 2.0
+        if abs(lp.x - midpoint) > LABEL_TOL:
+            offenders.append(
+                f"{sid!r} label.x={lp.x:.1f} vs midpoint {midpoint:.1f} "
+                f"(left={left:.1f}, right={right:.1f}, delta="
+                f"{abs(lp.x - midpoint):.1f})"
+            )
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
+
+
+# ---------------------------------------------------------------------------
+# Stack stations share their column X (audit item 17)
+# ---------------------------------------------------------------------------
+
+
+# Fixtures known to fail ``test_stack_station_xs_share_column``: stations
+# sharing the same predecessor set, successor set, and layer within a
+# section end up at different Xs.  Surfaced by the gprofiler2/grea pair
+# in DA's functional section (50.25 px drift) and the
+# survivor_merge/bcftools_merge pair in variantbenchmarking's
+# ensembl_truth section (60 px drift).  Linked to the loop-side-branch
+# recenter path; see nf-metro audit item 17 and #323.
+_XFAIL_STACK_X: dict[str, str] = {
+    f: "track-a: stack-mate stations drift in column X, see #323"
+    for f in (
+        "da_pipeline.mmd",
+        "differentialabundance.mmd",
+        "differentialabundance_default.mmd",
+        "variantbenchmarking.mmd",
+    )
+}
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_STACK_X),
+)
+def test_stack_station_xs_share_column(fixture):
+    """Stations in the same section sharing predecessors, successors,
+    and layer must agree in X within 1 px.
+
+    These stations are topologically siblings stacked vertically by
+    Y-ordering; they form a vertical "stack" at a single X column and
+    any X-drift among them is a regression of column placement.
+
+    Complements ``test_topological_siblings_share_y_or_symmetric``
+    (which checks Y) with the column-X analogue.
+    """
+    graph = _layout(fixture)
+    preds: dict[str, set[str]] = defaultdict(set)
+    succs: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        preds[e.target].add(e.source)
+        succs[e.source].add(e.target)
+
+    offenders: list[str] = []
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0:
+            continue
+        port_ids = set(sec.entry_ports) | set(sec.exit_ports)
+        groups: dict[
+            tuple[frozenset[str], frozenset[str], int], list[str]
+        ] = defaultdict(list)
+        for sid in sec.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            key = (frozenset(preds[sid]), frozenset(succs[sid]), st.layer)
+            groups[key].append(sid)
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            xs = [graph.stations[s].x for s in members]
+            if max(xs) - min(xs) > 1.0:
+                rounded = [round(x, 1) for x in xs]
+                offenders.append(
+                    f"section={sec.id!r} stack {members} xs={rounded} "
+                    f"drift={max(xs) - min(xs):.1f}"
+                )
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
+
+
+# ---------------------------------------------------------------------------
+# Station X stays within column tolerance (audit item 21)
+# ---------------------------------------------------------------------------
+
+
+# All fixtures pass with the median-column-X tolerance once
+# loop-side-branch stations (which the engine deliberately moves to the
+# midpoint of their loop's diagonal corners) are excluded.  The
+# placeholder dict locks in the invariant so a future bug-fix that
+# accidentally drifts a station off-column lights up here.
+_XFAIL_COL_DRIFT: dict[str, str] = {}
+
+
+def _is_loop_side_branch_station(
+    graph: MetroGraph,
+    sid: str,
+    in_by_tgt: dict[str, list],
+    out_by_src: dict[str, list],
+) -> bool:
+    """Mirror ``_recenter_loop_side_stations``'s precondition: a station
+    with exactly one in-edge and one out-edge, whose predecessor and
+    successor share Y, sitting off the trunk Y between them in X.
+
+    The engine moves such stations to the midpoint of their loop's
+    diagonal corners; that move legitimately decouples their X from
+    the section's column grid, so the column-X invariant must exempt
+    them.  Kept as a free function rather than a fixture-local helper
+    so other invariants (e.g. ``test_loop_recenter_only_for_pure_side_branches``)
+    can call it.
+    """
+    st = graph.stations.get(sid)
+    if st is None:
+        return False
+    ins = in_by_tgt.get(sid, [])
+    outs = out_by_src.get(sid, [])
+    if len(ins) != 1 or len(outs) != 1:
+        return False
+    src = graph.stations.get(ins[0].source)
+    tgt = graph.stations.get(outs[0].target)
+    if src is None or tgt is None:
+        return False
+    if abs(src.y - tgt.y) > 0.5:
+        return False
+    if abs(st.y - src.y) < 0.5:
+        return False
+    if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
+        return False
+    return True
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_COL_DRIFT),
+)
+def test_station_x_within_column_tolerance(fixture):
+    """For each LR/RL section, every (non-loop-side-branch) station at
+    layer L must sit within ``x_spacing`` of the median X of all
+    (non-loop-side-branch) stations at the same layer in the same
+    section.
+
+    The median acts as the section's implicit "column X" for layer L,
+    after fan-out spacing has been applied.  A station drifting more
+    than one full x_spacing off its column indicates either an X-mutating
+    phase regression or a new topology case that the engine handles
+    incorrectly.
+
+    Loop-side-branch stations (matched by
+    ``_recenter_loop_side_stations``'s precondition) are exempted: the
+    engine deliberately moves them to the midpoint of their loop's
+    diagonal corners.  See ``_is_loop_side_branch_station``.
+    """
+    import statistics
+
+    from nf_metro.layout.constants import X_SPACING
+
+    x_spacing = X_SPACING
+    graph = _layout(fixture, x_spacing=x_spacing)
+    in_by_tgt: dict[str, list] = defaultdict(list)
+    out_by_src: dict[str, list] = defaultdict(list)
+    for e in graph.edges:
+        in_by_tgt[e.target].append(e)
+        out_by_src[e.source].append(e)
+
+    offenders: list[str] = []
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0 or sec.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(sec.entry_ports) | set(sec.exit_ports)
+        layer_xs: dict[int, list[tuple[str, float]]] = defaultdict(list)
+        for sid in sec.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            if st.off_track:
+                continue
+            if _is_loop_side_branch_station(graph, sid, in_by_tgt, out_by_src):
+                continue
+            layer_xs[st.layer].append((sid, st.x))
+        for layer, members in layer_xs.items():
+            if len(members) < 2:
+                continue
+            xs = [x for _, x in members]
+            median_x = statistics.median(xs)
+            for sid, x in members:
+                if abs(x - median_x) > x_spacing:
+                    offenders.append(
+                        f"section={sec.id!r} layer={layer} {sid!r} "
+                        f"x={x:.1f} median={median_x:.1f} "
+                        f"drift={abs(x - median_x):.1f} > x_spacing={x_spacing:.1f}"
+                    )
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
+
+
+# ---------------------------------------------------------------------------
 # LR routes do not go backwards (#250)
 # ---------------------------------------------------------------------------
 
