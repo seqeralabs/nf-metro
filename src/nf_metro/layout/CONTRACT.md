@@ -532,12 +532,8 @@ Guard bodies live at the top of `engine.py` (lines 83-275).
   filled their full row claim).
 - **Invariants preserved**: Within-row trunk Ys. Bbox heights of
   upper rows.
-- **Notes**: Phase tag in code shadowed - there are two "Phase 13k"
-  comments (engine.py:789 and engine.py:796). Engine numbering is
-  unique by helper, but the comment labels collide; **UNCLEAR
-  structural debt - the two 13k entries should be renumbered.**
 
-### Phase 13k (second, sparse loop shift) (engine.py:796-800)
+### Phase 13k2: shift sparse loop stations to clear bundle (engine.py:796-800)
 - **Purpose**: Shift sparse loop-side stations (one inbound, one
   outbound, single-line consumer) onto a half-pitch Y when sharing
   the full-row Y with a busier sibling whose inbound bundle would
@@ -559,7 +555,7 @@ Guard bodies live at the top of `engine.py` (lines 83-275).
   downward, push lower-row sections down to keep
   `section_y_gap`.
 - **Helper**: `_push_lower_rows_after_bbox_grow` (engine.py:2698).
-- **Precondition**: Phase 13k may have grown some bboxes.
+- **Precondition**: Phase 13k2 may have grown some bboxes.
 - **Postcondition**: Row gaps preserved across the bbox grow.
 - **Invariants preserved**: Within-row Ys.
 - **Related tests**: `test_row_gap_accommodates_bypass`.
@@ -581,9 +577,11 @@ Guard bodies live at the top of `engine.py` (lines 83-275).
 The following observations came up while writing this doc. Each one is
 a candidate for a follow-up cleanup PR.
 
-1. **Two "Phase 13k" comments** (engine.py:789 and engine.py:796) refer
+1. ~~**Two "Phase 13k" comments** (engine.py:789 and engine.py:796) refer
    to entirely different helpers. The phase numbering scheme has
-   collided and should be renumbered.
+   collided and should be renumbered.~~ **Resolved**: the second
+   `_shift_sparse_loop_stations_to_clear_bundle` block is now labelled
+   `Phase 13k2`.
 2. **Phase 13d3 has more conditional logic than the rest** - it's
    gated on `center_ports` and tracks state on
    `_half_grid_station_ids` to coordinate with Phase 13e. That

@@ -1121,13 +1121,15 @@ def _compute_section_layout(
     # claim; multi-row layouts with content-filled rows are untouched.
     _tighten_lower_rows_after_shrink(graph, section_y_gap)
 
-    # Phase 13k: Shift sparse loop-side stations (e.g. ``grea`` -- one
+    # Phase 13k2: Shift sparse loop-side stations (e.g. ``grea`` -- one
     # incoming, one outgoing, single-line consumer) onto a half-grid Y
     # when sharing the full-row Y with a busier sibling whose inbound
     # bundle would otherwise cross the sparse station's marker bbox.
+    # (Distinct from Phase 13k above; renamed to disambiguate after the
+    # numbering collision flagged in src/nf_metro/layout/CONTRACT.md.)
     _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
 
-    # Phase 13l: When Phase 13k grew a section's bbox downward, push
+    # Phase 13l: When Phase 13k2 grew a section's bbox downward, push
     # sections in lower rows down so they don't crowd the grown bbox.
     # ``_tighten_lower_rows_after_shrink`` only closes slack (pulls
     # rows up); the inverse push happens here.
@@ -3037,7 +3039,7 @@ def _shift_sparse_loop_stations_to_clear_bundle(
 def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> None:
     """Push lower-row sections down when an upper-row bbox grows.
 
-    ``_shift_sparse_loop_stations_to_clear_bundle`` (Phase 13k) can
+    ``_shift_sparse_loop_stations_to_clear_bundle`` (Phase 13k2) can
     grow a section's ``bbox_h`` downward when shifting a sparse loop
     station like ``grea`` past the original bbox bottom.  Row offsets
     were fixed earlier by ``_compute_section_offsets`` from pre-shift
