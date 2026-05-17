@@ -93,18 +93,40 @@ def _guard_coordinates_finite(graph: MetroGraph, phase: str) -> None:
 
 
 def _guard_stations_in_sections(graph: MetroGraph, phase: str) -> None:
-    """After Phase 4+: internal stations must be within their section bbox."""
+    """After Phase 4+: rendered station markers (and terminus icons) must
+    be fully within their section bbox.
+
+    Tightened from station-centre containment to marker-edge containment:
+    we expand the station's render-time footprint by ``STATION_RADIUS_APPROX``
+    (regular markers) or ``ICON_HALF_HEIGHT`` (terminus / off-track icons)
+    and require the expanded box to stay inside the section's bbox.  Centre
+    containment alone hides regressions where off-track icons (~16 px half
+    height) spill above the bbox top while still being technically "in" the
+    section.
+    """
     junction_ids = set(graph.junctions)
+    tol = GUARD_TOLERANCE
     for sid, st in graph.stations.items():
         sec = graph.sections.get(st.section_id or "")
         if not sec or st.is_port or sid in junction_ids or sec.bbox_w == 0:
             continue
+        # Off-track inputs and terminus icons render at icon scale; on-track
+        # markers render at station-pill scale.  Use the wider reach so the
+        # guard catches icon spill-over above the bbox top.
+        half_h = ICON_HALF_HEIGHT if (st.off_track or st.is_terminus) else (
+            STATION_RADIUS_APPROX
+        )
+        top = st.y - half_h
+        bottom = st.y + half_h
         if not (
-            sec.bbox_x <= st.x <= sec.bbox_x + sec.bbox_w
-            and sec.bbox_y <= st.y <= sec.bbox_y + sec.bbox_h
+            sec.bbox_x - tol <= st.x <= sec.bbox_x + sec.bbox_w + tol
+            and sec.bbox_y - tol <= top
+            and bottom <= sec.bbox_y + sec.bbox_h + tol
         ):
             raise PhaseInvariantError(
-                f"{phase}: station {sid!r} at ({st.x:.1f}, {st.y:.1f}) "
+                f"{phase}: station {sid!r} marker bbox "
+                f"(x={st.x:.1f}, y={top:.1f}..{bottom:.1f}, "
+                f"half_h={half_h:.1f}) "
                 f"outside section {st.section_id!r} bbox "
                 f"({sec.bbox_x:.1f}, {sec.bbox_y:.1f}, "
                 f"w={sec.bbox_w:.1f}, h={sec.bbox_h:.1f})"
