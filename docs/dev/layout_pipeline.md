@@ -134,7 +134,7 @@ their consumers, then a few post-lift fixups.
 
 ### Stage 6 - Pass C: vertical settling & finishing
 
-The long settle.  16 sub-stages clean up the consequences of Stages 1
+The long settle.  15 sub-stages clean up the consequences of Stages 1
 through 5, snap everything to the grid, restore invariants broken by
 each cleanup pass, then handle the final geometric details (loop-side
 X recenter, bbox shrink, captioned-icon spacing).
@@ -154,11 +154,12 @@ X recenter, bbox shrink, captioned-icon spacing).
 - **Stages 6.10 to 6.12**: Pin single-station downstream columns to
   their unique upstream Y; auto-balance content around the trunk;
   re-center loop-side stations on their loop midpoint (X-axis pass).
-- **Stages 6.13 to 6.15**: Shrink bbox bottoms to content, close
-  vertical slack between rows; shift sparse loop-side stations onto
-  half-pitch Ys to clear bundle pass-throughs (the same helper pushes
-  lower rows down internally when a shift grew a bbox).
-- **Stage 6.16**: Pad stacked captioned file-icon columns so
+- **Stages 6.13 to 6.14**: Shrink bbox bottoms to content and close
+  vertical slack between rows in one two-phase helper; shift sparse
+  loop-side stations onto half-pitch Ys to clear bundle
+  pass-throughs (the same helper pushes lower rows down internally
+  when a shift grew a bbox).
+- **Stage 6.15**: Pad stacked captioned file-icon columns so
   under-icon captions don't overlap the icon below.
 
 Stage 6 is where most of the historical organic-suffix sprawl (the old
@@ -210,7 +211,7 @@ Common scenarios and where to start looking:
 
 ## Why so many sub-stages
 
-The Pass C tail (Stages 6.1 to 6.16) looks excessive at first glance.
+The Pass C tail (Stages 6.1 to 6.15) looks excessive at first glance.
 Each sub-stage exists because:
 
 1. A bug was found in some real-world fixture.

@@ -647,7 +647,6 @@ _PASS_C_BISECTION_ORDER: tuple[str, ...] = (
     "after Stage 6.13",
     "after Stage 6.14",
     "after Stage 6.15",
-    "after Stage 6.16",
 )
 """Ordered Pass C bisection checkpoints, used by
 ``_run_pass_c_guards`` to gate guards whose invariants only become
@@ -668,12 +667,12 @@ checkpoint in ``_compute_section_layout``.
 #   Stage 6.6's re-anchor lifts the off-track back above its consumer.
 # - no_line_crosses_non_consumer: a sparse loop-side station (single
 #   line in, single line out, full-bundle row-mates) sits on the trunk
-#   Y until Stage 6.15 shifts it to a half-grid offset; before that,
+#   Y until Stage 6.14 shifts it to a half-grid offset; before that,
 #   the sibling line bundle's route passes through its marker bbox.
 _BISECTION_FIRST_VALID: dict[str, str] = {
     "_guard_stations_in_sections": "after Stage 5.3",
     "_guard_no_station_overlap": "after Stage 6.6",
-    "_guard_no_line_crosses_non_consumer": "after Stage 6.15",
+    "_guard_no_line_crosses_non_consumer": "after Stage 6.14",
 }
 
 
@@ -968,7 +967,7 @@ def _compute_section_layout(
     5. **Pass C - junctions & off-track lift** (Stages 5.1 to 5.5).
        Position junctions, lift off-track stations, re-align row bbox
        tops, compact, snap inter-section port pairs.
-    6. **Pass C - vertical settling & finishing** (Stages 6.1 to 6.16).
+    6. **Pass C - vertical settling & finishing** (Stages 6.1 to 6.15).
        Fan content upward, snap to grid, re-anchor off-track, recenter
        full-bundle columns and restore their invariants, balance content
        around trunk, loop-side X recenter, bbox shrink + row tighten /
@@ -1360,43 +1359,35 @@ def _compute_section_layout(
 
     # Stage 6.13: Shrink rowspan / row-mate bboxes whose content moved
     # up after compact (e.g. ``_fan_source_inputs_upward`` lifted the
-    # bottom rows away from the bbox bottom).  Bottom-only shrink, so
-    # trunk alignment is unaffected.
-    _shrink_bboxes_to_content_bottom(graph, section_y_padding)
+    # bottom rows away from the bbox bottom), then pull lower rows up
+    # to close the slack the shrink revealed.  Bottom-only shrink, so
+    # trunk alignment is unaffected; tighten only fires where a rowspan
+    # section's content fell short of its row claim.
+    _shrink_and_tighten_rows(graph, section_y_padding, section_y_gap)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.13")
 
-    # Stage 6.14: Close vertical slack that the pre-shrink row-height
-    # estimate (in ``_compute_section_offsets``) left between row ``r``
-    # and row ``r + 1`` once Stage 6.13 has collapsed bboxes to their content.
-    # Only fires when a rowspan section's content fell short of its row
-    # claim; multi-row layouts with content-filled rows are untouched.
-    _tighten_lower_rows_after_shrink(graph, section_y_gap)
-    if validate:
-        _run_pass_c_guards(graph, "after Stage 6.14")
-
-    # Stage 6.15: Shift sparse loop-side stations (e.g. ``grea`` -- one
+    # Stage 6.14: Shift sparse loop-side stations (e.g. ``grea`` -- one
     # incoming, one outgoing, single-line consumer) onto a half-grid Y
     # when sharing the full-row Y with a busier sibling whose inbound
     # bundle would otherwise cross the sparse station's marker bbox.
     # When the shift grows a section's bbox downward, the helper also
     # pushes lower-row sections down internally to restore
-    # ``section_y_gap`` (the row-propagation step formerly tracked as
-    # a separate Stage 6.16).
+    # ``section_y_gap``.
     _shift_and_propagate_loop_stations(
         graph, y_spacing, section_y_padding, section_y_gap
     )
     if validate:
-        _run_pass_c_guards(graph, "after Stage 6.15")
+        _run_pass_c_guards(graph, "after Stage 6.14")
 
-    # Stage 6.16: Pad vertical spacing between stacked file-input icons
+    # Stage 6.15: Pad vertical spacing between stacked file-input icons
     # whose under-icon captions would otherwise overlap the next icon
     # below.  The default ``y_spacing`` grid (40 px) is smaller than a
     # captioned icon's vertical extent (~44 px), so columns of source
     # inputs in DA-style sections need a slightly wider pitch.
     _pad_stacked_captioned_file_icons(graph, y_spacing, section_y_padding)
     if validate:
-        _run_pass_c_guards(graph, "after Stage 6.16")
+        _run_pass_c_guards(graph, "after Stage 6.15")
 
     if validate:
         phase = "after final"
@@ -3274,9 +3265,9 @@ def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) ->
 
     Shared helper called by stages that may grow a section's
     ``bbox_h`` downward after row offsets are already fixed:
-    ``_shift_and_propagate_loop_stations`` (Stage 6.15, sparse loop
+    ``_shift_and_propagate_loop_stations`` (Stage 6.14, sparse loop
     station shift) and ``_pad_stacked_captioned_file_icons`` (Stage
-    6.16, captioned-icon pitch padding).  Row offsets were fixed
+    6.15, captioned-icon pitch padding).  Row offsets were fixed
     earlier by ``_compute_section_offsets`` from pre-grow bbox
     heights, so the section below a grown one can end up sitting
     closer than ``section_y_gap`` from the new bbox bottom.
@@ -4241,30 +4232,57 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
                 graph.stations[sid].y = anchor_y + off * y_spacing
 
 
+def _shrink_and_tighten_rows(
+    graph: MetroGraph,
+    section_y_padding: float,
+    section_y_gap: float,
+) -> None:
+    """Shrink section bbox bottoms to content, then pull lower rows up
+    to close any slack the shrink revealed.
+
+    Two-phase unified helper:
+
+    Phase 1 - shrink:
+      Resize each section's ``bbox_h`` so the bottom sits
+      ``section_y_padding`` below the bottom-most station / port,
+      shrinking when content rose during earlier passes
+      (``_fan_source_inputs_upward``, ``_recenter_full_bundle_columns``)
+      and growing when ``_snap_all_y_to_grid`` snapped a station
+      downward.  Station Ys are unchanged so trunk alignment is
+      preserved.  Never trims past the maximum bbox bottom of any
+      row-mate (another section whose bbox vertical range overlaps
+      this one's, OR which shares at least one grid-row index
+      accounting for ``grid_row_span``); trimming below would undo
+      intentional bottom alignment from Stage 6.5 or rowspan TB
+      sections.
+
+    Phase 2 - tighten:
+      ``_compute_section_offsets`` sizes ``row_heights[r]`` from the
+      pre-shrink bbox heights, and a rowspan section that ends at row
+      ``r`` inflates the height further to fit its (then-tall) bbox.
+      Once phase 1 collapses bbox bottoms to actual content, row
+      ``r + 1`` can sit below empty space.  For each row pair, close
+      any slack beyond ``section_y_gap`` by shifting lower rows
+      (sections + stations + ports) upward.  The tighten step needs
+      every row's shrink to finish first so the row-gap deficit is
+      measurable against the final bbox bottoms, which is why this
+      runs as a second pass over the same graph rather than per
+      section.
+    """
+    _shrink_bboxes_to_content_bottom(graph, section_y_padding)
+    _tighten_lower_rows_after_shrink(graph, section_y_gap)
+
+
 def _shrink_bboxes_to_content_bottom(
     graph: MetroGraph, section_y_padding: float
 ) -> None:
-    """Resize bbox bottoms so they sit ``section_y_padding`` below content.
+    """Phase 1 of :func:`_shrink_and_tighten_rows`.
 
-    ``_compact_row_content_to_bbox_top`` shrinks the bottom slack to
-    ``section_y_padding`` once, but later phases
-    (``_fan_source_inputs_upward``, ``_recenter_full_bundle_columns``)
-    can pull content further up, leaving fresh empty space below the
-    last station; conversely ``_snap_all_y_to_grid`` can snap a station
-    downward, eating into the existing padding.  Re-size each section's
-    ``bbox_h`` so the bottom sits ``section_y_padding`` below the
-    bottom-most station/port -- shrinking when content rose, growing
-    when content snapped down.  Station Ys are unchanged, so trunk
-    alignment is preserved.
-
-    Never trims past the maximum bbox bottom of any row-mate.  A
-    row-mate is any other section whose bbox vertical range overlaps
-    this section's bbox vertical range, OR which shares at least one
-    grid-row index (accounting for ``grid_row_span``).  Trimming below
-    such a row-mate's bottom would undo intentional bottom alignment
-    performed by ``_align_tb_section_bbox_bottoms`` (Stage 6.5) or by
-    row-spanning TB sections that share a visual bottom edge with
-    row-mates one or more grid rows lower.
+    Resize each section's ``bbox_h`` so the bottom sits
+    ``section_y_padding`` below the bottom-most station / port.  See
+    the parent helper's docstring for the full contract; this
+    function is split out so the runtime guard at "after Stage 6.13"
+    still bisects to a meaningful intermediate state.
     """
 
     def _row_mate_bottoms(section: Section) -> list[float]:
@@ -4336,27 +4354,19 @@ def _shrink_bboxes_to_content_bottom(
 
 
 def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) -> None:
-    """Pull lower-row sections up to close slack left by rowspan claims.
+    """Phase 2 of :func:`_shrink_and_tighten_rows`.
 
-    ``_compute_section_offsets`` sizes ``row_heights[r]`` from pre-shrink
-    bbox heights, and a rowspan section that ends at row ``r`` inflates
-    the height further to fit its (then-tall) bbox.  After
-    ``_shrink_bboxes_to_content_bottom`` collapses bbox bottoms to
-    actual content, row ``r+1`` sits below empty space when the only
-    section "filling" row ``r`` was the rowspanned one (whose own bbox
-    now ends well above the row bottom).
-
-    For each row ``r >= 1``, this measures the gap between row ``r``'s
-    current top and the max bbox bottom of sections that *end* at row
-    ``r - 1`` (single-row sections in row ``r - 1`` plus rowspan
-    sections that terminate there).  Rowspan sections that *extend
-    into* row ``r`` are excluded: their bbox bottom is now content-
-    bounded, not row-bounded, so they no longer constrain row ``r``'s
-    top.  Any slack beyond ``section_y_gap`` is closed by shifting
-    sections in row ``r`` and below (along with their stations and
-    ports) upward by that amount.  Junctions live in inter-section
-    space and routing recomputes after layout, so their positions are
-    left alone.
+    Pull lower-row sections up to close the slack revealed once
+    phase 1 collapsed bbox bottoms.  For each row ``r >= 1``, measure
+    the gap between row ``r``'s current top and the max bbox bottom
+    of sections that *end* at row ``r - 1``.  Rowspan sections that
+    *extend into* row ``r`` are excluded -- their bbox bottom is now
+    content-bounded, not row-bounded, so they no longer constrain
+    row ``r``'s top.  Any slack beyond ``section_y_gap`` is closed
+    by shifting sections in row ``r`` and below (along with their
+    stations and ports) upward by that amount.  Junctions live in
+    inter-section space and routing recomputes after layout, so
+    their positions are left alone.
     """
     if not graph.sections:
         return

@@ -2071,7 +2071,7 @@ def test_section_bbox_has_bottom_padding(fixture):
     edge, so the invariant is ``bbox_bot >= max(station.y) +
     section_y_padding``.
 
-    ``_shift_and_propagate_loop_stations`` (Stage 6.15) can
+    ``_shift_and_propagate_loop_stations`` (Stage 6.14) can
     move a sparse loop station like ``grea`` further down without
     restoring this padding.  Catches the v116 regression where
     section 3's bbox sat ~5px below ``grea``'s centre instead of
@@ -2113,7 +2113,7 @@ def test_section_bbox_has_bottom_padding(fixture):
 
 
 # ---------------------------------------------------------------------------
-# Inter-row gap accommodates grown bboxes from Stage 6.15 shifts
+# Inter-row gap accommodates grown bboxes from Stage 6.14 shifts
 # ---------------------------------------------------------------------------
 
 
