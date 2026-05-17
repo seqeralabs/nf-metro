@@ -558,6 +558,54 @@ def build_model(g: MetroGraph, t: Topology, c: Classification, y_spacing: float)
                 solver.addConstraint((v >= by + port_pad) | "required")
                 solver.addConstraint((v <= by + bh - port_pad) | "required")
 
+    # --- C2b: perp-port slot constraint (CLAUDE.md "station-as-elbow" rule).
+    # LEFT/RIGHT ports on TB/BT sections are perpendicular to the trunk;
+    # their Y must not align with any internal station Y, otherwise routing
+    # would draw a line through the station marker. Same for TOP/BOTTOM
+    # ports on LR/RL sections (X axis - but X is precomputed, so handled by
+    # section_placement, not by the solver).
+    #
+    # The disjunctive "port.y != station.y +/- 10" can't be directly
+    # encoded in a linear solver. We pre-classify each port's slot rank
+    # from engine Ys (which station(s) the port sits between vertically),
+    # then add ordered inequalities that reproduce that slot - exactly the
+    # way C2 reproduces layer-ordering from engine track ranks.
+    # Validator's check_station_as_elbow tolerance is 10px and uses
+    # `abs(delta) <= tolerance`, so a gap of exactly 10 still fails.
+    # Use 12 to clear the inclusive boundary.
+    ELBOW_GAP = STATION_RADIUS_APPROX + 7.0
+    for sec_id, sids in t.section_stations.items():
+        direction = t.section_direction.get(sec_id, "LR")
+        is_tb = direction in ("TB", "BT")
+        if not is_tb:
+            continue
+        port_ids = set(t.section_entry_ports[sec_id]) | set(t.section_exit_ports[sec_id])
+        side_ports = [
+            pid for pid in port_ids
+            if pid in y_vars
+            and t.port_side.get(pid) in (PortSide.LEFT, PortSide.RIGHT)
+        ]
+        if not side_ports:
+            continue
+        internal = [
+            sid for sid in sids
+            if sid not in port_ids and not sid.startswith("__")
+            and not t.station_is_port.get(sid)
+        ]
+        if not internal:
+            continue
+        internal_sorted = sorted(internal, key=lambda s: t.engine_station_y.get(s, 0.0))
+        for pid in side_ports:
+            pe = t.engine_station_y.get(pid)
+            if pe is None:
+                continue
+            for sid in internal_sorted:
+                se = t.engine_station_y.get(sid, 0.0)
+                if pe + 0.5 < se:
+                    solver.addConstraint((y_vars[pid] + ELBOW_GAP <= y_vars[sid]) | "required")
+                elif pe - 0.5 > se:
+                    solver.addConstraint((y_vars[pid] >= y_vars[sid] + ELBOW_GAP) | "required")
+
     # --- C2: same-layer / same-track ordering. Direction-aware.
     # LR/RL: layer drives X, track drives Y. Within a layer (same X column),
     #        stations ordered by track must satisfy y_a + y_spacing <= y_b.
