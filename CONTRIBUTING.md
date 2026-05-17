@@ -13,7 +13,7 @@ python scripts/build_gallery.py --debug
 python scripts/build_render_diff.py <baseline-dir> docs/assets/renders <diff-out>
 ```
 
-The diff script returns exit code 2 on "no changes" and 0 on "changes detected".
+The diff script returns exit code 2 on "no changes" and 0 on "changes detected" - exit 2 signals "no diff page worth publishing" so CI can skip the upload step.
 
 ## Layout invariants and the ratchet
 
@@ -33,7 +33,7 @@ The diff script returns exit code 2 on "no changes" and 0 on "changes detected".
 
 - `examples/` holds gallery fixtures (real nf-core pipelines and synthetic guide examples). Renders from this directory are included in the gallery and tracked by the PR-render workflow.
 - `examples/topologies/` holds synthetic structural-stress fixtures. Each fixture aims to trigger one specific topology class (multi-input convergence, U-turn fold, off-track convergence, etc.). Keep them small and single-purpose.
-- `tests/fixtures/` is reserved for fixtures consumed only by specific tests, not by gallery rendering.
+- `tests/fixtures/` holds fixtures consumed by specific tests rather than by gallery rendering. They are not included in the gallery, but they do participate in invariant parametrization (see below).
 
 `tests/test_layout_invariants.py` discovers all `%%metro`-format fixtures in `examples/` and `tests/fixtures/` automatically via `_discover_fixtures()`. New fixtures appear in every parametrized invariant by default.
 
