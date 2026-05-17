@@ -221,10 +221,15 @@ def _classify_merge_edges(
                     entry_port_for[mjid] = e.target
                     break
 
-        # Find farthest bypass predecessor (trunk carrier)
+        # Find farthest bypass predecessor (trunk carrier).  Branches
+        # must land on the trunk's own bypass_bottom_y -- the value the
+        # trunk's route actually uses -- not the deepest across all
+        # preds (which can disagree when the cap-at-midpoint guard in
+        # bypass_bottom_y fires for the trunk's span but not a closer
+        # branch's).
         farthest_source: str | None = None
         farthest_span = 0
-        deepest_by = 0.0
+        trunk_pred_by = 0.0
         for edge in graph.edges:
             if edge.target != mjid:
                 continue
@@ -246,14 +251,13 @@ def _classify_merge_edges(
                     BYPASS_CLEARANCE,
                     src_row=pred_row,
                 )
-                if by > deepest_by:
-                    deepest_by = by
                 if span > farthest_span:
                     farthest_span = span
                     farthest_source = edge.source
-        if farthest_source and deepest_by > 0:
+                    trunk_pred_by = by
+        if farthest_source and trunk_pred_by > 0:
             trunk_source[mjid] = farthest_source
-            trunk_by[mjid] = deepest_by
+            trunk_by[mjid] = trunk_pred_by
 
     # Classify edges into skip (not routed) and index_exclude
     # (routed as branches but excluded from gap indexing)

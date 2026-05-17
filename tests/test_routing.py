@@ -208,3 +208,59 @@ def test_bypass_routing_around_intervening_sections():
         f"No waypoint below intervening sections (bottom={max_section_bottom}). "
         f"Waypoint Ys: {waypoint_ys}"
     )
+
+
+def _route_endpoint_attached(point, station, sibling_polylines, tol=2.0):
+    """True if *point* coincides with *station* or any sibling polyline."""
+    import math
+
+    from nf_metro.layout.routing.common import point_on_polyline
+
+    if (
+        station is not None
+        and math.hypot(point[0] - station.x, point[1] - station.y) < 5.0
+    ):
+        return True
+    return any(
+        point_on_polyline(point, pts, tol) is not None for pts in sibling_polylines
+    )
+
+
+def test_merge_branch_lands_on_trunk_y():
+    """Merge-junction branch routes must terminate on the trunk bundle Y
+    (or on a sibling polyline) -- not hanging in mid-air between rows."""
+    from nf_metro.render.svg import apply_route_offsets
+
+    fp = Path(__file__).parent / "fixtures" / "genomeassembly_organellar.mmd"
+    graph = parse_metro_mermaid(fp.read_text())
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    by_line: dict[str, list[list[tuple[float, float]]]] = {}
+    for r in routes:
+        by_line.setdefault(r.line_id, []).append(apply_route_offsets(r, offsets))
+
+    offences = []
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        if len(pts) < 2:
+            continue
+        siblings = [p for p in by_line[r.line_id] if p is not pts]
+        src = graph.stations.get(r.edge.source)
+        tgt = graph.stations.get(r.edge.target)
+        if not _route_endpoint_attached(pts[0], src, siblings):
+            offences.append(
+                f"{r.edge.source}->{r.edge.target} on {r.line_id!r}: "
+                f"src {pts[0]} disconnected"
+            )
+        if not _route_endpoint_attached(pts[-1], tgt, siblings):
+            offences.append(
+                f"{r.edge.source}->{r.edge.target} on {r.line_id!r}: "
+                f"tgt {pts[-1]} disconnected"
+            )
+
+    assert not offences, (
+        f"{fp.name}: route endpoints hanging in mid-air (not on a "
+        f"station marker or sibling route segment):\n  " + "\n  ".join(offences[:5])
+    )
