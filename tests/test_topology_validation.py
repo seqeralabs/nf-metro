@@ -29,8 +29,8 @@ from layout_validator import (
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
-TOPOLOGIES_DIR = Path(__file__).parent / "fixtures" / "topologies"
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
+TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
 
 # Collect all topology fixtures
 TOPOLOGY_FILES = sorted(TOPOLOGIES_DIR.glob("*.mmd"))
