@@ -624,16 +624,12 @@ resolved; refer to the relevant tracking issue or PR for history.
    cross-phase coupling is hard to follow; the half-grid marker
    pattern would benefit from a dedicated discussion in the doc /
    code.
-2. **Pass B is described as "single pass"** in the function docstring,
-   but Phase 11 expands bboxes (`_expand_bbox_for_y`) and Phase 11c
-   immediately re-runs top-align to undo the resulting bbox-top
-   drift. Naming-wise, "single pass" is misleading.
-3. **Phase 13 (off-track lift) calls `_shift_graph_into_canvas`**,
+2. **Phase 13 (off-track lift) calls `_shift_graph_into_canvas`**,
    which globally translates every station / port / junction / bbox.
    That's a Phase 4-style transformation hiding inside a Phase 13
    helper; if any later phase assumed Phase 4's global-coord origin
    was stable, the assumption is wrong.
-4. **Phase 11d/11da symmetrically fan content using a stale port Y**;
+3. **Phase 11d/11da symmetrically fan content using a stale port Y**;
    Phase 13h re-centers using the final trunk Y. The two-pass pattern
    is necessary because Phase 11da runs before snap-to-grid, but it
    means the early pass's output is partially-discarded work.
