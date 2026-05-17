@@ -349,16 +349,12 @@ class TestDuplicateProcessLabels:
         text = (FIXTURES / "duplicate_processes.mmd").read_text()
         result = convert_nextflow_dag(text)
         decls = re.findall(r"^\s+([a-z0-9_]+)\(\[", result, re.MULTILINE)
-        assert len(decls) == len(set(decls)), (
-            f"Duplicate station declarations: {decls}"
-        )
+        assert len(decls) == len(set(decls)), f"Duplicate station declarations: {decls}"
 
     def test_no_self_loops(self):
         text = (FIXTURES / "duplicate_processes.mmd").read_text()
         result = convert_nextflow_dag(text)
-        for m in re.finditer(
-            r"([a-z0-9_]+)\s*-->\|[^|]+\|\s*([a-z0-9_]+)", result
-        ):
+        for m in re.finditer(r"([a-z0-9_]+)\s*-->\|[^|]+\|\s*([a-z0-9_]+)", result):
             assert m.group(1) != m.group(2), f"Self-loop edge: {m.group(0)}"
 
     def test_duplicates_lay_out(self):

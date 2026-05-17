@@ -607,9 +607,7 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
             out.append("")
             for src, tgt in sec_edges:
                 lid = edge_line.get((src, tgt), main_line_id)
-                out.append(
-                    f"        {station_ids[src]} -->|{lid}| {station_ids[tgt]}"
-                )
+                out.append(f"        {station_ids[src]} -->|{lid}| {station_ids[tgt]}")
 
         out.append("    end")
         out.append("")
