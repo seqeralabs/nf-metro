@@ -10,6 +10,7 @@ import re
 import drawsvg as draw
 
 from nf_metro.layout.routing import RoutedPath
+from nf_metro.layout.routing.common import point_on_polyline
 from nf_metro.layout.routing.corners import resolve_curve_radii
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.constants import (
@@ -124,11 +125,11 @@ def _build_line_motion_paths(
     TrimGalore). Returns list of (line_id, d_attr) pairs -- a line_id
     may appear multiple times when it has forking branches.
     """
-    # Index routes by (source, target, line_id) for lookup
-    route_by_edge: dict[tuple[str, str, str], RoutedPath] = {}
+    # Single offset-applied polyline per route, reused below.
+    route_polylines: dict[tuple[str, str, str], list[tuple[float, float]]] = {}
     for route in routes:
         key = (route.edge.source, route.edge.target, route.line_id)
-        route_by_edge[key] = route
+        route_polylines[key] = apply_route_offsets(route, station_offsets)
 
     # Group edges by line
     edges_by_line: dict[str, list] = {}
@@ -163,18 +164,22 @@ def _build_line_motion_paths(
         if not all_paths:
             continue
 
-        for path_edges in all_paths:
-            all_points = _chain_edge_points(
-                path_edges,
-                route_by_edge,
-                station_offsets,
-            )
-            if len(all_points) < 2:
-                continue
+        line_polylines = [
+            pts for key, pts in route_polylines.items() if key[2] == line_id
+        ]
 
-            d_attr = _points_to_svg_path(all_points, curve_radius)
-            if d_attr:
-                result.append((line_id, d_attr))
+        for path_edges in all_paths:
+            chunks = _chain_edge_points(
+                path_edges,
+                route_polylines,
+                line_polylines,
+            )
+            for chunk in chunks:
+                if len(chunk) < 2:
+                    continue
+                d_attr = _points_to_svg_path(chunk, curve_radius)
+                if d_attr:
+                    result.append((line_id, d_attr))
 
     return result
 
@@ -272,35 +277,108 @@ def _variant_path(
 
 def _chain_edge_points(
     edges: list,
-    route_by_edge: dict[tuple[str, str, str], RoutedPath],
-    station_offsets: dict[tuple[str, str], float],
-) -> list[tuple[float, float]]:
-    """Chain edge routes into one continuous list of waypoints."""
-    all_points: list[tuple[float, float]] = []
+    route_polylines: dict[tuple[str, str, str], list[tuple[float, float]]],
+    line_polylines: list[list[tuple[float, float]]],
+) -> list[list[tuple[float, float]]]:
+    """Chain edge route polylines into contiguous waypoint chunks.
 
-    for edge in edges:
-        route = route_by_edge.get(
-            (edge.source, edge.target, edge.line_id),
-        )
-        if not route:
+    When consecutive edges' route endpoints don't coincide -- a
+    merge-junction branch route terminates on the trunk bundle rather
+    than at the junction station -- the gap is bridged using
+    sibling-route geometry on the same line so the motion path stays
+    on rendered geometry instead of cutting an off-piste diagonal.
+    The bridge may consume the next edge as well, since the stub from
+    merge junction to entry port is often already covered by the trunk.
+    """
+    chunks: list[list[tuple[float, float]]] = []
+    current: list[tuple[float, float]] = []
+
+    i = 0
+    while i < len(edges):
+        edge = edges[i]
+        pts = route_polylines.get((edge.source, edge.target, edge.line_id))
+        if not pts:
+            i += 1
             continue
 
-        pts = apply_route_offsets(route, station_offsets)
+        if not current:
+            current = list(pts)
+            i += 1
+            continue
 
-        if not all_points:
-            all_points.extend(pts)
-        elif pts:
-            last = all_points[-1]
-            first = pts[0]
-            if (
-                abs(last[0] - first[0]) < EDGE_CONNECT_TOLERANCE
-                and abs(last[1] - first[1]) < EDGE_CONNECT_TOLERANCE
-            ):
-                all_points.extend(pts[1:])
-            else:
-                all_points.extend(pts)
+        if _points_match(current[-1], pts[0]):
+            current.extend(pts[1:])
+            i += 1
+            continue
 
-    return all_points
+        bridge = _find_bridge(current[-1], pts[0], line_polylines)
+        if bridge is not None:
+            current.extend(bridge[1:])
+            current.extend(pts[1:])
+            i += 1
+            continue
+
+        # Try skipping a stub edge whose geometry the trunk already covered.
+        if i + 1 < len(edges):
+            n = edges[i + 1]
+            next_pts = route_polylines.get((n.source, n.target, n.line_id))
+            if next_pts:
+                if _points_match(current[-1], next_pts[0]):
+                    current.extend(next_pts[1:])
+                    i += 2
+                    continue
+                bridge = _find_bridge(current[-1], next_pts[0], line_polylines)
+                if bridge is not None:
+                    current.extend(bridge[1:])
+                    current.extend(next_pts[1:])
+                    i += 2
+                    continue
+
+        chunks.append(current)
+        current = list(pts)
+        i += 1
+
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _points_match(a: tuple[float, float], b: tuple[float, float]) -> bool:
+    return (
+        abs(a[0] - b[0]) < EDGE_CONNECT_TOLERANCE
+        and abs(a[1] - b[1]) < EDGE_CONNECT_TOLERANCE
+    )
+
+
+def _find_bridge(
+    from_pt: tuple[float, float],
+    to_pt: tuple[float, float],
+    polylines: list[list[tuple[float, float]]],
+    tol: float = 2.0,
+) -> list[tuple[float, float]] | None:
+    """Return a sub-polyline from from_pt to to_pt along a sibling route."""
+    for pts in polylines:
+        from_loc = point_on_polyline(from_pt, pts, tol)
+        if from_loc is None:
+            continue
+        to_loc = point_on_polyline(to_pt, pts, tol)
+        if to_loc is None:
+            continue
+        from_idx, from_t = from_loc
+        to_idx, to_t = to_loc
+        if to_idx < from_idx or (to_idx == from_idx and to_t < from_t):
+            continue
+        bridge: list[tuple[float, float]] = [from_pt]
+        for j in range(from_idx + 1, to_idx + 1):
+            bridge.append(pts[j])
+        bridge.append(to_pt)
+        cleaned: list[tuple[float, float]] = [bridge[0]]
+        for p in bridge[1:]:
+            if not _points_match(cleaned[-1], p):
+                cleaned.append(p)
+        if len(cleaned) >= 2:
+            return cleaned
+    return None
 
 
 def _points_to_svg_path(

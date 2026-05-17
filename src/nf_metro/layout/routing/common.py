@@ -282,6 +282,37 @@ def adjacent_column_gap_x(
     return column_gap_midpoint(graph, col_a, col_b)
 
 
+def point_on_polyline(
+    point: tuple[float, float],
+    pts: list[tuple[float, float]],
+    tol: float = COORD_TOLERANCE,
+) -> tuple[int, float] | None:
+    """Locate *point* on a polyline within *tol* perpendicular distance.
+
+    Returns ``(segment_idx, t)`` where ``segment_idx`` is the index of
+    the segment's start vertex and ``t`` is the parameter along the
+    segment in [0, 1].  Returns None when no segment covers the point.
+    """
+    for i in range(len(pts) - 1):
+        ax, ay = pts[i]
+        bx, by = pts[i + 1]
+        dx, dy = bx - ax, by - ay
+        seg_len2 = dx * dx + dy * dy
+        if seg_len2 == 0:
+            if abs(point[0] - ax) <= tol and abs(point[1] - ay) <= tol:
+                return (i, 0.0)
+            continue
+        t = ((point[0] - ax) * dx + (point[1] - ay) * dy) / seg_len2
+        if t < -0.01 or t > 1.01:
+            continue
+        t = max(0.0, min(1.0, t))
+        proj_x = ax + t * dx
+        proj_y = ay + t * dy
+        if abs(point[0] - proj_x) <= tol and abs(point[1] - proj_y) <= tol:
+            return (i, t)
+    return None
+
+
 def bypass_bottom_y(
     graph: MetroGraph,
     src_col: int,
