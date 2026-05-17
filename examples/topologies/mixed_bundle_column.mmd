@@ -1,0 +1,41 @@
+%%metro title: Mixed Bundle Column
+%%metro style: dark
+%%metro line: alpha | Alpha | #e63946
+%%metro line: beta | Beta | #2db572
+%%metro line: gamma | Gamma | #0570b0
+%%metro line: delta | Delta | #f5c542
+%%metro line: epsilon | Epsilon | #9C27B0
+
+graph LR
+    subgraph src [Source]
+        s1[Input]
+        s2[Prepare]
+        s1 -->|alpha,beta,gamma,delta,epsilon| s2
+    end
+
+    subgraph wide [Wide Branch]
+        w1[Process Wide]
+        w2[Refine Wide]
+        w1 -->|alpha,beta,gamma| w2
+    end
+
+    subgraph narrow [Narrow Branch]
+        n1[Process Narrow]
+    end
+
+    subgraph solo [Solo Branch]
+        so1[Process Solo]
+    end
+
+    subgraph sink [Sink]
+        m1[Merge]
+        m2[Report]
+        m1 -->|alpha,beta,gamma,delta,epsilon| m2
+    end
+
+    s2 -->|alpha,beta,gamma| w1
+    s2 -->|delta| n1
+    s2 -->|epsilon| so1
+    w2 -->|alpha,beta,gamma| m1
+    n1 -->|delta| m1
+    so1 -->|epsilon| m1
