@@ -1758,3 +1758,68 @@ class TestPhase13Bisection:
         """
         graph = parse_metro_mermaid(self._MMD)
         compute_layout(graph, validate=True)
+
+    # Minimal center_ports fixture: enters the `if graph.center_ports:`
+    # block at Phase 13h so the "after Phase 13h.2" checkpoint actually
+    # fires.  Plain enough not to need full-bundle reanchoring, so the
+    # helpers there are effective no-ops and the checkpoint is reached
+    # cleanly.
+    _MMD_CENTER_PORTS = (
+        "%%metro center_ports: true\n"
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n"
+        "    subgraph s1 [S1]\n"
+        "        a[A]\n"
+        "        a2[A2]\n"
+        "        a -->|main| a2\n"
+        "    end\n"
+        "    subgraph s2 [S2]\n"
+        "        b[B]\n"
+        "    end\n"
+        "    a2 -->|main| b\n"
+    )
+
+    def test_phase_13h_subphase_checkpoint_fires_on_center_ports(self, monkeypatch):
+        """Phase 13h.2's bisection checkpoint surfaces a regression
+        introduced by ``_top_align_row_bboxes_only`` inside the
+        ``if center_ports:`` branch.
+
+        This exercises a code path the default ``_MMD`` fixture (no
+        ``center_ports``) cannot reach.  The corruption runs *after*
+        the Phase 13a checkpoint to avoid a false positive there: we
+        corrupt only on the second invocation of
+        ``_top_align_row_bboxes_only``, which lands inside Phase 13h.2.
+        """
+        from nf_metro.layout import engine
+
+        original = engine._top_align_row_bboxes_only
+        call_count = {"n": 0}
+
+        def corrupt(graph, *args, **kwargs):
+            result = original(graph, *args, **kwargs)
+            call_count["n"] += 1
+            # First call is Phase 13a (always runs); second is Phase 13h.2
+            # (only on center_ports graphs).  Corrupt only on the second
+            # to hit the Phase 13h.2 checkpoint specifically.
+            if call_count["n"] >= 2:
+                a = graph.stations.get("a")
+                a2 = graph.stations.get("a2")
+                if a is not None and a2 is not None:
+                    a.x = a2.x
+                    a.y = a2.y
+            return result
+
+        monkeypatch.setattr(engine, "_top_align_row_bboxes_only", corrupt)
+
+        graph = parse_metro_mermaid(self._MMD_CENTER_PORTS)
+        with pytest.raises(engine.PhaseInvariantError) as excinfo:
+            compute_layout(graph, validate=True)
+
+        msg = str(excinfo.value)
+        assert msg.startswith("after Phase 13h.2:"), (
+            f"Expected bisection to identify Phase 13h.2, but error was: {msg!r}"
+        )
+        assert call_count["n"] == 2, (
+            f"Expected exactly 2 calls to _top_align_row_bboxes_only "
+            f"(Phase 13a + Phase 13h.2), got {call_count['n']}"
+        )

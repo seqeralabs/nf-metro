@@ -1160,23 +1160,29 @@ def _compute_section_layout(
     # one below).  This re-center uses the final inter-section bundle
     # Y as the anchor so the trunk row stays empty in each fanned
     # column.
+    #
+    # Phase 13h.1 and Phase 13h.2 below restore invariants the recenter
+    # breaks; ``.N`` is used (not bare ``13h2``) so the suffix doesn't
+    # collide with the standalone Phase 13h3 further below.
     if graph.center_ports:
         _recenter_full_bundle_columns(graph, y_spacing)
-        # Re-anchor off-track inputs again: ``_recenter`` moves
-        # their consumers to the final trunk-anchored Y, which can
-        # leave the off-track icon stranded at the old consumer Y
-        # (overlapping the consumer station instead of sitting one
-        # row above it).  This second reanchor uses each consumer's
-        # post-recenter Y as the new anchor and grows the section
-        # bbox upward when the lifted band moves above its current top.
+
+        # Phase 13h.1: Re-anchor off-track inputs after the recenter.
+        # The recenter moves consumers to the final trunk-anchored Y,
+        # which can leave the off-track icon stranded at the old
+        # consumer Y (overlapping the consumer station instead of
+        # sitting one row above it).  Uses each consumer's post-
+        # recenter Y as the new anchor and grows the section bbox
+        # upward when the lifted band moves above its current top.
         _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
-        # Re-run the row top-align: a reanchor-driven bbox grow leaves
-        # the section's bbox above its row mates'.  Pull row mates'
-        # bbox tops up to match so the section row stays flush along
-        # its top edge.
+
+        # Phase 13h.2: Re-run row top-align.  A Phase 13h.1 reanchor-
+        # driven bbox grow leaves the section's bbox above its row
+        # mates'; pull row mates' bbox tops up to match so the section
+        # row stays flush along its top edge.
         _top_align_row_bboxes_only(graph)
         if validate:
-            _run_phase13_guards(graph, "after Phase 13h")
+            _run_phase13_guards(graph, "after Phase 13h.2")
 
     # Phase 13i: After fan-re-centering, single-station downstream
     # columns (e.g. terminus file icons) may have stayed at their

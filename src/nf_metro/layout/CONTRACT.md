@@ -464,19 +464,43 @@ bisection runner is `_run_phase13_guards`.
 - **Invariants preserved**: On-track station Y.
 - **Related tests**: `test_off_track_inputs_above_consumer`.
 
-### Phase 13h: re-center full-bundle columns (engine.py:734-757)
+### Phase 13h: re-center full-bundle columns (engine.py)
 - **Purpose**: Re-fan full-bundle columns around the row's final trunk
   Y (Phase 11da used the local port Y which may now be stale).
-  Re-anchors off-track inputs and re-runs row-top-align afterwards.
   Gated on `center_ports`.
-- **Helper**: `_recenter_full_bundle_columns` (engine.py:3578),
-  then `_reanchor_off_track_to_consumer`, then
-  `_top_align_row_bboxes_only`.
+- **Helper**: `_recenter_full_bundle_columns`.
 - **Precondition**: Final inter-section trunk Y known (post-snap).
 - **Postcondition**: Full-bundle columns are symmetric around the
-  row's final trunk Y, with off-track inputs re-pinned to their
-  consumers' new Ys and row bboxes still flush at the top.
-- **Invariants preserved**: Bbox tops (after the row re-top-align).
+  row's final trunk Y.
+- **Invariants preserved**: Off-track Y anchoring (re-established by
+  Phase 13h.1) and bbox-top alignment (re-established by Phase 13h.2)
+  are temporarily broken; both are restored before leaving the
+  `if center_ports:` block.
+
+### Phase 13h.1: re-anchor off-track after recenter (engine.py)
+- **Purpose**: The Phase 13h recenter moves consumers to the final
+  trunk-anchored Y, leaving off-track icons stranded at the old
+  consumer Y (and overlapping the consumer station). Re-pin each
+  off-track at `consumer.y - n*y_spacing` on the post-recenter grid.
+  Gated on `center_ports`.
+- **Helper**: `_reanchor_off_track_to_consumer` (same helper as Phase
+  13g; called again here on the post-recenter Ys).
+- **Precondition**: Phase 13h has re-centred full-bundle columns.
+- **Postcondition**: Off-track inputs sit one or more pitches above
+  their post-recenter consumer. Section bboxes grow upward when
+  lifted bands move above the existing top padding.
+- **Invariants preserved**: Row top-alignment may be broken when a
+  bbox grew upward; Phase 13h.2 restores it.
+
+### Phase 13h.2: re-run row top-align (engine.py)
+- **Purpose**: A Phase 13h.1 bbox grow can leave the grown section's
+  bbox top above its row mates'. Pull row mates' bbox tops up to
+  match so the section row stays flush along its top edge. Gated on
+  `center_ports`.
+- **Helper**: `_top_align_row_bboxes_only` (same helper as Phase 13a).
+- **Precondition**: Phase 13h.1 has re-anchored off-track inputs.
+- **Postcondition**: Row bboxes flush at the top across all row mates.
+- **Invariants preserved**: Station Ys (only bbox tops move).
 
 ### Phase 13i: align terminus to upstream (engine.py:759-763)
 - **Purpose**: After 13h re-pitched fanned columns, a single-station
@@ -595,17 +619,12 @@ resolved; refer to the relevant tracking issue or PR for history.
    but Phase 11 expands bboxes (`_expand_bbox_for_y`) and Phase 11c
    immediately re-runs top-align to undo the resulting bbox-top
    drift. Naming-wise, "single pass" is misleading.
-3. **Phase 13h triggers further phases** (`_reanchor_off_track_to_consumer`
-   and `_top_align_row_bboxes_only`) inside its `if center_ports:`
-   block. These are effectively unnumbered sub-phases hiding in
-   a conditional - they don't appear as `# Phase 13h.something`
-   comments but are real graph-mutating passes.
-4. **Phase 13 (off-track lift) calls `_shift_graph_into_canvas`**,
+3. **Phase 13 (off-track lift) calls `_shift_graph_into_canvas`**,
    which globally translates every station / port / junction / bbox.
    That's a Phase 4-style transformation hiding inside a Phase 13
    helper; if any later phase assumed Phase 4's global-coord origin
    was stable, the assumption is wrong.
-5. **Phase 11d/11da symmetrically fan content using a stale port Y**;
+4. **Phase 11d/11da symmetrically fan content using a stale port Y**;
    Phase 13h re-centers using the final trunk Y. The two-pass pattern
    is necessary because Phase 11da runs before snap-to-grid, but it
    means the early pass's output is partially-discarded work.
