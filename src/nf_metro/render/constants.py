@@ -236,3 +236,11 @@ STROKE_DASHARRAY: dict[str, str] = {
     "dotted": "2,4",
 }
 """SVG stroke-dasharray values for non-solid line styles."""
+
+
+def line_style_kwargs(style: str) -> dict[str, str]:
+    """Return extra SVG kwargs for a metro line style (dashed/dotted)."""
+    dasharray = STROKE_DASHARRAY.get(style)
+    if dasharray:
+        return {"stroke_dasharray": dasharray}
+    return {}

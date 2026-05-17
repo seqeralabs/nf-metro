@@ -736,11 +736,6 @@ def _find_downstream_bundle_y(
     sections = graph.sections
     same_row = section.grid_row
 
-    # Index edges by source once: every other lookup is by source.
-    edges_by_source: dict[str, list] = {}
-    for edge in graph.edges:
-        edges_by_source.setdefault(edge.source, []).append(edge)
-
     # Fan-in exits stay centred: 2+ distinct internal source Ys means
     # the visual convergence is meaningful and downstream anchoring
     # would collapse the bundle onto one source.
@@ -749,7 +744,7 @@ def _find_downstream_bundle_y(
     )
     src_ys: set[float] = set()
     for sid in internal_ids:
-        for edge in edges_by_source.get(sid, ()):
+        for edge in graph.edges_from(sid):
             if edge.target != exit_port_id:
                 continue
             st = stations.get(sid)
@@ -760,12 +755,12 @@ def _find_downstream_bundle_y(
                 break
 
     entry_ids: list[str] = []
-    for edge in edges_by_source.get(exit_port_id, ()):
+    for edge in graph.edges_from(exit_port_id):
         tgt = edge.target
         if tgt in ports and ports[tgt].is_entry:
             entry_ids.append(tgt)
         elif tgt in junction_ids:
-            for e2 in edges_by_source.get(tgt, ()):
+            for e2 in graph.edges_from(tgt):
                 if e2.target in ports and ports[e2.target].is_entry:
                     entry_ids.append(e2.target)
     if not entry_ids:
@@ -781,7 +776,7 @@ def _find_downstream_bundle_y(
             continue
         ds_internal = set(ds.station_ids) - set(ds.entry_ports) - set(ds.exit_ports)
         targets: dict[str, set[str]] = {}
-        for edge in edges_by_source.get(eid, ()):
+        for edge in graph.edges_from(eid):
             if edge.target not in ds_internal:
                 continue
             st = stations.get(edge.target)
@@ -821,14 +816,11 @@ def _find_connected_internal_coord(
         set(section.station_ids) - set(section.entry_ports) - set(section.exit_ports)
     )
     vals: list[float] = []
-    for edge in graph.edges:
-        if edge.source == port_id and edge.target in internal_ids:
-            if edge.target.startswith("__bypass_"):
-                continue
+    for edge in graph.edges_from(port_id):
+        if edge.target in internal_ids and not edge.target.startswith("__bypass_"):
             vals.append(getattr(graph.stations[edge.target], axis))
-        if edge.target == port_id and edge.source in internal_ids:
-            if edge.source.startswith("__bypass_"):
-                continue
+    for edge in graph.edges_to(port_id):
+        if edge.source in internal_ids and not edge.source.startswith("__bypass_"):
             vals.append(getattr(graph.stations[edge.source], axis))
     if vals:
         return sum(vals) / len(vals)

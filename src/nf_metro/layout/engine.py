@@ -2266,17 +2266,13 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> bool:
 
         # Find downstream entry port(s) in the same row.
         targets: list[float] = []
-        for edge in graph.edges:
-            if edge.source != port_id:
-                continue
+        for edge in graph.edges_from(port_id):
             entry_candidates: list[str] = []
             tgt_port = graph.ports.get(edge.target)
             if tgt_port and tgt_port.is_entry:
                 entry_candidates.append(edge.target)
             elif edge.target in junction_ids:
-                for e2 in graph.edges:
-                    if e2.source != edge.target:
-                        continue
+                for e2 in graph.edges_from(edge.target):
                     tp2 = graph.ports.get(e2.target)
                     if tp2 and tp2.is_entry:
                         entry_candidates.append(e2.target)
@@ -2302,24 +2298,18 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> bool:
         # to the exit port's Y so the inter-section trunk stays flat.
         port_set = set(section.entry_ports) | set(section.exit_ports)
         src_ys: set[float] = set()
-        for edge in graph.edges:
-            if edge.target != port_id:
-                continue
+        for edge in graph.edges_to(port_id):
             src = graph.stations.get(edge.source)
             if src and not src.is_port and edge.source not in port_set:
                 src_ys.add(round(src.y, 1))
         if len(src_ys) >= 2:
-            for edge in graph.edges:
-                if edge.source != port_id:
-                    continue
+            for edge in graph.edges_from(port_id):
                 entry_candidates: list[str] = []
                 tgt_port = graph.ports.get(edge.target)
                 if tgt_port and tgt_port.is_entry:
                     entry_candidates.append(edge.target)
                 elif edge.target in junction_ids:
-                    for e2 in graph.edges:
-                        if e2.source != edge.target:
-                            continue
+                    for e2 in graph.edges_from(edge.target):
                         tp2 = graph.ports.get(e2.target)
                         if tp2 and tp2.is_entry:
                             entry_candidates.append(e2.target)
@@ -2714,13 +2704,13 @@ def _balance_section_content_around_trunk(
             cur = src
             src_lines = set(graph.station_lines(src))
             while True:
-                outs = {e.target for e in graph.edges if e.source == cur}
+                outs = {e.target for e in graph.edges_from(cur)}
                 if len(outs) != 1:
                     break
                 nxt = next(iter(outs))
                 if nxt not in section_internal_set:
                     break
-                in_srcs = {e.source for e in graph.edges if e.target == nxt}
+                in_srcs = {e.source for e in graph.edges_to(nxt)}
                 if len(in_srcs) != 1:
                     break
                 if set(graph.station_lines(nxt)) != src_lines:
@@ -3781,12 +3771,6 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
     if not grid_sec_ids:
         return
 
-    import networkx as nx
-
-    G = nx.DiGraph()
-    for edge in graph.edges:
-        G.add_edge(edge.source, edge.target)
-
     for section in graph.sections.values():
         if (
             section.id not in grid_sec_ids
@@ -3834,7 +3818,7 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
                 if s != trunk_sid
                 and set(graph.station_lines(s))
                 and set(graph.station_lines(s)) < bundle
-                and (s in G and any(True for _ in G.predecessors(s)))
+                and graph.edges_to(s)
             ]
             if not siblings:
                 continue
@@ -4035,12 +4019,6 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
     if not grid_sec_ids:
         return
 
-    import networkx as nx
-
-    G = nx.DiGraph()
-    for edge in graph.edges:
-        G.add_edge(edge.source, edge.target)
-
     for section in graph.sections.values():
         if (
             section.id not in grid_sec_ids
@@ -4066,7 +4044,7 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
             cols[round(st.x, 3)].append(sid)
 
         def _has_pred(sid: str) -> bool:
-            return sid in G and next(iter(G.predecessors(sid)), None) is not None
+            return bool(graph.edges_to(sid))
 
         full_by_col = {
             x: [s for s in sids if set(graph.station_lines(s)) == bundle]
@@ -4181,12 +4159,6 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
     if not grid_sec_ids:
         return
 
-    import networkx as nx
-
-    G = nx.DiGraph()
-    for edge in graph.edges:
-        G.add_edge(edge.source, edge.target)
-
     for section in graph.sections.values():
         if (
             section.id not in grid_sec_ids
@@ -4209,7 +4181,7 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
             cols[round(st.x, 3)].append(sid)
 
         def _has_pred(sid: str) -> bool:
-            return sid in G and next(iter(G.predecessors(sid)), None) is not None
+            return bool(graph.edges_to(sid))
 
         full_by_col = {
             x: [s for s in sids if set(graph.station_lines(s)) == bundle]
@@ -4469,10 +4441,8 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
                 continue
             preds = {
                 e.source
-                for e in graph.edges
-                if e.target == sid
-                and e.source in sec_sids
-                and not graph.stations[e.source].is_port
+                for e in graph.edges_to(sid)
+                if e.source in sec_sids and not graph.stations[e.source].is_port
             }
             if len(preds) != 1:
                 continue
@@ -5332,9 +5302,7 @@ def _resolve_source_xy(
 
     # Junction: find the feeding exit port and compute placement.
     chained: list[str] = []
-    for e in graph.edges:
-        if e.target != edge_source:
-            continue
+    for e in graph.edges_to(edge_source):
         if e.source in junction_ids:
             chained.append(e.source)
             continue
@@ -6672,18 +6640,14 @@ def _align_phantom_pass_throughs(
     track keeps the trunk horizontal so the optional branch visually
     "bubbles" away from it.
     """
-    import networkx as nx
-
-    G = nx.DiGraph()
-    for edge in sub.edges:
-        G.add_edge(edge.source, edge.target)
-
     for sid, station in sub.stations.items():
-        if not station.is_hidden or sid not in tracks or sid not in G:
+        if not station.is_hidden or sid not in tracks:
             continue
-        succs = list(G.successors(sid))
-        if len(succs) == 1 and succs[0] in tracks:
-            tracks[succs[0]] = tracks[sid]
+        succs = {e.target for e in sub.edges_from(sid)}
+        if len(succs) == 1:
+            succ = next(iter(succs))
+            if succ in tracks:
+                tracks[succ] = tracks[sid]
 
 
 def _compute_fork_join_gaps(

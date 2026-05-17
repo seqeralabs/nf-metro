@@ -53,7 +53,6 @@ from nf_metro.render.constants import (
     SECTION_NUM_FONT_SIZE,
     SECTION_NUM_Y_OFFSET,
     SECTION_STROKE_WIDTH,
-    STROKE_DASHARRAY,
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
@@ -61,6 +60,7 @@ from nf_metro.render.constants import (
     WATERMARK_FONT_SIZE,
     WATERMARK_PADDING_RATIO,
     WATERMARK_Y_INSET,
+    line_style_kwargs,
 )
 from nf_metro.render.icons import (
     render_file_icon,
@@ -69,14 +69,6 @@ from nf_metro.render.icons import (
 )
 from nf_metro.render.legend import compute_legend_dimensions, render_legend
 from nf_metro.render.style import Theme
-
-
-def _line_style_kwargs(style: str) -> dict:
-    """Return extra SVG kwargs for a metro line style (dashed/dotted)."""
-    dasharray = STROKE_DASHARRAY.get(style)
-    if dasharray:
-        return {"stroke_dasharray": dasharray}
-    return {}
 
 
 def apply_route_offsets(
@@ -232,11 +224,7 @@ def _compute_icon_obstacles(
         r = theme.station_radius
 
         # Determine if source (no incoming edges) or sink
-        is_source = True
-        for edge in graph.edges:
-            if edge.target == station.id:
-                is_source = False
-                break
+        is_source = not graph.edges_to(station.id)
 
         section = graph.sections.get(station.section_id) if station.section_id else None
         section_dir = section.direction if section else "LR"
@@ -641,7 +629,7 @@ def _render_edges(
     for route in routes:
         line = graph.lines.get(route.line_id)
         color = line.color if line else FALLBACK_LINE_COLOR
-        style_kw = _line_style_kwargs(line.style) if line else {}
+        style_kw = line_style_kwargs(line.style) if line else {}
         class_name = f"metro-line-{route.line_id}"
 
         pts = apply_route_offsets(route, station_offsets)
@@ -854,14 +842,7 @@ def _render_terminus_icons(
         graph.sections.get(station.section_id) if station.section_id else None
     )
     # Detect if station is a source (no incoming edges) or sink.
-    # Check graph.edges (not section.internal_edges) because the latter
-    # is populated before inter-section edge rewriting and doesn't
-    # include port-to-station edges.
-    is_source = True
-    for edge in graph.edges:
-        if edge.target == station.id:
-            is_source = False
-            break
+    is_source = not graph.edges_to(station.id)
     # Place icons on the "outside" of the flow
     icon_gap = r + ICON_STATION_GAP
     icon_half_w = theme.terminus_width / 2
