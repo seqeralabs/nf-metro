@@ -6,10 +6,14 @@ __all__ = ["Theme"]
 
 from dataclasses import dataclass
 
-from nf_metro.layout.constants import TERMINUS_WIDTH
+from nf_metro.layout.constants import (
+    ICON_HALF_HEIGHT,
+    STATION_RADIUS_APPROX,
+    TERMINUS_WIDTH,
+)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class Theme:
     """Visual theme for a metro map."""
 
@@ -17,7 +21,7 @@ class Theme:
     background_color: str
     station_fill: str
     station_stroke: str
-    station_radius: float
+    station_radius: float = STATION_RADIUS_APPROX
     station_stroke_width: float
     line_width: float
     label_color: str
@@ -42,7 +46,7 @@ class Theme:
     animation_speed: float = 80.0  # pixels per second
     # Terminus (file icon) settings
     terminus_width: float = TERMINUS_WIDTH
-    terminus_height: float = 32.0
+    terminus_height: float = 2 * ICON_HALF_HEIGHT
     terminus_fold_size: float = 8.0
     terminus_fill: str = ""  # empty = inherit station_fill
     terminus_stroke: str = ""  # empty = inherit station_stroke

@@ -19,7 +19,7 @@ from nf_metro.render.animate import _build_line_motion_paths
 from nf_metro.themes import THEMES
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
-TOPOLOGIES_DIR = Path(__file__).parent / "fixtures" / "topologies"
+TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
 
 # Fixtures that exercise the merge-junction routing introduced in #207
 # along with a couple of standard examples as regression guards.

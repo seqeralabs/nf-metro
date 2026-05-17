@@ -1565,8 +1565,8 @@ def test_port_terminus_spacing_multi_terminus():
 # Phase-boundary guard tests
 # ---------------------------------------------------------------------------
 
-TOPOLOGIES_DIR = Path(__file__).parent / "fixtures" / "topologies"
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
+TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
 
 
 class TestPhaseGuards:

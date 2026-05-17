@@ -4,7 +4,7 @@ Centralizes magic numbers from svg.py, legend.py, animate.py, and icons.py.
 Theme-dependent values remain in style.py.
 """
 
-from nf_metro.layout.constants import CURVE_RADIUS
+from nf_metro.layout.constants import CURVE_RADIUS, ICON_CAPTION_GAP
 from nf_metro.layout.constants import ICON_INTER_GAP as ICON_INTER_GAP  # re-export
 from nf_metro.layout.constants import TERMINUS_WIDTH as TERMINUS_WIDTH  # re-export
 
@@ -91,8 +91,11 @@ ICON_STATION_GAP: float = 6.0
 ICON_BBOX_MARGIN: float = 2.0
 """Margin around icon bounding box for clamping."""
 
-ICON_NAME_GAP: float = 4.0
-"""Gap between the bottom of a terminus icon and its name caption."""
+ICON_NAME_GAP: float = ICON_CAPTION_GAP
+"""Gap between the bottom of a terminus icon and its name caption.
+
+Aliased from ``layout.constants.ICON_CAPTION_GAP`` so layout spacing
+math and render placement share a single source of truth."""
 
 ICON_NAME_FONT_SCALE: float = 0.6
 """Caption font size as a fraction of the theme label font size."""
