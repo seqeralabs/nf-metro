@@ -2504,14 +2504,11 @@ def test_routed_paths_clear_next_row_headers(fixture):
         header_top = sec.bbox_y - SECTION_HEADER_PROTRUSION
         headers.append((header_top, sec.bbox_x, sec.bbox_x + sec.bbox_w, sid))
 
-    # Minimum required clearance between a routed segment and a header
-    # below it.  Chosen to catch the v0.7.0 differentialabundance
-    # regression where the bottom-most line of a 4-line bypass bundle
-    # sat ~7.5px above the Plots header, while still accommodating
-    # TOP-entry channel routes that legitimately route at HEADER_CLEARANCE
-    # distance from the badge (~14px once badge protrusion is netted).
+    # Must exceed the stacked-bundle half-width (~6px for 4 lines at
+    # OFFSET_STEP=3) while staying under TOP-entry channel routes that
+    # legitimately sit ~14px above the badge.
     min_clearance = 12.0
-    h_axis_tol = 2.0  # treat as horizontal when |dy| <= 2px
+    h_axis_tol = 2.0
     for r in routes:
         if not r.is_inter_section:
             continue

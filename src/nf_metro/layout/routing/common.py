@@ -360,17 +360,10 @@ def bypass_bottom_y(
         else:
             return clearance
 
-    # When row-filtering is active, the candidate may land in the
-    # inter-row gap too close to a section header in another row.
-    # The header (number badge + label) extends ~26px above bbox_y.
-    # Keep the bypass at least HEADER_CLEARANCE above any next-row
-    # header_top so the stacked-line bundle does not visually crowd
-    # the badge.  If the inter-row gap is too tight to satisfy both
-    # the upper-bbox clearance and the header clearance, fall back to
-    # the midpoint as a last resort -- but the section-placement-side
-    # bypass floor (``layout.engine._predicted_bypass_bottom_in_row``)
-    # should normally widen the gap enough that the fallback never
-    # fires.
+    # Keep the bypass at least HEADER_CLEARANCE above any different-row
+    # section header_top; the stacked-line bundle otherwise crowds the
+    # badge.  Midpoint fallback for inter-row gaps too tight to satisfy
+    # both clearances (layout placement should normally prevent this).
     if src_row is not None:
         for s in graph.sections.values():
             if s.bbox_w > 0 and lo <= s.grid_col <= hi and s.grid_row != src_row:
