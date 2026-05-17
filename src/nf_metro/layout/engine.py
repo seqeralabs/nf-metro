@@ -2397,6 +2397,42 @@ def _fan_free_content_upward(
             graph.stations[sid].y = anchor_y - i * y_spacing
 
 
+def _shift_linear_consumer_chain(
+    graph: MetroGraph,
+    src: str,
+    delta: float,
+    internal_ids: set[str],
+    *,
+    cycle_guard: bool = False,
+) -> None:
+    """Walk a strictly-linear consumer chain and shift each station Y by *delta*.
+
+    Each step requires the current station to have a single outbound edge,
+    the next link to live inside *internal_ids* with a single inbound edge,
+    and an unchanged line-set across the hop.  Stops at the first hop that
+    fails any of those conditions.  Pass ``cycle_guard=True`` to additionally
+    bail out when the walk revisits a station.
+    """
+    cur = src
+    src_lines = set(graph.station_lines(src))
+    visited: set[str] = {src} if cycle_guard else set()
+    while True:
+        outs = {e.target for e in graph.edges_from(cur)}
+        if len(outs) != 1:
+            return
+        nxt = next(iter(outs))
+        if nxt not in internal_ids or (cycle_guard and nxt in visited):
+            return
+        if len({e.source for e in graph.edges_to(nxt)}) != 1:
+            return
+        if set(graph.station_lines(nxt)) != src_lines:
+            return
+        graph.stations[nxt].y += delta
+        if cycle_guard:
+            visited.add(nxt)
+        cur = nxt
+
+
 def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
     """Fill empty top space by lifting source-input chains above the trunk.
 
@@ -2481,34 +2517,15 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         sources.sort(key=lambda s: graph.stations[s].y)
         internal_set = set(internal_ids)
 
-        def _shift_chain(src: str, delta: float) -> None:
-            # Drag a strictly linear consumer chain so per-line tracks
-            # stay straight from icon to trunk junction.  Each step
-            # requires a single inbound edge from the previous link,
-            # an identical line set, and section-internal placement.
-            cur = src
-            src_lines = set(graph.station_lines(src))
-            while True:
-                outs = {e.target for e in graph.edges_from(cur)}
-                if len(outs) != 1:
-                    break
-                nxt = next(iter(outs))
-                if nxt not in internal_set:
-                    break
-                if len({e.source for e in graph.edges_to(nxt)}) != 1:
-                    break
-                if set(graph.station_lines(nxt)) != src_lines:
-                    break
-                graph.stations[nxt].y += delta
-                cur = nxt
-
+        # Drag each strictly-linear consumer chain so per-line tracks stay
+        # straight from icon to trunk junction.
         for i, src in enumerate(sources[:n_lift], 1):
             new_y = trunk_y - i * y_spacing
             delta = new_y - graph.stations[src].y
             if abs(delta) < 0.5:
                 continue
             graph.stations[src].y = new_y
-            _shift_chain(src, delta)
+            _shift_linear_consumer_chain(graph, src, delta, internal_set)
 
         # Compact the remaining below-trunk sources upward to fill the
         # rows their predecessors vacated.  Without this step, lifted
@@ -2522,7 +2539,7 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
             if abs(delta) < 0.5:
                 continue
             graph.stations[src].y = new_y
-            _shift_chain(src, delta)
+            _shift_linear_consumer_chain(graph, src, delta, internal_set)
 
 
 def _balance_direct_external_feeder_ys(
@@ -2663,24 +2680,6 @@ def _balance_section_content_around_trunk(
 
         section_internal_set = set(internal_ids)
 
-        def _shift_chain(src: str, delta: float) -> None:
-            cur = src
-            src_lines = set(graph.station_lines(src))
-            while True:
-                outs = {e.target for e in graph.edges_from(cur)}
-                if len(outs) != 1:
-                    break
-                nxt = next(iter(outs))
-                if nxt not in section_internal_set:
-                    break
-                in_srcs = {e.source for e in graph.edges_to(nxt)}
-                if len(in_srcs) != 1:
-                    break
-                if set(graph.station_lines(nxt)) != src_lines:
-                    break
-                graph.stations[nxt].y += delta
-                cur = nxt
-
         # Ys of every other station (incl. off-track icons) at ``col_x``.
         # Lift candidates must avoid these slots or the lifted marker
         # overlaps an existing marker / icon at render time.
@@ -2744,8 +2743,12 @@ def _balance_section_content_around_trunk(
                     break
                 graph.stations[candidate].y = ya
                 graph.stations[top_above].y = yc
-                _shift_chain(candidate, ya - yc)
-                _shift_chain(top_above, yc - ya)
+                _shift_linear_consumer_chain(
+                    graph, candidate, ya - yc, section_internal_set
+                )
+                _shift_linear_consumer_chain(
+                    graph, top_above, yc - ya, section_internal_set
+                )
                 break
             ext_feeders = _balance_direct_external_feeder_ys(
                 graph, candidate, section.id
@@ -2754,7 +2757,7 @@ def _balance_section_content_around_trunk(
                 break
             delta = new_y - graph.stations[candidate].y
             graph.stations[candidate].y = new_y
-            _shift_chain(candidate, delta)
+            _shift_linear_consumer_chain(graph, candidate, delta, section_internal_set)
 
         # Below-trunk compaction: when the first row below the trunk is
         # empty but content sits two or more slots below, lift all
@@ -7219,25 +7222,6 @@ def _pad_stacked_captioned_file_icons(
             if _has_under_icon_caption(st):
                 cols[round(st.x, 1)].append(sid)
 
-        def _shift_chain(src: str, delta: float) -> None:
-            cur = src
-            src_lines = set(graph.station_lines(src))
-            visited: set[str] = {src}
-            while True:
-                outs = {e.target for e in graph.edges_from(cur)}
-                if len(outs) != 1:
-                    break
-                nxt = next(iter(outs))
-                if nxt in visited or nxt not in internal_set:
-                    break
-                if len({e.source for e in graph.edges_to(nxt)}) != 1:
-                    break
-                if set(graph.station_lines(nxt)) != src_lines:
-                    break
-                graph.stations[nxt].y += delta
-                visited.add(nxt)
-                cur = nxt
-
         section_grew = False
         for col_sids in cols.values():
             if len(col_sids) < 2:
@@ -7251,7 +7235,9 @@ def _pad_stacked_captioned_file_icons(
                 if deficit <= 0.5:
                     continue
                 lower.y += deficit
-                _shift_chain(col_sids[i], deficit)
+                _shift_linear_consumer_chain(
+                    graph, col_sids[i], deficit, internal_set, cycle_guard=True
+                )
                 # Grow bbox if the shifted icon would now sit past the
                 # section's bottom padding line.
                 icon_bot = lower.y + ICON_HALF_HEIGHT
