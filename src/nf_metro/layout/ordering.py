@@ -71,12 +71,21 @@ def assign_tracks(
     for i, lid in enumerate(line_order):
         line_base[lid] = i * line_gap
 
-    # Step 3: Group nodes by (layer, primary_line)
+    # Step 3: Group nodes by (layer, primary_line).  Off-track stations
+    # are excluded from grouping: their Y is overwritten by the Phase 13
+    # off-track lift (anchored to the consumer station), so letting them
+    # participate in fan-out placement here would only distort the trunk
+    # track assignment for siblings and downstream stations.  They still
+    # get a placeholder track of 0 so callers can read it back.
     layer_line_groups: dict[tuple[int, str | None], list[str]] = defaultdict(list)
-    for sid in graph.stations:
+    off_track_ids: set[str] = set()
+    for sid, station in graph.stations.items():
+        if station.off_track:
+            off_track_ids.add(sid)
+            continue
         layer_line_groups[(layers.get(sid, 0), node_primary[sid])].append(sid)
 
-    tracks: dict[str, float] = {}
+    tracks: dict[str, float] = {sid: 0.0 for sid in off_track_ids}
     max_layer = max(layers.values()) if layers else 0
     orphan_track = len(line_order) * line_gap
 

@@ -4308,7 +4308,12 @@ def _layout_single_section(
     # Compact tracks so widely-spaced line priorities don't inflate
     # the vertical spread.  Gaps larger than LINE_GAP get capped so
     # distant line base tracks don't create excessive whitespace.
-    unique_tracks = sorted(set(tracks.values()))
+    # Off-track stations carry a placeholder track that will be
+    # overwritten by Phase 13's lift-to-consumer pass, so they must not
+    # influence the rank compaction of the on-track stations.
+    unique_tracks = sorted(
+        {tracks[sid] for sid in tracks if not sub.stations[sid].off_track}
+    )
     track_rank: dict[float, float] = {}
     if unique_tracks:
         track_rank[unique_tracks[0]] = 0.0
@@ -4332,12 +4337,15 @@ def _layout_single_section(
     for sid, station in sub.stations.items():
         station.layer = layers.get(sid, 0)
         station.track = tracks.get(sid, 0)
+        # Off-track stations get rank 0 here as a placeholder; Phase 13
+        # overwrites their Y to ``consumer.y - n*y_spacing``.
+        rank = track_rank.get(station.track, 0.0)
         if section.direction == "TB":
-            station.x = track_rank[station.track] * x_spacing
+            station.x = rank * x_spacing
             station.y = station.layer * y_spacing + layer_extra.get(station.layer, 0)
         else:
             station.x = station.layer * x_spacing + layer_extra.get(station.layer, 0)
-            station.y = track_rank[station.track] * effective_y_spacing
+            station.y = rank * effective_y_spacing
 
     # Resolve same-cell station collisions: two stations on the same line
     # priority can land on identical (x,y) when the track allocator collapses
@@ -6345,6 +6353,7 @@ def _build_section_subgraph(graph: MetroGraph, section: Section) -> MetroGraph:
                     label=station.label,
                     section_id=station.section_id,
                     is_port=False,
+                    off_track=station.off_track,
                     terminus_labels=list(station.terminus_labels),
                     terminus_icon_types=list(station.terminus_icon_types),
                     terminus_names=list(station.terminus_names),
