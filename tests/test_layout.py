@@ -1657,6 +1657,14 @@ class TestPhaseGuards:
         if path.exists():
             self._layout_validated(path.read_text())
 
+    def test_differentialabundance(self):
+        """``differentialabundance.mmd`` is the only gallery fixture that
+        combines ``center_ports: true`` with off-track terminus inputs
+        and a sparse loop-side station; exercises the bisection guard
+        phase-gating policy.
+        """
+        self._layout_validated((EXAMPLES_DIR / "differentialabundance.mmd").read_text())
+
     def test_simple_two_sections(self):
         self._layout_validated(
             "%%metro line: main | Main | #ff0000\n"
@@ -1711,28 +1719,38 @@ class TestPhase13Bisection:
         "    a2 -->|main,alt| b\n"
     )
 
+    # Corruption-phase -> expected surfacing checkpoint.  When the
+    # corruption phase is at or after the overlap-guard's first valid
+    # checkpoint (``after Phase 13g``), bisection localises to the
+    # corruption phase itself.  Otherwise the overlap regression
+    # surfaces at ``after Phase 13g`` (the first un-gated overlap
+    # check), which is the accepted trade-off for letting the bisection
+    # set tolerate the off-track-stranded-on-consumer transient at
+    # Phase 13e/13f (see ``_BISECTION_FIRST_VALID`` in engine.py).
     @pytest.mark.parametrize(
-        "phase_label,helper_name",
+        "corruption_helper,expected_phase",
         [
-            ("after Phase 13", "_lift_off_track_stations"),
-            ("after Phase 13a", "_top_align_row_bboxes_only"),
-            ("after Phase 13b", "_compact_row_content_to_bbox_top"),
-            ("after Phase 13e", "_snap_all_y_to_grid"),
-            ("after Phase 13i", "_align_terminus_to_upstream"),
-            ("after Phase 13j", "_shrink_bboxes_to_content_bottom"),
-            ("after Phase 13m", "_pad_stacked_captioned_file_icons"),
+            ("_lift_off_track_stations", "after Phase 13g"),
+            ("_top_align_row_bboxes_only", "after Phase 13g"),
+            ("_compact_row_content_to_bbox_top", "after Phase 13g"),
+            ("_snap_all_y_to_grid", "after Phase 13g"),
+            ("_align_terminus_to_upstream", "after Phase 13i"),
+            ("_shrink_bboxes_to_content_bottom", "after Phase 13j"),
+            ("_pad_stacked_captioned_file_icons", "after Phase 13m"),
         ],
     )
-    def test_overlap_localises_to_phase(self, monkeypatch, phase_label, helper_name):
+    def test_overlap_localises_to_phase(
+        self, monkeypatch, corruption_helper, expected_phase
+    ):
         from nf_metro.layout import engine
 
-        original = getattr(engine, helper_name)
+        original = getattr(engine, corruption_helper)
 
         def corrupt(graph, *args, **kwargs):
             result = original(graph, *args, **kwargs)
             # Move 'a' to land on 'a2', producing an overlap that
-            # ``_guard_no_station_overlap`` must catch at the very
-            # next bisection checkpoint.
+            # ``_guard_no_station_overlap`` must catch at the next
+            # un-gated bisection checkpoint.
             a = graph.stations.get("a")
             a2 = graph.stations.get("a2")
             if a is not None and a2 is not None:
@@ -1740,15 +1758,16 @@ class TestPhase13Bisection:
                 a.y = a2.y
             return result
 
-        monkeypatch.setattr(engine, helper_name, corrupt)
+        monkeypatch.setattr(engine, corruption_helper, corrupt)
 
         graph = parse_metro_mermaid(self._MMD)
         with pytest.raises(engine.PhaseInvariantError) as excinfo:
             compute_layout(graph, validate=True)
 
         msg = str(excinfo.value)
-        assert msg.startswith(phase_label + ":"), (
-            f"Expected bisection to identify {phase_label!r}, but error was: {msg!r}"
+        assert msg.startswith(expected_phase + ":"), (
+            f"Expected bisection to surface at {expected_phase!r}, "
+            f"but error was: {msg!r}"
         )
 
     def test_clean_layout_does_not_fire_bisection_guards(self):
@@ -1822,4 +1841,72 @@ class TestPhase13Bisection:
         assert call_count["n"] == 2, (
             f"Expected exactly 2 calls to _top_align_row_bboxes_only "
             f"(Phase 13a + Phase 13h.2), got {call_count['n']}"
+        )
+
+    def test_gated_overlap_guard_fires_at_later_bisection_checkpoints(
+        self, monkeypatch
+    ):
+        """An overlap injected at Phase 13m must surface at the
+        ``after Phase 13m`` bisection checkpoint (not deferred to the
+        final block).
+
+        Confirms ``_BISECTION_FIRST_VALID`` only delays a guard's
+        first valid checkpoint -- once past the threshold (``after
+        Phase 13g`` for the overlap guard), the guard fires at every
+        subsequent bisection checkpoint.
+        """
+        from nf_metro.layout import engine
+
+        original = engine._pad_stacked_captioned_file_icons
+
+        def corrupt(graph, *args, **kwargs):
+            result = original(graph, *args, **kwargs)
+            a = graph.stations.get("a")
+            a2 = graph.stations.get("a2")
+            if a is not None and a2 is not None:
+                a.x = a2.x
+                a.y = a2.y
+            return result
+
+        monkeypatch.setattr(engine, "_pad_stacked_captioned_file_icons", corrupt)
+
+        graph = parse_metro_mermaid(self._MMD)
+        with pytest.raises(engine.PhaseInvariantError) as excinfo:
+            compute_layout(graph, validate=True)
+
+        msg = str(excinfo.value)
+        assert msg.startswith("after Phase 13m:"), (
+            f"Expected bisection to surface at 'after Phase 13m' "
+            f"(overlap guard runs at every checkpoint from Phase 13g "
+            f"onward), but error was: {msg!r}"
+        )
+
+    @pytest.mark.parametrize(
+        "guard_name,first_valid",
+        [
+            ("_guard_stations_in_sections", "after Phase 13a"),
+            ("_guard_no_station_overlap", "after Phase 13g"),
+            ("_guard_no_line_crosses_non_consumer", "after Phase 13k2"),
+        ],
+    )
+    def test_bisection_first_valid_threshold(self, guard_name, first_valid):
+        """``_BISECTION_FIRST_VALID`` thresholds must reference real
+        Phase-13x checkpoints; ``_bisection_should_run`` must skip the
+        guard at the preceding checkpoint and run it at the threshold.
+        """
+        from nf_metro.layout import engine
+
+        assert first_valid in engine._PHASE_13_ORDER, (
+            f"Threshold {first_valid!r} not a known Phase-13x checkpoint"
+        )
+        assert engine._BISECTION_FIRST_VALID[guard_name] == first_valid
+
+        idx = engine._PHASE_13_ORDER.index(first_valid)
+        assert engine._bisection_should_run(guard_name, first_valid) is True
+        if idx > 0:
+            prev_phase = engine._PHASE_13_ORDER[idx - 1]
+            assert engine._bisection_should_run(guard_name, prev_phase) is False
+        # Final-block phase is not in _PHASE_13_ORDER; guard always runs.
+        assert (
+            engine._bisection_should_run(guard_name, "after Phase 12 (final)") is True
         )

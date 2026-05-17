@@ -51,15 +51,24 @@ Phases split into three regimes:
 | after Phase 4 | finite coords, stations-in-sections, bboxes-positive |
 | after Phase 5 | ports-on-boundaries |
 | after top-align (Phase 9) | ports-on-boundaries |
-| after each Phase 13x (bisection) | finite coords, bboxes-positive, stations-in-sections, ports-on-boundaries, no-station-overlap, no-line-crosses-non-consumer, station-x-column-drift |
-| after Phase 12 (final) | bisection set + off-track-above-consumer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
+| after each Phase 13x (bisection) | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
+| after Phase 12 (final) | bisection set (all unconditional) + off-track-above-consumer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
-Bisection checkpoints fire after every Phase-13x sub-phase
-(see the `# Phase 13...` comments in `_compute_section_layout`).
-Three guards are excluded from the bisection set because they are
-legitimately transient between sub-phases; the
-`_run_phase13_guards` docstring (engine.py) is the authoritative
-list and rationale.
+Bisection checkpoints fire after every Phase-13x sub-phase (see the
+`# Phase 13...` comments in `_compute_section_layout`). Three guards
+hold continuously only from a specific checkpoint onward, and the
+bisection runner skips them earlier; see `_BISECTION_FIRST_VALID` in
+`engine.py` for the threshold table:
+
+| Guard | First valid checkpoint | Transient because |
+|---|---|---|
+| `_guard_stations_in_sections` | after Phase 13a | Phase 13's off-track lift moves stations above the section bbox; Phase 13a grows the bbox to enclose them. |
+| `_guard_no_station_overlap` | after Phase 13g | Phase 13e's snap-to-grid can land an off-track terminus icon on its on-track column-mate's Y; Phase 13g re-anchors the off-track above its consumer. |
+| `_guard_no_line_crosses_non_consumer` | after Phase 13k2 | A sparse loop-side station sits on the trunk Y until Phase 13k2 shifts it to a half-grid offset; before that, sibling line bundles pass through its marker bbox. |
+
+Three further guards are excluded from the bisection set entirely
+(meaningful only at the final boundary); the `_run_phase13_guards`
+docstring in `engine.py` is the authoritative list.
 
 Guard bodies live at the top of `engine.py` (lines 83-275); the
 bisection runner is `_run_phase13_guards`.

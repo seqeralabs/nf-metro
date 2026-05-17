@@ -617,6 +617,70 @@ def _guard_station_x_column_drift(graph: MetroGraph, phase: str) -> None:
                     )
 
 
+_PHASE_13_ORDER: tuple[str, ...] = (
+    "after Phase 13",
+    "after Phase 13a",
+    "after Phase 13b",
+    "after Phase 13c",
+    "after Phase 13d",
+    "after Phase 13d2",
+    "after Phase 13d3",
+    "after Phase 13e",
+    "after Phase 13f",
+    "after Phase 13g",
+    "after Phase 13h.2",
+    "after Phase 13i",
+    "after Phase 13i2",
+    "after Phase 13h3",
+    "after Phase 13j",
+    "after Phase 13k",
+    "after Phase 13k2",
+    "after Phase 13l",
+    "after Phase 13m",
+)
+"""Ordered Phase-13x bisection checkpoints, used by
+``_run_phase13_guards`` to gate guards whose invariants only become
+valid mid-pipeline.  Update when adding or removing a Phase-13x
+checkpoint in ``_compute_section_layout``.
+"""
+
+# Each entry: bisection-runnable guard -> first checkpoint at which its
+# invariant must hold.  Before that checkpoint, the guard is skipped in
+# bisection mode; the final guard block (phase ``"after Phase 12
+# (final)"``, which is not in ``_PHASE_13_ORDER``) always runs it.
+#
+# - stations_in_sections: Phase 13 lifts off-track stations above their
+#   section's pre-grow bbox top; Phase 13a's row top-align grows the
+#   bbox upward to enclose them.
+# - no_station_overlap: Phase 13e's snap-to-grid can place an off-track
+#   terminus icon at the same coordinates as an on-track column-mate;
+#   Phase 13g's re-anchor lifts the off-track back above its consumer.
+# - no_line_crosses_non_consumer: a sparse loop-side station (single
+#   line in, single line out, full-bundle row-mates) sits on the trunk
+#   Y until Phase 13k2 shifts it to a half-grid offset; before that,
+#   the sibling line bundle's route passes through its marker bbox.
+_BISECTION_FIRST_VALID: dict[str, str] = {
+    "_guard_stations_in_sections": "after Phase 13a",
+    "_guard_no_station_overlap": "after Phase 13g",
+    "_guard_no_line_crosses_non_consumer": "after Phase 13k2",
+}
+
+
+def _bisection_should_run(guard_name: str, phase: str) -> bool:
+    """True if ``guard_name`` should run at bisection checkpoint ``phase``.
+
+    Returns True for the final guard block (``phase`` outside
+    ``_PHASE_13_ORDER``) so the final invariant set stays complete.
+    """
+    threshold = _BISECTION_FIRST_VALID.get(guard_name)
+    if threshold is None:
+        return True
+    try:
+        return _PHASE_13_ORDER.index(phase) >= _PHASE_13_ORDER.index(threshold)
+    except ValueError:
+        return True
+
+
 def _run_phase13_guards(
     graph: MetroGraph,
     phase: str,
@@ -634,8 +698,12 @@ def _run_phase13_guards(
     bisect.  Running the same overlap / breeze-past / column-drift
     checks at each boundary localises the culprit to a single phase.
 
-    Excluded from the bisection set (transient between sub-phases or
-    only meaningful at the final boundary):
+    Guards transient through specific Phase-13x sub-phases are gated
+    by ``_BISECTION_FIRST_VALID`` and skipped before they're valid.
+    See that table for the per-guard transient windows.
+
+    Always excluded from the bisection set (only meaningful at the
+    final boundary):
 
     * ``_guard_off_track_inputs_above_consumer`` -- Phase 13e's snap-
       to-grid shifts the on-track consumer Y by up to half a pitch
@@ -664,10 +732,14 @@ def _run_phase13_guards(
 
     _guard_coordinates_finite(graph, phase)
     _guard_section_bboxes_positive(graph, phase)
-    _guard_stations_in_sections(graph, phase)
+    if _bisection_should_run("_guard_stations_in_sections", phase):
+        _guard_stations_in_sections(graph, phase)
     _guard_ports_on_boundaries(graph, phase)
-    _guard_no_station_overlap(graph, phase, offsets=offsets)
-    if routes is not None:
+    if _bisection_should_run("_guard_no_station_overlap", phase):
+        _guard_no_station_overlap(graph, phase, offsets=offsets)
+    if routes is not None and _bisection_should_run(
+        "_guard_no_line_crosses_non_consumer", phase
+    ):
         _guard_no_line_crosses_non_consumer(
             graph, phase, offsets=offsets, routes=routes
         )
