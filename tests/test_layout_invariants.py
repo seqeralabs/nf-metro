@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.engine import compute_layout, is_loop_side_branch_station
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, PortSide
@@ -2685,43 +2685,6 @@ def test_grid_snap_does_not_mutate_x(fixture):
 _XFAIL_COL_DRIFT: dict[str, str] = {}
 
 
-def _is_loop_side_branch_station(
-    graph: MetroGraph,
-    sid: str,
-    in_by_tgt: dict[str, list],
-    out_by_src: dict[str, list],
-) -> bool:
-    """Mirror ``_recenter_loop_side_stations``'s precondition: a station
-    with exactly one in-edge and one out-edge, whose predecessor and
-    successor share Y, sitting off the trunk Y between them in X.
-
-    The engine moves such stations to the midpoint of their loop's
-    diagonal corners; that move legitimately decouples their X from
-    the section's column grid, so the column-X invariant must exempt
-    them.  Kept as a free function rather than a fixture-local helper
-    so other invariants (e.g. ``test_loop_recenter_only_for_pure_side_branches``)
-    can call it.
-    """
-    st = graph.stations.get(sid)
-    if st is None:
-        return False
-    ins = in_by_tgt.get(sid, [])
-    outs = out_by_src.get(sid, [])
-    if len(ins) != 1 or len(outs) != 1:
-        return False
-    src = graph.stations.get(ins[0].source)
-    tgt = graph.stations.get(outs[0].target)
-    if src is None or tgt is None:
-        return False
-    if abs(src.y - tgt.y) > 0.5:
-        return False
-    if abs(st.y - src.y) < 0.5:
-        return False
-    if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
-        return False
-    return True
-
-
 @pytest.mark.parametrize(
     "fixture",
     _params_with_xfails(ALL_FIXTURES, _XFAIL_COL_DRIFT),
@@ -2741,7 +2704,7 @@ def test_station_x_within_column_tolerance(fixture):
     Loop-side-branch stations (matched by
     ``_recenter_loop_side_stations``'s precondition) are exempted: the
     engine deliberately moves them to the midpoint of their loop's
-    diagonal corners.  See ``_is_loop_side_branch_station``.
+    diagonal corners.  See ``is_loop_side_branch_station``.
     """
     import statistics
 
@@ -2769,7 +2732,7 @@ def test_station_x_within_column_tolerance(fixture):
                 continue
             if st.off_track:
                 continue
-            if _is_loop_side_branch_station(graph, sid, in_by_tgt, out_by_src):
+            if is_loop_side_branch_station(graph, sid, in_by_tgt, out_by_src):
                 continue
             layer_xs[st.layer].append((sid, st.x))
         for layer, members in layer_xs.items():
