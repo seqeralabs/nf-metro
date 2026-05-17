@@ -734,6 +734,15 @@ def compute_layout(
         validate=validate,
     )
 
+    # SPIKE (#351): override Ys via constraint solver. Branch-only.
+    # Gated on NF_METRO_NO_SOLVER (set to 1 to disable, for diff scripts).
+    import os
+
+    if os.environ.get("NF_METRO_NO_SOLVER", "0") != "1":
+        from nf_metro.layout.constraint_solver_v2 import apply_to_graph
+
+        apply_to_graph(graph, y_spacing)
+
 
 def _compute_flat_layout(
     graph: MetroGraph,

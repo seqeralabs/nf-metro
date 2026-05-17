@@ -37,14 +37,11 @@ import sys
 import time
 import traceback
 from collections import Counter
-from copy import deepcopy
 from pathlib import Path
 
 from nf_metro.layout import compute_layout
 from nf_metro.parser import parse_metro_mermaid
 from tests.layout_validator import Severity, validate_layout
-
-from scratch.constraint_spike_v3_model import solve as solve_spike
 
 GALLERY = [
     "differentialabundance",
@@ -75,10 +72,20 @@ SUBSET = [
 
 
 def _layout_engine(text: str) -> dict:
-    g = parse_metro_mermaid(text)
-    t0 = time.perf_counter()
-    compute_layout(g, validate=False)
-    dt = time.perf_counter() - t0
+    import os
+
+    prev = os.environ.get("NF_METRO_NO_SOLVER")
+    os.environ["NF_METRO_NO_SOLVER"] = "1"
+    try:
+        g = parse_metro_mermaid(text)
+        t0 = time.perf_counter()
+        compute_layout(g, validate=False)
+        dt = time.perf_counter() - t0
+    finally:
+        if prev is None:
+            os.environ.pop("NF_METRO_NO_SOLVER", None)
+        else:
+            os.environ["NF_METRO_NO_SOLVER"] = prev
     violations = validate_layout(g)
     return {
         "graph": g,
@@ -90,10 +97,14 @@ def _layout_engine(text: str) -> dict:
 
 
 def _layout_spike(text: str) -> dict:
+    import os
+
+    os.environ.pop("NF_METRO_NO_SOLVER", None)
     g = parse_metro_mermaid(text)
     t0 = time.perf_counter()
     try:
-        diag = solve_spike(g)
+        compute_layout(g, validate=False)
+        diag = {}
     except Exception as exc:
         return {
             "graph": None,
@@ -214,8 +225,10 @@ def run_one(fixture: str, repo_root: Path) -> dict:
 def main():
     p = argparse.ArgumentParser()
     p.add_argument(
-        "--fixtures", nargs="*", default=None,
-        help="Fixtures to run (default: 5-fixture subset; pass 'all' for full gallery)"
+        "--fixtures",
+        nargs="*",
+        default=None,
+        help="Fixtures to run (default: 5-fixture subset; pass 'all' for full gallery)",
     )
     p.add_argument("--repo-root", default=".", help="Repo root (default: cwd)")
     p.add_argument("--verbose", "-v", action="store_true")
@@ -237,7 +250,9 @@ def main():
         except Exception as exc:
             print(f"  fixture crashed during evaluation: {type(exc).__name__}: {exc}")
             traceback.print_exc()
-            results.append({"fixture": fx, "bucket": "crashed", "notes": {"reason": str(exc)}})
+            results.append(
+                {"fixture": fx, "bucket": "crashed", "notes": {"reason": str(exc)}}
+            )
             continue
         if r.get("skipped"):
             print(f"  SKIPPED: {r['reason']}")
@@ -245,8 +260,16 @@ def main():
         results.append(r)
         n = r["notes"]
         print(f"  bucket: {r['bucket']:20s}")
-        print(f"  engine: {r['engine_errors']} errors, {r['engine_warnings']} warnings ({r['engine_time_s']*1000:.0f} ms)")
-        print(f"  spike:  {r['spike_errors']} errors, {r['spike_warnings']} warnings ({r['spike_time_s']*1000:.0f} ms)")
+        e_t = r["engine_time_s"] * 1000
+        s_t = r["spike_time_s"] * 1000
+        print(
+            f"  engine: {r['engine_errors']} errors, "
+            f"{r['engine_warnings']} warnings ({e_t:.0f} ms)"
+        )
+        print(
+            f"  spike:  {r['spike_errors']} errors, "
+            f"{r['spike_warnings']} warnings ({s_t:.0f} ms)"
+        )
         if n.get("new_errors"):
             print(f"  new errors: {n['new_errors']}")
         if r["spike_error_message"]:
@@ -261,13 +284,26 @@ def main():
     by_bucket: dict[str, list[str]] = {}
     for r in results:
         by_bucket.setdefault(r["bucket"], []).append(r["fixture"])
-    for bucket in ["better", "equivalent", "acceptable_worse", "unacceptable_worse", "fatal", "crashed"]:
+    for bucket in [
+        "better",
+        "equivalent",
+        "acceptable_worse",
+        "unacceptable_worse",
+        "fatal",
+        "crashed",
+    ]:
         names = by_bucket.get(bucket, [])
-        marker = "OK " if bucket in ("better", "equivalent", "acceptable_worse") else "BAD"
+        marker = (
+            "OK " if bucket in ("better", "equivalent", "acceptable_worse") else "BAD"
+        )
         print(f"  {marker} {bucket:20s}: {len(names):2d}  {names}")
     n_total = len(results)
-    n_good = sum(len(by_bucket.get(b, [])) for b in ("better", "equivalent", "acceptable_worse"))
-    n_bad = sum(len(by_bucket.get(b, [])) for b in ("unacceptable_worse", "fatal", "crashed"))
+    n_good = sum(
+        len(by_bucket.get(b, [])) for b in ("better", "equivalent", "acceptable_worse")
+    )
+    n_bad = sum(
+        len(by_bucket.get(b, [])) for b in ("unacceptable_worse", "fatal", "crashed")
+    )
     pct = 100 * n_good / n_total if n_total else 0
     print(f"\n  good: {n_good}/{n_total} ({pct:.0f}%)   bad: {n_bad}/{n_total}")
     pass_bar = "PASS" if (n_good * 5 >= n_total * 4 and n_bad == 0) else "FAIL"
