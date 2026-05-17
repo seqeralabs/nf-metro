@@ -87,11 +87,11 @@ The page supports drag-to-pan, scroll-to-zoom, station hover tooltips, and a cli
 
 The **Embed&hellip;** button opens a panel with three copyable snippets:
 
-- **Inline HTML** - a self-contained `<div>` with scoped CSS and an IIFE-bound script. Paste into any HTML host (MkDocs, Confluence, Notion, a blog template) and the interactivity travels with it. The wrapper class is hashed per render, so multiple maps coexist on the same page.
-- **iframe** - a one-line `<iframe src="...">` for when the `.html` file is already hosted.
+- **Inline HTML** - a self-contained `<div>` you paste into any HTML host (MkDocs, Confluence, Notion, blog templates). Keeps full interactivity, no iframe.
+- **iframe** - a one-liner pointing at the hosted `.html` file.
 - **Static SVG** - the raw `<svg>` markup for hosts that strip scripts.
 
-GitHub READMEs strip `<script>` tags, so the interactive page won't run inline there. The standard pattern is to host the HTML on GitHub Pages (or any static host) and link to it from the README, optionally with the static SVG as a preview image.
+GitHub READMEs strip `<script>` tags, so embed there as a static SVG (or link out to a hosted version). Most static-site generators and internal wikis run the inline-HTML snippet as-is.
 
 ### `nf-metro convert`
 

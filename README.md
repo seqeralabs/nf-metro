@@ -112,13 +112,11 @@ The page provides:
 - **Hover a station** to see its label, section, and the lines passing through it.
 - **Click a line in the legend** to isolate it. Stations and sections not carrying that line disappear and the view zooms to the bounding box of what remains. Click again, hit `Esc`, or use the **Reset** button to restore.
 - **Embed&hellip;** opens a copy-snippet panel with three options:
-  - **Inline HTML** - a self-contained `<div>` snippet with scoped CSS and an IIFE-bound script. Paste into any HTML host (MkDocs, Confluence, Notion, a blog template) and the full interactivity travels with it. No iframe required.
-  - **iframe** - a one-liner pointing at the hosted `.html` file. Useful when you already have somewhere to host the file.
+  - **Inline HTML** - a self-contained `<div>` you paste into any HTML host (MkDocs, Confluence, Notion, blog templates). Keeps full interactivity, no iframe.
+  - **iframe** - a one-liner pointing at the hosted `.html` file.
   - **Static SVG** - the raw `<svg>` markup for contexts that strip scripts.
 
-The hashed wrapper class on the inline snippet means multiple maps can coexist on the same host page without colliding.
-
-GitHub READMEs strip `<script>` tags, so the interactive page won't run inline there - host on GitHub Pages (or any static host) and link to it from the README. For places that *do* accept inline scripts (most static-site generators, internal wikis, web pages), the inline-HTML snippet works as-is.
+GitHub READMEs strip `<script>` tags, so embed there as a static SVG (or link out to a hosted version). Most static-site generators and internal wikis run the inline-HTML snippet as-is.
 
 ### `nf-metro validate`
 
