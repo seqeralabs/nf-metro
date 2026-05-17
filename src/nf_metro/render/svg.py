@@ -1157,41 +1157,26 @@ def _compute_row_boundary_segments(
         max_bottom = max(s.bbox_y + s.bbox_h for s in row_a_secs)
         min_top = min(s.bbox_y for s in row_b_secs)
         if max_bottom < min_top:
+            # Rows are globally separable: one canvas-wide line at the
+            # natural midpoint (below every row a section, above every
+            # row b section).  No bbox is cut by construction.
             y = (max_bottom + min_top) / 2
-        else:
-            anchor_ys: list[float] = []
-            for c in col_bounds:
-                sa = sec_by_cell.get((c, ra))
-                sb = sec_by_cell.get((c, rb))
-                if sa is None or sb is None:
-                    continue
-                a_bot = sa.bbox_y + sa.bbox_h
-                b_top = sb.bbox_y
-                if a_bot >= b_top:
-                    continue
-                anchor_ys.append((a_bot + b_top) / 2)
-            if not anchor_ys:
+            segments.append((ra, rb, canvas_x0, canvas_x1, y))
+            continue
+        # Rows overlap (a fold extends one row into the other's band).
+        # Emit per-column segments only at cells where both rows have
+        # a non-spanning section and the sections don't locally overlap,
+        # so the line appears only where the boundary is unambiguous.
+        for c, (x_start, x_end) in col_bounds.items():
+            sa = sec_by_cell.get((c, ra))
+            sb = sec_by_cell.get((c, rb))
+            if sa is None or sb is None:
                 continue
-            anchor_ys.sort()
-            y = anchor_ys[len(anchor_ys) // 2]
-        cut_ranges: list[tuple[float, float]] = []
-        for sec in row_a_secs + row_b_secs:
-            if sec.bbox_y < y < sec.bbox_y + sec.bbox_h:
-                cut_ranges.append((sec.bbox_x, sec.bbox_x + sec.bbox_w))
-        cut_ranges.sort()
-        merged: list[tuple[float, float]] = []
-        for x0, x1 in cut_ranges:
-            if merged and x0 <= merged[-1][1]:
-                merged[-1] = (merged[-1][0], max(merged[-1][1], x1))
-            else:
-                merged.append((x0, x1))
-        cursor = canvas_x0
-        for x0, x1 in merged:
-            if cursor < x0:
-                segments.append((ra, rb, cursor, x0, y))
-            cursor = max(cursor, x1)
-        if cursor < canvas_x1:
-            segments.append((ra, rb, cursor, canvas_x1, y))
+            a_bot = sa.bbox_y + sa.bbox_h
+            b_top = sb.bbox_y
+            if a_bot >= b_top:
+                continue
+            segments.append((ra, rb, x_start, x_end, (a_bot + b_top) / 2))
     return segments
 
 
