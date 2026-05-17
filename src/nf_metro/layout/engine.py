@@ -57,7 +57,7 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
-from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
 
 # ---------------------------------------------------------------------------
 # Phase-boundary guards
@@ -1611,9 +1611,13 @@ def _align_row_y_grids(
         # crowding and should not inflate spacing for the entire row.
         #
         max_lines = 0
+        section_class: dict[str, tuple[dict[int, list[float]], set[float]]] = {
+            sec_id: _classify_multi_station_ys(section_subgraphs[sec_id])
+            for sec_id in sec_ids
+        }
         for sec_id in sec_ids:
             sub = section_subgraphs[sec_id]
-            _, _multi_ys = _classify_multi_station_ys(sub)
+            _multi_ys = section_class[sec_id][1]
             for st in sub.stations.values():
                 if not st.is_port and st.y in _multi_ys:
                     max_lines = max(max_lines, len(graph.station_lines(st.id)))
@@ -1637,7 +1641,7 @@ def _align_row_y_grids(
             sub = section_subgraphs[sec_id]
             section = graph.sections[sec_id]
 
-            layer_stations, multi_layer_ys = _classify_multi_station_ys(sub)
+            layer_stations, multi_layer_ys = section_class[sec_id]
 
             # Remap multi-station-layer Y values first.
             if multi_layer_ys:
@@ -1966,16 +1970,14 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
         p = graph.ports.get(pid)
         if p is None or p.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
-        for edge in graph.edges:
-            other_id = (
-                edge.target
-                if edge.source == pid and edge.target in internal_ids
-                else edge.source
-                if edge.target == pid and edge.source in internal_ids
-                else None
-            )
-            if other_id is None:
-                continue
+        candidates: list[str] = []
+        for edge in graph.edges_from(pid):
+            if edge.target in internal_ids:
+                candidates.append(edge.target)
+        for edge in graph.edges_to(pid):
+            if edge.source in internal_ids:
+                candidates.append(edge.source)
+        for other_id in candidates:
             st = graph.stations.get(other_id)
             if (
                 st
@@ -2074,16 +2076,14 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                         continue
                     connected_ys: set[float] = set()
                     target_aligned = False
-                    for edge in graph.edges:
-                        other_id = (
-                            edge.target
-                            if edge.source == pid and edge.target in internal_ids
-                            else edge.source
-                            if edge.target == pid and edge.source in internal_ids
-                            else None
-                        )
-                        if other_id is None:
-                            continue
+                    neighbours: list[str] = []
+                    for edge in graph.edges_from(pid):
+                        if edge.target in internal_ids:
+                            neighbours.append(edge.target)
+                    for edge in graph.edges_to(pid):
+                        if edge.source in internal_ids:
+                            neighbours.append(edge.source)
+                    for other_id in neighbours:
                         st = graph.stations.get(other_id)
                         if st and not st.is_port:
                             connected_ys.add(round(st.y, 1))
@@ -3684,9 +3684,7 @@ def _divergence_target_ys(graph: MetroGraph) -> set[str]:
     for edge in graph.edges:
         tgt_id = edge.target
         if tgt_id in junction_ids:
-            for e2 in graph.edges:
-                if e2.source != tgt_id:
-                    continue
+            for e2 in graph.edges_from(tgt_id):
                 post = graph.stations.get(e2.target)
                 if post is None or post.is_port:
                     continue
@@ -4498,6 +4496,19 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
             st.y = src.y
 
 
+def _has_horizontal_predecessor_section(graph: MetroGraph, section: Section) -> bool:
+    """True if any entry-port predecessor lives in an LR/RL section."""
+    for pid in section.entry_ports:
+        for edge in graph.edges_to(pid):
+            src_port = graph.ports.get(edge.source)
+            if not src_port:
+                continue
+            src_sec = graph.sections.get(src_port.section_id)
+            if src_sec and src_sec.direction in ("LR", "RL"):
+                return True
+    return False
+
+
 def _layout_single_section(
     graph: MetroGraph,
     section: Section,
@@ -4527,19 +4538,10 @@ def _layout_single_section(
     # horizontal (LR/RL), so the entry-connected station stays at the
     # top and aligns with the upstream exit station (#165).  Skip for
     # TB predecessors where vertical entry makes top-biasing inappropriate.
-    entry_top = False
-    if section.entry_ports and section.direction in ("LR", "RL"):
-        for pid in section.entry_ports:
-            for edge in graph.edges:
-                if edge.target == pid:
-                    src_port = graph.ports.get(edge.source)
-                    if src_port:
-                        src_sec = graph.sections.get(src_port.section_id)
-                        if src_sec and src_sec.direction in ("LR", "RL"):
-                            entry_top = True
-                            break
-            if entry_top:
-                break
+    entry_top = section.direction in (
+        "LR",
+        "RL",
+    ) and _has_horizontal_predecessor_section(graph, section)
 
     tracks = assign_tracks(sub, layers, entry_top=entry_top)
 
@@ -5212,17 +5214,16 @@ def _position_junctions(graph: MetroGraph) -> None:
         successor_ports: list[Station] = []
         exit_port_id: str | None = None
 
-        for edge in graph.edges:
-            if edge.target == jid:
-                src = graph.stations.get(edge.source)
-                if src:
-                    predecessors.append(src)
-                    if src.is_port:
-                        exit_port_id = edge.source
-            if edge.source == jid:
-                tgt = graph.stations.get(edge.target)
-                if tgt and tgt.is_port:
-                    successor_ports.append(tgt)
+        for edge in graph.edges_to(jid):
+            src = graph.stations.get(edge.source)
+            if src:
+                predecessors.append(src)
+                if src.is_port:
+                    exit_port_id = edge.source
+        for edge in graph.edges_from(jid):
+            tgt = graph.stations.get(edge.target)
+            if tgt and tgt.is_port:
+                successor_ports.append(tgt)
 
         # Merge junction: N>1 predecessors, 1 entry port successor
         if len(predecessors) > 1 and len(successor_ports) == 1:
@@ -5294,12 +5295,11 @@ def _resolve_source_section_id(
         return None
     src_section_id = src.section_id
     if edge_source in junction_ids:
-        for e2 in graph.edges:
-            if e2.target == edge_source:
-                s2 = graph.stations.get(e2.source)
-                if s2 and s2.section_id:
-                    src_section_id = s2.section_id
-                    break
+        for e2 in graph.edges_to(edge_source):
+            s2 = graph.stations.get(e2.source)
+            if s2 and s2.section_id:
+                src_section_id = s2.section_id
+                break
     return src_section_id
 
 
@@ -5408,14 +5408,12 @@ def _align_entry_ports(graph: MetroGraph) -> None:
 def _align_lr_entry_port(
     graph: MetroGraph,
     port_id: str,
-    port,
+    port: Port,
     entry_section: Section,
     junction_ids: set[str],
 ) -> None:
     """Align a LEFT/RIGHT entry port's Y with its incoming source."""
-    for edge in graph.edges:
-        if edge.target != port_id:
-            continue
+    for edge in graph.edges_to(port_id):
         src = graph.stations.get(edge.source)
         if not src or not (src.is_port or edge.source in junction_ids):
             continue
@@ -5472,7 +5470,7 @@ def _align_lr_entry_port(
 def _align_tb_entry_port(
     graph: MetroGraph,
     port_id: str,
-    port,
+    port: Port,
     entry_section: Section,
     junction_ids: set[str],
 ) -> None:
@@ -5480,9 +5478,7 @@ def _align_tb_entry_port(
     # Collect all incoming sources.  Coordinates are derived via
     # _resolve_source_xy so junctions don't need to be pre-positioned.
     sources: list[tuple[float, float, str | None]] = []
-    for edge in graph.edges:
-        if edge.target != port_id:
-            continue
+    for edge in graph.edges_to(port_id):
         src = graph.stations.get(edge.source)
         if not src or not (src.is_port or edge.source in junction_ids):
             continue
@@ -5611,9 +5607,7 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
 
         # Find the single target entry port (skip fan-out via junctions)
         target_entry_id: str | None = None
-        for edge in graph.edges:
-            if edge.source != port_id:
-                continue
+        for edge in graph.edges_from(port_id):
             if edge.target in junction_ids:
                 # Fan-out to junction -- don't override
                 target_entry_id = None
@@ -5663,8 +5657,8 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
             - set(entry_section.exit_ports)
         )
         downstream_ys: list[float] = []
-        for edge in graph.edges:
-            if edge.source == target_entry_id and edge.target in internal_ids:
+        for edge in graph.edges_from(target_entry_id):
+            if edge.target in internal_ids:
                 downstream_ys.append(graph.stations[edge.target].y)
         if not downstream_ys:
             continue
@@ -5688,8 +5682,8 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
                 - set(exit_section.exit_ports)
             )
             upstream_ys: list[float] = []
-            for edge in graph.edges:
-                if edge.target == port_id and edge.source in exit_internal_ids:
+            for edge in graph.edges_to(port_id):
+                if edge.source in exit_internal_ids:
                     upstream_ys.append(graph.stations[edge.source].y)
             if upstream_ys:
                 upstream_y = sum(upstream_ys) / len(upstream_ys)
@@ -5769,10 +5763,11 @@ def _snap_sole_layer_stations_to_ports(graph: MetroGraph) -> None:
 
             # Collect the distinct internal stations connected to this port.
             connected: set[str] = set()
-            for edge in graph.edges:
-                if edge.source == pid and edge.target in internal_ids:
+            for edge in graph.edges_from(pid):
+                if edge.target in internal_ids:
                     connected.add(edge.target)
-                elif edge.target == pid and edge.source in internal_ids:
+            for edge in graph.edges_to(pid):
+                if edge.source in internal_ids:
                     connected.add(edge.source)
 
             # Only snap when exactly one station connects to the port
@@ -5792,10 +5787,8 @@ def _snap_sole_layer_stations_to_ports(graph: MetroGraph) -> None:
             # means internal stations feed into it, so snapping would
             # create a diagonal on those connections.
             has_internal_pred = any(
-                edge.target == current
-                and edge.source != pid
-                and edge.source in internal_ids
-                for edge in graph.edges
+                edge.source != pid and edge.source in internal_ids
+                for edge in graph.edges_to(current)
             )
             if has_internal_pred:
                 continue
@@ -5822,11 +5815,12 @@ def _snap_sole_layer_stations_to_ports(graph: MetroGraph) -> None:
                 # Follow to the next singleton: successors for entry
                 # ports (walking inward), predecessors for exit ports.
                 nexts: set[str] = set()
-                for edge in graph.edges:
-                    if is_entry and edge.source == current:
+                if is_entry:
+                    for edge in graph.edges_from(current):
                         if edge.target in internal_ids:
                             nexts.add(edge.target)
-                    elif not is_entry and edge.target == current:
+                else:
+                    for edge in graph.edges_to(current):
                         if edge.source in internal_ids:
                             nexts.add(edge.source)
                 current = next(iter(nexts)) if len(nexts) == 1 else None
@@ -5867,9 +5861,7 @@ def _snap_grid_group_entry_ports(graph: MetroGraph) -> None:
 
         # Find the first non-port station connected to this port.
         target_y = None
-        for edge in graph.edges:
-            if edge.source != port_id:
-                continue
+        for edge in graph.edges_from(port_id):
             tgt = graph.stations.get(edge.target)
             if tgt and not tgt.is_port and tgt.section_id == section.id:
                 target_y = tgt.y
@@ -5920,9 +5912,7 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
         # line ids carried by the exit edges in a single edge pass.
         source_ys: list[float] = []
         exit_lines: set[str] = set()
-        for edge in graph.edges:
-            if edge.target != port_id:
-                continue
+        for edge in graph.edges_to(port_id):
             exit_lines.add(edge.line_id)
             src = graph.stations.get(edge.source)
             if src and not src.is_port and src.section_id == section.id:
@@ -5979,9 +5969,7 @@ def _resolve_downstream_entry_y(
         return None
 
     entry_ys: list[float] = []
-    for edge in graph.edges:
-        if edge.source != exit_port_id:
-            continue
+    for edge in graph.edges_from(exit_port_id):
         # Direct exit -> entry connection
         dp = graph.ports.get(edge.target)
         if dp and dp.is_entry:
@@ -5991,9 +5979,7 @@ def _resolve_downstream_entry_y(
             continue
         # Via junction
         if edge.target in junction_ids:
-            for e2 in graph.edges:
-                if e2.source != edge.target:
-                    continue
+            for e2 in graph.edges_from(edge.target):
                 dp2 = graph.ports.get(e2.target)
                 if dp2 and dp2.is_entry:
                     ds_st = graph.stations.get(e2.target)
@@ -6032,14 +6018,12 @@ def _align_exit_ports(graph: MetroGraph) -> None:
 def _align_lr_exit_port(
     graph: MetroGraph,
     port_id: str,
-    port,
+    port: Port,
     exit_section: Section,
     junction_ids: set[str],
 ) -> None:
     """Align a LEFT/RIGHT exit port's Y with its target entry port."""
-    for edge in graph.edges:
-        if edge.source != port_id:
-            continue
+    for edge in graph.edges_from(port_id):
         tgt = graph.stations.get(edge.target)
         if not tgt:
             continue
@@ -6073,7 +6057,7 @@ def _align_lr_exit_port(
 
 def _resolve_tb_exit_y(
     graph: MetroGraph,
-    port,
+    port: Port,
     tgt: Station,
     exit_section: Section,
 ) -> float:

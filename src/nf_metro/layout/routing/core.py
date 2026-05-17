@@ -205,6 +205,12 @@ def _classify_merge_edges(
     trunk_by: dict[str, float] = {}
     entry_port_for: dict[str, str] = {}
 
+    def _col_for_id(sid: str) -> int | None:
+        st = graph.stations.get(sid)
+        if st is None:
+            return None
+        return _resolve_section_col(graph, st)
+
     for mjid in junctions:
         mst = graph.stations.get(mjid)
         if not mst:
@@ -214,12 +220,11 @@ def _classify_merge_edges(
             continue
 
         # Resolve entry port (successor of merge junction)
-        for e in graph.edges:
-            if e.source == mjid:
-                ep = graph.ports.get(e.target)
-                if ep and ep.is_entry:
-                    entry_port_for[mjid] = e.target
-                    break
+        for e in graph.edges_from(mjid):
+            ep = graph.ports.get(e.target)
+            if ep and ep.is_entry:
+                entry_port_for[mjid] = e.target
+                break
 
         # Find farthest bypass predecessor (trunk carrier).  Branches
         # must land on the trunk's own bypass_bottom_y -- the value the
@@ -230,9 +235,7 @@ def _classify_merge_edges(
         farthest_source: str | None = None
         farthest_span = 0
         trunk_pred_by = 0.0
-        for edge in graph.edges:
-            if edge.target != mjid:
-                continue
+        for edge in graph.edges_to(mjid):
             pred = graph.stations.get(edge.source)
             if not pred:
                 continue
@@ -265,10 +268,7 @@ def _classify_merge_edges(
     index_exclude: set[_EdgeKey] = set()
 
     for mjid, trunk_src in trunk_source.items():
-        m_col = _resolve_section_col(
-            graph,
-            graph.stations.get(mjid),  # type: ignore[arg-type]
-        )
+        m_col = _col_for_id(mjid)
 
         # Check for adjacent JUNCTION predecessors whose stubs need
         # the merge -> entry edge to cross the full gap.  Adjacent
@@ -276,35 +276,27 @@ def _classify_merge_edges(
         # redundant for them.
         has_adjacent_junction_pred = False
         if m_col is not None:
-            for e2 in graph.edges:
-                if e2.target != mjid or e2.source == trunk_src:
+            for e2 in graph.edges_to(mjid):
+                if e2.source == trunk_src or e2.source not in junction_ids:
                     continue
-                p = graph.stations.get(e2.source)
-                if not p or e2.source not in junction_ids:
-                    continue
-                p_col = _resolve_section_col(graph, p)
+                p_col = _col_for_id(e2.source)
                 if p_col is not None and abs(m_col - p_col) <= 1:
                     has_adjacent_junction_pred = True
                     break
 
-        for edge in graph.edges:
-            # merge -> entry: skip unless adjacent junction pred needs it
-            if edge.source == mjid and not has_adjacent_junction_pred:
+        # merge -> entry: skip unless adjacent junction pred needs it
+        if not has_adjacent_junction_pred:
+            for edge in graph.edges_from(mjid):
                 ep = graph.ports.get(edge.target)
                 if ep and ep.is_entry:
                     skip_edges.add((edge.source, edge.target, edge.line_id))
-            # Non-trunk bypass junction -> merge: exclude from indexing
-            # (truncated branches shouldn't occupy bundle slots)
-            if (
-                edge.target == mjid
-                and edge.source != trunk_src
-                and edge.source in junction_ids
-                and m_col is not None
-            ):
-                src_col = _resolve_section_col(
-                    graph,
-                    graph.stations.get(edge.source),  # type: ignore[arg-type]
-                )
+        # Non-trunk bypass junction -> merge: exclude from indexing
+        # (truncated branches shouldn't occupy bundle slots)
+        if m_col is not None:
+            for edge in graph.edges_to(mjid):
+                if edge.source == trunk_src or edge.source not in junction_ids:
+                    continue
+                src_col = _col_for_id(edge.source)
                 if src_col is not None and abs(m_col - src_col) > 1:
                     index_exclude.add((edge.source, edge.target, edge.line_id))
 
@@ -557,7 +549,7 @@ def _route_inter_section(
                 return _route_merge_trunk(
                     edge, src, tgt, i, src_col, tgt_col, ctx, src_row
                 )
-            return _route_merge_branch(edge, src, ctx, src_col, tgt_col)
+            return _route_merge_branch(edge, src, ctx, src_col)
         return _route_bypass(edge, src, tgt, i, src_col, tgt_col, ctx, src_row)
 
     # Near-vertical: junction to same-column entry with tiny horizontal
@@ -682,7 +674,6 @@ def _route_merge_branch(
     src: Station,
     ctx: _RoutingCtx,
     src_col: int,
-    tgt_col: int,
 ) -> RoutedPath:
     """Truncated L-shape descent from a junction to the trunk level.
 

@@ -380,11 +380,10 @@ def _station_column(
         return col_assign[station.section_id]
     # Junction: trace back to its source port's section
     if station.id in junction_ids:
-        for edge in graph.edges:
-            if edge.target == station.id:
-                src = graph.stations.get(edge.source)
-                if src and src.section_id and src.section_id in col_assign:
-                    return col_assign[src.section_id]
+        for edge in graph.edges_to(station.id):
+            src = graph.stations.get(edge.source)
+            if src and src.section_id and src.section_id in col_assign:
+                return col_assign[src.section_id]
     return None
 
 
@@ -430,9 +429,7 @@ def _has_merge_routing_in_gap(
             continue
         tgt_col = col_assign.get(mst.section_id, -1) if mst.section_id else -1
         # Check if any bypass predecessor crosses this gap
-        for edge in graph.edges:
-            if edge.target != mjid:
-                continue
+        for edge in graph.edges_to(mjid):
             src_col = _station_column(
                 graph,
                 graph.stations.get(edge.source),

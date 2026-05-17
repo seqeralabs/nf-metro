@@ -223,9 +223,7 @@ def _reindex_section_local(ctx: _OffsetCtx) -> None:
             continue
         line_feeder: dict[str, str] = {}
         for pid in section.entry_ports:
-            for edge in graph.edges:
-                if edge.target != pid:
-                    continue
+            for edge in graph.edges_to(pid):
                 src = graph.stations.get(edge.source)
                 if not src:
                     continue
@@ -233,8 +231,8 @@ def _reindex_section_local(ctx: _OffsetCtx) -> None:
                 if src.is_port:
                     feeder_sec = src.section_id
                 elif edge.source in graph.junctions:
-                    for je in graph.edges:
-                        if je.target == edge.source and je.line_id == edge.line_id:
+                    for je in graph.edges_to(edge.source):
+                        if je.line_id == edge.line_id:
                             js = graph.stations.get(je.source)
                             if js and js.is_port:
                                 feeder_sec = js.section_id
@@ -500,13 +498,12 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         if port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
         internal_offs: dict[str, float] = {}
-        for edge in graph.edges:
-            if edge.target == port_id:
-                src_st = graph.stations.get(edge.source)
-                if src_st and not src_st.is_port:
-                    internal_offs[edge.line_id] = ctx.offsets.get(
-                        (edge.source, edge.line_id), 0.0
-                    )
+        for edge in graph.edges_to(port_id):
+            src_st = graph.stations.get(edge.source)
+            if src_st and not src_st.is_port:
+                internal_offs[edge.line_id] = ctx.offsets.get(
+                    (edge.source, edge.line_id), 0.0
+                )
         if internal_offs:
             max_int = max(internal_offs.values())
             for lid, ioff in internal_offs.items():
@@ -523,13 +520,12 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         # line's "average Y" off the trunk: the kink belongs at the side
         # branch, not at the bundle's exit.
         line_feeders: dict[str, list[tuple[str, float]]] = {}
-        for edge in graph.edges:
-            if edge.target == port_id:
-                src_st = graph.stations.get(edge.source)
-                if src_st and not src_st.is_port:
-                    line_feeders.setdefault(edge.line_id, []).append(
-                        (edge.source, src_st.y)
-                    )
+        for edge in graph.edges_to(port_id):
+            src_st = graph.stations.get(edge.source)
+            if src_st and not src_st.is_port:
+                line_feeders.setdefault(edge.line_id, []).append(
+                    (edge.source, src_st.y)
+                )
         if len(line_feeders) < 2:
             continue
         port_lines = set(line_feeders.keys())
@@ -585,15 +581,14 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
 
         # Propagate to upstream hub stations
         feeder_ids: set[str] = set()
-        for edge in graph.edges:
-            if edge.target == port_id:
-                src_st = graph.stations.get(edge.source)
-                if src_st and not src_st.is_port:
-                    feeder_ids.add(edge.source)
+        for edge in graph.edges_to(port_id):
+            src_st = graph.stations.get(edge.source)
+            if src_st and not src_st.is_port:
+                feeder_ids.add(edge.source)
         if len(feeder_ids) >= 2:
             hub_candidates: set[str] = set()
-            for edge in graph.edges:
-                if edge.target in feeder_ids:
+            for feeder_id in feeder_ids:
+                for edge in graph.edges_to(feeder_id):
                     hub_candidates.add(edge.source)
             for hub_id in hub_candidates:
                 hub_lines = graph.station_lines(hub_id)
@@ -611,16 +606,15 @@ def _propagate_to_junctions(ctx: _OffsetCtx) -> None:
     """
     graph = ctx.graph
     for jid in graph.junctions:
-        for edge in graph.edges:
-            if edge.target == jid:
-                src = graph.stations.get(edge.source)
-                port_obj = graph.ports.get(edge.source)
-                if src and src.is_port and port_obj and not port_obj.is_entry:
-                    for lid in graph.station_lines(jid):
-                        port_off = ctx.offsets.get((edge.source, lid))
-                        if port_off is not None:
-                            ctx.offsets[(jid, lid)] = port_off
-                    break
+        for edge in graph.edges_to(jid):
+            src = graph.stations.get(edge.source)
+            port_obj = graph.ports.get(edge.source)
+            if src and src.is_port and port_obj and not port_obj.is_entry:
+                for lid in graph.station_lines(jid):
+                    port_off = ctx.offsets.get((edge.source, lid))
+                    if port_off is not None:
+                        ctx.offsets[(jid, lid)] = port_off
+                break
 
 
 def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
@@ -649,9 +643,7 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
     for port_id, port_obj in graph.ports.items():
         if not port_obj.is_entry or port_obj.side != PortSide.TOP:
             continue
-        for edge in graph.edges:
-            if edge.target != port_id:
-                continue
+        for edge in graph.edges_to(port_id):
             src = graph.stations.get(edge.source)
             if not src or not src.is_port:
                 continue
@@ -687,9 +679,7 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
         if port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
         feeding_exit_ports: set[str] = set()
-        for edge in graph.edges:
-            if edge.target != port_id:
-                continue
+        for edge in graph.edges_to(port_id):
             src = graph.stations.get(edge.source)
             if not src or not src.is_port:
                 continue
@@ -713,15 +703,14 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
                 ctx.offsets[(port_id, lid)] = exit_off
                 entry_offs[lid] = exit_off
         if len(entry_offs) >= 2:
-            for e2 in graph.edges:
-                if e2.source == port_id:
-                    tgt_st = graph.stations.get(e2.target)
-                    if tgt_st and not tgt_st.is_port:
-                        tgt_lines = graph.station_lines(e2.target)
-                        overlap = [lid for lid in tgt_lines if lid in entry_offs]
-                        if len(overlap) >= 2:
-                            for lid in overlap:
-                                ctx.offsets[(e2.target, lid)] = entry_offs[lid]
+            for e2 in graph.edges_from(port_id):
+                tgt_st = graph.stations.get(e2.target)
+                if tgt_st and not tgt_st.is_port:
+                    tgt_lines = graph.station_lines(e2.target)
+                    overlap = [lid for lid in tgt_lines if lid in entry_offs]
+                    if len(overlap) >= 2:
+                        for lid in overlap:
+                            ctx.offsets[(e2.target, lid)] = entry_offs[lid]
 
     # --- Compact entry port offset separation ---
     if ctx.compact:
@@ -749,8 +738,8 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
                 for pid in section.entry_ports:
                     if lid in graph.station_lines(pid):
                         ctx.offsets[(pid, lid)] = off
-                        for edge in graph.edges:
-                            if edge.target == pid and edge.line_id == lid:
+                        for edge in graph.edges_to(pid):
+                            if edge.line_id == lid:
                                 src_port = graph.ports.get(edge.source)
                                 if src_port and not src_port.is_entry:
                                     ctx.offsets[(edge.source, lid)] = off
@@ -969,10 +958,9 @@ def _align_junction_to_entry_port(ctx: _OffsetCtx) -> None:
         line_to_target: dict[str, str] = {}
         ok = True
         for lid in j_lines:
-            targets: list[str] = []
-            for edge in graph.edges:
-                if edge.source == jid and edge.line_id == lid:
-                    targets.append(edge.target)
+            targets = [
+                edge.target for edge in graph.edges_from(jid) if edge.line_id == lid
+            ]
             if len(targets) != 1:
                 ok = False
                 break
@@ -1006,9 +994,7 @@ def _align_junction_to_entry_port(ctx: _OffsetCtx) -> None:
 
         feeding_exit: str | None = None
         single_exit = True
-        for edge in graph.edges:
-            if edge.target != jid:
-                continue
+        for edge in graph.edges_to(jid):
             src_port = graph.ports.get(edge.source)
             if src_port and not src_port.is_entry:
                 if feeding_exit is None:
