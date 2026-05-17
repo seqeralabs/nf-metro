@@ -1,0 +1,27 @@
+flowchart TB
+    subgraph " "
+    v0["Channel.of"]
+    v1["Channel.of"]
+    end
+    v2([FASTQC])
+    subgraph " "
+    v3[" "]
+    v12[" "]
+    end
+    v4([TRIM_READS])
+    v6([ALIGN])
+    v7([SORT_BAM])
+    v11([MULTIQC])
+    v5(( ))
+    v8(( ))
+    v0 --> v2
+    v0 --> v4
+    v1 --> v5
+    v2 --> v3
+    v2 --> v8
+    v4 --> v6
+    v5 --> v6
+    v6 --> v7
+    v7 --> v8
+    v8 --> v11
+    v11 --> v12

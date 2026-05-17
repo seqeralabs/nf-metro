@@ -72,11 +72,12 @@ _NF_SUBGRAPH = re.compile(
 # Also handle unquoted: subgraph " "
 _NF_SUBGRAPH_SPACE = re.compile(r'^subgraph\s+" "\s*$')
 
-# Stadium node: v1(["LABEL"])
-_NF_STADIUM = re.compile(r'^(v\d+)\(\["([^"]*?)"\]\)\s*$')
+# Stadium node: v1(["LABEL"]) or v1([LABEL]).
+# Nextflow <= 22 emitted quoted labels; 23+ emits unquoted ones.
+_NF_STADIUM = re.compile(r'^(v\d+)\(\["?([^"\]]*?)"?\]\)\s*$')
 
-# Square bracket node: v1["LABEL"]
-_NF_SQUARE = re.compile(r'^(v\d+)\["([^"]*?)"\]\s*$')
+# Square bracket node: v1["LABEL"] or v1[LABEL] (same quoting drift).
+_NF_SQUARE = re.compile(r'^(v\d+)\["?([^"\]]*?)"?\]\s*$')
 
 # Circle node: v1(( )) or v1(( label ))
 _NF_CIRCLE = re.compile(r"^(v\d+)\(\(\s*(.*?)\s*\)\)\s*$")
@@ -324,6 +325,34 @@ def _sanitize_id(name: str) -> str:
     return re.sub(r"[^a-z0-9_]", "_", name.lower()).strip("_")
 
 
+def _allocate_station_ids(
+    section_order: list[str],
+    section_node_order: dict[str, list[str]],
+    nodes: dict[str, _NfNode],
+) -> dict[str, str]:
+    """Assign a unique station ID to every kept Nextflow node.
+
+    Two `_NfNode`s can share a label (e.g. `SAMTOOLS_SORT` reused across
+    several subworkflows). Sanitising the label alone collapses them onto
+    one station ID, producing duplicate declarations and self-loop edges
+    that crash layout. Walk sections in topological order and suffix
+    subsequent occurrences (`samtools_sort`, `samtools_sort_2`, ...).
+    """
+    used: set[str] = set()
+    station_ids: dict[str, str] = {}
+    for sec_key in section_order:
+        for nid in section_node_order.get(sec_key, []):
+            base = _sanitize_id(nodes[nid].label) or "node"
+            candidate = base
+            suffix = 2
+            while candidate in used:
+                candidate = f"{base}_{suffix}"
+                suffix += 1
+            used.add(candidate)
+            station_ids[nid] = candidate
+    return station_ids
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -525,6 +554,11 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
                 ordered.append(n)
         section_node_order[sec_key] = ordered
 
+    # Assign one unique station ID per kept node so duplicate labels across
+    # sections (e.g. SAMTOOLS_SORT reused in several subworkflows) don't
+    # collide.
+    station_ids = _allocate_station_ids(section_order, section_node_order, dag.nodes)
+
     # Infer title
     if not title:
         if len(section_names) == 1 and "__pipeline" in section_names:
@@ -567,19 +601,18 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
         # Station declarations
         for nid in ordered_nodes:
             node = dag.nodes[nid]
-            station_id = _sanitize_id(node.label)
             label = _humanize_label(node.label)
-            out.append(f"        {station_id}([{label}])")
+            out.append(f"        {station_ids[nid]}([{label}])")
 
         # Intra-section edges
         sec_edges = intra_edges.get(sec_key, [])
         if sec_edges:
             out.append("")
             for src, tgt in sec_edges:
-                src_label = _sanitize_id(dag.nodes[src].label)
-                tgt_label = _sanitize_id(dag.nodes[tgt].label)
                 lid = edge_line.get((src, tgt), main_line_id)
-                out.append(f"        {src_label} -->|{lid}| {tgt_label}")
+                out.append(
+                    f"        {station_ids[src]} -->|{lid}| {station_ids[tgt]}"
+                )
 
         out.append("    end")
         out.append("")
@@ -592,10 +625,8 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
     if all_inter:
         out.append("    %% Inter-section edges")
         for src, tgt in all_inter:
-            src_label = _sanitize_id(dag.nodes[src].label)
-            tgt_label = _sanitize_id(dag.nodes[tgt].label)
             lid = edge_line.get((src, tgt), main_line_id)
-            out.append(f"    {src_label} -->|{lid}| {tgt_label}")
+            out.append(f"    {station_ids[src]} -->|{lid}| {station_ids[tgt]}")
 
     # Ensure trailing newline
     return "\n".join(out) + "\n"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -297,10 +298,118 @@ class TestConvertNextflowDag:
 
 
 # ---------------------------------------------------------------------------
+# Regression: unquoted labels (issue #249, Nextflow 23.x+)
+# ---------------------------------------------------------------------------
+class TestUnquotedLabels:
+    """Nextflow 23.x+ emits v1([LABEL]) without surrounding quotes.
+
+    Prior to issue #249, the stadium regex required quotes, so every process
+    node failed to match and convert silently returned an empty pipeline.
+    """
+
+    def test_unquoted_stadium_parses(self):
+        text = (
+            "flowchart TB\n"
+            '    v1["input"]\n'
+            "    v2([PROCESS_A])\n"
+            "    v3([PROCESS_B])\n"
+            '    v4[" "]\n'
+            "    v1 --> v2\n"
+            "    v2 --> v3\n"
+            "    v3 --> v4\n"
+        )
+        dag = _parse_nextflow_mermaid(text)
+        process_nodes = [n for n in dag.nodes.values() if n.shape == "stadium"]
+        assert len(process_nodes) == 2
+        assert {n.label for n in process_nodes} == {"PROCESS_A", "PROCESS_B"}
+
+    def test_unquoted_convert_non_empty(self):
+        text = (FIXTURES / "unquoted_labels.mmd").read_text()
+        result = convert_nextflow_dag(text)
+        assert "Empty Pipeline" not in result
+        assert "fastqc" in result
+        assert "trim_reads" in result
+        assert "multiqc" in result
+
+    def test_mixed_quoted_and_unquoted(self):
+        text = (
+            "flowchart TB\n"
+            '    v1(["QUOTED_PROC"])\n'
+            "    v2([UNQUOTED_PROC])\n"
+            "    v1 --> v2\n"
+        )
+        dag = _parse_nextflow_mermaid(text)
+        labels = {n.label for n in dag.nodes.values() if n.shape == "stadium"}
+        assert labels == {"QUOTED_PROC", "UNQUOTED_PROC"}
+
+
+# ---------------------------------------------------------------------------
+# Regression: duplicate process labels across subworkflows (issue #249)
+# ---------------------------------------------------------------------------
+class TestDuplicateProcessLabels:
+    """When two `_NfNode`s share a label, station IDs must stay distinct.
+
+    Prior to issue #249, `_sanitize_id(node.label)` collapsed both into one
+    station ID, producing duplicate declarations and self-loop edges that
+    crashed layout with NetworkXUnfeasible.
+    """
+
+    def test_no_duplicate_station_declarations(self):
+        text = (FIXTURES / "duplicate_processes.mmd").read_text()
+        result = convert_nextflow_dag(text)
+        decls = re.findall(r"^\s+([a-z0-9_]+)\(\[", result, re.MULTILINE)
+        assert len(decls) == len(set(decls)), (
+            f"Duplicate station declarations: {decls}"
+        )
+
+    def test_no_self_loops(self):
+        text = (FIXTURES / "duplicate_processes.mmd").read_text()
+        result = convert_nextflow_dag(text)
+        for m in re.finditer(
+            r"([a-z0-9_]+)\s*-->\|[^|]+\|\s*([a-z0-9_]+)", result
+        ):
+            assert m.group(1) != m.group(2), f"Self-loop edge: {m.group(0)}"
+
+    def test_duplicates_lay_out(self):
+        from nf_metro.layout import compute_layout
+        from nf_metro.parser import parse_metro_mermaid
+
+        text = (FIXTURES / "duplicate_processes.mmd").read_text()
+        mmd = convert_nextflow_dag(text)
+        graph = parse_metro_mermaid(mmd)
+        compute_layout(graph, x_spacing=60.0, y_spacing=40.0)
+
+    def test_unnamed_subgraph_duplicates_disambiguated(self):
+        text = (
+            "flowchart TB\n"
+            '    subgraph " "\n'
+            "    v1([PROC])\n"
+            "    end\n"
+            '    subgraph " "\n'
+            "    v2([PROC])\n"
+            "    end\n"
+            "    v1 --> v2\n"
+        )
+        result = convert_nextflow_dag(text)
+        decls = re.findall(r"^\s+([a-z0-9_]+)\(\[", result, re.MULTILINE)
+        assert len(decls) == 2 and len(set(decls)) == 2, (
+            f"Expected two distinct stations, got {decls}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Roundtrip: convert then parse through nf-metro
 # ---------------------------------------------------------------------------
 class TestRoundtrip:
-    @pytest.fixture(params=["flat_pipeline", "with_subworkflows", "variant_calling"])
+    @pytest.fixture(
+        params=[
+            "flat_pipeline",
+            "with_subworkflows",
+            "variant_calling",
+            "unquoted_labels",
+            "duplicate_processes",
+        ]
+    )
     def fixture_name(self, request):
         return request.param
 
