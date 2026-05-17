@@ -3309,9 +3309,7 @@ def _predicted_bypass_bottom_in_row(
         visited.add(node_id)
         sec = _node_section(node_id)
         if sec is None:
-            edges = (
-                graph.edges_to(node_id) if upstream else graph.edges_from(node_id)
-            )
+            edges = graph.edges_to(node_id) if upstream else graph.edges_from(node_id)
             for e in edges:
                 nb = e.source if upstream else e.target
                 sec = _resolve(nb, upstream, visited)
@@ -4506,9 +4504,7 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
         # Bypass routes dip below intervening bboxes into the inter-row
         # gap; tightening must not pull lower rows up into them.
         bypass_spans = _aggregate_bypass_spans(graph, ending_at_prev)
-        effective_floor = max(
-            max_above_bot, max(bypass_spans.values(), default=0.0)
-        )
+        effective_floor = max(max_above_bot, max(bypass_spans.values(), default=0.0))
         current_top = min(s.bbox_y for s in lower)
         slack = current_top - (effective_floor + section_y_gap)
         if slack <= 0.5:
