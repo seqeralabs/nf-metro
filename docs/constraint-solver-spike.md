@@ -154,3 +154,4 @@ Neither follow-up is filed automatically; open a separate issue if either is wan
 1. **Cassowary strength tier coarseness.** Four tiers (R/S/M/W) is enough for simple-medium fixtures but loses fidelity on large ones. Per-constraint custom strengths (kiwisolver supports them) might recover quality at the cost of model complexity.
 2. **The engine's phase-order semantics carry information.** "Apply rule A, then conditionally apply rule B" is not expressible as soft preferences. Pre-classification (this spike's approach) covers some of these cases but not all - the trunk-Y / row-trunk / port-Y coupling on multi-row fixtures is the visible failure mode.
 3. **Quality acceptance must be visual.** The 15/15 validator-clean result on the gallery is real but uninformative. Any future spike or landing path needs the render-diff in the loop from day one, not as a final check.
+
