@@ -1677,3 +1677,84 @@ class TestPhaseGuards:
         )
         # validate=True should be harmless for flat layout
         compute_layout(graph, validate=True)
+
+
+class TestPhase13Bisection:
+    """Bisection guards fired at each Phase-13x boundary must identify the
+    offending sub-phase, not the catch-all 'after Phase 12 (final)' label.
+
+    Without bisection, a regression introduced by e.g. Phase 13k2 surfaces
+    as ``after Phase 12 (final): position clash: ...``; the maintainer
+    must manually bisect by toggling phases to find the culprit.  With
+    bisection, the same regression surfaces immediately as
+    ``after Phase 13k2: position clash: ...``.
+    """
+
+    # One representative fixture per check: simple two-station section
+    # with no off-track inputs so the corruption-induced overlap is the
+    # first guard violation encountered, regardless of which phase is
+    # being tested.
+    _MMD = (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro line: alt | Alt | #00ff00\n"
+        "graph LR\n"
+        "    subgraph s1 [S1]\n"
+        "        a[A]\n"
+        "        a2[A2]\n"
+        "        a -->|main| a2\n"
+        "    end\n"
+        "    subgraph s2 [S2]\n"
+        "        b[B]\n"
+        "        b2[B2]\n"
+        "        b -->|main| b2\n"
+        "    end\n"
+        "    a2 -->|main,alt| b\n"
+    )
+
+    @pytest.mark.parametrize(
+        "phase_label,helper_name",
+        [
+            ("after Phase 13", "_lift_off_track_stations"),
+            ("after Phase 13a", "_top_align_row_bboxes_only"),
+            ("after Phase 13b", "_compact_row_content_to_bbox_top"),
+            ("after Phase 13e", "_snap_all_y_to_grid"),
+            ("after Phase 13i", "_align_terminus_to_upstream"),
+            ("after Phase 13j", "_shrink_bboxes_to_content_bottom"),
+            ("after Phase 13m", "_pad_stacked_captioned_file_icons"),
+        ],
+    )
+    def test_overlap_localises_to_phase(self, monkeypatch, phase_label, helper_name):
+        from nf_metro.layout import engine
+
+        original = getattr(engine, helper_name)
+
+        def corrupt(graph, *args, **kwargs):
+            result = original(graph, *args, **kwargs)
+            # Move 'a' to land on 'a2', producing an overlap that
+            # ``_guard_no_station_overlap`` must catch at the very
+            # next bisection checkpoint.
+            a = graph.stations.get("a")
+            a2 = graph.stations.get("a2")
+            if a is not None and a2 is not None:
+                a.x = a2.x
+                a.y = a2.y
+            return result
+
+        monkeypatch.setattr(engine, helper_name, corrupt)
+
+        graph = parse_metro_mermaid(self._MMD)
+        with pytest.raises(engine.PhaseInvariantError) as excinfo:
+            compute_layout(graph, validate=True)
+
+        msg = str(excinfo.value)
+        assert msg.startswith(phase_label + ":"), (
+            f"Expected bisection to identify {phase_label!r}, but error was: {msg!r}"
+        )
+
+    def test_clean_layout_does_not_fire_bisection_guards(self):
+        """Sanity check: an unpatched layout must pass all bisection
+        checkpoints, confirming the guard set is genuinely empty-render-
+        diff for the gallery's normal-shape topologies.
+        """
+        graph = parse_metro_mermaid(self._MMD)
+        compute_layout(graph, validate=True)

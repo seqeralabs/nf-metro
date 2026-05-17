@@ -51,9 +51,18 @@ Phases split into three regimes:
 | after Phase 4 | finite coords, stations-in-sections, bboxes-positive |
 | after Phase 5 | ports-on-boundaries |
 | after top-align (Phase 9) | ports-on-boundaries |
-| after Phase 12 (final) | finite coords, bboxes-positive, stations-in-sections, ports-on-boundaries, no-station-overlap, no-line-crosses-non-consumer |
+| after each Phase 13x (bisection) | finite coords, bboxes-positive, stations-in-sections, ports-on-boundaries, no-station-overlap, no-line-crosses-non-consumer, station-x-column-drift |
+| after Phase 12 (final) | bisection set + off-track-above-consumer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
-Guard bodies live at the top of `engine.py` (lines 83-275).
+Bisection checkpoints fire after every Phase-13x sub-phase
+(see the `# Phase 13...` comments in `_compute_section_layout`).
+Three guards are excluded from the bisection set because they are
+legitimately transient between sub-phases; the
+`_run_phase13_guards` docstring (engine.py) is the authoritative
+list and rationale.
+
+Guard bodies live at the top of `engine.py` (lines 83-275); the
+bisection runner is `_run_phase13_guards`.
 
 ## Phase table
 
@@ -573,40 +582,30 @@ Guard bodies live at the top of `engine.py` (lines 83-275).
 ## Unclear / structural-debt signals
 
 The following observations came up while writing this doc. Each one is
-a candidate for a follow-up cleanup PR.
+a candidate for a follow-up cleanup PR. Items are removed as they are
+resolved; refer to the relevant tracking issue or PR for history.
 
-1. ~~**Two "Phase 13k" comments** (engine.py:789 and engine.py:796) refer
-   to entirely different helpers. The phase numbering scheme has
-   collided and should be renumbered.~~ **Resolved**: the second
-   `_shift_sparse_loop_stations_to_clear_bundle` block is now labelled
-   `Phase 13k2`.
-2. **Phase 13d3 has more conditional logic than the rest** - it's
+1. **Phase 13d3 has more conditional logic than the rest** - it's
    gated on `center_ports` and tracks state on
    `_half_grid_station_ids` to coordinate with Phase 13e. That
    cross-phase coupling is hard to follow; the half-grid marker
    pattern would benefit from a dedicated discussion in the doc /
    code.
-3. **Pass B is described as "single pass"** in the function docstring,
+2. **Pass B is described as "single pass"** in the function docstring,
    but Phase 11 expands bboxes (`_expand_bbox_for_y`) and Phase 11c
    immediately re-runs top-align to undo the resulting bbox-top
    drift. Naming-wise, "single pass" is misleading.
-4. **Phase 13h triggers further phases** (`_reanchor_off_track_to_consumer`
+3. **Phase 13h triggers further phases** (`_reanchor_off_track_to_consumer`
    and `_top_align_row_bboxes_only`) inside its `if center_ports:`
    block. These are effectively unnumbered sub-phases hiding in
    a conditional - they don't appear as `# Phase 13h.something`
    comments but are real graph-mutating passes.
-5. **Phase 13 (off-track lift) calls `_shift_graph_into_canvas`**,
+4. **Phase 13 (off-track lift) calls `_shift_graph_into_canvas`**,
    which globally translates every station / port / junction / bbox.
    That's a Phase 4-style transformation hiding inside a Phase 13
    helper; if any later phase assumed Phase 4's global-coord origin
    was stable, the assumption is wrong.
-6. **`compute_layout(validate=True)` runs `_guard_no_station_overlap`
-   and `_guard_no_line_crosses_non_consumer` only at "after Phase 12
-   (final)" - i.e. at the *end* of layout.** Many of the 13-suffixed
-   phases exist precisely to fix overlap or breeze-past issues. A
-   binary search bisecting which phase first introduces overlap is
-   currently a manual exercise.
-7. **Phase 11d/11da symmetrically fan content using a stale port Y**;
+5. **Phase 11d/11da symmetrically fan content using a stale port Y**;
    Phase 13h re-centers using the final trunk Y. The two-pass pattern
    is necessary because Phase 11da runs before snap-to-grid, but it
    means the early pass's output is partially-discarded work.
@@ -617,7 +616,8 @@ When adding a new phase to `_compute_section_layout`, document the
 following before merging:
 
 1. **Phase tag**: pick a new tag matching the position in the pipeline.
-   Avoid suffix collisions (see structural debt #1 above).
+   Avoid suffix collisions (the `Phase 13k` -> `Phase 13k2` rename in
+   PR #342 is what happens when you don't).
 2. **Helper location**: top-level function in `engine.py` (or a new
    module if it's substantial). Phase comments in the function body
    must reference the helper.

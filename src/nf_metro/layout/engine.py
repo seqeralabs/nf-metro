@@ -197,12 +197,15 @@ def _station_marker_bbox(
     return (st.x - radius, cy - half_h, st.x + radius, cy + half_h)
 
 
-def _guard_no_station_overlap(graph: MetroGraph, phase: str) -> None:
+def _guard_no_station_overlap(
+    graph: MetroGraph, phase: str, *, offsets: dict | None = None
+) -> None:
     """Final-phase: no two station marker bboxes may overlap at render
     time, else one station hides another in the SVG."""
-    from nf_metro.layout.routing import compute_station_offsets
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
 
-    offsets = compute_station_offsets(graph)
+        offsets = compute_station_offsets(graph)
     boxes: list[tuple[str, tuple[float, float, float, float]]] = []
     for sid in graph.stations:
         b = _station_marker_bbox(graph, sid, offsets=offsets)
@@ -219,7 +222,13 @@ def _guard_no_station_overlap(graph: MetroGraph, phase: str) -> None:
                 )
 
 
-def _guard_no_line_crosses_non_consumer(graph: MetroGraph, phase: str) -> None:
+def _guard_no_line_crosses_non_consumer(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict | None = None,
+    routes: list | None = None,
+) -> None:
     """Final-phase: no rendered line segment may pass through a
     station marker whose station neither consumes nor produces that
     line.
@@ -233,14 +242,19 @@ def _guard_no_line_crosses_non_consumer(graph: MetroGraph, phase: str) -> None:
     sharing its trunk-Y row with a busier sibling whose inbound
     bundle traverses the sparse consumer's column.
     """
-    from nf_metro.layout.routing import compute_station_offsets, route_edges
     from nf_metro.render.svg import apply_route_offsets
 
-    offsets = compute_station_offsets(graph)
-    try:
-        routes = route_edges(graph, station_offsets=offsets)
-    except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
-        return
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
 
     consumed_by: dict[str, set[str]] = {}
     produced_by: dict[str, set[str]] = {}
@@ -601,6 +615,64 @@ def _guard_station_x_column_drift(graph: MetroGraph, phase: str) -> None:
                         f"{abs(x - median_x):.1f} > X_SPACING={X_SPACING:.1f} "
                         f"from median={median_x:.1f}"
                     )
+
+
+def _run_phase13_guards(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict | None = None,
+    routes: list | None = None,
+) -> tuple[dict, list | None]:
+    """Bisection guards run after every Phase-13x sub-phase boundary in
+    ``validate=True`` mode.
+
+    The Phase 13 tidy-up pipeline is a sequence of ~20 mutating passes
+    over a shared graph; before this helper, ``validate=True`` only
+    sampled the final state, so a regression introduced at e.g. Phase
+    13h surfaced as ``after Phase 12 (final): ...`` with no way to
+    bisect.  Running the same overlap / breeze-past / column-drift
+    checks at each boundary localises the culprit to a single phase.
+
+    Excluded from the bisection set (transient between sub-phases or
+    only meaningful at the final boundary):
+
+    * ``_guard_off_track_inputs_above_consumer`` -- Phase 13e's snap-
+      to-grid shifts the on-track consumer Y by up to half a pitch
+      before Phase 13g re-anchors the off-track input.
+    * ``_guard_row_trunk_cy_consistent`` -- the row trunk Y is only
+      finalised once Phase 13h has re-centred ``center_ports`` graphs.
+    * ``_guard_inter_section_routes_in_row_band`` -- row-band height
+      tolerance assumes final bboxes, which Phase 13j/k may still be
+      shrinking.
+
+    The final guard block (``after Phase 12 (final)``) composes this
+    helper with the three excluded guards above, sharing
+    ``offsets``/``routes`` for a single computation per checkpoint.
+    Returns the computed ``(offsets, routes)`` so callers (e.g. the
+    final block) can pass them on to the remaining guards.
+    """
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+    if offsets is None:
+        offsets = compute_station_offsets(graph)
+    if routes is None:
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            routes = None
+
+    _guard_coordinates_finite(graph, phase)
+    _guard_section_bboxes_positive(graph, phase)
+    _guard_stations_in_sections(graph, phase)
+    _guard_ports_on_boundaries(graph, phase)
+    _guard_no_station_overlap(graph, phase, offsets=offsets)
+    if routes is not None:
+        _guard_no_line_crosses_non_consumer(
+            graph, phase, offsets=offsets, routes=routes
+        )
+    _guard_station_x_column_drift(graph, phase)
+    return offsets, routes
 
 
 def compute_min_y_spacing(
@@ -989,6 +1061,8 @@ def _compute_section_layout(
     # Phase 13: Lift off_track stations above their section's top track.
     # Runs last so it operates on finalised station Ys and bboxes.
     _lift_off_track_stations(graph, y_spacing, section_y_padding)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13")
 
     # Phase 13a: Re-align bbox tops within each grid row after off-track
     # lifting expanded some sections upward.  Unlike Phase 9/11c which
@@ -996,12 +1070,16 @@ def _compute_section_layout(
     # the empty input-band space lines up across the row.  Station Ys
     # in unlifted sections are preserved.
     _top_align_row_bboxes_only(graph)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13a")
 
     # Phase 13b: Compact row-mate sections so content sits just inside
     # the bbox top edge.  Shifts an entire row's column group up by the
     # smallest above-content slack, preserving trunk alignment.  Bbox
     # heights shrink correspondingly so the empty top space disappears.
     _compact_row_content_to_bbox_top(graph, section_y_padding, y_spacing)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13b")
 
     # Phase 13c: Snap inter-section LR/RL port pairs to a common Y so
     # the trunk bundle stays perfectly horizontal across boundaries.
@@ -1012,6 +1090,8 @@ def _compute_section_layout(
     # may have moved the exit port since then.
     _snap_inter_section_port_pairs(graph)
     _position_junctions(graph)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13c")
 
     # Phase 13d: Fan a section's free content upward when the row's
     # compaction left visible empty space at the bbox top.  Only fires
@@ -1019,6 +1099,8 @@ def _compute_section_layout(
     # (no off-track band) and whose trunk Y sits below the bbox top
     # padding by more than one ``y_spacing`` slot.
     _fan_free_content_upward(graph, section_y_padding, y_spacing)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13d")
 
     # Phase 13d2: Companion to 13d for source-stack sections.  When the
     # entry column has a single full-bundle trunk plus subset-bundle
@@ -1026,6 +1108,8 @@ def _compute_section_layout(
     # nearest-to-trunk sources into the empty top band so the section
     # is bottom- and top-weighted instead of stacked below the trunk.
     _fan_source_inputs_upward(graph, y_spacing)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13d2")
 
     # Phase 13d3: For sections that contain exactly a 2-branch
     # symmetric fan (and no off-track or other constraining content),
@@ -1036,6 +1120,8 @@ def _compute_section_layout(
     # grid pass doesn't immediately undo the compaction.
     if graph.center_ports:
         _apply_half_grid_2branch_symfan(graph, y_spacing, section_y_padding)
+        if validate:
+            _run_phase13_guards(graph, "after Phase 13d3")
 
     # Phase 13e: Snap all station/port Ys to a per-section y_spacing
     # grid.  Trunk-Y align, port-snap, and the row compaction/fan
@@ -1043,12 +1129,16 @@ def _compute_section_layout(
     # coordinates at fractional Ys (e.g. 298.785 when the pitch is 55).
     # This final pass restores clean grid positions before validation.
     _snap_all_y_to_grid(graph, y_spacing)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13e")
 
     # Phase 13f: Grow TB-section bbox bottoms so they align with the
     # downstream LR section's bbox bottom.  Without this the TB
     # section's bbox ends right at the inter-section exit port Y,
     # making the line look pinned to the section edge.
     _align_tb_section_bbox_bottoms(graph)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13f")
 
     # Phase 13g: Re-anchor off-track inputs to their consumer's final
     # (snapped) Y.  Phase 13's lift placed them relative to pre-snap
@@ -1058,6 +1148,8 @@ def _compute_section_layout(
     # consumer.y - n*y_spacing on the final grid and grows the bbox
     # upward if the new position rises above the padding zone.
     _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13g")
 
     # Phase 13h: Re-center full-bundle columns around the row's final
     # trunk Y.  ``_redistribute_full_bundle_columns`` runs early when
@@ -1083,12 +1175,16 @@ def _compute_section_layout(
         # bbox tops up to match so the section row stays flush along
         # its top edge.
         _top_align_row_bboxes_only(graph)
+        if validate:
+            _run_phase13_guards(graph, "after Phase 13h")
 
     # Phase 13i: After fan-re-centering, single-station downstream
     # columns (e.g. terminus file icons) may have stayed at their
     # pre-fan Y while their sole upstream moved to the trunk.  Pin
     # them back onto the source Y so the connection stays horizontal.
     _align_terminus_to_upstream(graph)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13i")
 
     # Phase 13i2: Auto-balance pass.  For sections whose final layout
     # still leaves an empty band above the trunk while more siblings
@@ -1097,6 +1193,8 @@ def _compute_section_layout(
     # Runs after re-centering and terminus-Y pinning so it sees the
     # final trunk Y.  U-turn-safe and bbox-bounded.
     _balance_section_content_around_trunk(graph, section_y_padding, y_spacing)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13i2")
 
     # Phase 13h3: Recenter fan-out side stations on their loop midpoint.
     # The layer-based X assignment places off-trunk siblings (e.g. propd,
@@ -1107,12 +1205,16 @@ def _compute_section_layout(
     # Reposition each side station to the midpoint of the two diagonal
     # corner Xs derived from the actual routing geometry.
     _recenter_loop_side_stations(graph)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13h3")
 
     # Phase 13j: Shrink rowspan / row-mate bboxes whose content moved
     # up after compact (e.g. ``_fan_source_inputs_upward`` lifted the
     # bottom rows away from the bbox bottom).  Bottom-only shrink, so
     # trunk alignment is unaffected.
     _shrink_bboxes_to_content_bottom(graph, section_y_padding)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13j")
 
     # Phase 13k: Close vertical slack that the pre-shrink row-height
     # estimate (in ``_compute_section_offsets``) left between row ``r``
@@ -1120,6 +1222,8 @@ def _compute_section_layout(
     # Only fires when a rowspan section's content fell short of its row
     # claim; multi-row layouts with content-filled rows are untouched.
     _tighten_lower_rows_after_shrink(graph, section_y_gap)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13k")
 
     # Phase 13k2: Shift sparse loop-side stations (e.g. ``grea`` -- one
     # incoming, one outgoing, single-line consumer) onto a half-grid Y
@@ -1128,12 +1232,16 @@ def _compute_section_layout(
     # (Distinct from Phase 13k above; renamed to disambiguate after the
     # numbering collision flagged in src/nf_metro/layout/CONTRACT.md.)
     _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13k2")
 
     # Phase 13l: When Phase 13k2 grew a section's bbox downward, push
     # sections in lower rows down so they don't crowd the grown bbox.
     # ``_tighten_lower_rows_after_shrink`` only closes slack (pulls
     # rows up); the inverse push happens here.
     _push_lower_rows_after_bbox_grow(graph, section_y_gap)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13l")
 
     # Phase 13m: Pad vertical spacing between stacked file-input icons
     # whose under-icon captions would otherwise overlap the next icon
@@ -1141,25 +1249,18 @@ def _compute_section_layout(
     # captioned icon's vertical extent (~44 px), so columns of source
     # inputs in DA-style sections need a slightly wider pitch.
     _pad_stacked_captioned_file_icons(graph, y_spacing, section_y_padding)
+    if validate:
+        _run_phase13_guards(graph, "after Phase 13m")
 
     if validate:
-        from nf_metro.layout.routing import compute_station_offsets, route_edges
-
         phase = "after Phase 12 (final)"
-        offsets = compute_station_offsets(graph)
-        routes = route_edges(graph, station_offsets=offsets)
-        _guard_coordinates_finite(graph, phase)
-        _guard_section_bboxes_positive(graph, phase)
-        _guard_stations_in_sections(graph, phase)
-        _guard_ports_on_boundaries(graph, phase)
-        _guard_no_station_overlap(graph, phase)
-        _guard_no_line_crosses_non_consumer(graph, phase)
+        offsets, routes = _run_phase13_guards(graph, phase)
         _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
         _guard_off_track_inputs_above_consumer(graph, phase)
-        _guard_station_x_column_drift(graph, phase)
-        _guard_inter_section_routes_in_row_band(
-            graph, phase, offsets=offsets, routes=routes
-        )
+        if routes is not None:
+            _guard_inter_section_routes_in_row_band(
+                graph, phase, offsets=offsets, routes=routes
+            )
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
