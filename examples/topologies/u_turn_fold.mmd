@@ -1,0 +1,75 @@
+%%metro title: U-Turn Fold
+%%metro style: dark
+%%metro line: main | Main | #2db572
+%%metro line: side | Side Line | #e63946
+
+graph LR
+    subgraph sec1 [Input]
+        s1a[Read]
+        s1b[QC]
+        s1c[Filter]
+        s1a -->|main| s1b
+        s1b -->|main| s1c
+    end
+
+    subgraph sec2 [Stage 2]
+        s2a[Step]
+        s2b[Step]
+        s2c[Step]
+        s2a -->|main| s2b
+        s2b -->|main| s2c
+    end
+
+    subgraph sec3 [Stage 3]
+        s3a[Step]
+        s3b[Step]
+        s3c[Step]
+        s3a -->|main,side| s3b
+        s3b -->|main,side| s3c
+    end
+
+    subgraph sec4 [Stage 4]
+        s4a[Step]
+        s4b[Step]
+        s4c[Step]
+        s4a -->|main,side| s4b
+        s4b -->|main,side| s4c
+    end
+
+    subgraph turn [Turn]
+        ta[Pre-Turn]
+        tb[Mid-Turn]
+        tc[Post-Turn]
+        ta -->|main,side| tb
+        tb -->|main,side| tc
+    end
+
+    subgraph sec6 [Stage 6]
+        s6a[Step]
+        s6b[Step]
+        s6c[Step]
+        s6a -->|main,side| s6b
+        s6b -->|main,side| s6c
+    end
+
+    subgraph sec7 [Stage 7]
+        s7a[Step]
+        s7b[Step]
+        s7c[Step]
+        s7a -->|main,side| s7b
+        s7b -->|main,side| s7c
+    end
+
+    subgraph sec8 [Output]
+        s8a[Aggregate]
+        s8b[Report]
+        s8a -->|main,side| s8b
+    end
+
+    s1c -->|main| s2a
+    s2c -->|main| s3a
+    s3c -->|main,side| s4a
+    s4c -->|main,side| ta
+    tc -->|main,side| s6a
+    s6c -->|main,side| s7a
+    s7c -->|main,side| s8a

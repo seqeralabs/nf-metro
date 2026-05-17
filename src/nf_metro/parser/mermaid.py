@@ -714,7 +714,9 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
             if consumed_lines and not (consumed_lines & trunk_lines):
                 continue
 
-            candidate_preds = station_ids if single_trunk_section else in_section_preds
+            candidate_preds = sorted(
+                station_ids if single_trunk_section else in_section_preds
+            )
 
             bypass_by_pred: dict[str, list[tuple[int, Edge]]] = {}
             for pred_id in candidate_preds:
