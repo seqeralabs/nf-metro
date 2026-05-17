@@ -528,7 +528,7 @@ def _guard_station_x_column_drift(graph: MetroGraph, phase: str) -> None:
     deliberately moves single in/out stations whose endpoints share Y to
     the midpoint of their loop's diagonal corners, legitimately decoupling
     their X from the column grid.  Mirrors
-    ``test_station_x_within_column_tolerance`` (audit item 21).
+    ``test_station_x_within_column_tolerance``.
     """
     import statistics
 

@@ -2673,7 +2673,7 @@ def test_grid_snap_does_not_mutate_x(fixture):
 
 
 # ---------------------------------------------------------------------------
-# Station X stays within column tolerance (audit item 21)
+# Station X stays within column tolerance
 # ---------------------------------------------------------------------------
 
 

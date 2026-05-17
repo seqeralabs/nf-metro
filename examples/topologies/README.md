@@ -31,7 +31,6 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `mismatched_tracks.mmd` | per-line track mismatch between sections |
 | `mixed_bundle_column.mmd` | mixed-cardinality fan-out into stacked column |
 | `mixed_port_sides.mmd` | multi-side exit ports (RIGHT + BOTTOM) |
-| `off_track_convergence.mmd` | multiple off-track file inputs into single in-section consumer |
 | `upward_bypass.mmd` | tall section bypass (upward gap) |
 | `rnaseq_lite.mmd` | realistic pipeline / TB+LR mix / diamond |
 | `variant_calling.mmd` | realistic pipeline / asymmetric fork-join / 4-way fan-in |
@@ -192,10 +191,6 @@ One source feeds three structurally identical parallel branches that all converg
 ### Mixed Bundle Column
 
 One stacked column contains three siblings of different line counts: a 3-line branch, a 1-line branch, and a 1-line branch, all sourced from the same upstream section and converging at a shared sink. Tests fan-out from a wide bundle into mixed-cardinality siblings in the same grid column.
-
-### Off-Track Convergence
-
-Four off-track file icons (FASTA, GTF, VCF, BED) all converge on the same in-section consumer (`Align`). Tests multi-icon convergence into a single consumer station - a common pattern in pipelines with many reference inputs.
 
 ### Funcprofiler Upstream
 
