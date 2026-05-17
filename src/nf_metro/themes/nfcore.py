@@ -7,7 +7,6 @@ NFCORE_THEME = Theme(
     background_color="#2b2b2b",
     station_fill="#ffffff",
     station_stroke="#333333",
-    station_radius=5.0,
     station_stroke_width=1.5,
     line_width=3.0,
     label_color="#e0e0e0",
