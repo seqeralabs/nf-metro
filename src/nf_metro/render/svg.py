@@ -1118,51 +1118,78 @@ def _grid_bbox_bounds(
     return col_bounds, row_bounds
 
 
-def _compute_col_boundary_xs(
+def _sections_by_grid_cell(
+    sections: list[Section],
+) -> dict[tuple[int, int], Section]:
+    """Index non-spanning sections by ``(grid_col, grid_row)``."""
+    out: dict[tuple[int, int], Section] = {}
+    for sec in sections:
+        if sec.grid_col_span == 1 and sec.grid_row_span == 1:
+            out[(sec.grid_col, sec.grid_row)] = sec
+    return out
+
+
+def _compute_row_boundary_segments(
+    sections: list[Section],
     col_bounds: dict[int, tuple[float, float]],
-) -> list[tuple[int, int, float]]:
-    """Return ``(col_a, col_b, mid_x)`` triples for consecutive grid columns
-    whose bbox X ranges don't overlap.
+) -> list[tuple[int, int, float, float, float]]:
+    """Return per-column row-boundary segments as
+    ``(row_a, row_b, x_start, x_end, y)`` tuples.
 
-    A debug-overlay column separator is only meaningful when the columns
-    are visually separable; if they overlap (e.g. a wide section in col i
-    extends past col i+1's left edge) the midpoint would fall inside one
-    of their bboxes, so the pair is skipped.
+    For each pair of consecutive grid rows and each column where both
+    rows have a non-spanning section, emit a horizontal segment at the
+    local midpoint between the upper section's bottom and the lower
+    section's top.  If a fold extends the upper section's bbox past
+    the lower section's top (local overlap), no segment is emitted for
+    that column - the row boundary visibly breaks at the fold column
+    instead of being plotted at a Y that would cut through bboxes.
     """
-    result: list[tuple[int, int, float]] = []
-    sorted_cols = sorted(col_bounds)
-    for i in range(len(sorted_cols) - 1):
-        ca, cb = sorted_cols[i], sorted_cols[i + 1]
-        right = col_bounds[ca][1]
-        left = col_bounds[cb][0]
-        if right >= left:
-            continue
-        result.append((ca, cb, (right + left) / 2))
-    return result
+    sec_by_cell = _sections_by_grid_cell(sections)
+    rows = sorted({r for _, r in sec_by_cell})
+    segments: list[tuple[int, int, float, float, float]] = []
+    for i in range(len(rows) - 1):
+        ra, rb = rows[i], rows[i + 1]
+        for c, (x_start, x_end) in col_bounds.items():
+            sa = sec_by_cell.get((c, ra))
+            sb = sec_by_cell.get((c, rb))
+            if sa is None or sb is None:
+                continue
+            a_bot = sa.bbox_y + sa.bbox_h
+            b_top = sb.bbox_y
+            if a_bot >= b_top:
+                continue
+            segments.append((ra, rb, x_start, x_end, (a_bot + b_top) / 2))
+    return segments
 
 
-def _compute_row_boundary_ys(
+def _compute_col_boundary_segments(
+    sections: list[Section],
     row_bounds: dict[int, tuple[float, float]],
-) -> list[tuple[int, int, float]]:
-    """Return ``(row_a, row_b, mid_y)`` triples for consecutive grid rows
-    whose bbox Y ranges don't overlap.
+) -> list[tuple[int, int, float, float, float]]:
+    """Return per-row column-boundary segments as
+    ``(col_a, col_b, y_start, y_end, x)`` tuples.
 
-    When a fold extends a row's bbox into the next row's band (so the
-    upper row's ``bbox_y + bbox_h`` exceeds the lower row's ``bbox_y``),
-    no horizontal line can sit cleanly between them - the midpoint would
-    cut through both bboxes.  Such pairs are dropped from the overlay
-    rather than drawn at a misleading Y.
+    Mirrors :func:`_compute_row_boundary_segments` along the other
+    axis - per-row vertical segments at the local midpoint between
+    horizontally adjacent sections, skipped where bboxes locally
+    overlap in X.
     """
-    result: list[tuple[int, int, float]] = []
-    sorted_rows = sorted(row_bounds)
-    for i in range(len(sorted_rows) - 1):
-        ra, rb = sorted_rows[i], sorted_rows[i + 1]
-        bottom = row_bounds[ra][1]
-        top = row_bounds[rb][0]
-        if bottom >= top:
-            continue
-        result.append((ra, rb, (bottom + top) / 2))
-    return result
+    sec_by_cell = _sections_by_grid_cell(sections)
+    cols = sorted({c for c, _ in sec_by_cell})
+    segments: list[tuple[int, int, float, float, float]] = []
+    for j in range(len(cols) - 1):
+        ca, cb = cols[j], cols[j + 1]
+        for r, (y_start, y_end) in row_bounds.items():
+            sa = sec_by_cell.get((ca, r))
+            sb = sec_by_cell.get((cb, r))
+            if sa is None or sb is None:
+                continue
+            a_right = sa.bbox_x + sa.bbox_w
+            b_left = sb.bbox_x
+            if a_right >= b_left:
+                continue
+            segments.append((ca, cb, y_start, y_end, (a_right + b_left) / 2))
+    return segments
 
 
 def _render_debug_overlay(
@@ -1224,67 +1251,74 @@ def _render_debug_overlay(
     if sections:
         col_bounds, row_bounds = _grid_bbox_bounds(sections)
 
-        # Global extents (fall back to col/row bounds or section bboxes)
+        # Label anchors (top-of-canvas for col labels, left for row labels).
+        # All sections spanning means no single-cell bounds exist - fall
+        # back to raw bboxes for label placement only.
         if not col_bounds or not row_bounds:
-            # All sections are spanning - use raw section bboxes
             all_x0 = min(s.bbox_x for s in sections) - 20
-            all_x1 = max(s.bbox_x + s.bbox_w for s in sections) + 20
             all_y0 = min(s.bbox_y for s in sections) - 20
-            all_y1 = max(s.bbox_y + s.bbox_h for s in sections) + 20
         else:
             all_x0 = min(b[0] for b in col_bounds.values()) - 20
-            all_x1 = max(b[1] for b in col_bounds.values()) + 20
             all_y0 = min(b[0] for b in row_bounds.values()) - 20
-            all_y1 = max(b[1] for b in row_bounds.values()) + 20
         grid_color = "rgba(255, 255, 0, 0.5)"
 
-        for ca, cb, mid_x in _compute_col_boundary_xs(col_bounds):
+        labelled_col_pairs: set[tuple[int, int]] = set()
+        for ca, cb, y_start, y_end, x in _compute_col_boundary_segments(
+            sections, row_bounds
+        ):
             d.append(
                 draw.Line(
-                    mid_x,
-                    all_y0,
-                    mid_x,
-                    all_y1,
+                    x,
+                    y_start,
+                    x,
+                    y_end,
                     stroke=grid_color,
                     stroke_width=1,
                     stroke_dasharray="6,4",
                 )
             )
-            d.append(
-                draw.Text(
-                    f"col {ca}|{cb}",
-                    debug_font_size,
-                    mid_x,
-                    all_y0 - 4,
-                    fill=grid_color,
-                    font_family=debug_font,
-                    text_anchor="middle",
+            if (ca, cb) not in labelled_col_pairs:
+                d.append(
+                    draw.Text(
+                        f"col {ca}|{cb}",
+                        debug_font_size,
+                        x,
+                        all_y0 - 4,
+                        fill=grid_color,
+                        font_family=debug_font,
+                        text_anchor="middle",
+                    )
                 )
-            )
+                labelled_col_pairs.add((ca, cb))
 
-        for ra, rb, mid_y in _compute_row_boundary_ys(row_bounds):
+        labelled_row_pairs: set[tuple[int, int]] = set()
+        for ra, rb, x_start, x_end, y in _compute_row_boundary_segments(
+            sections, col_bounds
+        ):
             d.append(
                 draw.Line(
-                    all_x0,
-                    mid_y,
-                    all_x1,
-                    mid_y,
+                    x_start,
+                    y,
+                    x_end,
+                    y,
                     stroke=grid_color,
                     stroke_width=1,
                     stroke_dasharray="6,4",
                 )
             )
-            d.append(
-                draw.Text(
-                    f"row {ra}|{rb}",
-                    debug_font_size,
-                    all_x0 - 4,
-                    mid_y,
-                    fill=grid_color,
-                    font_family=debug_font,
-                    text_anchor="end",
+            if (ra, rb) not in labelled_row_pairs:
+                d.append(
+                    draw.Text(
+                        f"row {ra}|{rb}",
+                        debug_font_size,
+                        all_x0 - 4,
+                        y,
+                        fill=grid_color,
+                        font_family=debug_font,
+                        text_anchor="end",
+                    )
                 )
-            )
+                labelled_row_pairs.add((ra, rb))
 
     # Shared Y grid lines: horizontal lines at each grid slot position
     # within each row group (populated by _align_row_y_grids in engine.py).
