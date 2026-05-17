@@ -648,7 +648,6 @@ _PASS_C_BISECTION_ORDER: tuple[str, ...] = (
     "after Stage 6.14",
     "after Stage 6.15",
     "after Stage 6.16",
-    "after Stage 6.17",
 )
 """Ordered Pass C bisection checkpoints, used by
 ``_run_pass_c_guards`` to gate guards whose invariants only become
@@ -969,7 +968,7 @@ def _compute_section_layout(
     5. **Pass C - junctions & off-track lift** (Stages 5.1 to 5.5).
        Position junctions, lift off-track stations, re-align row bbox
        tops, compact, snap inter-section port pairs.
-    6. **Pass C - vertical settling & finishing** (Stages 6.1 to 6.17).
+    6. **Pass C - vertical settling & finishing** (Stages 6.1 to 6.16).
        Fan content upward, snap to grid, re-anchor off-track, recenter
        full-bundle columns and restore their invariants, balance content
        around trunk, loop-side X recenter, bbox shrink + row tighten /
@@ -1380,26 +1379,24 @@ def _compute_section_layout(
     # incoming, one outgoing, single-line consumer) onto a half-grid Y
     # when sharing the full-row Y with a busier sibling whose inbound
     # bundle would otherwise cross the sparse station's marker bbox.
-    _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
+    # When the shift grows a section's bbox downward, the helper also
+    # pushes lower-row sections down internally to restore
+    # ``section_y_gap`` (the row-propagation step formerly tracked as
+    # a separate Stage 6.16).
+    _shift_and_propagate_loop_stations(
+        graph, y_spacing, section_y_padding, section_y_gap
+    )
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.15")
 
-    # Stage 6.16: When Stage 6.15 grew a section's bbox downward, push
-    # sections in lower rows down so they don't crowd the grown bbox.
-    # ``_tighten_lower_rows_after_shrink`` only closes slack (pulls
-    # rows up); the inverse push happens here.
-    _push_lower_rows_after_bbox_grow(graph, section_y_gap)
-    if validate:
-        _run_pass_c_guards(graph, "after Stage 6.16")
-
-    # Stage 6.17: Pad vertical spacing between stacked file-input icons
+    # Stage 6.16: Pad vertical spacing between stacked file-input icons
     # whose under-icon captions would otherwise overlap the next icon
     # below.  The default ``y_spacing`` grid (40 px) is smaller than a
     # captioned icon's vertical extent (~44 px), so columns of source
     # inputs in DA-style sections need a slightly wider pitch.
     _pad_stacked_captioned_file_icons(graph, y_spacing, section_y_padding)
     if validate:
-        _run_pass_c_guards(graph, "after Stage 6.17")
+        _run_pass_c_guards(graph, "after Stage 6.16")
 
     if validate:
         phase = "after final"
@@ -3135,13 +3132,14 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 graph.stations[sid].x = target_x
 
 
-def _shift_sparse_loop_stations_to_clear_bundle(
+def _shift_and_propagate_loop_stations(
     graph: MetroGraph,
     y_spacing: float,
     section_y_padding: float = SECTION_Y_PADDING,
+    section_y_gap: float = SECTION_Y_GAP,
 ) -> None:
-    """Shift single-line loop side stations onto a half-pitch Y when
-    their full-row Y collides with a busier sibling's inbound bundle.
+    """Shift sparse loop-side stations onto a half-pitch Y, then
+    propagate any bbox growth to lower rows.
 
     The bypass virtual station mechanism (``_insert_bypass_stations``)
     covers the pred -> exit_port case (e.g. ``annotate`` between limma
@@ -3158,14 +3156,17 @@ def _shift_sparse_loop_stations_to_clear_bundle(
         sibling T in the same section, and
       * shares the same Y row as that sibling,
 
-    shift S vertically by half a ``y_spacing`` away from the trunk
-    (i.e. ``trunk_y +- y_spacing / 2`` on the side S is already on)
-    so its marker bbox sits clear of the sibling's bundle Y range.
-    The shift is reverted if it would push S above or below the
-    section bbox.
+    shift S vertically by one full ``y_spacing`` away from the trunk
+    on the side it already sits on, so its marker bbox sits clear of
+    the sibling's bundle Y range.  Growing the section bbox downward
+    can then leave the lower-row gap below ``section_y_gap``; once all
+    shifts are applied, the helper pushes lower rows down to restore
+    that gap (the row-propagation step formerly handled by
+    ``_push_lower_rows_after_bbox_grow`` as a separate stage).
     """
     if y_spacing <= 0:
         return
+    any_bbox_grew = False
 
     def _consumed_lines(sid: str) -> set[str]:
         return {e.line_id for e in graph.edges_to(sid)}
@@ -3257,20 +3258,27 @@ def _shift_sparse_loop_stations_to_clear_bundle(
                 grow = sec_top + edge_pad - new_y
                 section.bbox_y -= grow
                 section.bbox_h += grow
+                any_bbox_grew = True
             elif new_y > sec_bottom - edge_pad:
                 grow = new_y - (sec_bottom - edge_pad)
                 section.bbox_h += grow
+                any_bbox_grew = True
             st.y = new_y
+
+    if any_bbox_grew:
+        _push_lower_rows_after_bbox_grow(graph, section_y_gap)
 
 
 def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> None:
     """Push lower-row sections down when an upper-row bbox grows.
 
-    ``_shift_sparse_loop_stations_to_clear_bundle`` (Stage 6.15) can
-    grow a section's ``bbox_h`` downward when shifting a sparse loop
-    station like ``grea`` past the original bbox bottom.  Row offsets
-    were fixed earlier by ``_compute_section_offsets`` from pre-shift
-    bbox heights, so the section below the grown one ends up sitting
+    Shared helper called by stages that may grow a section's
+    ``bbox_h`` downward after row offsets are already fixed:
+    ``_shift_and_propagate_loop_stations`` (Stage 6.15, sparse loop
+    station shift) and ``_pad_stacked_captioned_file_icons`` (Stage
+    6.16, captioned-icon pitch padding).  Row offsets were fixed
+    earlier by ``_compute_section_offsets`` from pre-grow bbox
+    heights, so the section below a grown one can end up sitting
     closer than ``section_y_gap`` from the new bbox bottom.
 
     For each row ``r >= 1``, measure the deficit between the lowest

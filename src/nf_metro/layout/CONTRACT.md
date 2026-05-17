@@ -56,7 +56,7 @@ Stages split into three regimes:
 | after final | bisection set (all unconditional) + off-track-above-consumer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
 Bisection checkpoints fire after every Pass C sub-stage (see the
-`# Stage 5.2:` through `# Stage 6.17:` comments in
+`# Stage 5.2:` through `# Stage 6.16:` comments in
 `_compute_section_layout`). Three guards
 hold continuously only from a specific checkpoint onward, and the
 bisection runner skips them earlier; see `_BISECTION_FIRST_VALID` in
@@ -602,32 +602,27 @@ in pipeline order.
 - **Invariants preserved**: Within-row trunk Ys. Bbox heights of
   upper rows.
 
-### Stage 6.15: shift sparse loop stations to clear bundle (engine.py:796-800)
+### Stage 6.15: shift and propagate loop stations (engine.py:796-806)
 - **Purpose**: Shift sparse loop-side stations (one inbound, one
   outbound, single-line consumer) onto a half-pitch Y when sharing
   the full-row Y with a busier sibling whose inbound bundle would
-  otherwise breeze-past the sparse station's marker.
-- **Helper**: `_shift_sparse_loop_stations_to_clear_bundle`
-  (engine.py:2563).
+  otherwise breeze-past the sparse station's marker.  When a shift
+  grows a section's bbox downward, push lower-row sections down
+  internally to restore `section_y_gap`.
+- **Helper**: `_shift_and_propagate_loop_stations`
+  (calls `_push_lower_rows_after_bbox_grow` when any bbox grew).
 - **Precondition**: Bundle Ys final.
 - **Postcondition**: Sparse single-line loop stations whose row Y
   conflicts with a busier sibling's bundle move to a half-pitch
-  offset. May grow bbox downward.
-- **Invariants preserved**: Busy sibling Y. Bundle Y.
+  offset (may grow bbox downward).  Row gaps preserved across any
+  bbox grow.
+- **Invariants preserved**: Busy sibling Y. Bundle Y. Within-row Ys
+  of unaffected sections.
 - **Related tests**: `test_lines_dont_cross_non_consumer_markers`,
-  `test_no_icon_overlaps_line_path`.
+  `test_no_icon_overlaps_line_path`,
+  `test_row_gap_accommodates_bypass`.
 
-### Stage 6.16: push lower rows after bbox grow (engine.py:802-806)
-- **Purpose**: Companion to Stage 6.15 - when Stage 6.15 grew a section's bbox
-  downward, push lower-row sections down to keep
-  `section_y_gap`.
-- **Helper**: `_push_lower_rows_after_bbox_grow` (engine.py:2698).
-- **Precondition**: Stage 6.15 may have grown some bboxes.
-- **Postcondition**: Row gaps preserved across the bbox grow.
-- **Invariants preserved**: Within-row Ys.
-- **Related tests**: `test_row_gap_accommodates_bypass`.
-
-### Stage 6.17: pad stacked captioned file icons (engine.py:808-813)
+### Stage 6.16: pad stacked captioned file icons (engine.py:808-813)
 - **Purpose**: Pad vertical spacing between stacked file-input icons
   whose under-icon captions would overlap the icon below at default
   `y_spacing`.
@@ -651,7 +646,7 @@ following before merging:
 
 1. **Stage tag**: pick the next sequential number within the
    appropriate stage (e.g. a new Stage 6.x sub-step gets the next
-   integer after Stage 6.17).  Historical note: the organic phase
+   integer after Stage 6.16).  Historical note: the organic phase
    suffix tree (`13d2`, `13k2`, the `Phase 13k` -> `Phase 13k2`
    rename in PR #342) is what the flat Stage.N scheme is designed to
    prevent.

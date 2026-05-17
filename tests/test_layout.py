@@ -1801,7 +1801,7 @@ class TestPassCBisection:
             ("_snap_all_y_to_grid", "after Stage 6.6"),
             ("_align_terminus_to_upstream", "after Stage 6.10"),
             ("_shrink_bboxes_to_content_bottom", "after Stage 6.13"),
-            ("_pad_stacked_captioned_file_icons", "after Stage 6.17"),
+            ("_pad_stacked_captioned_file_icons", "after Stage 6.16"),
         ],
     )
     def test_overlap_localises_to_phase(
@@ -1911,8 +1911,8 @@ class TestPassCBisection:
     def test_gated_overlap_guard_fires_at_later_bisection_checkpoints(
         self, monkeypatch
     ):
-        """An overlap injected at Stage 6.17 must surface at the
-        ``after Stage 6.17`` bisection checkpoint (not deferred to the
+        """An overlap injected at Stage 6.16 must surface at the
+        ``after Stage 6.16`` bisection checkpoint (not deferred to the
         final block).
 
         Confirms ``_BISECTION_FIRST_VALID`` only delays a guard's
@@ -1940,8 +1940,8 @@ class TestPassCBisection:
             compute_layout(graph, validate=True)
 
         msg = str(excinfo.value)
-        assert msg.startswith("after Stage 6.17:"), (
-            f"Expected bisection to surface at 'after Stage 6.17' "
+        assert msg.startswith("after Stage 6.16:"), (
+            f"Expected bisection to surface at 'after Stage 6.16' "
             f"(overlap guard runs at every checkpoint from Stage 6.6 "
             f"onward), but error was: {msg!r}"
         )
