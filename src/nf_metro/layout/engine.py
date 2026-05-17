@@ -11,6 +11,7 @@ import math
 from collections import Counter, defaultdict
 
 from nf_metro.layout.constants import (
+    BYPASS_CLEARANCE,
     CURVE_RADIUS,
     DESCENDER_CLEARANCE,
     DIAGONAL_RUN,
@@ -3271,6 +3272,90 @@ def _shift_sparse_loop_stations_to_clear_bundle(
             st.y = new_y
 
 
+def _predicted_bypass_bottom_in_row(
+    graph: MetroGraph, row: int
+) -> tuple[float, dict[tuple[int, int], float]]:
+    """Predict the deepest Y a bypass route may reach in *row*.
+
+    A bypass U-route is emitted at routing time when an edge spans
+    two or more columns AND has same-row intervening sections (see
+    ``layout.routing.core._has_intervening_sections`` and the
+    ``needs_bypass`` check).  This pre-routing prediction mirrors
+    that condition, walking junction predecessors/successors to
+    resolve the effective source/target column for edges that pass
+    through junction stations, and computes the same bottom Y
+    formula used in ``layout.routing.common.bypass_bottom_y``: the
+    deepest intervening section bottom plus ``BYPASS_CLEARANCE``.
+
+    Returns ``(row_max, per_col_max)``:
+
+    * ``row_max``: the deepest bypass bottom across the row (0.0 when
+      no bypass is expected).
+    * ``per_col_max``: mapping ``(lo, hi) -> bottom`` for each bypass
+      column span observed, so callers can scope the floor to lower
+      sections that the bypass actually passes over.
+    """
+    sections_in_row = [
+        s for s in graph.sections.values() if s.grid_row == row and s.bbox_w > 0
+    ]
+    if not sections_in_row:
+        return 0.0, {}
+
+    successors: dict[str, list[str]] = defaultdict(list)
+    predecessors: dict[str, list[str]] = defaultdict(list)
+    for e in graph.edges:
+        successors[e.source].append(e.target)
+        predecessors[e.target].append(e.source)
+
+    def _node_section(node_id: str):
+        st = graph.stations.get(node_id) or graph.ports.get(node_id)
+        if st is None:
+            return None
+        sec_id = getattr(st, "section_id", None)
+        if sec_id:
+            return graph.sections.get(sec_id)
+        return None
+
+    def _resolve(node_id: str, upstream: bool, visited: set[str] | None = None):
+        if visited is None:
+            visited = set()
+        if node_id in visited:
+            return None
+        visited.add(node_id)
+        sec = _node_section(node_id)
+        if sec is not None:
+            return sec
+        neighbors = predecessors[node_id] if upstream else successors[node_id]
+        for nb in neighbors:
+            sec = _resolve(nb, upstream, visited)
+            if sec is not None:
+                return sec
+        return None
+
+    row_max = 0.0
+    per_span: dict[tuple[int, int], float] = {}
+    for edge in graph.edges:
+        src_sec = _resolve(edge.source, upstream=True)
+        tgt_sec = _resolve(edge.target, upstream=False)
+        if src_sec is None or tgt_sec is None:
+            continue
+        if src_sec.grid_row != row or tgt_sec.grid_row != row:
+            continue
+        if abs(src_sec.grid_col - tgt_sec.grid_col) <= 1:
+            continue
+        lo, hi = sorted((src_sec.grid_col, tgt_sec.grid_col))
+        intervening = [s for s in sections_in_row if lo < s.grid_col < hi]
+        if not intervening:
+            continue
+        bot = max(s.bbox_y + s.bbox_h for s in intervening) + BYPASS_CLEARANCE
+        if bot > row_max:
+            row_max = bot
+        prev = per_span.get((lo, hi), 0.0)
+        if bot > prev:
+            per_span[(lo, hi)] = bot
+    return row_max, per_span
+
+
 def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> None:
     """Push lower-row sections down when an upper-row bbox grows.
 
@@ -3322,6 +3407,21 @@ def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) ->
         ]
         if not ending_at_prev:
             continue
+        # Cross-column edges in the upper rows with intervening sections
+        # route below those intervening bboxes, landing in the inter-row
+        # gap.  Aggregate bypass predictions from every upper-row start
+        # row whose sections end at ``r - 1`` -- a row-spanning section
+        # (e.g. ``scaffolding`` with grid_row=0 and grid_row_span=4)
+        # carries its bypass routes from its start row down to the row
+        # below its end row, so the prediction must key off the start
+        # row, not ``r - 1``.
+        bypass_by_span: dict[tuple[int, int], float] = {}
+        for upper_start_row in {s.grid_row for s in ending_at_prev}:
+            _, spans = _predicted_bypass_bottom_in_row(graph, upper_start_row)
+            for span, bot in spans.items():
+                if bot > bypass_by_span.get(span, 0.0):
+                    bypass_by_span[span] = bot
+
         # Only consider column-overlapping (upper, lower) pairs for
         # deficit computation: a tall upper-row bbox that lives in a
         # different column from the lower-row content does not need
@@ -3336,6 +3436,20 @@ def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) ->
                 upper_bot = us.bbox_y + us.bbox_h
                 lower_top = ls.bbox_y
                 d = (upper_bot + section_y_gap) - lower_top
+                if d > deficit:
+                    deficit = d
+        # Bypass routes do not need column overlap with the upper-row
+        # endpoint bbox; they only need column overlap with the lower
+        # section they would otherwise crowd against.
+        for (lo, hi), bypass_bot in bypass_by_span.items():
+            for ls in lower:
+                if ls.bbox_h <= 0:
+                    continue
+                ls_lo = ls.grid_col
+                ls_hi = ls.grid_col + ls.grid_col_span - 1
+                if ls_hi < lo or ls_lo > hi:
+                    continue
+                d = (bypass_bot + section_y_gap) - ls.bbox_y
                 if d > deficit:
                     deficit = d
         if deficit <= 0.5:
@@ -4399,8 +4513,20 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
         if not lower or not ending_at_prev:
             continue
         max_above_bot = max(s.bbox_y + s.bbox_h for s in ending_at_prev)
+        # Cross-column bypass routes in the upper rows dip below
+        # intervening bboxes into the inter-row gap.  A bypass keys off
+        # its endpoints' start row, not ``r - 1``, so query each upper-
+        # row start to find the deepest predicted bypass.  Use it as an
+        # additional floor so tightening does not pull the lower row up
+        # into a bypass route.
+        bypass_row_max = 0.0
+        for upper_start_row in {s.grid_row for s in ending_at_prev}:
+            bp, _ = _predicted_bypass_bottom_in_row(graph, upper_start_row)
+            if bp > bypass_row_max:
+                bypass_row_max = bp
+        effective_floor = max(max_above_bot, bypass_row_max)
         current_top = min(s.bbox_y for s in lower)
-        slack = current_top - (max_above_bot + section_y_gap)
+        slack = current_top - (effective_floor + section_y_gap)
         if slack <= 0.5:
             continue
 
