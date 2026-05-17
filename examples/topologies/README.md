@@ -10,6 +10,38 @@ nf-metro render examples/topologies/wide_fan_out.mmd -o /tmp/wide_fan_out.svg
 
 ---
 
+## Structural class index
+
+Each fixture is tagged with the layout class(es) it primarily exercises. Use this table to find a fixture that stresses a specific engine subsystem.
+
+| Fixture | Structural class(es) |
+|---|---|
+| `single_section.mmd` | minimal / no-port edge case |
+| `deep_linear.mmd` | linear chain / fold threshold |
+| `parallel_independent.mmd` | disconnected components / row stacking |
+| `wide_fan_out.mmd` | wide fan-out / junction creation |
+| `wide_fan_in.mmd` | wide fan-in / bundle ordering at L-corners |
+| `fan_in_merge.mmd` | same-line fan-in / merge-junction routing |
+| `multi_input_convergence.mmd` | single-line multi-source convergence |
+| `section_diamond.mmd` | section-level fork-join |
+| `shared_sink_parallel.mmd` | parallel multi-line branches with shared source and sink |
+| `asymmetric_tree.mmd` | unbalanced branching / variable branch depth |
+| `complex_multipath.mmd` | per-line route variation / bundle slot reservation |
+| `multi_line_bundle.mmd` | dense bundle / tall station pills |
+| `mismatched_tracks.mmd` | per-line track mismatch between sections |
+| `mixed_bundle_column.mmd` | mixed-cardinality fan-out into stacked column |
+| `mixed_port_sides.mmd` | multi-side exit ports (RIGHT + BOTTOM) |
+| `upward_bypass.mmd` | tall section bypass (upward gap) |
+| `rnaseq_lite.mmd` | realistic pipeline / TB+LR mix / diamond |
+| `variant_calling.mmd` | realistic pipeline / asymmetric fork-join / 4-way fan-in |
+| `funcprofiler_upstream.mmd` | dense fan-out + fan-in / known almost-horizontal defect |
+| `fold_fan_across.mmd` | fan-in/out across fold boundary / rowspan optimization |
+| `fold_double.mmd` | double-fold serpentine (LR -> RL -> LR) |
+| `fold_stacked_branch.mmd` | stacked branches feeding through fold |
+| `u_turn_fold.mmd` | fold with side line joining mid-trunk and leaving pre-end |
+
+---
+
 ## Simple Topologies
 
 ### Single Section
@@ -137,3 +169,29 @@ A ten-section linear pipeline with two fold points, producing a true serpentine 
 Three stacked analysis sections (RNA, ATAC, Protein) feed into a fold section (Integration) that fans out to two stacked targets (Biological Interpretation, Technical QC) on the return row, converging into a final report. Tests rowspan optimization, fan-out from a TB fold section, and post-fold stacked branching.
 
 ![Fold Stacked Branch](fold_stacked_branch.png)
+
+### U-Turn Fold
+
+Long linear pipeline whose main line wraps via a fold into a return row, with a secondary line joining mid-trunk and exiting before the end. Tests fold rowspan transitions while a partial-coverage line shares the trunk only across a sub-range of sections.
+
+---
+
+## Structural Stress Tests
+
+These fixtures don't appear in the gallery but back the topology validation suite.
+
+### Multi-Input Convergence
+
+Four independent single-station source sections all feeding the same `Merge` station in a sink section, all carrying one shared line. Tests single-line fan-in with sources stacked in a column.
+
+### Shared Sink Parallel
+
+One source feeds three structurally identical parallel branches that all converge into one sink. Every section carries the same 3-line bundle. Tests parallel multi-line trunks sharing a common source and a common sink.
+
+### Mixed Bundle Column
+
+One stacked column contains three siblings of different line counts: a 3-line branch, a 1-line branch, and a 1-line branch, all sourced from the same upstream section and converging at a shared sink. Tests fan-out from a wide bundle into mixed-cardinality siblings in the same grid column.
+
+### Funcprofiler Upstream
+
+Reduced upstream slice of nf-core/funcprofiler with one input section fanning out to seven profiler tools and back into a MultiQC section. Pinned via xfail in `test_no_almost_horizontal_edges` - documents a known almost-horizontal-edge defect in dense fan-out + fan-in topologies.

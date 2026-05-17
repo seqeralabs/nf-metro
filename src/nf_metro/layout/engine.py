@@ -71,10 +71,6 @@ Tests pass ``validate=True`` to catch cross-phase corruption that would
 otherwise only surface as subtle visual defects.
 """
 
-_ICON_HALF: float = 16.0
-"""Half-height of a terminus file icon, used as vertical clearance when
-lifting source stations toward a section's bbox top."""
-
 
 class PhaseInvariantError(Exception):
     """Raised when a layout phase produces invalid intermediate state."""
@@ -97,18 +93,42 @@ def _guard_coordinates_finite(graph: MetroGraph, phase: str) -> None:
 
 
 def _guard_stations_in_sections(graph: MetroGraph, phase: str) -> None:
-    """After Phase 4+: internal stations must be within their section bbox."""
+    """After Phase 4+: rendered station markers (and terminus icons) must
+    be fully within their section bbox.
+
+    Tightened from station-centre containment to marker-edge containment:
+    we expand the station's render-time footprint by ``STATION_RADIUS_APPROX``
+    (regular markers) or ``ICON_HALF_HEIGHT`` (terminus / off-track icons)
+    and require the expanded box to stay inside the section's bbox.  Centre
+    containment alone hides regressions where off-track icons (~16 px half
+    height) spill above the bbox top while still being technically "in" the
+    section.
+    """
     junction_ids = set(graph.junctions)
+    tol = GUARD_TOLERANCE
     for sid, st in graph.stations.items():
         sec = graph.sections.get(st.section_id or "")
         if not sec or st.is_port or sid in junction_ids or sec.bbox_w == 0:
             continue
+        # Off-track inputs and terminus icons render at icon scale; on-track
+        # markers render at station-pill scale.  Use the wider reach so the
+        # guard catches icon spill-over above the bbox top.
+        half_h = (
+            ICON_HALF_HEIGHT
+            if (st.off_track or st.is_terminus)
+            else STATION_RADIUS_APPROX
+        )
+        top = st.y - half_h
+        bottom = st.y + half_h
         if not (
-            sec.bbox_x <= st.x <= sec.bbox_x + sec.bbox_w
-            and sec.bbox_y <= st.y <= sec.bbox_y + sec.bbox_h
+            sec.bbox_x - tol <= st.x <= sec.bbox_x + sec.bbox_w + tol
+            and sec.bbox_y - tol <= top
+            and bottom <= sec.bbox_y + sec.bbox_h + tol
         ):
             raise PhaseInvariantError(
-                f"{phase}: station {sid!r} at ({st.x:.1f}, {st.y:.1f}) "
+                f"{phase}: station {sid!r} marker bbox "
+                f"(x={st.x:.1f}, y={top:.1f}..{bottom:.1f}, "
+                f"half_h={half_h:.1f}) "
                 f"outside section {st.section_id!r} bbox "
                 f"({sec.bbox_x:.1f}, {sec.bbox_y:.1f}, "
                 f"w={sec.bbox_w:.1f}, h={sec.bbox_h:.1f})"
@@ -272,6 +292,314 @@ def _guard_no_line_crosses_non_consumer(graph: MetroGraph, phase: str) -> None:
                         f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
                         f"({pts[k][0]:.1f},{pts[k][1]:.1f})->"
                         f"({pts[k + 1][0]:.1f},{pts[k + 1][1]:.1f})"
+                    )
+
+
+def _guard_row_trunk_cy_consistent(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict | None = None,
+) -> None:
+    """Final-phase: same-row LR sections that share the same line bundle
+    AND whose trunk Y-ranges overlap must render their trunk marker at
+    the same cy within ``GUARD_TOLERANCE``.
+
+    The bundle-overlap filter means same-row sections carrying disjoint
+    line sets (e.g. parallel sub-rows on a row-spanner) don't trigger.
+    """
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    def _section_full_bundle(sec) -> set[str]:
+        port_lines: set[str] = set()
+        has_lr_port = False
+        for pid in list(sec.entry_ports) + list(sec.exit_ports):
+            port = graph.ports.get(pid)
+            if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                continue
+            has_lr_port = True
+            port_lines.update(graph.station_lines(pid))
+        return port_lines if (has_lr_port and port_lines) else set()
+
+    def _section_trunk_info(sec) -> tuple[float, float, float, set[str]] | None:
+        bundle = _section_full_bundle(sec)
+        if not bundle:
+            return None
+        port_ys: list[float] = []
+        for pid in list(sec.entry_ports) + list(sec.exit_ports):
+            pst = graph.stations.get(pid)
+            pport = graph.ports.get(pid)
+            if (
+                pst is not None
+                and pport is not None
+                and pport.side in (PortSide.LEFT, PortSide.RIGHT)
+            ):
+                port_ys.append(pst.y)
+        if not port_ys:
+            return None
+        port_y = port_ys[0]
+        port_set = set(sec.entry_ports) | set(sec.exit_ports)
+        best: tuple[float, float, float, float] | None = None
+        for sid in sec.station_ids:
+            if sid in port_set:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            lines = graph.station_lines(sid)
+            if set(lines) != bundle:
+                continue
+            line_offs = [offsets.get((sid, lid), 0.0) for lid in lines]
+            if not line_offs:
+                continue
+            y_min = st.y + min(line_offs)
+            y_max = st.y + max(line_offs)
+            cy = st.y + (min(line_offs) + max(line_offs)) / 2
+            dist = abs(cy - port_y)
+            if best is None or dist < best[0]:
+                best = (dist, cy, y_min, y_max)
+        if best is None:
+            return None
+        return (best[1], best[2], best[3], bundle)
+
+    rows: dict[int, list] = {}
+    for sec in graph.sections.values():
+        if (
+            sec.bbox_h <= 0
+            or sec.grid_row < 0
+            or sec.direction not in ("LR", "RL")
+            or sec.grid_row_span > 1
+        ):
+            continue
+        rows.setdefault(sec.grid_row, []).append(sec)
+
+    for row, sections in rows.items():
+        info: dict[str, tuple[float, float, float, set[str]]] = {}
+        for sec in sections:
+            t = _section_trunk_info(sec)
+            if t is not None:
+                info[sec.id] = t
+        if len(info) < 2:
+            continue
+        parent = {sid: sid for sid in info}
+
+        def _find(x: str) -> str:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        ids = list(info)
+        for i, a in enumerate(ids):
+            cy_a, lo_a, hi_a, bun_a = info[a]
+            for b in ids[i + 1 :]:
+                cy_b, lo_b, hi_b, bun_b = info[b]
+                bands_overlap = min(hi_a, hi_b) - max(lo_a, lo_b) >= -GUARD_TOLERANCE
+                if bands_overlap and bun_a == bun_b:
+                    ra, rb = _find(a), _find(b)
+                    if ra != rb:
+                        parent[ra] = rb
+
+        groups: dict[str, list[str]] = {}
+        for sid in ids:
+            groups.setdefault(_find(sid), []).append(sid)
+
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            anchor = members[0]
+            anchor_cy = info[anchor][0]
+            for sid in members[1:]:
+                cy = info[sid][0]
+                if abs(cy - anchor_cy) > GUARD_TOLERANCE:
+                    raise PhaseInvariantError(
+                        f"{phase}: row {row} trunk cy drift: "
+                        f"section {sid!r} cy={cy:.1f} vs "
+                        f"section {anchor!r} cy={anchor_cy:.1f}"
+                    )
+
+
+def _guard_inter_section_routes_in_row_band(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict | None = None,
+    routes: list | None = None,
+) -> None:
+    """After routing: inter-section routes whose endpoints both sit in
+    grid row R must keep all waypoint Ys within a one-row band centered
+    on R, plus ``Y_SPACING`` slack for diagonal corner approach.
+    """
+    if offsets is None or routes is None:
+        from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+        if offsets is None:
+            offsets = compute_station_offsets(graph)
+        if routes is None:
+            routes = route_edges(graph, station_offsets=offsets)
+
+    row_band: dict[int, tuple[float, float]] = {}
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0 or sec.grid_row_span != 1:
+            continue
+        cur = row_band.get(sec.grid_row)
+        top = sec.bbox_y
+        bot = sec.bbox_y + sec.bbox_h
+        if cur is None:
+            row_band[sec.grid_row] = (top, bot)
+        else:
+            row_band[sec.grid_row] = (min(cur[0], top), max(cur[1], bot))
+
+    slack = Y_SPACING
+    for r in routes:
+        src = graph.stations.get(r.edge.source)
+        tgt = graph.stations.get(r.edge.target)
+        if src is None or tgt is None:
+            continue
+        if src.section_id is None or tgt.section_id is None:
+            continue
+        if src.section_id == tgt.section_id:
+            continue
+        sec_a = graph.sections.get(src.section_id)
+        sec_b = graph.sections.get(tgt.section_id)
+        if sec_a is None or sec_b is None:
+            continue
+        if sec_a.grid_row != sec_b.grid_row:
+            continue
+        if sec_a.grid_row_span != 1 or sec_b.grid_row_span != 1:
+            continue
+        band = row_band.get(sec_a.grid_row)
+        if band is None:
+            continue
+        lo, hi = band[0] - slack, band[1] + slack
+        for _x, y in r.points:
+            if y < lo or y > hi:
+                raise PhaseInvariantError(
+                    f"{phase}: route {r.edge.source!r}->{r.edge.target!r} "
+                    f"line {r.line_id!r} waypoint y={y:.1f} outside "
+                    f"row-{sec_a.grid_row} band [{lo:.1f}..{hi:.1f}]"
+                )
+
+
+def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> None:
+    """After Phase 11 and final: off-track input stations must sit at
+    least ``GUARD_TOLERANCE`` above (smaller Y than) their on-track
+    consumer.
+    """
+    junction_ids = set(graph.junctions)
+    consumer_of: dict[str, str] = {}
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if (
+            src is None
+            or tgt is None
+            or not src.off_track
+            or src.is_port
+            or src.id in junction_ids
+            or tgt.is_port
+            or tgt.id in junction_ids
+            or tgt.off_track
+        ):
+            continue
+        consumer_of.setdefault(src.id, tgt.id)
+
+    for off_id, consumer_id in consumer_of.items():
+        off_st = graph.stations.get(off_id)
+        cons_st = graph.stations.get(consumer_id)
+        if off_st is None or cons_st is None:
+            continue
+        if not (off_st.y < cons_st.y - GUARD_TOLERANCE):
+            raise PhaseInvariantError(
+                f"{phase}: off-track {off_id!r} y={off_st.y:.1f} "
+                f"not above consumer {consumer_id!r} y={cons_st.y:.1f}"
+            )
+
+
+def is_loop_side_branch_station(
+    graph: MetroGraph,
+    sid: str,
+    in_by_tgt: dict[str, list],
+    out_by_src: dict[str, list],
+) -> bool:
+    """Mirror ``_recenter_loop_side_stations``'s precondition: a station
+    with exactly one in-edge and one out-edge, whose predecessor and
+    successor share Y, sitting off the trunk Y between them in X.
+
+    The engine moves such stations to the midpoint of their loop's
+    diagonal corners; that move legitimately decouples their X from the
+    section's column grid, so column-X consistency checks must exempt
+    them.  Both ``_guard_station_x_column_drift`` here and the
+    ``test_station_x_within_column_tolerance`` invariant call this.
+    """
+    st = graph.stations.get(sid)
+    if st is None:
+        return False
+    ins = in_by_tgt.get(sid, [])
+    outs = out_by_src.get(sid, [])
+    if len(ins) != 1 or len(outs) != 1:
+        return False
+    src = graph.stations.get(ins[0].source)
+    tgt = graph.stations.get(outs[0].target)
+    if src is None or tgt is None:
+        return False
+    if abs(src.y - tgt.y) > 0.5:
+        return False
+    if abs(st.y - src.y) < 0.5:
+        return False
+    if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
+        return False
+    return True
+
+
+def _guard_station_x_column_drift(graph: MetroGraph, phase: str) -> None:
+    """Final-phase: within each LR/RL section, stations sharing a layer
+    must agree on X within one ``X_SPACING`` of the layer's median X.
+
+    Excludes loop-side-branch stations: ``_recenter_loop_side_stations``
+    deliberately moves single in/out stations whose endpoints share Y to
+    the midpoint of their loop's diagonal corners, legitimately decoupling
+    their X from the column grid.
+    """
+    import statistics
+
+    in_by_tgt: dict[str, list] = {}
+    out_by_src: dict[str, list] = {}
+    for e in graph.edges:
+        in_by_tgt.setdefault(e.target, []).append(e)
+        out_by_src.setdefault(e.source, []).append(e)
+
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0 or sec.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(sec.entry_ports) | set(sec.exit_ports)
+        layer_xs: dict[int, list[tuple[str, float]]] = {}
+        for sid in sec.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            if st.off_track:
+                continue
+            if is_loop_side_branch_station(graph, sid, in_by_tgt, out_by_src):
+                continue
+            layer_xs.setdefault(st.layer, []).append((sid, st.x))
+        for layer, members in layer_xs.items():
+            if len(members) < 2:
+                continue
+            xs = [x for _, x in members]
+            median_x = statistics.median(xs)
+            for sid, x in members:
+                if abs(x - median_x) > X_SPACING:
+                    raise PhaseInvariantError(
+                        f"{phase}: section {sec.id!r} layer {layer} "
+                        f"{sid!r} x={x:.1f} drifts "
+                        f"{abs(x - median_x):.1f} > X_SPACING={X_SPACING:.1f} "
+                        f"from median={median_x:.1f}"
                     )
 
 
@@ -813,12 +1141,23 @@ def _compute_section_layout(
     _pad_stacked_captioned_file_icons(graph, y_spacing, section_y_padding)
 
     if validate:
-        _guard_coordinates_finite(graph, "after Phase 12 (final)")
-        _guard_section_bboxes_positive(graph, "after Phase 12 (final)")
-        _guard_stations_in_sections(graph, "after Phase 12 (final)")
-        _guard_ports_on_boundaries(graph, "after Phase 12 (final)")
-        _guard_no_station_overlap(graph, "after Phase 12 (final)")
-        _guard_no_line_crosses_non_consumer(graph, "after Phase 12 (final)")
+        from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+        phase = "after Phase 12 (final)"
+        offsets = compute_station_offsets(graph)
+        routes = route_edges(graph, station_offsets=offsets)
+        _guard_coordinates_finite(graph, phase)
+        _guard_section_bboxes_positive(graph, phase)
+        _guard_stations_in_sections(graph, phase)
+        _guard_ports_on_boundaries(graph, phase)
+        _guard_no_station_overlap(graph, phase)
+        _guard_no_line_crosses_non_consumer(graph, phase)
+        _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
+        _guard_off_track_inputs_above_consumer(graph, phase)
+        _guard_station_x_column_drift(graph, phase)
+        _guard_inter_section_routes_in_row_band(
+            graph, phase, offsets=offsets, routes=routes
+        )
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
@@ -1927,7 +2266,7 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         # Reserve icon_half when any source renders as a file icon so the
         # icon's vertical extent stays inside the bbox.
         any_terminus = any(graph.stations[s].is_terminus for s in sources)
-        top_margin = y_spacing / 4 + (_ICON_HALF if any_terminus else 0.0)
+        top_margin = y_spacing / 4 + (ICON_HALF_HEIGHT if any_terminus else 0.0)
         slack = trunk_y - section.bbox_y - top_margin
         slots = int((slack + 0.5) // y_spacing)
         if slots < 1:

@@ -1,0 +1,31 @@
+%%metro title: Multi-Input Convergence
+%%metro style: dark
+%%metro line: main | Main | #2db572
+
+graph LR
+    subgraph src_a [Source A]
+        a1[Step A]
+    end
+
+    subgraph src_b [Source B]
+        b1[Step B]
+    end
+
+    subgraph src_c [Source C]
+        c1[Step C]
+    end
+
+    subgraph src_d [Source D]
+        d1[Step D]
+    end
+
+    subgraph sink [Sink]
+        merge[Merge]
+        report[Report]
+        merge -->|main| report
+    end
+
+    a1 -->|main| merge
+    b1 -->|main| merge
+    c1 -->|main| merge
+    d1 -->|main| merge

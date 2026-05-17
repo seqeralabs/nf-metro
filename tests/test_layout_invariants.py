@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.engine import compute_layout, is_loop_side_branch_station
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, PortSide
@@ -2504,7 +2504,15 @@ def test_section_entry_hub_on_grid(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+# Fixtures known to fail ``test_inter_section_route_y_stays_within_row_band``
+# because a same-row inter-section route dips outside its row band.
+_XFAIL_ROW_BAND: dict[str, str] = {}
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_ROW_BAND),
+)
 def test_inter_section_route_y_stays_within_row_band(fixture):
     """Inter-section routes whose endpoints both sit in grid row R must
     keep all waypoint Ys within a one-row vertical band centered on R.
@@ -2661,6 +2669,84 @@ def test_grid_snap_does_not_mutate_x(fixture):
             continue
         if abs(st1.x - st2.x) > 0.5:
             offenders.append(f"{sid!r} run1.x={st1.x:.2f} != run2.x={st2.x:.2f}")
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
+
+
+# ---------------------------------------------------------------------------
+# Station X stays within column tolerance
+# ---------------------------------------------------------------------------
+
+
+# All fixtures pass with the median-column-X tolerance once
+# loop-side-branch stations (which the engine deliberately moves to the
+# midpoint of their loop's diagonal corners) are excluded.  The
+# placeholder dict locks in the invariant so a future bug-fix that
+# accidentally drifts a station off-column lights up here.
+_XFAIL_COL_DRIFT: dict[str, str] = {}
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_COL_DRIFT),
+)
+def test_station_x_within_column_tolerance(fixture):
+    """For each LR/RL section, every (non-loop-side-branch) station at
+    layer L must sit within ``x_spacing`` of the median X of all
+    (non-loop-side-branch) stations at the same layer in the same
+    section.
+
+    The median acts as the section's implicit "column X" for layer L,
+    after fan-out spacing has been applied.  A station drifting more
+    than one full x_spacing off its column indicates either an X-mutating
+    phase regression or a new topology case that the engine handles
+    incorrectly.
+
+    Loop-side-branch stations (matched by
+    ``_recenter_loop_side_stations``'s precondition) are exempted: the
+    engine deliberately moves them to the midpoint of their loop's
+    diagonal corners.  See ``is_loop_side_branch_station``.
+    """
+    import statistics
+
+    from nf_metro.layout.constants import X_SPACING
+
+    x_spacing = X_SPACING
+    graph = _layout(fixture, x_spacing=x_spacing)
+    in_by_tgt: dict[str, list] = defaultdict(list)
+    out_by_src: dict[str, list] = defaultdict(list)
+    for e in graph.edges:
+        in_by_tgt[e.target].append(e)
+        out_by_src[e.source].append(e)
+
+    offenders: list[str] = []
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0 or sec.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(sec.entry_ports) | set(sec.exit_ports)
+        layer_xs: dict[int, list[tuple[str, float]]] = defaultdict(list)
+        for sid in sec.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            if st.off_track:
+                continue
+            if is_loop_side_branch_station(graph, sid, in_by_tgt, out_by_src):
+                continue
+            layer_xs[st.layer].append((sid, st.x))
+        for layer, members in layer_xs.items():
+            if len(members) < 2:
+                continue
+            xs = [x for _, x in members]
+            median_x = statistics.median(xs)
+            for sid, x in members:
+                if abs(x - median_x) > x_spacing:
+                    offenders.append(
+                        f"section={sec.id!r} layer={layer} {sid!r} "
+                        f"x={x:.1f} median={median_x:.1f} "
+                        f"drift={abs(x - median_x):.1f} > x_spacing={x_spacing:.1f}"
+                    )
     assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
 
 

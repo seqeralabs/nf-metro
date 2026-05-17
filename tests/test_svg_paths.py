@@ -22,8 +22,8 @@ from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.svg import apply_route_offsets, render_svg
 from nf_metro.themes import NFCORE_THEME
 
-TOPOLOGIES_DIR = Path(__file__).parent / "fixtures" / "topologies"
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
+TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
 
 # Tolerance for floating-point coordinate comparison
 COORD_EPS = 0.5
