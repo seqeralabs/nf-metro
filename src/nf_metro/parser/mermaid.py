@@ -1122,8 +1122,6 @@ def _insert_merge_junctions(graph: MetroGraph) -> None:
 
     # Apply edge rewrites
     kept = [
-        e
-        for e in graph.edges
-        if (e.source, e.target, e.line_id) not in edges_to_remove
+        e for e in graph.edges if (e.source, e.target, e.line_id) not in edges_to_remove
     ]
     graph.replace_edges(kept + new_edges)

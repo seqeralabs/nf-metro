@@ -343,9 +343,7 @@ def bypass_bottom_y(
         for s in graph.sections.values()
         if s.bbox_w > 0 and lo < s.grid_col < hi and _in_row(s)
     ]
-    max_intervening = max(
-        (s.bbox_y + s.bbox_h for s in intervening), default=0.0
-    )
+    max_intervening = max((s.bbox_y + s.bbox_h for s in intervening), default=0.0)
 
     if max_intervening > 0:
         candidate = max_intervening + clearance
