@@ -147,6 +147,7 @@ def _position_legend(
     logo_in_legend: bool,
     logo_w: float,
     logo_h: float,
+    legend_position: str,
 ) -> tuple[float, float, float, float, bool]:
     """Compute legend position and dimensions.
 
@@ -156,14 +157,14 @@ def _position_legend(
     legend_w, legend_h = compute_legend_dimensions(
         graph, theme, logo_size=legend_logo_size
     )
-    show_legend = graph.legend_position != "none" and legend_w > 0
+    show_legend = legend_position != "none" and legend_w > 0
     legend_x = 0.0
     legend_y = 0.0
 
     if not show_legend:
         return legend_x, legend_y, legend_w, legend_h, show_legend
 
-    pos = graph.legend_position
+    pos = legend_position
     gap = LEGEND_GAP
     inset = LEGEND_INSET
     content_left = min(
@@ -288,10 +289,19 @@ def render_svg(
     padding: float = CANVAS_PADDING,
     animate: bool = False,
     debug: bool = False,
+    legend_position: str | None = None,
 ) -> str:
-    """Render a metro map graph to an SVG string."""
+    """Render a metro map graph to an SVG string.
+
+    If ``legend_position`` is given it overrides ``graph.legend_position``
+    for this render only, without mutating the graph.
+    """
     if not graph.stations:
         return '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
+
+    effective_legend_position = (
+        legend_position if legend_position is not None else graph.legend_position
+    )
 
     station_offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=station_offsets)
@@ -314,11 +324,12 @@ def render_svg(
     if show_logo:
         logo_w, logo_h = compute_logo_dimensions(graph.logo_path)
 
-    logo_in_legend = show_logo and graph.legend_position != "none"
+    logo_in_legend = show_logo and effective_legend_position != "none"
     legend_logo_size = (logo_w, logo_h) if logo_in_legend else None
 
     legend_x, legend_y, legend_w, legend_h, show_legend = _position_legend(
-        graph, theme, max_x, max_y, padding, logo_in_legend, logo_w, logo_h
+        graph, theme, max_x, max_y, padding, logo_in_legend, logo_w, logo_h,
+        effective_legend_position,
     )
 
     if show_legend:
