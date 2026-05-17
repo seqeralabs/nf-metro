@@ -2779,6 +2779,197 @@ def test_station_x_within_column_tolerance(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Label X anchored to station marker on horizontal runs (issue #348)
+# ---------------------------------------------------------------------------
+
+_SV_STATS_NUDGE_REASON = (
+    "issue #348: sv_stats label nudged 14.1px to clear bcftools_stats "
+    "label collision; revisit when the engine collision-clearance is "
+    "tuned or the section is restructured"
+)
+_XFAIL_LABEL_AT_STATION_X: dict[str, str] = {
+    "variantbenchmarking.mmd": _SV_STATS_NUDGE_REASON,
+    "variantbenchmarking_auto.mmd": _SV_STATS_NUDGE_REASON,
+}
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_LABEL_AT_STATION_X),
+)
+def test_label_x_anchored_to_station_marker_on_horizontal_runs(fixture):
+    """For non-port, non-junction, non-off-track LR/RL stations whose
+    immediate inbound and outbound route segments are horizontal at the
+    station's Y, the label X must equal the station's marker X within
+    ``LABEL_DRIFT_TOL`` (10 px).
+
+    ``place_labels`` defaults ``label.x = station.x`` for these stations;
+    the only documented exception is the collision-avoidance nudge in
+    ``_nudge_to_clear``, capped at ``LABEL_NUDGE_MAX`` (20 px).  10 px is
+    half that cap and the empirical visual perception threshold: nudges
+    smaller than this look centred to a human reader, larger ones look
+    visibly off-centre.
+
+    Replaces the removed ``test_label_x_matches_segment_midpoint_on_horizontal_runs``
+    predicate (issue #348), which anchored against bracketing neighbour
+    station Xs and fired on 25 fixtures where the visual was actually
+    centred.  The new predicate fires only on labels that have drifted
+    visibly from their station marker.
+    """
+    from nf_metro.layout.labels import place_labels
+
+    Y_TOL = 1.0
+    LABEL_DRIFT_TOL = 10.0
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    labels = place_labels(graph, station_offsets=offsets)
+    label_by_sid = {lp.station_id: lp for lp in labels}
+
+    in_routes: dict[str, list] = defaultdict(list)
+    out_routes: dict[str, list] = defaultdict(list)
+    for r in routes:
+        in_routes[r.edge.target].append(r)
+        out_routes[r.edge.source].append(r)
+
+    offenders: list[str] = []
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or sid in graph.junctions:
+            continue
+        if st.off_track:
+            continue
+        sec = graph.sections.get(st.section_id) if st.section_id else None
+        if sec is None or sec.direction not in ("LR", "RL"):
+            continue
+        lp = label_by_sid.get(sid)
+        if lp is None or lp.text_anchor != "middle":
+            # TB-style side anchors place labels at pill_left/pill_right
+            # by construction; only middle-anchored labels are expected
+            # to sit at the marker X.
+            continue
+        ins = in_routes.get(sid, [])
+        outs = out_routes.get(sid, [])
+        if not ins or not outs:
+            continue
+        in_horizontal = all(
+            len(r.points) >= 2
+            and abs(r.points[-2][1] - r.points[-1][1]) <= Y_TOL
+            and abs(r.points[-1][1] - st.y) <= Y_TOL
+            for r in ins
+        )
+        if not in_horizontal:
+            continue
+        out_horizontal = all(
+            len(r.points) >= 2
+            and abs(r.points[0][1] - r.points[1][1]) <= Y_TOL
+            and abs(r.points[0][1] - st.y) <= Y_TOL
+            for r in outs
+        )
+        if not out_horizontal:
+            continue
+        drift = abs(lp.x - st.x)
+        if drift > LABEL_DRIFT_TOL:
+            offenders.append(
+                f"{sid!r} label.x={lp.x:.1f} station.x={st.x:.1f} drift={drift:.1f}"
+            )
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
+
+
+# ---------------------------------------------------------------------------
+# Visual stack stations share their column X (issue #348)
+# ---------------------------------------------------------------------------
+
+_XFAIL_VISUAL_STACK: dict[str, str] = {
+    "differentialabundance_default.mmd": (
+        "issue #348: gprofiler2 aligns with upstream input layer rather "
+        "than visual stack-mate grea below it; revisit when stack "
+        "alignment vs upstream alignment is decided"
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_VISUAL_STACK),
+)
+def test_visual_stack_station_xs_share_column(fixture):
+    """Stations forming a visual stack must agree in X within 1 px.
+
+    A visual stack is a group of stations in the same section sharing
+    predecessor set, successor set, and layer, where at least one pair
+    sits 0 < ΔY <= ``STACK_Y_WINDOW`` (2 * Y_SPACING = 80 px) apart.
+
+    The Y-window distinguishes visually-stacked stations (close enough
+    in Y that a viewer reads them as a column) from:
+
+    - Side-by-side layouts (ΔY = 0): topological siblings in TB/BT
+      sections are spread along X within their layer; X disagreement
+      is intentional, not a stack regression.
+
+    - Far-spread groups (ΔY > 80): topologically-similar stations the
+      engine deliberately placed in different visual "bands" of the
+      section.  Their X disagreement reads as independent placement,
+      not as a misaligned stack.
+
+    Replaces the removed ``test_stack_station_xs_share_column`` predicate
+    (issue #348), which used the bare (preds, succs, layer) signature
+    and fired on 4 fixtures where the topological-stack-mate framing
+    didn't match the visual outcome.
+    """
+    from nf_metro.layout.constants import Y_SPACING
+
+    STACK_Y_WINDOW = 2.0 * Y_SPACING
+    X_TOL = 1.0
+
+    graph = _layout(fixture)
+    preds: dict[str, set[str]] = defaultdict(set)
+    succs: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        preds[e.target].add(e.source)
+        succs[e.source].add(e.target)
+
+    offenders: list[str] = []
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0:
+            continue
+        port_ids = set(sec.entry_ports) | set(sec.exit_ports)
+        groups: dict[tuple[frozenset[str], frozenset[str], int], list[str]] = (
+            defaultdict(list)
+        )
+        for sid in sec.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden:
+                continue
+            key = (frozenset(preds[sid]), frozenset(succs[sid]), st.layer)
+            groups[key].append(sid)
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            xs = [graph.stations[s].x for s in members]
+            ys = [graph.stations[s].y for s in members]
+            x_drift = max(xs) - min(xs)
+            if x_drift <= X_TOL:
+                continue
+            visual_stack = any(
+                0 < abs(ys[i] - ys[j]) <= STACK_Y_WINDOW
+                for i in range(len(members))
+                for j in range(i + 1, len(members))
+            )
+            if not visual_stack:
+                continue
+            rounded_xs = [round(x, 1) for x in xs]
+            rounded_ys = [round(y, 1) for y in ys]
+            offenders.append(
+                f"section={sec.id!r} stack {members} xs={rounded_xs} "
+                f"ys={rounded_ys} dx={x_drift:.1f}"
+            )
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
+
+
+# ---------------------------------------------------------------------------
 # LR routes do not go backwards (#250)
 # ---------------------------------------------------------------------------
 
