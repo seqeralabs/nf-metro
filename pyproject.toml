@@ -23,6 +23,7 @@ classifiers = [
 dependencies = [
     "click>=8.0",
     "drawsvg>=2.0",
+    "kiwisolver>=1.4",
     "networkx>=3.0",
     "pillow>=9.0",
 ]

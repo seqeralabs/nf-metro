@@ -734,6 +734,13 @@ def compute_layout(
         validate=validate,
     )
 
+    # SPIKE (issue #345): unconditional constraint-solver post-pass.
+    # Branch-only experiment to drive a render diff for the writeup.
+    # Not for merge - see docs/constraint-solver-spike.md.
+    from nf_metro.layout.constraint_spike import apply_constraint_solver
+
+    apply_constraint_solver(graph, y_spacing)
+
 
 def _compute_flat_layout(
     graph: MetroGraph,
