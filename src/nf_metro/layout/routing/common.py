@@ -10,6 +10,7 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
     DEFAULT_LINE_PRIORITY,
+    HEADER_CLEARANCE,
     SECTION_HEADER_PROTRUSION,
 )
 from nf_metro.parser.model import Edge, MetroGraph, Section
@@ -359,17 +360,20 @@ def bypass_bottom_y(
         else:
             return clearance
 
-    # When row-filtering is active, the candidate may land in the
-    # inter-row gap too close to a section header in another row.
-    # The header (number badge + label) extends ~26px above bbox_y.
-    # Cap the bypass at the midpoint of the gap to keep equal spacing.
+    # Keep the bypass at least HEADER_CLEARANCE above any different-row
+    # section header_top; the stacked-line bundle otherwise crowds the
+    # badge.  Midpoint fallback for inter-row gaps too tight to satisfy
+    # both clearances (layout placement should normally prevent this).
     if src_row is not None:
         for s in graph.sections.values():
             if s.bbox_w > 0 and lo <= s.grid_col <= hi and s.grid_row != src_row:
                 header_top = s.bbox_y - SECTION_HEADER_PROTRUSION
-                if candidate > header_top:
-                    # Place bypass at midpoint between row bottom and header top
-                    row_bottom = candidate - clearance
-                    candidate = (row_bottom + header_top) / 2
+                row_bottom = candidate - clearance
+                safe_cap = header_top - HEADER_CLEARANCE
+                if candidate > safe_cap:
+                    if safe_cap >= row_bottom:
+                        candidate = safe_cap
+                    else:
+                        candidate = (row_bottom + header_top) / 2
 
     return candidate

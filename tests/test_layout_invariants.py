@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.constants import SECTION_Y_GAP
+from nf_metro.layout.constants import SECTION_HEADER_PROTRUSION, SECTION_Y_GAP
 from nf_metro.layout.engine import compute_layout, is_loop_side_branch_station
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -2471,6 +2471,74 @@ def test_bypass_clearance_from_lower_section(fixture):
                 f"effective_bot={effective_bot:.1f}, gap={gap:.1f} "
                 f"< SECTION_Y_GAP={SECTION_Y_GAP}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Inter-section routed paths must clear next-row section headers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_routed_paths_clear_next_row_headers(fixture):
+    """Every horizontal-or-near-horizontal segment of an inter-section
+    routed path must stay clear of any next-row section header.
+
+    Bypass routes (cross-column edges with intervening same-row sections)
+    dip into the inter-row gap below the intervening bbox bottom.  When
+    the next row's section header (number badge + label) protrudes
+    ``SECTION_HEADER_PROTRUSION`` above its bbox, an inter-row routed
+    segment passing through the same column range can visually crowd the
+    badge.  The section-placement-side ``_predicted_bypass_bottom_in_row``
+    floor exists specifically to keep these from colliding.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    # Collect (header_top_y, x_lo, x_hi, section_id) for every section
+    # whose header could be crowded from above.
+    headers: list[tuple[float, float, float, str]] = []
+    for sid, sec in graph.sections.items():
+        if sec.bbox_h <= 0 or sec.bbox_w <= 0:
+            continue
+        header_top = sec.bbox_y - SECTION_HEADER_PROTRUSION
+        headers.append((header_top, sec.bbox_x, sec.bbox_x + sec.bbox_w, sid))
+
+    # Must exceed the stacked-bundle half-width (~6px for 4 lines at
+    # OFFSET_STEP=3) while staying under TOP-entry channel routes that
+    # legitimately sit ~14px above the badge.
+    min_clearance = 12.0
+    h_axis_tol = 2.0
+    for r in routes:
+        if not r.is_inter_section:
+            continue
+        pts = r.points
+        if len(pts) < 2:
+            continue
+        for i in range(len(pts) - 1):
+            x1, y1 = pts[i]
+            x2, y2 = pts[i + 1]
+            if abs(y2 - y1) > h_axis_tol:
+                continue
+            seg_y = (y1 + y2) / 2
+            seg_x_lo = min(x1, x2)
+            seg_x_hi = max(x1, x2)
+            for header_top, hx_lo, hx_hi, hsid in headers:
+                if seg_x_hi <= hx_lo or seg_x_lo >= hx_hi:
+                    continue
+                # Only consider headers strictly below this segment.
+                if header_top <= seg_y:
+                    continue
+                gap = header_top - seg_y
+                assert gap + 0.5 >= min_clearance, (
+                    f"{fixture}: inter-section routed segment "
+                    f"({x1:.1f},{y1:.1f})->({x2:.1f},{y2:.1f}) "
+                    f"of edge {r.edge.source!r}->{r.edge.target!r} "
+                    f"sits {gap:.1f}px above header of section "
+                    f"{hsid!r} (header_top={header_top:.1f}), "
+                    f"below required clearance "
+                    f"{min_clearance:.1f}px"
+                )
 
 
 # ---------------------------------------------------------------------------
