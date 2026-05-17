@@ -169,6 +169,48 @@ def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> None:
+    """Final phase: column-overlapping adjacent-row section pairs must
+    keep at least ``section_y_gap`` between the upper section's bbox
+    bottom and the lower section's bbox top.
+
+    Sections that don't share horizontal extent are unconstrained --
+    their vertical proximity has no visual impact.
+    """
+    tol = 0.5
+    sections_by_row_start: dict[int, list[tuple[str, Section]]] = defaultdict(list)
+    for sid, sec in graph.sections.items():
+        if sec.bbox_w <= 0 or sec.bbox_h <= 0:
+            continue
+        sections_by_row_start[sec.grid_row].append((sid, sec))
+    if not sections_by_row_start:
+        return
+
+    deepest: tuple[float, float, str, str] | None = None
+    for usid, us in graph.sections.items():
+        if us.bbox_w <= 0 or us.bbox_h <= 0:
+            continue
+        next_row = us.grid_row + us.grid_row_span
+        for lsid, ls in sections_by_row_start.get(next_row, []):
+            if not (
+                us.bbox_x < ls.bbox_x + ls.bbox_w and ls.bbox_x < us.bbox_x + us.bbox_w
+            ):
+                continue
+            gap = ls.bbox_y - (us.bbox_y + us.bbox_h)
+            deficit = section_y_gap - gap
+            if deficit > tol and (deepest is None or deficit > deepest[0]):
+                deepest = (deficit, gap, usid, lsid)
+    if deepest is None:
+        return
+    deficit, gap, usid, lsid = deepest
+    raise PhaseInvariantError(
+        f"{phase}: row gap below required: sections {usid!r} (bottom) "
+        f"and {lsid!r} (top) overlap horizontally and are {gap:.1f}px "
+        f"apart, expected >= {section_y_gap:.1f}px "
+        f"(deficit {deficit:.1f}px)"
+    )
+
+
 def _station_marker_bbox(
     graph: MetroGraph,
     sid: str,
@@ -1368,6 +1410,7 @@ def _compute_section_layout(
         offsets, routes = _run_phase13_guards(graph, phase)
         _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
         _guard_off_track_inputs_above_consumer(graph, phase)
+        _guard_row_gaps(graph, phase, section_y_gap=section_y_gap)
         if routes is not None:
             _guard_inter_section_routes_in_row_band(
                 graph, phase, offsets=offsets, routes=routes

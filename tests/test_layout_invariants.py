@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from nf_metro.layout.constants import SECTION_Y_GAP
 from nf_metro.layout.engine import compute_layout, is_loop_side_branch_station
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -940,6 +941,38 @@ def test_section_bbox_contains_all_content(fixture, params):
                 f"Section {sec_id}: station {sid} bottom={bot} "
                 f"(y={st.y}, half={half}) overflows bbox bottom "
                 f"y={section.bbox_y + section.bbox_h}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Adjacent-row sections that overlap horizontally must keep the configured
+# section_y_gap between upper bbox bottom and lower bbox top
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_row_gap_between_adjacent_rows(fixture):
+    """For every section pair in adjacent grid rows that share horizontal
+    extent, the bbox-to-bbox vertical gap must be at least
+    ``SECTION_Y_GAP``.
+    """
+    graph = _layout(fixture)
+    for usid, us in graph.sections.items():
+        if us.bbox_w <= 0 or us.bbox_h <= 0:
+            continue
+        next_row = us.grid_row + us.grid_row_span
+        for lsid, ls in graph.sections.items():
+            if ls.bbox_w <= 0 or ls.bbox_h <= 0 or ls.grid_row != next_row:
+                continue
+            if not (
+                us.bbox_x < ls.bbox_x + ls.bbox_w and ls.bbox_x < us.bbox_x + us.bbox_w
+            ):
+                continue
+            gap = ls.bbox_y - (us.bbox_y + us.bbox_h)
+            assert gap >= SECTION_Y_GAP - 0.5, (
+                f"row gap below required: {usid!r} (bottom) and {lsid!r} "
+                f"(top) overlap horizontally and are {gap:.1f}px apart, "
+                f"expected >= {SECTION_Y_GAP:.1f}px"
             )
 
 
