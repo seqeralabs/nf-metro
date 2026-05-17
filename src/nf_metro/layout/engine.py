@@ -945,22 +945,32 @@ def _compute_section_layout(
     See ``CONTRACT.md`` for each phase's pre/postconditions; this
     docstring is a quick map of the pipeline's structure.
 
-    Phase 1: Parse & partition (already done by parser)
-    Phase 2: Internal section layout (per section, real stations only)
-    Phase 2.5: Align Y grids across same-row, same-direction sections
-    Phase 3: Section placement (meta-graph)
-    Phase 3a: Renumber sections by visual reading order
-    Phase 3b: Adapt x/y_offset for left/top overshoot
-    Phase 4: Global coordinate mapping
+    Phase 1 (parse & partition) is already done by the parser.  The
+    pipeline below splits into six stages.  Stages 1-2 leave content in
+    local coordinates and then translate to canvas coordinates; Stages
+    3-4 are Pass A and Pass B (port positioning and refinement on a
+    fixed station layout); Stages 5-6 are Pass C, split into the
+    junction + off-track-lift block and the long vertical-settling /
+    finishing block.
 
-    Pass A - Port initialisation & section geometry:
+    Stage 1 - Section construction (local coords):
+      Phase 2:   Internal section layout (per section, real stations only)
+      Phase 2.5: Align Y grids across same-row, same-direction sections
+      Phase 3:   Section placement (meta-graph)
+      Phase 3a:  Renumber sections by visual reading order
+      Phase 3b:  Adapt x/y_offset for left/top overshoot
+
+    Stage 2 - Globalise (local -> global coords):
+      Phase 4:   Translate stations and bboxes to canvas coordinates
+
+    Stage 3 - Pass A: Port initialisation & section geometry:
       Phase 5:  Port positioning on section boundaries
       Phase 6:  Align entry ports to incoming source Y/X
       Phase 7:  Shift LR/RL perp-entry internal stations (X only)
       Phase 8:  Align fold-section exit ports (may push target sections)
       Phase 9:  Top-align sections within each grid row
 
-    Pass B - Downstream alignment & trunk-Y consolidation:
+    Stage 4 - Pass B: Downstream alignment & trunk-Y consolidation:
       Phase 10:  Align exit-entry port pairs to downstream stations
       Phase 10b: Snap sole-layer stations to port Y
       Phase 10c: Snap grid-group entry ports to first-station Y
@@ -975,12 +985,14 @@ def _compute_section_layout(
       Phase 11da: Redistribute full-bundle columns around trunk
                   (center_ports only)
 
-    Pass C - Junction positioning & Phase 13 finalisation:
+    Stage 5 - Pass C: Junctions & off-track lift:
       Phase 12:    Position junction stations in inter-section gaps
       Phase 13:    Lift off-track stations above section's top track
       Phase 13a:   Re-align bbox tops within each row (bbox-only)
       Phase 13b:   Compact row content to bbox top
       Phase 13c:   Snap inter-section LR/RL port pairs + re-position junctions
+
+    Stage 6 - Pass C: Vertical settling & finishing:
       Phase 13d:   Fan free content upward
       Phase 13d2:  Fan source inputs upward
       Phase 13d3:  Half-grid 2-branch symfan (center_ports only)
@@ -1000,6 +1012,11 @@ def _compute_section_layout(
       Phase 13m:   Pad stacked captioned file icons
     """
     from nf_metro.layout.section_placement import place_sections, position_ports
+
+    # ---- Stage 1 - Section construction (local coords) ------------------
+    # Lay out each section internally, snap row Y grids, place sections on
+    # the canvas grid, renumber by reading order, correct left/top
+    # overshoot.  All work in section-local coordinates.
 
     # Phase 2: Lay out each section independently (real stations only, no ports)
     section_subgraphs: dict[str, MetroGraph] = {}
@@ -1055,6 +1072,10 @@ def _compute_section_layout(
             standard_margin = y_offset - section_y_padding
             y_offset += standard_margin - global_top
 
+    # ---- Stage 2 - Globalise (local -> global coords) ------------------
+    # The coord-regime transition.  Owns the post-Phase-4 guard
+    # checkpoint (finite coords, stations-in-sections, bboxes-positive).
+
     # Phase 4: Translate local coords to global coords (real stations)
     for sec_id, section in graph.sections.items():
         sub = section_subgraphs.get(sec_id)
@@ -1077,7 +1098,7 @@ def _compute_section_layout(
         _guard_stations_in_sections(graph, "after Phase 4")
         _guard_section_bboxes_positive(graph, "after Phase 4")
 
-    # ---- Pass A: Port initialisation & section geometry adjustments ------
+    # ---- Stage 3 - Pass A: Port initialisation & section geometry --------
     # Position ports on bbox edges, align entry ports, shift internal
     # stations for perp entries, align fold exits, then top-align.
     # Top-align runs last so it corrects any bbox shifts from fold-exit
@@ -1117,7 +1138,7 @@ def _compute_section_layout(
     if validate:
         _guard_ports_on_boundaries(graph, "after top-align")
 
-    # ---- Pass B: Downstream alignment & trunk-Y consolidation ----------
+    # ---- Stage 4 - Pass B: Downstream alignment & trunk-Y consolidation -
     # Phase 11's port-terminus spacing can expand bboxes via
     # ``_expand_bbox_for_y``; Phase 11c re-runs row top-align to undo
     # the resulting bbox-top drift.  Phases 11d / 11da run only on
@@ -1184,12 +1205,12 @@ def _compute_section_layout(
     # passes are load-bearing in combination.
     _redistribute_full_bundle_columns(graph, y_spacing)
 
-    # ---- Pass C: Junction positioning & Phase 13 finalisation ----------
+    # ---- Stage 5 - Pass C: Junctions & off-track lift ------------------
     # All port positions are now final; Phase 12 positions junctions
-    # once.  Phase 13 lifts off-track stations; the 13a..13m sub-phases
-    # then settle bboxes, ports, junctions, and Ys to their final
-    # values (some conditional on ``center_ports`` or sparse-loop
-    # topology - see each phase's comment for the precondition).
+    # once.  Phase 13 lifts off-track stations; 13a-13c then re-align
+    # row bbox tops, compact, and re-snap inter-section port pairs
+    # (re-running Phase 12 for the junctions that move with them).
+    # Stage 6 below handles the rest of Pass C.
 
     # Phase 12: Position junction stations in the inter-section gap.
     _position_junctions(graph)
@@ -1232,6 +1253,15 @@ def _compute_section_layout(
     _position_junctions(graph)
     if validate:
         _run_phase13_guards(graph, "after Phase 13c")
+
+    # ---- Stage 6 - Pass C: Vertical settling & finishing ---------------
+    # The long settle: fan free / source content upward, half-grid
+    # symfan, snap to grid, bbox-bottom and off-track-reanchor
+    # post-snap fixups, full-bundle recenter + its invariant-restore
+    # sub-phases, terminus pin / auto-balance, loop-side X recenter,
+    # bbox shrink + row tighten / push, captioned-icon pad.  Most
+    # phases here run unconditionally; a few are gated on
+    # ``center_ports`` or on a specific topology (see each comment).
 
     # Phase 13d: Fan a section's free content upward when the row's
     # compaction left visible empty space at the bbox top.  Only fires

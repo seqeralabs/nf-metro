@@ -73,6 +73,31 @@ docstring in `engine.py` is the authoritative list.
 Guard bodies live at the top of `engine.py` (lines 83-275); the
 bisection runner is `_run_phase13_guards`.
 
+## Stage overview
+
+The phase pipeline groups into six stages.  Stage boundaries align with
+the coord-regime transitions and the Pass A / Pass B / Pass C
+divisions referenced throughout this doc.
+
+1. **Stage 1 - Section construction (local coords)**: Phases 2, 2.5,
+   3, 3a, 3b.
+2. **Stage 2 - Globalise (local -> global coords)**: Phase 4.
+3. **Stage 3 - Pass A: port initialisation & section geometry**:
+   Phases 5, 6, 7, 8, 9.
+4. **Stage 4 - Pass B: downstream alignment & trunk-Y consolidation**:
+   Phases 10, 10b, 10c, 10d, 11, 11b, 11c, 11ca, 11d, 11da.
+5. **Stage 5 - Pass C: junctions & off-track lift**: Phases 12, 13,
+   13a, 13b, 13c.
+6. **Stage 6 - Pass C: vertical settling & finishing**: Phases 13d,
+   13d2, 13d3, 13e, 13f, 13g, 13h, 13h.1, 13h.2, 13i, 13i2, 13h3, 13j,
+   13k, 13k2, 13l, 13m.
+
+The matching `# ---- Stage N - ... ----` comment dividers in
+`_compute_section_layout` mark each stage's start in the source.
+Phase-table entries below appear in pipeline order; stage boundaries
+fall between Phase 3b/4, Phase 4/5, Phase 9/10, Phase 11da/12, and
+Phase 13c/13d.
+
 ## Phase table
 
 ### Phase 2: internal section layout (engine.py:483-490)
