@@ -3108,3 +3108,55 @@ def _resolve_section_col_for_station(graph, station):
                     if sec and sec.grid_col >= 0:
                         return sec.grid_col
     return None
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_debug_grid_overlay_boundaries_outside_section_bboxes(fixture):
+    """Debug-overlay row/column separator lines must not cut through any
+    section bbox.
+
+    The overlay draws a single horizontal line "between" each pair of
+    consecutive grid rows (and vertical lines for columns), placed at
+    the midpoint between row i's max bbox bottom and row i+1's min bbox
+    top.  When a fold extends a section's bbox into the next row's band
+    the rows overlap in Y, and the midpoint lands inside both rows'
+    bboxes - misleading the reader of the overlay.  The helper must
+    drop such pairs rather than emit a line at a meaningless Y.
+
+    Bug: https://github.com/pinin4fjords/nf-metro/issues/316
+    """
+    from nf_metro.render.svg import (
+        _compute_col_boundary_xs,
+        _compute_row_boundary_ys,
+        _grid_bbox_bounds,
+    )
+
+    graph = _layout(fixture)
+    sections = list(graph.sections.values())
+    if not sections:
+        pytest.skip("no sections")
+    col_bounds, row_bounds = _grid_bbox_bounds(sections)
+
+    offenders: list[str] = []
+    for ra, rb, mid_y in _compute_row_boundary_ys(row_bounds):
+        for sec in sections:
+            if sec.grid_row_span != 1:
+                continue
+            y0, y1 = sec.bbox_y, sec.bbox_y + sec.bbox_h
+            if y0 < mid_y < y1:
+                offenders.append(
+                    f"row {ra}|{rb} mid_y={mid_y:.1f} cuts {sec.id!r} "
+                    f"(row={sec.grid_row}, y={y0:.1f}..{y1:.1f})"
+                )
+    for ca, cb, mid_x in _compute_col_boundary_xs(col_bounds):
+        for sec in sections:
+            if sec.grid_col_span != 1:
+                continue
+            x0, x1 = sec.bbox_x, sec.bbox_x + sec.bbox_w
+            if x0 < mid_x < x1:
+                offenders.append(
+                    f"col {ca}|{cb} mid_x={mid_x:.1f} cuts {sec.id!r} "
+                    f"(col={sec.grid_col}, x={x0:.1f}..{x1:.1f})"
+                )
+
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:5])
