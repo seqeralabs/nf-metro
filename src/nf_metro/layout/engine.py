@@ -204,10 +204,8 @@ def _guard_no_station_overlap(
     """Final-phase: no two station marker bboxes may overlap at render
     time, else one station hides another in the SVG.
 
-    Sweep-line implementation: bboxes are sorted by left edge, and the
-    inner loop breaks once a candidate's left edge passes the current
-    bbox's right edge.  Drops the previous O(N²) all-pairs scan to
-    O(N log N + overlap-candidates).
+    Sweep-line: bboxes are sorted by left edge, and the inner loop breaks
+    once a candidate's left edge passes the current bbox's right edge.
     """
     if offsets is None:
         from nf_metro.layout.routing import compute_station_offsets
@@ -254,20 +252,6 @@ def _guard_no_line_crosses_non_consumer(
     in the differential-functional section, consuming only rnaseq)
     sharing its trunk-Y row with a busier sibling whose inbound
     bundle traverses the sparse consumer's column.
-
-    Implementation notes:
-
-    * ``apply_route_offsets`` is hoisted out of the station loop and
-      called once per route; the previous nesting paid for the offset
-      computation O(stations) times per route.
-    * Station bboxes are loaded into an ``BBoxXIndex``; each segment
-      queries only stations whose bbox X-extent overlaps its X-extent,
-      replacing the O(stations × routes × segments) scan with one that
-      skips most pairs in the typical case where X-extents are sparse.
-    * Per-segment intersection uses ``segment_intersects_bbox`` (exact
-      Liang-Barsky clip) in place of the previous 21-sample loop.  The
-      closed form is strictly at least as strict as the sampled version
-      and exact for any axis-aligned or 45-degree segment.
     """
     from nf_metro.render.svg import apply_route_offsets
 
@@ -300,9 +284,7 @@ def _guard_no_line_crosses_non_consumer(
         src, tgt, line_id = r.edge.source, r.edge.target, r.line_id
         for k in range(len(pts) - 1):
             p1, p2 = pts[k], pts[k + 1]
-            seg_x_min = p1[0] if p1[0] < p2[0] else p2[0]
-            seg_x_max = p1[0] if p1[0] > p2[0] else p2[0]
-            for sid, bbox in index.query_x_range(seg_x_min, seg_x_max):
+            for sid, bbox in index.query_x_range(min(p1[0], p2[0]), max(p1[0], p2[0])):
                 if line_id in station_lines_cache[sid]:
                     continue
                 if src == sid or tgt == sid:

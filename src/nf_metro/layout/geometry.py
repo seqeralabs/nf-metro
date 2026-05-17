@@ -1,14 +1,9 @@
-"""Low-level geometric primitives shared across layout passes and validation guards.
-
-Currently a single function: ``segment_intersects_bbox``.  Promoted out
-of ``labels.py`` so the engine's line-crossing guard can use the same
-exact closed-form clip instead of a 21-sample approximation
-(see issue #368).
-"""
+"""Low-level geometric primitives shared by layout passes and validation guards."""
 
 from __future__ import annotations
 
 import bisect
+from collections.abc import Iterator
 
 
 def segment_intersects_bbox(
@@ -20,10 +15,8 @@ def segment_intersects_bbox(
 ) -> bool:
     """Liang-Barsky test: ``True`` iff the segment touches or crosses *bbox*.
 
-    Exact for any segment (axis-aligned, 45-degree, or otherwise) against
-    an axis-aligned ``(x_min, y_min, x_max, y_max)`` bbox.  Used by
-    label placement (diagonal-route avoidance) and the line-crossing
-    validation guard.
+    Exact for any segment against an axis-aligned
+    ``(x_min, y_min, x_max, y_max)`` bbox.
     """
     bx_min, by_min, bx_max, by_max = bbox
     if max(x1, x2) < bx_min or min(x1, x2) > bx_max:
@@ -53,12 +46,7 @@ def segment_intersects_bbox(
 
 
 class BBoxXIndex:
-    """X-sorted index over labelled bboxes for O(log N + k) range queries.
-
-    Built once per validation-guard call; queries return only items whose
-    bbox X-extent overlaps the query X-range.  Replaces O(N²) all-pairs
-    scans in the engine's overlap and line-crossing guards (issue #368).
-    """
+    """X-sorted index over labelled bboxes for O(log N + k) range queries."""
 
     __slots__ = ("_items", "_x_mins")
 
@@ -66,27 +54,20 @@ class BBoxXIndex:
         self,
         boxes: list[tuple[str, tuple[float, float, float, float]]],
     ) -> None:
-        # Sort once by left edge; lets us binary-search for ``x1_max``
-        # and break early once that threshold is crossed.
         self._items = sorted(boxes, key=lambda item: item[1][0])
         self._x_mins = [item[1][0] for item in self._items]
 
     def __len__(self) -> int:
         return len(self._items)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[tuple[str, tuple[float, float, float, float]]]:
         return iter(self._items)
 
     def query_x_range(
         self, qx_min: float, qx_max: float
-    ):
+    ) -> Iterator[tuple[str, tuple[float, float, float, float]]]:
         """Yield ``(key, bbox)`` for every item whose bbox X-extent
         overlaps ``[qx_min, qx_max]``.
-
-        Filters in two passes: bisect to find items with ``x_min <=
-        qx_max`` (the only ones whose left edge could fall inside the
-        query); then linearly scan that prefix to drop items whose right
-        edge ``x_max < qx_min`` (left of the query entirely).
         """
         upper = bisect.bisect_right(self._x_mins, qx_max)
         for i in range(upper):

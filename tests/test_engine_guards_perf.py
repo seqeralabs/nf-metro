@@ -1,16 +1,8 @@
-"""Equivalence + spatial-index tests for the engine validation guards.
+"""Equivalence + unit tests pinning the closed-form line-crossing guard.
 
-The Phase-13x bisection guards (``_guard_no_station_overlap`` and
-``_guard_no_line_crosses_non_consumer``) historically scaled
-quadratically in the number of stations / routes / segments and ran
-multiple times per ``compute_layout(validate=True)`` call.  Issue #368
-replaces both with spatial-index-driven loops plus a closed-form
-Liang-Barsky segment-bbox intersection.
-
-These tests pin the refactor as semantically identity at the marker-bbox
-resolution the previous 21-sample loop was operating at: for every
-(non-consumer station, route segment) pair in every gallery fixture,
-the new closed-form result must agree with the legacy sampled result.
+For every (non-consumer station, route segment) pair in every gallery
+fixture, the closed-form Liang-Barsky result must be at least as strict
+as the legacy 21-sample result.
 """
 
 from __future__ import annotations
@@ -76,16 +68,8 @@ def _segment_crosses_bbox_sampled(
     p2: tuple[float, float],
     bbox: tuple[float, float, float, float],
 ) -> bool:
-    """Legacy 21-sample implementation of segment-bbox intersection.
-
-    Preserved here as the reference oracle for the closed-form
-    replacement.  The 5-percent sample spacing on a max-1000px segment
-    against a 10px marker bbox can miss thin grazing intersections; the
-    closed-form is strictly more accurate, so the equivalence test must
-    allow ``closed`` to fire when ``sampled`` doesn't (corner-clip
-    cases).  Any case where ``sampled`` fires but ``closed`` doesn't is
-    a genuine regression.
-    """
+    """Legacy 21-sample segment-bbox intersection, kept here as the
+    reference oracle for the closed-form replacement."""
     x1, y1 = p1
     x2, y2 = p2
     bx1, by1, bx2, by2 = bbox
@@ -133,14 +117,9 @@ def _iter_guard_triplets(fixture: str):
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_closed_form_at_least_as_strict_as_sampled(fixture):
-    """The closed-form Liang-Barsky clip must never miss an intersection
-    that the 21-sample loop catches.
-
-    Direction matters: ``sampled=True, closed=False`` is a genuine
-    regression (the new guard would silently let a real crossing through).
-    The reverse (``sampled=False, closed=True``) is allowed; it means
-    the closed-form catches a corner-clip the sampling missed, which is
-    a strictly better invariant.
+    """The closed-form clip must never miss an intersection that the
+    21-sample loop catches.  ``sampled=False, closed=True`` is allowed
+    (corner-clip cases the sampling missed) and strictly an improvement.
     """
     for sid, bbox, r, k, p1, p2 in _iter_guard_triplets(fixture):
         sampled = _segment_crosses_bbox_sampled(p1, p2, bbox)
@@ -155,14 +134,9 @@ def test_closed_form_at_least_as_strict_as_sampled(fixture):
 
 
 def test_closed_form_unit_cases():
-    """Targeted unit cases pinning the closed-form Liang-Barsky to the
-    semantics the sampled version was approximating.
-
-    These small synthetic cases are language-level invariants: they
-    don't depend on graph geometry and would catch a regression in the
-    intersection primitive itself even if the gallery happened not to
-    exercise that case.
-    """
+    """Synthetic edge cases for ``segment_intersects_bbox`` that the
+    gallery may not exercise (single-point segments, exact corner clip,
+    1-pixel miss)."""
     bbox = (0.0, 0.0, 10.0, 10.0)
     # Vertical segment through centre.
     assert _segment_intersects_bbox(5, -5, 5, 15, bbox)
