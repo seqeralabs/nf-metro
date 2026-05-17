@@ -2841,8 +2841,10 @@ def test_ports_on_section_boundary(fixture):
     the full fixture corpus so a regression on any single pipeline trips
     the test rather than only ``validate=True`` runs.
     """
+    from nf_metro.layout.constants import GUARD_TOLERANCE
+
     graph = _layout(fixture)
-    tol = 5.0  # GUARD_TOLERANCE from layout.constants
+    tol = GUARD_TOLERANCE
 
     offenders: list[str] = []
     for pid, port in graph.ports.items():

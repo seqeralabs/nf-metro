@@ -1954,26 +1954,24 @@ def _compact_row_content_to_bbox_top(
 
             if delta >= 0.5:
                 for section in group:
-                    # bbox_y is preserved across compact; only bbox_h shrinks.
-                    # Clamp TOP/BOTTOM ports to the resulting top/bottom edge
-                    # so the shift doesn't push edge-pinned ports outside
-                    # the bbox (e.g. a TOP port at bbox_y getting pushed to
-                    # bbox_y - delta).
-                    new_top = section.bbox_y
+                    # bbox_y is preserved; only bbox_h shrinks.  Clamp
+                    # edge-pinned ports so the shift doesn't push them
+                    # outside the (now-shorter) bbox.
                     new_bottom = section.bbox_y + max(0.0, section.bbox_h - delta)
                     for sid in section.station_ids:
                         st = graph.stations.get(sid)
                         if st is None:
                             continue
-                        port = graph.ports.get(sid)
                         new_y = st.y - delta
-                        if port is not None and port.side == PortSide.TOP:
-                            new_y = max(new_y, new_top)
-                        elif port is not None and port.side == PortSide.BOTTOM:
-                            new_y = min(new_y, new_bottom)
-                        st.y = new_y
-                        if port:
-                            port.y = new_y
+                        port = graph.ports.get(sid)
+                        if port is not None:
+                            if port.side == PortSide.TOP:
+                                new_y = max(new_y, section.bbox_y)
+                            elif port.side == PortSide.BOTTOM:
+                                new_y = min(new_y, new_bottom)
+                            _set_port_y(graph, sid, new_y)
+                        else:
+                            st.y = new_y
                     section.bbox_h = max(0.0, section.bbox_h - delta)
 
             for section in group:
