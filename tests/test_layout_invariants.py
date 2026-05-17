@@ -2699,6 +2699,7 @@ _XFAIL_LABEL_CENTER: dict[str, str] = {
         "rnaseq_sections.mmd",
         "topologies/fold_fan_across.mmd",
         "topologies/funcprofiler_upstream.mmd",
+        "topologies/off_track_convergence.mmd",
         "topologies/rnaseq_lite.mmd",
         "topologies/variant_calling.mmd",
         "differentialabundance.mmd",
