@@ -2712,11 +2712,6 @@ def test_station_x_within_column_tolerance(fixture):
 
     x_spacing = X_SPACING
     graph = _layout(fixture, x_spacing=x_spacing)
-    in_by_tgt: dict[str, list] = defaultdict(list)
-    out_by_src: dict[str, list] = defaultdict(list)
-    for e in graph.edges:
-        in_by_tgt[e.target].append(e)
-        out_by_src[e.source].append(e)
 
     offenders: list[str] = []
     for sec in graph.sections.values():
@@ -2732,7 +2727,7 @@ def test_station_x_within_column_tolerance(fixture):
                 continue
             if st.off_track:
                 continue
-            if is_loop_side_branch_station(graph, sid, in_by_tgt, out_by_src):
+            if is_loop_side_branch_station(graph, sid):
                 continue
             layer_xs[st.layer].append((sid, st.x))
         for layer, members in layer_xs.items():

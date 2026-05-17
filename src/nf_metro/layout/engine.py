@@ -527,12 +527,7 @@ def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> Non
             )
 
 
-def is_loop_side_branch_station(
-    graph: MetroGraph,
-    sid: str,
-    in_by_tgt: dict[str, list],
-    out_by_src: dict[str, list],
-) -> bool:
+def is_loop_side_branch_station(graph: MetroGraph, sid: str) -> bool:
     """Mirror ``_recenter_loop_side_stations``'s precondition: a station
     with exactly one in-edge and one out-edge, whose predecessor and
     successor share Y, sitting off the trunk Y between them in X.
@@ -546,8 +541,8 @@ def is_loop_side_branch_station(
     st = graph.stations.get(sid)
     if st is None:
         return False
-    ins = in_by_tgt.get(sid, [])
-    outs = out_by_src.get(sid, [])
+    ins = graph.edges_to(sid)
+    outs = graph.edges_from(sid)
     if len(ins) != 1 or len(outs) != 1:
         return False
     src = graph.stations.get(ins[0].source)
@@ -574,12 +569,6 @@ def _guard_station_x_column_drift(graph: MetroGraph, phase: str) -> None:
     """
     import statistics
 
-    in_by_tgt: dict[str, list] = {}
-    out_by_src: dict[str, list] = {}
-    for e in graph.edges:
-        in_by_tgt.setdefault(e.target, []).append(e)
-        out_by_src.setdefault(e.source, []).append(e)
-
     for sec in graph.sections.values():
         if sec.bbox_h <= 0 or sec.direction not in ("LR", "RL"):
             continue
@@ -593,7 +582,7 @@ def _guard_station_x_column_drift(graph: MetroGraph, phase: str) -> None:
                 continue
             if st.off_track:
                 continue
-            if is_loop_side_branch_station(graph, sid, in_by_tgt, out_by_src):
+            if is_loop_side_branch_station(graph, sid):
                 continue
             layer_xs.setdefault(st.layer, []).append((sid, st.x))
         for layer, members in layer_xs.items():
@@ -2896,17 +2885,11 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
     skipped when shifting would leave fewer than ``DIAGONAL_RUN`` worth
     of horizontal room on either side.
     """
-    # Index edges by source/target for O(1) loop detection.
-    # Single pass: index edges by endpoint and accumulate distinct
-    # successors/predecessors for fork/join detection (mirroring
-    # routing's label-clearance logic).
-    out_by_src: dict[str, list[Edge]] = defaultdict(list)
-    in_by_tgt: dict[str, list[Edge]] = defaultdict(list)
+    # Single pass over graph.edges to accumulate fork/join sets.
+    # (Adjacency itself is served by graph.edges_from / edges_to.)
     fork_targets: dict[str, set[str]] = defaultdict(set)
     join_sources: dict[str, set[str]] = defaultdict(set)
     for e in graph.edges:
-        out_by_src[e.source].append(e)
-        in_by_tgt[e.target].append(e)
         fork_targets[e.source].add(e.target)
         join_sources[e.target].add(e.source)
     fork_stations = {sid for sid, t in fork_targets.items() if len(t) > 1}
@@ -2933,8 +2916,8 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
             st = graph.stations.get(sid)
             if st is None or st.is_port or st.is_hidden:
                 continue
-            ins = in_by_tgt.get(sid, [])
-            outs = out_by_src.get(sid, [])
+            ins = graph.edges_to(sid)
+            outs = graph.edges_from(sid)
             if len(ins) != 1 or len(outs) != 1:
                 continue
             src_id = ins[0].source
@@ -2973,8 +2956,8 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                     continue
                 if abs(other.y - trunk_y) < 0.5:
                     continue  # on-trunk co-loopers don't establish a fan
-                other_ins = in_by_tgt.get(other_sid, [])
-                other_outs = out_by_src.get(other_sid, [])
+                other_ins = graph.edges_to(other_sid)
+                other_outs = graph.edges_from(other_sid)
                 other_srcs = {e.source for e in other_ins}
                 other_tgts = {e.target for e in other_outs}
                 if other_srcs == {src_id} and other_tgts == {tgt_id}:
@@ -3039,7 +3022,7 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
         def _column_key(sid: str) -> tuple[float, float] | None:
             pred_x: float | None = None
             succ_x: float | None = None
-            for e in in_by_tgt.get(sid, []):
+            for e in graph.edges_to(sid):
                 p = graph.stations.get(e.source)
                 if p is None or p.is_hidden:
                     continue
@@ -3051,7 +3034,7 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                     or (section.direction == "RL" and p.x < pred_x)
                 ):
                     pred_x = p.x
-            for e in out_by_src.get(sid, []):
+            for e in graph.edges_from(sid):
                 t = graph.stations.get(e.target)
                 if t is None or t.is_hidden:
                     continue
@@ -3100,7 +3083,7 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 # single-in/single-out filter pass-1 uses.
                 visible_ins = [
                     e
-                    for e in in_by_tgt.get(sid, [])
+                    for e in graph.edges_to(sid)
                     if (
                         (gs := graph.stations.get(e.source)) is not None
                         and not gs.is_hidden
@@ -3108,7 +3091,7 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 ]
                 visible_outs = [
                     e
-                    for e in out_by_src.get(sid, [])
+                    for e in graph.edges_from(sid)
                     if (
                         (gs := graph.stations.get(e.target)) is not None
                         and not gs.is_hidden
@@ -3159,15 +3142,8 @@ def _shift_sparse_loop_stations_to_clear_bundle(
     if y_spacing <= 0:
         return
 
-    in_by_tgt: dict[str, list[Edge]] = defaultdict(list)
-    out_by_src: dict[str, list[Edge]] = defaultdict(list)
-    for e in graph.edges:
-        in_by_tgt[e.target].append(e)
-        out_by_src[e.source].append(e)
-
-    consumed_by: dict[str, set[str]] = defaultdict(set)
-    for e in graph.edges:
-        consumed_by[e.target].add(e.line_id)
+    def _consumed_lines(sid: str) -> set[str]:
+        return {e.line_id for e in graph.edges_to(sid)}
 
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
@@ -3194,8 +3170,8 @@ def _shift_sparse_loop_stations_to_clear_bundle(
             st = graph.stations.get(sid)
             if st is None or st.is_port or st.is_hidden or st.off_track:
                 continue
-            ins = in_by_tgt.get(sid, [])
-            outs = out_by_src.get(sid, [])
+            ins = graph.edges_to(sid)
+            outs = graph.edges_from(sid)
             if len(ins) != 1 or len(outs) != 1:
                 continue
             src = graph.stations.get(ins[0].source)
@@ -3210,7 +3186,7 @@ def _shift_sparse_loop_stations_to_clear_bundle(
             dy = st.y - trunk_y
             if abs(dy) < 0.5:
                 continue
-            s_lines = consumed_by.get(sid, set())
+            s_lines = _consumed_lines(sid)
             sibling: Station | None = None
             for sib_id in section.station_ids:
                 if sib_id == sid or sib_id in port_ids:
@@ -3226,7 +3202,7 @@ def _shift_sparse_loop_stations_to_clear_bundle(
                     continue
                 if abs(sib.y - st.y) > 0.5:
                     continue
-                sib_lines = consumed_by.get(sib_id, set())
+                sib_lines = _consumed_lines(sib_id)
                 if len(sib_lines) > len(s_lines):
                     sibling = sib
                     break
