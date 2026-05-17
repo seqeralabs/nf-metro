@@ -1122,23 +1122,29 @@ def _compute_row_boundary_segments(
     sections: list[Section],
     col_bounds: dict[int, tuple[float, float]],
 ) -> list[tuple[int, int, float, float, float]]:
-    """Return per-column row-boundary segments as
-    ``(row_a, row_b, x_start, x_end, y)`` tuples.
+    """Return row-boundary segments as ``(row_a, row_b, x_start, x_end, y)``.
 
-    For each pair of consecutive grid rows and each column where both
-    rows have a non-spanning section, emit a horizontal segment at the
-    local midpoint between the upper section's bottom and the lower
-    section's top.  If a fold extends the upper section's bbox past
-    the lower section's top (local overlap), no segment is emitted for
-    that column - the row boundary visibly breaks at the fold column
-    instead of being plotted at a Y that would cut through bboxes.
+    For each consecutive grid-row pair, choose a representative
+    boundary Y from the per-column midpoints (median across columns
+    where both rows have a non-spanning section and don't locally
+    overlap), then draw a horizontal line at that Y spanning the
+    canvas - broken only around bboxes the line would otherwise cut.
+    Fold sections that extend past their row produce gaps in the line,
+    so the separator is visibly absent at fold columns but still
+    extends under all other sections (including columns where only one
+    of the two rows has a section).
     """
+    if not col_bounds:
+        return []
     sec_by_cell = _sections_by_grid_cell(sections)
     rows = sorted({r for _, r in sec_by_cell})
+    canvas_x0 = min(b[0] for b in col_bounds.values()) - 20
+    canvas_x1 = max(b[1] for b in col_bounds.values()) + 20
     segments: list[tuple[int, int, float, float, float]] = []
     for i in range(len(rows) - 1):
         ra, rb = rows[i], rows[i + 1]
-        for c, (x_start, x_end) in col_bounds.items():
+        anchor_ys: list[float] = []
+        for c in col_bounds:
             sa = sec_by_cell.get((c, ra))
             sb = sec_by_cell.get((c, rb))
             if sa is None or sb is None:
@@ -1147,7 +1153,31 @@ def _compute_row_boundary_segments(
             b_top = sb.bbox_y
             if a_bot >= b_top:
                 continue
-            segments.append((ra, rb, x_start, x_end, (a_bot + b_top) / 2))
+            anchor_ys.append((a_bot + b_top) / 2)
+        if not anchor_ys:
+            continue
+        anchor_ys.sort()
+        y = anchor_ys[len(anchor_ys) // 2]
+        cut_ranges: list[tuple[float, float]] = []
+        for sec in sections:
+            if sec.grid_row_span != 1 or sec.grid_row not in (ra, rb):
+                continue
+            if sec.bbox_y < y < sec.bbox_y + sec.bbox_h:
+                cut_ranges.append((sec.bbox_x, sec.bbox_x + sec.bbox_w))
+        cut_ranges.sort()
+        merged: list[tuple[float, float]] = []
+        for x0, x1 in cut_ranges:
+            if merged and x0 <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], x1))
+            else:
+                merged.append((x0, x1))
+        cursor = canvas_x0
+        for x0, x1 in merged:
+            if cursor < x0:
+                segments.append((ra, rb, cursor, x0, y))
+            cursor = max(cursor, x1)
+        if cursor < canvas_x1:
+            segments.append((ra, rb, cursor, canvas_x1, y))
     return segments
 
 
