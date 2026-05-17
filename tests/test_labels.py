@@ -2,11 +2,11 @@
 
 from dataclasses import dataclass, field
 
+from nf_metro.layout.geometry import segment_intersects_bbox as _segment_intersects_bbox
 from nf_metro.layout.labels import (
     LabelPlacement,
     _avoid_diagonal_routes,
     _compute_port_label_preference,
-    _segment_intersects_bbox,
 )
 from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Station
 

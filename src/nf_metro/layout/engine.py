@@ -54,6 +54,7 @@ from nf_metro.layout.constants import (
     Y_OFFSET,
     Y_SPACING,
 )
+from nf_metro.layout.geometry import BBoxXIndex, segment_intersects_bbox
 from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
@@ -201,7 +202,13 @@ def _guard_no_station_overlap(
     graph: MetroGraph, phase: str, *, offsets: dict | None = None
 ) -> None:
     """Final-phase: no two station marker bboxes may overlap at render
-    time, else one station hides another in the SVG."""
+    time, else one station hides another in the SVG.
+
+    Sweep-line implementation: bboxes are sorted by left edge, and the
+    inner loop breaks once a candidate's left edge passes the current
+    bbox's right edge.  Drops the previous O(N²) all-pairs scan to
+    O(N log N + overlap-candidates).
+    """
     if offsets is None:
         from nf_metro.layout.routing import compute_station_offsets
 
@@ -211,10 +218,16 @@ def _guard_no_station_overlap(
         b = _station_marker_bbox(graph, sid, offsets=offsets)
         if b is not None:
             boxes.append((sid, b))
+    boxes.sort(key=lambda item: item[1][0])
     tol = 0.5
-    for i, (s1, (x1, y1, X1, Y1)) in enumerate(boxes):
-        for s2, (x2, y2, X2, Y2) in boxes[i + 1 :]:
-            if x1 < X2 - tol and x2 < X1 - tol and y1 < Y2 - tol and y2 < Y1 - tol:
+    n = len(boxes)
+    for i in range(n):
+        s1, (x1, y1, X1, Y1) = boxes[i]
+        for j in range(i + 1, n):
+            s2, (x2, y2, X2, Y2) = boxes[j]
+            if x2 >= X1 - tol:
+                break  # Sorted by left edge; no further X-overlap possible.
+            if y1 < Y2 - tol and y2 < Y1 - tol:
                 raise PhaseInvariantError(
                     f"{phase}: position clash: {s1!r} at "
                     f"({(x1 + X1) / 2:.1f},{(y1 + Y1) / 2:.1f}) overlaps "
@@ -241,6 +254,20 @@ def _guard_no_line_crosses_non_consumer(
     in the differential-functional section, consuming only rnaseq)
     sharing its trunk-Y row with a busier sibling whose inbound
     bundle traverses the sparse consumer's column.
+
+    Implementation notes:
+
+    * ``apply_route_offsets`` is hoisted out of the station loop and
+      called once per route; the previous nesting paid for the offset
+      computation O(stations) times per route.
+    * Station bboxes are loaded into an ``BBoxXIndex``; each segment
+      queries only stations whose bbox X-extent overlaps its X-extent,
+      replacing the O(stations × routes × segments) scan with one that
+      skips most pairs in the typical case where X-extents are sparse.
+    * Per-segment intersection uses ``segment_intersects_bbox`` (exact
+      Liang-Barsky clip) in place of the previous 21-sample loop.  The
+      closed form is strictly at least as strict as the sampled version
+      and exact for any axis-aligned or 45-degree segment.
     """
     from nf_metro.render.svg import apply_route_offsets
 
@@ -256,50 +283,39 @@ def _guard_no_line_crosses_non_consumer(
         except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
             return
 
-    def _segment_crosses_bbox(
-        p1: tuple[float, float],
-        p2: tuple[float, float],
-        bbox: tuple[float, float, float, float],
-    ) -> bool:
-        x1, y1 = p1
-        x2, y2 = p2
-        bx1, by1, bx2, by2 = bbox
-        if max(x1, x2) < bx1 or min(x1, x2) > bx2:
-            return False
-        if max(y1, y2) < by1 or min(y1, y2) > by2:
-            return False
-        # Sample 20 points along the segment.  Routing waypoints are
-        # axis-aligned or 45-degree so this is exact at the resolution
-        # of the marker bbox (10 px wide).
-        for k in range(21):
-            f = k / 20.0
-            x = x1 + f * (x2 - x1)
-            y = y1 + f * (y2 - y1)
-            if bx1 <= x <= bx2 and by1 <= y <= by2:
-                return True
-        return False
-
-    for sid, st in graph.stations.items():
+    boxes: list[tuple[str, tuple[float, float, float, float]]] = []
+    station_lines_cache: dict[str, set[str]] = {}
+    for sid in graph.stations:
         bbox = _station_marker_bbox(graph, sid, offsets=offsets)
         if bbox is None:
             continue
-        station_lines = set(graph.station_lines(sid))
-        for r in routes:
-            if r.line_id in station_lines:
-                continue
-            if r.edge.source == sid or r.edge.target == sid:
-                continue
-            pts = apply_route_offsets(r, offsets)
-            for k in range(len(pts) - 1):
-                if _segment_crosses_bbox(pts[k], pts[k + 1], bbox):
+        boxes.append((sid, bbox))
+        station_lines_cache[sid] = set(graph.station_lines(sid))
+    if not boxes:
+        return
+    index = BBoxXIndex(boxes)
+
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        src, tgt, line_id = r.edge.source, r.edge.target, r.line_id
+        for k in range(len(pts) - 1):
+            p1, p2 = pts[k], pts[k + 1]
+            seg_x_min = p1[0] if p1[0] < p2[0] else p2[0]
+            seg_x_max = p1[0] if p1[0] > p2[0] else p2[0]
+            for sid, bbox in index.query_x_range(seg_x_min, seg_x_max):
+                if line_id in station_lines_cache[sid]:
+                    continue
+                if src == sid or tgt == sid:
+                    continue
+                if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
                     raise PhaseInvariantError(
-                        f"{phase}: line {r.line_id!r} on edge "
-                        f"{r.edge.source!r} -> {r.edge.target!r} "
+                        f"{phase}: line {line_id!r} on edge "
+                        f"{src!r} -> {tgt!r} "
                         f"crosses non-consumer station {sid!r} "
                         f"marker bbox ({bbox[0]:.1f},{bbox[1]:.1f})-"
                         f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
-                        f"({pts[k][0]:.1f},{pts[k][1]:.1f})->"
-                        f"({pts[k + 1][0]:.1f},{pts[k + 1][1]:.1f})"
+                        f"({p1[0]:.1f},{p1[1]:.1f})->"
+                        f"({p2[0]:.1f},{p2[1]:.1f})"
                     )
 
 

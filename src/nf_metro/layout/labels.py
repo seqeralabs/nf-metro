@@ -26,6 +26,7 @@ from nf_metro.layout.constants import (
     TB_LINE_Y_OFFSET,
     TB_PILL_EDGE_OFFSET,
 )
+from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.parser.model import MetroGraph
 
 if TYPE_CHECKING:
@@ -710,41 +711,6 @@ def place_labels(
     return [p for p in placements if p.obstacle_bbox is None]
 
 
-def _segment_intersects_bbox(
-    x1: float,
-    y1: float,
-    x2: float,
-    y2: float,
-    bbox: tuple[float, float, float, float],
-) -> bool:
-    """Liang-Barsky test: True iff segment touches/crosses *bbox*."""
-    bx_min, by_min, bx_max, by_max = bbox
-    if max(x1, x2) < bx_min or min(x1, x2) > bx_max:
-        return False
-    if max(y1, y2) < by_min or min(y1, y2) > by_max:
-        return False
-    dx, dy = x2 - x1, y2 - y1
-    t_min, t_max = 0.0, 1.0
-    for p, q in (
-        (-dx, x1 - bx_min),
-        (dx, bx_max - x1),
-        (-dy, y1 - by_min),
-        (dy, by_max - y1),
-    ):
-        if abs(p) < 1e-9:
-            if q < 0:
-                return False
-            continue
-        t = q / p
-        if p < 0 and t > t_min:
-            t_min = t
-        elif p > 0 and t < t_max:
-            t_max = t
-        if t_min > t_max:
-            return False
-    return True
-
-
 def _avoid_diagonal_routes(
     placements: list[LabelPlacement],
     graph: MetroGraph,
@@ -781,7 +747,7 @@ def _avoid_diagonal_routes(
 
     def hits(box: tuple[float, float, float, float]) -> bool:
         padded = (box[0] - m, box[1] - m, box[2] + m, box[3] + m)
-        return any(_segment_intersects_bbox(*s, padded) for s in diag)
+        return any(segment_intersects_bbox(*s, padded) for s in diag)
 
     for placement in [p for p in placements if p.obstacle_bbox is None]:
         if placement.dominant_baseline or placement.angle:
