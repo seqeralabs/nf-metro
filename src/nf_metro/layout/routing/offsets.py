@@ -955,12 +955,15 @@ def _align_junction_to_entry_port(ctx: _OffsetCtx) -> None:
         j_lines = list(graph.station_lines(jid))
         if len(j_lines) < 2:
             continue
+        # Group outbound edges by line once, then check each line has a
+        # single target downstream.
+        line_targets: dict[str, list[str]] = {}
+        for edge in graph.edges_from(jid):
+            line_targets.setdefault(edge.line_id, []).append(edge.target)
         line_to_target: dict[str, str] = {}
         ok = True
         for lid in j_lines:
-            targets = [
-                edge.target for edge in graph.edges_from(jid) if edge.line_id == lid
-            ]
+            targets = line_targets.get(lid, [])
             if len(targets) != 1:
                 ok = False
                 break

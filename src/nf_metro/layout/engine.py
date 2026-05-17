@@ -2106,7 +2106,7 @@ def _classify_section_station_ys(
             continue
         if st.is_port:
             ports.append(st.y)
-        elif getattr(st, "off_track", False):
+        elif st.off_track:
             off_track.append(st.y)
         else:
             on_track.append(st.y)
@@ -2248,7 +2248,7 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> bool:
     branch below runs unconditionally because it only moves the entry
     port (not the exit), preserving the auto-layout fan-in convergence.
     """
-    explicit_grid = bool(getattr(graph, "_explicit_grid", None))
+    explicit_grid = bool(graph._explicit_grid)
     junction_ids = set(graph.junctions)
     moved = False
 
@@ -2356,7 +2356,7 @@ def _fan_free_content_upward(
     Scoped to pipelines using explicit ``%%metro grid:`` directives so
     the auto-layout path is unaffected.
     """
-    if not getattr(graph, "_explicit_grid", None):
+    if not graph._explicit_grid:
         return
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
@@ -2444,16 +2444,8 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
     path is unaffected.  U-turn risk is nil because sources have no
     upstream feeders by definition.
     """
-    if not getattr(graph, "_explicit_grid", None):
+    if not graph._explicit_grid:
         return
-
-    # Reverse-adjacency built once: avoids scanning graph.edges for every
-    # source candidate's "no inbound edges" check.
-    in_edges: dict[str, set[str]] = {}
-    out_edges: dict[str, set[str]] = {}
-    for e in graph.edges:
-        in_edges.setdefault(e.target, set()).add(e.source)
-        out_edges.setdefault(e.source, set()).add(e.target)
 
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
@@ -2494,7 +2486,7 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
             if s != trunk_sid
             and graph.station_lines(s)
             and set(graph.station_lines(s)) < bundle
-            and not in_edges.get(s)
+            and not graph.edges_to(s)
             and graph.stations[s].y > trunk_y - 0.5
         ]
         if len(sources) < 2:
@@ -2525,13 +2517,13 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
             cur = src
             src_lines = set(graph.station_lines(src))
             while True:
-                outs = out_edges.get(cur, set())
+                outs = {e.target for e in graph.edges_from(cur)}
                 if len(outs) != 1:
                     break
                 nxt = next(iter(outs))
                 if nxt not in internal_set:
                     break
-                if len(in_edges.get(nxt, set())) != 1:
+                if len({e.source for e in graph.edges_to(nxt)}) != 1:
                     break
                 if set(graph.station_lines(nxt)) != src_lines:
                     break
@@ -2575,26 +2567,25 @@ def _balance_direct_external_feeder_ys(
     junction_ids = set(graph.junctions)
     feeder_ys: list[float] = []
     seen: set[tuple[str, str]] = set()
-    stack: list[tuple[str, str]] = []
-    for edge in graph.edges:
-        if edge.target == station_id:
-            stack.append((edge.source, edge.line_id))
+    stack: list[tuple[str, str]] = [
+        (edge.source, edge.line_id) for edge in graph.edges_to(station_id)
+    ]
     while stack:
         cur_id, lid = stack.pop()
         if (cur_id, lid) in seen:
             continue
         seen.add((cur_id, lid))
         if cur_id in junction_ids:
-            for edge in graph.edges:
-                if edge.target == cur_id and edge.line_id == lid:
+            for edge in graph.edges_to(cur_id):
+                if edge.line_id == lid:
                     stack.append((edge.source, lid))
             continue
         src = graph.stations.get(cur_id)
         if src is None:
             continue
         if src.is_port:
-            for edge in graph.edges:
-                if edge.target == cur_id and edge.line_id == lid:
+            for edge in graph.edges_to(cur_id):
+                if edge.line_id == lid:
                     stack.append((edge.source, lid))
             continue
         if src.section_id == section_id:
@@ -2626,7 +2617,7 @@ def _balance_section_content_around_trunk(
     safety prevents lifts that would force the line to climb past the
     trunk and double back.
     """
-    if not getattr(graph, "_explicit_grid", None):
+    if not graph._explicit_grid:
         return
     if not graph.center_ports:
         return
@@ -3429,9 +3420,7 @@ def _lift_would_cause_uturn(
     feeder_ys: list[float] = []
 
     def _collect(node_id: str) -> None:
-        for edge in graph.edges:
-            if edge.target != node_id:
-                continue
+        for edge in graph.edges_to(node_id):
             src_id = edge.source
             if src_id in seen:
                 continue
@@ -3540,7 +3529,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
                     # design; don't let them shift the row's grid origin.
                     continue
                 st = graph.stations.get(sid)
-                if st is None or getattr(st, "off_track", False):
+                if st is None or st.off_track:
                     continue
                 residues[round(st.y % pitch, 3)] += 1
         if not residues:
@@ -3591,7 +3580,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     # new midpoint so a fan-in still visually converges symmetrically.
     for target_id, src_ids in convergence_sources.items():
         st = graph.stations.get(target_id)
-        if st is None or getattr(st, "off_track", False):
+        if st is None or st.off_track:
             continue
         # Convergence sources whose snap displaced them away from their
         # original Y may break the midpoint relationship; recompute
@@ -3620,9 +3609,7 @@ def _convergence_source_ys(graph: MetroGraph) -> dict[str, list[str]]:
     for edge in graph.edges:
         src_id = edge.source
         if src_id in junction_ids:
-            for e2 in graph.edges:
-                if e2.target != src_id:
-                    continue
+            for e2 in graph.edges_to(src_id):
                 pre = graph.stations.get(e2.source)
                 if pre is None or pre.is_port:
                     continue
@@ -3716,20 +3703,6 @@ def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:
             continue
         bundle.update(graph.station_lines(pid))
     return bundle
-
-
-def _section_columns_by_x(
-    graph: MetroGraph, section: Section
-) -> dict[float, list[str]]:
-    """Group a section's non-port stations by their (rounded) X column."""
-    port_ids = set(section.entry_ports) | set(section.exit_ports)
-    cols: dict[float, list[str]] = defaultdict(list)
-    for sid in section.station_ids:
-        if sid in port_ids:
-            continue
-        if (st := graph.stations.get(sid)) is not None:
-            cols[round(st.x, 3)].append(sid)
-    return cols
 
 
 def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
@@ -6120,14 +6093,11 @@ def _align_tb_section_bbox_bottoms(graph: MetroGraph) -> None:
     def _downstream_section_ids(tb_section: Section) -> set[str]:
         out: set[str] = set()
         for pid in tb_section.exit_ports:
-            for edge in graph.edges:
-                if edge.source != pid:
-                    continue
+            for edge in graph.edges_from(pid):
                 candidates: list[str] = []
                 if edge.target in junction_ids:
-                    for e2 in graph.edges:
-                        if e2.source == edge.target:
-                            candidates.append(e2.target)
+                    for e2 in graph.edges_from(edge.target):
+                        candidates.append(e2.target)
                 else:
                     candidates.append(edge.target)
                 for tid in candidates:
@@ -6297,7 +6267,7 @@ def _space_ports_from_termini(
             # from being pushed away (and dragging the upstream port via
             # junction propagation) for a conflict that won't exist by
             # render time.
-            if getattr(st, "off_track", False):
+            if st.off_track:
                 continue
             preds = predecessors.get(sid, set())
             succs = successors.get(sid, set())
@@ -6673,8 +6643,6 @@ def _compute_fork_join_gaps(
     divergences are suppressed because there are no diagonal transitions
     and the extra spacing is purely wasteful.
     """
-    from collections import defaultdict
-
     out_targets: dict[str, set[str]] = defaultdict(set)
     in_sources: dict[str, set[str]] = defaultdict(set)
 
@@ -7021,9 +6989,8 @@ def _bump_off_track_clear_of_trunks(
     if y_spacing <= 0:
         return candidate_y
 
-    # Match the renderer's terminus icon height (32 px default; half=16)
-    # and add a small margin so the icon's stroke doesn't touch a track.
-    ICON_HALF = 16.0
+    # Match the renderer's terminus icon height and add a small margin
+    # so the icon's stroke doesn't touch a track.
     MARGIN = 2.0
     # Limit lift attempts so a pathological column doesn't pull the
     # icon off-canvas.
@@ -7067,16 +7034,16 @@ def _bump_off_track_clear_of_trunks(
         return candidate_y
 
     def _overlaps(y: float) -> bool:
-        top = y - ICON_HALF - MARGIN
-        bot = y + ICON_HALF + MARGIN
+        top = y - ICON_HALF_HEIGHT - MARGIN
+        bot = y + ICON_HALF_HEIGHT + MARGIN
         for tl_y_lo, tl_y_hi in zip(trunk_offsets_at_x[::2], trunk_offsets_at_x[1::2]):
             if not (bot < tl_y_lo or tl_y_hi < top):
                 return True
-        # Sibling clearance: keep at least 2 * ICON_HALF + MARGIN between
+        # Sibling clearance: keep at least 2 * ICON_HALF_HEIGHT + MARGIN between
         # icon centres in the same column so the icon bboxes don't
         # touch.
         for sy in sib_ys:
-            if abs(sy - y) < 2 * ICON_HALF + MARGIN:
+            if abs(sy - y) < 2 * ICON_HALF_HEIGHT + MARGIN:
                 return True
         return False
 

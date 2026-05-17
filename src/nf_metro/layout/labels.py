@@ -9,6 +9,7 @@ from __future__ import annotations
 __all__ = ["LabelPlacement", "label_text_width", "place_labels"]
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
     CHAR_WIDTH,
@@ -26,6 +27,9 @@ from nf_metro.layout.constants import (
     TB_PILL_EDGE_OFFSET,
 )
 from nf_metro.parser.model import MetroGraph
+
+if TYPE_CHECKING:
+    from nf_metro.layout.routing.common import RoutedPath
 
 
 def label_text_width(label: str) -> float:
@@ -408,7 +412,7 @@ def place_labels(
     label_offset: float = LABEL_OFFSET,
     station_offsets: dict[tuple[str, str], float] | None = None,
     icon_obstacles: list[tuple[float, float, float, float]] | None = None,
-    routes: list | None = None,
+    routes: list["RoutedPath"] | None = None,
 ) -> list[LabelPlacement]:
     """Place horizontal labels alternating above/below stations.
 
@@ -744,7 +748,7 @@ def _segment_intersects_bbox(
 def _avoid_diagonal_routes(
     placements: list[LabelPlacement],
     graph: MetroGraph,
-    routes: list,
+    routes: list["RoutedPath"],
     station_offsets: dict[tuple[str, str], float] | None,
 ) -> None:
     """Flip labels overlapping a non-horizontal route segment.
@@ -758,8 +762,8 @@ def _avoid_diagonal_routes(
     """
     diag: list[tuple[float, float, float, float]] = []
     for route in routes:
-        pts = list(getattr(route, "points", []))
-        if station_offsets and not getattr(route, "offsets_applied", False) and pts:
+        pts = list(route.points)
+        if station_offsets and not route.offsets_applied and pts:
             so = station_offsets.get((route.edge.source, route.line_id), 0.0)
             to = station_offsets.get((route.edge.target, route.line_id), 0.0)
             pts[0] = (pts[0][0], pts[0][1] + so)
