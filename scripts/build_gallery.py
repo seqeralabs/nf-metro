@@ -161,6 +161,12 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         TOPOLOGIES_DIR,
         "Tall section bypass where the trunk is above the source (upward gap1).",
     ),
+    (
+        "off_track_convergence",
+        TOPOLOGIES_DIR,
+        "Multiple off-track file inputs converging on a single consumer. "
+        "The trunk stays horizontal while the inputs stack above the consumer column.",
+    ),
 ]
 
 # Category headers inserted before specific entries

@@ -31,6 +31,7 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `mismatched_tracks.mmd` | per-line track mismatch between sections |
 | `mixed_bundle_column.mmd` | mixed-cardinality fan-out into stacked column |
 | `mixed_port_sides.mmd` | multi-side exit ports (RIGHT + BOTTOM) |
+| `off_track_convergence.mmd` | multiple off-track inputs converging on one consumer |
 | `upward_bypass.mmd` | tall section bypass (upward gap) |
 | `rnaseq_lite.mmd` | realistic pipeline / TB+LR mix / diamond |
 | `variant_calling.mmd` | realistic pipeline / asymmetric fork-join / 4-way fan-in |
