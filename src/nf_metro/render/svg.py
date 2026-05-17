@@ -1096,25 +1096,14 @@ def _grid_bbox_bounds(
     col_bounds: dict[int, tuple[float, float]] = {}
     row_bounds: dict[int, tuple[float, float]] = {}
     for sec in sections:
-        c, r = sec.grid_col, sec.grid_row
         x0, x1 = sec.bbox_x, sec.bbox_x + sec.bbox_w
         y0, y1 = sec.bbox_y, sec.bbox_y + sec.bbox_h
         if sec.grid_col_span == 1:
-            if c not in col_bounds:
-                col_bounds[c] = (x0, x1)
-            else:
-                col_bounds[c] = (
-                    min(col_bounds[c][0], x0),
-                    max(col_bounds[c][1], x1),
-                )
+            cx0, cx1 = col_bounds.get(sec.grid_col, (x0, x1))
+            col_bounds[sec.grid_col] = (min(cx0, x0), max(cx1, x1))
         if sec.grid_row_span == 1:
-            if r not in row_bounds:
-                row_bounds[r] = (y0, y1)
-            else:
-                row_bounds[r] = (
-                    min(row_bounds[r][0], y0),
-                    max(row_bounds[r][1], y1),
-                )
+            ry0, ry1 = row_bounds.get(sec.grid_row, (y0, y1))
+            row_bounds[sec.grid_row] = (min(ry0, y0), max(ry1, y1))
     return col_bounds, row_bounds
 
 
@@ -1280,10 +1269,8 @@ def _render_debug_overlay(
                 )
             )
 
-        labelled_row_pairs: set[tuple[int, int]] = set()
-        for ra, rb, x_start, x_end, y in _compute_row_boundary_segments(
-            sections, col_bounds
-        ):
+        row_segments = _compute_row_boundary_segments(sections, col_bounds)
+        for _ra, _rb, x_start, x_end, y in row_segments:
             d.append(
                 draw.Line(
                     x_start,
@@ -1295,19 +1282,22 @@ def _render_debug_overlay(
                     stroke_dasharray="6,4",
                 )
             )
-            if (ra, rb) not in labelled_row_pairs:
-                d.append(
-                    draw.Text(
-                        f"row {ra}|{rb}",
-                        debug_font_size,
-                        all_x0 - 4,
-                        y,
-                        fill=grid_color,
-                        font_family=debug_font,
-                        text_anchor="end",
-                    )
+        # One label per row pair, anchored at the first segment's Y.
+        row_pair_label_ys: dict[tuple[int, int], float] = {}
+        for ra, rb, _xs, _xe, y in row_segments:
+            row_pair_label_ys.setdefault((ra, rb), y)
+        for (ra, rb), y in row_pair_label_ys.items():
+            d.append(
+                draw.Text(
+                    f"row {ra}|{rb}",
+                    debug_font_size,
+                    all_x0 - 4,
+                    y,
+                    fill=grid_color,
+                    font_family=debug_font,
+                    text_anchor="end",
                 )
-                labelled_row_pairs.add((ra, rb))
+            )
 
     # Shared Y grid lines: horizontal lines at each grid slot position
     # within each row group (populated by _align_row_y_grids in engine.py).
