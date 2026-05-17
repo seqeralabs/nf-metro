@@ -328,7 +328,14 @@ def render_svg(
     legend_logo_size = (logo_w, logo_h) if logo_in_legend else None
 
     legend_x, legend_y, legend_w, legend_h, show_legend = _position_legend(
-        graph, theme, max_x, max_y, padding, logo_in_legend, logo_w, logo_h,
+        graph,
+        theme,
+        max_x,
+        max_y,
+        padding,
+        logo_in_legend,
+        logo_w,
+        logo_h,
         effective_legend_position,
     )
 
