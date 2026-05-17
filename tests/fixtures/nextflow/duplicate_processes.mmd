@@ -5,20 +5,14 @@ flowchart TB
     subgraph "NFCORE_RNASEQ:BAM_SORT_STATS_SAMTOOLS [BAM_SORT_STATS_SAMTOOLS]"
     v1(["SAMTOOLS_SORT"])
     v2(["SAMTOOLS_INDEX"])
-    v3(["SAMTOOLS_STATS"])
     end
     subgraph "NFCORE_RNASEQ:BAM_SORT_STATS_SAMTOOLS_UNFILTERED [BAM_SORT_STATS_SAMTOOLS_UNFILTERED]"
-    v4(["SAMTOOLS_SORT"])
-    v5(["SAMTOOLS_INDEX"])
-    v6(["SAMTOOLS_STATS"])
+    v3(["SAMTOOLS_SORT"])
+    v4(["SAMTOOLS_INDEX"])
     end
-    v7(["MULTIQC"])
+    v5(["MULTIQC"])
     v0 --> v1
     v1 --> v2
-    v1 --> v3
-    v2 --> v4
+    v2 --> v3
+    v3 --> v4
     v4 --> v5
-    v4 --> v6
-    v5 --> v7
-    v6 --> v7
-    v3 --> v7
