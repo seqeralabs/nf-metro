@@ -1175,6 +1175,10 @@ def _compute_section_layout(
     # Phase 13: Lift off_track stations above their section's top track.
     # Runs last so it operates on finalised station Ys and bboxes.
     _lift_off_track_stations(graph, y_spacing, section_y_padding)
+    # The upward bbox growth above can push the topmost section above
+    # the canvas top margin set by Phase 3b; shift the whole graph
+    # down to restore the margin.  No-op when no section overflowed.
+    _shift_graph_into_canvas(graph, section_y_padding)
     if validate:
         _run_phase13_guards(graph, "after Phase 13")
 
@@ -1262,6 +1266,9 @@ def _compute_section_layout(
     # consumer.y - n*y_spacing on the final grid and grows the bbox
     # upward if the new position rises above the padding zone.
     _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
+    # Same canvas-fit safeguard as after Phase 13: a reanchor-driven
+    # bbox grow can push the topmost section above the canvas top.
+    _shift_graph_into_canvas(graph, section_y_padding)
     if validate:
         _run_phase13_guards(graph, "after Phase 13g")
 
@@ -1289,6 +1296,10 @@ def _compute_section_layout(
         # recenter Y as the new anchor and grows the section bbox
         # upward when the lifted band moves above its current top.
         _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
+        # Same canvas-fit safeguard as Phase 13 / Phase 13g: a
+        # reanchor-driven bbox grow can push the topmost section
+        # above the canvas top.
+        _shift_graph_into_canvas(graph, section_y_padding)
 
         # Phase 13h.2: Re-run row top-align.  A Phase 13h.1 reanchor-
         # driven bbox grow leaves the section's bbox above its row
@@ -7185,6 +7196,10 @@ def _lift_off_track_stations(
     as its anchor.  After placement, the section bbox grows upward to
     fit the highest lifted input, and same-section TOP ports are
     nudged back to the new top edge.
+
+    Caller is responsible for invoking ``_shift_graph_into_canvas``
+    afterwards: the upward bbox growth here can push the topmost
+    section above the canvas top margin set by Phase 3b.
     """
     groups = _off_track_groups(graph)
     if not groups:
@@ -7202,10 +7217,6 @@ def _lift_off_track_stations(
         new_bbox_top = highest_y - section_y_padding
         if new_bbox_top < section.bbox_y:
             _grow_section_bbox_upward(graph, section, new_bbox_top)
-
-    # Phase 3b ran before our lift, so y_offset doesn't account for the
-    # new bbox tops.
-    _shift_graph_into_canvas(graph, section_y_padding)
 
 
 def _reanchor_off_track_to_consumer(
@@ -7226,13 +7237,14 @@ def _reanchor_off_track_to_consumer(
     the time.  If a re-anchor moves an off-track above the current bbox
     top minus padding, expand the bbox upward so the lifted input still
     sits inside the section's padding zone.  Same-section TOP ports
-    follow the new top edge.  When the growth pushes any section bbox
-    above the canvas top margin, shift the whole graph down so the
-    topmost section keeps its ``section_y_padding`` margin from the
-    canvas edge (mirrors the safeguard in ``_lift_off_track_stations``).
+    follow the new top edge.
+
+    Caller is responsible for invoking ``_shift_graph_into_canvas``
+    afterwards: the upward bbox growth here can push the topmost
+    section above the canvas top margin (mirrors the same caller
+    contract as ``_lift_off_track_stations``).
     """
     groups = _off_track_groups(graph)
-    grew = False
     for sec_id, (fallback_id, by_consumer) in groups.items():
         highest_y = _place_off_track_above_consumers(
             graph, y_spacing, sec_id, fallback_id, by_consumer
@@ -7245,10 +7257,6 @@ def _reanchor_off_track_to_consumer(
         desired_top = highest_y - section_y_padding
         if desired_top < section.bbox_y - 0.5:
             _grow_section_bbox_upward(graph, section, desired_top)
-            grew = True
-
-    if grew:
-        _shift_graph_into_canvas(graph, section_y_padding)
 
 
 def _required_captioned_icon_pitch(y_spacing: float) -> float:

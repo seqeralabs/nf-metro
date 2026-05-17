@@ -1687,6 +1687,70 @@ class TestPhaseGuards:
         compute_layout(graph, validate=True)
 
 
+class TestShiftGraphIntoCanvas:
+    """Behavioural invariants of ``_shift_graph_into_canvas``.
+
+    The helper is called explicitly from three Phase-13 sub-step
+    sites in ``_compute_section_layout``.  Each call must be safe
+    regardless of whether the preceding bbox-growing helper actually
+    grew anything; the helper's own no-op guard makes the call
+    idempotent.
+    """
+
+    def test_idempotent_when_already_in_canvas(self):
+        from nf_metro.layout import engine
+        from nf_metro.parser.model import MetroGraph, Section, Station
+
+        # Section already sits above its padding zone; the shift is a no-op.
+        graph = MetroGraph()
+        graph.sections["s1"] = Section(
+            id="s1", name="S1", bbox_x=0, bbox_y=200, bbox_w=100, bbox_h=80
+        )
+        graph.stations["a"] = Station(id="a", label="A", x=10, y=220)
+
+        engine._shift_graph_into_canvas(graph, section_y_padding=20.0)
+
+        # No shift applied, coords unchanged.
+        assert graph.stations["a"].y == 220
+        assert graph.sections["s1"].bbox_y == 200
+
+    def test_shifts_overflowing_section_down_to_padding(self):
+        from nf_metro.layout import engine
+        from nf_metro.parser.model import MetroGraph, Section, Station
+
+        graph = MetroGraph()
+        graph.sections["s1"] = Section(
+            id="s1", name="S1", bbox_x=0, bbox_y=-30, bbox_w=100, bbox_h=80
+        )
+        graph.stations["a"] = Station(id="a", label="A", x=10, y=10)
+
+        engine._shift_graph_into_canvas(graph, section_y_padding=20.0)
+
+        # bbox_y was -30, padding 20 -> shift = 20 - (-30) = 50.
+        assert graph.sections["s1"].bbox_y == 20
+        assert graph.stations["a"].y == 60
+
+    def test_double_call_is_safe(self):
+        from nf_metro.layout import engine
+        from nf_metro.parser.model import MetroGraph, Section, Station
+
+        graph = MetroGraph()
+        graph.sections["s1"] = Section(
+            id="s1", name="S1", bbox_x=0, bbox_y=-30, bbox_w=100, bbox_h=80
+        )
+        graph.stations["a"] = Station(id="a", label="A", x=10, y=10)
+
+        engine._shift_graph_into_canvas(graph, section_y_padding=20.0)
+        first_bbox_y = graph.sections["s1"].bbox_y
+        first_station_y = graph.stations["a"].y
+
+        engine._shift_graph_into_canvas(graph, section_y_padding=20.0)
+
+        # Second call is a no-op (section is now in canvas).
+        assert graph.sections["s1"].bbox_y == first_bbox_y
+        assert graph.stations["a"].y == first_station_y
+
+
 class TestPhase13Bisection:
     """Bisection guards fired at each Phase-13x boundary must identify the
     offending sub-phase, not the catch-all 'after Phase 12 (final)' label.

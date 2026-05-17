@@ -349,16 +349,18 @@ bisection runner is `_run_phase13_guards`.
   `max(pred.x) + JUNCTION_MARGIN, entry_port.y`.
 - **Invariants preserved**: Real stations, ports.
 
-### Phase 13: lift off-track stations (engine.py:661-663)
+### Phase 13: lift off-track stations (engine.py)
 - **Purpose**: Lift off-track file-input stations to the row above
   their consumer, stacking when multiple inputs share one consumer.
   Grow bbox upward; nudge same-section TOP ports back to new edge.
-- **Helper**: `_lift_off_track_stations` (engine.py:6582).
+- **Helper**: `_lift_off_track_stations`.
 - **Precondition**: Phase 12 complete; all on-track Ys final.
 - **Postcondition**: Each off-track station sits at
   `consumer.y - n*y_spacing` (n = stack rank). Section bbox extends
-  upward to fit. Canvas Y-offset increases if needed
-  (`_shift_graph_into_canvas`).
+  upward to fit.  May leave the topmost section above the canvas
+  margin -- ``_shift_graph_into_canvas`` runs immediately afterwards
+  to restore the margin (called explicitly by the caller, not by
+  the helper).
 - **Invariants preserved**: On-track station Y. Other sections' Ys
   (only the canvas Y-offset may shift the world uniformly).
 - **Related tests**: `test_off_track_inputs_above_consumer`,
@@ -462,14 +464,16 @@ bisection runner is `_run_phase13_guards`.
   `tb.bbox_y + tb.bbox_h >= target.bbox_y + target.bbox_h`.
 - **Invariants preserved**: All station and port Ys. Other bboxes.
 
-### Phase 13g: reanchor off-track to consumer (engine.py:725-732)
+### Phase 13g: reanchor off-track to consumer (engine.py)
 - **Purpose**: Re-pin each off-track input at `consumer.y - n*y_spacing`
   using the consumer's final snapped Y (Phase 13 used pre-snap Ys).
   Grow bbox upward if needed.
-- **Helper**: `_reanchor_off_track_to_consumer` (engine.py:6624).
+- **Helper**: `_reanchor_off_track_to_consumer`.
 - **Precondition**: Phase 13e snapped consumers to grid.
 - **Postcondition**: Off-track inputs sit `n * y_spacing` above their
-  consumer's final Y.
+  consumer's final Y.  May leave the topmost section above the
+  canvas margin -- ``_shift_graph_into_canvas`` runs immediately
+  afterwards (called explicitly by the caller, not by the helper).
 - **Invariants preserved**: On-track station Y.
 - **Related tests**: `test_off_track_inputs_above_consumer`.
 
@@ -491,7 +495,9 @@ bisection runner is `_run_phase13_guards`.
   trunk-anchored Y, leaving off-track icons stranded at the old
   consumer Y (and overlapping the consumer station). Re-pin each
   off-track at `consumer.y - n*y_spacing` on the post-recenter grid.
-  Gated on `center_ports`.
+  Followed by ``_shift_graph_into_canvas`` to handle bbox grow that
+  pushed the topmost section above the canvas margin.  Gated on
+  `center_ports`.
 - **Helper**: `_reanchor_off_track_to_consumer` (same helper as Phase
   13g; called again here on the post-recenter Ys).
 - **Precondition**: Phase 13h has re-centred full-bundle columns.
@@ -624,12 +630,7 @@ resolved; refer to the relevant tracking issue or PR for history.
    cross-phase coupling is hard to follow; the half-grid marker
    pattern would benefit from a dedicated discussion in the doc /
    code.
-2. **Phase 13 (off-track lift) calls `_shift_graph_into_canvas`**,
-   which globally translates every station / port / junction / bbox.
-   That's a Phase 4-style transformation hiding inside a Phase 13
-   helper; if any later phase assumed Phase 4's global-coord origin
-   was stable, the assumption is wrong.
-3. **Phase 11d/11da symmetrically fan content using a stale port Y**;
+2. **Phase 11d/11da symmetrically fan content using a stale port Y**;
    Phase 13h re-centers using the final trunk Y. The two-pass pattern
    is necessary because Phase 11da runs before snap-to-grid, but it
    means the early pass's output is partially-discarded work.
