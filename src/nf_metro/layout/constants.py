@@ -52,8 +52,10 @@ ROW_GAP: float = 120.0
 STATION_RADIUS_APPROX: float = 5.0
 """Approximate station pill radius for layout spacing calculations.
 
-This avoids importing the theme-dependent render value into the layout
-layer.  Must stay in sync with Theme.station_radius.
+Single source of truth for the default station radius: ``Theme.station_radius``
+defaults to this value (see ``render.style.Theme``).  Themes may override
+the radius, but the layout uses this approximation for spacing math so it
+stays decoupled from the theme layer.
 """
 
 SECTION_GAP: float = 3.0
@@ -287,7 +289,8 @@ caption text doesn't visually crash into the icon stroke."""
 ICON_HALF_HEIGHT: float = 16.0
 """Half-height of a terminus file icon for layout calculations.
 
-Must stay in sync with ``Theme.terminus_height / 2`` (default 32 / 2 = 16)."""
+Single source of truth for the default icon half-height: ``Theme.terminus_height``
+defaults to ``2 * ICON_HALF_HEIGHT`` (see ``render.style.Theme``)."""
 
 ICON_CAPTION_GAP: float = 4.0
 """Gap between the bottom of a terminus icon and its name caption.
