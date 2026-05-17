@@ -938,9 +938,7 @@ def collect_failures_via_pytest(worktree: Path, target: str) -> str:
     """Run pytest -rfX --tb=no -q against ``target`` inside ``worktree``
     and return its stdout. Failures don't abort us - the report is the goal."""
     env = os.environ.copy()
-    env["PYTHONPATH"] = (
-        f"{worktree / 'src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
-    )
+    env["PYTHONPATH"] = f"{worktree / 'src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
     cmd = ["pytest", target, "-rfX", "--tb=no", "-q", "--no-header"]
     proc = subprocess.run(
         cmd,
@@ -1050,9 +1048,7 @@ def main() -> int:
                     )
             except Exception as e:  # noqa: BLE001
                 bbox_fallback += 1
-                violator_err = (
-                    f"violator extraction error: {type(e).__name__}: {e}"
-                )
+                violator_err = f"violator extraction error: {type(e).__name__}: {e}"
 
         if base_svg is None:
             annotated_svg = None
@@ -1090,9 +1086,7 @@ def main() -> int:
     print(f"Wrote {out} ({out.stat().st_size:,} bytes)", file=sys.stderr)
 
     if render_failed:
-        print(
-            f"CAVEAT: {render_failed} fixture(s) failed to render", file=sys.stderr
-        )
+        print(f"CAVEAT: {render_failed} fixture(s) failed to render", file=sys.stderr)
     return 0
 
 
@@ -1250,8 +1244,7 @@ def _build_explanation_blocks(invariant: str, violators: list[dict]) -> str:
                     if len(info["parents"]) == 1:
                         p, py = info["parents"][0]
                         parent_part = (
-                            f"parent <code>{esc(p)}</code> "
-                            f"(y=<code>{py:.1f}</code>)"
+                            f"parent <code>{esc(p)}</code> (y=<code>{py:.1f}</code>)"
                         )
                     else:
                         parent_part = (
@@ -1420,8 +1413,7 @@ def _build_explanation_blocks(invariant: str, violators: list[dict]) -> str:
                 "flag Ambiguous.",
             ),
             "test_off_track_inputs_above_consumer": (
-                "An off-track input station does not sit above the "
-                "station it feeds.",
+                "An off-track input station does not sit above the station it feeds.",
                 "Find off-track inputs whose feed arrow points up instead "
                 "of down. If the layout intentionally puts the input "
                 "below, flag Ambiguous.",
@@ -1480,20 +1472,16 @@ def build_html(rows: list[dict]) -> str:
             violator_summary = (
                 f'<div class="violator-list"><strong>{len(r["violators"])} '
                 f"violator(s) highlighted:</strong><ul>"
-                + "".join(
-                    f"<li>{esc(v.get('note', ''))}</li>" for v in r["violators"]
-                )
+                + "".join(f"<li>{esc(v.get('note', ''))}</li>" for v in r["violators"])
                 + "</ul></div>"
             )
         elif v_err:
-            violator_summary = (
-                f'<div class="violator-note"><em>{esc(v_err)}</em></div>'
-            )
+            violator_summary = f'<div class="violator-note"><em>{esc(v_err)}</em></div>'
 
         if svg is None:
             img_block = (
                 f'<div class="render-fail">render failed: '
-                f'{esc(rdr_err or "unknown")}</div>'
+                f"{esc(rdr_err or 'unknown')}</div>"
             )
         else:
             b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")

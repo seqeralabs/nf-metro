@@ -231,9 +231,7 @@ PIPELINE_ENTRIES: list[tuple[str, str, str, str]] = [
 _manifest: dict[str, str] = {}
 
 
-def render_mmd(
-    mmd_path: Path, svg_path: Path, *, debug: bool = DEBUG_RENDERS
-) -> None:
+def render_mmd(mmd_path: Path, svg_path: Path, *, debug: bool = DEBUG_RENDERS) -> None:
     """Parse, layout, and render a .mmd file to SVG."""
     text = mmd_path.read_text()
     graph = parse_metro_mermaid(text)
