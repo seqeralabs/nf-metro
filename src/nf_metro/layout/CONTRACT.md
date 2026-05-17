@@ -547,11 +547,9 @@ Guard bodies live at the top of `engine.py` (lines 83-275).
 - **Invariants preserved**: Busy sibling Y. Bundle Y.
 - **Related tests**: `test_lines_dont_cross_non_consumer_markers`,
   `test_no_icon_overlaps_line_path`.
-- **Notes**: Shares the "13k" tag with the lower-row tighten phase
-  above. **UNCLEAR / collision.**
 
 ### Phase 13l: push lower rows after bbox grow (engine.py:802-806)
-- **Purpose**: Companion to 13k - when 13k grew a section's bbox
+- **Purpose**: Companion to 13k2 - when 13k2 grew a section's bbox
   downward, push lower-row sections down to keep
   `section_y_gap`.
 - **Helper**: `_push_lower_rows_after_bbox_grow` (engine.py:2698).
