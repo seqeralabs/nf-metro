@@ -1132,10 +1132,10 @@ def _compute_row_boundary_segments(
        above min bbox-top of row b), use the global midpoint - the
        natural row separator that sits below every section in the
        upper row and above every section in the lower row.
-    2. Otherwise pick the median of per-column local midpoints (cells
-       where both rows have a non-spanning section that don't locally
-       overlap).  Fold sections produce visible gaps where the line
-       would cut their bboxes.
+    2. Otherwise (a fold extends one row into the other's band), emit
+       one per-column segment at each cell's local midpoint, dropping
+       cells where the bboxes locally overlap.  Fold columns and
+       columns missing one of the two rows produce visible gaps.
     """
     if not col_bounds:
         return []
@@ -1186,11 +1186,9 @@ def _compute_col_boundary_xs(
     """Return ``(col_a, col_b, mid_x)`` triples for consecutive grid columns
     whose bbox X ranges don't overlap.
 
-    Columns very rarely overlap in practice (sections in the same column
-    share an X range by construction), so this stays a single full-height
-    line per pair; the overlap guard is preserved as a precaution.  The
-    horizontal counterpart needs per-column segmentation because folds
-    routinely make rows overlap in Y; columns don't.
+    Columns don't overlap like rows do (there's no column-axis analogue
+    of a fold), so a single canvas-spanning line per pair suffices; the
+    overlap guard is defensive.
     """
     result: list[tuple[int, int, float]] = []
     sorted_cols = sorted(col_bounds)
