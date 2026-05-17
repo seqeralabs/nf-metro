@@ -211,13 +211,7 @@ _XFAIL_ROW_TRUNK_CY: dict[str, str] = {}
 # Inter-section exit-port cy drifts from the matching entry-port cy in
 # the next section.  See nf-metro audit item 1 (the "limma kink"
 # regression family).  Limited to multi-section fixtures.
-_XFAIL_NO_KINK: dict[str, str] = {
-    "topologies/off_track_convergence.mmd": (
-        "Off-track inputs converging into one in-section consumer push the "
-        "consumer's row trunk Y down, decoupling it from the upstream exit "
-        "port cy. Genuine bug, pinned for engine fix."
-    ),
-}
+_XFAIL_NO_KINK: dict[str, str] = {}
 
 
 # Symmetric-fan pairs (two full-bundle stations in the same column) end
@@ -2691,36 +2685,7 @@ def test_grid_snap_does_not_mutate_x(fixture):
 # range across the corpus is ~3.6 to ~63 px; ~47 fixtures are affected.
 # Pinned as a single class so a future centering fix XPASSes across the
 # board; see also nf-metro audit /tmp/invariant-audit.md item 4 and #323.
-_XFAIL_LABEL_CENTER: dict[str, str] = {
-    f: "track-a: label X drifts from horizontal-run midpoint, see #323 / #318"
-    for f in (
-        "da_pipeline.mmd",
-        "genomeassembly_organellar.mmd",
-        "rnaseq_sections.mmd",
-        "topologies/fold_fan_across.mmd",
-        "topologies/funcprofiler_upstream.mmd",
-        "topologies/off_track_convergence.mmd",
-        "topologies/rnaseq_lite.mmd",
-        "topologies/variant_calling.mmd",
-        "differentialabundance.mmd",
-        "differentialabundance_default.mmd",
-        "epitopeprediction.mmd",
-        "genomeassembly.mmd",
-        "genomeassembly_staggered.mmd",
-        "hlatyping.mmd",
-        "rnaseq_auto.mmd",
-        "rnaseq_sections_manual.mmd",
-        "simple_pipeline.mmd",
-        "variant_calling.mmd",
-        "variant_calling_tuned.mmd",
-        "variantbenchmarking.mmd",
-        "variantbenchmarking_auto.mmd",
-        "variantprioritization.mmd",
-        "guide/01_minimal.mmd",
-        "guide/05b_multi_icons.mmd",
-        "guide/06a_without_hidden.mmd",
-    )
-}
+_XFAIL_LABEL_CENTER: dict[str, str] = {}
 
 
 @pytest.mark.parametrize(
@@ -2845,15 +2810,7 @@ def test_label_x_matches_segment_midpoint_on_horizontal_runs(fixture):
 # survivor_merge/bcftools_merge pair in variantbenchmarking's
 # ensembl_truth section (60 px drift).  Linked to the loop-side-branch
 # recenter path; see nf-metro audit item 17 and #323.
-_XFAIL_STACK_X: dict[str, str] = {
-    f: "track-a: stack-mate stations drift in column X, see #323"
-    for f in (
-        "da_pipeline.mmd",
-        "differentialabundance.mmd",
-        "differentialabundance_default.mmd",
-        "variantbenchmarking.mmd",
-    )
-}
+_XFAIL_STACK_X: dict[str, str] = {}
 
 
 @pytest.mark.parametrize(
