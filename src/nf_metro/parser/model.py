@@ -196,10 +196,12 @@ class MetroGraph:
     _station_lines_cache: dict[str, list[str]] | None = field(default=None, repr=False)
     # Grid alignment metadata (populated by Phase 2.5 _align_row_y_grids)
     _row_y_grid_info: dict = field(default_factory=dict, repr=False)
-    # Station IDs placed at half-pitch offsets relative to the row grid by the
-    # 2-branch symmetric-fan placement.  Tracked so that ``_snap_all_y_to_grid``
-    # leaves them alone (they intentionally sit on the half-grid).
-    _half_grid_station_ids: set[str] = field(default_factory=set, repr=False)
+    # Cross-phase channel: station IDs placed at half-pitch offsets
+    # relative to the row grid by Phase 13d3
+    # (``_apply_half_grid_2branch_symfan``) for 2-branch symfan sections.
+    # Phase 13e (``_snap_all_y_to_grid``) reads this set and skips those
+    # stations so they keep their intentional half-grid Y.
+    half_grid_station_ids: set[str] = field(default_factory=set, repr=False)
 
     def _invalidate_edge_caches(self) -> None:
         """Reset caches that depend on the edge list."""

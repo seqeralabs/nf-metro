@@ -1233,9 +1233,9 @@ def _compute_section_layout(
     # symmetric fan (and no off-track or other constraining content),
     # collapse the fan onto half-pitch offsets so the section consumes
     # one vertical grid unit instead of two.  Marks the branch stations
-    # in ``_half_grid_station_ids`` so the next snap pass leaves them
-    # alone.  Runs before ``_snap_all_y_to_grid`` so the snap-to-row-
-    # grid pass doesn't immediately undo the compaction.
+    # in ``graph.half_grid_station_ids`` so the next snap pass leaves
+    # them alone.  Runs before ``_snap_all_y_to_grid`` so the snap-to-
+    # row-grid pass doesn't immediately undo the compaction.
     if graph.center_ports:
         _apply_half_grid_2branch_symfan(graph, y_spacing, section_y_padding)
         if validate:
@@ -3532,7 +3532,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
         # consumer is preserved) but don't influence the origin.
         residues: Counter[float] = Counter()
         per_section_ports: dict[str, set[str]] = {}
-        half_grid_ids = getattr(graph, "_half_grid_station_ids", set()) or set()
+        half_grid_ids = graph.half_grid_station_ids
         for sec_id in sec_ids:
             section = graph.sections.get(sec_id)
             if section is None or section.bbox_h <= 0:
@@ -3869,7 +3869,7 @@ def _apply_half_grid_2branch_symfan(
       2. LR/RL exit port Y.
       3. Midpoint of the two branch stations' current Ys.
 
-    The branches are marked in ``_half_grid_station_ids`` so the
+    The branches are marked in ``graph.half_grid_station_ids`` so the
     subsequent ``_snap_all_y_to_grid`` pass leaves their half-pitch
     offsets intact (and ignores them when computing the row grid
     origin).
@@ -3929,7 +3929,7 @@ def _apply_half_grid_2branch_symfan(
         branches.sort(key=lambda s: s.y)
         branches[0].y = trunk_y - 0.5 * y_spacing
         branches[1].y = trunk_y + 0.5 * y_spacing
-        graph._half_grid_station_ids.update(b.id for b in branches)
+        graph.half_grid_station_ids.update(b.id for b in branches)
 
         # Half-grid branches consume half a y_spacing above and below
         # the trunk instead of a full slot.  Shrink the bbox top to match
@@ -3972,7 +3972,7 @@ def _section_symfan_uses_half_grid(graph: MetroGraph, section: Section) -> bool:
 
     Trunk Y itself is unchanged.  The branches sit at half-pitch
     relative to the row grid; ``_snap_all_y_to_grid`` skips them via
-    ``graph._half_grid_station_ids``.
+    ``graph.half_grid_station_ids``.
     """
     port_ids = set(section.entry_ports) | set(section.exit_ports)
     branches: list[Station] = []

@@ -427,26 +427,30 @@ bisection runner is `_run_phase13_guards`.
   trunk row instead of stacked below it.
 - **Invariants preserved**: Trunk station Y.
 
-### Phase 13d3: 2-branch symfan half-grid compaction (engine.py:702-710)
+### Phase 13d3: 2-branch symfan half-grid compaction (engine.py)
 - **Purpose**: Sections containing exactly a 2-branch symmetric fan
   (no off-track / constraining content) collapse onto half-pitch
-  offsets so the section is 1 grid-unit tall instead of 2. Marks
-  stations in `_half_grid_station_ids` so Phase 13e leaves them alone.
-  Gated on `center_ports`.
-- **Helper**: `_apply_half_grid_2branch_symfan` (engine.py:3266).
+  offsets so the section is 1 grid-unit tall instead of 2. Records
+  the placed stations on the public `MetroGraph.half_grid_station_ids`
+  field so Phase 13e leaves them alone -- this is the only cross-
+  phase channel for half-grid placement. Gated on `center_ports`.
+- **Helper**: `_apply_half_grid_2branch_symfan`.
 - **Precondition**: 13d/13d2 done; symfan classification stable
   (`_section_symfan_uses_half_grid`).
 - **Postcondition**: Eligible symfan pairs share half-pitch offsets
-  from the trunk Y.
+  from the trunk Y. `graph.half_grid_station_ids` contains their IDs.
 - **Invariants preserved**: Trunk station Y. Other sections.
 - **Related tests**: `test_symfan_pairs_share_y`.
 
-### Phase 13e: snap all Y to grid (engine.py:712-717)
+### Phase 13e: snap all Y to grid (engine.py)
 - **Purpose**: Final pass snapping every station and port Y to the
   nearest row-wide grid slot, removing fractional Ys left by earlier
-  shifts. Half-grid stations from 13d3 are skipped.
-- **Helper**: `_snap_all_y_to_grid` (engine.py:2882).
-- **Precondition**: All semantic Y shifts done.
+  shifts. Stations listed in `graph.half_grid_station_ids` (populated
+  by Phase 13d3) are skipped so they keep their intentional half-pitch
+  Y.
+- **Helper**: `_snap_all_y_to_grid`.
+- **Precondition**: All semantic Y shifts done. If Phase 13d3 ran,
+  `graph.half_grid_station_ids` is populated.
 - **Postcondition**: Every station and port Y is a grid slot of the
   per-section / per-row pitch (except marked half-grid stations).
 - **Invariants preserved**: X coordinates (tested by
@@ -624,13 +628,7 @@ The following observations came up while writing this doc. Each one is
 a candidate for a follow-up cleanup PR. Items are removed as they are
 resolved; refer to the relevant tracking issue or PR for history.
 
-1. **Phase 13d3 has more conditional logic than the rest** - it's
-   gated on `center_ports` and tracks state on
-   `_half_grid_station_ids` to coordinate with Phase 13e. That
-   cross-phase coupling is hard to follow; the half-grid marker
-   pattern would benefit from a dedicated discussion in the doc /
-   code.
-2. **Phase 11d/11da symmetrically fan content using a stale port Y**;
+1. **Phase 11d/11da symmetrically fan content using a stale port Y**;
    Phase 13h re-centers using the final trunk Y. The two-pass pattern
    is necessary because Phase 11da runs before snap-to-grid, but it
    means the early pass's output is partially-discarded work.

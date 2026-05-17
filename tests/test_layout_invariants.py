@@ -1722,7 +1722,7 @@ def test_all_stations_snap_to_grid(fixture):
 
     Half-grid placement (``trunk_y +/- 0.5 * y_spacing``) is reserved
     for the auto-half-grid 2-branch symmetric fan feature: stations
-    registered in ``graph._half_grid_station_ids`` whose section
+    registered in ``graph.half_grid_station_ids`` whose section
     satisfies ``_section_symfan_uses_half_grid`` and has exactly two
     on-track branches.  Any other half-grid station is a regression.
     """
@@ -1732,7 +1732,7 @@ def test_all_stations_snap_to_grid(fixture):
     tol = 1.0
     graph = _layout(fixture, y_spacing=y_spacing)
 
-    half_grid_ids = getattr(graph, "_half_grid_station_ids", set()) or set()
+    half_grid_ids = graph.half_grid_station_ids
     port_ids: set[str] = set()
     for sec in graph.sections.values():
         port_ids.update(sec.entry_ports)
