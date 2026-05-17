@@ -192,8 +192,10 @@ class MetroGraph:
     _pending_terminus: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
     # Pending off-track marks: station_ids to lift above section top track
     _pending_off_track: list[str] = field(default_factory=list)
-    # Lazy cache for station_lines(); invalidated on edge mutation
+    # Lazy caches keyed off the edge list; invalidated on edge mutation.
     _station_lines_cache: dict[str, list[str]] | None = field(default=None, repr=False)
+    _edges_from_cache: dict[str, list[Edge]] | None = field(default=None, repr=False)
+    _edges_to_cache: dict[str, list[Edge]] | None = field(default=None, repr=False)
     # Grid alignment metadata (populated by Phase 2.5 _align_row_y_grids)
     _row_y_grid_info: dict = field(default_factory=dict, repr=False)
     # Cross-phase channel: station IDs placed at half-pitch offsets
@@ -206,6 +208,8 @@ class MetroGraph:
     def _invalidate_edge_caches(self) -> None:
         """Reset caches that depend on the edge list."""
         self._station_lines_cache = None
+        self._edges_from_cache = None
+        self._edges_to_cache = None
 
     def add_line(self, line: MetroLine) -> None:
         self.lines[line.id] = line
@@ -221,6 +225,11 @@ class MetroGraph:
 
     def add_edge(self, edge: Edge) -> None:
         self.edges.append(edge)
+        self._invalidate_edge_caches()
+
+    def replace_edges(self, new_edges: list[Edge]) -> None:
+        """Replace the entire edge list and invalidate dependent caches."""
+        self.edges = new_edges
         self._invalidate_edge_caches()
 
     def add_section(self, section: Section) -> None:
@@ -261,6 +270,24 @@ class MetroGraph:
             self._station_lines_cache = {sid: sorted(lids) for sid, lids in idx.items()}
         return self._station_lines_cache.get(station_id, [])
 
+    def edges_from(self, station_id: str) -> list[Edge]:
+        """Return edges whose ``source`` is *station_id* (lazy adjacency cache)."""
+        if self._edges_from_cache is None:
+            idx: dict[str, list[Edge]] = {}
+            for e in self.edges:
+                idx.setdefault(e.source, []).append(e)
+            self._edges_from_cache = idx
+        return self._edges_from_cache.get(station_id, [])
+
+    def edges_to(self, station_id: str) -> list[Edge]:
+        """Return edges whose ``target`` is *station_id* (lazy adjacency cache)."""
+        if self._edges_to_cache is None:
+            idx: dict[str, list[Edge]] = {}
+            for e in self.edges:
+                idx.setdefault(e.target, []).append(e)
+            self._edges_to_cache = idx
+        return self._edges_to_cache.get(station_id, [])
+
     def line_stations(self, line_id: str) -> list[str]:
         """Return station IDs on a line, in edge order."""
         stations = []
@@ -274,16 +301,6 @@ class MetroGraph:
                     stations.append(edge.target)
                     seen.add(edge.target)
         return stations
-
-    def inter_section_edges(self) -> list[Edge]:
-        """Return edges that cross section boundaries."""
-        result = []
-        for edge in self.edges:
-            src_section = self.section_for_station(edge.source)
-            tgt_section = self.section_for_station(edge.target)
-            if src_section and tgt_section and src_section != tgt_section:
-                result.append(edge)
-        return result
 
     def section_for_station(self, station_id: str) -> str | None:
         """Return the section ID containing a station, or None."""

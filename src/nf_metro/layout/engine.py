@@ -256,12 +256,6 @@ def _guard_no_line_crosses_non_consumer(
         except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
             return
 
-    consumed_by: dict[str, set[str]] = {}
-    produced_by: dict[str, set[str]] = {}
-    for e in graph.edges:
-        consumed_by.setdefault(e.target, set()).add(e.line_id)
-        produced_by.setdefault(e.source, set()).add(e.line_id)
-
     def _segment_crosses_bbox(
         p1: tuple[float, float],
         p2: tuple[float, float],
@@ -289,7 +283,7 @@ def _guard_no_line_crosses_non_consumer(
         bbox = _station_marker_bbox(graph, sid, offsets=offsets)
         if bbox is None:
             continue
-        station_lines = consumed_by.get(sid, set()) | produced_by.get(sid, set())
+        station_lines = set(graph.station_lines(sid))
         for r in routes:
             if r.line_id in station_lines:
                 continue
@@ -3732,9 +3726,7 @@ def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:
         port = graph.ports.get(pid)
         if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
-        for edge in graph.edges:
-            if edge.source == pid or edge.target == pid:
-                bundle.add(edge.line_id)
+        bundle.update(graph.station_lines(pid))
     return bundle
 
 

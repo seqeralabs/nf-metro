@@ -22,6 +22,8 @@ is NEVER variable beyond the line's position within the bundle.
 
 from __future__ import annotations
 
+import math
+
 from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
 
 # ---------------------------------------------------------------------------
@@ -74,13 +76,8 @@ def resolve_curve_radii(
         )
 
         prev, curr, nxt = points[i - 1], points[i], points[i + 1]
-        dx1 = curr[0] - prev[0]
-        dy1 = curr[1] - prev[1]
-        len1 = (dx1**2 + dy1**2) ** 0.5
-
-        dx2 = nxt[0] - curr[0]
-        dy2 = nxt[1] - curr[1]
-        len2 = (dx2**2 + dy2**2) ** 0.5
+        len1 = math.hypot(curr[0] - prev[0], curr[1] - prev[1])
+        len2 = math.hypot(nxt[0] - curr[0], nxt[1] - curr[1])
 
         # Proportional allocation for segments shared between adjacent corners.
         if i > 1:

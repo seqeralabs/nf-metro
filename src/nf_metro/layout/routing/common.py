@@ -269,19 +269,6 @@ def line_source_y_at_port(
     return line_y
 
 
-def adjacent_column_gap_x(
-    graph: MetroGraph,
-    col_a: int,
-    col_b: int,
-) -> float:
-    """X midpoint between two adjacent columns.
-
-    Finds the right edge of col_a and left edge of col_b (assuming
-    col_a < col_b) and returns the midpoint.
-    """
-    return column_gap_midpoint(graph, col_a, col_b)
-
-
 def point_on_polyline(
     point: tuple[float, float],
     pts: list[tuple[float, float]],
@@ -356,10 +343,8 @@ def bypass_bottom_y(
         for s in graph.sections.values()
         if s.bbox_w > 0 and lo < s.grid_col < hi and _in_row(s)
     ]
-    max_intervening = (
-        max((s.bbox_y + s.bbox_h for s in intervening), default=0.0)
-        if intervening
-        else 0.0
+    max_intervening = max(
+        (s.bbox_y + s.bbox_h for s in intervening), default=0.0
     )
 
     if max_intervening > 0:

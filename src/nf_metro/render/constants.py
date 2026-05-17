@@ -216,7 +216,7 @@ FOLDER_TAB_WIDTH_RATIO: float = 0.4
 # ---------------------------------------------------------------------------
 # Animation styling
 # ---------------------------------------------------------------------------
-ANIMATION_BALL_OPACITY: str = "0.9"
+ANIMATION_BALL_OPACITY: float = 0.9
 """Opacity of animated balls traveling along lines."""
 
 # ---------------------------------------------------------------------------
