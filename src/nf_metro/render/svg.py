@@ -4,6 +4,7 @@ from __future__ import annotations
 
 __all__ = ["apply_route_offsets", "render_svg"]
 
+import html
 import textwrap
 from pathlib import Path
 
@@ -527,6 +528,14 @@ def _render_first_class_sections(
         if section.is_implicit:
             continue
 
+        section_lines: set[str] = set()
+        for sid in section.station_ids:
+            section_lines.update(graph.station_lines(sid))
+        section_data = {
+            "data-section-id": section.id,
+            "data-section-lines": ",".join(sorted(section_lines)),
+        }
+
         d.append(
             draw.Rectangle(
                 section.bbox_x,
@@ -538,6 +547,8 @@ def _render_first_class_sections(
                 fill=theme.section_fill,
                 stroke=theme.section_stroke,
                 stroke_width=SECTION_STROKE_WIDTH,
+                class_="nf-metro-section-box",
+                **section_data,
             )
         )
 
@@ -575,7 +586,10 @@ def _render_first_class_sections(
                 cy,
                 circle_r,
                 fill=theme.station_stroke,
-                **{"class": "nf-metro-section-num-circle"},
+                **{
+                    "class": "nf-metro-section-num-circle",
+                    "data-section-id": section.id,
+                },
             )
         )
         d.append(
@@ -589,6 +603,7 @@ def _render_first_class_sections(
                 font_weight="bold",
                 text_anchor="middle",
                 dy=TEXT_VCENTER_DY,
+                **{"data-section-id": section.id},
             )
         )
 
@@ -603,7 +618,7 @@ def _render_first_class_sections(
                 font_family=theme.label_font_family,
                 font_weight="bold",
                 dy=TEXT_VCENTER_DY,
-                **{"class": "nf-metro-section-label"},
+                **{"class": "nf-metro-section-label", "data-section-id": section.id},
             )
         )
 
@@ -645,6 +660,7 @@ def _render_edges(
                     stroke_width=theme.line_width,
                     stroke_linecap="round",
                     class_=class_name,
+                    **{"data-line-id": route.line_id},
                     **style_kw,
                 )
             )
@@ -656,6 +672,7 @@ def _render_edges(
                 stroke_linecap="round",
                 stroke_linejoin="round",
                 class_=class_name,
+                **{"data-line-id": route.line_id},
                 **style_kw,
             )
             path.M(*pts[0])
@@ -736,6 +753,21 @@ def _render_stations(
 
         span = max_off - min_off
 
+        # Hand-escape values that flow from user content into XML attributes.
+        # drawsvg does not escape unknown kwargs, so an unescaped "&" or "<"
+        # in a section name or station label breaks XML well-formedness.
+        station_data = {
+            "class_": "nf-metro-station",
+            "data-station-id": station.id,
+            "data-station-lines": ",".join(graph.station_lines(station.id)),
+            "data-station-label": html.escape(station.label or station.id),
+        }
+        if station.section_id:
+            station_data["data-section-id"] = station.section_id
+            sec_obj = graph.sections.get(station.section_id)
+            if sec_obj:
+                station_data["data-section-name"] = html.escape(sec_obj.name)
+
         # Non-process terminus stations: filled rectangle
         # (same size as pill, no rounding)
         is_blank_terminus = station.is_terminus and not station.label.strip()
@@ -752,6 +784,7 @@ def _render_stations(
                     fill=theme.station_fill,
                     stroke=theme.station_stroke,
                     stroke_width=theme.station_stroke_width,
+                    **station_data,
                 )
             )
         elif is_tb_vert:
@@ -770,6 +803,7 @@ def _render_stations(
                     fill=theme.station_fill,
                     stroke=theme.station_stroke,
                     stroke_width=theme.station_stroke_width,
+                    **station_data,
                 )
             )
         else:
@@ -788,11 +822,16 @@ def _render_stations(
                     fill=theme.station_fill,
                     stroke=theme.station_stroke,
                     stroke_width=theme.station_stroke_width,
+                    **station_data,
                 )
             )
 
         if station.is_terminus:
-            _render_terminus_icons(d, station, graph, theme, r, min_off, max_off)
+            icon_group = draw.Group(**{"data-station-id": station.id})
+            _render_terminus_icons(
+                icon_group, station, graph, theme, r, min_off, max_off
+            )
+            d.append(icon_group)
 
 
 def caption_aware_icon_step(
@@ -985,6 +1024,12 @@ def _render_labels(
                 # Keep the bottom line near the station
                 y -= (n_lines - 1) * line_spacing
 
+        # Skip emitting data-station-id for synthetic obstacle placements.
+        label_data: dict[str, str] = {}
+        if label.station_id and not label.station_id.startswith("__"):
+            label_data["data-station-id"] = label.station_id
+            label_data["class_"] = "nf-metro-station-label"
+
         if label.dominant_baseline:
             # Custom placement (e.g. TB vertical stations: right-side labels)
             d.append(
@@ -999,6 +1044,7 @@ def _render_labels(
                     text_anchor=label.text_anchor,
                     dominant_baseline=label.dominant_baseline,
                     line_height=LABEL_LINE_HEIGHT,
+                    **label_data,
                 )
             )
         else:
@@ -1015,6 +1061,7 @@ def _render_labels(
                     text_anchor="middle",
                     dominant_baseline=baseline,
                     line_height=LABEL_LINE_HEIGHT,
+                    **label_data,
                 )
             )
 

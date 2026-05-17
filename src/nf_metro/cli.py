@@ -10,6 +10,7 @@ from nf_metro import __version__
 from nf_metro.layout import compute_layout
 from nf_metro.parser import parse_metro_mermaid
 from nf_metro.render import render_svg
+from nf_metro.render.html import render_html
 from nf_metro.themes import THEMES
 
 
@@ -26,7 +27,15 @@ def cli() -> None:
     "--output",
     type=click.Path(path_type=Path),
     default=None,
-    help="Output SVG file path. Defaults to <input>.svg",
+    help="Output file path. Defaults to <input>.<format>",
+)
+@click.option(
+    "--format",
+    "format_",
+    type=click.Choice(["svg", "html"]),
+    default="svg",
+    help="Output format: 'svg' (default) or 'html' for an interactive "
+    "self-contained page with pan/zoom and per-line filtering.",
 )
 @click.option(
     "--theme",
@@ -118,6 +127,7 @@ def cli() -> None:
 def render(
     input_file: Path,
     output: Path | None,
+    format_: str,
     theme: str,
     width: int | None,
     height: int | None,
@@ -135,7 +145,7 @@ def render(
     from_nextflow: bool,
     title: str | None,
 ) -> None:
-    """Render a Mermaid metro map definition to SVG."""
+    """Render a Mermaid metro map definition to SVG or interactive HTML."""
     text = input_file.read_text()
 
     if from_nextflow:
@@ -174,14 +184,26 @@ def render(
     compute_layout(graph, **layout_kwargs)
 
     theme_obj = THEMES[theme]
-    svg = render_svg(
-        graph, theme_obj, width=width, height=height, animate=animate, debug=debug
-    )
 
     if output is None:
-        output = input_file.with_suffix(".svg")
+        output = input_file.with_suffix(f".{format_}")
 
-    output.write_text(svg if svg.endswith("\n") else svg + "\n")
+    if format_ == "html":
+        content = render_html(
+            graph,
+            theme_obj,
+            width=width,
+            height=height,
+            animate=animate,
+            debug=debug,
+            embed_basename=output.name,
+        )
+    else:
+        content = render_svg(
+            graph, theme_obj, width=width, height=height, animate=animate, debug=debug
+        )
+
+    output.write_text(content if content.endswith("\n") else content + "\n")
     click.echo(
         f"Rendered {len(graph.stations)} stations, "
         f"{len(graph.edges)} edges, "

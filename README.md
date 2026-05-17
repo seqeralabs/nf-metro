@@ -64,7 +64,7 @@ nf-metro info examples/simple_pipeline.mmd
 
 ### `nf-metro render`
 
-Render a Mermaid metro map definition to SVG.
+Render a Mermaid metro map definition to SVG or interactive HTML.
 
 ```
 nf-metro render [OPTIONS] INPUT_FILE
@@ -72,7 +72,8 @@ nf-metro render [OPTIONS] INPUT_FILE
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-o`, `--output PATH` | `<input>.svg` | Output SVG file path |
+| `-o`, `--output PATH` | `<input>.<format>` | Output file path |
+| `--format [svg\|html]` | `svg` | Output format: `svg` or interactive `html` |
 | `--theme [nfcore\|light]` | `nfcore` | Visual theme |
 | `--width INTEGER` | auto | SVG width in pixels |
 | `--height INTEGER` | auto | SVG height in pixels |
@@ -96,6 +97,28 @@ The `--logo` flag lets you use the same `.mmd` file with different logos for dar
 nf-metro render pipeline.mmd -o pipeline_dark.svg --theme nfcore --logo logo_dark.png
 nf-metro render pipeline.mmd -o pipeline_light.svg --theme light --logo logo_light.png
 ```
+
+#### Interactive HTML output
+
+`--format html` produces a self-contained `.html` file with the SVG inlined plus a small JS/CSS layer (no external dependencies, no network):
+
+```bash
+nf-metro render pipeline.mmd --format html -o pipeline.html
+```
+
+The page provides:
+
+- **Drag to pan**, **scroll to zoom** (Cmd/Ctrl+scroll in embedded mode).
+- **Hover a station** to see its label, section, and the lines passing through it.
+- **Click a line in the legend** to isolate it. Stations and sections not carrying that line disappear and the view zooms to the bounding box of what remains. Click again, hit `Esc`, or use the **Reset** button to restore.
+- **Embed&hellip;** opens a copy-snippet panel with three options:
+  - **Inline HTML** - a self-contained `<div>` snippet with scoped CSS and an IIFE-bound script. Paste into any HTML host (MkDocs, Confluence, Notion, a blog template) and the full interactivity travels with it. No iframe required.
+  - **iframe** - a one-liner pointing at the hosted `.html` file. Useful when you already have somewhere to host the file.
+  - **Static SVG** - the raw `<svg>` markup for contexts that strip scripts.
+
+The hashed wrapper class on the inline snippet means multiple maps can coexist on the same host page without colliding.
+
+GitHub READMEs strip `<script>` tags, so the interactive page won't run inline there - host on GitHub Pages (or any static host) and link to it from the README. For places that *do* accept inline scripts (most static-site generators, internal wikis, web pages), the inline-HTML snippet works as-is.
 
 ### `nf-metro validate`
 
