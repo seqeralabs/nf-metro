@@ -3126,11 +3126,31 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
 def _shift_and_propagate_loop_stations(
     graph: MetroGraph,
     y_spacing: float,
-    section_y_padding: float = SECTION_Y_PADDING,
-    section_y_gap: float = SECTION_Y_GAP,
+    section_y_padding: float,
+    section_y_gap: float,
 ) -> None:
     """Shift sparse loop-side stations onto a half-pitch Y, then
     propagate any bbox growth to lower rows.
+
+    Two-phase unified helper.  Phase 1 shifts sparse single-line loop
+    stations clear of busier siblings' inbound bundles (and may grow
+    the section bbox downward).  Phase 2 propagates any bbox growth
+    to lower rows so ``section_y_gap`` is preserved; it is a no-op
+    when phase 1 didn't grow anything.
+    """
+    _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
+    _push_lower_rows_after_bbox_grow(graph, section_y_gap)
+
+
+def _shift_sparse_loop_stations_to_clear_bundle(
+    graph: MetroGraph,
+    y_spacing: float,
+    section_y_padding: float = SECTION_Y_PADDING,
+) -> None:
+    """Phase 1 of :func:`_shift_and_propagate_loop_stations`.
+
+    Shift single-line loop side stations onto a half-pitch Y when
+    their full-row Y collides with a busier sibling's inbound bundle.
 
     The bypass virtual station mechanism (``_insert_bypass_stations``)
     covers the pred -> exit_port case (e.g. ``annotate`` between limma
@@ -3149,15 +3169,11 @@ def _shift_and_propagate_loop_stations(
 
     shift S vertically by one full ``y_spacing`` away from the trunk
     on the side it already sits on, so its marker bbox sits clear of
-    the sibling's bundle Y range.  Growing the section bbox downward
-    can then leave the lower-row gap below ``section_y_gap``; once all
-    shifts are applied, the helper pushes lower rows down to restore
-    that gap (the row-propagation step formerly handled by
-    ``_push_lower_rows_after_bbox_grow`` as a separate stage).
+    the sibling's bundle Y range.  The section bbox is grown when
+    necessary; phase 2 then closes the row gap that growth opened.
     """
     if y_spacing <= 0:
         return
-    any_bbox_grew = False
 
     def _consumed_lines(sid: str) -> set[str]:
         return {e.line_id for e in graph.edges_to(sid)}
@@ -3249,15 +3265,10 @@ def _shift_and_propagate_loop_stations(
                 grow = sec_top + edge_pad - new_y
                 section.bbox_y -= grow
                 section.bbox_h += grow
-                any_bbox_grew = True
             elif new_y > sec_bottom - edge_pad:
                 grow = new_y - (sec_bottom - edge_pad)
                 section.bbox_h += grow
-                any_bbox_grew = True
             st.y = new_y
-
-    if any_bbox_grew:
-        _push_lower_rows_after_bbox_grow(graph, section_y_gap)
 
 
 def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> None:
