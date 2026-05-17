@@ -1124,44 +1124,58 @@ def _compute_row_boundary_segments(
 ) -> list[tuple[int, int, float, float, float]]:
     """Return row-boundary segments as ``(row_a, row_b, x_start, x_end, y)``.
 
-    For each consecutive grid-row pair, choose a representative
-    boundary Y from the per-column midpoints (median across columns
-    where both rows have a non-spanning section and don't locally
-    overlap), then draw a horizontal line at that Y spanning the
-    canvas - broken only around bboxes the line would otherwise cut.
-    Fold sections that extend past their row produce gaps in the line,
-    so the separator is visibly absent at fold columns but still
-    extends under all other sections (including columns where only one
-    of the two rows has a section).
+    For each consecutive grid-row pair, pick a boundary Y and draw a
+    canvas-wide horizontal line at that Y, broken around bboxes the
+    line would cut:
+
+    1. If rows don't overlap globally (max bbox-bottom of row a is
+       above min bbox-top of row b), use the global midpoint - the
+       natural row separator that sits below every section in the
+       upper row and above every section in the lower row.
+    2. Otherwise pick the median of per-column local midpoints (cells
+       where both rows have a non-spanning section that don't locally
+       overlap).  Fold sections produce visible gaps where the line
+       would cut their bboxes.
     """
     if not col_bounds:
         return []
     sec_by_cell = _sections_by_grid_cell(sections)
-    rows = sorted({r for _, r in sec_by_cell})
     canvas_x0 = min(b[0] for b in col_bounds.values()) - 20
     canvas_x1 = max(b[1] for b in col_bounds.values()) + 20
+    sections_by_row: dict[int, list[Section]] = {}
+    for sec in sections:
+        if sec.grid_row_span == 1:
+            sections_by_row.setdefault(sec.grid_row, []).append(sec)
+    rows = sorted(sections_by_row)
     segments: list[tuple[int, int, float, float, float]] = []
     for i in range(len(rows) - 1):
         ra, rb = rows[i], rows[i + 1]
-        anchor_ys: list[float] = []
-        for c in col_bounds:
-            sa = sec_by_cell.get((c, ra))
-            sb = sec_by_cell.get((c, rb))
-            if sa is None or sb is None:
-                continue
-            a_bot = sa.bbox_y + sa.bbox_h
-            b_top = sb.bbox_y
-            if a_bot >= b_top:
-                continue
-            anchor_ys.append((a_bot + b_top) / 2)
-        if not anchor_ys:
+        row_a_secs = sections_by_row.get(ra, [])
+        row_b_secs = sections_by_row.get(rb, [])
+        if not row_a_secs or not row_b_secs:
             continue
-        anchor_ys.sort()
-        y = anchor_ys[len(anchor_ys) // 2]
-        cut_ranges: list[tuple[float, float]] = []
-        for sec in sections:
-            if sec.grid_row_span != 1 or sec.grid_row not in (ra, rb):
+        max_bottom = max(s.bbox_y + s.bbox_h for s in row_a_secs)
+        min_top = min(s.bbox_y for s in row_b_secs)
+        if max_bottom < min_top:
+            y = (max_bottom + min_top) / 2
+        else:
+            anchor_ys: list[float] = []
+            for c in col_bounds:
+                sa = sec_by_cell.get((c, ra))
+                sb = sec_by_cell.get((c, rb))
+                if sa is None or sb is None:
+                    continue
+                a_bot = sa.bbox_y + sa.bbox_h
+                b_top = sb.bbox_y
+                if a_bot >= b_top:
+                    continue
+                anchor_ys.append((a_bot + b_top) / 2)
+            if not anchor_ys:
                 continue
+            anchor_ys.sort()
+            y = anchor_ys[len(anchor_ys) // 2]
+        cut_ranges: list[tuple[float, float]] = []
+        for sec in row_a_secs + row_b_secs:
             if sec.bbox_y < y < sec.bbox_y + sec.bbox_h:
                 cut_ranges.append((sec.bbox_x, sec.bbox_x + sec.bbox_w))
         cut_ranges.sort()
