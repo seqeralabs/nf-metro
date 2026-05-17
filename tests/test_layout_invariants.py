@@ -2827,6 +2827,47 @@ def test_routes_dont_loop_backwards(fixture):
     assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
 
 
+# ---------------------------------------------------------------------------
+# Ports must sit on a section bbox edge, and Port/Station registries must
+# agree on the port's coordinates
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_ports_on_section_boundary(fixture):
+    """Every port station must sit on its section's bbox edge.
+
+    Mirrors the runtime ``_guard_ports_on_boundaries`` check but exercises
+    the full fixture corpus so a regression on any single pipeline trips
+    the test rather than only ``validate=True`` runs.
+    """
+    graph = _layout(fixture)
+    tol = 5.0  # GUARD_TOLERANCE from layout.constants
+
+    offenders: list[str] = []
+    for pid, port in graph.ports.items():
+        st = graph.stations.get(pid)
+        if st is None:
+            continue
+        sec = graph.sections.get(st.section_id or "")
+        if sec is None or sec.bbox_w == 0 or sec.bbox_h == 0:
+            continue
+        on_left = abs(st.x - sec.bbox_x) <= tol
+        on_right = abs(st.x - (sec.bbox_x + sec.bbox_w)) <= tol
+        on_top = abs(st.y - sec.bbox_y) <= tol
+        on_bottom = abs(st.y - (sec.bbox_y + sec.bbox_h)) <= tol
+        if not (on_left or on_right or on_top or on_bottom):
+            offenders.append(
+                f"port {pid!r} (side={port.side.name}) at "
+                f"({st.x:.1f}, {st.y:.1f}) not on any edge of section "
+                f"{st.section_id!r} bbox "
+                f"({sec.bbox_x:.1f}, {sec.bbox_y:.1f}, "
+                f"w={sec.bbox_w:.1f}, h={sec.bbox_h:.1f})"
+            )
+
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
+
+
 def _resolve_section_col_for_station(graph, station):
     """Resolve a station's grid column.  For ports, use the section.
     For junctions, follow an incoming edge back to a real station.
