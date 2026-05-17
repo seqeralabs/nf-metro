@@ -1162,34 +1162,28 @@ def _compute_row_boundary_segments(
     return segments
 
 
-def _compute_col_boundary_segments(
-    sections: list[Section],
-    row_bounds: dict[int, tuple[float, float]],
-) -> list[tuple[int, int, float, float, float]]:
-    """Return per-row column-boundary segments as
-    ``(col_a, col_b, y_start, y_end, x)`` tuples.
+def _compute_col_boundary_xs(
+    col_bounds: dict[int, tuple[float, float]],
+) -> list[tuple[int, int, float]]:
+    """Return ``(col_a, col_b, mid_x)`` triples for consecutive grid columns
+    whose bbox X ranges don't overlap.
 
-    Mirrors :func:`_compute_row_boundary_segments` along the other
-    axis - per-row vertical segments at the local midpoint between
-    horizontally adjacent sections, skipped where bboxes locally
-    overlap in X.
+    Columns very rarely overlap in practice (sections in the same column
+    share an X range by construction), so this stays a single full-height
+    line per pair; the overlap guard is preserved as a precaution.  The
+    horizontal counterpart needs per-column segmentation because folds
+    routinely make rows overlap in Y; columns don't.
     """
-    sec_by_cell = _sections_by_grid_cell(sections)
-    cols = sorted({c for c, _ in sec_by_cell})
-    segments: list[tuple[int, int, float, float, float]] = []
-    for j in range(len(cols) - 1):
-        ca, cb = cols[j], cols[j + 1]
-        for r, (y_start, y_end) in row_bounds.items():
-            sa = sec_by_cell.get((ca, r))
-            sb = sec_by_cell.get((cb, r))
-            if sa is None or sb is None:
-                continue
-            a_right = sa.bbox_x + sa.bbox_w
-            b_left = sb.bbox_x
-            if a_right >= b_left:
-                continue
-            segments.append((ca, cb, y_start, y_end, (a_right + b_left) / 2))
-    return segments
+    result: list[tuple[int, int, float]] = []
+    sorted_cols = sorted(col_bounds)
+    for i in range(len(sorted_cols) - 1):
+        ca, cb = sorted_cols[i], sorted_cols[i + 1]
+        right = col_bounds[ca][1]
+        left = col_bounds[cb][0]
+        if right >= left:
+            continue
+        result.append((ca, cb, (right + left) / 2))
+    return result
 
 
 def _render_debug_overlay(
@@ -1251,45 +1245,40 @@ def _render_debug_overlay(
     if sections:
         col_bounds, row_bounds = _grid_bbox_bounds(sections)
 
-        # Label anchors (top-of-canvas for col labels, left for row labels).
-        # All sections spanning means no single-cell bounds exist - fall
-        # back to raw bboxes for label placement only.
+        # Global extents for full-canvas column lines and row label anchor.
         if not col_bounds or not row_bounds:
             all_x0 = min(s.bbox_x for s in sections) - 20
             all_y0 = min(s.bbox_y for s in sections) - 20
+            all_y1 = max(s.bbox_y + s.bbox_h for s in sections) + 20
         else:
             all_x0 = min(b[0] for b in col_bounds.values()) - 20
             all_y0 = min(b[0] for b in row_bounds.values()) - 20
+            all_y1 = max(b[1] for b in row_bounds.values()) + 20
         grid_color = "rgba(255, 255, 0, 0.5)"
 
-        labelled_col_pairs: set[tuple[int, int]] = set()
-        for ca, cb, y_start, y_end, x in _compute_col_boundary_segments(
-            sections, row_bounds
-        ):
+        for ca, cb, mid_x in _compute_col_boundary_xs(col_bounds):
             d.append(
                 draw.Line(
-                    x,
-                    y_start,
-                    x,
-                    y_end,
+                    mid_x,
+                    all_y0,
+                    mid_x,
+                    all_y1,
                     stroke=grid_color,
                     stroke_width=1,
                     stroke_dasharray="6,4",
                 )
             )
-            if (ca, cb) not in labelled_col_pairs:
-                d.append(
-                    draw.Text(
-                        f"col {ca}|{cb}",
-                        debug_font_size,
-                        x,
-                        all_y0 - 4,
-                        fill=grid_color,
-                        font_family=debug_font,
-                        text_anchor="middle",
-                    )
+            d.append(
+                draw.Text(
+                    f"col {ca}|{cb}",
+                    debug_font_size,
+                    mid_x,
+                    all_y0 - 4,
+                    fill=grid_color,
+                    font_family=debug_font,
+                    text_anchor="middle",
                 )
-                labelled_col_pairs.add((ca, cb))
+            )
 
         labelled_row_pairs: set[tuple[int, int]] = set()
         for ra, rb, x_start, x_end, y in _compute_row_boundary_segments(

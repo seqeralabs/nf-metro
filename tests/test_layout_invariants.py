@@ -3126,7 +3126,7 @@ def test_debug_grid_overlay_boundaries_outside_section_bboxes(fixture):
     Bug: https://github.com/pinin4fjords/nf-metro/issues/316
     """
     from nf_metro.render.svg import (
-        _compute_col_boundary_segments,
+        _compute_col_boundary_xs,
         _compute_row_boundary_segments,
         _grid_bbox_bounds,
     )
@@ -3152,19 +3152,15 @@ def test_debug_grid_overlay_boundaries_outside_section_bboxes(fixture):
                     f"row {ra}|{rb} segment y={y:.1f} x={x_start:.0f}..{x_end:.0f} "
                     f"cuts {sec.id!r} (row={sec.grid_row}, y={y0:.1f}..{y1:.1f})"
                 )
-    for ca, cb, y_start, y_end, x in _compute_col_boundary_segments(
-        sections, row_bounds
-    ):
+    for ca, cb, mid_x in _compute_col_boundary_xs(col_bounds):
         for sec in sections:
-            if sec.grid_col_span != 1 or sec.grid_col not in (ca, cb):
+            if sec.grid_col_span != 1:
                 continue
             x0, x1 = sec.bbox_x, sec.bbox_x + sec.bbox_w
-            y0, y1 = sec.bbox_y, sec.bbox_y + sec.bbox_h
-            y_overlaps = max(y_start, y0) < min(y_end, y1)
-            if y_overlaps and x0 < x < x1:
+            if x0 < mid_x < x1:
                 offenders.append(
-                    f"col {ca}|{cb} segment x={x:.1f} y={y_start:.0f}..{y_end:.0f} "
-                    f"cuts {sec.id!r} (col={sec.grid_col}, x={x0:.1f}..{x1:.1f})"
+                    f"col {ca}|{cb} mid_x={mid_x:.1f} cuts {sec.id!r} "
+                    f"(col={sec.grid_col}, x={x0:.1f}..{x1:.1f})"
                 )
 
     assert not offenders, f"{fixture}: " + "; ".join(offenders[:5])
