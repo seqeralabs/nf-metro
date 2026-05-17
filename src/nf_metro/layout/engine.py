@@ -71,10 +71,6 @@ Tests pass ``validate=True`` to catch cross-phase corruption that would
 otherwise only surface as subtle visual defects.
 """
 
-_ICON_HALF: float = 16.0
-"""Half-height of a terminus file icon, used as vertical clearance when
-lifting source stations toward a section's bbox top."""
-
 
 class PhaseInvariantError(Exception):
     """Raised when a layout phase produces invalid intermediate state."""
@@ -1927,7 +1923,7 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         # Reserve icon_half when any source renders as a file icon so the
         # icon's vertical extent stays inside the bbox.
         any_terminus = any(graph.stations[s].is_terminus for s in sources)
-        top_margin = y_spacing / 4 + (_ICON_HALF if any_terminus else 0.0)
+        top_margin = y_spacing / 4 + (ICON_HALF_HEIGHT if any_terminus else 0.0)
         slack = trunk_y - section.bbox_y - top_margin
         slots = int((slack + 0.5) // y_spacing)
         if slots < 1:
