@@ -61,11 +61,11 @@ from nf_metro.layout.ordering import assign_tracks
 from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
 
 # ---------------------------------------------------------------------------
-# Phase-boundary guards
+# Stage-boundary guards
 # ---------------------------------------------------------------------------
 
 _VALIDATE_DEFAULT = False
-"""Set to True to enable phase-boundary invariant checks.
+"""Set to True to enable stage-boundary invariant checks.
 
 Controlled by the ``validate`` parameter on ``compute_layout``.
 Tests pass ``validate=True`` to catch cross-phase corruption that would
@@ -78,7 +78,7 @@ class PhaseInvariantError(Exception):
 
 
 def _guard_coordinates_finite(graph: MetroGraph, phase: str) -> None:
-    """After Phase 4+: all laid-out stations must have finite coordinates."""
+    """After Stage 2.1+: all laid-out stations must have finite coordinates."""
     junction_ids = graph.junction_ids
     for sid, st in graph.stations.items():
         if st.section_id and not st.is_port and sid not in junction_ids:
@@ -94,7 +94,7 @@ def _guard_coordinates_finite(graph: MetroGraph, phase: str) -> None:
 
 
 def _guard_stations_in_sections(graph: MetroGraph, phase: str) -> None:
-    """After Phase 4+: rendered station markers (and terminus icons) must
+    """After Stage 2.1+: rendered station markers (and terminus icons) must
     be fully within their section bbox.
 
     Tightened from station-centre containment to marker-edge containment:
@@ -137,7 +137,7 @@ def _guard_stations_in_sections(graph: MetroGraph, phase: str) -> None:
 
 
 def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
-    """After Phase 5+: ports must sit on their section's bounding box edge."""
+    """After Stage 3.1+: ports must sit on their section's bounding box edge."""
     tolerance = GUARD_TOLERANCE
     for pid, port in graph.ports.items():
         st = graph.stations.get(pid)
@@ -158,7 +158,7 @@ def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
 
 
 def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
-    """After Phase 2+: non-empty sections must have positive-size bboxes."""
+    """After Stage 1.1+: non-empty sections must have positive-size bboxes."""
     for sid, sec in graph.sections.items():
         if not sec.station_ids:
             continue
@@ -522,7 +522,7 @@ def _guard_inter_section_routes_in_row_band(
 
 
 def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> None:
-    """After Phase 11 and final: off-track input stations must sit at
+    """After Stage 4.5 and final: off-track input stations must sit at
     least ``GUARD_TOLERANCE`` above (smaller Y than) their on-track
     consumer.
     """
@@ -629,52 +629,52 @@ def _guard_station_x_column_drift(graph: MetroGraph, phase: str) -> None:
                     )
 
 
-_PHASE_13_ORDER: tuple[str, ...] = (
-    "after Phase 13",
-    "after Phase 13a",
-    "after Phase 13b",
-    "after Phase 13c",
-    "after Phase 13d",
-    "after Phase 13d2",
-    "after Phase 13d3",
-    "after Phase 13e",
-    "after Phase 13f",
-    "after Phase 13g",
-    "after Phase 13h.2",
-    "after Phase 13i",
-    "after Phase 13i2",
-    "after Phase 13h3",
-    "after Phase 13j",
-    "after Phase 13k",
-    "after Phase 13k2",
-    "after Phase 13l",
-    "after Phase 13m",
+_PASS_C_BISECTION_ORDER: tuple[str, ...] = (
+    "after Stage 5.2",
+    "after Stage 5.3",
+    "after Stage 5.4",
+    "after Stage 5.5",
+    "after Stage 6.1",
+    "after Stage 6.2",
+    "after Stage 6.3",
+    "after Stage 6.4",
+    "after Stage 6.5",
+    "after Stage 6.6",
+    "after Stage 6.9",
+    "after Stage 6.10",
+    "after Stage 6.11",
+    "after Stage 6.12",
+    "after Stage 6.13",
+    "after Stage 6.14",
+    "after Stage 6.15",
+    "after Stage 6.16",
+    "after Stage 6.17",
 )
-"""Ordered Phase-13x bisection checkpoints, used by
-``_run_phase13_guards`` to gate guards whose invariants only become
-valid mid-pipeline.  Update when adding or removing a Phase-13x
+"""Ordered Pass C bisection checkpoints, used by
+``_run_pass_c_guards`` to gate guards whose invariants only become
+valid mid-pipeline.  Update when adding or removing a Pass C
 checkpoint in ``_compute_section_layout``.
 """
 
 # Each entry: bisection-runnable guard -> first checkpoint at which its
 # invariant must hold.  Before that checkpoint, the guard is skipped in
-# bisection mode; the final guard block (phase ``"after Phase 12
-# (final)"``, which is not in ``_PHASE_13_ORDER``) always runs it.
+# bisection mode; the final guard block (phase ``"after Stage 5.1
+# (final)"``, which is not in ``_PASS_C_BISECTION_ORDER``) always runs it.
 #
-# - stations_in_sections: Phase 13 lifts off-track stations above their
-#   section's pre-grow bbox top; Phase 13a's row top-align grows the
+# - stations_in_sections: Stage 5.2 lifts off-track stations above their
+#   section's pre-grow bbox top; Stage 5.3's row top-align grows the
 #   bbox upward to enclose them.
-# - no_station_overlap: Phase 13e's snap-to-grid can place an off-track
+# - no_station_overlap: Stage 6.4's snap-to-grid can place an off-track
 #   terminus icon at the same coordinates as an on-track column-mate;
-#   Phase 13g's re-anchor lifts the off-track back above its consumer.
+#   Stage 6.6's re-anchor lifts the off-track back above its consumer.
 # - no_line_crosses_non_consumer: a sparse loop-side station (single
 #   line in, single line out, full-bundle row-mates) sits on the trunk
-#   Y until Phase 13k2 shifts it to a half-grid offset; before that,
+#   Y until Stage 6.15 shifts it to a half-grid offset; before that,
 #   the sibling line bundle's route passes through its marker bbox.
 _BISECTION_FIRST_VALID: dict[str, str] = {
-    "_guard_stations_in_sections": "after Phase 13a",
-    "_guard_no_station_overlap": "after Phase 13g",
-    "_guard_no_line_crosses_non_consumer": "after Phase 13k2",
+    "_guard_stations_in_sections": "after Stage 5.3",
+    "_guard_no_station_overlap": "after Stage 6.6",
+    "_guard_no_line_crosses_non_consumer": "after Stage 6.15",
 }
 
 
@@ -682,51 +682,53 @@ def _bisection_should_run(guard_name: str, phase: str) -> bool:
     """True if ``guard_name`` should run at bisection checkpoint ``phase``.
 
     Returns True for the final guard block (``phase`` outside
-    ``_PHASE_13_ORDER``) so the final invariant set stays complete.
+    ``_PASS_C_BISECTION_ORDER``) so the final invariant set stays complete.
     """
     threshold = _BISECTION_FIRST_VALID.get(guard_name)
     if threshold is None:
         return True
     try:
-        return _PHASE_13_ORDER.index(phase) >= _PHASE_13_ORDER.index(threshold)
+        phase_idx = _PASS_C_BISECTION_ORDER.index(phase)
+        threshold_idx = _PASS_C_BISECTION_ORDER.index(threshold)
+        return phase_idx >= threshold_idx
     except ValueError:
         return True
 
 
-def _run_phase13_guards(
+def _run_pass_c_guards(
     graph: MetroGraph,
     phase: str,
     *,
     offsets: dict | None = None,
     routes: list | None = None,
 ) -> tuple[dict, list | None]:
-    """Bisection guards run after every Phase-13x sub-phase boundary in
+    """Bisection guards run after every Pass C sub-phase boundary in
     ``validate=True`` mode.
 
-    The Phase 13 tidy-up pipeline is a sequence of ~20 mutating passes
+    The Stage 5.2 tidy-up pipeline is a sequence of ~20 mutating passes
     over a shared graph; before this helper, ``validate=True`` only
-    sampled the final state, so a regression introduced at e.g. Phase
-    13h surfaced as ``after Phase 12 (final): ...`` with no way to
+    sampled the final state, so a regression introduced at e.g.
+    Stage 6.7 surfaced as ``after final: ...`` with no way to
     bisect.  Running the same overlap / breeze-past / column-drift
     checks at each boundary localises the culprit to a single phase.
 
-    Guards transient through specific Phase-13x sub-phases are gated
+    Guards transient through specific Pass C sub-phases are gated
     by ``_BISECTION_FIRST_VALID`` and skipped before they're valid.
     See that table for the per-guard transient windows.
 
     Always excluded from the bisection set (only meaningful at the
     final boundary):
 
-    * ``_guard_off_track_inputs_above_consumer`` -- Phase 13e's snap-
+    * ``_guard_off_track_inputs_above_consumer`` -- Stage 6.4's snap-
       to-grid shifts the on-track consumer Y by up to half a pitch
-      before Phase 13g re-anchors the off-track input.
+      before Stage 6.6 re-anchors the off-track input.
     * ``_guard_row_trunk_cy_consistent`` -- the row trunk Y is only
-      finalised once Phase 13h has re-centred ``center_ports`` graphs.
+      finalised once Stage 6.7 has re-centred ``center_ports`` graphs.
     * ``_guard_inter_section_routes_in_row_band`` -- row-band height
-      tolerance assumes final bboxes, which Phase 13j/k may still be
+      tolerance assumes final bboxes, which Stage 6.13/k may still be
       shrinking.
 
-    The final guard block (``after Phase 12 (final)``) composes this
+    The final guard block (``after final``) composes this
     helper with the three excluded guards above, sharing
     ``offsets``/``routes`` for a single computation per checkpoint.
     Returns the computed ``(offsets, routes)`` so callers (e.g. the
@@ -853,7 +855,7 @@ def compute_layout(
     captioned icons and labelled stations automatically.  Pass an
     explicit numeric value to override.
 
-    When *validate* is True, phase-boundary invariant checks run after
+    When *validate* is True, stage-boundary invariant checks run after
     key phases.  Violations raise ``PhaseInvariantError`` instead of
     silently producing broken layouts.
     """
@@ -942,74 +944,40 @@ def _compute_section_layout(
 ) -> None:
     """Section-first layout pipeline.
 
-    See ``CONTRACT.md`` for each phase's pre/postconditions; this
-    docstring is a quick map of the pipeline's structure.
+    Quick map of the pipeline's structure.  See ``CONTRACT.md`` for the
+    full per-sub-stage table with pre/postconditions and invariant
+    coverage, and ``docs/dev/layout_pipeline.md`` for the human-facing
+    overview.
 
-    Phase 1 (parse & partition) is already done by the parser.  The
-    pipeline below splits into six stages.  Stages 1-2 leave content in
-    local coordinates and then translate to canvas coordinates; Stages
-    3-4 are Pass A and Pass B (port positioning and refinement on a
-    fixed station layout); Stages 5-6 are Pass C, split into the
-    junction + off-track-lift block and the long vertical-settling /
-    finishing block.
+    Parsing & partition is already done by the parser.  Six stages
+    follow:
 
-    Stage 1 - Section construction (local coords):
-      Phase 2:   Internal section layout (per section, real stations only)
-      Phase 2.5: Align Y grids across same-row, same-direction sections
-      Phase 3:   Section placement (meta-graph)
-      Phase 3a:  Renumber sections by visual reading order
-      Phase 3b:  Adapt x/y_offset for left/top overshoot
+    1. **Section construction** (Stages 1.1 to 1.5).  Lay out each
+       section internally, snap row Y grids, place on the canvas grid,
+       renumber by reading order, correct left/top overshoot.  Coords
+       stay local.
+    2. **Globalise** (Stage 2.1).  Single-stage coord-regime
+       transition: translate stations and bboxes to canvas coordinates.
+    3. **Pass A - port positioning** (Stages 3.1 to 3.5).  Place ports
+       on bbox edges, align entry ports, shift LR/RL perp-entry
+       stations, align fold-section exit ports, top-align rows.
+    4. **Pass B - downstream alignment & trunk-Y consolidation**
+       (Stages 4.1 to 4.10).  Pull ports toward downstream content,
+       snap to grid-group stations, space from termini, recompute
+       bboxes, align trunk Ys, redistribute fan-out and full-bundle
+       columns.
+    5. **Pass C - junctions & off-track lift** (Stages 5.1 to 5.5).
+       Position junctions, lift off-track stations, re-align row bbox
+       tops, compact, snap inter-section port pairs.
+    6. **Pass C - vertical settling & finishing** (Stages 6.1 to 6.17).
+       Fan content upward, snap to grid, re-anchor off-track, recenter
+       full-bundle columns and restore their invariants, balance content
+       around trunk, loop-side X recenter, bbox shrink + row tighten /
+       push, captioned-icon pad.
 
-    Stage 2 - Globalise (local -> global coords):
-      Phase 4:   Translate stations and bboxes to canvas coordinates
-
-    Stage 3 - Pass A: Port initialisation & section geometry:
-      Phase 5:  Port positioning on section boundaries
-      Phase 6:  Align entry ports to incoming source Y/X
-      Phase 7:  Shift LR/RL perp-entry internal stations (X only)
-      Phase 8:  Align fold-section exit ports (may push target sections)
-      Phase 9:  Top-align sections within each grid row
-
-    Stage 4 - Pass B: Downstream alignment & trunk-Y consolidation:
-      Phase 10:  Align exit-entry port pairs to downstream stations
-      Phase 10b: Snap sole-layer stations to port Y
-      Phase 10c: Snap grid-group entry ports to first-station Y
-      Phase 10d: Mirror of 10c for exit ports
-      Phase 11:  Space ports from terminus stations (may expand bboxes)
-      Phase 11b: Recompute bboxes for grid-aligned sections
-      Phase 11c: Re-run top-align (undo the bbox-top drift Phase 11 may
-                 introduce via ``_expand_bbox_for_y``)
-      Phase 11ca: Align trunk Ys across same-row sections
-      Phase 11d:  Redistribute fan-out siblings around trunk
-                  (center_ports only)
-      Phase 11da: Redistribute full-bundle columns around trunk
-                  (center_ports only)
-
-    Stage 5 - Pass C: Junctions & off-track lift:
-      Phase 12:    Position junction stations in inter-section gaps
-      Phase 13:    Lift off-track stations above section's top track
-      Phase 13a:   Re-align bbox tops within each row (bbox-only)
-      Phase 13b:   Compact row content to bbox top
-      Phase 13c:   Snap inter-section LR/RL port pairs + re-position junctions
-
-    Stage 6 - Pass C: Vertical settling & finishing:
-      Phase 13d:   Fan free content upward
-      Phase 13d2:  Fan source inputs upward
-      Phase 13d3:  Half-grid 2-branch symfan (center_ports only)
-      Phase 13e:   Snap all Ys to per-section grid
-      Phase 13f:   Grow TB-section bbox bottoms
-      Phase 13g:   Re-anchor off-track to consumer's final Y
-      Phase 13h:   Re-center full-bundle columns (center_ports only)
-        Phase 13h.1: Re-anchor off-track after recenter
-        Phase 13h.2: Re-run row top-align after 13h.1 bbox grow
-      Phase 13i:   Align terminus to upstream
-      Phase 13i2:  Balance section content around trunk
-      Phase 13h3:  Recenter loop side stations
-      Phase 13j:   Shrink bboxes to content bottom
-      Phase 13k:   Tighten lower rows after shrink
-      Phase 13k2:  Shift sparse loop stations to clear bundle
-      Phase 13l:   Push lower rows after bbox grow
-      Phase 13m:   Pad stacked captioned file icons
+    Inline ``# ---- Stage N - ... ----`` dividers below mark each
+    stage's start; ``# Stage X.Y:`` comments above each helper call
+    name the sub-stage.
     """
     from nf_metro.layout.section_placement import place_sections, position_ports
 
@@ -1018,7 +986,7 @@ def _compute_section_layout(
     # the canvas grid, renumber by reading order, correct left/top
     # overshoot.  All work in section-local coordinates.
 
-    # Phase 2: Lay out each section independently (real stations only, no ports)
+    # Stage 1.1: Lay out each section independently (real stations only, no ports)
     section_subgraphs: dict[str, MetroGraph] = {}
     for sec_id, section in graph.sections.items():
         sub = _layout_single_section(
@@ -1028,18 +996,18 @@ def _compute_section_layout(
             section_subgraphs[sec_id] = sub
 
     if validate:
-        _guard_section_bboxes_positive(graph, "after Phase 2")
+        _guard_section_bboxes_positive(graph, "after Stage 1.1")
 
-    # Phase 2.5: Align Y grids across same-row, same-direction sections
+    # Stage 1.2: Align Y grids across same-row, same-direction sections
     _align_row_y_grids(graph, section_subgraphs, y_spacing, section_y_padding)
 
-    # Phase 3: Place sections on the canvas
+    # Stage 1.3: Place sections on the canvas
     place_sections(graph, section_x_gap, section_y_gap)
 
-    # Phase 3a: Renumber sections by visual reading order (row, col)
+    # Stage 1.4: Renumber sections by visual reading order (row, col)
     _renumber_sections_by_grid(graph)
 
-    # Phase 3b: Adapt x/y_offset for left/top overshoot.
+    # Stage 1.5: Adapt x/y_offset for left/top overshoot.
     # Section bboxes extend left of the local origin by at least
     # section_x_padding; x_offset normally absorbs this with margin to
     # spare (standard margin = x_offset - section_x_padding).  When
@@ -1073,10 +1041,10 @@ def _compute_section_layout(
             y_offset += standard_margin - global_top
 
     # ---- Stage 2 - Globalise (local -> global coords) ------------------
-    # The coord-regime transition.  Owns the post-Phase-4 guard
+    # The coord-regime transition.  Owns the post-Stage-2.1 guard
     # checkpoint (finite coords, stations-in-sections, bboxes-positive).
 
-    # Phase 4: Translate local coords to global coords (real stations)
+    # Stage 2.1: Translate local coords to global coords (real stations)
     for sec_id, section in graph.sections.items():
         sub = section_subgraphs.get(sec_id)
         if not sub:
@@ -1094,9 +1062,9 @@ def _compute_section_layout(
         section.bbox_y += section.offset_y + y_offset
 
     if validate:
-        _guard_coordinates_finite(graph, "after Phase 4")
-        _guard_stations_in_sections(graph, "after Phase 4")
-        _guard_section_bboxes_positive(graph, "after Phase 4")
+        _guard_coordinates_finite(graph, "after Stage 2.1")
+        _guard_stations_in_sections(graph, "after Stage 2.1")
+        _guard_section_bboxes_positive(graph, "after Stage 2.1")
 
     # ---- Stage 3 - Pass A: Port initialisation & section geometry --------
     # Position ports on bbox edges, align entry ports, shift internal
@@ -1104,34 +1072,34 @@ def _compute_section_layout(
     # Top-align runs last so it corrects any bbox shifts from fold-exit
     # alignment.
 
-    # Phase 5: Position ports on section boundaries (after bbox is in global coords)
+    # Stage 3.1: Position ports on section boundaries (after bbox is in global coords)
     for sec_id, section in graph.sections.items():
         position_ports(section, graph)
 
     if validate:
-        _guard_ports_on_boundaries(graph, "after Phase 5")
+        _guard_ports_on_boundaries(graph, "after Stage 3.1")
 
-    # Phase 6: Align LEFT/RIGHT entry ports with their incoming
+    # Stage 3.2: Align LEFT/RIGHT entry ports with their incoming
     # connection's Y so inter-section horizontal runs are straight.
     # Uses _resolve_source_xy() to derive junction coordinates
     # on-the-fly, removing the dependency on pre-positioned junctions.
     _align_entry_ports(graph)
 
-    # Phase 7: Shift internal stations in LR/RL sections with
+    # Stage 3.3: Shift internal stations in LR/RL sections with
     # perpendicular (TOP/BOTTOM) entry away from the port.  Needs the
-    # aligned port X from Phase 6; only moves internal station X, not
+    # aligned port X from Stage 3.2; only moves internal station X, not
     # ports or bboxes.
     _shift_lr_perp_entry_stations(graph, x_spacing)
 
-    # Phase 8: Align LEFT/RIGHT exit ports on row-spanning (fold)
+    # Stage 3.4: Align LEFT/RIGHT exit ports on row-spanning (fold)
     # sections with their target's Y so the exit is at the return row.
     # May push target sections down (via _resolve_tb_exit_y), which
     # top-align in the next step corrects.
     _align_exit_ports(graph)
 
-    # Phase 9: Top-align sections within each grid row.
+    # Stage 3.5: Top-align sections within each grid row.
     # Runs after fold-exit alignment so it corrects any bbox_y shifts
-    # from Phase 8's target-section push.  Same-row port pairs shift
+    # from Stage 3.4's target-section push.  Same-row port pairs shift
     # by the same delta, preserving entry-port alignment.
     _top_align_row_sections(graph)
 
@@ -1139,66 +1107,66 @@ def _compute_section_layout(
         _guard_ports_on_boundaries(graph, "after top-align")
 
     # ---- Stage 4 - Pass B: Downstream alignment & trunk-Y consolidation -
-    # Phase 11's port-terminus spacing can expand bboxes via
-    # ``_expand_bbox_for_y``; Phase 11c re-runs row top-align to undo
+    # Stage 4.5's port-terminus spacing can expand bboxes via
+    # ``_expand_bbox_for_y``; Stage 4.7 re-runs row top-align to undo
     # the resulting bbox-top drift.  Phases 11d / 11da run only on
     # ``center_ports`` graphs.
 
-    # Phase 10: For non-fold LR/RL sections, pull exit-entry port pairs
+    # Stage 4.1: For non-fold LR/RL sections, pull exit-entry port pairs
     # toward the downstream section's stations so lines flow directly.
     _align_ports_to_downstream(graph)
 
-    # Phase 10b: When a port-connected station is the sole occupant of its
+    # Stage 4.2: When a port-connected station is the sole occupant of its
     # layer, snap it to the port Y so the connection is horizontal.
     _snap_sole_layer_stations_to_ports(graph)
 
-    # Phase 10c: For grid-group sections (where 10b is skipped), snap
+    # Stage 4.3: For grid-group sections (where 10b is skipped), snap
     # entry ports to the Y of their first connected internal station.
     # This produces a straight horizontal port-to-station connection
     # instead of a diagonal from the upstream junction Y.
     _snap_grid_group_entry_ports(graph)
 
-    # Phase 10d: Mirror of 10c for exit ports.  Move exit ports of
+    # Stage 4.4: Mirror of 10c for exit ports.  Move exit ports of
     # grid-group sections to the Y of the downstream entry port (which
     # 10c already snapped to a grid station).  This eliminates detours
     # where lines leave at the section midpoint then route back.
     _snap_grid_group_exit_ports(graph)
 
-    # Phase 11: Ensure ports maintain at least y_spacing from terminus
+    # Stage 4.5: Ensure ports maintain at least y_spacing from terminus
     # stations in their section so file icons don't overlap routed lines.
     _space_ports_from_termini(graph, y_spacing)
 
-    # Phase 11b: Recompute bboxes for grid-aligned sections.  Earlier
+    # Stage 4.6: Recompute bboxes for grid-aligned sections.  Earlier
     # phases (6, 8, 11) may have expanded bboxes for temporary port
-    # positions that were later corrected (e.g. Phase 10 pulls ports
+    # positions that were later corrected (e.g. Stage 4.1 pulls ports
     # back toward downstream stations).  Recompute with symmetric
     # padding around the final non-port station range.
     _recompute_grid_group_bboxes(graph)
 
-    # Phase 11c: Re-run top-align after Phase 11 may have shifted
+    # Stage 4.7: Re-run top-align after Stage 4.5 may have shifted
     # individual section bbox_y values (via _expand_bbox_for_y) so
     # bbox tops within each row stay flush after port-terminus spacing.
     _top_align_row_sections(graph)
 
-    # Phase 11ca: Align trunk Ys across same-row sections.  Shifts
+    # Stage 4.8: Align trunk Ys across same-row sections.  Shifts
     # content downward in shallower sections so the inter-section bundle
     # passes through at a single Y per row.  Bbox tops are preserved.
     _align_row_trunk_ys(graph)
 
-    # Phase 11d: When --center-ports is on, redistribute fan-out siblings
+    # Stage 4.9: When --center-ports is on, redistribute fan-out siblings
     # of a section's trunk junction symmetrically around the trunk Y.
     # Scoped to fan-out side branches only: linear chains, fan-in
     # structures, and file inputs are left in place.
     _redistribute_fanout_siblings(graph, y_spacing)
 
-    # Phase 11da: Symmetrically fan a column of full-bundle stations
+    # Stage 4.10: Symmetrically fan a column of full-bundle stations
     # around the trunk Y when no unique trunk exists (e.g. Reporting's
     # Shiny app + Quarto report, both carrying the full bundle).
     #
-    # Why both 11da and Phase 13h's recenter: 11da's symmetric layout
-    # is read by Phase 13's bbox-growth, compaction, and snap-to-grid
+    # Why both 11da and Stage 6.7's recenter: 11da's symmetric layout
+    # is read by Stage 5.2's bbox-growth, compaction, and snap-to-grid
     # passes (an empty trunk row in fanned columns lets 13b/13j shrink
-    # the section bbox to the compact extent).  Phase 13h then re-fans
+    # the section bbox to the compact extent).  Stage 6.7 then re-fans
     # the same columns using the post-row-alignment trunk Y, which can
     # have drifted from 11da's port-Y anchor.  Skipping 11da changes
     # intermediate bbox sizes and is not empty-render-diff; the two
@@ -1206,53 +1174,53 @@ def _compute_section_layout(
     _redistribute_full_bundle_columns(graph, y_spacing)
 
     # ---- Stage 5 - Pass C: Junctions & off-track lift ------------------
-    # All port positions are now final; Phase 12 positions junctions
-    # once.  Phase 13 lifts off-track stations; 13a-13c then re-align
+    # All port positions are now final; Stage 5.1 positions junctions
+    # once.  Stage 5.2 lifts off-track stations; 13a-13c then re-align
     # row bbox tops, compact, and re-snap inter-section port pairs
-    # (re-running Phase 12 for the junctions that move with them).
+    # (re-running Stage 5.1 for the junctions that move with them).
     # Stage 6 below handles the rest of Pass C.
 
-    # Phase 12: Position junction stations in the inter-section gap.
+    # Stage 5.1: Position junction stations in the inter-section gap.
     _position_junctions(graph)
 
-    # Phase 13: Lift off_track stations above their section's top track.
+    # Stage 5.2: Lift off_track stations above their section's top track.
     # Runs last so it operates on finalised station Ys and bboxes.
     _lift_off_track_stations(graph, y_spacing, section_y_padding)
     # The upward bbox growth above can push the topmost section above
-    # the canvas top margin set by Phase 3b; shift the whole graph
+    # the canvas top margin set by Stage 1.5; shift the whole graph
     # down to restore the margin.  No-op when no section overflowed.
     _shift_graph_into_canvas(graph, section_y_padding)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13")
+        _run_pass_c_guards(graph, "after Stage 5.2")
 
-    # Phase 13a: Re-align bbox tops within each grid row after off-track
-    # lifting expanded some sections upward.  Unlike Phase 9/11c which
+    # Stage 5.3: Re-align bbox tops within each grid row after off-track
+    # lifting expanded some sections upward.  Unlike Stage 3.5/11c which
     # shifts stations with the bbox, this only grows the bbox upward so
     # the empty input-band space lines up across the row.  Station Ys
     # in unlifted sections are preserved.
     _top_align_row_bboxes_only(graph)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13a")
+        _run_pass_c_guards(graph, "after Stage 5.3")
 
-    # Phase 13b: Compact row-mate sections so content sits just inside
+    # Stage 5.4: Compact row-mate sections so content sits just inside
     # the bbox top edge.  Shifts an entire row's column group up by the
     # smallest above-content slack, preserving trunk alignment.  Bbox
     # heights shrink correspondingly so the empty top space disappears.
     _compact_row_content_to_bbox_top(graph, section_y_padding, y_spacing)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13b")
+        _run_pass_c_guards(graph, "after Stage 5.4")
 
-    # Phase 13c: Snap inter-section LR/RL port pairs to a common Y so
+    # Stage 5.5: Snap inter-section LR/RL port pairs to a common Y so
     # the trunk bundle stays perfectly horizontal across boundaries.
     # Picks the downstream entry port's Y as the anchor since it sits
     # on the row's aligned trunk grid.  Junctions are re-positioned
-    # afterwards: Phase 12 fixed their Y to the pre-compaction exit
+    # afterwards: Stage 5.1 fixed their Y to the pre-compaction exit
     # port Y, and either the snap pass or ``_compact_row_content_to_bbox_top``
     # may have moved the exit port since then.
     _snap_inter_section_port_pairs(graph)
     _position_junctions(graph)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13c")
+        _run_pass_c_guards(graph, "after Stage 5.5")
 
     # ---- Stage 6 - Pass C: Vertical settling & finishing ---------------
     # The long settle: fan free / source content upward, half-grid
@@ -1263,25 +1231,25 @@ def _compute_section_layout(
     # phases here run unconditionally; a few are gated on
     # ``center_ports`` or on a specific topology (see each comment).
 
-    # Phase 13d: Fan a section's free content upward when the row's
+    # Stage 6.1: Fan a section's free content upward when the row's
     # compaction left visible empty space at the bbox top.  Only fires
     # for sections whose internal stations have no upward dependency
     # (no off-track band) and whose trunk Y sits below the bbox top
     # padding by more than one ``y_spacing`` slot.
     _fan_free_content_upward(graph, section_y_padding, y_spacing)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13d")
+        _run_pass_c_guards(graph, "after Stage 6.1")
 
-    # Phase 13d2: Companion to 13d for source-stack sections.  When the
+    # Stage 6.2: Companion to 13d for source-stack sections.  When the
     # entry column has a single full-bundle trunk plus subset-bundle
     # source inputs (file icons with no inbound edges), lift the
     # nearest-to-trunk sources into the empty top band so the section
     # is bottom- and top-weighted instead of stacked below the trunk.
     _fan_source_inputs_upward(graph, y_spacing)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13d2")
+        _run_pass_c_guards(graph, "after Stage 6.2")
 
-    # Phase 13d3: For sections that contain exactly a 2-branch
+    # Stage 6.3: For sections that contain exactly a 2-branch
     # symmetric fan (and no off-track or other constraining content),
     # collapse the fan onto half-pitch offsets so the section consumes
     # one vertical grid unit instead of two.  Marks the branch stations
@@ -1291,40 +1259,40 @@ def _compute_section_layout(
     if graph.center_ports:
         _apply_half_grid_2branch_symfan(graph, y_spacing, section_y_padding)
         if validate:
-            _run_phase13_guards(graph, "after Phase 13d3")
+            _run_pass_c_guards(graph, "after Stage 6.3")
 
-    # Phase 13e: Snap all station/port Ys to a per-section y_spacing
+    # Stage 6.4: Snap all station/port Ys to a per-section y_spacing
     # grid.  Trunk-Y align, port-snap, and the row compaction/fan
     # phases compute shifts that don't respect the grid pitch, leaving
     # coordinates at fractional Ys (e.g. 298.785 when the pitch is 55).
     # This final pass restores clean grid positions before validation.
     _snap_all_y_to_grid(graph, y_spacing)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13e")
+        _run_pass_c_guards(graph, "after Stage 6.4")
 
-    # Phase 13f: Grow TB-section bbox bottoms so they align with the
+    # Stage 6.5: Grow TB-section bbox bottoms so they align with the
     # downstream LR section's bbox bottom.  Without this the TB
     # section's bbox ends right at the inter-section exit port Y,
     # making the line look pinned to the section edge.
     _align_tb_section_bbox_bottoms(graph)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13f")
+        _run_pass_c_guards(graph, "after Stage 6.5")
 
-    # Phase 13g: Re-anchor off-track inputs to their consumer's final
-    # (snapped) Y.  Phase 13's lift placed them relative to pre-snap
+    # Stage 6.6: Re-anchor off-track inputs to their consumer's final
+    # (snapped) Y.  Stage 5.2's lift placed them relative to pre-snap
     # consumer Ys; snapping the consumer to the grid can shift it by
     # up to half a pitch, which would collapse the y_spacing gap above
     # off-track.  Recomputing here pins each off-track at
     # consumer.y - n*y_spacing on the final grid and grows the bbox
     # upward if the new position rises above the padding zone.
     _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
-    # Same canvas-fit safeguard as after Phase 13: a reanchor-driven
+    # Same canvas-fit safeguard as after Stage 5.2: a reanchor-driven
     # bbox grow can push the topmost section above the canvas top.
     _shift_graph_into_canvas(graph, section_y_padding)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13g")
+        _run_pass_c_guards(graph, "after Stage 6.6")
 
-    # Phase 13h: Re-center full-bundle columns around the row's final
+    # Stage 6.7: Re-center full-bundle columns around the row's final
     # trunk Y.  ``_redistribute_full_bundle_columns`` runs early when
     # only local port Ys are available; for terminal sections whose
     # port Y differs from the row's eventual trunk Y, the symmetric
@@ -1334,13 +1302,13 @@ def _compute_section_layout(
     # Y as the anchor so the trunk row stays empty in each fanned
     # column.
     #
-    # Phase 13h.1 and Phase 13h.2 below restore invariants the recenter
+    # Stage 6.8 and Stage 6.9 below restore invariants the recenter
     # breaks; ``.N`` is used (not bare ``13h2``) so the suffix doesn't
-    # collide with the standalone Phase 13h3 further below.
+    # collide with the standalone Stage 6.12 further below.
     if graph.center_ports:
         _recenter_full_bundle_columns(graph, y_spacing)
 
-        # Phase 13h.1: Re-anchor off-track inputs after the recenter.
+        # Stage 6.8: Re-anchor off-track inputs after the recenter.
         # The recenter moves consumers to the final trunk-anchored Y,
         # which can leave the off-track icon stranded at the old
         # consumer Y (overlapping the consumer station instead of
@@ -1348,28 +1316,28 @@ def _compute_section_layout(
         # recenter Y as the new anchor and grows the section bbox
         # upward when the lifted band moves above its current top.
         _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
-        # Same canvas-fit safeguard as Phase 13 / Phase 13g: a
+        # Same canvas-fit safeguard as Stage 5.2 / Stage 6.6: a
         # reanchor-driven bbox grow can push the topmost section
         # above the canvas top.
         _shift_graph_into_canvas(graph, section_y_padding)
 
-        # Phase 13h.2: Re-run row top-align.  A Phase 13h.1 reanchor-
+        # Stage 6.9: Re-run row top-align.  A Stage 6.8 reanchor-
         # driven bbox grow leaves the section's bbox above its row
         # mates'; pull row mates' bbox tops up to match so the section
         # row stays flush along its top edge.
         _top_align_row_bboxes_only(graph)
         if validate:
-            _run_phase13_guards(graph, "after Phase 13h.2")
+            _run_pass_c_guards(graph, "after Stage 6.9")
 
-    # Phase 13i: After fan-re-centering, single-station downstream
+    # Stage 6.10: After fan-re-centering, single-station downstream
     # columns (e.g. terminus file icons) may have stayed at their
     # pre-fan Y while their sole upstream moved to the trunk.  Pin
     # them back onto the source Y so the connection stays horizontal.
     _align_terminus_to_upstream(graph)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13i")
+        _run_pass_c_guards(graph, "after Stage 6.10")
 
-    # Phase 13i2: Auto-balance pass.  For sections whose final layout
+    # Stage 6.11: Auto-balance pass.  For sections whose final layout
     # still leaves an empty band above the trunk while more siblings
     # sit below than above, lift bottommost movable siblings into the
     # empty top band so content sits symmetrically around the trunk.
@@ -1377,9 +1345,9 @@ def _compute_section_layout(
     # final trunk Y.  U-turn-safe and bbox-bounded.
     _balance_section_content_around_trunk(graph, section_y_padding, y_spacing)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13i2")
+        _run_pass_c_guards(graph, "after Stage 6.11")
 
-    # Phase 13h3: Recenter fan-out side stations on their loop midpoint.
+    # Stage 6.12: Recenter fan-out side stations on their loop midpoint.
     # The layer-based X assignment places off-trunk siblings (e.g. propd,
     # dream, DESeq2 fanned off limma between section entry and annotate
     # results) at a fixed offset from the section entry that ignores how
@@ -1389,55 +1357,55 @@ def _compute_section_layout(
     # corner Xs derived from the actual routing geometry.
     _recenter_loop_side_stations(graph)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13h3")
+        _run_pass_c_guards(graph, "after Stage 6.12")
 
-    # Phase 13j: Shrink rowspan / row-mate bboxes whose content moved
+    # Stage 6.13: Shrink rowspan / row-mate bboxes whose content moved
     # up after compact (e.g. ``_fan_source_inputs_upward`` lifted the
     # bottom rows away from the bbox bottom).  Bottom-only shrink, so
     # trunk alignment is unaffected.
     _shrink_bboxes_to_content_bottom(graph, section_y_padding)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13j")
+        _run_pass_c_guards(graph, "after Stage 6.13")
 
-    # Phase 13k: Close vertical slack that the pre-shrink row-height
+    # Stage 6.14: Close vertical slack that the pre-shrink row-height
     # estimate (in ``_compute_section_offsets``) left between row ``r``
     # and row ``r + 1`` once 13j has collapsed bboxes to their content.
     # Only fires when a rowspan section's content fell short of its row
     # claim; multi-row layouts with content-filled rows are untouched.
     _tighten_lower_rows_after_shrink(graph, section_y_gap)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13k")
+        _run_pass_c_guards(graph, "after Stage 6.14")
 
-    # Phase 13k2: Shift sparse loop-side stations (e.g. ``grea`` -- one
+    # Stage 6.15: Shift sparse loop-side stations (e.g. ``grea`` -- one
     # incoming, one outgoing, single-line consumer) onto a half-grid Y
     # when sharing the full-row Y with a busier sibling whose inbound
     # bundle would otherwise cross the sparse station's marker bbox.
-    # (Distinct from Phase 13k above; renamed to disambiguate after the
+    # (Distinct from Stage 6.14 above; renamed to disambiguate after the
     # numbering collision flagged in src/nf_metro/layout/CONTRACT.md.)
     _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13k2")
+        _run_pass_c_guards(graph, "after Stage 6.15")
 
-    # Phase 13l: When Phase 13k2 grew a section's bbox downward, push
+    # Stage 6.16: When Stage 6.15 grew a section's bbox downward, push
     # sections in lower rows down so they don't crowd the grown bbox.
     # ``_tighten_lower_rows_after_shrink`` only closes slack (pulls
     # rows up); the inverse push happens here.
     _push_lower_rows_after_bbox_grow(graph, section_y_gap)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13l")
+        _run_pass_c_guards(graph, "after Stage 6.16")
 
-    # Phase 13m: Pad vertical spacing between stacked file-input icons
+    # Stage 6.17: Pad vertical spacing between stacked file-input icons
     # whose under-icon captions would otherwise overlap the next icon
     # below.  The default ``y_spacing`` grid (40 px) is smaller than a
     # captioned icon's vertical extent (~44 px), so columns of source
     # inputs in DA-style sections need a slightly wider pitch.
     _pad_stacked_captioned_file_icons(graph, y_spacing, section_y_padding)
     if validate:
-        _run_phase13_guards(graph, "after Phase 13m")
+        _run_pass_c_guards(graph, "after Stage 6.17")
 
     if validate:
-        phase = "after Phase 12 (final)"
-        offsets, routes = _run_phase13_guards(graph, phase)
+        phase = "after final"
+        offsets, routes = _run_pass_c_guards(graph, phase)
         _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
         _guard_off_track_inputs_above_consumer(graph, phase)
         _guard_row_gaps(graph, phase, section_y_gap=section_y_gap)
@@ -1599,16 +1567,16 @@ def _align_row_y_grids(
        value not found at any multi-station layer) keep their original Y.
        This preserves hub-station centering (e.g. bench_hub).
     2. **Bbox dimensions** (bbox_w, bbox_h) are unchanged.  Stations may
-       shift within their bbox but the box itself keeps its Phase-2 size.
+       shift within their bbox but the box itself keeps its Stage-1.1 size.
     3. **y_pad compensation**: a uniform shift of ``max_y_pad - y_pad``
-       is applied to every station so that after Phase 9 top-aligns
+       is applied to every station so that after Stage 3.5 top-aligns
        bbox_y, the first-station Y matches across sections despite
        differing ``_multiline_label_padding``.
 
     Stores grid metadata on ``graph._row_y_grid_info`` for the debug
     overlay to render shared Y grid lines.
 
-    Runs between Phase 2 and Phase 3, operating in local coordinates.
+    Runs between Stage 1.1 and Stage 1.3, operating in local coordinates.
     """
     from nf_metro.layout.section_placement import _assign_grid_layout
 
@@ -1842,7 +1810,7 @@ def _align_row_y_grids(
 
             # y_pad compensation: shift all stations so that the
             # distance from the top of the Y range to the first
-            # station equals max_y_pad.  After Phase 9 top-aligns
+            # station equals max_y_pad.  After Stage 3.5 top-aligns
             # bbox_y, this makes first_station_y consistent across
             # sections with different multiline label padding.
             y_pad = section_y_padding + _multiline_label_padding(sub)
@@ -2175,7 +2143,7 @@ def _compact_row_content_to_bbox_top(
        station (on-track or off-track) stays inside the bbox padding
        zone.  The uniform shift applied to the group is the minimum
        allowable shift across same-row sections; that preserves the
-       trunk-Y alignment established by Phase 11ca.  Both on-track and
+       trunk-Y alignment established by Stage 4.8.  Both on-track and
        off-track stations move together so the gap between each
        off-track input and its consumer is preserved.
     2. Shrink each section's ``bbox_h`` so the bottom slack matches
@@ -2280,7 +2248,7 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
     For each LEFT/RIGHT exit port that connects (directly or via a
     junction) to a same-row LEFT/RIGHT entry port, picks the entry's Y
     as the shared anchor.  This eliminates the small Y kinks left by
-    sections whose trunk Y couldn't be aligned via Phase 11ca (e.g.
+    sections whose trunk Y couldn't be aligned via Stage 4.8 (e.g.
     row-spanning sections that the trunk aligner skips); the inside-
     section link from the internal source to the port may bend by a
     pixel or two but the inter-section bundle stays perfectly
@@ -3300,7 +3268,7 @@ def _shift_sparse_loop_stations_to_clear_bundle(
 def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> None:
     """Push lower-row sections down when an upper-row bbox grows.
 
-    ``_shift_sparse_loop_stations_to_clear_bundle`` (Phase 13k2) can
+    ``_shift_sparse_loop_stations_to_clear_bundle`` (Stage 6.15) can
     grow a section's ``bbox_h`` downward when shifting a sparse loop
     station like ``grea`` past the original bbox bottom.  Row offsets
     were fixed earlier by ``_compute_section_offsets`` from pre-shift
@@ -3544,7 +3512,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
         half = pitch / 2.0
         # Collect non-port, on-track station Ys across the whole group
         # to estimate the row's shared grid offset.  Off-track stations
-        # were lifted by Phase 13 relative to their consumers; they
+        # were lifted by Stage 5.2 relative to their consumers; they
         # snap to the same grid (so the y_spacing gap above the
         # consumer is preserved) but don't influence the origin.
         residues: Counter[float] = Counter()
@@ -4288,7 +4256,7 @@ def _shrink_bboxes_to_content_bottom(
     this section's bbox vertical range, OR which shares at least one
     grid-row index (accounting for ``grid_row_span``).  Trimming below
     such a row-mate's bottom would undo intentional bottom alignment
-    performed by ``_align_tb_section_bbox_bottoms`` (Phase 13f) or by
+    performed by ``_align_tb_section_bbox_bottoms`` (Stage 6.5) or by
     row-spanning TB sections that share a visual bottom edge with
     row-mates one or more grid rows lower.
     """
@@ -4534,7 +4502,7 @@ def _layout_single_section(
     # the vertical spread.  Gaps larger than LINE_GAP get capped so
     # distant line base tracks don't create excessive whitespace.
     # Off-track stations carry a placeholder track that will be
-    # overwritten by Phase 13's lift-to-consumer pass, so they must not
+    # overwritten by Stage 5.2's lift-to-consumer pass, so they must not
     # influence the rank compaction of the on-track stations.
     unique_tracks = sorted(
         {tracks[sid] for sid in tracks if not sub.stations[sid].off_track}
@@ -4562,7 +4530,7 @@ def _layout_single_section(
     for sid, station in sub.stations.items():
         station.layer = layers.get(sid, 0)
         station.track = tracks.get(sid, 0)
-        # Off-track stations get rank 0 here as a placeholder; Phase 13
+        # Off-track stations get rank 0 here as a placeholder; Stage 5.2
         # overwrites their Y to ``consumer.y - n*y_spacing``.  On-track
         # stations must have a track that made it into the rank map.
         if not station.off_track:
@@ -5101,10 +5069,10 @@ def _shift_lr_perp_entry_stations(
     """Shift internal stations in LR/RL sections with perpendicular entry.
 
     Mirrors ``_adjust_tb_entry_shifts`` for horizontal-flow sections.
-    In TB sections the station shift is applied in Phase 2, and entry-port
+    In TB sections the station shift is applied in Stage 1.1, and entry-port
     alignment later overrides the port Y with the upstream source Y,
     creating a gap.  For LR/RL sections no such port-X override exists,
-    so we shift stations after port initialisation (Phase 5) while ports
+    so we shift stations after port initialisation (Stage 3.1) while ports
     stay put and internal stations move inward.
 
     The shift is only applied when the gap between the perpendicular entry
@@ -5156,7 +5124,7 @@ def _shift_lr_perp_entry_stations(
             continue  # gap is already sufficient
 
         # Shift internal stations away from the entry side.
-        # Phase 2 (_adjust_lr_entry_inset) already reserved bbox space
+        # Stage 1.1 (_adjust_lr_entry_inset) already reserved bbox space
         # for this shift, so no bbox expansion is needed here.
         for sid in section.station_ids:
             if sid in port_ids:
@@ -5693,7 +5661,7 @@ def _snap_sole_layer_stations_to_ports(graph: MetroGraph) -> None:
     to the port Y without colliding with layer-siblings.
     """
     # Build set of section IDs that participated in grid alignment.
-    # Phase 10b must not override the shared Y grid for these sections.
+    # Stage 4.2 must not override the shared Y grid for these sections.
     grid_group_secs = _grid_group_section_ids(graph)
 
     for section in graph.sections.values():
@@ -5804,8 +5772,8 @@ def _snap_sole_layer_stations_to_ports(graph: MetroGraph) -> None:
 def _snap_grid_group_entry_ports(graph: MetroGraph) -> None:
     """Snap entry ports of grid-group sections to their connected station Y.
 
-    Phase 6 aligns entry ports to the upstream junction Y (e.g. the
-    midpoint of two exit stations in the source section).  When Phase 10b
+    Stage 3.2 aligns entry ports to the upstream junction Y (e.g. the
+    midpoint of two exit stations in the source section).  When Stage 4.2
     is skipped for grid-group sections, the internal station stays on the
     grid but the port keeps the junction-derived Y, creating a diagonal.
 
@@ -5849,7 +5817,7 @@ def _snap_grid_group_entry_ports(graph: MetroGraph) -> None:
 def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
     """Snap exit ports of grid-group sections to their connected station Y.
 
-    Mirrors Phase 10c (entry port snap) for exit ports.  When a
+    Mirrors Stage 4.3 (entry port snap) for exit ports.  When a
     grid-group section's exit port is at a midpoint between internal
     stations (the default centering), move it to the Y of the connected
     internal station that feeds into it.  This eliminates midpoint
@@ -6296,7 +6264,7 @@ def _space_ports_from_termini(
             if not st or not st.is_terminus or st.is_port:
                 continue
             # Off-track stations get lifted above the topmost line track
-            # later (Phase 13), so they no longer share a Y with the
+            # later (Stage 5.2), so they no longer share a Y with the
             # inter-section bundle.  Excluding them here prevents ports
             # from being pushed away (and dragging the upstream port via
             # junction propagation) for a conflict that won't exist by
@@ -7150,7 +7118,7 @@ def _lift_off_track_stations(
 
     Caller is responsible for invoking ``_shift_graph_into_canvas``
     afterwards: the upward bbox growth here can push the topmost
-    section above the canvas top margin set by Phase 3b.
+    section above the canvas top margin set by Stage 1.5.
     """
     groups = _off_track_groups(graph)
     if not groups:
@@ -7177,14 +7145,14 @@ def _reanchor_off_track_to_consumer(
 ) -> None:
     """Re-place off-track inputs relative to consumer Ys after final snap.
 
-    Phase 13 placed each off-track input at ``consumer.y - n*y_spacing``
+    Stage 5.2 placed each off-track input at ``consumer.y - n*y_spacing``
     using the consumer's pre-snap Y.  Later phases (compaction, grid
     snap, fan re-centering) may shift the consumer, which would
     collapse or shrink the gap between the off-track input and its
     consumer.  This pass re-pins each off-track at
     ``consumer.y - n*y_spacing`` on the consumer's final snapped Y.
 
-    Bboxes were grown in Phase 13 based on the off-track positions at
+    Bboxes were grown in Stage 5.2 based on the off-track positions at
     the time.  If a re-anchor moves an off-track above the current bbox
     top minus padding, expand the bbox upward so the lifted input still
     sits inside the section's padding zone.  Same-section TOP ports

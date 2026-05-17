@@ -2054,7 +2054,7 @@ def test_loop_column_stations_share_x(fixture):
 
 
 # ---------------------------------------------------------------------------
-# Section bbox bottom padding (Phase 13k post-shift padding)
+# Section bbox bottom padding (Stage 6.14 post-shift padding)
 # ---------------------------------------------------------------------------
 
 
@@ -2071,7 +2071,7 @@ def test_section_bbox_has_bottom_padding(fixture):
     edge, so the invariant is ``bbox_bot >= max(station.y) +
     section_y_padding``.
 
-    ``_shift_sparse_loop_stations_to_clear_bundle`` (Phase 13k) can
+    ``_shift_sparse_loop_stations_to_clear_bundle`` (Stage 6.14) can
     move a sparse loop station like ``grea`` further down without
     restoring this padding.  Catches the v116 regression where
     section 3's bbox sat ~5px below ``grea``'s centre instead of
@@ -2113,7 +2113,7 @@ def test_section_bbox_has_bottom_padding(fixture):
 
 
 # ---------------------------------------------------------------------------
-# Inter-row gap accommodates grown bboxes from Phase 13k shifts
+# Inter-row gap accommodates grown bboxes from Stage 6.14 shifts
 # ---------------------------------------------------------------------------
 
 

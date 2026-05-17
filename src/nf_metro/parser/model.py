@@ -204,12 +204,12 @@ class MetroGraph:
     _edges_to_cache: dict[str, list[Edge]] | None = field(default=None, repr=False)
     # Lazy set view of `junctions`, invalidated on junction mutation.
     _junction_ids_cache: set[str] | None = field(default=None, repr=False)
-    # Grid alignment metadata (populated by Phase 2.5 _align_row_y_grids)
+    # Grid alignment metadata (populated by Stage 1.2 _align_row_y_grids)
     _row_y_grid_info: dict = field(default_factory=dict, repr=False)
     # Cross-phase channel: station IDs placed at half-pitch offsets
-    # relative to the row grid by Phase 13d3
+    # relative to the row grid by Stage 6.3
     # (``_apply_half_grid_2branch_symfan``) for 2-branch symfan sections.
-    # Phase 13e (``_snap_all_y_to_grid``) reads this set and skips those
+    # Stage 6.4 (``_snap_all_y_to_grid``) reads this set and skips those
     # stations so they keep their intentional half-grid Y.
     half_grid_station_ids: set[str] = field(default_factory=set, repr=False)
 

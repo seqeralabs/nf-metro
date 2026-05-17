@@ -1,44 +1,45 @@
-# Layout Phase Contract
+# Layout Stage Contract
 
-Per-phase pre/postconditions for `_compute_section_layout` in
+Per-stage pre/postconditions for `_compute_section_layout` in
 `src/nf_metro/layout/engine.py`. The pipeline is a long chain of mutating
 passes over a shared `MetroGraph`; this doc records what each pass assumes
-and what it guarantees, so that adding or reordering a phase doesn't
+and what it guarantees, so that adding or reordering a stage doesn't
 silently violate a downstream pass's expectations.
 
 ## How to read this doc
 
-- **Phase tag** matches the `# Phase N[suffix]` comments inside
-  `_compute_section_layout`. Suffixes (`13d2`, `13ca`, ...) reflect
-  organic history; treat them as opaque identifiers, not a hierarchy.
-- **Lines** point at the entry comment of the phase in `engine.py` at the
-  current HEAD. Re-grep `# Phase N` if the file shifts.
-- **Precondition** = what the helper assumes. Pass-A phases assume
-  global coordinates and ports on bbox edges; Pass-C phases assume
+- **Stage tag** matches the `# Stage X.Y:` comments inside
+  `_compute_section_layout`. The first digit is the stage number (1-6,
+  see "Stage overview" below); the second is sequential within the
+  stage.
+- **Lines** point at the entry comment of the stage in `engine.py` at the
+  current HEAD. Re-grep `# Stage ` if the file shifts.
+- **Precondition** = what the helper assumes. Pass-A stages assume
+  global coordinates and ports on bbox edges; Pass-C stages assume
   finalised station Ys.
-- **Postcondition** = the property the phase establishes (and that
-  later phases may depend on).
-- **Invariants preserved** = state the phase does NOT touch. Useful when
-  asking "can I move this phase earlier?"
+- **Postcondition** = the property the stage establishes (and that
+  later stages may depend on).
+- **Invariants preserved** = state the stage does NOT touch. Useful when
+  asking "can I move this stage earlier?"
 - **Related tests** = invariants in `tests/test_layout_invariants.py`
   that exercise the postcondition. Many tests are full-pipeline
-  end-to-end checks (no single phase owns them outright); the mapping is
-  "this phase is the one that establishes the property the test
-  asserts," not "this test fails iff this phase regresses."
+  end-to-end checks (no single stage owns them outright); the mapping is
+  "this stage is the one that establishes the property the test
+  asserts," not "this test fails iff this stage regresses."
 
-A phase whose purpose isn't crisp here is a structural-debt signal -
+A stage whose purpose isn't crisp here is a structural-debt signal -
 those rows are flagged "UNCLEAR" in the Notes column. Don't paper over
-them; investigate before adding another phase next to them.
+them; investigate before adding another stage next to them.
 
 ## Coordinate-system convention
 
-Phases split into three regimes:
+Stages split into three regimes:
 
-1. **Pre-Phase-4**: stations have section-local coordinates. Bboxes are
+1. **Pre-Stage-2.1**: stations have section-local coordinates. Bboxes are
    in local coordinates.
-2. **Post-Phase-4**: stations and bboxes are in global canvas
+2. **Post-Stage-2.1**: stations and bboxes are in global canvas
    coordinates. Ports do not yet exist on bbox edges.
-3. **Post-Phase-5**: ports sit on bbox edges (validated by
+3. **Post-Stage-3.1**: ports sit on bbox edges (validated by
    `_guard_ports_on_boundaries`).
 
 ## Validate-mode guards
@@ -47,60 +48,58 @@ Phases split into three regimes:
 
 | Checkpoint | Guards |
 |---|---|
-| after Phase 2 | `_guard_section_bboxes_positive` |
-| after Phase 4 | finite coords, stations-in-sections, bboxes-positive |
-| after Phase 5 | ports-on-boundaries |
-| after top-align (Phase 9) | ports-on-boundaries |
-| after each Phase 13x (bisection) | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
-| after Phase 12 (final) | bisection set (all unconditional) + off-track-above-consumer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
+| after Stage 1.1 | `_guard_section_bboxes_positive` |
+| after Stage 2.1 | finite coords, stations-in-sections, bboxes-positive |
+| after Stage 3.1 | ports-on-boundaries |
+| after top-align (Stage 3.5) | ports-on-boundaries |
+| after each Stage 5.2x (bisection) | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
+| after final | bisection set (all unconditional) + off-track-above-consumer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
-Bisection checkpoints fire after every Phase-13x sub-phase (see the
-`# Phase 13...` comments in `_compute_section_layout`). Three guards
+Bisection checkpoints fire after every Pass C sub-stage (see the
+`# Stage 5.2:` through `# Stage 6.17:` comments in
+`_compute_section_layout`). Three guards
 hold continuously only from a specific checkpoint onward, and the
 bisection runner skips them earlier; see `_BISECTION_FIRST_VALID` in
 `engine.py` for the threshold table:
 
 | Guard | First valid checkpoint | Transient because |
 |---|---|---|
-| `_guard_stations_in_sections` | after Phase 13a | Phase 13's off-track lift moves stations above the section bbox; Phase 13a grows the bbox to enclose them. |
-| `_guard_no_station_overlap` | after Phase 13g | Phase 13e's snap-to-grid can land an off-track terminus icon on its on-track column-mate's Y; Phase 13g re-anchors the off-track above its consumer. |
-| `_guard_no_line_crosses_non_consumer` | after Phase 13k2 | A sparse loop-side station sits on the trunk Y until Phase 13k2 shifts it to a half-grid offset; before that, sibling line bundles pass through its marker bbox. |
+| `_guard_stations_in_sections` | after Stage 5.3 | Stage 5.2's off-track lift moves stations above the section bbox; Stage 5.3 grows the bbox to enclose them. |
+| `_guard_no_station_overlap` | after Stage 6.6 | Stage 6.4's snap-to-grid can land an off-track terminus icon on its on-track column-mate's Y; Stage 6.6 re-anchors the off-track above its consumer. |
+| `_guard_no_line_crosses_non_consumer` | after Stage 6.15 | A sparse loop-side station sits on the trunk Y until Stage 6.15 shifts it to a half-grid offset; before that, sibling line bundles pass through its marker bbox. |
 
 Three further guards are excluded from the bisection set entirely
-(meaningful only at the final boundary); the `_run_phase13_guards`
+(meaningful only at the final boundary); the `_run_pass_c_guards`
 docstring in `engine.py` is the authoritative list.
 
 Guard bodies live at the top of `engine.py` (lines 83-275); the
-bisection runner is `_run_phase13_guards`.
+bisection runner is `_run_pass_c_guards`.
 
 ## Stage overview
 
-The phase pipeline groups into six stages.  Stage boundaries align with
-the coord-regime transitions and the Pass A / Pass B / Pass C
-divisions referenced throughout this doc.
+The pipeline groups into six stages.  Stage boundaries align with the
+coord-regime transitions and the Pass A / Pass B / Pass C divisions
+referenced throughout this doc.
 
-1. **Stage 1 - Section construction (local coords)**: Phases 2, 2.5,
-   3, 3a, 3b.
-2. **Stage 2 - Globalise (local -> global coords)**: Phase 4.
+1. **Stage 1 - Section construction (local coords)**: Stages 1.1
+   through 1.5.
+2. **Stage 2 - Globalise (local -> global coords)**: Stage 2.1.
 3. **Stage 3 - Pass A: port initialisation & section geometry**:
-   Phases 5, 6, 7, 8, 9.
+   Stages 3.1 through 3.5.
 4. **Stage 4 - Pass B: downstream alignment & trunk-Y consolidation**:
-   Phases 10, 10b, 10c, 10d, 11, 11b, 11c, 11ca, 11d, 11da.
-5. **Stage 5 - Pass C: junctions & off-track lift**: Phases 12, 13,
-   13a, 13b, 13c.
-6. **Stage 6 - Pass C: vertical settling & finishing**: Phases 13d,
-   13d2, 13d3, 13e, 13f, 13g, 13h, 13h.1, 13h.2, 13i, 13i2, 13h3, 13j,
-   13k, 13k2, 13l, 13m.
+   Stages 4.1 through 4.10.
+5. **Stage 5 - Pass C: junctions & off-track lift**: Stages 5.1
+   through 5.5.
+6. **Stage 6 - Pass C: vertical settling & finishing**: Stages 6.1
+   through 6.17.
 
 The matching `# ---- Stage N - ... ----` comment dividers in
 `_compute_section_layout` mark each stage's start in the source.
-Phase-table entries below appear in pipeline order; stage boundaries
-fall between Phase 3b/4, Phase 4/5, Phase 9/10, Phase 11da/12, and
-Phase 13c/13d.
+Stage-table entries below appear in pipeline order.
 
-## Phase table
+## Stage table
 
-### Phase 2: internal section layout (engine.py:483-490)
+### Stage 1.1: internal section layout (engine.py:483-490)
 - **Purpose**: Lay out each section's real stations in section-local
   coordinates via layer/track assignment.
 - **Helper**: `_layout_single_section` (engine.py:3917).
@@ -117,15 +116,15 @@ Phase 13c/13d.
 - **Related tests**: `test_section_bbox_contains_all_content`,
   `test_loop_column_stations_share_x`.
 
-### Phase 2.5: align row Y grids (engine.py:495-496)
+### Stage 1.2: align row Y grids (engine.py:495-496)
 - **Purpose**: Snap station Ys to a shared row-wide grid so same-row
   same-direction sections agree on grid pitch and slot count.
 - **Helper**: `_align_row_y_grids` (engine.py:958).
-- **Precondition**: Phase 2 complete; sections still in local
+- **Precondition**: Stage 1.1 complete; sections still in local
   coordinates; section subgraphs available.
 - **Postcondition**: Within each `(grid_row, direction)` group, all
   multi-station layers share one Y grid. Bbox `w/h` unchanged from
-  Phase 2 (only station Ys shift). `graph._row_y_grid_info` stores
+  Stage 1.1 (only station Ys shift). `graph._row_y_grid_info` stores
   grid metadata for the debug overlay.
 - **Invariants preserved**: Isolated stations (sole layer occupants
   with off-grid Y) keep original Y - hub centering survives. Section
@@ -133,18 +132,18 @@ Phase 13c/13d.
 - **Related tests**: `test_row_trunk_marker_cy_consistent`,
   `test_all_stations_snap_to_grid`.
 
-### Phase 3: section placement (engine.py:498-499)
+### Stage 1.3: section placement (engine.py:498-499)
 - **Purpose**: Place sections on the canvas grid via topological
   layering of the section DAG.
 - **Helper**: `place_sections` in `section_placement.py`.
-- **Precondition**: Sections have bboxes from Phase 2 and grid
+- **Precondition**: Sections have bboxes from Stage 1.1 and grid
   positions from `auto_layout`. Still all local-coord.
 - **Postcondition**: Every section has `offset_x`, `offset_y` set such
   that `(local + offset)` lands sections on a non-overlapping grid.
 - **Invariants preserved**: Station local coords unchanged. Bboxes
   still local-coord.
 
-### Phase 3a: renumber sections (engine.py:501-502)
+### Stage 1.4: renumber sections (engine.py:501-502)
 - **Purpose**: Renumber sections by visual reading order (sweep, col,
   row) so legend / debug numbering follows the eye.
 - **Helper**: `_renumber_sections_by_grid` (engine.py:824).
@@ -155,10 +154,10 @@ Phase 13c/13d.
   edges. Pure metadata pass.
 - **Related tests**: none directly (cosmetic / debug-only).
 
-### Phase 3b: offset overshoot correction (engine.py:504-535)
+### Stage 1.5: offset overshoot correction (engine.py:504-535)
 - **Purpose**: Grow `x_offset`/`y_offset` when section local extents
   reach left/above the canvas origin, so global coords stay positive
-  after Phase 4.
+  after Stage 2.1.
 - **Helper**: inline.
 - **Precondition**: Section `offset_x/y` and local `bbox_x/y` set.
 - **Postcondition**: For every laid-out section, `offset_{x,y} +
@@ -166,11 +165,11 @@ Phase 13c/13d.
 - **Invariants preserved**: Section bboxes (local), station local
   coords, grid layout.
 
-### Phase 4: local-to-global translation (engine.py:537-557)
+### Stage 2.1: local-to-global translation (engine.py:537-557)
 - **Purpose**: Translate every real station and section bbox into
   global canvas coordinates.
 - **Helper**: inline.
-- **Precondition**: Phase 3 / 3b complete; `section.offset_{x,y}`,
+- **Precondition**: Stage 1.3 / 3b complete; `section.offset_{x,y}`,
   `x_offset`, `y_offset` final.
 - **Postcondition**: Every real station's `x, y` and every section's
   `bbox_x, bbox_y` are global. `bbox_w, bbox_h` unchanged. Section
@@ -182,11 +181,11 @@ Phase 13c/13d.
 - **Related tests**: `test_section_bbox_contains_all_content` (the
   containment invariant first holds here).
 
-### Phase 5: position ports on section boundaries (engine.py:565-570)
+### Stage 3.1: position ports on section boundaries (engine.py:565-570)
 - **Purpose**: Place every port on its section's bbox edge at the
   section's nominal centre line for its side.
 - **Helper**: `position_ports` in `section_placement.py`.
-- **Precondition**: Section bboxes in global coords (Phase 4).
+- **Precondition**: Section bboxes in global coords (Stage 2.1).
 - **Postcondition**: Every port station's `(x, y)` lies on the bbox
   edge corresponding to its side, within `GUARD_TOLERANCE`. Ports
   start at the bbox-edge midpoint for their side.
@@ -194,16 +193,13 @@ Phase 13c/13d.
   junctions.
 - **Validate guard after**: `_guard_ports_on_boundaries`.
 
-### Phase 5b: (none) - placeholder
-- No 5b phase exists; numbering jumps to Phase 6.
-
-### Phase 6: align LR entry ports (engine.py:572-576)
+### Stage 3.2: align LR entry ports (engine.py:572-576)
 - **Purpose**: For LEFT/RIGHT entry ports, set Y to the incoming
   source's Y so the inter-section horizontal run is straight; for
   TOP/BOTTOM entry ports, set X / Y accordingly.
 - **Helper**: `_align_entry_ports` (engine.py:4788), dispatching to
   `_align_lr_entry_port` and `_align_tb_entry_port`.
-- **Precondition**: Phase 5 placed ports on bbox edges. Junction
+- **Precondition**: Stage 3.1 placed ports on bbox edges. Junction
   positions are unknown - the helper uses `_resolve_source_xy` to
   derive junction coords on-the-fly.
 - **Postcondition**: Each entry port's coordinate on the axis along
@@ -214,12 +210,12 @@ Phase 13c/13d.
 - **Related tests**: `test_no_kink_at_section_boundary` (the
   straight-run property this phase establishes).
 
-### Phase 7: shift LR/RL perp-entry internal stations (engine.py:578-582)
+### Stage 3.3: shift LR/RL perp-entry internal stations (engine.py:578-582)
 - **Purpose**: When an LR/RL section has a TOP or BOTTOM (perpendicular)
   entry port, shift internal stations' X so the entry port has
   in-section runway before stations begin.
 - **Helper**: `_shift_lr_perp_entry_stations` (engine.py:4520).
-- **Precondition**: Phase 6 finalised LR/RL entry-port X for perp
+- **Precondition**: Stage 3.2 finalised LR/RL entry-port X for perp
   entries.
 - **Postcondition**: Internal stations in such sections sit at least
   `x_spacing` away from the perp entry port X.
@@ -228,35 +224,35 @@ Phase 13c/13d.
 - **Related tests**: `test_terminus_not_directly_after_diagonal`,
   `test_no_kink_at_section_boundary` (entry-side geometry).
 
-### Phase 8: align fold-section exit ports (engine.py:584-588)
+### Stage 3.4: align fold-section exit ports (engine.py:584-588)
 - **Purpose**: For row-spanning (fold) and TB-direction sections,
   shift LEFT/RIGHT exit ports to the target section's entry Y. May
   push the target section down via `_resolve_tb_exit_y`.
 - **Helper**: `_align_exit_ports` (engine.py:5410), dispatching to
   `_align_lr_exit_port`.
-- **Precondition**: Entry ports aligned (Phase 6); target sections
-  positioned (Phase 3/4).
+- **Precondition**: Entry ports aligned (Stage 3.2); target sections
+  positioned (Stage 1.3/4).
 - **Postcondition**: Exit ports on fold/TB sections sit at the same Y
   as their target section's entry port (within section bbox extent).
 - **Invariants preserved**: Real station coords. Entry-port Ys
-  (Phase 9's top-align corrects any bbox push-down).
+  (Stage 3.5's top-align corrects any bbox push-down).
 - **Related tests**: `test_no_kink_at_section_boundary`,
   `test_inter_section_route_y_stays_within_row_band`.
 
-### Phase 9: top-align sections within each grid row (engine.py:590-594)
+### Stage 3.5: top-align sections within each grid row (engine.py:590-594)
 - **Purpose**: Shift sections up so contiguous column groups within a
   row share the same `bbox_y`.
 - **Helper**: `_top_align_row_sections` (engine.py:1275).
-- **Precondition**: All Phase-8 bbox shifts settled.
+- **Precondition**: All Stage-3.4 bbox shifts settled.
 - **Postcondition**: Same-row contiguous-column sections share
   `bbox_y` (and station/port Y shifts by the same delta, preserving
-  Phase 6 alignment).
+  Stage 3.2 alignment).
 - **Invariants preserved**: Relative station-to-section position
   inside each shifted section. Bbox heights.
 - **Validate guard after**: `_guard_ports_on_boundaries` (top-align
   preserves port-on-edge by shifting ports with stations).
 
-### Phase 10: align ports to downstream (engine.py:603-605)
+### Stage 4.1: align ports to downstream (engine.py:603-605)
 - **Purpose**: For non-fold LR/RL sections, pull exit-entry port
   pairs toward the downstream section's internal stations so lines
   flow without detour.
@@ -265,31 +261,31 @@ Phase 13c/13d.
 - **Postcondition**: Each non-fold LR/RL exit-entry pair Y sits near
   the downstream section's connected station Y.
 - **Invariants preserved**: Section bboxes (movement is bbox-bounded,
-  Phase 11b/c recompute bboxes where needed). Real stations.
+  Stage 4.6/c recompute bboxes where needed). Real stations.
 - **Related tests**: `test_no_kink_at_section_boundary`.
 
-### Phase 10b: snap sole-layer stations to ports (engine.py:607-609)
+### Stage 4.2: snap sole-layer stations to ports (engine.py:607-609)
 - **Purpose**: When a port-connected station is the only occupant of
   its layer, snap it to the port Y so the connection is horizontal.
 - **Helper**: `_snap_sole_layer_stations_to_ports` (engine.py:5120).
-- **Precondition**: Phase 10 settled port Ys.
+- **Precondition**: Stage 4.1 settled port Ys.
 - **Postcondition**: Sole-layer port-connected stations share Y with
   their port. Multi-station layers are skipped (would risk collision).
 - **Invariants preserved**: Multi-station layer Ys. Shared row-Y grid
-  is not respected here (Phase 13e re-snaps).
+  is not respected here (Stage 6.4 re-snaps).
 - **Related tests**: `test_section_entry_hub_on_grid` (downstream).
 
-### Phase 10c: snap grid-group entry ports (engine.py:611-615)
+### Stage 4.3: snap grid-group entry ports (engine.py:611-615)
 - **Purpose**: For grid-group sections (skipped by 10b), snap entry
   ports to the connected first-internal-station Y - straight
   port-to-station connection.
 - **Helper**: `_snap_grid_group_entry_ports` (engine.py:5237).
-- **Precondition**: Phase 10b complete.
+- **Precondition**: Stage 4.2 complete.
 - **Postcondition**: Grid-group entry ports share Y with their first
   connected internal station.
 - **Invariants preserved**: Internal station Y. Exit ports.
 
-### Phase 10d: snap grid-group exit ports (engine.py:617-621)
+### Stage 4.4: snap grid-group exit ports (engine.py:617-621)
 - **Purpose**: Mirror of 10c for exit ports - snap to the downstream
   entry port's Y (which 10c just snapped to a grid station).
 - **Helper**: `_snap_grid_group_exit_ports` (engine.py:5284).
@@ -299,7 +295,7 @@ Phase 13c/13d.
   station).
 - **Invariants preserved**: Internal stations.
 
-### Phase 11: space ports from termini (engine.py:623-625)
+### Stage 4.5: space ports from termini (engine.py:623-625)
 - **Purpose**: Push ports away from terminus stations so a routed
   line clears any file-icon caption / label by at least `y_spacing`.
 - **Helper**: `_space_ports_from_termini` (engine.py:5695).
@@ -310,68 +306,68 @@ Phase 13c/13d.
 - **Invariants preserved**: Real non-terminus station Y. Other
   sections.
 
-### Phase 11b: recompute grid-group bboxes (engine.py:627-632)
+### Stage 4.6: recompute grid-group bboxes (engine.py:627-632)
 - **Purpose**: Reset grid-group bboxes to symmetric `max_y_pad`
   padding around final non-port station Y range, then expand for any
   ports outside.
 - **Helper**: `_recompute_grid_group_bboxes` (engine.py:1232).
-- **Precondition**: Port Ys final (Phase 11).
+- **Precondition**: Port Ys final (Stage 4.5).
 - **Postcondition**: Each grid-group section bbox snugly bounds its
   content with consistent top/bottom padding.
 - **Invariants preserved**: Station and port Ys.
 
-### Phase 11c: re-run top-align (engine.py:634-637)
-- **Purpose**: Repeat Phase 9 after Phase 11 expanded bboxes via
+### Stage 4.7: re-run top-align (engine.py:634-637)
+- **Purpose**: Repeat Stage 3.5 after Stage 4.5 expanded bboxes via
   `_expand_bbox_for_y`.
 - **Helper**: `_top_align_row_sections` (re-invoked).
-- **Precondition**: Phase 11/11b complete.
-- **Postcondition**: As Phase 9.
-- **Invariants preserved**: As Phase 9.
+- **Precondition**: Stage 4.5/11b complete.
+- **Postcondition**: As Stage 3.5.
+- **Invariants preserved**: As Stage 3.5.
 
-### Phase 11ca: align row trunk Ys (engine.py:639-642)
+### Stage 4.8: align row trunk Ys (engine.py:639-642)
 - **Purpose**: Within each row, shift content downward in shallower
   sections so the inter-section trunk bundle passes through at a
   single Y. Bbox tops preserved (heights grow downward).
 - **Helper**: `_align_row_trunk_ys` (engine.py:1414).
-- **Precondition**: Phase 11c done.
+- **Precondition**: Stage 4.7 done.
 - **Postcondition**: For sections in a row's contiguous column run,
   the trunk Y is the row's deepest pre-pass trunk Y. Row-spanning
   sections are skipped.
 - **Invariants preserved**: Bbox tops. Row-spanning sections.
 
-### Phase 11d: redistribute fan-out siblings (engine.py:644-648)
+### Stage 4.9: redistribute fan-out siblings (engine.py:644-648)
 - **Purpose**: For each fan-out column with a unique trunk junction
   (one station carrying the full bundle plus >=2 side branches),
   redistribute side stations symmetrically around the trunk Y. Gated
   on `graph.center_ports`.
 - **Helper**: `_redistribute_fanout_siblings` (engine.py:3163).
-- **Precondition**: Trunk Ys aligned (Phase 11ca).
+- **Precondition**: Trunk Ys aligned (Stage 4.8).
 - **Postcondition**: In qualifying columns, fan-out siblings sit
   symmetrically around the trunk station's Y. Linear chains, fan-in
   structures, and file inputs are left in place.
 - **Invariants preserved**: Trunk station Y. Off-track stations.
 
-### Phase 11da: redistribute full-bundle columns (engine.py)
+### Stage 4.10: redistribute full-bundle columns (engine.py)
 - **Purpose**: When a column has no unique trunk (every station
   carries the full bundle - e.g. Reporting's Shiny + Quarto),
   symmetrically fan stations around the local LR port Y. Gated on
   `center_ports`.
 - **Helper**: `_redistribute_full_bundle_columns`.
-- **Precondition**: Phase 11d ran.
+- **Precondition**: Stage 4.9 ran.
 - **Postcondition**: Full-bundle columns sit symmetric around the
   LR port Y.
-- **Why both this and Phase 13h**: Phase 13h
+- **Why both this and Stage 6.7**: Stage 6.7
   (``_recenter_full_bundle_columns``) re-fans the same columns
   using the final trunk Y, which can have drifted from 11da's
-  port-Y anchor.  Phase 11da's output is *not* redundant: the
-  intermediate symmetric layout is read by Phase 13's bbox-growth
+  port-Y anchor.  Stage 4.10's output is *not* redundant: the
+  intermediate symmetric layout is read by Stage 5.2's bbox-growth
   and compaction passes (an empty trunk row in fanned columns lets
   13b/13j shrink the section bbox to the compact extent).
   Skipping 11da changes intermediate bbox sizes and is not empty-
   render-diff -- the two passes are load-bearing in combination.
 - **Invariants preserved**: Other columns.
 
-### Phase 12: position junctions (engine.py:658-659)
+### Stage 5.1: position junctions (engine.py:658-659)
 - **Purpose**: Place each junction station in the inter-section gap
   at the exit port's Y (fan-out) or near the entry port (merge).
 - **Helper**: `_position_junctions` (engine.py:4596).
@@ -382,12 +378,12 @@ Phase 13c/13d.
   `max(pred.x) + JUNCTION_MARGIN, entry_port.y`.
 - **Invariants preserved**: Real stations, ports.
 
-### Phase 13: lift off-track stations (engine.py)
+### Stage 5.2: lift off-track stations (engine.py)
 - **Purpose**: Lift off-track file-input stations to the row above
   their consumer, stacking when multiple inputs share one consumer.
   Grow bbox upward; nudge same-section TOP ports back to new edge.
 - **Helper**: `_lift_off_track_stations`.
-- **Precondition**: Phase 12 complete; all on-track Ys final.
+- **Precondition**: Stage 5.1 complete; all on-track Ys final.
 - **Postcondition**: Each off-track station sits at
   `consumer.y - n*y_spacing` (n = stack rank). Section bbox extends
   upward to fit.  May leave the topmost section above the canvas
@@ -399,22 +395,22 @@ Phase 13c/13d.
 - **Related tests**: `test_off_track_inputs_above_consumer`,
   `test_off_track_icons_ordered_by_consumer_y`.
 
-### Phase 13a: re-align row bbox tops only (engine.py:665-670)
-- **Purpose**: After Phase 13 grew some bboxes upward, grow other
+### Stage 5.3: re-align row bbox tops only (engine.py:665-670)
+- **Purpose**: After Stage 5.2 grew some bboxes upward, grow other
   same-row bboxes upward to match. Station Ys in unlifted sections
   preserved.
 - **Helper**: `_top_align_row_bboxes_only` (engine.py:1348).
-- **Precondition**: Phase 13 may have lifted some bboxes.
+- **Precondition**: Stage 5.2 may have lifted some bboxes.
 - **Postcondition**: Within each row's contiguous column group, all
   bboxes share `bbox_y` (heights extended upward as needed).
 - **Invariants preserved**: All station / port Ys.
 
-### Phase 13b: compact row content to bbox top (engine.py:672-676)
+### Stage 5.4: compact row content to bbox top (engine.py:672-676)
 - **Purpose**: Shift each row's column-group up by the smallest
   above-content slack, then shrink bbox heights to remove the empty
   band. Preserves trunk alignment.
 - **Helper**: `_compact_row_content_to_bbox_top` (engine.py:1540).
-- **Precondition**: Bbox tops aligned (Phase 13a).
+- **Precondition**: Bbox tops aligned (Stage 5.3).
 - **Postcondition**: Each row's contiguous column group's bbox top
   sits at `min(content_top) - section_y_padding`. Stations shift up
   by the same delta as their bbox.
@@ -422,9 +418,9 @@ Phase 13c/13d.
   each section. Trunk Y stays aligned across the row.
 - **Related tests**: `test_section_bbox_has_bottom_padding`.
 
-### Phase 13c: snap inter-section port pairs + reposition junctions (engine.py:678-686)
+### Stage 5.5: snap inter-section port pairs + reposition junctions (engine.py:678-686)
 - **Purpose**: Snap exit/entry port pairs in the same row to a shared
-  Y (the entry's), then re-run Phase 12 to put junctions back on the
+  Y (the entry's), then re-run Stage 5.1 to put junctions back on the
   exit port.
 - **Helper**: `_snap_inter_section_port_pairs` (engine.py:1641) then
   `_position_junctions`.
@@ -436,13 +432,13 @@ Phase 13c/13d.
 - **Related tests**: `test_no_kink_at_section_boundary`,
   `test_inter_section_route_y_stays_within_row_band`.
 
-### Phase 13d: fan free content upward (engine.py:688-693)
+### Stage 6.1: fan free content upward (engine.py:688-693)
 - **Purpose**: When the row's compaction leaves visible empty top
   band but the section has trunk-candidate sibling stations,
   fan those upward into the empty band.
 - **Helper**: `_fan_free_content_upward` (engine.py:1762).
-- **Precondition**: Trunk Y aligned (Phase 11ca). Compaction done
-  (Phase 13b).
+- **Precondition**: Trunk Y aligned (Stage 4.8). Compaction done
+  (Stage 5.4).
 - **Postcondition**: Eligible sections fan stations upward by at most
   one `y_spacing` slot, balancing content above/below trunk.
 - **Invariants preserved**: Trunk station Y. Off-track stations
@@ -450,7 +446,7 @@ Phase 13c/13d.
 - **Related tests**: `test_section_top_band_filled`,
   `test_section1_input_above_trunk`.
 
-### Phase 13d2: fan source inputs upward (engine.py:695-700)
+### Stage 6.2: fan source inputs upward (engine.py:695-700)
 - **Purpose**: Companion to 13d for source-stack sections (single
   full-bundle trunk + subset-bundle file inputs at the entry column).
   Lift trunk-nearest source inputs into the empty top band.
@@ -460,12 +456,12 @@ Phase 13c/13d.
   trunk row instead of stacked below it.
 - **Invariants preserved**: Trunk station Y.
 
-### Phase 13d3: 2-branch symfan half-grid compaction (engine.py)
+### Stage 6.3: 2-branch symfan half-grid compaction (engine.py)
 - **Purpose**: Sections containing exactly a 2-branch symmetric fan
   (no off-track / constraining content) collapse onto half-pitch
   offsets so the section is 1 grid-unit tall instead of 2. Records
   the placed stations on the public `MetroGraph.half_grid_station_ids`
-  field so Phase 13e leaves them alone -- this is the only cross-
+  field so Stage 6.4 leaves them alone -- this is the only cross-
   phase channel for half-grid placement. Gated on `center_ports`.
 - **Helper**: `_apply_half_grid_2branch_symfan`.
 - **Precondition**: 13d/13d2 done; symfan classification stable
@@ -475,14 +471,14 @@ Phase 13c/13d.
 - **Invariants preserved**: Trunk station Y. Other sections.
 - **Related tests**: `test_symfan_pairs_share_y`.
 
-### Phase 13e: snap all Y to grid (engine.py)
+### Stage 6.4: snap all Y to grid (engine.py)
 - **Purpose**: Final pass snapping every station and port Y to the
   nearest row-wide grid slot, removing fractional Ys left by earlier
   shifts. Stations listed in `graph.half_grid_station_ids` (populated
-  by Phase 13d3) are skipped so they keep their intentional half-pitch
+  by Stage 6.3) are skipped so they keep their intentional half-pitch
   Y.
 - **Helper**: `_snap_all_y_to_grid`.
-- **Precondition**: All semantic Y shifts done. If Phase 13d3 ran,
+- **Precondition**: All semantic Y shifts done. If Stage 6.3 ran,
   `graph.half_grid_station_ids` is populated.
 - **Postcondition**: Every station and port Y is a grid slot of the
   per-section / per-row pitch (except marked half-grid stations).
@@ -491,7 +487,7 @@ Phase 13c/13d.
 - **Related tests**: `test_all_stations_snap_to_grid`,
   `test_grid_snap_does_not_mutate_x`.
 
-### Phase 13f: align TB-section bbox bottoms (engine.py:719-723)
+### Stage 6.5: align TB-section bbox bottoms (engine.py:719-723)
 - **Purpose**: Extend TB-section bbox bottom to match downstream
   LR/RL section's bbox bottom so the line doesn't look pinned to the
   TB bbox edge.
@@ -501,12 +497,12 @@ Phase 13c/13d.
   `tb.bbox_y + tb.bbox_h >= target.bbox_y + target.bbox_h`.
 - **Invariants preserved**: All station and port Ys. Other bboxes.
 
-### Phase 13g: reanchor off-track to consumer (engine.py)
+### Stage 6.6: reanchor off-track to consumer (engine.py)
 - **Purpose**: Re-pin each off-track input at `consumer.y - n*y_spacing`
-  using the consumer's final snapped Y (Phase 13 used pre-snap Ys).
+  using the consumer's final snapped Y (Stage 5.2 used pre-snap Ys).
   Grow bbox upward if needed.
 - **Helper**: `_reanchor_off_track_to_consumer`.
-- **Precondition**: Phase 13e snapped consumers to grid.
+- **Precondition**: Stage 6.4 snapped consumers to grid.
 - **Postcondition**: Off-track inputs sit `n * y_spacing` above their
   consumer's final Y.  May leave the topmost section above the
   canvas margin -- ``_shift_graph_into_canvas`` runs immediately
@@ -514,58 +510,58 @@ Phase 13c/13d.
 - **Invariants preserved**: On-track station Y.
 - **Related tests**: `test_off_track_inputs_above_consumer`.
 
-### Phase 13h: re-center full-bundle columns (engine.py)
+### Stage 6.7: re-center full-bundle columns (engine.py)
 - **Purpose**: Re-fan full-bundle columns around the row's final trunk
-  Y (Phase 11da used the local port Y which may now be stale).
+  Y (Stage 4.10 used the local port Y which may now be stale).
   Gated on `center_ports`.
 - **Helper**: `_recenter_full_bundle_columns`.
 - **Precondition**: Final inter-section trunk Y known (post-snap).
 - **Postcondition**: Full-bundle columns are symmetric around the
   row's final trunk Y.
 - **Invariants preserved**: Off-track Y anchoring (re-established by
-  Phase 13h.1) and bbox-top alignment (re-established by Phase 13h.2)
+  Stage 6.8) and bbox-top alignment (re-established by Stage 6.9)
   are temporarily broken; both are restored before leaving the
   `if center_ports:` block.
 
-### Phase 13h.1: re-anchor off-track after recenter (engine.py)
-- **Purpose**: The Phase 13h recenter moves consumers to the final
+### Stage 6.8: re-anchor off-track after recenter (engine.py)
+- **Purpose**: The Stage 6.7 recenter moves consumers to the final
   trunk-anchored Y, leaving off-track icons stranded at the old
   consumer Y (and overlapping the consumer station). Re-pin each
   off-track at `consumer.y - n*y_spacing` on the post-recenter grid.
   Followed by ``_shift_graph_into_canvas`` to handle bbox grow that
   pushed the topmost section above the canvas margin.  Gated on
   `center_ports`.
-- **Helper**: `_reanchor_off_track_to_consumer` (same helper as Phase
-  13g; called again here on the post-recenter Ys).
-- **Precondition**: Phase 13h has re-centred full-bundle columns.
+- **Helper**: `_reanchor_off_track_to_consumer` (same helper as
+  Stage 6.6; called again here on the post-recenter Ys).
+- **Precondition**: Stage 6.7 has re-centred full-bundle columns.
 - **Postcondition**: Off-track inputs sit one or more pitches above
   their post-recenter consumer. Section bboxes grow upward when
   lifted bands move above the existing top padding.
 - **Invariants preserved**: Row top-alignment may be broken when a
-  bbox grew upward; Phase 13h.2 restores it.
+  bbox grew upward; Stage 6.9 restores it.
 
-### Phase 13h.2: re-run row top-align (engine.py)
-- **Purpose**: A Phase 13h.1 bbox grow can leave the grown section's
+### Stage 6.9: re-run row top-align (engine.py)
+- **Purpose**: A Stage 6.8 bbox grow can leave the grown section's
   bbox top above its row mates'. Pull row mates' bbox tops up to
   match so the section row stays flush along its top edge. Gated on
   `center_ports`.
-- **Helper**: `_top_align_row_bboxes_only` (same helper as Phase 13a).
-- **Precondition**: Phase 13h.1 has re-anchored off-track inputs.
+- **Helper**: `_top_align_row_bboxes_only` (same helper as Stage 5.3).
+- **Precondition**: Stage 6.8 has re-anchored off-track inputs.
 - **Postcondition**: Row bboxes flush at the top across all row mates.
 - **Invariants preserved**: Station Ys (only bbox tops move).
 
-### Phase 13i: align terminus to upstream (engine.py:759-763)
+### Stage 6.10: align terminus to upstream (engine.py:759-763)
 - **Purpose**: After 13h re-pitched fanned columns, a single-station
   downstream column (e.g. a `file` terminus) may have stayed at its
   pre-fan Y. Pin it back onto its sole upstream's Y.
 - **Helper**: `_align_terminus_to_upstream` (engine.py:3860).
-- **Precondition**: Phase 13h re-centered fans.
+- **Precondition**: Stage 6.7 re-centered fans.
 - **Postcondition**: Single-station downstream columns share Y with
   their unique upstream.
 - **Invariants preserved**: Multi-station columns.
 - **Related tests**: `test_terminus_not_directly_after_diagonal`.
 
-### Phase 13i2: balance section content around trunk (engine.py:765-771)
+### Stage 6.11: balance section content around trunk (engine.py:765-771)
 - **Purpose**: Auto-balance pass. For sections whose final layout
   still has an empty band above the trunk while more siblings sit
   below than above, lift bottommost movable siblings into the empty
@@ -578,7 +574,7 @@ Phase 13c/13d.
   balance are left alone.
 - **Related tests**: `test_section_top_band_filled`.
 
-### Phase 13h3: recenter loop side stations (engine.py:773-781)
+### Stage 6.12: recenter loop side stations (engine.py:773-781)
 - **Purpose**: Recompute the X of fan-out side stations (one trunk
   predecessor, one trunk successor - "loop side" stations like propd,
   dream, DESeq2 around limma) to the midpoint of their actual diagonal
@@ -593,7 +589,7 @@ Phase 13c/13d.
   `test_loop_recenter_only_for_pure_side_branches`,
   `test_loop_column_stations_share_x`.
 
-### Phase 13j: shrink bbox to content bottom (engine.py:783-787)
+### Stage 6.13: shrink bbox to content bottom (engine.py:783-787)
 - **Purpose**: Shrink each section's bbox bottom to
   `max_content_y + section_y_padding` after earlier phases lifted
   bottom rows.
@@ -606,7 +602,7 @@ Phase 13c/13d.
 - **Related tests**: `test_section_bbox_has_bottom_padding`,
   `test_section_bbox_matches_content_extent`.
 
-### Phase 13k: tighten lower rows after shrink (engine.py:789-794)
+### Stage 6.14: tighten lower rows after shrink (engine.py:789-794)
 - **Purpose**: Pull lower-row sections up to close vertical slack left
   by the pre-shrink row-height estimate when rowspan sections
   collapsed via 13j.
@@ -618,7 +614,7 @@ Phase 13c/13d.
 - **Invariants preserved**: Within-row trunk Ys. Bbox heights of
   upper rows.
 
-### Phase 13k2: shift sparse loop stations to clear bundle (engine.py:796-800)
+### Stage 6.15: shift sparse loop stations to clear bundle (engine.py:796-800)
 - **Purpose**: Shift sparse loop-side stations (one inbound, one
   outbound, single-line consumer) onto a half-pitch Y when sharing
   the full-row Y with a busier sibling whose inbound bundle would
@@ -633,17 +629,17 @@ Phase 13c/13d.
 - **Related tests**: `test_lines_dont_cross_non_consumer_markers`,
   `test_no_icon_overlaps_line_path`.
 
-### Phase 13l: push lower rows after bbox grow (engine.py:802-806)
+### Stage 6.16: push lower rows after bbox grow (engine.py:802-806)
 - **Purpose**: Companion to 13k2 - when 13k2 grew a section's bbox
   downward, push lower-row sections down to keep
   `section_y_gap`.
 - **Helper**: `_push_lower_rows_after_bbox_grow` (engine.py:2698).
-- **Precondition**: Phase 13k2 may have grown some bboxes.
+- **Precondition**: Stage 6.15 may have grown some bboxes.
 - **Postcondition**: Row gaps preserved across the bbox grow.
 - **Invariants preserved**: Within-row Ys.
 - **Related tests**: `test_row_gap_accommodates_bypass`.
 
-### Phase 13m: pad stacked captioned file icons (engine.py:808-813)
+### Stage 6.17: pad stacked captioned file icons (engine.py:808-813)
 - **Purpose**: Pad vertical spacing between stacked file-input icons
   whose under-icon captions would overlap the icon below at default
   `y_spacing`.
@@ -660,31 +656,35 @@ Phase 13c/13d.
 No open signals at this time. Add new entries here when phase
 pre/postconditions reveal a candidate for cleanup.
 
-## Adding a new phase: checklist
+## Adding a new stage: checklist
 
-When adding a new phase to `_compute_section_layout`, document the
+When adding a new stage to `_compute_section_layout`, document the
 following before merging:
 
-1. **Phase tag**: pick a new tag matching the position in the pipeline.
-   Avoid suffix collisions (the `Phase 13k` -> `Phase 13k2` rename in
-   PR #342 is what happens when you don't).
+1. **Stage tag**: pick the next sequential number within the
+   appropriate stage (e.g. a new Stage 6.x sub-step gets the next
+   integer after Stage 6.17).  Historical note: the organic phase
+   suffix tree (`13d2`, `13k2`, the `Phase 13k` -> `Phase 13k2`
+   rename in PR #342) is what the flat Stage.N scheme is designed to
+   prevent.
 2. **Helper location**: top-level function in `engine.py` (or a new
-   module if it's substantial). Phase comments in the function body
+   module if it's substantial). Stage comments in the function body
    must reference the helper.
 3. **Precondition**: what state on the graph the helper assumes.
    Mention coordinate-system regime (local vs global), whether ports
    are positioned, whether junctions are positioned, and whether
    trunks/grids are final.
-4. **Postcondition**: the property the phase guarantees. Be concrete -
+4. **Postcondition**: the property the stage guarantees. Be concrete -
    "Y values are snapped to the row grid" not "Y values look nice".
-5. **Invariants preserved**: what the phase does NOT change. Crucial
+5. **Invariants preserved**: what the stage does NOT change. Crucial
    for reasoning about reorder safety. Bboxes? Other sections?
    Off-track stations? Half-grid marker set?
 6. **Related tests**: which invariants in `tests/test_layout_invariants.py`
-   defend the postcondition. If none, add one - phases without test
-   coverage are how the 13-suffix sprawl happened.
-7. **Validate-mode coverage**: if the phase introduces a new property
+   defend the postcondition. If none, add one - stages without test
+   coverage are how the Phase-13-suffix sprawl happened in the first
+   place.
+7. **Validate-mode coverage**: if the stage introduces a new property
    that should hold permanently, add a `_guard_*` helper and call it
    from `validate=True` mode.
-8. **Update this doc**: extend the per-phase table above and call out
-   any cross-phase coupling in the structural-debt section.
+8. **Update this doc**: extend the per-stage table above and call out
+   any cross-stage coupling in the structural-debt section.

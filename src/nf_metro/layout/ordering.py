@@ -72,7 +72,7 @@ def assign_tracks(
         line_base[lid] = i * line_gap
 
     # Step 3: Group nodes by (layer, primary_line).  Off-track stations
-    # are excluded from grouping: their Y is overwritten by the Phase 13
+    # are excluded from grouping: their Y is overwritten by the Stage 5.2
     # off-track lift (anchored to the consumer station), so letting them
     # participate in fan-out placement here would only distort the trunk
     # track assignment for siblings and downstream stations.

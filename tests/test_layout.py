@@ -374,8 +374,8 @@ def test_section_content_y_stable_under_neutral_layout():
 
 
 def test_rowspan_trim_doesnt_misalign_tb_bbox_bottom():
-    """``_shrink_bboxes_to_content_bottom`` (Phase 13j) must not undo
-    ``_align_tb_section_bbox_bottoms`` (Phase 13f), nor trim a
+    """``_shrink_bboxes_to_content_bottom`` (Stage 6.13) must not undo
+    ``_align_tb_section_bbox_bottoms`` (Stage 6.5), nor trim a
     row-spanning TB section's bbox bottom above a known row-mate it
     visually shares a bottom edge with.
 
@@ -1379,7 +1379,7 @@ def test_label_text_width_empty():
     assert label_text_width("") == 0
 
 
-# --- Port-terminus spacing (Phase 7c) ---
+# --- Port-terminus spacing (Stage 4.5) ---
 
 
 def test_port_terminus_spacing_basic():
@@ -1436,7 +1436,7 @@ def test_port_terminus_spacing_basic():
 
 
 def test_port_terminus_spacing_no_station_as_elbow():
-    """Phase 7c must not introduce station-as-elbow violations.
+    """Stage 4.5 must not introduce station-as-elbow violations.
 
     Uses the variant_calling_tuned example which triggered the original
     icon overlap issue, and checks that the fix doesn't create new
@@ -1452,7 +1452,7 @@ def test_port_terminus_spacing_no_station_as_elbow():
 
     violations = check_station_as_elbow(graph)
     errors = [v for v in violations if v.severity == Severity.ERROR]
-    assert not errors, "station-as-elbow violations after Phase 7c:\n" + "\n".join(
+    assert not errors, "station-as-elbow violations after Stage 4.5:\n" + "\n".join(
         v.message for v in errors
     )
 
@@ -1627,7 +1627,7 @@ def test_port_terminus_spacing_multi_terminus():
 
 
 # ---------------------------------------------------------------------------
-# Phase-boundary guard tests
+# Stage-boundary guard tests
 # ---------------------------------------------------------------------------
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
@@ -1690,7 +1690,7 @@ class TestPhaseGuards:
 class TestShiftGraphIntoCanvas:
     """Behavioural invariants of ``_shift_graph_into_canvas``.
 
-    The helper is called explicitly from three Phase-13 sub-step
+    The helper is called explicitly from three Pass C sub-step
     sites in ``_compute_section_layout``.  Each call must be safe
     regardless of whether the preceding bbox-growing helper actually
     grew anything; the helper's own no-op guard makes the call
@@ -1751,15 +1751,16 @@ class TestShiftGraphIntoCanvas:
         assert graph.stations["a"].y == first_station_y
 
 
-class TestPhase13Bisection:
-    """Bisection guards fired at each Phase-13x boundary must identify the
-    offending sub-phase, not the catch-all 'after Phase 12 (final)' label.
+class TestPassCBisection:
+    """Bisection guards fired at each Pass C bisection boundary must
+    identify the offending sub-stage, not the catch-all 'after final'
+    label.
 
-    Without bisection, a regression introduced by e.g. Phase 13k2 surfaces
-    as ``after Phase 12 (final): position clash: ...``; the maintainer
+    Without bisection, a regression introduced by e.g. Stage 6.15 surfaces
+    as ``after final: position clash: ...``; the maintainer
     must manually bisect by toggling phases to find the culprit.  With
     bisection, the same regression surfaces immediately as
-    ``after Phase 13k2: position clash: ...``.
+    ``after Stage 6.15: position clash: ...``.
     """
 
     # One representative fixture per check: simple two-station section
@@ -1785,22 +1786,22 @@ class TestPhase13Bisection:
 
     # Corruption-phase -> expected surfacing checkpoint.  When the
     # corruption phase is at or after the overlap-guard's first valid
-    # checkpoint (``after Phase 13g``), bisection localises to the
+    # checkpoint (``after Stage 6.6``), bisection localises to the
     # corruption phase itself.  Otherwise the overlap regression
-    # surfaces at ``after Phase 13g`` (the first un-gated overlap
+    # surfaces at ``after Stage 6.6`` (the first un-gated overlap
     # check), which is the accepted trade-off for letting the bisection
     # set tolerate the off-track-stranded-on-consumer transient at
-    # Phase 13e/13f (see ``_BISECTION_FIRST_VALID`` in engine.py).
+    # Stage 6.4/13f (see ``_BISECTION_FIRST_VALID`` in engine.py).
     @pytest.mark.parametrize(
         "corruption_helper,expected_phase",
         [
-            ("_lift_off_track_stations", "after Phase 13g"),
-            ("_top_align_row_bboxes_only", "after Phase 13g"),
-            ("_compact_row_content_to_bbox_top", "after Phase 13g"),
-            ("_snap_all_y_to_grid", "after Phase 13g"),
-            ("_align_terminus_to_upstream", "after Phase 13i"),
-            ("_shrink_bboxes_to_content_bottom", "after Phase 13j"),
-            ("_pad_stacked_captioned_file_icons", "after Phase 13m"),
+            ("_lift_off_track_stations", "after Stage 6.6"),
+            ("_top_align_row_bboxes_only", "after Stage 6.6"),
+            ("_compact_row_content_to_bbox_top", "after Stage 6.6"),
+            ("_snap_all_y_to_grid", "after Stage 6.6"),
+            ("_align_terminus_to_upstream", "after Stage 6.10"),
+            ("_shrink_bboxes_to_content_bottom", "after Stage 6.13"),
+            ("_pad_stacked_captioned_file_icons", "after Stage 6.17"),
         ],
     )
     def test_overlap_localises_to_phase(
@@ -1843,7 +1844,7 @@ class TestPhase13Bisection:
         compute_layout(graph, validate=True)
 
     # Minimal center_ports fixture: enters the `if graph.center_ports:`
-    # block at Phase 13h so the "after Phase 13h.2" checkpoint actually
+    # block at Stage 6.7 so the "after Stage 6.9" checkpoint actually
     # fires.  Plain enough not to need full-bundle reanchoring, so the
     # helpers there are effective no-ops and the checkpoint is reached
     # cleanly.
@@ -1863,15 +1864,15 @@ class TestPhase13Bisection:
     )
 
     def test_phase_13h_subphase_checkpoint_fires_on_center_ports(self, monkeypatch):
-        """Phase 13h.2's bisection checkpoint surfaces a regression
+        """Stage 6.9's bisection checkpoint surfaces a regression
         introduced by ``_top_align_row_bboxes_only`` inside the
         ``if center_ports:`` branch.
 
         This exercises a code path the default ``_MMD`` fixture (no
         ``center_ports``) cannot reach.  The corruption runs *after*
-        the Phase 13a checkpoint to avoid a false positive there: we
+        the Stage 5.3 checkpoint to avoid a false positive there: we
         corrupt only on the second invocation of
-        ``_top_align_row_bboxes_only``, which lands inside Phase 13h.2.
+        ``_top_align_row_bboxes_only``, which lands inside Stage 6.9.
         """
         from nf_metro.layout import engine
 
@@ -1881,9 +1882,9 @@ class TestPhase13Bisection:
         def corrupt(graph, *args, **kwargs):
             result = original(graph, *args, **kwargs)
             call_count["n"] += 1
-            # First call is Phase 13a (always runs); second is Phase 13h.2
+            # First call is Stage 5.3 (always runs); second is Stage 6.9
             # (only on center_ports graphs).  Corrupt only on the second
-            # to hit the Phase 13h.2 checkpoint specifically.
+            # to hit the Stage 6.9 checkpoint specifically.
             if call_count["n"] >= 2:
                 a = graph.stations.get("a")
                 a2 = graph.stations.get("a2")
@@ -1899,24 +1900,24 @@ class TestPhase13Bisection:
             compute_layout(graph, validate=True)
 
         msg = str(excinfo.value)
-        assert msg.startswith("after Phase 13h.2:"), (
-            f"Expected bisection to identify Phase 13h.2, but error was: {msg!r}"
+        assert msg.startswith("after Stage 6.9:"), (
+            f"Expected bisection to identify Stage 6.9, but error was: {msg!r}"
         )
         assert call_count["n"] == 2, (
             f"Expected exactly 2 calls to _top_align_row_bboxes_only "
-            f"(Phase 13a + Phase 13h.2), got {call_count['n']}"
+            f"(Stage 5.3 + Stage 6.9), got {call_count['n']}"
         )
 
     def test_gated_overlap_guard_fires_at_later_bisection_checkpoints(
         self, monkeypatch
     ):
-        """An overlap injected at Phase 13m must surface at the
-        ``after Phase 13m`` bisection checkpoint (not deferred to the
+        """An overlap injected at Stage 6.17 must surface at the
+        ``after Stage 6.17`` bisection checkpoint (not deferred to the
         final block).
 
         Confirms ``_BISECTION_FIRST_VALID`` only delays a guard's
         first valid checkpoint -- once past the threshold (``after
-        Phase 13g`` for the overlap guard), the guard fires at every
+        Stage 6.6`` for the overlap guard), the guard fires at every
         subsequent bisection checkpoint.
         """
         from nf_metro.layout import engine
@@ -1939,38 +1940,39 @@ class TestPhase13Bisection:
             compute_layout(graph, validate=True)
 
         msg = str(excinfo.value)
-        assert msg.startswith("after Phase 13m:"), (
-            f"Expected bisection to surface at 'after Phase 13m' "
-            f"(overlap guard runs at every checkpoint from Phase 13g "
+        assert msg.startswith("after Stage 6.17:"), (
+            f"Expected bisection to surface at 'after Stage 6.17' "
+            f"(overlap guard runs at every checkpoint from Stage 6.6 "
             f"onward), but error was: {msg!r}"
         )
 
     @pytest.mark.parametrize(
         "guard_name,first_valid",
         [
-            ("_guard_stations_in_sections", "after Phase 13a"),
-            ("_guard_no_station_overlap", "after Phase 13g"),
-            ("_guard_no_line_crosses_non_consumer", "after Phase 13k2"),
+            ("_guard_stations_in_sections", "after Stage 5.3"),
+            ("_guard_no_station_overlap", "after Stage 6.6"),
+            ("_guard_no_line_crosses_non_consumer", "after Stage 6.15"),
         ],
     )
     def test_bisection_first_valid_threshold(self, guard_name, first_valid):
         """``_BISECTION_FIRST_VALID`` thresholds must reference real
-        Phase-13x checkpoints; ``_bisection_should_run`` must skip the
-        guard at the preceding checkpoint and run it at the threshold.
+        Pass C bisection checkpoints; ``_bisection_should_run`` must
+        skip the guard at the preceding checkpoint and run it at the
+        threshold.
         """
         from nf_metro.layout import engine
 
-        assert first_valid in engine._PHASE_13_ORDER, (
-            f"Threshold {first_valid!r} not a known Phase-13x checkpoint"
+        assert first_valid in engine._PASS_C_BISECTION_ORDER, (
+            f"Threshold {first_valid!r} not a known Pass C checkpoint"
         )
         assert engine._BISECTION_FIRST_VALID[guard_name] == first_valid
 
-        idx = engine._PHASE_13_ORDER.index(first_valid)
+        idx = engine._PASS_C_BISECTION_ORDER.index(first_valid)
         assert engine._bisection_should_run(guard_name, first_valid) is True
         if idx > 0:
-            prev_phase = engine._PHASE_13_ORDER[idx - 1]
+            prev_phase = engine._PASS_C_BISECTION_ORDER[idx - 1]
             assert engine._bisection_should_run(guard_name, prev_phase) is False
-        # Final-block phase is not in _PHASE_13_ORDER; guard always runs.
+        # Final-block phase is not in _PASS_C_BISECTION_ORDER; guard always runs.
         assert (
-            engine._bisection_should_run(guard_name, "after Phase 12 (final)") is True
+            engine._bisection_should_run(guard_name, "after final") is True
         )

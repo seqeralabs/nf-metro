@@ -42,3 +42,5 @@ nav:
   - Nextflow Import: nextflow.md
   - nf-core Pipelines: pipelines/index.md
   - Gallery: gallery/index.md
+  - Internals:
+    - Layout pipeline: dev/layout_pipeline.md

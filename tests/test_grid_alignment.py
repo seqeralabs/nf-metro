@@ -1,4 +1,4 @@
-"""Regression tests for shared Y grid alignment (Phase 2.5).
+"""Regression tests for shared Y grid alignment (Stage 1.2).
 
 These tests verify the grid alignment behaviour across real pipeline
 examples.  They cover the issues fixed on the feat/shared-y-grid-alignment
@@ -135,7 +135,7 @@ class TestGridInvariants:
 
 
 class TestIssueK:
-    """Phase 10d must not drag exit ports away from matching downstream entry."""
+    """Stage 4.4 must not drag exit ports away from matching downstream entry."""
 
     @pytest.fixture(autouse=True)
     def setup(self):
@@ -155,7 +155,7 @@ class TestIssueK:
 
 
 class TestIssueL:
-    """Phase 10d must preserve straight alignment->variant_calling connection."""
+    """Stage 4.4 must preserve straight alignment->variant_calling connection."""
 
     @pytest.fixture(autouse=True)
     def setup(self):
@@ -251,7 +251,7 @@ class TestIssueN:
 
 
 class TestFanInExitPreservation:
-    """Phase 10d must keep centered midpoint for 3+ source fan-in exits."""
+    """Stage 4.4 must keep centered midpoint for 3+ source fan-in exits."""
 
     @pytest.fixture(autouse=True)
     def setup(self):
@@ -366,7 +366,7 @@ class TestVariantbenchmarkingSpacing:
 
 
 # ---------------------------------------------------------------------------
-# Inter-section port pair snap (final-polish phase 13c)
+# Inter-section port pair snap (final-polish Stage 5.5)
 # ---------------------------------------------------------------------------
 
 

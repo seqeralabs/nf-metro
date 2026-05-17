@@ -134,7 +134,7 @@ def _compute_section_offsets(
 
     # Right reach re-anchored to the standard left edge so that bbox_x
     # pushed further left (e.g. by terminus-icon clearance) doesn't
-    # inflate the column.  Phase 3b of compute_layout absorbs the
+    # inflate the column.  Stage 1.5 of compute_layout absorbs the
     # leftward overhang via a global x_offset bump.
     def _effective_width(section: Section) -> float:
         return section.bbox_x + section.bbox_w + SECTION_X_PADDING
