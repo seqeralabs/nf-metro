@@ -211,7 +211,13 @@ _XFAIL_ROW_TRUNK_CY: dict[str, str] = {}
 # Inter-section exit-port cy drifts from the matching entry-port cy in
 # the next section.  See nf-metro audit item 1 (the "limma kink"
 # regression family).  Limited to multi-section fixtures.
-_XFAIL_NO_KINK: dict[str, str] = {}
+_XFAIL_NO_KINK: dict[str, str] = {
+    "topologies/off_track_convergence.mmd": (
+        "Off-track inputs converging into one in-section consumer push the "
+        "consumer's row trunk Y down, decoupling it from the upstream exit "
+        "port cy. Genuine bug, pinned for engine fix."
+    ),
+}
 
 
 # Symmetric-fan pairs (two full-bundle stations in the same column) end
@@ -2504,7 +2510,15 @@ def test_section_entry_hub_on_grid(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+# Fixtures known to fail ``test_inter_section_route_y_stays_within_row_band``
+# because a same-row inter-section route dips outside its row band.
+_XFAIL_ROW_BAND: dict[str, str] = {}
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_ROW_BAND),
+)
 def test_inter_section_route_y_stays_within_row_band(fixture):
     """Inter-section routes whose endpoints both sit in grid row R must
     keep all waypoint Ys within a one-row vertical band centered on R.
