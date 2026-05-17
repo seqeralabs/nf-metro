@@ -554,9 +554,6 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
                 ordered.append(n)
         section_node_order[sec_key] = ordered
 
-    # Assign one unique station ID per kept node so duplicate labels across
-    # sections (e.g. SAMTOOLS_SORT reused in several subworkflows) don't
-    # collide.
     station_ids = _allocate_station_ids(section_order, section_node_order, dag.nodes)
 
     # Infer title

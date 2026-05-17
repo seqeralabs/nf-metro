@@ -301,11 +301,7 @@ class TestConvertNextflowDag:
 # Regression: unquoted labels (issue #249, Nextflow 23.x+)
 # ---------------------------------------------------------------------------
 class TestUnquotedLabels:
-    """Nextflow 23.x+ emits v1([LABEL]) without surrounding quotes.
-
-    Prior to issue #249, the stadium regex required quotes, so every process
-    node failed to match and convert silently returned an empty pipeline.
-    """
+    """Stadium nodes parse whether or not labels are wrapped in quotes."""
 
     def test_unquoted_stadium_parses(self):
         text = (
@@ -347,12 +343,7 @@ class TestUnquotedLabels:
 # Regression: duplicate process labels across subworkflows (issue #249)
 # ---------------------------------------------------------------------------
 class TestDuplicateProcessLabels:
-    """When two `_NfNode`s share a label, station IDs must stay distinct.
-
-    Prior to issue #249, `_sanitize_id(node.label)` collapsed both into one
-    station ID, producing duplicate declarations and self-loop edges that
-    crashed layout with NetworkXUnfeasible.
-    """
+    """Distinct nodes that share a label get distinct station IDs."""
 
     def test_no_duplicate_station_declarations(self):
         text = (FIXTURES / "duplicate_processes.mmd").read_text()
