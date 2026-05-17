@@ -705,7 +705,7 @@ def _run_pass_c_guards(
     """Bisection guards run after every Pass C sub-phase boundary in
     ``validate=True`` mode.
 
-    The Stage 5.2 tidy-up pipeline is a sequence of ~20 mutating passes
+    The Pass C tidy-up pipeline is a sequence of ~20 mutating passes
     over a shared graph; before this helper, ``validate=True`` only
     sampled the final state, so a regression introduced at e.g.
     Stage 6.7 surfaced as ``after final: ...`` with no way to
@@ -725,7 +725,7 @@ def _run_pass_c_guards(
     * ``_guard_row_trunk_cy_consistent`` -- the row trunk Y is only
       finalised once Stage 6.7 has re-centred ``center_ports`` graphs.
     * ``_guard_inter_section_routes_in_row_band`` -- row-band height
-      tolerance assumes final bboxes, which Stage 6.13/k may still be
+      tolerance assumes final bboxes, which Stages 6.13 / 6.14 may still be
       shrinking.
 
     The final guard block (``after final``) composes this
@@ -1109,7 +1109,7 @@ def _compute_section_layout(
     # ---- Stage 4 - Pass B: Downstream alignment & trunk-Y consolidation -
     # Stage 4.5's port-terminus spacing can expand bboxes via
     # ``_expand_bbox_for_y``; Stage 4.7 re-runs row top-align to undo
-    # the resulting bbox-top drift.  Phases 11d / 11da run only on
+    # the resulting bbox-top drift.  Stages 4.9 / 4.10 run only on
     # ``center_ports`` graphs.
 
     # Stage 4.1: For non-fold LR/RL sections, pull exit-entry port pairs
@@ -1120,15 +1120,15 @@ def _compute_section_layout(
     # layer, snap it to the port Y so the connection is horizontal.
     _snap_sole_layer_stations_to_ports(graph)
 
-    # Stage 4.3: For grid-group sections (where 10b is skipped), snap
+    # Stage 4.3: For grid-group sections (where Stage 4.2 is skipped), snap
     # entry ports to the Y of their first connected internal station.
     # This produces a straight horizontal port-to-station connection
     # instead of a diagonal from the upstream junction Y.
     _snap_grid_group_entry_ports(graph)
 
-    # Stage 4.4: Mirror of 10c for exit ports.  Move exit ports of
+    # Stage 4.4: Mirror of Stage 4.3 for exit ports.  Move exit ports of
     # grid-group sections to the Y of the downstream entry port (which
-    # 10c already snapped to a grid station).  This eliminates detours
+    # Stage 4.3 already snapped to a grid station).  This eliminates detours
     # where lines leave at the section midpoint then route back.
     _snap_grid_group_exit_ports(graph)
 
@@ -1137,7 +1137,7 @@ def _compute_section_layout(
     _space_ports_from_termini(graph, y_spacing)
 
     # Stage 4.6: Recompute bboxes for grid-aligned sections.  Earlier
-    # phases (6, 8, 11) may have expanded bboxes for temporary port
+    # stages (3.2, 3.4, 4.5) may have expanded bboxes for temporary port
     # positions that were later corrected (e.g. Stage 4.1 pulls ports
     # back toward downstream stations).  Recompute with symmetric
     # padding around the final non-port station range.
@@ -1163,22 +1163,23 @@ def _compute_section_layout(
     # around the trunk Y when no unique trunk exists (e.g. Reporting's
     # Shiny app + Quarto report, both carrying the full bundle).
     #
-    # Why both 11da and Stage 6.7's recenter: 11da's symmetric layout
-    # is read by Stage 5.2's bbox-growth, compaction, and snap-to-grid
-    # passes (an empty trunk row in fanned columns lets 13b/13j shrink
-    # the section bbox to the compact extent).  Stage 6.7 then re-fans
-    # the same columns using the post-row-alignment trunk Y, which can
-    # have drifted from 11da's port-Y anchor.  Skipping 11da changes
-    # intermediate bbox sizes and is not empty-render-diff; the two
-    # passes are load-bearing in combination.
+    # Why both Stage 4.10 and Stage 6.7's recenter: Stage 4.10's
+    # symmetric layout is read by Stage 5.2's bbox-growth, compaction,
+    # and snap-to-grid passes (an empty trunk row in fanned columns
+    # lets Stages 5.4 / 6.13 shrink the section bbox to the compact
+    # extent).  Stage 6.7 then re-fans the same columns using the
+    # post-row-alignment trunk Y, which can have drifted from Stage
+    # 4.10's port-Y anchor.  Skipping Stage 4.10 changes intermediate
+    # bbox sizes and is not empty-render-diff; the two passes are
+    # load-bearing in combination.
     _redistribute_full_bundle_columns(graph, y_spacing)
 
     # ---- Stage 5 - Pass C: Junctions & off-track lift ------------------
     # All port positions are now final; Stage 5.1 positions junctions
-    # once.  Stage 5.2 lifts off-track stations; 13a-13c then re-align
-    # row bbox tops, compact, and re-snap inter-section port pairs
-    # (re-running Stage 5.1 for the junctions that move with them).
-    # Stage 6 below handles the rest of Pass C.
+    # once.  Stage 5.2 lifts off-track stations; Stages 5.3 to 5.5
+    # then re-align row bbox tops, compact, and re-snap inter-section
+    # port pairs (re-running Stage 5.1 for the junctions that move
+    # with them).  Stage 6 below handles the rest of Pass C.
 
     # Stage 5.1: Position junction stations in the inter-section gap.
     _position_junctions(graph)
@@ -1194,7 +1195,7 @@ def _compute_section_layout(
         _run_pass_c_guards(graph, "after Stage 5.2")
 
     # Stage 5.3: Re-align bbox tops within each grid row after off-track
-    # lifting expanded some sections upward.  Unlike Stage 3.5/11c which
+    # lifting expanded some sections upward.  Unlike Stages 3.5 / 4.7 which
     # shifts stations with the bbox, this only grows the bbox upward so
     # the empty input-band space lines up across the row.  Station Ys
     # in unlifted sections are preserved.
@@ -1240,7 +1241,7 @@ def _compute_section_layout(
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.1")
 
-    # Stage 6.2: Companion to 13d for source-stack sections.  When the
+    # Stage 6.2: Companion to Stage 6.1 for source-stack sections.  When the
     # entry column has a single full-bundle trunk plus subset-bundle
     # source inputs (file icons with no inbound edges), lift the
     # nearest-to-trunk sources into the empty top band so the section
@@ -1303,8 +1304,7 @@ def _compute_section_layout(
     # column.
     #
     # Stage 6.8 and Stage 6.9 below restore invariants the recenter
-    # breaks; ``.N`` is used (not bare ``13h2``) so the suffix doesn't
-    # collide with the standalone Stage 6.12 further below.
+    # breaks.
     if graph.center_ports:
         _recenter_full_bundle_columns(graph, y_spacing)
 
@@ -1369,7 +1369,7 @@ def _compute_section_layout(
 
     # Stage 6.14: Close vertical slack that the pre-shrink row-height
     # estimate (in ``_compute_section_offsets``) left between row ``r``
-    # and row ``r + 1`` once 13j has collapsed bboxes to their content.
+    # and row ``r + 1`` once Stage 6.13 has collapsed bboxes to their content.
     # Only fires when a rowspan section's content fell short of its row
     # claim; multi-row layouts with content-filled rows are untouched.
     _tighten_lower_rows_after_shrink(graph, section_y_gap)
@@ -1380,8 +1380,6 @@ def _compute_section_layout(
     # incoming, one outgoing, single-line consumer) onto a half-grid Y
     # when sharing the full-row Y with a busier sibling whose inbound
     # bundle would otherwise cross the sparse station's marker bbox.
-    # (Distinct from Stage 6.14 above; renamed to disambiguate after the
-    # numbering collision flagged in src/nf_metro/layout/CONTRACT.md.)
     _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.15")

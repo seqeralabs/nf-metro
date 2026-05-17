@@ -52,7 +52,7 @@ Stages split into three regimes:
 | after Stage 2.1 | finite coords, stations-in-sections, bboxes-positive |
 | after Stage 3.1 | ports-on-boundaries |
 | after top-align (Stage 3.5) | ports-on-boundaries |
-| after each Stage 5.2x (bisection) | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
+| after each Pass C sub-stage (bisection) | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
 | after final | bisection set (all unconditional) + off-track-above-consumer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
 Bisection checkpoints fire after every Pass C sub-stage (see the
@@ -77,25 +77,13 @@ bisection runner is `_run_pass_c_guards`.
 
 ## Stage overview
 
-The pipeline groups into six stages.  Stage boundaries align with the
-coord-regime transitions and the Pass A / Pass B / Pass C divisions
-referenced throughout this doc.
-
-1. **Stage 1 - Section construction (local coords)**: Stages 1.1
-   through 1.5.
-2. **Stage 2 - Globalise (local -> global coords)**: Stage 2.1.
-3. **Stage 3 - Pass A: port initialisation & section geometry**:
-   Stages 3.1 through 3.5.
-4. **Stage 4 - Pass B: downstream alignment & trunk-Y consolidation**:
-   Stages 4.1 through 4.10.
-5. **Stage 5 - Pass C: junctions & off-track lift**: Stages 5.1
-   through 5.5.
-6. **Stage 6 - Pass C: vertical settling & finishing**: Stages 6.1
-   through 6.17.
-
-The matching `# ---- Stage N - ... ----` comment dividers in
-`_compute_section_layout` mark each stage's start in the source.
-Stage-table entries below appear in pipeline order.
+The pipeline groups into six stages aligned with the coord-regime
+transitions and the Pass A / Pass B / Pass C divisions used throughout
+this doc.  See [`docs/dev/layout_pipeline.md`](../../../docs/dev/layout_pipeline.md)
+for a prose walkthrough of each stage; the matching
+`# ---- Stage N - ... ----` comment dividers in `_compute_section_layout`
+mark each stage's start in the source.  Stage-table entries below appear
+in pipeline order.
 
 ## Stage table
 
@@ -276,7 +264,7 @@ Stage-table entries below appear in pipeline order.
 - **Related tests**: `test_section_entry_hub_on_grid` (downstream).
 
 ### Stage 4.3: snap grid-group entry ports (engine.py:611-615)
-- **Purpose**: For grid-group sections (skipped by 10b), snap entry
+- **Purpose**: For grid-group sections (skipped by Stage 4.2), snap entry
   ports to the connected first-internal-station Y - straight
   port-to-station connection.
 - **Helper**: `_snap_grid_group_entry_ports` (engine.py:5237).
@@ -286,10 +274,10 @@ Stage-table entries below appear in pipeline order.
 - **Invariants preserved**: Internal station Y. Exit ports.
 
 ### Stage 4.4: snap grid-group exit ports (engine.py:617-621)
-- **Purpose**: Mirror of 10c for exit ports - snap to the downstream
-  entry port's Y (which 10c just snapped to a grid station).
+- **Purpose**: Mirror of Stage 4.3 for exit ports - snap to the downstream
+  entry port's Y (which Stage 4.3 just snapped to a grid station).
 - **Helper**: `_snap_grid_group_exit_ports` (engine.py:5284).
-- **Precondition**: 10c complete (downstream entry ports snapped).
+- **Precondition**: Stage 4.3 complete (downstream entry ports snapped).
 - **Postcondition**: Grid-group exit ports share Y with their
   downstream entry port (i.e. with the downstream's connected
   station).
@@ -299,7 +287,7 @@ Stage-table entries below appear in pipeline order.
 - **Purpose**: Push ports away from terminus stations so a routed
   line clears any file-icon caption / label by at least `y_spacing`.
 - **Helper**: `_space_ports_from_termini` (engine.py:5695).
-- **Precondition**: Port Ys settled by Phases 10-10d.
+- **Precondition**: Port Ys settled by Stages 4.1 to 4.4.
 - **Postcondition**: For every (port, terminus) pair in the same
   section, `|port.y - terminus.y| >= y_spacing` (modulo bbox bounds).
   Bboxes may expand via `_expand_bbox_for_y` to keep ports on edges.
@@ -320,7 +308,7 @@ Stage-table entries below appear in pipeline order.
 - **Purpose**: Repeat Stage 3.5 after Stage 4.5 expanded bboxes via
   `_expand_bbox_for_y`.
 - **Helper**: `_top_align_row_sections` (re-invoked).
-- **Precondition**: Stage 4.5/11b complete.
+- **Precondition**: Stages 4.5 / 4.6 complete.
 - **Postcondition**: As Stage 3.5.
 - **Invariants preserved**: As Stage 3.5.
 
@@ -358,13 +346,13 @@ Stage-table entries below appear in pipeline order.
   LR port Y.
 - **Why both this and Stage 6.7**: Stage 6.7
   (``_recenter_full_bundle_columns``) re-fans the same columns
-  using the final trunk Y, which can have drifted from 11da's
+  using the final trunk Y, which can have drifted from Stage 4.10's
   port-Y anchor.  Stage 4.10's output is *not* redundant: the
-  intermediate symmetric layout is read by Stage 5.2's bbox-growth
+  intermediate symmetric layout is read by Pass C's bbox-growth
   and compaction passes (an empty trunk row in fanned columns lets
-  13b/13j shrink the section bbox to the compact extent).
-  Skipping 11da changes intermediate bbox sizes and is not empty-
-  render-diff -- the two passes are load-bearing in combination.
+  Stages 5.4 / 6.13 shrink the section bbox to the compact extent).
+  Skipping Stage 4.10 changes intermediate bbox sizes and is not
+  empty-render-diff -- the two passes are load-bearing in combination.
 - **Invariants preserved**: Other columns.
 
 ### Stage 5.1: position junctions (engine.py:658-659)
@@ -447,11 +435,11 @@ Stage-table entries below appear in pipeline order.
   `test_section1_input_above_trunk`.
 
 ### Stage 6.2: fan source inputs upward (engine.py:695-700)
-- **Purpose**: Companion to 13d for source-stack sections (single
+- **Purpose**: Companion to Stage 6.1 for source-stack sections (single
   full-bundle trunk + subset-bundle file inputs at the entry column).
   Lift trunk-nearest source inputs into the empty top band.
 - **Helper**: `_fan_source_inputs_upward` (engine.py:1852).
-- **Precondition**: 13d done.
+- **Precondition**: Stage 6.1 done.
 - **Postcondition**: Section is top- and bottom-weighted around the
   trunk row instead of stacked below it.
 - **Invariants preserved**: Trunk station Y.
@@ -464,7 +452,7 @@ Stage-table entries below appear in pipeline order.
   field so Stage 6.4 leaves them alone -- this is the only cross-
   phase channel for half-grid placement. Gated on `center_ports`.
 - **Helper**: `_apply_half_grid_2branch_symfan`.
-- **Precondition**: 13d/13d2 done; symfan classification stable
+- **Precondition**: Stages 6.1 / 6.2 done; symfan classification stable
   (`_section_symfan_uses_half_grid`).
 - **Postcondition**: Eligible symfan pairs share half-pitch offsets
   from the trunk Y. `graph.half_grid_station_ids` contains their IDs.
@@ -551,7 +539,7 @@ Stage-table entries below appear in pipeline order.
 - **Invariants preserved**: Station Ys (only bbox tops move).
 
 ### Stage 6.10: align terminus to upstream (engine.py:759-763)
-- **Purpose**: After 13h re-pitched fanned columns, a single-station
+- **Purpose**: After Stage 6.7 re-pitched fanned columns, a single-station
   downstream column (e.g. a `file` terminus) may have stayed at its
   pre-fan Y. Pin it back onto its sole upstream's Y.
 - **Helper**: `_align_terminus_to_upstream` (engine.py:3860).
@@ -605,9 +593,9 @@ Stage-table entries below appear in pipeline order.
 ### Stage 6.14: tighten lower rows after shrink (engine.py:789-794)
 - **Purpose**: Pull lower-row sections up to close vertical slack left
   by the pre-shrink row-height estimate when rowspan sections
-  collapsed via 13j.
+  collapsed via Stage 6.13.
 - **Helper**: `_tighten_lower_rows_after_shrink` (engine.py:3802).
-- **Precondition**: 13j shrank some rowspan sections.
+- **Precondition**: Stage 6.13 shrank some rowspan sections.
 - **Postcondition**: For each row pair, the row gap is
   `section_y_gap` (no more, no less, except where rowspan sections
   filled their full row claim).
@@ -630,7 +618,7 @@ Stage-table entries below appear in pipeline order.
   `test_no_icon_overlaps_line_path`.
 
 ### Stage 6.16: push lower rows after bbox grow (engine.py:802-806)
-- **Purpose**: Companion to 13k2 - when 13k2 grew a section's bbox
+- **Purpose**: Companion to Stage 6.15 - when Stage 6.15 grew a section's bbox
   downward, push lower-row sections down to keep
   `section_y_gap`.
 - **Helper**: `_push_lower_rows_after_bbox_grow` (engine.py:2698).

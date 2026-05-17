@@ -1791,7 +1791,7 @@ class TestPassCBisection:
     # surfaces at ``after Stage 6.6`` (the first un-gated overlap
     # check), which is the accepted trade-off for letting the bisection
     # set tolerate the off-track-stranded-on-consumer transient at
-    # Stage 6.4/13f (see ``_BISECTION_FIRST_VALID`` in engine.py).
+    # Stages 6.4 / 6.5 (see ``_BISECTION_FIRST_VALID`` in engine.py).
     @pytest.mark.parametrize(
         "corruption_helper,expected_phase",
         [
