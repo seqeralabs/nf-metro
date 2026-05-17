@@ -322,7 +322,7 @@ def _build_routing_context(
     station_offsets: dict[tuple[str, str], float] | None,
 ) -> _RoutingCtx:
     """Pre-compute all shared state for edge routing."""
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
 
     # Fold edge: max X across all stations
     all_x = [s.x for s in graph.stations.values()]
@@ -1660,7 +1660,7 @@ def _route_entry_runway(
         return None
 
     # Find the earliest internal station between entry port and target.
-    port_ids = set(section.entry_ports) | set(section.exit_ports)
+    port_ids = section.port_ids
     first_x: float | None = None
     for sid in section.station_ids:
         if sid == edge.target or sid in port_ids:
@@ -2589,9 +2589,7 @@ def _compute_junction_fan_info(
         outgoing: list[Edge] = []
         has_lshape = False
         has_bypass = False
-        for edge in graph.edges:
-            if edge.source != jid:
-                continue
+        for edge in graph.edges_from(jid):
             if (edge.source, edge.target, edge.line_id) in _skip:
                 continue
             tgt = graph.stations.get(edge.target)

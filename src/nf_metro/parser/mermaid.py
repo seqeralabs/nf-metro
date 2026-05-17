@@ -996,7 +996,7 @@ def _rewrite_edges_with_junctions(
             port_counter += 1
             junction = Station(id=junction_id, label="", is_port=True, section_id=None)
             graph.add_station(junction)
-            graph.junctions.append(junction_id)
+            graph.add_junction(junction_id)
 
             all_line_ids_set: set[str] = set()
             for edges in entry_targets.values():
@@ -1110,7 +1110,7 @@ def _insert_merge_junctions(graph: MetroGraph) -> None:
             section_id=entry_port.section_id,
         )
         graph.add_station(merge_station)
-        graph.junctions.append(merge_id)
+        graph.add_junction(merge_id)
 
         # Rewrite: each source -> merge junction
         for edge in edges:

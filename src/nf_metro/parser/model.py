@@ -125,6 +125,12 @@ class Section:
     internal_edges: list[Edge] = field(default_factory=list)
     entry_ports: list[str] = field(default_factory=list)  # port IDs
     exit_ports: list[str] = field(default_factory=list)  # port IDs
+
+    @property
+    def port_ids(self) -> set[str]:
+        """Set of all entry- and exit-port IDs on this section."""
+        return set(self.entry_ports).union(self.exit_ports)
+
     # Hints from %%metro entry/exit directives: list of (side, [line_ids])
     exit_hints: list[tuple[PortSide, list[str]]] = field(default_factory=list)
     entry_hints: list[tuple[PortSide, list[str]]] = field(default_factory=list)
@@ -196,6 +202,8 @@ class MetroGraph:
     _station_lines_cache: dict[str, list[str]] | None = field(default=None, repr=False)
     _edges_from_cache: dict[str, list[Edge]] | None = field(default=None, repr=False)
     _edges_to_cache: dict[str, list[Edge]] | None = field(default=None, repr=False)
+    # Lazy set view of `junctions`, invalidated on junction mutation.
+    _junction_ids_cache: set[str] | None = field(default=None, repr=False)
     # Grid alignment metadata (populated by Phase 2.5 _align_row_y_grids)
     _row_y_grid_info: dict = field(default_factory=dict, repr=False)
     # Cross-phase channel: station IDs placed at half-pitch offsets
@@ -231,6 +239,18 @@ class MetroGraph:
         """Replace the entire edge list and invalidate dependent caches."""
         self.edges = new_edges
         self._invalidate_edge_caches()
+
+    def add_junction(self, junction_id: str) -> None:
+        """Append a junction ID and invalidate the junction-set cache."""
+        self.junctions.append(junction_id)
+        self._junction_ids_cache = None
+
+    @property
+    def junction_ids(self) -> set[str]:
+        """Set view of ``self.junctions`` for O(1) membership checks."""
+        if self._junction_ids_cache is None:
+            self._junction_ids_cache = set(self.junctions)
+        return self._junction_ids_cache
 
     def add_section(self, section: Section) -> None:
         self.sections[section.id] = section

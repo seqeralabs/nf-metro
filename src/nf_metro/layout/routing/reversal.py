@@ -31,7 +31,7 @@ def detect_reversed_sections(graph: MetroGraph) -> set[str]:
     """
     tb_sections = {sid for sid, s in graph.sections.items() if s.direction == "TB"}
     reversed_secs: set[str] = set()
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
 
     # Phase 1a: detect sections directly fed by TB BOTTOM exits
     for sec_id, section in graph.sections.items():
@@ -39,23 +39,25 @@ def detect_reversed_sections(graph: MetroGraph) -> set[str]:
             port = graph.ports.get(port_id)
             if not port or port.side != PortSide.TOP:
                 continue
-            for edge in graph.edges:
-                if edge.target == port_id:
-                    src = graph.stations.get(edge.source)
-                    if not src or not src.is_port:
-                        continue
-                    src_port = graph.ports.get(edge.source)
-                    if (
-                        src_port
-                        and not src_port.is_entry
-                        and src_port.side == PortSide.BOTTOM
-                        and src.section_id in tb_sections
-                    ):
-                        reversed_secs.add(sec_id)
+            for edge in graph.edges_to(port_id):
+                src = graph.stations.get(edge.source)
+                if not src or not src.is_port:
+                    continue
+                src_port = graph.ports.get(edge.source)
+                if (
+                    src_port
+                    and not src_port.is_entry
+                    and src_port.side == PortSide.BOTTOM
+                    and src.section_id in tb_sections
+                ):
+                    reversed_secs.add(sec_id)
 
     # Build section adjacency from inter-section edges (used by
-    # propagation phases below).
+    # propagation phases below).  Also pre-compute the section-pair set
+    # for which the inter-section edge runs between LEFT/RIGHT ports on
+    # both sides (a direction-preserving continuation).
     sec_successors: dict[str, set[str]] = {}
+    horizontal_succ_pairs: set[tuple[str, str]] = set()
     for edge in graph.edges:
         src = graph.stations.get(edge.source)
         tgt = graph.stations.get(edge.target)
@@ -63,16 +65,6 @@ def detect_reversed_sections(graph: MetroGraph) -> set[str]:
             continue
         if src.section_id and tgt.section_id and src.section_id != tgt.section_id:
             sec_successors.setdefault(src.section_id, set()).add(tgt.section_id)
-
-    def _is_horizontal_successor(sec_id: str, succ_id: str) -> bool:
-        """Check if succ_id is reached via a horizontal port connection."""
-        for edge in graph.edges:
-            src = graph.stations.get(edge.source)
-            tgt = graph.stations.get(edge.target)
-            if not src or not tgt:
-                continue
-            if src.section_id != sec_id or tgt.section_id != succ_id:
-                continue
             src_port = graph.ports.get(edge.source)
             tgt_port = graph.ports.get(edge.target)
             if (
@@ -83,8 +75,7 @@ def detect_reversed_sections(graph: MetroGraph) -> set[str]:
                 and tgt_port.is_entry
                 and tgt_port.side in (PortSide.LEFT, PortSide.RIGHT)
             ):
-                return True
-        return False
+                horizontal_succ_pairs.add((src.section_id, tgt.section_id))
 
     def _propagate_along_rows() -> bool:
         """Propagate reversal to horizontal successors.
@@ -115,8 +106,9 @@ def detect_reversed_sections(graph: MetroGraph) -> set[str]:
                     succ = graph.sections.get(succ_id)
                     if not succ:
                         continue
-                    if succ.grid_row == section.grid_row or _is_horizontal_successor(
-                        sec_id, succ_id
+                    if (
+                        succ.grid_row == section.grid_row
+                        or (sec_id, succ_id) in horizontal_succ_pairs
                     ):
                         reversed_secs.add(succ_id)
                         changed = True
@@ -170,26 +162,23 @@ def detect_reversed_sections(graph: MetroGraph) -> set[str]:
                     PortSide.RIGHT,
                 ):
                     continue
-                for edge in graph.edges:
+                for edge in graph.edges_to(port_id):
                     if added:
                         break
-                    if edge.target != port_id:
-                        continue
                     src = graph.stations.get(edge.source)
                     if not src:
                         continue
                     matched = False
                     if edge.source in junction_ids:
                         # Look through junction to find upstream exit port
-                        for e2 in graph.edges:
-                            if e2.target == edge.source:
-                                s2 = graph.stations.get(e2.source)
-                                if not s2 or not s2.is_port:
-                                    continue
-                                s2_port = graph.ports.get(e2.source)
-                                if _is_tb_lr_exit_nonreversed(s2_port):
-                                    matched = True
-                                    break
+                        for e2 in graph.edges_to(edge.source):
+                            s2 = graph.stations.get(e2.source)
+                            if not s2 or not s2.is_port:
+                                continue
+                            s2_port = graph.ports.get(e2.source)
+                            if _is_tb_lr_exit_nonreversed(s2_port):
+                                matched = True
+                                break
                     elif src.is_port:
                         src_port = graph.ports.get(edge.source)
                         matched = _is_tb_lr_exit_nonreversed(src_port)

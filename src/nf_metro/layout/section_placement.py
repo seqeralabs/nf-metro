@@ -339,7 +339,7 @@ def _count_lines_between_columns(
     ports and junctions) to find how many lines will need to route through
     the gap between *col_a* and *col_b*.
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
     lines: set[str] = set()
 
     for edge in graph.edges:
@@ -420,7 +420,7 @@ def _has_merge_routing_in_gap(
     if not merge_ids:
         return False
 
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
     lo, hi = min(col_a, col_b), max(col_a, col_b)
 
     for mjid in merge_ids:
@@ -730,7 +730,7 @@ def _find_downstream_bundle_y(
     fits inside this section's bbox, otherwise None so the caller can
     fall back to the local-internal centre.
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
     ports = graph.ports
     stations = graph.stations
     sections = graph.sections

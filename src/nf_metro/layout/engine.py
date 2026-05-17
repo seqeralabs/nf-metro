@@ -78,7 +78,7 @@ class PhaseInvariantError(Exception):
 
 def _guard_coordinates_finite(graph: MetroGraph, phase: str) -> None:
     """After Phase 4+: all laid-out stations must have finite coordinates."""
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
     for sid, st in graph.stations.items():
         if st.section_id and not st.is_port and sid not in junction_ids:
             if math.isnan(st.x) or math.isnan(st.y):
@@ -104,7 +104,7 @@ def _guard_stations_in_sections(graph: MetroGraph, phase: str) -> None:
     height) spill above the bbox top while still being technically "in" the
     section.
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
     tol = GUARD_TOLERANCE
     for sid, st in graph.stations.items():
         sec = graph.sections.get(st.section_id or "")
@@ -338,7 +338,7 @@ def _guard_row_trunk_cy_consistent(
         if not port_ys:
             return None
         port_y = port_ys[0]
-        port_set = set(sec.entry_ports) | set(sec.exit_ports)
+        port_set = sec.port_ids
         best: tuple[float, float, float, float] | None = None
         for sid in sec.station_ids:
             if sid in port_set:
@@ -486,7 +486,7 @@ def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> Non
     least ``GUARD_TOLERANCE`` above (smaller Y than) their on-track
     consumer.
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
     consumer_of: dict[str, str] = {}
     for edge in graph.edges:
         src = graph.stations.get(edge.source)
@@ -561,7 +561,7 @@ def _guard_station_x_column_drift(graph: MetroGraph, phase: str) -> None:
     for sec in graph.sections.values():
         if sec.bbox_h <= 0 or sec.direction not in ("LR", "RL"):
             continue
-        port_ids = set(sec.entry_ports) | set(sec.exit_ports)
+        port_ids = sec.port_ids
         layer_xs: dict[int, list[tuple[str, float]]] = {}
         for sid in sec.station_ids:
             if sid in port_ids:
@@ -1942,7 +1942,7 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
     bundle = _section_bundle_lines(graph, section)
     if not bundle:
         return None
-    port_ids = set(section.entry_ports) | set(section.exit_ports)
+    port_ids = section.port_ids
     internal_ids = set(section.station_ids) - port_ids
     trunk_ys: set[float] = set()
     for pid in port_ids:
@@ -2041,7 +2041,7 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
             for section in group:
                 if section.id not in shifted:
                     continue
-                port_set = set(section.entry_ports) | set(section.exit_ports)
+                port_set = section.port_ids
                 internal_ids = set(section.station_ids) - port_set
                 for pid in port_set:
                     p = graph.ports.get(pid)
@@ -2228,7 +2228,7 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
     port (not the exit), preserving the auto-layout fan-in convergence.
     """
     explicit_grid = bool(graph._explicit_grid)
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
 
     for port_id, port in graph.ports.items():
         if port.is_entry:
@@ -2274,7 +2274,7 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
         # keep their centred-midpoint convergence Y, so don't move the
         # exit port itself.  Instead, snap the downstream entry port
         # to the exit port's Y so the inter-section trunk stays flat.
-        port_set = set(section.entry_ports) | set(section.exit_ports)
+        port_set = section.port_ids
         src_ys: set[float] = set()
         for edge in graph.edges_to(port_id):
             src = graph.stations.get(edge.source)
@@ -2340,7 +2340,7 @@ def _fan_free_content_upward(
             for sid in section.station_ids
         ):
             continue
-        port_set = set(section.entry_ports) | set(section.exit_ports)
+        port_set = section.port_ids
         internal_ids = [
             sid
             for sid in section.station_ids
@@ -2429,7 +2429,7 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
             for sid in section.station_ids
         ):
             continue
-        port_set = set(section.entry_ports) | set(section.exit_ports)
+        port_set = section.port_ids
         internal_ids = [
             sid
             for sid in section.station_ids
@@ -2538,7 +2538,7 @@ def _balance_direct_external_feeder_ys(
     by line means transit-only stations feeding the same shared port
     on a different line are not counted.
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
     feeder_ys: list[float] = []
     seen: set[tuple[str, str]] = set()
     stack: list[tuple[str, str]] = [
@@ -2602,7 +2602,7 @@ def _balance_section_content_around_trunk(
         bundle = _section_bundle_lines(graph, section)
         if not bundle:
             continue
-        port_set = set(section.entry_ports) | set(section.exit_ports)
+        port_set = section.port_ids
         internal_ids = [
             sid
             for sid in section.station_ids
@@ -2891,7 +2891,7 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
-        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        port_ids = section.port_ids
         # Each side station: not a port, not hidden, has exactly one
         # incoming edge and one outgoing edge, both endpoints sit on
         # the section trunk Y (single source / single target on-trunk).
@@ -2984,7 +2984,7 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
-        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        port_ids = section.port_ids
         # Determine the section's trunk Y from a horizontal port.
         trunk_y: float | None = None
         for pid in section.entry_ports + section.exit_ports:
@@ -3133,7 +3133,7 @@ def _shift_sparse_loop_stations_to_clear_bundle(
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
-        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        port_ids = section.port_ids
         # Trunk Y from the LR/RL ports.
         trunk_y: float | None = None
         for pid in section.entry_ports + section.exit_ports:
@@ -3376,7 +3376,7 @@ def _lift_would_cause_uturn(
     Returns False when there's no risk (no feeders, single feeder, or
     any feeder sits above the anchor giving the bundle a reason to climb).
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
     seen: set[str] = set()
     feeder_ys: list[float] = []
 
@@ -3480,7 +3480,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
             section = graph.sections.get(sec_id)
             if section is None or section.bbox_h <= 0:
                 continue
-            port_ids = set(section.entry_ports) | set(section.exit_ports)
+            port_ids = section.port_ids
             per_section_ports[sec_id] = port_ids
             for sid in section.station_ids:
                 if sid in port_ids:
@@ -3565,7 +3565,7 @@ def _convergence_source_ys(graph: MetroGraph) -> dict[str, list[str]]:
     Walks one step back through junctions to identify the real
     predecessors so fan-in via a single junction is still detected.
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
     inbound: dict[str, set[str]] = defaultdict(set)
     for edge in graph.edges:
         src_id = edge.source
@@ -3617,7 +3617,7 @@ def _divergence_target_ys(graph: MetroGraph) -> set[str]:
     Walks one step forward through junctions to identify the real
     successors so fan-out via a single junction is still detected.
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
     outbound: dict[str, set[str]] = defaultdict(set)
     for edge in graph.edges:
         tgt_id = edge.target
@@ -3715,7 +3715,7 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
         bundle = _section_bundle_lines(graph, section)
         if not bundle:
             continue
-        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        port_ids = section.port_ids
 
         # Group non-port, on-track stations by column x.  Off-track
         # stations (file inputs lifted above their consumer) are placed
@@ -3799,7 +3799,7 @@ def _apply_half_grid_2branch_symfan(
         if not _section_symfan_uses_half_grid(graph, section):
             continue
 
-        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        port_ids = section.port_ids
         branches: list[Station] = []
         for sid in section.station_ids:
             if sid in port_ids:
@@ -3891,7 +3891,7 @@ def _section_symfan_uses_half_grid(graph: MetroGraph, section: Section) -> bool:
     relative to the row grid; ``_snap_all_y_to_grid`` skips them via
     ``graph.half_grid_station_ids``.
     """
-    port_ids = set(section.entry_ports) | set(section.exit_ports)
+    port_ids = section.port_ids
     branches: list[Station] = []
     has_off_track = False
     by_col: dict[float, int] = defaultdict(int)
@@ -3963,7 +3963,7 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
         bundle = _section_bundle_lines(graph, section)
         if not bundle:
             continue
-        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        port_ids = section.port_ids
 
         cols: dict[float, list[str]] = defaultdict(list)
         for sid in section.station_ids:
@@ -4103,7 +4103,7 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
         bundle = _section_bundle_lines(graph, section)
         if not bundle:
             continue
-        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        port_ids = section.port_ids
 
         cols: dict[float, list[str]] = defaultdict(list)
         for sid in section.station_ids:
@@ -4765,14 +4765,13 @@ def _adjust_tb_entry_shifts(
         port = graph.ports.get(pid)
         if not port or port.side != PortSide.TOP:
             continue
-        for edge in graph.edges:
-            if edge.target == pid:
-                src = graph.stations.get(edge.source)
-                if src and src.section_id:
-                    src_sec = graph.sections.get(src.section_id)
-                    if src_sec and src_sec.grid_col != section.grid_col:
-                        has_cross_col_top_entry = True
-                        break
+        for edge in graph.edges_to(pid):
+            src = graph.stations.get(edge.source)
+            if src and src.section_id:
+                src_sec = graph.sections.get(src.section_id)
+                if src_sec and src_sec.grid_col != section.grid_col:
+                    has_cross_col_top_entry = True
+                    break
         if has_cross_col_top_entry:
             break
     if has_cross_col_top_entry:
@@ -4814,9 +4813,7 @@ def _adjust_lr_entry_inset(
         if graph.ports[pid].side != flow_side:
             continue
         targets = {
-            e.target
-            for e in graph.edges
-            if e.source == pid and e.target in section.station_ids
+            e.target for e in graph.edges_from(pid) if e.target in section.station_ids
         }
         if len(targets) > 1:
             entry_inset = x_spacing * EXIT_GAP_MULTIPLIER
@@ -4866,8 +4863,10 @@ def _adjust_lr_exit_gap(
     # marker, but the diagonal still terminates at a visible station.
     feeder_ys: set[float] = set()
     real_ids = set(sub.stations)
-    for edge in graph.edges:
-        if edge.target in flow_exit_port_ids and edge.source in real_ids:
+    for pid in flow_exit_port_ids:
+        for edge in graph.edges_to(pid):
+            if edge.source not in real_ids:
+                continue
             src_id = edge.source
             if src_id.startswith("__bypass_"):
                 pred_y = None
@@ -4996,7 +4995,7 @@ def _adjust_terminus_icon_clearance(
         needed = _terminus_icon_clearance(n_icons, station.terminus_names)
 
         # Determine source vs sink from the full graph's edges
-        is_source = not any(e.target == station.id for e in graph.edges)
+        is_source = not graph.edges_to(station.id)
 
         section_dir = section.direction or "LR"
 
@@ -5055,7 +5054,7 @@ def _shift_lr_perp_entry_stations(
             continue
 
         # Collect internal station X positions
-        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        port_ids = section.port_ids
         internal_xs: list[float] = []
         for sid in section.station_ids:
             if sid in port_ids:
@@ -5291,7 +5290,7 @@ def _align_entry_ports(graph: MetroGraph) -> None:
     LEFT/RIGHT ports: align Y for straight horizontal runs.
     TOP/BOTTOM ports: align X for vertical drops or Y for cross-column.
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
 
     for port_id, port in graph.ports.items():
         if not port.is_entry:
@@ -5490,7 +5489,7 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
     Only applies to non-fold LR/RL sections without fan-out junctions
     (fold/TB sections are handled by ``_align_exit_ports``).
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
 
     for port_id, port in graph.ports.items():
         if port.is_entry:
@@ -5634,7 +5633,7 @@ def _snap_sole_layer_stations_to_ports(graph: MetroGraph) -> None:
         if section.id in grid_group_secs:
             continue
 
-        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        port_ids = section.port_ids
         internal_ids = set(section.station_ids) - port_ids
 
         # Skip single-station sections: the station is already centred
@@ -5792,7 +5791,7 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
     if not grid_group_secs:
         return
 
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
 
     for port_id, port in graph.ports.items():
         if port.is_entry:
@@ -5901,7 +5900,7 @@ def _align_exit_ports(graph: MetroGraph) -> None:
     section's entry may be at a different Y. Aligning ensures a straight
     horizontal inter-section connection.
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
 
     for port_id, port in graph.ports.items():
         if port.is_entry:
@@ -6049,7 +6048,7 @@ def _align_tb_section_bbox_bottoms(graph: MetroGraph) -> None:
     Skipped for TB sections with BOTTOM-side exit ports (TB->TB flow)
     so the bottom-edge port placement invariant continues to hold.
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
 
     def _downstream_section_ids(tb_section: Section) -> set[str]:
         out: set[str] = set()
@@ -6288,7 +6287,7 @@ def _push_ports_from_termini(
     when multiple ports in the same section conflict with the same
     terminus.
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
     section_port_set = set(port_ids)
 
     for pid in port_ids:
@@ -6409,7 +6408,7 @@ def _push_termini_from_port(
     """
     # Collect existing station Y values in the section (excluding ports
     # and the termini being moved) as candidate snap targets.
-    port_ids = set(section.entry_ports) | set(section.exit_ports)
+    port_ids = section.port_ids
     tid_set = set(terminus_ids)
     section_ys: set[float] = set()
     for sid in section.station_ids:
@@ -6470,7 +6469,7 @@ def _build_section_subgraph(graph: MetroGraph, section: Section) -> MetroGraph:
     sub.diamond_style = graph.diamond_style
 
     # Collect port IDs for this section
-    port_ids = set(section.entry_ports) | set(section.exit_ports)
+    port_ids = section.port_ids
 
     # Add only real (non-port) stations belonging to this section
     real_station_ids: set[str] = set()
@@ -6537,9 +6536,10 @@ def _insert_phantom_pass_throughs(
 
     # Find lines entering from entry ports to deep-layer internal stations.
     entry_targets: dict[str, set[str]] = {}
-    for edge in graph.edges:
-        if edge.source in entry_port_ids and edge.target in sub.stations:
-            entry_targets.setdefault(edge.line_id, set()).add(edge.target)
+    for pid in entry_port_ids:
+        for edge in graph.edges_from(pid):
+            if edge.target in sub.stations:
+                entry_targets.setdefault(edge.line_id, set()).add(edge.target)
 
     for line_id, targets in entry_targets.items():
         target_layers = [layers.get(t, min_layer) for t in targets]
@@ -6798,7 +6798,7 @@ def _off_track_groups(
     that consumer.  ``fallback_consumer_id`` is the topmost on-track
     station in the section, used as the anchor for the ``""`` bucket.
     """
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
 
     by_section: dict[str, list[Station]] = defaultdict(list)
     for sid, st in graph.stations.items():
@@ -6809,18 +6809,18 @@ def _off_track_groups(
         by_section[st.section_id].append(st)
 
     consumer_of: dict[str, str] = {}
-    for edge in graph.edges:
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if src is None or tgt is None:
-            continue
-        if not src.off_track or src.is_port or src.id in junction_ids:
-            continue
-        if tgt.is_port or tgt.id in junction_ids or tgt.off_track:
-            continue
-        if src.section_id != tgt.section_id:
-            continue
-        consumer_of.setdefault(src.id, tgt.id)
+    for off_stations in by_section.values():
+        for off_st in off_stations:
+            for edge in graph.edges_from(off_st.id):
+                tgt = graph.stations.get(edge.target)
+                if tgt is None:
+                    continue
+                if tgt.is_port or tgt.id in junction_ids or tgt.off_track:
+                    continue
+                if off_st.section_id != tgt.section_id:
+                    continue
+                consumer_of.setdefault(off_st.id, tgt.id)
+                break
 
     result: dict[str, tuple[str, dict[str, list[Station]]]] = {}
     for sec_id, off_stations in by_section.items():
@@ -6868,7 +6868,7 @@ def _place_off_track_above_consumers(
     """
     section = graph.sections.get(section_id)
     sec_dir = section.direction if section is not None else "LR"
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
 
     # Track already-placed off-track Ys per column so a bumped icon
     # doesn't crash into a sibling off-track already at the desired Y.
@@ -7197,7 +7197,7 @@ def _pad_stacked_captioned_file_icons(
     if pitch <= y_spacing + 0.5:
         return
 
-    junction_ids = set(graph.junctions)
+    junction_ids = graph.junction_ids
     grew_sections: list[Section] = []
 
     for section in graph.sections.values():

@@ -37,7 +37,7 @@ def _build_offset_ctx(graph: MetroGraph, offset_step: float) -> _OffsetCtx:
     line_order = list(graph.lines.keys())
     line_priority = {lid: i for i, lid in enumerate(line_order)}
     max_priority = len(line_order) - 1 if line_order else 0
-    compact = getattr(graph, "compact_offsets", False)
+    compact = graph.compact_offsets
 
     inbound: dict[str, set[str]] = {sid: set() for sid in graph.stations}
     outbound: dict[str, set[str]] = {sid: set() for sid in graph.stations}

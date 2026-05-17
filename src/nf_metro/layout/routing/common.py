@@ -261,11 +261,10 @@ def line_source_y_at_port(
     and returns the source station's Y position for each line.
     """
     line_y: dict[str, float] = {}
-    for edge in graph.edges:
-        if edge.target == port_id:
-            src = graph.stations.get(edge.source)
-            if src and not src.is_port:
-                line_y[edge.line_id] = src.y
+    for edge in graph.edges_to(port_id):
+        src = graph.stations.get(edge.source)
+        if src and not src.is_port:
+            line_y[edge.line_id] = src.y
     return line_y
 
 
@@ -374,24 +373,3 @@ def bypass_bottom_y(
                     candidate = (row_bottom + header_top) / 2
 
     return candidate
-
-
-def line_incoming_y_at_entry_port(
-    port_id: str,
-    graph: MetroGraph,
-    exit_offsets: dict[tuple[str, str], float],
-) -> dict[str, float]:
-    """Map line_id -> effective Y of incoming connection at an entry port.
-
-    Uses the source station's Y + its already-computed station offset
-    for the line, so the entry port ordering matches the bundle ordering
-    from the source section.
-    """
-    line_y: dict[str, float] = {}
-    for edge in graph.edges:
-        if edge.target == port_id:
-            src = graph.stations.get(edge.source)
-            if src and src.is_port:
-                src_off = exit_offsets.get((edge.source, edge.line_id), 0)
-                line_y[edge.line_id] = src.y + src_off
-    return line_y
