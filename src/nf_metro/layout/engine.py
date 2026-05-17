@@ -4338,7 +4338,13 @@ def _layout_single_section(
         station.layer = layers.get(sid, 0)
         station.track = tracks.get(sid, 0)
         # Off-track stations get rank 0 here as a placeholder; Phase 13
-        # overwrites their Y to ``consumer.y - n*y_spacing``.
+        # overwrites their Y to ``consumer.y - n*y_spacing``.  On-track
+        # stations must have a track that made it into the rank map.
+        if not station.off_track:
+            assert station.track in track_rank, (
+                f"on-track station {sid!r} has track {station.track} "
+                f"missing from rank map {sorted(track_rank)}"
+            )
         rank = track_rank.get(station.track, 0.0)
         if section.direction == "TB":
             station.x = rank * x_spacing

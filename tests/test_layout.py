@@ -1204,6 +1204,56 @@ def test_multiple_off_track_inputs_share_consumer_stack_above_it():
     )
 
 
+def test_off_track_convergence_keeps_consumer_on_trunk():
+    """The off_track_convergence gallery fixture: four off-track inputs all
+    consumed by one in-section station (`align`) must not pull `align` off
+    the row trunk.
+
+    Locks in the fix for the displacement bug: prior to the off-track
+    exclusion in ``assign_tracks`` / ``_layout_single_section``, ``align``
+    sat ~230 px below the row trunk because the in-section track grouping
+    treated the four file inputs as ordinary on-track stations on the same
+    line and pushed the consumer off-track.
+    """
+    fixture = (
+        Path(__file__).resolve().parent.parent
+        / "examples"
+        / "topologies"
+        / "off_track_convergence.mmd"
+    )
+    graph = parse_metro_mermaid(fixture.read_text())
+    compute_layout(graph, x_spacing=70, y_spacing=55)
+    # Reads -> Prepare -> Align -> Annotate -> Report should sit on one
+    # horizontal trunk Y.
+    reads_y = graph.stations["reads"].y
+    prep_y = graph.stations["prep"].y
+    align_y = graph.stations["align"].y
+    annotate_y = graph.stations["annotate"].y
+    report_y = graph.stations["report"].y
+    assert reads_y == pytest.approx(prep_y), f"reads y={reads_y} vs prep y={prep_y}"
+    assert prep_y == pytest.approx(align_y), f"prep y={prep_y} vs align y={align_y}"
+    assert align_y == pytest.approx(annotate_y), (
+        f"align y={align_y} vs annotate y={annotate_y}"
+    )
+    assert annotate_y == pytest.approx(report_y), (
+        f"annotate y={annotate_y} vs report y={report_y}"
+    )
+    # The four file inputs stack above align at consecutive y_spacing slots.
+    icons = sorted(
+        graph.stations[s].y for s in ("ref_in", "gtf_in", "vcf_in", "bed_in")
+    )
+    # Each icon sits above the consumer; consecutive icons differ by one
+    # y_spacing slot.
+    for icon_y in icons:
+        assert icon_y < align_y, (
+            f"icon y={icon_y} should sit above consumer align y={align_y}"
+        )
+    for a, b in zip(icons, icons[1:]):
+        assert b - a == pytest.approx(55), (
+            f"icons at y={a} and y={b} should stack at y_spacing=55 apart"
+        )
+
+
 def test_cli_straight_diamonds_default(tmp_path):
     """--straight-diamonds is on by default."""
     from click.testing import CliRunner
