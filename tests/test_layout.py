@@ -1973,6 +1973,4 @@ class TestPassCBisection:
             prev_phase = engine._PASS_C_BISECTION_ORDER[idx - 1]
             assert engine._bisection_should_run(guard_name, prev_phase) is False
         # Final-block phase is not in _PASS_C_BISECTION_ORDER; guard always runs.
-        assert (
-            engine._bisection_should_run(guard_name, "after final") is True
-        )
+        assert engine._bisection_should_run(guard_name, "after final") is True
