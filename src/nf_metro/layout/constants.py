@@ -295,8 +295,9 @@ defaults to ``2 * ICON_HALF_HEIGHT`` (see ``render.style.Theme``)."""
 ICON_CAPTION_GAP: float = 4.0
 """Gap between the bottom of a terminus icon and its name caption.
 
-Layout-side mirror of ``render.constants.ICON_NAME_GAP`` so spacing
-calculations don't depend on the render layer."""
+Single source of truth: re-exported by ``render.constants`` as
+``ICON_NAME_GAP`` so layout spacing math and renderer placement stay
+in lockstep without the layout layer depending on render."""
 
 ICON_CAPTION_FONT_HEIGHT: float = FONT_HEIGHT * 0.6
 """Approximate caption font height for layout spacing calculations.
