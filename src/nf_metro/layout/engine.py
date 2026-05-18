@@ -4363,11 +4363,14 @@ def _shrink_and_tighten_rows(
       and growing when ``_snap_all_y_to_grid`` snapped a station
       downward.  Station Ys are unchanged so trunk alignment is
       preserved.  Never trims past the maximum bbox bottom of any
-      row-mate (another section whose bbox vertical range overlaps
-      this one's, OR which shares at least one grid-row index
-      accounting for ``grid_row_span``); trimming below would undo
-      intentional bottom alignment from Stage 6.5 or rowspan TB
-      sections.
+      row-mate (another section whose ``grid_row`` equals this
+      section's starting row, accounting for the other section's
+      ``grid_row_span``); trimming below a row-mate would undo
+      intentional bottom alignment from Stage 6.5 or TB-rowspan
+      neighbours.  The check is keyed on this section's STARTING row
+      rather than its full row-span -- a rowspan>1 LR sidebar whose
+      content fits in one row is not pinned to neighbours in the
+      claimed-but-unfilled extra rows.
 
     Phase 2 - tighten:
       ``_compute_section_offsets`` sizes ``row_heights[r]`` from the
@@ -4399,28 +4402,45 @@ def _shrink_bboxes_to_content_bottom(
     """
 
     def _row_mate_bottoms(section: Section) -> list[float]:
-        my_grid_top = section.grid_row if section.grid_row >= 0 else None
-        my_grid_bot = (
-            section.grid_row + max(1, section.grid_row_span)
-            if section.grid_row >= 0
-            else None
-        )
+        # Two policies depending on this section's direction:
+        #
+        # TB sections (folds) get their bbox grown by ``section_y_gap``
+        # in section_placement so they visually span into the next row's
+        # target.  Their intended bottom is the target row-mate's bottom,
+        # which is in a different grid row but Y-overlapping.  Honour
+        # Y-overlap for these so the bottom-alignment from Stage 6.5 /
+        # the fold extension survives.
+        #
+        # LR/RL sections use ONLY their STARTING grid row to find
+        # row-mates.  Counting this section's rowspan would pull in
+        # sections from rows the rowspan claims but doesn't fill -- a
+        # rowspan=2 LR sidebar whose content fits in row 0 must not be
+        # pinned to a row-1 neighbour just because its declared span
+        # overlaps row 1.  Y-overlap is intentionally excluded for
+        # LR/RL: a stale pre-shrink bbox would otherwise be
+        # self-protecting (the overlap blocks the shrink that would
+        # remove the overlap).
+        my_grid_row = section.grid_row if section.grid_row >= 0 else None
         my_y_top = section.bbox_y
         my_y_bot = section.bbox_y + section.bbox_h
         out: list[float] = []
         for other in graph.sections.values():
             if other.id == section.id or other.bbox_h <= 0:
                 continue
-            o_y_top = other.bbox_y
-            o_y_bot = other.bbox_y + other.bbox_h
-            y_overlap = o_y_top < my_y_bot and o_y_bot > my_y_top
-            grid_overlap = False
-            if my_grid_top is not None and other.grid_row >= 0:
+            if section.direction == "TB":
+                o_y_top = other.bbox_y
+                o_y_bot = other.bbox_y + other.bbox_h
+                mate = o_y_top < my_y_bot and o_y_bot > my_y_top
+            elif my_grid_row is not None and other.grid_row >= 0:
                 o_grid_top = other.grid_row
                 o_grid_bot = other.grid_row + max(1, other.grid_row_span)
-                grid_overlap = o_grid_top < my_grid_bot and o_grid_bot > my_grid_top
-            if y_overlap or grid_overlap:
-                out.append(o_y_bot)
+                mate = o_grid_top <= my_grid_row < o_grid_bot
+            else:
+                o_y_top = other.bbox_y
+                o_y_bot = other.bbox_y + other.bbox_h
+                mate = o_y_top < my_y_bot and o_y_bot > my_y_top
+            if mate:
+                out.append(other.bbox_y + other.bbox_h)
         return out
 
     v_curve_clearance = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
