@@ -12,7 +12,7 @@ permissions:
   pages: write
 
 concurrency:
-  group: docs
+  group: gh-pages
   cancel-in-progress: false
 
 jobs:
