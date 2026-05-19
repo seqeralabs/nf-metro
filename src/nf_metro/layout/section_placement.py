@@ -14,7 +14,8 @@ import warnings
 from collections import defaultdict, deque
 
 from nf_metro.layout.constants import (
-    CURVE_RADIUS,
+    BUNDLE_TO_BUNDLE_CLEARANCE,
+    EDGE_TO_BUNDLE_CLEARANCE,
     MERGE_GAP_MIN,
     MIN_INTER_SECTION_GAP,
     MIN_INTER_SECTION_ROW_GAP,
@@ -24,7 +25,6 @@ from nf_metro.layout.constants import (
     PLACEMENT_Y_GAP,
     PORT_MIN_GAP,
     SECTION_HEADER_PROTRUSION,
-    SECTION_ROUTE_CLEARANCE,
     SECTION_X_PADDING,
 )
 from nf_metro.parser.model import MetroGraph, PortSide, Section
@@ -328,48 +328,6 @@ def _rows_overlap(a: Section, b: Section) -> bool:
     return a_start <= b_end and b_start <= a_end
 
 
-def _count_lines_between_columns(
-    graph: MetroGraph,
-    col_assign: dict[str, int],
-    col_a: int,
-    col_b: int,
-) -> int:
-    """Count distinct lines routing between two adjacent columns.
-
-    Examines inter-section edges (those crossing section boundaries via
-    ports and junctions) to find how many lines will need to route through
-    the gap between *col_a* and *col_b*.
-    """
-    junction_ids = graph.junction_ids
-    lines: set[str] = set()
-
-    for edge in graph.edges:
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if not src or not tgt:
-            continue
-
-        # Only inter-section edges (port-to-port or via junctions)
-        is_inter = (src.is_port or edge.source in junction_ids) and (
-            tgt.is_port or edge.target in junction_ids
-        )
-        if not is_inter:
-            continue
-
-        # Resolve source/target section columns
-        src_col = _station_column(graph, src, col_assign, junction_ids)
-        tgt_col = _station_column(graph, tgt, col_assign, junction_ids)
-        if src_col is None or tgt_col is None:
-            continue
-
-        # Check if this edge crosses between col_a and col_b
-        lo, hi = min(src_col, tgt_col), max(src_col, tgt_col)
-        if lo <= col_a and hi >= col_b:
-            lines.add(edge.line_id)
-
-    return len(lines)
-
-
 def _station_column(
     graph: MetroGraph,
     station,
@@ -388,30 +346,13 @@ def _station_column(
     return None
 
 
-def _min_gap_for_bundle(
-    n_lines: int,
-    curve_radius: float = CURVE_RADIUS,
-    offset_step: float = OFFSET_STEP,
-) -> float:
-    """Compute the minimum inter-section gap needed for *n_lines* in a bundle.
-
-    The outermost line in an L-shape bundle has a curve radius of
-    ``curve_radius + (n-1) * offset_step``.  The gap must accommodate
-    the outermost arc from both sides of the channel midpoint.
-    """
-    if n_lines <= 0:
-        return MIN_INTER_SECTION_GAP
-    max_radius = curve_radius + max(n_lines - 1, 0) * offset_step
-    return max(2 * max_radius, MIN_INTER_SECTION_GAP)
-
-
-def _count_bundles_in_gap(
+def _bundles_in_gap(
     graph: MetroGraph,
     col_assign: dict[str, int],
     col_a: int,
     col_b: int,
-) -> tuple[int, int]:
-    """Count distinct vertical channels (bundles) traversing one gap.
+) -> list[int]:
+    """Return ``[n_lines, ...]`` for every distinct bundle traversing the gap.
 
     Each inter-section edge contributes one or two vertical channels:
     - A bypass edge (``|tgt_col - src_col| > 1``) contributes a gap1
@@ -425,13 +366,11 @@ def _count_bundles_in_gap(
     same grouping ``compute_bundle_info`` uses), so they don't claim
     separate horizontal space.
 
-    Returns ``(n_bundles, max_lines_per_bundle)`` for the gap between
-    *col_a* and *col_b*.
+    The returned list contains one entry per distinct bundle; its value
+    is the number of distinct lines in that bundle.
     """
     junction_ids = graph.junction_ids
-    # Map corridor_key (in this gap) -> set of distinct lines.
-    bundles_down: dict[tuple, set[str]] = defaultdict(set)
-    bundles_up: dict[tuple, set[str]] = defaultdict(set)
+    bundles: dict[tuple, set[str]] = defaultdict(set)
 
     lo, hi = min(col_a, col_b), max(col_a, col_b)
 
@@ -452,60 +391,50 @@ def _count_bundles_in_gap(
         if src_col == tgt_col:
             continue
 
-        # Determine which gaps this edge's vertical channels occupy.
-        # Bundle direction (down/up) is geometry-driven; without exact
-        # endpoint Y positions here we use a conservative grouping based
-        # on bypass topology: gap1 (source side) is one direction,
-        # gap2 (target side) is the opposite for a U-shaped bypass.
         edge_lo = min(src_col, tgt_col)
         edge_hi = max(src_col, tgt_col)
         h_dir = 1 if tgt_col > src_col else -1
-        corridor_key = (src_col, tgt_col, h_dir)
-
+        # Down (gap1, source side) and up (gap2, target side) bundles in
+        # the same gap have different sweep keys so they occupy separate
+        # slots in the gap.
         if edge_hi - edge_lo == 1:
-            # Adjacent columns: single channel in (edge_lo, edge_hi) gap.
             if lo == edge_lo and hi == edge_hi:
-                # Direction unknown without endpoint y; treat as down for
-                # grouping (it doesn't matter for counting purposes).
-                bundles_down[corridor_key].add(edge.line_id)
+                bundles[("D", src_col, tgt_col, h_dir)].add(edge.line_id)
         else:
-            # Bypass: gap1 at (edge_lo, edge_lo + 1), gap2 at (edge_hi - 1, edge_hi).
             if lo == edge_lo and hi == edge_lo + 1:
-                bundles_down[corridor_key].add(edge.line_id)
+                bundles[("D", src_col, tgt_col, h_dir)].add(edge.line_id)
             if lo == edge_hi - 1 and hi == edge_hi:
-                bundles_up[corridor_key].add(edge.line_id)
+                bundles[("U", src_col, tgt_col, h_dir)].add(edge.line_id)
 
-    n_bundles = len(bundles_down) + len(bundles_up)
-    max_lines = max(
-        (len(s) for s in list(bundles_down.values()) + list(bundles_up.values())),
-        default=0,
-    )
-    return n_bundles, max_lines
+    return [len(lines) for lines in bundles.values() if lines]
 
 
-def _min_gap_for_multi_bundle(
-    n_bundles: int,
-    max_lines_per_bundle: int,
-    curve_radius: float = CURVE_RADIUS,
+def _min_gap_for_bundles(
+    bundle_line_counts: list[int],
+    edge_clearance: float = EDGE_TO_BUNDLE_CLEARANCE,
+    inter_bundle: float = BUNDLE_TO_BUNDLE_CLEARANCE,
     offset_step: float = OFFSET_STEP,
-    clearance: float = SECTION_ROUTE_CLEARANCE,
 ) -> float:
-    """Compute the minimum gap width when multiple bundles share a gap.
+    """Required gap width for a list of bundles in one inter-section gap.
 
-    Each bundle occupies a horizontal span of
-    ``(max_lines - 1) * offset_step + 2 * curve_radius`` (so the outer
-    arcs at its corners clear the channel center).  Adjacent bundles
-    need an inter-bundle separation of at least ``offset_step`` so their
-    arcs don't merge, and the outermost bundles need ``clearance`` from
-    the section edges.  This is a lower bound; in practice ``_route_bypass``
-    can stagger bundles closer.  Returns ``MIN_INTER_SECTION_GAP`` when
-    *n_bundles* <= 1 (single-bundle gaps fall back to the standard floor).
+    Implements the principled formula::
+
+        gap >= A + Σ bundle_widths + (count - 1) * B + A
+
+    where each ``bundle_width = (n_i - 1) * OFFSET_STEP`` is the visual
+    span of the ``n_i`` parallel lines in bundle *i*.  ``A`` is the
+    section-edge-to-bundle clearance (:data:`EDGE_TO_BUNDLE_CLEARANCE`)
+    and ``B`` is the inter-bundle clearance
+    (:data:`BUNDLE_TO_BUNDLE_CLEARANCE`).
+
+    For an empty list, returns 0 (no gap requirement from routing; the
+    caller's static :data:`MIN_INTER_SECTION_GAP` floor still applies).
     """
-    if n_bundles <= 1:
-        return MIN_INTER_SECTION_GAP
-    bundle_span = max(0, max_lines_per_bundle - 1) * offset_step + 2 * curve_radius
-    required = n_bundles * bundle_span + (n_bundles - 1) * offset_step + 2 * clearance
-    return max(required, MIN_INTER_SECTION_GAP)
+    if not bundle_line_counts:
+        return 0.0
+    widths = sum(max(0, n - 1) * offset_step for n in bundle_line_counts)
+    count = len(bundle_line_counts)
+    return 2 * edge_clearance + widths + (count - 1) * inter_bundle
 
 
 def _has_merge_routing_in_gap(
@@ -580,24 +509,16 @@ def _enforce_min_column_gaps(
         if not left_secs or not right_secs:
             continue
 
-        # Compute bundle-aware minimum for this column pair
-        n_lines = _count_lines_between_columns(graph, col_assign, col, col + 1)
-        bundle_min = _min_gap_for_bundle(n_lines)
+        # Principled gap width: A + Σ bundle_widths + (count-1)*B + A.
+        # For a single bundle of one line this collapses to 2*A; with
+        # the default A=16 px that's 32 px, smaller than the static
+        # MIN_INTER_SECTION_GAP=40 px so single-line gaps are NOT widened
+        # past the standard layout column gap.  Multi-line or multi-bundle
+        # corridors deterministically claim only the horizontal space
+        # their visual width actually occupies.
+        bundles = _bundles_in_gap(graph, col_assign, col, col + 1)
+        bundle_min = _min_gap_for_bundles(bundles)
         effective_min = max(min_gap, bundle_min)
-
-        # Widen further when multiple distinct bundles share this gap.
-        # A bundle here is a set of edges that coalesce into one
-        # concentric channel (same ``(src_col, tgt_col, h_dir)``
-        # corridor as ``compute_bundle_info``); two bundles in the same
-        # gap need their own horizontal slots.
-        n_bundles, max_lines_per_bundle = _count_bundles_in_gap(
-            graph, col_assign, col, col + 1
-        )
-        if n_bundles > 1:
-            effective_min = max(
-                effective_min,
-                _min_gap_for_multi_bundle(n_bundles, max_lines_per_bundle),
-            )
 
         # Widen further for gaps with merge junction routing
         if _has_merge_routing_in_gap(graph, col_assign, col, col + 1):
@@ -620,10 +541,13 @@ def _enforce_min_column_gaps(
 
         # Warn if we're overriding the user's requested gap
         if requested_gap is not None and effective_min > requested_gap:
+            n_bundles = len(bundles)
+            total_lines = sum(bundles)
             warnings.warn(
                 f"Section gap between columns {col} and {col + 1} "
                 f"widened from {requested_gap:.0f}px to {effective_min:.0f}px "
-                f"to accommodate {n_lines} routing line(s)",
+                f"to accommodate {n_bundles} bundle(s) / "
+                f"{total_lines} routing line(s)",
                 stacklevel=2,
             )
 
