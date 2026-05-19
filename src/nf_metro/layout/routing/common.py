@@ -401,15 +401,23 @@ def bypass_bottom_y(
                         candidate = (row_bottom + header_top) / 2
 
     # Final safety: the iterative inter-row clamping above can land the
-    # candidate INSIDE a different-row section when no real gap exists
+    # candidate INSIDE an intervening section when no real gap exists
     # (e.g. a wide colspan section blocks every column in the bypass's
     # span).  Detect that and fall back to routing BELOW every section
     # in the column range - the only universally-safe alternative when
     # there is no inter-row gap to slot into.
+    #
+    # Restrict the check to STRICTLY-INTERVENING columns (lo < col < hi):
+    # the source and target sections at the endpoints aren't crossed by
+    # the bypass channel - the route exits/enters them through their
+    # ports.  Including endpoint columns would push every same-row
+    # bypass below the taller endpoint (e.g. wide fan-out section
+    # bypassing a short adjacent neighbour to reach the next column).
     blocking = [
         s
         for s in graph.sections.values()
-        if s.bbox_w > 0 and lo <= s.grid_col <= hi
+        if s.bbox_w > 0
+        and lo < s.grid_col < hi
         and s.bbox_y - SECTION_HEADER_PROTRUSION <= candidate <= s.bbox_y + s.bbox_h
     ]
     if blocking:
