@@ -309,12 +309,21 @@ def inter_column_channel_x(
 ) -> float:
     """Compute the X position for a vertical channel in an L-shaped route.
 
-    Places the channel in the gap between columns so it doesn't pass
-    through sibling sections stacked in the source's column. Falls
-    back to near-source placement when section info is unavailable.
+    Places the channel at the midpoint of the inter-column gap between
+    the source's and target's columns.  Resolves junction sources/targets
+    via :func:`resolve_section` so a junction at an L-elbow inherits the
+    column of its upstream/downstream section rather than falling back to
+    a near-source heuristic.  Falls back to near-source placement only
+    when section info cannot be resolved at all.
     """
-    src_sec = graph.sections.get(src.section_id) if src.section_id else None
-    tgt_sec = graph.sections.get(tgt.section_id) if tgt.section_id else None
+    # Resolve sections, tracing through junctions to upstream/downstream
+    # sections.  Using ``prefer_upstream=True`` for the source ensures a
+    # junction at an L-elbow inherits its upstream section's column
+    # (the column it just left), and ``prefer_upstream=False`` for the
+    # target preserves insertion order so the target junction inherits
+    # the first connected section in edge order.
+    src_sec = resolve_section(graph, src, prefer_upstream=True)
+    tgt_sec = resolve_section(graph, tgt, prefer_upstream=False)
 
     if src_sec and tgt_sec and src_sec.grid_col != tgt_sec.grid_col:
         # Find the rightmost/leftmost edges of the source and target
@@ -322,14 +331,28 @@ def inter_column_channel_x(
         src_col = src_sec.grid_col
         tgt_col = tgt_sec.grid_col
 
+        # Bundle half-width: the outermost line sits this far from the
+        # channel midpoint.  ``max_r`` here is the outer curve radius
+        # ``curve_radius + (n-1)*offset_step``, so ``(max_r - offset_step) / 2``
+        # is an upper bound on ``(n-1)*offset_step / 2``.  We use the
+        # upper bound so the constraint is conservative.
+        bundle_half = max(0.0, (max_r - offset_step) / 2)
+
         if dx > 0:
             right = col_right_edge(graph, src_col, default=sx)
             left = col_left_edge(graph, tgt_col, default=tx)
-            return (right + left) / 2
+            mid = (right + left) / 2
+            # Ensure the leftmost line of the bundle stays right of source
+            # (the L-shape's outgoing horizontal must lead RIGHT into the
+            # channel, never reverse direction).
+            min_mid = sx + offset_step + bundle_half
+            return max(mid, min_mid)
         else:
             left = col_left_edge(graph, src_col, default=sx)
             right = col_right_edge(graph, tgt_col, default=tx)
-            return (left + right) / 2
+            mid = (left + right) / 2
+            max_mid = sx - offset_step - bundle_half
+            return min(mid, max_mid)
 
 
     # Junction at L-shape elbow (src is a junction with no section_id):
