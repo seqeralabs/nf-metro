@@ -817,29 +817,42 @@ def _find_entry_port_top_y(
 ) -> float | None:
     """Pick the topmost downstream-target Y for a LEFT/RIGHT entry port.
 
-    When an entry port feeds multiple internal stations whose Ys differ
-    (e.g. a fan-out at the section boundary into top and bottom branches),
-    the default average centres the port between them and forces both
-    sides into diagonal lead-ins.  Anchoring on the topmost target Y
-    instead lands the trunk on the section's first row, so any branches
-    below fork off via a normal curve.
+    Sarek-style trigger: when an entry port feeds a MIX of a full-bundle
+    trunk station and one or more subset side branches, anchor on the
+    topmost target so the inter-section trunk lands at the top row and
+    side branches fork off downward.
+
+    When targets are equal-rank (all on the same bundle line set, e.g.
+    plots section's plot_expl/plot_diff both carrying the full bundle),
+    keep the default averaging behaviour so the port sits between the
+    branches and each one curves into a symmetric fan.
 
     Returns None when:
     - the entry port only feeds one Y (caller fallback already produces
       the same result),
     - none of the targets are non-bypass internal stations,
+    - all targets share the same line set (no subset side branches),
     so the caller's existing averaging path runs unchanged.
     """
     internal_ids = (
         set(section.station_ids) - set(section.entry_ports) - set(section.exit_ports)
     )
+    target_ids: list[str] = []
     target_ys: list[float] = []
     for edge in graph.edges_from(entry_port_id):
         if edge.target in internal_ids and not edge.target.startswith("__bypass_"):
+            target_ids.append(edge.target)
             target_ys.append(graph.stations[edge.target].y)
     if not target_ys:
         return None
     if max(target_ys) - min(target_ys) <= 1.0:
+        return None
+    # Require mixed-bundle targets: at least one full-bundle station
+    # paired with at least one subset side branch.  Equal-rank fans (all
+    # targets carrying the same line set) keep the default averaging so
+    # the symmetric fan stays centred on the port.
+    target_line_sets = [frozenset(graph.station_lines(t)) for t in target_ids]
+    if len(set(target_line_sets)) < 2:
         return None
     return min(target_ys)
 
