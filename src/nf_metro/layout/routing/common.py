@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from enum import Enum
 
 from nf_metro.layout.constants import (
     BYPASS_CLEARANCE,
@@ -13,7 +14,22 @@ from nf_metro.layout.constants import (
     HEADER_CLEARANCE,
     SECTION_HEADER_PROTRUSION,
 )
-from nf_metro.parser.model import Edge, MetroGraph, Section
+from nf_metro.parser.model import Edge, MetroGraph, Section, Station
+
+
+class Direction(Enum):
+    """Cardinal travel direction for a horizontal or vertical run.
+
+    Used by the inter-section descriptor scaffolding (see
+    ``inter_section.py``) to characterise corner in/out tangents in a
+    direction-agnostic way.  Not yet wired into runtime routing; the
+    routing code still operates on raw signed deltas.
+    """
+
+    R = "R"  # east, +x
+    L = "L"  # west, -x
+    U = "U"  # north, -y
+    D = "D"  # south, +y
 
 # ---------------------------------------------------------------------------
 # Grid-position helpers
@@ -245,6 +261,14 @@ def inter_column_channel_x(
             right = col_right_edge(graph, tgt_col, default=tx)
             return (left + right) / 2
 
+
+    # Junction at L-shape elbow (src is a junction with no section_id):
+    # When the junction is at the corner of a clockwise/counter-clockwise
+    # L, the channel should sit at the junction's x so the L pivots
+    # cleanly through the junction.  Apply only for genuine L-shapes
+    # (significant dy AND dx) to avoid disturbing degenerate near-vertical
+    # or near-horizontal routes that the old fallback handled correctly.
+    # See docs/dev/authoring_misfires.md #2 / #10.
     # Fallback: place near source
     if dx > 0:
         return sx + max_r + offset_step
@@ -376,4 +400,122 @@ def bypass_bottom_y(
                     else:
                         candidate = (row_bottom + header_top) / 2
 
+    # Final safety: the iterative inter-row clamping above can land the
+    # candidate INSIDE a different-row section when no real gap exists
+    # (e.g. a wide colspan section blocks every column in the bypass's
+    # span).  Detect that and fall back to routing BELOW every section
+    # in the column range - the only universally-safe alternative when
+    # there is no inter-row gap to slot into.
+    blocking = [
+        s
+        for s in graph.sections.values()
+        if s.bbox_w > 0 and lo <= s.grid_col <= hi
+        and s.bbox_y - SECTION_HEADER_PROTRUSION <= candidate <= s.bbox_y + s.bbox_h
+    ]
+    if blocking:
+        return max(s.bbox_y + s.bbox_h for s in blocking) + clearance
+
     return candidate
+
+
+# ---------------------------------------------------------------------------
+# Section resolution + inter-row channel placement
+# ---------------------------------------------------------------------------
+
+
+def resolve_section(
+    graph: MetroGraph,
+    station: Station,
+    prefer_upstream: bool = True,
+) -> Section | None:
+    """Resolve a station's section, tracing through junctions if needed.
+
+    For stations with a ``section_id``, returns that section directly.
+    For junctions (``section_id is None``), traces edges to find a
+    connected port's section.
+
+    When *prefer_upstream* is True (default), incoming edges are checked
+    first so the junction resolves to the upstream section.  When False,
+    both directions are scanned in a single pass with no preference.
+    """
+    if station.section_id:
+        return graph.sections.get(station.section_id)
+
+    if prefer_upstream:
+        for e in graph.edges_to(station.id):
+            other = graph.stations.get(e.source)
+            if other and other.section_id:
+                sec = graph.sections.get(other.section_id)
+                if sec:
+                    return sec
+        for e in graph.edges_from(station.id):
+            other = graph.stations.get(e.target)
+            if other and other.section_id:
+                sec = graph.sections.get(other.section_id)
+                if sec:
+                    return sec
+    else:
+        # Preserve original graph.edges insertion order: callers depend on
+        # the first incident edge winning when a junction has neighbours
+        # in multiple sections.
+        for e in graph.edges:
+            other_id = None
+            if e.source == station.id:
+                other_id = e.target
+            elif e.target == station.id:
+                other_id = e.source
+            if other_id:
+                other = graph.stations.get(other_id)
+                if other and other.section_id:
+                    sec = graph.sections.get(other.section_id)
+                    if sec:
+                        return sec
+    return None
+
+
+def inter_row_channel_y(
+    graph: MetroGraph,
+    src: Station,
+    tgt: Station,
+    sy: float,
+    ty: float,
+    dy: float,
+    max_r: float,
+) -> float:
+    """Compute Y for a horizontal channel in an inter-row gap.
+
+    Vertical equivalent of ``inter_column_channel_x``: places the
+    channel in the inter-row gap, above the target section's header
+    (number badge + label rendered above bbox_y).
+    """
+    # Keep the channel clear of section headers (numbered circle + label)
+    # that protrude above/below bbox_y.
+
+    # Resolve sections for junction stations (section_id is None for
+    # junctions; trace through edges to find a connected port's section).
+    src_sec = resolve_section(graph, src)
+    tgt_sec = resolve_section(graph, tgt)
+
+    if src_sec and tgt_sec and src_sec.grid_row != tgt_sec.grid_row:
+        src_row = src_sec.grid_row
+        tgt_row = tgt_sec.grid_row
+
+        if dy > 0:
+            # Going down: gap between bottom of source row and top of target row
+            bottom = row_bottom_edge(graph, src_row, default=sy)
+            top = row_top_edge(graph, tgt_row, default=ty)
+            # Place above the header zone
+            header_top = top - HEADER_CLEARANCE
+            return (bottom + header_top) / 2
+        else:
+            # Going up: gap between top of source row and bottom of target row
+            top = row_top_edge(graph, src_row, default=sy)
+            bottom = row_bottom_edge(graph, tgt_row, default=ty)
+            header_bottom = bottom + HEADER_CLEARANCE
+            return (top + header_bottom) / 2
+
+    # Fallback: place near target, clearing the header zone
+    if dy > 0:
+        return ty - HEADER_CLEARANCE - max_r
+    else:
+        return ty + HEADER_CLEARANCE + max_r
