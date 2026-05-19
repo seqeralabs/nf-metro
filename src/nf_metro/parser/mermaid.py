@@ -161,16 +161,17 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
         _resolve_sections(graph)
         _insert_bypass_stations(graph)
 
-    # Apply pending terminus designations.  Skip stations that have any
-    # predecessor (i.e. mid-pipeline hubs that the .mmd author marked as
-    # a file-input but which actually receive input from another section):
-    # the file icon implies "this is where the path starts" and would be
-    # misleading.  Such stations render as a plain hub instead.
+    # Apply pending terminus designations.  Skip mid-pipeline hub
+    # stations: stations the .mmd author tagged as a file/dir input but
+    # which actually receive AND forward data (predecessors + successors).
+    # The file icon implies "this is where the path starts" or "this is
+    # where it ends", which is misleading on a routing hub.  Pure sources
+    # (no predecessors) and pure sinks (no successors) keep their icon.
     for station_id, entries in graph._pending_terminus.items():
         station = graph.stations.get(station_id)
         if not station:
             continue
-        if graph.edges_to(station_id):
+        if graph.edges_to(station_id) and graph.edges_from(station_id):
             continue
         station.terminus_labels = [label for label, _, _ in entries]
         station.terminus_icon_types = [icon_type for _, icon_type, _ in entries]

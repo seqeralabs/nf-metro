@@ -561,9 +561,7 @@ def _guard_bundle_order_preserved(
     if not violations:
         return
     first = violations[0]
-    extra = (
-        f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
-    )
+    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
@@ -1491,9 +1489,7 @@ def _compute_section_layout(
             _guard_inter_section_routes_in_row_band(
                 graph, phase, offsets=offsets, routes=routes
             )
-            _guard_bundle_order_preserved(
-                graph, phase, offsets=offsets, routes=routes
-            )
+            _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
@@ -3041,31 +3037,34 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
             # side station (a real horizontal loop, not a U-turn).
             if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
                 continue
-            # Require at least one OFF-TRUNK sibling sharing the same
-            # single src and tgt: this is what makes the station part
-            # of a genuine parallel fan-out where the column is owned
-            # by the loop, not by an unrelated trunk station that just
-            # happens to share the layer-X.  Single side branches (e.g.
-            # ``search`` paired with the trunk continuation ``align``)
-            # carry no fan, and recentering them off the column where
-            # the trunk station sits visibly breaks the layout.
-            has_off_trunk_sibling = False
+            # Require at least one sibling sharing the same single src
+            # and tgt: this is what makes the station part of a genuine
+            # parallel fan-out where the column is owned by the loop,
+            # not by an unrelated trunk station that just happens to
+            # share the layer-X.  Single side branches (e.g. ``search``
+            # paired with the trunk continuation ``align`` where they
+            # don't share endpoints) carry no fan and would visibly
+            # break the layout when recentered off the trunk column.
+            # The sibling may be on or off the trunk Y: when the
+            # section's entry port snapped to the topmost target (the
+            # sarek-style top-anchored stack), the other branch carries
+            # the trunk while the side branch is off-trunk; both
+            # situations are genuine fan-outs.
+            has_loop_sibling = False
             for other_sid in section.station_ids:
                 if other_sid == sid:
                     continue
                 other = graph.stations.get(other_sid)
                 if other is None or other.is_port or other.is_hidden:
                     continue
-                if abs(other.y - trunk_y) < 0.5:
-                    continue  # on-trunk co-loopers don't establish a fan
                 other_ins = graph.edges_to(other_sid)
                 other_outs = graph.edges_from(other_sid)
                 other_srcs = {e.source for e in other_ins}
                 other_tgts = {e.target for e in other_outs}
                 if other_srcs == {src_id} and other_tgts == {tgt_id}:
-                    has_off_trunk_sibling = True
+                    has_loop_sibling = True
                     break
-            if not has_off_trunk_sibling:
+            if not has_loop_sibling:
                 continue
             # Compute the two diagonal corner Xs using routing's
             # placement rule (see _compute_diagonal_placement).
@@ -7563,11 +7562,15 @@ def _required_captioned_icon_pitch(y_spacing: float) -> float:
     keeps every station on the user's chosen grid; loosening pitch
     is the user's job once they see the warning.
     """
-    return y_spacing if y_spacing > 0 else (
-        2 * ICON_HALF_HEIGHT
-        + ICON_CAPTION_GAP
-        + ICON_CAPTION_FONT_HEIGHT
-        + ICON_STACK_LABEL_CLEARANCE
+    return (
+        y_spacing
+        if y_spacing > 0
+        else (
+            2 * ICON_HALF_HEIGHT
+            + ICON_CAPTION_GAP
+            + ICON_CAPTION_FONT_HEIGHT
+            + ICON_STACK_LABEL_CLEARANCE
+        )
     )
 
 
