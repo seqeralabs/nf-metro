@@ -3157,6 +3157,122 @@ def test_ports_on_section_boundary(fixture):
     assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
 
 
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_inter_section_routes_dont_reenter_source_section(fixture):
+    """An inter-section route, after exiting through a port on one side
+    of its source section's bbox, must not have any segment that crosses
+    BACK INTO the source section's bbox.
+
+    Catches the "left-and-down at section right edge" pattern: route
+    exits at the right (x = section.right) then a subsequent segment
+    goes leftward at the same Y, re-entering the source's column at the
+    source's y, before bending down.  See
+    docs/dev/authoring_misfires.md #11.6 and #12.5.
+
+    Same-section (intra-section) routes are exempt - they stay inside.
+    Routes touching TB/BT sections are exempt (those route vertically
+    inside their column).
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    offenders: list[str] = []
+    for r in routes:
+        pts = r.points
+        if len(pts) < 2:
+            continue
+        if not r.is_inter_section:
+            continue
+        src_st = graph.stations.get(r.edge.source)
+        tgt_st = graph.stations.get(r.edge.target)
+        if src_st is None or tgt_st is None:
+            continue
+        # Resolve the SOURCE section (tracing through junctions).
+        src_sec = _resolve_section_for_station(graph, src_st)
+        if src_sec is None:
+            continue
+        if src_sec.direction in ("TB", "BT"):
+            continue
+        # Skip routes that stay in the same section (intra-section).
+        tgt_sec = _resolve_section_for_station(graph, tgt_st)
+        if tgt_sec is not None and tgt_sec.id == src_sec.id:
+            continue
+        sec_l = src_sec.bbox_x
+        sec_r = src_sec.bbox_x + src_sec.bbox_w
+        sec_t = src_sec.bbox_y
+        sec_b = src_sec.bbox_y + src_sec.bbox_h
+        # Two checks per route:
+        # (a) For each interior corner point pts[1..-2] (which is the
+        #     Q-curve's CONTROL point in the rendered SVG), the corner
+        #     must not lie strictly inside the source section's bbox.
+        #     This catches "channel x is inside the source section" bugs
+        #     in L-shape routes.
+        # (b) For each segment midpoint, the midpoint must not lie
+        #     strictly inside the source section's bbox.  Catches
+        #     segments that cross the bbox interior.
+        # The source station itself (pts[0]) and the target (pts[-1]) are
+        # allowed to coincide with the section boundary.
+        EDGE_TOL = 0.5
+        found = False
+        for j in range(1, len(pts) - 1):
+            cx, cy = pts[j]
+            if (
+                sec_l + EDGE_TOL < cx < sec_r - EDGE_TOL
+                and sec_t + EDGE_TOL < cy < sec_b - EDGE_TOL
+            ):
+                offenders.append(
+                    f"{r.edge.source} -> {r.edge.target} "
+                    f"(line={r.line_id}) corner "
+                    f"{tuple(round(c, 1) for c in pts[j])} inside "
+                    f"source section {src_sec.id} bbox "
+                    f"[{sec_l},{sec_t}]-[{sec_r},{sec_b}]"
+                )
+                found = True
+                break
+        if found:
+            continue
+        for j in range(1, len(pts)):
+            x0, y0 = pts[j - 1]
+            x1, y1 = pts[j]
+            mx = (x0 + x1) / 2.0
+            my = (y0 + y1) / 2.0
+            if (
+                sec_l + EDGE_TOL < mx < sec_r - EDGE_TOL
+                and sec_t + EDGE_TOL < my < sec_b - EDGE_TOL
+            ):
+                offenders.append(
+                    f"{r.edge.source} -> {r.edge.target} "
+                    f"(line={r.line_id}) seg "
+                    f"{tuple(round(c, 1) for c in pts[j - 1])} -> "
+                    f"{tuple(round(c, 1) for c in pts[j])} "
+                    f"midpoint ({round(mx, 1)}, {round(my, 1)}) inside "
+                    f"source section {src_sec.id} bbox "
+                    f"[{sec_l},{sec_t}]-[{sec_r},{sec_b}]"
+                )
+                break
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
+
+
+def _resolve_section_for_station(graph, station):
+    """Resolve a station's section, tracing back through junctions.
+
+    For regular stations, returns the section they belong to.
+    For junction stations (section_id=None), follows an incoming edge to
+    a real station and returns that station's section.
+    """
+    if station is None:
+        return None
+    if station.section_id:
+        return graph.sections.get(station.section_id)
+    if station.id in graph.junctions:
+        for e in graph.edges:
+            if e.target == station.id:
+                pred = graph.stations.get(e.source)
+                if pred and pred.section_id:
+                    return graph.sections.get(pred.section_id)
+    return None
+
+
 def _resolve_section_col_for_station(graph, station):
     """Resolve a station's grid column.  For ports, use the section.
     For junctions, follow an incoming edge back to a real station.

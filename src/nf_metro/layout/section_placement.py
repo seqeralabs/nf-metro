@@ -682,9 +682,20 @@ def _position_ports_on_boundary(
         # LEFT/RIGHT exit ports prefer the downstream bundle Y so the
         # inter-section run stays horizontal; fall back to the local
         # internal-station average for entry ports and fan-in exits.
+        # LEFT/RIGHT entry ports with multiple downstream targets pick
+        # the topmost target Y so the inter-section trunk lands at the
+        # first station rather than midway through a fan-out.
         anchor: float | None = None
         if free_axis == "y" and port is not None and not port.is_entry:
             anchor = _find_downstream_bundle_y(pid, section, graph)
+        if (
+            free_axis == "y"
+            and anchor is None
+            and port is not None
+            and port.is_entry
+            and port.side in (PortSide.LEFT, PortSide.RIGHT)
+        ):
+            anchor = _find_entry_port_top_y(pid, section, graph)
         if anchor is None:
             anchor = _find_connected_internal_coord(pid, section, graph, free_axis)
         if free_axis == "y":
@@ -797,6 +808,40 @@ def _find_downstream_bundle_y(
     if not (section.bbox_y <= target_y <= section.bbox_y + section.bbox_h):
         return None
     return target_y
+
+
+def _find_entry_port_top_y(
+    entry_port_id: str,
+    section: Section,
+    graph: MetroGraph,
+) -> float | None:
+    """Pick the topmost downstream-target Y for a LEFT/RIGHT entry port.
+
+    When an entry port feeds multiple internal stations whose Ys differ
+    (e.g. a fan-out at the section boundary into top and bottom branches),
+    the default average centres the port between them and forces both
+    sides into diagonal lead-ins.  Anchoring on the topmost target Y
+    instead lands the trunk on the section's first row, so any branches
+    below fork off via a normal curve.
+
+    Returns None when:
+    - the entry port only feeds one Y (caller fallback already produces
+      the same result),
+    - none of the targets are non-bypass internal stations,
+    so the caller's existing averaging path runs unchanged.
+    """
+    internal_ids = (
+        set(section.station_ids) - set(section.entry_ports) - set(section.exit_ports)
+    )
+    target_ys: list[float] = []
+    for edge in graph.edges_from(entry_port_id):
+        if edge.target in internal_ids and not edge.target.startswith("__bypass_"):
+            target_ys.append(graph.stations[edge.target].y)
+    if not target_ys:
+        return None
+    if max(target_ys) - min(target_ys) <= 1.0:
+        return None
+    return min(target_ys)
 
 
 def _find_connected_internal_coord(
