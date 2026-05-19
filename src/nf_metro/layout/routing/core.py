@@ -33,14 +33,17 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.routing.common import (
     RoutedPath,
+    bundle_width,
     bypass_bottom_y,
     col_left_edge,
     col_right_edge,
+    column_gap_edges,
     column_gap_midpoint,
     compute_bundle_info,
     inter_column_channel_x,
     inter_row_channel_y,
     resolve_section,
+    symmetric_bundle_midpoint,
 )
 from nf_metro.layout.routing.corners import (
     bypass_radii,
@@ -1005,33 +1008,47 @@ def _route_bypass(
         else:
             gap2_mid = gap2_mid_default
         if trunk_v_up_pull_away:
-            # Place this bundle CLOSER to the previous column (away from
-            # the target's edge) so it doesn't overlap with a sibling
-            # around-section bundle that hugs the target's left edge.
-            # The around-section bundle sits at target_left -
-            # (curve_radius + offset_step + extra_clearance + delta) -
-            # i.e. its xmin = target_left - SECTION_ROUTE_CLEARANCE -
-            # 2*max_around_delta.  Anchor this bundle's xmin at
-            # neighbour_right + SECTION_ROUTE_CLEARANCE so it keeps a
-            # visible gap from the neighbour, AND ensure its xmax stays
-            # clear of the around-section bundle.  When the inter-column
-            # gap is too narrow to fit both bundles with clearance, fall
-            # back to the standard placement (overlap is the lesser
-            # evil compared to a route entering the neighbour bbox).
-            neighbour_right = col_right_edge(graph, tgt_col - 1)
-            pulled_mid_candidate = neighbour_right + SECTION_ROUTE_CLEARANCE + half_g2
-            # Around-section xmin (must stay clear of pulled bundle xmax)
-            around_section_xmin = (
-                effective_tx
-                - SECTION_ROUTE_CLEARANCE
-                - 2 * ((g2_n - 1) * ctx.offset_step / 2)
+            # Two bundles share the gap between (tgt_col - 1) and tgt_col:
+            # this bypass (gap2) bundle on the LEFT, paired with an
+            # around-section bundle on the RIGHT (placed by
+            # _route_around_section_below).  Place them symmetrically
+            # around the gap midpoint via the principled formula
+            # (gap_left + (W - WT)/2 for the leftmost line; bundles
+            # separated by exactly B = BUNDLE_TO_BUNDLE_CLEARANCE).
+            # When the gap is too narrow to fit both bundles with
+            # clearance, fall back to the standard (single-bundle)
+            # placement; overlap is the lesser evil compared to a
+            # route entering the neighbouring section's bbox.
+            gap_left, gap_right = column_gap_edges(graph, tgt_col - 1, tgt_col)
+            this_width = bundle_width(g2_n, ctx.offset_step)
+            # The around-route bundle's line count equals the merge
+            # trunk's effective line count, which today matches g2_n
+            # (one around-route line per fan_in line).  Use g2_n as a
+            # conservative width estimate.
+            around_width = this_width
+            pulled_mid_candidate = symmetric_bundle_midpoint(
+                gap_left,
+                gap_right,
+                [this_width, around_width],
+                bundle_index=0,
             )
-            pulled_xmax = pulled_mid_candidate + half_g2
-            min_inter_bundle_gap = ctx.offset_step  # 1 step between bundles
+            # Sanity: only honour the symmetric placement when both
+            # bundles can fit with at least A clearance from each edge
+            # and B inter-bundle separation.  Otherwise the gap was
+            # never widened (e.g. layout disabled or pull-away
+            # triggered without _enforce_min_column_gaps participating),
+            # so fall back to the standard placement.
+            this_xmin = pulled_mid_candidate - this_width / 2
+            around_mid = symmetric_bundle_midpoint(
+                gap_left,
+                gap_right,
+                [this_width, around_width],
+                bundle_index=1,
+            )
+            around_xmax = around_mid + around_width / 2
             if (
-                pulled_mid_candidate - half_g2 - neighbour_right
-                >= SECTION_ROUTE_CLEARANCE
-                and around_section_xmin - pulled_xmax >= min_inter_bundle_gap
+                this_xmin - gap_left >= SECTION_ROUTE_CLEARANCE
+                and gap_right - around_xmax >= SECTION_ROUTE_CLEARANCE
             ):
                 gap2_mid = pulled_mid_candidate
         gap2_x = gap2_mid + delta2
