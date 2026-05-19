@@ -173,7 +173,41 @@ External routes (wrap channels, around routes, inter-row bypasses) choose
 their channel position relative to nearby section bboxes.  Without this
 floor the channel may sit one curve_radius + offset_step (~13 px) past
 the edge, which reads as flush against the section in renders.  This
-floor gives a small but visible breathing space."""
+floor gives a small but visible breathing space.
+
+Kept as an alias of :data:`EDGE_TO_BUNDLE_CLEARANCE` (the principled
+"constant A" of the inter-section gap geometry) so legacy call sites
+continue to compile while the new geometry rolls out."""
+
+EDGE_TO_BUNDLE_CLEARANCE: float = 16.0
+"""Constant A: minimum distance between a section bbox edge and the
+nearest line of an adjacent route bundle.
+
+Used as the single source of truth for two related clearances:
+
+- The leftmost (resp. rightmost) line of a bundle running vertically
+  in an inter-section gap sits at least ``A`` from the right (resp.
+  left) edge of the neighbouring section.  Section-placement enforces
+  this via ``_enforce_min_column_gaps`` (gap width >= ``A + Σ widths
+  + (count-1)*B + A``) so renders honour the symmetric geometry without
+  the channel ever being pushed against a section edge.
+- Bypass / around-section routes maintain at least ``A`` from any
+  intervening section's nearest edge.
+
+Equal to :data:`SECTION_ROUTE_CLEARANCE` (the legacy name) so existing
+clearance code paths continue to honour the same physical distance."""
+
+BUNDLE_TO_BUNDLE_CLEARANCE: float = 12.0
+"""Constant B: minimum distance between two adjacent bundles sharing
+the same inter-section gap.
+
+When *N* concentric bundles travel down the same gap (typically a
+``trunk_v_up_pull_away`` bypass paired with an around-section V_up
+channel), the required gap width is
+``A + Σ bundle_widths + (count-1)*B + A`` where bundle width is
+``(n_i - 1) * OFFSET_STEP`` for ``n_i`` lines.  ``B`` gives bundles a
+breathing space that reads visually as a separate stream rather than
+a single fatter bundle."""
 
 BYPASS_NEST_STEP: float = 8.0
 """Per-line vertical offset for stacking multiple bypass routes."""
