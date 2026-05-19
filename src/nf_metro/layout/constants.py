@@ -166,6 +166,15 @@ present a clear horizontal segment through their X coordinate)."""
 BYPASS_CLEARANCE: float = 25.0
 """Vertical clearance below the lowest intervening section for bypass routes."""
 
+SECTION_ROUTE_CLEARANCE: float = 16.0
+"""Minimum gap between a section bbox edge and an external route channel.
+
+External routes (wrap channels, around routes, inter-row bypasses) choose
+their channel position relative to nearby section bboxes.  Without this
+floor the channel may sit one curve_radius + offset_step (~13 px) past
+the edge, which reads as flush against the section in renders.  This
+floor gives a small but visible breathing space."""
+
 BYPASS_NEST_STEP: float = 8.0
 """Per-line vertical offset for stacking multiple bypass routes."""
 
@@ -201,8 +210,16 @@ entry port and the first internal station.  Mirrors ENTRY_SHIFT_TB."""
 EXIT_GAP_MULTIPLIER: float = 0.6
 """Exit gap multiplier for flow-side exits."""
 
-JUNCTION_MARGIN: float = 10.0
-"""Margin for positioning junctions in inter-section gaps."""
+JUNCTION_MARGIN: float = 24.0
+"""Margin for positioning junctions in inter-section gaps.
+
+Must exceed ``CURVE_RADIUS + (n-1)*OFFSET_STEP + OFFSET_STEP/2`` so that
+the L-shape corner at a fan-out junction can resolve to a standard
+``CURVE_RADIUS`` arc with concentric-line lead-in (up to n=4 lines, the
+outermost line's curve start sits ``CURVE_RADIUS + 3*OFFSET_STEP``
+LEFT of the junction), without the inter-row channel re-entering the
+source section's bbox.
+"""
 
 MIN_PORT_STATION_GAP: float = 16.0
 """Minimum gap between entry port and internal stations (TB perpendicular)."""
@@ -270,6 +287,17 @@ TERMINUS_WIDTH: float = 28.0
 Used by both layout (for clearance calculations) and render (as the
 Theme.terminus_width default).
 """
+
+ICON_TERMINUS_FORK_LEAD: float = 38.0
+"""Pre-fork straight run for diagonals leaving a file-input station.
+
+When a file-input (terminus) station fans out to multiple downstream
+stations at different Ys, the diagonal placement must not start
+inside the file icon's drawn area.  This constant is the minimum
+horizontal run from the station marker out past the icon before the
+diagonal begins, so the line visually leaves the file before
+branching.  Set to TERMINUS_WIDTH + ICON_STATION_GAP (28 + 6) plus a
+small visual cushion."""
 
 ICON_INTER_GAP: float = 4.0
 """Gap between adjacent file icons when a station has multiple icons."""
@@ -339,3 +367,19 @@ from untouched ones when checking column-companion consensus."""
 # ---------------------------------------------------------------------------
 GUARD_TOLERANCE: float = 5.0
 """Tolerance for stage-boundary invariant checks (port-on-boundary, etc.)."""
+
+# ---------------------------------------------------------------------------
+# Canvas-wide grid snap
+# ---------------------------------------------------------------------------
+CANVAS_GRID_SHIFT_THRESHOLD: float = 0.85
+"""Minimum fraction of real stations sharing one ``y % y_spacing`` residue
+to trigger a final canvas-wide shift back onto the grid.
+
+Above this threshold, the canvas is treated as uniformly off-grid by a
+late helper (typically ``_shift_graph_into_canvas`` shifting by a non-
+grid amount): a single shift restores every station to integer
+multiples of ``y_spacing``.  Below the threshold, sections sit at
+multiple distinct residues by construction (e.g. sarek, where wrap
+endpoints land at three different residues 10px apart by design), so
+no single shift can align them all and the per-section snap from Stage
+6.4 is honoured as the best-effort alignment."""

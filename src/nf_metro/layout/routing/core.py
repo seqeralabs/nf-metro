@@ -20,13 +20,14 @@ from nf_metro.layout.constants import (
     CURVE_RADIUS,
     DIAGONAL_RUN,
     FOLD_MARGIN,
-    HEADER_CLEARANCE,
+    ICON_TERMINUS_FORK_LEAD,
     JUNCTION_MARGIN,
     MERGE_ROUTE_MARGIN,
     MIN_STATION_FLAT_LENGTH,
     MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
     OFFSET_STEP,
+    SECTION_ROUTE_CLEARANCE,
     STATION_MOVE_TOLERANCE,
 )
 from nf_metro.layout.labels import label_text_width
@@ -38,8 +39,8 @@ from nf_metro.layout.routing.common import (
     column_gap_midpoint,
     compute_bundle_info,
     inter_column_channel_x,
-    row_bottom_edge,
-    row_top_edge,
+    inter_row_channel_y,
+    resolve_section,
 )
 from nf_metro.layout.routing.corners import (
     bypass_radii,
@@ -599,6 +600,35 @@ def _route_inter_section(
     if tgt_port and tgt_port.is_entry and tgt_port.side == PortSide.RIGHT and dx > 0:
         return _route_right_entry_wrap(edge, src, tgt, i, n, ctx)
 
+    # LEFT entry port with source to the RIGHT: mirror of the above.  The
+    # standard L-shape would cut through the target section's interior
+    # at ty to reach a left-side entry port (the long horizontal lands
+    # inside the bbox).  Wrap leftward through the inter-row gap then
+    # drop into the entry from the left.  Restricted to cross-row cases
+    # where the standard L-shape would actually intrude (same-row
+    # neighbours route fine with a normal L).
+    if (
+        tgt_port
+        and tgt_port.is_entry
+        and tgt_port.side == PortSide.LEFT
+        and dx < 0
+        and src_row is not None
+        and _resolve_section_row(graph, tgt) is not None
+        and src_row != _resolve_section_row(graph, tgt)
+    ):
+        # When the inter-row channel _route_left_entry_wrap would use
+        # lands inside an intervening section (e.g. a multi-row jump
+        # past a tall middle row), route AROUND BELOW the target
+        # section instead.  Otherwise use the standard wrap.  The
+        # source section is excluded - the H lead-in just outside the
+        # source's right edge is fine even if its Y falls within the
+        # source's row.
+        wrap_hy = inter_row_channel_y(graph, src, tgt, sy, ty, dy, ctx.curve_radius)
+        exclude = {src.section_id} if src.section_id else set()
+        if _h_segment_crosses_other_section(graph, sx, tx, wrap_hy, exclude):
+            return _route_around_section_below(edge, src, tgt, tgt, i, n, ctx)
+        return _route_left_entry_wrap(edge, src, tgt, i, n, ctx)
+
     # Non-bypass edges to merge junctions: route to entry port.
     # When dy is tiny, use a straight line to avoid cramped curves.
     ep_id = ctx.merge.entry_port_for.get(edge.target)
@@ -612,6 +642,20 @@ def _route_inter_section(
                     points=[(sx, sy), (ep.x, ep.y)],
                     is_inter_section=True,
                 )
+            # If the standard L-shape's horizontal segment at the entry
+            # port's Y would cross a section bbox the route doesn't
+            # enter (e.g. sarek __junction_8 -> __merge_X reaches
+            # reporting's LEFT entry by cutting through reporting at
+            # y=ep.y), route AROUND BELOW the target section instead.
+            # The source section is excluded - its right-edge lead-in
+            # is safe even when its bbox spans the route's Y range.
+            ep_port = graph.ports.get(ep_id)
+            if ep_port and ep_port.side == PortSide.LEFT:
+                exclude = {src.section_id} if src.section_id else set()
+                if _h_segment_crosses_other_section(graph, sx, ep.x, ep.y, exclude):
+                    return _route_around_section_below(
+                        edge, src, tgt, ep, i, n, ctx
+                    )
             return _route_l_shape(edge, src, ep, i, n, ctx)
 
     # Standard L-shape
@@ -708,6 +752,43 @@ def _route_merge_branch(
     )
 
 
+def _has_around_section_sibling(
+    edge: Edge, ep: Station, ep_port, ctx: _RoutingCtx
+) -> bool:
+    """Detect whether another edge to the same entry port will route via
+    :func:`_route_around_section_below`.
+
+    The around-section route hugs the target section's left edge with its
+    V_up channel at ``section_left - base_gap - extra_clearance - delta``.
+    When a merge trunk's bypass also lands in the same inter-column gap,
+    the two bundles overlap visually.  Trunks that detect a competing
+    around-section sibling can pull their V_up away from the target edge
+    (see ``trunk_v_up_pull_away`` in :func:`_route_bypass`).
+
+    Mirrors the predicate in the top-level dispatcher (lines around
+    644-658): another edge whose target is the same merge junction (i.e.
+    same ``ep_id``), whose source is NOT this edge's source, and whose
+    L-shape's H segment at ``ep.y`` would cross a non-source section.
+    """
+    if ep_port is None or ep_port.side != PortSide.LEFT:
+        return False
+    # Find all edges whose target is the same merge junction.
+    for other in ctx.graph.edges_to(edge.target):
+        if other.source == edge.source:
+            continue
+        other_src = ctx.graph.stations.get(other.source)
+        if other_src is None:
+            continue
+        exclude = (
+            {other_src.section_id} if other_src.section_id else set()
+        )
+        if _h_segment_crosses_other_section(
+            ctx.graph, other_src.x, ep.x, ep.y, exclude
+        ):
+            return True
+    return False
+
+
 def _route_merge_trunk(
     edge: Edge,
     src: Station,
@@ -722,11 +803,39 @@ def _route_merge_trunk(
 
     Delegates to _route_bypass with the entry port as the effective
     target so the route extends past the merge junction to the section
-    entry.
+    entry.  Both X and Y of the entry port are overridden because the
+    merge junction is virtual and lives inside the target section at a
+    different Y from the actual entry port; without the Y override the
+    bypass terminates at the merge junction's Y and leaves a visible
+    "hanging" curve disconnected from the entry port.
+
+    When the trunk and entry are in the same grid row but separated by
+    intervening row-mates (e.g. sarek's post_vc -> reporting trunk
+    bypassing annotation), the standard above-row bypass channel sits
+    in the inter-row gap that also holds the target row's section
+    titles.  Force ``cross_row`` so the channel runs BELOW all sections
+    in the column range, mirroring :func:`_route_around_section_below`
+    and avoiding overlap with the title text.
+
+    When a sibling edge to the same merge junction will route via
+    :func:`_route_around_section_below` (e.g. sarek's preprocessing wrap
+    that also lands at reporting's LEFT entry), both routes would place
+    their V_up channels in the inter-column gap just left of the target
+    section, producing overlapping bundles in the same x range.  Detect
+    that and pull the trunk's V_up channel further from the target edge
+    (towards the previous column) so the two bundles occupy distinct
+    columns within the gap.
     """
     ep_id = ctx.merge.entry_port_for.get(edge.target)
     ep = ctx.graph.stations.get(ep_id) if ep_id else None
+    ep_port = ctx.graph.ports.get(ep_id) if ep_id else None
     effective_tx = ep.x if ep else tgt.x
+    effective_ty = ep.y if ep else tgt.y
+    tgt_row = _resolve_section_row(ctx.graph, tgt)
+    force_cross_row = src_row is not None and tgt_row == src_row
+    trunk_v_up_pull_away = (
+        ep is not None and _has_around_section_sibling(edge, ep, ep_port, ctx)
+    )
     return _route_bypass(
         edge,
         src,
@@ -737,6 +846,9 @@ def _route_merge_trunk(
         ctx,
         src_row,
         effective_tx=effective_tx,
+        effective_ty=effective_ty,
+        force_cross_row=force_cross_row,
+        trunk_v_up_pull_away=trunk_v_up_pull_away,
     )
 
 
@@ -750,17 +862,34 @@ def _route_bypass(
     ctx: _RoutingCtx,
     src_row: int | None = None,
     effective_tx: float | None = None,
+    effective_ty: float | None = None,
+    force_cross_row: bool = False,
+    trunk_v_up_pull_away: bool = False,
 ) -> RoutedPath:
     """U-shaped bypass route around intervening sections.
 
-    When *effective_tx* is provided, it overrides the target X for
-    gap2 limit computation (used by merge trunks to reach the entry
-    port instead of the merge junction).
+    When *effective_tx* / *effective_ty* are provided, they override
+    the target coordinates for gap2 placement (used by merge trunks to
+    reach the entry port instead of the merge junction, which sits at a
+    different Y inside the section).  When *force_cross_row* is True,
+    ``bypass_bottom_y`` is asked to route below ALL sections in the
+    column range regardless of whether src and tgt share a row.
+
+    When *trunk_v_up_pull_away* is True, gap2_x is placed in the half
+    of the inter-column gap CLOSER to the previous column (i.e. AWAY
+    from the target's edge) so it doesn't overlap with a sibling
+    around-section route that hugs the target's edge.  Only honoured
+    when the displacement keeps gap2_x at least SECTION_ROUTE_CLEARANCE
+    from the neighbouring section; otherwise the standard placement is
+    used (the bundles will overlap, but the alternative is to put
+    gap2_x INSIDE the neighbouring section bbox, which is worse).
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
     if effective_tx is None:
         effective_tx = tx
+    if effective_ty is not None:
+        ty = effective_ty
     dx = tx - sx
     going_right = dx > 0
     graph = ctx.graph
@@ -777,7 +906,9 @@ def _route_bypass(
         nest_offset = max(i, g2_j) * ctx.offset_step
     # Resolve target row to detect cross-row bypasses.
     tgt_row = _resolve_section_row(graph, tgt)
-    cross_row = src_row is not None and tgt_row is not None and src_row != tgt_row
+    cross_row = force_cross_row or (
+        src_row is not None and tgt_row is not None and src_row != tgt_row
+    )
     base_y = bypass_bottom_y(
         graph,
         src_col,
@@ -827,7 +958,9 @@ def _route_bypass(
     if going_right:
         if fan is not None:
             # Corner 1 uses unified fan indices for a shared first corner
-            # with L-shape siblings.  Override delta1 and r1.
+            # with L-shape and wrap siblings.  Use the going_right
+            # fan_mid_x formula so curve_start = gap1_x - r1 = junction.x,
+            # eliminating the upstream-past-curve "nubbin".
             ui, un = fan
             fan_delta, r1, _ = l_shape_radii(
                 ui,
@@ -857,6 +990,39 @@ def _route_bypass(
             gap2_mid = gap2_limit - half_g2
         else:
             gap2_mid = gap2_base + half_g2
+        if trunk_v_up_pull_away:
+            # Place this bundle CLOSER to the previous column (away from
+            # the target's edge) so it doesn't overlap with a sibling
+            # around-section bundle that hugs the target's left edge.
+            # The around-section bundle sits at target_left -
+            # (curve_radius + offset_step + extra_clearance + delta) -
+            # i.e. its xmin = target_left - SECTION_ROUTE_CLEARANCE -
+            # 2*max_around_delta.  Anchor this bundle's xmin at
+            # neighbour_right + SECTION_ROUTE_CLEARANCE so it keeps a
+            # visible gap from the neighbour, AND ensure its xmax stays
+            # clear of the around-section bundle.  When the inter-column
+            # gap is too narrow to fit both bundles with clearance, fall
+            # back to the standard placement (overlap is the lesser
+            # evil compared to a route entering the neighbour bbox).
+            neighbour_right = col_right_edge(graph, tgt_col - 1)
+            pulled_mid_candidate = (
+                neighbour_right + SECTION_ROUTE_CLEARANCE + half_g2
+            )
+            # Around-section xmin (must stay clear of pulled bundle xmax)
+            around_section_xmin = (
+                effective_tx
+                - SECTION_ROUTE_CLEARANCE
+                - 2 * ((g2_n - 1) * ctx.offset_step / 2)
+            )
+            pulled_xmax = pulled_mid_candidate + half_g2
+            min_inter_bundle_gap = ctx.offset_step  # 1 step between bundles
+            if (
+                pulled_mid_candidate - half_g2 - neighbour_right
+                >= SECTION_ROUTE_CLEARANCE
+                and around_section_xmin - pulled_xmax
+                >= min_inter_bundle_gap
+            ):
+                gap2_mid = pulled_mid_candidate
         gap2_x = gap2_mid + delta2
     else:
         if fan is not None:
@@ -868,7 +1034,11 @@ def _route_bypass(
                 offset_step=ctx.offset_step,
                 base_radius=ctx.curve_radius,
             )
-            fan_mid_x = sx - ctx.curve_radius - (un - 1) * ctx.offset_step / 2
+            # Shared first corner with curve_start at junction.x (see
+            # going_right branch).  Same formula since the wrap's
+            # source-side curve is on the OUTSIDE (right) of the
+            # source section regardless of dx sign.
+            fan_mid_x = sx + ctx.curve_radius + (un - 1) * ctx.offset_step / 2
             gap1_x = fan_mid_x + fan_delta
         else:
             gap1_base = (
@@ -930,7 +1100,13 @@ def _route_l_shape(
     fan = ctx.junction_fan_info.get(ekey)
     if fan is not None:
         ui, un = fan
-        # First corner: unified position within the combined fan-out
+        # First corner: unified position within the combined fan-out.
+        # Use the going_right fan_mid_x formula so corner_x - r_first
+        # lands at junction.x and the upstream segment terminates at
+        # the curve start with NO nubbin past the curve start.  This
+        # is independent of the route's overall dx sign since the
+        # source-side curve in a wrap-style fan is always on the
+        # OUTSIDE (right) of the source section.
         delta, r_first, _ = l_shape_radii(
             ui,
             un,
@@ -938,11 +1114,7 @@ def _route_l_shape(
             offset_step=ctx.offset_step,
             base_radius=ctx.curve_radius,
         )
-        # mid_x places all lines so they diverge at sx
-        if dx > 0:
-            mid_x = sx + ctx.curve_radius + (un - 1) * ctx.offset_step / 2
-        else:
-            mid_x = sx - ctx.curve_radius - (un - 1) * ctx.offset_step / 2
+        mid_x = sx + ctx.curve_radius + (un - 1) * ctx.offset_step / 2
         # Second corner: from sub-bundle (only L-shape siblings turn here)
         _, _, r_second = l_shape_radii(
             i,
@@ -999,6 +1171,31 @@ def _route_l_shape(
                 base_radius=new_base,
             )
 
+    # When fan is active, vx == sx (corner at junction).  The first
+    # segment (sx, sy) -> (vx, sy) is zero-length, which prevents the
+    # renderer from drawing the corner curve.  Extend pts[0] back by
+    # curve_radius LEFT of the junction so the first corner gets a
+    # standard CURVE_RADIUS arc with horizontal lead-in (overlapping
+    # the upstream exit_port->junction segment's last curve_radius
+    # pixels, fine since they share the same line colour).
+    if fan is not None:
+        src_off = _get_offset(ctx, edge.source, edge.line_id)
+        tgt_off = _get_offset(ctx, edge.target, edge.line_id)
+        r_lead = ctx.curve_radius
+        return RoutedPath(
+            edge=edge,
+            line_id=edge.line_id,
+            points=[
+                (vx - r_lead, sy + src_off),
+                (vx, sy + src_off),
+                (vx, ty + tgt_off),
+                (tx, ty + tgt_off),
+            ],
+            is_inter_section=True,
+            curve_radii=[r_lead, r_second],
+            offsets_applied=True,
+        )
+
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
@@ -1037,7 +1234,7 @@ def _route_top_entry_l_shape(
     )
 
     # Compute Y for the horizontal channel in the inter-row gap.
-    mid_y = _inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius)
+    mid_y = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius)
     hy = mid_y + delta
 
     # Horizontal lead-in: a short run so the corner from horizontal to
@@ -1079,6 +1276,406 @@ def _route_top_entry_l_shape(
     )
 
 
+def _route_left_entry_wrap(
+    edge: Edge, src: Station, tgt: Station, i: int, n: int, ctx: _RoutingCtx
+) -> RoutedPath:
+    """Route to a LEFT entry port by wrapping around the left side.
+
+    When the source is to the RIGHT of a LEFT entry port AND the sections
+    are stacked vertically (so the standard L-shape would cut horizontally
+    through the target section's interior to reach the left-side entry),
+    drop straight down from the source, run leftward in the inter-row gap
+    past the target section's left edge, then drop down and into the LEFT
+    entry port::
+
+        (sx,sy) -> (sx, hy) -> (vx, hy) -> (vx, ty) -> (tx, ty)
+
+    This mirrors :func:`_route_right_entry_wrap` and avoids the
+    "cut through intervening section" anti-pattern.
+    """
+    sx, sy = src.x, src.y
+    tx, ty = tgt.x, tgt.y
+    dy = ty - sy
+    going_down = dy > 0
+
+    # When the junction has mixed-direction siblings, share the first-
+    # corner geometry with the other handlers (bypass / L-shape) by
+    # consuming junction_fan_info exactly the way _route_l_shape and
+    # _route_bypass do.  This makes ALL outgoing routes from the
+    # junction pivot through the same first corner; they only diverge
+    # at the second corner (where this wrap turns into the inter-row
+    # channel and the bypass continues downward).
+    ekey = (edge.source, edge.target, edge.line_id)
+    fan = ctx.junction_fan_info.get(ekey)
+    if fan is not None:
+        ui, un = fan
+        fan_delta, r_first, _ = l_shape_radii(
+            ui,
+            un,
+            going_down=going_down,
+            offset_step=ctx.offset_step,
+            base_radius=ctx.curve_radius,
+        )
+        # For the wrap, the source-side first corner sits on the
+        # OUTSIDE of section 1 (the right of section 1's right edge,
+        # since we're wrapping right then down then left).  Use the
+        # going_right convention (+curve_radius + (un-1)*offset_step/2)
+        # for fan_mid_x so the curve_start_x = corner_x - r_wrap lands
+        # EXACTLY at the junction's x, which means the upstream
+        # exit_port -> junction segment terminates at the curve start
+        # with no overlap / no "nubbin" past the curve start.
+        fan_mid_x = sx + ctx.curve_radius + (un - 1) * ctx.offset_step / 2
+        # Second corner is per-line within this edge's sub-bundle.
+        _, _, r_second = l_shape_radii(
+            i,
+            n,
+            going_down=going_down,
+            offset_step=ctx.offset_step,
+            base_radius=ctx.curve_radius,
+        )
+        delta = fan_delta
+    else:
+        delta, r_first, r_second = l_shape_radii(
+            i,
+            n,
+            going_down=going_down,
+            offset_step=ctx.offset_step,
+            base_radius=ctx.curve_radius,
+        )
+        fan_mid_x = None
+
+    # Per-corner offset propagation rule:
+    # The bundle enters going RIGHT with the outer line (i=0, delta > 0
+    # going_down) at LARGER x in V1.  Through the four-corner wrap
+    # (R -> D -> L -> D -> R; handedness CW, CW, CCW, CCW), the outer
+    # line stays "on top" of the bundle when delivered at C4.  Each
+    # corner propagates the stagger as:
+    #   - V1 (vertical, post-C1): OUTER at LARGER x (sign +delta on corner_x).
+    #   - H  (horizontal, post-C2): OUTER at LARGER y (sign +delta on hy).
+    #   - V2 (vertical, post-C3): OUTER at LARGER x (sign +delta on vx).
+    #   - Entry endpoint (post-C4): OUTER at SMALLER y (natural priority
+    #     ordering via station_offsets, no per-corner flip).
+    # This is the rule illustrated by the user's A/B example: A starts on
+    # top going right, lands on top after C4 with no crossings at any
+    # corner.
+    hy_base = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius)
+    hy = hy_base + delta
+
+    # Ensure the V2 channel (the per-line vertical run on the target's
+    # OUTER side, before C4) sits at least SECTION_ROUTE_CLEARANCE past
+    # the target section's left edge.  The default vx places the line
+    # CLOSEST to the edge (delta=+max_delta in this sign convention) at
+    # ~curve_radius from the edge, which reads as flush in renders.
+    # A uniform extra shift preserves the per-line delta stagger so the
+    # offset propagation rule is unchanged.
+    n_for_outer = fan[1] if fan is not None else n
+    max_delta = (n_for_outer - 1) * ctx.offset_step / 2
+    base_gap = ctx.curve_radius + ctx.offset_step
+    extra_clearance = max(
+        0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta)
+    )
+    vx = tx - base_gap - extra_clearance + delta
+
+    # Apply src/tgt station offsets explicitly so the renderer's later
+    # _apply_line_offsets pass doesn't double-apply.  Without this, the
+    # intermediate hy points fall in the source-vs-target heuristic's
+    # target side (closer to ty than sy), get the target offset, and
+    # cancel the per-line `delta` here - making the bundle collapse to
+    # a single y in the horizontal gap segment.
+    src_off = _get_offset(ctx, edge.source, edge.line_id)
+    tgt_off = _get_offset(ctx, edge.target, edge.line_id)
+
+    # Per-corner concentric radii.  The wrap turns R -> D -> L -> D -> R,
+    # giving corner handedness CW, CCW, CCW, CW.  Tracing the outer line
+    # (i=0, largest off_for_radius):
+    #   * C1 (H_lead -> V1, CW):   outer is OUTSIDE the turn -> LARGE r.
+    #   * C2 (V1   -> H,  CCW):    outer is OUTSIDE the turn -> LARGE r.
+    #   * C3 (H    -> V2, CCW):    outer is OUTSIDE the turn -> LARGE r.
+    #   * C4 (V2   -> H_entry, CW):outer is INSIDE  the turn -> SMALL r.
+    # C4's handedness is the mirror of C1: the OUTER line of the bundle
+    # is now on the INSIDE of the turn, so it gets base_radius (the
+    # smallest radius) while the INNER bundle line gets the largest.
+    # This matches the per-line vx stagger (vx = tx - curve_radius -
+    # offset_step + delta), which places exactly r_outer_at_C4
+    # =base_radius of post-segment for the outer line and
+    # r_inner_at_C4 = base_radius + max_off for the inner line.  Using
+    # outside=True for C4 (as previously) clamps the outer line's curve
+    # radius down to base_radius because the post-C4 segment is too
+    # short, producing the visible "outer line collapses at C4"
+    # asymmetry against C1/C2/C3.  Mirrors the [r_lead, r_first,
+    # r_first, r_second] pattern in _route_right_entry_wrap.
+    if fan is not None:
+        off_for_radius = (un - 1 - ui) * ctx.offset_step
+        max_off_for_radius = (un - 1) * ctx.offset_step
+    else:
+        off_for_radius = (n - 1 - i) * ctx.offset_step
+        max_off_for_radius = (n - 1) * ctx.offset_step
+    r_wrap = corner_radius(
+        off_for_radius,
+        max_off_for_radius,
+        outside=True,
+        base_radius=ctx.curve_radius,
+    )
+    r_inside = corner_radius(
+        off_for_radius,
+        max_off_for_radius,
+        outside=False,
+        base_radius=ctx.curve_radius,
+    )
+    if fan_mid_x is not None:
+        corner_x = fan_mid_x + fan_delta
+    else:
+        # No junction: still place the C1 corner OUTSIDE the source
+        # section's right edge with per-line stagger, using the same
+        # formula as the fan case (treating the bundle as a virtual
+        # fan of size n).  Without this lead-in, corner_x == sx puts
+        # V1 right at the section boundary and collapses all lines
+        # onto a single column, producing the "compressed bundle at
+        # the section edge" visual reported on sarek section 2.
+        non_fan_mid_x = sx + ctx.curve_radius + (n - 1) * ctx.offset_step / 2
+        corner_x = non_fan_mid_x + delta
+    # Ensure the V1 channel (the per-line vertical run on the SOURCE's
+    # OUTER side, between C1 and C2) sits at least SECTION_ROUTE_CLEARANCE
+    # past the source section's right edge.  Without this, when the source
+    # station is AT the section's right edge (e.g. an exit port on the
+    # right side), corner_x's closest line lands ~curve_radius past the
+    # edge, which reads as flush in renders.  When the source is already
+    # offset from the section (e.g. a junction at sx = bbox_right +
+    # JUNCTION_MARGIN), this shift is zero.  Uniform across lines, so the
+    # per-line delta stagger and the corner_x - r_wrap == sx cancellation
+    # below are preserved by also shifting lx.
+    src_section = (
+        ctx.graph.sections.get(src.section_id) if src.section_id else None
+    )
+    if src_section and src_section.bbox_w > 0:
+        section_right = src_section.bbox_x + src_section.bbox_w
+    else:
+        section_right = sx
+    # Closest line to the source edge sits at corner_x_min = sx + curve_radius
+    # (the line at delta = -max_delta).  Required gap from section_right
+    # is SECTION_ROUTE_CLEARANCE; current gap is sx + curve_radius -
+    # section_right.
+    current_v1_gap = sx + ctx.curve_radius - section_right
+    extra_v1 = max(0.0, SECTION_ROUTE_CLEARANCE - current_v1_gap)
+    corner_x += extra_v1
+    # Lead-in extends r_wrap LEFT of the corner so the first corner
+    # gets the SAME concentric radius as the other three corners.  With
+    # the virtual-fan corner_x above, every line lands lx == sx
+    # exactly (corner_x - r_wrap = sx + curve_radius + (n-1)*step/2 +
+    # delta - r_wrap, and r_wrap = curve_radius + (n-1-i)*step, delta
+    # = ((n-1)/2 - i)*step => they cancel to sx for every i).  With
+    # extra_v1 > 0, that cancellation places lx at sx + extra_v1; pin
+    # lx back to sx so the route starts at the source station/port and
+    # the extra clearance manifests as a longer horizontal lead-in
+    # before C1 rather than a gap at the start of the path.
+    lx = sx
+    return RoutedPath(
+        edge=edge,
+        line_id=edge.line_id,
+        points=[
+            (lx, sy + src_off),
+            (corner_x, sy + src_off),
+            (corner_x, hy),
+            (vx, hy),
+            (vx, ty + tgt_off),
+            (tx, ty + tgt_off),
+        ],
+        is_inter_section=True,
+        # Handedness-aware radii: C1 and C2 are right turns (the bundle's
+        # outer line is OUTSIDE the turn) so use the larger outside-of-turn
+        # radius r_wrap.  C3 and C4 are left turns (outer line is INSIDE
+        # the turn) so use the smaller inside-of-turn radius r_inside.
+        # Without this, C3's outer-line radius (r_wrap) clamps mid-curve
+        # because the post-C3 segment is too short, producing the visible
+        # "outer line wider than inner" asymmetry the user reported.
+        curve_radii=[r_wrap, r_wrap, r_inside, r_inside],
+        offsets_applied=True,
+    )
+
+
+def _route_around_section_below(
+    edge: Edge,
+    src: Station,
+    tgt: Station,
+    entry_port: Station,
+    i: int,
+    n: int,
+    ctx: _RoutingCtx,
+) -> RoutedPath:
+    """Route to a LEFT entry port by going AROUND BELOW the target section.
+
+    Used when a standard L-shape or :func:`_route_left_entry_wrap` would
+    have its horizontal segment cross an intervening section's bbox
+    (e.g. sarek section 1 -> section 5 LEFT entry, where the natural
+    inter-row gap lands inside variant_calling).  Routes via 4 corners
+    in a clockwise R-D-L-U-R loop that descends past the target row's
+    bottom, runs leftward under everything, rises in the inter-section
+    gap to the entry Y, and enters the LEFT port from below::
+
+        (lx, sy) -> (cx, sy)          ; H lead-in right
+        (cx, sy) -> (cx, by)          ; V down past target row's bottom
+        (cx, by) -> (vx, by)          ; H left past target's left edge
+        (vx, by) -> (vx, ey)          ; V up to entry Y
+        (vx, ey) -> (ex, ey)          ; H right into LEFT entry port
+
+    All four corners are clockwise (R->D, D->L, L->U, U->R), so the
+    outer line of the bundle stays on the OUTSIDE of every turn and
+    gets the larger radius throughout.
+
+    *tgt* is the L-shape's nominal target (the edge target, often a
+    merge junction).  *entry_port* is the actual endpoint of the route
+    (the LEFT entry port station resolved from the merge junction or
+    equal to *tgt* when the edge targets a port directly).
+    """
+    sx, sy = src.x, src.y
+    ex, ey = entry_port.x, entry_port.y
+    going_down = ey > sy
+
+    # Match the geometry of _route_left_entry_wrap's first corner so
+    # this handler composes cleanly with sibling routes from the same
+    # junction (junction_fan_info pivots all outgoing edges through a
+    # shared first corner; merge-branch edges are excluded from
+    # junction_fan_info, so for the merge case fan is typically None).
+    ekey = (edge.source, edge.target, edge.line_id)
+    fan = ctx.junction_fan_info.get(ekey)
+    if fan is not None:
+        ui, un = fan
+        fan_delta, _r_first, _ = l_shape_radii(
+            ui,
+            un,
+            going_down=going_down,
+            offset_step=ctx.offset_step,
+            base_radius=ctx.curve_radius,
+        )
+        fan_mid_x = sx + ctx.curve_radius + (un - 1) * ctx.offset_step / 2
+        delta = fan_delta
+        off_for_radius = (un - 1 - ui) * ctx.offset_step
+        max_off_for_radius = (un - 1) * ctx.offset_step
+    else:
+        delta, _r_first, _r_second = l_shape_radii(
+            i,
+            n,
+            going_down=going_down,
+            offset_step=ctx.offset_step,
+            base_radius=ctx.curve_radius,
+        )
+        fan_mid_x = None
+        off_for_radius = (n - 1 - i) * ctx.offset_step
+        max_off_for_radius = (n - 1) * ctx.offset_step
+
+    # All four corners are CW (clockwise loop: R->D->L->U->R).  The outer
+    # line of the bundle stays OUTSIDE every turn and gets the larger
+    # radius; the inner line gets the smaller radius.
+    r_outer = corner_radius(
+        off_for_radius,
+        max_off_for_radius,
+        outside=True,
+        base_radius=ctx.curve_radius,
+    )
+
+    # Bypass Y below all sections in the column range so the route
+    # clears every intervening section (cross_row=True).
+    src_col = _resolve_section_col(ctx.graph, src)
+    ep_col = _resolve_section_col(ctx.graph, entry_port)
+    # Fallbacks if a column can't be resolved (degenerate cases).
+    bc_src_col = src_col if src_col is not None else 0
+    bc_tgt_col = ep_col if ep_col is not None else bc_src_col
+    by_base = bypass_bottom_y(
+        ctx.graph,
+        bc_src_col,
+        bc_tgt_col,
+        BYPASS_CLEARANCE,
+        src_row=_resolve_section_row(ctx.graph, src),
+        cross_row=True,
+    )
+    by = by_base + delta
+
+    # Vertical V2 channel sits just left of the target section's bbox.
+    # The outer bundle line (delta > 0 going_down) sits at LARGER y in
+    # H_bottom AND at SMALLER x in V_up.  This handedness is OPPOSITE
+    # to _route_left_entry_wrap's vx convention because the around-route
+    # turns from leftward-H to upward-V (a CW W->N corner with center
+    # NE of corner), whereas the wrap turns from leftward-H to
+    # downward-V (a CCW W->S corner with center SE).  Concentric C3
+    # requires the outer line on the FAR side from the arc center, so
+    # the V_up x stagger uses ``-delta`` here while the wrap uses
+    # ``+delta``.  Without this sign flip, the per-line C3 arcs end up
+    # with different centers and visibly cross under the target
+    # section's left edge.
+    ep_section = (
+        ctx.graph.sections.get(entry_port.section_id)
+        if entry_port.section_id
+        else None
+    )
+    if ep_section and ep_section.bbox_w > 0:
+        section_left = ep_section.bbox_x
+    else:
+        section_left = ex
+    # Channel sits at section_left - (curve_radius + offset_step) - delta.
+    # The line CLOSEST to section_left is the one with delta=-max_delta
+    # (innermost in the bundle); its gap to section_left is base_gap -
+    # max_delta.  Bump uniformly so even that closest line stays at
+    # least SECTION_ROUTE_CLEARANCE from the edge.  The shift is uniform
+    # across lines so the per-line delta stagger (and the around-route's
+    # V_up sign convention) is preserved.
+    n_for_outer = fan[1] if fan is not None else n
+    max_delta = (n_for_outer - 1) * ctx.offset_step / 2
+    base_gap = ctx.curve_radius + ctx.offset_step
+    extra_clearance = max(
+        0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta)
+    )
+    vx = section_left - base_gap - extra_clearance - delta
+
+    # First-corner X: lead-in right of source, mirroring _route_left_entry_wrap.
+    if fan_mid_x is not None:
+        corner_x = fan_mid_x + delta
+    else:
+        non_fan_mid_x = sx + ctx.curve_radius + (n - 1) * ctx.offset_step / 2
+        corner_x = non_fan_mid_x + delta
+    # V1 clearance from the source section's right edge, mirroring
+    # _route_left_entry_wrap.  See comments there for the derivation.
+    src_section = (
+        ctx.graph.sections.get(src.section_id) if src.section_id else None
+    )
+    if src_section and src_section.bbox_w > 0:
+        v1_section_right = src_section.bbox_x + src_section.bbox_w
+    else:
+        v1_section_right = sx
+    current_v1_gap = sx + ctx.curve_radius - v1_section_right
+    extra_v1 = max(0.0, SECTION_ROUTE_CLEARANCE - current_v1_gap)
+    corner_x += extra_v1
+    # Pin lx at sx so the route starts at the source station; extra_v1
+    # manifests as a longer H lead-in before C1.  See the analogous
+    # comment in _route_left_entry_wrap.
+    lx = sx
+
+    src_off = _get_offset(ctx, edge.source, edge.line_id)
+    tgt_off = _get_offset(ctx, edge.target, edge.line_id)
+
+    return RoutedPath(
+        edge=edge,
+        line_id=edge.line_id,
+        points=[
+            (lx, sy + src_off),
+            (corner_x, sy + src_off),
+            (corner_x, by),
+            (vx, by),
+            (vx, ey + tgt_off),
+            (ex, ey + tgt_off),
+        ],
+        is_inter_section=True,
+        # All four corners are CW; the outer bundle line stays on the
+        # OUTSIDE of every turn (large y at H_bottom, small x at V_up
+        # given the V_up sign flip above), so every corner uses the
+        # outside-of-turn radius.  C1/C2/C3 are perfectly concentric;
+        # C4 shares Cx with C3 but its Cy differs per line because all
+        # lines converge at the single entry port endpoint (the arcs
+        # nest from inside-out without crossing).
+        curve_radii=[r_outer, r_outer, r_outer, r_outer],
+        offsets_applied=True,
+    )
+
+
 def _route_right_entry_wrap(
     edge: Edge, src: Station, tgt: Station, i: int, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -1089,13 +1686,20 @@ def _route_right_entry_wrap(
     drop into the inter-row gap, run horizontally past the target
     section's right edge, then drop into the RIGHT entry port::
 
-        (sx,sy) -> (sx, hy) -> (vx, hy) -> (vx, ty) -> (tx, ty)
+        (sx,sy) -> (lx, sy) -> (lx, hy) -> (vx, hy) -> (vx, ty) -> (tx, ty)
 
     For cross-row cases, the horizontal channel runs just below the
     source row's sections (bypass style) so the line stays high and
     only drops down when it reaches the target column.
 
     This avoids crossing through intervening sections.
+
+    Per-corner offset propagation is the mirror of
+    :func:`_route_left_entry_wrap`: bundle going RIGHT with outer line
+    (i=0, delta>0 going_down) at SMALLER y in V0 (sy+src_off) wraps
+    through R-D-R-D-L (handedness CW, CCW, CW, CW), landing at the
+    entry port with outer at SMALLER y again - matching the natural
+    priority-based station-offset ordering.
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
@@ -1132,11 +1736,23 @@ def _route_right_entry_wrap(
         hy += delta
     else:
         # Same-row: use inter-row gap above the target section.
-        hy = _inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius)
+        hy = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius)
         hy += delta
 
-    # Vertical channel X: just past the entry port in the inter-section gap.
-    vx = tx + ctx.curve_radius + ctx.offset_step + delta
+    # Vertical channel X: just past the entry port in the inter-section
+    # gap.  Mirror of the left-entry wrap's V2 sign convention: OUTER
+    # (delta > 0 going_down) lands at SMALLER x in V2 here (west of
+    # bundle midline) because the C3 (R->D, CW) corner preserves the
+    # right-of-travel position established on H by C2 (D->R, CCW).
+    # Apply SECTION_ROUTE_CLEARANCE so the line CLOSEST to the section's
+    # right edge (delta=-max_delta in this sign convention) keeps a
+    # visible gap.  Uniform shift preserves the offset stagger.
+    max_delta = (n - 1) * ctx.offset_step / 2
+    base_gap = ctx.curve_radius + ctx.offset_step
+    extra_clearance = max(
+        0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta)
+    )
+    vx = tx + base_gap + extra_clearance - delta
 
     # Short horizontal lead-in so the first corner (horizontal-to-vertical)
     # gets a smooth curve instead of a sharp right angle at the junction.
@@ -1149,104 +1765,6 @@ def _route_right_entry_wrap(
         is_inter_section=True,
         curve_radii=[r_lead, r_first, r_first, r_second],
     )
-
-
-def _inter_row_channel_y(
-    graph: MetroGraph,
-    src: Station,
-    tgt: Station,
-    sy: float,
-    ty: float,
-    dy: float,
-    max_r: float,
-) -> float:
-    """Compute Y for a horizontal channel in an inter-row gap.
-
-    Vertical equivalent of ``inter_column_channel_x``: places the
-    channel in the inter-row gap, above the target section's header
-    (number badge + label rendered above bbox_y).
-    """
-    # Keep the channel clear of section headers (numbered circle + label)
-    # that protrude above/below bbox_y.
-
-    # Resolve sections for junction stations (section_id is None for
-    # junctions; trace through edges to find a connected port's section).
-    src_sec = _resolve_section(graph, src)
-    tgt_sec = _resolve_section(graph, tgt)
-
-    if src_sec and tgt_sec and src_sec.grid_row != tgt_sec.grid_row:
-        src_row = src_sec.grid_row
-        tgt_row = tgt_sec.grid_row
-
-        if dy > 0:
-            # Going down: gap between bottom of source row and top of target row
-            bottom = row_bottom_edge(graph, src_row, default=sy)
-            top = row_top_edge(graph, tgt_row, default=ty)
-            # Place above the header zone
-            header_top = top - HEADER_CLEARANCE
-            return (bottom + header_top) / 2
-        else:
-            # Going up: gap between top of source row and bottom of target row
-            top = row_top_edge(graph, src_row, default=sy)
-            bottom = row_bottom_edge(graph, tgt_row, default=ty)
-            header_bottom = bottom + HEADER_CLEARANCE
-            return (top + header_bottom) / 2
-
-    # Fallback: place near target, clearing the header zone
-    if dy > 0:
-        return ty - HEADER_CLEARANCE - max_r
-    else:
-        return ty + HEADER_CLEARANCE + max_r
-
-
-def _resolve_section(
-    graph: MetroGraph,
-    station: Station,
-    prefer_upstream: bool = True,
-):
-    """Resolve a station's section, tracing through junctions if needed.
-
-    For stations with a ``section_id``, returns that section directly.
-    For junctions (``section_id is None``), traces edges to find a
-    connected port's section.
-
-    When *prefer_upstream* is True (default), incoming edges are checked
-    first so the junction resolves to the upstream section.  When False,
-    both directions are scanned in a single pass with no preference.
-    """
-    if station.section_id:
-        return graph.sections.get(station.section_id)
-
-    if prefer_upstream:
-        for e in graph.edges_to(station.id):
-            other = graph.stations.get(e.source)
-            if other and other.section_id:
-                sec = graph.sections.get(other.section_id)
-                if sec:
-                    return sec
-        for e in graph.edges_from(station.id):
-            other = graph.stations.get(e.target)
-            if other and other.section_id:
-                sec = graph.sections.get(other.section_id)
-                if sec:
-                    return sec
-    else:
-        # Preserve original graph.edges insertion order: callers depend on
-        # the first incident edge winning when a junction has neighbours
-        # in multiple sections.
-        for e in graph.edges:
-            other_id = None
-            if e.source == station.id:
-                other_id = e.target
-            elif e.target == station.id:
-                other_id = e.source
-            if other_id:
-                other = graph.stations.get(other_id)
-                if other and other.section_id:
-                    sec = graph.sections.get(other.section_id)
-                    if sec:
-                        return sec
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1815,6 +2333,15 @@ def _route_diagonal(
         src_min = max(min_straight, label_text_width(src.label) / 2)
     if edge.target in ctx.join_stations and tgt.label.strip():
         tgt_min = max(min_straight, label_text_width(tgt.label) / 2)
+    # File-input stations fan out to several downstream stations; the
+    # diagonal should start past the icon so the line visually leaves
+    # the file before forking.  Without this clamp the diagonal can
+    # start inside the icon's drawn area (MIN_STRAIGHT_EDGE = 10 px,
+    # icon extends to ~station.x + 20 + 14).
+    if src.is_terminus and edge.source in ctx.fork_stations:
+        src_min = max(src_min, ICON_TERMINUS_FORK_LEAD)
+    if tgt.is_terminus and edge.target in ctx.join_stations:
+        tgt_min = max(tgt_min, ICON_TERMINUS_FORK_LEAD)
     if src_min + tgt_min + ctx.diagonal_run > abs(dx):
         src_min = min_straight
         tgt_min = min_straight
@@ -2421,7 +2948,7 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
 
 def _resolve_section_col(graph: MetroGraph, station: Station) -> int | None:
     """Resolve the grid column for a port or junction station."""
-    sec = _resolve_section(graph, station, prefer_upstream=False)
+    sec = resolve_section(graph, station, prefer_upstream=False)
     if sec and sec.grid_col >= 0:
         return sec.grid_col
     return None
@@ -2429,7 +2956,7 @@ def _resolve_section_col(graph: MetroGraph, station: Station) -> int | None:
 
 def _resolve_section_row(graph: MetroGraph, station: Station) -> int | None:
     """Resolve the grid row for a port or junction station."""
-    sec = _resolve_section(graph, station, prefer_upstream=False)
+    sec = resolve_section(graph, station, prefer_upstream=False)
     if sec and sec.grid_row >= 0:
         return sec.grid_row
     return None
@@ -2447,6 +2974,42 @@ def _has_intervening_sections(
         if s.bbox_w > 0 and lo < s.grid_col < hi:
             if src_row is None or s.grid_row == src_row:
                 return True
+    return False
+
+
+def _h_segment_crosses_other_section(
+    graph: MetroGraph,
+    x1: float,
+    x2: float,
+    y: float,
+    exclude_section_ids: set[str],
+    margin: float = 0.0,
+) -> bool:
+    """Return True if a horizontal segment at *y* crosses any section interior.
+
+    Sections listed in *exclude_section_ids* are skipped entirely.  All
+    other sections are tested against the segment's open interior.  The
+    horizontal segment runs from ``min(x1, x2)`` to ``max(x1, x2)``.
+
+    A section is "crossed" when the segment overlaps its bbox's open
+    interior - i.e. the segment penetrates the section rather than just
+    grazing its boundary.  ``y`` is considered inside when it falls
+    within ``[bbox_y - margin, bbox_y + bbox_h + margin]``.
+    """
+    lo_x, hi_x = (x1, x2) if x1 <= x2 else (x2, x1)
+    for s in graph.sections.values():
+        if s.bbox_w <= 0:
+            continue
+        if s.id in exclude_section_ids:
+            continue
+        # Strict X interior overlap: segment must enter past the bbox
+        # left edge AND not end before reaching past the right edge.
+        right = s.bbox_x + s.bbox_w
+        if hi_x <= s.bbox_x or lo_x >= right:
+            continue
+        # Y inside bbox (with optional margin so headers/footers count).
+        if s.bbox_y - margin <= y <= s.bbox_y + s.bbox_h + margin:
+            return True
     return False
 
 
@@ -2559,12 +3122,13 @@ def _compute_junction_fan_info(
     line_priority: dict[str, int],
     skip_edges: set[tuple[str, str, str]] | None = None,
 ) -> dict[tuple[str, str, str], tuple[int, int]]:
-    """Unified fan-out positions for junctions with mixed L-shape/bypass edges.
+    """Unified fan-out positions for junctions with mixed-direction edges.
 
-    When a junction fans out to both adjacent-column targets (routed as
-    L-shapes) and distant targets (routed as bypasses), all edges of
-    the SAME line share a single vertical channel so they travel
-    together through the first corner and only diverge afterward.
+    When a junction fans out to targets that would otherwise be routed
+    by DIFFERENT inter-section handlers (L-shape, bypass, LEFT/RIGHT
+    entry wrap), all edges of the SAME line share a single vertical
+    channel so they travel together through the first corner and only
+    diverge afterward.
 
     Assigns per-LINE positions (not per-edge), so test->preprocess and
     test->normalization share the same (i, n) and thus the same
@@ -2585,44 +3149,90 @@ def _compute_junction_fan_info(
             continue
         src_row = _resolve_section_row(graph, jst)
 
-        # Collect all outgoing inter-section edges (excluding skipped)
+        # Classify each outgoing edge into one of: L-shape (adjacent col,
+        # no intervening sections), bypass (column gap with intervening),
+        # or wrap (LEFT/RIGHT entry port reached from the opposite side,
+        # going via the inter-row channel).  A junction qualifies for a
+        # unified shared-first-corner fan when its outgoing edges use at
+        # least two of these three handlers, since each handler would
+        # otherwise pick a different source-side channel X.
+        #
+        # Category detection uses ALL outgoing inter-section edges
+        # (including merge-branch edges that get skipped from the
+        # per-line position assignment).  Otherwise a junction whose
+        # bypass siblings are all routed as merge branches would lose
+        # its bypass category and the wrap-only / L-only fallback would
+        # leave the wrap routes free to pick a different corner X than
+        # the bypass routes.
         outgoing: list[Edge] = []
         has_lshape = False
         has_bypass = False
+        has_wrap = False
         for edge in graph.edges_from(jid):
-            if (edge.source, edge.target, edge.line_id) in _skip:
-                continue
             tgt = graph.stations.get(edge.target)
             if not tgt or not (tgt.is_port or edge.target in junction_ids):
                 continue
             tgt_col = _resolve_section_col(graph, tgt)
             if tgt_col is None:
                 continue
+            tgt_row = _resolve_section_row(graph, tgt)
+            tgt_port = graph.ports.get(edge.target)
             is_bypass = abs(tgt_col - src_col) > 1 and _has_intervening_sections(
                 graph, src_col, tgt_col, src_row
             )
+            dx_edge = tgt.x - jst.x
+            is_wrap = (
+                tgt_port is not None
+                and tgt_port.is_entry
+                and not is_bypass
+                and src_row is not None
+                and tgt_row is not None
+                and src_row != tgt_row
+                and (
+                    (tgt_port.side == PortSide.RIGHT and dx_edge > 0)
+                    or (tgt_port.side == PortSide.LEFT and dx_edge < 0)
+                )
+            )
             if is_bypass:
                 has_bypass = True
+            elif is_wrap:
+                has_wrap = True
             else:
                 has_lshape = True
-            outgoing.append(edge)
+            if (edge.source, edge.target, edge.line_id) not in _skip:
+                outgoing.append(edge)
 
-        if not outgoing or not has_lshape or not has_bypass:
+        # Need at least two distinct handler categories for a shared
+        # first-corner fan to be meaningful (otherwise all edges already
+        # go through the same handler and that handler computes one
+        # corridor on its own).
+        category_count = int(has_lshape) + int(has_bypass) + int(has_wrap)
+        if not outgoing or category_count < 2:
             continue
 
         # Assign one position per unique line_id (sorted by priority).
-        # All edges of the same line share that position.
+        # All edges of the same line share that position, including
+        # edges previously SKIPPED for the bundle.  This makes a merge
+        # branch route share the same source-side fan position as a
+        # sibling wrap/L-shape route, so all of them pivot through the
+        # same first corner X (their geometries diverge afterward).
+        all_outgoing = [
+            e for e in graph.edges_from(jid)
+            if (es := graph.stations.get(e.target)) is not None
+            and (es.is_port or e.target in junction_ids)
+        ]
         line_ids = sorted(
-            {e.line_id for e in outgoing},
+            {e.line_id for e in all_outgoing},
             key=lambda lid: line_priority.get(lid, 0),
         )
         line_pos = {lid: i for i, lid in enumerate(line_ids)}
         n = len(line_ids)
 
-        for edge in outgoing:
-            result[(edge.source, edge.target, edge.line_id)] = (
-                line_pos[edge.line_id],
-                n,
-            )
+        for edge in all_outgoing:
+            if edge.line_id in line_pos:
+                result[(edge.source, edge.target, edge.line_id)] = (
+                    line_pos[edge.line_id],
+                    n,
+                )
 
     return result
