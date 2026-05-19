@@ -1519,6 +1519,37 @@ def _route_left_entry_wrap(
     )
 
 
+def _has_bypass_sibling_to_same_entry(
+    edge: Edge,
+    entry_port: Station,
+    ctx: _RoutingCtx,
+) -> bool:
+    """Detect whether a sibling merge trunk's bypass shares the V_up gap.
+
+    Mirrors :func:`_has_around_section_sibling` (which lives on the
+    trunk side and answers "is there an around-route sharing my gap?").
+    Used by :func:`_route_around_section_below` to decide whether the
+    V_up channel shares its gap with a bypass bundle (in which case
+    the around-route is bundle index 1 in the symmetric layout) or
+    has the gap to itself (bundle index 0 of 1).
+    """
+    if entry_port is None:
+        return False
+    ep_id = entry_port.id
+    # Walk back from the entry port through the merge-junction graph
+    # to find the merge junction this entry_port serves.
+    for mj_id, mapped_ep in ctx.merge.entry_port_for.items():
+        if mapped_ep != ep_id:
+            continue
+        # mj_id is a merge junction whose entry_port is ours.  Check
+        # whether the trunk source feeding it routes via bypass.
+        trunk_src = ctx.merge.trunk_source.get(mj_id)
+        if trunk_src is None or trunk_src == edge.source:
+            continue
+        return True
+    return False
+
+
 def _route_around_section_below(
     edge: Edge,
     src: Station,
@@ -1637,20 +1668,39 @@ def _route_around_section_below(
         section_left = ep_section.bbox_x
     else:
         section_left = ex
-    # Channel sits at section_left - (curve_radius + offset_step) - delta.
-    # The line CLOSEST to section_left is the one with delta=-max_delta
-    # (innermost in the bundle); its gap to section_left is base_gap -
-    # max_delta.  Bump uniformly so even that closest line stays at
-    # least SECTION_ROUTE_CLEARANCE from the edge.  The shift is uniform
-    # across lines so the per-line delta stagger (and the around-route's
-    # V_up sign convention) is preserved.
     n_for_outer = fan[1] if fan is not None else n
     max_delta = (n_for_outer - 1) * ctx.offset_step / 2
     base_gap = ctx.curve_radius + ctx.offset_step
-    extra_clearance = max(
-        0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta)
-    )
-    vx = section_left - base_gap - extra_clearance - delta
+
+    # V_up X: position the bundle within the inter-column gap just
+    # left of the target section, using the principled symmetric
+    # placement.  When a sibling merge-trunk bypass shares this gap,
+    # we're bundle 1 (rightmost); else we're the sole bundle.  The
+    # symmetric helper handles both cases and the post-corner -delta
+    # stagger preserves the around-route's V_up sign convention.
+    paired_with_bypass = _has_bypass_sibling_to_same_entry(edge, entry_port, ctx)
+    if ep_col is not None and ep_col > 0:
+        gap_left, gap_right = column_gap_edges(ctx.graph, ep_col - 1, ep_col)
+        bw = bundle_width(n_for_outer, ctx.offset_step)
+        widths = [bw, bw] if paired_with_bypass else [bw]
+        bundle_idx = 1 if paired_with_bypass else 0
+        vx_mid = symmetric_bundle_midpoint(gap_left, gap_right, widths, bundle_idx)
+        # Sanity floor: the V_up must keep at least EDGE_TO_BUNDLE_CLEARANCE
+        # from the target section's left edge so the line doesn't visually
+        # hug the bbox.  Re-applies the legacy clamp when the gap is too
+        # narrow for full symmetric placement.
+        max_vx_mid = (
+            section_left
+            - base_gap
+            - max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
+        )
+        vx_mid = min(vx_mid, max_vx_mid)
+        vx = vx_mid - delta
+    else:
+        # Fallback for degenerate cases without column info: legacy
+        # anchored-to-edge placement.
+        extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
+        vx = section_left - base_gap - extra_clearance - delta
 
     # First-corner X: lead-in right of source, mirroring _route_left_entry_wrap.
     if fan_mid_x is not None:
