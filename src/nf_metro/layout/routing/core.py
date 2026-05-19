@@ -653,9 +653,7 @@ def _route_inter_section(
             if ep_port and ep_port.side == PortSide.LEFT:
                 exclude = {src.section_id} if src.section_id else set()
                 if _h_segment_crosses_other_section(graph, sx, ep.x, ep.y, exclude):
-                    return _route_around_section_below(
-                        edge, src, tgt, ep, i, n, ctx
-                    )
+                    return _route_around_section_below(edge, src, tgt, ep, i, n, ctx)
             return _route_l_shape(edge, src, ep, i, n, ctx)
 
     # Standard L-shape
@@ -779,9 +777,7 @@ def _has_around_section_sibling(
         other_src = ctx.graph.stations.get(other.source)
         if other_src is None:
             continue
-        exclude = (
-            {other_src.section_id} if other_src.section_id else set()
-        )
+        exclude = {other_src.section_id} if other_src.section_id else set()
         if _h_segment_crosses_other_section(
             ctx.graph, other_src.x, ep.x, ep.y, exclude
         ):
@@ -833,8 +829,8 @@ def _route_merge_trunk(
     effective_ty = ep.y if ep else tgt.y
     tgt_row = _resolve_section_row(ctx.graph, tgt)
     force_cross_row = src_row is not None and tgt_row == src_row
-    trunk_v_up_pull_away = (
-        ep is not None and _has_around_section_sibling(edge, ep, ep_port, ctx)
+    trunk_v_up_pull_away = ep is not None and _has_around_section_sibling(
+        edge, ep, ep_port, ctx
     )
     return _route_bypass(
         edge,
@@ -1005,9 +1001,7 @@ def _route_bypass(
             # back to the standard placement (overlap is the lesser
             # evil compared to a route entering the neighbour bbox).
             neighbour_right = col_right_edge(graph, tgt_col - 1)
-            pulled_mid_candidate = (
-                neighbour_right + SECTION_ROUTE_CLEARANCE + half_g2
-            )
+            pulled_mid_candidate = neighbour_right + SECTION_ROUTE_CLEARANCE + half_g2
             # Around-section xmin (must stay clear of pulled bundle xmax)
             around_section_xmin = (
                 effective_tx
@@ -1019,8 +1013,7 @@ def _route_bypass(
             if (
                 pulled_mid_candidate - half_g2 - neighbour_right
                 >= SECTION_ROUTE_CLEARANCE
-                and around_section_xmin - pulled_xmax
-                >= min_inter_bundle_gap
+                and around_section_xmin - pulled_xmax >= min_inter_bundle_gap
             ):
                 gap2_mid = pulled_mid_candidate
         gap2_x = gap2_mid + delta2
@@ -1371,9 +1364,7 @@ def _route_left_entry_wrap(
     n_for_outer = fan[1] if fan is not None else n
     max_delta = (n_for_outer - 1) * ctx.offset_step / 2
     base_gap = ctx.curve_radius + ctx.offset_step
-    extra_clearance = max(
-        0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta)
-    )
+    extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
     vx = tx - base_gap - extra_clearance + delta
 
     # Apply src/tgt station offsets explicitly so the renderer's later
@@ -1444,9 +1435,7 @@ def _route_left_entry_wrap(
     # JUNCTION_MARGIN), this shift is zero.  Uniform across lines, so the
     # per-line delta stagger and the corner_x - r_wrap == sx cancellation
     # below are preserved by also shifting lx.
-    src_section = (
-        ctx.graph.sections.get(src.section_id) if src.section_id else None
-    )
+    src_section = ctx.graph.sections.get(src.section_id) if src.section_id else None
     if src_section and src_section.bbox_w > 0:
         section_right = src_section.bbox_x + src_section.bbox_w
     else:
@@ -1603,9 +1592,7 @@ def _route_around_section_below(
     # with different centers and visibly cross under the target
     # section's left edge.
     ep_section = (
-        ctx.graph.sections.get(entry_port.section_id)
-        if entry_port.section_id
-        else None
+        ctx.graph.sections.get(entry_port.section_id) if entry_port.section_id else None
     )
     if ep_section and ep_section.bbox_w > 0:
         section_left = ep_section.bbox_x
@@ -1621,9 +1608,7 @@ def _route_around_section_below(
     n_for_outer = fan[1] if fan is not None else n
     max_delta = (n_for_outer - 1) * ctx.offset_step / 2
     base_gap = ctx.curve_radius + ctx.offset_step
-    extra_clearance = max(
-        0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta)
-    )
+    extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
     vx = section_left - base_gap - extra_clearance - delta
 
     # First-corner X: lead-in right of source, mirroring _route_left_entry_wrap.
@@ -1634,9 +1619,7 @@ def _route_around_section_below(
         corner_x = non_fan_mid_x + delta
     # V1 clearance from the source section's right edge, mirroring
     # _route_left_entry_wrap.  See comments there for the derivation.
-    src_section = (
-        ctx.graph.sections.get(src.section_id) if src.section_id else None
-    )
+    src_section = ctx.graph.sections.get(src.section_id) if src.section_id else None
     if src_section and src_section.bbox_w > 0:
         v1_section_right = src_section.bbox_x + src_section.bbox_w
     else:
@@ -1749,9 +1732,7 @@ def _route_right_entry_wrap(
     # visible gap.  Uniform shift preserves the offset stagger.
     max_delta = (n - 1) * ctx.offset_step / 2
     base_gap = ctx.curve_radius + ctx.offset_step
-    extra_clearance = max(
-        0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta)
-    )
+    extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
     vx = tx + base_gap + extra_clearance - delta
 
     # Short horizontal lead-in so the first corner (horizontal-to-vertical)
@@ -3217,7 +3198,8 @@ def _compute_junction_fan_info(
         # sibling wrap/L-shape route, so all of them pivot through the
         # same first corner X (their geometries diverge afterward).
         all_outgoing = [
-            e for e in graph.edges_from(jid)
+            e
+            for e in graph.edges_from(jid)
             if (es := graph.stations.get(e.target)) is not None
             and (es.is_port or e.target in junction_ids)
         ]

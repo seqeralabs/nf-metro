@@ -98,9 +98,7 @@ def test_wrap_descriptor_parity_delegates_to_turn_sequence():
             Corner(Direction.D, Direction.R, CornerHandedness.CCW),
         )
     )
-    desc = WrapDescriptor(
-        kind="test", turn_sequence=seq, channel_kind="L_SHAPE"
-    )
+    desc = WrapDescriptor(kind="test", turn_sequence=seq, channel_kind="L_SHAPE")
     assert desc.parity == seq.parity is True
 
 

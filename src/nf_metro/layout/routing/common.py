@@ -31,6 +31,7 @@ class Direction(Enum):
     U = "U"  # north, -y
     D = "D"  # south, +y
 
+
 # ---------------------------------------------------------------------------
 # Grid-position helpers
 # ---------------------------------------------------------------------------
@@ -261,7 +262,6 @@ def inter_column_channel_x(
             right = col_right_edge(graph, tgt_col, default=tx)
             return (left + right) / 2
 
-
     # Junction at L-shape elbow (src is a junction with no section_id):
     # When the junction is at the corner of a clockwise/counter-clockwise
     # L, the channel should sit at the junction's x so the L pivots
@@ -409,7 +409,8 @@ def bypass_bottom_y(
     blocking = [
         s
         for s in graph.sections.values()
-        if s.bbox_w > 0 and lo <= s.grid_col <= hi
+        if s.bbox_w > 0
+        and lo <= s.grid_col <= hi
         and s.bbox_y - SECTION_HEADER_PROTRUSION <= candidate <= s.bbox_y + s.bbox_h
     ]
     if blocking:
