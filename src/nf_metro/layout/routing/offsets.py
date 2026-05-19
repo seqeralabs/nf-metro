@@ -1141,4 +1141,49 @@ def compute_station_offsets(
     _compute_entry_port_offsets(ctx)
     _align_junction_to_entry_port(ctx)
     _reconcile_horizontal_offsets(ctx)
+    _flip_offsets_in_wrap_sections(ctx)
     return ctx.offsets
+
+
+def _flip_offsets_in_wrap_sections(ctx: _OffsetCtx) -> None:
+    """Negate per-line offsets for stations / ports in flipped sections.
+
+    Sections with ``flip_lines=True`` have their internal track order
+    reversed.  Their per-station / per-port line offsets must follow:
+    the line that naturally sits at offset ``+k`` should sit at offset
+    ``-k`` here so the bundle ordering is consistent with the flipped
+    tracks.
+
+    With the per-corner wrap propagation rule
+    (:func:`_route_left_entry_wrap`), no section is auto-flipped on
+    cross-row wrap entry, so this pass is a no-op for renders that
+    don't set ``flip_lines`` manually.  It is retained as a forward-
+    compatibility hook for explicit ``flip_lines`` overrides.
+    """
+    flipped_sections = {
+        sid for sid, sec in ctx.graph.sections.items() if sec.flip_lines
+    }
+    if not flipped_sections:
+        return
+
+    flip_stations: set[str] = set()
+    for sec_id in flipped_sections:
+        sec = ctx.graph.sections[sec_id]
+        flip_stations.update(sec.station_ids)
+    for port_id, port in ctx.graph.ports.items():
+        if port.section_id in flipped_sections:
+            flip_stations.add(port_id)
+
+    # Junctions are NOT flipped: they sit upstream of the wrap's three
+    # corners, where the bundle still carries its source-side ordering.
+    # The geometric zigzag through C1-C2-C3 inverts the bundle by the
+    # time it reaches the entry port; the per-station / per-port flip
+    # on the entry side is what lets that landing match the flipped
+    # tracks inside the target section.  Flipping the junction too
+    # would create a y-mismatch on the exit_port -> junction segment
+    # (a visible diagonal "bump" at the source section's edge).
+
+    for key in list(ctx.offsets.keys()):
+        sid, _lid = key
+        if sid in flip_stations:
+            ctx.offsets[key] = -ctx.offsets[key]
