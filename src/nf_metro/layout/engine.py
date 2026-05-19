@@ -12,6 +12,7 @@ from collections import Counter, defaultdict
 
 from nf_metro.layout.constants import (
     BYPASS_CLEARANCE,
+    CANVAS_GRID_SHIFT_THRESHOLD,
     CURVE_RADIUS,
     DESCENDER_CLEARANCE,
     DIAGONAL_RUN,
@@ -522,6 +523,50 @@ def _guard_inter_section_routes_in_row_band(
                 )
 
 
+def _guard_bundle_order_preserved(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict | None = None,
+    routes: list | None = None,
+) -> None:
+    """Final-phase: at every shared-xy corner where 2 or more bundled
+    lines meet, the lines' relative left/right ordering must be
+    preserved between incoming and outgoing tangents.
+
+    See ``src/nf_metro/layout/routing/invariants.py`` for the
+    semantic definition.  The guard is a thin wrapper: it routes the
+    edges (if not provided), invokes
+    :func:`check_bundle_order_preserved`, and raises
+    :class:`PhaseInvariantError` with the first violation's
+    self-describing message (the full violation list is summarised in
+    the count).
+
+    The check operates on the final ``route_edges`` output, so it can
+    only run at the final guard block where the routing is stable.
+    """
+    from nf_metro.layout.routing.invariants import check_bundle_order_preserved
+
+    if routes is None:
+        from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+        if offsets is None:
+            offsets = compute_station_offsets(graph)
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+
+    violations = check_bundle_order_preserved(routes)
+    if not violations:
+        return
+    first = violations[0]
+    extra = (
+        f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+    )
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
 def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> None:
     """After Stage 4.5 and final: off-track input stations must sit at
     least ``GUARD_TOLERANCE`` above (smaller Y than) their on-track
@@ -854,12 +899,30 @@ def compute_layout(
     captioned icons and labelled stations automatically.  Pass an
     explicit numeric value to override.
 
+    If the explicit value is below the minimum the content needs, a
+    ``UserWarning`` is emitted: the render is honoured at the requested
+    pitch, but labels and captioned file-icons may collide.  Omit
+    ``y_spacing`` to let the engine pick a safe value.
+
     When *validate* is True, stage-boundary invariant checks run after
     key phases.  Violations raise ``PhaseInvariantError`` instead of
     silently producing broken layouts.
     """
     if y_spacing is None:
         y_spacing = compute_min_y_spacing(graph)
+    else:
+        min_required = compute_min_y_spacing(graph)
+        if y_spacing < min_required - 1e-6:
+            import warnings
+
+            warnings.warn(
+                f"explicit y_spacing={y_spacing!r} is below the minimum "
+                f"({min_required:.1f}) this graph's content requires; "
+                f"labels and captioned file-icons may collide. "
+                f"Omit --y-spacing to let the engine pick a safe value.",
+                UserWarning,
+                stacklevel=2,
+            )
     # Optionally reorder lines by section span before layout.
     # Must happen here (on the full graph) before section subgraphs are
     # built, since subgraphs share graph.lines via reference.
@@ -984,6 +1047,11 @@ def _compute_section_layout(
     # Lay out each section internally, snap row Y grids, place sections on
     # the canvas grid, renumber by reading order, correct left/top
     # overshoot.  All work in section-local coordinates.
+
+    # Stage 1.0: Propagate wrap-flip parity through the section DAG so each
+    # section's internal line-track order matches what the inter-section
+    # wrap routing actually produces at its entry boundary.
+    _propagate_wrap_flip_parity(graph)
 
     # Stage 1.1: Lay out each section independently (real stations only, no ports)
     section_subgraphs: dict[str, MetroGraph] = {}
@@ -1266,7 +1334,12 @@ def _compute_section_layout(
     # phases compute shifts that don't respect the grid pitch, leaving
     # coordinates at fractional Ys (e.g. 298.785 when the pitch is 55).
     # This final pass restores clean grid positions before validation.
+    # Junctions sit in the inter-section gap with no section_id and are
+    # skipped by the snap pass; re-running _position_junctions after the
+    # snap re-anchors them to the moved exit ports so the L-shape route
+    # doesn't U-turn through a stale junction Y.
     _snap_all_y_to_grid(graph, y_spacing)
+    _position_junctions(graph)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.4")
 
@@ -1363,8 +1436,13 @@ def _compute_section_layout(
     # bottom rows away from the bbox bottom), then pull lower rows up
     # to close the slack the shrink revealed.  Bottom-only shrink, so
     # trunk alignment is unaffected; tighten only fires where a rowspan
-    # section's content fell short of its row claim.
+    # section's content fell short of its row claim.  Junctions live
+    # in inter-section space and aren't moved by the tighten pass, so
+    # re-run ``_position_junctions`` afterwards to re-anchor them to
+    # the now-shifted exit/entry port Ys (otherwise the trunk dips to
+    # the junction's pre-shift Y and produces an S-kink).
     _shrink_and_tighten_rows(graph, section_y_padding, section_y_gap)
+    _position_junctions(graph)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.13")
 
@@ -1390,6 +1468,19 @@ def _compute_section_layout(
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.15")
 
+    # Stage 6.16: Restore canvas-wide grid alignment after all settling.
+    # Stage 6.4 snaps to a per-row grid; later helpers (notably
+    # ``_shift_graph_into_canvas`` shifting by ``section_y_padding -
+    # min_top``, which is not a multiple of ``y_spacing`` when padding
+    # is not a grid multiple) can introduce a uniform half-grid drift.
+    # When every real station shares a single non-zero residue, shift
+    # the whole canvas by the smallest signed amount that returns them
+    # to integer multiples of ``y_spacing``.  No-op when residues are
+    # mixed (e.g. sarek-style multi-row layouts).
+    _snap_canvas_y_to_grid(graph, y_spacing, section_y_padding)
+    if validate:
+        _run_pass_c_guards(graph, "after Stage 6.16")
+
     if validate:
         phase = "after final"
         offsets, routes = _run_pass_c_guards(graph, phase)
@@ -1398,6 +1489,9 @@ def _compute_section_layout(
         _guard_row_gaps(graph, phase, section_y_gap=section_y_gap)
         if routes is not None:
             _guard_inter_section_routes_in_row_band(
+                graph, phase, offsets=offsets, routes=routes
+            )
+            _guard_bundle_order_preserved(
                 graph, phase, offsets=offsets, routes=routes
             )
 
@@ -1615,24 +1709,18 @@ def _align_row_y_grids(
         # e.g. bench_hub with 6 lines) don't represent inter-track
         # crowding and should not inflate spacing for the entire row.
         #
-        max_lines = 0
         section_class: dict[str, tuple[dict[int, list[float]], set[float]]] = {
             sec_id: _classify_multi_station_ys(section_subgraphs[sec_id])
             for sec_id in sec_ids
         }
-        for sec_id in sec_ids:
-            sub = section_subgraphs[sec_id]
-            _multi_ys = section_class[sec_id][1]
-            for st in sub.stations.values():
-                if not st.is_port and st.y in _multi_ys:
-                    max_lines = max(max_lines, len(graph.station_lines(st.id)))
-        min_track_gap = (
-            (max_lines - 1) * OFFSET_STEP
-            + 2 * STATION_RADIUS_APPROX
-            + LABEL_OFFSET
-            + FONT_HEIGHT
-        )
-        effective_y_spacing = max(y_spacing, min_track_gap)
+        # Honour the user-supplied ``y_spacing`` as authoritative grid
+        # pitch.  Earlier versions widened it for multi-line bundle
+        # clearance, but that pulled stations off the user's grid (e.g.
+        # rendering DA with ``--y-spacing 40`` produced 44px pitches).
+        # When the requested pitch is too tight for the bundle, the
+        # warning emitted at the top of ``compute_layout`` informs the
+        # user; the engine should not silently substitute a wider pitch.
+        effective_y_spacing = y_spacing
 
         grid_info[row] = {
             "section_ids": list(sec_ids),
@@ -3705,6 +3793,91 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
         st.y = midpoint
 
 
+def _snap_canvas_y_to_grid(
+    graph: MetroGraph,
+    y_spacing: float,
+    section_y_padding: float,
+) -> None:
+    """Final pass: align canvas-wide so stations land on integer y_spacing.
+
+    The user rule is that real stations sit at integer multiples of
+    ``y_spacing`` from a consistent canvas origin.  Earlier phases
+    (Stage 6.4 ``_snap_all_y_to_grid`` + Stage 6.4's junction repos)
+    produce a per-row grid, but late helpers can still shift the whole
+    canvas by a non-grid amount.  Notably ``_shift_graph_into_canvas``
+    can shift by ``section_y_padding - min_bbox_y`` which is not a
+    multiple of ``y_spacing`` when padding is not a multiple of the
+    pitch (default 50 / 40 = half-grid drift).
+
+    Detection: collect the residue ``station.y % y_spacing`` for every
+    real (non-port, non-off-track, non-half-grid, non-convergence)
+    station.  If a single residue covers
+    ``>= CANVAS_GRID_SHIFT_THRESHOLD`` of the population (default 85%),
+    the canvas as a whole is uniformly off-grid by that residue.
+    Compute the smallest signed shift ``delta`` such that:
+
+      * ``(residue + delta) % y_spacing == 0`` (residue returns to grid)
+      * ``min(section.bbox_y) + delta >= section_y_padding`` (top
+        margin preserved)
+
+    Apply ``delta`` to every station, port, junction (via bbox + offset
+    chain) and section bbox.  If the dominant residue does NOT meet
+    threshold (e.g. sarek where sections sit at multiple residues by
+    construction), no shift is applied: the per-section snap from Stage
+    6.4 is honoured as the best-effort alignment.
+    """
+    if y_spacing <= 0 or not graph.sections:
+        return
+    half_grid_ids = graph.half_grid_station_ids
+    convergence_sources = _convergence_source_ys(graph)
+    residues: Counter[float] = Counter()
+    for st in graph.stations.values():
+        if st.is_port or st.off_track:
+            continue
+        if st.id in half_grid_ids or st.id in convergence_sources:
+            continue
+        residues[round(st.y % y_spacing, 3)] += 1
+    total = sum(residues.values())
+    if total == 0:
+        return
+    mode_residue, mode_count = residues.most_common(1)[0]
+    if mode_count / total < CANVAS_GRID_SHIFT_THRESHOLD:
+        return
+    if abs(mode_residue) < 1e-3 or abs(mode_residue - y_spacing) < 1e-3:
+        return  # already on grid
+
+    # Two candidate shifts: down by `-mode_residue`, or up by
+    # `y_spacing - mode_residue`.  Prefer the one that preserves the
+    # top margin; among equal choices prefer the smaller absolute shift.
+    min_top = min(
+        (s.bbox_y for s in graph.sections.values() if s.bbox_h > 0),
+        default=section_y_padding,
+    )
+    shift_down = -mode_residue
+    shift_up = y_spacing - mode_residue
+    candidates: list[float] = []
+    if min_top + shift_down >= section_y_padding - 1e-6:
+        candidates.append(shift_down)
+    if min_top + shift_up >= section_y_padding - 1e-6:
+        candidates.append(shift_up)
+    if not candidates:
+        # Neither preserves the margin; pick the up-shift since
+        # shifting down would clip the canvas.
+        candidates.append(shift_up)
+    shift = min(candidates, key=abs)
+    if abs(shift) < 1e-6:
+        return
+    for st in graph.stations.values():
+        st.y += shift
+    for section in graph.sections.values():
+        section.bbox_y += shift
+    for port in graph.ports.values():
+        port.y += shift
+    # Junctions ride the same shift via _position_junctions, which keys
+    # off the (now-shifted) exit/entry port Ys.
+    _position_junctions(graph)
+
+
 def _convergence_source_ys(graph: MetroGraph) -> dict[str, list[str]]:
     """Return {target_id: [source_station_ids]} for fan-in convergences.
 
@@ -4211,9 +4384,16 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
                 trunk_y = others[len(others) // 2]
             participants.sort(key=lambda s: pre_fan_y[s])
             n = len(participants)
+            # Anchored-at-top mode: when the topmost participant already
+            # sits on the trunk Y (entry port snapped to topmost target,
+            # not column midpoint), keep it ON the trunk and stack the
+            # rest one slot at a time below.  Otherwise fan symmetrically.
             # Even: offsets -n//2..-1, 1..n//2 (skipping 0).
             # Odd:  offsets -(n//2)..n//2 inclusive (0 = trunk_y).
-            if n % 2 == 0:
+            top_on_trunk = abs(pre_fan_y[participants[0]] - trunk_y) < 0.5
+            if top_on_trunk:
+                offsets = list(range(0, n))
+            elif n % 2 == 0:
                 offsets = list(range(-(n // 2), 0)) + list(range(1, n // 2 + 1))
             else:
                 offsets = list(range(-(n // 2), n // 2 + 1))
@@ -4337,7 +4517,17 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
                 continue
             participants.sort(key=lambda s: graph.stations[s].y)
             n = len(participants)
-            if n % 2 == 0:
+            # Anchored-at-top mode: when the topmost participant already
+            # sits on the anchor Y (because the entry port snapped to it
+            # rather than to the column midpoint), keep it ON the anchor
+            # and stack the rest one slot at a time below.  This avoids
+            # pushing the topmost station UP off the trunk row when the
+            # user's topology has a clear top trunk + side branches below
+            # rather than a symmetric fan.
+            top_on_anchor = abs(graph.stations[participants[0]].y - anchor_y) < 0.5
+            if top_on_anchor:
+                offsets = list(range(0, n))
+            elif n % 2 == 0:
                 offsets = list(range(-(n // 2), 0)) + list(range(1, n // 2 + 1))
             else:
                 offsets = list(range(-(n // 2), n // 2 + 1))
@@ -4594,6 +4784,22 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
             st.y = src.y
 
 
+def _propagate_wrap_flip_parity(graph: MetroGraph) -> None:
+    """No-op: section-level ``flip_lines`` is no longer auto-propagated.
+
+    With the per-corner offset propagation rule in
+    :func:`_route_left_entry_wrap` and :func:`_route_right_entry_wrap`,
+    cross-row wraps deliver the bundle to the target section with the
+    SAME outer/inner ordering it left the source.  No section needs its
+    internal line-tracks flipped to compensate.
+
+    ``Section.flip_lines`` remains on the dataclass as a manual override
+    surface but is never set automatically.  The historical wrap-flip
+    cascade (commit ``c3cd5f6``) is retired.
+    """
+    return
+
+
 def _has_horizontal_predecessor_section(graph: MetroGraph, section: Section) -> bool:
     """True if any entry-port predecessor lives in an LR/RL section."""
     for pid in section.entry_ports:
@@ -4625,6 +4831,14 @@ def _layout_single_section(
     sub = _build_section_subgraph(graph, section)
     if not sub.stations:
         return None
+
+    # Wrap-flipped section: lay out internals against a REVERSED line
+    # order so the trunk's primary-line, fan-out placements, and
+    # fork-join compaction match the bundle ordering the wrap actually
+    # delivers at the entry.  The flip is paired with an offset-flip
+    # post-process in ``compute_station_offsets``.
+    if section.flip_lines:
+        sub.lines = dict(reversed(list(graph.lines.items())))
 
     # Insert phantom pass-throughs into the subgraph (not the main graph)
     # so that lines entering at a deep layer get their own track.
@@ -5954,15 +6168,22 @@ def _snap_grid_group_entry_ports(graph: MetroGraph) -> None:
         if not section or section.direction not in ("LR", "RL"):
             continue
 
-        # Find the first non-port station connected to this port.
-        target_y = None
+        # Collect the Ys of all non-port stations connected to this port.
+        # When the port feeds multiple targets at different Ys (a fan-out
+        # at the section boundary), pick the topmost so the inter-section
+        # trunk lands at the section's first row and any branches below
+        # fork off downward.  Iteration-order "first" would otherwise give
+        # an arbitrary anchor depending on edge insertion order.
+        target_ys: list[float] = []
         for edge in graph.edges_from(port_id):
             tgt = graph.stations.get(edge.target)
             if tgt and not tgt.is_port and tgt.section_id == section.id:
-                target_y = tgt.y
-                break
+                target_ys.append(tgt.y)
 
-        if target_y is not None and abs(port_st.y - target_y) >= 1.0:
+        if not target_ys:
+            continue
+        target_y = min(target_ys)
+        if abs(port_st.y - target_y) >= 1.0:
             port_st.y = target_y
 
 
@@ -7333,22 +7554,21 @@ def _reanchor_off_track_to_consumer(
 def _required_captioned_icon_pitch(y_spacing: float) -> float:
     """Minimum centre-to-centre Y gap between two captioned file icons.
 
-    Stacked file-input stations carrying under-icon captions need enough
-    Y separation for the upper caption text to clear the lower icon's
-    top edge.  The required pitch is
-
-        2 * icon_half + caption_gap + caption_font_height + clearance
-
-    floored at ``y_spacing`` so the existing grid pitch is honoured when
-    captions are short.
+    The captioned-icon stack uses exactly one ``y_spacing`` slot per
+    icon.  When the requested ``y_spacing`` is too tight for captions
+    to clear the lower icon, the icons collide visibly - the user is
+    informed of this by the y-spacing-below-minimum warning emitted
+    from ``compute_layout``; the engine does NOT silently substitute
+    a wider pitch.  Letting stations land on adjacent grid slots
+    keeps every station on the user's chosen grid; loosening pitch
+    is the user's job once they see the warning.
     """
-    pitch = (
+    return y_spacing if y_spacing > 0 else (
         2 * ICON_HALF_HEIGHT
         + ICON_CAPTION_GAP
         + ICON_CAPTION_FONT_HEIGHT
         + ICON_STACK_LABEL_CLEARANCE
     )
-    return max(pitch, y_spacing)
 
 
 def _has_under_icon_caption(station: Station) -> bool:
