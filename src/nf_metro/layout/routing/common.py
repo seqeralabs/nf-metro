@@ -7,11 +7,14 @@ from dataclasses import dataclass
 from enum import Enum
 
 from nf_metro.layout.constants import (
+    BUNDLE_TO_BUNDLE_CLEARANCE,
     BYPASS_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
     DEFAULT_LINE_PRIORITY,
+    EDGE_TO_BUNDLE_CLEARANCE,
     HEADER_CLEARANCE,
+    OFFSET_STEP,
     SECTION_HEADER_PROTRUSION,
 )
 from nf_metro.parser.model import Edge, MetroGraph, Section, Station
@@ -82,6 +85,73 @@ def column_gap_midpoint(graph: MetroGraph, col_a: int, col_b: int) -> float:
     right = col_right_edge(graph, lo)
     left = col_left_edge(graph, hi, default=right)
     return (right + left) / 2
+
+
+def column_gap_edges(graph: MetroGraph, col_a: int, col_b: int) -> tuple[float, float]:
+    """Return ``(left_edge, right_edge)`` of the gap between two columns.
+
+    *left_edge* is the right boundary of the lower-column sections;
+    *right_edge* is the left boundary of the higher-column sections.
+    """
+    lo, hi = min(col_a, col_b), max(col_a, col_b)
+    right = col_right_edge(graph, lo)
+    left = col_left_edge(graph, hi, default=right)
+    return right, left
+
+
+def symmetric_bundle_midpoint(
+    gap_left: float,
+    gap_right: float,
+    bundle_widths: list[float],
+    bundle_index: int,
+    edge_clearance: float = EDGE_TO_BUNDLE_CLEARANCE,
+    inter_bundle: float = BUNDLE_TO_BUNDLE_CLEARANCE,
+) -> float:
+    """X midline of one bundle when several share an inter-section gap.
+
+    Implements the symmetric placement described in the inter-section
+    gap design contract::
+
+        - ``W = gap_right - gap_left``
+        - ``WT = sum(bundle_widths) + (N - 1) * B``
+        - The leftmost line of the leftmost bundle sits at
+          ``gap_left + (W - WT) / 2``.
+        - Bundles are separated by exactly ``B``; only the
+          edge-to-bundle distance grows when ``W`` exceeds the minimum.
+
+    Returns the midline x for bundle ``bundle_index`` (0-indexed from
+    the leftmost).  ``bundle_widths[k]`` is the visual span of bundle
+    ``k`` (typically ``(n_k - 1) * OFFSET_STEP``).
+
+    When ``W`` is smaller than the required minimum the function still
+    returns the symmetric midline as if the gap were exactly that
+    minimum; the caller is responsible for widening the gap (handled
+    by ``_enforce_min_column_gaps`` during section placement).
+    """
+    n = len(bundle_widths)
+    if n == 0:
+        return (gap_left + gap_right) / 2
+    if bundle_index < 0 or bundle_index >= n:
+        raise IndexError(f"bundle_index {bundle_index} out of range [0,{n})")
+
+    W = gap_right - gap_left
+    WT = sum(bundle_widths) + (n - 1) * inter_bundle
+    # If the gap is wider than the minimum (2A + WT), the extra space
+    # is distributed equally to both edges; the symmetric leftmost-line
+    # offset from gap_left is (W - WT) / 2.
+    leftmost_offset = max(edge_clearance, (W - WT) / 2)
+    # Position of the leftmost line of the leftmost bundle.
+    cursor = gap_left + leftmost_offset
+    for k in range(bundle_index):
+        cursor += bundle_widths[k] + inter_bundle
+    # cursor is now the leftmost line of bundle bundle_index;
+    # the midline is cursor + width/2.
+    return cursor + bundle_widths[bundle_index] / 2
+
+
+def bundle_width(n_lines: int, offset_step: float = OFFSET_STEP) -> float:
+    """Visual span of a bundle of *n_lines* parallel lines."""
+    return max(0, n_lines - 1) * offset_step
 
 
 @dataclass
