@@ -807,20 +807,27 @@ def _route_merge_trunk(
 
     When the trunk and entry are in the same grid row but separated by
     intervening row-mates (e.g. sarek's post_vc -> reporting trunk
-    bypassing annotation), the standard above-row bypass channel sits
-    in the inter-row gap that also holds the target row's section
-    titles.  Force ``cross_row`` so the channel runs BELOW all sections
-    in the column range, mirroring :func:`_route_around_section_below`
-    and avoiding overlap with the title text.
+    bypassing annotation) AND a sibling edge to the same merge junction
+    will route via :func:`_route_around_section_below`, the standard
+    above-row bypass channel sits in the inter-row gap also held by
+    the around-section sibling, producing overlapping bundles plus
+    title-zone overlap.  Force ``cross_row`` so the channel runs BELOW
+    all sections in the column range, mirroring the around-section
+    route's bottom-side placement.
+
+    For same-row trunks with no competing around-section sibling, the
+    inter-row gap is wide enough to host the bypass cleanly, so the
+    standard above-row placement is kept (avoids pushing routes like
+    variantbenchmarking's section 2 -> section 8 chain all the way
+    below the canvas).
 
     When a sibling edge to the same merge junction will route via
-    :func:`_route_around_section_below` (e.g. sarek's preprocessing wrap
-    that also lands at reporting's LEFT entry), both routes would place
+    :func:`_route_around_section_below`, both routes would also place
     their V_up channels in the inter-column gap just left of the target
-    section, producing overlapping bundles in the same x range.  Detect
-    that and pull the trunk's V_up channel further from the target edge
-    (towards the previous column) so the two bundles occupy distinct
-    columns within the gap.
+    section, producing overlapping bundles in the same x range.  Pull
+    the trunk's V_up channel further from the target edge (towards the
+    previous column) so the two bundles occupy distinct columns within
+    the gap.
     """
     ep_id = ctx.merge.entry_port_for.get(edge.target)
     ep = ctx.graph.stations.get(ep_id) if ep_id else None
@@ -828,10 +835,15 @@ def _route_merge_trunk(
     effective_tx = ep.x if ep else tgt.x
     effective_ty = ep.y if ep else tgt.y
     tgt_row = _resolve_section_row(ctx.graph, tgt)
-    force_cross_row = src_row is not None and tgt_row == src_row
-    trunk_v_up_pull_away = ep is not None and _has_around_section_sibling(
+    has_around_sibling = ep is not None and _has_around_section_sibling(
         edge, ep, ep_port, ctx
     )
+    same_row = src_row is not None and tgt_row == src_row
+    # Only push the bypass below the row when there's an actual sibling
+    # competing for the inter-row gap.  Plain same-row bypasses (no
+    # around-section sibling) keep the standard above-row placement.
+    force_cross_row = same_row and has_around_sibling
+    trunk_v_up_pull_away = has_around_sibling
     return _route_bypass(
         edge,
         src,
