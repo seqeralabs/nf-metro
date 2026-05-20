@@ -16,8 +16,8 @@ entry-port quarter-circles; the alignment test in
 
 Same-row L-shapes and the TB ``(BOTTOM, TOP, 1, 0)`` straight drop
 are deliberately absent: their geometric parity disagrees with the
-propagator's row-delta ``is_wrap`` flag, and reconciling that is left
-to a follow-up.
+propagator's row-delta ``is_wrap`` flag.  Reconciling that is tracked
+in issue #393.
 """
 
 from __future__ import annotations
