@@ -297,6 +297,37 @@ def compute_bundle_info(
     return assignments
 
 
+def _v_channel_crosses_other_section(
+    graph: MetroGraph,
+    x: float,
+    y1: float,
+    y2: float,
+    exclude_section_ids: set[str],
+) -> bool:
+    """Return True if a vertical line at *x* from *y1* to *y2* pierces a section bbox.
+
+    Sections listed in *exclude_section_ids* are skipped (the route's own
+    source / target sections).  All other sections are tested against
+    the segment's open interior.
+    """
+    lo_y, hi_y = (y1, y2) if y1 <= y2 else (y2, y1)
+    for s in graph.sections.values():
+        if s.bbox_w <= 0:
+            continue
+        if s.id in exclude_section_ids:
+            continue
+        right = s.bbox_x + s.bbox_w
+        # Strict X interior: V must penetrate the bbox, not just graze it.
+        if x <= s.bbox_x or x >= right:
+            continue
+        bottom = s.bbox_y + s.bbox_h
+        # Strict Y interior overlap.
+        if hi_y <= s.bbox_y or lo_y >= bottom:
+            continue
+        return True
+    return False
+
+
 def inter_column_channel_x(
     graph: MetroGraph,
     src,
@@ -306,6 +337,8 @@ def inter_column_channel_x(
     dx: float,
     max_r: float,
     offset_step: float,
+    sy: float | None = None,
+    ty: float | None = None,
 ) -> float:
     """Compute the X position for a vertical channel in an L-shaped route.
 
@@ -313,8 +346,19 @@ def inter_column_channel_x(
     the source's and target's columns.  Resolves junction sources/targets
     via :func:`resolve_section` so a junction at an L-elbow inherits the
     column of its upstream/downstream section rather than falling back to
-    a near-source heuristic.  Falls back to near-source placement only
-    when section info cannot be resolved at all.
+    a near-source heuristic.
+
+    When *sy* and *ty* are provided, the gap-midpoint placement is only
+    honoured when the resulting V-channel does not pierce a non-src,
+    non-tgt section's bbox in the Y range it traverses.  Staggered
+    cascades (each section in a different row, with sections in
+    intervening columns) would otherwise drop the V through an
+    unrelated section's interior.  Falls back to near-source in that
+    case, mirroring the pre-resolve_section behaviour for junction
+    elbows.
+
+    Falls back to near-source placement when section info cannot be
+    resolved at all.
     """
     # Resolve sections, tracing through junctions to upstream/downstream
     # sections.  Using ``prefer_upstream=True`` for the source ensures a
@@ -346,13 +390,28 @@ def inter_column_channel_x(
             # (the L-shape's outgoing horizontal must lead RIGHT into the
             # channel, never reverse direction).
             min_mid = sx + offset_step + bundle_half
-            return max(mid, min_mid)
+            mid = max(mid, min_mid)
         else:
             left = col_left_edge(graph, src_col, default=sx)
             right = col_right_edge(graph, tgt_col, default=tx)
             mid = (left + right) / 2
             max_mid = sx - offset_step - bundle_half
-            return min(mid, max_mid)
+            mid = min(mid, max_mid)
+
+        # When the V-channel's Y range is known, verify the gap-midpoint
+        # placement does not pierce any non-source / non-target section's
+        # bbox.  Staggered cascades that fan from a low-row source to a
+        # high-row target through staggered intervening columns would
+        # otherwise drop the V through an unrelated section interior.
+        if sy is not None and ty is not None:
+            exclude = {src_sec.id, tgt_sec.id}
+            if _v_channel_crosses_other_section(graph, mid, sy, ty, exclude):
+                # Fall through to the near-source fallback below.
+                pass
+            else:
+                return mid
+        else:
+            return mid
 
 
     # Junction at L-shape elbow (src is a junction with no section_id):
