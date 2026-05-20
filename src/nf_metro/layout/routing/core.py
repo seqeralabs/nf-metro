@@ -174,8 +174,66 @@ def route_edges(
 
     _center_bubble_stations(routes, graph)
     _spread_diagonal_bundles(routes, ctx)
+    _trim_upstream_to_downstream_start(graph, routes)
 
     return routes
+
+
+def _trim_upstream_to_downstream_start(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> None:
+    """Trim each upstream port->junction route's last point to align
+    with the matching downstream junction->target route's first point.
+
+    When a fan-out junction's downstream L-shape adopts a V channel
+    whose curve_start lies between the junction and the source's exit
+    port (the lead-in extension branch in :func:`_route_l_shape`), the
+    upstream route still terminates at ``junction.x``.  That leaves a
+    horizontal "nubbin" of upstream line drawn at ``junction.y``
+    extending past the point where the downstream curve has already
+    begun bending away.  Shortening the upstream's last point to
+    match the downstream's curve_start removes the nubbin without
+    visually shifting either endpoint of either edge.
+
+    Matching is per line_id: each upstream is paired with the
+    downstream sharing the same junction and line.  Only horizontal
+    upstream tails are trimmed (the last segment must be on the same
+    Y as the downstream's pts[0]); curved or vertical upstream
+    terminations are left untouched.
+    """
+    by_key: dict[tuple[str, str, str], RoutedPath] = {
+        (r.edge.source, r.edge.target, r.line_id): r for r in routes
+    }
+    for jid in graph.junction_ids:
+        # Restrict trimming to fan-out junctions (one upstream port,
+        # multiple downstreams).  Merge junctions intentionally have
+        # the trunk extend through the junction to the downstream
+        # entry port -- trimming would cut the visible trunk short.
+        upstream_edges = list(graph.edges_to(jid))
+        upstream_sources = {e.source for e in upstream_edges}
+        if len(upstream_sources) > 1:
+            continue
+        for down_edge in graph.edges_from(jid):
+            down = by_key.get((down_edge.source, down_edge.target, down_edge.line_id))
+            if down is None or len(down.points) < 2:
+                continue
+            down_start = down.points[0]
+            for up_edge in upstream_edges:
+                if up_edge.line_id != down_edge.line_id:
+                    continue
+                up = by_key.get((up_edge.source, up_edge.target, up_edge.line_id))
+                if up is None or len(up.points) < 2:
+                    continue
+                last = up.points[-1]
+                prev = up.points[-2]
+                # Only trim when the upstream's terminating segment is
+                # horizontal at the same Y as the downstream's start --
+                # the only configuration where a nubbin can form.
+                if abs(prev[1] - last[1]) >= 1.0:
+                    continue
+                if abs(last[1] - down_start[1]) >= 1.0:
+                    continue
+                up.points[-1] = (down_start[0], last[1])
 
 
 # ---------------------------------------------------------------------------
