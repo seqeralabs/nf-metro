@@ -22,7 +22,6 @@ from nf_metro.layout.constants import (
     FOLD_MARGIN,
     ICON_TERMINUS_FORK_LEAD,
     JUNCTION_MARGIN,
-    MERGE_ROUTE_MARGIN,
     MIN_STATION_FLAT_LENGTH,
     MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
@@ -36,8 +35,6 @@ from nf_metro.layout.routing.common import (
     _v_channel_crosses_other_section,
     bundle_width,
     bypass_bottom_y,
-    col_left_edge,
-    col_right_edge,
     column_gap_edges,
     column_gap_midpoint,
     compute_bundle_info,
@@ -773,8 +770,9 @@ def _route_merge_branch(
     """Truncated L-shape descent from a junction to the trunk level.
 
     Routes a 4-point path: horizontal lead-in, curve down, vertical
-    drop, curve into trunk direction.  The lead-in is positioned at
-    MERGE_ROUTE_MARGIN from the source section edge.
+    drop, curve into trunk direction.  The descent X aligns with the
+    inter-column gap midpoint so the branch's V_down coincides with
+    any trunk V_up sharing the same gap, avoiding visual line swaps.
     """
     sx, sy = src.x, src.y
     dx = ctx.graph.stations[edge.target].x - sx
@@ -784,24 +782,35 @@ def _route_merge_branch(
     # Trunk bypass Y level (branches drop to meet it)
     by = ctx.merge.trunk_by.get(edge.target, sy)
 
-    # Position descent at MERGE_ROUTE_MARGIN from section edge
-    if dx > 0:
-        lead_x = col_right_edge(ctx.graph, src_col) + MERGE_ROUTE_MARGIN
-    else:
-        lead_x = col_left_edge(ctx.graph, src_col) - MERGE_ROUTE_MARGIN
-    # Clamp to at least curve_radius from the junction
-    min_lead = sx + trunk_dir * ctx.curve_radius
+    # Prefer the inter-column gap midpoint between the source's
+    # column and the next column over the MERGE_ROUTE_MARGIN
+    # default.  Aligning the branch's V_down with the trunk's
+    # V_up in the same gap removes the visual "swap" where the
+    # branch's descent sits on the opposite side of the gap from
+    # the trunk's ascent (issue: step_a/step_b crossing in 03b).
     if trunk_dir > 0:
-        lead_x = max(lead_x, min_lead)
+        gap_mid = column_gap_midpoint(ctx.graph, src_col, src_col + 1)
     else:
-        lead_x = min(lead_x, min_lead)
+        gap_mid = column_gap_midpoint(ctx.graph, src_col - 1, src_col)
+    lead_x = gap_mid
+    # If the gap midpoint sits closer than curve_radius to the source,
+    # extend pts[0] backward by curve_radius so the first corner has a
+    # full lead-in segment.  The extra segment overlaps the upstream
+    # exit_port -> junction edge (same line colour) and is trimmed by
+    # _trim_upstream_to_downstream_start.
+    h_dir = trunk_dir
+    available_lead = (lead_x - sx) * h_dir
+    if available_lead < ctx.curve_radius:
+        leadin_x = lead_x - h_dir * ctx.curve_radius
+    else:
+        leadin_x = sx
     tail_x = lead_x + trunk_dir * ctx.curve_radius * 2
 
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
         points=[
-            (sx, sy + src_off),
+            (leadin_x, sy + src_off),
             (lead_x, sy + src_off),
             (lead_x, by),
             (tail_x, by),
@@ -832,9 +841,22 @@ def _has_around_section_sibling(
     """
     if ep_port is None or ep_port.side != PortSide.LEFT:
         return False
-    # Find all edges whose target is the same merge junction.
-    for other in ctx.graph.edges_to(edge.target):
+    # Look for edges from OTHER sources that target the entry port
+    # via a path that actually dispatches to
+    # ``_route_around_section_below``.  Around-section routes only
+    # fire for non-merge edges (target is the entry port directly,
+    # not a merge junction) whose hypothetical L would otherwise
+    # cross an intervening section's bbox at ``ep.y``.  Edges into
+    # the merge junction itself go through ``_route_merge_branch``
+    # or ``_route_merge_trunk`` -- never around-section -- so
+    # iterating ``edges_to(merge_junction)`` is the wrong universe.
+    junction_ids = ctx.junction_ids
+    for other in ctx.graph.edges_to(ep.id):
         if other.source == edge.source:
+            continue
+        # Skip the merge-junction-to-entry-port forwarding edge; it
+        # is a layout artefact, not a separately routed edge.
+        if other.source in junction_ids:
             continue
         other_src = ctx.graph.stations.get(other.source)
         if other_src is None:
