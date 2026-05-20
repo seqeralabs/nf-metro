@@ -1161,7 +1161,16 @@ def _route_l_shape(
         )
         max_r = ctx.curve_radius + (n - 1) * ctx.offset_step
         mid_x = inter_column_channel_x(
-            ctx.graph, src, tgt, sx, tx, dx, max_r, ctx.offset_step
+            ctx.graph,
+            src,
+            tgt,
+            sx,
+            tx,
+            dx,
+            max_r,
+            ctx.offset_step,
+            sy=sy,
+            ty=ty,
         )
 
     vx = mid_x + delta
@@ -2167,6 +2176,8 @@ def _route_perp_entry_merged(
             tgt.x - upstream_st.x,
             ctx.curve_radius,
             ctx.offset_step,
+            sy=upstream_st.y,
+            ty=ty,
         )
         return RoutedPath(
             edge=edge,
