@@ -33,6 +33,7 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.routing.common import (
     RoutedPath,
+    _v_channel_crosses_other_section,
     bundle_width,
     bypass_bottom_y,
     col_left_edge,
@@ -1177,6 +1178,50 @@ def _route_l_shape(
             ty=ty,
         )
 
+        # Prefer the inter-column gap midpoint when it sits BETWEEN
+        # the source's near-source channel and the source itself.  The
+        # ``inter_column_channel_x`` clamp keeps the leftmost bundle
+        # line clear of the source's curve start, but that pushes the
+        # V-channel away from the gap centre when the source junction
+        # sits close to the gap midpoint (e.g. a single-line L-shape
+        # emerging right next to the section's right edge).  Accept
+        # the gap midpoint instead and absorb the missing horizontal
+        # lead-in by extending the path back over the upstream segment
+        # (same line colour, so the overlap is invisible) at the
+        # bottom of this function.
+        bundle_half = max(0.0, (n - 1) * ctx.offset_step / 2)
+        src_sec = resolve_section(ctx.graph, src, prefer_upstream=True)
+        tgt_sec = resolve_section(ctx.graph, tgt, prefer_upstream=False)
+        if (
+            src_sec is not None
+            and tgt_sec is not None
+            and src_sec.grid_col != tgt_sec.grid_col
+        ):
+            gap_mid_default = column_gap_midpoint(
+                ctx.graph,
+                src_sec.grid_col,
+                tgt_sec.grid_col,
+            )
+            # Only adopt the gap midpoint when it is on the SAME side of
+            # the source as the target (dx > 0 -> midpoint > sx; dx < 0
+            # -> midpoint < sx).  Otherwise the L would reverse direction
+            # past the source AND past the section the line just exited,
+            # which the lead-in extension cannot mask cleanly.
+            if dx > 0:
+                pass_through = gap_mid_default - bundle_half > sx
+                tighter_than_clamp = gap_mid_default < mid_x
+            else:
+                pass_through = gap_mid_default + bundle_half < sx
+                tighter_than_clamp = gap_mid_default > mid_x
+            if pass_through and tighter_than_clamp:
+                # Verify the V-channel through the gap midpoint does not
+                # pierce a non-source / non-target section bbox (the
+                # same constraint ``inter_column_channel_x`` applies).
+                if not _v_channel_crosses_other_section(
+                    ctx.graph, gap_mid_default, sy, ty, {src_sec.id, tgt_sec.id}
+                ):
+                    mid_x = gap_mid_default
+
     vx = mid_x + delta
 
     # When the vertical segment is too short for both corners at full
@@ -1235,6 +1280,29 @@ def _route_l_shape(
             is_inter_section=True,
             curve_radii=[r_lead, r_second],
             offsets_applied=True,
+        )
+
+    # When the adopted V-channel sits closer than ``r_first`` to the
+    # source's X, the horizontal lead-in segment ``(sx, sy) -> (vx, sy)``
+    # is shorter than the corner radius and ``resolve_curve_radii`` would
+    # clamp the first corner.  Extend the path back by ``r_first`` left/
+    # right of ``vx`` so the corner gets a full-radius arc; the extra
+    # segment overlaps the upstream exit_port->junction edge (same line
+    # colour), so the overlap is invisible.
+    h_dir = 1 if vx >= sx else -1
+    available_lead = (vx - sx) * h_dir
+    if available_lead < r_first:
+        return RoutedPath(
+            edge=edge,
+            line_id=edge.line_id,
+            points=[
+                (vx - r_first * h_dir, sy),
+                (vx, sy),
+                (vx, ty),
+                (tx, ty),
+            ],
+            is_inter_section=True,
+            curve_radii=[r_first, r_second],
         )
 
     return RoutedPath(
