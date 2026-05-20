@@ -156,9 +156,7 @@ def test_relative_side(a, b, side_dir, expected) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _synthetic_route(
-    line_id: str, points: list[tuple[float, float]]
-) -> RoutedPath:
+def _synthetic_route(line_id: str, points: list[tuple[float, float]]) -> RoutedPath:
     """Build a ``RoutedPath`` from a points list for testing.
 
     Source/target IDs are fixed (``'__src__'``, ``'__tgt__'``) so the
@@ -232,9 +230,7 @@ def test_synthetic_flipped_corner_is_caught() -> None:
     ]
     routes = [_synthetic_route("A", a_pts), _synthetic_route("B", b_pts)]
     violations = check_bundle_order_preserved(routes)
-    assert violations, (
-        "expected a synthetic bundle-order violation; got an empty list"
-    )
+    assert violations, "expected a synthetic bundle-order violation; got an empty list"
     v = violations[0]
     assert v.line_a == "A" and v.line_b == "B"
     assert v.in_tangent is Direction.R
