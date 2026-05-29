@@ -749,6 +749,67 @@ def test_no_kink_at_section_boundary(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Fan-out junctions share Y with their feeding LR/RL exit port
+# ---------------------------------------------------------------------------
+
+
+def _fanout_junction_exit_ports(graph: MetroGraph):
+    """Yield ``(junction, exit_port)`` for every fan-out junction fed by a
+    single LEFT/RIGHT exit port.
+
+    A fan-out junction has exactly one port predecessor (the exit port the
+    bundle leaves through) and more than one entry-port successor.  For
+    LEFT/RIGHT (LR/RL) exit ports, ``_position_junctions`` anchors the
+    junction at the exit port's Y so the bundle runs straight from exit to
+    junction; BOTTOM/TOP exit ports are intentionally offset and excluded.
+    """
+    junction_ids = set(graph.junctions)
+    for jid in junction_ids:
+        junction = graph.stations.get(jid)
+        if junction is None:
+            continue
+        # One edge per line, so dedupe to distinct port endpoints.
+        port_preds = {
+            edge.source
+            for edge in graph.edges_to(jid)
+            if (src := graph.stations.get(edge.source)) and src.is_port
+        }
+        succ_entry_ports = {
+            edge.target
+            for edge in graph.edges_from(jid)
+            if (tgt := graph.stations.get(edge.target)) and tgt.is_port
+        }
+        if len(port_preds) != 1 or len(succ_entry_ports) <= 1:
+            continue
+        exit_port = graph.stations.get(next(iter(port_preds)))
+        port_obj = graph.ports.get(exit_port.id)
+        if port_obj is None or port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        yield junction, exit_port
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_fanout_junction_shares_exit_port_y(fixture):
+    """A fan-out junction fed by an LR/RL exit port must sit at the exit
+    port's Y.
+
+    ``_position_junctions`` places such a junction at ``exit_port.y`` so the
+    bundle runs straight from the exit into the junction.  Late settling
+    stages (e.g. Stage 6.14 ``_shift_and_propagate_loop_stations``) can move
+    the exit port after junctions were last positioned; if junctions are not
+    re-anchored the junction is stranded above/below the port, forcing the
+    fanned routes to dip to the stale junction Y and back (#386:
+    complex_multipath section 3 -> sections 4/5 S-curve).
+    """
+    graph = _layout(fixture)
+    for junction, exit_port in _fanout_junction_exit_ports(graph):
+        assert abs(junction.y - exit_port.y) < _Y_TOL, (
+            f"{fixture}: fan-out junction {junction.id} y={junction.y} "
+            f"stranded from exit port {exit_port.id} y={exit_port.y}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Side-branch single-line edges stay off the trunk inside the section
 # ---------------------------------------------------------------------------
 

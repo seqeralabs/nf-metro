@@ -636,6 +636,43 @@ def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> Non
             )
 
 
+def _guard_fanout_junction_shares_exit_port_y(graph: MetroGraph, phase: str) -> None:
+    """A fan-out junction fed by an LR/RL exit port must share that port's Y.
+
+    ``_position_junctions`` anchors such a junction at the exit port's Y so the
+    bundle runs straight from exit to junction.  When a late settling pass
+    moves the exit port without re-running junction positioning, the junction
+    is stranded above/below the port and the fanned routes dip to the stale
+    junction Y and back (#386).  BOTTOM/TOP exit ports are intentionally offset
+    from their junction, so only LEFT/RIGHT exits are checked.
+    """
+    for jid in graph.junction_ids:
+        junction = graph.stations.get(jid)
+        if junction is None:
+            continue
+        port_preds = {
+            e.source
+            for e in graph.edges_to(jid)
+            if (src := graph.stations.get(e.source)) and src.is_port
+        }
+        entry_succs = {
+            e.target
+            for e in graph.edges_from(jid)
+            if (tgt := graph.stations.get(e.target)) and tgt.is_port
+        }
+        if len(port_preds) != 1 or len(entry_succs) <= 1:
+            continue
+        exit_port = graph.stations[next(iter(port_preds))]
+        port_obj = graph.ports.get(exit_port.id)
+        if port_obj is None or port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        if abs(junction.y - exit_port.y) > GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: fan-out junction {jid!r} y={junction.y:.1f} "
+                f"stranded from exit port {exit_port.id!r} y={exit_port.y:.1f}"
+            )
+
+
 def is_loop_side_branch_station(graph: MetroGraph, sid: str) -> bool:
     """Mirror ``_recenter_loop_side_stations``'s precondition: a station
     with exactly one in-edge and one out-edge, whose predecessor and
@@ -1483,6 +1520,11 @@ def _compute_section_layout(
     _shift_and_propagate_loop_stations(
         graph, y_spacing, section_y_padding, section_y_gap
     )
+    # The shift can move an exit port off the Y it held when junctions were
+    # last positioned (Stage 6.13).  Re-anchor junctions to the settled port
+    # Ys so a fan-out bundle runs straight from exit to junction instead of
+    # dipping to a stale junction Y and back (#386).
+    _position_junctions(graph)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.14")
 
@@ -1504,6 +1546,7 @@ def _compute_section_layout(
         offsets, routes = _run_pass_c_guards(graph, phase)
         _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
         _guard_off_track_inputs_above_consumer(graph, phase)
+        _guard_fanout_junction_shares_exit_port_y(graph, phase)
         _guard_row_gaps(graph, phase, section_y_gap=section_y_gap)
         if routes is not None:
             _guard_inter_section_routes_in_row_band(
