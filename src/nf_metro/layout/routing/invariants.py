@@ -384,11 +384,10 @@ class MergePortApproachViolation:
     bound: float
 
     def message(self) -> str:
-        rel = "below" if self.approach == "below" else "above"
         slot = "bottom" if self.approach == "below" else "top"
         return (
             f"merge port {self.port_id!r} line {self.line_id!r}: arrives "
-            f"from {rel} but sits at offset {self.offset:.1f}, on the wrong "
+            f"from {self.approach} but sits at offset {self.offset:.1f}, on the wrong "
             f"side of horizontal co-travellers (bound {self.bound:.1f}); "
             f"a perpendicular re-joining line must take the {slot} slot to "
             f"avoid crossing the bundle"

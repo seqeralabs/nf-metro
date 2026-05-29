@@ -1051,21 +1051,22 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
         if classified is None:
             continue
         horizontal, below, above = classified
+        cur = {
+            lid: ctx.offsets.get((port_id, lid), 0.0)
+            for lid in graph.station_lines(port_id)
+        }
 
-        def _cur(lid: str) -> float:
-            return ctx.offsets.get((port_id, lid), 0.0)
-
-        max_horiz = max(_cur(lid) for lid in horizontal)
-        min_horiz = min(_cur(lid) for lid in horizontal)
+        max_horiz = max(cur[lid] for lid in horizontal)
+        min_horiz = min(cur[lid] for lid in horizontal)
 
         new_offs: dict[str, float] = {}
-        for rank, lid in enumerate(sorted(below, key=_cur), start=1):
+        for rank, lid in enumerate(sorted(below, key=cur.get), start=1):
             new_offs[lid] = max_horiz + rank * ctx.offset_step
-        for rank, lid in enumerate(sorted(above, key=_cur, reverse=True), start=1):
+        for rank, lid in enumerate(sorted(above, key=cur.get, reverse=True), start=1):
             new_offs[lid] = min_horiz - rank * ctx.offset_step
 
         if all(
-            abs(new_offs[lid] - _cur(lid)) <= _OFFSET_EQ_TOLERANCE for lid in new_offs
+            abs(new_offs[lid] - cur[lid]) <= _OFFSET_EQ_TOLERANCE for lid in new_offs
         ):
             continue
 
