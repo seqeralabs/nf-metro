@@ -173,6 +173,11 @@ def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _bbox_cols_overlap(a: Section, b: Section) -> bool:
+    """True when two sections' bboxes overlap in X (share horizontal extent)."""
+    return a.bbox_x < b.bbox_x + b.bbox_w and b.bbox_x < a.bbox_x + a.bbox_w
+
+
 def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> None:
     """Final phase: column-overlapping adjacent-row section pairs must
     keep at least ``section_y_gap`` between the upper section's bbox
@@ -196,9 +201,7 @@ def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> N
             continue
         next_row = us.grid_row + us.grid_row_span
         for lsid, ls in sections_by_row_start.get(next_row, []):
-            if not (
-                us.bbox_x < ls.bbox_x + ls.bbox_w and ls.bbox_x < us.bbox_x + us.bbox_w
-            ):
+            if not _bbox_cols_overlap(us, ls):
                 continue
             gap = ls.bbox_y - (us.bbox_y + us.bbox_h)
             deficit = section_y_gap - gap
@@ -1485,15 +1488,6 @@ def _compute_section_layout(
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.14")
 
-    # Stage 6.15: Restore canvas-wide grid alignment after all settling.
-    # Stage 6.4 snaps to a per-row grid; later helpers (notably
-    # ``_shift_graph_into_canvas`` shifting by ``section_y_padding -
-    # min_top``, which is not a multiple of ``y_spacing`` when padding
-    # is not a grid multiple) can introduce a uniform half-grid drift.
-    # When every real station shares a single non-zero residue, shift
-    # the whole canvas by the smallest signed amount that returns them
-    # to integer multiples of ``y_spacing``.  No-op when residues are
-    # mixed (e.g. sarek-style multi-row layouts).
     # Stage 6.15a: Restore top padding symmetric with the bottom.  Fan
     # re-distribution (Stages 4.9 / 4.10 / 6.7 / 6.11) can lift a branch
     # above the content-top line the bbox was sized for, crowding the
@@ -1507,6 +1501,15 @@ def _compute_section_layout(
     _grow_bboxes_to_content_top(graph, section_y_padding, section_y_gap)
     _shift_graph_into_canvas(graph, section_y_padding)
 
+    # Stage 6.15: Restore canvas-wide grid alignment after all settling.
+    # Stage 6.4 snaps to a per-row grid; later helpers (notably
+    # ``_shift_graph_into_canvas`` shifting by ``section_y_padding -
+    # min_top``, which is not a multiple of ``y_spacing`` when padding
+    # is not a grid multiple) can introduce a uniform half-grid drift.
+    # When every real station shares a single non-zero residue, shift
+    # the whole canvas by the smallest signed amount that returns them
+    # to integer multiples of ``y_spacing``.  No-op when residues are
+    # mixed (e.g. sarek-style multi-row layouts).
     _snap_canvas_y_to_grid(graph, y_spacing, section_y_padding)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.15")
@@ -4698,16 +4701,15 @@ def _section_content_top_target(
 
     Mirror of the bottom anchor in :func:`_shrink_bboxes_to_content_bottom`:
     the top sits ``section_y_padding`` above the highest content marker
-    (bypass helpers use curve-only clearance; ports must stay inside with
-    no extra pad).  Bounded so it never rises within ``section_y_gap +
-    SECTION_HEADER_PROTRUSION`` of a column-overlapping section in the
-    row above.  The plain ``section_y_gap`` (matching
-    :func:`_guard_row_gaps`) keeps the bboxes apart, but inter-section
-    routes dip into that gap and must clear this section's header badge,
-    which protrudes ``SECTION_HEADER_PROTRUSION`` above its bbox top;
-    reserving that protrusion keeps the grow from crowding the badge up
-    against a route passing over the section's columns.  Returns
-    ``None`` when the section has no real content to anchor to.
+    (bypass helpers use curve-only clearance; ports must stay inside).
+
+    The bound against the row above reserves ``section_y_gap +
+    SECTION_HEADER_PROTRUSION``, not just the bbox gap: the section's
+    header badge protrudes ``SECTION_HEADER_PROTRUSION`` above its bbox
+    top, and inter-section routes dip into the gap, so reserving the
+    protrusion keeps the grow from crowding the badge into a route.
+
+    Returns ``None`` when the section has no real content to anchor to.
     """
     content_min_ys = [
         graph.stations[sid].y
@@ -4743,10 +4745,7 @@ def _section_content_top_target(
             continue
         if other.grid_row + max(1, other.grid_row_span) != section.grid_row:
             continue
-        if not (
-            other.bbox_x < section.bbox_x + section.bbox_w
-            and section.bbox_x < other.bbox_x + other.bbox_w
-        ):
+        if not _bbox_cols_overlap(other, section):
             continue
         above_bots.append(other.bbox_y + other.bbox_h)
     if above_bots:
