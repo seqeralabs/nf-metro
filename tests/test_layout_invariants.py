@@ -2250,6 +2250,79 @@ def test_section_bbox_has_bottom_padding(fixture):
     )
 
 
+# Section bbox top doesn't carry the configured section_y_padding above
+# the highest station marker (the mirror of bottom padding).  Affects
+# sections whose content fans above the trunk: a fan-redistribution pass
+# lifts a station above the content-top line the bbox was sized for,
+# crowding the topmost marker against the bbox top while the bottom keeps
+# its full band.  Sections gap-bounded against the row above (where full
+# top padding would crowd the section-header badge against an inter-row
+# route) belong here as xfails.
+_XFAIL_BBOX_TOP_PAD: dict[str, str] = {
+    "differentialabundance_default.mmd": (
+        "plots is gap-bounded: growing its top to a full padding band would "
+        "bring its section-header badge within the inter-row route clearance "
+        "(test_routed_paths_clear_next_row_headers), so the top-padding "
+        "restore deliberately stops short. Revisit if the row gap or routing "
+        "changes."
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_BBOX_TOP_PAD),
+)
+def test_section_bbox_has_top_padding(fixture):
+    """Each section's bbox top must sit at least ``section_y_padding``
+    above the centre Y of its highest internal station.
+
+    Symmetric counterpart to ``test_section_bbox_has_bottom_padding``.
+    The codebase convention measures padding from the station's centre
+    Y, so the invariant is ``bbox_top <= min(station.y) -
+    section_y_padding``.
+
+    Fan-redistribution passes (Stages 4.9 / 4.10 / 6.7 / 6.11) lift a
+    branch station above the trunk after the section bbox was sized for
+    the pre-fan content extent.  Without a top-padding restore the
+    topmost marker sits ~10px from the bbox top while the bottom keeps
+    its full 50px, leaving the box visibly uncentred about the trunk
+    (issue #406).
+    """
+    from nf_metro.layout.constants import SECTION_Y_PADDING
+
+    graph = _layout(fixture)
+    tol = 1.0
+
+    offenders: list[str] = []
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0:
+            continue
+        port_ids = set(sec.entry_ports) | set(sec.exit_ports)
+        internal_ys = [
+            graph.stations[sid].y
+            for sid in sec.station_ids
+            if sid in graph.stations
+            and sid not in port_ids
+            and not graph.stations[sid].is_hidden
+        ]
+        if not internal_ys:
+            continue
+        highest_marker_cy = min(internal_ys)
+        gap = highest_marker_cy - sec.bbox_y
+        if gap + tol < SECTION_Y_PADDING:
+            offenders.append(
+                f"section {sec.id!r}: bbox top={sec.bbox_y:.1f}, "
+                f"highest marker cy={highest_marker_cy:.1f}, "
+                f"gap={gap:.1f} < section_y_padding={SECTION_Y_PADDING}"
+            )
+
+    assert not offenders, (
+        f"{fixture}: section bbox tops must sit at least "
+        f"section_y_padding above the highest station centre: " + "; ".join(offenders)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Inter-row gap accommodates grown bboxes from Stage 6.14 shifts
 # ---------------------------------------------------------------------------
