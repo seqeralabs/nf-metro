@@ -124,6 +124,32 @@ def test_parse_multiline_label_multiple_breaks():
     assert graph.stations["node"].label == "A\nB\nC"
 
 
+def test_parse_quoted_label_strips_quotes():
+    """Double-quoted labels (Mermaid escaping for parens) lose the quotes."""
+    text = 'graph LR\n    liftover["Liftover (Picard, UCSC)"]\n'
+    graph = parse_metro_mermaid(text)
+    assert graph.stations["liftover"].label == "Liftover (Picard, UCSC)"
+
+
+def test_parse_quoted_label_with_newline():
+    r"""A quoted label keeps \\n handling after the quotes are stripped."""
+    text = r"graph LR" + "\n" + r'    liftover["Liftover \n (Picard, UCSC)"]' + "\n"
+    graph = parse_metro_mermaid(text)
+    assert graph.stations["liftover"].label == "Liftover\n(Picard, UCSC)"
+
+
+def test_parse_quoted_subgraph_title_strips_quotes():
+    """Double-quoted subgraph titles render without the surrounding quotes."""
+    text = (
+        "graph LR\n"
+        '    subgraph prep ["Preprocessing (Optional)"]\n'
+        "        a[A]\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.sections["prep"].name == "Preprocessing (Optional)"
+
+
 def test_parse_edges():
     text = "graph LR\n    a[Input]\n    b[Output]\n    a -->|main| b\n"
     graph = parse_metro_mermaid(text)

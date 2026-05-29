@@ -121,7 +121,7 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
         if subgraph_m:
             section_id = subgraph_m.group(1)
             display_name = subgraph_m.group(2) or section_id
-            section = Section(id=section_id, name=display_name.strip())
+            section = Section(id=section_id, name=_unquote(display_name.strip()))
             graph.add_section(section)
             current_section_id = section_id
             continue
@@ -180,6 +180,19 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
 
 # Subgraph pattern: subgraph id [Display Name]
 _SUBGRAPH_PATTERN = re.compile(r"^subgraph\s+(\w+)\s*(?:\[(.+?)\])?\s*$")
+
+
+def _unquote(text: str) -> str:
+    """Strip one pair of surrounding double quotes from a title or label.
+
+    Mermaid requires special characters such as parentheses to be wrapped in
+    double quotes (e.g. ``["Liftover (Picard)"]``) so the diagram parses on
+    GitHub. The quotes are escaping syntax, not part of the displayed text, so
+    they are removed here, leaving the inner text untouched.
+    """
+    if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+        return text[1:-1]
+    return text
 
 
 def _parse_directive(
@@ -364,6 +377,7 @@ def _parse_node(
         if m:
             node_id = m.group(1)
             label = m.group(2).strip() if m.lastindex >= 2 else node_id
+            label = _unquote(label)
             # Convert literal \n sequences to real newlines (multi-line labels)
             if "\\n" in label:
                 label = "\n".join(part.strip() for part in label.split("\\n"))

@@ -56,15 +56,15 @@ graph LR
         samplesheet -->|test| _inputs_hub
     end
 
-    subgraph preprocess [Preprocessing (Optional)]
+    subgraph preprocess ["Preprocessing (Optional)"]
         %%metro entry: left | truth, test
         %%metro exit: right | truth, test
         subsample[Subsample]
-        liftover[Liftover\n(Picard, UCSC)]
+        liftover["Liftover\n(Picard, UCSC)"]
         subsample -->|test| liftover
     end
 
-    subgraph normalization [Variant Normalization (Optional)]
+    subgraph normalization ["Variant Normalization (Optional)"]
         %%metro entry: left | truth, test
         %%metro exit: right | truth, test
         sv_processing[SV\nProcessing]
@@ -72,7 +72,7 @@ graph LR
         sv_processing -->|test| var_norm
     end
 
-    subgraph filtering [Variant Filtering (Optional)]
+    subgraph filtering ["Variant Filtering (Optional)"]
         %%metro entry: left | test
         %%metro exit: right | test
         filter_contigs[Filter\nContigs]

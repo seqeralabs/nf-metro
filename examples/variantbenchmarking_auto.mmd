@@ -47,19 +47,19 @@ graph LR
         samplesheet -->|test| _inputs_hub
     end
 
-    subgraph preprocess [Preprocessing (Optional)]
+    subgraph preprocess ["Preprocessing (Optional)"]
         subsample[Subsample]
-        liftover[Liftover\n(Picard, UCSC)]
+        liftover["Liftover\n(Picard, UCSC)"]
         subsample -->|test| liftover
     end
 
-    subgraph normalization [Variant Normalization (Optional)]
+    subgraph normalization ["Variant Normalization (Optional)"]
         sv_processing[SV\nProcessing]
         var_norm[Variant\nNormalization]
         sv_processing -->|test| var_norm
     end
 
-    subgraph filtering [Variant Filtering (Optional)]
+    subgraph filtering ["Variant Filtering (Optional)"]
         filter_contigs[Filter\nContigs]
         bcftools_filter[bcftools\nfilter]
         survivor_filter[SURVIVOR\nfilter]
