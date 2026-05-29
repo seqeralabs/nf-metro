@@ -693,6 +693,37 @@ def _guard_bundle_order_preserved(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
+def _guard_merge_port_approach_side(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict | None = None,
+) -> None:
+    """Final-phase: at every multi-feeder reconvergence merge port, a
+    line that re-joins the bundle perpendicular (rising from a section
+    below, descending from one above) must take the bundle slot nearest
+    its approach side, so its riser does not cross over the lines that
+    arrive horizontally.
+
+    See
+    :func:`nf_metro.layout.routing.invariants.check_merge_port_approach_side`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import check_merge_port_approach_side
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    violations = check_merge_port_approach_side(graph, offsets)
+    if not violations:
+        return
+    first = violations[0]
+    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
 def _guard_fanout_tail_join(
     graph: MetroGraph,
     phase: str,
@@ -1688,6 +1719,7 @@ def _compute_section_layout(
         _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
         _guard_off_track_inputs_above_consumer(graph, phase)
         _guard_fanout_junction_shares_exit_port_y(graph, phase)
+        _guard_merge_port_approach_side(graph, phase, offsets=offsets)
         _guard_row_gaps(graph, phase, section_y_gap=section_y_gap)
         _guard_section_top_padding(
             graph,

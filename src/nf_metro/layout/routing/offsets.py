@@ -6,6 +6,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from nf_metro.layout.constants import OFFSET_STEP
+from nf_metro.layout.routing.invariants import classify_merge_port_feeders
 from nf_metro.layout.routing.reversal import detect_reversed_sections
 from nf_metro.parser.model import MetroGraph, PortSide
 
@@ -1020,6 +1021,92 @@ def _align_junction_to_entry_port(ctx: _OffsetCtx) -> None:
                         ctx.offsets[(feeding_exit, lid)] = off
 
 
+def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
+    """Re-slot perpendicular re-joining lines at multi-feeder merge ports.
+
+    At an LR/RL entry port fed by more than one exit port, a line that
+    arrives perpendicular to the bundle (rising from a section below, or
+    descending from one above) with no horizontal co-travel in the
+    port's row has no upstream ordering to preserve.  Forced into its
+    priority slot - especially under a section-reversal flip - it can
+    land on the far side of the bundle, so its riser crosses over the
+    horizontally-arriving lines.
+
+    For each such port, leave the horizontal co-travellers on their
+    incoming offsets (so their feeder edges stay flat) and move only a
+    mis-slotted perpendicular line: a ``below`` line is pushed just past
+    the bottom of the horizontal band (one step below its largest
+    offset), an ``above`` line just past the top.  Multiple perpendicular
+    lines on the same side keep their incoming relative order.  Ports
+    already in approach order are unchanged.  The new per-line offsets
+    propagate to every downstream station in the port's section so the
+    bundle stays consistent through the section.
+    """
+    if ctx.compact:
+        return
+
+    graph = ctx.graph
+    for port_id in graph.ports:
+        classified = classify_merge_port_feeders(graph, port_id)
+        if classified is None:
+            continue
+        horizontal, below, above = classified
+
+        def _cur(lid: str) -> float:
+            return ctx.offsets.get((port_id, lid), 0.0)
+
+        max_horiz = max(_cur(lid) for lid in horizontal)
+        min_horiz = min(_cur(lid) for lid in horizontal)
+
+        new_offs: dict[str, float] = {}
+        for rank, lid in enumerate(sorted(below, key=_cur), start=1):
+            new_offs[lid] = max_horiz + rank * ctx.offset_step
+        for rank, lid in enumerate(sorted(above, key=_cur, reverse=True), start=1):
+            new_offs[lid] = min_horiz - rank * ctx.offset_step
+
+        if all(
+            abs(new_offs[lid] - _cur(lid)) <= _OFFSET_EQ_TOLERANCE for lid in new_offs
+        ):
+            continue
+
+        sec_id = graph.ports[port_id].section_id
+        _apply_offsets_through_section(ctx, port_id, sec_id, new_offs)
+
+
+def _apply_offsets_through_section(
+    ctx: _OffsetCtx,
+    port_id: str,
+    sec_id: str | None,
+    new_offs: dict[str, float],
+) -> None:
+    """Set ``new_offs`` at ``port_id`` and propagate downstream in-section.
+
+    Walks ``edges_from`` from the port through non-port stations of the
+    same section, copying each line's new offset so the whole bundle
+    moves together.  Stops at section boundaries and ports.
+    """
+    graph = ctx.graph
+    for lid, off in new_offs.items():
+        ctx.offsets[(port_id, lid)] = off
+
+    visited = {port_id}
+    queue = deque([port_id])
+    while queue:
+        cur = queue.popleft()
+        for edge in graph.edges_from(cur):
+            tgt_id = edge.target
+            if tgt_id in visited:
+                continue
+            tgt = graph.stations.get(tgt_id)
+            if tgt is None or tgt.is_port or tgt.section_id != sec_id:
+                continue
+            visited.add(tgt_id)
+            for lid in graph.station_lines(tgt_id):
+                if lid in new_offs:
+                    ctx.offsets[(tgt_id, lid)] = new_offs[lid]
+            queue.append(tgt_id)
+
+
 def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> None:
     """Snap offsets for same-section edges where endpoints share base Y.
 
@@ -1125,6 +1212,9 @@ def compute_station_offsets(
     6. **Junction inheritance** - copies exit port offsets to junctions.
     7. **Entry port offsets** - TOP entry override for TB BOTTOM exits,
        LR/RL exit-to-entry propagation, compact entry separation.
+    7b. **Merge-port approach-side allocation** - at multi-feeder LR/RL
+       entry ports, re-slots a perpendicular re-joining line to the
+       bundle slot nearest its approach side (non-compact only).
     8. **Horizontal reconciliation** - snaps mismatched offsets on
        same-Y edges to eliminate almost-horizontal slopes.
 
@@ -1140,5 +1230,6 @@ def compute_station_offsets(
     _propagate_to_junctions(ctx)
     _compute_entry_port_offsets(ctx)
     _align_junction_to_entry_port(ctx)
+    _allocate_merge_ports_by_approach(ctx)
     _reconcile_horizontal_offsets(ctx)
     return ctx.offsets

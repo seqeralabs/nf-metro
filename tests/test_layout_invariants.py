@@ -3813,3 +3813,54 @@ def test_thick_bundle_row_pitch(fixture):
         f"{fixture}: no thick (>= 4-line) bundle column with >= 2 stacked "
         f"stations matched the precondition"
     )
+
+
+# ---------------------------------------------------------------------------
+# Merge-port approach-side slot allocation
+# ---------------------------------------------------------------------------
+
+
+def _fixtures_with_merge_port() -> list[str]:
+    """Fixtures with at least one reconvergence merge port.
+
+    A merge port here is an LR/RL entry port fed by >= 2 exit ports with
+    both a horizontal co-traveller and a perpendicular feeder - the case
+    the approach-side allocation governs.  Computed once at import time.
+    """
+    from nf_metro.layout.routing.invariants import classify_merge_port_feeders
+
+    out: list[str] = []
+    for name in ALL_FIXTURES:
+        try:
+            g = _layout(name)
+        except Exception:
+            continue
+        if any(classify_merge_port_feeders(g, pid) is not None for pid in g.ports):
+            out.append(name)
+    return out
+
+
+_FIXTURES_WITH_MERGE_PORT = _fixtures_with_merge_port()
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_MERGE_PORT)
+def test_merge_port_rejoining_line_takes_approach_slot(fixture):
+    """A line that re-joins a bundle perpendicular at a multi-feeder
+    entry port must take the bundle slot nearest its approach side.
+
+    A line rising from a section below must sit at or below every
+    horizontally-arriving co-traveller (bottom slot); a line descending
+    from a section above must sit at or above them (top slot).  When it
+    is forced into a priority slot on the far side instead, its
+    perpendicular riser crosses over the horizontal lines - the visible
+    crossover this invariant guards against (issue #415).
+    """
+    from nf_metro.layout.routing.invariants import check_merge_port_approach_side
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    violations = check_merge_port_approach_side(graph, offsets)
+    assert violations == [], (
+        f"{fixture}: {len(violations)} merge-port approach-side "
+        f"violation(s); first: {violations[0].message() if violations else ''}"
+    )

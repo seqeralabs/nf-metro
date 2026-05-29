@@ -31,6 +31,7 @@ from nf_metro.layout.routing.common import (
     horizontal_direction,
     vertical_direction,
 )
+from nf_metro.parser.model import PortSide
 
 # Segments shorter than this are sub-pixel artefacts of per-line
 # offsets and carry no meaningful direction of travel.
@@ -350,11 +351,179 @@ def check_fanout_tail_join(
     return gaps
 
 
+# ---------------------------------------------------------------------------
+# Merge-port approach-side slot allocation
+# ---------------------------------------------------------------------------
+
+# Feeders sharing a port's row land within a few px of its base Y once
+# per-line offsets are applied; a perpendicular feeder arrives from a
+# different section row, a whole section-height away.  10px cleanly
+# separates the two without tripping on multi-line bundle spread.
+_MERGE_APPROACH_Y_TOL = 10.0
+
+
+@dataclass(frozen=True)
+class MergePortApproachViolation:
+    """A line slotted on the wrong side of a multi-feeder merge port.
+
+    At an LR/RL entry port fed by more than one exit port, a line that
+    arrives perpendicular to the bundle (rising from a section below or
+    descending from one above, with no horizontal co-travel in the
+    port's row) must take the bundle slot nearest its approach side: the
+    bottom slot when rising from below, the top slot when descending
+    from above.  Otherwise its perpendicular riser crosses over the
+    lines that arrive horizontally.  ``offset`` is the offending line's
+    Y offset at the port; ``bound`` is the horizontal-co-traveller
+    offset it violates.
+    """
+
+    port_id: str
+    line_id: str
+    approach: str  # "below" or "above"
+    offset: float
+    bound: float
+
+    def message(self) -> str:
+        rel = "below" if self.approach == "below" else "above"
+        slot = "bottom" if self.approach == "below" else "top"
+        return (
+            f"merge port {self.port_id!r} line {self.line_id!r}: arrives "
+            f"from {rel} but sits at offset {self.offset:.1f}, on the wrong "
+            f"side of horizontal co-travellers (bound {self.bound:.1f}); "
+            f"a perpendicular re-joining line must take the {slot} slot to "
+            f"avoid crossing the bundle"
+        )
+
+
+def _immediate_feeder(graph, port_id: str, line_id: str):  # noqa: ANN001, ANN202
+    """Return ``(source_station, is_junction)`` feeding ``line_id`` in.
+
+    Uses the IMMEDIATE edge source - it does not walk back through a
+    junction.  Whether the source is a fan/merge junction matters: only
+    a line fed by a direct exit port at a different row is a clean
+    inter-section edge the router L-shapes into the port with a riser at
+    the boundary (a true perpendicular join).  A junction-fed line may
+    drop to the port's row far upstream and co-travel horizontally, so
+    its junction's Y does not describe how it approaches the port.
+    """
+    for edge in graph.edges_to(port_id):
+        if edge.line_id != line_id:
+            continue
+        src = graph.stations.get(edge.source)
+        if src is None:
+            return None, False
+        return src, edge.source in graph.junctions
+    return None, False
+
+
+def classify_merge_port_feeders(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    port_id: str,
+) -> tuple[list[str], list[str], list[str]] | None:
+    """Classify a merge port's feeder lines by approach side.
+
+    Returns ``(horizontal, below, above)`` line-id lists for an LR/RL
+    entry port fed by at least two distinct feeders, with at least one
+    horizontal co-traveller and at least one perpendicular feeder.  A
+    line is horizontal when its immediate feeder sits in the port's own
+    row; it is ``below`` / ``above`` only when fed by a direct exit port
+    (not a junction) a row below / above the port - the clean
+    inter-section edge that arrives perpendicular at the boundary.  A
+    line dropped into the row by an upstream fan/merge junction
+    co-travels horizontally and is not a perpendicular joiner, so it is
+    left unclassified.  Returns ``None`` when the port is not such a
+    reconvergence merge - i.e. when there is no approach-side decision
+    to make.
+    """
+    port_obj = graph.ports.get(port_id)
+    if port_obj is None or not port_obj.is_entry:
+        return None
+    if port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):
+        return None
+    port_st = graph.stations.get(port_id)
+    if port_st is None:
+        return None
+
+    distinct_sources: set[int] = set()
+    horizontal: list[str] = []
+    below: list[str] = []
+    above: list[str] = []
+    for lid in graph.station_lines(port_id):
+        src, is_junction = _immediate_feeder(graph, port_id, lid)
+        if src is None:
+            continue
+        distinct_sources.add(id(src))
+        dy = src.y - port_st.y
+        if abs(dy) <= _MERGE_APPROACH_Y_TOL:
+            horizontal.append(lid)
+        elif is_junction:
+            continue
+        elif dy > 0:
+            below.append(lid)
+        else:
+            above.append(lid)
+    if len(distinct_sources) < 2:
+        return None
+    if not horizontal or not (below or above):
+        return None
+    return horizontal, below, above
+
+
+def check_merge_port_approach_side(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    offsets: dict[tuple[str, str], float],
+) -> list[MergePortApproachViolation]:
+    """Return merge ports where a perpendicular feeder is mis-slotted.
+
+    For every reconvergence merge port (see
+    :func:`classify_merge_port_feeders`), a line rising from below must
+    sit at or below every horizontal co-traveller, and a line descending
+    from above must sit at or above every horizontal co-traveller.
+    """
+    violations: list[MergePortApproachViolation] = []
+    for port_id in graph.ports:
+        classified = classify_merge_port_feeders(graph, port_id)
+        if classified is None:
+            continue
+        horizontal, below, above = classified
+        horiz_offs = [offsets.get((port_id, lid), 0.0) for lid in horizontal]
+        max_horiz = max(horiz_offs)
+        min_horiz = min(horiz_offs)
+        for lid in below:
+            off = offsets.get((port_id, lid), 0.0)
+            if off < max_horiz - COORD_TOLERANCE_FINE:
+                violations.append(
+                    MergePortApproachViolation(
+                        port_id=port_id,
+                        line_id=lid,
+                        approach="below",
+                        offset=off,
+                        bound=max_horiz,
+                    )
+                )
+        for lid in above:
+            off = offsets.get((port_id, lid), 0.0)
+            if off > min_horiz + COORD_TOLERANCE_FINE:
+                violations.append(
+                    MergePortApproachViolation(
+                        port_id=port_id,
+                        line_id=lid,
+                        approach="above",
+                        offset=off,
+                        bound=min_horiz,
+                    )
+                )
+    return violations
+
+
 __all__ = [
     "BundleOrderViolation",
     "FanoutTailGap",
+    "MergePortApproachViolation",
     "Side",
     "check_bundle_order_preserved",
     "check_fanout_tail_join",
+    "check_merge_port_approach_side",
+    "classify_merge_port_feeders",
     "fanout_junctions",
 ]
