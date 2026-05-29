@@ -3162,24 +3162,147 @@ def test_ports_on_section_boundary(fixture):
     assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
 
 
-def _resolve_section_col_for_station(graph, station):
-    """Resolve a station's grid column.  For ports, use the section.
-    For junctions, follow an incoming edge back to a real station.
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_inter_section_routes_dont_reenter_source_section(fixture):
+    """An inter-section route, after exiting through a port on one side
+    of its source section's bbox, must not have any segment that crosses
+    BACK INTO the source section's bbox.
+
+    Catches the "left-and-down at section right edge" pattern: route
+    exits at the right (x = section.right) then a subsequent segment
+    goes leftward at the same Y, re-entering the source's column at the
+    source's y, before bending down.  See
+    docs/dev/authoring_misfires.md #11.6 and #12.5.
+
+    Same-section (intra-section) routes are exempt - they stay inside.
+    Routes touching TB/BT sections are exempt (those route vertically
+    inside their column).
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    offenders: list[str] = []
+    for r in routes:
+        pts = r.points
+        if len(pts) < 2:
+            continue
+        if not r.is_inter_section:
+            continue
+        src_st = graph.stations.get(r.edge.source)
+        tgt_st = graph.stations.get(r.edge.target)
+        if src_st is None or tgt_st is None:
+            continue
+        # Resolve the SOURCE section (tracing through junctions).
+        src_sec = _resolve_section_for_station(graph, src_st)
+        if src_sec is None:
+            continue
+        if src_sec.direction in ("TB", "BT"):
+            continue
+        # Skip routes that stay in the same section (intra-section).
+        tgt_sec = _resolve_section_for_station(graph, tgt_st)
+        if tgt_sec is not None and tgt_sec.id == src_sec.id:
+            continue
+        sec_l = src_sec.bbox_x
+        sec_r = src_sec.bbox_x + src_sec.bbox_w
+        sec_t = src_sec.bbox_y
+        sec_b = src_sec.bbox_y + src_sec.bbox_h
+        # Two checks per route:
+        # (a) For each interior corner point pts[1..-2] (which is the
+        #     Q-curve's CONTROL point in the rendered SVG), the corner
+        #     must not lie strictly inside the source section's bbox.
+        #     This catches "channel x is inside the source section" bugs
+        #     in L-shape routes.
+        # (b) For each segment midpoint, the midpoint must not lie
+        #     strictly inside the source section's bbox.  Catches
+        #     segments that cross the bbox interior.
+        # The source station itself (pts[0]) and the target (pts[-1]) are
+        # allowed to coincide with the section boundary.
+        EDGE_TOL = 0.5
+
+        def _strictly_inside(px: float, py: float) -> bool:
+            return (
+                sec_l + EDGE_TOL < px < sec_r - EDGE_TOL
+                and sec_t + EDGE_TOL < py < sec_b - EDGE_TOL
+            )
+
+        # A junction-originated route can START strictly inside its source
+        # section (pts[0] is a junction placed inside the bbox).  The outward
+        # run from that interior start to the exit boundary is legitimate;
+        # the invariant only forbids geometry that crosses BACK IN after the
+        # route has left.  ``exit_idx`` is the first point that is not
+        # strictly inside - anything before it is the outward run and exempt.
+        # Routes that start on the boundary (the usual exit-port case) have
+        # exit_idx == 0 and get the full strict check.
+        exit_idx = 0
+        for k, (px, py) in enumerate(pts):
+            if not _strictly_inside(px, py):
+                exit_idx = k
+                break
+        found = False
+        for j in range(1, len(pts) - 1):
+            if j < exit_idx:
+                continue
+            cx, cy = pts[j]
+            if _strictly_inside(cx, cy):
+                offenders.append(
+                    f"{r.edge.source} -> {r.edge.target} "
+                    f"(line={r.line_id}) corner "
+                    f"{tuple(round(c, 1) for c in pts[j])} inside "
+                    f"source section {src_sec.id} bbox "
+                    f"[{sec_l},{sec_t}]-[{sec_r},{sec_b}]"
+                )
+                found = True
+                break
+        if found:
+            continue
+        for j in range(1, len(pts)):
+            if j <= exit_idx:
+                continue
+            x0, y0 = pts[j - 1]
+            x1, y1 = pts[j]
+            mx = (x0 + x1) / 2.0
+            my = (y0 + y1) / 2.0
+            if _strictly_inside(mx, my):
+                offenders.append(
+                    f"{r.edge.source} -> {r.edge.target} "
+                    f"(line={r.line_id}) seg "
+                    f"{tuple(round(c, 1) for c in pts[j - 1])} -> "
+                    f"{tuple(round(c, 1) for c in pts[j])} "
+                    f"midpoint ({round(mx, 1)}, {round(my, 1)}) inside "
+                    f"source section {src_sec.id} bbox "
+                    f"[{sec_l},{sec_t}]-[{sec_r},{sec_b}]"
+                )
+                break
+    assert not offenders, f"{fixture}: " + "; ".join(offenders[:3])
+
+
+def _resolve_section_for_station(graph, station):
+    """Resolve a station's section, tracing back through junctions.
+
+    For regular stations, returns the section they belong to.
+    For junction stations (section_id=None), follows an incoming edge to
+    a real station and returns that station's section.
     """
     if station is None:
         return None
     if station.section_id:
-        sec = graph.sections.get(station.section_id)
-        if sec and sec.grid_col >= 0:
-            return sec.grid_col
+        return graph.sections.get(station.section_id)
     if station.id in graph.junctions:
         for e in graph.edges:
             if e.target == station.id:
                 pred = graph.stations.get(e.source)
                 if pred and pred.section_id:
-                    sec = graph.sections.get(pred.section_id)
-                    if sec and sec.grid_col >= 0:
-                        return sec.grid_col
+                    return graph.sections.get(pred.section_id)
+    return None
+
+
+def _resolve_section_col_for_station(graph, station):
+    """Resolve a station's grid column.  For ports, use the section.
+    For junctions, follow an incoming edge back to a real station.
+    """
+    sec = _resolve_section_for_station(graph, station)
+    if sec and sec.grid_col >= 0:
+        return sec.grid_col
     return None
 
 
@@ -3237,3 +3360,245 @@ def test_debug_grid_overlay_boundaries_outside_section_bboxes(fixture):
                 )
 
     assert not offenders, f"{fixture}: " + "; ".join(offenders[:5])
+
+
+# ---------------------------------------------------------------------------
+# Trunk-Y / fan-symmetry invariants.
+#
+# Three properties that an entry/exit-port placement must preserve:
+# equal-rank fans stay symmetric about their port, fan-and-reconverge exit
+# ports stay on their merge row, and thick multi-line bundles keep vertical
+# clearance.  Each is violated by anchoring a fan on its topmost target.
+# ---------------------------------------------------------------------------
+
+
+def _lr_port(graph: MetroGraph, port_ids) -> str | None:
+    """Return the first LEFT/RIGHT port id in ``port_ids`` (or None)."""
+    for pid in port_ids:
+        port = graph.ports.get(pid)
+        if port is not None and port.side in (PortSide.LEFT, PortSide.RIGHT):
+            return pid
+    return None
+
+
+# Fixtures whose terminal LR section has an entry port that fans directly
+# into >= 2 equal-rank targets straddling the port.  The fan must stay
+# symmetric about the port; the pre-fix engine top-anchored the whole fan
+# (shifting every target below the port), so its mean drifts off the port.
+#
+# Curated rather than corpus-wide: under default station pitch some real
+# pipelines (differentialabundance_default, hlatyping reporting,
+# variantbenchmarking stats) legitimately stack their two sinks on one
+# side of the port even on the fixed engine, so a corpus-wide assertion
+# would false-positive there.  These three fixtures have the room to fan
+# symmetrically and do so on the fixed engine.
+_SYMFAN_ABOUT_PORT_FIXTURES = [
+    "differentialabundance.mmd",
+    "da_pipeline.mmd",
+    "topologies/terminal_symmetric_fan.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _SYMFAN_ABOUT_PORT_FIXTURES)
+def test_terminal_fan_symmetric_about_entry_port(fixture):
+    """A terminal LR/RL section whose entry port fans directly into a
+    set of equal-rank targets must keep that fan symmetric about the
+    port: the mean of the target Ys equals the entry port Y.
+
+    Regression lock for the top-anchor bug where the fan was pinned to
+    its topmost target (the entry port row), so one branch collapsed
+    onto the trunk and the fan's centre of mass dropped below the port.
+    Evidence (differentialabundance.mmd ``reporting``): fixed engine
+    places shinyngs at 175.2 and quarto at 292.0 (mean 233.6 == port
+    Y 233.6); the pre-fix engine pinned shinyngs to 233.6, dropping the
+    mean to 262.8.
+    """
+    graph = _layout(fixture)
+    tested = 0
+    for sec in graph.sections.values():
+        if sec.direction not in ("LR", "RL"):
+            continue
+        # Terminal: no LR/RL exit port (the bundle ends in this section).
+        if _lr_port(graph, sec.exit_ports) is not None:
+            continue
+        ep = _lr_port(graph, sec.entry_ports)
+        if ep is None:
+            continue
+        port_y = graph.stations[ep].y
+        # Direct fan targets: visible internal stations the entry port
+        # feeds, de-duplicated across the per-line edge fan.
+        targets: list[str] = []
+        for e in graph.edges_from(ep):
+            t = graph.stations.get(e.target)
+            if t is None or t.is_port or t.off_track or t.is_hidden:
+                continue
+            if e.target not in targets:
+                targets.append(e.target)
+        if len(targets) < 2:
+            continue
+        # Equal-rank: every target carries the same line set.
+        line_sets = {frozenset(graph.station_lines(t)) for t in targets}
+        if len(line_sets) != 1:
+            continue
+        ys = [graph.stations[t].y for t in targets]
+        # Straddle precondition: a genuine fan has targets both above and
+        # below the port.  A same-side stack (both below) is a different
+        # layout and not the symmetric-fan pattern this locks.
+        if not (min(ys) < port_y - _Y_TOL and max(ys) > port_y + _Y_TOL):
+            continue
+        tested += 1
+        mean = sum(ys) / len(ys)
+        assert abs(mean - port_y) <= 2.0, (
+            f"{fixture} section {sec.id}: terminal fan not symmetric about "
+            f"entry port (port_y={port_y:.1f}, target mean={mean:.1f}, "
+            f"targets={sorted((t, round(graph.stations[t].y, 1)) for t in targets)})"
+        )
+    assert tested >= 1, (
+        f"{fixture}: no terminal entry-port fan matched the precondition"
+    )
+
+
+# Fixtures with a pass-through LR section (entry + exit both carry the
+# full bundle) whose exit port is fed by an in-section reconvergence
+# (a merge station with in-degree >= 2).  The exit must sit on the merge
+# row; the pre-fix engine top-anchored the exit to the entry trunk row,
+# detaching it from the merge and kinking the inter-section trunk.
+_TRUNK_RECONVERGE_FIXTURES = [
+    "hlatyping.mmd",
+    "topologies/trunk_through_fan.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _TRUNK_RECONVERGE_FIXTURES)
+def test_trunk_exit_follows_reconvergence(fixture):
+    """For a pass-through LR/RL section (LR entry and exit ports both
+    carrying the section's full bundle) whose exit port is fed by a
+    single in-section reconvergence merge station, the exit port Y must
+    equal the merge station's Y.
+
+    Regression lock for the fan-and-reconverge trunk-Y kink: the merge
+    of a side branch back onto the trunk sits below the entry trunk row,
+    and the exit port must follow it down.  Evidence (hlatyping.mmd
+    ``hla_typing``): the fixed engine places the exit port at 160.0 to
+    match the merge ``_merge1`` at 160.0; the pre-fix engine pinned the
+    exit to the entry trunk Y 120.0, a 40px detachment from its feeder.
+    """
+    graph = _layout(fixture)
+    tested = 0
+    for sec_id, sec in graph.sections.items():
+        if sec.direction not in ("LR", "RL"):
+            continue
+        ep = _lr_port(graph, sec.entry_ports)
+        xp = _lr_port(graph, sec.exit_ports)
+        if ep is None or xp is None:
+            continue
+        bundle = _section_full_bundle(graph, sec)
+        if not bundle:
+            continue
+        if set(graph.station_lines(ep)) != bundle:
+            continue
+        if set(graph.station_lines(xp)) != bundle:
+            continue
+        # Sole in-section, non-port feeder of the exit port.
+        feeders: list[str] = []
+        for e in graph.edges_to(xp):
+            s = graph.stations.get(e.source)
+            if s is None or s.is_port or s.section_id != sec_id:
+                continue
+            if e.source not in feeders:
+                feeders.append(e.source)
+        if len(feeders) != 1:
+            continue
+        merge = feeders[0]
+        # Reconvergence: the merge joins >= 2 distinct upstream sources.
+        in_sources = {e.source for e in graph.edges_to(merge)}
+        if len(in_sources) < 2:
+            continue
+        tested += 1
+        exit_y = graph.stations[xp].y
+        merge_y = graph.stations[merge].y
+        assert abs(exit_y - merge_y) <= 2.0, (
+            f"{fixture} section {sec_id}: exit port detached from its "
+            f"reconvergence merge (exit_y={exit_y:.1f}, "
+            f"merge {merge!r} y={merge_y:.1f})"
+        )
+    assert tested >= 1, (
+        f"{fixture}: no pass-through section with a reconvergence-fed "
+        f"exit port matched the precondition"
+    )
+
+
+# Thick-bundle fixtures whose fan columns stack on-track stations that
+# all carry a >= 4-line bundle.  Consecutive station rows in such a
+# column must clear ``min_track_gap`` so the bundle's parallel lines and
+# their labels don't crowd.  Curated to rnaseq_sections_manual.mmd: it
+# stacks a 6-line bundle (BBSplit/SortMeRNA/RiboDetector) at a clean grid
+# pitch on the fixed engine.  rnaseq_sections.mmd and variantbenchmarking
+# stack the same kind of bundle at a sub-min_track_gap pitch even on the
+# fixed engine (a separate, pre-existing tightness), so a corpus-wide
+# assertion would false-positive there.
+_THICK_BUNDLE_FIXTURES = ["rnaseq_sections_manual.mmd"]
+
+
+@pytest.mark.parametrize("fixture", _THICK_BUNDLE_FIXTURES)
+def test_thick_bundle_row_pitch(fixture):
+    """A column that stacks >= 2 on-track stations each carrying a
+    bundle of N >= 4 lines must keep consecutive station Ys at least
+    ``min_track_gap`` apart, so the parallel lines plus the under-marker
+    label have vertical breathing room.
+
+    Regression lock for the flat-``y_spacing`` crowding bug.  The fixed
+    engine widens the row pitch to ``max(y_spacing, min_track_gap)``,
+    where ``min_track_gap = (max_lines-1)*OFFSET_STEP + 2*STATION_RADIUS
+    _APPROX + LABEL_OFFSET + FONT_HEIGHT``.  Evidence
+    (rnaseq_sections_manual.mmd ``preprocessing``): the fixed engine
+    stacks the 6-line bundle at a 50px pitch (== min_track_gap); the
+    pre-fix engine crowded it to a flat 40px ``y_spacing``.
+    """
+    from nf_metro.layout.constants import (
+        FONT_HEIGHT,
+        LABEL_OFFSET,
+        OFFSET_STEP,
+        STATION_RADIUS_APPROX,
+    )
+
+    graph = _layout(fixture)
+    tested = 0
+    for sec in graph.sections.values():
+        if sec.direction not in ("LR", "RL"):
+            continue
+        port_ids = set(sec.entry_ports) | set(sec.exit_ports)
+        cols: dict[float, list[float]] = defaultdict(list)
+        max_lines = 0
+        for sid in sec.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden or st.off_track:
+                continue
+            max_lines = max(max_lines, len(graph.station_lines(sid)))
+            cols[round(st.x, 1)].append(st.y)
+        if max_lines < 4:
+            continue
+        min_track_gap = (
+            (max_lines - 1) * OFFSET_STEP
+            + 2 * STATION_RADIUS_APPROX
+            + LABEL_OFFSET
+            + FONT_HEIGHT
+        )
+        for x, raw_ys in cols.items():
+            ys = sorted(set(round(y, 1) for y in raw_ys))
+            if len(ys) < 2:
+                continue
+            min_gap = min(ys[i + 1] - ys[i] for i in range(len(ys) - 1))
+            tested += 1
+            assert min_gap >= min_track_gap - _Y_TOL, (
+                f"{fixture} section {sec.id} column x={x}: thick "
+                f"{max_lines}-line bundle crowded - consecutive station "
+                f"Ys {ys} have min gap {min_gap:.1f}px < min_track_gap "
+                f"{min_track_gap:.1f}px"
+            )
+    assert tested >= 1, (
+        f"{fixture}: no thick (>= 4-line) bundle column with >= 2 stacked "
+        f"stations matched the precondition"
+    )
