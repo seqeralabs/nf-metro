@@ -44,6 +44,7 @@ def _gather_fixtures() -> list[Path]:
     paths: list[Path] = []
     paths.extend(sorted(TOPOLOGIES.glob("*.mmd")))
     paths.extend(sorted(EXAMPLES.glob("*.mmd")))
+    paths.extend(sorted((EXAMPLES / "topologies").glob("*.mmd")))
     return paths
 
 
