@@ -115,6 +115,13 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "symmetric fan-and-reconverge, exit on the merge row (regression "
         "lock for detached reconvergence exits).",
     ),
+    (
+        "wide_label_fan",
+        TOPOLOGIES_DIR,
+        "A two-column fan whose station labels are wider than the column "
+        "pitch; the engine wraps the labels and widens spacing so they "
+        "don't collide (issue #405).",
+    ),
     # --- Branching and multipath ---
     (
         "asymmetric_tree",
