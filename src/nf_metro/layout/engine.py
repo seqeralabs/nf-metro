@@ -173,6 +173,31 @@ def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _guard_no_negative_grid_columns(graph: MetroGraph, phase: str) -> None:
+    """After Stage 1.1+: no section may sit at a negative grid column.
+
+    The auto-layout serpentine packer steps a return row leftward from
+    its fold bridge; without normalization that walk can run off the left
+    edge into negative columns (issue #256), which renders the section's
+    badge left of everything and snakes the inter-section trunk down the
+    left margin. ``infer_section_layout`` normalizes the grid so the
+    leftmost column is 0; this guard fails loudly if that ever regresses.
+    """
+    # Read from grid_overrides (populated with an explicit column for every
+    # placed section) rather than Section.grid_col, whose -1 sentinel for
+    # "auto" is indistinguishable from a genuine column -1.
+    offenders = {
+        sid: override[0]
+        for sid, override in graph.grid_overrides.items()
+        if override[0] < 0
+    }
+    if offenders:
+        raise PhaseInvariantError(
+            f"{phase}: sections at negative grid columns "
+            f"(serpentine packer ran off the left edge): {offenders}"
+        )
+
+
 def _bbox_cols_overlap(a: Section, b: Section) -> bool:
     """True when two sections' bboxes overlap in X (share horizontal extent)."""
     return a.bbox_x < b.bbox_x + b.bbox_w and b.bbox_x < a.bbox_x + a.bbox_w
@@ -1128,6 +1153,7 @@ def _compute_section_layout(
 
     if validate:
         _guard_section_bboxes_positive(graph, "after Stage 1.1")
+        _guard_no_negative_grid_columns(graph, "after Stage 1.1")
 
     # Stage 1.2: Align Y grids across same-row, same-direction sections
     _align_row_y_grids(graph, section_subgraphs, y_spacing, section_y_padding)
