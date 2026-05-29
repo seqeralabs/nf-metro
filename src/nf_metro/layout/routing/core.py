@@ -3167,6 +3167,13 @@ def _normalize_gap_channels(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
         Prefer the row whose x-interval brackets the channel AND whose
         vertical band the channel overlaps; fall back to any bracketing
         row, then to the row-agnostic union.
+
+        A channel that vertically crosses several rows must clear sections
+        in ALL of them, so its gap is narrowed to the intersection of every
+        crossed row's gap in the same column.  Otherwise a fan climbing out
+        of a row whose section edge sits further out than a sibling row's
+        would centre in the wider sibling gap and step back behind its source
+        section edge (#386).
         """
         x = ch.x
         overlap_match: tuple[int, int | None, float, float] | None = None
@@ -3183,10 +3190,17 @@ def _normalize_gap_channels(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
                 if band is not None and ch.y_lo < band[1] and band[0] < ch.y_hi:
                     if overlap_match is None:
                         overlap_match = (lo, row, left, right)
-        if overlap_match is not None:
-            return overlap_match
-        if bracket_match is not None:
-            return bracket_match
+        match = overlap_match or bracket_match
+        if match is not None:
+            lo, row, left, right = match
+            for r, band in row_bands.items():
+                if not (ch.y_lo < band[1] and band[0] < ch.y_hi):
+                    continue
+                for rlo, rleft, rright in gap_intervals.get(r, []):
+                    if rlo == lo:
+                        left = max(left, rleft)
+                        right = min(right, rright)
+            return (lo, row, left, right)
         for lo, left, right in gap_intervals.get(None, []):
             if left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE:
                 return (lo, None, left, right)
@@ -3206,6 +3220,13 @@ def _normalize_gap_channels(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
             # x sits on / outside a section edge: not a clean gap channel.
             if not (left <= ch.x <= right):
                 continue
+        # Bundles sharing a (gap, row) are laid out together in one x-range,
+        # so the shared bound must clear every member's crossed rows: narrow
+        # to the intersection rather than letting the last channel win.
+        prev = gap_bounds.get((lo, row))
+        if prev is not None:
+            left = max(left, prev[0])
+            right = min(right, prev[1])
         gap_bounds[(lo, row)] = (left, right)
         buckets[(lo, row, ch.down)].append(ch)
 

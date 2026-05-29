@@ -21,6 +21,7 @@ import pytest
 from nf_metro.layout.constants import SECTION_HEADER_PROTRUSION, SECTION_Y_GAP
 from nf_metro.layout.engine import compute_layout, is_loop_side_branch_station
 from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing.common import resolve_section
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, PortSide
 
@@ -806,6 +807,83 @@ def test_fanout_junction_shares_exit_port_y(fixture):
             f"{fixture}: fan-out junction {junction.id} y={junction.y} "
             f"stranded from exit port {exit_port.id} y={exit_port.y}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Inter-section routes don't backtrack in X against their net flow direction
+# ---------------------------------------------------------------------------
+
+
+def _route_exit_port_side(graph: MetroGraph, rp) -> PortSide | None:
+    """Return the side of the exit port a route leaves through.
+
+    The route source is either the exit port itself or a junction fed by
+    one; trace back one step through a junction to reach the port.
+    """
+    port = graph.ports.get(rp.edge.source)
+    if port is not None:
+        return port.side
+    # Source is a junction (also is_port=True but not a boundary port);
+    # trace back one step to the feeding exit port.
+    for e in graph.edges_to(rp.edge.source):
+        port = graph.ports.get(e.source)
+        if port is not None:
+            return port.side
+    return None
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_inter_section_route_no_x_backtrack(fixture):
+    """A forward-flowing inter-section route between two LR columns must be
+    X-monotonic: no horizontal segment may reverse against its net
+    source->target direction.
+
+    A right-to-left segment on a left-to-right route renders as a visible
+    turn-back toward the section just left (#386: the standard/legacy climb
+    out of Full Pre-process stepped from the fan-out junction back toward
+    section 3 before going up, because the gap channel was centred in a
+    wider sibling-row gap that sat left of the junction).
+
+    Scoped to "forward" routes only: both endpoints resolve to LR sections
+    in distinct columns AND the exit port faces the target column.  A route
+    that exits a port facing AWAY from its target (e.g. a right-side port
+    feeding a section to the left) must wrap, so its outward stub legitimately
+    reverses; those, fold/serpentine (TB), same-column, and ``normalize_exempt``
+    wrap legs are skipped.
+    """
+    graph = _layout(fixture)
+    routes = route_edges(graph)
+    for rp in routes:
+        if not rp.is_inter_section or rp.normalize_exempt:
+            continue
+        src_sec = resolve_section(graph, graph.stations[rp.edge.source])
+        tgt_sec = resolve_section(graph, graph.stations[rp.edge.target])
+        if src_sec is None or tgt_sec is None:
+            continue
+        if src_sec.direction != "LR" or tgt_sec.direction != "LR":
+            continue
+        if src_sec.grid_col == tgt_sec.grid_col:
+            continue
+        rightward = tgt_sec.grid_col > src_sec.grid_col
+        exit_side = _route_exit_port_side(graph, rp)
+        # Only "forward" routes (exit port faces the target) must be
+        # monotonic; an exit facing away legitimately wraps.
+        if rightward and exit_side != PortSide.RIGHT:
+            continue
+        if not rightward and exit_side != PortSide.LEFT:
+            continue
+        xs = [p[0] for p in rp.points]
+        for x1, x2 in zip(xs, xs[1:]):
+            if rightward:
+                assert x2 >= x1 - _Y_TOL, (
+                    f"{fixture}: {rp.line_id} {rp.edge.source}->{rp.edge.target} "
+                    f"backtracks left x={x1:.1f}->{x2:.1f} on a rightward route"
+                )
+            else:
+                assert x2 <= x1 + _Y_TOL, (
+                    f"{fixture}: {rp.line_id} {rp.edge.source}->{rp.edge.target} "
+                    f"backtracks right x={x1:.1f}->{x2:.1f} on a leftward route"
+                )
 
 
 # ---------------------------------------------------------------------------

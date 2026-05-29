@@ -524,6 +524,71 @@ def _guard_inter_section_routes_in_row_band(
                 )
 
 
+def _guard_inter_section_route_no_backtrack(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list | None = None,
+) -> None:
+    """After routing: a forward-flowing inter-section route between two LR
+    columns must be X-monotonic.
+
+    A route that exits a port toward its target column (rightward exit, target
+    to the right) must not contain a horizontal segment that reverses; such a
+    backtrack renders as a turn-back toward the section just behind the exit
+    (#386).  Routes that exit AWAY from their target legitimately wrap and are
+    skipped, as are ``normalize_exempt`` wrap legs, TB folds, and same-column
+    routes.
+    """
+    from nf_metro.layout.routing.common import resolve_section
+
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        routes = route_edges(graph)
+
+    def _exit_side(rp) -> PortSide | None:
+        port = graph.ports.get(rp.edge.source)
+        if port is not None:
+            return port.side
+        for e in graph.edges_to(rp.edge.source):
+            port = graph.ports.get(e.source)
+            if port is not None:
+                return port.side
+        return None
+
+    for rp in routes:
+        if not rp.is_inter_section or rp.normalize_exempt:
+            continue
+        src_sec = resolve_section(graph, graph.stations[rp.edge.source])
+        tgt_sec = resolve_section(graph, graph.stations[rp.edge.target])
+        if src_sec is None or tgt_sec is None:
+            continue
+        if src_sec.direction != "LR" or tgt_sec.direction != "LR":
+            continue
+        if src_sec.grid_col == tgt_sec.grid_col:
+            continue
+        rightward = tgt_sec.grid_col > src_sec.grid_col
+        side = _exit_side(rp)
+        if rightward and side != PortSide.RIGHT:
+            continue
+        if not rightward and side != PortSide.LEFT:
+            continue
+        xs = [p[0] for p in rp.points]
+        for x1, x2 in zip(xs, xs[1:]):
+            backtracks = (
+                (x2 < x1 - GUARD_TOLERANCE)
+                if rightward
+                else (x2 > x1 + GUARD_TOLERANCE)
+            )
+            if backtracks:
+                raise PhaseInvariantError(
+                    f"{phase}: route {rp.edge.source!r}->{rp.edge.target!r} "
+                    f"line {rp.line_id!r} backtracks x={x1:.1f}->{x2:.1f} "
+                    f"against its {'rightward' if rightward else 'leftward'} flow"
+                )
+
+
 def _guard_bundle_order_preserved(
     graph: MetroGraph,
     phase: str,
@@ -1554,6 +1619,7 @@ def _compute_section_layout(
             )
             _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
             _guard_fanout_tail_join(graph, phase, offsets=offsets, routes=routes)
+            _guard_inter_section_route_no_backtrack(graph, phase, routes=routes)
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
