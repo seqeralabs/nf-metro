@@ -586,6 +586,71 @@ def _guard_inter_section_routes_in_row_band(
                 )
 
 
+def _guard_inter_section_route_no_backtrack(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list | None = None,
+) -> None:
+    """After routing: a forward-flowing inter-section route between two LR
+    columns must be X-monotonic.
+
+    A route that exits a port toward its target column (rightward exit, target
+    to the right) must not contain a horizontal segment that reverses; such a
+    backtrack renders as a turn-back toward the section just behind the exit
+    (#386).  Routes that exit AWAY from their target legitimately wrap and are
+    skipped, as are ``normalize_exempt`` wrap legs, TB folds, and same-column
+    routes.
+    """
+    from nf_metro.layout.routing.common import resolve_section
+
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        routes = route_edges(graph)
+
+    def _exit_side(rp) -> PortSide | None:
+        port = graph.ports.get(rp.edge.source)
+        if port is not None:
+            return port.side
+        for e in graph.edges_to(rp.edge.source):
+            port = graph.ports.get(e.source)
+            if port is not None:
+                return port.side
+        return None
+
+    for rp in routes:
+        if not rp.is_inter_section or rp.normalize_exempt:
+            continue
+        src_sec = resolve_section(graph, graph.stations[rp.edge.source])
+        tgt_sec = resolve_section(graph, graph.stations[rp.edge.target])
+        if src_sec is None or tgt_sec is None:
+            continue
+        if src_sec.direction != "LR" or tgt_sec.direction != "LR":
+            continue
+        if src_sec.grid_col == tgt_sec.grid_col:
+            continue
+        rightward = tgt_sec.grid_col > src_sec.grid_col
+        side = _exit_side(rp)
+        if rightward and side != PortSide.RIGHT:
+            continue
+        if not rightward and side != PortSide.LEFT:
+            continue
+        xs = [p[0] for p in rp.points]
+        for x1, x2 in zip(xs, xs[1:]):
+            backtracks = (
+                (x2 < x1 - GUARD_TOLERANCE)
+                if rightward
+                else (x2 > x1 + GUARD_TOLERANCE)
+            )
+            if backtracks:
+                raise PhaseInvariantError(
+                    f"{phase}: route {rp.edge.source!r}->{rp.edge.target!r} "
+                    f"line {rp.line_id!r} backtracks x={x1:.1f}->{x2:.1f} "
+                    f"against its {'rightward' if rightward else 'leftward'} flow"
+                )
+
+
 def _guard_bundle_order_preserved(
     graph: MetroGraph,
     phase: str,
@@ -695,6 +760,43 @@ def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> Non
             raise PhaseInvariantError(
                 f"{phase}: off-track {off_id!r} y={off_st.y:.1f} "
                 f"not above consumer {consumer_id!r} y={cons_st.y:.1f}"
+            )
+
+
+def _guard_fanout_junction_shares_exit_port_y(graph: MetroGraph, phase: str) -> None:
+    """A fan-out junction fed by an LR/RL exit port must share that port's Y.
+
+    ``_position_junctions`` anchors such a junction at the exit port's Y so the
+    bundle runs straight from exit to junction.  When a late settling pass
+    moves the exit port without re-running junction positioning, the junction
+    is stranded above/below the port and the fanned routes dip to the stale
+    junction Y and back (#386).  BOTTOM/TOP exit ports are intentionally offset
+    from their junction, so only LEFT/RIGHT exits are checked.
+    """
+    for jid in graph.junction_ids:
+        junction = graph.stations.get(jid)
+        if junction is None:
+            continue
+        port_preds = {
+            e.source
+            for e in graph.edges_to(jid)
+            if (src := graph.stations.get(e.source)) and src.is_port
+        }
+        entry_succs = {
+            e.target
+            for e in graph.edges_from(jid)
+            if (tgt := graph.stations.get(e.target)) and tgt.is_port
+        }
+        if len(port_preds) != 1 or len(entry_succs) <= 1:
+            continue
+        exit_port = graph.stations[next(iter(port_preds))]
+        port_obj = graph.ports.get(exit_port.id)
+        if port_obj is None or port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        if abs(junction.y - exit_port.y) > GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: fan-out junction {jid!r} y={junction.y:.1f} "
+                f"stranded from exit port {exit_port.id!r} y={exit_port.y:.1f}"
             )
 
 
@@ -1546,6 +1648,11 @@ def _compute_section_layout(
     _shift_and_propagate_loop_stations(
         graph, y_spacing, section_y_padding, section_y_gap
     )
+    # The shift can move an exit port off the Y it held when junctions were
+    # last positioned (Stage 6.13).  Re-anchor junctions to the settled port
+    # Ys so a fan-out bundle runs straight from exit to junction instead of
+    # dipping to a stale junction Y and back (#386).
+    _position_junctions(graph)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.14")
 
@@ -1580,6 +1687,7 @@ def _compute_section_layout(
         offsets, routes = _run_pass_c_guards(graph, phase)
         _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
         _guard_off_track_inputs_above_consumer(graph, phase)
+        _guard_fanout_junction_shares_exit_port_y(graph, phase)
         _guard_row_gaps(graph, phase, section_y_gap=section_y_gap)
         _guard_section_top_padding(
             graph,
@@ -1593,6 +1701,7 @@ def _compute_section_layout(
             )
             _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
             _guard_fanout_tail_join(graph, phase, offsets=offsets, routes=routes)
+            _guard_inter_section_route_no_backtrack(graph, phase, routes=routes)
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
