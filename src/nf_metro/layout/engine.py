@@ -43,8 +43,8 @@ from nf_metro.layout.constants import (
     OFFSET_STEP,
     ROW_GAP,
     SECTION_GAP,
-    SECTION_X_GAP,
     SECTION_HEADER_PROTRUSION,
+    SECTION_X_GAP,
     SECTION_X_PADDING,
     SECTION_Y_GAP,
     SECTION_Y_PADDING,
@@ -1521,7 +1521,10 @@ def _compute_section_layout(
         _guard_off_track_inputs_above_consumer(graph, phase)
         _guard_row_gaps(graph, phase, section_y_gap=section_y_gap)
         _guard_section_top_padding(
-            graph, phase, section_y_padding=section_y_padding, section_y_gap=section_y_gap
+            graph,
+            phase,
+            section_y_padding=section_y_padding,
+            section_y_gap=section_y_gap,
         )
         if routes is not None:
             _guard_inter_section_routes_in_row_band(
