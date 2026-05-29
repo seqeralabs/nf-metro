@@ -6,10 +6,16 @@ above/below alternation and collision avoidance.
 
 from __future__ import annotations
 
-__all__ = ["LabelPlacement", "label_text_width", "place_labels"]
+__all__ = [
+    "LabelOverlap",
+    "LabelPlacement",
+    "find_label_overlaps",
+    "label_text_width",
+    "place_labels",
+]
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from nf_metro.layout.constants import (
     CHAR_WIDTH,
@@ -21,6 +27,8 @@ from nf_metro.layout.constants import (
     LABEL_MARGIN,
     LABEL_NUDGE_MAX,
     LABEL_OFFSET,
+    LABEL_OVERLAP_TOL,
+    LABEL_WRAP_MIN_LINE_CHARS,
     PORT_LABEL_MAX_DX,
     TB_LABEL_H_SPACING,
     TB_LINE_Y_OFFSET,
@@ -109,6 +117,122 @@ def _boxes_overlap(
         or a[3] + margin < b[1]
         or b[3] + margin < a[1]
     )
+
+
+class LabelOverlap(NamedTuple):
+    """A detected overlap involving a station label.
+
+    ``kind`` is ``"label"`` (label box over another label box) or
+    ``"marker"`` (label box over a non-owner station marker).  ``a`` is the
+    owning station of the label; ``b`` is the other label's station (for
+    ``"label"``) or the intruded marker's station (for ``"marker"``).
+    ``ox``/``oy`` are the per-axis intrusion depths in px.
+    """
+
+    kind: Literal["label", "marker"]
+    a: str
+    b: str
+    ox: float
+    oy: float
+
+
+def _intrusion(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> tuple[float, float]:
+    """Return per-axis overlap depth (negative when separated on that axis)."""
+    ox = min(a[2], b[2]) - max(a[0], b[0])
+    oy = min(a[3], b[3]) - max(a[1], b[1])
+    return ox, oy
+
+
+def find_label_overlaps(
+    graph: MetroGraph,
+    placements: list[LabelPlacement],
+    station_offsets: dict[tuple[str, str], float] | None = None,
+    marker_tol: float = LABEL_OVERLAP_TOL,
+) -> list[LabelOverlap]:
+    """Find label/label and label/marker overlaps in a set of placements.
+
+    Two *label* boxes count as overlapping when they intrude on both axes
+    (beyond a sub-pixel epsilon): text-on-text is never acceptable.  A label
+    over a *marker* is reported only when it intrudes by more than
+    ``marker_tol`` on both axes, so a label whose edge merely grazes a pill
+    (the 1px touch between tightly stacked parallel lines) is tolerated.
+
+    Shared by the wrapping pass, the runtime guard, and the layout validator
+    so all three agree on what "overlap" means.
+    """
+    eps = 0.5
+    labels = [
+        p
+        for p in placements
+        if p.station_id
+        and not p.station_id.startswith("__")
+        and p.obstacle_bbox is None
+    ]
+    boxes = [(p, _label_bbox(p)) for p in labels]
+    overlaps: list[LabelOverlap] = []
+
+    for i in range(len(boxes)):
+        pa, ba = boxes[i]
+        for j in range(i + 1, len(boxes)):
+            pb, bb = boxes[j]
+            ox, oy = _intrusion(ba, bb)
+            if ox > eps and oy > eps:
+                overlaps.append(
+                    LabelOverlap("label", pa.station_id, pb.station_id, ox, oy)
+                )
+
+    # Reuse the engine's pill geometry (returns None for ports, hidden
+    # stations, and junctions, none of which render a marker to collide with).
+    from nf_metro.layout.engine import _station_marker_bbox
+
+    markers = {
+        sid: bbox
+        for sid in graph.stations
+        if (bbox := _station_marker_bbox(graph, sid, station_offsets)) is not None
+    }
+    for p, lb in boxes:
+        for sid, mb in markers.items():
+            if sid == p.station_id:
+                continue
+            ox, oy = _intrusion(lb, mb)
+            if ox > marker_tol and oy > marker_tol:
+                overlaps.append(LabelOverlap("marker", p.station_id, sid, ox, oy))
+
+    return overlaps
+
+
+def _wrap_text_to_chars(text: str, max_chars: int) -> str:
+    """Word-wrap ``text`` so no line exceeds ``max_chars`` characters.
+
+    Words longer than the budget are hard-broken with a trailing hyphen as a
+    last resort (so a single long token like "Quantification" can still be
+    narrowed).  ``max_chars`` is floored at ``LABEL_WRAP_MIN_LINE_CHARS``.
+    """
+    budget = max(max_chars, LABEL_WRAP_MIN_LINE_CHARS)
+    lines: list[str] = []
+    cur = ""
+    for word in text.split():
+        w = word
+        # Hard-break tokens that can't fit the budget on their own.
+        while len(w) > budget:
+            if cur:
+                lines.append(cur)
+                cur = ""
+            lines.append(w[: budget - 1] + "-")
+            w = w[budget - 1 :]
+        if not cur:
+            cur = w
+        elif len(cur) + 1 + len(w) <= budget:
+            cur += " " + w
+        else:
+            lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return "\n".join(lines)
 
 
 def _nudge_to_clear(
@@ -414,6 +538,7 @@ def place_labels(
     station_offsets: dict[tuple[str, str], float] | None = None,
     icon_obstacles: list[tuple[float, float, float, float]] | None = None,
     routes: list["RoutedPath"] | None = None,
+    allow_hyphenation: bool = True,
 ) -> list[LabelPlacement]:
     """Place horizontal labels alternating above/below stations.
 
@@ -708,7 +833,125 @@ def place_labels(
     if routes:
         _avoid_diagonal_routes(placements, graph, routes, station_offsets)
 
+    _wrap_overlapping_labels(
+        placements, graph, station_offsets, allow_hyphenation=allow_hyphenation
+    )
+
     return [p for p in placements if p.obstacle_bbox is None]
+
+
+# Upper bound on wrapping rounds.  Each round narrows one offending label by
+# at least one line-width step, so this comfortably exceeds the steps any
+# realistic label needs to shrink from full width to the legibility floor.
+_WRAP_MAX_ROUNDS = 200
+
+
+def _wrap_overlapping_labels(
+    placements: list[LabelPlacement],
+    graph: MetroGraph,
+    station_offsets: dict[tuple[str, str], float] | None,
+    allow_hyphenation: bool = True,
+) -> None:
+    """Narrow colliding labels by wrapping them onto multiple lines.
+
+    Conditional: only labels that actually overlap a neighbour (per
+    :func:`find_label_overlaps`) are wrapped, so a clean layout is left
+    byte-identical.  Each round picks the widest wrappable offender and
+    shrinks its line budget by one character, re-wrapping the *original*
+    label (never the already-wrapped text, which would compound hyphens).
+    The label grows away from its station so the extra height never intrudes
+    on the pill.  Author-specified multi-line labels are left untouched --
+    the author already chose the breaks.
+
+    When ``allow_hyphenation`` is False the budget stops at the longest word
+    (word-boundary wrapping only), leaving any residual overlap for the
+    engine's spread loop to clear by widening spacing.  When True (the final
+    render, where spacing is settled) a word may be hard-broken with a hyphen
+    down to ``LABEL_WRAP_MIN_LINE_CHARS`` as a last resort.
+    """
+    by_id = {
+        p.station_id: p
+        for p in placements
+        if p.station_id
+        and not p.station_id.startswith("__")
+        and p.obstacle_bbox is None
+        and graph.stations.get(p.station_id) is not None
+    }
+    # Only re-flow single-line labels; respect any author-chosen breaks.
+    wrappable = {sid for sid, p in by_id.items() if "\n" not in p.text}
+    if not wrappable:
+        return
+
+    originals = {sid: graph.stations[sid].label for sid in by_id}
+    budgets = {sid: len(by_id[sid].text) for sid in wrappable}
+
+    def min_budget(sid: str) -> int:
+        if allow_hyphenation:
+            return LABEL_WRAP_MIN_LINE_CHARS
+        longest_word = max((len(w) for w in originals[sid].split()), default=1)
+        return max(LABEL_WRAP_MIN_LINE_CHARS, longest_word)
+
+    for _ in range(_WRAP_MAX_ROUNDS):
+        overlaps = find_label_overlaps(graph, placements, station_offsets)
+        offender = _choose_wrap_offender(overlaps, by_id, wrappable)
+        if offender is None:
+            break
+        new_budget = budgets[offender] - 1
+        if new_budget < min_budget(offender):
+            wrappable.discard(offender)
+            continue
+        budgets[offender] = new_budget
+        by_id[offender].text = _wrap_text_to_chars(originals[offender], new_budget)
+
+    _expand_sections_for_wrapped_labels(placements, graph)
+
+
+def _choose_wrap_offender(
+    overlaps: list[LabelOverlap],
+    by_id: dict[str, LabelPlacement],
+    wrappable: set[str],
+) -> str | None:
+    """Pick the widest still-wrappable label involved in any overlap.
+
+    For ``"marker"`` overlaps only the label owner can be narrowed; for
+    ``"label"`` overlaps either side is a candidate.  Narrowing the wider
+    label first does the most to clear the collision with the least wrapping.
+    """
+    best: str | None = None
+    best_w = -1.0
+    for ov in overlaps:
+        candidates = (ov.a,) if ov.kind == "marker" else (ov.a, ov.b)
+        for sid in candidates:
+            if sid not in wrappable:
+                continue
+            w = label_text_width(by_id[sid].text)
+            if w > best_w:
+                best_w = w
+                best = sid
+    return best
+
+
+def _expand_sections_for_wrapped_labels(
+    placements: list[LabelPlacement],
+    graph: MetroGraph,
+) -> None:
+    """Grow each section's bbox to contain its (now taller) wrapped labels."""
+    margin = LABEL_BBOX_MARGIN
+    for p in placements:
+        if not p.station_id or p.station_id.startswith("__") or p.obstacle_bbox:
+            continue
+        station = graph.stations.get(p.station_id)
+        if station is None or not station.section_id:
+            continue
+        sec = graph.sections.get(station.section_id)
+        if sec is None or sec.bbox_w <= 0:
+            continue
+        x_min, y_min, x_max, y_max = _label_bbox(p)
+        if y_min - margin < sec.bbox_y:
+            sec.bbox_h += sec.bbox_y - (y_min - margin)
+            sec.bbox_y = y_min - margin
+        if y_max + margin > sec.bbox_y + sec.bbox_h:
+            sec.bbox_h = (y_max + margin) - sec.bbox_y
 
 
 def _avoid_diagonal_routes(

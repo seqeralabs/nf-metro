@@ -48,8 +48,9 @@ def cli() -> None:
 @click.option(
     "--x-spacing",
     type=float,
-    default=60.0,
-    help="Horizontal spacing between layers (default: 60)",
+    default=None,
+    help="Horizontal spacing between layers (default: auto - widened from "
+    "60 only when wide labels would otherwise collide)",
 )
 @click.option(
     "--y-spacing",
@@ -131,7 +132,7 @@ def render(
     theme: str,
     width: int | None,
     height: int | None,
-    x_spacing: float,
+    x_spacing: float | None,
     y_spacing: float | None,
     max_layers_per_row: int | None,
     animate: bool,
