@@ -251,7 +251,15 @@ def _assign_grid_positions(
         sids = col_groups[topo_col]
         w = topo_col_width[topo_col]
         stack_size = len(sids)
-        need_fold = cumulative_width > 0 and cumulative_width + w > max_station_columns
+        is_last_col = topo_idx == len(sorted_cols) - 1
+        # Don't fold the final topo column: there are no further columns to
+        # wrap into the next row, so a fold here only creates a spurious TB
+        # bridge (and a negative grid column) instead of bending the chain.
+        need_fold = (
+            not is_last_col
+            and cumulative_width > 0
+            and cumulative_width + w > max_station_columns
+        )
 
         if need_fold:
             fold_col = current_grid_col
@@ -301,6 +309,15 @@ def _assign_grid_positions(
             max_stack_in_band = max(max_stack_in_band, stack_size)
             current_grid_col += col_step
             cumulative_width += w
+
+    # Boustrophedon normalization: a return row built by stepping left from
+    # the fold bridge can run off the left edge into negative columns. Shift
+    # the whole grid right so the leftmost column is 0, keeping every
+    # section's relative position (and thus the serpentine read order).
+    if folded:
+        min_col = min(col for col, _ in folded.values())
+        if min_col < 0:
+            folded = {sid: (col - min_col, row) for sid, (col, row) in folded.items()}
 
     # Write results to grid_overrides and section fields
     for sid, (col, row) in folded.items():

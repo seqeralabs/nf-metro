@@ -43,6 +43,7 @@ from nf_metro.layout.constants import (
     OFFSET_STEP,
     ROW_GAP,
     SECTION_GAP,
+    SECTION_HEADER_PROTRUSION,
     SECTION_X_GAP,
     SECTION_X_PADDING,
     SECTION_Y_GAP,
@@ -172,6 +173,36 @@ def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _guard_no_negative_grid_columns(graph: MetroGraph, phase: str) -> None:
+    """After Stage 1.1+: no section may sit at a negative grid column.
+
+    The auto-layout serpentine packer steps a return row leftward from
+    its fold bridge; without normalization that walk can run off the left
+    edge into negative columns (issue #256), which renders the section's
+    badge left of everything and snakes the inter-section trunk down the
+    left margin. ``infer_section_layout`` normalizes the grid so the
+    leftmost column is 0; this guard fails loudly if that ever regresses.
+    """
+    # Read from grid_overrides (populated with an explicit column for every
+    # placed section) rather than Section.grid_col, whose -1 sentinel for
+    # "auto" is indistinguishable from a genuine column -1.
+    offenders = {
+        sid: override[0]
+        for sid, override in graph.grid_overrides.items()
+        if override[0] < 0
+    }
+    if offenders:
+        raise PhaseInvariantError(
+            f"{phase}: sections at negative grid columns "
+            f"(serpentine packer ran off the left edge): {offenders}"
+        )
+
+
+def _bbox_cols_overlap(a: Section, b: Section) -> bool:
+    """True when two sections' bboxes overlap in X (share horizontal extent)."""
+    return a.bbox_x < b.bbox_x + b.bbox_w and b.bbox_x < a.bbox_x + a.bbox_w
+
+
 def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> None:
     """Final phase: column-overlapping adjacent-row section pairs must
     keep at least ``section_y_gap`` between the upper section's bbox
@@ -195,9 +226,7 @@ def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> N
             continue
         next_row = us.grid_row + us.grid_row_span
         for lsid, ls in sections_by_row_start.get(next_row, []):
-            if not (
-                us.bbox_x < ls.bbox_x + ls.bbox_w and ls.bbox_x < us.bbox_x + us.bbox_w
-            ):
+            if not _bbox_cols_overlap(us, ls):
                 continue
             gap = ls.bbox_y - (us.bbox_y + us.bbox_h)
             deficit = section_y_gap - gap
@@ -212,6 +241,39 @@ def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> N
         f"apart, expected >= {section_y_gap:.1f}px "
         f"(deficit {deficit:.1f}px)"
     )
+
+
+def _guard_section_top_padding(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    section_y_padding: float,
+    section_y_gap: float,
+) -> None:
+    """Final phase: each section's bbox top must clear its highest marker.
+
+    The mirror of the bottom-padding contract.  After
+    :func:`_grow_bboxes_to_content_top` runs, every section's bbox top
+    should sit at its content-anchored target (a full ``section_y_padding``
+    above the highest marker, unless gap-bounded by the row above).  A
+    bbox top below that target means a later pass crowded the topmost
+    marker against the box edge (issue #406).
+    """
+    tol = 1.0
+    for section in graph.sections.values():
+        if section.bbox_h <= 0:
+            continue
+        target = _section_content_top_target(
+            graph, section, section_y_padding, section_y_gap
+        )
+        if target is None:
+            continue
+        if section.bbox_y > target + tol:
+            raise PhaseInvariantError(
+                f"{phase}: section {section.id!r} bbox top {section.bbox_y:.1f} "
+                f"sits below its content-anchored target {target:.1f} "
+                f"(highest marker crowds the bbox top edge)"
+            )
 
 
 def _station_marker_bbox(
@@ -524,6 +586,71 @@ def _guard_inter_section_routes_in_row_band(
                 )
 
 
+def _guard_inter_section_route_no_backtrack(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list | None = None,
+) -> None:
+    """After routing: a forward-flowing inter-section route between two LR
+    columns must be X-monotonic.
+
+    A route that exits a port toward its target column (rightward exit, target
+    to the right) must not contain a horizontal segment that reverses; such a
+    backtrack renders as a turn-back toward the section just behind the exit
+    (#386).  Routes that exit AWAY from their target legitimately wrap and are
+    skipped, as are ``normalize_exempt`` wrap legs, TB folds, and same-column
+    routes.
+    """
+    from nf_metro.layout.routing.common import resolve_section
+
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        routes = route_edges(graph)
+
+    def _exit_side(rp) -> PortSide | None:
+        port = graph.ports.get(rp.edge.source)
+        if port is not None:
+            return port.side
+        for e in graph.edges_to(rp.edge.source):
+            port = graph.ports.get(e.source)
+            if port is not None:
+                return port.side
+        return None
+
+    for rp in routes:
+        if not rp.is_inter_section or rp.normalize_exempt:
+            continue
+        src_sec = resolve_section(graph, graph.stations[rp.edge.source])
+        tgt_sec = resolve_section(graph, graph.stations[rp.edge.target])
+        if src_sec is None or tgt_sec is None:
+            continue
+        if src_sec.direction != "LR" or tgt_sec.direction != "LR":
+            continue
+        if src_sec.grid_col == tgt_sec.grid_col:
+            continue
+        rightward = tgt_sec.grid_col > src_sec.grid_col
+        side = _exit_side(rp)
+        if rightward and side != PortSide.RIGHT:
+            continue
+        if not rightward and side != PortSide.LEFT:
+            continue
+        xs = [p[0] for p in rp.points]
+        for x1, x2 in zip(xs, xs[1:]):
+            backtracks = (
+                (x2 < x1 - GUARD_TOLERANCE)
+                if rightward
+                else (x2 > x1 + GUARD_TOLERANCE)
+            )
+            if backtracks:
+                raise PhaseInvariantError(
+                    f"{phase}: route {rp.edge.source!r}->{rp.edge.target!r} "
+                    f"line {rp.line_id!r} backtracks x={x1:.1f}->{x2:.1f} "
+                    f"against its {'rightward' if rightward else 'leftward'} flow"
+                )
+
+
 def _guard_bundle_order_preserved(
     graph: MetroGraph,
     phase: str,
@@ -566,6 +693,41 @@ def _guard_bundle_order_preserved(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
+def _guard_fanout_tail_join(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict | None = None,
+    routes: list | None = None,
+) -> None:
+    """Final-phase: at every single-source fan-out junction, each
+    upstream ``port -> junction`` route must hand off to its same-line
+    downstream ``junction -> target`` route with no gap along the line's
+    travel direction (no visible apex notch).
+
+    See :func:`nf_metro.layout.routing.invariants.check_fanout_tail_join`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import check_fanout_tail_join
+
+    if routes is None:
+        from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+        if offsets is None:
+            offsets = compute_station_offsets(graph)
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+
+    gaps = check_fanout_tail_join(routes, graph)
+    if not gaps:
+        return
+    first = gaps[0]
+    extra = f" (+{len(gaps) - 1} more)" if len(gaps) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
 def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> None:
     """After Stage 4.5 and final: off-track input stations must sit at
     least ``GUARD_TOLERANCE`` above (smaller Y than) their on-track
@@ -598,6 +760,43 @@ def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> Non
             raise PhaseInvariantError(
                 f"{phase}: off-track {off_id!r} y={off_st.y:.1f} "
                 f"not above consumer {consumer_id!r} y={cons_st.y:.1f}"
+            )
+
+
+def _guard_fanout_junction_shares_exit_port_y(graph: MetroGraph, phase: str) -> None:
+    """A fan-out junction fed by an LR/RL exit port must share that port's Y.
+
+    ``_position_junctions`` anchors such a junction at the exit port's Y so the
+    bundle runs straight from exit to junction.  When a late settling pass
+    moves the exit port without re-running junction positioning, the junction
+    is stranded above/below the port and the fanned routes dip to the stale
+    junction Y and back (#386).  BOTTOM/TOP exit ports are intentionally offset
+    from their junction, so only LEFT/RIGHT exits are checked.
+    """
+    for jid in graph.junction_ids:
+        junction = graph.stations.get(jid)
+        if junction is None:
+            continue
+        port_preds = {
+            e.source
+            for e in graph.edges_to(jid)
+            if (src := graph.stations.get(e.source)) and src.is_port
+        }
+        entry_succs = {
+            e.target
+            for e in graph.edges_from(jid)
+            if (tgt := graph.stations.get(e.target)) and tgt.is_port
+        }
+        if len(port_preds) != 1 or len(entry_succs) <= 1:
+            continue
+        exit_port = graph.stations[next(iter(port_preds))]
+        port_obj = graph.ports.get(exit_port.id)
+        if port_obj is None or port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        if abs(junction.y - exit_port.y) > GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: fan-out junction {jid!r} y={junction.y:.1f} "
+                f"stranded from exit port {exit_port.id!r} y={exit_port.y:.1f}"
             )
 
 
@@ -1218,6 +1417,7 @@ def _compute_section_layout(
 
     if validate:
         _guard_section_bboxes_positive(graph, "after Stage 1.1")
+        _guard_no_negative_grid_columns(graph, "after Stage 1.1")
 
     # Stage 1.2: Align Y grids across same-row, same-direction sections
     _align_row_y_grids(graph, section_subgraphs, y_spacing, section_y_padding)
@@ -1610,8 +1810,26 @@ def _compute_section_layout(
     _shift_and_propagate_loop_stations(
         graph, y_spacing, section_y_padding, section_y_gap
     )
+    # The shift can move an exit port off the Y it held when junctions were
+    # last positioned (Stage 6.13).  Re-anchor junctions to the settled port
+    # Ys so a fan-out bundle runs straight from exit to junction instead of
+    # dipping to a stale junction Y and back (#386).
+    _position_junctions(graph)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.14")
+
+    # Stage 6.15a: Restore top padding symmetric with the bottom.  Fan
+    # re-distribution (Stages 4.9 / 4.10 / 6.7 / 6.11) can lift a branch
+    # above the content-top line the bbox was sized for, crowding the
+    # topmost marker against the bbox top while the bottom keeps its full
+    # band.  Grow each bbox top to a full ``section_y_padding`` above the
+    # highest marker (bounded by the row above) so content fanning above
+    # the trunk sits centred in its box.  The upward growth can push the
+    # topmost section above the canvas top margin, so re-fit; the
+    # re-fit's non-grid shift is then cleaned up by the Stage 6.15
+    # canvas snap below.
+    _grow_bboxes_to_content_top(graph, section_y_padding, section_y_gap)
+    _shift_graph_into_canvas(graph, section_y_padding)
 
     # Stage 6.15: Restore canvas-wide grid alignment after all settling.
     # Stage 6.4 snaps to a per-row grid; later helpers (notably
@@ -1631,12 +1849,21 @@ def _compute_section_layout(
         offsets, routes = _run_pass_c_guards(graph, phase)
         _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
         _guard_off_track_inputs_above_consumer(graph, phase)
+        _guard_fanout_junction_shares_exit_port_y(graph, phase)
         _guard_row_gaps(graph, phase, section_y_gap=section_y_gap)
+        _guard_section_top_padding(
+            graph,
+            phase,
+            section_y_padding=section_y_padding,
+            section_y_gap=section_y_gap,
+        )
         if routes is not None:
             _guard_inter_section_routes_in_row_band(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
+            _guard_fanout_tail_join(graph, phase, offsets=offsets, routes=routes)
+            _guard_inter_section_route_no_backtrack(graph, phase, routes=routes)
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
@@ -4798,6 +5025,99 @@ def _shrink_bboxes_to_content_bottom(
         new_h = desired_bot - section.bbox_y
         if new_h < section.bbox_h - 0.5:
             section.bbox_h = max(0.0, new_h)
+
+
+def _section_content_top_target(
+    graph: MetroGraph,
+    section: Section,
+    section_y_padding: float,
+    section_y_gap: float,
+) -> float | None:
+    """Return the bbox top that gives ``section`` a full top padding band.
+
+    Mirror of the bottom anchor in :func:`_shrink_bboxes_to_content_bottom`:
+    the top sits ``section_y_padding`` above the highest content marker
+    (bypass helpers use curve-only clearance; ports must stay inside).
+
+    The bound against the row above reserves ``section_y_gap +
+    SECTION_HEADER_PROTRUSION``, not just the bbox gap: the section's
+    header badge protrudes ``SECTION_HEADER_PROTRUSION`` above its bbox
+    top, and inter-section routes dip into the gap, so reserving the
+    protrusion keeps the grow from crowding the badge into a route.
+
+    Returns ``None`` when the section has no real content to anchor to.
+    """
+    content_min_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if (
+            sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not sid.startswith("__bypass_")
+        )
+    ]
+    if not content_min_ys:
+        return None
+    bypass_min_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if sid in graph.stations and sid.startswith("__bypass_")
+    ]
+    port_min_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if sid in graph.stations and graph.stations[sid].is_port
+    ]
+    v_curve_clearance = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
+    target = min(content_min_ys) - section_y_padding
+    if bypass_min_ys:
+        target = min(target, min(bypass_min_ys) - v_curve_clearance)
+    if port_min_ys:
+        target = min(target, min(port_min_ys))
+
+    above_bots: list[float] = []
+    for other in graph.sections.values():
+        if other.id == section.id or other.bbox_w <= 0 or other.bbox_h <= 0:
+            continue
+        if other.grid_row + max(1, other.grid_row_span) != section.grid_row:
+            continue
+        if not _bbox_cols_overlap(other, section):
+            continue
+        above_bots.append(other.bbox_y + other.bbox_h)
+    if above_bots:
+        target = max(
+            target, max(above_bots) + section_y_gap + SECTION_HEADER_PROTRUSION
+        )
+    return target
+
+
+def _grow_bboxes_to_content_top(
+    graph: MetroGraph,
+    section_y_padding: float,
+    section_y_gap: float,
+) -> None:
+    """Grow section bbox tops so the highest marker keeps a full padding band.
+
+    Symmetric counterpart to :func:`_shrink_bboxes_to_content_bottom`.
+    Fan-redistribution passes (Stages 4.9 / 4.10 / 6.7 / 6.11) can lift a
+    branch station above the content-top line the bbox was sized for,
+    leaving the topmost marker crowded against the bbox top while the
+    bottom keeps its full ``section_y_padding`` band -- so a fan
+    symmetric about the trunk reads as pushed up within its box
+    (issue #406).
+
+    Grow-only: the top is never lowered, so intentional top-flush row
+    alignment from :func:`_top_align_row_bboxes_only` is preserved.  TOP
+    ports follow the new edge via :func:`_grow_section_bbox_upward`.
+    """
+    for section in graph.sections.values():
+        if section.bbox_h <= 0:
+            continue
+        target = _section_content_top_target(
+            graph, section, section_y_padding, section_y_gap
+        )
+        if target is not None and target < section.bbox_y - 0.5:
+            _grow_section_bbox_upward(graph, section, target)
 
 
 def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) -> None:

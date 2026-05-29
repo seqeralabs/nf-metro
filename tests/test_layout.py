@@ -1634,22 +1634,6 @@ EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
 
 
-# Fixtures with KNOWN bundle-order violations the criterion correctly
-# surfaces.  ``fold_stacked_branch`` retains a real, pre-existing rna /
-# atac flip at the D->L corner entering ``bio_interp`` (an RL section
-# reached from the integration TB section's BOTTOM exit; the L-shape's
-# concentric arcs swap outer / inner ordering across the CCW turn).
-# Fixing this requires a stagger-flip equivalent to the wrap handler's
-# ``eff_i = (n - 1 - i)`` for L-shape routes whose inner/outer arc role
-# inverts across the corner.  We xfail rather than blunt the criterion to
-# hide it.
-_KNOWN_BUNDLE_ORDER_VIOLATION_FIXTURES = frozenset(
-    {
-        "fold_stacked_branch",
-    }
-)
-
-
 class TestPhaseGuards:
     """Verify that phase-boundary invariants hold across all fixtures."""
 
@@ -1663,12 +1647,6 @@ class TestPhaseGuards:
         ids=lambda p: p.stem,
     )
     def test_topology_fixtures(self, fixture):
-        if fixture.stem in _KNOWN_BUNDLE_ORDER_VIOLATION_FIXTURES:
-            pytest.xfail(
-                f"{fixture.stem}: known bundle-order violation; "
-                "the criterion correctly catches the rna/atac flip at "
-                "the bio_interp entry corner."
-            )
         self._layout_validated(fixture.read_text())
 
     def test_rnaseq_sections(self):

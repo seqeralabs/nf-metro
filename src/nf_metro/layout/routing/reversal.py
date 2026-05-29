@@ -10,6 +10,25 @@ from __future__ import annotations
 from nf_metro.parser.model import MetroGraph, PortSide
 
 
+def _fed_by_bottom_exit_fold(
+    graph: MetroGraph, port_id: str, junction_ids: set[str]
+) -> bool:
+    """Whether ``port_id`` is fed through a fold junction by a BOTTOM exit.
+
+    The fold junction drops the incoming bundle vertically (BOTTOM exit
+    -> junction) and turns it into the entry port; the down->turn
+    concentric corner is what reverses the bundle ordering.
+    """
+    for edge in graph.edges_to(port_id):
+        if edge.source not in junction_ids:
+            continue
+        for upstream in graph.edges_to(edge.source):
+            src_port = graph.ports.get(upstream.source)
+            if src_port and not src_port.is_entry and src_port.side == PortSide.BOTTOM:
+                return True
+    return False
+
+
 def detect_reversed_sections(graph: MetroGraph) -> set[str]:
     """Find sections where incoming bundle ordering is reversed.
 
@@ -24,6 +43,12 @@ def detect_reversed_sections(graph: MetroGraph) -> set[str]:
        concentric corner routing reverses the bundle ordering (outermost
        vertical line becomes outermost horizontal line), so the downstream
        section must use reversed Y ordering to match.
+
+    3. RIGHT entry fed through a fold junction by a BOTTOM exit: the
+       exit drops the bundle vertically (X offsets) and the fold
+       junction turns it left into the RIGHT entry.  That down->left
+       concentric corner reverses the bundle ordering, so the
+       downstream section must use reversed Y ordering to match.
 
     Reversal propagates: if a reversed section exits to another section
     on the same row, that downstream section is also reversed so bundle
@@ -51,6 +76,19 @@ def detect_reversed_sections(graph: MetroGraph) -> set[str]:
                     and src.section_id in tb_sections
                 ):
                     reversed_secs.add(sec_id)
+
+    # Phase 1c: detect sections whose RIGHT entry is fed through a fold
+    # junction by a BOTTOM exit (down->left concentric corner).
+    for sec_id, section in graph.sections.items():
+        if sec_id in reversed_secs:
+            continue
+        for port_id in section.entry_ports:
+            port = graph.ports.get(port_id)
+            if not port or port.side != PortSide.RIGHT:
+                continue
+            if _fed_by_bottom_exit_fold(graph, port_id, junction_ids):
+                reversed_secs.add(sec_id)
+                break
 
     # Build section adjacency from inter-section edges (used by
     # propagation phases below).  Also pre-compute the section-pair set
