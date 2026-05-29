@@ -54,6 +54,7 @@ def validate_layout(graph: MetroGraph) -> list[Violation]:
     precomputed = _compute_routes(graph)
     violations.extend(check_edge_waypoints(graph, _precomputed=precomputed))
     if precomputed is not None:
+        violations.extend(check_label_overlap(graph, _precomputed=precomputed))
         violations.extend(check_edge_section_crossing(graph, _precomputed=precomputed))
         violations.extend(
             check_bypass_section_clearance(graph, _precomputed=precomputed)
@@ -293,6 +294,55 @@ def check_minimum_section_spacing(
                     )
                 )
 
+    return violations
+
+
+def check_label_overlap(
+    graph: MetroGraph,
+    _precomputed: tuple[dict[tuple[str, str], float], list[RoutedPath]] | None = None,
+) -> list[Violation]:
+    """Check that no station label overlaps another label or a marker.
+
+    Mirrors the runtime guard: label/label overlap is never allowed;
+    label/marker grazes within ``LABEL_OVERLAP_TOL`` are tolerated.  Uses the
+    same detector the engine and wrapping pass use, so this reports exactly
+    what the final render would draw.
+    """
+    from nf_metro.layout.labels import find_label_overlaps, place_labels
+
+    violations: list[Violation] = []
+    if _precomputed is not None:
+        offsets, routes = _precomputed
+    else:
+        precomputed = _compute_routes(graph)
+        if precomputed is None:
+            return violations
+        offsets, routes = precomputed
+
+    try:
+        placements = place_labels(graph, station_offsets=offsets, routes=routes)
+    except Exception as e:
+        return [
+            Violation(
+                check="label_overlap",
+                severity=Severity.ERROR,
+                message=f"Label placement failed: {e}",
+            )
+        ]
+
+    for ov in find_label_overlaps(graph, placements, offsets):
+        target = "label" if ov.kind == "label" else "marker"
+        violations.append(
+            Violation(
+                check="label_overlap",
+                severity=Severity.ERROR,
+                message=(
+                    f"Label {ov.a!r} overlaps {target} {ov.b!r} by "
+                    f"({ov.ox:.1f}, {ov.oy:.1f})px"
+                ),
+                context={"a": ov.a, "b": ov.b, "kind": ov.kind},
+            )
+        )
     return violations
 
 

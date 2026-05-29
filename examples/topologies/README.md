@@ -40,6 +40,7 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `fold_double.mmd` | double-fold serpentine (LR -> RL -> LR) |
 | `fold_stacked_branch.mmd` | stacked branches feeding through fold |
 | `u_turn_fold.mmd` | fold with side line joining mid-trunk and leaving pre-end |
+| `wide_label_fan.mmd` | wide station labels / auto label-wrap + column-spread (issue #405) |
 
 ---
 

@@ -1083,6 +1083,34 @@ def test_section_bbox_contains_all_content(fixture, params):
 
 
 # ---------------------------------------------------------------------------
+# Station labels must not overlap each other or non-owner markers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_no_label_overlap(fixture):
+    """No station label may overlap another label or a non-owner marker.
+
+    The auto-spacing engine wraps wide labels and widens column/row pitch so
+    dense sections don't ship colliding labels (issue #405).  This asserts
+    the final rendered placements are collision-free across the whole corpus
+    -- label/label overlap is never allowed; a label grazing a marker within
+    ``LABEL_OVERLAP_TOL`` is tolerated (see ``find_label_overlaps``).
+    """
+    from nf_metro.layout.labels import find_label_overlaps, place_labels
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    placements = place_labels(graph, station_offsets=offsets, routes=routes)
+    overlaps = find_label_overlaps(graph, placements, offsets)
+    assert not overlaps, "; ".join(
+        f"{ov.a!r} overlaps {ov.kind} {ov.b!r} by ({ov.ox:.1f}, {ov.oy:.1f})px"
+        for ov in overlaps
+    )
+
+
+# ---------------------------------------------------------------------------
 # Adjacent-row sections that overlap horizontally must keep the configured
 # section_y_gap between upper bbox bottom and lower bbox top
 # ---------------------------------------------------------------------------

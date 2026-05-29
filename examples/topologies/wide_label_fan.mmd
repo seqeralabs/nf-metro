@@ -1,0 +1,19 @@
+%%metro title: Wide Label Fan
+%%metro style: dark
+%%metro center_ports: true
+%%metro line: a | A | #e63946
+%%metro line: b | B | #0570b0
+
+graph LR
+    subgraph proc [Reporting]
+        %%metro entry: left | a, b
+        hub[Aggregate]
+        align[Alignment Summary]
+        quant[Quantification Report]
+        aqc[Alignment QC HTML]
+        qqc[Quantification QC HTML]
+        hub -->|a| align
+        hub -->|b| quant
+        align -->|a| aqc
+        quant -->|b| qqc
+    end

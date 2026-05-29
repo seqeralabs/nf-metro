@@ -302,6 +302,23 @@ LABEL_NUDGE_MAX: float = 20.0
 LABEL_BBOX_MARGIN: float = 4.0
 """Margin for clamping labels within section bounding box."""
 
+LABEL_OVERLAP_TOL: float = 2.0
+"""Minimum per-axis intrusion (px) before a label box counts as overlapping
+another label or a station marker.
+
+A box pair is treated as overlapping only when it intrudes by more than this
+on *both* axes, so a label whose edge merely grazes a neighbouring marker
+(e.g. the 1px vertical touch between tightly stacked parallel lines) is not
+flagged.  Used by the overlap detector that drives the wrapping pass, the
+runtime guard, and the layout validator."""
+
+LABEL_WRAP_MIN_LINE_CHARS: int = 4
+"""Floor on the per-line character budget when wrapping a colliding label.
+
+Wrapping narrows a label to clear a collision; this stops it shrinking past
+a legible width.  A single word longer than the budget is hard-broken with a
+hyphen (the last-resort split), but never below this many characters."""
+
 # ---------------------------------------------------------------------------
 # Ordering
 # ---------------------------------------------------------------------------
