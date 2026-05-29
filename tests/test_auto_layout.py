@@ -482,13 +482,17 @@ _FOLD_FIXTURES = [
 _FOLD_THRESHOLDS = [3, 4, 9]
 
 
-def _folded_grid(fixture: str, max_station_columns: int):
-    """Parse a fold fixture and return {section_id: (col, row)} after
-    full auto-layout inference (greedy packer + post-passes)."""
+def _fold_layout(fixture: str, max_station_columns: int):
+    """Parse a fold fixture and run full auto-layout inference (greedy
+    packer + post-passes), returning the laid-out graph."""
     path = TOPOLOGIES_DIR / f"{fixture}.mmd"
-    graph = parse_metro_mermaid(
+    return parse_metro_mermaid(
         path.read_text(), max_station_columns=max_station_columns
     )
+
+
+def _grid_of(graph):
+    """{section_id: (grid_col, grid_row)} for every section."""
     return {sid: (sec.grid_col, sec.grid_row) for sid, sec in graph.sections.items()}
 
 
@@ -502,7 +506,7 @@ def test_folded_grid_has_no_negative_columns(fixture, threshold):
     the badge to the left of everything and snakes the trunk down the
     left edge.
     """
-    grid = _folded_grid(fixture, threshold)
+    grid = _grid_of(_fold_layout(fixture, threshold))
     offenders = {sid: (c, r) for sid, (c, r) in grid.items() if c < 0}
     assert not offenders, (
         f"{fixture} (threshold={threshold}): sections at negative grid "
@@ -523,14 +527,13 @@ def test_folded_grid_preserves_topo_order_in_serpentine_read(fixture, threshold)
     sibling-scatter defect from #256 (a converging successor slotted
     between two stacked sibling predecessors).
     """
-    path = TOPOLOGIES_DIR / f"{fixture}.mmd"
-    graph = parse_metro_mermaid(path.read_text(), max_station_columns=threshold)
+    graph = _fold_layout(fixture, threshold)
     # Use the section DAG captured during inference (built before
     # _resolve_sections rewrites inter-section edges into port chains);
     # rebuilding from the resolved graph would lose those edges.
     predecessors = graph.section_dag.predecessors
     sections = graph.sections
-    grid = {sid: (sec.grid_col, sec.grid_row) for sid, sec in sections.items()}
+    grid = _grid_of(graph)
 
     # A row band can be several rows tall: stacked sections share a band and
     # thus a flow direction. Flow alternates per band, not per row. Derive
