@@ -763,8 +763,7 @@ def _fanout_junction_exit_ports(graph: MetroGraph):
     junction at the exit port's Y so the bundle runs straight from exit to
     junction; BOTTOM/TOP exit ports are intentionally offset and excluded.
     """
-    junction_ids = set(graph.junctions)
-    for jid in junction_ids:
+    for jid in graph.junctions:
         junction = graph.stations.get(jid)
         if junction is None:
             continue
