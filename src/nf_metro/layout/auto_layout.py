@@ -317,9 +317,7 @@ def _assign_grid_positions(
     if folded:
         min_col = min(col for col, _ in folded.values())
         if min_col < 0:
-            folded = {
-                sid: (col - min_col, row) for sid, (col, row) in folded.items()
-            }
+            folded = {sid: (col - min_col, row) for sid, (col, row) in folded.items()}
 
     # Write results to grid_overrides and section fields
     for sid, (col, row) in folded.items():
