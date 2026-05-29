@@ -207,8 +207,154 @@ def _check_pair(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Fan-out junction tail join
+# ---------------------------------------------------------------------------
+
+# A gap ALONG the upstream travel direction reads as a visible "bite"
+# at the corner apex (the line stops short of its own bend); anything
+# larger than this is the seam / notch the fix closes.  A PERPENDICULAR
+# gap up to a stroke width is hidden under the line and tolerated.
+_TAIL_JOIN_TANGENT_TOLERANCE = 1.0
+
+
+@dataclass(frozen=True)
+class FanoutTailGap:
+    """One upstream/downstream handoff mismatch at a fan-out junction.
+
+    ``junction_id`` is the fan-out junction; ``line_id`` the metro line
+    whose ``port -> junction`` route ends at ``upstream_end`` while its
+    paired ``junction -> target`` route begins at ``downstream_start``.
+    ``tangent_gap`` is the component of the offset ALONG the upstream
+    travel direction -- the visible along-line "bite" at the apex.
+    """
+
+    junction_id: str
+    line_id: str
+    upstream_source: str
+    downstream_target: str
+    upstream_end: tuple[float, float]
+    downstream_start: tuple[float, float]
+    tangent_gap: float
+
+    def message(self) -> str:
+        ux, uy = self.upstream_end
+        dx, dy = self.downstream_start
+        return (
+            f"fan-out junction {self.junction_id!r} line {self.line_id!r}: "
+            f"upstream {self.upstream_source!r}->{self.junction_id!r} ends at "
+            f"({ux:.1f},{uy:.1f}) but downstream {self.junction_id!r}->"
+            f"{self.downstream_target!r} starts at ({dx:.1f},{dy:.1f}); "
+            f"along-travel gap {self.tangent_gap:.1f}px > "
+            f"{_TAIL_JOIN_TANGENT_TOLERANCE:.1f}px (visible apex notch)"
+        )
+
+
+def fanout_junctions(graph) -> dict[str, str]:  # noqa: ANN001 - MetroGraph (avoid cycle)
+    """Map each *fan-out* junction id to its single upstream source id.
+
+    A fan-out junction is a junction station fed by edges from exactly
+    ONE distinct upstream source (a single exit port or upstream
+    junction) and fanning out to one or more inter-section targets.
+    Merge junctions (>1 distinct upstream source) are excluded: their
+    trunk routing intentionally lands branches on a shared bypass Y and
+    must not be snapped together at the junction.
+    """
+    junction_ids = graph.junction_ids
+    result: dict[str, str] = {}
+    for jid in junction_ids:
+        sources = {e.source for e in graph.edges_to(jid)}
+        if len(sources) != 1:
+            continue
+        if not any(True for _ in graph.edges_from(jid)):
+            continue
+        result[jid] = next(iter(sources))
+    return result
+
+
+def _fanout_route_maps(
+    routes: list[RoutedPath],
+    fanouts: dict[str, str],
+) -> tuple[dict[tuple[str, str], RoutedPath], dict[tuple[str, str], RoutedPath]]:
+    """Index fan-out-incident routes by ``(junction_id, line_id)``.
+
+    Returns ``(upstream, downstream)``: ``upstream`` holds each
+    ``port -> junction`` route, ``downstream`` the first
+    ``junction -> target`` route for that line.  Both the apex-gap check
+    and the routing pass that closes it consume these maps, so the keying
+    is defined once.
+    """
+    upstream: dict[tuple[str, str], RoutedPath] = {}
+    downstream: dict[tuple[str, str], RoutedPath] = {}
+    for r in routes:
+        if not r.points:
+            continue
+        if r.edge.target in fanouts:
+            upstream[(r.edge.target, r.line_id)] = r
+        if r.edge.source in fanouts:
+            downstream.setdefault((r.edge.source, r.line_id), r)
+    return upstream, downstream
+
+
+def check_fanout_tail_join(
+    routes: list[RoutedPath],
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+) -> list[FanoutTailGap]:
+    """Return gaps where a fan-out junction's upstream tail does not meet
+    its paired downstream route.
+
+    For every fan-out junction (see :func:`fanout_junctions`), the
+    component of the offset between an incoming ``port -> junction``
+    route's end and the SAME-line outgoing ``junction -> target`` route's
+    start, measured ALONG the upstream travel direction, must be within
+    ``_TAIL_JOIN_TANGENT_TOLERANCE``.  A larger along-travel gap is the
+    visible apex notch (the line stops short of its own bend) that this
+    invariant guards against.  A purely perpendicular offset (the inner
+    bundle member's concentric approach Y) is hidden under the stroke and
+    not flagged.
+    """
+    fanouts = fanout_junctions(graph)
+    if not fanouts:
+        return []
+
+    upstream, downstream = _fanout_route_maps(routes, fanouts)
+
+    gaps: list[FanoutTailGap] = []
+    for (jid, line_id), up in upstream.items():
+        down = downstream.get((jid, line_id))
+        if down is None or len(up.points) < 2:
+            continue
+        ux, uy = up.points[-1]
+        dx, dy = down.points[0]
+        # Travel direction of the upstream tail (its last segment).
+        p_prev = up.points[-2]
+        tx, ty = ux - p_prev[0], uy - p_prev[1]
+        seg_len = (tx * tx + ty * ty) ** 0.5
+        if seg_len < _MIN_SEGMENT_LENGTH:
+            continue
+        # Project the (downstream_start - upstream_end) offset onto the
+        # unit travel direction: the along-line component.
+        tangent_gap = abs(((dx - ux) * tx + (dy - uy) * ty) / seg_len)
+        if tangent_gap > _TAIL_JOIN_TANGENT_TOLERANCE:
+            gaps.append(
+                FanoutTailGap(
+                    junction_id=jid,
+                    line_id=line_id,
+                    upstream_source=up.edge.source,
+                    downstream_target=down.edge.target,
+                    upstream_end=(ux, uy),
+                    downstream_start=(dx, dy),
+                    tangent_gap=tangent_gap,
+                )
+            )
+    return gaps
+
+
 __all__ = [
     "BundleOrderViolation",
+    "FanoutTailGap",
     "Side",
     "check_bundle_order_preserved",
+    "check_fanout_tail_join",
+    "fanout_junctions",
 ]

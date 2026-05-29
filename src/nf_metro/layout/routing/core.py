@@ -177,6 +177,7 @@ def route_edges(
     _center_bubble_stations(routes, graph)
     _spread_diagonal_bundles(routes, ctx)
     _normalize_gap_channels(routes, ctx)
+    _join_fanout_upstream_tails(routes, ctx)
 
     return routes
 
@@ -3292,6 +3293,63 @@ def _normalize_gap_channels(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
                 continue
             for ch, (li, nx) in targets:
                 _restack_channel(ch, nx, li, n, step, ctx.curve_radius)
+
+
+def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Snap each fan-out junction's upstream tail onto its downstream start.
+
+    At a *fan-out* junction (single upstream source, one or more
+    inter-section targets), the incoming ``port -> junction`` route and
+    the outgoing ``junction -> target`` route are two separate
+    :class:`RoutedPath`\\ s.  Their handoff points at the junction don't
+    coincide: the downstream route carries the per-line bundle offset
+    (and, for L-shape fans, a curve lead-in that starts a ``curve_radius``
+    past the junction), while the upstream route ends at the bare junction
+    coordinate.  The mismatch renders as a seam / notch where the two
+    segments meet end-to-end instead of one continuous flowing line.
+
+    This pass extends the upstream route's final, horizontal segment so
+    it ends at the X of the paired (same ``line_id``) downstream route's
+    first waypoint -- closing the horizontal "bite" at the apex that
+    otherwise shows as a notch (the downstream L-shape lead-in starts a
+    ``curve_radius`` PAST the junction, leaving a gap along the line's
+    travel direction between the upstream tail end and the downstream
+    curve start).
+
+    The upstream tail's Y is kept unchanged: when the downstream start
+    carries a per-line bundle ``offset`` (the inner concentric-corner
+    member), the residual PERPENDICULAR offset between the extended
+    upstream end and the downstream start is sub-line-width and hidden
+    under the stroke.  Lifting the upstream Y to match would either tilt
+    the approach or step it, reintroducing a visible kink at the apex, so
+    only the X is extended.  Only the upstream tail is moved; the
+    downstream geometry is left untouched.
+
+    Gated to genuine single-upstream-source fan-out junctions.  Merge
+    junctions (>1 distinct upstream source) are excluded so their trunk
+    routing, which intentionally lands branches on a shared bypass Y, is
+    never perturbed.
+    """
+    from nf_metro.layout.routing.invariants import (
+        _fanout_route_maps,
+        fanout_junctions,
+    )
+
+    fanouts = fanout_junctions(ctx.graph)
+    if not fanouts:
+        return
+
+    upstream, downstream = _fanout_route_maps(routes, fanouts)
+    for (jid, line_id), up in upstream.items():
+        down = downstream.get((jid, line_id))
+        if down is None or len(up.points) < 2:
+            continue
+        p_prev, p_last = up.points[-2], up.points[-1]
+        # Only a genuinely-horizontal final segment is extended; extend
+        # its X to the downstream start X, keeping the upstream Y so the
+        # approach into the bend stays horizontal.
+        if abs(p_prev[1] - p_last[1]) <= COORD_TOLERANCE_FINE:
+            up.points[-1] = (down.points[0][0], p_last[1])
 
 
 def _distinct_line_order(chans: list[_VChannel]) -> list[str]:

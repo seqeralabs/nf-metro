@@ -603,6 +603,41 @@ def _guard_bundle_order_preserved(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
+def _guard_fanout_tail_join(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict | None = None,
+    routes: list | None = None,
+) -> None:
+    """Final-phase: at every single-source fan-out junction, each
+    upstream ``port -> junction`` route must hand off to its same-line
+    downstream ``junction -> target`` route with no gap along the line's
+    travel direction (no visible apex notch).
+
+    See :func:`nf_metro.layout.routing.invariants.check_fanout_tail_join`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import check_fanout_tail_join
+
+    if routes is None:
+        from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+        if offsets is None:
+            offsets = compute_station_offsets(graph)
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+
+    gaps = check_fanout_tail_join(routes, graph)
+    if not gaps:
+        return
+    first = gaps[0]
+    extra = f" (+{len(gaps) - 1} more)" if len(gaps) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
 def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> None:
     """After Stage 4.5 and final: off-track input stations must sit at
     least ``GUARD_TOLERANCE`` above (smaller Y than) their on-track
@@ -1531,6 +1566,7 @@ def _compute_section_layout(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
+            _guard_fanout_tail_join(graph, phase, offsets=offsets, routes=routes)
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
