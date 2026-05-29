@@ -44,6 +44,7 @@ from nf_metro.layout.constants import (
     ROW_GAP,
     SECTION_GAP,
     SECTION_X_GAP,
+    SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
     SECTION_Y_GAP,
     SECTION_Y_PADDING,
@@ -212,6 +213,39 @@ def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> N
         f"apart, expected >= {section_y_gap:.1f}px "
         f"(deficit {deficit:.1f}px)"
     )
+
+
+def _guard_section_top_padding(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    section_y_padding: float,
+    section_y_gap: float,
+) -> None:
+    """Final phase: each section's bbox top must clear its highest marker.
+
+    The mirror of the bottom-padding contract.  After
+    :func:`_grow_bboxes_to_content_top` runs, every section's bbox top
+    should sit at its content-anchored target (a full ``section_y_padding``
+    above the highest marker, unless gap-bounded by the row above).  A
+    bbox top below that target means a later pass crowded the topmost
+    marker against the box edge (issue #406).
+    """
+    tol = 1.0
+    for section in graph.sections.values():
+        if section.bbox_h <= 0:
+            continue
+        target = _section_content_top_target(
+            graph, section, section_y_padding, section_y_gap
+        )
+        if target is None:
+            continue
+        if section.bbox_y > target + tol:
+            raise PhaseInvariantError(
+                f"{phase}: section {section.id!r} bbox top {section.bbox_y:.1f} "
+                f"sits below its content-anchored target {target:.1f} "
+                f"(highest marker crowds the bbox top edge)"
+            )
 
 
 def _station_marker_bbox(
@@ -1460,6 +1494,19 @@ def _compute_section_layout(
     # the whole canvas by the smallest signed amount that returns them
     # to integer multiples of ``y_spacing``.  No-op when residues are
     # mixed (e.g. sarek-style multi-row layouts).
+    # Stage 6.15a: Restore top padding symmetric with the bottom.  Fan
+    # re-distribution (Stages 4.9 / 4.10 / 6.7 / 6.11) can lift a branch
+    # above the content-top line the bbox was sized for, crowding the
+    # topmost marker against the bbox top while the bottom keeps its full
+    # band.  Grow each bbox top to a full ``section_y_padding`` above the
+    # highest marker (bounded by the row above) so content fanning above
+    # the trunk sits centred in its box.  The upward growth can push the
+    # topmost section above the canvas top margin, so re-fit; the
+    # re-fit's non-grid shift is then cleaned up by the Stage 6.15
+    # canvas snap below.
+    _grow_bboxes_to_content_top(graph, section_y_padding, section_y_gap)
+    _shift_graph_into_canvas(graph, section_y_padding)
+
     _snap_canvas_y_to_grid(graph, y_spacing, section_y_padding)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.15")
@@ -1470,6 +1517,9 @@ def _compute_section_layout(
         _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
         _guard_off_track_inputs_above_consumer(graph, phase)
         _guard_row_gaps(graph, phase, section_y_gap=section_y_gap)
+        _guard_section_top_padding(
+            graph, phase, section_y_padding=section_y_padding, section_y_gap=section_y_gap
+        )
         if routes is not None:
             _guard_inter_section_routes_in_row_band(
                 graph, phase, offsets=offsets, routes=routes
@@ -4636,6 +4686,103 @@ def _shrink_bboxes_to_content_bottom(
         new_h = desired_bot - section.bbox_y
         if new_h < section.bbox_h - 0.5:
             section.bbox_h = max(0.0, new_h)
+
+
+def _section_content_top_target(
+    graph: MetroGraph,
+    section: Section,
+    section_y_padding: float,
+    section_y_gap: float,
+) -> float | None:
+    """Return the bbox top that gives ``section`` a full top padding band.
+
+    Mirror of the bottom anchor in :func:`_shrink_bboxes_to_content_bottom`:
+    the top sits ``section_y_padding`` above the highest content marker
+    (bypass helpers use curve-only clearance; ports must stay inside with
+    no extra pad).  Bounded so it never rises within ``section_y_gap +
+    SECTION_HEADER_PROTRUSION`` of a column-overlapping section in the
+    row above.  The plain ``section_y_gap`` (matching
+    :func:`_guard_row_gaps`) keeps the bboxes apart, but inter-section
+    routes dip into that gap and must clear this section's header badge,
+    which protrudes ``SECTION_HEADER_PROTRUSION`` above its bbox top;
+    reserving that protrusion keeps the grow from crowding the badge up
+    against a route passing over the section's columns.  Returns
+    ``None`` when the section has no real content to anchor to.
+    """
+    content_min_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if (
+            sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not sid.startswith("__bypass_")
+        )
+    ]
+    if not content_min_ys:
+        return None
+    bypass_min_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if sid in graph.stations and sid.startswith("__bypass_")
+    ]
+    port_min_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if sid in graph.stations and graph.stations[sid].is_port
+    ]
+    v_curve_clearance = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
+    target = min(content_min_ys) - section_y_padding
+    if bypass_min_ys:
+        target = min(target, min(bypass_min_ys) - v_curve_clearance)
+    if port_min_ys:
+        target = min(target, min(port_min_ys))
+
+    above_bots: list[float] = []
+    for other in graph.sections.values():
+        if other.id == section.id or other.bbox_w <= 0 or other.bbox_h <= 0:
+            continue
+        if other.grid_row + max(1, other.grid_row_span) != section.grid_row:
+            continue
+        if not (
+            other.bbox_x < section.bbox_x + section.bbox_w
+            and section.bbox_x < other.bbox_x + other.bbox_w
+        ):
+            continue
+        above_bots.append(other.bbox_y + other.bbox_h)
+    if above_bots:
+        target = max(
+            target, max(above_bots) + section_y_gap + SECTION_HEADER_PROTRUSION
+        )
+    return target
+
+
+def _grow_bboxes_to_content_top(
+    graph: MetroGraph,
+    section_y_padding: float,
+    section_y_gap: float,
+) -> None:
+    """Grow section bbox tops so the highest marker keeps a full padding band.
+
+    Symmetric counterpart to :func:`_shrink_bboxes_to_content_bottom`.
+    Fan-redistribution passes (Stages 4.9 / 4.10 / 6.7 / 6.11) can lift a
+    branch station above the content-top line the bbox was sized for,
+    leaving the topmost marker crowded against the bbox top while the
+    bottom keeps its full ``section_y_padding`` band -- so a fan
+    symmetric about the trunk reads as pushed up within its box
+    (issue #406).
+
+    Grow-only: the top is never lowered, so intentional top-flush row
+    alignment from :func:`_top_align_row_bboxes_only` is preserved.  TOP
+    ports follow the new edge via :func:`_grow_section_bbox_upward`.
+    """
+    for section in graph.sections.values():
+        if section.bbox_h <= 0:
+            continue
+        target = _section_content_top_target(
+            graph, section, section_y_padding, section_y_gap
+        )
+        if target is not None and target < section.bbox_y - 0.5:
+            _grow_section_bbox_upward(graph, section, target)
 
 
 def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) -> None:
