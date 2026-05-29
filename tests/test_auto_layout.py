@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from nf_metro.layout.auto_layout import (
     _assign_grid_positions,
     _build_section_dag,
@@ -460,3 +462,118 @@ def test_below_fold_sections_share_rows_with_return():
         f"Return section sec5 at row {sec5_row} should share row with "
         f"below-fold sec4 at row {sec4_row}"
     )
+
+
+# --- Folded-grid topological-order invariants (issue #256) ---
+
+TOPOLOGIES_DIR = EXAMPLES / "topologies"
+
+# Fold-exercising fixtures: each wraps into >=2 rows at small fold
+# thresholds, stressing the serpentine packer's row/column assignment.
+_FOLD_FIXTURES = [
+    "fold_double",
+    "fold_fan_across",
+    "fold_stacked_branch",
+    "u_turn_fold",
+    "deep_linear",
+]
+
+# Fold thresholds that force serpentine wrapping on these fixtures.
+_FOLD_THRESHOLDS = [3, 4, 9]
+
+
+def _fold_layout(fixture: str, max_station_columns: int):
+    """Parse a fold fixture and run full auto-layout inference (greedy
+    packer + post-passes), returning the laid-out graph."""
+    path = TOPOLOGIES_DIR / f"{fixture}.mmd"
+    return parse_metro_mermaid(
+        path.read_text(), max_station_columns=max_station_columns
+    )
+
+
+def _grid_of(graph):
+    """{section_id: (grid_col, grid_row)} for every section."""
+    return {sid: (sec.grid_col, sec.grid_row) for sid, sec in graph.sections.items()}
+
+
+@pytest.mark.parametrize("fixture", _FOLD_FIXTURES)
+@pytest.mark.parametrize("threshold", _FOLD_THRESHOLDS)
+def test_folded_grid_has_no_negative_columns(fixture, threshold):
+    """No auto-placed section may land at a negative grid column.
+
+    A negative column means a section was pushed left of the entire
+    layout (the spurious-trailing-fold defect in #256), which renders
+    the badge to the left of everything and snakes the trunk down the
+    left edge.
+    """
+    grid = _grid_of(_fold_layout(fixture, threshold))
+    offenders = {sid: (c, r) for sid, (c, r) in grid.items() if c < 0}
+    assert not offenders, (
+        f"{fixture} (threshold={threshold}): sections at negative grid "
+        f"columns: {offenders}"
+    )
+
+
+@pytest.mark.parametrize("fixture", _FOLD_FIXTURES)
+@pytest.mark.parametrize("threshold", _FOLD_THRESHOLDS)
+def test_folded_grid_preserves_topo_order_in_serpentine_read(fixture, threshold):
+    """A folded grid must read in topological order along the serpentine.
+
+    Reading row 0 left-to-right, row 1 right-to-left, row 2
+    left-to-right, ... must visit each section no earlier than its
+    topological predecessor. A section read before its predecessor means
+    the inter-section trunk has to double back across the wrap - either
+    the spurious-trailing-fold / negative-column defect or the
+    sibling-scatter defect from #256 (a converging successor slotted
+    between two stacked sibling predecessors).
+    """
+    graph = _fold_layout(fixture, threshold)
+    # Use the section DAG captured during inference (built before
+    # _resolve_sections rewrites inter-section edges into port chains);
+    # rebuilding from the resolved graph would lose those edges.
+    predecessors = graph.section_dag.predecessors
+    sections = graph.sections
+    grid = _grid_of(graph)
+
+    # A row band can be several rows tall: stacked sections share a band and
+    # thus a flow direction. Flow alternates per band, not per row. Derive
+    # each row's flow from the horizontal section directions on it (LR ->
+    # +col, RL -> -col), falling back to serpentine parity for all-vertical
+    # rows. Consecutive rows sharing a flow direction form one band.
+    rows = sorted({r for _, r in grid.values()})
+    row_flow: dict[int, int] = {}
+    for sec in sections.values():
+        if sec.direction in ("LR", "RL"):
+            row_flow.setdefault(sec.grid_row, 1 if sec.direction == "LR" else -1)
+    for row in rows:
+        row_flow.setdefault(row, 1 if row % 2 == 0 else -1)
+
+    band_of: dict[int, int] = {}
+    band_idx = 0
+    for i, row in enumerate(rows):
+        if i > 0 and row_flow[row] != row_flow[rows[i - 1]]:
+            band_idx += 1
+        band_of[row] = band_idx
+
+    # Serpentine read-order rank: bands ascend; within a band, sections are
+    # read along the band's flow direction (stacked sections at the same
+    # column-position read consecutively, by row).
+    def read_rank(item):
+        _sid, (col, row) = item
+        return (band_of[row], row_flow[row] * col, row)
+
+    order = [sid for sid, _ in sorted(grid.items(), key=read_rank)]
+    rank = {sid: i for i, sid in enumerate(order)}
+
+    for sid, preds in predecessors.items():
+        if sid not in rank:
+            continue
+        for pred in preds:
+            if pred not in rank:
+                continue
+            assert rank[pred] <= rank[sid], (
+                f"{fixture} (threshold={threshold}): predecessor {pred!r} "
+                f"at grid {grid[pred]} (read-rank {rank[pred]}) comes AFTER "
+                f"its successor {sid!r} at grid {grid[sid]} (read-rank "
+                f"{rank[sid]}) in serpentine read order"
+            )
