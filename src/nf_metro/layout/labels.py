@@ -15,7 +15,7 @@ __all__ = [
 ]
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from nf_metro.layout.constants import (
     CHAR_WIDTH,
@@ -30,7 +30,6 @@ from nf_metro.layout.constants import (
     LABEL_OVERLAP_TOL,
     LABEL_WRAP_MIN_LINE_CHARS,
     PORT_LABEL_MAX_DX,
-    STATION_RADIUS_APPROX,
     TB_LABEL_H_SPACING,
     TB_LINE_Y_OFFSET,
     TB_PILL_EDGE_OFFSET,
@@ -120,31 +119,6 @@ def _boxes_overlap(
     )
 
 
-def _marker_bbox(
-    graph: MetroGraph,
-    station,
-    station_offsets: dict[tuple[str, str], float] | None,
-) -> tuple[float, float, float, float]:
-    """Bounding box of a station's rendered pill marker.
-
-    The pill is ``STATION_RADIUS_APPROX`` wide either side of the station
-    centre and spans the line offsets vertically (a multi-line bundle's pill
-    is taller), matching ``render.svg`` pill geometry.
-    """
-    r = STATION_RADIUS_APPROX
-    offs = (
-        [
-            station_offsets.get((station.id, lid), 0.0)
-            for lid in graph.station_lines(station.id)
-        ]
-        if station_offsets
-        else []
-    )
-    lo = min(offs) if offs else 0.0
-    hi = max(offs) if offs else 0.0
-    return (station.x - r, station.y + lo - r, station.x + r, station.y + hi + r)
-
-
 class LabelOverlap(NamedTuple):
     """A detected overlap involving a station label.
 
@@ -155,7 +129,7 @@ class LabelOverlap(NamedTuple):
     ``ox``/``oy`` are the per-axis intrusion depths in px.
     """
 
-    kind: str
+    kind: Literal["label", "marker"]
     a: str
     b: str
     ox: float
@@ -210,10 +184,14 @@ def find_label_overlaps(
                     LabelOverlap("label", pa.station_id, pb.station_id, ox, oy)
                 )
 
+    # Reuse the engine's pill geometry (returns None for ports, hidden
+    # stations, and junctions, none of which render a marker to collide with).
+    from nf_metro.layout.engine import _station_marker_bbox
+
     markers = {
-        s.id: _marker_bbox(graph, s, station_offsets)
-        for s in graph.stations.values()
-        if not s.is_port and not s.is_hidden
+        sid: bbox
+        for sid in graph.stations
+        if (bbox := _station_marker_bbox(graph, sid, station_offsets)) is not None
     }
     for p, lb in boxes:
         for sid, mb in markers.items():
@@ -907,7 +885,7 @@ def _wrap_overlapping_labels(
     originals = {sid: graph.stations[sid].label for sid in by_id}
     budgets = {sid: len(by_id[sid].text) for sid in wrappable}
 
-    def floor(sid: str) -> int:
+    def min_budget(sid: str) -> int:
         if allow_hyphenation:
             return LABEL_WRAP_MIN_LINE_CHARS
         longest_word = max((len(w) for w in originals[sid].split()), default=1)
@@ -919,7 +897,7 @@ def _wrap_overlapping_labels(
         if offender is None:
             break
         new_budget = budgets[offender] - 1
-        if new_budget < floor(offender):
+        if new_budget < min_budget(offender):
             wrappable.discard(offender)
             continue
         budgets[offender] = new_budget
