@@ -653,6 +653,18 @@ def _guard_inter_section_route_no_backtrack(
                 )
 
 
+def first_vertical_leg_x(points) -> float | None:
+    """X of the first (near-)vertical leg of *points*.
+
+    The source-side vertical channel ("V1") of an inter-section route;
+    ``None`` when no vertical leg exists.
+    """
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        if abs(x1 - x0) < 1.0 and abs(y1 - y0) > 1.0:
+            return x1
+    return None
+
+
 def _guard_fan_bundles_coincide_or_separate(
     graph: MetroGraph,
     phase: str,
@@ -682,17 +694,11 @@ def _guard_fan_bundles_coincide_or_separate(
     if not fan_sources:
         return
 
-    def _first_vertical_leg_x(points) -> float | None:
-        for (x0, y0), (x1, y1) in zip(points, points[1:]):
-            if abs(x1 - x0) < 1.0 and abs(y1 - y0) > 1.0:
-                return x1
-        return None
-
     by_src_line: dict[tuple[str, str], list[float]] = {}
     for rp in routes:
         if not rp.is_inter_section or rp.edge.source not in fan_sources:
             continue
-        vx = _first_vertical_leg_x(rp.points)
+        vx = first_vertical_leg_x(rp.points)
         if vx is None:
             continue
         by_src_line.setdefault((rp.edge.source, rp.line_id), []).append(vx)

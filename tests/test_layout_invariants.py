@@ -964,18 +964,6 @@ def test_merge_feeder_does_not_loop_below_target(fixture):
         )
 
 
-def _first_vertical_leg_x(points) -> float | None:
-    """X of the first leg of *points* that runs (near-)vertically.
-
-    The source-side vertical channel ("V1") of an inter-section route.
-    Returns ``None`` when no vertical leg exists.
-    """
-    for (x0, y0), (x1, y1) in zip(points, points[1:]):
-        if abs(x1 - x0) < 1.0 and abs(y1 - y0) > 1.0:
-            return x1
-    return None
-
-
 @pytest.mark.parametrize(
     "fixture",
     sorted({*_FIXTURES_MULTI_SECTION, "sarek.mmd"}),
@@ -1003,6 +991,7 @@ def test_junction_same_line_fans_coincide_or_separate(fixture):
     columns are a separate concern.
     """
     from nf_metro.layout.constants import CURVE_RADIUS, DIAGONAL_RUN, OFFSET_STEP
+    from nf_metro.layout.engine import first_vertical_leg_x
     from nf_metro.layout.routing.core import _build_routing_context
 
     graph = _layout(fixture)
@@ -1016,7 +1005,7 @@ def test_junction_same_line_fans_coincide_or_separate(fixture):
     for rp in routes:
         if not rp.is_inter_section or rp.edge.source not in fan_sources:
             continue
-        vx = _first_vertical_leg_x(rp.points)
+        vx = first_vertical_leg_x(rp.points)
         if vx is None:
             continue
         by_src_line[(rp.edge.source, rp.line_id)].append((rp, vx))
