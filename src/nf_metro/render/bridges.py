@@ -27,6 +27,11 @@ one event).  Within a cluster the routes split cleanly into two bundles
 broken by a single gap spanning the full width of the *over* bundle, so a
 bundle reads as passing under as a whole rather than line by line.
 
+A cluster is bridged only when the two bundles **share a colour** (line):
+when every colour differs the lines already read as distinct where they
+cross, so a gap adds nothing; a bridge earns its keep only when a shared
+colour could otherwise look like it joins or interchanges at the crossing.
+
 Over/under is decided per cluster: when the two bundles use different lines
 the senior (earlier-defined) bundle stays over, matching paint order; when
 they share lines (e.g. a vertical merge bus crossing its own horizontal
@@ -42,14 +47,12 @@ from dataclasses import dataclass
 
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render.constants import (
-    BRIDGE_BUNDLE_GAP,
     BRIDGE_CLUSTER_RADIUS,
     BRIDGE_CORNER_CLEARANCE,
     BRIDGE_GAP_HALF,
     BRIDGE_JOIN_TOLERANCE,
     BRIDGE_MIN_ANGLE_DEG,
     BRIDGE_NODE_TOLERANCE,
-    BRIDGE_PARALLEL_ANGLE_DEG,
 )
 
 __all__ = ["BridgeBreak", "compute_bridges"]
@@ -343,9 +346,10 @@ def _cluster_gaps(
 
     colour = _two_colour(nodes, adj)
     if colour is None:
-        return _per_pair_gaps(
-            cluster, routes, polylines, line_priority, back, seg_of, corner_clear
-        )
+        # A non-bipartite tangle (3+ mutually-crossing lines) has no clean
+        # over/under split; such crossings are between distinct colours and
+        # are not bridged.
+        return []
 
     group = {
         0: [n for n in nodes if colour[n] == 0],
@@ -353,6 +357,14 @@ def _cluster_gaps(
     }
     under = _under_group(group, routes, polylines, line_priority, back, seg_of)
     over = nodes - under
+
+    # Only bridge where the two bundles share a colour.  When all the colours
+    # differ the lines already read as distinct where they cross, so a gap
+    # adds nothing; a bridge earns its keep only when a shared colour would
+    # otherwise look like it might join/interchange at the crossing.
+    if {routes[n].line_id for n in under}.isdisjoint(routes[n].line_id for n in over):
+        return []
+
     cross_pts = [
         c.point
         for c in cluster
@@ -360,58 +372,7 @@ def _cluster_gaps(
     ]
     if not cross_pts:
         return []
-
-    # A lone under-line travelling in the over-line's own bundle is a branch
-    # diverging from that bundle, not an independent crossing - bridging it
-    # leaves a single line broken beside its continuous bundle-mate.
-    if len({routes[n].line_id for n in under}) == 1 and _bundled_with_over(
-        sorted(under)[0],
-        {routes[n].line_id for n in over},
-        routes,
-        polylines,
-        seg_of,
-        cross_pts,
-    ):
-        return []
     return _uniform_gaps(sorted(under), seg_of, polylines, cross_pts, corner_clear)
-
-
-def _bundled_with_over(
-    under_idx: int,
-    over_line_ids: set[str],
-    routes: list,
-    polylines: list[list[Point]],
-    seg_of: dict[int, int],
-    cross_pts: list[Point],
-) -> bool:
-    """True if a route of the over-line runs parallel and adjacent to the
-    under-line through the crossing (the over-line branches out of the
-    under-line's bundle)."""
-    poly = polylines[under_idx]
-    seg = seg_of[under_idx]
-    u_ang = _segment_angle_deg(poly[seg], poly[seg + 1])
-    cx = sum(p[0] for p in cross_pts) / len(cross_pts)
-    cy = sum(p[1] for p in cross_pts) / len(cross_pts)
-    for ri, p in enumerate(polylines):
-        if ri == under_idx or routes[ri].line_id not in over_line_ids:
-            continue
-        for i in range(len(p) - 1):
-            if (
-                _angle_between(_segment_angle_deg(p[i], p[i + 1]), u_ang)
-                > BRIDGE_PARALLEL_ANGLE_DEG
-            ):
-                continue
-            ax, ay = p[i]
-            dx, dy = p[i + 1][0] - ax, p[i + 1][1] - ay
-            length_sq = dx * dx + dy * dy
-            if length_sq == 0:
-                continue
-            t = ((cx - ax) * dx + (cy - ay) * dy) / length_sq
-            if not 0.0 <= t <= 1.0:
-                continue
-            if math.hypot(ax + t * dx - cx, ay + t * dy - cy) <= BRIDGE_BUNDLE_GAP:
-                return True
-    return False
 
 
 def _uniform_gaps(
@@ -520,29 +481,6 @@ def _group_horizontalness(
         p = polylines[n]
         total += _horizontalness(_segment_angle_deg(p[seg], p[seg + 1]))
     return total / len(members)
-
-
-def _per_pair_gaps(
-    cluster: list[_Crossing],
-    routes: list,
-    polylines: list[list[Point]],
-    line_priority: dict[str, int],
-    back: int,
-    seg_of: dict[int, int],
-    corner_clear: float,
-) -> list[tuple[int, int, Gap]]:
-    """Fallback for a non-bipartite cluster: break the lower-priority line of
-    each crossing pair individually."""
-    per: dict[int, list[Point]] = defaultdict(list)
-    for c in cluster:
-        pa = line_priority.get(routes[c.a].line_id, back)
-        pb = line_priority.get(routes[c.b].line_id, back)
-        under = c.a if pa >= pb else c.b
-        per[under].append(c.point)
-    out: list[tuple[int, int, Gap]] = []
-    for n, pts in per.items():
-        out.extend(_uniform_gaps([n], seg_of, polylines, pts, corner_clear))
-    return out
 
 
 def _unit(a: Point, b: Point) -> Point:

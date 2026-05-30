@@ -1,16 +1,18 @@
 """Invariants for the non-merging-crossing bridge glyph (issue #439).
 
 A bridge is a short gap in the lower-priority ("under") line where two
-distinct lines cross without sharing a node, so the crossing reads as an
-overpass rather than an interchange.  These tests pin:
+bundles cross without merging, so the crossing reads as an overpass.  A gap
+is drawn only when the two bundles **share a colour** (otherwise colour
+already distinguishes them) and the crossing is a true crossover, not an
+interchange or a line's approach to a station join.  These tests pin:
 
-* genuine crossings produce a gap, and the gap breaks the *whole* under
-  bundle (every collinear sibling route of the line), not one route;
-* interchanges (shared station/port/junction/merge) never produce a gap;
+* shared-colour crossings produce a gap that breaks the *whole* under
+  bundle (every collinear sibling route), not one route;
+* distinct-colour crossings, interchanges, and join approaches get no gap;
 * every gap sits clear of any node and lies on the under-route's segment;
 * detection is deterministic;
-* the rendered under-line SVG path actually carries a pen-up at the gap
-  (this is what differs from ``main``, which draws the line continuous).
+* the rendered under-line carries a pen-up at the gap (vs continuous on
+  ``main``), while animation motion paths flow over it unchanged.
 """
 
 from pathlib import Path
@@ -28,24 +30,27 @@ from nf_metro.themes import NFCORE_THEME
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
 
-# Fixtures with at least one genuine non-merging crossing.
+# Fixtures with at least one bridged crossing: the two crossing bundles share
+# a colour, so a gap is needed to show which passes over.
 FIXTURES_WITH_CROSSINGS = [
     EXAMPLES_DIR / "genomic_pipeline.mmd",
-    EXAMPLES_DIR / "rnaseq_sections.mmd",
-    EXAMPLES_DIR / "differentialabundance.mmd",
-    TOPOLOGIES_DIR / "complex_multipath.mmd",
-    TOPOLOGIES_DIR / "funcprofiler_upstream.mmd",
+    EXAMPLES_DIR / "differentialabundance_default.mmd",
 ]
 
-# Fixtures with no bridge: pure fans/merges/shared sinks, or a lone under-line
-# travelling in the over-line's own bundle (genomeassembly - a branch
-# divergence, deliberately not bridged).
+# Fixtures with no bridge: pure fans/merges/shared sinks; distinct-colour
+# crossings (colour already disambiguates, e.g. rnaseq_sections, complex_
+# multipath, funcprofiler, genomeassembly); or a crossing on a line's approach
+# to a station join (differentialabundance, where the only crossings are a
+# distinct-colour crossover and a shared-colour gsea-join approach).
 FIXTURES_WITHOUT_CROSSINGS = [
     EXAMPLES_DIR / "rnaseq_auto.mmd",
     EXAMPLES_DIR / "variant_calling.mmd",
     EXAMPLES_DIR / "genomeassembly.mmd",
+    EXAMPLES_DIR / "differentialabundance.mmd",
+    EXAMPLES_DIR / "rnaseq_sections.mmd",
+    TOPOLOGIES_DIR / "complex_multipath.mmd",
+    TOPOLOGIES_DIR / "funcprofiler_upstream.mmd",
     TOPOLOGIES_DIR / "trunk_through_fan.mmd",
-    TOPOLOGIES_DIR / "terminal_symmetric_fan.mmd",
     TOPOLOGIES_DIR / "shared_sink_parallel.mmd",
 ]
 
@@ -127,34 +132,36 @@ def test_detection_is_deterministic(path):
     assert fingerprint() == fingerprint()
 
 
-def test_whole_under_bundle_breaks_differentialabundance():
-    """Regression for the sibling-route gap fill: where the rnaseq diagonal
-    crosses the assay bundle, all three under lines must break, not just the
-    routes that happen to cross (overlapping siblings would fill the gap)."""
-    graph, routes, _, bridges = _bridges(EXAMPLES_DIR / "differentialabundance.mmd")
-    lines_broken = set()
+def test_shared_colour_bundle_breaks_whole():
+    """At differentialabundance_default's shared-colour crossing (all four
+    lines on both sides), the whole under bundle breaks - several distinct
+    lines, not one - and overlapping sibling routes don't fill the gap."""
+    graph, routes, _, bridges = _bridges(
+        EXAMPLES_DIR / "differentialabundance_default.mmd"
+    )
     by_id = {id(r): r for r in routes}
-    for rid, breaks in bridges.items():
-        for bk in breaks:
-            mx = (bk.cut_a[0] + bk.cut_b[0]) / 2
-            my = (bk.cut_a[1] + bk.cut_b[1]) / 2
-            if abs(mx - 703) < 20 and abs(my - 240) < 20:
-                lines_broken.add(by_id[rid].line_id)
-    assert {"affy", "maxquant", "geo"} <= lines_broken
+    lines_broken = {
+        by_id[rid].line_id for rid, breaks in bridges.items() for _ in breaks
+    }
+    assert len(lines_broken) >= 3
 
 
-def test_suppressed_when_lone_underline_in_over_bundle():
-    """genomeassembly's hic_reads crosses the assemblies bus while travelling
-    in the assemblies bundle - a branch divergence, so no bridge fires (would
-    leave hic_reads broken beside its continuous bundle-mate)."""
-    _, _, _, bridges = _bridges(EXAMPLES_DIR / "genomeassembly.mmd")
-    assert bridges == {}
+def test_distinct_colour_crossings_not_bridged():
+    """rnaseq_sections (hisat2 over bowtie2) and complex_multipath (fast over
+    legacy/standard) are crossings of wholly distinct colours - colour already
+    disambiguates them, so no bridge is drawn."""
+    for path in (
+        EXAMPLES_DIR / "rnaseq_sections.mmd",
+        TOPOLOGIES_DIR / "complex_multipath.mmd",
+    ):
+        _, _, _, bridges = _bridges(path)
+        assert bridges == {}, path.stem
 
 
 def test_join_approach_not_bridged():
-    """differentialabundance's gprofiler2 lines cross the gmt_in->gsea lines on
-    their approach to the gsea station (~22px away) - a join, not a crossover,
-    so no bridge fires there.  The genuine crossover near (703,240) remains."""
+    """In differentialabundance the gprofiler2 lines cross the gmt_in->gsea
+    lines on their approach to the gsea station (~22px), sharing colours - but
+    it is a join, not a crossover, so no bridge fires near gsea."""
     graph, _, _, bridges = _bridges(EXAMPLES_DIR / "differentialabundance.mmd")
     gsea = graph.stations["gsea"]
     for breaks in bridges.values():
@@ -164,13 +171,12 @@ def test_join_approach_not_bridged():
             assert not (abs(mx - gsea.x) < 40 and abs(my - gsea.y) < 40), (
                 f"bridge at ({mx:.0f},{my:.0f}) sits on the gsea join approach"
             )
-    assert bridges, "the genuine (703,240) crossover should still bridge"
 
 
 def test_rendered_under_line_has_pen_up():
     """An under-line that crosses under another draws a path with an interior
     move (pen-up) - on ``main`` it is continuous."""
-    graph = parse_metro_mermaid((TOPOLOGIES_DIR / "complex_multipath.mmd").read_text())
+    graph = parse_metro_mermaid((EXAMPLES_DIR / "genomic_pipeline.mmd").read_text())
     compute_layout(graph)
     svg = render_svg(graph, NFCORE_THEME)
     broken = [d for d in _edge_path_ds(svg) if d.count("M") > 1]
@@ -180,11 +186,34 @@ def test_rendered_under_line_has_pen_up():
 def test_theme_toggle_disables_bridges():
     import dataclasses
 
-    graph = parse_metro_mermaid((TOPOLOGIES_DIR / "complex_multipath.mmd").read_text())
+    graph = parse_metro_mermaid((EXAMPLES_DIR / "genomic_pipeline.mmd").read_text())
     compute_layout(graph)
     theme_off = dataclasses.replace(NFCORE_THEME, bridge_glyph=False)
     svg = render_svg(graph, theme_off)
     assert not any(d.count("M") > 1 for d in _edge_path_ds(svg))
+
+
+def test_animation_paths_flow_over_gaps():
+    """Animated balls travel the continuous route - the bridge gaps are a
+    static-render effect only.  Motion paths must be identical with bridges
+    on or off."""
+    import dataclasses
+
+    graph = parse_metro_mermaid((EXAMPLES_DIR / "genomic_pipeline.mmd").read_text())
+    compute_layout(graph)
+    on = _motion_paths(render_svg(graph, NFCORE_THEME, animate=True))
+    off = _motion_paths(
+        render_svg(
+            graph, dataclasses.replace(NFCORE_THEME, bridge_glyph=False), animate=True
+        )
+    )
+    assert on and on == off
+
+
+def _motion_paths(svg: str) -> list[str]:
+    import re
+
+    return re.findall(r'<path id="motion-path-[^"]*" d="([^"]*)"', svg)
 
 
 def _perp_distance(pt, a, b):

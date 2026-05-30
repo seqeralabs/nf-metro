@@ -252,15 +252,6 @@ BRIDGE_CLUSTER_RADIUS: float = 30.0
 """Crossings within this distance are treated as one bundle-crossing event:
 the whole under bundle breaks with a single gap spanning the over bundle."""
 
-BRIDGE_BUNDLE_GAP: float = 12.0
-"""Max perpendicular distance for an over-line route to count as travelling
-in the under-line's bundle.  A lone under-line bundled with the over-line is
-a branch divergence, not an independent crossing, and is not bridged."""
-
-BRIDGE_PARALLEL_ANGLE_DEG: float = 15.0
-"""Max angle between two segments for them to count as travelling parallel
-(used to detect an over-line route bundled with the under-line)."""
-
 BRIDGE_CORNER_CLEARANCE: float = 2.0
 """A crossing must sit at least ``curve_radius + this`` from a corner of the
 under-line, so the break never lands inside a smoothed corner."""
