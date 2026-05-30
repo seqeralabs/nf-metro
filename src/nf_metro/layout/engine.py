@@ -26,6 +26,7 @@ from nf_metro.layout.constants import (
     ICON_CAPTION_FONT_HEIGHT,
     ICON_CAPTION_GAP,
     ICON_HALF_HEIGHT,
+    ICON_INTER_GAP,
     ICON_STACK_LABEL_CLEARANCE,
     JUNCTION_MARGIN,
     LABEL_BBOX_MARGIN,
@@ -52,6 +53,7 @@ from nf_metro.layout.constants import (
     STATION_RADIUS_APPROX,
     TB_LINE_Y_OFFSET,
     TERMINUS_ICON_CLEARANCE,
+    TERMINUS_ICON_CLEARANCE_V,
     TERMINUS_WIDTH,
     X_OFFSET,
     X_SPACING,
@@ -274,6 +276,38 @@ def _guard_section_top_padding(
                 f"sits below its content-anchored target {target:.1f} "
                 f"(highest marker crowds the bbox top edge)"
             )
+
+
+def _guard_terminus_icons_within_bbox(graph: MetroGraph, phase: str) -> None:
+    """Final phase: TB/BT terminus file icons must fit inside the section bbox.
+
+    Vertical-flow termini stack their file icon (and caption) below or
+    above the station marker; the section bbox must reserve that extent so
+    the icon doesn't spill past the box edge (issue #254).
+    """
+    tol = 1.0
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("TB", "BT"):
+            continue
+        top = section.bbox_y
+        bottom = section.bbox_y + section.bbox_h
+        for sid in section.station_ids:
+            st = graph.stations.get(sid)
+            if st is None or not st.is_terminus:
+                continue
+            above, below = _terminus_y_overhang(st, section.direction, graph)
+            if st.y + below > bottom + tol:
+                raise PhaseInvariantError(
+                    f"{phase}: terminus {sid!r} icons extend to "
+                    f"{st.y + below:.1f}, past section {section.id!r} bbox "
+                    f"bottom {bottom:.1f}"
+                )
+            if st.y - above < top - tol:
+                raise PhaseInvariantError(
+                    f"{phase}: terminus {sid!r} icons extend to "
+                    f"{st.y - above:.1f}, above section {section.id!r} bbox "
+                    f"top {top:.1f}"
+                )
 
 
 def _station_marker_bbox(
@@ -1875,6 +1909,20 @@ def _compute_section_layout(
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.15")
 
+    # Stage 6.16: Re-align LEFT/RIGHT entry ports with their feeders.  A
+    # TB section's perpendicular entry port is pinned a fixed offset above
+    # its first internal station, so the late vertical settling (Stages
+    # 6.13-6.15) that shifts the section's content also drags the entry
+    # port off the upstream feeder Y it was snapped to in Stage 3.2,
+    # re-introducing an inter-section S-kink.  Re-running the alignment
+    # (TB/BT sections only, to leave settled LR/RL geometry untouched)
+    # re-snaps the port to its now-settled feeder.  Junctions are
+    # re-anchored afterwards for the same reason as Stages 6.13/6.14.
+    _align_entry_ports(graph, tb_only=True)
+    _position_junctions(graph)
+    if validate:
+        _run_pass_c_guards(graph, "after Stage 6.16")
+
     if validate:
         phase = "after final"
         offsets, routes = _run_pass_c_guards(graph, phase)
@@ -1889,6 +1937,7 @@ def _compute_section_layout(
             section_y_padding=section_y_padding,
             section_y_gap=section_y_gap,
         )
+        _guard_terminus_icons_within_bbox(graph, phase)
         if routes is not None:
             _guard_inter_section_routes_in_row_band(
                 graph, phase, offsets=offsets, routes=routes
@@ -5020,8 +5069,17 @@ def _shrink_bboxes_to_content_bottom(
     for section in graph.sections.values():
         if section.bbox_h <= 0:
             continue
-        content_max_ys = [
+        section_dir = section.direction or "LR"
+        # Each non-port station reserves at least ``section_y_padding`` below
+        # its marker; a TB/BT terminus whose icons hang below reserves their
+        # full vertical extent instead.  (Overhang is 0 for LR/RL, so this
+        # stays byte-identical there.)
+        content_bots = [
             graph.stations[sid].y
+            + max(
+                section_y_padding,
+                _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1],
+            )
             for sid in section.station_ids
             if (
                 sid in graph.stations
@@ -5039,9 +5097,9 @@ def _shrink_bboxes_to_content_bottom(
             for sid in section.station_ids
             if sid in graph.stations and graph.stations[sid].is_port
         ]
-        if not content_max_ys:
+        if not content_bots:
             continue
-        content_bot = max(content_max_ys) + section_y_padding
+        content_bot = max(content_bots)
         if bypass_max_ys:
             content_bot = max(content_bot, max(bypass_max_ys) + v_curve_clearance)
         if port_max_ys:
@@ -5836,6 +5894,44 @@ def _terminus_icon_clearance(
     return TERMINUS_ICON_CLEARANCE + extra
 
 
+def _terminus_icon_clearance_vertical(
+    n_icons: int,
+    names: list[str] | None = None,
+) -> float:
+    """Vertical clearance for *n_icons* file icons stacked along the flow axis.
+
+    TB/BT counterpart of ``_terminus_icon_clearance``: icons stack along Y,
+    so each additional icon adds the icon height plus (when captions are
+    present) a caption row, matching the renderer's TB step.
+    """
+    if n_icons <= 1:
+        return TERMINUS_ICON_CLEARANCE_V
+    caption_room = (
+        ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT if names and any(names) else 0.0
+    )
+    step = 2 * ICON_HALF_HEIGHT + ICON_INTER_GAP + caption_room
+    return TERMINUS_ICON_CLEARANCE_V + (n_icons - 1) * step
+
+
+def _terminus_y_overhang(
+    station: Station, section_dir: str, graph: MetroGraph
+) -> tuple[float, float]:
+    """(above, below) px a TB/BT terminus's icons extend past its marker.
+
+    Returns ``(0.0, 0.0)`` for non-terminus stations and for LR/RL
+    sections (whose icons extend horizontally), so content-extent callers
+    stay byte-identical there.
+    """
+    if not station.is_terminus or section_dir not in ("TB", "BT"):
+        return 0.0, 0.0
+    is_source = not graph.edges_to(station.id)
+    extends_forward = is_source if section_dir == "BT" else not is_source
+    extent = _terminus_icon_clearance_vertical(
+        len(station.terminus_labels), station.terminus_names
+    )
+    return (0.0, extent) if extends_forward else (extent, 0.0)
+
+
 def _adjust_terminus_icon_clearance(
     sub: MetroGraph,
     section: Section,
@@ -5843,42 +5939,48 @@ def _adjust_terminus_icon_clearance(
 ) -> None:
     """Expand bbox when terminus file icons would be too close to the edge.
 
-    Terminus stations display file icon(s) on their "outside" (flow-entry for
-    sources, flow-exit for sinks).  The icon(s) extend horizontally from the
-    station center.  If SECTION_X_PADDING doesn't provide enough room, we
-    grow the bbox on the affected side.
+    Terminus icons march along the section's flow axis (horizontally for
+    LR/RL, vertically for TB/BT), on the station's "outside": forwards for
+    sinks, backwards for sources, with RL/BT mirrored.  When the section
+    padding doesn't leave enough room, grow the bbox on the affected side.
     """
+    section_dir = section.direction or "LR"
+    is_tb = section_dir in ("TB", "BT")
+
     for station in sub.stations.values():
         if not station.is_terminus:
             continue
 
         n_icons = len(station.terminus_labels)
-        needed = _terminus_icon_clearance(n_icons, station.terminus_names)
-
-        # Determine source vs sink from the full graph's edges
         is_source = not graph.edges_to(station.id)
+        # Sinks extend in the forward flow direction, sources in reverse;
+        # RL/BT mirror.  Matches render.svg._terminus_icon_centers.
+        extends_forward = is_source if section_dir in ("RL", "BT") else not is_source
 
-        section_dir = section.direction or "LR"
-
-        # Icon is always placed horizontally (left or right of station),
-        # even for TB/BT sections.
-        if section_dir in ("LR", "TB"):
-            icon_on_left = is_source
-        else:  # RL, BT
-            icon_on_left = not is_source
-
-        if icon_on_left:
-            clearance = station.x - section.bbox_x
-            if clearance < needed:
-                expand = needed - clearance
-                section.bbox_x -= expand
-                section.bbox_w += expand
+        if is_tb:
+            needed = _terminus_icon_clearance_vertical(n_icons, station.terminus_names)
+            if extends_forward:  # icons below the station
+                clearance = section.bbox_y + section.bbox_h - station.y
+                if clearance < needed:
+                    section.bbox_h += needed - clearance
+            else:  # icons above the station
+                clearance = station.y - section.bbox_y
+                if clearance < needed:
+                    expand = needed - clearance
+                    section.bbox_y -= expand
+                    section.bbox_h += expand
         else:
-            bbox_right = section.bbox_x + section.bbox_w
-            clearance = bbox_right - station.x
-            if clearance < needed:
-                expand = needed - clearance
-                section.bbox_w += expand
+            needed = _terminus_icon_clearance(n_icons, station.terminus_names)
+            if not extends_forward:  # icons left of the station
+                clearance = station.x - section.bbox_x
+                if clearance < needed:
+                    expand = needed - clearance
+                    section.bbox_x -= expand
+                    section.bbox_w += expand
+            else:  # icons right of the station
+                clearance = section.bbox_x + section.bbox_w - station.x
+                if clearance < needed:
+                    section.bbox_w += needed - clearance
 
 
 def _shift_lr_perp_entry_stations(
@@ -6189,11 +6291,16 @@ def _set_port_x(graph: MetroGraph, port_id: str, x: float) -> None:
         port.x = x
 
 
-def _align_entry_ports(graph: MetroGraph) -> None:
+def _align_entry_ports(graph: MetroGraph, tb_only: bool = False) -> None:
     """Align entry ports with their incoming connection's coordinates.
 
     LEFT/RIGHT ports: align Y for straight horizontal runs.
     TOP/BOTTOM ports: align X for vertical drops or Y for cross-column.
+
+    With ``tb_only`` set, only ports on TB/BT sections are re-aligned --
+    used by the late re-alignment pass (Stage 6.16), which targets the
+    perpendicular-entry drift that vertical settling introduces in
+    TB sections without disturbing settled LR/RL geometry.
     """
     junction_ids = graph.junction_ids
 
@@ -6203,6 +6310,9 @@ def _align_entry_ports(graph: MetroGraph) -> None:
 
         entry_section = graph.sections.get(port.section_id)
         if not entry_section:
+            continue
+
+        if tb_only and entry_section.direction not in ("TB", "BT"):
             continue
 
         if port.side in (PortSide.LEFT, PortSide.RIGHT):

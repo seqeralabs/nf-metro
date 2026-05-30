@@ -424,6 +424,43 @@ class TestTbFileTerminiRegression:
         ]
         assert len(termini) == 3
 
+    def test_termini_icons_reserved_below_in_bbox(self, tb_graph):
+        """The TB section bbox bottom must clear its sink terminus icons."""
+        reporting = tb_graph.sections["reporting"]
+        bottom = reporting.bbox_y + reporting.bbox_h
+        sink_termini = [
+            tb_graph.stations[sid]
+            for sid in reporting.station_ids
+            if tb_graph.stations[sid].is_terminus
+        ]
+        assert sink_termini
+        # Each sink terminus sits above the bbox bottom with room for its
+        # downward icon (a bare marker would only need ~5px).
+        for st in sink_termini:
+            assert bottom - st.y > 2 * 16.0, (
+                f"{st.id}: only {bottom - st.y:.1f}px below station for icon"
+            )
+
+    def test_entry_port_aligned_with_feeder_no_kink(self, tb_graph):
+        """The TB entry port shares its feeder's Y (Stage 6.16 re-align)."""
+        entry_ports = tb_graph.sections["reporting"].entry_ports
+        assert entry_ports
+        for pid in entry_ports:
+            feeder_ys = [
+                tb_graph.stations[e.source].y
+                for e in tb_graph.edges_to(pid)
+                if e.source in tb_graph.stations
+            ]
+            assert feeder_ys
+            port_y = tb_graph.stations[pid].y
+            assert min(abs(port_y - fy) for fy in feeder_ys) < 1.0
+
+    def test_validate_guards_pass(self):
+        """compute_layout(validate=True) exercises the terminus-icon guard."""
+        text = TB_FILE_TERMINI_FILE.read_text()
+        graph = parse_metro_mermaid(text)
+        compute_layout(graph, validate=True)
+
 
 # --- Topology-specific assertions ---
 

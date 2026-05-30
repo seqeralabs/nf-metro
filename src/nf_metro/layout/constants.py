@@ -394,6 +394,22 @@ Accounts for station_radius (~5px) + icon gap (6px) + icon width (28px) = 39px
 extent, plus ~19px visual margin so icons don't crowd the section border.
 """
 
+TERMINUS_ICON_CLEARANCE_V: float = (
+    STATION_RADIUS_APPROX
+    + 6.0  # icon gap (render-side ICON_STATION_GAP)
+    + 2 * ICON_HALF_HEIGHT
+    + ICON_CAPTION_GAP
+    + ICON_CAPTION_FONT_HEIGHT
+    + 14.0  # visual margin so captions don't crowd the section border
+)
+"""Minimum clearance from a terminus station center to the section bbox
+edge along the *vertical* (flow) axis, used by TB/BT sections.
+
+TB/BT termini stack their file icon (and under-icon caption) below or
+above the station instead of beside it, so the reservation uses icon
+height + caption height rather than icon width.
+"""
+
 PORT_LABEL_MAX_DX: float = 120.0
 """Max horizontal distance for port-route label override.
 
