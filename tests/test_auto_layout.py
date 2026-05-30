@@ -293,8 +293,14 @@ def test_port_side_explicit_preserved():
     assert graph.sections["sec2"].entry_hints[0][0] == PortSide.TOP
 
 
-def test_port_side_below_section():
-    """Entry from a section above gets TOP entry side."""
+def test_stacked_lr_sections_flow_aligned_ports():
+    """Stacked LR sections connect via a carriage-return wrap (#432).
+
+    A left-to-right section stacked directly below another in the same
+    grid column must present flow-aligned ports - exit RIGHT, entry LEFT -
+    not a TOP/BOTTOM vertical hop.  The inter-section router carriage-
+    returns (right -> down -> left -> down -> right) to join them.
+    """
     graph = _make_graph_with_sections(
         ["top_sec", "bottom_sec"],
         [("top_sec_s1", "top_sec", "bottom_sec_s1", "bottom_sec", "main")],
@@ -302,18 +308,41 @@ def test_port_side_below_section():
     successors, predecessors, edge_lines = _build_section_dag(graph)
     _assign_grid_positions(graph, successors, predecessors, max_station_columns=100)
 
-    # Force bottom_sec to be below top_sec
+    # Force bottom_sec to be below top_sec in the same column.
     graph.sections["top_sec"].grid_col = 0
     graph.sections["top_sec"].grid_row = 0
     graph.sections["bottom_sec"].grid_col = 0
     graph.sections["bottom_sec"].grid_row = 1
+    assert graph.sections["top_sec"].direction == "LR"
+    assert graph.sections["bottom_sec"].direction == "LR"
 
     _infer_port_sides(graph, successors, predecessors, edge_lines, set())
 
-    # Exit should be BOTTOM
-    assert graph.sections["top_sec"].exit_hints[0][0] == PortSide.BOTTOM
-    # Entry should be TOP
-    assert graph.sections["bottom_sec"].entry_hints[0][0] == PortSide.TOP
+    # Exit on the trailing (RIGHT) edge, entry on the leading (LEFT) edge.
+    assert graph.sections["top_sec"].exit_hints[0][0] == PortSide.RIGHT
+    assert graph.sections["bottom_sec"].entry_hints[0][0] == PortSide.LEFT
+
+
+def test_rl_sections_flow_aligned_ports():
+    """RL sections mirror the flow-aligned rule: entry RIGHT, exit LEFT."""
+    graph = _make_graph_with_sections(
+        ["top_sec", "bottom_sec"],
+        [("top_sec_s1", "top_sec", "bottom_sec_s1", "bottom_sec", "main")],
+    )
+    successors, predecessors, edge_lines = _build_section_dag(graph)
+    _assign_grid_positions(graph, successors, predecessors, max_station_columns=100)
+
+    graph.sections["top_sec"].grid_col = 0
+    graph.sections["top_sec"].grid_row = 0
+    graph.sections["top_sec"].direction = "RL"
+    graph.sections["bottom_sec"].grid_col = 0
+    graph.sections["bottom_sec"].grid_row = 1
+    graph.sections["bottom_sec"].direction = "RL"
+
+    _infer_port_sides(graph, successors, predecessors, edge_lines, set())
+
+    assert graph.sections["top_sec"].exit_hints[0][0] == PortSide.LEFT
+    assert graph.sections["bottom_sec"].entry_hints[0][0] == PortSide.RIGHT
 
 
 # --- Edge cases ---
@@ -349,6 +378,32 @@ def test_single_section_no_op():
 
 
 # --- Integration tests ---
+
+
+def test_sarek_stacked_sections_infer_left_entry():
+    """sarek's stacked col-1 sections auto-infer LEFT entry ports (#432).
+
+    ``post_vc``/``annotation``/``reporting`` carry no explicit entry/exit
+    directives; with only their grid positions declared they must still
+    infer flow-aligned LEFT entries so they connect via a carriage-return
+    wrap, not enter through the right edge.
+    """
+    from nf_metro.layout.engine import compute_layout
+
+    text = (EXAMPLES / "sarek.mmd").read_text()
+    graph = parse_metro_mermaid(text)
+    compute_layout(graph)
+
+    for sec_id in ("post_vc", "annotation", "reporting"):
+        entries = [
+            p for p in graph.ports.values() if p.section_id == sec_id and p.is_entry
+        ]
+        assert entries, f"{sec_id} should have an entry port"
+        for port in entries:
+            assert port.side == PortSide.LEFT, (
+                f"{sec_id} entry port {port.id} inferred on {port.side.name}, "
+                "expected LEFT (flow-aligned carriage-return)"
+            )
 
 
 def test_rnaseq_auto_renders():

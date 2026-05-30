@@ -753,6 +753,126 @@ def _guard_inter_section_route_no_full_width_backtrack(
             )
 
 
+def _route_crosses_section_boundary(
+    graph: MetroGraph,
+    routes: list,
+    *,
+    port_tol: float = 24.0,
+    inset: float = 4.0,
+    axis_tol: float = 1.0,
+) -> tuple | None:
+    """Return the first ``(route, section_id, x, y)`` where an axis-aligned
+    routed segment crosses a section bbox edge away from any declared port,
+    else None.
+
+    A segment p1->p2 "crosses" a section edge when it passes strictly
+    through one of the four bbox sides within the perpendicular extent of
+    that side.  Crossings within *port_tol* of one of the section's ports
+    are permitted (that is how a line legitimately enters/leaves).  Any
+    other crossing means a horizontal or vertical run is cutting through a
+    section box where no port invites it -- the symptom this guard forbids
+    (e.g. an entry inferred on the wrong side so the connector slices the
+    box, #432).
+
+    Two classes are intentionally out of scope:
+
+    * **Diagonal transition segments** (45-degree corner curves) clip box
+      corners while legitimately approaching a side port; only axis-aligned
+      runs (within *axis_tol*) are inspected.
+    * **Fan-in/-out bundle routes** through ``__junction_*`` / ``__merge_*``
+      / ``__bypass_*`` virtual nodes route around or through neighbouring
+      sections by a separate mechanism with its own guards; long-range
+      multi-row merge bundles (sarek's MultiQC fan-in) are a known, tracked
+      limitation and are excluded here.
+    """
+    ports_by_sec: dict[str, list] = {}
+    for port in graph.ports.values():
+        ports_by_sec.setdefault(port.section_id, []).append(port)
+
+    def near_port(sec_id: str, x: float, y: float) -> bool:
+        return any(
+            abs(p.x - x) <= port_tol and abs(p.y - y) <= port_tol
+            for p in ports_by_sec.get(sec_id, [])
+        )
+
+    def edge_crossings(p1, p2, x0, y0, x1, y1):
+        ax, ay = p1
+        bx, by = p2
+        hits = []
+        for ex in (x0, x1):
+            if (ax - ex) * (bx - ex) < 0:
+                t = (ex - ax) / (bx - ax)
+                yy = ay + t * (by - ay)
+                if y0 - inset <= yy <= y1 + inset:
+                    hits.append((ex, yy))
+        for ey in (y0, y1):
+            if (ay - ey) * (by - ey) < 0:
+                t = (ey - ay) / (by - ay)
+                xx = ax + t * (bx - ax)
+                if x0 - inset <= xx <= x1 + inset:
+                    hits.append((xx, ey))
+        return hits
+
+    def is_bundle_node(node_id: str) -> bool:
+        return node_id.startswith(("__junction", "__merge", "__bypass"))
+
+    boxes = [
+        (
+            sid,
+            sec.bbox_x,
+            sec.bbox_y,
+            sec.bbox_x + sec.bbox_w,
+            sec.bbox_y + sec.bbox_h,
+        )
+        for sid, sec in graph.sections.items()
+        if sec.bbox_w > 0 and sec.bbox_h > 0
+    ]
+    for rp in routes:
+        if is_bundle_node(rp.edge.source) or is_bundle_node(rp.edge.target):
+            continue
+        pts = rp.points
+        for i in range(len(pts) - 1):
+            p1, p2 = pts[i], pts[i + 1]
+            # Only axis-aligned runs cut a box; diagonal corner curves clip
+            # edges while approaching side ports legitimately.
+            if abs(p1[0] - p2[0]) > axis_tol and abs(p1[1] - p2[1]) > axis_tol:
+                continue
+            for sid, x0, y0, x1, y1 in boxes:
+                for bx, by in edge_crossings(p1, p2, x0, y0, x1, y1):
+                    if not near_port(sid, bx, by):
+                        return (rp, sid, bx, by)
+    return None
+
+
+def _guard_routes_enter_sections_at_ports(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list | None = None,
+) -> None:
+    """After routing: no routed segment may cross a section bbox boundary
+    except within tolerance of a declared port on that section.
+
+    A line that cuts through a section box anywhere other than a port is
+    visually entering/leaving the section where nothing invites it (e.g. a
+    fan-in merge bundle ploughing into a section through its right edge, or
+    an entry inferred on the wrong side so the connector slices the box).
+    """
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        routes = route_edges(graph)
+
+    hit = _route_crosses_section_boundary(graph, routes)
+    if hit is not None:
+        rp, sid, bx, by = hit
+        raise PhaseInvariantError(
+            f"{phase}: route {rp.edge.source!r}->{rp.edge.target!r} "
+            f"line {rp.line_id!r} crosses section {sid!r} boundary at "
+            f"({bx:.1f}, {by:.1f}) away from any declared port"
+        )
+
+
 def _guard_serpentine_no_backtrack(
     graph: MetroGraph,
     phase: str,
@@ -2177,6 +2297,7 @@ def _compute_section_layout(
             _guard_inter_section_route_no_full_width_backtrack(
                 graph, phase, routes=routes
             )
+            _guard_routes_enter_sections_at_ports(graph, phase, routes=routes)
             _guard_serpentine_no_backtrack(graph, phase, routes=routes)
             _guard_inter_row_run_clearance(graph, phase, routes=routes)
             _guard_inter_section_descent_edge_clearance(graph, phase, routes=routes)
