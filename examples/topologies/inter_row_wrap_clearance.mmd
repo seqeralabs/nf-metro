@@ -1,0 +1,31 @@
+%%metro title: Inter-row wrap clearance
+%%metro style: dark
+%%metro center_ports: true
+%%metro line: l1 | Line 1 | #0570b0
+%%metro line: l2 | Line 2 | #d62728
+%%metro line: l3 | Line 3 | #756bb1
+%%metro grid: top | 0,0
+%%metro grid: bottom | 0,1
+
+graph LR
+    subgraph top [Top section]
+        %%metro exit: right | l1, l2, l3
+        a_in[ ]
+        a1[Step A1]
+        a2[Step A2]
+        a3[Step A3]
+        a_in -->|l1,l2,l3| a1
+        a1 -->|l1,l2,l3| a2
+        a2 -->|l1,l2,l3| a3
+    end
+
+    subgraph bottom [Bottom section]
+        %%metro entry: left | l1, l2, l3
+        b_in[ ]
+        b1[Step B1]
+        b2[Step B2]
+        b_in -->|l1,l2,l3| b1
+        b1 -->|l1,l2,l3| b2
+    end
+
+    a3 -->|l1,l2,l3| b_in

@@ -664,7 +664,7 @@ def _guard_inter_row_run_clearance(
     An inter-section bundle that crosses grid rows (e.g. a right-exit
     wrapping down to a left-entry below) lands its horizontal run in the
     inter-row gap.  A run grazing the source bbox reads as "running along
-    under the box" (#414).  The placement-side widening
+    under the box".  The placement-side widening
     (``_wrap_bundle_row_minimums``) reserves the space; this guard fails
     loudly if a layout change ever lets the run creep back against the box.
     """
@@ -5043,8 +5043,8 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
 
     # An inter-row wrap bundle needs a wider gap than the bare
     # ``section_y_gap`` so its horizontal run clears both bounding
-    # sections (#414); honour that minimum here so tightening doesn't
-    # reclaim the space ``_enforce_min_row_gaps`` reserved at placement.
+    # sections; honour that minimum here so tightening doesn't reclaim
+    # the space ``_enforce_min_row_gaps`` reserved at placement.
     wrap_min = _wrap_bundle_row_minimums(graph)
 
     sections_by_start_row: dict[int, list[Section]] = defaultdict(list)

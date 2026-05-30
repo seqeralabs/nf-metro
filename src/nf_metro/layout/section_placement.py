@@ -16,6 +16,7 @@ from collections import defaultdict, deque
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     EDGE_TO_BUNDLE_CLEARANCE,
+    INTER_ROW_HEADER_CLEARANCE,
     MERGE_GAP_MIN,
     MIN_INTER_SECTION_GAP,
     MIN_INTER_SECTION_ROW_GAP,
@@ -27,6 +28,7 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
 )
+from nf_metro.layout.routing.common import resolve_section
 from nf_metro.parser.model import MetroGraph, PortSide, Section
 
 
@@ -351,21 +353,6 @@ def _station_column(
     return None
 
 
-def _station_section(graph: MetroGraph, station, junction_ids: set[str]):
-    """Resolve a station's owning section, tracing back through junctions."""
-    if station.section_id and station.section_id in graph.sections:
-        return graph.sections[station.section_id]
-    if station.id in junction_ids:
-        for edge in graph.edges_to(station.id):
-            src = graph.stations.get(edge.source)
-            if src is None:
-                continue
-            sec = _station_section(graph, src, junction_ids)
-            if sec is not None:
-                return sec
-    return None
-
-
 def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]:
     """Minimum bbox-to-bbox row gap each inter-row wrap bundle needs.
 
@@ -374,24 +361,19 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     horizontal run (see ``_route_left_entry_wrap``).  To keep that run
     clear of both bounding obstacles it needs a band of
     ``EDGE_TO_BUNDLE_CLEARANCE`` below the upper bbox bottom, the bundle
-    span, and ``SECTION_HEADER_PROTRUSION + EDGE_TO_BUNDLE_CLEARANCE``
-    above the lower row (clearing its header badge, not just the bbox
-    edge); a narrow gap squeezes the bundle flush against a box (#414).
-    Returns, per adjacent ``(upper_row, lower_row)`` pair, the required
-    bbox-to-bbox gap so the placement pass can widen too-tight rows.
+    span, and ``INTER_ROW_HEADER_CLEARANCE`` above the lower row (clearing
+    its header badge, not just the bbox edge); a narrow gap squeezes the
+    bundle flush against a box.  Returns, per adjacent
+    ``(upper_row, lower_row)`` pair, the required bbox-to-bbox gap so the
+    placement pass can widen too-tight rows.
 
-    Fold/serpentine sections (TB direction or multi-row span) route via
-    reversal handling, not this channel, and are excluded.
+    Fold/serpentine sections (multi-row span) route via reversal handling,
+    not this channel, and are excluded.
     """
 
     def _is_flow_section(sec) -> bool:
-        # Exclude multi-row fold/serpentine sections: they span into the
-        # next row and route via reversal handling, not this channel.
-        # A single-row TB section (normal vertical flow with a top
-        # entry/header) is a legitimate channel target.
         return sec is not None and sec.grid_row_span == 1
 
-    junction_ids = graph.junction_ids
     # (upper_row, lower_row) -> entry_port_id -> set of line ids
     per_gap: dict[tuple[int, int], dict[str, set[str]]] = defaultdict(
         lambda: defaultdict(set)
@@ -411,7 +393,7 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
         src = graph.stations.get(edge.source)
         if src is None:
             continue
-        src_sec = _station_section(graph, src, junction_ids)
+        src_sec = resolve_section(graph, src)
         if not _is_flow_section(src_sec):
             continue
         src_row, tgt_row = src_sec.grid_row, tgt_sec.grid_row
@@ -424,11 +406,10 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
         per_gap[gap][edge.target].add(edge.line_id)
 
     minimums: dict[tuple[int, int], float] = {}
-    target_clearance = SECTION_HEADER_PROTRUSION + EDGE_TO_BUNDLE_CLEARANCE
     for gap, ports in per_gap.items():
         widest = max(len(lines) for lines in ports.values())
         span = (widest - 1) * OFFSET_STEP
-        minimums[gap] = EDGE_TO_BUNDLE_CLEARANCE + span + target_clearance
+        minimums[gap] = EDGE_TO_BUNDLE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE
     return minimums
 
 
@@ -743,13 +724,18 @@ def _enforce_min_row_gaps(
         if deficit <= 0:
             continue
 
-        # Warn if we're overriding the user's requested gap
-        required_bbox_gap = min_gap + header_protrusion
+        # Warn if we're overriding the user's requested gap, naming the
+        # constraint that actually drove the widening.
+        if wrap_deficit > header_deficit:
+            reason = "to fit an inter-row routing bundle"
+            required_bbox_gap = wrap_min
+        else:
+            reason = "to clear section headers"
+            required_bbox_gap = min_gap + header_protrusion
         if requested_gap is not None and required_bbox_gap > requested_gap:
             warnings.warn(
                 f"Section gap between rows {row} and {row + 1} "
-                f"widened to {required_bbox_gap:.0f}px "
-                f"to clear section headers "
+                f"widened to {required_bbox_gap:.0f}px {reason} "
                 f"(requested {requested_gap:.0f}px)",
                 stacklevel=2,
             )

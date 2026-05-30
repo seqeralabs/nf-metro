@@ -895,15 +895,14 @@ def test_inter_section_route_no_x_backtrack(fixture):
 # ---------------------------------------------------------------------------
 
 
-def _placed_bbox(sec) -> tuple[float, float, float, float]:
-    """Return placed ``(left, right, top, bottom)`` of a section bbox.
+def _section_bbox(sec) -> tuple[float, float, float, float]:
+    """Return final ``(left, right, top, bottom)`` of a section bbox.
 
-    The render/route coordinate system is ``offset + bbox``; the raw
-    ``bbox_*`` fields alone omit the section's grid placement offset.
+    By routing time the grid placement offset is already folded into
+    ``bbox_x``/``bbox_y`` (they are the rendered coordinates); ``offset_*``
+    is a stale placement-time record and must not be re-added.
     """
-    left = sec.offset_x + sec.bbox_x
-    top = sec.offset_y + sec.bbox_y
-    return left, left + sec.bbox_w, top, top + sec.bbox_h
+    return sec.bbox_x, sec.bbox_x + sec.bbox_w, sec.bbox_y, sec.bbox_y + sec.bbox_h
 
 
 @pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
@@ -915,10 +914,7 @@ def test_inter_row_run_clears_source_section(fixture):
     wraps down to a left-entry in the row below), its horizontal run lands
     in the inter-row gap.  That run must keep at least
     ``EDGE_TO_BUNDLE_CLEARANCE`` from the source section's near edge so it
-    doesn't read as "running along under the box" (#414: the sarek
-    ``applybqsr -> cram_in`` bundle sat 7px below Pre-processing's bottom
-    because the channel Y was computed in raw-bbox space and centred on a
-    ``HEADER_CLEARANCE``-only midpoint with no source-side margin).
+    doesn't read as "running along under the box".
     """
     graph = _layout(fixture)
     routes = route_edges(graph)
@@ -932,7 +928,7 @@ def test_inter_row_run_clears_source_section(fixture):
             continue
         if src_sec.grid_row == tgt_sec.grid_row:
             continue  # inter-row routes only
-        left, right, top, bottom = _placed_bbox(src_sec)
+        left, right, top, bottom = _section_bbox(src_sec)
         pts = rp.points
         for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
             if abs(y1 - y0) > _Y_TOL or abs(x1 - x0) < _Y_TOL:

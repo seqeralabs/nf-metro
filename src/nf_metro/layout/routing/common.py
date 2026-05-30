@@ -14,6 +14,7 @@ from nf_metro.layout.constants import (
     DEFAULT_LINE_PRIORITY,
     EDGE_TO_BUNDLE_CLEARANCE,
     HEADER_CLEARANCE,
+    INTER_ROW_HEADER_CLEARANCE,
     OFFSET_STEP,
     SECTION_HEADER_PROTRUSION,
 )
@@ -584,8 +585,8 @@ def inter_row_channel_y(
         if abs(src_row - tgt_row) == 1:
             # Adjacent-row wrap: centre the run in a symmetric clearance
             # band so it clears the source bbox bottom and the next row's
-            # header badge equally (#414).  The bounding rows are the two
-            # this gap separates.
+            # header badge equally.  The bounding rows are the two this
+            # gap separates.
             if dy > 0:
                 upper_bottom = row_bottom_edge(graph, src_row, default=sy)
                 lower_top = row_top_edge(graph, tgt_row, default=ty)
@@ -618,17 +619,15 @@ def _center_inter_row_channel(upper_bottom: float, lower_top: float) -> float:
     """Y for a horizontal channel in the gap between two stacked rows.
 
     The channel is centred in the band that keeps
-    :data:`EDGE_TO_BUNDLE_CLEARANCE` ("constant A") clear of both bounding
-    obstacles: the bbox bottom of the row above, and the *header badge* of
-    the row below (numbered circle + label render
-    :data:`SECTION_HEADER_PROTRUSION` above its bbox top).  Clearing the
-    badge -- rather than just the bbox edge -- keeps the run from grazing
-    the next-row label.  When the gap is too narrow to satisfy both
-    margins the channel falls back to the geometric midpoint, splitting
-    the deficit symmetrically rather than starving one side.
+    :data:`EDGE_TO_BUNDLE_CLEARANCE` ("constant A") above the bbox bottom
+    of the row above and :data:`INTER_ROW_HEADER_CLEARANCE` above the row
+    below -- the latter clears the *header badge* (numbered circle +
+    label) rather than just the bbox edge, so the run doesn't graze the
+    next-row label.  When the gap is too narrow to satisfy both margins
+    the channel biases to ``hi`` so it still clears the badge.
     """
     lo = upper_bottom + EDGE_TO_BUNDLE_CLEARANCE
-    hi = lower_top - SECTION_HEADER_PROTRUSION - EDGE_TO_BUNDLE_CLEARANCE
+    hi = lower_top - INTER_ROW_HEADER_CLEARANCE
     if lo <= hi:
         return (lo + hi) / 2
     # Gap too narrow for both margins (typically a heterogeneous-row case
