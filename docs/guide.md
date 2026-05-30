@@ -422,11 +422,12 @@ These go at the top of the file, before `graph LR`.
 | Directive | Description |
 |-----------|-------------|
 | `%%metro title: <text>` | Map title |
-| `%%metro logo: <path>` | Logo image (replaces title text). Use `--logo` CLI flag to override per-render. |
+| `%%metro logo: <path>` | Logo image, bundled into the legend (or top-left if there is no legend). Use `--logo` CLI flag to override per-render. |
+| `%%metro logo_scale: <factor>` | Scale the logo within the legend block (`1.0` = default auto-size). Values above 1 grow the legend box to contain the logo. |
 | `%%metro style: <name>` | Theme: `dark` (default) or `light` |
 | `%%metro line: <id> \| <name> \| <color> [\| <style>]` | Define a metro line. Optional style: `solid` (default), `dashed`, or `dotted` |
 | `%%metro grid: <section> \| <col>,<row>[,<rowspan>[,<colspan>]]` | Pin a section to a grid position |
-| `%%metro legend: <position>` | Legend position: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, or `none` |
+| `%%metro legend: <position>` | Position the legend (and its embedded logo). Keyword: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, or `none` (a bare keyword auto-relocates if it would overlap a section or route). Add `\| canvas` to anchor the keyword to the canvas margin, or `\| <dx>,<dy>` to nudge it; both pin the block exactly (warning on overlap rather than relocating). Use `<x>,<y>` for absolute top-left coordinates. |
 | `%%metro line_order: <strategy>` | Line ordering for track assignment: `definition` (default, preserves `.mmd` order) or `span` (longest-spanning lines get inner tracks) |
 | `%%metro file: <station> \| <label> [\| <name>]` | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon. |
 | `%%metro files: <station> \| <label> [\| <name>]` | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption. |

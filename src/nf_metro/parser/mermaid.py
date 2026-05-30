@@ -249,6 +249,8 @@ def _parse_directive(
                 graph._explicit_directions.add(current_section_id)
     elif content.startswith("grid:"):
         _parse_grid_directive(content, graph)
+    elif content.startswith("logo_scale:"):
+        _parse_logo_scale_directive(content[len("logo_scale:") :].strip(), graph)
     elif content.startswith("logo:"):
         graph.logo_path = content[len("logo:") :].strip()
     elif content.startswith("compact_offsets:"):
@@ -265,9 +267,7 @@ def _parse_directive(
         except ValueError:
             pass
     elif content.startswith("legend:"):
-        pos = content[len("legend:") :].strip().lower()
-        if pos in ("bl", "br", "tl", "tr", "bottom", "right", "none"):
-            graph.legend_position = pos
+        _parse_legend_directive(content[len("legend:") :].strip(), graph)
     elif content.startswith("off_track:"):
         ids = [s.strip() for s in content[len("off_track:") :].split(",")]
         graph._pending_off_track.extend(sid for sid in ids if sid)
@@ -345,6 +345,95 @@ def _parse_grid_directive(content: str, graph: MetroGraph) -> None:
         return
     graph.grid_overrides[section_id] = (col, row, rowspan, colspan)
     graph._explicit_grid.add(section_id)
+
+
+_LEGEND_KEYWORDS = ("bl", "br", "tl", "tr", "bottom", "right", "none")
+
+
+def _parse_xy(text: str) -> tuple[float, float] | None:
+    """Parse a ``x,y`` pair into floats, or None if it is not a number pair."""
+    if "," not in text:
+        return None
+    x_str, _, y_str = text.partition(",")
+    try:
+        return (float(x_str.strip()), float(y_str.strip()))
+    except ValueError:
+        return None
+
+
+def _parse_legend_directive(value: str, graph: MetroGraph) -> None:
+    """Parse the %%metro legend: directive positioning the legend+logo block.
+
+    Grammar (the keyword forms stay content-anchored with the historical
+    overlap fallback; the qualifier and absolute forms pin the block exactly):
+
+        legend: <keyword>              keyword (bl/br/tl/tr/bottom/right/none)
+        legend: <keyword> | canvas     anchor the keyword to the canvas frame
+        legend: <keyword> | <dx>,<dy>  nudge the keyword anchor by an offset
+        legend: <x>,<y>                absolute top-left coordinates
+    """
+    # Reset modifiers so a re-declared directive starts clean.
+    graph.legend_anchor = "content"
+    graph.legend_offset = None
+    graph.legend_at = None
+
+    head, sep, qualifier = value.partition("|")
+    head = head.strip().lower()
+    qualifier = qualifier.strip().lower()
+
+    coords = _parse_xy(head)
+    if coords is not None:
+        graph.legend_at = coords
+        graph.legend_position = "free"
+        if sep:
+            warnings.warn(
+                f"legend qualifier {qualifier!r} ignored with absolute coordinates.",
+                stacklevel=2,
+            )
+        return
+
+    if head not in _LEGEND_KEYWORDS:
+        warnings.warn(
+            f"Unknown legend position {head!r}; expected one of "
+            f"{'/'.join(_LEGEND_KEYWORDS)} or 'x,y'. Ignoring.",
+            stacklevel=2,
+        )
+        return
+    graph.legend_position = head
+
+    if not qualifier:
+        return
+    if qualifier == "canvas":
+        graph.legend_anchor = "canvas"
+        return
+    offset = _parse_xy(qualifier)
+    if offset is not None:
+        graph.legend_offset = offset
+    else:
+        warnings.warn(
+            f"Unknown legend qualifier {qualifier!r}; expected 'canvas' or "
+            "'dx,dy'. Ignoring.",
+            stacklevel=2,
+        )
+
+
+def _parse_logo_scale_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro logo_scale: <factor> (1.0 = default auto-size)."""
+    try:
+        scale = float(value)
+    except ValueError:
+        warnings.warn(
+            f"Invalid logo_scale {value!r}; expected a positive number.",
+            stacklevel=2,
+        )
+        return
+    if scale <= 0:
+        warnings.warn(
+            f"logo_scale must be positive, got {value!r}; ignoring.",
+            stacklevel=2,
+        )
+        return
+    graph.logo_scale = scale
 
 
 # Regex patterns for node shapes

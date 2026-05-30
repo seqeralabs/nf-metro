@@ -189,7 +189,13 @@ class MetroGraph:
     center_ports: bool = False
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
+    # Placement modifiers for the bundled legend+logo block. The corner/edge
+    # keyword lives in legend_position; these refine where that block lands.
+    legend_anchor: str = "content"  # "content" (section bbox) or "canvas"
+    legend_offset: tuple[float, float] | None = None  # nudge applied to anchor
+    legend_at: tuple[float, float] | None = None  # absolute top-left override
     logo_path: str = ""
+    logo_scale: float = 1.0  # multiplies the logo size within the legend block
     # Section dependency graph (populated by auto_layout)
     section_dag: SectionDAG | None = None
     # Section IDs that had explicit %%metro direction: directives

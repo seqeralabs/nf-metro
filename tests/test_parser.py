@@ -887,6 +887,73 @@ def test_parse_legend_min_height_invalid_ignored():
     assert graph.legend_min_height == 0.0
 
 
+def test_parse_legend_keyword_defaults():
+    graph = parse_metro_mermaid("%%metro legend: br\ngraph LR\n")
+    assert graph.legend_position == "br"
+    assert graph.legend_anchor == "content"
+    assert graph.legend_offset is None
+    assert graph.legend_at is None
+
+
+def test_parse_legend_canvas_anchor():
+    graph = parse_metro_mermaid("%%metro legend: br | canvas\ngraph LR\n")
+    assert graph.legend_position == "br"
+    assert graph.legend_anchor == "canvas"
+
+
+def test_parse_legend_offset():
+    graph = parse_metro_mermaid("%%metro legend: br | +0,120\ngraph LR\n")
+    assert graph.legend_position == "br"
+    assert graph.legend_offset == (0.0, 120.0)
+
+
+def test_parse_legend_offset_negative():
+    graph = parse_metro_mermaid("%%metro legend: tr | -10,-20\ngraph LR\n")
+    assert graph.legend_offset == (-10.0, -20.0)
+
+
+def test_parse_legend_absolute_coordinates():
+    graph = parse_metro_mermaid("%%metro legend: 40,560\ngraph LR\n")
+    assert graph.legend_position == "free"
+    assert graph.legend_at == (40.0, 560.0)
+
+
+def test_parse_legend_unknown_keyword_warns_and_ignores():
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid("%%metro legend: middle\ngraph LR\n")
+    assert graph.legend_position == "bottom"  # default unchanged
+
+
+def test_parse_legend_unknown_qualifier_warns():
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid("%%metro legend: br | sideways\ngraph LR\n")
+    assert graph.legend_position == "br"
+    assert graph.legend_anchor == "content"
+    assert graph.legend_offset is None
+
+
+def test_parse_logo_scale():
+    graph = parse_metro_mermaid("%%metro logo_scale: 1.5\ngraph LR\n")
+    assert graph.logo_scale == 1.5
+
+
+def test_parse_logo_scale_default():
+    graph = parse_metro_mermaid("graph LR\n")
+    assert graph.logo_scale == 1.0
+
+
+def test_parse_logo_scale_invalid_ignored():
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid("%%metro logo_scale: huge\ngraph LR\n")
+    assert graph.logo_scale == 1.0
+
+
+def test_parse_logo_scale_nonpositive_ignored():
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid("%%metro logo_scale: 0\ngraph LR\n")
+    assert graph.logo_scale == 1.0
+
+
 def test_no_duplicate_edges_after_resolve_sections():
     """Multiple inter-section edges to the same section should not create
     duplicate (source, target, line_id) triples after _resolve_sections."""

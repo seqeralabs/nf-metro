@@ -1,0 +1,56 @@
+%%metro title: Legend + logo placement
+%%metro style: dark
+%%metro logo: examples/placeholder_logo.png
+%%metro logo_scale: 1.5
+%%metro legend: br | canvas
+%%metro file: fq_in | FASTQ
+%%metro line: main | Main route | #3b82f6
+%%metro line: qc | QC route | #e6842a
+%%metro grid: input | 0,0
+%%metro grid: trim | 1,0
+%%metro grid: align | 2,0
+%%metro grid: call | 3,0
+%%metro grid: report | 4,0
+%%metro grid: qc | 2,1
+graph LR
+    subgraph input [Input]
+        %%metro exit: right | main
+        %%metro exit: bottom | qc
+        fq_in[ ]
+        cat[Cat FASTQ]
+        fq_in -->|main,qc| cat
+    end
+    subgraph trim [Trimming]
+        %%metro entry: left | main
+        %%metro exit: right | main
+        trimg[Trim]
+    end
+    subgraph align [Alignment]
+        %%metro entry: left | main
+        %%metro exit: right | main
+        bwa[BWA-MEM]
+        sort[Sort]
+        bwa -->|main| sort
+    end
+    subgraph call [Variant calling]
+        %%metro entry: left | main
+        %%metro exit: right | main
+        caller[Caller]
+    end
+    subgraph report [Reporting]
+        %%metro entry: left | main
+        annot[Annotate]
+        rep[Report]
+        annot -->|main| rep
+    end
+    subgraph qc [Quality control]
+        %%metro entry: left | qc
+        fastqc[FastQC]
+        multiqc[MultiQC]
+        fastqc -->|qc| multiqc
+    end
+    cat -->|main| trimg
+    trimg -->|main| bwa
+    sort -->|main| caller
+    caller -->|main| annot
+    cat -->|qc| fastqc

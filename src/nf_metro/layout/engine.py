@@ -202,6 +202,28 @@ def _guard_no_negative_grid_columns(graph: MetroGraph, phase: str) -> None:
         )
 
 
+def _guard_explicit_grid_directions(graph: MetroGraph, phase: str) -> None:
+    """Explicit-grid sections keep the LR default unless they carry an
+    explicit %%metro direction.
+
+    A section's grid position is the author's manual layout intent, not a
+    flow-direction signal (issue #446). Direction inference therefore skips
+    explicit-grid sections; this guard fails loudly if a future change ever
+    lets inference reorient one (e.g. by reading override-aware positions),
+    which would silently elongate serpentine-stacked maps vertically.
+    """
+    offenders = {
+        sid: graph.sections[sid].direction
+        for sid in graph._explicit_grid - graph._explicit_directions
+        if sid in graph.sections and graph.sections[sid].direction != "LR"
+    }
+    if offenders:
+        raise PhaseInvariantError(
+            f"{phase}: explicit-grid sections with no %%metro direction were "
+            f"inferred to a non-LR direction: {offenders}"
+        )
+
+
 def _bbox_cols_overlap(a: Section, b: Section) -> bool:
     """True when two sections' bboxes overlap in X (share horizontal extent)."""
     return a.bbox_x < b.bbox_x + b.bbox_w and b.bbox_x < a.bbox_x + a.bbox_w
@@ -1988,6 +2010,7 @@ def _compute_section_layout(
     if validate:
         _guard_section_bboxes_positive(graph, "after Stage 1.1")
         _guard_no_negative_grid_columns(graph, "after Stage 1.1")
+        _guard_explicit_grid_directions(graph, "after Stage 1.1")
 
     # Stage 1.2: Align Y grids across same-row, same-direction sections
     _align_row_y_grids(graph, section_subgraphs, y_spacing, section_y_padding)

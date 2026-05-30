@@ -6,11 +6,13 @@ __all__ = ["apply_route_offsets", "render_svg"]
 
 import html
 import textwrap
+import warnings
 from pathlib import Path
 
 import drawsvg as draw
 
 from nf_metro.layout.constants import LABEL_LINE_HEIGHT
+from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.labels import LabelPlacement, place_labels
 from nf_metro.layout.routing import RoutedPath, compute_station_offsets, route_edges
 from nf_metro.layout.routing.corners import resolve_curve_radii
@@ -47,6 +49,7 @@ from nf_metro.render.constants import (
     ICON_STATION_GAP,
     LEGEND_GAP,
     LEGEND_INSET,
+    LEGEND_ROUTE_CLEARANCE,
     LOGO_Y_STANDALONE,
     SECTION_BOX_RADIUS,
     SECTION_LABEL_REGION_RATIO,
@@ -149,10 +152,19 @@ def _position_legend(
     logo_w: float,
     logo_h: float,
     legend_position: str,
+    routes: list[RoutedPath],
 ) -> tuple[float, float, float, float, bool]:
     """Compute legend position and dimensions.
 
     Returns (legend_x, legend_y, legend_w, legend_h, show_legend).
+
+    ``legend_position`` is passed in because callers may override it per render
+    (only ``"none"`` is overridden in practice); the placement modifiers
+    (``legend_anchor``/``legend_offset``/``legend_at``) are read from ``graph``.
+
+    A casual corner keyword auto-relocates to the bottom-left when it would
+    overlap a section or a routed line. An explicit pin (canvas anchor, offset,
+    or absolute coordinates) is honoured as placed, but warns on overlap.
     """
     legend_logo_size = (logo_w, logo_h) if logo_in_legend else None
     legend_w, legend_h = compute_legend_dimensions(
@@ -165,6 +177,18 @@ def _position_legend(
     if not show_legend:
         return legend_x, legend_y, legend_w, legend_h, show_legend
 
+    # Absolute placement (legend: x,y) pins the block top-left exactly.
+    if graph.legend_at is not None:
+        legend_x, legend_y = graph.legend_at
+        if _legend_overlaps_content(
+            legend_x, legend_y, legend_w, legend_h, graph, routes
+        ):
+            warnings.warn(
+                f"legend placed at {graph.legend_at} overlaps a section or route.",
+                stacklevel=2,
+            )
+        return legend_x, legend_y, legend_w, legend_h, show_legend
+
     pos = legend_position
     gap = LEGEND_GAP
     inset = LEGEND_INSET
@@ -172,37 +196,60 @@ def _position_legend(
         (s.bbox_x for s in graph.sections.values() if s.bbox_w > 0),
         default=padding,
     )
-    content_right = max_x
     content_top = min(
         (s.bbox_y for s in graph.sections.values() if s.bbox_w > 0),
         default=padding,
     )
-    content_bottom = max_y
+
+    # Frame the keyword anchor against the section bbox (default) or the canvas
+    # margin. The canvas frame lets a corner fill the empty drawing margin.
+    if graph.legend_anchor == "canvas":
+        left, top = padding, padding
+    else:
+        left, top = content_left, content_top
+    right, bottom = max_x, max_y
 
     if pos == "bl":
-        legend_x = content_left
-        legend_y = content_bottom - legend_h
+        legend_x = left
+        legend_y = bottom - legend_h
     elif pos == "br":
-        legend_x = content_right - legend_w - inset
-        legend_y = content_bottom - legend_h - inset
+        legend_x = right - legend_w - inset
+        legend_y = bottom - legend_h - inset
     elif pos == "tl":
-        legend_x = content_left + inset
-        legend_y = content_top + inset
+        legend_x = left + inset
+        legend_y = top + inset
     elif pos == "tr":
-        legend_x = content_right - legend_w - inset
-        legend_y = content_top + inset
+        legend_x = right - legend_w - inset
+        legend_y = top + inset
     elif pos == "bottom":
-        legend_x = content_left
-        legend_y = content_bottom + gap
+        legend_x = left
+        legend_y = bottom + gap
     elif pos == "right":
-        legend_x = content_right + gap
-        legend_y = content_top
+        legend_x = right + gap
+        legend_y = top
 
-    if pos not in ("bottom", "right") and _legend_overlaps_sections(
-        legend_x, legend_y, legend_w, legend_h, graph
+    # An explicit pin (canvas anchor or offset) means the author placed the
+    # block deliberately, so don't auto-relocate it; warn instead if it
+    # overlaps. A casual corner keyword relocates to the bottom-left when it
+    # would overlap a section or a routed line.
+    explicit_pin = graph.legend_anchor == "canvas" or graph.legend_offset is not None
+    if graph.legend_offset is not None:
+        legend_x += graph.legend_offset[0]
+        legend_y += graph.legend_offset[1]
+
+    if explicit_pin:
+        if _legend_overlaps_content(
+            legend_x, legend_y, legend_w, legend_h, graph, routes
+        ):
+            warnings.warn(
+                f"legend pinned at '{pos}' overlaps a section or route.",
+                stacklevel=2,
+            )
+    elif pos not in ("bottom", "right") and _legend_overlaps_content(
+        legend_x, legend_y, legend_w, legend_h, graph, routes
     ):
         legend_x = content_left
-        legend_y = content_bottom + gap
+        legend_y = max_y + gap
 
     return legend_x, legend_y, legend_w, legend_h, show_legend
 
@@ -338,6 +385,7 @@ def render_svg(
         logo_w,
         logo_h,
         effective_legend_position,
+        routes,
     )
 
     if show_legend:
@@ -348,6 +396,8 @@ def render_svg(
     logo_x = 0.0
     logo_y = 0.0
     if show_logo and not show_legend:
+        logo_w *= graph.logo_scale
+        logo_h *= graph.logo_scale
         logo_x = padding
         logo_y = LOGO_Y_STANDALONE
         max_x = max(max_x, logo_x + logo_w)
@@ -458,6 +508,38 @@ def _legend_overlaps_sections(
         ):
             return True
     return False
+
+
+def _legend_overlaps_routes(
+    lx: float,
+    ly: float,
+    lw: float,
+    lh: float,
+    routes: list[RoutedPath],
+    margin: float,
+) -> bool:
+    """Check if a legend rectangle (grown by *margin*) crosses any route."""
+    bbox = (lx - margin, ly - margin, lx + lw + margin, ly + lh + margin)
+    for route in routes:
+        pts = route.points
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+            if segment_intersects_bbox(x1, y1, x2, y2, bbox):
+                return True
+    return False
+
+
+def _legend_overlaps_content(
+    lx: float,
+    ly: float,
+    lw: float,
+    lh: float,
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+) -> bool:
+    """Whether the legend rect overlaps a section box or a routed line."""
+    return _legend_overlaps_sections(lx, ly, lw, lh, graph) or _legend_overlaps_routes(
+        lx, ly, lw, lh, routes, LEGEND_ROUTE_CLEARANCE
+    )
 
 
 def _version_string() -> str:

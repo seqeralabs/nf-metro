@@ -20,6 +20,9 @@ LEGEND_GAP: float = 30.0
 LEGEND_INSET: float = 10.0
 """Inset from content edge for corner legend positions (tl/tr/bl/br)."""
 
+LEGEND_ROUTE_CLEARANCE: float = 6.0
+"""Clearance kept between the legend box and routed lines when testing overlap."""
+
 LOGO_Y_STANDALONE: float = 5.0
 """Y offset for standalone logo (no legend)."""
 

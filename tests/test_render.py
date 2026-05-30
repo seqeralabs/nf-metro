@@ -151,6 +151,46 @@ def test_legend_min_height_enlarges_legend():
     assert h_min >= 120 + 2 * LEGEND_PADDING
 
 
+def test_logo_scale_enlarges_bundled_logo():
+    """`logo_scale` grows the logo (and the legend box) within the joint block."""
+    from nf_metro.render.legend import compute_legend_dimensions
+
+    base = (
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n"
+        "    a[A]\n    b[B]\n"
+        "    a -->|main| b\n"
+    )
+    logo = (320.0, 120.0)  # original (w, h) aspect carrier
+
+    g1 = parse_metro_mermaid(base)
+    w1, h1 = compute_legend_dimensions(g1, NFCORE_THEME, logo_size=logo)
+
+    g2 = parse_metro_mermaid("%%metro logo_scale: 2.0\n" + base)
+    w2, h2 = compute_legend_dimensions(g2, NFCORE_THEME, logo_size=logo)
+
+    # A larger logo widens the block and, once it exceeds the text block,
+    # grows the legend height to contain it.
+    assert w2 > w1
+    assert h2 > h1
+
+
+def test_logo_scale_default_no_change():
+    """Without `logo_scale`, legend dimensions match the historical default."""
+    from nf_metro.render.legend import compute_legend_dimensions
+
+    base = (
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n    a[A]\n    b[B]\n    a -->|main| b\n"
+    )
+    logo = (320.0, 120.0)
+    g = parse_metro_mermaid(base)
+    assert g.logo_scale == 1.0
+    # Should not raise and should produce a positive-size legend.
+    w, h = compute_legend_dimensions(g, NFCORE_THEME, logo_size=logo)
+    assert w > 0 and h > 0
+
+
 def test_render_file_size():
     """SVG output should be reasonably small."""
     graph = parse_metro_mermaid(
