@@ -13,6 +13,31 @@ from nf_metro.layout.ordering import assign_tracks
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 
+def _patch_layout_helper(monkeypatch, name, replacement):
+    """Rebind a layout helper everywhere it is bound for call-time lookup.
+
+    Phase helpers live in ``nf_metro.layout.phases.*`` and are re-exported
+    from ``engine``.  A bare-name call resolves through the *defining*
+    module's namespace, while ``engine.<name>`` only intercepts calls made
+    from ``engine`` itself.  Patch the name in every loaded ``layout`` module
+    whose binding is the original object so the corruption takes effect
+    regardless of which module the call site lives in.
+    """
+    import sys
+
+    from nf_metro.layout import engine
+
+    original = getattr(engine, name)
+    patched = []
+    for modname, mod in list(sys.modules.items()):
+        if not modname.startswith("nf_metro.layout"):
+            continue
+        if getattr(mod, name, None) is original:
+            monkeypatch.setattr(mod, name, replacement)
+            patched.append(modname)
+    assert patched, f"{name!r} was not bound in any layout module"
+
+
 def test_layer_assignment_linear(simple_linear_graph):
     layers = assign_layers(simple_linear_graph)
     assert layers["a"] == 0
@@ -1823,7 +1848,7 @@ class TestPassCBisection:
                 a.y = a2.y
             return result
 
-        monkeypatch.setattr(engine, corruption_helper, corrupt)
+        _patch_layout_helper(monkeypatch, corruption_helper, corrupt)
 
         graph = parse_metro_mermaid(self._MMD)
         with pytest.raises(engine.PhaseInvariantError) as excinfo:
@@ -1893,7 +1918,7 @@ class TestPassCBisection:
                     a.y = a2.y
             return result
 
-        monkeypatch.setattr(engine, "_top_align_row_bboxes_only", corrupt)
+        _patch_layout_helper(monkeypatch, "_top_align_row_bboxes_only", corrupt)
 
         graph = parse_metro_mermaid(self._MMD_CENTER_PORTS)
         with pytest.raises(engine.PhaseInvariantError) as excinfo:
@@ -1933,7 +1958,7 @@ class TestPassCBisection:
                 a.y = a2.y
             return result
 
-        monkeypatch.setattr(engine, "_snap_canvas_y_to_grid", corrupt)
+        _patch_layout_helper(monkeypatch, "_snap_canvas_y_to_grid", corrupt)
 
         graph = parse_metro_mermaid(self._MMD)
         with pytest.raises(engine.PhaseInvariantError) as excinfo:
