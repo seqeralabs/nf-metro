@@ -1011,3 +1011,25 @@ class TestAlmostHorizontalEdges:
         graph = _load_and_layout(EXAMPLES_DIR / "variant_calling.mmd")
         violations = check_almost_horizontal_edges(graph)
         assert not violations, "\n".join(v.message for v in violations)
+
+    def test_with_subworkflows_no_slope(self):
+        """with_subworkflows should be clean (#420).
+
+        Its Alignment trunk co-travels to the exit port with the
+        alignment_reporting branch; the exit-only reorder must not step the
+        through-trunk's offset, which would slant its junction-to-entry
+        segment between Preprocess and Alignment.
+        """
+        from nf_metro.convert import convert_nextflow_dag
+
+        path = (
+            Path(__file__).parent.parent
+            / "tests"
+            / "fixtures"
+            / "nextflow"
+            / "with_subworkflows.mmd"
+        )
+        graph = parse_metro_mermaid(convert_nextflow_dag(path.read_text()))
+        compute_layout(graph)
+        violations = check_almost_horizontal_edges(graph)
+        assert not violations, "\n".join(v.message for v in violations)

@@ -288,6 +288,32 @@ def _reindex_section_local(ctx: _OffsetCtx) -> None:
                     ctx.offsets[(sid_s, lid)] = p * ctx.offset_step
 
 
+def _entry_fed_in_section(graph: MetroGraph, sid: str, lid: str, sec_id: str) -> bool:
+    """Whether *lid* reaches *sid* from this section's entry port.
+
+    Walks back along *lid*'s in-section edges; returns True if the chain
+    originates at an entry port.  Such a line is the section's continuing
+    through-trunk and should keep its offset slot.
+    """
+    seen: set[str] = set()
+    stack = [sid]
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        for e in graph.edges_to(cur):
+            if e.line_id != lid:
+                continue
+            port = graph.ports.get(e.source)
+            if port and port.is_entry:
+                return True
+            src = graph.stations.get(e.source)
+            if src and not src.is_port and src.section_id == sec_id:
+                stack.append(e.source)
+    return False
+
+
 def _reorder_exit_only_lines(ctx: _OffsetCtx) -> None:
     """Reorder offsets at stations where a line originates and exits to a port.
 
@@ -374,6 +400,18 @@ def _reorder_exit_only_lines(ctx: _OffsetCtx) -> None:
                     swap_lid = other
                     break
             if swap_lid is None:
+                continue
+
+            # Don't displace the continuing through-trunk when the
+            # exit-only line co-travels with it to the *same* exit port:
+            # the reorder then prevents no crossing (both leave together)
+            # but steps the trunk's offset mid-run, slanting its
+            # junction-to-entry segment downstream (#420).  When the two
+            # diverge to different targets the swap is genuinely separating
+            # them and must stand (#125).
+            if outbound_target.get(
+                (sid, swap_lid)
+            ) == target_id and _entry_fed_in_section(graph, sid, swap_lid, sec_id):
                 continue
 
             # Prepare swap: lid -> desired_off, swap_lid -> cur_off
