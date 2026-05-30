@@ -101,6 +101,20 @@ def _guard_coordinates_finite(graph: MetroGraph, phase: str) -> None:
                 )
 
 
+def _bbox_guarded_stations(graph: MetroGraph):
+    """Yield ``(sid, station, section)`` for each rendered station that a
+    bbox-containment guard should check: skips ports, junctions, and
+    stations whose section has no sized bbox.  Shared by the marker-edge
+    and centre-containment guards so they can't drift on what they exempt.
+    """
+    junction_ids = graph.junction_ids
+    for sid, st in graph.stations.items():
+        sec = graph.sections.get(st.section_id or "")
+        if not sec or st.is_port or sid in junction_ids or sec.bbox_w == 0:
+            continue
+        yield sid, st, sec
+
+
 def _guard_stations_in_sections(graph: MetroGraph, phase: str) -> None:
     """After Stage 2.1+: rendered station markers (and terminus icons) must
     be fully within their section bbox.
@@ -113,12 +127,8 @@ def _guard_stations_in_sections(graph: MetroGraph, phase: str) -> None:
     height) spill above the bbox top while still being technically "in" the
     section.
     """
-    junction_ids = graph.junction_ids
     tol = GUARD_TOLERANCE
-    for sid, st in graph.stations.items():
-        sec = graph.sections.get(st.section_id or "")
-        if not sec or st.is_port or sid in junction_ids or sec.bbox_w == 0:
-            continue
+    for sid, st, sec in _bbox_guarded_stations(graph):
         # Off-track inputs and terminus icons render at icon scale; on-track
         # markers render at station-pill scale.  Use the wider reach so the
         # guard catches icon spill-over above the bbox top.
@@ -163,14 +173,13 @@ def _section_lacks_flow_aligned_port(graph: MetroGraph, section: Section) -> boo
     An internally-horizontal (LR/RL) section whose only ports are on the
     top/bottom (or a vertical section with only left/right ports) has no
     flow-aligned edge to pin its run to the bbox, so the engine lays the
-    run out past the box.  This is the unsupported directive combination
-    behind issue #424; the bbox-containment guard uses it to emit an
-    actionable error.
+    run out past the box.  The bbox-containment guard uses this to emit an
+    actionable error for that unsupported directive combination.
     """
     flow_sides = _FLOW_ALIGNED_SIDES.get(section.direction)
     if flow_sides is None:
         return False
-    sides = [p.side for p in graph.ports.values() if p.section_id == section.id]
+    sides = [graph.ports[pid].side for pid in section.port_ids if pid in graph.ports]
     return bool(sides) and not any(s in flow_sides for s in sides)
 
 
@@ -181,17 +190,13 @@ def _guard_stations_within_bbox(graph: MetroGraph, phase: str) -> None:
     Unlike :func:`_guard_stations_in_sections` (which runs only under
     ``validate`` mid-layout and checks marker-edge containment on the Y
     axis), this guard runs on every layout -- including the default render
-    path -- and checks the *settled* bbox on both axes.  It is the
-    backstop for issue #424: forcing perpendicular ports on a horizontal
-    section lays its stations out past the right of its own bbox, and the
-    engine must reject that loudly rather than render it silently.
+    path -- and checks the *settled* bbox on both axes.  Forcing
+    perpendicular ports on a horizontal section lays its stations out past
+    the right of its own bbox, and the engine must reject that loudly
+    rather than render it silently.
     """
-    junction_ids = graph.junction_ids
     tol = GUARD_TOLERANCE
-    for sid, st in graph.stations.items():
-        sec = graph.sections.get(st.section_id or "")
-        if not sec or st.is_port or sid in junction_ids or sec.bbox_w == 0:
-            continue
+    for sid, st, sec in _bbox_guarded_stations(graph):
         inside_x = sec.bbox_x - tol <= st.x <= sec.bbox_x + sec.bbox_w + tol
         inside_y = sec.bbox_y - tol <= st.y <= sec.bbox_y + sec.bbox_h + tol
         if inside_x and inside_y:

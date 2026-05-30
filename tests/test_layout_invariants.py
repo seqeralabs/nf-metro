@@ -1406,7 +1406,9 @@ def test_section_bbox_contains_all_content(fixture, params):
                 f"(y={st.y}, half={half}) overflows bbox bottom "
                 f"y={section.bbox_y + section.bbox_h}"
             )
-            assert section.bbox_x - 0.5 <= st.x <= section.bbox_x + section.bbox_w + 0.5, (
+            assert (
+                section.bbox_x - 0.5 <= st.x <= section.bbox_x + section.bbox_w + 0.5
+            ), (
                 f"Section {sec_id}: station {sid} x={st.x} outside bbox "
                 f"x-range [{section.bbox_x}, {section.bbox_x + section.bbox_w}]"
             )
