@@ -1,0 +1,31 @@
+%%metro title: LR section with both ports forced perpendicular
+%%metro line: l1 | Line 1 | #e64980 | solid
+%%metro grid: upstream | 0,0
+%%metro grid: annotation | 0,1
+%%metro grid: downstream | 0,2
+
+graph LR
+    subgraph upstream [Upstream]
+        u1[U1]
+        u2[U2]
+        u1 -->|l1| u2
+    end
+    subgraph annotation [Annotation]
+        %%metro direction: LR
+        %%metro entry: top | l1
+        %%metro exit: bottom | l1
+        snpeff[snpEff]
+        vep[VEP]
+        bcftools_ann[bcftools]
+        snpsift[SnpSift]
+        snpeff -->|l1| vep
+        vep -->|l1| bcftools_ann
+        bcftools_ann -->|l1| snpsift
+    end
+    subgraph downstream [Downstream]
+        d1[D1]
+        d2[D2]
+        d1 -->|l1| d2
+    end
+    u2 -->|l1| snpeff
+    snpsift -->|l1| d1

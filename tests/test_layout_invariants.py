@@ -23,7 +23,11 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_Y_GAP,
 )
-from nf_metro.layout.engine import compute_layout, is_loop_side_branch_station
+from nf_metro.layout.engine import (
+    PhaseInvariantError,
+    compute_layout,
+    is_loop_side_branch_station,
+)
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import resolve_section
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -1338,23 +1342,45 @@ _BBOX_PARAM_SETS = [
     pytest.param({}, id="default"),
 ]
 
+# The full corpus plus a deliberately-unsupported topology (an internally
+# horizontal section whose only ports are perpendicular, leaving no
+# flow-aligned edge to anchor the horizontal run -- issue #424).  On the
+# corpus the invariant holds outright; on the regression fixture the engine
+# must either keep content in-bbox or reject it loudly, never silently
+# overflow.
+_BBOX_CONTAINMENT_FIXTURES = [
+    *ALL_FIXTURES,
+    "regressions/lr_perpendicular_ports_overflow.mmd",
+]
 
-@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+
+@pytest.mark.parametrize("fixture", _BBOX_CONTAINMENT_FIXTURES)
 @pytest.mark.parametrize("params", _BBOX_PARAM_SETS)
 def test_section_bbox_contains_all_content(fixture, params):
     """Every section's bbox must contain its on-track stations and any
-    off-track / terminus icons.  Catches regressions where an icon
-    (off-track input or single-icon terminus) is placed near the bbox
-    top so the icon spills outside the section background.
+    off-track / terminus icons, on both axes.  Catches regressions where
+    an icon (off-track input or single-icon terminus) is placed near the
+    bbox top so the icon spills outside the section background, and where
+    an internally-horizontal section lays its stations out to the right of
+    its own bbox (issue #424).
 
     Margin: on-track station markers reach ~9.5 px above the centre,
     file icons reach ``terminus_height / 2 = 16`` px above the centre
     (both off-track inputs and on-track terminus stations render the
     same icon at ``station.y + bundle_mid``).  We assert
     ``station.y - reach >= bbox_y - 0.5`` (sub-pixel tolerance) and
-    ``station.y + reach <= bbox_y + bbox_h + 0.5``.
+    ``station.y + reach <= bbox_y + bbox_h + 0.5`` vertically, and the
+    station centre within ``[bbox_x - 0.5, bbox_x + bbox_w + 0.5]``
+    horizontally.
+
+    A loud ``PhaseInvariantError`` upholds the invariant: it means the
+    engine refused to ship an out-of-bbox layout rather than rendering it
+    silently.  The dedicated rejection test below pins that path.
     """
-    graph = _layout(fixture, **params)
+    try:
+        graph = _layout(fixture, **params)
+    except PhaseInvariantError:
+        return
     junction_ids = set(graph.junctions)
 
     for sec_id, section in graph.sections.items():
@@ -1380,6 +1406,29 @@ def test_section_bbox_contains_all_content(fixture, params):
                 f"(y={st.y}, half={half}) overflows bbox bottom "
                 f"y={section.bbox_y + section.bbox_h}"
             )
+            assert section.bbox_x - 0.5 <= st.x <= section.bbox_x + section.bbox_w + 0.5, (
+                f"Section {sec_id}: station {sid} x={st.x} outside bbox "
+                f"x-range [{section.bbox_x}, {section.bbox_x + section.bbox_w}]"
+            )
+
+
+def test_lr_section_all_perpendicular_ports_rejected():
+    """An internally-LR/RL section whose only ports are perpendicular
+    (every entry/exit on top/bottom) has no flow-aligned edge to anchor
+    its horizontal run, so its stations are laid out past the right of
+    its own bbox.  The engine must reject this loudly with an actionable
+    message naming the section, rather than rendering it silently (#424).
+    """
+    text = (
+        FIXTURES / "regressions" / "lr_perpendicular_ports_overflow.mmd"
+    ).read_text()
+    graph = parse_metro_mermaid(text)
+    graph.center_ports = True
+    with pytest.raises(PhaseInvariantError) as excinfo:
+        compute_layout(graph)
+    msg = str(excinfo.value).lower()
+    assert "annotation" in msg
+    assert "perpendicular" in msg or "flow-aligned" in msg
 
 
 # ---------------------------------------------------------------------------

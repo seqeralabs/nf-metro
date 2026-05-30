@@ -7,7 +7,7 @@ from pathlib import Path
 import click
 
 from nf_metro import __version__
-from nf_metro.layout import compute_layout
+from nf_metro.layout import PhaseInvariantError, compute_layout
 from nf_metro.parser import parse_metro_mermaid
 from nf_metro.render import render_svg
 from nf_metro.render.html import render_html
@@ -182,7 +182,10 @@ def render(
         layout_kwargs["section_x_gap"] = section_x_gap
     if section_y_gap is not None:
         layout_kwargs["section_y_gap"] = section_y_gap
-    compute_layout(graph, **layout_kwargs)
+    try:
+        compute_layout(graph, **layout_kwargs)
+    except PhaseInvariantError as e:
+        raise click.ClickException(str(e))
 
     theme_obj = THEMES[theme]
 

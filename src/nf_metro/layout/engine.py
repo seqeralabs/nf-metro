@@ -144,6 +144,76 @@ def _guard_stations_in_sections(graph: MetroGraph, phase: str) -> None:
             )
 
 
+# Sides that lie along a section's internal flow axis: an LR/RL section
+# flows horizontally, so its flow-aligned ports are on the left/right; a
+# TB/BT section flows vertically, so its flow-aligned ports are on the
+# top/bottom.  A section with at least one flow-aligned port has an edge
+# to anchor the start (or end) of its run to the bbox boundary.
+_FLOW_ALIGNED_SIDES = {
+    "LR": {PortSide.LEFT, PortSide.RIGHT},
+    "RL": {PortSide.LEFT, PortSide.RIGHT},
+    "TB": {PortSide.TOP, PortSide.BOTTOM},
+    "BT": {PortSide.TOP, PortSide.BOTTOM},
+}
+
+
+def _section_lacks_flow_aligned_port(graph: MetroGraph, section: Section) -> bool:
+    """True when *section* has ports but none on its flow axis.
+
+    An internally-horizontal (LR/RL) section whose only ports are on the
+    top/bottom (or a vertical section with only left/right ports) has no
+    flow-aligned edge to pin its run to the bbox, so the engine lays the
+    run out past the box.  This is the unsupported directive combination
+    behind issue #424; the bbox-containment guard uses it to emit an
+    actionable error.
+    """
+    flow_sides = _FLOW_ALIGNED_SIDES.get(section.direction)
+    if flow_sides is None:
+        return False
+    sides = [p.side for p in graph.ports.values() if p.section_id == section.id]
+    return bool(sides) and not any(s in flow_sides for s in sides)
+
+
+def _guard_stations_within_bbox(graph: MetroGraph, phase: str) -> None:
+    """Always-on postcondition: every station centre must lie within its
+    section's bbox (plus a small tolerance).
+
+    Unlike :func:`_guard_stations_in_sections` (which runs only under
+    ``validate`` mid-layout and checks marker-edge containment on the Y
+    axis), this guard runs on every layout -- including the default render
+    path -- and checks the *settled* bbox on both axes.  It is the
+    backstop for issue #424: forcing perpendicular ports on a horizontal
+    section lays its stations out past the right of its own bbox, and the
+    engine must reject that loudly rather than render it silently.
+    """
+    junction_ids = graph.junction_ids
+    tol = GUARD_TOLERANCE
+    for sid, st in graph.stations.items():
+        sec = graph.sections.get(st.section_id or "")
+        if not sec or st.is_port or sid in junction_ids or sec.bbox_w == 0:
+            continue
+        inside_x = sec.bbox_x - tol <= st.x <= sec.bbox_x + sec.bbox_w + tol
+        inside_y = sec.bbox_y - tol <= st.y <= sec.bbox_y + sec.bbox_h + tol
+        if inside_x and inside_y:
+            continue
+        detail = (
+            f"{phase}: station {sid!r} centre ({st.x:.1f}, {st.y:.1f}) "
+            f"outside section {st.section_id!r} bbox "
+            f"({sec.bbox_x:.1f}, {sec.bbox_y:.1f}, "
+            f"w={sec.bbox_w:.1f}, h={sec.bbox_h:.1f})"
+        )
+        if _section_lacks_flow_aligned_port(graph, sec):
+            detail += (
+                f"; section {st.section_id!r} is internally {sec.direction} "
+                f"but its only ports are perpendicular to that flow, so the "
+                f"run has no flow-aligned port to anchor it to the bbox. "
+                f"Give the section a flow-aligned entry/exit port "
+                f"(left/right for LR/RL, top/bottom for TB/BT) or change "
+                f"its '%%metro direction:'."
+            )
+        raise PhaseInvariantError(detail)
+
+
 def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
     """After Stage 3.1+: ports must sit on their section's bounding box edge."""
     tolerance = GUARD_TOLERANCE
@@ -1863,6 +1933,12 @@ def compute_layout(
         if new_x <= x_spacing + 1e-6 and new_y <= y_spacing + 1e-6:
             break  # can't widen the binding axis (e.g. pinned) -- give up
         x_spacing, y_spacing = new_x, new_y
+
+    # Always-on backstop (independent of ``validate``): the settled layout
+    # must never leave a station outside its own section bbox.  Runs on the
+    # render path so an unsupported directive combination fails loudly
+    # instead of shipping a silently-broken diagram (issue #424).
+    _guard_stations_within_bbox(graph, "final")
 
     if validate:
         _guard_no_label_overlap(graph, "final")
