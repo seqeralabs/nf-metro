@@ -17,6 +17,7 @@ from nf_metro.layout.constants import (
     CURVE_RADIUS,
     DESCENDER_CLEARANCE,
     DIAGONAL_RUN,
+    EDGE_TO_BUNDLE_CLEARANCE,
     ENTRY_SHIFT_LR,
     ENTRY_SHIFT_TB,
     ENTRY_SHIFT_TB_CROSS,
@@ -648,6 +649,67 @@ def _guard_inter_section_route_no_backtrack(
                     f"{phase}: route {rp.edge.source!r}->{rp.edge.target!r} "
                     f"line {rp.line_id!r} backtracks x={x1:.1f}->{x2:.1f} "
                     f"against its {'rightward' if rightward else 'leftward'} flow"
+                )
+
+
+def _guard_inter_row_run_clearance(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list | None = None,
+) -> None:
+    """After routing: a horizontal leg of an inter-*row* route must keep
+    ``EDGE_TO_BUNDLE_CLEARANCE`` from its source section's near bbox edge.
+
+    An inter-section bundle that crosses grid rows (e.g. a right-exit
+    wrapping down to a left-entry below) lands its horizontal run in the
+    inter-row gap.  A run grazing the source bbox reads as "running along
+    under the box" (#414).  The placement-side widening
+    (``_wrap_bundle_row_minimums``) reserves the space; this guard fails
+    loudly if a layout change ever lets the run creep back against the box.
+    """
+    from nf_metro.layout.routing.common import resolve_section
+
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        routes = route_edges(graph)
+
+    tol = GUARD_TOLERANCE
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        src_sec = resolve_section(graph, graph.stations.get(rp.edge.source))
+        tgt_sec = resolve_section(graph, graph.stations.get(rp.edge.target))
+        if src_sec is None or tgt_sec is None:
+            continue
+        if src_sec.grid_row == tgt_sec.grid_row:
+            continue
+        left = src_sec.bbox_x
+        right = left + src_sec.bbox_w
+        top = src_sec.bbox_y
+        bottom = top + src_sec.bbox_h
+        pts = rp.points
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            if abs(y1 - y0) > tol or abs(x1 - x0) < tol:
+                continue  # horizontal runs only
+            xlo, xhi = sorted((x0, x1))
+            if xhi <= left + tol or xlo >= right - tol:
+                continue  # run doesn't overlap the source section in X
+            y = y0
+            if bottom + tol < y < bottom + EDGE_TO_BUNDLE_CLEARANCE - tol:
+                raise PhaseInvariantError(
+                    f"{phase}: inter-row run of {rp.edge.source!r}->"
+                    f"{rp.edge.target!r} line {rp.line_id!r} at y={y:.1f} sits "
+                    f"{y - bottom:.1f}px below source section {src_sec.id!r} "
+                    f"bottom={bottom:.1f} (< {EDGE_TO_BUNDLE_CLEARANCE})"
+                )
+            if top - EDGE_TO_BUNDLE_CLEARANCE + tol < y < top - tol:
+                raise PhaseInvariantError(
+                    f"{phase}: inter-row run of {rp.edge.source!r}->"
+                    f"{rp.edge.target!r} line {rp.line_id!r} at y={y:.1f} sits "
+                    f"{top - y:.1f}px above source section {src_sec.id!r} "
+                    f"top={top:.1f} (< {EDGE_TO_BUNDLE_CLEARANCE})"
                 )
 
 
@@ -1702,6 +1764,7 @@ def _compute_section_layout(
             _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
             _guard_fanout_tail_join(graph, phase, offsets=offsets, routes=routes)
             _guard_inter_section_route_no_backtrack(graph, phase, routes=routes)
+            _guard_inter_row_run_clearance(graph, phase, routes=routes)
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
@@ -4976,6 +5039,14 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
     if not graph.sections:
         return
 
+    from nf_metro.layout.section_placement import _wrap_bundle_row_minimums
+
+    # An inter-row wrap bundle needs a wider gap than the bare
+    # ``section_y_gap`` so its horizontal run clears both bounding
+    # sections (#414); honour that minimum here so tightening doesn't
+    # reclaim the space ``_enforce_min_row_gaps`` reserved at placement.
+    wrap_min = _wrap_bundle_row_minimums(graph)
+
     sections_by_start_row: dict[int, list[Section]] = defaultdict(list)
     sections_by_end_row: dict[int, list[Section]] = defaultdict(list)
     for s in graph.sections.values():
@@ -4998,7 +5069,8 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
         bypass_spans = _aggregate_bypass_spans(graph, ending_at_prev)
         effective_floor = max(max_above_bot, max(bypass_spans.values(), default=0.0))
         current_top = min(s.bbox_y for s in lower)
-        slack = current_top - (effective_floor + section_y_gap)
+        target_gap = max(section_y_gap, wrap_min.get((r - 1, r), 0.0))
+        slack = current_top - (effective_floor + target_gap)
         if slack <= 0.5:
             continue
 

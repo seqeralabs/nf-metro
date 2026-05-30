@@ -18,7 +18,11 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.constants import SECTION_HEADER_PROTRUSION, SECTION_Y_GAP
+from nf_metro.layout.constants import (
+    EDGE_TO_BUNDLE_CLEARANCE,
+    SECTION_HEADER_PROTRUSION,
+    SECTION_Y_GAP,
+)
 from nf_metro.layout.engine import compute_layout, is_loop_side_branch_station
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import resolve_section
@@ -883,6 +887,71 @@ def test_inter_section_route_no_x_backtrack(fixture):
                 assert x2 <= x1 + _Y_TOL, (
                     f"{fixture}: {rp.line_id} {rp.edge.source}->{rp.edge.target} "
                     f"backtracks right x={x1:.1f}->{x2:.1f} on a leftward route"
+                )
+
+
+# ---------------------------------------------------------------------------
+# Inter-row horizontal channels keep clearance from the source section
+# ---------------------------------------------------------------------------
+
+
+def _placed_bbox(sec) -> tuple[float, float, float, float]:
+    """Return placed ``(left, right, top, bottom)`` of a section bbox.
+
+    The render/route coordinate system is ``offset + bbox``; the raw
+    ``bbox_*`` fields alone omit the section's grid placement offset.
+    """
+    left = sec.offset_x + sec.bbox_x
+    top = sec.offset_y + sec.bbox_y
+    return left, left + sec.bbox_w, top, top + sec.bbox_h
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_inter_row_run_clears_source_section(fixture):
+    """A horizontal leg of an inter-*row* route must not graze its source
+    section's bbox edge.
+
+    When an inter-section bundle crosses grid rows (e.g. a right-exit that
+    wraps down to a left-entry in the row below), its horizontal run lands
+    in the inter-row gap.  That run must keep at least
+    ``EDGE_TO_BUNDLE_CLEARANCE`` from the source section's near edge so it
+    doesn't read as "running along under the box" (#414: the sarek
+    ``applybqsr -> cram_in`` bundle sat 7px below Pre-processing's bottom
+    because the channel Y was computed in raw-bbox space and centred on a
+    ``HEADER_CLEARANCE``-only midpoint with no source-side margin).
+    """
+    graph = _layout(fixture)
+    routes = route_edges(graph)
+    A = EDGE_TO_BUNDLE_CLEARANCE
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        src_sec = resolve_section(graph, graph.stations.get(rp.edge.source))
+        tgt_sec = resolve_section(graph, graph.stations.get(rp.edge.target))
+        if src_sec is None or tgt_sec is None:
+            continue
+        if src_sec.grid_row == tgt_sec.grid_row:
+            continue  # inter-row routes only
+        left, right, top, bottom = _placed_bbox(src_sec)
+        pts = rp.points
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            if abs(y1 - y0) > _Y_TOL or abs(x1 - x0) < _Y_TOL:
+                continue  # horizontal runs only
+            xlo, xhi = sorted((x0, x1))
+            if xhi <= left + _Y_TOL or xlo >= right - _Y_TOL:
+                continue  # run doesn't overlap the source section horizontally
+            y = y0
+            if y > bottom + _Y_TOL:
+                assert y - bottom >= A - _Y_TOL, (
+                    f"{fixture}: {rp.line_id} {rp.edge.source}->{rp.edge.target} "
+                    f"horizontal run y={y:.1f} sits only {y - bottom:.1f}px below "
+                    f"source section {src_sec.id!r} bottom={bottom:.1f} (< {A})"
+                )
+            elif y < top - _Y_TOL:
+                assert top - y >= A - _Y_TOL, (
+                    f"{fixture}: {rp.line_id} {rp.edge.source}->{rp.edge.target} "
+                    f"horizontal run y={y:.1f} sits only {top - y:.1f}px above "
+                    f"source section {src_sec.id!r} top={top:.1f} (< {A})"
                 )
 
 

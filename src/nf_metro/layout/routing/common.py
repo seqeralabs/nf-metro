@@ -581,22 +581,59 @@ def inter_row_channel_y(
         src_row = src_sec.grid_row
         tgt_row = tgt_sec.grid_row
 
+        if abs(src_row - tgt_row) == 1:
+            # Adjacent-row wrap: centre the run in a symmetric clearance
+            # band so it clears the source bbox bottom and the next row's
+            # header badge equally (#414).  The bounding rows are the two
+            # this gap separates.
+            if dy > 0:
+                upper_bottom = row_bottom_edge(graph, src_row, default=sy)
+                lower_top = row_top_edge(graph, tgt_row, default=ty)
+            else:
+                upper_bottom = row_bottom_edge(graph, tgt_row, default=ty)
+                lower_top = row_top_edge(graph, src_row, default=sy)
+            return _center_inter_row_channel(upper_bottom, lower_top)
+
+        # Multi-row crossing: an intervening row sits between source and
+        # target.  Keep the legacy midpoint so ``_route_around_section_below``
+        # still detects the section in the channel's path and routes around
+        # it rather than the run being lifted into a gap it can't reach.
         if dy > 0:
-            # Going down: gap between bottom of source row and top of target row
             bottom = row_bottom_edge(graph, src_row, default=sy)
             top = row_top_edge(graph, tgt_row, default=ty)
-            # Place above the header zone
-            header_top = top - HEADER_CLEARANCE
-            return (bottom + header_top) / 2
+            return (bottom + (top - HEADER_CLEARANCE)) / 2
         else:
-            # Going up: gap between top of source row and bottom of target row
             top = row_top_edge(graph, src_row, default=sy)
             bottom = row_bottom_edge(graph, tgt_row, default=ty)
-            header_bottom = bottom + HEADER_CLEARANCE
-            return (top + header_bottom) / 2
+            return (top + (bottom + HEADER_CLEARANCE)) / 2
 
     # Fallback: place near target, clearing the header zone
     if dy > 0:
         return ty - HEADER_CLEARANCE - max_r
     else:
         return ty + HEADER_CLEARANCE + max_r
+
+
+def _center_inter_row_channel(upper_bottom: float, lower_top: float) -> float:
+    """Y for a horizontal channel in the gap between two stacked rows.
+
+    The channel is centred in the band that keeps
+    :data:`EDGE_TO_BUNDLE_CLEARANCE` ("constant A") clear of both bounding
+    obstacles: the bbox bottom of the row above, and the *header badge* of
+    the row below (numbered circle + label render
+    :data:`SECTION_HEADER_PROTRUSION` above its bbox top).  Clearing the
+    badge -- rather than just the bbox edge -- keeps the run from grazing
+    the next-row label.  When the gap is too narrow to satisfy both
+    margins the channel falls back to the geometric midpoint, splitting
+    the deficit symmetrically rather than starving one side.
+    """
+    lo = upper_bottom + EDGE_TO_BUNDLE_CLEARANCE
+    hi = lower_top - SECTION_HEADER_PROTRUSION - EDGE_TO_BUNDLE_CLEARANCE
+    if lo <= hi:
+        return (lo + hi) / 2
+    # Gap too narrow for both margins (typically a heterogeneous-row case
+    # where the global row edges over-state the obstruction at this x).
+    # Bias to ``hi`` so the run still clears the next-row header badge --
+    # the visually intrusive side -- and the source side keeps whatever
+    # the gap allows, rather than the geometric midpoint that grazes both.
+    return hi
