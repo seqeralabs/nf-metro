@@ -622,6 +622,15 @@ def _guard_inter_section_routes_in_row_band(
                 )
 
 
+def _ensure_routes(graph: MetroGraph, routes: list | None) -> list:
+    """Return *routes*, routing all edges first if the caller didn't supply them."""
+    if routes is not None:
+        return routes
+    from nf_metro.layout.routing import route_edges
+
+    return route_edges(graph)
+
+
 def _route_exit_side(graph: MetroGraph, rp) -> PortSide | None:
     """Side of the port a route exits through (directly or via its feeder)."""
     port = graph.ports.get(rp.edge.source)
@@ -710,10 +719,7 @@ def _guard_inter_section_route_no_backtrack(
     """
     from nf_metro.layout.routing.common import resolve_section
 
-    if routes is None:
-        from nf_metro.layout.routing import route_edges
-
-        routes = route_edges(graph)
+    routes = _ensure_routes(graph, routes)
 
     for rp, x1, x2 in _inter_section_backtrack_legs(
         graph, routes, reference="grid", tolerance=GUARD_TOLERANCE
@@ -735,7 +741,7 @@ def first_vertical_leg_x(points) -> float | None:
     ``None`` when no vertical leg exists.
     """
     for (x0, y0), (x1, y1) in zip(points, points[1:]):
-        if abs(x1 - x0) < 1.0 and abs(y1 - y0) > 1.0:
+        if abs(x1 - x0) < COORD_TOLERANCE and abs(y1 - y0) > COORD_TOLERANCE:
             return x1
     return None
 
@@ -852,10 +858,7 @@ def _guard_inter_section_route_no_full_width_backtrack(
     right-then-left dog-leg sweeping the whole diagram is forbidden
     even when exempt.
     """
-    if routes is None:
-        from nf_metro.layout.routing import route_edges
-
-        routes = route_edges(graph)
+    routes = _ensure_routes(graph, routes)
 
     canvas_width = _canvas_width(graph)
     if canvas_width <= 0:
@@ -978,10 +981,7 @@ def _guard_routes_enter_sections_at_ports(
     fan-in merge bundle ploughing into a section through its right edge, or
     an entry inferred on the wrong side so the connector slices the box).
     """
-    if routes is None:
-        from nf_metro.layout.routing import route_edges
-
-        routes = route_edges(graph)
+    routes = _ensure_routes(graph, routes)
 
     hit = _route_crosses_section_boundary(graph, routes)
     if hit is not None:
@@ -1011,10 +1011,7 @@ def _guard_serpentine_no_backtrack(
     """
     from nf_metro.layout.auto_layout import detect_serpentine_runs
 
-    if routes is None:
-        from nf_metro.layout.routing import route_edges
-
-        routes = route_edges(graph)
+    routes = _ensure_routes(graph, routes)
 
     dag = graph.section_dag
     if dag is None:
@@ -1067,10 +1064,7 @@ def _guard_inter_row_run_clearance(
     """
     from nf_metro.layout.routing.common import resolve_section
 
-    if routes is None:
-        from nf_metro.layout.routing import route_edges
-
-        routes = route_edges(graph)
+    routes = _ensure_routes(graph, routes)
 
     tol = GUARD_TOLERANCE
     for rp in routes:
@@ -1129,10 +1123,7 @@ def _guard_inter_section_descent_edge_clearance(
     """
     from nf_metro.layout.routing.common import endpoint_port_xs
 
-    if routes is None:
-        from nf_metro.layout.routing import route_edges
-
-        routes = route_edges(graph)
+    routes = _ensure_routes(graph, routes)
 
     tol = GUARD_TOLERANCE
     for rp in routes:
