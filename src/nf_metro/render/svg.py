@@ -164,6 +164,11 @@ def _position_legend(
     if not show_legend:
         return legend_x, legend_y, legend_w, legend_h, show_legend
 
+    # Absolute placement (legend: x,y) pins the block top-left exactly.
+    if legend_position == "free" and graph.legend_at is not None:
+        legend_x, legend_y = graph.legend_at
+        return legend_x, legend_y, legend_w, legend_h, show_legend
+
     pos = legend_position
     gap = LEGEND_GAP
     inset = LEGEND_INSET
@@ -171,37 +176,53 @@ def _position_legend(
         (s.bbox_x for s in graph.sections.values() if s.bbox_w > 0),
         default=padding,
     )
-    content_right = max_x
     content_top = min(
         (s.bbox_y for s in graph.sections.values() if s.bbox_w > 0),
         default=padding,
     )
-    content_bottom = max_y
+
+    # Frame the keyword anchor against the section bbox (default) or the canvas
+    # margin. The canvas frame lets a corner fill the empty drawing margin.
+    if graph.legend_anchor == "canvas":
+        left, top = padding, padding
+    else:
+        left, top = content_left, content_top
+    right, bottom = max_x, max_y
 
     if pos == "bl":
-        legend_x = content_left
-        legend_y = content_bottom - legend_h
+        legend_x = left
+        legend_y = bottom - legend_h
     elif pos == "br":
-        legend_x = content_right - legend_w - inset
-        legend_y = content_bottom - legend_h - inset
+        legend_x = right - legend_w - inset
+        legend_y = bottom - legend_h - inset
     elif pos == "tl":
-        legend_x = content_left + inset
-        legend_y = content_top + inset
+        legend_x = left + inset
+        legend_y = top + inset
     elif pos == "tr":
-        legend_x = content_right - legend_w - inset
-        legend_y = content_top + inset
+        legend_x = right - legend_w - inset
+        legend_y = top + inset
     elif pos == "bottom":
-        legend_x = content_left
-        legend_y = content_bottom + gap
+        legend_x = left
+        legend_y = bottom + gap
     elif pos == "right":
-        legend_x = content_right + gap
-        legend_y = content_top
+        legend_x = right + gap
+        legend_y = top
 
-    if pos not in ("bottom", "right") and _legend_overlaps_sections(
-        legend_x, legend_y, legend_w, legend_h, graph
+    # An explicit pin (canvas anchor or offset) means the author placed the
+    # block deliberately, so skip the overlap fallback that auto-relocates a
+    # casual corner keyword to the bottom-left.
+    explicit_pin = graph.legend_anchor == "canvas" or graph.legend_offset is not None
+    if graph.legend_offset is not None:
+        legend_x += graph.legend_offset[0]
+        legend_y += graph.legend_offset[1]
+
+    if (
+        not explicit_pin
+        and pos not in ("bottom", "right")
+        and _legend_overlaps_sections(legend_x, legend_y, legend_w, legend_h, graph)
     ):
         legend_x = content_left
-        legend_y = content_bottom + gap
+        legend_y = max_y + gap
 
     return legend_x, legend_y, legend_w, legend_h, show_legend
 
@@ -347,6 +368,8 @@ def render_svg(
     logo_x = 0.0
     logo_y = 0.0
     if show_logo and not show_legend:
+        logo_w *= graph.logo_scale
+        logo_h *= graph.logo_scale
         logo_x = padding
         logo_y = LOGO_Y_STANDALONE
         max_x = max(max_x, logo_x + logo_w)

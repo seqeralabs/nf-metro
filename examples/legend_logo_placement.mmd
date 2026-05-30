@@ -1,0 +1,47 @@
+%%metro title: Legend + logo placement
+%%metro style: dark
+%%metro logo: examples/nf-core-rnaseq_logo_dark.png
+%%metro logo_scale: 1.6
+%%metro legend: br | canvas
+%%metro file: fq_in | FASTQ
+%%metro line: align | Alignment route | #3b82f6
+%%metro line: qc | QC route | #f59e0b
+%%metro grid: input | 0,0
+%%metro grid: alignment | 1,0
+%%metro grid: quant | 2,0
+%%metro grid: qc | 0,1
+
+graph LR
+    subgraph input [Input]
+        %%metro exit: right | align, qc
+        fq_in[ ]
+        cat_fastq[Cat FASTQ]
+        fq_in -->|align,qc| cat_fastq
+    end
+
+    subgraph alignment [Alignment]
+        %%metro entry: left | align
+        %%metro exit: right | align
+        bwa[BWA-MEM]
+        sort[Sort]
+        bwa -->|align| sort
+    end
+
+    subgraph quant [Quantification]
+        %%metro entry: left | align
+        salmon[Salmon]
+        sum_exp[Sum. Exp.]
+        salmon -->|align| sum_exp
+    end
+
+    subgraph qc [Quality control]
+        %%metro entry: left | qc
+        fastqc[FastQC]
+        multiqc[MultiQC]
+        fastqc -->|qc| multiqc
+    end
+
+    %% Inter-section edges
+    cat_fastq -->|align| bwa
+    sort -->|align| salmon
+    cat_fastq -->|qc| fastqc

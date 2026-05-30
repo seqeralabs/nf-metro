@@ -23,18 +23,41 @@ from nf_metro.render.style import Theme
 
 
 def _scale_logo_to_content(
-    logo_size: tuple[float, float], content_height: float
+    logo_size: tuple[float, float], text_block_height: float, scale: float = 1.0
 ) -> tuple[float, float]:
-    """Scale logo to fit within content height, preserving aspect ratio.
+    """Scale a logo against the legend's text block, preserving aspect ratio.
 
-    Uses 60% of content_height so the logo doesn't dominate the legend.
+    The logo is sized to ``LOGO_SCALE_FACTOR`` of the text block height, then
+    multiplied by the user ``scale`` (``%%metro logo_scale:``). A scale above 1
+    can make the logo taller than the text block, in which case the legend box
+    grows to contain it (see ``_legend_metrics``).
     """
     orig_w, orig_h = logo_size
     if orig_h <= 0:
         return (0.0, 0.0)
-    target_h = content_height * LOGO_SCALE_FACTOR
+    target_h = text_block_height * LOGO_SCALE_FACTOR * scale
     aspect = orig_w / orig_h
     return (target_h * aspect, target_h)
+
+
+def _legend_metrics(
+    graph: MetroGraph,
+    logo_size: tuple[float, float] | None,
+) -> tuple[float, float, float, float]:
+    """Return (text_block_h, content_h, logo_w, logo_h) for the legend.
+
+    ``content_h`` is the inner height of the legend box: the taller of the
+    text block and a (possibly enlarged) logo.
+    """
+    line_height = LEGEND_LINE_HEIGHT
+    text_block_h = max(len(graph.lines) * line_height, graph.legend_min_height)
+    logo_w = logo_h = 0.0
+    if logo_size:
+        logo_w, logo_h = _scale_logo_to_content(
+            logo_size, text_block_h, graph.logo_scale
+        )
+    content_h = max(text_block_h, logo_h)
+    return text_block_h, content_h, logo_w, logo_h
 
 
 def compute_legend_dimensions(
@@ -50,22 +73,15 @@ def compute_legend_dimensions(
     if not graph.lines:
         return (0.0, 0.0)
 
-    line_height = LEGEND_LINE_HEIGHT
     padding = LEGEND_PADDING
     swatch_width = LEGEND_SWATCH_WIDTH
     text_offset = swatch_width + LEGEND_TEXT_GAP
 
     max_name_len = max(len(ml.display_name) for ml in graph.lines.values())
     char_width = theme.legend_font_size * LEGEND_CHAR_WIDTH_RATIO
-    content_height = max(len(graph.lines) * line_height, graph.legend_min_height)
 
-    # Logo scaled to fit content height
-    logo_w = 0.0
-    logo_gap = 0.0
-    if logo_size:
-        scaled_w, _ = _scale_logo_to_content(logo_size, content_height)
-        logo_w = scaled_w
-        logo_gap = LOGO_GAP
+    _text_h, content_height, logo_w, _logo_h = _legend_metrics(graph, logo_size)
+    logo_gap = LOGO_GAP if logo_size else 0.0
 
     width = padding * 2 + logo_w + logo_gap + text_offset + max_name_len * char_width
     height = padding * 2 + content_height
@@ -94,7 +110,10 @@ def render_legend(
     padding = LEGEND_PADDING
     swatch_width = LEGEND_SWATCH_WIDTH
     text_offset = swatch_width + LEGEND_TEXT_GAP
-    content_height = max(len(graph.lines) * line_height, graph.legend_min_height)
+
+    text_block_h, content_height, scaled_w, scaled_h = _legend_metrics(
+        graph, logo_size
+    )
 
     legend_width, legend_height = compute_legend_dimensions(
         graph, theme, logo_size=logo_size
@@ -116,8 +135,6 @@ def render_legend(
     # Logo (left side, vertically centered in content area)
     logo_offset = 0.0
     if logo_path and logo_size:
-        scaled_w, scaled_h = _scale_logo_to_content(logo_size, content_height)
-        logo_gap = LOGO_GAP
         logo_x = x + padding
         logo_y = y + padding + (content_height - scaled_h) / 2
         d.append(
@@ -130,11 +147,13 @@ def render_legend(
                 embed=True,
             )
         )
-        logo_offset = scaled_w + logo_gap
+        logo_offset = scaled_w + LOGO_GAP
 
-    # Line entries
+    # Line entries, vertically centred within the content area (which can be
+    # taller than the text block when an enlarged logo grows the box).
+    text_top = y + padding + (content_height - text_block_h) / 2
     for i, metro_line in enumerate(graph.lines.values()):
-        entry_y = y + padding + i * line_height + line_height / 2
+        entry_y = text_top + i * line_height + line_height / 2
 
         # Color swatch (line segment)
         dash_kw = line_style_kwargs(metro_line.style)
