@@ -5913,6 +5913,16 @@ def _terminus_icon_clearance_vertical(
     return TERMINUS_ICON_CLEARANCE_V + (n_icons - 1) * step
 
 
+def _terminus_icons_extend_forward(is_source: bool, section_dir: str) -> bool:
+    """Whether a terminus's icons extend in the section's forward flow.
+
+    Sinks extend forwards (down for TB, right for LR), sources backwards;
+    RL/BT mirror that.  Single source of truth for the rule that
+    ``render.svg._terminus_icon_centers`` applies on the render side.
+    """
+    return is_source if section_dir in ("RL", "BT") else not is_source
+
+
 def _terminus_y_overhang(
     station: Station, section_dir: str, graph: MetroGraph
 ) -> tuple[float, float]:
@@ -5925,11 +5935,12 @@ def _terminus_y_overhang(
     if not station.is_terminus or section_dir not in ("TB", "BT"):
         return 0.0, 0.0
     is_source = not graph.edges_to(station.id)
-    extends_forward = is_source if section_dir == "BT" else not is_source
     extent = _terminus_icon_clearance_vertical(
         len(station.terminus_labels), station.terminus_names
     )
-    return (0.0, extent) if extends_forward else (extent, 0.0)
+    if _terminus_icons_extend_forward(is_source, section_dir):  # below
+        return 0.0, extent
+    return extent, 0.0
 
 
 def _adjust_terminus_icon_clearance(
@@ -5953,9 +5964,7 @@ def _adjust_terminus_icon_clearance(
 
         n_icons = len(station.terminus_labels)
         is_source = not graph.edges_to(station.id)
-        # Sinks extend in the forward flow direction, sources in reverse;
-        # RL/BT mirror.  Matches render.svg._terminus_icon_centers.
-        extends_forward = is_source if section_dir in ("RL", "BT") else not is_source
+        extends_forward = _terminus_icons_extend_forward(is_source, section_dir)
 
         if is_tb:
             needed = _terminus_icon_clearance_vertical(n_icons, station.terminus_names)
