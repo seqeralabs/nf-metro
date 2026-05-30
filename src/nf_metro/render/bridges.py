@@ -46,6 +46,7 @@ from nf_metro.render.constants import (
     BRIDGE_CLUSTER_RADIUS,
     BRIDGE_CORNER_CLEARANCE,
     BRIDGE_GAP_HALF,
+    BRIDGE_JOIN_TOLERANCE,
     BRIDGE_MIN_ANGLE_DEG,
     BRIDGE_NODE_TOLERANCE,
     BRIDGE_PARALLEL_ANGLE_DEG,
@@ -144,7 +145,12 @@ def compute_bridges(
     from ``id(route)`` of each under-route to the gaps to break on it.
     """
     node_xy = [(s.x, s.y) for s in graph.stations.values()]
-    crossings = _find_crossings(routes, polylines, node_xy)
+    station_xy = {
+        s.id: (s.x, s.y)
+        for s in graph.stations.values()
+        if not s.is_port and not s.is_hidden and not s.id.startswith("__")
+    }
+    crossings = _find_crossings(routes, polylines, node_xy, station_xy)
     clusters = _cluster_crossings(crossings)
 
     line_priority = {lid: i for i, lid in enumerate(graph.lines)}
@@ -220,7 +226,10 @@ def _guard_bridges(
 
 
 def _find_crossings(
-    routes: list, polylines: list[list[Point]], node_xy: list[Point]
+    routes: list,
+    polylines: list[list[Point]],
+    node_xy: list[Point],
+    station_xy: dict[str, Point],
 ) -> list[_Crossing]:
     """All genuine non-merging segment crossings between distinct lines."""
     out: list[_Crossing] = []
@@ -230,10 +239,13 @@ def _find_crossings(
             rb, pb = routes[b], polylines[b]
             if ra.line_id == rb.line_id or _shares_endpoint(ra.edge, rb.edge):
                 continue
+            endpoints = (ra.edge.source, ra.edge.target, rb.edge.source, rb.edge.target)
             for i in range(len(pa) - 1):
                 for j in range(len(pb) - 1):
                     pt = _segment_intersection(pa[i], pa[i + 1], pb[j], pb[j + 1])
                     if pt is None or _near_node(pt, node_xy):
+                        continue
+                    if _near_join(pt, endpoints, station_xy):
                         continue
                     ang = _angle_between(
                         _segment_angle_deg(pa[i], pa[i + 1]),
@@ -243,6 +255,21 @@ def _find_crossings(
                         continue
                     out.append(_Crossing(a=a, seg_a=i, b=b, seg_b=j, point=pt))
     return out
+
+
+def _near_join(
+    pt: Point, endpoints: tuple[str, ...], station_xy: dict[str, Point]
+) -> bool:
+    """True if the crossing is the approach to a real station where one of the
+    crossing lines joins/branches - a join, not a crossover."""
+    for nid in endpoints:
+        nxy = station_xy.get(nid)
+        if (
+            nxy is not None
+            and math.hypot(pt[0] - nxy[0], pt[1] - nxy[1]) < BRIDGE_JOIN_TOLERANCE
+        ):
+            return True
+    return False
 
 
 def _cluster_crossings(crossings: list[_Crossing]) -> list[list[_Crossing]]:

@@ -151,6 +151,22 @@ def test_suppressed_when_lone_underline_in_over_bundle():
     assert bridges == {}
 
 
+def test_join_approach_not_bridged():
+    """differentialabundance's gprofiler2 lines cross the gmt_in->gsea lines on
+    their approach to the gsea station (~22px away) - a join, not a crossover,
+    so no bridge fires there.  The genuine crossover near (703,240) remains."""
+    graph, _, _, bridges = _bridges(EXAMPLES_DIR / "differentialabundance.mmd")
+    gsea = graph.stations["gsea"]
+    for breaks in bridges.values():
+        for bk in breaks:
+            mx = (bk.cut_a[0] + bk.cut_b[0]) / 2
+            my = (bk.cut_a[1] + bk.cut_b[1]) / 2
+            assert not (abs(mx - gsea.x) < 40 and abs(my - gsea.y) < 40), (
+                f"bridge at ({mx:.0f},{my:.0f}) sits on the gsea join approach"
+            )
+    assert bridges, "the genuine (703,240) crossover should still bridge"
+
+
 def test_rendered_under_line_has_pen_up():
     """An under-line that crosses under another draws a path with an interior
     move (pen-up) - on ``main`` it is continuous."""

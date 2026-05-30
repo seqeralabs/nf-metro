@@ -239,6 +239,11 @@ BRIDGE_NODE_TOLERANCE: float = 14.0
 """A crossing within this distance of any station/junction/port the layout
 places is treated as an interchange, not a crossing, and gets no bridge."""
 
+BRIDGE_JOIN_TOLERANCE: float = 30.0
+"""A crossing within this distance of a real station that terminates one of
+the crossing lines is its approach to a join, not a crossover - no bridge.
+Ports and junction/merge nodes are routing artifacts and do not count."""
+
 BRIDGE_MIN_ANGLE_DEG: float = 12.0
 """Minimum angle between two segments for their intersection to count as a
 crossing (near-parallel bundle slivers are not crossings)."""
