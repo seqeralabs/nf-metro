@@ -410,7 +410,7 @@ def clear_channel_of_section_edge(
     half_width: float,
     y_lo: float,
     y_hi: float,
-    endpoint_port_xs: list[float],
+    port_xs: list[float],
     edge_clearance: float = EDGE_TO_BUNDLE_CLEARANCE,
     port_tol: float = COORD_TOLERANCE,
 ) -> float:
@@ -421,7 +421,7 @@ def clear_channel_of_section_edge(
     endpoints (a port-to-port drop).  When the channel instead lands
     within *edge_clearance* of a section's bbox edge on the interior
     side, with no endpoint port at that x, the graze is incidental and
-    the lines visibly cross the section border (#423).
+    the lines visibly cross the section border.
 
     *mid_x* is the channel's midline; the bundle's nearest line to a
     section edge sits at most *half_width* from *mid_x*.  *y_lo*/*y_hi*
@@ -440,7 +440,7 @@ def clear_channel_of_section_edge(
             continue  # channel does not span this section's Y range
         left = sec.bbox_x
         right = left + sec.bbox_w
-        if any(abs(adjusted - px) <= port_tol for px in endpoint_port_xs):
+        if any(abs(adjusted - px) <= port_tol for px in port_xs):
             continue  # legitimate port-to-port drop on this edge
         # Bundle span (outermost lines either side of the midline).
         bundle_lo = adjusted - half_width

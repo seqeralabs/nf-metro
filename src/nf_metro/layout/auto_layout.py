@@ -856,12 +856,9 @@ def _infer_port_sides(
         # regardless of neighbour position; the router carriage-returns.
         flow_aligned_exit = horizontal
 
-        # Entry is flow-aligned only when no predecessor drops in vertically
-        # from a fold above in the same column.  A fold predecessor exits
-        # BOTTOM, so a TOP entry (handled by the relative-side branch) gives
-        # a clean straight drop; forcing a flow-aligned side there would add
-        # an unnecessary wrap (#432 narrows flow-alignment to the horizontal
-        # carriage-return case it is meant for).
+        # Entry is flow-aligned unless a vertically-exiting (TB/fold)
+        # predecessor sits above: that drops straight down, so the
+        # relative-side branch's TOP entry reads cleaner than a wrap.
         flow_aligned_entry = horizontal and not _feeds_from_vertical_drop_above(
             graph, sec_id, my_row, predecessors, fold_sections
         )
@@ -1088,7 +1085,7 @@ def detect_serpentine_runs(
 
     Returns runs as lists of section ids ordered top-to-bottom.  Runs of
     length < 2 are omitted.  Used to serpentine the effective flow
-    direction of stacked same-direction sections (issue #421).
+    direction of stacked same-direction sections.
     """
     # Group single-cell sections by grid column, keyed by row.  A column with
     # two sections claiming one (col, row) cell is malformed and is skipped.

@@ -370,7 +370,7 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     A multi-row-span *source* routes via reversal handling, not this
     channel, and is excluded; a multi-row-span *target* (rowspan grid
     placement) is fine -- only its top edge bounds the gap, so the
-    adjacent ``(src_row, tgt_row)`` reservation still applies (#422).
+    adjacent ``(src_row, tgt_row)`` reservation still applies.
     """
 
     def _is_flow_section(sec) -> bool:

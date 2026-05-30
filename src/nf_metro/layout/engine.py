@@ -703,11 +703,12 @@ def _guard_fan_bundles_coincide_or_separate(
     graph: MetroGraph,
     phase: str,
     *,
+    offsets: dict | None = None,
     routes: list | None = None,
 ) -> None:
     """After routing: two routes carrying the SAME line out of a unified-fan
     junction must coincide on their source-side vertical channel or separate
-    clearly - never smear a few px apart (#437).
+    clearly - never smear a few px apart.
 
     A unified-fan junction (one the router assigns shared
     ``junction_fan_info`` positions) fans the same line to multiple targets
@@ -720,7 +721,8 @@ def _guard_fan_bundles_coincide_or_separate(
     from nf_metro.layout.routing import compute_station_offsets, route_edges
     from nf_metro.layout.routing.core import _build_routing_context
 
-    offsets = compute_station_offsets(graph)
+    if offsets is None:
+        offsets = compute_station_offsets(graph)
     if routes is None:
         routes = route_edges(graph, station_offsets=offsets)
     ctx = _build_routing_context(graph, DIAGONAL_RUN, CURVE_RADIUS, offsets)
@@ -776,7 +778,7 @@ def inter_section_route_backtrack_legs(graph: MetroGraph, routes: list):
     column nests inside a wide row-span sibling: there the target column is
     "higher" yet sits to the *left*, so a single long leftward traverse is a
     monotonic approach toward the target - not a dog-leg - and is not
-    yielded.  A true #425 dog-leg (right past the target, then back left)
+    yielded.  A true dog-leg (right past the target, then back left)
     still moves away from the endpoint on its outward leg and is yielded.
 
     Routes that exit a port facing away from their endpoint legitimately
@@ -846,7 +848,7 @@ def _guard_inter_section_route_no_full_width_backtrack(
     sibling, reaching it requires a legitimate X
     reversal, so such routes are made ``normalize_exempt`` and the strict
     guard skips them.  This guard still bounds those reversals: a
-    right-then-left dog-leg sweeping the whole diagram (#425) is forbidden
+    right-then-left dog-leg sweeping the whole diagram is forbidden
     even when exempt.
     """
     if routes is None:
@@ -889,7 +891,7 @@ def _route_crosses_section_boundary(
     other crossing means a horizontal or vertical run is cutting through a
     section box where no port invites it -- the symptom this guard forbids
     (e.g. an entry inferred on the wrong side so the connector slices the
-    box, #432).
+    box,).
 
     Two classes are intentionally out of scope:
 
@@ -998,7 +1000,7 @@ def _guard_serpentine_no_backtrack(
 ) -> None:
     """After routing: stacked same-direction sections must not backtrack.
 
-    Same-direction sections stacked in one grid column and chained (#421)
+    Same-direction sections stacked in one grid column and chained
     serpentine their effective flow row by row so consecutive sections meet
     on a shared side joined by a short vertical drop.  A section that fails
     to alternate enters on the wrong side and folds its internal route back
@@ -1120,7 +1122,7 @@ def _guard_inter_section_descent_edge_clearance(
     with a port at one of the route's endpoints (a port-to-port drop).
     When the channel instead lands within ``EDGE_TO_BUNDLE_CLEARANCE`` of
     a section edge, on the interior side, with no endpoint port at that
-    X, the lines visibly cross the border (#423).  The channel-x selection
+    X, the lines visibly cross the border.  The channel-x selection
     in :func:`_route_l_shape` pushes such channels outward; this guard
     fails loudly if a future change lets one creep back against an edge.
     """
@@ -2433,7 +2435,9 @@ def _compute_section_layout(
             _guard_serpentine_no_backtrack(graph, phase, routes=routes)
             _guard_inter_row_run_clearance(graph, phase, routes=routes)
             _guard_inter_section_descent_edge_clearance(graph, phase, routes=routes)
-            _guard_fan_bundles_coincide_or_separate(graph, phase, routes=routes)
+            _guard_fan_bundles_coincide_or_separate(
+                graph, phase, offsets=offsets, routes=routes
+            )
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:

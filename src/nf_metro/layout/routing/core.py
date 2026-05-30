@@ -653,7 +653,7 @@ def _route_inter_section(
             return _route_around_section_below(edge, src, tgt, tgt, i, n, ctx)
         return _route_left_entry_wrap(edge, src, tgt, i, n, ctx)
 
-    # Serpentine LEFT exit -> LEFT entry stacked in the same column (#421):
+    # Serpentine LEFT exit -> LEFT entry stacked in the same column:
     # an RL section's left exit dropping to the LR section directly below
     # whose left entry sits a few px inward.  The standard L-shape places
     # its vertical channel at sx + radius, which lands inside the source
@@ -696,10 +696,9 @@ def _route_inter_section(
             if ep_port and ep_port.side == PortSide.LEFT:
                 exclude = {src.section_id} if src.section_id else set()
                 if _h_segment_crosses_other_section(graph, sx, ep.x, ep.y, exclude):
-                    # When a clear inter-row / inter-column corridor exists
-                    # (downward cross-row feeder
-                    # fan-in), descend it instead of looping below the
-                    # canvas (#432).
+                    # When a clear inter-row / inter-column corridor exists for
+                    # this downward cross-row feeder, descend it instead of
+                    # looping below the canvas.
                     if _corridor_is_viable(ctx, src, ep):
                         return _route_inter_row_gap_corridor(
                             edge, src, tgt, ep, i, n, ctx
@@ -707,7 +706,7 @@ def _route_inter_section(
                     return _route_around_section_below(edge, src, tgt, ep, i, n, ctx)
             # RIGHT entry nested inside an oversized source section: a
             # single-channel L-shape would descend far right and sweep
-            # back across the whole diagram (#425).  Step down past the
+            # back across the whole diagram.  Step down past the
             # source then into a channel near the target instead.
             if edge.source in ctx.junction_ids and _should_step_descent(
                 graph, src, ep, ep_port
@@ -1182,7 +1181,7 @@ def _nested_target_clear_channel_x(
 
     For a route whose entry port *ep* sits in a narrow column nested inside
     an oversized source section, the only single-channel descent that
-    clears the source is far to the right (producing the #425 dog-leg).
+    clears the source is far to the right (producing the dog-leg).
     A stepped descent instead drops to just below the source, steps left
     into the channel returned here - the rightmost edge of any section in
     the target's column that the descent's vertical run (*y_lo*..*y_hi*)
@@ -1216,7 +1215,7 @@ def _route_stepped_descent(
 ) -> RoutedPath:
     """Stepped descent to an entry port nested inside an oversized source.
 
-    Replaces the far-right dog-leg (#425) for a junction-sourced merge
+    Replaces the far-right dog-leg for a junction-sourced merge
     route whose single-channel L-shape would be shoved to the far edge of
     an oversized source section.  Routes a 6-corner step::
 
@@ -1283,7 +1282,7 @@ def _should_step_descent(
     ep_port,
 ) -> bool:
     """Detect the nested-column degenerate geometry that needs a stepped
-    descent (#425).
+    descent.
 
     Fires only when a junction-sourced merge route to a RIGHT entry port
     would otherwise drop in a single far-right channel because the target
@@ -1358,7 +1357,7 @@ def _route_l_shape(
         )
         # The fan pivots the channel through ``sx +/- curve_radius``,
         # which hugs the source section's edge.  When that edge is also a
-        # section bbox border the descent grazes it incidentally (#423):
+        # section bbox border the descent grazes it incidentally:
         # push the channel outward so the nearest line clears the edge.
         half_width = (un - 1) * ctx.offset_step / 2
         mid_x = clear_channel_of_section_edge(
@@ -1391,7 +1390,7 @@ def _route_l_shape(
         )
         # The near-source fallback hugs the source section's edge; push
         # the channel outward when that edge is a section bbox border the
-        # route doesn't enter (#423).
+        # route doesn't enter.
         half_width = (n - 1) * ctx.offset_step / 2
         mid_x = clear_channel_of_section_edge(
             ctx.graph,
@@ -1548,7 +1547,7 @@ def _route_top_entry_l_shape(
 def _route_left_exit_left_entry_drop(
     edge: Edge, src: Station, tgt: Station, i: int, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
-    """Drop a LEFT exit into a LEFT entry stacked directly below (#421).
+    """Drop a LEFT exit into a LEFT entry stacked directly below.
 
     Both ports sit on the left edge of one grid column.  Run a short lead
     out to the left of the column, drop vertically in that channel, then
@@ -1683,9 +1682,8 @@ def _route_left_entry_wrap(
     extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
     vx = tx - base_gap - extra_clearance + delta
     # When this wrap shares a junction fan with a corridor feeder descending
-    # the same target column,
-    # anchor the descent channel to the column's LEFT edge so the spine and
-    # the corridor overlay as one bundle instead of smearing (#437).
+    # the same target column, anchor the descent channel to the column's LEFT
+    # edge so the spine and the corridor overlay as one bundle instead of smearing.
     if fan is not None and _fan_has_corridor_sibling(edge.source, ctx):
         tgt_col = _resolve_section_col(ctx.graph, tgt)
         if tgt_col is not None:
@@ -1846,10 +1844,9 @@ def _corridor_descent_x(
     """X of the inter-column channel just LEFT of the target column.
 
     The corridor descends the clear gap between ``ep_col - 1`` and
-    ``ep_col`` measured at the *target* row (so a wide row-span section in
-    a different row -
-    does not collapse the gap).  Returns ``None`` when there is no column
-    to the left (degenerate; caller falls back to the around-below loop).
+    ``ep_col`` measured at the *target* row, so a wide row-span section in a
+    different row does not collapse the gap.  Returns ``None`` when there is no
+    column to the left (degenerate; caller falls back to the around-below loop).
     """
     if ep_col <= 0:
         return None
@@ -1872,7 +1869,7 @@ def _fan_left_entry_descent_x(
     stacked in the same column - one reached by :func:`_route_left_entry_wrap`
     (the spine), the other by :func:`_route_inter_row_gap_corridor` (the QC
     feed) - both bundles must descend the SAME vertical channel so they
-    overlay as one clean bundle rather than smearing a few px apart (#437).
+    overlay as one clean bundle rather than smearing a few px apart.
 
     Anchor the channel to the column's LEFT edge (the leftmost section left
     edge across all rows of *tgt_col*) so both handlers, whose individual
@@ -1893,7 +1890,7 @@ def _fan_has_corridor_sibling(junction_id: str, ctx: _RoutingCtx) -> bool:
     """True if *junction_id* fans an edge routed via the inter-row-gap corridor.
 
     Used so a sibling :func:`_route_left_entry_wrap` spine aligns its descent
-    channel with the corridor feeder's (#437).  A corridor feeder is a
+    channel with the corridor feeder's.  A corridor feeder is a
     downward cross-row edge into a LEFT-entry section (merge junction or
     direct port) for which :func:`_corridor_is_viable` holds.
     """
@@ -1980,35 +1977,23 @@ def _route_inter_row_gap_corridor(
     sx, sy = src.x, src.y
     ex, ey = entry_port.x, entry_port.y
 
-    # When this corridor feeder shares a junction fan with a sibling wrap
-    # , consume the unified
-    # fan position so the source-side first corner and the inter-row gap
-    # stagger MATCH the wrap exactly.  Without this the corridor picks its
-    # own per-bundle (i, n) and the two same-line bundles smear a few px
-    # apart instead of overlaying (#437).
+    # When this corridor feeder shares a junction fan with a sibling wrap,
+    # consume the unified fan position so the source-side first corner and the
+    # inter-row gap stagger match the wrap exactly.  Without this the corridor
+    # picks its own per-bundle (i, n) and the two same-line bundles smear a few
+    # px apart instead of overlaying.
     ekey = (edge.source, edge.target, edge.line_id)
     fan = ctx.junction_fan_info.get(ekey)
     pos_i, pos_n = fan if fan is not None else (i, n)
 
-    delta, _r1, _r2 = l_shape_radii(
+    # l_shape_radii(Direction.D) already returns the outer (corners 1-2) and
+    # inner (corners 3-4) radii for this bundle; reuse them rather than
+    # recomputing via corner_radius.
+    delta, r_outer, r_inner = l_shape_radii(
         pos_i,
         pos_n,
         vertical=Direction.D,
         offset_step=ctx.offset_step,
-        base_radius=ctx.curve_radius,
-    )
-    off_for_radius = (pos_n - 1 - pos_i) * ctx.offset_step
-    max_off_for_radius = (pos_n - 1) * ctx.offset_step
-    r_outer = corner_radius(
-        off_for_radius,
-        max_off_for_radius,
-        outside=True,
-        base_radius=ctx.curve_radius,
-    )
-    r_inner = corner_radius(
-        off_for_radius,
-        max_off_for_radius,
-        outside=False,
         base_radius=ctx.curve_radius,
     )
 
@@ -2027,7 +2012,7 @@ def _route_inter_row_gap_corridor(
         # Share the sibling wrap's inter-row band: it centres the leftward
         # traverse in the gap below the SOURCE row using the global (non
         # column-restricted) row edges, so the two bundles' H legs coincide
-        # rather than smearing 3px apart (#437).
+        # rather than smearing 3px apart.
         wrap_top = row_bottom_edge(ctx.graph, src_row, default=gap_top)
         wrap_bottom = row_top_edge(ctx.graph, src_row + 1, default=wrap_top)
         gy_base = _center_inter_row_channel(wrap_top, wrap_bottom)
@@ -2042,7 +2027,7 @@ def _route_inter_row_gap_corridor(
     # next row's header badge.  In a tight gap the band is narrower than the
     # bundle, so the per-line stagger collapses rather than grazing an edge.
     # Skipped for fan feeders, which share the wrap sibling's (unclamped)
-    # band so the two bundles' H legs coincide (#437).
+    # band so the two bundles' H legs coincide.
     if fan is None and gap_bottom > gap_top:
         gy = min(
             max(gy, gap_top + EDGE_TO_BUNDLE_CLEARANCE),
@@ -2062,7 +2047,7 @@ def _route_inter_row_gap_corridor(
     # H lead-in right of the source, clear of the source section's edge.
     # When the source is a sectionless junction, fall back to its own X as
     # the reference edge (mirrors :func:`_route_left_entry_wrap`) so a fan
-    # feeder gets the SAME source-side clearance as its sibling wrap (#437).
+    # feeder gets the SAME source-side clearance as its sibling wrap.
     src_section = ctx.graph.sections.get(src.section_id) if src.section_id else None
     corner_x = sx + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2 + delta
     if src_section and src_section.bbox_w > 0:
