@@ -38,6 +38,7 @@ from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
     _center_inter_row_channel,
+    _sections_in_col,
     bundle_width,
     bypass_bottom_y,
     clear_channel_of_section_edge,
@@ -1192,17 +1193,10 @@ def _nested_target_clear_channel_x(
     ep_sec = graph.sections.get(ep.section_id) if ep.section_id else None
     if ep_sec is None:
         return None
-    tgt_col = ep_sec.grid_col
-    rights = [
-        s.bbox_x + s.bbox_w
-        for s in graph.sections.values()
-        if s.bbox_w > 0
-        and s.grid_col == tgt_col
-        and not (y_hi < s.bbox_y or y_lo > s.bbox_y + s.bbox_h)
-    ]
-    if not rights:
+    secs = _sections_in_col(graph, ep_sec.grid_col, y_band=(y_lo, y_hi))
+    if not secs:
         return None
-    return max(rights) + clearance
+    return max(s.bbox_x + s.bbox_w for s in secs) + clearance
 
 
 def _route_stepped_descent(
