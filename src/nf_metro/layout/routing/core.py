@@ -538,9 +538,9 @@ def _route_inter_section(
         and src.section_id in ctx.tb_sections
     )
 
-    # Resolve section columns and row for bypass detection
+    # Resolve section columns and rows for bypass detection
     src_col, src_row = _resolve_section_colrow(graph, src)
-    tgt_col = _resolve_section_col(graph, tgt)
+    tgt_col, tgt_row = _resolve_section_colrow(graph, tgt)
     needs_bypass = (
         src_col is not None
         and tgt_col is not None
@@ -606,9 +606,9 @@ def _route_inter_section(
         edge.source in ctx.junction_ids
         and abs(dx) <= JUNCTION_MARGIN + COORD_TOLERANCE
         and abs(dy) > abs(dx) * 3
-        and (src_col_for_special := _resolve_section_col(graph, src)) is not None
-        and (tgt_col_for_special := _resolve_section_col(graph, tgt)) is not None
-        and src_col_for_special == tgt_col_for_special
+        and src_col is not None
+        and tgt_col is not None
+        and src_col == tgt_col
     ):
         delta, r_first, r_second = l_shape_radii(
             i,
@@ -655,8 +655,8 @@ def _route_inter_section(
         and tgt_port.side == PortSide.LEFT
         and dx < 0
         and src_row is not None
-        and _resolve_section_row(graph, tgt) is not None
-        and src_row != _resolve_section_row(graph, tgt)
+        and tgt_row is not None
+        and src_row != tgt_row
     ):
         # When the inter-row channel _route_left_entry_wrap would use
         # lands inside an intervening section (e.g. a multi-row jump
@@ -690,7 +690,7 @@ def _route_inter_section(
         and tgt_col is not None
         and src_col == tgt_col
         and src_row is not None
-        and _resolve_section_row(graph, tgt) != src_row
+        and tgt_row != src_row
     ):
         return _route_left_exit_left_entry_drop(edge, src, tgt, i, n, ctx)
 
