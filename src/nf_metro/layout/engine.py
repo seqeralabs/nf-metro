@@ -7522,11 +7522,8 @@ def _insert_phantom_pass_throughs(
         target_layers = [layers.get(t, min_layer) for t in targets]
         if all(ly > min_layer for ly in target_layers):
             earliest_target = min(targets, key=lambda t: layers.get(t, 0))
-            earliest_layer = layers.get(earliest_target, 0)
 
-            if _entry_target_has_clear_trunk(
-                sub, earliest_target, earliest_layer, line_id, layers
-            ):
+            if _entry_target_has_clear_trunk(sub, earliest_target, line_id, layers):
                 # The line already runs into this target along a clean
                 # in-section trunk, so a phantom would only add a spurious
                 # same-line sibling at the early layer and split the trunk
@@ -7551,7 +7548,6 @@ def _insert_phantom_pass_throughs(
 def _entry_target_has_clear_trunk(
     sub: MetroGraph,
     target: str,
-    target_layer: int,
     line_id: str,
     layers: dict[str, int],
 ) -> bool:
@@ -7574,17 +7570,21 @@ def _entry_target_has_clear_trunk(
       section -- a flattened entry would otherwise run through the icon
       sitting on the trunk at the section's input edge.
     """
-    real_preds = [
+    target_layer = layers.get(target, 0)
+
+    # Distinct real predecessor stations (an a -->|l1,l2| b edge pair
+    # yields one station twice, so dedupe before counting the trunk).
+    real_preds = {
         e.source
         for e in sub.edges_to(target)
         if (st := sub.stations.get(e.source)) is not None
         and not st.is_hidden
         and not st.is_port
-    ]
-    if len(set(real_preds)) != 1:
+    }
+    if len(real_preds) != 1:
         return False
 
-    pred = real_preds[0]
+    pred = next(iter(real_preds))
     if line_id not in sub.station_lines(pred):
         return False
     if layers.get(pred, target_layer) >= target_layer:

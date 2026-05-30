@@ -297,9 +297,7 @@ _CHAIN_ALIGNMENT_FILES = [
 ]
 
 
-@pytest.mark.parametrize(
-    "mmd_path", _CHAIN_ALIGNMENT_FILES, ids=lambda p: p.stem
-)
+@pytest.mark.parametrize("mmd_path", _CHAIN_ALIGNMENT_FILES, ids=lambda p: p.stem)
 def test_no_intra_section_chain_misalignment_across_gallery(mmd_path):
     """Consecutive same-line stations inside one section run axis-aligned.
 
