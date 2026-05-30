@@ -227,23 +227,24 @@ class TestFuncprofilerUpstreamDefects:
 
 # --- Failing regression: variant_calling ---
 #
-# variant_calling.mmd has three confirmed visible defects (verified
+# variant_calling.mmd had three confirmed visible defects (verified
 # manually with the user as part of validator development):
 #
 # 1. Section 2 (Alignment) chain alignment - bwa_index, bwa_mem,
-#    samtools_sort, samtools_index alternate rows in a 4-station zigzag
-#    on the Main line, with no structural reason. Catches a layout
-#    placement that should put consecutive same-line stations on the
-#    same track.
+#    samtools_sort, samtools_index alternated rows in a 4-station zigzag
+#    on the Main line, with no structural reason. FIXED in #420 by not
+#    inserting an entry-runway phantom on a line that already has its
+#    own trunk station at an earlier layer.
 # 2. Section 3 (Variant Calling) excessive column gap - GATK
 #    HaplotypeCaller and DeepVariant share column x=772 but are 80px
-#    apart with one empty grid row between them.
+#    apart with one empty grid row between them. STILL OPEN (#318).
 # 3. Section 1 -> Section 2/4 inter-section line crossing - Main and
-#    QC Reporting both fan out from junction __junction_6 and cross at
-#    (216,123) on the way to their respective targets.
+#    QC Reporting both fanned out from junction __junction_6 and crossed
+#    on the way to their respective targets. FIXED as a side effect of
+#    #420 (the flattened Alignment trunk removes the crossing).
 #
-# These tests fail until the layout engine is fixed. Once each is
-# resolved, the corresponding assertion will start passing.
+# Defects 1 and 3 now pass; defect 2 remains xfail until the column-gap
+# layout is fixed.
 
 VARIANT_CALLING_FILE = EXAMPLES_DIR / "variant_calling.mmd"
 
@@ -257,8 +258,8 @@ _VARIANT_CALLING_XFAIL = pytest.mark.xfail(
 class TestVariantCallingDefects:
     """Lock in known variant_calling layout defects via strict xfail.
 
-    Each defect is currently present; when an engine fix lands the
-    matching xfail flips to XPASS and reds CI, prompting the marker
+    Each remaining defect is currently present; when an engine fix lands
+    the matching xfail flips to XPASS and reds CI, prompting the marker
     removal.
     """
 
@@ -266,7 +267,6 @@ class TestVariantCallingDefects:
     def graph(self):
         return _load_and_layout(VARIANT_CALLING_FILE)
 
-    @_VARIANT_CALLING_XFAIL
     def test_no_intra_section_chain_misalignment(self, graph):
         v = check_intra_section_chain_alignment(graph)
         assert not v, "\n".join(vi.message for vi in v)
@@ -276,10 +276,39 @@ class TestVariantCallingDefects:
         v = check_excessive_column_gaps(graph)
         assert not v, "\n".join(vi.message for vi in v)
 
-    @_VARIANT_CALLING_XFAIL
     def test_no_route_segment_crossings(self, graph):
         v = check_route_segment_crossings(graph)
         assert not v, "\n".join(vi.message for vi in v)
+
+
+# --- #420: single-line linear chains must stay axis-aligned ---
+#
+# Parametrised across the whole gallery rather than only variant_calling:
+# the zig-zag was a general track-stagger defect (entry-runway phantoms
+# splitting a line that already had its own trunk), so the invariant must
+# hold for every fixture, not just the one that first exposed it.
+
+_CHAIN_ALIGNMENT_FILES = [
+    VARIANT_CALLING_FILE,
+    RNASEQ_FILE,
+    EPITOPEPREDICTION_FILE,
+    HLATYPING_FILE,
+    *TOPOLOGY_FILES,
+]
+
+
+@pytest.mark.parametrize(
+    "mmd_path", _CHAIN_ALIGNMENT_FILES, ids=lambda p: p.stem
+)
+def test_no_intra_section_chain_misalignment_across_gallery(mmd_path):
+    """Consecutive same-line stations inside one section run axis-aligned.
+
+    Regression guard for #420 (TB/LR linear-chain zig-zag), generalised
+    beyond the variant_calling fixture that first surfaced it.
+    """
+    graph = _load_and_layout(mmd_path)
+    violations = check_intra_section_chain_alignment(graph)
+    assert not violations, "\n".join(v.message for v in violations)
 
 
 # --- Regression guard: rnaseq example ---

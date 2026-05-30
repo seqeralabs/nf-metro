@@ -2104,10 +2104,6 @@ def _gap_vertical_channels(graph, routes, col_a, col_b):
 @pytest.mark.parametrize(
     "fixture, col_a, col_b, n_distinct",
     [
-        # variant_calling: junction_6 fans `main` (adjacent col1) and `qc`
-        # (bypass to col3) -- both DOWNWARD in the col0|col1 gap.  Two
-        # distinct lines, bundled exactly OFFSET_STEP apart.
-        ("examples/variant_calling.mmd", 0, 1, 2),
         # differentialabundance: four data lines fan downward in the gap
         # left of `functional`, each feeding BOTH plots and reporting.  The
         # two segments of a given line OVERLAY at one x, so the bundle is
