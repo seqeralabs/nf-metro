@@ -156,6 +156,7 @@ def _fixtures_with(predicate) -> list[str]:
 
 _FIXTURES_WITH_OFF_TRACK = _fixtures_with(lambda t: "off_track:" in t)
 _FIXTURES_MULTI_SECTION = _fixtures_with(lambda t: t.count("subgraph") >= 2)
+_FIXTURES_COMPACT = _fixtures_with(lambda t: "compact_offsets: true" in t)
 
 # Multi-section gallery fixtures plus the serpentine-stacked
 # regression.  The regression's narrow ``reporting`` column nests under the
@@ -4197,5 +4198,34 @@ def test_merge_port_rejoining_line_takes_approach_slot(fixture):
     violations = check_merge_port_approach_side(graph, offsets)
     assert violations == [], (
         f"{fixture}: {len(violations)} merge-port approach-side "
+        f"violation(s); first: {violations[0].message() if violations else ''}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Partial-line fan branches must not reserve absent-line offset slots
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_COMPACT)
+def test_partial_fan_branch_has_no_offset_gap(fixture):
+    """Under ``compact_offsets``, an independent fan branch that carries
+    only a subset of a bundle's lines must place those lines on
+    consecutive offset slots, not reserve an empty slot for the lines it
+    omits.
+
+    Catches the genomic_pipeline Variant-calling regression where
+    ``strelka``/``indexcov`` (germline + somatic, no tumor_only) parked
+    their two lines in the top and bottom of three reserved slots,
+    leaving a visible gap where the absent ``tumor_only`` track would be
+    (issue #443).
+    """
+    from nf_metro.layout.routing.invariants import check_partial_branch_offset_gaps
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    violations = check_partial_branch_offset_gaps(graph, offsets)
+    assert violations == [], (
+        f"{fixture}: {len(violations)} partial-branch offset-gap "
         f"violation(s); first: {violations[0].message() if violations else ''}"
     )

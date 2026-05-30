@@ -21,17 +21,18 @@ gallery example and topology fixture.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 
-from nf_metro.layout.constants import COORD_TOLERANCE_FINE
+from nf_metro.layout.constants import COORD_TOLERANCE_FINE, OFFSET_STEP
 from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
     horizontal_direction,
     vertical_direction,
 )
-from nf_metro.parser.model import PortSide
+from nf_metro.parser.model import MetroGraph, PortSide
 
 # Segments shorter than this are sub-pixel artefacts of per-line
 # offsets and carry no meaningful direction of travel.
@@ -515,14 +516,139 @@ def check_merge_port_approach_side(
     return violations
 
 
+# ---------------------------------------------------------------------------
+# Partial-line fan-branch offset gaps
+# ---------------------------------------------------------------------------
+
+# Two stations share a base Y row when their centres are within this many
+# px; matches the offset module's same-Y tolerance.
+_SAME_Y_TOL = 0.1
+
+
+def _distinct_levels(values: Iterable[float]) -> list[float]:
+    """Return ascending offset levels, merging values within tolerance.
+
+    Coincident lines (offsets within ``COORD_TOLERANCE_FINE``) collapse
+    to a single level so they are treated as one occupied slot.
+    """
+    levels: list[float] = []
+    for v in sorted(values):
+        if not levels or v - levels[-1] > COORD_TOLERANCE_FINE:
+            levels.append(v)
+    return levels
+
+
+def is_independent_fan_branch(graph: MetroGraph, station_id: str) -> bool:
+    """Return whether a station is an independent fan branch.
+
+    Such a station carries two or more lines that all arrive from a
+    fan-out and leave to a fan-in at other rows: it has no edge to a
+    same-section neighbour on its own base Y, so no straight horizontal
+    through-track runs through its marker.  Re-compacting its present
+    lines onto consecutive offset slots therefore cannot bend a shared
+    track - the only connections are the fan-out / fan-in curves, which
+    bend regardless.
+
+    A station with a same-Y same-section neighbour (a port, a hidden
+    pass-through, or another station) is excluded: its lines genuinely
+    run straight across that neighbour and must keep their bundle slots.
+    """
+    st = graph.stations.get(station_id)
+    if st is None or st.is_port or st.is_hidden or st.section_id is None:
+        return False
+    if station_id in graph.junctions:
+        return False
+    if len(graph.station_lines(station_id)) < 2:
+        return False
+    for edge in graph.edges:
+        if edge.source == station_id:
+            other_id = edge.target
+        elif edge.target == station_id:
+            other_id = edge.source
+        else:
+            continue
+        other = graph.stations.get(other_id)
+        if other is None or other.section_id != st.section_id:
+            continue
+        if abs(other.y - st.y) <= _SAME_Y_TOL:
+            return False
+    return True
+
+
+@dataclass(frozen=True)
+class PartialBranchGapViolation:
+    """An independent fan branch whose present lines reserve an absent
+    line's offset slot, leaving a gap in its marker.
+
+    ``offsets`` is the sorted ``(line_id, offset)`` tuple of the lines
+    the station actually carries; the gap is the missing slot between
+    two of them.
+    """
+
+    station_id: str
+    offsets: tuple[tuple[str, float], ...]
+
+    def message(self) -> str:
+        slots = ", ".join(f"{lid}={off:.1f}" for lid, off in self.offsets)
+        return (
+            f"station {self.station_id!r} is an independent fan branch but "
+            f"its lines reserve an absent-line slot ({slots}); present lines "
+            f"must occupy consecutive offset slots with no gap"
+        )
+
+
+def check_partial_branch_offset_gaps(
+    graph: MetroGraph,
+    offsets: dict[tuple[str, str], float],
+    *,
+    offset_step: float = OFFSET_STEP,
+) -> list[PartialBranchGapViolation]:
+    """Return independent fan branches whose marker reserves an absent slot.
+
+    Only meaningful under ``compact_offsets``: that mode promises to
+    tighten bundle spacing, so a partial-line branch should sit on
+    consecutive slots rather than reserve a gap for lines it does not
+    carry.  In non-compact mode lines keep globally reserved slots by
+    design, so the check is a no-op there.
+    """
+    if not graph.compact_offsets:
+        return []
+    violations: list[PartialBranchGapViolation] = []
+    for sid in graph.stations:
+        if not is_independent_fan_branch(graph, sid):
+            continue
+        sorted_offs = sorted(
+            (offsets.get((sid, lid), 0.0), lid) for lid in graph.station_lines(sid)
+        )
+        levels = _distinct_levels(off for off, _ in sorted_offs)
+        # A reserved absent-line slot is an interior gap between two
+        # distinct occupied levels wider than one step.  Lines that share
+        # a level (coincident) collapse to one level and never trip this.
+        has_gap = any(
+            levels[i + 1] - levels[i] > offset_step + COORD_TOLERANCE_FINE
+            for i in range(len(levels) - 1)
+        )
+        if has_gap:
+            violations.append(
+                PartialBranchGapViolation(
+                    station_id=sid,
+                    offsets=tuple((lid, off) for off, lid in sorted_offs),
+                )
+            )
+    return violations
+
+
 __all__ = [
     "BundleOrderViolation",
     "FanoutTailGap",
     "MergePortApproachViolation",
+    "PartialBranchGapViolation",
     "Side",
     "check_bundle_order_preserved",
     "check_fanout_tail_join",
     "check_merge_port_approach_side",
+    "check_partial_branch_offset_gaps",
     "classify_merge_port_feeders",
     "fanout_junctions",
+    "is_independent_fan_branch",
 ]

@@ -1241,6 +1241,36 @@ def _guard_merge_port_approach_side(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
+def _guard_partial_branch_offset_gaps(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict | None = None,
+) -> None:
+    """Final-phase: under ``compact_offsets``, an independent fan branch
+    that carries only a subset of a bundle's lines must place them on
+    consecutive offset slots, not reserve an empty interior slot for the
+    lines it omits (which parks its marker off-centre with a gap).
+
+    See
+    :func:`nf_metro.layout.routing.invariants.check_partial_branch_offset_gaps`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import check_partial_branch_offset_gaps
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    violations = check_partial_branch_offset_gaps(graph, offsets)
+    if not violations:
+        return
+    first = violations[0]
+    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
 def _guard_fanout_tail_join(
     graph: MetroGraph,
     phase: str,
@@ -2413,6 +2443,7 @@ def _compute_section_layout(
         _guard_off_track_inputs_above_consumer(graph, phase)
         _guard_fanout_junction_shares_exit_port_y(graph, phase)
         _guard_merge_port_approach_side(graph, phase, offsets=offsets)
+        _guard_partial_branch_offset_gaps(graph, phase, offsets=offsets)
         _guard_row_gaps(graph, phase, section_y_gap=section_y_gap)
         _guard_section_top_padding(
             graph,
