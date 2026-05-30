@@ -1584,6 +1584,56 @@ def _route_left_exit_left_entry_drop(
     )
 
 
+def _left_entry_descent_x(
+    ctx: _RoutingCtx, anchor_x: float, n_outer: int, signed_delta: float = 0.0
+) -> float:
+    """Descent-channel X for a LEFT-entry bundle, left of *anchor_x*.
+
+    Places the bundle ``base_gap`` (curve radius + one offset step) left of
+    *anchor_x*, bumping further when that gap would bring the bundle's
+    innermost line within ``SECTION_ROUTE_CLEARANCE`` of the edge.  Callers
+    pass the per-line stagger as *signed_delta* (``+delta`` when the channel
+    sits on the bundle's right, ``-delta`` when on its left) to keep the
+    concentric-corner handedness local to each handler.
+    """
+    base_gap = ctx.curve_radius + ctx.offset_step
+    max_delta = (n_outer - 1) * ctx.offset_step / 2
+    extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
+    return anchor_x - base_gap - extra_clearance + signed_delta
+
+
+def _radius_inputs(
+    fan: tuple[int, int] | None, i: int, n: int, offset_step: float
+) -> tuple[float, float]:
+    """Concentric-radius inputs ``(off, max_off)`` for a wrap/around corner.
+
+    Uses the unified fan position ``(ui, un)`` when the edge pivots through a
+    shared junction fan, else the edge's own ``(i, n)`` sub-bundle index.
+    """
+    if fan is not None:
+        ui, un = fan
+        return (un - 1 - ui) * offset_step, (un - 1) * offset_step
+    return (n - 1 - i) * offset_step, (n - 1) * offset_step
+
+
+def _v1_corner_x(ctx: _RoutingCtx, src: Station, sx: float, corner_x: float) -> float:
+    """Push *corner_x* right so the source-side V1 channel keeps
+    ``SECTION_ROUTE_CLEARANCE`` from the source section's right edge.
+
+    When the source station sits at its section's right edge (e.g. a
+    right-side exit port), the default lead-in lands the closest line only
+    ~curve_radius past the edge, which reads as flush.  A junction source
+    already offset past the edge yields a zero bump.
+    """
+    src_section = ctx.graph.sections.get(src.section_id) if src.section_id else None
+    if src_section and src_section.bbox_w > 0:
+        section_right = src_section.bbox_x + src_section.bbox_w
+    else:
+        section_right = sx
+    current_gap = sx + ctx.curve_radius - section_right
+    return corner_x + max(0.0, SECTION_ROUTE_CLEARANCE - current_gap)
+
+
 def _route_left_entry_wrap(
     edge: Edge, src: Station, tgt: Station, i: int, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -1677,10 +1727,7 @@ def _route_left_entry_wrap(
     # A uniform extra shift preserves the per-line delta stagger so the
     # offset propagation rule is unchanged.
     n_for_outer = fan[1] if fan is not None else n
-    max_delta = (n_for_outer - 1) * ctx.offset_step / 2
-    base_gap = ctx.curve_radius + ctx.offset_step
-    extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
-    vx = tx - base_gap - extra_clearance + delta
+    vx = _left_entry_descent_x(ctx, tx, n_for_outer, delta)
     # When this wrap shares a junction fan with a corridor feeder descending
     # the same target column, anchor the descent channel to the column's LEFT
     # edge so the spine and the corridor overlay as one bundle instead of smearing.
@@ -1719,12 +1766,7 @@ def _route_left_entry_wrap(
     # short, producing the visible "outer line collapses at C4"
     # asymmetry against C1/C2/C3.  Mirrors the [r_lead, r_first,
     # r_first, r_second] pattern in _route_right_entry_wrap.
-    if fan is not None:
-        off_for_radius = (un - 1 - ui) * ctx.offset_step
-        max_off_for_radius = (un - 1) * ctx.offset_step
-    else:
-        off_for_radius = (n - 1 - i) * ctx.offset_step
-        max_off_for_radius = (n - 1) * ctx.offset_step
+    off_for_radius, max_off_for_radius = _radius_inputs(fan, i, n, ctx.offset_step)
     r_wrap = corner_radius(
         off_for_radius,
         max_off_for_radius,
@@ -1759,27 +1801,17 @@ def _route_left_entry_wrap(
     # JUNCTION_MARGIN), this shift is zero.  Uniform across lines, so the
     # per-line delta stagger and the corner_x - r_wrap == sx cancellation
     # below are preserved by also shifting lx.
-    src_section = ctx.graph.sections.get(src.section_id) if src.section_id else None
-    if src_section and src_section.bbox_w > 0:
-        section_right = src_section.bbox_x + src_section.bbox_w
-    else:
-        section_right = sx
-    # Closest line to the source edge sits at corner_x_min = sx + curve_radius
-    # (the line at delta = -max_delta).  Required gap from section_right
-    # is SECTION_ROUTE_CLEARANCE; current gap is sx + curve_radius -
-    # section_right.
-    current_v1_gap = sx + ctx.curve_radius - section_right
-    extra_v1 = max(0.0, SECTION_ROUTE_CLEARANCE - current_v1_gap)
-    corner_x += extra_v1
+    corner_x = _v1_corner_x(ctx, src, sx, corner_x)
     # Lead-in extends r_wrap LEFT of the corner so the first corner
     # gets the SAME concentric radius as the other three corners.  With
     # the virtual-fan corner_x above, every line lands lx == sx
     # exactly (corner_x - r_wrap = sx + curve_radius + (n-1)*step/2 +
     # delta - r_wrap, and r_wrap = curve_radius + (n-1-i)*step, delta
-    # = ((n-1)/2 - i)*step => they cancel to sx for every i).  With
-    # extra_v1 > 0, that cancellation places lx at sx + extra_v1; pin
-    # lx back to sx so the route starts at the source station/port and
-    # the extra clearance manifests as a longer horizontal lead-in
+    # = ((n-1)/2 - i)*step => they cancel to sx for every i).  When the
+    # source clearance bump is non-zero, that cancellation places lx at
+    # sx + bump; pin lx back to sx so the route starts at the source
+    # station/port and the extra clearance manifests as a longer
+    # horizontal lead-in
     # before C1 rather than a gap at the start of the path.
     lx = sx
     return RoutedPath(
@@ -1880,10 +1912,7 @@ def _fan_left_entry_descent_x(
     col_left = col_left_edge(ctx.graph, tgt_col, default=0.0)
     if col_left <= 0.0:
         return None
-    base_gap = ctx.curve_radius + ctx.offset_step
-    max_delta = (n_outer - 1) * ctx.offset_step / 2
-    extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
-    return col_left - base_gap - extra_clearance + delta
+    return _left_entry_descent_x(ctx, col_left, n_outer, delta)
 
 
 def _fan_has_corridor_sibling(junction_id: str, ctx: _RoutingCtx) -> bool:
@@ -2048,14 +2077,8 @@ def _route_inter_row_gap_corridor(
     # When the source is a sectionless junction, fall back to its own X as
     # the reference edge (mirrors :func:`_route_left_entry_wrap`) so a fan
     # feeder gets the SAME source-side clearance as its sibling wrap.
-    src_section = ctx.graph.sections.get(src.section_id) if src.section_id else None
     corner_x = sx + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2 + delta
-    if src_section and src_section.bbox_w > 0:
-        section_right = src_section.bbox_x + src_section.bbox_w
-    else:
-        section_right = sx
-    current_gap = sx + ctx.curve_radius - section_right
-    corner_x += max(0.0, SECTION_ROUTE_CLEARANCE - current_gap)
+    corner_x = _v1_corner_x(ctx, src, sx, corner_x)
 
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
@@ -2139,8 +2162,6 @@ def _route_around_section_below(
         )
         fan_mid_x = sx + ctx.curve_radius + (un - 1) * ctx.offset_step / 2
         delta = fan_delta
-        off_for_radius = (un - 1 - ui) * ctx.offset_step
-        max_off_for_radius = (un - 1) * ctx.offset_step
     else:
         delta, _r_first, _r_second = l_shape_radii(
             i,
@@ -2150,8 +2171,7 @@ def _route_around_section_below(
             base_radius=ctx.curve_radius,
         )
         fan_mid_x = None
-        off_for_radius = (n - 1 - i) * ctx.offset_step
-        max_off_for_radius = (n - 1) * ctx.offset_step
+    off_for_radius, max_off_for_radius = _radius_inputs(fan, i, n, ctx.offset_step)
 
     # All four corners are CW (clockwise loop: R->D->L->U->R).  The outer
     # line of the bundle stays OUTSIDE every turn and gets the larger
@@ -2200,11 +2220,6 @@ def _route_around_section_below(
     else:
         section_left = ex
     n_for_outer = fan[1] if fan is not None else n
-    max_delta = (n_for_outer - 1) * ctx.offset_step / 2
-    base_gap = ctx.curve_radius + ctx.offset_step
-    # Bump so the bundle's innermost line keeps SECTION_ROUTE_CLEARANCE from
-    # the target section edge even when base_gap - max_delta falls short.
-    extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
 
     # V_up X: position the bundle within the inter-column gap just
     # left of the target section, using the principled symmetric
@@ -2222,13 +2237,13 @@ def _route_around_section_below(
         # Sanity floor: keep the V_up clear of the target section's left
         # edge (re-applying the legacy clamp) when the gap is too narrow
         # for full symmetric placement.
-        max_vx_mid = section_left - base_gap - extra_clearance
+        max_vx_mid = _left_entry_descent_x(ctx, section_left, n_for_outer)
         vx_mid = min(vx_mid, max_vx_mid)
         vx = vx_mid - delta
     else:
         # Fallback for degenerate cases without column info: legacy
         # anchored-to-edge placement.
-        vx = section_left - base_gap - extra_clearance - delta
+        vx = _left_entry_descent_x(ctx, section_left, n_for_outer, -delta)
 
     # First-corner X: lead-in right of source, mirroring _route_left_entry_wrap.
     if fan_mid_x is not None:
@@ -2238,17 +2253,10 @@ def _route_around_section_below(
         corner_x = non_fan_mid_x + delta
     # V1 clearance from the source section's right edge, mirroring
     # _route_left_entry_wrap.  See comments there for the derivation.
-    src_section = ctx.graph.sections.get(src.section_id) if src.section_id else None
-    if src_section and src_section.bbox_w > 0:
-        v1_section_right = src_section.bbox_x + src_section.bbox_w
-    else:
-        v1_section_right = sx
-    current_v1_gap = sx + ctx.curve_radius - v1_section_right
-    extra_v1 = max(0.0, SECTION_ROUTE_CLEARANCE - current_v1_gap)
-    corner_x += extra_v1
-    # Pin lx at sx so the route starts at the source station; extra_v1
-    # manifests as a longer H lead-in before C1.  See the analogous
-    # comment in _route_left_entry_wrap.
+    corner_x = _v1_corner_x(ctx, src, sx, corner_x)
+    # Pin lx at sx so the route starts at the source station; the source
+    # clearance bump manifests as a longer H lead-in before C1.  See the
+    # analogous comment in _route_left_entry_wrap.
     lx = sx
 
     src_off = _get_offset(ctx, edge.source, edge.line_id)
