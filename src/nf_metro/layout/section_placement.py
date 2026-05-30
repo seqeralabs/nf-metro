@@ -396,6 +396,16 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
         src_sec = resolve_section(graph, src)
         if not _is_flow_section(src_sec):
             continue
+        # A horizontal-side entry only WRAPS (placing a flush run in the
+        # inter-row gap) when the source is on the far side of the target
+        # from the port.  A LEFT entry reached from a source in the same or
+        # a righthand column wraps; one reached from the left is a plain
+        # L-shape drop and needs no widening (e.g. preprocessing -> a
+        # column-1 section below it).  Mirror for RIGHT.
+        if port.side == PortSide.LEFT and src_sec.grid_col < tgt_sec.grid_col:
+            continue
+        if port.side == PortSide.RIGHT and src_sec.grid_col > tgt_sec.grid_col:
+            continue
         src_row, tgt_row = src_sec.grid_row, tgt_sec.grid_row
         # Only adjacent-row wraps centre in this gap; a multi-row crossing
         # routes around intervening sections (``_route_around_section_below``)
