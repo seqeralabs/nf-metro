@@ -622,6 +622,76 @@ def _guard_inter_section_routes_in_row_band(
                 )
 
 
+def _route_exit_side(graph: MetroGraph, rp) -> PortSide | None:
+    """Side of the port a route exits through (directly or via its feeder)."""
+    port = graph.ports.get(rp.edge.source)
+    if port is not None:
+        return port.side
+    for e in graph.edges_to(rp.edge.source):
+        port = graph.ports.get(e.source)
+        if port is not None:
+            return port.side
+    return None
+
+
+def _inter_section_backtrack_legs(
+    graph: MetroGraph,
+    routes: list,
+    *,
+    reference: str = "grid",
+    tolerance: float = 0.0,
+    include_exempt: bool = False,
+):
+    """Yield ``(rp, x1, x2)`` for each horizontal leg of a forward LR
+    inter-section route that reverses against its flow.
+
+    *reference* selects how "forward" is defined:
+
+    * ``"grid"`` - flow points toward the target grid column (strict;
+      used by the monotonic guard, which assumes grid order matches X).
+    * ``"endpoint"`` - flow points toward the route's own endpoint X
+      (tolerant of a nested-column approach where the target column sits
+      left of its source; used by the full-width dog-leg guard).
+
+    *tolerance* widens the reversal threshold; *include_exempt* keeps
+    ``normalize_exempt`` wrap routes (needed to measure around-section
+    dog-legs).  Routes exiting a port that faces away from their target
+    column legitimately wrap and are skipped, as are TB folds and
+    same-column routes.
+    """
+    from nf_metro.layout.routing.common import resolve_section
+
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        if rp.normalize_exempt and not include_exempt:
+            continue
+        src_sec = resolve_section(graph, graph.stations[rp.edge.source])
+        tgt_sec = resolve_section(graph, graph.stations[rp.edge.target])
+        if src_sec is None or tgt_sec is None:
+            continue
+        if src_sec.direction != "LR" or tgt_sec.direction != "LR":
+            continue
+        if src_sec.grid_col == tgt_sec.grid_col:
+            continue
+        xs = [p[0] for p in rp.points]
+        if len(xs) < 2:
+            continue
+        rightward_cols = tgt_sec.grid_col > src_sec.grid_col
+        side = _route_exit_side(graph, rp)
+        if rightward_cols and side != PortSide.RIGHT:
+            continue
+        if not rightward_cols and side != PortSide.LEFT:
+            continue
+        forward_is_right = rightward_cols if reference == "grid" else xs[-1] > xs[0]
+        for x1, x2 in zip(xs, xs[1:]):
+            backtracks = (
+                (x2 < x1 - tolerance) if forward_is_right else (x2 > x1 + tolerance)
+            )
+            if backtracks:
+                yield rp, x1, x2
+
+
 def _guard_inter_section_route_no_backtrack(
     graph: MetroGraph,
     phase: str,
@@ -645,46 +715,17 @@ def _guard_inter_section_route_no_backtrack(
 
         routes = route_edges(graph)
 
-    def _exit_side(rp) -> PortSide | None:
-        port = graph.ports.get(rp.edge.source)
-        if port is not None:
-            return port.side
-        for e in graph.edges_to(rp.edge.source):
-            port = graph.ports.get(e.source)
-            if port is not None:
-                return port.side
-        return None
-
-    for rp in routes:
-        if not rp.is_inter_section or rp.normalize_exempt:
-            continue
+    for rp, x1, x2 in _inter_section_backtrack_legs(
+        graph, routes, reference="grid", tolerance=GUARD_TOLERANCE
+    ):
         src_sec = resolve_section(graph, graph.stations[rp.edge.source])
         tgt_sec = resolve_section(graph, graph.stations[rp.edge.target])
-        if src_sec is None or tgt_sec is None:
-            continue
-        if src_sec.direction != "LR" or tgt_sec.direction != "LR":
-            continue
-        if src_sec.grid_col == tgt_sec.grid_col:
-            continue
         rightward = tgt_sec.grid_col > src_sec.grid_col
-        side = _exit_side(rp)
-        if rightward and side != PortSide.RIGHT:
-            continue
-        if not rightward and side != PortSide.LEFT:
-            continue
-        xs = [p[0] for p in rp.points]
-        for x1, x2 in zip(xs, xs[1:]):
-            backtracks = (
-                (x2 < x1 - GUARD_TOLERANCE)
-                if rightward
-                else (x2 > x1 + GUARD_TOLERANCE)
-            )
-            if backtracks:
-                raise PhaseInvariantError(
-                    f"{phase}: route {rp.edge.source!r}->{rp.edge.target!r} "
-                    f"line {rp.line_id!r} backtracks x={x1:.1f}->{x2:.1f} "
-                    f"against its {'rightward' if rightward else 'leftward'} flow"
-                )
+        raise PhaseInvariantError(
+            f"{phase}: route {rp.edge.source!r}->{rp.edge.target!r} "
+            f"line {rp.line_id!r} backtracks x={x1:.1f}->{x2:.1f} "
+            f"against its {'rightward' if rightward else 'leftward'} flow"
+        )
 
 
 def first_vertical_leg_x(points) -> float | None:
@@ -787,48 +828,9 @@ def inter_section_route_backtrack_legs(graph: MetroGraph, routes: list):
     (``normalize_exempt``) wrap routes are *included* so a multi-corner
     around-section dog-leg is still measured.
     """
-    from nf_metro.layout.routing.common import resolve_section
-
-    def _exit_side(rp):
-        port = graph.ports.get(rp.edge.source)
-        if port is not None:
-            return port.side
-        for e in graph.edges_to(rp.edge.source):
-            port = graph.ports.get(e.source)
-            if port is not None:
-                return port.side
-        return None
-
-    for rp in routes:
-        if not rp.is_inter_section:
-            continue
-        src_sec = resolve_section(graph, graph.stations[rp.edge.source])
-        tgt_sec = resolve_section(graph, graph.stations[rp.edge.target])
-        if src_sec is None or tgt_sec is None:
-            continue
-        if src_sec.direction != "LR" or tgt_sec.direction != "LR":
-            continue
-        if src_sec.grid_col == tgt_sec.grid_col:
-            continue
-        xs = [p[0] for p in rp.points]
-        if len(xs) < 2:
-            continue
-        # Direction toward the route's own endpoint: a leg moving the other
-        # way (away from where the route ends) is the dog-leg's outward leg.
-        toward_endpoint_is_right = xs[-1] > xs[0]
-        side = _exit_side(rp)
-        # An exit port facing away from the endpoint legitimately wraps; its
-        # outward stub is not a dog-leg.  (Grid-column-based skip preserved
-        # for the wrap case: the exit faces the target column it serves.)
-        rightward_cols = tgt_sec.grid_col > src_sec.grid_col
-        if rightward_cols and side != PortSide.RIGHT:
-            continue
-        if not rightward_cols and side != PortSide.LEFT:
-            continue
-        for x1, x2 in zip(xs, xs[1:]):
-            backtracks = (x2 < x1) if toward_endpoint_is_right else (x2 > x1)
-            if backtracks:
-                yield rp, x1, x2
+    yield from _inter_section_backtrack_legs(
+        graph, routes, reference="endpoint", tolerance=0.0, include_exempt=True
+    )
 
 
 def _guard_inter_section_route_no_full_width_backtrack(
