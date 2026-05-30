@@ -42,11 +42,13 @@ from dataclasses import dataclass
 
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render.constants import (
+    BRIDGE_BUNDLE_GAP,
     BRIDGE_CLUSTER_RADIUS,
     BRIDGE_CORNER_CLEARANCE,
     BRIDGE_GAP_HALF,
     BRIDGE_MIN_ANGLE_DEG,
     BRIDGE_NODE_TOLERANCE,
+    BRIDGE_PARALLEL_ANGLE_DEG,
 )
 
 __all__ = ["BridgeBreak", "compute_bridges"]
@@ -323,7 +325,55 @@ def _cluster_gaps(
     ]
     if not cross_pts:
         return []
+
+    # A lone under-line travelling in the over-line's own bundle is a branch
+    # diverging from that bundle, not an independent crossing - bridging it
+    # leaves a single line broken beside its continuous bundle-mate.
+    if len({routes[n].line_id for n in under}) == 1 and _bundled_with_over(
+        sorted(under)[0],
+        {routes[n].line_id for n in over},
+        routes,
+        polylines,
+        seg_of,
+        cross_pts,
+    ):
+        return []
     return _uniform_gaps(sorted(under), seg_of, polylines, cross_pts, corner_clear)
+
+
+def _bundled_with_over(
+    under_idx: int,
+    over_line_ids: set[str],
+    routes: list,
+    polylines: list[list[Point]],
+    seg_of: dict[int, int],
+    cross_pts: list[Point],
+) -> bool:
+    """True if a route of the over-line runs parallel and adjacent to the
+    under-line through the crossing (the over-line branches out of the
+    under-line's bundle)."""
+    poly = polylines[under_idx]
+    seg = seg_of[under_idx]
+    u_ang = _segment_angle_deg(poly[seg], poly[seg + 1])
+    cx = sum(p[0] for p in cross_pts) / len(cross_pts)
+    cy = sum(p[1] for p in cross_pts) / len(cross_pts)
+    for ri, p in enumerate(polylines):
+        if ri == under_idx or routes[ri].line_id not in over_line_ids:
+            continue
+        for i in range(len(p) - 1):
+            if _angle_between(_segment_angle_deg(p[i], p[i + 1]), u_ang) > BRIDGE_PARALLEL_ANGLE_DEG:
+                continue
+            ax, ay = p[i]
+            dx, dy = p[i + 1][0] - ax, p[i + 1][1] - ay
+            length_sq = dx * dx + dy * dy
+            if length_sq == 0:
+                continue
+            t = ((cx - ax) * dx + (cy - ay) * dy) / length_sq
+            if not 0.0 <= t <= 1.0:
+                continue
+            if math.hypot(ax + t * dx - cx, ay + t * dy - cy) <= BRIDGE_BUNDLE_GAP:
+                return True
+    return False
 
 
 def _uniform_gaps(
@@ -333,30 +383,47 @@ def _uniform_gaps(
     cross_pts: list[Point],
     corner_clear: float,
 ) -> list[tuple[int, int, Gap]]:
-    """Project the crossing points onto a representative under-direction and
-    break every under-line at that same span (clamped clear of each segment's
-    corners)."""
+    """Break every under-line at the same gap, centred on the over bundle.
+
+    The gap is centred on the crossing midpoint and given equal padding on
+    both sides; corner clearance shrinks both sides by the same amount (the
+    most-constrained under-line decides), so the gap stays symmetric about
+    the over-line and identical across the bundle rather than ragged."""
     rep = polylines[under[0]]
     rseg = seg_of[under[0]]
     ux, uy = _unit(rep[rseg], rep[rseg + 1])
     projs = [p[0] * ux + p[1] * uy for p in cross_pts]
-    lo = min(projs) - BRIDGE_GAP_HALF
-    hi = max(projs) + BRIDGE_GAP_HALF
+    cmin, cmax = min(projs), max(projs)
+    centre = (cmin + cmax) / 2.0
+    over_half = (cmax - cmin) / 2.0
 
-    out: list[tuple[int, int, Gap]] = []
+    geom = []
+    sym_half = over_half + BRIDGE_GAP_HALF
     for ri in under:
         seg = seg_of[ri]
         a, b = polylines[ri][seg], polylines[ri][seg + 1]
-        sx, sy = b[0] - a[0], b[1] - a[1]
-        seg_len = math.hypot(sx, sy)
+        seg_len = math.hypot(b[0] - a[0], b[1] - a[1])
         if seg_len == 0:
             continue
-        sux, suy = sx / seg_len, sy / seg_len
         a_u = a[0] * ux + a[1] * uy
-        lo_s = max(corner_clear, lo - a_u)
-        hi_s = min(seg_len - corner_clear, hi - a_u)
-        if lo_s >= hi_s:
-            continue
+        sym_half = min(sym_half, centre - (a_u + corner_clear), a_u + seg_len - corner_clear - centre)
+        geom.append((ri, seg, a, (b[0] - a[0]) / seg_len, (b[1] - a[1]) / seg_len, a_u, seg_len))
+
+    # Prefer a gap centred on the over bundle (symmetric, identical across the
+    # bundle).  Where a segment is too short to centre a covering gap, fall
+    # back to clamping each line independently so the crossing still breaks.
+    symmetric = sym_half >= over_half and sym_half > 0
+
+    out: list[tuple[int, int, Gap]] = []
+    for ri, seg, a, sux, suy, a_u, seg_len in geom:
+        if symmetric:
+            lo_s = centre - sym_half - a_u
+            hi_s = centre + sym_half - a_u
+        else:
+            lo_s = max(corner_clear, cmin - a_u - BRIDGE_GAP_HALF)
+            hi_s = min(seg_len - corner_clear, cmax - a_u + BRIDGE_GAP_HALF)
+            if lo_s >= hi_s:
+                continue
         out.append(
             (
                 ri,

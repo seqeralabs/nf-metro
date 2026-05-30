@@ -30,19 +30,20 @@ TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
 
 # Fixtures with at least one genuine non-merging crossing.
 FIXTURES_WITH_CROSSINGS = [
-    EXAMPLES_DIR / "genomeassembly.mmd",
-    EXAMPLES_DIR / "genomeassembly_staggered.mmd",
     EXAMPLES_DIR / "genomic_pipeline.mmd",
     EXAMPLES_DIR / "rnaseq_sections.mmd",
     EXAMPLES_DIR / "differentialabundance.mmd",
     TOPOLOGIES_DIR / "complex_multipath.mmd",
+    TOPOLOGIES_DIR / "funcprofiler_upstream.mmd",
 ]
 
-# Fixtures whose only line meetings are fans/merges/shared sinks - no
-# genuine crossing, so no bridge may fire.
+# Fixtures with no bridge: pure fans/merges/shared sinks, or a lone under-line
+# travelling in the over-line's own bundle (genomeassembly - a branch
+# divergence, deliberately not bridged).
 FIXTURES_WITHOUT_CROSSINGS = [
     EXAMPLES_DIR / "rnaseq_auto.mmd",
     EXAMPLES_DIR / "variant_calling.mmd",
+    EXAMPLES_DIR / "genomeassembly.mmd",
     TOPOLOGIES_DIR / "trunk_through_fan.mmd",
     TOPOLOGIES_DIR / "terminal_symmetric_fan.mmd",
     TOPOLOGIES_DIR / "shared_sink_parallel.mmd",
@@ -136,25 +137,32 @@ def test_whole_under_bundle_breaks_differentialabundance():
     assert {"affy", "maxquant", "geo"} <= lines_broken
 
 
+def test_suppressed_when_lone_underline_in_over_bundle():
+    """genomeassembly's hic_reads crosses the assemblies bus while travelling
+    in the assemblies bundle - a branch divergence, so no bridge fires (would
+    leave hic_reads broken beside its continuous bundle-mate)."""
+    _, _, _, bridges = _bridges(EXAMPLES_DIR / "genomeassembly.mmd")
+    assert bridges == {}
+
+
 def test_rendered_under_line_has_pen_up():
-    """The genomeassembly orange line crosses under blue; its rendered path
-    must contain an interior move (pen-up) - on ``main`` it is continuous."""
-    graph = parse_metro_mermaid((EXAMPLES_DIR / "genomeassembly.mmd").read_text())
+    """An under-line that crosses under another draws a path with an interior
+    move (pen-up) - on ``main`` it is continuous."""
+    graph = parse_metro_mermaid(
+        (TOPOLOGIES_DIR / "complex_multipath.mmd").read_text()
+    )
     compute_layout(graph)
     svg = render_svg(graph, NFCORE_THEME)
-    # An under-line path with a gap has more than one 'M' command.
-    broken = [
-        d
-        for d in _edge_path_ds(svg)
-        if d.count("M") > 1
-    ]
+    broken = [d for d in _edge_path_ds(svg) if d.count("M") > 1]
     assert broken, "expected at least one broken (bridged) under-line path"
 
 
 def test_theme_toggle_disables_bridges():
     import dataclasses
 
-    graph = parse_metro_mermaid((EXAMPLES_DIR / "genomeassembly.mmd").read_text())
+    graph = parse_metro_mermaid(
+        (TOPOLOGIES_DIR / "complex_multipath.mmd").read_text()
+    )
     compute_layout(graph)
     theme_off = dataclasses.replace(NFCORE_THEME, bridge_glyph=False)
     svg = render_svg(graph, theme_off)
