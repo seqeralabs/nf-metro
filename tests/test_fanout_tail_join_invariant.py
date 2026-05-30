@@ -77,7 +77,7 @@ def test_variant_calling_tuned_junction6_joins() -> None:
 def test_merge_junctions_excluded_from_fanout() -> None:
     """Merge junctions (>1 upstream source) must NOT be treated as
     fan-out junctions, so their trunk routing is never snapped."""
-    # sarek-style fixtures carry merge junctions; assert any junction
+    # collector-fan-in-style fixtures carry merge junctions; assert any junction
     # with multiple distinct upstream sources is excluded.
     for path in _gather_fixtures():
         graph = parse_metro_mermaid(path.read_text())

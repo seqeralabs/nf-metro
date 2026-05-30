@@ -157,6 +157,19 @@ def _fixtures_with(predicate) -> list[str]:
 _FIXTURES_WITH_OFF_TRACK = _fixtures_with(lambda t: "off_track:" in t)
 _FIXTURES_MULTI_SECTION = _fixtures_with(lambda t: t.count("subgraph") >= 2)
 
+# Multi-section gallery fixtures plus the serpentine-stacked
+# regression.  The regression's narrow ``reporting`` column nests under the
+# wide ``preprocessing`` row-span (exposing the nested-column dog-leg
+# geometry, #425) and its ``variant_calling`` row-span (rows 1-3) separates
+# an inter-row wrap's source/target rows by a multi-row placement (#422); the
+# multi-section gallery fixtures cover the adjacent-row, non-rowspan wrap
+# (via ``topologies/stacked_lr_serpentine.mmd``).
+_FIXTURES_MULTI_SECTION_PLUS_STACK = sorted(
+    {*_FIXTURES_MULTI_SECTION, "regressions/stacked_collector_fanin.mmd"}
+)
+_FIXTURES_DOGLEG = _FIXTURES_MULTI_SECTION_PLUS_STACK
+_FIXTURES_INTER_ROW_CLEARANCE = _FIXTURES_MULTI_SECTION_PLUS_STACK
+
 
 def _fixtures_with_bypass() -> list[str]:
     """Return fixtures whose layout produces at least one ``__bypass_``
@@ -891,6 +904,227 @@ def test_inter_section_route_no_x_backtrack(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Merge feeders descend the inter-column corridor, not the canvas bottom
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    sorted({*_FIXTURES_MULTI_SECTION, "genomic_pipeline.mmd"}),
+)
+def test_merge_feeder_does_not_loop_below_target(fixture):
+    """A merge-junction feeder reaching a target row *below* its source must
+    not dip far below the target section's bottom edge to reach it (#432).
+
+    A multi-row collector fan-in feeds the left-entry ``reporting`` section
+    (row 3) from QC sources that exit on the right in rows 0 and 1.  The
+    naive around-below route drops the feeder to the very bottom of the
+    canvas (below the tall ``variant_calling`` row-span), runs leftward
+    there, then climbs back up into the entry - two big loops sweeping the
+    canvas bottom.  A clear inter-column corridor exists between the source
+    and target columns: drop into the inter-row gap below the source row,
+    traverse left in that gap to the inter-column channel, then descend
+    that channel straight to the entry.  This invariant pins the corridor:
+    a downward cross-row feeder must stay within a bounded margin of the
+    target section's bottom rather than looping below everything beneath
+    it.
+
+    Scoped to *downward cross-row* feeders.  A same-row fan-in merge
+    legitimately U-routes through the inter-row gap *below* the row and
+    climbs back into a same-row target (e.g. ``03b_fan_in_merge``,
+    ``genomeassembly``); that gap-dip is the intended geometry, not a
+    canvas-bottom loop.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    for rp in routes:
+        if not (
+            rp.edge.source.startswith("__junction")
+            and rp.edge.target.startswith("__merge")
+        ):
+            continue
+        src_sec = resolve_section(graph, graph.stations[rp.edge.source])
+        tgt_sec = resolve_section(graph, graph.stations[rp.edge.target])
+        if src_sec is None or tgt_sec is None:
+            continue
+        # Only downward cross-row feeders take the corridor; same-row
+        # fan-ins legitimately U-route through the gap below the row.
+        if tgt_sec.grid_row <= src_sec.grid_row:
+            continue
+        tgt_bottom = tgt_sec.bbox_y + tgt_sec.bbox_h
+        max_y = max(p[1] for p in rp.points)
+        # The route may sweep a little below the entry port (its descent
+        # curve) but must not loop below the target section's whole box.
+        assert max_y <= tgt_bottom + SECTION_Y_GAP + _Y_TOL, (
+            f"{fixture}: merge feeder {rp.edge.source}->{rp.edge.target} "
+            f"({rp.line_id}) dips to y={max_y:.1f}, far below the target "
+            f"section bottom {tgt_bottom:.1f} - it loops below the canvas "
+            f"instead of descending the inter-column corridor"
+        )
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    sorted({*_FIXTURES_MULTI_SECTION, "genomic_pipeline.mmd"}),
+)
+def test_junction_same_line_fans_coincide_or_separate(fixture):
+    """Two routes carrying the SAME line out of a UNIFIED-FAN junction must
+    either coincide on their source-side vertical channel or separate
+    clearly - never smear by a few px (#437).
+
+    the ``__junction_9`` (Post-processing's right exit) fans the same
+    three lines to two destinations: the spine into Annotation (a LEFT-entry
+    wrap) and the QC feed down the inter-column corridor to MultiQC.  The
+    engine assigns both a shared :func:`_compute_junction_fan_info` position
+    so they're MEANT to pivot through one channel; when their first vertical
+    channels sit 6-18px apart they read as a single smeared band rather than
+    one clean overlay.  This invariant forbids that intermediate spacing:
+    for each unified-fan junction and each line fanning to >=2 inter-section
+    targets, the first vertical legs must coincide (<= ``OFFSET_STEP`` apart,
+    i.e. within the per-bundle stagger) or be cleanly separated (>= a
+    section gap apart, the intended split when targets land in different
+    columns).
+
+    Scoped to junctions the engine treats as a unified fan (present in
+    ``junction_fan_info``); pure L-shape/bypass fans to genuinely distinct
+    columns are a separate concern.
+    """
+    from nf_metro.layout.constants import CURVE_RADIUS, DIAGONAL_RUN, OFFSET_STEP
+    from nf_metro.layout.engine import first_vertical_leg_x
+    from nf_metro.layout.routing.core import _build_routing_context
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    ctx = _build_routing_context(graph, DIAGONAL_RUN, CURVE_RADIUS, offsets)
+    fan_sources = {key[0] for key in ctx.junction_fan_info}
+
+    # Group inter-section routes by (junction source, line).
+    by_src_line: dict[tuple[str, str], list] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section or rp.edge.source not in fan_sources:
+            continue
+        vx = first_vertical_leg_x(rp.points)
+        if vx is None:
+            continue
+        by_src_line[(rp.edge.source, rp.line_id)].append((rp, vx))
+
+    coincide_tol = OFFSET_STEP + _Y_TOL
+    separate_min = SECTION_Y_GAP
+    for (src, line), entries in by_src_line.items():
+        if len(entries) < 2:
+            continue
+        xs = sorted(vx for _rp, vx in entries)
+        for lo, hi in zip(xs, xs[1:]):
+            gap = hi - lo
+            assert gap <= coincide_tol or gap >= separate_min, (
+                f"{fixture}: junction {src} line {line} fans two routes "
+                f"whose first vertical channels are {gap:.1f}px apart "
+                f"(x={lo:.1f} vs {hi:.1f}) - neither coincident "
+                f"(<= {coincide_tol:.1f}) nor clearly separated "
+                f"(>= {separate_min:.1f}); a smeared partial overlap"
+            )
+
+
+@pytest.mark.parametrize("fixture", sorted({*_FIXTURES_MULTI_SECTION_PLUS_STACK}))
+def test_inter_section_route_no_full_width_dogleg_clean(fixture):
+    """No merge feeder takes a full-width out-and-back dog-leg (#432).
+
+    The corridor route's long leftward traverse in the inter-row gap is a
+    monotonic approach toward the target, not a backtrack, so the refined
+    full-width guard passes on now.
+    """
+    from nf_metro.layout.engine import (
+        _canvas_width,
+        inter_section_route_backtrack_legs,
+    )
+
+    graph = _layout(fixture)
+    routes = route_edges(graph)
+    canvas_width = _canvas_width(graph)
+    assert canvas_width > 0
+    limit = 0.4 * canvas_width
+    for rp, x1, x2 in inter_section_route_backtrack_legs(graph, routes):
+        span = abs(x2 - x1)
+        assert span <= limit + _Y_TOL, (
+            f"{fixture}: {rp.line_id} {rp.edge.source}->{rp.edge.target} "
+            f"backtracks {span:.1f}px in one leg (x={x1:.1f}->{x2:.1f}), "
+            f"exceeding 40% of canvas width {canvas_width:.1f}"
+        )
+
+
+# a multi-row collector fan-in now descends the shared inter-column corridor into
+# the left-entry ``reporting`` section, so the feeders are X-monotonic toward
+# the target and no longer trip the full-width dog-leg guard.
+_XFAIL_DOGLEG: dict[str, str] = {}
+
+
+@pytest.mark.parametrize(
+    "fixture", _params_with_xfails(_FIXTURES_DOGLEG, _XFAIL_DOGLEG)
+)
+def test_inter_section_route_no_full_width_dogleg(fixture):
+    """A forward inter-section route may reverse in X to reach a target
+    column nested inside an oversized sibling, but no single backtrack leg
+    may sweep more than 40% of the canvas width (#425).
+
+    The strict X-monotonic guard above forbids *any* reversal on a forward
+    LR route and skips wrapping (``normalize_exempt``) routes.  When a
+    narrow target column nests inside an oversized sibling, reaching it
+    requires a legitimate reversal, so such routes are exempt.  This still
+    bounds those reversals: a right-then-left dog-leg sweeping the whole
+    diagram is forbidden even when exempt.
+    """
+    from nf_metro.layout.engine import (
+        _canvas_width,
+        inter_section_route_backtrack_legs,
+    )
+
+    graph = _layout(fixture)
+    routes = route_edges(graph)
+    canvas_width = _canvas_width(graph)
+    assert canvas_width > 0
+    limit = 0.4 * canvas_width
+    for rp, x1, x2 in inter_section_route_backtrack_legs(graph, routes):
+        span = abs(x2 - x1)
+        assert span <= limit + _Y_TOL, (
+            f"{fixture}: {rp.line_id} {rp.edge.source}->{rp.edge.target} "
+            f"backtracks {span:.1f}px in one leg (x={x1:.1f}->{x2:.1f}), "
+            f"exceeding 40% of canvas width {canvas_width:.1f}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Routes enter/leave sections only at declared ports
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION_PLUS_STACK)
+def test_routes_enter_sections_only_at_ports(fixture):
+    """No routed segment may cross a section bbox boundary except within
+    tolerance of a declared port (#432).
+
+    A line that slices through a section box anywhere other than a port is
+    visually entering/leaving where nothing invites it - the symptom of a
+    port inferred on the wrong side (so the connector cuts the box) or a
+    fan-in bundle ploughing into a section through an undeclared edge.
+    """
+    from nf_metro.layout.engine import _route_crosses_section_boundary
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    hit = _route_crosses_section_boundary(graph, routes)
+    assert hit is None, (
+        f"{fixture}: route {hit[0].edge.source}->{hit[0].edge.target} "
+        f"({hit[0].line_id}) crosses section {hit[1]!r} boundary at "
+        f"({hit[2]:.1f}, {hit[3]:.1f}) away from any declared port"
+        if hit is not None
+        else ""
+    )
+
+
+# ---------------------------------------------------------------------------
 # Inter-row horizontal channels keep clearance from the source section
 # ---------------------------------------------------------------------------
 
@@ -905,7 +1139,7 @@ def _section_bbox(sec) -> tuple[float, float, float, float]:
     return sec.bbox_x, sec.bbox_x + sec.bbox_w, sec.bbox_y, sec.bbox_y + sec.bbox_h
 
 
-@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+@pytest.mark.parametrize("fixture", _FIXTURES_INTER_ROW_CLEARANCE)
 def test_inter_row_run_clears_source_section(fixture):
     """A horizontal leg of an inter-*row* route must not graze its source
     section's bbox edge.
@@ -2608,7 +2842,15 @@ def _icon_x_extent(graph: MetroGraph, station, section) -> tuple[float, float]:
     return cx - icon_half_w, cx + icon_half_w
 
 
-@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+# a multi-row collector fan-in now descends the inter-column corridor into the
+# left-entry ``reporting`` section instead of sweeping the reporting row's
+# full width, so the merge bundle no longer crosses the file icons (#432).
+_XFAIL_ICON_OVERLAP: dict[str, str] = {}
+
+
+@pytest.mark.parametrize(
+    "fixture", _params_with_xfails(ALL_FIXTURES, _XFAIL_ICON_OVERLAP)
+)
 def test_no_icon_overlaps_line_path(fixture):
     """A station's rendered file icon must not be crossed by routed line
     segments belonging to lines the station neither produces nor consumes.

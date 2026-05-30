@@ -55,6 +55,13 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "showing how explicit directives can fine-tune placement.",
     ),
     (
+        "genomic_pipeline",
+        EXAMPLES_DIR,
+        "Multi-section genomic variant-calling pipeline: same-direction sections "
+        "stacked in one column (serpentine carriage-return) plus a multi-row QC "
+        "collector fan-in descending a shared inter-column corridor.",
+    ),
+    (
         "differentialabundance",
         EXAMPLES_DIR,
         "nf-core/differentialabundance with four input lines, off-track gene-set inputs, and a bypass-heavy reporting row. Uses `%%metro center_ports: true`.",
@@ -176,6 +183,12 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         TOPOLOGIES_DIR,
         "Stacked analysis sections feeding through a fold into branching targets.",
     ),
+    (
+        "stacked_lr_serpentine",
+        TOPOLOGIES_DIR,
+        "Same-direction sections stacked in one grid column, chained via short "
+        "vertical drops on alternating sides (serpentine), no wrap-around.",
+    ),
     # --- Offset and bypass ---
     (
         "mismatched_tracks",
@@ -198,7 +211,7 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         TOPOLOGIES_DIR,
         "Cross-row route to a LEFT-entry target where the natural inter-row "
         "channel would cut through an intervening section's bbox. Exercises "
-        "`_route_around_section_below` (sarek-style geometry).",
+        "`_route_around_section_below` (collector-fan-in geometry).",
     ),
     (
         "inter_row_wrap_clearance",

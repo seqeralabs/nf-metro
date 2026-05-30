@@ -147,6 +147,46 @@ class TestTopologyValidation:
             )
 
 
+# --- Serpentine stacked-section invariant (issue #421) ---
+
+# Fixtures known to contain a serpentine run of stacked, chained,
+# same-direction single-cell sections in one grid column. The new
+# stacked_lr_serpentine fixture is the targeted case; variantbenchmarking_auto
+# is an existing gallery pipeline whose Variant Filtering -> Benchmarking
+# sections stack in one column, so the invariant must generalise to it.
+SERPENTINE_FILES = [
+    TOPOLOGIES_DIR / "stacked_lr_serpentine.mmd",
+    EXAMPLES_DIR / "variantbenchmarking_auto.mmd",
+]
+SERPENTINE_IDS = [f.stem for f in SERPENTINE_FILES]
+
+
+@pytest.mark.parametrize("path", SERPENTINE_FILES, ids=SERPENTINE_IDS)
+def test_stacked_sections_serpentine_no_backtrack(path):
+    """Stacked same-direction sections must connect via vertical drops.
+
+    Each section in a detected serpentine run must flow internally without
+    folding its route back across the section width: a section that fails to
+    alternate direction would enter on the wrong side and wrap around. This
+    test fails on the pre-#421 engine, which inferred LR for every stacked
+    section regardless of position.
+    """
+    from layout_validator import check_serpentine_no_backtrack
+
+    from nf_metro.layout.auto_layout import detect_serpentine_runs
+
+    graph = _load_and_layout(path)
+
+    dag = graph.section_dag
+    assert dag is not None
+    runs = detect_serpentine_runs(graph, dag.successors, dag.predecessors)
+    assert runs, f"{path.stem}: expected at least one serpentine run to exist"
+
+    violations = check_serpentine_no_backtrack(graph)
+    errors = [v for v in violations if v.severity == Severity.ERROR]
+    assert not errors, "\n".join(v.message for v in errors)
+
+
 # --- Layout-quality warning reporter ---
 #
 # The intra-section-chain and exit-port-feeder validators emit WARNING-level

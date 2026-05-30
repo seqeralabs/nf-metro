@@ -1,0 +1,36 @@
+%%metro title: Stacked LR Serpentine
+%%metro style: dark
+%%metro line: main | Main | #e63946
+%%metro grid: ingest | 0,0,3,1
+%%metro grid: align | 1,0,1,1
+%%metro grid: dedup | 1,1,1,1
+%%metro grid: call | 1,2,1,1
+
+graph LR
+    subgraph ingest [Ingest]
+        i1[Read]
+        i2[QC]
+        i1 -->|main| i2
+    end
+
+    subgraph align [Alignment]
+        a1[Map]
+        a2[Sort]
+        a1 -->|main| a2
+    end
+
+    subgraph dedup [Dedup]
+        d1[Mark Dup]
+        d2[Recalibrate]
+        d1 -->|main| d2
+    end
+
+    subgraph call [Variant Calling]
+        c1[Call]
+        c2[Filter]
+        c1 -->|main| c2
+    end
+
+    i2 -->|main| a1
+    a2 -->|main| d1
+    d2 -->|main| c1

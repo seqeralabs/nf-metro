@@ -1,0 +1,173 @@
+%%metro title: Stacked Collector Fan-in
+%%metro style: dark
+%%metro legend: br
+%%metro line_order: definition
+%%metro center_ports: true
+%%metro compact_offsets: true
+%%metro file: fastq_in | FASTQ
+%%metro file: bam_in | BAM
+%%metro file: cram_in | CRAM
+%%metro file: vcf_out | VCF
+%%metro file: report_out | HTML
+%%metro line: germline | Germline | #0570b0
+%%metro line: tumor_only | Tumor only | #d62728
+%%metro line: somatic | Tumor-normal pair | #756bb1
+%%metro grid: preprocessing | 0,0,1,2
+%%metro grid: variant_calling | 0,1,3,1
+%%metro grid: post_vc | 1,1,1,1
+%%metro grid: annotation | 1,2,1,1
+%%metro grid: reporting | 1,3,1,1
+
+graph LR
+    subgraph preprocessing [Pre-processing]
+        %%metro exit: right | germline, tumor_only, somatic
+        fastq_in[ ]
+        bam_in[ ]
+        fastqc[FastQC]
+        fastp[FastP]
+        umi[UMI consensus]
+        bwa[BWA-MEM]
+        bwa2[BWA-MEM2]
+        dragmap[DragMap]
+        sentieon_bwa[Sentieon BWA]
+        merge_index[samtools merge/index]
+        markdup[MarkDuplicates]
+        sentieon_dedup[Sentieon Dedup]
+        bqsr[BaseRecalibrator]
+        applybqsr[ApplyBQSR]
+        mosdepth[mosdepth]
+        ngscheckmate[NGSCheckmate]
+
+        fastq_in -->|germline,tumor_only,somatic| fastqc
+        fastq_in -->|germline,tumor_only,somatic| fastp
+        bam_in -->|germline,tumor_only,somatic| fastp
+        fastp -->|germline,tumor_only,somatic| umi
+        umi -->|germline,tumor_only,somatic| bwa
+        umi -->|germline,tumor_only,somatic| bwa2
+        umi -->|germline,tumor_only,somatic| dragmap
+        umi -->|germline,tumor_only,somatic| sentieon_bwa
+        bwa -->|germline,tumor_only,somatic| merge_index
+        bwa2 -->|germline,tumor_only,somatic| merge_index
+        dragmap -->|germline,tumor_only,somatic| merge_index
+        sentieon_bwa -->|germline,tumor_only,somatic| merge_index
+        merge_index -->|germline,tumor_only,somatic| markdup
+        merge_index -->|germline,tumor_only,somatic| sentieon_dedup
+        markdup -->|germline,tumor_only,somatic| bqsr
+        sentieon_dedup -->|germline,tumor_only,somatic| bqsr
+        bqsr -->|germline,tumor_only,somatic| applybqsr
+        applybqsr -->|germline,tumor_only,somatic| mosdepth
+        applybqsr -->|germline,tumor_only,somatic| ngscheckmate
+    end
+
+    subgraph variant_calling [Variant calling]
+        %%metro entry: left | germline, tumor_only, somatic
+        %%metro exit: right | germline, tumor_only, somatic
+        cram_in[ ]
+        haplotypecaller[HaplotypeCaller]
+        deepvariant[DeepVariant]
+        sentieon_dnascope[Sentieon DNAscope]
+        sentieon_haplotyper[Sentieon Haplotyper]
+        freebayes[FreeBayes]
+        strelka[Strelka]
+        mpileup[bcftools mpileup]
+        mutect2[Mutect2]
+        lofreq[LoFreq]
+        muse[MuSE]
+        sentieon_tnscope[Sentieon TNscope]
+        manta[Manta]
+        tiddit[TIDDIT]
+        ascat[ASCAT]
+        cnvkit[CNVkit]
+        controlfreec[Control-FREEC]
+        indexcov[indexcov]
+        msisensor2[MSIsensor2]
+        msisensorpro[MSIsensor-pro]
+        vcfs[ ]
+
+        cram_in -->|germline| haplotypecaller
+        cram_in -->|germline| deepvariant
+        cram_in -->|germline| sentieon_dnascope
+        cram_in -->|germline| sentieon_haplotyper
+        cram_in -->|germline,tumor_only,somatic| freebayes
+        cram_in -->|germline,somatic| strelka
+        cram_in -->|germline,tumor_only,somatic| mpileup
+        cram_in -->|tumor_only,somatic| mutect2
+        cram_in -->|tumor_only| lofreq
+        cram_in -->|somatic| muse
+        cram_in -->|tumor_only,somatic| sentieon_tnscope
+        cram_in -->|germline,tumor_only,somatic| manta
+        cram_in -->|germline,tumor_only,somatic| tiddit
+        cram_in -->|somatic| ascat
+        cram_in -->|germline,tumor_only,somatic| cnvkit
+        cram_in -->|tumor_only,somatic| controlfreec
+        cram_in -->|germline,somatic| indexcov
+        cram_in -->|tumor_only| msisensor2
+        cram_in -->|somatic| msisensorpro
+
+        haplotypecaller -->|germline| vcfs
+        deepvariant -->|germline| vcfs
+        sentieon_dnascope -->|germline| vcfs
+        sentieon_haplotyper -->|germline| vcfs
+        freebayes -->|germline,tumor_only,somatic| vcfs
+        strelka -->|germline,somatic| vcfs
+        mpileup -->|germline,tumor_only,somatic| vcfs
+        mutect2 -->|tumor_only,somatic| vcfs
+        lofreq -->|tumor_only| vcfs
+        muse -->|somatic| vcfs
+        sentieon_tnscope -->|tumor_only,somatic| vcfs
+        manta -->|germline,tumor_only,somatic| vcfs
+        tiddit -->|germline,tumor_only,somatic| vcfs
+        ascat -->|somatic| vcfs
+        cnvkit -->|germline,tumor_only,somatic| vcfs
+        controlfreec -->|tumor_only,somatic| vcfs
+        indexcov -->|germline,somatic| vcfs
+        msisensor2 -->|tumor_only| vcfs
+        msisensorpro -->|somatic| vcfs
+    end
+
+    subgraph post_vc [Post-processing]
+        filter_vcfs[Filter VCFs]
+        normalize[Normalize]
+        concatenate[Concatenate]
+        consensus[Consensus]
+        varlociraptor[Varlociraptor]
+        bcftools_stats[bcftools stats]
+        vcftools[VCFtools]
+
+        filter_vcfs -->|germline,tumor_only,somatic| normalize
+        normalize -->|germline,tumor_only,somatic| concatenate
+        concatenate -->|germline,tumor_only,somatic| consensus
+        consensus -->|germline,tumor_only,somatic| varlociraptor
+        varlociraptor -->|germline,tumor_only,somatic| bcftools_stats
+        bcftools_stats -->|germline,tumor_only,somatic| vcftools
+    end
+
+    subgraph annotation [Annotation]
+        snpeff[snpEff]
+        vep[VEP]
+        bcftools_ann[bcftools annotate]
+        snpsift[SnpSift]
+
+        snpeff -->|germline,tumor_only,somatic| vep
+        vep -->|germline,tumor_only,somatic| bcftools_ann
+        bcftools_ann -->|germline,tumor_only,somatic| snpsift
+    end
+
+    subgraph reporting [Reporting]
+        multiqc[MultiQC]
+        vcf_out[ ]
+        report_out[ ]
+
+        multiqc -->|germline,tumor_only,somatic| report_out
+        snpsift_to_vcf[ ]
+        snpsift_to_vcf -->|germline,tumor_only,somatic| vcf_out
+    end
+
+    %% Inter-section edges
+    applybqsr -->|germline,tumor_only,somatic| cram_in
+    vcfs -->|germline,tumor_only,somatic| filter_vcfs
+    vcftools -->|germline,tumor_only,somatic| snpeff
+    snpsift -->|germline,tumor_only,somatic| snpsift_to_vcf
+    fastqc -->|germline,tumor_only,somatic| multiqc
+    mosdepth -->|germline,tumor_only,somatic| multiqc
+    bcftools_stats -->|germline,tumor_only,somatic| multiqc

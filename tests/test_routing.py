@@ -323,7 +323,7 @@ def test_around_section_below_dispatched_for_cross_row_left_entry():
     reached from the opposite-row source when the natural inter-row
     channel would cut through an intervening section's bbox.
 
-    Mirrors the sarek section 1 -> section 5 LEFT-entry geometry: 3-row
+    Mirrors a row-0 source to lower-row LEFT-entry geometry: 3-row
     layout with target in the bottom row, source in the top row to the
     right of target, and an intervening section in the middle row whose
     bbox falls in the inter-row channel's Y range.
