@@ -5,13 +5,21 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 
-from nf_metro.layout.constants import OFFSET_STEP
-from nf_metro.layout.routing.invariants import classify_merge_port_feeders
+from nf_metro.layout.constants import (
+    COORD_TOLERANCE_FINE,
+    OFFSET_STEP,
+    SAME_Y_TOLERANCE,
+)
+from nf_metro.layout.routing.invariants import (
+    check_partial_branch_offset_gaps,
+    classify_merge_port_feeders,
+    distinct_offset_levels,
+)
 from nf_metro.layout.routing.reversal import detect_reversed_sections
 from nf_metro.parser.model import MetroGraph, PortSide
 
 # Tolerances used across offset phases
-_SAME_Y_TOLERANCE: float = 0.1
+_SAME_Y_TOLERANCE: float = SAME_Y_TOLERANCE
 _OFFSET_EQ_TOLERANCE: float = 0.001
 
 
@@ -1165,27 +1173,18 @@ def _recenter_partial_fan_branches(ctx: _OffsetCtx) -> None:
     if not ctx.compact:
         return
 
-    from nf_metro.layout.routing.invariants import check_partial_branch_offset_gaps
-
-    graph = ctx.graph
     for violation in check_partial_branch_offset_gaps(
-        graph, ctx.offsets, offset_step=ctx.offset_step
+        ctx.graph, ctx.offsets, offset_step=ctx.offset_step
     ):
-        sid = violation.station_id
-        lines = graph.station_lines(sid)
-        levels: list[float] = []
-        for off in sorted(ctx.offsets.get((sid, lid), 0.0) for lid in lines):
-            if not levels or off - levels[-1] > _OFFSET_EQ_TOLERANCE:
-                levels.append(off)
+        levels = distinct_offset_levels(off for _, off in violation.offsets)
         base = levels[0]
-        for lid in lines:
-            cur = ctx.offsets.get((sid, lid), 0.0)
+        for lid, cur in violation.offsets:
             idx = next(
                 i
                 for i, lvl in enumerate(levels)
-                if abs(lvl - cur) <= _OFFSET_EQ_TOLERANCE
+                if abs(lvl - cur) <= COORD_TOLERANCE_FINE
             )
-            ctx.offsets[(sid, lid)] = base + idx * ctx.offset_step
+            ctx.offsets[(violation.station_id, lid)] = base + idx * ctx.offset_step
 
 
 def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> None:

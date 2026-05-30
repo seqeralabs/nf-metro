@@ -25,7 +25,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 
-from nf_metro.layout.constants import COORD_TOLERANCE_FINE, OFFSET_STEP
+from nf_metro.layout.constants import (
+    COORD_TOLERANCE_FINE,
+    OFFSET_STEP,
+    SAME_Y_TOLERANCE,
+)
 from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
@@ -520,12 +524,8 @@ def check_merge_port_approach_side(
 # Partial-line fan-branch offset gaps
 # ---------------------------------------------------------------------------
 
-# Two stations share a base Y row when their centres are within this many
-# px; matches the offset module's same-Y tolerance.
-_SAME_Y_TOL = 0.1
 
-
-def _distinct_levels(values: Iterable[float]) -> list[float]:
+def distinct_offset_levels(values: Iterable[float]) -> list[float]:
     """Return ascending offset levels, merging values within tolerance.
 
     Coincident lines (offsets within ``COORD_TOLERANCE_FINE``) collapse
@@ -560,17 +560,13 @@ def is_independent_fan_branch(graph: MetroGraph, station_id: str) -> bool:
         return False
     if len(graph.station_lines(station_id)) < 2:
         return False
-    for edge in graph.edges:
-        if edge.source == station_id:
-            other_id = edge.target
-        elif edge.target == station_id:
-            other_id = edge.source
-        else:
-            continue
+    neighbours = [e.target for e in graph.edges_from(station_id)]
+    neighbours += [e.source for e in graph.edges_to(station_id)]
+    for other_id in neighbours:
         other = graph.stations.get(other_id)
         if other is None or other.section_id != st.section_id:
             continue
-        if abs(other.y - st.y) <= _SAME_Y_TOL:
+        if abs(other.y - st.y) <= SAME_Y_TOLERANCE:
             return False
     return True
 
@@ -620,7 +616,7 @@ def check_partial_branch_offset_gaps(
         sorted_offs = sorted(
             (offsets.get((sid, lid), 0.0), lid) for lid in graph.station_lines(sid)
         )
-        levels = _distinct_levels(off for off, _ in sorted_offs)
+        levels = distinct_offset_levels(off for off, _ in sorted_offs)
         # A reserved absent-line slot is an interior gap between two
         # distinct occupied levels wider than one step.  Lines that share
         # a level (coincident) collapse to one level and never trip this.
@@ -649,6 +645,7 @@ __all__ = [
     "check_merge_port_approach_side",
     "check_partial_branch_offset_gaps",
     "classify_merge_port_feeders",
+    "distinct_offset_levels",
     "fanout_junctions",
     "is_independent_fan_branch",
 ]

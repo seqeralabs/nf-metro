@@ -137,6 +137,9 @@ COORD_TOLERANCE: float = 1.0
 COORD_TOLERANCE_FINE: float = 0.01
 """Fine tolerance for detecting nearly identical Y coordinates."""
 
+SAME_Y_TOLERANCE: float = 0.1
+"""Tolerance for treating two stations as sharing a base Y row."""
+
 CROSS_ROW_THRESHOLD: float = 80.0
 """Y gap threshold for detecting cross-row (fold) edges."""
 
