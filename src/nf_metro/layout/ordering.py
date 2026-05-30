@@ -517,8 +517,11 @@ def _place_fan_out(
 
     # Phantom-trunk placement: an entry-runway phantom is the line's
     # through-trunk into a convergence target, so pin it at anchor and
-    # fan the real fan-in branches above it (keeping the trunk straight
-    # through the junction; #420).
+    # fan the real fan-in branches above it -- the phantom enters from the
+    # section's left edge at the trunk track, so the merging branches read
+    # cleanest dropping in from above (note this fans the OPPOSITE way to
+    # the line-superset trunk_node block below, which fans branches down).
+    # Keeps the trunk straight through the junction (#420).
     phantom_trunk = _phantom_trunk_node(nodes, graph)
     if phantom_trunk is not None:
         tracks[phantom_trunk] = anchor
