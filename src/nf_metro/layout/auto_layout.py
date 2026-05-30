@@ -727,12 +727,10 @@ def _infer_directions(
     Fold sections are forced to TB (they bridge between row bands).
     Sections whose predecessors are all to the right get RL.
 
-    Explicitly-gridded sections keep the default LR unless they carry an
-    explicit %%metro direction. Their grid position is the author's manual
-    layout intent, not a flow-direction signal: inferring RL/TB from it
-    reorients serpentine-stacked sections vertically (see #446). Skipping
-    them also avoids the stale grid_col == -1 these sections read during
-    auto-layout, which previously fired spurious RL/TB against auto-placed
+    Explicitly-gridded sections are skipped: their grid position is manual
+    layout intent, not a flow-direction signal (#446). They also still read
+    grid_col == -1 here (the override is applied later in section_placement),
+    so without the skip the -1 fires spurious RL/TB against auto-placed
     neighbours in mixed grids.
     """
     for sec_id, section in graph.sections.items():

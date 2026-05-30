@@ -214,10 +214,8 @@ def _guard_explicit_grid_directions(graph: MetroGraph, phase: str) -> None:
     """
     offenders = {
         sid: graph.sections[sid].direction
-        for sid in graph._explicit_grid
-        if sid in graph.sections
-        and sid not in graph._explicit_directions
-        and graph.sections[sid].direction != "LR"
+        for sid in graph._explicit_grid - graph._explicit_directions
+        if sid in graph.sections and graph.sections[sid].direction != "LR"
     }
     if offenders:
         raise PhaseInvariantError(
