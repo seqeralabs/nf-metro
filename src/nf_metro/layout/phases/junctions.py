@@ -37,6 +37,76 @@ def _junction_incoming_line_count(graph: MetroGraph, jid: str) -> int:
     return len({e.line_id for e in graph.edges_to(jid)}) or 1
 
 
+def _compute_junction_xy(graph: MetroGraph, jid: str) -> tuple[float, float] | None:
+    """Return the (x, y) ``_position_junctions`` would assign to *jid*.
+
+    Pure function of the current port/predecessor coordinates - reads no
+    stored junction position.  Returns ``None`` when the junction has no
+    resolvable placement (no positioned exit port and not a recognised
+    merge), in which case ``_position_junctions`` leaves it untouched.
+
+    Backs both the repair (``_position_junctions``) and the
+    ``junctions_track_ports`` maintained invariant's predicate, so the two
+    cannot drift.
+    """
+    junction = graph.stations.get(jid)
+    if not junction:
+        return None
+
+    predecessors: list[Station] = []
+    successor_ports: list[Station] = []
+    exit_port_id: str | None = None
+
+    for edge in graph.edges_to(jid):
+        src = graph.stations.get(edge.source)
+        if src:
+            predecessors.append(src)
+            if src.is_port:
+                exit_port_id = edge.source
+    for edge in graph.edges_from(jid):
+        tgt = graph.stations.get(edge.target)
+        if tgt and tgt.is_port:
+            successor_ports.append(tgt)
+
+    # Merge junction: N>1 predecessors, 1 entry port successor
+    if len(predecessors) > 1 and len(successor_ports) == 1:
+        entry_port = successor_ports[0]
+        entry_port_obj = graph.ports.get(entry_port.id)
+        if entry_port_obj and entry_port_obj.is_entry:
+            return _merge_junction_xy(
+                predecessors,
+                entry_port,
+                n=_junction_incoming_line_count(graph, jid),
+            )
+
+    # Fan-out junction: 1 exit port predecessor, N>1 entry port successors
+    exit_port_x: float | None = None
+    exit_port_y: float | None = None
+    entry_port_xs: list[float] = []
+
+    for pred in predecessors:
+        if pred.is_port:
+            exit_port_x = pred.x
+            exit_port_y = pred.y
+
+    for succ in successor_ports:
+        entry_port_xs.append(succ.x)
+
+    if exit_port_x is None or exit_port_y is None or not entry_port_xs:
+        return None
+
+    margin = _required_junction_margin(_junction_outgoing_line_count(graph, jid))
+    exit_port_obj = graph.ports.get(exit_port_id) if exit_port_id else None
+    if exit_port_obj and exit_port_obj.side == PortSide.BOTTOM:
+        return exit_port_x, exit_port_y + margin
+    if exit_port_obj and exit_port_obj.side in (PortSide.RIGHT, PortSide.LEFT):
+        direction = 1.0 if exit_port_obj.side == PortSide.RIGHT else -1.0
+        return exit_port_x + direction * margin, exit_port_y
+    nearest_entry_x = min(entry_port_xs, key=lambda x: abs(x - exit_port_x))
+    direction = 1.0 if nearest_entry_x > exit_port_x else -1.0
+    return exit_port_x + direction * margin, exit_port_y
+
+
 def _position_junctions(graph: MetroGraph) -> None:
     """Position junction stations at the midpoint of the inter-section gap.
 
@@ -52,78 +122,17 @@ def _position_junctions(graph: MetroGraph) -> None:
         junction = graph.stations.get(jid)
         if not junction:
             continue
-
-        # Collect predecessors and successors
-        predecessors: list[Station] = []
-        successor_ports: list[Station] = []
-        exit_port_id: str | None = None
-
-        for edge in graph.edges_to(jid):
-            src = graph.stations.get(edge.source)
-            if src:
-                predecessors.append(src)
-                if src.is_port:
-                    exit_port_id = edge.source
-        for edge in graph.edges_from(jid):
-            tgt = graph.stations.get(edge.target)
-            if tgt and tgt.is_port:
-                successor_ports.append(tgt)
-
-        # Merge junction: N>1 predecessors, 1 entry port successor
-        if len(predecessors) > 1 and len(successor_ports) == 1:
-            entry_port = successor_ports[0]
-            entry_port_obj = graph.ports.get(entry_port.id)
-            if entry_port_obj and entry_port_obj.is_entry:
-                _position_merge_junction(
-                    junction,
-                    predecessors,
-                    entry_port,
-                    n=_junction_incoming_line_count(graph, jid),
-                )
-                continue
-
-        # Fan-out junction: 1 exit port predecessor, N>1 entry port successors
-        exit_port_x: float | None = None
-        exit_port_y: float | None = None
-        entry_port_xs: list[float] = []
-
-        for pred in predecessors:
-            if pred.is_port:
-                exit_port_x = pred.x
-                exit_port_y = pred.y
-
-        for succ in successor_ports:
-            entry_port_xs.append(succ.x)
-
-        if exit_port_x is not None and exit_port_y is not None and entry_port_xs:
-            margin = _required_junction_margin(
-                _junction_outgoing_line_count(graph, jid)
-            )
-            exit_port_obj = graph.ports.get(exit_port_id) if exit_port_id else None
-            if exit_port_obj and exit_port_obj.side == PortSide.BOTTOM:
-                junction.x = exit_port_x
-                junction.y = exit_port_y + margin
-            elif exit_port_obj and exit_port_obj.side in (
-                PortSide.RIGHT,
-                PortSide.LEFT,
-            ):
-                direction = 1.0 if exit_port_obj.side == PortSide.RIGHT else -1.0
-                junction.x = exit_port_x + direction * margin
-                junction.y = exit_port_y
-            else:
-                nearest_entry_x = min(entry_port_xs, key=lambda x: abs(x - exit_port_x))
-                direction = 1.0 if nearest_entry_x > exit_port_x else -1.0
-                junction.x = exit_port_x + direction * margin
-                junction.y = exit_port_y
+        target = _compute_junction_xy(graph, jid)
+        if target is not None:
+            junction.x, junction.y = target
 
 
-def _position_merge_junction(
-    junction: Station,
+def _merge_junction_xy(
     predecessors: list[Station],
     entry_port: Station,
     n: int = 1,
-) -> None:
-    """Position a merge junction near the entry port it feeds.
+) -> tuple[float, float]:
+    """Return the (x, y) a merge junction near *entry_port* should occupy.
 
     Places at x = max(predecessor.x) + _required_junction_margin(n),
     y = entry_port.y so all converging lines share a visible single-line
@@ -139,10 +148,8 @@ def _position_merge_junction(
     # width into the entry.  Merge local to the target instead, so only the
     # individual feeders make the long approach and the merge->entry hop is short.
     if entry_port.x < max_pred_x - margin:
-        junction.x = entry_port.x - margin
-    else:
-        junction.x = max_pred_x + margin
-    junction.y = entry_port.y
+        return entry_port.x - margin, entry_port.y
+    return max_pred_x + margin, entry_port.y
 
 
 def _resolve_source_section_id(

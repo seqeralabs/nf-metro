@@ -137,13 +137,21 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     inter_section_route_backtrack_legs,
 )
 from nf_metro.layout.phases.junctions import (  # noqa: F401
+    _compute_junction_xy,
     _junction_incoming_line_count,
     _junction_outgoing_line_count,
+    _merge_junction_xy,
     _position_junctions,
-    _position_merge_junction,
     _required_junction_margin,
     _resolve_source_section_id,
     _resolve_source_xy,
+)
+from nf_metro.layout.phases.maintained import (  # noqa: F401
+    JUNCTIONS_TRACK_PORTS,
+    MaintainedInvariant,
+    assert_maintained,
+    canvas_top_margin,
+    maintain,
 )
 from nf_metro.layout.phases.off_track import (  # noqa: F401
     _align_phantom_pass_throughs,
@@ -226,6 +234,17 @@ Controlled by the ``validate`` parameter on ``compute_layout``.
 Tests pass ``validate=True`` to catch cross-phase corruption that would
 otherwise only surface as subtle visual defects.
 """
+
+
+# Invariants kept alive across Pass-C settling (#365).  Each constructive
+# Pass-C phase that may perturb one is followed by ``maintain(graph, ...)``,
+# which re-applies any violated invariant's repair in priority order.  This
+# replaces the hand-placed restore calls (the repeated ``_position_junctions``
+# and ``_shift_graph_into_canvas`` re-runs) with declared rules, so a new
+# phase needs no "remember to re-run the restore" bookkeeping.
+def _pass_c_maintained(section_y_padding: float) -> list[MaintainedInvariant]:
+    """The Pass-C invariant set, bound to this layout's spacing params."""
+    return [JUNCTIONS_TRACK_PORTS, canvas_top_margin(section_y_padding)]
 
 
 def compute_min_y_spacing(
@@ -728,16 +747,21 @@ def _compute_section_layout(
     # port pairs (re-running Stage 5.1 for the junctions that move
     # with them).  Stage 6 below handles the rest of Pass C.
 
+    # Invariants maintained across the Pass-C settle (#365), bound to this
+    # layout's spacing.  Each constructive phase below is followed by
+    # ``maintain(graph, maintained)`` instead of hand-placed restore calls.
+    maintained = _pass_c_maintained(section_y_padding)
+
     # Stage 5.1: Position junction stations in the inter-section gap.
     _position_junctions(graph)
 
     # Stage 5.2: Lift off_track stations above their section's top track.
     # Runs last so it operates on finalised station Ys and bboxes.
     _lift_off_track_stations(graph, y_spacing, section_y_padding)
-    # The upward bbox growth above can push the topmost section above
-    # the canvas top margin set by Stage 1.5; shift the whole graph
-    # down to restore the margin.  No-op when no section overflowed.
-    _shift_graph_into_canvas(graph, section_y_padding)
+    # The upward bbox growth above can push the topmost section above the
+    # canvas top margin; the canvas_top_margin invariant shifts the whole
+    # graph down to restore it (no-op when no section overflowed).
+    maintain(graph, maintained)
     if validate:
         _run_pass_c_guards(graph, "after Stage 5.2")
 
@@ -766,7 +790,7 @@ def _compute_section_layout(
     # port Y, and either the snap pass or ``_compact_row_content_to_bbox_top``
     # may have moved the exit port since then.
     _snap_inter_section_port_pairs(graph)
-    _position_junctions(graph)
+    maintain(graph, maintained)
     if validate:
         _run_pass_c_guards(graph, "after Stage 5.5")
 
@@ -819,7 +843,7 @@ def _compute_section_layout(
     # snap re-anchors them to the moved exit ports so the L-shape route
     # doesn't U-turn through a stale junction Y.
     _snap_all_y_to_grid(graph, y_spacing)
-    _position_junctions(graph)
+    maintain(graph, maintained)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.4")
 
@@ -840,8 +864,9 @@ def _compute_section_layout(
     # upward if the new position rises above the padding zone.
     _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
     # Same canvas-fit safeguard as after Stage 5.2: a reanchor-driven
-    # bbox grow can push the topmost section above the canvas top.
-    _shift_graph_into_canvas(graph, section_y_padding)
+    # bbox grow can push the topmost section above the canvas top; the
+    # canvas_top_margin invariant restores it.
+    maintain(graph, maintained)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.6")
 
@@ -870,8 +895,8 @@ def _compute_section_layout(
         _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
         # Same canvas-fit safeguard as Stage 5.2 / Stage 6.6: a
         # reanchor-driven bbox grow can push the topmost section
-        # above the canvas top.
-        _shift_graph_into_canvas(graph, section_y_padding)
+        # above the canvas top; the canvas_top_margin invariant restores it.
+        maintain(graph, maintained)
 
         # Stage 6.9: Re-run row top-align.  A Stage 6.8 reanchor-
         # driven bbox grow leaves the section's bbox above its row
@@ -922,7 +947,7 @@ def _compute_section_layout(
     # the now-shifted exit/entry port Ys (otherwise the trunk dips to
     # the junction's pre-shift Y and produces an S-kink).
     _shrink_and_tighten_rows(graph, section_y_padding, section_y_gap)
-    _position_junctions(graph)
+    maintain(graph, maintained)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.13")
 
@@ -937,10 +962,11 @@ def _compute_section_layout(
         graph, y_spacing, section_y_padding, section_y_gap
     )
     # The shift can move an exit port off the Y it held when junctions were
-    # last positioned (Stage 6.13).  Re-anchor junctions to the settled port
-    # Ys so a fan-out bundle runs straight from exit to junction instead of
-    # dipping to a stale junction Y and back (#386).
-    _position_junctions(graph)
+    # last positioned (Stage 6.13).  The junctions_track_ports invariant
+    # re-anchors them to the settled port Ys so a fan-out bundle runs
+    # straight from exit to junction instead of dipping to a stale junction
+    # Y and back (#386).
+    maintain(graph, maintained)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.14")
 
@@ -955,7 +981,7 @@ def _compute_section_layout(
     # re-fit's non-grid shift is then cleaned up by the Stage 6.15
     # canvas snap below.
     _grow_bboxes_to_content_top(graph, section_y_padding, section_y_gap)
-    _shift_graph_into_canvas(graph, section_y_padding)
+    maintain(graph, maintained)
 
     # Stage 6.15: Restore canvas-wide grid alignment after all settling.
     # Stage 6.4 snaps to a per-row grid; later helpers (notably
@@ -980,13 +1006,14 @@ def _compute_section_layout(
     # re-snaps the port to its now-settled feeder.  Junctions are
     # re-anchored afterwards for the same reason as Stages 6.13/6.14.
     _align_entry_ports(graph, tb_only=True)
-    _position_junctions(graph)
+    maintain(graph, maintained)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.16")
 
     if validate:
         phase = "after final"
         offsets, routes = _run_pass_c_guards(graph, phase)
+        assert_maintained(graph, maintained, phase)
         _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
         _guard_off_track_inputs_above_consumer(graph, phase)
         _guard_fanout_junction_shares_exit_port_y(graph, phase)
