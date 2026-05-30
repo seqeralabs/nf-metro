@@ -54,3 +54,5 @@ class Theme:
     terminus_corner_radius: float = 2.0
     terminus_font_size: float = 7.5
     terminus_font_color: str = ""  # empty = inherit label_color
+    # Bridge glyph at non-merging line crossings
+    bridge_glyph: bool = True

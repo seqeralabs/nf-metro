@@ -229,6 +229,29 @@ ICON_CLEARANCE_MARGIN: float = 4.0
 """Extra clearance around terminus icons when computing section bounds."""
 
 # ---------------------------------------------------------------------------
+# Bridge glyph (non-merging line crossings)
+# ---------------------------------------------------------------------------
+BRIDGE_GAP_HALF: float = 6.0
+"""Padding added on each side of the crossing span when breaking the
+under-line, so the gap clears the over bundle's outermost lines."""
+
+BRIDGE_NODE_TOLERANCE: float = 14.0
+"""A crossing within this distance of any station/junction/port the layout
+places is treated as an interchange, not a crossing, and gets no bridge."""
+
+BRIDGE_MIN_ANGLE_DEG: float = 12.0
+"""Minimum angle between two segments for their intersection to count as a
+crossing (near-parallel bundle slivers are not crossings)."""
+
+BRIDGE_CLUSTER_RADIUS: float = 30.0
+"""Crossings within this distance are treated as one bundle-crossing event:
+the whole under bundle breaks with a single gap spanning the over bundle."""
+
+BRIDGE_CORNER_CLEARANCE: float = 2.0
+"""A crossing must sit at least ``curve_radius + this`` from a corner of the
+under-line, so the break never lands inside a smoothed corner."""
+
+# ---------------------------------------------------------------------------
 # Line styles (stroke dash arrays)
 # ---------------------------------------------------------------------------
 STROKE_DASHARRAY: dict[str, str] = {

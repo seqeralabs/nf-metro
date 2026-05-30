@@ -23,6 +23,7 @@ from nf_metro.parser.model import (
     Section,
     Station,
 )
+from nf_metro.render.bridges import BridgeBreak, compute_bridges
 from nf_metro.render.constants import (
     CANVAS_PADDING,
     DEBUG_DIAMOND_RADIUS,
@@ -659,15 +660,25 @@ def _render_edges(
     line_priority = {lid: i for i, lid in enumerate(graph.lines)}
     routes = sorted(routes, key=lambda r: -line_priority.get(r.line_id, -1))
 
-    for route in routes:
+    polylines = [apply_route_offsets(route, station_offsets) for route in routes]
+    bridges: dict[int, list[BridgeBreak]] = (
+        compute_bridges(graph, routes, polylines, curve_radius=curve_radius)
+        if theme.bridge_glyph
+        else {}
+    )
+
+    for route, pts in zip(routes, polylines):
         line = graph.lines.get(route.line_id)
         color = line.color if line else FALLBACK_LINE_COLOR
         style_kw = line_style_kwargs(line.style) if line else {}
         class_name = f"metro-line-{route.line_id}"
+        breaks = bridges.get(id(route))
 
-        pts = apply_route_offsets(route, station_offsets)
-
-        if len(pts) == 2:
+        if breaks:
+            _render_bridged_edge(
+                d, pts, route, breaks, color, style_kw, class_name, theme, curve_radius
+            )
+        elif len(pts) == 2:
             d.append(
                 draw.Line(
                     pts[0][0],
@@ -727,6 +738,74 @@ def _render_edges(
 
             path.L(*pts[-1])
             d.append(path)
+
+
+def _render_bridged_edge(
+    d: draw.Drawing,
+    pts: list[tuple[float, float]],
+    route: RoutedPath,
+    breaks: list[BridgeBreak],
+    color: str,
+    style_kw: dict,
+    class_name: str,
+    theme: Theme,
+    curve_radius: float,
+) -> None:
+    """Render an under-line interrupted by a short gap at each crossing.
+
+    The line is drawn exactly as the continuous case except that, on every
+    straight run carrying a crossing, the pen lifts across a small gap so the
+    over-line reads as passing over the top.
+    """
+    resolved = resolve_curve_radii(pts, route.curve_radii, default_radius=curve_radius)
+    m = len(pts) - 1
+
+    # Curve entry/exit per interior vertex (apex points when no curve).
+    before: dict[int, tuple[float, float]] = {}
+    after: dict[int, tuple[float, float]] = {}
+    for i in range(1, m):
+        prev, curr, nxt = pts[i - 1], pts[i], pts[i + 1]
+        len1 = ((curr[0] - prev[0]) ** 2 + (curr[1] - prev[1]) ** 2) ** 0.5
+        len2 = ((nxt[0] - curr[0]) ** 2 + (nxt[1] - curr[1]) ** 2) ** 0.5
+        r = resolved[i - 1]
+        if len1 > 0 and len2 > 0:
+            before[i] = (
+                curr[0] - (curr[0] - prev[0]) / len1 * r,
+                curr[1] - (curr[1] - prev[1]) / len1 * r,
+            )
+            after[i] = (
+                curr[0] + (nxt[0] - curr[0]) / len2 * r,
+                curr[1] + (nxt[1] - curr[1]) / len2 * r,
+            )
+        else:
+            before[i] = after[i] = curr
+
+    path = draw.Path(
+        stroke=color,
+        stroke_width=theme.line_width,
+        fill="none",
+        stroke_linecap="round",
+        stroke_linejoin="round",
+        class_=class_name,
+        **{"data-line-id": route.line_id},
+        **style_kw,
+    )
+    path.M(*pts[0])
+    for s in range(m):
+        run_start = pts[0] if s == 0 else after[s]
+        run_end = pts[m] if s + 1 == m else before[s + 1]
+        seg_breaks = sorted(
+            (bk for bk in breaks if bk.seg_index == s),
+            key=lambda bk: (bk.cut_a[0] - run_start[0]) ** 2
+            + (bk.cut_a[1] - run_start[1]) ** 2,
+        )
+        for bk in seg_breaks:
+            path.L(*bk.cut_a)
+            path.M(*bk.cut_b)
+        path.L(*run_end)
+        if s + 1 <= m - 1:
+            path.Q(pts[s + 1][0], pts[s + 1][1], *after[s + 1])
+    d.append(path)
 
 
 def _render_stations(
