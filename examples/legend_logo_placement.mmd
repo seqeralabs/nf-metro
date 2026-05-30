@@ -1,48 +1,64 @@
 %%metro title: Legend + logo placement
 %%metro style: dark
-%%metro logo: examples/nf-core-rnaseq_logo_dark.png
-%%metro logo_scale: 1.6
-%%metro legend: bl | canvas
-%%metro file: fq_in | FASTQ
-%%metro line: align | Alignment route | #3b82f6
-%%metro line: qc | QC route | #f59e0b
-%%metro grid: input | 0,0
-%%metro grid: alignment | 1,0
-%%metro grid: quant | 2,0
-%%metro grid: qc | 2,1
+%%metro logo: examples/placeholder_logo.png
+%%metro logo_scale: 1.7
+%%metro legend: br | canvas
+%%metro line: dna | DNA route | #3b82f6
+%%metro line: rna | RNA route | #e6842a
+%%metro grid: dna_in | 0,0
+%%metro grid: dna_align | 1,0
+%%metro grid: dna_call | 2,0
+%%metro grid: dna_report | 3,0
+%%metro grid: rna_in | 0,1
+%%metro grid: rna_quant | 1,1
 
 graph LR
-    subgraph input [Input]
-        %%metro exit: right | align
-        %%metro exit: bottom | qc
-        fq_in[ ]
-        cat_fastq[Cat FASTQ]
-        fq_in -->|align,qc| cat_fastq
+    subgraph dna_in [DNA input]
+        %%metro exit: right | dna
+        d_fastq[FASTQ]
+        d_trim[Trim]
+        d_fastq -->|dna| d_trim
     end
 
-    subgraph alignment [Alignment]
-        %%metro entry: left | align
-        %%metro exit: right | align
+    subgraph dna_align [Alignment]
+        %%metro entry: left | dna
+        %%metro exit: right | dna
         bwa[BWA-MEM]
         sort[Sort]
-        bwa -->|align| sort
+        bwa -->|dna| sort
     end
 
-    subgraph quant [Quantification]
-        %%metro entry: left | align
+    subgraph dna_call [Variant calling]
+        %%metro entry: left | dna
+        %%metro exit: right | dna
+        call[Caller]
+        filt[Filter]
+        call -->|dna| filt
+    end
+
+    subgraph dna_report [Reporting]
+        %%metro entry: left | dna
+        annot[Annotate]
+        report[Report]
+        annot -->|dna| report
+    end
+
+    subgraph rna_in [RNA input]
+        %%metro exit: right | rna
+        r_fastq[FASTQ]
+        r_trim[Trim]
+        r_fastq -->|rna| r_trim
+    end
+
+    subgraph rna_quant [Quantification]
+        %%metro entry: left | rna
         salmon[Salmon]
         sum_exp[Sum. Exp.]
-        salmon -->|align| sum_exp
+        salmon -->|rna| sum_exp
     end
 
-    subgraph qc [Quality control]
-        %%metro entry: left | qc
-        fastqc[FastQC]
-        multiqc[MultiQC]
-        fastqc -->|qc| multiqc
-    end
-
-    %% Inter-section edges
-    cat_fastq -->|align| bwa
-    sort -->|align| salmon
-    cat_fastq -->|qc| fastqc
+    %% Inter-section edges (each arm stays in its own row)
+    d_trim -->|dna| bwa
+    sort -->|dna| call
+    filt -->|dna| annot
+    r_trim -->|rna| salmon

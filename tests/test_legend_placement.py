@@ -65,12 +65,13 @@ def _place(text: str):
         logo_w,
         logo_h,
         pos,
+        routes,
     )
     content_left = min(
         (s.bbox_x for s in graph.sections.values() if s.bbox_w > 0),
         default=S.CANVAS_PADDING,
     )
-    return graph, res, max_x, max_y, content_left
+    return graph, res, max_x, max_y, content_left, routes
 
 
 @pytest.mark.parametrize("fixture", FIXTURES, ids=lambda p: p.stem)
@@ -91,7 +92,7 @@ def test_legend_offset_applies_and_skips_fallback(fixture):
     overlap a section (the historical fallback is disabled for explicit pins).
     """
     dx, dy = 40.0, -30.0
-    _g, (lx, ly, lw, lh, show), max_x, max_y, _cl = _place(
+    _g, (lx, ly, lw, lh, show), max_x, max_y, _cl, _routes = _place(
         _with_legend(fixture, f"br | {dx:+},{dy:+}")
     )
     assert show
@@ -107,7 +108,7 @@ def test_legend_canvas_anchor_pins_bottom_right(fixture):
     Even when the corner overlaps a section (rnaseq_sections), the block stays
     pinned right rather than relocating to the bottom-left.
     """
-    _g, (lx, ly, lw, lh, show), max_x, max_y, content_left = _place(
+    _g, (lx, ly, lw, lh, show), max_x, max_y, content_left, _routes = _place(
         _with_legend(fixture, "br | canvas")
     )
     assert show
@@ -125,9 +126,32 @@ def test_bare_corner_keeps_overlap_fallback():
     keep falling back to the bottom-left below content (unchanged behaviour).
     """
     fixture = EXAMPLES / "rnaseq_sections.mmd"
-    _g, (lx, ly, _lw, lh, show), _max_x, max_y, content_left = _place(
+    _g, (lx, ly, _lw, lh, show), _max_x, max_y, content_left, _routes = _place(
         _with_legend(fixture, "br")
     )
     assert show
     assert lx == pytest.approx(content_left)
     assert ly > max_y - lh
+
+
+def test_keyword_legend_never_overlaps_routes():
+    """A bare corner keyword relocates so the block clears all routes.
+
+    On legend_logo_placement the QC line runs across the lower-left where a
+    bare `bl` would sit, so auto-placement must move the block off the route.
+    """
+    fixture = EXAMPLES / "legend_logo_placement.mmd"
+    _g, (lx, ly, lw, lh, show), _mx, _my, _cl, routes = _place(
+        _with_legend(fixture, "bl")
+    )
+    assert show
+    assert not S._legend_overlaps_routes(
+        lx, ly, lw, lh, routes, S.LEGEND_ROUTE_CLEARANCE
+    )
+
+
+def test_explicit_pin_warns_on_route_overlap():
+    """An explicit pin is honoured as placed but warns when it hits a route."""
+    fixture = EXAMPLES / "legend_logo_placement.mmd"
+    with pytest.warns(UserWarning, match="overlaps a section or route"):
+        _place(_with_legend(fixture, "bl | canvas"))

@@ -6,6 +6,7 @@ __all__ = ["apply_route_offsets", "render_svg"]
 
 import html
 import textwrap
+import warnings
 from pathlib import Path
 
 import drawsvg as draw
@@ -46,6 +47,7 @@ from nf_metro.render.constants import (
     ICON_STATION_GAP,
     LEGEND_GAP,
     LEGEND_INSET,
+    LEGEND_ROUTE_CLEARANCE,
     LOGO_Y_STANDALONE,
     SECTION_BOX_RADIUS,
     SECTION_LABEL_REGION_RATIO,
@@ -148,6 +150,7 @@ def _position_legend(
     logo_w: float,
     logo_h: float,
     legend_position: str,
+    routes: list[RoutedPath],
 ) -> tuple[float, float, float, float, bool]:
     """Compute legend position and dimensions.
 
@@ -156,6 +159,10 @@ def _position_legend(
     ``legend_position`` is passed in because callers may override it per render
     (only ``"none"`` is overridden in practice); the placement modifiers
     (``legend_anchor``/``legend_offset``/``legend_at``) are read from ``graph``.
+
+    A casual corner keyword auto-relocates to the bottom-left when it would
+    overlap a section or a routed line. An explicit pin (canvas anchor, offset,
+    or absolute coordinates) is honoured as placed, but warns on overlap.
     """
     legend_logo_size = (logo_w, logo_h) if logo_in_legend else None
     legend_w, legend_h = compute_legend_dimensions(
@@ -171,6 +178,13 @@ def _position_legend(
     # Absolute placement (legend: x,y) pins the block top-left exactly.
     if graph.legend_at is not None:
         legend_x, legend_y = graph.legend_at
+        if _legend_overlaps_content(
+            legend_x, legend_y, legend_w, legend_h, graph, routes
+        ):
+            warnings.warn(
+                f"legend placed at {graph.legend_at} overlaps a section or route.",
+                stacklevel=2,
+            )
         return legend_x, legend_y, legend_w, legend_h, show_legend
 
     pos = legend_position
@@ -213,18 +227,24 @@ def _position_legend(
         legend_y = top
 
     # An explicit pin (canvas anchor or offset) means the author placed the
-    # block deliberately, so skip the overlap fallback that auto-relocates a
-    # casual corner keyword to the bottom-left.
+    # block deliberately, so don't auto-relocate it; warn instead if it
+    # overlaps. A casual corner keyword relocates to the bottom-left when it
+    # would overlap a section or a routed line.
     explicit_pin = graph.legend_anchor == "canvas" or graph.legend_offset is not None
     if graph.legend_offset is not None:
         legend_x += graph.legend_offset[0]
         legend_y += graph.legend_offset[1]
 
-    if (
-        not explicit_pin
-        and pos not in ("bottom", "right")
-        and _legend_overlaps_sections(legend_x, legend_y, legend_w, legend_h, graph)
-    ):
+    overlaps = _legend_overlaps_content(
+        legend_x, legend_y, legend_w, legend_h, graph, routes
+    )
+    if explicit_pin:
+        if overlaps:
+            warnings.warn(
+                f"legend pinned at '{pos}' overlaps a section or route.",
+                stacklevel=2,
+            )
+    elif pos not in ("bottom", "right") and overlaps:
         legend_x = content_left
         legend_y = max_y + gap
 
@@ -362,6 +382,7 @@ def render_svg(
         logo_w,
         logo_h,
         effective_legend_position,
+        routes,
     )
 
     if show_legend:
@@ -484,6 +505,76 @@ def _legend_overlaps_sections(
         ):
             return True
     return False
+
+
+def _segment_intersects_rect(
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    rx: float,
+    ry: float,
+    rw: float,
+    rh: float,
+) -> bool:
+    """Liang-Barsky test: does segment (x1,y1)-(x2,y2) touch the rect?"""
+    xmin, xmax = rx, rx + rw
+    ymin, ymax = ry, ry + rh
+    dx, dy = x2 - x1, y2 - y1
+    # Both endpoints inside trivially intersects; the loop below also covers it.
+    p = (-dx, dx, -dy, dy)
+    q = (x1 - xmin, xmax - x1, y1 - ymin, ymax - y1)
+    t0, t1 = 0.0, 1.0
+    for pi, qi in zip(p, q):
+        if pi == 0:
+            if qi < 0:
+                return False  # parallel and outside this slab
+        else:
+            t = qi / pi
+            if pi < 0:
+                if t > t1:
+                    return False
+                if t > t0:
+                    t0 = t
+            else:
+                if t < t0:
+                    return False
+                if t < t1:
+                    t1 = t
+    return True
+
+
+def _legend_overlaps_routes(
+    lx: float,
+    ly: float,
+    lw: float,
+    lh: float,
+    routes: list[RoutedPath],
+    margin: float,
+) -> bool:
+    """Check if a legend rectangle (grown by *margin*) crosses any route."""
+    rx, ry = lx - margin, ly - margin
+    rw, rh = lw + 2 * margin, lh + 2 * margin
+    for route in routes:
+        pts = route.points
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+            if _segment_intersects_rect(x1, y1, x2, y2, rx, ry, rw, rh):
+                return True
+    return False
+
+
+def _legend_overlaps_content(
+    lx: float,
+    ly: float,
+    lw: float,
+    lh: float,
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+) -> bool:
+    """Whether the legend rect overlaps a section box or a routed line."""
+    return _legend_overlaps_sections(lx, ly, lw, lh, graph) or _legend_overlaps_routes(
+        lx, ly, lw, lh, routes, LEGEND_ROUTE_CLEARANCE
+    )
 
 
 def _version_string() -> str:

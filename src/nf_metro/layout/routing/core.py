@@ -588,6 +588,23 @@ def _route_inter_section(
                     edge, src, tgt, i, src_col, tgt_col, ctx, src_row
                 )
             return _route_merge_branch(edge, src, ctx, src_col)
+        # A downward cross-column feeder into a LEFT entry descends into the
+        # row below before its horizontal run, so intervening sections in the
+        # SOURCE row are not obstacles. When the L-shape's horizontal at the
+        # entry Y is clear of other sections, drop straight in instead of
+        # looping to the canvas bottom (_route_bypass).
+        if (
+            tgt_port is not None
+            and tgt_port.is_entry
+            and tgt_port.side == PortSide.LEFT
+            and src_row is not None
+            and tgt_row is not None
+            and tgt_row > src_row
+        ):
+            exclude = {src.section_id, tgt.section_id}
+            exclude.discard(None)
+            if not _h_segment_crosses_other_section(graph, sx, tx, ty, exclude):
+                return _route_l_shape(edge, src, tgt, i, n, ctx)
         return _route_bypass(edge, src, tgt, i, src_col, tgt_col, ctx, src_row)
 
     # Near-vertical: junction to same-column entry with tiny horizontal
