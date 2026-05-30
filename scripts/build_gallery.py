@@ -75,9 +75,9 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "legend_logo_placement",
         EXAMPLES_DIR,
         "Demonstrates positioning the bundled legend+logo block: `%%metro "
-        "legend: br | canvas` pins it to the empty lower-right and `%%metro "
-        "logo_scale:` enlarges the embedded logo. Also supports `| dx,dy` "
-        "offsets and absolute `x,y` placement.",
+        "legend: bl | canvas` pins it to the empty lower-left canvas corner and "
+        "`%%metro logo_scale:` enlarges the embedded logo. The directive also "
+        "supports `| dx,dy` offsets and absolute `x,y` placement.",
     ),
     (
         "tb_file_termini",

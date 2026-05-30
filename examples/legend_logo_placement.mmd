@@ -2,18 +2,19 @@
 %%metro style: dark
 %%metro logo: examples/nf-core-rnaseq_logo_dark.png
 %%metro logo_scale: 1.6
-%%metro legend: br | canvas
+%%metro legend: bl | canvas
 %%metro file: fq_in | FASTQ
 %%metro line: align | Alignment route | #3b82f6
 %%metro line: qc | QC route | #f59e0b
 %%metro grid: input | 0,0
 %%metro grid: alignment | 1,0
 %%metro grid: quant | 2,0
-%%metro grid: qc | 0,1
+%%metro grid: qc | 2,1
 
 graph LR
     subgraph input [Input]
-        %%metro exit: right | align, qc
+        %%metro exit: right | align
+        %%metro exit: bottom | qc
         fq_in[ ]
         cat_fastq[Cat FASTQ]
         fq_in -->|align,qc| cat_fastq

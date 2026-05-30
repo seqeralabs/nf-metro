@@ -367,7 +367,7 @@ def _parse_legend_directive(value: str, graph: MetroGraph) -> None:
     Grammar (the keyword forms stay content-anchored with the historical
     overlap fallback; the qualifier and absolute forms pin the block exactly):
 
-        legend: <keyword>              corner/edge keyword (bl/br/tl/tr/bottom/right/none)
+        legend: <keyword>              keyword (bl/br/tl/tr/bottom/right/none)
         legend: <keyword> | canvas     anchor the keyword to the canvas frame
         legend: <keyword> | <dx>,<dy>  nudge the keyword anchor by an offset
         legend: <x>,<y>                absolute top-left coordinates
@@ -387,8 +387,7 @@ def _parse_legend_directive(value: str, graph: MetroGraph) -> None:
         graph.legend_position = "free"
         if sep:
             warnings.warn(
-                f"legend qualifier {qualifier!r} ignored with absolute "
-                "coordinates.",
+                f"legend qualifier {qualifier!r} ignored with absolute coordinates.",
                 stacklevel=2,
             )
         return

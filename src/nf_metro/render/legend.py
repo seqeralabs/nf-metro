@@ -111,9 +111,7 @@ def render_legend(
     swatch_width = LEGEND_SWATCH_WIDTH
     text_offset = swatch_width + LEGEND_TEXT_GAP
 
-    text_block_h, content_height, scaled_w, scaled_h = _legend_metrics(
-        graph, logo_size
-    )
+    text_block_h, content_height, scaled_w, scaled_h = _legend_metrics(graph, logo_size)
 
     legend_width, legend_height = compute_legend_dimensions(
         graph, theme, logo_size=logo_size
