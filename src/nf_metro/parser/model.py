@@ -190,6 +190,7 @@ class MetroGraph:
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
     logo_path: str = ""
+    logo_position: str = ""  # "" (legend/top-left) or "br" (standalone bottom-right)
     # Section dependency graph (populated by auto_layout)
     section_dag: SectionDAG | None = None
     # Section IDs that had explicit %%metro direction: directives

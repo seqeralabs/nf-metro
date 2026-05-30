@@ -46,6 +46,9 @@ from nf_metro.render.constants import (
     ICON_STATION_GAP,
     LEGEND_GAP,
     LEGEND_INSET,
+    LOGO_GAP,
+    LOGO_HEIGHT_BR,
+    LOGO_HEIGHT_DEFAULT,
     LOGO_Y_STANDALONE,
     SECTION_BOX_RADIUS,
     SECTION_LABEL_REGION_RATIO,
@@ -321,10 +324,13 @@ def render_svg(
     # Compute legend and logo dimensions
     logo_w, logo_h = (0.0, 0.0)
     show_logo = graph.logo_path and Path(graph.logo_path).is_file()
+    logo_br = bool(show_logo and graph.logo_position == "br")
     if show_logo:
-        logo_w, logo_h = compute_logo_dimensions(graph.logo_path)
+        logo_h_target = LOGO_HEIGHT_BR if logo_br else LOGO_HEIGHT_DEFAULT
+        logo_w, logo_h = compute_logo_dimensions(graph.logo_path, logo_h_target)
 
-    logo_in_legend = show_logo and effective_legend_position != "none"
+    # A bottom-right standalone logo is never embedded in the legend.
+    logo_in_legend = show_logo and not logo_br and effective_legend_position != "none"
     legend_logo_size = (logo_w, logo_h) if logo_in_legend else None
 
     legend_x, legend_y, legend_w, legend_h, show_legend = _position_legend(
@@ -343,10 +349,17 @@ def render_svg(
         max_x = max(max_x, legend_x + legend_w)
         max_y = max(max_y, legend_y + legend_h)
 
-    # Standalone logo positioning (only when no legend to embed it in)
+    # Standalone logo positioning
     logo_x = 0.0
     logo_y = 0.0
-    if show_logo and not show_legend:
+    if logo_br:
+        # Bottom-right, sitting inside the content's lower-right corner to
+        # fill empty space. Lift above the legend if it shares that corner.
+        logo_x = max_x - logo_w
+        logo_y = max_y - logo_h
+        if show_legend and legend_y < logo_y + logo_h and legend_x + legend_w > logo_x:
+            logo_y = legend_y - logo_h - LOGO_GAP
+    elif show_logo and not show_legend:
         logo_x = padding
         logo_y = LOGO_Y_STANDALONE
         max_x = max(max_x, logo_x + logo_w)
@@ -374,8 +387,10 @@ def render_svg(
             draw.Rectangle(0, 0, svg_width, svg_height, fill=theme.background_color)
         )
 
-    # Title / Logo (standalone logo only when not embedded in legend)
-    if show_logo and not logo_in_legend:
+    # Top-left: a standalone top-left logo (legacy no-legend case) occupies the
+    # title slot; otherwise render the title there. A bottom-right logo does NOT
+    # claim the title slot, so the title still shows top-left alongside it.
+    if show_logo and not logo_in_legend and not logo_br:
         _render_logo(d, graph.logo_path, logo_x, logo_y, logo_w, logo_h)
     elif graph.title and not logo_in_legend:
         d.append(
@@ -390,6 +405,10 @@ def render_svg(
                 **{"class": "nf-metro-title"},
             )
         )
+
+    # Bottom-right standalone logo (rendered in addition to the title)
+    if logo_br:
+        _render_logo(d, graph.logo_path, logo_x, logo_y, logo_w, logo_h)
 
     # Sections
     if graph.sections:

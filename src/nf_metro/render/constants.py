@@ -26,6 +26,9 @@ LOGO_Y_STANDALONE: float = 5.0
 LOGO_HEIGHT_DEFAULT: float = 80.0
 """Default logo display height."""
 
+LOGO_HEIGHT_BR: float = 150.0
+"""Display height for a standalone bottom-right logo (``logo_position: br``)."""
+
 # ---------------------------------------------------------------------------
 # Legend
 # ---------------------------------------------------------------------------
