@@ -1,18 +1,28 @@
 # Spike: declarative maintained invariants (#365)
 
 **Verdict: partial land.** The mechanism works byte-identically for the
-*simple, cheap-to-check* restore invariants (junction positioning, canvas
-top-margin) and removes a real class of bug (#386). It does **not** pay for
-the complex restores (off-track stacking, row top-align, fan re-center),
-for a concrete mechanism-level reason documented below. This is outcome
-(a) from the issue, scoped: "promising for a subset, procedural phases
-survive elsewhere."
+restores that establish a *final-boundary invariant* (junction positioning,
+canvas top-margin) and removes a real class of bug (#386). It **cannot** be
+extended to a fully-uniform "run every restore to a fixpoint" system,
+because not every "restore" phase maintains an invariant - some are
+*transient transforms* whose effect is deliberately superseded later. This
+is outcome (a) from the issue, scoped: "promising for a subset, procedural
+phases survive elsewhere."
+
+A full run-everywhere overhaul was prototyped and measured (see
+"The fully-uniform experiment" below): it diverges on 7 gallery fixtures,
+and the divergence is *not* a patchable bbox-edge artifact - it overrides
+the intended layout. The hybrid (declarative invariants + procedural
+transforms) is therefore **forced by the semantics of the phases, not a
+scoping choice**.
 
 This is explicitly **not** a constraint solver. The #353 failure mode
 (Cassowary weak attractors couldn't reproduce the engine's hierarchical
 decision order) is not relitigated here: the repairs *are* the existing
 constructive helpers, applied in a *declared* order, not numeric
-attractors relaxed to equilibrium.
+attractors relaxed to equilibrium. The negative result below is the same
+wall #351/#353 hit, now with a sharper mechanism: a phase whose output is
+intentionally overridden has no invariant to declare.
 
 ## What the pipeline actually looks like
 
@@ -34,12 +44,12 @@ regresses any junction whose restore the author forgot to re-trigger -
 which is exactly #386 ("re-run `_position_junctions` after Stage 6.14 to
 kill the dip").
 
-The restore phases **are** maintained invariants. The spike lifts them
-into data: each declares a *predicate* (does it hold?), a *repair*
-(re-establish it), and a *priority* (lower repairs first). `maintain`
-applies the repairs in priority order to a fixpoint, so one
-`maintain(graph, ...)` call after each constructive phase subsumes the
-scattered manual re-runs.
+Some of these restore phases maintain a true invariant (junctions, canvas);
+others are transient transforms (see the taxonomy below). The spike lifts
+the *invariant* ones into data: each declares a *predicate* (does it hold?),
+a *repair* (re-establish it), and a *priority* (lower repairs first).
+`maintain` applies them in priority order, so one `maintain(graph, ...)`
+call after each constructive phase subsumes their scattered manual re-runs.
 
 ## What landed
 
@@ -58,55 +68,87 @@ The orchestrator's 9 manual restore calls (5 `_position_junctions`
 re-runs + 4 `_shift_graph_into_canvas`) are replaced by `maintain(graph,
 maintained)`. **All 76 gallery renders are byte-identical to main.**
 
-## Why these two invariants work and the others don't
+## Invariants vs transient transforms (the decisive taxonomy)
 
-The decisive finding: **a guard predicate is not the same as the repair's
-postcondition, and the maintained-invariant predicate must mirror the
-*repair*.**
+The "restore" phases are not all the same kind of thing. They split by one
+question: **does the property still hold at the final layout boundary?**
 
-For an idempotent repair `R`, the faithful predicate is "would `R` be a
-no-op?" - i.e. "is the state already exactly what `R` would produce?". The
-hand-written pipeline re-ran each restore *unconditionally*, so the
-invariant it kept is **exact equality**, not the looser "good enough"
-condition the validate-mode guards check.
+- **True invariants** - hold at the end, so re-establishing them whenever a
+  later phase perturbs them is always correct:
+  - `junctions_track_ports` - `junction.xy == _compute_junction_xy(ports)`,
+    a pure function of port coordinates reading no stored junction state.
+  - `canvas_top_margin` - topmost section bbox top `>= section_y_padding`;
+    its repair is a uniform whole-graph translate (moves junctions + ports
+    together, so it never breaks the junction invariant - they compose).
+  - `off_track_above_consumer` - off-track inputs sit a pitch above their
+    consumer. This *does* hold at the end, but its repair has a
+    **precondition** (final/snapped consumer Ys) and an irreversible
+    monotonic bbox-grow, so it is not safe to run before the consumers are
+    final.
+- **Transient transforms** - establish a property that a *later* phase
+  deliberately overrides, so they have no invariant to maintain:
+  - `_top_align_row_bboxes_only` flushes row bbox tops. But on `main` the
+    finished layout's row tops are **not** flush - measured 40px of
+    top-spread within a row group on `terminal_symmetric_fan` and
+    `trunk_through_fan`, because Stage 6.15a (`_grow_bboxes_to_content_top`)
+    and Stage 6.13 (shrink/tighten) re-establish *content-hugging* tops.
+    Flush-tops is a transient state used to line up off-track input bands
+    during the early settle, not a final property. Running it everywhere
+    re-flushes the boxes and reintroduces the empty band above short
+    sections - changing the design, not fixing a regression.
+  - The fan family (`_redistribute_*`, `_recenter_full_bundle_columns`,
+    `_compact_row_content_to_bbox_top`, `_shrink_and_tighten_rows`) is the
+    same: each is a one-shot transform at a specific point, not an
+    invariant.
 
-- `_position_junctions` writes `junction.xy = _compute_junction_xy(...)`,
-  a pure function of port coordinates that reads no stored junction state.
-  The "would it be a no-op?" predicate is a one-line exact comparison
-  against `_compute_junction_xy`. **Cheap and exact.** (A first cut used a
-  0.5px tolerance and diverged on `genomeassembly_staggered`, because a
-  sub-pixel port nudge moved the target while the manual code re-snapped
-  it exactly. Tightening to FP-epsilon restored byte-identity - direct
-  evidence that the invariant is exact equality.)
-- `_shift_graph_into_canvas` is a uniform whole-graph translate; its
-  no-op predicate is `min_section_bbox_top >= margin`, identical to the
-  helper's own early-return. **Cheap and exact.** Being a translate, it
-  moves junctions and ports together, so it can never break the junction
-  invariant - the two compose trivially.
+Only the true invariants belong in the maintained registry. `junctions`
+and `canvas` are run-anytime safe and are lifted (below). `off_track` is a
+true invariant but precondition-gated, so it stays procedurally placed
+after the snap until/unless the gate is worth encoding. The transforms stay
+procedural because there is no invariant to declare.
 
-The complex restores fail the cheapness test:
+This taxonomy is the **principled** basis for which phases are declarative:
+*invariants are maintained; transforms are procedural*. It is not an
+arbitrary scope line.
 
-- `_reanchor_off_track_to_consumer` pins each off-track at *exactly*
-  `consumer.y - n*y_spacing`, where the target accounts for trunk
-  line-track bands, sibling-icon clearance, and iterative overlap
-  stepping (`_place_off_track_above_consumers`). The matching guard,
-  `_guard_off_track_inputs_above_consumer`, only checks the *weak*
-  condition `off.y < consumer.y - tol`. A predicate that mirrors the
-  *repair* would have to re-derive the entire placement computation - the
-  predicate costs as much as the repair and is a fresh bug surface. The
-  guard cannot be reused as the predicate (it would say "holds" while the
-  repair would still move the icon, diverging).
-- `_top_align_row_bboxes_only` and `_recenter_full_bundle_columns` have
-  the same shape: complex postconditions whose faithful no-op predicate is
-  a re-derivation.
+## The fully-uniform experiment (negative result)
 
-So the value of the mechanism is gated on **predicate cheapness**, not on
-the priority-ordered fixpoint (which is sound - the convergence backstop
-and the junctions+canvas composition both hold). Where the repair's
-postcondition is a cheap exact predicate, lifting it removes real
-bookkeeping and a real bug class. Where it isn't, the predicate-authoring
-cost exceeds the benefit of declaring the order, and the implicit
-procedural ordering should stay.
+To test whether the hybrid was merely a scoping choice, all four restores
+(`junctions`, `canvas`, `off_track`, `top_align`) were lifted into the
+registry with a **change-detection** `maintain` (run every repair to a
+fixpoint, terminate when a pass mutates nothing - no predicate-skip), and
+every hand-placed restore call was replaced by `maintain`. Result:
+
+- **7 fixtures diverge**: `differentialabundance`,
+  `differentialabundance_default`, `da_pipeline`, `off_track_convergence`
+  (off-track), `terminal_symmetric_fan`, `trunk_through_fan`,
+  `variantbenchmarking` (fans).
+- Isolation: making `off_track` procedural again fixed the 4 off-track
+  fixtures; the 3 fan fixtures still diverged from `top_align`.
+- The `top_align` divergence is the empty-band-above-short-section change,
+  confirmed against the 40px non-flush measurement above - i.e. it is the
+  transform overriding the intended layout, not a patchable edge nudge.
+
+The experiment lives on branch `experiment/365-full-uniform` (draft PR for
+the render diff). It is kept as a documented second negative result in the
+spirit of #351/#353: a fully-uniform declarative pipeline is blocked not by
+predicate cost but by the existence of transient transforms.
+
+## A genuinely-achievable extension (if uniformity is pursued further)
+
+The principled way to extend declarativeness is to lift *more true
+invariants*, not the transforms:
+
+- `off_track_above_consumer`, gated on a "consumers are final" precondition
+  (e.g. a post-snap flag), so it is safe in the run-everywhere set.
+- Other final-boundary guards that already have an idempotent repair
+  (`_guard_row_trunk_cy_consistent`, etc.) could be re-expressed as
+  maintained invariants.
+
+This should be done **one invariant at a time, gallery-vetted with human
+eyes**, never as a blind sweep - the transforms interleave with the
+invariants in order-dependent ways, and a wholesale rewrite is the
+#351/#353 failure mode.
 
 ## Trust-but-verify finding (CONTRACT.md drift)
 
@@ -133,13 +175,17 @@ invariants (`assert_maintained`) do not.
 1. **Keep** the `maintained.py` mechanism and the two invariants. They are
    byte-identical, tested, and `assert_maintained` makes the junction/canvas
    ordering machine-checkable (closes the #386 regression class).
-2. **Adopt incrementally**: a new restore-class phase whose postcondition
-   is a cheap exact predicate should be added as a `MaintainedInvariant`,
-   not a hand-placed re-run.
-3. **Do not** force the complex restores (off-track, top-align, recenter)
-   through the mechanism. Their faithful predicate is a re-derivation of
-   the repair; the ordering is better left procedural until/unless those
-   helpers are refactored to expose a cheap "is this already placed?"
-   query.
-4. **Fix the contract drift** (separate change): add the 6.15a/6.16 rows,
-   correct the 6.11 and 4.9/4.10 gating notes.
+2. **Adopt incrementally**: a new phase that establishes a *final-boundary
+   invariant* should be added as a `MaintainedInvariant`, not a hand-placed
+   re-run. A phase that is a *transient transform* (its property is
+   overridden later) stays procedural - it has no invariant to declare.
+3. **Do not** attempt a fully-uniform run-everywhere overhaul. The
+   experiment (branch `experiment/365-full-uniform`) shows it diverges on 7
+   fixtures because `top_align` is a transient (the finished layout's row
+   tops are deliberately non-flush by 40px) and `off_track` is
+   precondition-gated. This is a documented negative result, not a TODO.
+4. **If uniformity is pursued**, lift more *true invariants* one at a time,
+   gallery-vetted (e.g. `off_track` behind a "consumers final" gate). Never
+   a blind sweep - the transforms interleave order-dependently (#351/#353).
+5. **Contract drift** is fixed separately in PR #460 (the 6.15a/6.16 rows,
+   the 6.11 and 4.9/4.10 gating notes).
