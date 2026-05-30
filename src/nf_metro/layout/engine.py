@@ -148,10 +148,12 @@ from nf_metro.layout.phases.junctions import (  # noqa: F401
 )
 from nf_metro.layout.phases.maintained import (  # noqa: F401
     JUNCTIONS_TRACK_PORTS,
+    ROW_BBOX_TOPS_FLUSH,
     MaintainedInvariant,
     assert_maintained,
     canvas_top_margin,
     maintain,
+    off_track_above_consumer,
 )
 from nf_metro.layout.phases.off_track import (  # noqa: F401
     _align_phantom_pass_throughs,
@@ -236,13 +238,21 @@ otherwise only surface as subtle visual defects.
 """
 
 
-def _pass_c_maintained(section_y_padding: float) -> list[MaintainedInvariant]:
+def _pass_c_maintained(
+    section_y_padding: float, y_spacing: float
+) -> list[MaintainedInvariant]:
     """The Pass-C invariant set, bound to this layout's spacing params.
 
-    ``maintain`` re-applies these repairs after each constructive phase that
-    may perturb a junction or the canvas top margin; see ``maintained.py``.
+    ``maintain`` re-applies these repairs (in priority order) after each
+    constructive phase, replacing the hand-placed restore calls; see
+    ``maintained.py``.
     """
-    return [JUNCTIONS_TRACK_PORTS, canvas_top_margin(section_y_padding)]
+    return [
+        off_track_above_consumer(y_spacing, section_y_padding),
+        canvas_top_margin(section_y_padding),
+        ROW_BBOX_TOPS_FLUSH,
+        JUNCTIONS_TRACK_PORTS,
+    ]
 
 
 def compute_min_y_spacing(
@@ -746,7 +756,7 @@ def _compute_section_layout(
     # with them).  Stage 6 below handles the rest of Pass C.
 
     # Invariant set re-applied by ``maintain`` after each perturbing phase.
-    maintained = _pass_c_maintained(section_y_padding)
+    maintained = _pass_c_maintained(section_y_padding, y_spacing)
 
     # Stage 5.1: Position junction stations in the inter-section gap.
     _position_junctions(graph)
@@ -762,11 +772,11 @@ def _compute_section_layout(
         _run_pass_c_guards(graph, "after Stage 5.2")
 
     # Stage 5.3: Re-align bbox tops within each grid row after off-track
-    # lifting expanded some sections upward.  Unlike Stages 3.5 / 4.7 which
-    # shifts stations with the bbox, this only grows the bbox upward so
-    # the empty input-band space lines up across the row.  Station Ys
-    # in unlifted sections are preserved.
-    _top_align_row_bboxes_only(graph)
+    # lifting expanded some sections upward.  The row_bbox_tops_flush
+    # invariant grows the other row-mate bboxes upward to match so the
+    # empty input-band space lines up across the row; station Ys in
+    # unlifted sections are preserved.
+    maintain(graph, maintained)
     if validate:
         _run_pass_c_guards(graph, "after Stage 5.3")
 
@@ -853,15 +863,11 @@ def _compute_section_layout(
 
     # Stage 6.6: Re-anchor off-track inputs to their consumer's final
     # (snapped) Y.  Stage 5.2's lift placed them relative to pre-snap
-    # consumer Ys; snapping the consumer to the grid can shift it by
-    # up to half a pitch, which would collapse the y_spacing gap above
-    # off-track.  Recomputing here pins each off-track at
-    # consumer.y - n*y_spacing on the final grid and grows the bbox
-    # upward if the new position rises above the padding zone.
-    _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
-    # Same canvas-fit safeguard as after Stage 5.2: a reanchor-driven
-    # bbox grow can push the topmost section above the canvas top; the
-    # canvas_top_margin invariant restores it.
+    # consumer Ys; snapping the consumer to the grid can shift it by up to
+    # half a pitch, which would collapse the y_spacing gap above off-track.
+    # The off_track_above_consumer invariant re-pins each off-track at
+    # consumer.y - n*y_spacing on the final grid (growing the bbox upward
+    # as needed); canvas_top_margin then restores any breached margin.
     maintain(graph, maintained)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.6")
@@ -876,29 +882,15 @@ def _compute_section_layout(
     # Y as the anchor so the trunk row stays empty in each fanned
     # column.
     #
-    # Stage 6.8 and Stage 6.9 below restore invariants the recenter
-    # breaks.
+    # The recenter perturbs several invariants (Stages 6.8/6.9 used to
+    # restore them by hand): it strands off-track icons at their old
+    # consumer Y, its bbox grow can breach the canvas margin, and that grow
+    # leaves the grown section's bbox above its row mates'.  The maintained
+    # set re-establishes off_track_above_consumer, canvas_top_margin, and
+    # row_bbox_tops_flush in priority order.
     if graph.center_ports:
         _recenter_full_bundle_columns(graph, y_spacing)
-
-        # Stage 6.8: Re-anchor off-track inputs after the recenter.
-        # The recenter moves consumers to the final trunk-anchored Y,
-        # which can leave the off-track icon stranded at the old
-        # consumer Y (overlapping the consumer station instead of
-        # sitting one row above it).  Uses each consumer's post-
-        # recenter Y as the new anchor and grows the section bbox
-        # upward when the lifted band moves above its current top.
-        _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
-        # Same canvas-fit safeguard as Stage 5.2 / Stage 6.6: a
-        # reanchor-driven bbox grow can push the topmost section
-        # above the canvas top; the canvas_top_margin invariant restores it.
         maintain(graph, maintained)
-
-        # Stage 6.9: Re-run row top-align.  A Stage 6.8 reanchor-
-        # driven bbox grow leaves the section's bbox above its row
-        # mates'; pull row mates' bbox tops up to match so the section
-        # row stays flush along its top edge.
-        _top_align_row_bboxes_only(graph)
         if validate:
             _run_pass_c_guards(graph, "after Stage 6.9")
 
