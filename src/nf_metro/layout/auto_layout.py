@@ -9,7 +9,7 @@ Preserves any values explicitly set by %%metro directives.
 
 from __future__ import annotations
 
-__all__ = ["infer_section_layout"]
+__all__ = ["infer_section_layout", "detect_serpentine_runs"]
 
 from collections import defaultdict, deque
 
@@ -785,6 +785,44 @@ def _infer_directions(
         section.direction = "LR"
 
 
+def _flow_aligned_sides(direction: str) -> tuple[PortSide, PortSide]:
+    """Return ``(entry_side, exit_side)`` aligned with a section's flow.
+
+    A left-to-right section enters on the LEFT and exits on the RIGHT; a
+    right-to-left section is mirrored.  Horizontal-flow sections always
+    present flow-aligned ports regardless of where their neighbours sit
+    on the grid; the inter-section router carriage-returns the connection
+    (right -> down -> left -> down -> right) for a same-column stack.
+    """
+    if direction == "RL":
+        return PortSide.RIGHT, PortSide.LEFT
+    return PortSide.LEFT, PortSide.RIGHT
+
+
+def _has_fold_predecessor_above(
+    graph: MetroGraph,
+    sec_id: str,
+    my_col: int,
+    my_row: int,
+    predecessors: dict[str, set[str]],
+    fold_sections: set[str],
+) -> bool:
+    """True when a fold predecessor sits in this section's column on a row
+    above it.
+
+    A fold section exits BOTTOM and drops straight down; the section it
+    feeds should accept that drop on its TOP edge rather than wrap to a
+    flow-aligned side.
+    """
+    for src in predecessors.get(sec_id, set()):
+        if src not in fold_sections:
+            continue
+        src_col, src_row, src_row_span, _src_col_span = _effective_grid_pos(graph, src)
+        if src_col == my_col and (src_row + src_row_span - 1) < my_row:
+            return True
+    return False
+
+
 def _infer_port_sides(
     graph: MetroGraph,
     successors: dict[str, set[str]],
@@ -793,17 +831,38 @@ def _infer_port_sides(
     fold_sections: set[str],
     convergence_sections: set[str] | None = None,
 ) -> None:
-    """Infer entry/exit port sides from relative section grid positions.
+    """Infer entry/exit port sides from section flow and grid positions.
+
+    Horizontal-flow (LR/RL) sections present flow-aligned ports: entry on
+    the leading edge, exit on the trailing edge, regardless of neighbour
+    position.  A same-column stack of LR sections therefore connects via a
+    carriage-return wrap rather than a TOP/BOTTOM hop.
 
     Fold sections (TB bridges) get entry LEFT, exit BOTTOM.
-    Other sections use _relative_side to determine sides from grid positions.
-    Convergence return-row sections get TOP entry for above-row predecessors.
+    Remaining TB sections use _relative_side to derive sides from grid
+    positions; convergence return-row sections get TOP entry for above-row
+    predecessors.
     """
     if convergence_sections is None:
         convergence_sections = set()
     for sec_id, section in graph.sections.items():
-        my_col = section.grid_col
-        my_row = section.grid_row
+        my_col, my_row, _row_span, my_col_span = _effective_grid_pos(graph, sec_id)
+        horizontal = section.direction in ("LR", "RL") and sec_id not in fold_sections
+        entry_aligned, exit_aligned = _flow_aligned_sides(section.direction)
+
+        # A horizontal section exits flow-aligned (LR -> RIGHT, RL -> LEFT)
+        # regardless of neighbour position; the router carriage-returns.
+        flow_aligned_exit = horizontal
+
+        # Entry is flow-aligned only when no predecessor drops in vertically
+        # from a fold above in the same column.  A fold predecessor exits
+        # BOTTOM, so a TOP entry (handled by the relative-side branch) gives
+        # a clean straight drop; forcing a flow-aligned side there would add
+        # an unnecessary wrap (#432 narrows flow-alignment to the horizontal
+        # carriage-return case it is meant for).
+        flow_aligned_entry = horizontal and not _has_fold_predecessor_above(
+            graph, sec_id, my_col, my_row, predecessors, fold_sections
+        )
 
         # Infer exit hints (only if section has no explicit exit_hints)
         if not section.exit_hints and sec_id in successors:
@@ -815,48 +874,57 @@ def _infer_port_sides(
             if all_exit_lines:
                 if sec_id in fold_sections:
                     exit_side = _compute_fold_exit_side(
-                        graph, section, sec_id, successors, edge_lines
+                        graph, sec_id, successors, edge_lines
                     )
                     section.exit_hints.append((exit_side, sorted(all_exit_lines)))
+                elif flow_aligned_exit:
+                    section.exit_hints.append((exit_aligned, sorted(all_exit_lines)))
                 else:
-                    _compute_exit_hints_by_side(
-                        graph, section, sec_id, successors, edge_lines
-                    )
+                    _compute_exit_hints_by_side(graph, sec_id, successors, edge_lines)
 
         # Infer entry hints (only if section has no explicit entry_hints)
         if not section.entry_hints and sec_id in predecessors:
-            side_lines: dict[PortSide, set[str]] = defaultdict(set)
-
+            all_entry_lines: set[str] = set()
             for src in predecessors[sec_id]:
-                src_sec = graph.sections.get(src)
-                if not src_sec or src not in graph.grid_overrides:
-                    continue
+                all_entry_lines.update(edge_lines.get((src, sec_id), set()))
 
-                lines = edge_lines.get((src, sec_id), set())
-                # Convergence return-row sections: predecessors on a row
-                # above should use TOP entry for clean vertical connections.
-                src_bottom_row = src_sec.grid_row + src_sec.grid_row_span - 1
-                if sec_id in convergence_sections and src_bottom_row < my_row:
-                    side = PortSide.TOP
-                else:
-                    side = _relative_side(
-                        my_col,
-                        my_row,
-                        src_sec.grid_col,
-                        src_sec.grid_row,
-                        section.grid_col_span,
-                        src_sec.grid_col_span,
+            if flow_aligned_entry:
+                if all_entry_lines:
+                    section.entry_hints.append((entry_aligned, sorted(all_entry_lines)))
+            else:
+                side_lines: dict[PortSide, set[str]] = defaultdict(set)
+                for src in predecessors[sec_id]:
+                    src_sec = graph.sections.get(src)
+                    if not src_sec or src not in graph.grid_overrides:
+                        continue
+                    src_col, src_row, src_row_span, src_col_span = _effective_grid_pos(
+                        graph, src
                     )
-                side_lines[side].update(lines)
+                    lines = edge_lines.get((src, sec_id), set())
+                    # Convergence return-row sections: predecessors on a row
+                    # above should use TOP entry for clean vertical
+                    # connections.
+                    src_bottom_row = src_row + src_row_span - 1
+                    if sec_id in convergence_sections and src_bottom_row < my_row:
+                        side = PortSide.TOP
+                    else:
+                        side = _relative_side(
+                            my_col,
+                            my_row,
+                            src_col,
+                            src_row,
+                            my_col_span,
+                            src_col_span,
+                        )
+                    side_lines[side].update(lines)
 
-            for side, lines in sorted(side_lines.items(), key=lambda x: x[0].value):
-                if lines:
-                    section.entry_hints.append((side, sorted(lines)))
+                for side, lines in sorted(side_lines.items(), key=lambda x: x[0].value):
+                    if lines:
+                        section.entry_hints.append((side, sorted(lines)))
 
 
 def _compute_fold_exit_side(
     graph: MetroGraph,
-    section,
     sec_id: str,
     successors: dict[str, set[str]],
     edge_lines: dict[tuple[str, str], set[str]],
@@ -867,22 +935,22 @@ def _compute_fold_exit_side(
     exit is LEFT. For multi-row spans where all successors are below,
     uses BOTTOM so lines continue their vertical flow.
     """
-    my_col = section.grid_col
-    my_row = section.grid_row
+    my_col, my_row, my_row_span, my_col_span = _effective_grid_pos(graph, sec_id)
 
     side_votes: dict[PortSide, int] = defaultdict(int)
     for tgt in successors.get(sec_id, set()):
         tgt_sec = graph.sections.get(tgt)
         if not tgt_sec:
             continue
+        tgt_col, tgt_row, _tgt_row_span, tgt_col_span = _effective_grid_pos(graph, tgt)
         lines = edge_lines.get((sec_id, tgt), set())
         side = _relative_side(
             my_col,
             my_row,
-            tgt_sec.grid_col,
-            tgt_sec.grid_row,
-            section.grid_col_span,
-            tgt_sec.grid_col_span,
+            tgt_col,
+            tgt_row,
+            my_col_span,
+            tgt_col_span,
         )
         side_votes[side] += len(lines)
 
@@ -893,10 +961,10 @@ def _compute_fold_exit_side(
 
     # Override for multi-row spans: if all successors are below the fold
     # span, use BOTTOM exit so lines continue their vertical flow.
-    if section.grid_row_span > 1:
-        fold_bottom_row = section.grid_row + section.grid_row_span - 1
+    if my_row_span > 1:
+        fold_bottom_row = my_row + my_row_span - 1
         all_below = all(
-            graph.sections[tgt].grid_row > fold_bottom_row
+            _effective_grid_pos(graph, tgt)[1] > fold_bottom_row
             for tgt in successors.get(sec_id, set())
             if tgt in graph.sections
         )
@@ -908,7 +976,6 @@ def _compute_fold_exit_side(
 
 def _compute_exit_hints_by_side(
     graph: MetroGraph,
-    section,
     sec_id: str,
     successors: dict[str, set[str]],
     edge_lines: dict[tuple[str, str], set[str]],
@@ -918,25 +985,26 @@ def _compute_exit_hints_by_side(
     Creates one exit hint per side, collecting all lines that exit
     toward that side.
     """
-    my_col = section.grid_col
-    my_row = section.grid_row
+    my_col, my_row, _my_row_span, my_col_span = _effective_grid_pos(graph, sec_id)
 
     side_exit_lines: dict[PortSide, set[str]] = defaultdict(set)
     for tgt in successors.get(sec_id, set()):
         tgt_sec = graph.sections.get(tgt)
         if not tgt_sec or tgt not in graph.grid_overrides:
             continue
+        tgt_col, tgt_row, _tgt_row_span, tgt_col_span = _effective_grid_pos(graph, tgt)
         lines = edge_lines.get((sec_id, tgt), set())
         side = _relative_side(
             my_col,
             my_row,
-            tgt_sec.grid_col,
-            tgt_sec.grid_row,
-            section.grid_col_span,
-            tgt_sec.grid_col_span,
+            tgt_col,
+            tgt_row,
+            my_col_span,
+            tgt_col_span,
         )
         side_exit_lines[side].update(lines)
 
+    section = graph.sections[sec_id]
     if side_exit_lines:
         for side, lines in sorted(side_exit_lines.items(), key=lambda x: x[0].value):
             if lines:
@@ -980,3 +1048,89 @@ def _relative_side(
         return PortSide.TOP
 
     return PortSide.RIGHT  # same position, default right
+
+
+def _effective_grid_pos(graph: MetroGraph, sec_id: str) -> tuple[int, int, int, int]:
+    """Return (col, row, row_span, col_span) for a section during inference.
+
+    Explicit grid overrides are applied to ``section.grid_col`` only later in
+    section_placement, so during auto-layout they read -1.  Prefer the value
+    recorded in ``graph.grid_overrides`` when present.
+    """
+    if sec_id in graph.grid_overrides:
+        return graph.grid_overrides[sec_id]
+    section = graph.sections[sec_id]
+    return (
+        section.grid_col,
+        section.grid_row,
+        section.grid_row_span,
+        section.grid_col_span,
+    )
+
+
+def detect_serpentine_runs(
+    graph: MetroGraph,
+    successors: dict[str, set[str]],
+    predecessors: dict[str, set[str]],
+) -> list[list[str]]:
+    """Find runs of vertically-stacked single-cell sections forming a chain.
+
+    A serpentine run is a maximal sequence of sections that
+
+    * occupy a single grid cell (row_span == col_span == 1),
+    * share a grid column,
+    * sit on consecutive grid rows, and
+    * form a simple chain: the section on row N feeds exactly one section
+      in the same column (the one on row N+1), and that lower section is
+      fed from the column only by the upper one.
+
+    Returns runs as lists of section ids ordered top-to-bottom.  Runs of
+    length < 2 are omitted.  Used to serpentine the effective flow
+    direction of stacked same-direction sections (issue #421).
+    """
+    # Group single-cell sections by grid column, keyed by row.  A column with
+    # two sections claiming one (col, row) cell is malformed and is skipped.
+    col_rows: dict[int, dict[int, str]] = defaultdict(dict)
+    collided_cols: set[int] = set()
+    for sec_id in graph.sections:
+        col, row, row_span, col_span = _effective_grid_pos(graph, sec_id)
+        if col < 0 or row < 0 or row_span != 1 or col_span != 1:
+            continue
+        if row in col_rows[col]:
+            collided_cols.add(col)
+        col_rows[col][row] = sec_id
+
+    runs: list[list[str]] = []
+    for col, rows in col_rows.items():
+        if col in collided_cols:
+            continue
+        ordered_rows = sorted(rows)
+        in_column = set(rows.values())
+        i = 0
+        while i < len(ordered_rows):
+            run = [rows[ordered_rows[i]]]
+            j = i
+            while j + 1 < len(ordered_rows):
+                upper_row = ordered_rows[j]
+                lower_row = ordered_rows[j + 1]
+                if lower_row != upper_row + 1:
+                    break
+                upper = rows[upper_row]
+                lower = rows[lower_row]
+                # upper must feed lower, and lower must be the only in-column
+                # successor of upper (a clean chain, not a fan-out).
+                upper_col_succ = successors.get(upper, set()) & in_column
+                lower_col_pred = predecessors.get(lower, set()) & in_column
+                if (
+                    lower in successors.get(upper, set())
+                    and upper_col_succ == {lower}
+                    and lower_col_pred == {upper}
+                ):
+                    run.append(lower)
+                    j += 1
+                else:
+                    break
+            if len(run) >= 2:
+                runs.append(run)
+            i = j + 1
+    return runs
