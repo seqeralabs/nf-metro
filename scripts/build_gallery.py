@@ -78,7 +78,8 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "legend: br | canvas` pins it to the empty lower-right canvas corner and "
         "`%%metro logo_scale:` enlarges the embedded logo. The directive also "
         "supports `| dx,dy` offsets and absolute `x,y` placement; the block "
-        "auto-avoids sections and routes.",
+        "auto-avoids sections and routes. The QC line shows a downward "
+        "cross-column feeder dropping straight into its consumer section.",
     ),
     (
         "tb_file_termini",
