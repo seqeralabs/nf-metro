@@ -843,7 +843,7 @@ def _render_bridged_edge(
     route: RoutedPath,
     breaks: list[BridgeBreak],
     color: str,
-    style_kw: dict,
+    style_kw: dict[str, str],
     class_name: str,
     theme: Theme,
     curve_radius: float,

@@ -44,8 +44,12 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from nf_metro.parser.model import Edge, MetroGraph
+
+if TYPE_CHECKING:
+    from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.render.constants import (
     BRIDGE_CLUSTER_RADIUS,
     BRIDGE_CORNER_CLEARANCE,
@@ -136,7 +140,7 @@ def _near_node(pt: Point, node_xy: list[Point]) -> bool:
 
 def compute_bridges(
     graph: MetroGraph,
-    routes: list,
+    routes: list[RoutedPath],
     polylines: list[list[Point]],
     *,
     curve_radius: float,
@@ -157,7 +161,6 @@ def compute_bridges(
     clusters = _cluster_crossings(crossings)
 
     line_priority = {lid: i for i, lid in enumerate(graph.lines)}
-    back = len(line_priority)
     corner_clear = curve_radius + BRIDGE_CORNER_CLEARANCE
 
     by_line: dict[str, list[int]] = defaultdict(list)
@@ -184,7 +187,7 @@ def compute_bridges(
 
     for cluster in clusters:
         for route_idx, seg, span in _cluster_gaps(
-            cluster, routes, polylines, line_priority, back, corner_clear
+            cluster, routes, polylines, line_priority, corner_clear
         ):
             # Break every collinear route of this line through the span, not
             # just the one that crossed - sibling routes (same line, same
@@ -201,7 +204,7 @@ def compute_bridges(
 
 
 def _guard_bridges(
-    routes: list,
+    routes: list[RoutedPath],
     polylines: list[list[Point]],
     node_xy: list[Point],
     breaks: dict[int, list[BridgeBreak]],
@@ -229,7 +232,7 @@ def _guard_bridges(
 
 
 def _find_crossings(
-    routes: list,
+    routes: list[RoutedPath],
     polylines: list[list[Point]],
     node_xy: list[Point],
     station_xy: dict[str, Point],
@@ -324,10 +327,9 @@ Gap = tuple[Point, Point]
 
 def _cluster_gaps(
     cluster: list[_Crossing],
-    routes: list,
+    routes: list[RoutedPath],
     polylines: list[list[Point]],
     line_priority: dict[str, int],
-    back: int,
     corner_clear: float,
 ) -> list[tuple[int, int, Gap]]:
     """For one cluster, return (route_index, seg_index, gap) for every line of
@@ -355,14 +357,16 @@ def _cluster_gaps(
         0: [n for n in nodes if colour[n] == 0],
         1: [n for n in nodes if colour[n] == 1],
     }
-    under = _under_group(group, routes, polylines, line_priority, back, seg_of)
+    under, lines_under, lines_over = _under_group(
+        group, routes, polylines, line_priority, seg_of
+    )
     over = nodes - under
 
     # Only bridge where the two bundles share a colour.  When all the colours
     # differ the lines already read as distinct where they cross, so a gap
     # adds nothing; a bridge earns its keep only when a shared colour would
     # otherwise look like it might join/interchange at the crossing.
-    if {routes[n].line_id for n in under}.isdisjoint(routes[n].line_id for n in over):
+    if lines_under.isdisjoint(lines_over):
         return []
 
     cross_pts = [
@@ -444,22 +448,25 @@ def _uniform_gaps(
 
 def _under_group(
     group: dict[int, list[int]],
-    routes: list,
+    routes: list[RoutedPath],
     polylines: list[list[Point]],
     line_priority: dict[str, int],
-    back: int,
     seg_of: dict[int, int],
-) -> set[int]:
-    """Pick which colour group is the under bundle (the one to break)."""
-    lines0 = {routes[n].line_id for n in group[0]}
-    lines1 = {routes[n].line_id for n in group[1]}
+) -> tuple[set[int], set[str], set[str]]:
+    """Pick the under bundle; return its route indices and the two bundles'
+    colour (line-id) sets as ``(under, lines_under, lines_over)``."""
+    colours = {
+        0: {routes[n].line_id for n in group[0]},
+        1: {routes[n].line_id for n in group[1]},
+    }
+    back = len(line_priority)
 
     def min_prio(lines: set[str]) -> int:
         return min((line_priority.get(lid, back) for lid in lines), default=back)
 
-    if lines0.isdisjoint(lines1):
+    if colours[0].isdisjoint(colours[1]):
         # Distinct lines: senior (earlier-defined) bundle stays over.
-        under_colour = 1 if min_prio(lines0) <= min_prio(lines1) else 0
+        under_colour = 1 if min_prio(colours[0]) <= min_prio(colours[1]) else 0
     else:
         # Shared lines (e.g. a vertical bus crossing its own horizontal
         # connector): the more-horizontal bundle goes under, so the
@@ -467,7 +474,7 @@ def _under_group(
         h0 = _group_horizontalness(group[0], polylines, seg_of)
         h1 = _group_horizontalness(group[1], polylines, seg_of)
         under_colour = 0 if h0 >= h1 else 1
-    return set(group[under_colour])
+    return set(group[under_colour]), colours[under_colour], colours[under_colour ^ 1]
 
 
 def _group_horizontalness(
