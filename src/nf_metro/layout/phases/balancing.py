@@ -1,4 +1,4 @@
-"""Layout phase: balancing (extracted from engine.py, see #451)."""
+"""Centre section content around the trunk; balance feeders and loop stations."""
 
 from __future__ import annotations
 

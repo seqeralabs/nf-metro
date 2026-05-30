@@ -1,4 +1,4 @@
-"""Layout phase: spacing (extracted from engine.py, see #451)."""
+"""Global y-spacing widening search that clears residual label overlaps."""
 
 from __future__ import annotations
 

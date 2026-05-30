@@ -1,4 +1,4 @@
-"""Layout phase: guards (extracted from engine.py, see #451)."""
+"""Stage-boundary invariant guards run by ``compute_layout(validate=True)``."""
 
 from __future__ import annotations
 

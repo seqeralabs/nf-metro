@@ -1,4 +1,4 @@
-"""Layout phase: canvas (extracted from engine.py, see #451)."""
+"""Whole-graph canvas translation into view and section renumbering by reading order."""
 
 from __future__ import annotations
 

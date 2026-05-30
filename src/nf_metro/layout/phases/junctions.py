@@ -1,4 +1,4 @@
-"""Layout phase: junctions (extracted from engine.py, see #451)."""
+"""Fan-junction positioning and source-section resolution."""
 
 from __future__ import annotations
 

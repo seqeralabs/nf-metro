@@ -1,4 +1,4 @@
-"""Layout phase: fan_bundles (extracted from engine.py, see #451)."""
+"""Symmetric fan-out/fan-in bundle distribution and half-grid placement."""
 
 from __future__ import annotations
 

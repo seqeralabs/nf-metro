@@ -1,4 +1,4 @@
-"""Layout phase: _common (extracted from engine.py, see #451)."""
+"""Shared leaf helpers used across layout phases (bbox math, section queries)."""
 
 from __future__ import annotations
 

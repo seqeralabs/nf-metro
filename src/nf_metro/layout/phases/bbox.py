@@ -1,4 +1,4 @@
-"""Layout phase: bbox (extracted from engine.py, see #451)."""
+"""Grow and shrink section bboxes to fit content and predicted bypass spans."""
 
 from __future__ import annotations
 

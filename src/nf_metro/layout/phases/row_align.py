@@ -1,4 +1,4 @@
-"""Layout phase: row_align (extracted from engine.py, see #451)."""
+"""Align trunk Ys and bboxes across sections sharing a serpentine row."""
 
 from __future__ import annotations
 

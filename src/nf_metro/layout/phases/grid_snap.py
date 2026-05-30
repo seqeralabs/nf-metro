@@ -1,4 +1,4 @@
-"""Layout phase: grid_snap (extracted from engine.py, see #451)."""
+"""Snap station and port Ys back to the row grid pitch after fractional shifts."""
 
 from __future__ import annotations
 

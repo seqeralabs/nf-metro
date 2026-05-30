@@ -1,4 +1,4 @@
-"""Layout phase: off_track (extracted from engine.py, see #451)."""
+"""Off-track input placement and phantom pass-through insertion."""
 
 from __future__ import annotations
 

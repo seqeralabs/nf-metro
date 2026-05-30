@@ -1,1 +1,1 @@
-"""Per-phase layout modules extracted from engine.py (issue #451)."""
+"""Per-phase layout modules that ``compute_layout`` orchestrates."""

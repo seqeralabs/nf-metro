@@ -1,4 +1,4 @@
-"""Layout phase: single_section (extracted from engine.py, see #451)."""
+"""Internal layout of a single section: tracks, labels, terminus icons, RL mirroring."""
 
 from __future__ import annotations
 

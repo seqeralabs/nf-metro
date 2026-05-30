@@ -1,4 +1,4 @@
-"""Layout phase: ports (extracted from engine.py, see #451)."""
+"""Entry/exit port positioning and alignment on section boundaries."""
 
 from __future__ import annotations
 
