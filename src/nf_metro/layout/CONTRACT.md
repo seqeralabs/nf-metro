@@ -53,7 +53,7 @@ Stages split into three regimes:
 | after Stage 3.1 | ports-on-boundaries |
 | after top-align (Stage 3.5) | ports-on-boundaries |
 | after each Pass C sub-stage (bisection) | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
-| after final | bisection set (all unconditional) + off-track-above-consumer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
+| after final | bisection set (all unconditional) + maintained-invariants (`assert_maintained`), off-track-above-consumer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
 Bisection checkpoints fire after every Pass C sub-stage (see the
 `# Stage 5.2:` through `# Stage 6.15:` comments in
@@ -74,6 +74,29 @@ docstring in `engine.py` is the authoritative list.
 
 Guard bodies live at the top of `engine.py` (lines 83-275); the
 bisection runner is `_run_pass_c_guards`.
+
+## Maintained invariants (#365)
+
+Several Pass-C properties are kept alive *declaratively* rather than by
+hand-placed restore calls. `phases/maintained.py` declares each as a
+`MaintainedInvariant` (predicate + idempotent repair + priority); the
+orchestrator calls `maintain(graph, maintained)` after each constructive
+Pass-C phase that may perturb one, and the repairs run in priority order to
+a fixpoint. The set:
+
+| Invariant | Priority | Predicate | Repair |
+|---|---|---|---|
+| `canvas_top_margin` | 20 | topmost section bbox top `>= section_y_padding` | `_shift_graph_into_canvas` |
+| `junctions_track_ports` | 30 | `junction.xy == _compute_junction_xy` | `_position_junctions` |
+
+This is why the per-stage "re-run `_position_junctions`" / "shift into
+canvas" notes below describe an *effect* now produced by `maintain`, not a
+literal helper call at that line. A new restore-class property with a
+*cheap, exact* "is it already satisfied?" predicate should be added here
+as an invariant rather than as another hand-placed re-run; see
+[`docs/dev/maintained_invariants_spike.md`](../../../docs/dev/maintained_invariants_spike.md)
+for why complex restores (off-track stacking, top-align) stay procedural.
+`assert_maintained` re-checks the set at the final validate boundary.
 
 ## Stage overview
 
