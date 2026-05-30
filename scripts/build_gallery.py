@@ -65,6 +65,11 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Same nf-core/differentialabundance map at default (uncentered) layout — useful for spotting regressions that only show with default port placement.",
     ),
     (
+        "tb_file_termini",
+        EXAMPLES_DIR,
+        "A `%%metro direction: TB` reporting section whose file outputs are line termini. Regression fixture for #254 (terminus file icons now orient to a vertical flow, with the connector entering from the top).",
+    ),
+    (
         "genomeassembly_staggered",
         EXAMPLES_DIR,
         "sanger-tol/genomeassembly with explicit `%%metro grid:` directives stacking each section in its own grid row. Regression fixture for #250 (cross-column junction routes were going backward in X).",

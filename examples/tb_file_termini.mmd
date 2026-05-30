@@ -1,0 +1,33 @@
+%%metro title: TB section file outputs
+%%metro style: dark
+%%metro line: rna | RNA-seq | #1f9e89
+%%metro line: dna | Variant | #2c7fb8
+%%metro file: report_html | HTML | Report
+%%metro file: bundle_zip | ZIP | Bundle
+%%metro file: multiqc_html | HTML | MultiQC
+
+graph LR
+    subgraph analysis [Analysis]
+        align[Align]
+        call[Call]
+        align -->|rna,dna| call
+    end
+
+    subgraph reporting [Reporting]
+        %%metro direction: TB
+        %%metro entry: left | rna, dna
+        report[Build report]
+        bundle[Zip bundle]
+        multiqc[MultiQC]
+        report_html[ ]
+        bundle_zip[ ]
+        multiqc_html[ ]
+
+        report -->|rna,dna| report_html
+        report -->|rna,dna| bundle
+        bundle -->|rna,dna| bundle_zip
+        report -->|rna,dna| multiqc
+        multiqc -->|rna,dna| multiqc_html
+    end
+
+    call -->|rna,dna| report

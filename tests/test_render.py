@@ -4,7 +4,8 @@ import xml.etree.ElementTree as ET
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.render.svg import render_svg
+from nf_metro.parser.model import Station
+from nf_metro.render.svg import _terminus_icon_centers, render_svg
 from nf_metro.themes import LIGHT_THEME, NFCORE_THEME
 
 
@@ -463,3 +464,103 @@ def test_render_icon_type_guide_fixtures():
         svg = render_svg(graph, NFCORE_THEME)
         root = ET.fromstring(svg)
         assert root.tag.endswith("svg") or "svg" in root.tag
+
+
+# --- Terminus icon orientation (issue #254) ---
+
+
+def _station(x=100.0, y=50.0):
+    return Station(id="t", label="", x=x, y=y)
+
+
+def test_terminus_icons_lr_march_along_x():
+    """LR termini lay icons out horizontally, centred on the bundle Y."""
+    st = _station()
+    # Sink (no outgoing) extends to the right (forward flow).
+    centers = _terminus_icon_centers(
+        st, "LR", is_source=False, n=2, first_offset=10.0, step=4.0, bundle_center=3.0
+    )
+    assert centers == [(110.0, 53.0), (114.0, 53.0)]
+    # Source (no incoming) extends to the left (reverse flow).
+    src = _terminus_icon_centers(
+        st, "LR", is_source=True, n=1, first_offset=10.0, step=4.0, bundle_center=0.0
+    )
+    assert src == [(90.0, 50.0)]
+
+
+def test_terminus_icons_rl_mirror_lr():
+    """RL flows right-to-left, so the forward/reverse sides are mirrored."""
+    st = _station()
+    sink = _terminus_icon_centers(
+        st, "RL", is_source=False, n=1, first_offset=10.0, step=4.0, bundle_center=0.0
+    )
+    assert sink == [(90.0, 50.0)]
+
+
+def test_terminus_icons_tb_march_along_y():
+    """TB termini stack icons vertically, centred on the bundle X.
+
+    Regression test for #254: in a TB section the line arrives from
+    above/below, so icons must be displaced along Y (the flow axis), not
+    along X as for LR.
+    """
+    st = _station()
+    # Sink at the bottom of a TB flow: icons extend downward.
+    sink = _terminus_icon_centers(
+        st, "TB", is_source=False, n=2, first_offset=10.0, step=4.0, bundle_center=3.0
+    )
+    assert sink == [(103.0, 60.0), (103.0, 64.0)]
+    # Every icon stays on the station's X (cross axis); only Y advances.
+    assert all(cx == 103.0 for cx, _ in sink)
+    assert all(cy != st.y for _, cy in sink)
+    # Source at the top of a TB flow: icons extend upward.
+    src = _terminus_icon_centers(
+        st, "TB", is_source=True, n=1, first_offset=10.0, step=4.0, bundle_center=0.0
+    )
+    assert src == [(100.0, 40.0)]
+
+
+def test_terminus_icons_bt_mirror_tb():
+    """BT flows bottom-to-top, mirroring TB's forward/reverse sides."""
+    st = _station()
+    sink = _terminus_icon_centers(
+        st, "BT", is_source=False, n=1, first_offset=10.0, step=4.0, bundle_center=0.0
+    )
+    assert sink == [(100.0, 40.0)]
+
+
+def test_render_tb_section_file_icon_below_station():
+    """A file terminus in a TB section renders its icon below the station."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: report_out | HTML | Report\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        %%metro direction: TB\n"
+        "        run[Run]\n"
+        "        report_out[ ]\n"
+        "        run -->|main| report_out\n"
+        "    end\n"
+    )
+    compute_layout(graph)
+    station = graph.stations["report_out"]
+    section = graph.sections["sec"]
+    assert section.direction == "TB"
+    centers = _terminus_icon_centers(
+        station,
+        "TB",
+        is_source=False,
+        n=1,
+        first_offset=10.0,
+        step=4.0,
+        bundle_center=0.0,
+    )
+    (icon_cx, icon_cy) = centers[0]
+    # Icon sits on the station's X column and below it (downward TB flow).
+    assert abs(icon_cx - station.x) < 1e-6
+    assert icon_cy > station.y
+    # And the render still succeeds and carries the icon label.
+    svg = render_svg(graph, NFCORE_THEME)
+    assert "HTML" in svg
+    root = ET.fromstring(svg)
+    assert root.tag.endswith("svg") or "svg" in root.tag

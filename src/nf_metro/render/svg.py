@@ -881,6 +881,38 @@ def caption_aware_icon_step(
     return required
 
 
+def _terminus_icon_centers(
+    station: Station,
+    section_dir: str,
+    is_source: bool,
+    n: int,
+    first_offset: float,
+    step: float,
+    bundle_center: float,
+) -> list[tuple[float, float]]:
+    """Centre coordinates for a terminus station's file icons.
+
+    Icons march away from the station along the section's *flow* axis
+    (X for LR/RL, Y for TB/BT) and stay centred on the station's bundle
+    on the *cross* axis.  Sinks extend in the forward flow direction,
+    sources in the reverse; RL/BT mirror that so icons always point to
+    the outside of the diagram.
+    """
+    is_tb = section_dir in ("TB", "BT")
+    # Sinks sit at the end of the flow and extend forwards; sources sit at
+    # the start and extend backwards.  RL/BT reverse the forward direction.
+    extends_forward = is_source if section_dir in ("RL", "BT") else not is_source
+    sign = 1.0 if extends_forward else -1.0
+    centers: list[tuple[float, float]] = []
+    for i in range(n):
+        flow = sign * (first_offset + i * step)
+        if is_tb:
+            centers.append((station.x + bundle_center, station.y + flow))
+        else:
+            centers.append((station.x + flow, station.y + bundle_center))
+    return centers
+
+
 def _render_terminus_icons(
     d: draw.Drawing,
     station: Station,
@@ -892,44 +924,50 @@ def _render_terminus_icons(
 ) -> None:
     """Render file icon(s) adjacent to a terminus station.
 
-    Multiple icons are arranged in a horizontal row, extending away from
-    the station (i.e. the first icon is closest to the station pill).
+    Multiple icons march away from the station along the section's flow
+    axis (a horizontal row for LR/RL, a vertical stack for TB/BT), with
+    the first icon closest to the station pill.
     """
     section: Section | None = (
         graph.sections.get(station.section_id) if station.section_id else None
     )
     # Detect if station is a source (no incoming edges) or sink.
     is_source = not graph.edges_to(station.id)
-    # Place icons on the "outside" of the flow
+    section_dir = section.direction if section else "LR"
+    is_tb = section_dir in ("TB", "BT")
+    # Gap between the station pill and the first icon, plus the icon's own
+    # half-extent along the flow axis (width for LR/RL, height for TB/BT).
     icon_gap = r + ICON_STATION_GAP
     icon_half_w = theme.terminus_width / 2
-    section_dir = section.direction if section else "LR"
+    icon_half_h = theme.terminus_height / 2
+    icon_half_flow = icon_half_h if is_tb else icon_half_w
 
-    # Determine direction: icons extend leftward for sources (LR/TB)
-    # or rightward for sinks, inverted for RL.
-    if section_dir == "RL":
-        icons_go_right = is_source
-    else:
-        icons_go_right = not is_source
-
-    icon_cy = station.y + (min_off + max_off) / 2
+    bundle_center = (min_off + max_off) / 2
 
     icon_types = station.terminus_icon_types or [ICON_TYPE_FILE] * len(
         station.terminus_labels
     )
     names = station.terminus_names or [""] * len(station.terminus_labels)
 
-    # Compute per-icon X step.  When adjacent captions would overlap
-    # at the default step, widen it so both fit on the same row.
     caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
     name_widths = [len(n) * caption_font_size * 0.55 if n else 0.0 for n in names]
-    icon_step = caption_aware_icon_step(names, name_widths, theme.terminus_width)
-
-    # Base X for the first (nearest) icon center
-    if icons_go_right:
-        base_cx = station.x + icon_gap + icon_half_w
+    # LR/RL march icons along X, so widen the step when adjacent captions
+    # would overlap.  TB/BT stack icons along Y, where height (not caption
+    # width) sets the spacing.
+    if is_tb:
+        icon_step = theme.terminus_height + ICON_INTER_GAP
     else:
-        base_cx = station.x - icon_gap - icon_half_w
+        icon_step = caption_aware_icon_step(names, name_widths, theme.terminus_width)
+
+    centers = _terminus_icon_centers(
+        station,
+        section_dir,
+        is_source,
+        len(station.terminus_labels),
+        icon_gap + icon_half_flow,
+        icon_step,
+        bundle_center,
+    )
 
     # Captions sitting at the same Y overlap when their estimated
     # widths exceed icon_step; in that case, every other caption is
@@ -947,13 +985,15 @@ def _render_terminus_icons(
         icon_type = icon_types[i] if i < len(icon_types) else ICON_TYPE_FILE
         name = names[i] if i < len(names) else ""
 
-        if icons_go_right:
-            icon_cx = base_cx + i * icon_step
-        else:
-            icon_cx = base_cx - i * icon_step
+        icon_cx, icon_cy = centers[i]
 
-        # Clamp to stay within section bbox
-        if section and section.bbox_w > 0:
+        # Clamp to stay within the section bbox, on whichever axis the
+        # icons march along.
+        if section and is_tb and section.bbox_h > 0:
+            top = section.bbox_y + icon_half_h + ICON_BBOX_MARGIN
+            bottom = section.bbox_y + section.bbox_h - icon_half_h - ICON_BBOX_MARGIN
+            icon_cy = max(top, min(icon_cy, bottom))
+        elif section and not is_tb and section.bbox_w > 0:
             icon_right = (
                 section.bbox_x + section.bbox_w - icon_half_w - ICON_BBOX_MARGIN
             )

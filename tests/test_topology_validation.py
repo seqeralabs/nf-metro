@@ -40,6 +40,7 @@ TOPOLOGY_IDS = [f.stem for f in TOPOLOGY_FILES]
 RNASEQ_FILE = EXAMPLES_DIR / "rnaseq_sections.mmd"
 EPITOPEPREDICTION_FILE = EXAMPLES_DIR / "epitopeprediction.mmd"
 HLATYPING_FILE = EXAMPLES_DIR / "hlatyping.mmd"
+TB_FILE_TERMINI_FILE = EXAMPLES_DIR / "tb_file_termini.mmd"
 
 
 def _load_and_layout(path: Path, max_station_columns: int = 15):
@@ -388,6 +389,40 @@ class TestHlatypingRegression:
         for sid, section in hlatyping_graph.sections.items():
             assert section.bbox_w > 0, f"Section '{sid}' has zero width"
             assert section.bbox_h > 0, f"Section '{sid}' has zero height"
+
+
+class TestTbFileTerminiRegression:
+    """Ensure the TB-section file-termini example lays out cleanly (#254)."""
+
+    @pytest.fixture
+    def tb_graph(self):
+        return _load_and_layout(TB_FILE_TERMINI_FILE)
+
+    def test_no_section_overlap(self, tb_graph):
+        violations = check_section_overlap(tb_graph)
+        errors = [v for v in violations if v.severity == Severity.ERROR]
+        assert not errors, "\n".join(v.message for v in errors)
+
+    def test_station_containment(self, tb_graph):
+        violations = check_station_containment(tb_graph)
+        errors = [v for v in violations if v.severity == Severity.ERROR]
+        assert not errors, "\n".join(v.message for v in errors)
+
+    def test_coordinate_sanity(self, tb_graph):
+        violations = check_coordinate_sanity(tb_graph)
+        errors = [v for v in violations if v.severity == Severity.ERROR]
+        assert not errors, "\n".join(v.message for v in errors)
+
+    def test_reporting_section_is_tb_with_termini(self, tb_graph):
+        """The reporting section must stay TB and own the file termini."""
+        reporting = tb_graph.sections["reporting"]
+        assert reporting.direction == "TB"
+        termini = [
+            tb_graph.stations[sid]
+            for sid in reporting.station_ids
+            if tb_graph.stations[sid].is_terminus
+        ]
+        assert len(termini) == 3
 
 
 # --- Topology-specific assertions ---
