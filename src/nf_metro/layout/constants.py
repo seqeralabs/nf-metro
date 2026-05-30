@@ -459,7 +459,6 @@ Above this threshold, the canvas is treated as uniformly off-grid by a
 late helper (typically ``_shift_graph_into_canvas`` shifting by a non-
 grid amount): a single shift restores every station to integer
 multiples of ``y_spacing``.  Below the threshold, sections sit at
-multiple distinct residues by construction (e.g. sarek, where wrap
-endpoints land at three different residues 10px apart by design), so
+multiple distinct residues by construction, so
 no single shift can align them all and the per-section snap from Stage
 6.4 is honoured as the best-effort alignment."""

@@ -14,6 +14,7 @@ from collections import Counter, defaultdict
 from nf_metro.layout.constants import (
     BYPASS_CLEARANCE,
     CANVAS_GRID_SHIFT_THRESHOLD,
+    COORD_TOLERANCE,
     CURVE_RADIUS,
     DESCENDER_CLEARANCE,
     DIAGONAL_RUN,
@@ -686,6 +687,365 @@ def _guard_inter_section_route_no_backtrack(
                 )
 
 
+def first_vertical_leg_x(points) -> float | None:
+    """X of the first (near-)vertical leg of *points*.
+
+    The source-side vertical channel ("V1") of an inter-section route;
+    ``None`` when no vertical leg exists.
+    """
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        if abs(x1 - x0) < 1.0 and abs(y1 - y0) > 1.0:
+            return x1
+    return None
+
+
+def _guard_fan_bundles_coincide_or_separate(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list | None = None,
+) -> None:
+    """After routing: two routes carrying the SAME line out of a unified-fan
+    junction must coincide on their source-side vertical channel or separate
+    clearly - never smear a few px apart (#437).
+
+    A unified-fan junction (one the router assigns shared
+    ``junction_fan_info`` positions) fans the same line to multiple targets
+    that are MEANT to pivot through one channel.  When two such routes' first
+    vertical legs sit between ``OFFSET_STEP`` (the legitimate per-bundle
+    stagger) and ``SECTION_Y_GAP`` (a clean column split) apart, they render
+    as a smeared partial overlap rather than one bundle or two separated
+    bundles.
+    """
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+    from nf_metro.layout.routing.core import _build_routing_context
+
+    offsets = compute_station_offsets(graph)
+    if routes is None:
+        routes = route_edges(graph, station_offsets=offsets)
+    ctx = _build_routing_context(graph, DIAGONAL_RUN, CURVE_RADIUS, offsets)
+    fan_sources = {key[0] for key in ctx.junction_fan_info}
+    if not fan_sources:
+        return
+
+    by_src_line: dict[tuple[str, str], list[float]] = {}
+    for rp in routes:
+        if not rp.is_inter_section or rp.edge.source not in fan_sources:
+            continue
+        vx = first_vertical_leg_x(rp.points)
+        if vx is None:
+            continue
+        by_src_line.setdefault((rp.edge.source, rp.line_id), []).append(vx)
+
+    # Coincide within the per-bundle stagger plus a 1px rounding epsilon;
+    # GUARD_TOLERANCE (5px) would swallow the 6px smear this guards against.
+    coincide_tol = OFFSET_STEP + 1.0
+    for (src, line), xs in by_src_line.items():
+        if len(xs) < 2:
+            continue
+        ordered = sorted(xs)
+        for lo, hi in zip(ordered, ordered[1:]):
+            gap = hi - lo
+            if coincide_tol < gap < SECTION_Y_GAP:
+                raise PhaseInvariantError(
+                    f"{phase}: junction {src!r} line {line!r} fans two routes "
+                    f"whose first vertical channels are {gap:.1f}px apart "
+                    f"(x={lo:.1f} vs {hi:.1f}) - neither coincident "
+                    f"(<= {coincide_tol:.1f}) nor clearly separated "
+                    f"(>= {SECTION_Y_GAP:.1f}); a smeared partial overlap"
+                )
+
+
+def _canvas_width(graph: MetroGraph) -> float:
+    """Horizontal extent of all positioned sections (rightmost - leftmost)."""
+    rights = [s.bbox_x + s.bbox_w for s in graph.sections.values() if s.bbox_w > 0]
+    lefts = [s.bbox_x for s in graph.sections.values() if s.bbox_w > 0]
+    if not rights or not lefts:
+        return 0.0
+    return max(rights) - min(lefts)
+
+
+def inter_section_route_backtrack_legs(graph: MetroGraph, routes: list):
+    """Yield ``(rp, x1, x2)`` for each horizontal leg that moves *away* from
+    the route's own endpoint X - a genuine out-and-back dog-leg.
+
+    A backtrack is reverse-direction travel: the line heads away from where
+    it is going, then has to come back.  This is measured against the
+    route's actual endpoint X (its last waypoint), not the grid-column
+    order.  Grid columns can disagree with X order when a narrow target
+    column nests inside a wide row-span sibling: there the target column is
+    "higher" yet sits to the *left*, so a single long leftward traverse is a
+    monotonic approach toward the target - not a dog-leg - and is not
+    yielded.  A true #425 dog-leg (right past the target, then back left)
+    still moves away from the endpoint on its outward leg and is yielded.
+
+    Routes that exit a port facing away from their endpoint legitimately
+    wrap and are skipped, as are TB folds and same-column routes.  Unlike
+    the strict :func:`_guard_inter_section_route_no_backtrack`, exempt
+    (``normalize_exempt``) wrap routes are *included* so a multi-corner
+    around-section dog-leg is still measured.
+    """
+    from nf_metro.layout.routing.common import resolve_section
+
+    def _exit_side(rp):
+        port = graph.ports.get(rp.edge.source)
+        if port is not None:
+            return port.side
+        for e in graph.edges_to(rp.edge.source):
+            port = graph.ports.get(e.source)
+            if port is not None:
+                return port.side
+        return None
+
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        src_sec = resolve_section(graph, graph.stations[rp.edge.source])
+        tgt_sec = resolve_section(graph, graph.stations[rp.edge.target])
+        if src_sec is None or tgt_sec is None:
+            continue
+        if src_sec.direction != "LR" or tgt_sec.direction != "LR":
+            continue
+        if src_sec.grid_col == tgt_sec.grid_col:
+            continue
+        xs = [p[0] for p in rp.points]
+        if len(xs) < 2:
+            continue
+        # Direction toward the route's own endpoint: a leg moving the other
+        # way (away from where the route ends) is the dog-leg's outward leg.
+        toward_endpoint_is_right = xs[-1] > xs[0]
+        side = _exit_side(rp)
+        # An exit port facing away from the endpoint legitimately wraps; its
+        # outward stub is not a dog-leg.  (Grid-column-based skip preserved
+        # for the wrap case: the exit faces the target column it serves.)
+        rightward_cols = tgt_sec.grid_col > src_sec.grid_col
+        if rightward_cols and side != PortSide.RIGHT:
+            continue
+        if not rightward_cols and side != PortSide.LEFT:
+            continue
+        for x1, x2 in zip(xs, xs[1:]):
+            backtracks = (x2 < x1) if toward_endpoint_is_right else (x2 > x1)
+            if backtracks:
+                yield rp, x1, x2
+
+
+def _guard_inter_section_route_no_full_width_backtrack(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list | None = None,
+    fraction: float = 0.4,
+) -> None:
+    """After routing: a forward inter-section route may reverse in X (when a
+    narrow target column nests inside an oversized sibling) but no single
+    backtrack leg may exceed *fraction* of the canvas width.
+
+    The strict :func:`_guard_inter_section_route_no_backtrack` forbids *any*
+    reversal on a forward LR route, assuming grid-column order matches X
+    order.  When a column is geometrically nested inside an oversized
+    sibling, reaching it requires a legitimate X
+    reversal, so such routes are made ``normalize_exempt`` and the strict
+    guard skips them.  This guard still bounds those reversals: a
+    right-then-left dog-leg sweeping the whole diagram (#425) is forbidden
+    even when exempt.
+    """
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        routes = route_edges(graph)
+
+    canvas_width = _canvas_width(graph)
+    if canvas_width <= 0:
+        return
+    limit = fraction * canvas_width
+
+    for rp, x1, x2 in inter_section_route_backtrack_legs(graph, routes):
+        span = abs(x2 - x1)
+        if span > limit + GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: route {rp.edge.source!r}->{rp.edge.target!r} "
+                f"line {rp.line_id!r} backtracks {span:.1f}px in one leg "
+                f"(x={x1:.1f}->{x2:.1f}), exceeding {fraction:.0%} of canvas "
+                f"width {canvas_width:.1f} - a full-width dog-leg"
+            )
+
+
+def _route_crosses_section_boundary(
+    graph: MetroGraph,
+    routes: list,
+    *,
+    port_tol: float = 24.0,
+    inset: float = 4.0,
+    axis_tol: float = 1.0,
+) -> tuple | None:
+    """Return the first ``(route, section_id, x, y)`` where an axis-aligned
+    routed segment crosses a section bbox edge away from any declared port,
+    else None.
+
+    A segment p1->p2 "crosses" a section edge when it passes strictly
+    through one of the four bbox sides within the perpendicular extent of
+    that side.  Crossings within *port_tol* of one of the section's ports
+    are permitted (that is how a line legitimately enters/leaves).  Any
+    other crossing means a horizontal or vertical run is cutting through a
+    section box where no port invites it -- the symptom this guard forbids
+    (e.g. an entry inferred on the wrong side so the connector slices the
+    box, #432).
+
+    Two classes are intentionally out of scope:
+
+    * **Diagonal transition segments** (45-degree corner curves) clip box
+      corners while legitimately approaching a side port; only axis-aligned
+      runs (within *axis_tol*) are inspected.
+    * **Fan-in/-out bundle routes** through ``__junction_*`` / ``__merge_*``
+      / ``__bypass_*`` virtual nodes route around or through neighbouring
+      sections by a separate mechanism with its own guards; long-range
+      multi-row merge bundles are a known, tracked
+      limitation and are excluded here.
+    """
+    ports_by_sec: dict[str, list] = {}
+    for port in graph.ports.values():
+        ports_by_sec.setdefault(port.section_id, []).append(port)
+
+    def near_port(sec_id: str, x: float, y: float) -> bool:
+        return any(
+            abs(p.x - x) <= port_tol and abs(p.y - y) <= port_tol
+            for p in ports_by_sec.get(sec_id, [])
+        )
+
+    def edge_crossings(p1, p2, x0, y0, x1, y1):
+        ax, ay = p1
+        bx, by = p2
+        hits = []
+        for ex in (x0, x1):
+            if (ax - ex) * (bx - ex) < 0:
+                t = (ex - ax) / (bx - ax)
+                yy = ay + t * (by - ay)
+                if y0 - inset <= yy <= y1 + inset:
+                    hits.append((ex, yy))
+        for ey in (y0, y1):
+            if (ay - ey) * (by - ey) < 0:
+                t = (ey - ay) / (by - ay)
+                xx = ax + t * (bx - ax)
+                if x0 - inset <= xx <= x1 + inset:
+                    hits.append((xx, ey))
+        return hits
+
+    def is_bundle_node(node_id: str) -> bool:
+        return node_id.startswith(("__junction", "__merge", "__bypass"))
+
+    boxes = [
+        (
+            sid,
+            sec.bbox_x,
+            sec.bbox_y,
+            sec.bbox_x + sec.bbox_w,
+            sec.bbox_y + sec.bbox_h,
+        )
+        for sid, sec in graph.sections.items()
+        if sec.bbox_w > 0 and sec.bbox_h > 0
+    ]
+    for rp in routes:
+        if is_bundle_node(rp.edge.source) or is_bundle_node(rp.edge.target):
+            continue
+        pts = rp.points
+        for i in range(len(pts) - 1):
+            p1, p2 = pts[i], pts[i + 1]
+            # Only axis-aligned runs cut a box; diagonal corner curves clip
+            # edges while approaching side ports legitimately.
+            if abs(p1[0] - p2[0]) > axis_tol and abs(p1[1] - p2[1]) > axis_tol:
+                continue
+            for sid, x0, y0, x1, y1 in boxes:
+                for bx, by in edge_crossings(p1, p2, x0, y0, x1, y1):
+                    if not near_port(sid, bx, by):
+                        return (rp, sid, bx, by)
+    return None
+
+
+def _guard_routes_enter_sections_at_ports(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list | None = None,
+) -> None:
+    """After routing: no routed segment may cross a section bbox boundary
+    except within tolerance of a declared port on that section.
+
+    A line that cuts through a section box anywhere other than a port is
+    visually entering/leaving the section where nothing invites it (e.g. a
+    fan-in merge bundle ploughing into a section through its right edge, or
+    an entry inferred on the wrong side so the connector slices the box).
+    """
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        routes = route_edges(graph)
+
+    hit = _route_crosses_section_boundary(graph, routes)
+    if hit is not None:
+        rp, sid, bx, by = hit
+        raise PhaseInvariantError(
+            f"{phase}: route {rp.edge.source!r}->{rp.edge.target!r} "
+            f"line {rp.line_id!r} crosses section {sid!r} boundary at "
+            f"({bx:.1f}, {by:.1f}) away from any declared port"
+        )
+
+
+def _guard_serpentine_no_backtrack(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list | None = None,
+) -> None:
+    """After routing: stacked same-direction sections must not backtrack.
+
+    Same-direction sections stacked in one grid column and chained (#421)
+    serpentine their effective flow row by row so consecutive sections meet
+    on a shared side joined by a short vertical drop.  A section that fails
+    to alternate enters on the wrong side and folds its internal route back
+    across the section width.  For every section in a detected serpentine
+    run, the wrong-way horizontal travel of its internal segments must stay
+    below half the section width.
+    """
+    from nf_metro.layout.auto_layout import detect_serpentine_runs
+
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        routes = route_edges(graph)
+
+    dag = graph.section_dag
+    if dag is None:
+        return
+    runs = detect_serpentine_runs(graph, dag.successors, dag.predecessors)
+    serpentine_sections = {sid for run in runs for sid in run}
+    if not serpentine_sections:
+        return
+
+    wrong_way: dict[str, float] = {sid: 0.0 for sid in serpentine_sections}
+    for rp in routes:
+        src_sec = graph.section_for_station(rp.edge.source)
+        if src_sec != graph.section_for_station(rp.edge.target):
+            continue
+        if src_sec not in serpentine_sections:
+            continue
+        forward = 1.0 if graph.sections[src_sec].direction != "RL" else -1.0
+        xs = [p[0] for p in rp.points]
+        for x1, x2 in zip(xs, xs[1:]):
+            dx = x2 - x1
+            if dx * forward < 0:
+                wrong_way[src_sec] += abs(dx)
+
+    for sid, against in wrong_way.items():
+        section = graph.sections[sid]
+        limit = 0.5 * max(section.bbox_w, 1.0)
+        if against > limit + GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: stacked section {sid!r} (dir={section.direction}) "
+                f"backtracks {against:.1f}px against its flow (>{limit:.1f}px); "
+                f"the serpentine chain is kinking instead of dropping vertically"
+            )
+
+
 def _guard_inter_row_run_clearance(
     graph: MetroGraph,
     phase: str,
@@ -745,6 +1105,65 @@ def _guard_inter_row_run_clearance(
                     f"{top - y:.1f}px above source section {src_sec.id!r} "
                     f"top={top:.1f} (< {EDGE_TO_BUNDLE_CLEARANCE})"
                 )
+
+
+def _guard_inter_section_descent_edge_clearance(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list | None = None,
+) -> None:
+    """After routing: a vertical descent channel of an inter-section route
+    must not *incidentally* graze a section bbox edge.
+
+    A descent legitimately sits on a section edge when its X coincides
+    with a port at one of the route's endpoints (a port-to-port drop).
+    When the channel instead lands within ``EDGE_TO_BUNDLE_CLEARANCE`` of
+    a section edge, on the interior side, with no endpoint port at that
+    X, the lines visibly cross the border (#423).  The channel-x selection
+    in :func:`_route_l_shape` pushes such channels outward; this guard
+    fails loudly if a future change lets one creep back against an edge.
+    """
+    from nf_metro.layout.routing.common import endpoint_port_xs
+
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        routes = route_edges(graph)
+
+    tol = GUARD_TOLERANCE
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        port_xs = endpoint_port_xs(graph, rp.edge)
+        pts = rp.points
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            if abs(x1 - x0) > tol:
+                continue  # vertical segments only
+            vx = (x0 + x1) / 2
+            if any(abs(vx - px) <= COORD_TOLERANCE for px in port_xs):
+                continue  # legitimate port-to-port drop
+            ylo, yhi = sorted((y0, y1))
+            for sec in graph.sections.values():
+                if sec.bbox_w <= 0:
+                    continue
+                if yhi < sec.bbox_y or ylo > sec.bbox_y + sec.bbox_h:
+                    continue
+                left = sec.bbox_x
+                right = left + sec.bbox_w
+                from_left = vx - left
+                from_right = right - vx
+                grazes = (-tol <= from_left < EDGE_TO_BUNDLE_CLEARANCE - tol) or (
+                    -tol <= from_right < EDGE_TO_BUNDLE_CLEARANCE - tol
+                )
+                if grazes:
+                    edge_x = left if from_left < from_right else right
+                    raise PhaseInvariantError(
+                        f"{phase}: descent of {rp.edge.source!r}->"
+                        f"{rp.edge.target!r} line {rp.line_id!r} at x={vx:.1f} "
+                        f"grazes section {sec.id!r} edge x={edge_x:.1f} "
+                        f"(< {EDGE_TO_BUNDLE_CLEARANCE})"
+                    )
 
 
 def _guard_bundle_order_preserved(
@@ -1966,7 +2385,7 @@ def _compute_section_layout(
     # When every real station shares a single non-zero residue, shift
     # the whole canvas by the smallest signed amount that returns them
     # to integer multiples of ``y_spacing``.  No-op when residues are
-    # mixed (e.g. sarek-style multi-row layouts).
+    # mixed.
     _snap_canvas_y_to_grid(graph, y_spacing, section_y_padding)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.15")
@@ -2007,7 +2426,14 @@ def _compute_section_layout(
             _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
             _guard_fanout_tail_join(graph, phase, offsets=offsets, routes=routes)
             _guard_inter_section_route_no_backtrack(graph, phase, routes=routes)
+            _guard_inter_section_route_no_full_width_backtrack(
+                graph, phase, routes=routes
+            )
+            _guard_routes_enter_sections_at_ports(graph, phase, routes=routes)
+            _guard_serpentine_no_backtrack(graph, phase, routes=routes)
             _guard_inter_row_run_clearance(graph, phase, routes=routes)
+            _guard_inter_section_descent_edge_clearance(graph, phase, routes=routes)
+            _guard_fan_bundles_coincide_or_separate(graph, phase, routes=routes)
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
@@ -4341,8 +4767,7 @@ def _snap_canvas_y_to_grid(
 
     Apply ``delta`` to every station, port, junction (via bbox + offset
     chain) and section bbox.  If the dominant residue does NOT meet
-    threshold (e.g. sarek where sections sit at multiple residues by
-    construction), no shift is applied: the per-section snap from Stage
+    threshold, no shift is applied: the per-section snap from Stage
     6.4 is honoured as the best-effort alignment.
     """
     if y_spacing <= 0 or not graph.sections:
@@ -6263,7 +6688,17 @@ def _position_merge_junction(
     merging at the junction; passing 1 falls back to the baseline margin.
     """
     max_pred_x = max(p.x for p in predecessors)
-    junction.x = max_pred_x + _required_junction_margin(n)
+    margin = _required_junction_margin(n)
+    # Normal forward fan-in: merge just past the right-most predecessor on its
+    # way into a target to the right.  But when the target sits well to the LEFT
+    # of the predecessors (a collector like MultiQC fed from across the map),
+    # merging at max_pred_x forces the whole merged bundle to backtrack the full
+    # width into the entry.  Merge local to the target instead, so only the
+    # individual feeders make the long approach and the merge->entry hop is short.
+    if entry_port.x < max_pred_x - margin:
+        junction.x = entry_port.x - margin
+    else:
+        junction.x = max_pred_x + margin
     junction.y = entry_port.y
 
 
