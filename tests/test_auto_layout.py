@@ -240,6 +240,59 @@ def test_direction_explicit_preserved():
     assert graph.sections["sec1"].direction == "TB"
 
 
+def test_explicit_grid_section_keeps_lr_against_auto_successor_below():
+    """An explicit-grid section keeps the LR default even when an auto-placed
+    successor lands in a lower grid row.
+
+    Regression lock for #446: during auto-layout an explicit-grid section
+    still reads grid_col == -1, so comparing it against an auto neighbour
+    (row >= 0) used to fire the "all successors below" TB branch and reorient
+    the section vertically.
+    """
+    graph = _make_graph_with_sections(
+        ["manual", "downstream"],
+        [("manual_s1", "manual", "downstream_s1", "downstream", "main")],
+    )
+    # 'manual' is explicitly gridded; 'downstream' is left to auto-layout.
+    graph.grid_overrides["manual"] = (0, 0, 1, 1)
+    graph._explicit_grid.add("manual")
+
+    successors, predecessors, _ = _build_section_dag(graph)
+    _assign_grid_positions(graph, successors, predecessors, max_station_columns=100)
+    _infer_directions(graph, successors, predecessors, set())
+
+    assert graph.sections["manual"].direction == "LR"
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "genomic_pipeline.mmd",
+        "genomeassembly_staggered.mmd",
+        "topologies/stacked_lr_serpentine.mmd",
+        "topologies/around_section_below.mmd",
+        "topologies/inter_row_wrap_clearance.mmd",
+    ],
+)
+def test_explicit_grid_sections_default_lr(fixture):
+    """Explicit-grid sections with no %%metro direction stay LR after layout.
+
+    These fixtures lay every section out by hand; their grid stacks
+    successors below predecessors (serpentine wraps), which must not be read
+    as vertical internal flow (#446).
+    """
+    text = (EXAMPLES / fixture).read_text()
+    graph = parse_metro_mermaid(text)
+
+    explicit = graph._explicit_grid - graph._explicit_directions
+    assert explicit, f"{fixture} has no explicit-grid sections to check"
+    for sec_id in explicit:
+        assert graph.sections[sec_id].direction == "LR", (
+            f"{fixture}: {sec_id} should default LR, got "
+            f"{graph.sections[sec_id].direction}"
+        )
+
+
 # --- Phase 4: Port side inference ---
 
 
