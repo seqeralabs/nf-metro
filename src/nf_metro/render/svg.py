@@ -12,6 +12,7 @@ from pathlib import Path
 import drawsvg as draw
 
 from nf_metro.layout.constants import LABEL_LINE_HEIGHT
+from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.labels import LabelPlacement, place_labels
 from nf_metro.layout.routing import RoutedPath, compute_station_offsets, route_edges
 from nf_metro.layout.routing.corners import resolve_curve_radii
@@ -235,16 +236,17 @@ def _position_legend(
         legend_x += graph.legend_offset[0]
         legend_y += graph.legend_offset[1]
 
-    overlaps = _legend_overlaps_content(
-        legend_x, legend_y, legend_w, legend_h, graph, routes
-    )
     if explicit_pin:
-        if overlaps:
+        if _legend_overlaps_content(
+            legend_x, legend_y, legend_w, legend_h, graph, routes
+        ):
             warnings.warn(
                 f"legend pinned at '{pos}' overlaps a section or route.",
                 stacklevel=2,
             )
-    elif pos not in ("bottom", "right") and overlaps:
+    elif pos not in ("bottom", "right") and _legend_overlaps_content(
+        legend_x, legend_y, legend_w, legend_h, graph, routes
+    ):
         legend_x = content_left
         legend_y = max_y + gap
 
@@ -507,43 +509,6 @@ def _legend_overlaps_sections(
     return False
 
 
-def _segment_intersects_rect(
-    x1: float,
-    y1: float,
-    x2: float,
-    y2: float,
-    rx: float,
-    ry: float,
-    rw: float,
-    rh: float,
-) -> bool:
-    """Liang-Barsky test: does segment (x1,y1)-(x2,y2) touch the rect?"""
-    xmin, xmax = rx, rx + rw
-    ymin, ymax = ry, ry + rh
-    dx, dy = x2 - x1, y2 - y1
-    # Both endpoints inside trivially intersects; the loop below also covers it.
-    p = (-dx, dx, -dy, dy)
-    q = (x1 - xmin, xmax - x1, y1 - ymin, ymax - y1)
-    t0, t1 = 0.0, 1.0
-    for pi, qi in zip(p, q):
-        if pi == 0:
-            if qi < 0:
-                return False  # parallel and outside this slab
-        else:
-            t = qi / pi
-            if pi < 0:
-                if t > t1:
-                    return False
-                if t > t0:
-                    t0 = t
-            else:
-                if t < t0:
-                    return False
-                if t < t1:
-                    t1 = t
-    return True
-
-
 def _legend_overlaps_routes(
     lx: float,
     ly: float,
@@ -553,12 +518,11 @@ def _legend_overlaps_routes(
     margin: float,
 ) -> bool:
     """Check if a legend rectangle (grown by *margin*) crosses any route."""
-    rx, ry = lx - margin, ly - margin
-    rw, rh = lw + 2 * margin, lh + 2 * margin
+    bbox = (lx - margin, ly - margin, lx + lw + margin, ly + lh + margin)
     for route in routes:
         pts = route.points
         for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
-            if _segment_intersects_rect(x1, y1, x2, y2, rx, ry, rw, rh):
+            if segment_intersects_bbox(x1, y1, x2, y2, bbox):
                 return True
     return False
 

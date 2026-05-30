@@ -588,18 +588,19 @@ def _route_inter_section(
                     edge, src, tgt, i, src_col, tgt_col, ctx, src_row
                 )
             return _route_merge_branch(edge, src, ctx, src_col)
-        # A downward cross-column feeder into a LEFT entry descends into the
-        # row below before its horizontal run, so intervening sections in the
-        # SOURCE row are not obstacles. When the L-shape's horizontal at the
-        # entry Y is clear of other sections, drop straight in instead of
-        # looping to the canvas bottom (_route_bypass).
+        # A feeder into a LEFT entry one row directly below descends into that
+        # row before its horizontal run, so intervening sections in the SOURCE
+        # row are not obstacles. When the L-shape's horizontal at the entry Y
+        # is clear of other sections, drop straight in instead of looping to
+        # the canvas bottom (_route_bypass). Restricted to adjacent rows: a
+        # multi-row descent's vertical leg could pierce an intervening row.
         if (
             tgt_port is not None
             and tgt_port.is_entry
             and tgt_port.side == PortSide.LEFT
             and src_row is not None
             and tgt_row is not None
-            and tgt_row > src_row
+            and tgt_row == src_row + 1
         ):
             exclude = {src.section_id, tgt.section_id}
             exclude.discard(None)
