@@ -16,6 +16,7 @@ from collections import defaultdict, deque
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     EDGE_TO_BUNDLE_CLEARANCE,
+    INTER_ROW_HEADER_CLEARANCE,
     MERGE_GAP_MIN,
     MIN_INTER_SECTION_GAP,
     MIN_INTER_SECTION_ROW_GAP,
@@ -27,6 +28,7 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
 )
+from nf_metro.layout.routing.common import resolve_section
 from nf_metro.parser.model import MetroGraph, PortSide, Section
 
 
@@ -316,7 +318,12 @@ def place_sections(
     _enforce_min_column_gaps(
         graph, col_assign, min_col, max_col, requested_gap=section_x_gap
     )
-    _enforce_min_row_gaps(graph, row_assign, requested_gap=section_y_gap)
+    _enforce_min_row_gaps(
+        graph,
+        row_assign,
+        requested_gap=section_y_gap,
+        wrap_min_by_pair=_wrap_bundle_row_minimums(graph),
+    )
 
 
 def _rows_overlap(a: Section, b: Section) -> bool:
@@ -344,6 +351,76 @@ def _station_column(
             if src and src.section_id and src.section_id in col_assign:
                 return col_assign[src.section_id]
     return None
+
+
+def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]:
+    """Minimum bbox-to-bbox row gap each inter-row wrap bundle needs.
+
+    An inter-section bundle that crosses grid rows into a horizontal-side
+    (LEFT/RIGHT) entry port wraps through the inter-row gap as a
+    horizontal run (see ``_route_left_entry_wrap``).  To keep that run
+    clear of both bounding obstacles it needs a band of
+    ``EDGE_TO_BUNDLE_CLEARANCE`` below the upper bbox bottom, the bundle
+    span, and ``INTER_ROW_HEADER_CLEARANCE`` above the lower row (clearing
+    its header badge, not just the bbox edge); a narrow gap squeezes the
+    bundle flush against a box.  Returns, per adjacent
+    ``(upper_row, lower_row)`` pair, the required bbox-to-bbox gap so the
+    placement pass can widen too-tight rows.
+
+    Fold/serpentine sections (multi-row span) route via reversal handling,
+    not this channel, and are excluded.
+    """
+
+    def _is_flow_section(sec) -> bool:
+        return sec is not None and sec.grid_row_span == 1
+
+    # (upper_row, lower_row) -> entry_port_id -> set of line ids
+    per_gap: dict[tuple[int, int], dict[str, set[str]]] = defaultdict(
+        lambda: defaultdict(set)
+    )
+    for edge in graph.edges:
+        port = graph.ports.get(edge.target)
+        if port is None or not port.is_entry:
+            continue
+        # LEFT/RIGHT entries wrap; TOP entries drop in via a horizontal
+        # lead-in.  Both place a horizontal run in the inter-row gap (via
+        # ``inter_row_channel_y``) that must clear the next-row header.
+        if port.side not in (PortSide.LEFT, PortSide.RIGHT, PortSide.TOP):
+            continue
+        tgt_sec = graph.sections.get(port.section_id)
+        if not _is_flow_section(tgt_sec):
+            continue
+        src = graph.stations.get(edge.source)
+        if src is None:
+            continue
+        src_sec = resolve_section(graph, src)
+        if not _is_flow_section(src_sec):
+            continue
+        # A horizontal-side entry only WRAPS (placing a flush run in the
+        # inter-row gap) when the source is on the far side of the target
+        # from the port.  A LEFT entry reached from a source in the same or
+        # a righthand column wraps; one reached from the left is a plain
+        # L-shape drop and needs no widening (e.g. preprocessing -> a
+        # column-1 section below it).  Mirror for RIGHT.
+        if port.side == PortSide.LEFT and src_sec.grid_col < tgt_sec.grid_col:
+            continue
+        if port.side == PortSide.RIGHT and src_sec.grid_col > tgt_sec.grid_col:
+            continue
+        src_row, tgt_row = src_sec.grid_row, tgt_sec.grid_row
+        # Only adjacent-row wraps centre in this gap; a multi-row crossing
+        # routes around intervening sections (``_route_around_section_below``)
+        # and is sized by that path, not by widening this gap.
+        if abs(src_row - tgt_row) != 1:
+            continue
+        gap = (src_row, tgt_row) if tgt_row > src_row else (tgt_row, src_row)
+        per_gap[gap][edge.target].add(edge.line_id)
+
+    minimums: dict[tuple[int, int], float] = {}
+    for gap, ports in per_gap.items():
+        widest = max(len(lines) for lines in ports.values())
+        span = (widest - 1) * OFFSET_STEP
+        minimums[gap] = EDGE_TO_BUNDLE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE
+    return minimums
 
 
 def _bundles_in_gap(
@@ -581,6 +658,7 @@ def _enforce_min_row_gaps(
     min_gap: float = MIN_INTER_SECTION_ROW_GAP,
     header_protrusion: float = SECTION_HEADER_PROTRUSION,
     requested_gap: float | None = None,
+    wrap_min_by_pair: dict[tuple[int, int], float] | None = None,
 ) -> None:
     """Shift rows downward so section headers don't overlap the section above.
 
@@ -588,9 +666,18 @@ def _enforce_min_row_gaps(
     bbox.  The visual gap is measured from the upper section's bbox
     bottom to the lower section's header top (bbox_y - protrusion).
     Only checks section pairs that share horizontal extent.
+
+    ``wrap_min_by_pair`` (see :func:`_wrap_bundle_row_minimums`) adds a
+    second, routing-aware constraint: an adjacent-row gap that hosts an
+    inter-row wrap bundle is widened so the bundle's horizontal run keeps
+    full clearance from both bounding sections.  That requirement is
+    bbox-to-bbox (no header protrusion) and spans the row envelope, so it
+    is checked against the tightest envelope edges rather than only
+    horizontally-overlapping pairs.
     """
     if not row_assign:
         return
+    wrap_min_by_pair = wrap_min_by_pair or {}
 
     min_row = min(row_assign.values())
     max_row = max(
@@ -626,23 +713,43 @@ def _enforce_min_row_gaps(
                 if worst_gap is None or gap < worst_gap:
                     worst_gap = gap
 
-        if worst_gap is None or worst_gap >= min_gap:
+        # Header-clearance deficit (horizontally-overlapping pairs only).
+        header_deficit = 0.0
+        if worst_gap is not None and worst_gap < min_gap:
+            header_deficit = min_gap - worst_gap
+
+        # Routing deficit: keep an inter-row wrap bundle clear of both
+        # bounding sections.  Measured bbox-to-bbox across the whole row
+        # envelope (matching ``row_bottom_edge`` / ``row_top_edge``).
+        wrap_deficit = 0.0
+        wrap_min = wrap_min_by_pair.get((row, row + 1))
+        if wrap_min is not None:
+            envelope_bottom = max(s.offset_y + s.bbox_y + s.bbox_h for s in upper_secs)
+            envelope_top = min(s.offset_y + s.bbox_y for s in lower_secs)
+            envelope_gap = envelope_top - envelope_bottom
+            if envelope_gap < wrap_min:
+                wrap_deficit = wrap_min - envelope_gap
+
+        deficit = max(header_deficit, wrap_deficit)
+        if deficit <= 0:
             continue
 
-        # The required bbox-to-bbox distance for the warning message
-        required_bbox_gap = min_gap + header_protrusion
-
-        # Warn if we're overriding the user's requested gap
+        # Warn if we're overriding the user's requested gap, naming the
+        # constraint that actually drove the widening.
+        if wrap_deficit > header_deficit:
+            reason = "to fit an inter-row routing bundle"
+            required_bbox_gap = wrap_min
+        else:
+            reason = "to clear section headers"
+            required_bbox_gap = min_gap + header_protrusion
         if requested_gap is not None and required_bbox_gap > requested_gap:
             warnings.warn(
                 f"Section gap between rows {row} and {row + 1} "
-                f"widened to {required_bbox_gap:.0f}px "
-                f"to clear section headers "
+                f"widened to {required_bbox_gap:.0f}px {reason} "
                 f"(requested {requested_gap:.0f}px)",
                 stacklevel=2,
             )
 
-        deficit = min_gap - worst_gap
         for shift_row in range(row + 1, max_row + 1):
             for s in row_sections.get(shift_row, []):
                 s.offset_y += deficit

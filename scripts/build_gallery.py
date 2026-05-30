@@ -195,6 +195,13 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "channel would cut through an intervening section's bbox. Exercises "
         "`_route_around_section_below` (sarek-style geometry).",
     ),
+    (
+        "inter_row_wrap_clearance",
+        TOPOLOGIES_DIR,
+        "A right-exit bundle wrapping down to a left-entry in the row below. "
+        "The horizontal run sits centred in the inter-row gap, clear of both "
+        "the section above and the next row's header.",
+    ),
 ]
 
 # Category headers inserted before specific entries

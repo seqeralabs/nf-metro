@@ -219,6 +219,17 @@ Section headers (numbered circle + label) are rendered above bbox_y by
 approximately SECTION_HEADER_PROTRUSION (~26px).  This constant adds a
 small margin so routing channels don't overlap the header zone."""
 
+INTER_ROW_HEADER_CLEARANCE: float = SECTION_HEADER_PROTRUSION + EDGE_TO_BUNDLE_CLEARANCE
+"""Distance from a section's bbox top to an inter-row channel above it.
+
+An adjacent-row wrap channel approaching a section from above must clear
+the header *badge* (which protrudes ``SECTION_HEADER_PROTRUSION`` above
+``bbox_y``) by ``EDGE_TO_BUNDLE_CLEARANCE``, the same margin the source
+side keeps from its bbox bottom.  Section placement reserves this band
+(``_wrap_bundle_row_minimums``) and routing centres within it
+(``_center_inter_row_channel``); the single definition keeps the two in
+lockstep."""
+
 # ---------------------------------------------------------------------------
 # Engine: entry/exit alignment
 # ---------------------------------------------------------------------------
