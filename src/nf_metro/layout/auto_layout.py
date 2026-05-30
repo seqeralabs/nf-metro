@@ -799,26 +799,28 @@ def _flow_aligned_sides(direction: str) -> tuple[PortSide, PortSide]:
     return PortSide.LEFT, PortSide.RIGHT
 
 
-def _has_fold_predecessor_above(
+def _feeds_from_vertical_drop_above(
     graph: MetroGraph,
     sec_id: str,
-    my_col: int,
     my_row: int,
     predecessors: dict[str, set[str]],
     fold_sections: set[str],
 ) -> bool:
-    """True when a fold predecessor sits in this section's column on a row
-    above it.
+    """True when a vertically-exiting predecessor (a TB or fold section) sits above.
 
-    A fold section exits BOTTOM and drops straight down; the section it
-    feeds should accept that drop on its TOP edge rather than wrap to a
-    flow-aligned side.
+    A TB/fold section exits BOTTOM and drops straight down, so the section it
+    feeds should accept that drop on its TOP edge; forcing a flow-aligned side
+    there bends the vertical drop into a diagonal.  Horizontal-flow (LR/RL)
+    predecessors instead exit sideways and wrap to a flow-aligned entry
+    (a carriage-return chain or an around-section wrap), so they don't block it.
     """
     for src in predecessors.get(sec_id, set()):
-        if src not in fold_sections:
+        src_sec = graph.sections.get(src)
+        if not src_sec:
             continue
-        src_col, src_row, src_row_span, _src_col_span = _effective_grid_pos(graph, src)
-        if src_col == my_col and (src_row + src_row_span - 1) < my_row:
+        _src_col, src_row, src_row_span, _src_col_span = _effective_grid_pos(graph, src)
+        is_vertical = src_sec.direction == "TB" or src in fold_sections
+        if is_vertical and (src_row + src_row_span - 1) < my_row:
             return True
     return False
 
@@ -860,8 +862,8 @@ def _infer_port_sides(
         # a clean straight drop; forcing a flow-aligned side there would add
         # an unnecessary wrap (#432 narrows flow-alignment to the horizontal
         # carriage-return case it is meant for).
-        flow_aligned_entry = horizontal and not _has_fold_predecessor_above(
-            graph, sec_id, my_col, my_row, predecessors, fold_sections
+        flow_aligned_entry = horizontal and not _feeds_from_vertical_drop_above(
+            graph, sec_id, my_row, predecessors, fold_sections
         )
 
         # Infer exit hints (only if section has no explicit exit_hints)
