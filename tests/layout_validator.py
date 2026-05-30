@@ -75,6 +75,9 @@ def validate_layout(graph: MetroGraph) -> list[Violation]:
         violations.extend(
             check_route_segment_crossings(graph, _precomputed=precomputed)
         )
+        violations.extend(
+            check_serpentine_no_backtrack(graph, _precomputed=precomputed)
+        )
     return violations
 
 
@@ -1537,6 +1540,87 @@ def check_exit_port_feeder_alignment(
                         "delta": delta,
                         "port_coord": port_coord,
                         "station_coord": st_coord,
+                    },
+                )
+            )
+
+    return violations
+
+
+def check_serpentine_no_backtrack(
+    graph: MetroGraph,
+    backtrack_frac: float = 0.5,
+    _precomputed: tuple[dict[tuple[str, str], float], list[RoutedPath]] | None = None,
+) -> list[Violation]:
+    """Stacked same-direction sections must not backtrack horizontally.
+
+    When same-direction sections are stacked in one grid column and chained
+    (issue #421), the engine serpentines their effective flow so consecutive
+    sections meet on a shared side joined by a short vertical drop.  A section
+    that fails to serpentine instead enters on the wrong side and folds its
+    internal route back across (nearly) the full section width.
+
+    For every section in a detected serpentine run, this sums the horizontal
+    travel of its internal routed segments that runs *against* the section's
+    flow direction.  If that wrong-way travel exceeds ``backtrack_frac`` of the
+    section width, the section is kinking the chain.
+    """
+    from nf_metro.layout.auto_layout import detect_serpentine_runs
+
+    violations: list[Violation] = []
+
+    if _precomputed is not None:
+        offsets, routes = _precomputed
+    else:
+        try:
+            offsets = compute_station_offsets(graph)
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:
+            return violations
+
+    dag = graph.section_dag
+    if dag is None:
+        return violations
+    runs = detect_serpentine_runs(graph, dag.successors, dag.predecessors)
+    serpentine_sections = {sid for run in runs for sid in run}
+    if not serpentine_sections:
+        return violations
+
+    # Internal route segments grouped by home section.
+    wrong_way: dict[str, float] = {sid: 0.0 for sid in serpentine_sections}
+    for route in routes:
+        src_sec = graph.section_for_station(route.edge.source)
+        tgt_sec = graph.section_for_station(route.edge.target)
+        if src_sec != tgt_sec or src_sec not in serpentine_sections:
+            continue
+        section = graph.sections[src_sec]
+        forward = 1.0 if section.direction != "RL" else -1.0
+        pts = apply_route_offsets(route, offsets)
+        for k in range(len(pts) - 1):
+            dx = pts[k + 1][0] - pts[k][0]
+            if dx * forward < 0:
+                wrong_way[src_sec] += abs(dx)
+
+    for sid, against in wrong_way.items():
+        section = graph.sections[sid]
+        limit = backtrack_frac * max(section.bbox_w, 1.0)
+        if against > limit:
+            violations.append(
+                Violation(
+                    check="serpentine_no_backtrack",
+                    severity=Severity.ERROR,
+                    message=(
+                        f"Stacked section '{sid}' (dir={section.direction}) "
+                        f"backtracks {against:.0f}px against its flow "
+                        f"(>{limit:.0f}px = {backtrack_frac:.0%} of width "
+                        f"{section.bbox_w:.0f}); the serpentine chain is "
+                        f"kinking instead of dropping vertically"
+                    ),
+                    context={
+                        "section": sid,
+                        "direction": section.direction,
+                        "against": against,
+                        "limit": limit,
                     },
                 )
             )

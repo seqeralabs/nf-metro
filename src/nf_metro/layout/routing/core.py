@@ -644,6 +644,27 @@ def _route_inter_section(
             return _route_around_section_below(edge, src, tgt, tgt, i, n, ctx)
         return _route_left_entry_wrap(edge, src, tgt, i, n, ctx)
 
+    # Serpentine LEFT exit -> LEFT entry stacked in the same column (#421):
+    # an RL section's left exit dropping to the LR section directly below
+    # whose left entry sits a few px inward.  The standard L-shape places
+    # its vertical channel at sx + radius, which lands inside the source
+    # bbox.  Drop the channel on the LEFT of the column instead so the
+    # connector stays outside both section boxes.
+    if (
+        src_port is not None
+        and not src_port.is_entry
+        and src_port.side == PortSide.LEFT
+        and tgt_port is not None
+        and tgt_port.is_entry
+        and tgt_port.side == PortSide.LEFT
+        and src_col is not None
+        and tgt_col is not None
+        and src_col == tgt_col
+        and src_row is not None
+        and _resolve_section_row(graph, tgt) != src_row
+    ):
+        return _route_left_exit_left_entry_drop(edge, src, tgt, i, n, ctx)
+
     # Non-bypass edges to merge junctions: route to entry port.
     # When dy is tiny, use a straight line to avoid cramped curves.
     ep_id = ctx.merge.entry_port_for.get(edge.target)
@@ -1326,6 +1347,46 @@ def _route_top_entry_l_shape(
         is_inter_section=True,
         normalize_exempt=True,
         curve_radii=[r_lead, r_first, r_second],
+    )
+
+
+def _route_left_exit_left_entry_drop(
+    edge: Edge, src: Station, tgt: Station, i: int, n: int, ctx: _RoutingCtx
+) -> RoutedPath:
+    """Drop a LEFT exit into a LEFT entry stacked directly below (#421).
+
+    Both ports sit on the left edge of one grid column.  Run a short lead
+    out to the left of the column, drop vertically in that channel, then
+    come back in to the target's left entry port::
+
+        (sx,sy) -> (vx,sy) -> (vx,ty) -> (tx,ty)
+
+    The channel ``vx`` is placed just left of the column's leftmost edge so
+    the connector never re-enters either section's bbox.
+    """
+    sx, sy = src.x, src.y
+    tx, ty = tgt.x, tgt.y
+    dy = ty - sy
+    vertical = vertical_direction(dy)
+
+    delta, r_first, r_second = l_shape_radii(
+        i,
+        n,
+        vertical=vertical,
+        offset_step=ctx.offset_step,
+        base_radius=ctx.curve_radius,
+    )
+
+    src_col = _resolve_section_col(ctx.graph, src)
+    left_edge = col_left_edge(ctx.graph, src_col, default=min(sx, tx))
+    vx = min(left_edge, sx, tx) - ctx.curve_radius - ctx.offset_step + delta
+
+    return RoutedPath(
+        edge=edge,
+        line_id=edge.line_id,
+        points=[(sx, sy), (vx, sy), (vx, ty), (tx, ty)],
+        is_inter_section=True,
+        curve_radii=[r_first, r_second],
     )
 
 

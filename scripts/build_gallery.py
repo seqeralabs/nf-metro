@@ -171,6 +171,12 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         TOPOLOGIES_DIR,
         "Stacked analysis sections feeding through a fold into branching targets.",
     ),
+    (
+        "stacked_lr_serpentine",
+        TOPOLOGIES_DIR,
+        "Same-direction sections stacked in one grid column, chained via short "
+        "vertical drops on alternating sides (serpentine), no wrap-around.",
+    ),
     # --- Offset and bypass ---
     (
         "mismatched_tracks",

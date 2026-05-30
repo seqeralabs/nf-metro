@@ -652,6 +652,62 @@ def _guard_inter_section_route_no_backtrack(
                 )
 
 
+def _guard_serpentine_no_backtrack(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list | None = None,
+) -> None:
+    """After routing: stacked same-direction sections must not backtrack.
+
+    Same-direction sections stacked in one grid column and chained (#421)
+    serpentine their effective flow row by row so consecutive sections meet
+    on a shared side joined by a short vertical drop.  A section that fails
+    to alternate enters on the wrong side and folds its internal route back
+    across the section width.  For every section in a detected serpentine
+    run, the wrong-way horizontal travel of its internal segments must stay
+    below half the section width.
+    """
+    from nf_metro.layout.auto_layout import detect_serpentine_runs
+
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        routes = route_edges(graph)
+
+    dag = graph.section_dag
+    if dag is None:
+        return
+    runs = detect_serpentine_runs(graph, dag.successors, dag.predecessors)
+    serpentine_sections = {sid for run in runs for sid in run}
+    if not serpentine_sections:
+        return
+
+    wrong_way: dict[str, float] = {sid: 0.0 for sid in serpentine_sections}
+    for rp in routes:
+        src_sec = graph.section_for_station(rp.edge.source)
+        if src_sec != graph.section_for_station(rp.edge.target):
+            continue
+        if src_sec not in serpentine_sections:
+            continue
+        forward = 1.0 if graph.sections[src_sec].direction != "RL" else -1.0
+        xs = [p[0] for p in rp.points]
+        for x1, x2 in zip(xs, xs[1:]):
+            dx = x2 - x1
+            if dx * forward < 0:
+                wrong_way[src_sec] += abs(dx)
+
+    for sid, against in wrong_way.items():
+        section = graph.sections[sid]
+        limit = 0.5 * max(section.bbox_w, 1.0)
+        if against > limit + GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: stacked section {sid!r} (dir={section.direction}) "
+                f"backtracks {against:.1f}px against its flow (>{limit:.1f}px); "
+                f"the serpentine chain is kinking instead of dropping vertically"
+            )
+
+
 def _guard_inter_row_run_clearance(
     graph: MetroGraph,
     phase: str,
@@ -1958,6 +2014,7 @@ def _compute_section_layout(
             _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
             _guard_fanout_tail_join(graph, phase, offsets=offsets, routes=routes)
             _guard_inter_section_route_no_backtrack(graph, phase, routes=routes)
+            _guard_serpentine_no_backtrack(graph, phase, routes=routes)
             _guard_inter_row_run_clearance(graph, phase, routes=routes)
 
 

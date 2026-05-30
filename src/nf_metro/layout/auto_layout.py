@@ -9,7 +9,7 @@ Preserves any values explicitly set by %%metro directives.
 
 from __future__ import annotations
 
-__all__ = ["infer_section_layout"]
+__all__ = ["infer_section_layout", "detect_serpentine_runs"]
 
 from collections import defaultdict, deque
 
@@ -39,6 +39,14 @@ def infer_section_layout(graph: MetroGraph, max_station_columns: int = 15) -> No
     if not successors and not predecessors:
         return
 
+    # Capture which sections carry author-supplied port hints before
+    # inference fills the rest in: the serpentine pass must only override
+    # inferred port sides, never explicit %%metro entry:/exit: directives.
+    explicit_entry_sections = {
+        sid for sid, s in graph.sections.items() if s.entry_hints
+    }
+    explicit_exit_sections = {sid for sid, s in graph.sections.items() if s.exit_hints}
+
     fold_sections, below_fold_sections, convergence_sections = _assign_grid_positions(
         graph,
         successors,
@@ -58,6 +66,15 @@ def infer_section_layout(graph: MetroGraph, max_station_columns: int = 15) -> No
         edge_lines,
         fold_sections,
         convergence_sections,
+    )
+    _serpentine_stacked_sections(
+        graph,
+        successors,
+        predecessors,
+        edge_lines,
+        fold_sections,
+        explicit_entry_sections,
+        explicit_exit_sections,
     )
 
 
@@ -980,3 +997,166 @@ def _relative_side(
         return PortSide.TOP
 
     return PortSide.RIGHT  # same position, default right
+
+
+def _effective_grid_pos(graph: MetroGraph, sec_id: str) -> tuple[int, int, int, int]:
+    """Return (col, row, row_span, col_span) for a section during inference.
+
+    Explicit grid overrides are applied to ``section.grid_col`` only later in
+    section_placement, so during auto-layout they read -1.  Prefer the value
+    recorded in ``graph.grid_overrides`` when present.
+    """
+    if sec_id in graph.grid_overrides:
+        return graph.grid_overrides[sec_id]
+    section = graph.sections[sec_id]
+    return (
+        section.grid_col,
+        section.grid_row,
+        section.grid_row_span,
+        section.grid_col_span,
+    )
+
+
+def detect_serpentine_runs(
+    graph: MetroGraph,
+    successors: dict[str, set[str]],
+    predecessors: dict[str, set[str]],
+) -> list[list[str]]:
+    """Find runs of vertically-stacked single-cell sections forming a chain.
+
+    A serpentine run is a maximal sequence of sections that
+
+    * occupy a single grid cell (row_span == col_span == 1),
+    * share a grid column,
+    * sit on consecutive grid rows, and
+    * form a simple chain: the section on row N feeds exactly one section
+      in the same column (the one on row N+1), and that lower section is
+      fed from the column only by the upper one.
+
+    Returns runs as lists of section ids ordered top-to-bottom.  Runs of
+    length < 2 are omitted.  Used to serpentine the effective flow
+    direction of stacked same-direction sections (issue #421).
+    """
+    # Group single-cell sections by grid column, keyed by row.
+    col_rows: dict[int, dict[int, str]] = defaultdict(dict)
+    for sec_id in graph.sections:
+        col, row, row_span, col_span = _effective_grid_pos(graph, sec_id)
+        if col < 0 or row < 0 or row_span != 1 or col_span != 1:
+            continue
+        # Two sections sharing a (col, row) cell is malformed; skip the column.
+        if row in col_rows[col]:
+            col_rows[col][row] = ""  # poison marker
+        else:
+            col_rows[col][row] = sec_id
+
+    runs: list[list[str]] = []
+    for col, rows in col_rows.items():
+        if any(v == "" for v in rows.values()):
+            continue
+        ordered_rows = sorted(rows)
+        in_column = set(rows.values())
+        i = 0
+        while i < len(ordered_rows):
+            run = [rows[ordered_rows[i]]]
+            j = i
+            while j + 1 < len(ordered_rows):
+                upper_row = ordered_rows[j]
+                lower_row = ordered_rows[j + 1]
+                if lower_row != upper_row + 1:
+                    break
+                upper = rows[upper_row]
+                lower = rows[lower_row]
+                # upper must feed lower, and lower must be the only in-column
+                # successor of upper (a clean chain, not a fan-out).
+                upper_col_succ = successors.get(upper, set()) & in_column
+                lower_col_pred = predecessors.get(lower, set()) & in_column
+                if (
+                    lower in successors.get(upper, set())
+                    and upper_col_succ == {lower}
+                    and lower_col_pred == {upper}
+                ):
+                    run.append(lower)
+                    j += 1
+                else:
+                    break
+            if len(run) >= 2:
+                runs.append(run)
+            i = j + 1
+    return runs
+
+
+def _serpentine_stacked_sections(
+    graph: MetroGraph,
+    successors: dict[str, set[str]],
+    predecessors: dict[str, set[str]],
+    edge_lines: dict[tuple[str, str], set[str]],
+    fold_sections: set[str],
+    explicit_entry_sections: set[str],
+    explicit_exit_sections: set[str],
+) -> None:
+    """Serpentine the flow of vertically-stacked same-direction sections.
+
+    When same-direction sections are stacked in one grid column and chained
+    (issue #421), connecting them naively forces a wrap-around: the upper
+    section exits one side and the lower section enters the same side while
+    still flowing the same way internally, kinking the internal route.
+
+    The transit-map answer is to alternate the effective flow row by row
+    (LR, RL, LR, ...) so consecutive sections meet on a shared side joined by
+    a short vertical drop.  We flip the direction of every other section in
+    the run and re-point its inferred entry/exit hints accordingly.
+
+    Author-set ``%%metro direction:`` / ``entry:`` / ``exit:`` directives
+    always win; only inferred values are changed.
+    """
+    runs = detect_serpentine_runs(graph, successors, predecessors)
+    for run in runs:
+        head = graph.sections[run[0]]
+        # Only serpentine horizontal-flow stacks; TB/fold stacks already drop
+        # vertically and need no reversal.
+        if head.direction not in ("LR", "RL"):
+            continue
+        if any(sid in fold_sections for sid in run):
+            continue
+        # Author-set port sides or directions pin the layout; serpentine only
+        # fills the fully-inferred case (issue #421).  If any section in the
+        # run carries an explicit entry/exit/direction directive, leave the
+        # whole run alone so the author's intent is honoured end-to-end.
+        if any(
+            sid in explicit_entry_sections
+            or sid in explicit_exit_sections
+            or sid in graph._explicit_directions
+            for sid in run
+        ):
+            continue
+
+        base = head.direction
+        flipped = "RL" if base == "LR" else "LR"
+        for idx, sec_id in enumerate(run):
+            want = base if idx % 2 == 0 else flipped
+            section = graph.sections[sec_id]
+            if want != section.direction and sec_id not in graph._explicit_directions:
+                section.direction = want
+
+        # Re-derive entry/exit sides for the (now alternating) run so each
+        # internal hop is a clean vertical drop between consecutive sections.
+        for idx, sec_id in enumerate(run):
+            section = graph.sections[sec_id]
+            entry_side = PortSide.RIGHT if section.direction == "RL" else PortSide.LEFT
+            exit_side = (
+                PortSide.LEFT if entry_side == PortSide.RIGHT else PortSide.RIGHT
+            )
+
+            if sec_id not in explicit_entry_sections and predecessors.get(sec_id):
+                in_lines: set[str] = set()
+                for src in predecessors[sec_id]:
+                    in_lines.update(edge_lines.get((src, sec_id), set()))
+                if in_lines:
+                    section.entry_hints = [(entry_side, sorted(in_lines))]
+
+            if sec_id not in explicit_exit_sections and successors.get(sec_id):
+                out_lines: set[str] = set()
+                for tgt in successors[sec_id]:
+                    out_lines.update(edge_lines.get((sec_id, tgt), set()))
+                if out_lines:
+                    section.exit_hints = [(exit_side, sorted(out_lines))]
