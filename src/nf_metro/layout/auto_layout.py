@@ -874,15 +874,13 @@ def _infer_port_sides(
             if all_exit_lines:
                 if sec_id in fold_sections:
                     exit_side = _compute_fold_exit_side(
-                        graph, section, sec_id, successors, edge_lines
+                        graph, sec_id, successors, edge_lines
                     )
                     section.exit_hints.append((exit_side, sorted(all_exit_lines)))
                 elif flow_aligned_exit:
                     section.exit_hints.append((exit_aligned, sorted(all_exit_lines)))
                 else:
-                    _compute_exit_hints_by_side(
-                        graph, section, sec_id, successors, edge_lines
-                    )
+                    _compute_exit_hints_by_side(graph, sec_id, successors, edge_lines)
 
         # Infer entry hints (only if section has no explicit entry_hints)
         if not section.entry_hints and sec_id in predecessors:
@@ -927,7 +925,6 @@ def _infer_port_sides(
 
 def _compute_fold_exit_side(
     graph: MetroGraph,
-    section,
     sec_id: str,
     successors: dict[str, set[str]],
     edge_lines: dict[tuple[str, str], set[str]],
@@ -938,7 +935,7 @@ def _compute_fold_exit_side(
     exit is LEFT. For multi-row spans where all successors are below,
     uses BOTTOM so lines continue their vertical flow.
     """
-    my_col, my_row, _my_row_span, my_col_span = _effective_grid_pos(graph, sec_id)
+    my_col, my_row, my_row_span, my_col_span = _effective_grid_pos(graph, sec_id)
 
     side_votes: dict[PortSide, int] = defaultdict(int)
     for tgt in successors.get(sec_id, set()):
@@ -964,7 +961,6 @@ def _compute_fold_exit_side(
 
     # Override for multi-row spans: if all successors are below the fold
     # span, use BOTTOM exit so lines continue their vertical flow.
-    _my_col, my_row, my_row_span, _my_col_span = _effective_grid_pos(graph, sec_id)
     if my_row_span > 1:
         fold_bottom_row = my_row + my_row_span - 1
         all_below = all(
@@ -980,7 +976,6 @@ def _compute_fold_exit_side(
 
 def _compute_exit_hints_by_side(
     graph: MetroGraph,
-    section,
     sec_id: str,
     successors: dict[str, set[str]],
     edge_lines: dict[tuple[str, str], set[str]],
@@ -1009,6 +1004,7 @@ def _compute_exit_hints_by_side(
         )
         side_exit_lines[side].update(lines)
 
+    section = graph.sections[sec_id]
     if side_exit_lines:
         for side, lines in sorted(side_exit_lines.items(), key=lambda x: x[0].value):
             if lines:
