@@ -32,7 +32,10 @@ from dataclasses import dataclass
 from nf_metro.layout.phases.bbox import _min_section_bbox_top
 from nf_metro.layout.phases.canvas import _shift_graph_into_canvas
 from nf_metro.layout.phases.guards import PhaseInvariantError
-from nf_metro.layout.phases.junctions import _compute_junction_xy, _position_junctions
+from nf_metro.layout.phases.junctions import (
+    _position_junctions,
+    _resolvable_junctions,
+)
 from nf_metro.parser.model import MetroGraph
 
 # Predicate comparison epsilon.  The repair (``_position_junctions``)
@@ -123,17 +126,10 @@ def assert_maintained(
 def _junctions_track_ports_holds(graph: MetroGraph) -> bool:
     """True when every junction sits where its ports place it.
 
-    Compares each junction's stored ``(x, y)`` against the pure
-    ``_compute_junction_xy`` target.  A mismatch means a port moved since
-    the junction was last positioned.
+    Compares each junction's stored ``(x, y)`` against its computed target.
+    A mismatch means a port moved since the junction was last positioned.
     """
-    for jid in graph.junctions:
-        junction = graph.stations.get(jid)
-        if not junction:
-            continue
-        target = _compute_junction_xy(graph, jid)
-        if target is None:
-            continue
+    for junction, target in _resolvable_junctions(graph):
         if (
             abs(junction.x - target[0]) > _MAINTAIN_TOL
             or abs(junction.y - target[1]) > _MAINTAIN_TOL

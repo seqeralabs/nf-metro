@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from nf_metro.layout.constants import (
     JUNCTION_MARGIN,
 )
@@ -107,6 +109,25 @@ def _compute_junction_xy(graph: MetroGraph, jid: str) -> tuple[float, float] | N
     return exit_port_x + direction * margin, exit_port_y
 
 
+def _resolvable_junctions(
+    graph: MetroGraph,
+) -> Iterator[tuple[Station, tuple[float, float]]]:
+    """Yield ``(junction, target_xy)`` for each junction with a placement.
+
+    Skips junctions whose station is missing or whose ``_compute_junction_xy``
+    returns ``None`` (no resolvable placement).  Shared by the repair
+    (``_position_junctions``) and the ``junctions_track_ports`` predicate so
+    they iterate identically.
+    """
+    for jid in graph.junctions:
+        junction = graph.stations.get(jid)
+        if not junction:
+            continue
+        target = _compute_junction_xy(graph, jid)
+        if target is not None:
+            yield junction, target
+
+
 def _position_junctions(graph: MetroGraph) -> None:
     """Position junction stations at the midpoint of the inter-section gap.
 
@@ -118,13 +139,8 @@ def _position_junctions(graph: MetroGraph) -> None:
     at ``max(pred.x) + _required_junction_margin(n)``, y = entry_port.y to
     create a visible single-line segment from merge point to entry.
     """
-    for jid in graph.junctions:
-        junction = graph.stations.get(jid)
-        if not junction:
-            continue
-        target = _compute_junction_xy(graph, jid)
-        if target is not None:
-            junction.x, junction.y = target
+    for junction, target in _resolvable_junctions(graph):
+        junction.x, junction.y = target
 
 
 def _merge_junction_xy(

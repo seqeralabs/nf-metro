@@ -236,14 +236,12 @@ otherwise only surface as subtle visual defects.
 """
 
 
-# Invariants kept alive across Pass-C settling (#365).  Each constructive
-# Pass-C phase that may perturb one is followed by ``maintain(graph, ...)``,
-# which re-applies any violated invariant's repair in priority order.  This
-# replaces the hand-placed restore calls (the repeated ``_position_junctions``
-# and ``_shift_graph_into_canvas`` re-runs) with declared rules, so a new
-# phase needs no "remember to re-run the restore" bookkeeping.
 def _pass_c_maintained(section_y_padding: float) -> list[MaintainedInvariant]:
-    """The Pass-C invariant set, bound to this layout's spacing params."""
+    """The Pass-C invariant set, bound to this layout's spacing params.
+
+    ``maintain`` re-applies these repairs after each constructive phase that
+    may perturb a junction or the canvas top margin; see ``maintained.py``.
+    """
     return [JUNCTIONS_TRACK_PORTS, canvas_top_margin(section_y_padding)]
 
 
@@ -747,9 +745,7 @@ def _compute_section_layout(
     # port pairs (re-running Stage 5.1 for the junctions that move
     # with them).  Stage 6 below handles the rest of Pass C.
 
-    # Invariants maintained across the Pass-C settle (#365), bound to this
-    # layout's spacing.  Each constructive phase below is followed by
-    # ``maintain(graph, maintained)`` instead of hand-placed restore calls.
+    # Invariant set re-applied by ``maintain`` after each perturbing phase.
     maintained = _pass_c_maintained(section_y_padding)
 
     # Stage 5.1: Position junction stations in the inter-section gap.
