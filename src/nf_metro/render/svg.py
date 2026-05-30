@@ -952,10 +952,11 @@ def _render_terminus_icons(
     caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
     name_widths = [len(n) * caption_font_size * 0.55 if n else 0.0 for n in names]
     # LR/RL march icons along X, so widen the step when adjacent captions
-    # would overlap.  TB/BT stack icons along Y, where height (not caption
-    # width) sets the spacing.
+    # would overlap.  TB/BT stack icons along Y, where icon height (plus a
+    # caption row, when present) sets the spacing.
     if is_tb:
-        icon_step = theme.terminus_height + ICON_INTER_GAP
+        caption_room = caption_font_size + ICON_NAME_GAP if any(names) else 0.0
+        icon_step = theme.terminus_height + ICON_INTER_GAP + caption_room
     else:
         icon_step = caption_aware_icon_step(names, name_widths, theme.terminus_width)
 
