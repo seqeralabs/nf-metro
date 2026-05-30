@@ -256,8 +256,7 @@ def _classify_merge_edges(
             pred = graph.stations.get(edge.source)
             if not pred:
                 continue
-            pred_col = _resolve_section_col(graph, pred)
-            pred_row = _resolve_section_row(graph, pred)
+            pred_col, pred_row = _resolve_section_colrow(graph, pred)
             if (
                 pred_col is not None
                 and abs(tgt_col - pred_col) > 1
@@ -420,6 +419,27 @@ def _build_routing_context(
     )
 
 
+def compute_junction_fan_info(graph: MetroGraph) -> dict[_EdgeKey, tuple[int, int]]:
+    """Unified per-edge fan positions for fan-out junctions.
+
+    The offset-independent subset of :func:`_build_routing_context` needed by
+    the fan-coincidence guard, so it need not build the full routing context
+    just to read ``junction_fan_info``.
+    """
+    junction_ids = graph.junction_ids
+    fork_targets: dict[str, set[str]] = defaultdict(set)
+    join_sources: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        fork_targets[e.source].add(e.target)
+        join_sources[e.target].add(e.source)
+    merge = _classify_merge_edges(graph, junction_ids, join_sources, fork_targets)
+    line_priority = {lid: i for i, lid in enumerate(graph.lines.keys())}
+    all_exclude = merge.skip_edges | merge.index_exclude
+    return _compute_junction_fan_info(
+        graph, junction_ids, line_priority, skip_edges=all_exclude
+    )
+
+
 def _compute_section_trunk_ys(graph: MetroGraph) -> dict[str, float]:
     """Return a mapping ``section_id -> trunk_y`` for LR/RL sections.
 
@@ -519,9 +539,8 @@ def _route_inter_section(
     )
 
     # Resolve section columns and row for bypass detection
-    src_col = _resolve_section_col(graph, src)
+    src_col, src_row = _resolve_section_colrow(graph, src)
     tgt_col = _resolve_section_col(graph, tgt)
-    src_row = _resolve_section_row(graph, src)
     needs_bypass = (
         src_col is not None
         and tgt_col is not None
@@ -846,8 +865,7 @@ def _has_around_section_sibling(
             continue
         # Skip siblings that would dispatch through the bypass branch.
         # needs_bypass = (|tgt_col - src_col| > 1) AND intervening.
-        other_col = _resolve_section_col(graph, other_src)
-        other_row = _resolve_section_row(graph, other_src)
+        other_col, other_row = _resolve_section_colrow(graph, other_src)
         if (
             other_col is not None
             and ep_col is not None
@@ -1948,10 +1966,8 @@ def _corridor_is_viable(ctx: _RoutingCtx, src: Station, entry_port: Station) -> 
     ep_port = ctx.graph.ports.get(entry_port.id)
     if ep_port is None or ep_port.side != PortSide.LEFT:
         return False
-    src_row = _resolve_section_row(ctx.graph, src)
-    ep_row = _resolve_section_row(ctx.graph, entry_port)
-    src_col = _resolve_section_col(ctx.graph, src)
-    ep_col = _resolve_section_col(ctx.graph, entry_port)
+    src_col, src_row = _resolve_section_colrow(ctx.graph, src)
+    ep_col, ep_row = _resolve_section_colrow(ctx.graph, entry_port)
     if None in (src_row, ep_row, src_col, ep_col):
         return False
     if ep_row <= src_row:
@@ -2020,10 +2036,8 @@ def _route_inter_row_gap_corridor(
         base_radius=ctx.curve_radius,
     )
 
-    src_row = _resolve_section_row(ctx.graph, src)
-    src_col = _resolve_section_col(ctx.graph, src)
-    ep_col = _resolve_section_col(ctx.graph, entry_port)
-    ep_row = _resolve_section_row(ctx.graph, entry_port)
+    src_col, src_row = _resolve_section_colrow(ctx.graph, src)
+    ep_col, ep_row = _resolve_section_colrow(ctx.graph, entry_port)
 
     # Inter-row gap Y just below the source row (column-restricted so a
     # tall row-span in another column doesn't push the channel down).  Use
@@ -2179,7 +2193,7 @@ def _route_around_section_below(
 
     # Bypass Y below all sections in the column range so the route
     # clears every intervening section (cross_row=True).
-    src_col = _resolve_section_col(ctx.graph, src)
+    src_col, src_row = _resolve_section_colrow(ctx.graph, src)
     ep_col = _resolve_section_col(ctx.graph, entry_port)
     # Fallbacks if a column can't be resolved (degenerate cases).
     bc_src_col = src_col if src_col is not None else 0
@@ -2189,7 +2203,7 @@ def _route_around_section_below(
         bc_src_col,
         bc_tgt_col,
         BYPASS_CLEARANCE,
-        src_row=_resolve_section_row(ctx.graph, src),
+        src_row=src_row,
         cross_row=True,
     )
     by = by_base + delta
@@ -2322,10 +2336,8 @@ def _route_right_entry_wrap(
     # Detect cross-row case: use bypass-style Y just below the source
     # row's sections so the line runs horizontally under the adjacent
     # section before dropping to the target row.
-    src_row = _resolve_section_row(ctx.graph, src)
-    tgt_row = _resolve_section_row(ctx.graph, tgt)
-    src_col = _resolve_section_col(ctx.graph, src)
-    tgt_col = _resolve_section_col(ctx.graph, tgt)
+    src_col, src_row = _resolve_section_colrow(ctx.graph, src)
+    tgt_col, tgt_row = _resolve_section_colrow(ctx.graph, tgt)
 
     cross_row = (
         src_row is not None
@@ -3567,6 +3579,22 @@ def _resolve_section_row(graph: MetroGraph, station: Station) -> int | None:
     return None
 
 
+def _resolve_section_colrow(
+    graph: MetroGraph, station: Station
+) -> tuple[int | None, int | None]:
+    """Resolve grid ``(col, row)`` for a port/junction station in one pass.
+
+    ``_resolve_section_col`` and ``_resolve_section_row`` each re-resolve the
+    section (an adjacency walk); callers needing both should resolve once.
+    """
+    sec = resolve_section(graph, station, prefer_upstream=False)
+    if sec is None:
+        return None, None
+    col = sec.grid_col if sec.grid_col >= 0 else None
+    row = sec.grid_row if sec.grid_row >= 0 else None
+    return col, row
+
+
 @dataclass
 class _VChannel:
     """One vertical channel segment of a routed inter-section path.
@@ -4123,9 +4151,8 @@ def _compute_bypass_gap_indices(
         if not is_inter:
             continue
 
-        src_col = _resolve_section_col(graph, src)
+        src_col, src_row = _resolve_section_colrow(graph, src)
         tgt_col = _resolve_section_col(graph, tgt)
-        src_row = _resolve_section_row(graph, src)
         if (
             src_col is None
             or tgt_col is None
@@ -4212,10 +4239,9 @@ def _compute_junction_fan_info(
         jst = graph.stations.get(jid)
         if not jst:
             continue
-        src_col = _resolve_section_col(graph, jst)
+        src_col, src_row = _resolve_section_colrow(graph, jst)
         if src_col is None:
             continue
-        src_row = _resolve_section_row(graph, jst)
 
         # Classify each outgoing edge into one of: L-shape (adjacent col,
         # no intervening sections), bypass (column gap with intervening),
@@ -4240,10 +4266,9 @@ def _compute_junction_fan_info(
             tgt = graph.stations.get(edge.target)
             if not tgt or not (tgt.is_port or edge.target in junction_ids):
                 continue
-            tgt_col = _resolve_section_col(graph, tgt)
+            tgt_col, tgt_row = _resolve_section_colrow(graph, tgt)
             if tgt_col is None:
                 continue
-            tgt_row = _resolve_section_row(graph, tgt)
             tgt_port = graph.ports.get(edge.target)
             is_bypass = abs(tgt_col - src_col) > 1 and _has_intervening_sections(
                 graph, src_col, tgt_col, src_row

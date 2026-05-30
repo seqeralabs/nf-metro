@@ -760,14 +760,13 @@ def _guard_fan_bundles_coincide_or_separate(
     bundles.
     """
     from nf_metro.layout.routing import compute_station_offsets, route_edges
-    from nf_metro.layout.routing.core import _build_routing_context
+    from nf_metro.layout.routing.core import compute_junction_fan_info
 
     if offsets is None:
         offsets = compute_station_offsets(graph)
     if routes is None:
         routes = route_edges(graph, station_offsets=offsets)
-    ctx = _build_routing_context(graph, DIAGONAL_RUN, CURVE_RADIUS, offsets)
-    fan_sources = {key[0] for key in ctx.junction_fan_info}
+    fan_sources = {key[0] for key in compute_junction_fan_info(graph)}
     if not fan_sources:
         return
 
