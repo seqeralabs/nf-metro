@@ -56,7 +56,7 @@ Stages split into three regimes:
 | after final | bisection set (all unconditional) + off-track-above-consumer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
 Bisection checkpoints fire after every Pass C sub-stage (see the
-`# Stage 5.2:` through `# Stage 6.15:` comments in
+`# Stage 5.2:` through `# Stage 6.16:` comments in
 `_compute_section_layout`). Three guards
 hold continuously only from a specific checkpoint onward, and the
 bisection runner skips them earlier; see `_BISECTION_FIRST_VALID` in
@@ -72,8 +72,8 @@ Three further guards are excluded from the bisection set entirely
 (meaningful only at the final boundary); the `_run_pass_c_guards`
 docstring in `engine.py` is the authoritative list.
 
-Guard bodies live at the top of `engine.py` (lines 83-275); the
-bisection runner is `_run_pass_c_guards`.
+Guard bodies live in `phases/guards.py` and are imported into `engine.py`;
+the bisection runner is `_run_pass_c_guards`.
 
 ## Stage overview
 
@@ -326,9 +326,10 @@ in pipeline order.
 ### Stage 4.9: redistribute fan-out siblings (engine.py:644-648)
 - **Purpose**: For each fan-out column with a unique trunk junction
   (one station carrying the full bundle plus >=2 side branches),
-  redistribute side stations symmetrically around the trunk Y. Gated
-  on `graph.center_ports`.
-- **Helper**: `_redistribute_fanout_siblings` (engine.py:3163).
+  redistribute side stations symmetrically around the trunk Y. No-op
+  unless `graph.center_ports` (guard inside the helper, not at the call
+  site).
+- **Helper**: `_redistribute_fanout_siblings` (`phases/fan_bundles.py`).
 - **Precondition**: Trunk Ys aligned (Stage 4.8).
 - **Postcondition**: In qualifying columns, fan-out siblings sit
   symmetrically around the trunk station's Y. Linear chains, fan-in
@@ -338,9 +339,9 @@ in pipeline order.
 ### Stage 4.10: redistribute full-bundle columns (engine.py)
 - **Purpose**: When a column has no unique trunk (every station
   carries the full bundle - e.g. Reporting's Shiny + Quarto),
-  symmetrically fan stations around the local LR port Y. Gated on
-  `center_ports`.
-- **Helper**: `_redistribute_full_bundle_columns`.
+  symmetrically fan stations around the local LR port Y. No-op unless
+  `center_ports` (guard inside the helper, not at the call site).
+- **Helper**: `_redistribute_full_bundle_columns` (`phases/fan_bundles.py`).
 - **Precondition**: Stage 4.9 ran.
 - **Postcondition**: Full-bundle columns sit symmetric around the
   LR port Y.
@@ -549,11 +550,14 @@ in pipeline order.
 - **Invariants preserved**: Multi-station columns.
 - **Related tests**: `test_terminus_not_directly_after_diagonal`.
 
-### Stage 6.11: balance section content around trunk (engine.py:765-771)
+### Stage 6.11: balance section content around trunk
 - **Purpose**: Auto-balance pass. For sections whose final layout
   still has an empty band above the trunk while more siblings sit
   below than above, lift bottommost movable siblings into the empty
   top band. U-turn-safe and bbox-bounded.
+- **Gating**: Early-returns unless **both** `graph._explicit_grid` and
+  `graph.center_ports` are set (scoped to explicit-`%%metro grid:` +
+  centre-ports pipelines), so it is a no-op on auto-laid graphs.
 - **Helper**: `_balance_section_content_around_trunk` (engine.py:2030).
 - **Precondition**: All earlier 13-phase reshuffles done.
 - **Postcondition**: Sibling count above trunk >= sibling count below
@@ -621,6 +625,22 @@ in pipeline order.
   `test_no_icon_overlaps_line_path`,
   `test_row_gap_accommodates_bypass`.
 
+### Stage 6.15a: restore symmetric top padding
+- **Purpose**: Fan re-distribution (Stages 4.9 / 4.10 / 6.7 / 6.11) can
+  lift a branch above the content-top line the bbox was sized for,
+  crowding the topmost marker against the bbox top while the bottom keeps
+  its full band. Grow each bbox top to a full `section_y_padding` above the
+  highest marker (bounded by the row above) so fanned-above content sits
+  centred. The upward grow can breach the canvas top margin, so
+  `_shift_graph_into_canvas` runs immediately after.
+- **Helper**: `_grow_bboxes_to_content_top` (`phases/bbox.py`), then
+  `_shift_graph_into_canvas`.
+- **Precondition**: All content Ys final (post-6.14).
+- **Postcondition**: Each bbox top sits `section_y_padding` above its
+  highest marker, bounded by the row above.
+- **Invariants preserved**: Station Ys (only bbox tops grow). Resolves #406.
+- **Related tests**: `test_section_bbox_has_top_padding`.
+
 ### Stage 6.15: snap canvas to the y-grid
 - **Purpose**: After all settling, restore canvas-wide grid alignment.
   Stage 6.4 snaps to a per-row grid, but later helpers (notably
@@ -636,6 +656,23 @@ in pipeline order.
   canvas moves by one delta).
 - **Related tests**: `test_auto_y_spacing_fits_content`.
 
+### Stage 6.16: re-align TB entry ports with feeders
+- **Purpose**: A TB/BT section's perpendicular entry port is pinned a fixed
+  offset above its first internal station, so the late vertical settling
+  (Stages 6.13-6.15) that shifts the section's content drags the entry port
+  off the upstream feeder Y it was snapped to in Stage 3.2, re-introducing
+  an inter-section S-kink. Re-run the alignment (TB/BT only, to leave
+  settled LR/RL geometry untouched) to re-snap the port to its now-settled
+  feeder, then re-anchor junctions to the moved ports.
+- **Helper**: `_align_entry_ports(graph, tb_only=True)` (`phases/ports.py`),
+  then `_position_junctions`.
+- **Precondition**: All vertical settling done (post-6.15).
+- **Postcondition**: TB/BT entry ports share their upstream feeder's Y;
+  junctions re-anchored to the settled ports.
+- **Invariants preserved**: LR/RL entry/exit geometry (skipped by
+  `tb_only`).
+- **Validate guard after**: bisection set ("after Stage 6.16").
+
 ## Unclear / structural-debt signals
 
 No open signals at this time. Add new entries here when phase
@@ -648,7 +685,7 @@ following before merging:
 
 1. **Stage tag**: pick the next sequential number within the
    appropriate stage (e.g. a new Stage 6.x sub-step gets the next
-   integer after Stage 6.15).  Historical note: the organic phase
+   integer after Stage 6.16).  Historical note: the organic phase
    suffix tree (`13d2`, `13k2`, the `Phase 13k` -> `Phase 13k2`
    rename in PR #342) is what the flat Stage.N scheme is designed to
    prevent.
