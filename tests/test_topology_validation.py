@@ -232,16 +232,17 @@ class TestFuncprofilerUpstreamDefects:
 #
 # 1. Section 2 (Alignment) chain alignment - bwa_index, bwa_mem,
 #    samtools_sort, samtools_index alternated rows in a 4-station zigzag
-#    on the Main line, with no structural reason. FIXED in #420 by not
-#    inserting an entry-runway phantom on a line that already has its
-#    own trunk station at an earlier layer.
+#    on the Main line. FIXED in #420: bwa_mem is a fan-in (the bwa_index
+#    branch plus the fastp entry both carry Main into it), so the entry
+#    phantom now anchors the through-trunk while bwa_index fans in above
+#    it, keeping bwa_mem -> samtools_sort -> samtools_index straight.
 # 2. Section 3 (Variant Calling) excessive column gap - GATK
 #    HaplotypeCaller and DeepVariant share column x=772 but are 80px
 #    apart with one empty grid row between them. STILL OPEN (#318).
 # 3. Section 1 -> Section 2/4 inter-section line crossing - Main and
 #    QC Reporting both fanned out from junction __junction_6 and crossed
 #    on the way to their respective targets. FIXED as a side effect of
-#    #420 (the flattened Alignment trunk removes the crossing).
+#    #420 (the straight Alignment trunk removes the crossing).
 #
 # Defects 1 and 3 now pass; defect 2 remains xfail until the column-gap
 # layout is fixed.
@@ -285,8 +286,9 @@ class TestVariantCallingDefects:
 #
 # Parametrised across the whole gallery rather than only variant_calling:
 # the zig-zag was a general track-stagger defect (entry-runway phantoms
-# splitting a line that already had its own trunk), so the invariant must
-# hold for every fixture, not just the one that first exposed it.
+# fanning out symmetrically with a fan-in branch instead of anchoring the
+# trunk), so the invariant must hold for every fixture, not just the one
+# that first exposed it.
 
 _CHAIN_ALIGNMENT_FILES = [
     VARIANT_CALLING_FILE,

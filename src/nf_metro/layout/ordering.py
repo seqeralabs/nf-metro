@@ -409,6 +409,32 @@ def _trunk_fanout_node(nodes: list[str], graph: MetroGraph | None) -> str | None
     return None
 
 
+def _phantom_trunk_node(nodes: list[str], graph: MetroGraph | None) -> str | None:
+    """Return the lone entry-runway phantom in a fan-out group, if any.
+
+    A phantom pass-through (inserted so a deep-entering line keeps its own
+    early-layer track) represents that line's through-trunk into the
+    convergence target.  When it shares a layer with real same-line
+    stations, those reals are fan-in branches merging onto the trunk -- so
+    the phantom, not a real station, should hold the anchor track and the
+    branches fan off it.  Without this the symmetric fan-out splits the
+    phantom and the branch evenly, dragging the trunk off-axis into a
+    zig-zag (#420).
+    """
+    if graph is None:
+        return None
+    phantoms = [
+        n
+        for n in nodes
+        if (st := graph.stations.get(n)) is not None
+        and st.is_hidden
+        and n.startswith("_phantom_")
+    ]
+    if len(phantoms) == 1 and len(nodes) > 1:
+        return phantoms[0]
+    return None
+
+
 def _place_fan_out(
     nodes: list[str],
     base: float,
@@ -488,6 +514,18 @@ def _place_fan_out(
         use_asymmetric = True
     elif layer_idx == 1 and n == 2:
         use_asymmetric = True
+
+    # Phantom-trunk placement: an entry-runway phantom is the line's
+    # through-trunk into a convergence target, so pin it at anchor and
+    # fan the real fan-in branches above it (keeping the trunk straight
+    # through the junction; #420).
+    phantom_trunk = _phantom_trunk_node(nodes, graph)
+    if phantom_trunk is not None:
+        tracks[phantom_trunk] = anchor
+        others = [n for n in nodes if n != phantom_trunk]
+        for i, node in enumerate(others, 1):
+            tracks[node] = anchor - i * fan_spacing
+        return
 
     # Trunk-anchored placement: when one node carries a strict superset
     # of every sibling's line set, it's the bundle trunk.  Pin it at

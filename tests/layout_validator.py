@@ -1359,6 +1359,10 @@ def check_intra_section_chain_alignment(
     # misalignment between two real stations.
     out_neighbours: dict[str, set[str]] = {}
     in_neighbours: dict[str, set[str]] = {}
+    # Targets fed by an entry/exit port: a station that merges an internal
+    # branch with the line's external entry is a genuine fan-in hub, so the
+    # internal edge into it is legitimately diagonal and must not be flagged.
+    port_fed: set[str] = set()
     for e in graph.edges:
         src_st = graph.stations.get(e.source)
         tgt_st = graph.stations.get(e.target)
@@ -1366,6 +1370,8 @@ def check_intra_section_chain_alignment(
             out_neighbours.setdefault(e.source, set()).add(e.target)
         if src_st is not None and not src_st.is_port:
             in_neighbours.setdefault(e.target, set()).add(e.source)
+        if src_st is not None and src_st.is_port:
+            port_fed.add(e.target)
 
     for edge in graph.edges:
         src = graph.stations.get(edge.source)
@@ -1394,6 +1400,12 @@ def check_intra_section_chain_alignment(
         if len(out_neighbours.get(edge.source, ())) > 1:
             continue
         if len(in_neighbours.get(edge.target, ())) > 1:
+            continue
+
+        # Skip entry-port fan-in hubs: the target merges this internal
+        # branch with the line's external entry, so the branch edge is a
+        # legitimate diagonal merge, not a chain misalignment.
+        if edge.target in port_fed:
             continue
 
         # Skip pre-terminus targets: a station whose only follow-on is

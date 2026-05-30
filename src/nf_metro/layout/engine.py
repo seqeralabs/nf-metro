@@ -7522,14 +7522,6 @@ def _insert_phantom_pass_throughs(
         target_layers = [layers.get(t, min_layer) for t in targets]
         if all(ly > min_layer for ly in target_layers):
             earliest_target = min(targets, key=lambda t: layers.get(t, 0))
-
-            if _entry_target_has_clear_trunk(sub, earliest_target, line_id, layers):
-                # The line already runs into this target along a clean
-                # in-section trunk, so a phantom would only add a spurious
-                # same-line sibling at the early layer and split the trunk
-                # into a zig-zag fan-out (#420).
-                continue
-
             phantom_id = f"_phantom_{section.id}_{line_id}"
 
             sub.add_station(
@@ -7543,59 +7535,6 @@ def _insert_phantom_pass_throughs(
             sub.add_edge(
                 Edge(source=phantom_id, target=earliest_target, line_id=line_id)
             )
-
-
-def _entry_target_has_clear_trunk(
-    sub: MetroGraph,
-    target: str,
-    line_id: str,
-    layers: dict[str, int],
-) -> bool:
-    """Whether an entry-runway phantom into *target* would be redundant.
-
-    A phantom gives a deep-entering line its own track so its inbound
-    route doesn't graze unrelated early-layer stations.  It is redundant
-    -- and actively harmful (#420) -- when the line already flows into
-    *target* along a clean in-section trunk: the entry then merely merges
-    onto that trunk, and the phantom would split the trunk into a zig-zag
-    fan-out at the early layer.
-
-    The trunk is "clear" when:
-
-    * *target* has exactly one real (non-hidden, non-port) in-section
-      predecessor, so it is a linear chain link rather than a multi-line
-      convergence hub (whose inbound branches the entry would cross), and
-    * that predecessor carries *line_id* at an earlier layer, and
-    * no terminus (input file icon) carries *line_id* earlier in the
-      section -- a flattened entry would otherwise run through the icon
-      sitting on the trunk at the section's input edge.
-    """
-    target_layer = layers.get(target, 0)
-
-    # Distinct real predecessor stations (an a -->|l1,l2| b edge pair
-    # yields one station twice, so dedupe before counting the trunk).
-    real_preds = {
-        e.source
-        for e in sub.edges_to(target)
-        if (st := sub.stations.get(e.source)) is not None
-        and not st.is_hidden
-        and not st.is_port
-    }
-    if len(real_preds) != 1:
-        return False
-
-    pred = next(iter(real_preds))
-    if line_id not in sub.station_lines(pred):
-        return False
-    if layers.get(pred, target_layer) >= target_layer:
-        return False
-
-    return not any(
-        st.is_terminus
-        and line_id in sub.station_lines(sid)
-        and layers.get(sid, target_layer) < target_layer
-        for sid, st in sub.stations.items()
-    )
 
 
 def _align_phantom_pass_throughs(
