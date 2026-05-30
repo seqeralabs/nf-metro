@@ -564,3 +564,31 @@ def test_render_tb_section_file_icon_below_station():
     assert "HTML" in svg
     root = ET.fromstring(svg)
     assert root.tag.endswith("svg") or "svg" in root.tag
+
+
+def test_render_tb_terminus_pill_is_horizontal():
+    """A blank terminus nub in a TB section is a horizontal (wide) pill."""
+    import re
+
+    graph = parse_metro_mermaid(
+        "%%metro line: a | A | #ff0000\n"
+        "%%metro line: b | B | #00ff00\n"
+        "%%metro file: out | HTML\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        %%metro direction: TB\n"
+        "        run[Run]\n"
+        "        out[ ]\n"
+        "        run -->|a,b| out\n"
+        "    end\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    # The terminus nub <rect> carries data-station-id="out"; in a TB section
+    # it must be wider than tall (lines arrive vertically into it).
+    m = re.search(r'<rect\b[^>]*data-station-id="out"[^>]*/?>', svg)
+    assert m, "terminus nub rect not found"
+    rect = m.group(0)
+    width = float(re.search(r'width="([0-9.]+)"', rect).group(1))
+    height = float(re.search(r'height="([0-9.]+)"', rect).group(1))
+    assert width > height, f"TB terminus pill not horizontal: {width=} {height=}"

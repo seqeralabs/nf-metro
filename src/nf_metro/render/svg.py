@@ -790,12 +790,21 @@ def _render_stations(
         # (same size as pill, no rounding)
         is_blank_terminus = station.is_terminus and not station.label.strip()
         if is_blank_terminus:
-            w = r * 2
-            h = span + r * 2
-            cy = station.y + (min_off + max_off) / 2
+            # Match the section flow axis: a horizontal nub for TB/BT (lines
+            # arrive vertically), a vertical nub otherwise.
+            if is_tb_vert:
+                w = span + r * 2
+                h = r * 2
+                cx = station.x + (min_off + max_off) / 2
+                cy = station.y
+            else:
+                w = r * 2
+                h = span + r * 2
+                cx = station.x
+                cy = station.y + (min_off + max_off) / 2
             d.append(
                 draw.Rectangle(
-                    station.x - w / 2,
+                    cx - w / 2,
                     cy - h / 2,
                     w,
                     h,
