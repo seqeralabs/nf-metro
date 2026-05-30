@@ -152,6 +152,10 @@ def _position_legend(
     """Compute legend position and dimensions.
 
     Returns (legend_x, legend_y, legend_w, legend_h, show_legend).
+
+    ``legend_position`` is passed in because callers may override it per render
+    (only ``"none"`` is overridden in practice); the placement modifiers
+    (``legend_anchor``/``legend_offset``/``legend_at``) are read from ``graph``.
     """
     legend_logo_size = (logo_w, logo_h) if logo_in_legend else None
     legend_w, legend_h = compute_legend_dimensions(
@@ -165,7 +169,7 @@ def _position_legend(
         return legend_x, legend_y, legend_w, legend_h, show_legend
 
     # Absolute placement (legend: x,y) pins the block top-left exactly.
-    if legend_position == "free" and graph.legend_at is not None:
+    if graph.legend_at is not None:
         legend_x, legend_y = graph.legend_at
         return legend_x, legend_y, legend_w, legend_h, show_legend
 
