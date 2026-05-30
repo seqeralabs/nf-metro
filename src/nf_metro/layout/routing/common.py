@@ -294,9 +294,14 @@ def compute_bundle_info(
             if src_sec and tgt_sec and src_sec.grid_col != tgt_sec.grid_col:
                 col_key = (src_sec.grid_col, tgt_sec.grid_col)
             elif tgt_sec:
-                # Source is a junction: include target column so edges
-                # to different columns get separate bundles.
-                col_key = (round(sx), tgt_sec.grid_col)
+                # Source is a junction: include target column AND row so
+                # edges to different sections get separate bundles.  A
+                # junction can fan to two targets in the same column but
+                # different rows (e.g. sarek junction_9 -> annotation row 2
+                # via a wrap and -> reporting row 3 via the MultiQC
+                # corridor); those are distinct corridors and must not be
+                # conflated into one over-wide interleaved bundle.
+                col_key = (round(sx), tgt_sec.grid_col, tgt_sec.grid_row)
             else:
                 col_key = round(sx)
             key = ("L", col_key, v_dir, h_dir)

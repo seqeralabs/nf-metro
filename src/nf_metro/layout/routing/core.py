@@ -1850,7 +1850,11 @@ def _corridor_descent_x(
     gap_left, gap_right = column_gap_edges(ctx.graph, ep_col - 1, ep_col, row=ep_row)
     if gap_right <= gap_left:
         return None
-    return (gap_left + gap_right) / 2 - delta
+    # +delta (not -delta): the L->D corner into this channel is concentric
+    # only when vx + r is constant across the bundle.  r_inner shrinks for
+    # the +delta (rightmost) line, so that line must sit at the LARGER vx;
+    # the opposite sign delaminates the descent corner.
+    return (gap_left + gap_right) / 2 + delta
 
 
 def _corridor_is_viable(ctx: _RoutingCtx, src: Station, entry_port: Station) -> bool:
@@ -1917,7 +1921,7 @@ def _route_inter_row_gap_corridor(
     left of the target column, so they travel down together as one bundle
     meeting the carriage-return spine, rather than two separate loops.
 
-    Corners: R->D (CW), D->L (CW), L->D (CCW), D->R (CW).  The bundle is
+    Corners: R->D (CW), D->L (CW), L->D (CCW), D->R (CCW).  The bundle is
     staggered by ``delta`` (the L-shape offset) on each leg so parallel
     lines keep concentric corners and a constant gap.
     """
@@ -1937,6 +1941,12 @@ def _route_inter_row_gap_corridor(
         off_for_radius,
         max_off_for_radius,
         outside=True,
+        base_radius=ctx.curve_radius,
+    )
+    r_inner = corner_radius(
+        off_for_radius,
+        max_off_for_radius,
+        outside=False,
         base_radius=ctx.curve_radius,
     )
 
@@ -1994,7 +2004,13 @@ def _route_inter_row_gap_corridor(
         ],
         is_inter_section=True,
         normalize_exempt=True,
-        curve_radii=[r_outer, r_outer, r_outer, r_outer],
+        # Corridor turns R->D->L->D->R (handedness CW, CW, CCW, CCW).  The
+        # bundle's outer line is OUTSIDE corners 1-2 (larger radius r_outer)
+        # but INSIDE corners 3-4 (smaller radius r_inner), so each corner's
+        # arcs share a center and the bundle holds even spacing through the
+        # descent.  Using r_outer at all four corners delaminates the L->D and
+        # D->R turns.  Mirrors :func:`_route_left_entry_wrap`.
+        curve_radii=[r_outer, r_outer, r_inner, r_inner],
         offsets_applied=True,
     )
 

@@ -530,3 +530,126 @@ class TestLineZOrderConsistent:
     def test_topology_fixtures(self, fixture):
         _, _, _, svg = _layout_and_route_file(fixture)
         self._check(svg)
+
+
+# ---------------------------------------------------------------------------
+# 8. Concentric arc centers must coincide across a bundle at every corner
+# ---------------------------------------------------------------------------
+
+
+def _arc_center(prev, curr, nxt, r):
+    """Center of the rounded-corner arc at vertex *curr* with radius *r*.
+
+    For an axis-aligned 90-degree turn the center lies *r* along each of the
+    two incident segment directions from the vertex (i.e. along the inward
+    normals).  ``center = curr + r*(unit(prev-curr) + unit(nxt-curr))``.
+    """
+    import math
+
+    def unit(a, b):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        d = math.hypot(dx, dy)
+        return (0.0, 0.0) if d == 0 else (dx / d, dy / d)
+
+    u1 = unit(curr, prev)
+    u2 = unit(curr, nxt)
+    return (curr[0] + r * (u1[0] + u2[0]), curr[1] + r * (u1[1] + u2[1]))
+
+
+def _corridor_descent_x(pts) -> float | None:
+    """X of a routed path's inter-column descent channel, or None.
+
+    The MultiQC-corridor feeders (#432) traverse the inter-row gap LEFTWARD
+    (a long >150px horizontal run) and immediately turn DOWN into a tall
+    (>150px) inter-column channel.  This long-leftward-then-long-down
+    signature distinguishes corridor descents from short L-shape / bypass
+    turns and from fan-out lead-ins, so the concentricity check stays scoped
+    to the corridor curves.  Returns the descent channel x.
+    """
+    for j in range(len(pts) - 2):
+        ax, ay = pts[j]
+        bx, by = pts[j + 1]
+        cx, cy = pts[j + 2]
+        leftward = abs(ay - by) < 1 and (ax - bx) > 150
+        down = abs(bx - cx) < 1 and (cy - by) > 150
+        if leftward and down:
+            return bx
+    return None
+
+
+class TestConcentricArcCenters:
+    """Corridor bundle lines must share an arc center at every shared corner.
+
+    Distinct radii (TestConcentricBundles) are necessary but not sufficient
+    for visually concentric corners: if two lines turn the same corner with
+    radii r and r+step but *different* arc centers, they splay apart through
+    the turn ("delamination").  True concentricity requires every line in the
+    bundle to pivot about the SAME center at each corner, with radii spaced by
+    the bundle step.  This pins the MultiQC-corridor curves (#432/#435), whose
+    feeders co-route from one junction source, against delamination.
+    """
+
+    # An L-shape staggers lines by offset_step in the channel; concentric
+    # centers must agree to within a fraction of that step.
+    CENTER_EPS = 1.5
+
+    def _check(self, routes, offsets):
+        from collections import defaultdict
+
+        # A corridor bundle is the per-line fan from one junction source that
+        # shares one descent channel (the feeder lines that travel together).
+        # Group by (source, channel) so unrelated routes from the same source
+        # are not conflated.
+        bundles: dict[tuple[str, int], list[RoutedPath]] = defaultdict(list)
+        for r in routes:
+            if not r.is_inter_section or not r.curve_radii:
+                continue
+            pts = apply_route_offsets(r, offsets)
+            vx = _corridor_descent_x(pts)
+            if vx is None:
+                continue
+            bundles[(r.edge.source, round(vx / 10))].append(r)
+
+        for src, bundle in bundles.items():
+            if len(bundle) < 2:
+                continue
+            applied = [(r, apply_route_offsets(r, offsets)) for r in bundle]
+            # Compare corner-by-corner only when the bundle shares structure.
+            if any(len(pts) - 2 != len(r.curve_radii) for r, pts in applied):
+                continue
+            n_corners = min(len(r.curve_radii) for r, _ in applied)
+            for corner_idx in range(n_corners):
+                centers = [
+                    _arc_center(
+                        pts[corner_idx],
+                        pts[corner_idx + 1],
+                        pts[corner_idx + 2],
+                        r.curve_radii[corner_idx],
+                    )
+                    for r, pts in applied
+                ]
+                cx = [c[0] for c in centers]
+                cy = [c[1] for c in centers]
+                spread = max(max(cx) - min(cx), max(cy) - min(cy))
+                assert spread <= self.CENTER_EPS, (
+                    f"Corridor bundle from {src!r} corner {corner_idx}: arc "
+                    f"centers splay by {spread:.2f}px (>{self.CENTER_EPS}); "
+                    f"lines delaminate through the turn. "
+                    f"centers={[(round(x, 1), round(y, 1)) for x, y in centers]}"
+                )
+
+    def test_sarek_corridor(self):
+        fixture = EXAMPLES_DIR / "sarek.mmd"
+        if not fixture.exists():
+            pytest.skip(f"fixture not available: {fixture}")
+        _, routes, offsets, _ = _layout_and_route_file(fixture)
+        self._check(routes, offsets)
+
+    @pytest.mark.parametrize(
+        "fixture",
+        sorted(TOPOLOGIES_DIR.glob("*.mmd")),
+        ids=lambda p: p.stem,
+    )
+    def test_topology_fixtures(self, fixture):
+        _, routes, offsets, _ = _layout_and_route_file(fixture)
+        self._check(routes, offsets)
