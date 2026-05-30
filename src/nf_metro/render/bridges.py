@@ -71,11 +71,18 @@ class BridgeBreak:
 
 @dataclass
 class _Crossing:
-    a: int  # route index
+    """An intersection of route ``a`` (on segment ``seg_a``) with route ``b``
+    (on segment ``seg_b``), where ``a``/``b`` are indices into ``routes``."""
+
+    a: int
     seg_a: int
     b: int
     seg_b: int
     point: Point
+
+
+class BridgeInvariantError(AssertionError):
+    """A computed bridge violated a structural invariant."""
 
 
 def _segment_intersection(p1: Point, p2: Point, p3: Point, p4: Point) -> Point | None:
@@ -136,7 +143,8 @@ def compute_bridges(
     offset-applied geometry actually drawn for ``routes[i]``.  Returns a map
     from ``id(route)`` of each under-route to the gaps to break on it.
     """
-    crossings = _find_crossings(graph, routes, polylines)
+    node_xy = [(s.x, s.y) for s in graph.stations.values()]
+    crossings = _find_crossings(routes, polylines, node_xy)
     clusters = _cluster_crossings(crossings)
 
     line_priority = {lid: i for i, lid in enumerate(graph.lines)}
@@ -151,7 +159,13 @@ def compute_bridges(
     seen: dict[int, set[tuple]] = defaultdict(set)
 
     def add(route_idx: int, seg: int, span: tuple[Point, Point]) -> None:
-        key = (seg, round(span[0][0]), round(span[0][1]))
+        key = (
+            seg,
+            round(span[0][0]),
+            round(span[0][1]),
+            round(span[1][0]),
+            round(span[1][1]),
+        )
         if key in seen[route_idx]:
             return
         seen[route_idx].add(key)
@@ -173,23 +187,18 @@ def compute_bridges(
                     add(sib, sib_seg, span)
 
     result = dict(breaks)
-    _guard_bridges(graph, routes, polylines, result)
+    _guard_bridges(routes, polylines, node_xy, result)
     return result
 
 
-class BridgeInvariantError(AssertionError):
-    """A computed bridge violated a structural invariant."""
-
-
 def _guard_bridges(
-    graph: MetroGraph,
     routes: list,
     polylines: list[list[Point]],
+    node_xy: list[Point],
     breaks: dict[int, list[BridgeBreak]],
 ) -> None:
     """Fail loudly if a bridge lands on a node (an interchange, not a
     crossing) or its gap is not collinear with the segment it breaks."""
-    node_xy = [(s.x, s.y) for s in graph.stations.values()]
     poly_by_id = {id(r): p for r, p in zip(routes, polylines)}
     for rid, bk_list in breaks.items():
         poly = poly_by_id[rid]
@@ -208,14 +217,12 @@ def _guard_bridges(
                         f"bridge gap end {pt} is not on segment "
                         f"{bk.seg_index} of its route"
                     )
-    return None
 
 
 def _find_crossings(
-    graph: MetroGraph, routes: list, polylines: list[list[Point]]
+    routes: list, polylines: list[list[Point]], node_xy: list[Point]
 ) -> list[_Crossing]:
     """All genuine non-merging segment crossings between distinct lines."""
-    node_xy = [(s.x, s.y) for s in graph.stations.values()]
     out: list[_Crossing] = []
     for a in range(len(routes)):
         ra, pa = routes[a], polylines[a]
@@ -263,9 +270,7 @@ def _cluster_crossings(crossings: list[_Crossing]) -> list[list[_Crossing]]:
     return list(groups.values())
 
 
-def _two_colour(
-    nodes: set[int], adj: dict[int, set[int]]
-) -> dict[int, int] | None:
+def _two_colour(nodes: set[int], adj: dict[int, set[int]]) -> dict[int, int] | None:
     """2-colour the crossing graph; None if it is not bipartite."""
     colour: dict[int, int] = {}
     for start in sorted(nodes):
@@ -315,7 +320,10 @@ def _cluster_gaps(
             cluster, routes, polylines, line_priority, back, seg_of, corner_clear
         )
 
-    group = {0: [n for n in nodes if colour[n] == 0], 1: [n for n in nodes if colour[n] == 1]}
+    group = {
+        0: [n for n in nodes if colour[n] == 0],
+        1: [n for n in nodes if colour[n] == 1],
+    }
     under = _under_group(group, routes, polylines, line_priority, back, seg_of)
     over = nodes - under
     cross_pts = [
@@ -361,7 +369,10 @@ def _bundled_with_over(
         if ri == under_idx or routes[ri].line_id not in over_line_ids:
             continue
         for i in range(len(p) - 1):
-            if _angle_between(_segment_angle_deg(p[i], p[i + 1]), u_ang) > BRIDGE_PARALLEL_ANGLE_DEG:
+            if (
+                _angle_between(_segment_angle_deg(p[i], p[i + 1]), u_ang)
+                > BRIDGE_PARALLEL_ANGLE_DEG
+            ):
                 continue
             ax, ay = p[i]
             dx, dy = p[i + 1][0] - ax, p[i + 1][1] - ay
@@ -406,8 +417,14 @@ def _uniform_gaps(
         if seg_len == 0:
             continue
         a_u = a[0] * ux + a[1] * uy
-        sym_half = min(sym_half, centre - (a_u + corner_clear), a_u + seg_len - corner_clear - centre)
-        geom.append((ri, seg, a, (b[0] - a[0]) / seg_len, (b[1] - a[1]) / seg_len, a_u, seg_len))
+        sym_half = min(
+            sym_half,
+            centre - (a_u + corner_clear),
+            a_u + seg_len - corner_clear - centre,
+        )
+        geom.append(
+            (ri, seg, a, (b[0] - a[0]) / seg_len, (b[1] - a[1]) / seg_len, a_u, seg_len)
+        )
 
     # Prefer a gap centred on the over bundle (symmetric, identical across the
     # bundle).  Where a segment is too short to centre a covering gap, fall
@@ -428,7 +445,10 @@ def _uniform_gaps(
             (
                 ri,
                 seg,
-                ((a[0] + sux * lo_s, a[1] + suy * lo_s), (a[0] + sux * hi_s, a[1] + suy * hi_s)),
+                (
+                    (a[0] + sux * lo_s, a[1] + suy * lo_s),
+                    (a[0] + sux * hi_s, a[1] + suy * hi_s),
+                ),
             )
         )
     return out
@@ -519,9 +539,7 @@ def _segment_containing(
     return None
 
 
-def _point_on_segment(
-    pt: Point, p: Point, q: Point, corner_clear: float
-) -> bool:
+def _point_on_segment(pt: Point, p: Point, q: Point, corner_clear: float) -> bool:
     """True if ``pt`` lies on segment p->q (within 1px perpendicular) and at
     least ``corner_clear`` from either end."""
     dx, dy = q[0] - p[0], q[1] - p[1]

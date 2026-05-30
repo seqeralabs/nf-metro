@@ -112,8 +112,14 @@ def test_detection_is_deterministic(path):
         routes, polys, bridges = _bridges(path)[1:]
         by_id = {id(r): r for r in routes}
         return sorted(
-            (by_id[rid].line_id, bk.seg_index, round(bk.cut_a[0]), round(bk.cut_a[1]),
-             round(bk.cut_b[0]), round(bk.cut_b[1]))
+            (
+                by_id[rid].line_id,
+                bk.seg_index,
+                round(bk.cut_a[0]),
+                round(bk.cut_a[1]),
+                round(bk.cut_b[0]),
+                round(bk.cut_b[1]),
+            )
             for rid, breaks in bridges.items()
             for bk in breaks
         )
@@ -148,9 +154,7 @@ def test_suppressed_when_lone_underline_in_over_bundle():
 def test_rendered_under_line_has_pen_up():
     """An under-line that crosses under another draws a path with an interior
     move (pen-up) - on ``main`` it is continuous."""
-    graph = parse_metro_mermaid(
-        (TOPOLOGIES_DIR / "complex_multipath.mmd").read_text()
-    )
+    graph = parse_metro_mermaid((TOPOLOGIES_DIR / "complex_multipath.mmd").read_text())
     compute_layout(graph)
     svg = render_svg(graph, NFCORE_THEME)
     broken = [d for d in _edge_path_ds(svg) if d.count("M") > 1]
@@ -160,9 +164,7 @@ def test_rendered_under_line_has_pen_up():
 def test_theme_toggle_disables_bridges():
     import dataclasses
 
-    graph = parse_metro_mermaid(
-        (TOPOLOGIES_DIR / "complex_multipath.mmd").read_text()
-    )
+    graph = parse_metro_mermaid((TOPOLOGIES_DIR / "complex_multipath.mmd").read_text())
     compute_layout(graph)
     theme_off = dataclasses.replace(NFCORE_THEME, bridge_glyph=False)
     svg = render_svg(graph, theme_off)

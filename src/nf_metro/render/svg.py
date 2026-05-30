@@ -709,35 +709,50 @@ def _render_edges(
             resolved = resolve_curve_radii(
                 pts, route.curve_radii, default_radius=curve_radius
             )
+            before, after, curved = _curve_tangents(pts, resolved)
 
             for i in range(1, len(pts) - 1):
-                prev = pts[i - 1]
-                curr = pts[i]
-                nxt = pts[i + 1]
-
-                dx1 = curr[0] - prev[0]
-                dy1 = curr[1] - prev[1]
-                len1 = (dx1**2 + dy1**2) ** 0.5
-
-                dx2 = nxt[0] - curr[0]
-                dy2 = nxt[1] - curr[1]
-                len2 = (dx2**2 + dy2**2) ** 0.5
-
-                r = resolved[i - 1]
-
-                if len1 > 0 and len2 > 0:
-                    before_x = curr[0] - (dx1 / len1) * r
-                    before_y = curr[1] - (dy1 / len1) * r
-                    after_x = curr[0] + (dx2 / len2) * r
-                    after_y = curr[1] + (dy2 / len2) * r
-
-                    path.L(before_x, before_y)
-                    path.Q(curr[0], curr[1], after_x, after_y)
+                if curved[i]:
+                    path.L(*before[i])
+                    path.Q(pts[i][0], pts[i][1], *after[i])
                 else:
-                    path.L(*curr)
+                    path.L(*pts[i])
 
             path.L(*pts[-1])
             d.append(path)
+
+
+def _curve_tangents(
+    pts: list[tuple[float, float]], resolved: list[float]
+) -> tuple[
+    dict[int, tuple[float, float]], dict[int, tuple[float, float]], dict[int, bool]
+]:
+    """Curve entry/exit points for each interior vertex.
+
+    Returns ``(before, after, curved)`` keyed by vertex index ``i`` in
+    ``1..len(pts)-2``: ``before[i]``/``after[i]`` are the points where the
+    smoothing curve leaves and rejoins the polyline; ``curved[i]`` is False
+    for a degenerate corner (zero-length neighbour), where both collapse to
+    the vertex itself.
+    """
+    before: dict[int, tuple[float, float]] = {}
+    after: dict[int, tuple[float, float]] = {}
+    curved: dict[int, bool] = {}
+    for i in range(1, len(pts) - 1):
+        prev, curr, nxt = pts[i - 1], pts[i], pts[i + 1]
+        dx1, dy1 = curr[0] - prev[0], curr[1] - prev[1]
+        len1 = (dx1**2 + dy1**2) ** 0.5
+        dx2, dy2 = nxt[0] - curr[0], nxt[1] - curr[1]
+        len2 = (dx2**2 + dy2**2) ** 0.5
+        r = resolved[i - 1]
+        if len1 > 0 and len2 > 0:
+            before[i] = (curr[0] - dx1 / len1 * r, curr[1] - dy1 / len1 * r)
+            after[i] = (curr[0] + dx2 / len2 * r, curr[1] + dy2 / len2 * r)
+            curved[i] = True
+        else:
+            before[i] = after[i] = curr
+            curved[i] = False
+    return before, after, curved
 
 
 def _render_bridged_edge(
@@ -759,26 +774,7 @@ def _render_bridged_edge(
     """
     resolved = resolve_curve_radii(pts, route.curve_radii, default_radius=curve_radius)
     m = len(pts) - 1
-
-    # Curve entry/exit per interior vertex (apex points when no curve).
-    before: dict[int, tuple[float, float]] = {}
-    after: dict[int, tuple[float, float]] = {}
-    for i in range(1, m):
-        prev, curr, nxt = pts[i - 1], pts[i], pts[i + 1]
-        len1 = ((curr[0] - prev[0]) ** 2 + (curr[1] - prev[1]) ** 2) ** 0.5
-        len2 = ((nxt[0] - curr[0]) ** 2 + (nxt[1] - curr[1]) ** 2) ** 0.5
-        r = resolved[i - 1]
-        if len1 > 0 and len2 > 0:
-            before[i] = (
-                curr[0] - (curr[0] - prev[0]) / len1 * r,
-                curr[1] - (curr[1] - prev[1]) / len1 * r,
-            )
-            after[i] = (
-                curr[0] + (nxt[0] - curr[0]) / len2 * r,
-                curr[1] + (nxt[1] - curr[1]) / len2 * r,
-            )
-        else:
-            before[i] = after[i] = curr
+    before, after, _ = _curve_tangents(pts, resolved)
 
     path = draw.Path(
         stroke=color,
@@ -796,8 +792,9 @@ def _render_bridged_edge(
         run_end = pts[m] if s + 1 == m else before[s + 1]
         seg_breaks = sorted(
             (bk for bk in breaks if bk.seg_index == s),
-            key=lambda bk: (bk.cut_a[0] - run_start[0]) ** 2
-            + (bk.cut_a[1] - run_start[1]) ** 2,
+            key=lambda bk: (
+                (bk.cut_a[0] - run_start[0]) ** 2 + (bk.cut_a[1] - run_start[1]) ** 2
+            ),
         )
         for bk in seg_breaks:
             path.L(*bk.cut_a)
