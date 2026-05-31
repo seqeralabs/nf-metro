@@ -2986,6 +2986,8 @@ def test_section_bbox_top_hugs_content(fixture):
             continue
         fit = _section_fit_top(graph, sec, SECTION_Y_PADDING, SECTION_Y_GAP)
         hug = _section_content_hug_top(graph, sec, SECTION_Y_PADDING)
+        # fit > hug means the row-above ceiling raised the top above the
+        # content-hug, so a band is reserved for the header badge.
         if fit is None or hug is None or fit > hug + tol:
             continue
         content_top = min(
