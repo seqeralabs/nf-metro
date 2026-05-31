@@ -104,6 +104,25 @@ docstring in `engine.py` is the authoritative list.
 Guard bodies live in `phases/guards.py` and are imported into `engine.py`;
 the bisection runner is `_run_pass_c_guards`.
 
+## Anchor invariant
+
+The **trunk anchor** of a section is the Y of its LEFT/RIGHT (LR/RL) port
+stations: the level at which the inter-section line bundle runs. Anchors are
+set only by structural phases - port positioning along the section DAG
+(align/snap entry/exit ports, inter-section port-pair snap), the row trunk
+alignment (4.8), grid snapping, the inter-row cascade (6.13/6.14 phase 2) and
+uniform canvas/row translation.
+
+The **content-placement** phases - fan-out / full-bundle redistribution (4.9,
+4.10), band-fill (6.1, 6.2), the 2-branch symfan half-grid (6.3), full-bundle
+recenter (6.7), balance-around-trunk (6.11) and loop-side recenter (6.12) -
+position content *around* the resolved anchors and must never move one. Each
+runs through the `_placed` wrapper in `_compute_section_layout`, which under
+`validate=True` calls `_guard_anchors_frozen_during_placement` to assert the
+LR port Ys are unchanged across the phase. This separation (structural anchors
+vs. dependent placement) is what makes the layout forward-resolvable: content
+is a function of the frozen anchors, not the reverse.
+
 ## Stage overview
 
 The pipeline groups into six stages aligned with the coord-regime

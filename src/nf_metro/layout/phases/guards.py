@@ -42,6 +42,41 @@ class PhaseInvariantError(Exception):
     """Raised when a layout phase produces invalid intermediate state."""
 
 
+def _lr_port_anchor_snapshot(graph: MetroGraph) -> dict[str, float]:
+    """Y of every LR/RL port station -- the inter-section trunk anchors that
+    content placement positions content around.  Paired with
+    :func:`_guard_anchors_frozen_during_placement`."""
+    out: dict[str, float] = {}
+    for pid, st in graph.stations.items():
+        if not st.is_port:
+            continue
+        port = graph.ports.get(pid)
+        if port is not None and port.side in (PortSide.LEFT, PortSide.RIGHT):
+            out[pid] = st.y
+    return out
+
+
+def _guard_anchors_frozen_during_placement(
+    graph: MetroGraph, before: dict[str, float], phase: str
+) -> None:
+    """A content-placement phase positions content around the resolved trunk
+    anchors and must not move one.  Compare each LR/RL port Y against the
+    snapshot taken before the phase ran (via
+    :func:`_lr_port_anchor_snapshot`) and raise if any moved.  Anchors are
+    set only by port-positioning, the row trunk alignment, grid snapping, the
+    inter-row cascade and uniform translation -- never by fan / off-track /
+    band-fill / balance / recenter placement."""
+    after = _lr_port_anchor_snapshot(graph)
+    for pid, y0 in before.items():
+        y1 = after.get(pid)
+        if y1 is not None and abs(y1 - y0) > COORD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: content placement moved LR port anchor {pid!r} "
+                f"from y={y0:.2f} to y={y1:.2f} (delta {y1 - y0:+.2f}); "
+                f"placement must leave trunk anchors frozen"
+            )
+
+
 def _guard_coordinates_finite(graph: MetroGraph, phase: str) -> None:
     """After Stage 2.1+: all laid-out stations must have finite coordinates."""
     junction_ids = graph.junction_ids

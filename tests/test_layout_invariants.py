@@ -4587,3 +4587,82 @@ def test_partial_fan_branch_has_no_offset_gap(fixture):
         f"{fixture}: {len(violations)} partial-branch offset-gap "
         f"violation(s); first: {violations[0].message() if violations else ''}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Anchor invariant: content placement never moves a trunk (LR port) anchor
+# ---------------------------------------------------------------------------
+
+
+_DEPENDENT_PLACEMENT_PHASES = (
+    "_redistribute_fanout_siblings",
+    "_redistribute_full_bundle_columns",
+    "_fan_free_content_upward",
+    "_fan_source_inputs_upward",
+    "_apply_half_grid_2branch_symfan",
+    "_recenter_full_bundle_columns",
+    "_balance_section_content_around_trunk",
+    "_recenter_loop_side_stations",
+)
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_content_placement_leaves_lr_port_anchors_frozen(fixture, monkeypatch):
+    """Anchors-first invariant: every content-placement phase (fans,
+    off-track lift, band-fill, balance, recenter) positions content around
+    the resolved trunk anchors and must not move one.  Wrap each phase to
+    snapshot LR/RL port Ys before/after and assert none move.  Checked in
+    isolation (no full ``validate`` suite) so an unrelated guard cannot
+    pre-empt this assertion."""
+    from nf_metro.layout import engine
+    from nf_metro.layout.phases.guards import _lr_port_anchor_snapshot
+
+    moved: list[tuple[str, str, float]] = []
+
+    def _make_probe(name: str, orig):
+        def probe(graph, *args, **kwargs):
+            before = _lr_port_anchor_snapshot(graph)
+            result = orig(graph, *args, **kwargs)
+            after = _lr_port_anchor_snapshot(graph)
+            for pid, y0 in before.items():
+                y1 = after.get(pid)
+                if y1 is not None and abs(y1 - y0) > 1.0:
+                    moved.append((name, pid, round(y1 - y0, 2)))
+            return result
+
+        return probe
+
+    for name in _DEPENDENT_PLACEMENT_PHASES:
+        monkeypatch.setattr(engine, name, _make_probe(name, getattr(engine, name)))
+
+    _layout(fixture)
+    assert not moved, (
+        f"{fixture}: content placement moved LR port anchor(s): {moved[:3]}"
+    )
+
+
+def test_anchor_guard_catches_a_displaced_port(monkeypatch):
+    """The guard is meaningful, not vacuous: if a content-placement phase
+    moves an LR port anchor, ``compute_layout(validate=True)`` raises.
+    Monkeypatch the balance phase to shove the first LR port after it runs
+    and assert the guard catches it."""
+    from nf_metro.layout import engine
+    from nf_metro.layout.phases.balancing import (
+        _balance_section_content_around_trunk as _orig_balance,
+    )
+
+    def _evil(graph, *args):
+        _orig_balance(graph, *args)
+        for pid, st in graph.stations.items():
+            port = graph.ports.get(pid)
+            if (
+                st.is_port
+                and port is not None
+                and port.side in (PortSide.LEFT, PortSide.RIGHT)
+            ):
+                st.y += 50.0
+                break
+
+    monkeypatch.setattr(engine, "_balance_section_content_around_trunk", _evil)
+    with pytest.raises(PhaseInvariantError, match="LR port anchor"):
+        _layout_example("differentialabundance.mmd", validate=True)
