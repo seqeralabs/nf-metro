@@ -41,10 +41,12 @@ from nf_metro.layout.phases._common import (  # noqa: F401
     _expand_bbox_for_y,
     _fan_offsets,
     _grid_group_section_ids,
+    _grid_rows_top_to_bottom,
     _grow_section_bbox_upward,
     _max_stations_per_layer,
     _route_crosses_section_boundary,
     _row_contiguous_column_groups,
+    _scoped_sections,
     _section_bundle_lines,
     _section_trunk_y,
     _station_marker_bbox,
@@ -495,6 +497,25 @@ def _run_placement(
         )
 
 
+def _run_placement_per_row(
+    graph: MetroGraph,
+    validate: bool,
+    stage: str,
+    fn: Callable[..., None],
+    *args: object,
+) -> None:
+    """Run a row-local content-placement phase once per grid row, top to bottom.
+
+    Each row's sections read only coordinates within that row, and the phase
+    is translation-invariant, so scoping ``graph.sections`` to one row at a
+    time reproduces the whole-graph result.  The anchor guard from
+    :func:`_run_placement` runs per row.
+    """
+    for section_ids in _grid_rows_top_to_bottom(graph):
+        with _scoped_sections(graph, section_ids):
+            _run_placement(graph, validate, stage, fn, *args)
+
+
 def _compute_section_layout(
     graph: MetroGraph,
     x_spacing: float = X_SPACING,
@@ -867,7 +888,7 @@ def _place_pass_c_content(
     # for sections whose internal stations have no upward dependency
     # (no off-track band) and whose trunk Y sits below the bbox top
     # padding by more than one ``y_spacing`` slot.
-    _run_placement(
+    _run_placement_per_row(
         graph, validate, "6.1", _fan_free_content_upward, section_y_padding, y_spacing
     )
     if validate:
@@ -878,7 +899,7 @@ def _place_pass_c_content(
     # source inputs (file icons with no inbound edges), lift the
     # nearest-to-trunk sources into the empty top band so the section
     # is bottom- and top-weighted instead of stacked below the trunk.
-    _run_placement(graph, validate, "6.2", _fan_source_inputs_upward, y_spacing)
+    _run_placement_per_row(graph, validate, "6.2", _fan_source_inputs_upward, y_spacing)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.2")
 
@@ -890,7 +911,7 @@ def _place_pass_c_content(
     # them alone.  Runs before ``_snap_all_y_to_grid`` so the snap-to-
     # row-grid pass doesn't immediately undo the compaction.
     if graph.center_ports:
-        _run_placement(
+        _run_placement_per_row(
             graph,
             validate,
             "6.3",
@@ -953,7 +974,9 @@ def _place_pass_c_content(
     # Stage 6.8 and Stage 6.9 below restore invariants the recenter
     # breaks.
     if graph.center_ports:
-        _run_placement(graph, validate, "6.7", _recenter_full_bundle_columns, y_spacing)
+        _run_placement_per_row(
+            graph, validate, "6.7", _recenter_full_bundle_columns, y_spacing
+        )
 
         # Stage 6.8: Re-anchor off-track inputs after the recenter.
         # The recenter moves consumers to the final trunk-anchored Y,
@@ -990,7 +1013,7 @@ def _place_pass_c_content(
     # empty top band so content sits symmetrically around the trunk.
     # Runs after re-centering and terminus-Y pinning so it sees the
     # final trunk Y.  U-turn-safe and bbox-bounded.
-    _run_placement(
+    _run_placement_per_row(
         graph,
         validate,
         "6.11",
@@ -1009,7 +1032,7 @@ def _place_pass_c_content(
     # leave the station visibly off-centre on its horizontal loop run.
     # Reposition each side station to the midpoint of the two diagonal
     # corner Xs derived from the actual routing geometry.
-    _run_placement(graph, validate, "6.12", _recenter_loop_side_stations)
+    _run_placement_per_row(graph, validate, "6.12", _recenter_loop_side_stations)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.12")
 

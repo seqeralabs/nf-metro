@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
@@ -10,6 +12,41 @@ from nf_metro.layout.constants import (
     STATION_RADIUS_APPROX,
 )
 from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
+
+
+@contextmanager
+def _scoped_sections(graph: MetroGraph, section_ids: list[str]) -> Iterator[None]:
+    """Temporarily restrict ``graph.sections`` to ``section_ids``.
+
+    Row-local content phases iterate ``graph.sections`` and read only
+    coordinates within each section, so restricting the view to one grid
+    row's sections lets a whole-graph phase run row-by-row.  Station and
+    edge data on ``graph`` are untouched, so the per-station caches stay
+    valid.  Restores the original mapping on exit, including on error.
+    """
+    original = graph.sections
+    graph.sections = {sid: original[sid] for sid in section_ids if sid in original}
+    try:
+        yield
+    finally:
+        graph.sections = original
+
+
+def _grid_rows_top_to_bottom(graph: MetroGraph) -> list[list[str]]:
+    """Section ids grouped by grid row, rows ordered top-to-bottom.
+
+    Sections with no bbox or an unassigned row are dropped, matching the
+    precondition the row-local content phases already apply when they skip
+    such sections.  Ids within a row keep ascending-column order.
+    """
+    by_row: dict[int, list[Section]] = defaultdict(list)
+    for section in graph.sections.values():
+        if section.bbox_h > 0 and section.grid_row >= 0:
+            by_row[section.grid_row].append(section)
+    return [
+        [s.id for s in sorted(by_row[row], key=lambda s: s.grid_col)]
+        for row in sorted(by_row)
+    ]
 
 
 def _bbox_cols_overlap(a: Section, b: Section) -> bool:
