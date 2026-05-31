@@ -772,6 +772,38 @@ def _settle_pass_c(
     """Pass C: junction placement, off-track lift, vertical content settling,
     the inter-row cascade, and final canvas/grid snapping.  See CONTRACT.md for
     the per-stage contract."""
+    _place_pass_c_content(
+        graph,
+        validate=validate,
+        y_spacing=y_spacing,
+        section_y_padding=section_y_padding,
+    )
+    _stack_rows(
+        graph,
+        validate=validate,
+        y_spacing=y_spacing,
+        section_y_padding=section_y_padding,
+        section_y_gap=section_y_gap,
+    )
+    _finalize_layout(
+        graph,
+        validate=validate,
+        y_spacing=y_spacing,
+        section_y_padding=section_y_padding,
+        section_y_gap=section_y_gap,
+    )
+
+
+def _place_pass_c_content(
+    graph: MetroGraph,
+    *,
+    validate: bool,
+    y_spacing: float,
+    section_y_padding: float,
+) -> None:
+    """Stage 5.1 through Stage 6.12: position junctions, lift off-track
+    inputs, settle vertical content, and recenter fans / loop-side
+    stations within each section."""
     # ---- Stage 5 - Pass C: Junctions & off-track lift ------------------
     # All port positions are now final; Stage 5.1 positions junctions
     # once.  Stage 5.2 lifts off-track stations; Stages 5.3 to 5.5
@@ -981,6 +1013,18 @@ def _settle_pass_c(
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.12")
 
+
+def _stack_rows(
+    graph: MetroGraph,
+    *,
+    validate: bool,
+    y_spacing: float,
+    section_y_padding: float,
+    section_y_gap: float,
+) -> None:
+    """Stage 6.13 and Stage 6.14: the cross-row inter-row stacking -- shrink
+    and tighten row-mate bboxes, then shift sparse loop-side stations and
+    propagate the resulting bbox growth to lower rows."""
     # Stage 6.13: Shrink rowspan / row-mate bboxes whose content moved
     # up after compact (e.g. ``_fan_source_inputs_upward`` lifted the
     # bottom rows away from the bbox bottom), then pull lower rows up
@@ -1014,6 +1058,18 @@ def _settle_pass_c(
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.14")
 
+
+def _finalize_layout(
+    graph: MetroGraph,
+    *,
+    validate: bool,
+    y_spacing: float,
+    section_y_padding: float,
+    section_y_gap: float,
+) -> None:
+    """Stage 6.15a through the final guards: restore symmetric top padding,
+    re-snap the canvas to the grid, re-align perpendicular entry ports with
+    their feeders, and run the closing Pass C invariant checks."""
     # Stage 6.15a: Restore top padding symmetric with the bottom.  Fan
     # re-distribution (Stages 4.9 / 4.10 / 6.7 / 6.11) can lift a branch
     # above the content-top line the bbox was sized for, crowding the
