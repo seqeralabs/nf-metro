@@ -387,7 +387,7 @@ def tb_entry_corner(
     max_tgt_off: float,
     entry_right: bool,
     base_radius: float = CURVE_RADIUS,
-) -> tuple[float, float, float]:
+) -> tuple[float, float]:
     """Compute offsets and radius for a TB section entry L-shape.
 
     Routes: horizontal from LEFT or RIGHT entry port -> corner ->

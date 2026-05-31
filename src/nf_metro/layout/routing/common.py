@@ -280,7 +280,7 @@ def compute_bundle_info(
 
         if abs(dx) < COORD_TOLERANCE:
             # Vertical: group by shared X position
-            key = ("V", round(sx), v_dir)
+            key: tuple = ("V", round(sx), v_dir)
         else:
             # L-shaped: group by the inter-column gap the vertical
             # channel will occupy.  Use (src_col, tgt_col) when
@@ -301,6 +301,7 @@ def compute_bundle_info(
                 if tgt_st and tgt_st.section_id
                 else None
             )
+            col_key: int | tuple[int, ...]
             if src_sec and tgt_sec and src_sec.grid_col != tgt_sec.grid_col:
                 col_key = (src_sec.grid_col, tgt_sec.grid_col)
             elif tgt_sec:

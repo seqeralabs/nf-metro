@@ -8,6 +8,7 @@ import html
 import textwrap
 import warnings
 from pathlib import Path
+from typing import Any
 
 import drawsvg as draw
 
@@ -368,7 +369,7 @@ def render_svg(
 
     # Compute legend and logo dimensions
     logo_w, logo_h = (0.0, 0.0)
-    show_logo = graph.logo_path and Path(graph.logo_path).is_file()
+    show_logo = bool(graph.logo_path) and Path(graph.logo_path).is_file()
     if show_logo:
         logo_w, logo_h = compute_logo_dimensions(graph.logo_path)
 
@@ -1170,7 +1171,7 @@ def _render_terminus_icons(
                 min(icon_cx, icon_right),
             )
 
-        common = dict(
+        common: dict[str, Any] = dict(
             cx=icon_cx,
             cy=icon_cy,
             width=theme.terminus_width,

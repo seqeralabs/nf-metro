@@ -14,9 +14,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install ruff
+      - run: pip install ruff mypy
       - run: ruff check src/ tests/
       - run: ruff format --check src/ tests/
+      - run: mypy
 
   test:
     runs-on: ubuntu-latest

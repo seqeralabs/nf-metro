@@ -201,7 +201,9 @@ class MetroGraph:
     # Section IDs that had explicit %%metro direction: directives
     _explicit_directions: set[str] = field(default_factory=set)
     # Pending terminus designations: station_id -> list of (label, icon_type)
-    _pending_terminus: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
+    _pending_terminus: dict[str, list[tuple[str, str, str]]] = field(
+        default_factory=dict
+    )
     # Pending off-track marks: station_ids to lift above section top track
     _pending_off_track: list[str] = field(default_factory=list)
     # Lazy caches keyed off the edge list; invalidated on edge mutation.

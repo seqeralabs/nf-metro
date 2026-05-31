@@ -762,10 +762,12 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
     # --- Compact entry port offset separation ---
     if ctx.compact:
         for sec_id, section in graph.sections.items():
-            entry_lines: list[str] = []
+            compact_entry_lines: list[str] = []
             for pid in section.entry_ports:
-                entry_lines.extend(graph.station_lines(pid))
-            unique = sorted(set(entry_lines), key=lambda x: ctx.line_priority.get(x, 0))
+                compact_entry_lines.extend(graph.station_lines(pid))
+            unique = sorted(
+                set(compact_entry_lines), key=lambda x: ctx.line_priority.get(x, 0)
+            )
             if len(unique) < 2:
                 continue
             existing = [

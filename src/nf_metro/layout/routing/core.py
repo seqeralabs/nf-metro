@@ -4180,7 +4180,6 @@ def _compute_bypass_gap_indices(
             continue
 
         dx = tgt.x - src.x
-        ekey: EdgeKey = (edge.source, edge.target, edge.line_id)
         bypass_edges.append((ekey, src_col, tgt_col, dx))
 
     gap1_groups: dict[tuple[int, int], list[tuple[EdgeKey, int]]] = defaultdict(list)
@@ -4209,14 +4208,14 @@ def _compute_bypass_gap_indices(
             gap1_idx[ek] = (j, n)
 
     lp = line_priority or {}
-    for group in gap2_groups.values():
+    for gap2_group in gap2_groups.values():
         # Sort by line priority so the lowest-offset line (highest
         # priority) gets the outermost vertical channel.  This
         # prevents crossings when lines converge at an entry port
         # from different source columns.
-        group.sort(key=lambda x: lp.get(x[2], 0))
-        n = len(group)
-        for j, (ek, _sc, _lid) in enumerate(group):
+        gap2_group.sort(key=lambda x: lp.get(x[2], 0))
+        n = len(gap2_group)
+        for j, (ek, _sc, _lid) in enumerate(gap2_group):
             gap2_idx[ek] = (j, n)
 
     result: dict[EdgeKey, tuple[int, int, int, int]] = {}

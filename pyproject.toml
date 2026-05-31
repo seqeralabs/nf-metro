@@ -40,6 +40,7 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.4",
+    "mypy>=1.8",
 ]
 docs = [
     "mkdocs-material>=9.0",
@@ -60,9 +61,21 @@ addopts = "-rxX"
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
+select = ["E", "F", "I", "W", "ANN"]
 
 [tool.ruff.lint.per-file-ignores]
+# Type-annotation rules are enforced on the library only; tests favour
+# brevity over fully annotated fixtures and helpers.
+"tests/**" = ["ANN"]
+"scripts/**" = ["ANN"]
 # Generator emits long literal HTML/JS template lines; wrapping them would
 # distort the produced markup rather than improve readability.
 ".claude/skills/nf-metro-layout-triage/build_review.py" = ["E501"]
+
+[tool.mypy]
+files = ["src"]
+mypy_path = "src"
+explicit_package_bases = true
+python_version = "3.10"
+ignore_missing_imports = true
+strict_optional = false

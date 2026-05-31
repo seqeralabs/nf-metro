@@ -99,7 +99,7 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
                 src_ys.add(round(src.y, 1))
         if len(src_ys) >= 2:
             for edge in graph.edges_from(port_id):
-                entry_candidates: list[str] = []
+                entry_candidates = []
                 tgt_port = graph.ports.get(edge.target)
                 if tgt_port and tgt_port.is_entry:
                     entry_candidates.append(edge.target)
@@ -521,9 +521,9 @@ def _balance_section_content_around_trunk(
             top_band = section_top_y - section.bbox_y
             if top_band <= y_spacing + 0.5:
                 break
-            ys = {s: graph.stations[s].y for s in movable}
-            above = [s for s, y in ys.items() if y < trunk_y - 0.5]
-            below = [s for s, y in ys.items() if y > trunk_y + 0.5]
+            ys_by_sid = {s: graph.stations[s].y for s in movable}
+            above = [s for s, y in ys_by_sid.items() if y < trunk_y - 0.5]
+            below = [s for s, y in ys_by_sid.items() if y > trunk_y + 0.5]
             if len(below) <= len(above):
                 break
             line_sets = {frozenset(graph.station_lines(s)) for s in movable}
@@ -806,7 +806,7 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
             continue
         port_ids = section.port_ids
         # Determine the section's trunk Y from a horizontal port.
-        trunk_y: float | None = None
+        section_trunk_y: float | None = None
         for pid in section.entry_ports + section.exit_ports:
             ps = graph.stations.get(pid)
             port = graph.ports.get(pid)
@@ -815,9 +815,9 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 and port is not None
                 and port.side in (PortSide.LEFT, PortSide.RIGHT)
             ):
-                trunk_y = ps.y
+                section_trunk_y = ps.y
                 break
-        if trunk_y is None:
+        if section_trunk_y is None:
             continue
 
         # Visible trunk-Y predecessor/successor X-extent for a station.
@@ -831,7 +831,7 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 p = graph.stations.get(e.source)
                 if p is None or p.is_hidden:
                     continue
-                if abs(p.y - trunk_y) > 0.5:
+                if abs(p.y - section_trunk_y) > 0.5:
                     return None
                 if (
                     pred_x is None
@@ -843,7 +843,7 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 t = graph.stations.get(e.target)
                 if t is None or t.is_hidden:
                     continue
-                if abs(t.y - trunk_y) > 0.5:
+                if abs(t.y - section_trunk_y) > 0.5:
                     return None
                 if (
                     succ_x is None
@@ -880,7 +880,7 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
             anchor_xs: list[float] = []
             for sid in members:
                 st = graph.stations[sid]
-                if abs(st.y - trunk_y) <= 0.5:
+                if abs(st.y - section_trunk_y) <= 0.5:
                     trunk_members.append(sid)
                     continue
                 # Anchor X must come from a station pass-1 already

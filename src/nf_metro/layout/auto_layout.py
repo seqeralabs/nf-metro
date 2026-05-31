@@ -12,6 +12,7 @@ from __future__ import annotations
 __all__ = ["infer_section_layout", "detect_serpentine_runs"]
 
 from collections import defaultdict, deque
+from collections.abc import Set as AbstractSet
 
 from nf_metro.parser.model import MetroGraph, PortSide, SectionDAG
 
@@ -605,7 +606,7 @@ def _adjust_explicit_tb_sections(
 def _optimize_colspans(
     graph: MetroGraph,
     fold_sections: set[str],
-    below_fold_sections: set[str] = frozenset(),
+    below_fold_sections: AbstractSet[str] = frozenset(),
     successors: dict[str, set[str]] | None = None,
 ) -> None:
     """Optimize column spans to reduce dead space from oversized sections.
@@ -719,7 +720,7 @@ def _infer_directions(
     successors: dict[str, set[str]],
     predecessors: dict[str, set[str]],
     fold_sections: set[str],
-    below_fold_sections: set[str] = frozenset(),
+    below_fold_sections: AbstractSet[str] = frozenset(),
 ) -> None:
     """Infer section flow direction (LR/RL/TB) from grid positions.
 
