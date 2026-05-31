@@ -114,9 +114,8 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
             snapped = origin + round((y - origin) / p) * p
             return snapped if abs(snapped - y) <= h + 1e-6 else y
 
-        # A grid slot already taken by a station must not capture a second
-        # station in the same column; the later one keeps its pre-snap Y.
-        # Ports are render-invisible and excluded from the overlap invariant.
+        # Independent snapping can round two same-column stations onto one
+        # slot; the later one keeps its pre-snap Y rather than collapsing.
         column_slots: dict[float, set[float]] = {}
 
         for sec_id, port_ids in per_section_ports.items():
@@ -135,7 +134,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
                 if sid in convergence_sources:
                     continue
                 target = _snap(st.y)
-                slots = column_slots.setdefault(round(st.x, 1), set())
+                slots = column_slots.setdefault(round(st.x, 3), set())
                 if round(target, 3) in slots:
                     target = st.y
                 slots.add(round(target, 3))
