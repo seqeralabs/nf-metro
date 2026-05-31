@@ -711,17 +711,19 @@ def _compute_section_layout(
     # position content around them and must never move one; ``_placed`` runs
     # each so that, under ``validate``, a guard asserts the anchors stayed
     # frozen.  See CONTRACT.md (anchor invariant).
-    def _placed(label: str, fn: Callable[..., None], *args: object) -> None:
+    def _placed(stage: str, fn: Callable[..., None], *args: object) -> None:
         before = _lr_port_anchor_snapshot(graph) if validate else None
         fn(graph, *args)
         if validate and before is not None:
-            _guard_anchors_frozen_during_placement(graph, before, label)
+            _guard_anchors_frozen_during_placement(
+                graph, before, f"Stage {stage} {fn.__name__}"
+            )
 
     # Stage 4.9: When --center-ports is on, redistribute fan-out siblings
     # of a section's trunk junction symmetrically around the trunk Y.
     # Scoped to fan-out side branches only: linear chains, fan-in
     # structures, and file inputs are left in place.
-    _placed("Stage 4.9 redistribute_fanout_siblings", _redistribute_fanout_siblings, y_spacing)
+    _placed("4.9", _redistribute_fanout_siblings, y_spacing)
 
     # Stage 4.10: Symmetrically fan a column of full-bundle stations
     # around the trunk Y when no unique trunk exists (e.g. Reporting's
@@ -736,11 +738,7 @@ def _compute_section_layout(
     # 4.10's port-Y anchor.  Skipping Stage 4.10 changes intermediate
     # bbox sizes and is not empty-render-diff; the two passes are
     # load-bearing in combination.
-    _placed(
-        "Stage 4.10 redistribute_full_bundle_columns",
-        _redistribute_full_bundle_columns,
-        y_spacing,
-    )
+    _placed("4.10", _redistribute_full_bundle_columns, y_spacing)
 
     # ---- Stage 5 - Pass C: Junctions & off-track lift ------------------
     # All port positions are now final; Stage 5.1 positions junctions
@@ -805,12 +803,7 @@ def _compute_section_layout(
     # for sections whose internal stations have no upward dependency
     # (no off-track band) and whose trunk Y sits below the bbox top
     # padding by more than one ``y_spacing`` slot.
-    _placed(
-        "Stage 6.1 fan_free_content_upward",
-        _fan_free_content_upward,
-        section_y_padding,
-        y_spacing,
-    )
+    _placed("6.1", _fan_free_content_upward, section_y_padding, y_spacing)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.1")
 
@@ -819,7 +812,7 @@ def _compute_section_layout(
     # source inputs (file icons with no inbound edges), lift the
     # nearest-to-trunk sources into the empty top band so the section
     # is bottom- and top-weighted instead of stacked below the trunk.
-    _placed("Stage 6.2 fan_source_inputs_upward", _fan_source_inputs_upward, y_spacing)
+    _placed("6.2", _fan_source_inputs_upward, y_spacing)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.2")
 
@@ -831,12 +824,7 @@ def _compute_section_layout(
     # them alone.  Runs before ``_snap_all_y_to_grid`` so the snap-to-
     # row-grid pass doesn't immediately undo the compaction.
     if graph.center_ports:
-        _placed(
-            "Stage 6.3 apply_half_grid_2branch_symfan",
-            _apply_half_grid_2branch_symfan,
-            y_spacing,
-            section_y_padding,
-        )
+        _placed("6.3", _apply_half_grid_2branch_symfan, y_spacing, section_y_padding)
         if validate:
             _run_pass_c_guards(graph, "after Stage 6.3")
 
@@ -892,11 +880,7 @@ def _compute_section_layout(
     # Stage 6.8 and Stage 6.9 below restore invariants the recenter
     # breaks.
     if graph.center_ports:
-        _placed(
-            "Stage 6.7 recenter_full_bundle_columns",
-            _recenter_full_bundle_columns,
-            y_spacing,
-        )
+        _placed("6.7", _recenter_full_bundle_columns, y_spacing)
 
         # Stage 6.8: Re-anchor off-track inputs after the recenter.
         # The recenter moves consumers to the final trunk-anchored Y,
@@ -933,12 +917,7 @@ def _compute_section_layout(
     # empty top band so content sits symmetrically around the trunk.
     # Runs after re-centering and terminus-Y pinning so it sees the
     # final trunk Y.  U-turn-safe and bbox-bounded.
-    _placed(
-        "Stage 6.11 balance_section_content_around_trunk",
-        _balance_section_content_around_trunk,
-        section_y_padding,
-        y_spacing,
-    )
+    _placed("6.11", _balance_section_content_around_trunk, section_y_padding, y_spacing)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.11")
 
@@ -950,7 +929,7 @@ def _compute_section_layout(
     # leave the station visibly off-centre on its horizontal loop run.
     # Reposition each side station to the midpoint of the two diagonal
     # corner Xs derived from the actual routing geometry.
-    _placed("Stage 6.12 recenter_loop_side_stations", _recenter_loop_side_stations)
+    _placed("6.12", _recenter_loop_side_stations)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.12")
 

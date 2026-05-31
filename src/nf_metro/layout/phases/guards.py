@@ -47,12 +47,11 @@ def _lr_port_anchor_snapshot(graph: MetroGraph) -> dict[str, float]:
     content placement positions content around.  Paired with
     :func:`_guard_anchors_frozen_during_placement`."""
     out: dict[str, float] = {}
-    for pid, st in graph.stations.items():
-        if not st.is_port:
-            continue
-        port = graph.ports.get(pid)
-        if port is not None and port.side in (PortSide.LEFT, PortSide.RIGHT):
-            out[pid] = st.y
+    for pid, port in graph.ports.items():
+        if port.side in (PortSide.LEFT, PortSide.RIGHT):
+            st = graph.stations.get(pid)
+            if st is not None:
+                out[pid] = st.y
     return out
 
 
