@@ -64,7 +64,7 @@ from nf_metro.layout.phases.balancing import (  # noqa: F401
 )
 from nf_metro.layout.phases.bbox import (  # noqa: F401
     _aggregate_bypass_spans,
-    _grow_bboxes_to_content_top,
+    _fit_bboxes_to_content_top,
     _lift_would_cause_uturn,
     _loop_corner_x,
     _min_section_bbox_top,
@@ -961,7 +961,7 @@ def _compute_section_layout(
     # topmost section above the canvas top margin, so re-fit; the
     # re-fit's non-grid shift is then cleaned up by the Stage 6.15
     # canvas snap below.
-    _grow_bboxes_to_content_top(graph, section_y_padding, section_y_gap)
+    _fit_bboxes_to_content_top(graph, section_y_padding, section_y_gap)
     _shift_graph_into_canvas(graph, section_y_padding)
 
     # Stage 6.15: Restore canvas-wide grid alignment after all settling.

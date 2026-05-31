@@ -564,7 +564,7 @@ def _section_band_is_empty(graph: MetroGraph, section: Section) -> bool:
     return True
 
 
-def _grow_bboxes_to_content_top(
+def _fit_bboxes_to_content_top(
     graph: MetroGraph,
     section_y_padding: float,
     section_y_gap: float,

@@ -300,7 +300,7 @@ def _guard_section_top_padding(
     """Final phase: each section's bbox top must clear its highest marker.
 
     The mirror of the bottom-padding contract.  After
-    :func:`_grow_bboxes_to_content_top` runs, every section's bbox top
+    :func:`_fit_bboxes_to_content_top` runs, every section's bbox top
     should sit at its content-anchored target (a full ``section_y_padding``
     above the highest marker, unless gap-bounded by the row above).  A
     bbox top below that target means a later pass crowded the topmost
