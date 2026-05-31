@@ -614,9 +614,11 @@ in pipeline order.
   `test_reanchor_off_track_requires_snapped_consumers`,
   `test_reanchor_off_track_bbox_fit_is_reversible`.
 - **Lifecycle:** invariant - off-track inputs sit a pitch above their
-  consumer's final Y. *liftable:* yes, now that the "consumers final"
-  precondition is explicit and the bbox fit is reversible (#463);
-  registry integration deferred to #459.
+  consumer's final Y. *liftable:* as a **precondition-gated** invariant
+  (#463): the bbox fit is now reversible, but the helper *raises* when
+  `_consumers_grid_snapped` is unset, so a run-anytime `maintain()` pass
+  must check that flag and skip while consumers are pre-snap rather than
+  call-and-catch. Registry integration deferred to #459.
 
 ### Stage 6.7: re-center full-bundle columns (engine.py)
 - **Purpose**: Re-fan full-bundle columns around the row's final trunk
@@ -652,9 +654,12 @@ in pipeline order.
 - **Invariants preserved**: Row top-alignment may be broken when a
   bbox top moved; Stage 6.9 restores it.
 - **Lifecycle:** invariant - off-track inputs sit a pitch above their
-  post-recenter consumer at the final boundary. *liftable:* yes, now
-  that the "consumers final" precondition is explicit and the bbox fit
-  is reversible (#463); registry integration deferred to #459.
+  post-recenter consumer at the final boundary. *liftable:* as a
+  **precondition-gated** invariant (#463): reversible bbox fit, but the
+  helper raises while `_consumers_grid_snapped` is unset, so a run-anytime
+  `maintain()` pass must check that flag and skip until consumers are
+  snapped rather than call-and-catch. Registry integration deferred to
+  #459.
 
 ### Stage 6.9: re-run row top-align (engine.py)
 - **Purpose**: A Stage 6.8 bbox grow can leave the grown section's

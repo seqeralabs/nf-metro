@@ -587,6 +587,10 @@ def _off_track_fit_top(
     target = highest_off_track_y - section_y_padding
     for sid in section.station_ids:
         st = graph.stations.get(sid)
+        # Mirror the content set of ``_section_content_top_target``
+        # (bbox.py): ports and bypass V helpers are excluded, but hidden
+        # phantoms are kept, so this must not switch to ``st.is_hidden``
+        # (which would also drop phantoms and diverge from that helper).
         if st is None or st.is_port or sid.startswith("__bypass_"):
             continue
         target = min(target, st.y - section_y_padding)
@@ -630,6 +634,8 @@ def _reanchor_off_track_to_consumer(
     section above the canvas top margin (mirrors the same caller
     contract as ``_lift_off_track_stations``).
     """
+    # Function-local: a module-level import would close the cycle
+    # off_track -> guards -> single_section -> off_track.
     from nf_metro.layout.phases.guards import PhaseInvariantError
 
     if not graph._consumers_grid_snapped:

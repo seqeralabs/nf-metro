@@ -32,6 +32,7 @@ from nf_metro.layout.engine import (
 )
 from nf_metro.layout.phases._common import _grow_section_bbox_upward
 from nf_metro.layout.phases.off_track import (
+    _off_track_fit_top,
     _off_track_groups,
     _reanchor_off_track_to_consumer,
 )
@@ -636,6 +637,67 @@ def test_reanchor_off_track_bbox_fit_is_reversible(fixture):
             f"the off-track band (expected {ideal_top:.1f}); grow-only left "
             f"{section.bbox_y - ideal_top:.1f}px of slack"
         )
+
+
+def test_off_track_fit_top_clamps_to_content_above_band():
+    """The reversible fit must not clip on-track content above the band.
+
+    `_off_track_fit_top` seeds at ``highest_off_track - padding`` but
+    clamps down to any content station that sits higher, so a shrink
+    keeps that station's full padding band instead of cutting it off.
+    Exercises the content clamp, which never binds at the byte-identical
+    call sites (off-track is the topmost content there).
+    """
+    graph = _layout("da_pipeline.mmd")
+    groups = _off_track_groups(graph)
+    sec_id, (_fallback, by_consumer) = next(iter(groups.items()))
+    section = graph.sections[sec_id]
+    highest = min(
+        graph.stations[st.id].y for stations in by_consumer.values() for st in stations
+    )
+    on_id = next(
+        s
+        for s in section.station_ids
+        if not graph.stations[s].is_port
+        and not graph.stations[s].off_track
+        and not s.startswith("__bypass_")
+    )
+    graph.stations[on_id].y = highest - 30.0  # above the off-track band
+
+    top = _off_track_fit_top(graph, section, highest, SECTION_Y_PADDING)
+
+    assert top == pytest.approx(graph.stations[on_id].y - SECTION_Y_PADDING, abs=_Y_TOL)
+    # Grew past the off-track-only fit rather than clipping the station.
+    assert top < highest - SECTION_Y_PADDING - _Y_TOL
+
+
+def test_off_track_fit_top_clamps_to_non_top_port():
+    """A non-TOP port above the band bounds the fit so it isn't stranded.
+
+    TOP ports follow the bbox edge and impose no bound; a LEFT/RIGHT/
+    BOTTOM port sitting above the band top must keep the top from
+    shrinking below it.  Exercises the port clamp.
+    """
+    graph = _layout("da_pipeline.mmd")
+    groups = _off_track_groups(graph)
+    sec_id, (_fallback, by_consumer) = next(iter(groups.items()))
+    section = graph.sections[sec_id]
+    highest = min(
+        graph.stations[st.id].y for stations in by_consumer.values() for st in stations
+    )
+    band_top = highest - SECTION_Y_PADDING
+    pid = next(
+        p
+        for p in section.entry_ports + section.exit_ports
+        if graph.ports[p].side != PortSide.TOP
+    )
+    above = band_top - 20.0  # port above the band top
+    graph.stations[pid].y = above
+    graph.ports[pid].y = above
+
+    top = _off_track_fit_top(graph, section, highest, SECTION_Y_PADDING)
+
+    assert top == pytest.approx(above, abs=_Y_TOL)
 
 
 # ---------------------------------------------------------------------------
