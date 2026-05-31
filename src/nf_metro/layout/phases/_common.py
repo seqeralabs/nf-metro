@@ -407,10 +407,12 @@ def _build_section_subgraph(graph: MetroGraph, section: Section) -> MetroGraph:
     return sub
 
 
-def _grow_section_bbox_upward(graph: MetroGraph, section, new_bbox_top: float) -> None:
-    """Expand a section's bbox upward to *new_bbox_top* and pull TOP ports.
+def _set_section_bbox_top(graph: MetroGraph, section, new_bbox_top: float) -> None:
+    """Move a section's bbox top to *new_bbox_top* and pull TOP ports along.
 
-    BOTTOM ports stay put because the bbox only grows upward.
+    Works in both directions: a smaller *new_bbox_top* grows the box
+    upward, a larger one shrinks it.  BOTTOM ports stay put because only
+    the top edge moves.
     """
     section.bbox_h += section.bbox_y - new_bbox_top
     section.bbox_y = new_bbox_top
@@ -422,3 +424,13 @@ def _grow_section_bbox_upward(graph: MetroGraph, section, new_bbox_top: float) -
         if port.side == PortSide.TOP:
             port_st.y = section.bbox_y
             port.y = port_st.y
+
+
+def _grow_section_bbox_upward(graph: MetroGraph, section, new_bbox_top: float) -> None:
+    """Expand a section's bbox upward to *new_bbox_top* and pull TOP ports.
+
+    Grow-only convenience wrapper: callers guard on ``new_bbox_top <
+    section.bbox_y`` so the top is never lowered.  See
+    :func:`_set_section_bbox_top` for the bidirectional primitive.
+    """
+    _set_section_bbox_top(graph, section, new_bbox_top)

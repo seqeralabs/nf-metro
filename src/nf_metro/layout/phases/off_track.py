@@ -12,8 +12,11 @@ from nf_metro.layout.constants import (
     SECTION_Y_PADDING,
 )
 from nf_metro.layout.labels import label_text_width
-from nf_metro.layout.phases._common import _grow_section_bbox_upward
-from nf_metro.parser.model import Edge, MetroGraph, Section, Station
+from nf_metro.layout.phases._common import (
+    _grow_section_bbox_upward,
+    _set_section_bbox_top,
+)
+from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
 
 
 def _insert_phantom_pass_throughs(
@@ -566,6 +569,36 @@ def _lift_off_track_stations(
             _grow_section_bbox_upward(graph, section, new_bbox_top)
 
 
+def _off_track_fit_top(
+    graph: MetroGraph,
+    section: Section,
+    highest_off_track_y: float,
+    section_y_padding: float,
+) -> float:
+    """Bbox top that gives the off-track band one full padding band.
+
+    Returns ``highest_off_track_y - section_y_padding`` clamped so the
+    refit never clips other content sitting above the band, nor strands
+    a non-TOP port above the new top (TOP ports follow the edge, so they
+    impose no bound).  Used by the reversible off-track reanchor: unlike
+    the grow-only :func:`_grow_section_bbox_upward`, the caller applies
+    this in both directions so a stale too-tall box is reclaimed.
+    """
+    target = highest_off_track_y - section_y_padding
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or sid.startswith("__bypass_"):
+            continue
+        target = min(target, st.y - section_y_padding)
+    for pid in section.entry_ports + section.exit_ports:
+        port = graph.ports.get(pid)
+        port_st = graph.stations.get(pid)
+        if not port or not port_st or port.side == PortSide.TOP:
+            continue
+        target = min(target, port_st.y)
+    return target
+
+
 def _reanchor_off_track_to_consumer(
     graph: MetroGraph,
     y_spacing: float,
@@ -580,17 +613,31 @@ def _reanchor_off_track_to_consumer(
     consumer.  This pass re-pins each off-track at
     ``consumer.y - n*y_spacing`` on the consumer's final snapped Y.
 
-    Bboxes were grown in Stage 5.2 based on the off-track positions at
-    the time.  If a re-anchor moves an off-track above the current bbox
-    top minus padding, expand the bbox upward so the lifted input still
-    sits inside the section's padding zone.  Same-section TOP ports
-    follow the new top edge.
+    **Precondition** (``graph._consumers_grid_snapped``): on-track
+    consumers must already be grid-snapped (Stage 6.4).  Re-anchoring
+    against non-final consumer Ys lands the icon off-grid, so the pass
+    raises :class:`PhaseInvariantError` rather than depending on its
+    call position to guarantee snapped consumers.
+
+    The section top is then recomputed **to fit** the off-track band:
+    it grows when the band rises above the current top minus padding and
+    shrinks when an earlier (now stale) bbox top sits too tall, so the
+    result is order-independent.  Same-section TOP ports follow the new
+    top edge.
 
     Caller is responsible for invoking ``_shift_graph_into_canvas``
     afterwards: the upward bbox growth here can push the topmost
     section above the canvas top margin (mirrors the same caller
     contract as ``_lift_off_track_stations``).
     """
+    from nf_metro.layout.phases.guards import PhaseInvariantError
+
+    if not graph._consumers_grid_snapped:
+        raise PhaseInvariantError(
+            "_reanchor_off_track_to_consumer requires grid-snapped consumers "
+            "(graph._consumers_grid_snapped); it must run after the Stage 6.4 "
+            "snap, otherwise off-track icons re-anchor to non-final Ys"
+        )
     groups = _off_track_groups(graph)
     for sec_id, (fallback_id, by_consumer) in groups.items():
         highest_y = _place_off_track_above_consumers(
@@ -601,6 +648,6 @@ def _reanchor_off_track_to_consumer(
         section = graph.sections.get(sec_id)
         if section is None:
             continue
-        desired_top = highest_y - section_y_padding
-        if desired_top < section.bbox_y - 0.5:
-            _grow_section_bbox_upward(graph, section, desired_top)
+        desired_top = _off_track_fit_top(graph, section, highest_y, section_y_padding)
+        if abs(desired_top - section.bbox_y) > 0.5:
+            _set_section_bbox_top(graph, section, desired_top)

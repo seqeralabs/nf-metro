@@ -596,18 +596,27 @@ in pipeline order.
 ### Stage 6.6: reanchor off-track to consumer (engine.py)
 - **Purpose**: Re-pin each off-track input at `consumer.y - n*y_spacing`
   using the consumer's final snapped Y (Stage 5.2 used pre-snap Ys).
-  Grow bbox upward if needed.
+  Recompute the section top to fit the band (grow **or** shrink).
 - **Helper**: `_reanchor_off_track_to_consumer`.
-- **Precondition**: Stage 6.4 snapped consumers to grid.
+- **Precondition**: Stage 6.4 snapped consumers to grid. Enforced
+  explicitly via `graph._consumers_grid_snapped` (set right after the
+  Stage 6.4 snap); the helper raises `PhaseInvariantError` if it runs
+  while unset, so the dependence on snapped consumers is no longer
+  implicit in call position (#463).
 - **Postcondition**: Off-track inputs sit `n * y_spacing` above their
-  consumer's final Y.  May leave the topmost section above the
-  canvas margin -- ``_shift_graph_into_canvas`` runs immediately
-  afterwards (called explicitly by the caller, not by the helper).
+  consumer's final Y. The section top hugs the off-track band with one
+  `section_y_padding` band (recompute-to-fit, so re-running is
+  order-independent). May leave the topmost section above the canvas
+  margin -- ``_shift_graph_into_canvas`` runs immediately afterwards
+  (called explicitly by the caller, not by the helper).
 - **Invariants preserved**: On-track station Y.
-- **Related tests**: `test_off_track_inputs_above_consumer`.
+- **Related tests**: `test_off_track_inputs_above_consumer`,
+  `test_reanchor_off_track_requires_snapped_consumers`,
+  `test_reanchor_off_track_bbox_fit_is_reversible`.
 - **Lifecycle:** invariant - off-track inputs sit a pitch above their
-  consumer's final Y. *liftable:* only behind a "consumers final"
-  precondition (#463).
+  consumer's final Y. *liftable:* yes, now that the "consumers final"
+  precondition is explicit and the bbox fit is reversible (#463);
+  registry integration deferred to #459.
 
 ### Stage 6.7: re-center full-bundle columns (engine.py)
 - **Purpose**: Re-fan full-bundle columns around the row's final trunk
@@ -638,13 +647,14 @@ in pipeline order.
   Stage 6.6; called again here on the post-recenter Ys).
 - **Precondition**: Stage 6.7 has re-centred full-bundle columns.
 - **Postcondition**: Off-track inputs sit one or more pitches above
-  their post-recenter consumer. Section bboxes grow upward when
-  lifted bands move above the existing top padding.
+  their post-recenter consumer. Section tops are recomputed to fit the
+  off-track band (grow or shrink), so re-running is order-independent.
 - **Invariants preserved**: Row top-alignment may be broken when a
-  bbox grew upward; Stage 6.9 restores it.
+  bbox top moved; Stage 6.9 restores it.
 - **Lifecycle:** invariant - off-track inputs sit a pitch above their
-  post-recenter consumer at the final boundary. *liftable:* only behind
-  a "consumers final" precondition (#463).
+  post-recenter consumer at the final boundary. *liftable:* yes, now
+  that the "consumers final" precondition is explicit and the bbox fit
+  is reversible (#463); registry integration deferred to #459.
 
 ### Stage 6.9: re-run row top-align (engine.py)
 - **Purpose**: A Stage 6.8 bbox grow can leave the grown section's

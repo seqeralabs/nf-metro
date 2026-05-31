@@ -526,6 +526,10 @@ def _compute_section_layout(
     """
     from nf_metro.layout.section_placement import place_sections, position_ports
 
+    # On-track consumers are not yet grid-snapped; the off-track reanchor
+    # (Stage 6.6 / 6.8) refuses to run until Stage 6.4 sets this True.
+    graph._consumers_grid_snapped = False
+
     # ---- Stage 1 - Section construction (local coords) ------------------
     # Lay out each section internally, snap row Y grids, place sections on
     # the canvas grid, renumber by reading order, correct left/top
@@ -820,6 +824,9 @@ def _compute_section_layout(
     # doesn't U-turn through a stale junction Y.
     _snap_all_y_to_grid(graph, y_spacing)
     _position_junctions(graph)
+    # On-track consumer Ys are now final/grid-snapped; the off-track
+    # reanchor (Stage 6.6 / 6.8) may run from here on.
+    graph._consumers_grid_snapped = True
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.4")
 

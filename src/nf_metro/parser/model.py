@@ -218,6 +218,12 @@ class MetroGraph:
     # Stage 6.4 (``_snap_all_y_to_grid``) reads this set and skips those
     # stations so they keep their intentional half-grid Y.
     half_grid_station_ids: set[str] = field(default_factory=set, repr=False)
+    # Precondition flag for the off-track reanchor: set True right after the
+    # Stage 6.4 grid snap so on-track consumer Ys are final.  The reanchor
+    # (``_reanchor_off_track_to_consumer``) refuses to run while False,
+    # making its dependence on snapped consumers explicit rather than
+    # implicit in call position.
+    _consumers_grid_snapped: bool = field(default=False, repr=False)
 
     def _invalidate_edge_caches(self) -> None:
         """Reset caches that depend on the edge list."""
