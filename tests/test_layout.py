@@ -1821,19 +1821,16 @@ class TestPassCBisection:
 
     # Corruption-phase -> expected surfacing checkpoint.  When the
     # corruption phase is at or after the overlap-guard's first valid
-    # checkpoint (``after Stage 6.6``), bisection localises to the
-    # corruption phase itself.  Otherwise the overlap regression
-    # surfaces at ``after Stage 6.6`` (the first un-gated overlap
-    # check), which is the accepted trade-off for letting the bisection
-    # set tolerate the off-track-stranded-on-consumer transient at
-    # Stages 6.4 / 6.5 (see ``_BISECTION_FIRST_VALID`` in engine.py).
+    # checkpoint (``after Stage 6.4``), bisection localises to the
+    # corruption phase itself.  Corruptions injected before Stage 6.4
+    # surface at ``after Stage 6.4`` (the first un-gated overlap check).
     @pytest.mark.parametrize(
         "corruption_helper,expected_phase",
         [
-            ("_lift_off_track_stations", "after Stage 6.6"),
-            ("_top_align_row_bboxes_only", "after Stage 6.6"),
-            ("_compact_row_content_to_bbox_top", "after Stage 6.6"),
-            ("_snap_all_y_to_grid", "after Stage 6.6"),
+            ("_lift_off_track_stations", "after Stage 6.4"),
+            ("_top_align_row_bboxes_only", "after Stage 6.4"),
+            ("_compact_row_content_to_bbox_top", "after Stage 6.4"),
+            ("_snap_all_y_to_grid", "after Stage 6.4"),
             ("_align_terminus_to_upstream", "after Stage 6.10"),
             ("_shrink_bboxes_to_content_bottom", "after Stage 6.13"),
             ("_snap_canvas_y_to_grid", "after Stage 6.15"),
@@ -1952,7 +1949,7 @@ class TestPassCBisection:
 
         Confirms ``_BISECTION_FIRST_VALID`` only delays a guard's
         first valid checkpoint -- once past the threshold (``after
-        Stage 6.6`` for the overlap guard), the guard fires at every
+        Stage 6.4`` for the overlap guard), the guard fires at every
         subsequent bisection checkpoint.
         """
         from nf_metro.layout import engine
@@ -1977,7 +1974,7 @@ class TestPassCBisection:
         msg = str(excinfo.value)
         assert msg.startswith("after Stage 6.15:"), (
             f"Expected bisection to surface at 'after Stage 6.15' "
-            f"(overlap guard runs at every checkpoint from Stage 6.6 "
+            f"(overlap guard runs at every checkpoint from Stage 6.4 "
             f"onward), but error was: {msg!r}"
         )
 
@@ -1985,7 +1982,7 @@ class TestPassCBisection:
         "guard_name,first_valid",
         [
             ("_guard_stations_in_sections", "after Stage 5.3"),
-            ("_guard_no_station_overlap", "after Stage 6.6"),
+            ("_guard_no_station_overlap", "after Stage 6.4"),
             ("_guard_no_line_crosses_non_consumer", "after Stage 6.14"),
         ],
     )
