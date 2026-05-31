@@ -26,6 +26,25 @@ silently violate a downstream pass's expectations.
   end-to-end checks (no single stage owns them outright); the mapping is
   "this stage is the one that establishes the property the test
   asserts," not "this test fails iff this stage regresses."
+- **Lifecycle** classifies the stage by one objective question: does the
+  property it establishes still hold at the *final* layout boundary?
+  - **invariant** - it does. The one-line final-boundary property is
+    given. (Some invariants are re-asserted by later re-runs of the same
+    helper; re-assertion *maintains* the invariant, it does not negate
+    it.)
+  - **transient** - a later stage deliberately overrides it, so the stage
+    has no final-boundary property to declare. The superseding stage is
+    named.
+
+  Lifecycle answers "what does this phase guarantee at the end" and is
+  pinned by `tests/test_contract_lifecycle.py`. It is **orthogonal** to
+  the question #365 explored: "is this invariant safe to *lift* into a
+  declarative run-anytime `maintain()` registry?" Liftability requires
+  the invariant *plus* idempotency, order-independence, and no (or a
+  gated) precondition - properties the lifting work (#463, #464)
+  establishes empirically. So an inline `liftable:` qualifier appears
+  **only** where liftability is non-trivially anything other than "yes";
+  its absence is not a promise of liftability.
 
 A stage whose purpose isn't crisp here is a structural-debt signal -
 those rows are flagged "UNCLEAR" in the Notes column. Don't paper over
@@ -103,6 +122,9 @@ in pipeline order.
   positioned.
 - **Related tests**: `test_section_bbox_contains_all_content`,
   `test_loop_column_stations_share_x`.
+- **Lifecycle:** invariant - each station's layer/track and
+  section-local relative layout persist to the end; Stage 2.1 only
+  translates them into global coordinates, it does not re-lay them out.
 
 ### Stage 1.2: align row Y grids (engine.py:495-496)
 - **Purpose**: Snap station Ys to a shared row-wide grid so same-row
@@ -119,6 +141,8 @@ in pipeline order.
   bbox dimensions unchanged.
 - **Related tests**: `test_row_trunk_marker_cy_consistent`,
   `test_all_stations_snap_to_grid`.
+- **Lifecycle:** invariant - the shared per-row Y grid holds at the
+  final boundary (re-asserted by Stage 6.4's grid snap).
 
 ### Stage 1.3: section placement (engine.py:498-499)
 - **Purpose**: Place sections on the canvas grid via topological
@@ -130,6 +154,8 @@ in pipeline order.
   that `(local + offset)` lands sections on a non-overlapping grid.
 - **Invariants preserved**: Station local coords unchanged. Bboxes
   still local-coord.
+- **Lifecycle:** invariant - the section grid (column/row placement,
+  non-overlap) holds at the final boundary.
 
 ### Stage 1.4: renumber sections (engine.py:501-502)
 - **Purpose**: Renumber sections by visual reading order (sweep, col,
@@ -141,6 +167,8 @@ in pipeline order.
 - **Invariants preserved**: Section IDs, station coords, bboxes,
   edges. Pure metadata pass.
 - **Related tests**: none directly (cosmetic / debug-only).
+- **Lifecycle:** invariant - `display_number` metadata is final
+  (cosmetic, never recomputed).
 
 ### Stage 1.5: offset overshoot correction (engine.py:504-535)
 - **Purpose**: Grow `x_offset`/`y_offset` when section local extents
@@ -152,6 +180,9 @@ in pipeline order.
   bbox_{x,y} + {x,y}_offset >= section_{x,y}_padding`.
 - **Invariants preserved**: Section bboxes (local), station local
   coords, grid layout.
+- **Lifecycle:** invariant - positive in-canvas coordinates hold at the
+  end (the canvas top margin is maintained by Stage 6.15 /
+  `_shift_graph_into_canvas`).
 
 ### Stage 2.1: local-to-global translation (engine.py:537-557)
 - **Purpose**: Translate every real station and section bbox into
@@ -168,6 +199,8 @@ in pipeline order.
   bboxes-positive.
 - **Related tests**: `test_section_bbox_contains_all_content` (the
   containment invariant first holds here).
+- **Lifecycle:** invariant - the global-coordinate regime is permanent;
+  every later stage works in global coordinates.
 
 ### Stage 3.1: position ports on section boundaries (engine.py:565-570)
 - **Purpose**: Place every port on its section's bbox edge at the
@@ -180,6 +213,8 @@ in pipeline order.
 - **Invariants preserved**: Real station coords, section bboxes,
   junctions.
 - **Validate guard after**: `_guard_ports_on_boundaries`.
+- **Lifecycle:** invariant - ports sit on their bbox edges at the final
+  boundary (guarded continuously by `_guard_ports_on_boundaries`).
 
 ### Stage 3.2: align LR entry ports (engine.py:572-576)
 - **Purpose**: For LEFT/RIGHT entry ports, set Y to the incoming
@@ -197,6 +232,8 @@ in pipeline order.
   bbox-only). Exit ports. Junctions still unpositioned.
 - **Related tests**: `test_no_kink_at_section_boundary` (the
   straight-run property this phase establishes).
+- **Lifecycle:** invariant - the entry-port straight-run (no-kink) Y
+  holds at the end (re-asserted by Stages 5.5 / 6.16).
 
 ### Stage 3.3: shift LR/RL perp-entry internal stations (engine.py:578-582)
 - **Purpose**: When an LR/RL section has a TOP or BOTTOM (perpendicular)
@@ -211,6 +248,8 @@ in pipeline order.
   bbox-bounded).
 - **Related tests**: `test_terminus_not_directly_after_diagonal`,
   `test_no_kink_at_section_boundary` (entry-side geometry).
+- **Lifecycle:** invariant - the perpendicular-entry runway
+  (internal-station X clearance) holds at the final boundary.
 
 ### Stage 3.4: align fold-section exit ports (engine.py:584-588)
 - **Purpose**: For row-spanning (fold) and TB-direction sections,
@@ -226,6 +265,8 @@ in pipeline order.
   (Stage 3.5's top-align corrects any bbox push-down).
 - **Related tests**: `test_no_kink_at_section_boundary`,
   `test_inter_section_route_y_stays_within_row_band`.
+- **Lifecycle:** invariant - the fold/TB exit-port no-kink Y holds at
+  the end (re-asserted by Stage 5.5).
 
 ### Stage 3.5: top-align sections within each grid row (engine.py:590-594)
 - **Purpose**: Shift sections up so contiguous column groups within a
@@ -239,6 +280,10 @@ in pipeline order.
   inside each shifted section. Bbox heights.
 - **Validate guard after**: `_guard_ports_on_boundaries` (top-align
   preserves port-on-edge by shifting ports with stations).
+- **Lifecycle:** transient - superseded by Stage 6.15a, which grows a
+  fanned section's bbox top above the flush line, so finished same-row
+  tops are not guaranteed flush (measured ~40px non-flush on
+  `terminal_symmetric_fan` / `trunk_through_fan`).
 
 ### Stage 4.1: align ports to downstream (engine.py:603-605)
 - **Purpose**: For non-fold LR/RL sections, pull exit-entry port
@@ -251,6 +296,9 @@ in pipeline order.
 - **Invariants preserved**: Section bboxes (movement is bbox-bounded,
   Stage 4.6/c recompute bboxes where needed). Real stations.
 - **Related tests**: `test_no_kink_at_section_boundary`.
+- **Lifecycle:** invariant - exit/entry pairs flow to the downstream
+  section (no-kink) at the final boundary (refined, not undone, by Stage
+  5.5).
 
 ### Stage 4.2: snap sole-layer stations to ports (engine.py:607-609)
 - **Purpose**: When a port-connected station is the only occupant of
@@ -262,6 +310,8 @@ in pipeline order.
 - **Invariants preserved**: Multi-station layer Ys. Shared row-Y grid
   is not respected here (Stage 6.4 re-snaps).
 - **Related tests**: `test_section_entry_hub_on_grid` (downstream).
+- **Lifecycle:** invariant - the horizontal sole-layer-station-to-port
+  connection holds at the end (re-snapped onto the grid by Stage 6.4).
 
 ### Stage 4.3: snap grid-group entry ports (engine.py:611-615)
 - **Purpose**: For grid-group sections (skipped by Stage 4.2), snap entry
@@ -272,6 +322,8 @@ in pipeline order.
 - **Postcondition**: Grid-group entry ports share Y with their first
   connected internal station.
 - **Invariants preserved**: Internal station Y. Exit ports.
+- **Lifecycle:** invariant - grid-group entry ports share Y with their
+  first connected station at the final boundary.
 
 ### Stage 4.4: snap grid-group exit ports (engine.py:617-621)
 - **Purpose**: Mirror of Stage 4.3 for exit ports - snap to the downstream
@@ -282,6 +334,8 @@ in pipeline order.
   downstream entry port (i.e. with the downstream's connected
   station).
 - **Invariants preserved**: Internal stations.
+- **Lifecycle:** invariant - grid-group exit ports share Y with their
+  downstream entry port at the final boundary.
 
 ### Stage 4.5: space ports from termini (engine.py:623-625)
 - **Purpose**: Push ports away from terminus stations so a routed
@@ -293,6 +347,8 @@ in pipeline order.
   Bboxes may expand via `_expand_bbox_for_y` to keep ports on edges.
 - **Invariants preserved**: Real non-terminus station Y. Other
   sections.
+- **Lifecycle:** invariant - the port-to-terminus clearance holds at the
+  final boundary.
 
 ### Stage 4.6: recompute grid-group bboxes (engine.py:627-632)
 - **Purpose**: Reset grid-group bboxes to symmetric `max_y_pad`
@@ -303,6 +359,8 @@ in pipeline order.
 - **Postcondition**: Each grid-group section bbox snugly bounds its
   content with consistent top/bottom padding.
 - **Invariants preserved**: Station and port Ys.
+- **Lifecycle:** transient - the snug grid-group bbox is superseded by
+  the final bbox sizing in Stage 6.13 (bottom) and Stage 6.15a (top).
 
 ### Stage 4.7: re-run top-align (engine.py:634-637)
 - **Purpose**: Repeat Stage 3.5 after Stage 4.5 expanded bboxes via
@@ -311,6 +369,8 @@ in pipeline order.
 - **Precondition**: Stages 4.5 / 4.6 complete.
 - **Postcondition**: As Stage 3.5.
 - **Invariants preserved**: As Stage 3.5.
+- **Lifecycle:** transient - superseded by Stage 6.15a (flush row tops,
+  as Stage 3.5).
 
 ### Stage 4.8: align row trunk Ys (engine.py:639-642)
 - **Purpose**: Within each row, shift content downward in shallower
@@ -322,6 +382,8 @@ in pipeline order.
   the trunk Y is the row's deepest pre-pass trunk Y. Row-spanning
   sections are skipped.
 - **Invariants preserved**: Bbox tops. Row-spanning sections.
+- **Lifecycle:** invariant - the per-row trunk Y is consistent at the
+  final boundary (`test_row_trunk_marker_cy_consistent`).
 
 ### Stage 4.9: redistribute fan-out siblings (engine.py:644-648)
 - **Purpose**: For each fan-out column with a unique trunk junction
@@ -335,6 +397,9 @@ in pipeline order.
   symmetrically around the trunk station's Y. Linear chains, fan-in
   structures, and file inputs are left in place.
 - **Invariants preserved**: Trunk station Y. Off-track stations.
+- **Lifecycle:** transient - superseded by Stage 6.7 / 6.11, which
+  re-fan the siblings against the final trunk Y (this fan uses the early
+  trunk Y).
 
 ### Stage 4.10: redistribute full-bundle columns (engine.py)
 - **Purpose**: When a column has no unique trunk (every station
@@ -355,6 +420,9 @@ in pipeline order.
   Skipping Stage 4.10 changes intermediate bbox sizes and is not
   empty-render-diff -- the two passes are load-bearing in combination.
 - **Invariants preserved**: Other columns.
+- **Lifecycle:** transient - superseded by Stage 6.7, which re-fans the
+  full-bundle columns against the final trunk Y (this fan uses the local
+  port Y).
 
 ### Stage 5.1: position junctions (engine.py:658-659)
 - **Purpose**: Place each junction station in the inter-section gap
@@ -366,6 +434,9 @@ in pipeline order.
   toward the targets; merge junctions sit at
   `max(pred.x) + JUNCTION_MARGIN, entry_port.y`.
 - **Invariants preserved**: Real stations, ports.
+- **Lifecycle:** invariant - junctions track their ports at the final
+  boundary (`junction.xy == _compute_junction_xy(ports)`, re-established
+  after every later port move).
 
 ### Stage 5.2: lift off-track stations (engine.py)
 - **Purpose**: Lift off-track file-input stations to the row above
@@ -383,6 +454,10 @@ in pipeline order.
   (only the canvas Y-offset may shift the world uniformly).
 - **Related tests**: `test_off_track_inputs_above_consumer`,
   `test_off_track_icons_ordered_by_consumer_y`.
+- **Lifecycle:** invariant - off-track inputs sit a pitch above their
+  consumer at the final boundary. *liftable:* only behind a "consumers
+  final" precondition - the anchor uses the consumer's final Y and is
+  re-applied by Stages 6.6 / 6.8 (#463).
 
 ### Stage 5.3: re-align row bbox tops only (engine.py:665-670)
 - **Purpose**: After Stage 5.2 grew some bboxes upward, grow other
@@ -393,6 +468,8 @@ in pipeline order.
 - **Postcondition**: Within each row's contiguous column group, all
   bboxes share `bbox_y` (heights extended upward as needed).
 - **Invariants preserved**: All station / port Ys.
+- **Lifecycle:** transient - superseded by Stage 6.15a (flush row tops,
+  as Stage 3.5).
 
 ### Stage 5.4: compact row content to bbox top (engine.py:672-676)
 - **Purpose**: Shift each row's column-group up by the smallest
@@ -406,6 +483,8 @@ in pipeline order.
 - **Invariants preserved**: Inter-station relative positions inside
   each section. Trunk Y stays aligned across the row.
 - **Related tests**: `test_section_bbox_has_bottom_padding`.
+- **Lifecycle:** transient - superseded by Stage 6.1 (fans content back
+  into the band) and Stage 6.13 (re-sizes the bbox bottom).
 
 ### Stage 5.5: snap inter-section port pairs + reposition junctions (engine.py:678-686)
 - **Purpose**: Snap exit/entry port pairs in the same row to a shared
@@ -420,6 +499,8 @@ in pipeline order.
 - **Invariants preserved**: Internal station Y in each section.
 - **Related tests**: `test_no_kink_at_section_boundary`,
   `test_inter_section_route_y_stays_within_row_band`.
+- **Lifecycle:** invariant - LR/RL exit-entry port pairs share a Y
+  (no-kink) and junctions track their ports at the final boundary.
 
 ### Stage 6.1: fan free content upward (engine.py:688-693)
 - **Purpose**: When the row's compaction leaves visible empty top
@@ -434,6 +515,9 @@ in pipeline order.
   (sections with off-track band are skipped).
 - **Related tests**: `test_section_top_band_filled`,
   `test_section1_input_above_trunk`.
+- **Lifecycle:** invariant - the filled top band / content balanced
+  around the trunk holds at the final boundary
+  (`test_section_top_band_filled`).
 
 ### Stage 6.2: fan source inputs upward (engine.py:695-700)
 - **Purpose**: Companion to Stage 6.1 for source-stack sections (single
@@ -444,6 +528,8 @@ in pipeline order.
 - **Postcondition**: Section is top- and bottom-weighted around the
   trunk row instead of stacked below it.
 - **Invariants preserved**: Trunk station Y.
+- **Lifecycle:** invariant - source-stack sections stay
+  top-and-bottom-weighted around the trunk at the final boundary.
 
 ### Stage 6.3: 2-branch symfan half-grid compaction (engine.py)
 - **Purpose**: Sections containing exactly a 2-branch symmetric fan
@@ -459,6 +545,9 @@ in pipeline order.
   from the trunk Y. `graph.half_grid_station_ids` contains their IDs.
 - **Invariants preserved**: Trunk station Y. Other sections.
 - **Related tests**: `test_symfan_pairs_share_y`.
+- **Lifecycle:** invariant - 2-branch symfan pairs keep their half-pitch
+  offsets at the final boundary (Stage 6.4 skips
+  `graph.half_grid_station_ids`).
 
 ### Stage 6.4: snap all Y to grid (engine.py)
 - **Purpose**: Final pass snapping every station and port Y to the
@@ -475,6 +564,9 @@ in pipeline order.
   `test_grid_snap_does_not_mutate_x`). Half-grid station Ys.
 - **Related tests**: `test_all_stations_snap_to_grid`,
   `test_grid_snap_does_not_mutate_x`.
+- **Lifecycle:** invariant - every (non-half-grid) station/port Y is a
+  grid slot at the final boundary (re-asserted canvas-wide by Stage
+  6.15).
 
 ### Stage 6.5: align TB-section bbox bottoms (engine.py:719-723)
 - **Purpose**: Extend TB-section bbox bottom to match downstream
@@ -485,6 +577,8 @@ in pipeline order.
 - **Postcondition**: For each TB section feeding an LR/RL target,
   `tb.bbox_y + tb.bbox_h >= target.bbox_y + target.bbox_h`.
 - **Invariants preserved**: All station and port Ys. Other bboxes.
+- **Lifecycle:** invariant - TB-section bbox bottoms align with their
+  downstream LR/RL target at the final boundary.
 
 ### Stage 6.6: reanchor off-track to consumer (engine.py)
 - **Purpose**: Re-pin each off-track input at `consumer.y - n*y_spacing`
@@ -498,6 +592,9 @@ in pipeline order.
   afterwards (called explicitly by the caller, not by the helper).
 - **Invariants preserved**: On-track station Y.
 - **Related tests**: `test_off_track_inputs_above_consumer`.
+- **Lifecycle:** invariant - off-track inputs sit a pitch above their
+  consumer's final Y. *liftable:* only behind a "consumers final"
+  precondition (#463).
 
 ### Stage 6.7: re-center full-bundle columns (engine.py)
 - **Purpose**: Re-fan full-bundle columns around the row's final trunk
@@ -511,6 +608,10 @@ in pipeline order.
   Stage 6.8) and bbox-top alignment (re-established by Stage 6.9)
   are temporarily broken; both are restored before leaving the
   `if center_ports:` block.
+- **Lifecycle:** invariant - full-bundle columns are symmetric around
+  the row's final trunk Y at the boundary; no later stage re-fans them.
+  *liftable:* no - one-shot, order-dependent (computes against the final
+  trunk Y, so a premature run is wrong).
 
 ### Stage 6.8: re-anchor off-track after recenter (engine.py)
 - **Purpose**: The Stage 6.7 recenter moves consumers to the final
@@ -528,6 +629,9 @@ in pipeline order.
   lifted bands move above the existing top padding.
 - **Invariants preserved**: Row top-alignment may be broken when a
   bbox grew upward; Stage 6.9 restores it.
+- **Lifecycle:** invariant - off-track inputs sit a pitch above their
+  post-recenter consumer at the final boundary. *liftable:* only behind
+  a "consumers final" precondition (#463).
 
 ### Stage 6.9: re-run row top-align (engine.py)
 - **Purpose**: A Stage 6.8 bbox grow can leave the grown section's
@@ -538,6 +642,8 @@ in pipeline order.
 - **Precondition**: Stage 6.8 has re-anchored off-track inputs.
 - **Postcondition**: Row bboxes flush at the top across all row mates.
 - **Invariants preserved**: Station Ys (only bbox tops move).
+- **Lifecycle:** transient - superseded by Stage 6.15a (flush row tops,
+  as Stage 3.5).
 
 ### Stage 6.10: align terminus to upstream (engine.py:759-763)
 - **Purpose**: After Stage 6.7 re-pitched fanned columns, a single-station
@@ -549,6 +655,8 @@ in pipeline order.
   their unique upstream.
 - **Invariants preserved**: Multi-station columns.
 - **Related tests**: `test_terminus_not_directly_after_diagonal`.
+- **Lifecycle:** invariant - single-station downstream columns share Y
+  with their unique upstream at the final boundary.
 
 ### Stage 6.11: balance section content around trunk
 - **Purpose**: Auto-balance pass. For sections whose final layout
@@ -565,6 +673,8 @@ in pipeline order.
 - **Invariants preserved**: Trunk station Y. Sections that already
   balance are left alone.
 - **Related tests**: `test_section_top_band_filled`.
+- **Lifecycle:** invariant - section content is balanced around the
+  trunk (siblings above >= below, where movable) at the final boundary.
 
 ### Stage 6.12: recenter loop side stations (engine.py:773-781)
 - **Purpose**: Recompute the X of fan-out side stations (one trunk
@@ -580,6 +690,8 @@ in pipeline order.
 - **Related tests**: `test_fan_station_centered_on_loop`,
   `test_loop_recenter_only_for_pure_side_branches`,
   `test_loop_column_stations_share_x`.
+- **Lifecycle:** invariant - loop-side stations sit at the visual centre
+  of their loop run at the final boundary.
 
 ### Stage 6.13: shrink and tighten rows (engine.py:783-794)
 - **Purpose**: Shrink each section's bbox bottom to
@@ -604,6 +716,11 @@ in pipeline order.
   heights of upper rows.
 - **Related tests**: `test_section_bbox_has_bottom_padding`,
   `test_section_bbox_matches_content_extent`.
+- **Lifecycle:** invariant - content-hugging bbox bottoms and correct
+  inter-row gaps hold at the final boundary (maintained by Stage 6.14,
+  which restores the gap via `_push_lower_rows_after_bbox_grow` whenever
+  it grows a bbox downward). *liftable:* no - one-shot, order-dependent
+  (computes against the final content extent).
 
 ### Stage 6.14: shift and propagate loop stations (engine.py:796-806)
 - **Purpose**: Shift sparse loop-side stations (one inbound, one
@@ -624,6 +741,9 @@ in pipeline order.
 - **Related tests**: `test_lines_dont_cross_non_consumer_markers`,
   `test_no_icon_overlaps_line_path`,
   `test_row_gap_accommodates_bypass`.
+- **Lifecycle:** invariant - sparse loop-side stations keep their
+  half-pitch offset at the final boundary; row gaps preserved across any
+  bbox grow.
 
 ### Stage 6.15a: restore symmetric top padding
 - **Purpose**: Fan re-distribution (Stages 4.9 / 4.10 / 6.7 / 6.11) can
@@ -640,6 +760,9 @@ in pipeline order.
   highest marker, bounded by the row above.
 - **Invariants preserved**: Station Ys (only bbox tops grow). Resolves #406.
 - **Related tests**: `test_section_bbox_has_top_padding`.
+- **Lifecycle:** invariant - each bbox top sits a full
+  `section_y_padding` above its highest marker at the final boundary
+  (the final top-sizing pass).
 
 ### Stage 6.15: snap canvas to the y-grid
 - **Purpose**: After all settling, restore canvas-wide grid alignment.
@@ -655,6 +778,9 @@ in pipeline order.
 - **Invariants preserved**: Relative station/section/port Ys (the whole
   canvas moves by one delta).
 - **Related tests**: `test_auto_y_spacing_fits_content`.
+- **Lifecycle:** invariant - canvas-wide grid alignment holds at the
+  final boundary (the last Y pass; only ports/junctions move after, via
+  Stage 6.16).
 
 ### Stage 6.16: re-align TB entry ports with feeders
 - **Purpose**: A TB/BT section's perpendicular entry port is pinned a fixed
@@ -672,6 +798,8 @@ in pipeline order.
 - **Invariants preserved**: LR/RL entry/exit geometry (skipped by
   `tb_only`).
 - **Validate guard after**: bisection set ("after Stage 6.16").
+- **Lifecycle:** invariant - TB/BT entry ports share their upstream
+  feeder Y (no-kink) and junctions track them at the final boundary.
 
 ## Unclear / structural-debt signals
 
