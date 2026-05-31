@@ -36,6 +36,16 @@ silently violate a downstream pass's expectations.
     has no final-boundary property to declare. The superseding stage is
     named.
 
+  The distinction is about the *property*, not the coordinates. A stage
+  stays **invariant** when a later stage recomputes the exact coordinates
+  but the abstract property it established (no-kink flow, horizontal port
+  connection, filled top band, grid-snapped Y) still holds at the end -
+  that is maintenance. It is **transient** only when a later stage
+  discards the decision itself, replacing the property with a different
+  layout (flush row tops giving way to content-hugging tops; an early fan
+  re-fanned around the final trunk Y). The test in doubt: does the
+  property survive to the end, or is the decision overwritten?
+
   Lifecycle answers "what does this phase guarantee at the end" and is
   pinned by `tests/test_contract_lifecycle.py`. It is **orthogonal** to
   the question #365 explored: "is this invariant safe to *lift* into a
@@ -517,7 +527,10 @@ in pipeline order.
   `test_section1_input_above_trunk`.
 - **Lifecycle:** invariant - the filled top band / content balanced
   around the trunk holds at the final boundary
-  (`test_section_top_band_filled`).
+  (`test_section_top_band_filled`). Stage 6.11 can fill the same band on
+  the same section, but moves a *disjoint* station set (strict-subset,
+  non-trunk siblings; this stage moves only full-bundle trunk
+  candidates), so it does not override this placement.
 
 ### Stage 6.2: fan source inputs upward (engine.py:695-700)
 - **Purpose**: Companion to Stage 6.1 for source-stack sections (single

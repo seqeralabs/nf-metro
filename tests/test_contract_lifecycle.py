@@ -80,7 +80,7 @@ def test_transient_stages_name_superseding_stage(tag, block):
     kind, rest = found[0]
     if kind != "transient":
         pytest.skip(f"Stage {tag} is invariant")
-    assert "Stage" in rest, (
+    assert re.search(r"Stage \d+\.\d+[a-z]?", rest), (
         f"Stage {tag} is transient but its Lifecycle line names no "
-        f"superseding stage: {rest!r}"
+        f"superseding stage (expected a 'Stage N.N' reference): {rest!r}"
     )
