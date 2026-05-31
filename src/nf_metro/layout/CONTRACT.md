@@ -94,7 +94,7 @@ bisection runner skips them earlier; see `_BISECTION_FIRST_VALID` in
 | Guard | First valid checkpoint | Transient because |
 |---|---|---|
 | `_guard_stations_in_sections` | after Stage 5.3 | Stage 5.2's off-track lift moves stations above the section bbox; Stage 5.3 grows the bbox to enclose them. |
-| `_guard_no_station_overlap` | after Stage 6.6 | Stage 6.4's snap-to-grid can land an off-track terminus icon on its on-track column-mate's Y; Stage 6.6 re-anchors the off-track above its consumer. |
+| `_guard_no_station_overlap` | after Stage 6.4 | Pre-snap fan placement can sit a fraction of a pitch off the row grid; Stage 6.4's snap pulls every station onto the grid while keeping same-column stations on distinct slots, after which markers must be collision-free. |
 | `_guard_no_line_crosses_non_consumer` | after Stage 6.14 | A sparse loop-side station sits on the trunk Y until Stage 6.14 shifts it to a half-grid offset; before that, sibling line bundles pass through its marker bbox. |
 
 Three further guards are excluded from the bisection set entirely

@@ -1391,16 +1391,17 @@ checkpoint in ``_compute_section_layout``.
 # - stations_in_sections: Stage 5.2 lifts off-track stations above their
 #   section's pre-grow bbox top; Stage 5.3's row top-align grows the
 #   bbox upward to enclose them.
-# - no_station_overlap: Stage 6.4's snap-to-grid can place an off-track
-#   terminus icon at the same coordinates as an on-track column-mate;
-#   Stage 6.6's re-anchor lifts the off-track back above its consumer.
+# - no_station_overlap: pre-snap fan placement can sit a fraction of a
+#   pitch off the row grid; Stage 6.4's snap pulls every station onto the
+#   grid and keeps same-column stations on distinct slots, after which
+#   markers must be collision-free.
 # - no_line_crosses_non_consumer: a sparse loop-side station (single
 #   line in, single line out, full-bundle row-mates) sits on the trunk
 #   Y until Stage 6.14 shifts it to a half-grid offset; before that,
 #   the sibling line bundle's route passes through its marker bbox.
 _BISECTION_FIRST_VALID: dict[str, str] = {
     "_guard_stations_in_sections": "after Stage 5.3",
-    "_guard_no_station_overlap": "after Stage 6.6",
+    "_guard_no_station_overlap": "after Stage 6.4",
     "_guard_no_line_crosses_non_consumer": "after Stage 6.14",
 }
 

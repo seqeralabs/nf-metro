@@ -114,6 +114,10 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
             snapped = origin + round((y - origin) / p) * p
             return snapped if abs(snapped - y) <= h + 1e-6 else y
 
+        # Independent snapping can round two same-column stations onto one
+        # slot; the later one keeps its pre-snap Y rather than collapsing.
+        column_slots: dict[float, set[float]] = {}
+
         for sec_id, port_ids in per_section_ports.items():
             section = graph.sections.get(sec_id)
             if section is None:
@@ -129,7 +133,12 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
                     continue
                 if sid in convergence_sources:
                     continue
-                st.y = _snap(st.y)
+                target = _snap(st.y)
+                slots = column_slots.setdefault(round(st.x, 3), set())
+                if round(target, 3) in slots:
+                    target = st.y
+                slots.add(round(target, 3))
+                st.y = target
             for pid in port_ids:
                 port = graph.ports.get(pid)
                 port_st = graph.stations.get(pid)

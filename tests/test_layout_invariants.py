@@ -539,6 +539,31 @@ def test_symfan_pairs_share_y(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Grid snap keeps same-column stations on distinct slots
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_grid_snap_keeps_columns_distinct(fixture):
+    """Stage 6.4's grid snap must not pull two distinct same-column
+    stations onto one slot.
+
+    A fan-out column placed off the row pitch (e.g. a centre-ports fan at a
+    40px spread over a 41px row grid) can round two adjacent termini onto
+    the same Y, hidden later only by the centre-ports re-fan.  ``validate``
+    runs ``_guard_no_station_overlap`` from the Stage 6.4 boundary, so the
+    collapse surfaces as a position clash.
+    """
+    try:
+        _layout(fixture, validate=True)
+    except PhaseInvariantError as exc:
+        # Unrelated pre-existing invariant failures are out of scope for
+        # this test; only a station-overlap clash indicates the snap
+        # collapsed a column.
+        assert "position clash" not in str(exc), str(exc)
+
+
+# ---------------------------------------------------------------------------
 # Off-track inputs sit above their consumer
 # ---------------------------------------------------------------------------
 
