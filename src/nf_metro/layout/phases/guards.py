@@ -26,7 +26,7 @@ from nf_metro.layout.phases._common import (
     first_vertical_leg_x,
     is_loop_side_branch_station,
 )
-from nf_metro.layout.phases.bbox import _section_content_top_target
+from nf_metro.layout.phases.bbox import _section_fit_top
 from nf_metro.layout.phases.single_section import _terminus_y_overhang
 from nf_metro.layout.phases.spacing import _residual_label_overlaps
 from nf_metro.parser.model import MetroGraph, PortSide, Section
@@ -310,9 +310,7 @@ def _guard_section_top_padding(
     for section in graph.sections.values():
         if section.bbox_h <= 0:
             continue
-        target = _section_content_top_target(
-            graph, section, section_y_padding, section_y_gap
-        )
+        target = _section_fit_top(graph, section, section_y_padding, section_y_gap)
         if target is None:
             continue
         if section.bbox_y > target + tol:

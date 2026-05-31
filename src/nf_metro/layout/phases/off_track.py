@@ -587,7 +587,7 @@ def _off_track_fit_top(
     target = highest_off_track_y - section_y_padding
     for sid in section.station_ids:
         st = graph.stations.get(sid)
-        # Mirror the content set of ``_section_content_top_target``
+        # Mirror the content set of ``_section_fit_top``
         # (bbox.py): ports and bypass V helpers are excluded, but hidden
         # phantoms are kept, so this must not switch to ``st.is_hidden``
         # (which would also drop phantoms and diverge from that helper).

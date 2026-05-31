@@ -70,7 +70,7 @@ from nf_metro.layout.phases.bbox import (  # noqa: F401
     _min_section_bbox_top,
     _predicted_bypass_bottom_in_row,
     _push_lower_rows_after_bbox_grow,
-    _section_content_top_target,
+    _section_fit_top,
     _shrink_and_tighten_rows,
     _shrink_bboxes_to_content_bottom,
     _tighten_lower_rows_after_shrink,

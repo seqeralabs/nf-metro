@@ -19,7 +19,9 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.constants import (
+    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
+    MIN_STATION_FLAT_LENGTH,
     SECTION_HEADER_PROTRUSION,
     SECTION_Y_GAP,
     SECTION_Y_PADDING,
@@ -31,6 +33,7 @@ from nf_metro.layout.engine import (
     is_loop_side_branch_station,
 )
 from nf_metro.layout.phases._common import _grow_section_bbox_upward
+from nf_metro.layout.phases.bbox import _section_fit_top
 from nf_metro.layout.phases.off_track import (
     _off_track_fit_top,
     _off_track_groups,
@@ -39,7 +42,7 @@ from nf_metro.layout.phases.off_track import (
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import resolve_section
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import MetroGraph, PortSide
+from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
@@ -698,6 +701,125 @@ def test_off_track_fit_top_clamps_to_non_top_port():
     top = _off_track_fit_top(graph, section, highest, SECTION_Y_PADDING)
 
     assert top == pytest.approx(above, abs=_Y_TOL)
+
+
+# ---------------------------------------------------------------------------
+# _section_fit_top: the generalised content-hug target (#464 PR1)
+#
+# These exercise the clamp branches of _section_fit_top directly.  The
+# grow-only call site (Stage 6.15a) only ever fires when the off-track /
+# fan band is the topmost content, so the bypass, port and row-above
+# clamps never bind there -- the same gap #463 closed for
+# _off_track_fit_top.  PR1 owns the generalised primitive that PR2/PR3
+# will start running in the shrink direction, so the clamps are covered
+# here on synthetic graphs that isolate each branch.
+# ---------------------------------------------------------------------------
+
+
+def _fit_top_section(*, content_ys, ports=(), bypass_ys=(), grid_row=0):
+    """Build a one-section graph for exercising ``_section_fit_top``.
+
+    ``content_ys`` are non-port station Ys; ``ports`` are ``is_port``
+    station Ys; ``bypass_ys`` are ``__bypass_`` helper station Ys.  The
+    section bbox spans x in [0, 100] so a row-above section at the same x
+    overlaps in columns.
+    """
+    graph = MetroGraph()
+    section = Section(
+        id="s",
+        name="S",
+        station_ids=[],
+        bbox_x=0.0,
+        bbox_y=0.0,
+        bbox_w=100.0,
+        bbox_h=400.0,
+        grid_col=0,
+        grid_row=grid_row,
+        grid_row_span=1,
+        grid_col_span=1,
+    )
+    graph.sections["s"] = section
+    for i, y in enumerate(content_ys):
+        sid = f"c{i}"
+        graph.stations[sid] = Station(id=sid, label="x", section_id="s", y=y)
+        section.station_ids.append(sid)
+    for i, y in enumerate(ports):
+        sid = f"p{i}"
+        graph.stations[sid] = Station(
+            id=sid, label="", section_id="s", is_port=True, y=y
+        )
+        section.station_ids.append(sid)
+    for i, y in enumerate(bypass_ys):
+        sid = f"__bypass_{i}"
+        graph.stations[sid] = Station(id=sid, label="", section_id="s", y=y)
+        section.station_ids.append(sid)
+    return graph, section
+
+
+def test_section_fit_top_anchors_on_highest_content():
+    """The target hugs the topmost content station with a full padding band."""
+    graph, section = _fit_top_section(content_ys=[200.0, 260.0])
+
+    top = _section_fit_top(graph, section, SECTION_Y_PADDING, SECTION_Y_GAP)
+
+    assert top == pytest.approx(200.0 - SECTION_Y_PADDING, abs=_Y_TOL)
+
+
+def test_section_fit_top_clamps_to_port_above_content():
+    """A port above the content band bounds the target so it stays inside.
+
+    Mirrors the bottom anchor: ports are hard-contained (no extra
+    padding), so a port higher than ``content_top - padding`` pulls the
+    target up to the port rather than clipping it outside the box.
+    """
+    graph, section = _fit_top_section(content_ys=[260.0], ports=[120.0])
+
+    top = _section_fit_top(graph, section, SECTION_Y_PADDING, SECTION_Y_GAP)
+
+    # content-only fit would be 260 - 50 = 210; the port at 120 binds.
+    assert top == pytest.approx(120.0, abs=_Y_TOL)
+
+
+def test_section_fit_top_clamps_to_bypass_curve_clearance():
+    """A bypass helper above content bounds the target by curve clearance."""
+    v_curve_clearance = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
+    graph, section = _fit_top_section(content_ys=[260.0], bypass_ys=[100.0])
+
+    top = _section_fit_top(graph, section, SECTION_Y_PADDING, SECTION_Y_GAP)
+
+    # content-only fit (210) is overridden by 100 - curve clearance.
+    assert top == pytest.approx(100.0 - v_curve_clearance, abs=_Y_TOL)
+
+
+def test_section_fit_top_bounded_by_row_above():
+    """The row-above term is a grow ceiling: it can only lower the top.
+
+    A section in row 1 with a column-overlapping neighbour ending row 0
+    cannot hug higher than ``above_bottom + section_y_gap +
+    SECTION_HEADER_PROTRUSION``, reserving the header-badge clearance.
+    """
+    graph, section = _fit_top_section(content_ys=[260.0], grid_row=1)
+    above = Section(
+        id="above",
+        name="Above",
+        station_ids=[],
+        bbox_x=0.0,
+        bbox_y=0.0,
+        bbox_w=100.0,
+        bbox_h=200.0,
+        grid_col=0,
+        grid_row=0,
+        grid_row_span=1,
+        grid_col_span=1,
+    )
+    graph.sections["above"] = above
+
+    top = _section_fit_top(graph, section, SECTION_Y_PADDING, SECTION_Y_GAP)
+
+    floor = 200.0 + SECTION_Y_GAP + SECTION_HEADER_PROTRUSION
+    # content-only fit (210) is below the floor, so the floor wins.
+    assert floor > 260.0 - SECTION_Y_PADDING
+    assert top == pytest.approx(floor, abs=_Y_TOL)
 
 
 # ---------------------------------------------------------------------------

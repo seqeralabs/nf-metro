@@ -14,7 +14,7 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
 )
 from nf_metro.layout.labels import label_text_width
-from nf_metro.layout.phases._common import _bbox_cols_overlap, _grow_section_bbox_upward
+from nf_metro.layout.phases._common import _bbox_cols_overlap, _set_section_bbox_top
 from nf_metro.layout.phases.single_section import _terminus_y_overhang
 from nf_metro.parser.model import MetroGraph, Section, Station
 
@@ -452,23 +452,34 @@ def _shrink_bboxes_to_content_bottom(
             section.bbox_h = max(0.0, new_h)
 
 
-def _section_content_top_target(
+def _section_fit_top(
     graph: MetroGraph,
     section: Section,
     section_y_padding: float,
     section_y_gap: float,
 ) -> float | None:
-    """Return the bbox top that gives ``section`` a full top padding band.
+    """Return the content-hug bbox top for ``section``.
 
-    Mirror of the bottom anchor in :func:`_shrink_bboxes_to_content_bottom`:
-    the top sits ``section_y_padding`` above the highest content marker
-    (bypass helpers use curve-only clearance; ports must stay inside).
+    The general content-hug target: the top sits ``section_y_padding``
+    above the highest content marker, clamped to keep bypass helpers
+    (curve-only clearance) and ports inside.  Generalises
+    :func:`nf_metro.layout.phases.off_track._off_track_fit_top` (which
+    anchors on the off-track band) to all section content, and is the
+    mirror of the bottom anchor in :func:`_shrink_bboxes_to_content_bottom`.
+
+    Content set: non-port stations excluding the ``__bypass_`` helpers
+    (hidden phantoms are kept), matching ``_off_track_fit_top`` exactly --
+    deliberately not ``is_hidden``, which is a superset that would drop
+    those phantoms and diverge.
 
     The bound against the row above reserves ``section_y_gap +
     SECTION_HEADER_PROTRUSION``, not just the bbox gap: the section's
     header badge protrudes ``SECTION_HEADER_PROTRUSION`` above its bbox
     top, and inter-section routes dip into the gap, so reserving the
-    protrusion keeps the grow from crowding the badge into a route.
+    protrusion keeps a grow from crowding the badge into a route.  This
+    row-above term is a grow-direction ceiling (it can only raise the
+    returned top, i.e. lower it on screen); callers that hug content
+    downward apply it as a bound, not as the content-hug position.
 
     Returns ``None`` when the section has no real content to anchor to.
     """
@@ -531,18 +542,20 @@ def _grow_bboxes_to_content_top(
     symmetric about the trunk reads as pushed up within its box
     (issue #406).
 
-    Grow-only: the top is never lowered, so intentional top-flush row
-    alignment from :func:`_top_align_row_bboxes_only` is preserved.  TOP
-    ports follow the new edge via :func:`_grow_section_bbox_upward`.
+    Grow-only: the gate only fires when the content-hug target sits
+    above the current top, so the top is never lowered and intentional
+    top-flush row alignment from :func:`_top_align_row_bboxes_only` is
+    preserved.  The move goes through the bidirectional
+    :func:`_set_section_bbox_top` primitive (TOP ports follow the new
+    edge); the grow-only gate, not the primitive, is what keeps this
+    pass one-directional.
     """
     for section in graph.sections.values():
         if section.bbox_h <= 0:
             continue
-        target = _section_content_top_target(
-            graph, section, section_y_padding, section_y_gap
-        )
+        target = _section_fit_top(graph, section, section_y_padding, section_y_gap)
         if target is not None and target < section.bbox_y - 0.5:
-            _grow_section_bbox_upward(graph, section, target)
+            _set_section_bbox_top(graph, section, target)
 
 
 def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) -> None:
