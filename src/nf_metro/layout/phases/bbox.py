@@ -464,16 +464,8 @@ def _section_fit_top(
 ) -> float | None:
     """Return the content-hug bbox top for ``section``.
 
-    The top sits ``section_y_padding`` above the highest content marker,
-    clamped so bypass helpers (curve-only clearance) and ports stay
-    inside; mirror of the bottom anchor in
-    :func:`_shrink_bboxes_to_content_bottom`.  The off-track variant
-    :func:`nf_metro.layout.phases.off_track._off_track_fit_top` is the
-    same target anchored on just the off-track band.
-
-    Content set: non-port stations excluding ``__bypass_`` helpers, with
-    hidden phantoms kept -- deliberately not ``is_hidden`` (a superset
-    that drops those phantoms and diverges from ``_off_track_fit_top``).
+    :func:`_section_content_hug_top` over the shared content set, then
+    bounded by the row above.
 
     The row-above bound reserves ``section_y_gap +
     SECTION_HEADER_PROTRUSION`` (the header badge protrudes above the
