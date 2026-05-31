@@ -773,24 +773,29 @@ in pipeline order.
   half-pitch offset at the final boundary; row gaps preserved across any
   bbox grow.
 
-### Stage 6.15a: restore symmetric top padding
-- **Purpose**: Fan re-distribution (Stages 4.9 / 4.10 / 6.7 / 6.11) can
-  lift a branch above the content-top line the bbox was sized for,
-  crowding the topmost marker against the bbox top while the bottom keeps
-  its full band. Grow each bbox top to a full `section_y_padding` above the
-  highest marker (bounded by the row above) so fanned-above content sits
-  centred. The upward grow can breach the canvas top margin, so
+### Stage 6.15a: fit bbox tops to content (grow and shrink)
+- **Purpose**: Size each bbox top to `section_y_padding` above its highest
+  marker, bounded by the row above. Grows when fan re-distribution (Stages
+  4.9 / 4.10 / 6.7 / 6.11) lifted a branch above the line the bbox was sized
+  for, crowding the topmost marker (issue #406). Shrinks when the transient
+  row-top flush left an empty band above content with nothing in it (no port
+  or bypass helper); a band holding a port or bypass helper is left intact.
+  The upward grow can breach the canvas top margin, so
   `_shift_graph_into_canvas` runs immediately after.
-- **Helper**: `_grow_bboxes_to_content_top` (`phases/bbox.py`), then
+- **Helper**: `_fit_bboxes_to_content_top` (`phases/bbox.py`), then
   `_shift_graph_into_canvas`.
 - **Precondition**: All content Ys final (post-6.14).
 - **Postcondition**: Each bbox top sits `section_y_padding` above its
-  highest marker, bounded by the row above.
-- **Invariants preserved**: Station Ys (only bbox tops grow). Resolves #406.
-- **Related tests**: `test_section_bbox_has_top_padding`.
-- **Lifecycle:** invariant - each bbox top sits a full
-  `section_y_padding` above its highest marker at the final boundary
-  (the final top-sizing pass).
+  highest marker, bounded by the row above. For a section with an empty
+  band (no port / bypass above content) this is an equality, not just a
+  floor: the excess band is reclaimed.
+- **Invariants preserved**: Station Ys (only bbox tops move). Resolves #406.
+- **Related tests**: `test_section_bbox_has_top_padding`,
+  `test_section_bbox_top_hugs_content`.
+- **Lifecycle:** invariant - each bbox top hugs its highest marker at the
+  final boundary (a full `section_y_padding`, an equality for empty-band
+  sections), the final top-sizing pass. Row-top flush alignment is not a
+  maintained property; it is transient scaffolding superseded here.
 
 ### Stage 6.15: snap canvas to the y-grid
 - **Purpose**: After all settling, restore canvas-wide grid alignment.
