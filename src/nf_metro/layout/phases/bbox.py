@@ -460,26 +460,23 @@ def _section_fit_top(
 ) -> float | None:
     """Return the content-hug bbox top for ``section``.
 
-    The general content-hug target: the top sits ``section_y_padding``
-    above the highest content marker, clamped to keep bypass helpers
-    (curve-only clearance) and ports inside.  Generalises
-    :func:`nf_metro.layout.phases.off_track._off_track_fit_top` (which
-    anchors on the off-track band) to all section content, and is the
-    mirror of the bottom anchor in :func:`_shrink_bboxes_to_content_bottom`.
+    The top sits ``section_y_padding`` above the highest content marker,
+    clamped so bypass helpers (curve-only clearance) and ports stay
+    inside; mirror of the bottom anchor in
+    :func:`_shrink_bboxes_to_content_bottom`.  The off-track variant
+    :func:`nf_metro.layout.phases.off_track._off_track_fit_top` is the
+    same target anchored on just the off-track band.
 
-    Content set: non-port stations excluding the ``__bypass_`` helpers
-    (hidden phantoms are kept), matching ``_off_track_fit_top`` exactly --
-    deliberately not ``is_hidden``, which is a superset that would drop
-    those phantoms and diverge.
+    Content set: non-port stations excluding ``__bypass_`` helpers, with
+    hidden phantoms kept -- deliberately not ``is_hidden`` (a superset
+    that drops those phantoms and diverges from ``_off_track_fit_top``).
 
-    The bound against the row above reserves ``section_y_gap +
-    SECTION_HEADER_PROTRUSION``, not just the bbox gap: the section's
-    header badge protrudes ``SECTION_HEADER_PROTRUSION`` above its bbox
-    top, and inter-section routes dip into the gap, so reserving the
-    protrusion keeps a grow from crowding the badge into a route.  This
-    row-above term is a grow-direction ceiling (it can only raise the
-    returned top, i.e. lower it on screen); callers that hug content
-    downward apply it as a bound, not as the content-hug position.
+    The row-above bound reserves ``section_y_gap +
+    SECTION_HEADER_PROTRUSION`` (the header badge protrudes above the
+    bbox top and inter-section routes dip into the gap).  It is a
+    grow-direction ceiling: it can lower the returned top but never raise
+    it above the content-hug position, so a caller hugging content
+    downward applies it as a bound, not as the target.
 
     Returns ``None`` when the section has no real content to anchor to.
     """
@@ -542,13 +539,12 @@ def _grow_bboxes_to_content_top(
     symmetric about the trunk reads as pushed up within its box
     (issue #406).
 
-    Grow-only: the gate only fires when the content-hug target sits
-    above the current top, so the top is never lowered and intentional
-    top-flush row alignment from :func:`_top_align_row_bboxes_only` is
-    preserved.  The move goes through the bidirectional
-    :func:`_set_section_bbox_top` primitive (TOP ports follow the new
-    edge); the grow-only gate, not the primitive, is what keeps this
-    pass one-directional.
+    Grow-only: the gate fires only when the content-hug target sits above
+    the current top, so the top is never lowered and the top-flush row
+    alignment from :func:`_top_align_row_bboxes_only` is preserved.  The
+    move uses the bidirectional :func:`_set_section_bbox_top` (TOP ports
+    follow the new edge); the gate, not the primitive, keeps this pass
+    one-directional.
     """
     for section in graph.sections.values():
         if section.bbox_h <= 0:

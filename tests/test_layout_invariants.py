@@ -704,15 +704,13 @@ def test_off_track_fit_top_clamps_to_non_top_port():
 
 
 # ---------------------------------------------------------------------------
-# _section_fit_top: the generalised content-hug target (#464 PR1)
+# _section_fit_top clamp coverage
 #
-# These exercise the clamp branches of _section_fit_top directly.  The
-# grow-only call site (Stage 6.15a) only ever fires when the off-track /
+# The grow-only call site (Stage 6.15a) only fires when the off-track /
 # fan band is the topmost content, so the bypass, port and row-above
-# clamps never bind there -- the same gap #463 closed for
-# _off_track_fit_top.  PR1 owns the generalised primitive that PR2/PR3
-# will start running in the shrink direction, so the clamps are covered
-# here on synthetic graphs that isolate each branch.
+# clamps never bind there.  Synthetic graphs isolate each clamp branch so
+# the shrink direction is covered before any caller starts hugging
+# content downward.
 # ---------------------------------------------------------------------------
 
 
