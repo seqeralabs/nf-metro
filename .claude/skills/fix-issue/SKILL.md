@@ -134,12 +134,24 @@ https://pinin4fjords.github.io/nf-metro/_pr/<PR_NUMBER>/
 
 The sticky comment ends in a verdict line. Gate the next step on it:
 
-- **"No visual changes detected"** -> eligible for auto-merge under the
-  user's standing authorisation for no-change PRs. Proceed.
+- **"No visual changes detected"** -> a clean result, but **not** a
+  licence to merge. Report the verdict and wait for the user to say
+  merge. There is no standing auto-merge authorisation.
 - **"Ready for review"** (or any wording indicating visual deltas exist)
   -> **STOP**. Surface the deltas to the user with one short line per
   affected gallery example describing what changed (e.g.
-  `da_pipeline.mmd: trunk shifted 12px right`). Do not auto-merge.
+  `da_pipeline.mmd: trunk shifted 12px right`).
+
+In **all** cases, merging is the user's call, made per-PR:
+
+- Never merge until the user explicitly asks for this PR to be merged.
+- **Never** use `gh pr merge --admin` (or any other bypass of the
+  repo's branch-protection / review-required policy) on your own
+  initiative. If a normal merge is blocked because the repo requires
+  review, that block is the policy working - stop and tell the user it
+  needs their review or an explicit instruction to admin-merge. Do not
+  cite "prior PRs were admin-merged" as authorisation; past instances
+  are history, not standing consent.
 
 ### Optional: quick local render of a single file
 
