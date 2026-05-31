@@ -366,8 +366,8 @@ def compute_bundle_info(
 
 def inter_column_channel_x(
     graph: MetroGraph,
-    src,
-    tgt,
+    src: Station,
+    tgt: Station,
     sx: float,
     tx: float,
     dx: float,

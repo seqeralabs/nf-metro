@@ -39,6 +39,7 @@ from nf_metro.parser.model import MetroGraph
 
 if TYPE_CHECKING:
     from nf_metro.layout.routing.common import RoutedPath
+    from nf_metro.parser.model import Section, Station
 
 
 def label_text_width(label: str) -> float:
@@ -379,7 +380,7 @@ def _compute_port_label_preference(
 
 
 def _apply_edge_override(
-    station,
+    station: Station,
     start_above: bool,
     section_y_range: dict[str, tuple[float, float]],
     sections_with_multiline: set[str],
@@ -1034,8 +1035,8 @@ def _avoid_diagonal_routes(
 
 def _clamp_label_vertical(
     candidate: LabelPlacement,
-    sec,
-    station,
+    sec: Section,
+    station: Station,
     label_offset: float,
     min_off: float,
     max_off: float,
@@ -1227,7 +1228,7 @@ def _compute_safe_offsets(
 
 
 def _try_place(
-    station,
+    station: Station,
     label_offset: float,
     above: bool,
     existing: list[LabelPlacement],

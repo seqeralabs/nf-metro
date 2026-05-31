@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from nf_metro.parser.model import MetroGraph
+
+if TYPE_CHECKING:
+    from nf_metro.layout.labels import LabelOverlap
 
 # Cap on spread-loop passes.  Each pass strictly widens the binding axis,
 # so a handful suffices to clear any realistic crowding before giving up.
@@ -13,7 +18,9 @@ _MAX_SPREAD_ITERS = 6
 _SPREAD_SLACK = 4.0
 
 
-def _residual_label_overlaps(graph: MetroGraph, *, allow_hyphenation: bool):
+def _residual_label_overlaps(
+    graph: MetroGraph, *, allow_hyphenation: bool
+) -> list[LabelOverlap]:
     """Place labels at the current layout and report leftover overlaps.
 
     Runs the same offset/route/label pipeline the renderer uses (so the
@@ -62,7 +69,14 @@ def _residual_label_overlaps(graph: MetroGraph, *, allow_hyphenation: bool):
                 s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h = bx, by, bw, bh
 
 
-def _spread_bump(graph, residual, x_spacing, y_spacing, auto_x, auto_y):
+def _spread_bump(
+    graph: MetroGraph,
+    residual: list[LabelOverlap],
+    x_spacing: float,
+    y_spacing: float,
+    auto_x: bool,
+    auto_y: bool,
+) -> tuple[float, float]:
     """Compute widened (x, y) spacing to clear the residual label overlaps.
 
     Each overlap is attributed to the axis along which its two stations are

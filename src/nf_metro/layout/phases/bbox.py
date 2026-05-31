@@ -40,7 +40,7 @@ def _predicted_bypass_bottom_in_row(
     if not sections_in_row:
         return {}
 
-    def _node_section(node_id: str):
+    def _node_section(node_id: str) -> Section | None:
         st = graph.stations.get(node_id) or graph.ports.get(node_id)
         if st is None:
             return None
@@ -49,7 +49,9 @@ def _predicted_bypass_bottom_in_row(
 
     resolve_cache: dict[tuple[str, bool], Section | None] = {}
 
-    def _resolve(node_id: str, upstream: bool, visited: set[str] | None = None):
+    def _resolve(
+        node_id: str, upstream: bool, visited: set[str] | None = None
+    ) -> Section | None:
         key = (node_id, upstream)
         if key in resolve_cache:
             return resolve_cache[key]

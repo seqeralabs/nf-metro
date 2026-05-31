@@ -64,7 +64,7 @@ from nf_metro.layout.routing.corners import (
     tb_entry_corner,
     tb_exit_corner,
 )
-from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
+from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Station
 
 # ---------------------------------------------------------------------------
 # Routing context: pre-computed state shared by all handlers
@@ -847,7 +847,7 @@ def _route_merge_branch(
 
 
 def _has_around_section_sibling(
-    edge: Edge, ep: Station, ep_port, ctx: _RoutingCtx
+    edge: Edge, ep: Station, ep_port: Port | None, ctx: _RoutingCtx
 ) -> bool:
     """Detect whether another edge to the same entry port will route via
     :func:`_route_around_section_below`.
@@ -1309,7 +1309,7 @@ def _should_step_descent(
     graph: MetroGraph,
     src: Station,
     ep: Station,
-    ep_port,
+    ep_port: Port | None,
 ) -> bool:
     """Detect the nested-column degenerate geometry that needs a stepped
     descent.

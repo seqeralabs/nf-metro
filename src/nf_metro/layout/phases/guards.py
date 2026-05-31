@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
@@ -29,7 +30,12 @@ from nf_metro.layout.phases._common import (
 from nf_metro.layout.phases.bbox import _section_fit_top
 from nf_metro.layout.phases.single_section import _terminus_y_overhang
 from nf_metro.layout.phases.spacing import _residual_label_overlaps
-from nf_metro.parser.model import MetroGraph, PortSide, Section
+from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from nf_metro.layout.routing.common import RoutedPath
 
 
 class PhaseInvariantError(Exception):
@@ -52,7 +58,9 @@ def _guard_coordinates_finite(graph: MetroGraph, phase: str) -> None:
                 )
 
 
-def _bbox_guarded_stations(graph: MetroGraph):
+def _bbox_guarded_stations(
+    graph: MetroGraph,
+) -> Iterator[tuple[str, Station, Section]]:
     """Yield ``(sid, station, section)`` for each rendered station that a
     bbox-containment guard should check: skips ports, junctions, and
     stations whose section has no sized bbox.  Shared by the marker-edge
@@ -474,7 +482,9 @@ def _guard_row_trunk_cy_consistent(
 
         offsets = compute_station_offsets(graph)
 
-    def _section_trunk_info(sec) -> tuple[float, float, float, set[str]] | None:
+    def _section_trunk_info(
+        sec: Section,
+    ) -> tuple[float, float, float, set[str]] | None:
         bundle = _section_bundle_lines(graph, sec)
         if not bundle:
             return None
@@ -643,7 +653,7 @@ def _ensure_routes(graph: MetroGraph, routes: list | None) -> list:
     return route_edges(graph)
 
 
-def _route_exit_side(graph: MetroGraph, rp) -> PortSide | None:
+def _route_exit_side(graph: MetroGraph, rp: RoutedPath) -> PortSide | None:
     """Side of the port a route exits through (directly or via its feeder)."""
     port = graph.ports.get(rp.edge.source)
     if port is not None:
@@ -662,7 +672,7 @@ def _inter_section_backtrack_legs(
     reference: str = "grid",
     tolerance: float = 0.0,
     include_exempt: bool = False,
-):
+) -> Iterator[tuple[RoutedPath, float, float]]:
     """Yield ``(rp, x1, x2)`` for each horizontal leg of a forward LR
     inter-section route that reverses against its flow.
 
@@ -804,7 +814,9 @@ def _guard_fan_bundles_coincide_or_separate(
                 )
 
 
-def inter_section_route_backtrack_legs(graph: MetroGraph, routes: list):
+def inter_section_route_backtrack_legs(
+    graph: MetroGraph, routes: list
+) -> Iterator[tuple[RoutedPath, float, float]]:
     """Yield ``(rp, x1, x2)`` for each horizontal leg that moves *away* from
     the route's own endpoint X - a genuine out-and-back dog-leg.
 

@@ -162,10 +162,10 @@ def _compute_fork_join_gaps(
     visible_tracks = {t for sid, t in tracks.items() if not sid.startswith("__bypass_")}
     is_single_track = len(visible_tracks) <= 1
 
-    def _has_bypass(ids):
+    def _has_bypass(ids: set[str]) -> bool:
         return any(nid.startswith("__bypass_") for nid in ids)
 
-    def _bypass_aware_tracks(ids, owner_sid):
+    def _bypass_aware_tracks(ids: set[str], owner_sid: str) -> set[float]:
         """Visible peer tracks plus the owner's own track, V's removed."""
         result: set[float] = set()
         owner_track = tracks.get(owner_sid)

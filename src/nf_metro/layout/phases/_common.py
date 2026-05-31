@@ -68,7 +68,7 @@ def _station_marker_bbox(
     return (st.x - radius, cy - half_h, st.x + radius, cy + half_h)
 
 
-def first_vertical_leg_x(points) -> float | None:
+def first_vertical_leg_x(points: list[tuple[float, float]]) -> float | None:
     """X of the first (near-)vertical leg of *points*.
 
     The source-side vertical channel ("V1") of an inter-section route;
@@ -131,7 +131,14 @@ def _route_crosses_section_boundary(
             for p in ports_by_sec.get(sec_id, [])
         )
 
-    def edge_crossings(p1, p2, x0, y0, x1, y1):
+    def edge_crossings(
+        p1: tuple[float, float],
+        p2: tuple[float, float],
+        x0: float,
+        y0: float,
+        x1: float,
+        y1: float,
+    ) -> list[tuple[float, float]]:
         ax, ay = p1
         bx, by = p2
         hits = []
@@ -429,7 +436,9 @@ def _build_section_subgraph(graph: MetroGraph, section: Section) -> MetroGraph:
     return sub
 
 
-def _set_section_bbox_top(graph: MetroGraph, section, new_bbox_top: float) -> None:
+def _set_section_bbox_top(
+    graph: MetroGraph, section: Section, new_bbox_top: float
+) -> None:
     """Move a section's bbox top to *new_bbox_top* and pull TOP ports along.
 
     Works in both directions: a smaller *new_bbox_top* grows the box
@@ -448,7 +457,9 @@ def _set_section_bbox_top(graph: MetroGraph, section, new_bbox_top: float) -> No
             port.y = port_st.y
 
 
-def _grow_section_bbox_upward(graph: MetroGraph, section, new_bbox_top: float) -> None:
+def _grow_section_bbox_upward(
+    graph: MetroGraph, section: Section, new_bbox_top: float
+) -> None:
     """Expand a section's bbox upward to *new_bbox_top* and pull TOP ports.
 
     Grow-only convenience wrapper: callers guard on ``new_bbox_top <

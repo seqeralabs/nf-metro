@@ -29,7 +29,7 @@ from nf_metro.layout.constants import (
     SECTION_X_PADDING,
 )
 from nf_metro.layout.routing.common import resolve_section
-from nf_metro.parser.model import MetroGraph, PortSide, Section
+from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
 
 def _assign_grid_layout(
@@ -337,7 +337,7 @@ def _rows_overlap(a: Section, b: Section) -> bool:
 
 def _station_column(
     graph: MetroGraph,
-    station,
+    station: Station,
     col_assign: dict[str, int],
     junction_ids: set[str],
 ) -> int | None:
@@ -373,7 +373,7 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     adjacent ``(src_row, tgt_row)`` reservation still applies.
     """
 
-    def _is_flow_section(sec) -> bool:
+    def _is_flow_section(sec: Section | None) -> bool:
         return sec is not None and sec.grid_row_span == 1
 
     # (upper_row, lower_row) -> entry_port_id -> set of line ids

@@ -7,7 +7,7 @@ assignments in compute_station_offsets().
 
 from __future__ import annotations
 
-from nf_metro.parser.model import MetroGraph, PortSide
+from nf_metro.parser.model import MetroGraph, Port, PortSide
 
 
 def _fed_by_bottom_exit_fold(
@@ -168,7 +168,7 @@ def detect_reversed_sections(graph: MetroGraph) -> set[str]:
     # We iterate because a later TB section may become reversed
     # through row propagation from an earlier TB section's
     # downstream (e.g. calling -> hard_filter -> ... -> integration).
-    def _is_tb_lr_exit_nonreversed(port_obj):
+    def _is_tb_lr_exit_nonreversed(port_obj: Port | None) -> bool:
         """Check if port is an LR exit of a non-reversed TB section."""
         return (
             port_obj is not None

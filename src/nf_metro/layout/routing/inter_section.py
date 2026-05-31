@@ -20,6 +20,7 @@ don't fire on; the dispatcher's if-cascade handles them directly.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
 from functools import cached_property
@@ -128,10 +129,10 @@ class TurnSequence:
     def __len__(self) -> int:
         return len(self.corners)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Corner]:
         return iter(self.corners)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Corner:
         return self.corners[idx]
 
     @cached_property

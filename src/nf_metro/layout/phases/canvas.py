@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from nf_metro.layout.phases.bbox import _min_section_bbox_top
-from nf_metro.parser.model import MetroGraph
+from nf_metro.parser.model import MetroGraph, Section
 
 
 def _renumber_sections_by_grid(graph: MetroGraph) -> None:
@@ -88,7 +88,7 @@ def _renumber_sections_by_grid(graph: MetroGraph) -> None:
         elif sw not in sweep_is_rl and s.direction == "LR":
             sweep_is_rl[sw] = False
 
-    def _sort_key(s):
+    def _sort_key(s: Section) -> tuple[int, int, int, int]:
         sw = sweep[s.id]
         col = -s.grid_col if sweep_is_rl.get(sw, False) else s.grid_col
         return (comp_idx.get(s.id, 0), sw, col, s.grid_row)
