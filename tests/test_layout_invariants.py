@@ -33,7 +33,11 @@ from nf_metro.layout.engine import (
     is_loop_side_branch_station,
 )
 from nf_metro.layout.phases._common import _grow_section_bbox_upward
-from nf_metro.layout.phases.bbox import _section_fit_top
+from nf_metro.layout.phases.bbox import (
+    _section_band_is_empty,
+    _section_content_hug_top,
+    _section_fit_top,
+)
 from nf_metro.layout.phases.off_track import (
     _off_track_fit_top,
     _off_track_groups,
@@ -2953,6 +2957,55 @@ def test_section_bbox_has_top_padding(fixture):
     assert not offenders, (
         f"{fixture}: section bbox tops must sit at least "
         f"section_y_padding above the highest station centre: " + "; ".join(offenders)
+    )
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_section_bbox_top_hugs_content(fixture):
+    """Empty-band sections hug content to an EQUALITY, not just a floor.
+
+    A section with a genuinely empty flush band -- no port and no
+    ``__bypass_`` helper above its topmost content
+    (:func:`_section_band_is_empty`) -- has its bbox top sit exactly
+    ``section_y_padding`` above the highest content marker, leaving no
+    empty band.  This is the equality companion to the ``>=`` floor
+    invariant ``test_section_bbox_has_top_padding``.
+
+    Ceiling-bound sections (where the row-above grow ceiling raises
+    :func:`_section_fit_top` above the ceiling-free
+    :func:`_section_content_hug_top`) legitimately keep a band so the
+    header badge clears the inter-row routing; they are skipped here and
+    covered by the floor test instead.
+    """
+    graph = _layout(fixture)
+    tol = 1.0
+
+    offenders: list[str] = []
+    for sec in graph.sections.values():
+        if sec.bbox_h <= 0 or not _section_band_is_empty(graph, sec):
+            continue
+        fit = _section_fit_top(graph, sec, SECTION_Y_PADDING, SECTION_Y_GAP)
+        hug = _section_content_hug_top(graph, sec, SECTION_Y_PADDING)
+        # fit > hug means the row-above ceiling raised the top above the
+        # content-hug, so a band is reserved for the header badge.
+        if fit is None or hug is None or fit > hug + tol:
+            continue
+        content_top = min(
+            graph.stations[sid].y
+            for sid in sec.station_ids
+            if not graph.stations[sid].is_port and not sid.startswith("__bypass_")
+        )
+        gap = content_top - sec.bbox_y
+        if abs(gap - SECTION_Y_PADDING) > tol:
+            offenders.append(
+                f"section {sec.id!r}: gap={gap:.1f} != "
+                f"section_y_padding={SECTION_Y_PADDING} "
+                f"(leftover band {gap - SECTION_Y_PADDING:.1f})"
+            )
+
+    assert not offenders, (
+        f"{fixture}: section tops with an empty band must hug content to "
+        f"section_y_padding with no leftover space: " + "; ".join(offenders)
     )
 
 

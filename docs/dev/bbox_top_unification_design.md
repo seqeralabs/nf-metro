@@ -235,14 +235,50 @@ top). Expected render impact: **none** (byte-identical gallery). Verification: f
 gallery hash diff == main; existing top/bottom-padding + lifecycle tests green.
 
 **PR2 - enable shrink for Group A (pure flush bands).**
+
+Step 0 (implementation note, from the #470 review): the shrink target is
+ceiling-free, and `_section_fit_top` does NOT change. `_section_fit_top` folds the
+row-above grow ceiling (`above_bottom + section_y_gap + SECTION_HEADER_PROTRUSION`)
+into its single return, and is shared by the grow pass (6.15a) AND
+`_guard_section_top_padding`. Leave it alone. The row-above ceiling is a GROW bound
+only and cannot bind when shrinking: lowering a too-tall top moves it away from the
+row above, so the ceiling is never the active constraint in the shrink direction.
+Therefore PR2's Group A shrink target is the PURE content-hug (content + port/bypass
+clamps, NO row-above ceiling) - exactly `_off_track_fit_top`'s shape. Implement the
+final top pass as: compute content-hug; if it sits above the current top -> apply the
+ceiling and grow (unchanged, byte-identical); if it sits below the current top AND the
+section is Group A (no port/bypass above content) -> shrink to the ceiling-free
+content-hug. This keeps `_section_fit_top`, its grow path, `_guard_section_top_padding`,
+and PR1's clamp tests (incl. `test_section_fit_top_bounded_by_row_above`) all unchanged;
+only the new Group A shrink branch is render-visible.
+
 Allow the final pass to also lower the top for sections with no port / bypass above
-content. Expected render impact: differentialabundance, differentialabundance_default,
-off_track_convergence lose their empty bands (boxes drop to content-hug; row tops
-become staggered). 5 sections, 3 fixtures. Highest-risk fixture here is
-off_track_convergence (233px change, adjacent to #463's off-track machinery).
-Verification: gallery diff shows only those 3 fixtures; off-track invariant tests
-(`test_off_track_inputs_above_consumer`) and lifecycle tests green; new equality test
-(see PR4) added scoped to Group A.
+content. Implemented as a new ceiling-free `_section_content_hug_top` + a
+`_section_band_is_empty` (Group A) gate + a shrink branch in
+`_grow_bboxes_to_content_top`; `_section_fit_top` untouched.
+
+DONE. Confirmed gallery delta - 6 fixtures, every changed section now hugs
+content at exactly `section_y_padding`:
+
+- differentialabundance: `reporting` -58px.
+- differentialabundance_default: `differential`, `reporting` -116px each.
+- off_track_convergence: `input`, `output` -233px each.
+- genomeassembly_staggered: `scaffolding` -8.2px.
+- nf_flat_pipeline: `pipeline` -12.2px.
+- nf_unquoted_labels: `pipeline` -12.2px.
+
+The last three were under-stated in the original prediction: the section 1.4
+diagnostic scanned only `examples/` + `examples/topologies/`, missing the
+`tests/fixtures/nextflow/` conversions (the two `nf_*`) and rounding off the 8.2px
+`scaffolding` case. All six are genuine empty-band reclamations on the same gate.
+`differentialabundance_default/plots` keeps its band (ceiling-bound, pre-existing
+xfail). The synthetic `test_compute_layout_rowspan_section_compacts_content` was
+updated: it asserted the now-dropped row-top flush; it now asserts each section hugs
+its own content (trunk-Y assertions unchanged).
+
+Verification: gallery diff shows only those 6 fixtures; new equality test
+`test_section_bbox_top_hugs_content` green; `test_off_track_inputs_above_consumer`,
+the off-track suite, `test_contract_lifecycle`, and PR1's clamp tests all green.
 
 **PR3 - enable shrink for Group B (port-bearing bands), conditionally and per-case.**
 Group B is NOT a blanket "shrink all six". Some of those port-bearing bands are
@@ -342,8 +378,13 @@ Two adjustments to the staging plan (folded into section 4 above):
   SVGs). Added unit tests exercising the bypass, port and row-above clamps of
   `_section_fit_top` (those branches never bind at the current grow-only call site,
   the same coverage gap #463 closed for `_off_track_fit_top`).
-- **PR2 onward: pending.** They change renders and need preview review; PR3/Group B
-  needs the per-case judgement above.
+- **PR2 (Group A shrink): done.** New ceiling-free `_section_content_hug_top`
+  + `_section_band_is_empty` gate + a shrink branch in `_grow_bboxes_to_content_top`;
+  `_section_fit_top` and the guard untouched. Render-changing: 6 fixtures lose genuinely
+  empty top bands (deltas recorded under PR2 in section 4). New equality test
+  `test_section_bbox_top_hugs_content`.
+- **PR3 onward: pending.** PR3/Group B needs the per-case judgement above; PR4 retires
+  the dead 5.4 step-1 and folds the grow-only pass in (flush stays).
 
 ## Verification (for the implementation phase, not this design task)
 

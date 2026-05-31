@@ -524,27 +524,114 @@ def _section_fit_top(
     return target
 
 
+def _section_content_hug_top(
+    graph: MetroGraph,
+    section: Section,
+    section_y_padding: float,
+) -> float | None:
+    """Ceiling-free content-hug top for ``section``.
+
+    The shrink twin of :func:`_section_fit_top`: the same content-hug
+    (``section_y_padding`` above the highest content marker, clamped to
+    keep bypass helpers and ports inside) but WITHOUT the row-above grow
+    ceiling.  The ceiling is a grow-direction bound only -- lowering a
+    too-tall top moves it away from the row above, so it never binds when
+    hugging content downward.
+
+    Separate from ``_section_fit_top`` so the grow target it shares with
+    ``_guard_section_top_padding`` is untouched.  Same content set as
+    ``_section_fit_top`` / ``_off_track_fit_top``: non-port stations
+    excluding ``__bypass_`` helpers, phantoms kept.
+
+    Returns ``None`` when the section has no real content to anchor to.
+    """
+    content_min_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if (
+            sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not sid.startswith("__bypass_")
+        )
+    ]
+    if not content_min_ys:
+        return None
+    bypass_min_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if sid in graph.stations and sid.startswith("__bypass_")
+    ]
+    port_min_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if sid in graph.stations and graph.stations[sid].is_port
+    ]
+    v_curve_clearance = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
+    target = min(content_min_ys) - section_y_padding
+    if bypass_min_ys:
+        target = min(target, min(bypass_min_ys) - v_curve_clearance)
+    if port_min_ys:
+        target = min(target, min(port_min_ys))
+    return target
+
+
+def _section_band_is_empty(graph: MetroGraph, section: Section) -> bool:
+    """True when the band above ``section``'s topmost content is empty.
+
+    Empty means no ``is_port`` station and no ``__bypass_`` helper sits
+    above the highest content marker.  Such a band carries nothing, so
+    the bbox top can be lowered to hug content.  A port or bypass helper
+    above content is intentional runway for that port's approach and must
+    not be shrunk into.
+    """
+    content_min_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if (
+            sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not sid.startswith("__bypass_")
+        )
+    ]
+    if not content_min_ys:
+        return False
+    topmost = min(content_min_ys)
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is None:
+            continue
+        if (st.is_port or sid.startswith("__bypass_")) and st.y < topmost - 0.5:
+            return False
+    return True
+
+
 def _grow_bboxes_to_content_top(
     graph: MetroGraph,
     section_y_padding: float,
     section_y_gap: float,
 ) -> None:
-    """Grow section bbox tops so the highest marker keeps a full padding band.
+    """Fit section bbox tops to content: grow to keep a full padding band,
+    and shrink to reclaim a genuinely empty flush band.
 
-    Symmetric counterpart to :func:`_shrink_bboxes_to_content_bottom`.
-    Fan-redistribution passes (Stages 4.9 / 4.10 / 6.7 / 6.11) can lift a
-    branch station above the content-top line the bbox was sized for,
-    leaving the topmost marker crowded against the bbox top while the
-    bottom keeps its full ``section_y_padding`` band -- so a fan
-    symmetric about the trunk reads as pushed up within its box
-    (issue #406).
+    Grow side (issue #406): fan-redistribution passes (Stages 4.9 / 4.10 /
+    6.7 / 6.11) can lift a branch above the content-top line the bbox was
+    sized for, crowding the topmost marker against the bbox top while the
+    bottom keeps its full ``section_y_padding`` band.  Growing the top to
+    :func:`_section_fit_top` (content-hug, bounded by the row-above
+    ceiling) restores the band.
 
-    Grow-only: the gate fires only when the content-hug target sits above
-    the current top, so the top is never lowered and the top-flush row
-    alignment from :func:`_top_align_row_bboxes_only` is preserved.  The
-    move uses the bidirectional :func:`_set_section_bbox_top` (TOP ports
-    follow the new edge); the gate, not the primitive, keeps this pass
-    one-directional.
+    Shrink side: the transient row-top flush
+    (:func:`_top_align_row_bboxes_only`) can leave a short section's top
+    flushed up to a tall fan/off-track row-mate with empty space above its
+    content.  When that band carries nothing
+    (:func:`_section_band_is_empty`), lower the top to the ceiling-free
+    :func:`_section_content_hug_top`.  A band holding a port or bypass
+    helper is left intact.
+
+    The grow branch keeps precedence, so a section whose top the row-above
+    ceiling pushed down is grown rather than shrunk into the badge.  Both
+    moves go through the bidirectional :func:`_set_section_bbox_top` (TOP
+    ports follow the new edge).
     """
     for section in graph.sections.values():
         if section.bbox_h <= 0:
@@ -552,6 +639,14 @@ def _grow_bboxes_to_content_top(
         target = _section_fit_top(graph, section, section_y_padding, section_y_gap)
         if target is not None and target < section.bbox_y - 0.5:
             _set_section_bbox_top(graph, section, target)
+            continue
+        hug = _section_content_hug_top(graph, section, section_y_padding)
+        if (
+            hug is not None
+            and hug > section.bbox_y + 0.5
+            and _section_band_is_empty(graph, section)
+        ):
+            _set_section_bbox_top(graph, section, hug)
 
 
 def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) -> None:
