@@ -13,6 +13,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.phases._common import (
+    _content_station_ys,
     _grow_section_bbox_upward,
     _set_section_bbox_top,
 )
@@ -585,15 +586,12 @@ def _off_track_fit_top(
     this in both directions so a stale too-tall box is reclaimed.
     """
     target = highest_off_track_y - section_y_padding
-    for sid in section.station_ids:
-        st = graph.stations.get(sid)
-        # Mirror the content set of ``_section_fit_top``
-        # (bbox.py): ports and bypass V helpers are excluded, but hidden
-        # phantoms are kept, so this must not switch to ``st.is_hidden``
-        # (which would also drop phantoms and diverge from that helper).
-        if st is None or st.is_port or sid.startswith("__bypass_"):
-            continue
-        target = min(target, st.y - section_y_padding)
+    for y in _content_station_ys(graph, section):
+        target = min(target, y - section_y_padding)
+    # Non-TOP ports bound the fit so they aren't stranded above the new
+    # top; TOP ports follow the edge and impose no bound.  This port clamp
+    # is deliberately narrower than the bbox helpers' all-port clamp, so
+    # only the content set is shared, not the port handling.
     for pid in section.entry_ports + section.exit_ports:
         port = graph.ports.get(pid)
         port_st = graph.stations.get(pid)

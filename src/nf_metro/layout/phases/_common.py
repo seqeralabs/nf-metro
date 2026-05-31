@@ -17,6 +17,28 @@ def _bbox_cols_overlap(a: Section, b: Section) -> bool:
     return a.bbox_x < b.bbox_x + b.bbox_w and b.bbox_x < a.bbox_x + a.bbox_w
 
 
+def _content_station_ys(graph: MetroGraph, section: Section) -> list[float]:
+    """Y of every content marker in ``section``.
+
+    Content = non-port stations excluding the ``__bypass_`` helpers; hidden
+    phantoms are kept.  The single definition of the content set the
+    top-fit helpers (:func:`...bbox._section_content_hug_top`,
+    :func:`...bbox._section_fit_top`,
+    :func:`...off_track._off_track_fit_top`) anchor on, so the set cannot
+    drift between them -- e.g. a switch to ``is_hidden``, a superset that
+    would drop the phantoms.
+    """
+    return [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if (
+            sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not sid.startswith("__bypass_")
+        )
+    ]
+
+
 def _station_marker_bbox(
     graph: MetroGraph,
     sid: str,
