@@ -770,8 +770,8 @@ def _settle_pass_c(
     section_y_gap: float,
 ) -> None:
     """Pass C: junction placement, off-track lift, vertical content settling,
-    the inter-row cascade, and final canvas/grid snapping.  Extracted verbatim
-    from _compute_section_layout; see CONTRACT.md for the per-stage contract."""
+    the inter-row cascade, and final canvas/grid snapping.  See CONTRACT.md for
+    the per-stage contract."""
     # ---- Stage 5 - Pass C: Junctions & off-track lift ------------------
     # All port positions are now final; Stage 5.1 positions junctions
     # once.  Stage 5.2 lifts off-track stations; Stages 5.3 to 5.5
