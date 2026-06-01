@@ -21,6 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from conftest import CONTENT_PLACEMENT_PHASES
 
 import nf_metro.layout.engine as engine
 from nf_metro.convert import convert_nextflow_dag
@@ -33,19 +34,6 @@ TOPOLOGIES = EXAMPLES / "topologies"
 GUIDE = EXAMPLES / "guide"
 TESTS_FIXTURES = ROOT / "tests" / "fixtures"
 NEXTFLOW = TESTS_FIXTURES / "nextflow"
-
-# The content-placement phases wrapped by _run_placement / _run_placement_per_row
-# in _compute_section_layout (the set guarded by _guard_anchors_frozen).
-PLACEMENT_PHASES = [
-    "_redistribute_fanout_siblings",  # Stage 4.9
-    "_redistribute_full_bundle_columns",  # Stage 4.10
-    "_fan_free_content_upward",  # Stage 6.1
-    "_fan_source_inputs_upward",  # Stage 6.2
-    "_apply_half_grid_2branch_symfan",  # Stage 6.3
-    "_recenter_full_bundle_columns",  # Stage 6.7
-    "_balance_section_content_around_trunk",  # Stage 6.11
-    "_recenter_loop_side_stations",  # Stage 6.12
-]
 
 
 def _corpus() -> list[tuple[str, Path, bool]]:
@@ -79,12 +67,25 @@ def _coords(graph) -> dict[str, tuple[float, float]]:
     return {sid: (round(s.x, 6), round(s.y, 6)) for sid, s in graph.stations.items()}
 
 
-@pytest.mark.parametrize("phase_name", PLACEMENT_PHASES)
+# The single-pass baseline depends only on the fixture, so compute it once per
+# fixture rather than re-running it for each of the eight phases.
+_BASELINE: dict[str, dict[str, tuple[float, float]]] = {}
+
+
+def _baseline(
+    fid: str, path: Path, is_nextflow: bool
+) -> dict[str, tuple[float, float]]:
+    if fid not in _BASELINE:
+        _BASELINE[fid] = _coords(_layout(path, is_nextflow))
+    return _BASELINE[fid]
+
+
+@pytest.mark.parametrize("phase_name", CONTENT_PLACEMENT_PHASES)
 @pytest.mark.parametrize("fixture", CORPUS, ids=[fid for fid, _, _ in CORPUS])
 def test_placement_phase_is_idempotent(fixture, phase_name, monkeypatch):
     fid, path, is_nextflow = fixture
 
-    baseline = _coords(_layout(path, is_nextflow))
+    baseline = _baseline(fid, path, is_nextflow)
 
     original = getattr(engine, phase_name)
 

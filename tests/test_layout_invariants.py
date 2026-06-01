@@ -17,6 +17,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import pytest
+from conftest import CONTENT_PLACEMENT_PHASES
 
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
@@ -4620,18 +4621,6 @@ def test_partial_fan_branch_has_no_offset_gap(fixture):
 # ---------------------------------------------------------------------------
 
 
-_DEPENDENT_PLACEMENT_PHASES = (
-    "_redistribute_fanout_siblings",
-    "_redistribute_full_bundle_columns",
-    "_fan_free_content_upward",
-    "_fan_source_inputs_upward",
-    "_apply_half_grid_2branch_symfan",
-    "_recenter_full_bundle_columns",
-    "_balance_section_content_around_trunk",
-    "_recenter_loop_side_stations",
-)
-
-
 @pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
 def test_content_placement_leaves_port_anchors_frozen(fixture, monkeypatch):
     """Anchors-first invariant: every content-placement phase (fans,
@@ -4663,7 +4652,7 @@ def test_content_placement_leaves_port_anchors_frozen(fixture, monkeypatch):
 
         return probe
 
-    for name in _DEPENDENT_PLACEMENT_PHASES:
+    for name in CONTENT_PLACEMENT_PHASES:
         monkeypatch.setattr(engine, name, _make_probe(name, getattr(engine, name)))
 
     _layout(fixture)

@@ -51,6 +51,24 @@ TWO_SECTION_TEXT = (
 )
 
 
+# --- Shared constants ---
+
+# The content-placement phases wrapped by _run_placement / _run_placement_per_row
+# in _compute_section_layout (the set guarded by _guard_anchors_frozen). Shared so
+# the anchor-frozen test and the idempotence test enumerate the same set and a new
+# phase can't be added to one without the other.
+CONTENT_PLACEMENT_PHASES = (
+    "_redistribute_fanout_siblings",  # Stage 4.9
+    "_redistribute_full_bundle_columns",  # Stage 4.10
+    "_fan_free_content_upward",  # Stage 6.1
+    "_fan_source_inputs_upward",  # Stage 6.2
+    "_apply_half_grid_2branch_symfan",  # Stage 6.3
+    "_recenter_full_bundle_columns",  # Stage 6.7
+    "_balance_section_content_around_trunk",  # Stage 6.11
+    "_recenter_loop_side_stations",  # Stage 6.12
+)
+
+
 # --- Parse/layout helpers ---
 
 

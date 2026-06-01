@@ -307,11 +307,10 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         trunk_sid = trunks[0]
         trunk_y = graph.stations[trunk_sid].y
 
-        # Source set is purely structural (entry-column, strict-subset
-        # bundle, no inbound edges).  No current-Y predicate: the phase
-        # arranges this fixed set into the canonical "n_lift above the
-        # trunk, the rest below" shape regardless of the incoming Y order,
-        # so re-applying it is a no-op (idempotent under the anchor layer).
+        # No current-Y predicate in the source set: the phase arranges this
+        # fixed structural set into the canonical "n_lift above the trunk,
+        # the rest below" shape regardless of incoming Y order, so
+        # re-applying it is a no-op (idempotent under the anchor layer).
         sources = [
             s
             for s in entry_col
