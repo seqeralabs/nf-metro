@@ -353,6 +353,78 @@ def _shrink_and_tighten_rows(
     _tighten_lower_rows_after_shrink(graph, section_y_gap)
 
 
+def _predict_section_content_bottom(
+    graph: MetroGraph, section: Section, section_y_padding: float
+) -> float | None:
+    """Lowest Y the section's content requires, by the bbox-shrink rule.
+
+    The single per-section content-bottom rule shared by the bbox shrink
+    (:func:`_shrink_bboxes_to_content_bottom`) and the structural-extent
+    snapshot (:func:`_snapshot_struct_heights_below_top`): the max over
+    non-port, non-``__bypass_`` stations of ``y + max(section_y_padding,
+    terminus_overhang)``, then raised to keep bypass-curve helpers and
+    ports inside.  Returns ``None`` when the section has no real content.
+
+    Named for its role in the snapshot: captured before the opportunistic
+    Pass C content-compaction phases run so the inter-row cascade can stack
+    from a structural extent.
+    """
+    section_dir = section.direction or "LR"
+    content_bots = [
+        graph.stations[sid].y
+        + max(
+            section_y_padding,
+            _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1],
+        )
+        for sid in section.station_ids
+        if (
+            sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not sid.startswith("__bypass_")
+        )
+    ]
+    if not content_bots:
+        return None
+    content_bot = max(content_bots)
+    bypass_max_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if sid in graph.stations and sid.startswith("__bypass_")
+    ]
+    port_max_ys = [
+        graph.stations[sid].y
+        for sid in section.station_ids
+        if sid in graph.stations and graph.stations[sid].is_port
+    ]
+    v_curve_clearance = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
+    if bypass_max_ys:
+        content_bot = max(content_bot, max(bypass_max_ys) + v_curve_clearance)
+    if port_max_ys:
+        content_bot = max(content_bot, max(port_max_ys))
+    return content_bot
+
+
+def _snapshot_struct_heights_below_top(
+    graph: MetroGraph, section_y_padding: float
+) -> None:
+    """Record each section's structural height below its bbox top.
+
+    Captures ``_predict_section_content_bottom(...) - section.bbox_y`` per
+    section into ``graph._struct_height_below_top`` before the opportunistic
+    Pass C content-compaction phases tighten content.  The inter-row cascade
+    later reconstructs the structural bottom on each section's current bbox
+    top (``bbox_y + stored_height``) so row offsets resolve from this
+    anchors-first prediction rather than the settled extent.
+    """
+    graph._struct_height_below_top = {}
+    for section in graph.sections.values():
+        if section.bbox_h <= 0:
+            continue
+        bottom = _predict_section_content_bottom(graph, section, section_y_padding)
+        if bottom is not None:
+            graph._struct_height_below_top[section.id] = bottom - section.bbox_y
+
+
 def _shrink_bboxes_to_content_bottom(
     graph: MetroGraph, section_y_padding: float
 ) -> None:
@@ -406,45 +478,12 @@ def _shrink_bboxes_to_content_bottom(
                 out.append(o_y_bot)
         return out
 
-    v_curve_clearance = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
     for section in graph.sections.values():
         if section.bbox_h <= 0:
             continue
-        section_dir = section.direction or "LR"
-        # Each non-port station reserves at least ``section_y_padding`` below
-        # its marker; a TB/BT terminus whose icons hang below reserves their
-        # full vertical extent instead.  (Overhang is 0 for LR/RL, so this
-        # stays byte-identical there.)
-        content_bots = [
-            graph.stations[sid].y
-            + max(
-                section_y_padding,
-                _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1],
-            )
-            for sid in section.station_ids
-            if (
-                sid in graph.stations
-                and not graph.stations[sid].is_port
-                and not sid.startswith("__bypass_")
-            )
-        ]
-        bypass_max_ys = [
-            graph.stations[sid].y
-            for sid in section.station_ids
-            if sid in graph.stations and sid.startswith("__bypass_")
-        ]
-        port_max_ys = [
-            graph.stations[sid].y
-            for sid in section.station_ids
-            if sid in graph.stations and graph.stations[sid].is_port
-        ]
-        if not content_bots:
+        content_bot = _predict_section_content_bottom(graph, section, section_y_padding)
+        if content_bot is None:
             continue
-        content_bot = max(content_bots)
-        if bypass_max_ys:
-            content_bot = max(content_bot, max(bypass_max_ys) + v_curve_clearance)
-        if port_max_ys:
-            content_bot = max(content_bot, max(port_max_ys))
         current_bot = section.bbox_y + section.bbox_h
         if content_bot > current_bot + 0.5:
             section.bbox_h = content_bot - section.bbox_y
@@ -644,7 +683,16 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
         ending_at_prev = sections_by_end_row.get(r - 1, [])
         if not lower or not ending_at_prev:
             continue
-        max_above_bot = max(s.bbox_y + s.bbox_h for s in ending_at_prev)
+        # Stack from the structural extent captured before content
+        # compaction when available, reconstructed on each section's current
+        # bbox top; fall back to the settled bbox bottom otherwise.
+        struct = graph._struct_height_below_top
+        if struct:
+            max_above_bot = max(
+                s.bbox_y + struct.get(s.id, s.bbox_h) for s in ending_at_prev
+            )
+        else:
+            max_above_bot = max(s.bbox_y + s.bbox_h for s in ending_at_prev)
         # Bypass routes dip below intervening bboxes into the inter-row
         # gap; tightening must not pull lower rows up into them.
         bypass_spans = _aggregate_bypass_spans(graph, ending_at_prev)

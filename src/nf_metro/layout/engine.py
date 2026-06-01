@@ -76,6 +76,7 @@ from nf_metro.layout.phases.bbox import (  # noqa: F401
     _section_fit_top,
     _shrink_and_tighten_rows,
     _shrink_bboxes_to_content_bottom,
+    _snapshot_struct_heights_below_top,
     _tighten_lower_rows_after_shrink,
 )
 from nf_metro.layout.phases.canvas import (  # noqa: F401
@@ -825,6 +826,12 @@ def _place_pass_c_content(
     """Stage 5.1 through Stage 6.12: position junctions, lift off-track
     inputs, settle vertical content, and recenter fans / loop-side
     stations within each section."""
+    # Capture each section's structural content-bottom (as a height below
+    # its bbox top) before the opportunistic content-compaction phases run,
+    # so the inter-row cascade (Stage 6.13 phase 2) stacks lower rows from a
+    # structural prediction rather than the post-compaction settled extent.
+    _snapshot_struct_heights_below_top(graph, section_y_padding)
+
     # ---- Stage 5 - Pass C: Junctions & off-track lift ------------------
     # All port positions are now final; Stage 5.1 positions junctions
     # once.  Stage 5.2 lifts off-track stations; Stages 5.3 to 5.5

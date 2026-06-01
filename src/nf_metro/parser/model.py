@@ -226,6 +226,13 @@ class MetroGraph:
     # making its dependence on snapped consumers explicit rather than
     # implicit in call position.
     _consumers_grid_snapped: bool = field(default=False, repr=False)
+    # Structural height-below-bbox-top per section, captured before the
+    # opportunistic Pass C content-compaction phases run.  The inter-row
+    # cascade (``_tighten_lower_rows_after_shrink``) stacks lower rows from
+    # this structural extent so row offsets resolve from the anchors-first
+    # prediction rather than the post-compaction settled extent.  Empty
+    # until the snapshot at the start of ``_place_pass_c_content``.
+    _struct_height_below_top: dict[str, float] = field(default_factory=dict, repr=False)
 
     def _invalidate_edge_caches(self) -> None:
         """Reset caches that depend on the edge list."""
