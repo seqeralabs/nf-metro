@@ -10,7 +10,12 @@ from nf_metro.layout.constants import (
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
 )
-from nf_metro.layout.phases._common import _section_bundle_lines
+from nf_metro.layout.phases._common import (
+    _ref_bbox_top,
+    _ref_y,
+    _section_bundle_lines,
+    _section_lr_port_anchor_y,
+)
 from nf_metro.layout.phases.bbox import (
     _lift_would_cause_uturn,
     _loop_corner_x,
@@ -167,9 +172,8 @@ def _fan_free_content_upward(
         ]
         if not internal_ids:
             continue
-        ys = [graph.stations[sid].y for sid in internal_ids]
-        top_y = min(ys)
-        slack = top_y - section.bbox_y - section_y_padding
+        top_y = min(_ref_y(graph, sid) for sid in internal_ids)
+        slack = top_y - _ref_bbox_top(graph, section) - section_y_padding
         if slack < y_spacing - 0.5:
             continue
         slots = int(slack // y_spacing)
@@ -181,8 +185,7 @@ def _fan_free_content_upward(
             continue
 
         # Trunk candidates: stations in the entry column carrying the
-        # full bundle.  Sort by current Y; topmost stays pinned, others
-        # stack above at y_spacing pitch.
+        # full bundle; topmost stays pinned, others stack above it.
         xs = sorted({round(graph.stations[sid].x, 3) for sid in internal_ids})
         if not xs:
             continue
@@ -204,9 +207,9 @@ def _fan_free_content_upward(
         ]
         if len(trunk_candidates) == len(entry_col_all) and graph.center_ports:
             continue
-        trunk_candidates.sort(key=lambda s: graph.stations[s].y)
+        trunk_candidates.sort(key=lambda s: _ref_y(graph, s))
         pinned = trunk_candidates[0]
-        anchor_y = graph.stations[pinned].y
+        anchor_y = _ref_y(graph, pinned)
         to_lift = [
             sid
             for sid in trunk_candidates[1 : 1 + slots]
@@ -223,6 +226,7 @@ def _shift_linear_consumer_chain(
     internal_ids: set[str],
     *,
     cycle_guard: bool = False,
+    from_ref: bool = False,
 ) -> None:
     """Walk a strictly-linear consumer chain and shift each station Y by *delta*.
 
@@ -231,6 +235,11 @@ def _shift_linear_consumer_chain(
     and an unchanged line-set across the hop.  Stops at the first hop that
     fails any of those conditions.  Pass ``cycle_guard=True`` to additionally
     bail out when the walk revisits a station.
+
+    With ``from_ref`` each member's new Y is its frozen placement-reference Y
+    plus *delta* rather than its live Y plus *delta*, so the result is a pure
+    function of the frozen reference (equal to the live shift when the
+    reference matches the current geometry).
     """
     cur = src
     src_lines = set(graph.station_lines(src))
@@ -246,7 +255,8 @@ def _shift_linear_consumer_chain(
             return
         if set(graph.station_lines(nxt)) != src_lines:
             return
-        graph.stations[nxt].y += delta
+        base = _ref_y(graph, nxt) if from_ref else graph.stations[nxt].y
+        graph.stations[nxt].y = base + delta
         if cycle_guard:
             visited.add(nxt)
         cur = nxt
@@ -305,7 +315,8 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         if len(trunks) != 1:
             continue
         trunk_sid = trunks[0]
-        trunk_y = graph.stations[trunk_sid].y
+        anchor = _section_lr_port_anchor_y(graph, section)
+        trunk_y = anchor if anchor is not None else _ref_y(graph, trunk_sid)
 
         # No current-Y predicate in the source set: the phase arranges this
         # fixed structural set into the canonical "n_lift above the trunk,
@@ -326,7 +337,7 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         # icon's vertical extent stays inside the bbox.
         any_terminus = any(graph.stations[s].is_terminus for s in sources)
         top_margin = y_spacing / 4 + (ICON_HALF_HEIGHT if any_terminus else 0.0)
-        slack = trunk_y - section.bbox_y - top_margin
+        slack = trunk_y - _ref_bbox_top(graph, section) - top_margin
         slots = int((slack + 0.5) // y_spacing)
         if slots < 1:
             continue
@@ -345,11 +356,11 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         # straight from icon to trunk junction.
         for i, src in enumerate(sources[:n_lift], 1):
             new_y = trunk_y - i * y_spacing
-            delta = new_y - graph.stations[src].y
+            delta = new_y - _ref_y(graph, src)
             if abs(delta) < 0.5:
                 continue
             graph.stations[src].y = new_y
-            _shift_linear_consumer_chain(graph, src, delta, internal_set)
+            _shift_linear_consumer_chain(graph, src, delta, internal_set, from_ref=True)
 
         # Compact the remaining below-trunk sources upward to fill the
         # rows their predecessors vacated.  Without this step, lifted
@@ -359,11 +370,11 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         # below-trunk source at ``trunk_y + i * y_spacing``.
         for i, src in enumerate(sources[n_lift:], 1):
             new_y = trunk_y + i * y_spacing
-            delta = new_y - graph.stations[src].y
+            delta = new_y - _ref_y(graph, src)
             if abs(delta) < 0.5:
                 continue
             graph.stations[src].y = new_y
-            _shift_linear_consumer_chain(graph, src, delta, internal_set)
+            _shift_linear_consumer_chain(graph, src, delta, internal_set, from_ref=True)
 
 
 def _balance_direct_external_feeder_ys(
@@ -454,13 +465,7 @@ def _balance_section_content_around_trunk(
         if not internal_ids:
             continue
 
-        trunk_y: float | None = None
-        for pid in section.entry_ports + section.exit_ports:
-            port = graph.ports.get(pid)
-            st = graph.stations.get(pid)
-            if port and st and port.side in (PortSide.LEFT, PortSide.RIGHT):
-                trunk_y = st.y
-                break
+        trunk_y = _section_lr_port_anchor_y(graph, section)
         if trunk_y is None:
             full_ys = sorted(
                 graph.stations[s].y

@@ -41,11 +41,6 @@ CORPUS = content_corpus()
 KNOWN_LEAKS: frozenset[tuple[str, str]] = frozenset(
     {
         ("_redistribute_fanout_siblings", "examples/differentialabundance"),
-        ("_fan_free_content_upward", "examples/differentialabundance_default"),
-        ("_fan_free_content_upward", "tests/da_pipeline"),
-        ("_fan_source_inputs_upward", "examples/differentialabundance"),
-        ("_fan_source_inputs_upward", "examples/differentialabundance_default"),
-        ("_fan_source_inputs_upward", "tests/da_pipeline"),
         ("_balance_section_content_around_trunk", "examples/differentialabundance"),
         ("_balance_section_content_around_trunk", "examples/genomic_pipeline"),
     }

@@ -49,6 +49,7 @@ from nf_metro.layout.phases._common import (  # noqa: F401
     _scoped_sections,
     _section_bundle_lines,
     _section_trunk_y,
+    _snapshot_placement_refs,
     _station_marker_bbox,
     first_vertical_leg_x,
     is_loop_side_branch_station,
@@ -890,6 +891,8 @@ def _place_pass_c_content(
     # for sections whose internal stations have no upward dependency
     # (no off-track band) and whose trunk Y sits below the bbox top
     # padding by more than one ``y_spacing`` slot.
+    # Frozen reference for Stages 6.1 / 6.2 (see _snapshot_placement_refs).
+    _snapshot_placement_refs(graph)
     _run_placement_per_row(
         graph, validate, "6.1", _fan_free_content_upward, section_y_padding, y_spacing
     )

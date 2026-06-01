@@ -330,6 +330,54 @@ def _row_contiguous_column_groups(
     return result
 
 
+def _section_lr_port_anchor_y(graph: MetroGraph, section: Section) -> float | None:
+    """The section's frozen trunk anchor: its LR/RL entry port Y, or the
+    exit port Y when there is no LR/RL entry port.
+
+    Unlike :func:`_section_trunk_y` (which reads an internal station's
+    current Y), this returns a port station's Y -- a frozen inter-section
+    anchor held fixed through content placement -- so content phases can
+    centre on the trunk without depending on mutable station positions.
+    Returns ``None`` when the section has no LR/RL port.
+    """
+    for ports in (section.entry_ports, section.exit_ports):
+        for pid in ports:
+            port = graph.ports.get(pid)
+            st = graph.stations.get(pid)
+            if port and st and port.side in (PortSide.LEFT, PortSide.RIGHT):
+                return st.y
+    return None
+
+
+def _snapshot_placement_refs(graph: MetroGraph) -> None:
+    """Freeze station Ys and section bbox tops as the placement reference.
+
+    Captured once right before Stage 6.1 and read by Stages 6.1 / 6.2 via
+    :func:`_ref_y` / :func:`_ref_bbox_top` for their slack and arrangement
+    decisions, so re-applying or perturbing the live geometry between the
+    snapshot and those phases can't change where they place content.  Sibling
+    of :func:`...bbox._snapshot_struct_heights_below_top` (#485).
+    """
+    graph._placement_ref_y = {sid: st.y for sid, st in graph.stations.items()}
+    graph._placement_ref_bbox_top = {
+        sec.id: sec.bbox_y for sec in graph.sections.values()
+    }
+
+
+def _ref_y(graph: MetroGraph, sid: str) -> float:
+    """Frozen reference Y for ``sid`` (see :func:`_snapshot_placement_refs`),
+    falling back to the live Y when no snapshot covers it."""
+    ref = graph._placement_ref_y.get(sid)
+    return ref if ref is not None else graph.stations[sid].y
+
+
+def _ref_bbox_top(graph: MetroGraph, section: Section) -> float:
+    """Frozen reference bbox top for ``section`` (see
+    :func:`_snapshot_placement_refs`), falling back to the live top."""
+    ref = graph._placement_ref_bbox_top.get(section.id)
+    return ref if ref is not None else section.bbox_y
+
+
 def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
     """Topmost Y of a full-bundle internal station connected to an LR port.
 

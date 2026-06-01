@@ -11,6 +11,7 @@ from nf_metro.layout.phases._common import (
     _fan_offsets,
     _grid_group_section_ids,
     _section_bundle_lines,
+    _section_lr_port_anchor_y,
 )
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
@@ -571,28 +572,11 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
             for x, sids in cols.items()
         }
 
-        # Trunk anchor: prefer the entry port station's Y, which after
-        # row alignment sits on the row's bundle line.  Fall back to
-        # the exit port station, then a single-station full-bundle
-        # column (natural pass-through), then the median Y.
-        anchor_y: float | None = None
-        for pid in section.entry_ports:
-            p = graph.ports.get(pid)
-            ps = graph.stations.get(pid)
-            if p is None or ps is None:
-                continue
-            if p.side in (PortSide.LEFT, PortSide.RIGHT):
-                anchor_y = ps.y
-                break
-        if anchor_y is None:
-            for pid in section.exit_ports:
-                p = graph.ports.get(pid)
-                ps = graph.stations.get(pid)
-                if p is None or ps is None:
-                    continue
-                if p.side in (PortSide.LEFT, PortSide.RIGHT):
-                    anchor_y = ps.y
-                    break
+        # Trunk anchor: prefer the LR/RL entry (then exit) port station Y,
+        # which after row alignment sits on the row's bundle line.  Fall back
+        # to a single-station full-bundle column (natural pass-through), then
+        # the median Y.
+        anchor_y = _section_lr_port_anchor_y(graph, section)
         if anchor_y is None:
             single_ys = [
                 graph.stations[full[0]].y

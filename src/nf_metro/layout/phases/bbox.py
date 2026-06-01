@@ -17,6 +17,7 @@ from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _content_station_ys,
+    _ref_y,
     _set_section_bbox_top,
 )
 from nf_metro.layout.phases.single_section import _terminus_y_overhang
@@ -301,7 +302,7 @@ def _lift_would_cause_uturn(
                 continue
             if src.section_id == section_id:
                 continue
-            feeder_ys.append(src.y)
+            feeder_ys.append(_ref_y(graph, src_id))
 
     _collect(station_id)
     if len(feeder_ys) < 2:

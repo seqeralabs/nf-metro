@@ -233,6 +233,11 @@ class MetroGraph:
     # prediction rather than the post-compaction settled extent.  Empty
     # until the snapshot at the start of ``_place_pass_c_content``.
     _struct_height_below_top: dict[str, float] = field(default_factory=dict, repr=False)
+    # Frozen station Ys / section bbox tops captured before a content-balancing
+    # phase, read for its slack and arrangement decisions; see
+    # _snapshot_placement_refs.
+    _placement_ref_y: dict[str, float] = field(default_factory=dict, repr=False)
+    _placement_ref_bbox_top: dict[str, float] = field(default_factory=dict, repr=False)
 
     def _invalidate_edge_caches(self) -> None:
         """Reset caches that depend on the edge list."""
