@@ -127,8 +127,11 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
     one sibling whose line set is a strict subset of the bundle.
 
     In those columns, the trunk station is pinned at its current Y and
-    the strict-subset siblings are redistributed in alternating slots
-    ``+1, -1, +2, -2, ...`` at ``y_spacing`` pitch above and below it.
+    the strict-subset siblings, ordered by their structural track, are
+    redistributed in alternating slots ``+1, -1, +2, -2, ...`` at
+    ``y_spacing`` pitch above and below it.  Ordering by track (rather
+    than current Y) makes the slot assignment invariant under prior
+    placement, so re-applying the phase is a no-op.
 
     Strict scoping: only stations in a trunk-junction column AND with
     a strict-subset line set are moved.  File inputs, processing
@@ -207,7 +210,7 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
             ]
             if not siblings:
                 continue
-            siblings.sort(key=lambda s: graph.stations[s].y)
+            siblings.sort(key=lambda s: (graph.stations[s].track, s))
             for i, sid in enumerate(siblings, 1):
                 k = (i + 1) // 2
                 sign = 1 if (i % 2 == 1) else -1

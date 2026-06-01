@@ -307,6 +307,11 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         trunk_sid = trunks[0]
         trunk_y = graph.stations[trunk_sid].y
 
+        # Source set is purely structural (entry-column, strict-subset
+        # bundle, no inbound edges).  No current-Y predicate: the phase
+        # arranges this fixed set into the canonical "n_lift above the
+        # trunk, the rest below" shape regardless of the incoming Y order,
+        # so re-applying it is a no-op (idempotent under the anchor layer).
         sources = [
             s
             for s in entry_col
@@ -314,7 +319,6 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
             and graph.station_lines(s)
             and set(graph.station_lines(s)) < bundle
             and not graph.edges_to(s)
-            and graph.stations[s].y > trunk_y - 0.5
         ]
         if len(sources) < 2:
             continue
@@ -333,7 +337,9 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         if n_lift == 0:
             continue
 
-        sources.sort(key=lambda s: graph.stations[s].y)
+        # Sort by track (the structural per-line ordering), not current Y,
+        # so the source->slot assignment is invariant under prior placement.
+        sources.sort(key=lambda s: (graph.stations[s].track, s))
         internal_set = set(internal_ids)
 
         # Drag each strictly-linear consumer chain so per-line tracks stay
