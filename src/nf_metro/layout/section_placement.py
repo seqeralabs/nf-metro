@@ -464,7 +464,7 @@ def _bundles_in_gap(
     is the number of distinct lines in that bundle.
     """
     junction_ids = graph.junction_ids
-    bundles: dict[tuple, set[str]] = defaultdict(set)
+    bundles: dict[tuple[str, int], set[str]] = defaultdict(set)
 
     lo, hi = min(col_a, col_b), max(col_a, col_b)
 

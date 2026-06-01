@@ -168,7 +168,7 @@ def compute_bridges(
         by_line[r.line_id].append(idx)
 
     breaks: dict[int, list[BridgeBreak]] = defaultdict(list)
-    seen: dict[int, set[tuple]] = defaultdict(set)
+    seen: dict[int, set[tuple[int, int, int, int, int]]] = defaultdict(set)
 
     def add(route_idx: int, seg: int, span: tuple[Point, Point]) -> None:
         key = (

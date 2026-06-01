@@ -296,7 +296,7 @@ def _nudge_to_clear(
 
 
 def _edge_solo(
-    stations: list,
+    stations: list[Station],
     section_y_range: dict[str, tuple[float, float]],
 ) -> dict[str, tuple[bool, bool]]:
     """Determine whether each section's Y extremes have a sole station.
@@ -428,7 +428,7 @@ def _make_obstacle_placements(
 
 
 def _trial_cost(
-    stations: list,
+    stations: list[Station],
     graph: MetroGraph,
     label_offset: float,
     station_offsets: dict[tuple[str, str], float] | None,
@@ -604,7 +604,7 @@ def place_labels(
 
     # Trial both alternation patterns per section, pick the better one.
     section_flip: dict[str, bool] = {}
-    sec_groups: dict[str, list] = {}
+    sec_groups: dict[str, list[Station]] = {}
     for s in sorted_stations:
         if s.section_id and s.section_id in section_y_range:
             sec_groups.setdefault(s.section_id, []).append(s)
@@ -1145,7 +1145,7 @@ def _clamp_label_vertical(
 
 
 def _compute_safe_offsets(
-    sorted_stations: list,
+    sorted_stations: list[Station],
     label_offset: float,
     station_offsets: dict[tuple[str, str], float] | None,
     graph: MetroGraph,
@@ -1160,7 +1160,7 @@ def _compute_safe_offsets(
     Returns a dict mapping station_id -> (safe_above, safe_below).
     """
     # Group stations by (section_id, rounded X) to find vertical neighbors.
-    col_groups: dict[tuple[str | None, float], list] = {}
+    col_groups: dict[tuple[str | None, float], list[Station]] = {}
     for s in sorted_stations:
         key = (s.section_id, round(s.x, 1))
         col_groups.setdefault(key, []).append(s)

@@ -142,7 +142,7 @@ def assign_tracks(
 
 
 def _build_diamond_index(
-    G: nx.DiGraph,
+    G: nx.DiGraph[str],
     layers: dict[str, int],
     graph: MetroGraph | None = None,
 ) -> set[str]:
@@ -243,7 +243,7 @@ def _find_free_nearby_track(
 
 
 def _predecessor_avg(
-    node: str, G: nx.DiGraph, tracks: dict[str, float]
+    node: str, G: nx.DiGraph[str], tracks: dict[str, float]
 ) -> float | None:
     """Average track position of a node's already-placed predecessors."""
     preds = [p for p in G.predecessors(node) if p in tracks]
@@ -256,7 +256,7 @@ def _place_single_node(
     node: str,
     base: float,
     line_gap: float,
-    G: nx.DiGraph,
+    G: nx.DiGraph[str],
     tracks: dict[str, float],
     graph: MetroGraph | None = None,
     layers: dict[str, int] | None = None,
@@ -368,7 +368,7 @@ def _place_single_node(
         return pred_avg + direction * SIDE_BRANCH_NUDGE
 
 
-def _is_diamond_fanout(nodes: list[str], G: nx.DiGraph) -> bool:
+def _is_diamond_fanout(nodes: list[str], G: nx.DiGraph[str]) -> bool:
     """Check if fan-out nodes form a diamond (shared preds and common successors).
 
     A diamond fan-out is a fork-join where all nodes share exactly the same
@@ -439,7 +439,7 @@ def _place_fan_out(
     nodes: list[str],
     base: float,
     line_gap: float,
-    G: nx.DiGraph,
+    G: nx.DiGraph[str],
     tracks: dict[str, float],
     *,
     straight_diamonds: bool = False,
@@ -556,7 +556,7 @@ def _equalize_fork_groups(
     layer: int,
     layers: dict[str, int],
     tracks: dict[str, float],
-    G: nx.DiGraph,
+    G: nx.DiGraph[str],
     graph: MetroGraph,
     node_primary: dict[str, str | None],
     line_gap: float,
@@ -649,7 +649,7 @@ def _equalize_fork_groups(
         if pred_tracks:
             pred_mean = sum(pred_tracks) / len(pred_tracks)
 
-            def _anchor_key(sid: str) -> tuple:
+            def _anchor_key(sid: str) -> tuple[int, float, float]:
                 t = tracks[sid]
                 return (-len(graph.station_lines(sid)), abs(t - pred_mean), t)
 

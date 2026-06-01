@@ -5,13 +5,17 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
 )
-from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
+
+if TYPE_CHECKING:
+    from nf_metro.layout.routing.common import RoutedPath
 
 
 @contextmanager
@@ -79,7 +83,7 @@ def _content_station_ys(graph: MetroGraph, section: Section) -> list[float]:
 def _station_marker_bbox(
     graph: MetroGraph,
     sid: str,
-    offsets: dict | None = None,
+    offsets: dict[tuple[str, str], float] | None = None,
     radius: float = STATION_RADIUS_APPROX,
 ) -> tuple[float, float, float, float] | None:
     """Rendered marker / icon bbox for ``sid``, or ``None`` for ports,
@@ -128,12 +132,12 @@ def _canvas_width(graph: MetroGraph) -> float:
 
 def _route_crosses_section_boundary(
     graph: MetroGraph,
-    routes: list,
+    routes: list[RoutedPath],
     *,
     port_tol: float = 24.0,
     inset: float = 4.0,
     axis_tol: float = 1.0,
-) -> tuple | None:
+) -> tuple[RoutedPath, str, float, float] | None:
     """Return the first ``(route, section_id, x, y)`` where an axis-aligned
     routed segment crosses a section bbox edge away from any declared port,
     else None.
@@ -158,7 +162,7 @@ def _route_crosses_section_boundary(
       multi-row merge bundles are a known, tracked
       limitation and are excluded here.
     """
-    ports_by_sec: dict[str, list] = {}
+    ports_by_sec: dict[str | None, list[Port]] = {}
     for port in graph.ports.values():
         ports_by_sec.setdefault(port.section_id, []).append(port)
 

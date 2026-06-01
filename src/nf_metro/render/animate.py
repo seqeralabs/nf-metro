@@ -12,7 +12,7 @@ import drawsvg as draw
 from nf_metro.layout.routing import RoutedPath
 from nf_metro.layout.routing.common import point_on_polyline
 from nf_metro.layout.routing.corners import resolve_curve_radii
-from nf_metro.parser.model import MetroGraph
+from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render.constants import (
     ANIMATION_BALL_OPACITY,
     ANIMATION_CURVE_RADIUS,
@@ -132,7 +132,7 @@ def _build_line_motion_paths(
         route_polylines[key] = apply_route_offsets(route, station_offsets)
 
     # Group edges by line
-    edges_by_line: dict[str, list] = {}
+    edges_by_line: dict[str, list[Edge]] = {}
     for edge in graph.edges:
         edges_by_line.setdefault(edge.line_id, []).append(edge)
 
@@ -143,7 +143,7 @@ def _build_line_motion_paths(
             continue
 
         # Build adjacency: source -> list of (target, edge)
-        adj: dict[str, list] = {}
+        adj: dict[str, list[tuple[str, Edge]]] = {}
         incoming: set[str] = set()
         for edge in edges:
             adj.setdefault(edge.source, []).append((edge.target, edge))
@@ -186,8 +186,8 @@ def _build_line_motion_paths(
 
 def _find_edge_disjoint_paths(
     roots: set[str],
-    adj: dict[str, list],
-) -> list[list]:
+    adj: dict[str, list[tuple[str, Edge]]],
+) -> list[list[Edge]]:
     """Build one full root-to-sink path per unique branch.
 
     Instead of the cartesian product of all diamonds (which explodes
@@ -207,7 +207,7 @@ def _find_edge_disjoint_paths(
     if not canonical:
         return []
 
-    paths: list[list] = [canonical]
+    paths: list[list[Edge]] = [canonical]
 
     # Build a set of canonical edge choices at each fork for quick lookup
     canonical_set: set[int] = {id(e) for e in canonical}
@@ -236,9 +236,9 @@ def _find_edge_disjoint_paths(
     return paths
 
 
-def _first_path(start: str, adj: dict[str, list]) -> list:
+def _first_path(start: str, adj: dict[str, list[tuple[str, Edge]]]) -> list[Edge]:
     """Follow the first outgoing edge at every node from start to sink."""
-    path: list = []
+    path: list[Edge] = []
     current = start
     visited: set[str] = set()
     while current in adj and current not in visited:
@@ -251,16 +251,16 @@ def _first_path(start: str, adj: dict[str, list]) -> list:
 
 def _variant_path(
     start: str,
-    adj: dict[str, list],
+    adj: dict[str, list[tuple[str, Edge]]],
     fork_node: str,
-    forced_edge: object,
+    forced_edge: Edge,
     forced_target: str,
-) -> list:
+) -> list[Edge]:
     """Build a root-to-sink path that takes forced_edge at fork_node.
 
     At every other fork, follows the first (canonical) branch.
     """
-    path: list = []
+    path: list[Edge] = []
     current = start
     visited: set[str] = set()
     while current in adj and current not in visited:
@@ -276,7 +276,7 @@ def _variant_path(
 
 
 def _chain_edge_points(
-    edges: list,
+    edges: list[Edge],
     route_polylines: dict[tuple[str, str, str], list[tuple[float, float]]],
     line_polylines: list[list[tuple[float, float]]],
 ) -> list[list[tuple[float, float]]]:

@@ -264,9 +264,9 @@ def compute_bundle_info(
 
     # Group by corridor: edges sharing the same vertical channel
     # Key: (route_type, rounded_channel_position, vertical_direction)
-    corridor_groups: dict[tuple, list[tuple[Edge, float, float, float, float]]] = (
-        defaultdict(list)
-    )
+    corridor_groups: dict[
+        tuple[object, ...], list[tuple[Edge, float, float, float, float]]
+    ] = defaultdict(list)
 
     for item in inter_edges:
         edge, sx, sy, tx, ty = item
@@ -280,7 +280,7 @@ def compute_bundle_info(
 
         if abs(dx) < COORD_TOLERANCE:
             # Vertical: group by shared X position
-            key: tuple = ("V", round(sx), v_dir)
+            key: tuple[object, ...] = ("V", round(sx), v_dir)
         else:
             # L-shaped: group by the inter-column gap the vertical
             # channel will occupy.  Use (src_col, tgt_col) when

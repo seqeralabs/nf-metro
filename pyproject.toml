@@ -80,9 +80,17 @@ explicit_package_bases = true
 python_version = "3.10"
 ignore_missing_imports = false
 strict_optional = true
+disallow_any_generics = true
 
 # drawsvg ships no type information; everything else (click, Pillow,
 # networkx via types-networkx) is typed once the package is installed.
 [[tool.mypy.overrides]]
 module = ["drawsvg"]
 ignore_missing_imports = true
+
+# Fully-annotated core: the data model and the layout phases pass data
+# between split modules, so require complete signatures there.
+[[tool.mypy.overrides]]
+module = ["nf_metro.parser.model", "nf_metro.layout.phases.*"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true

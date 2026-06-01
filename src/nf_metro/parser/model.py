@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TypedDict
+
+
+class RowGridInfo(TypedDict):
+    """Per-row grid metadata recorded by Stage 1.2 (``_align_row_y_grids``)."""
+
+    section_ids: list[str]
+    slot_count: int
+    slot_spacing: float
+    max_y_pad: float
 
 
 @dataclass
@@ -213,7 +223,7 @@ class MetroGraph:
     # Lazy set view of `junctions`, invalidated on junction mutation.
     _junction_ids_cache: set[str] | None = field(default=None, repr=False)
     # Grid alignment metadata (populated by Stage 1.2 _align_row_y_grids)
-    _row_y_grid_info: dict = field(default_factory=dict, repr=False)
+    _row_y_grid_info: dict[int, RowGridInfo] = field(default_factory=dict, repr=False)
     # Cross-phase channel: station IDs placed at half-pitch offsets
     # relative to the row grid by Stage 6.3
     # (``_apply_half_grid_2branch_symfan``) for 2-branch symfan sections.

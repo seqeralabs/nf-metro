@@ -69,7 +69,7 @@ def render_html(
     )
 
 
-def _build_inline_snippet(svg: str, lines: list[dict], sid: str) -> str:
+def _build_inline_snippet(svg: str, lines: list[dict[str, str]], sid: str) -> str:
     return _INLINE_TEMPLATE.substitute(
         sid=sid,
         svg=svg,

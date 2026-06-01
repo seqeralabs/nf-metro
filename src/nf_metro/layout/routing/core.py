@@ -3235,9 +3235,15 @@ def _build_bubble_ctx(routes: list[RoutedPath], graph: MetroGraph) -> _BubbleCtx
     )
 
 
+# (new_x, in_routes, flat_in, out_routes, flat_out)
+_StationMoveCandidate = tuple[
+    float, list[RoutedPath], list[RoutedPath], list[RoutedPath], list[RoutedPath]
+]
+
+
 def _collect_centering_candidates(
     graph: MetroGraph, ctx: _BubbleCtx
-) -> dict[str, tuple]:
+) -> dict[str, _StationMoveCandidate]:
     """First pass: shift simple diagonals and collect station-move candidates.
 
     For stations with a single diagonal on each side and no bundle
@@ -3245,7 +3251,7 @@ def _collect_centering_candidates(
     For more complex cases (shared bundles, flat+diagonal mixes),
     collects a station-move candidate for the second pass.
     """
-    station_move_candidates: dict[str, tuple] = {}
+    station_move_candidates: dict[str, _StationMoveCandidate] = {}
 
     def _is_internal(sid: str) -> bool:
         st = graph.stations.get(sid)
@@ -3440,7 +3446,7 @@ def _collect_centering_candidates(
 
 def _apply_station_moves(
     graph: MetroGraph,
-    candidates: dict[str, tuple],
+    candidates: dict[str, _StationMoveCandidate],
     original_x: dict[str, float],
 ) -> None:
     """Second pass: apply station-move candidates with companion consensus.

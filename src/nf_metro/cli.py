@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -174,7 +175,7 @@ def render(
     if logo is not None:
         graph.logo_path = str(logo)
 
-    layout_kwargs: dict = dict(
+    layout_kwargs: dict[str, Any] = dict(
         x_spacing=x_spacing,
         y_spacing=y_spacing,
     )

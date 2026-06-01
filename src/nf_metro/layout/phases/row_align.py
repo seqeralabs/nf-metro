@@ -21,7 +21,7 @@ from nf_metro.layout.phases._common import (
 )
 from nf_metro.layout.phases.ports import _set_port_y
 from nf_metro.layout.phases.single_section import _multiline_label_padding
-from nf_metro.parser.model import MetroGraph, PortSide, Section
+from nf_metro.parser.model import MetroGraph, PortSide, RowGridInfo, Section
 
 
 def _align_row_y_grids(
@@ -69,7 +69,7 @@ def _align_row_y_grids(
         groups[(row, section.direction)].append(sec_id)
 
     # Store grid info for debug overlay
-    grid_info: dict[int, dict] = {}
+    grid_info: dict[int, RowGridInfo] = {}
 
     for (row, _direction), sec_ids in groups.items():
         if len(sec_ids) < 2:

@@ -291,7 +291,7 @@ def _resolve_station_collisions(
     # half-step either side of a layer centre so off-grid layer_extra
     # offsets stay in the same bucket as their layer peers.
     primary_step_norm = max(primary_step, 1.0)
-    by_primary: dict[float, list] = {}
+    by_primary: dict[float, list[Station]] = {}
     for s in real:
         bucket = round(getattr(s, primary) / primary_step_norm)
         by_primary.setdefault(bucket, []).append(s)

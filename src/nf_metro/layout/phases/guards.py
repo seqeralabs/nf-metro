@@ -409,7 +409,10 @@ def _guard_terminus_icons_within_bbox(graph: MetroGraph, phase: str) -> None:
 
 
 def _guard_no_station_overlap(
-    graph: MetroGraph, phase: str, *, offsets: dict | None = None
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
 ) -> None:
     """Final-phase: no two station marker bboxes may overlap at render
     time, else one station hides another in the SVG.
@@ -447,8 +450,8 @@ def _guard_no_line_crosses_non_consumer(
     graph: MetroGraph,
     phase: str,
     *,
-    offsets: dict | None = None,
-    routes: list | None = None,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
 ) -> None:
     """Final-phase: no rendered line segment may pass through a
     station marker whose station neither consumes nor produces that
@@ -515,7 +518,7 @@ def _guard_row_trunk_cy_consistent(
     graph: MetroGraph,
     phase: str,
     *,
-    offsets: dict | None = None,
+    offsets: dict[tuple[str, str], float] | None = None,
 ) -> None:
     """Final-phase: same-row LR sections that share the same line bundle
     AND whose trunk Y-ranges overlap must render their trunk marker at
@@ -572,7 +575,7 @@ def _guard_row_trunk_cy_consistent(
             return None
         return (best[1], best[2], best[3], bundle)
 
-    rows: dict[int, list] = {}
+    rows: dict[int, list[Section]] = {}
     for sec in graph.sections.values():
         if (
             sec.bbox_h <= 0
@@ -633,8 +636,8 @@ def _guard_inter_section_routes_in_row_band(
     graph: MetroGraph,
     phase: str,
     *,
-    offsets: dict | None = None,
-    routes: list | None = None,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
 ) -> None:
     """After routing: inter-section routes whose endpoints both sit in
     grid row R must keep all waypoint Ys within a one-row band centered
@@ -691,7 +694,9 @@ def _guard_inter_section_routes_in_row_band(
                 )
 
 
-def _ensure_routes(graph: MetroGraph, routes: list | None) -> list:
+def _ensure_routes(
+    graph: MetroGraph, routes: list[RoutedPath] | None
+) -> list[RoutedPath]:
     """Return *routes*, routing all edges first if the caller didn't supply them."""
     if routes is not None:
         return routes
@@ -714,7 +719,7 @@ def _route_exit_side(graph: MetroGraph, rp: RoutedPath) -> PortSide | None:
 
 def _inter_section_backtrack_legs(
     graph: MetroGraph,
-    routes: list,
+    routes: list[RoutedPath],
     *,
     reference: str = "grid",
     tolerance: float = 0.0,
@@ -774,7 +779,7 @@ def _guard_inter_section_route_no_backtrack(
     graph: MetroGraph,
     phase: str,
     *,
-    routes: list | None = None,
+    routes: list[RoutedPath] | None = None,
 ) -> None:
     """After routing: a forward-flowing inter-section route between two LR
     columns must be X-monotonic.
@@ -811,8 +816,8 @@ def _guard_fan_bundles_coincide_or_separate(
     graph: MetroGraph,
     phase: str,
     *,
-    offsets: dict | None = None,
-    routes: list | None = None,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
 ) -> None:
     """After routing: two routes carrying the SAME line out of a unified-fan
     junction must coincide on their source-side vertical channel or separate
@@ -866,7 +871,7 @@ def _guard_fan_bundles_coincide_or_separate(
 
 
 def inter_section_route_backtrack_legs(
-    graph: MetroGraph, routes: list
+    graph: MetroGraph, routes: list[RoutedPath]
 ) -> Iterator[tuple[RoutedPath, float, float]]:
     """Yield ``(rp, x1, x2)`` for each horizontal leg that moves *away* from
     the route's own endpoint X - a genuine out-and-back dog-leg.
@@ -896,7 +901,7 @@ def _guard_inter_section_route_no_full_width_backtrack(
     graph: MetroGraph,
     phase: str,
     *,
-    routes: list | None = None,
+    routes: list[RoutedPath] | None = None,
     fraction: float = 0.4,
 ) -> None:
     """After routing: a forward inter-section route may reverse in X (when a
@@ -934,7 +939,7 @@ def _guard_routes_enter_sections_at_ports(
     graph: MetroGraph,
     phase: str,
     *,
-    routes: list | None = None,
+    routes: list[RoutedPath] | None = None,
 ) -> None:
     """After routing: no routed segment may cross a section bbox boundary
     except within tolerance of a declared port on that section.
@@ -960,7 +965,7 @@ def _guard_serpentine_no_backtrack(
     graph: MetroGraph,
     phase: str,
     *,
-    routes: list | None = None,
+    routes: list[RoutedPath] | None = None,
 ) -> None:
     """After routing: stacked same-direction sections must not backtrack.
 
@@ -1013,7 +1018,7 @@ def _guard_inter_row_run_clearance(
     graph: MetroGraph,
     phase: str,
     *,
-    routes: list | None = None,
+    routes: list[RoutedPath] | None = None,
 ) -> None:
     """After routing: a horizontal leg of an inter-*row* route must keep
     ``EDGE_TO_BUNDLE_CLEARANCE`` from its source section's near bbox edge.
@@ -1071,7 +1076,7 @@ def _guard_inter_section_descent_edge_clearance(
     graph: MetroGraph,
     phase: str,
     *,
-    routes: list | None = None,
+    routes: list[RoutedPath] | None = None,
 ) -> None:
     """After routing: a vertical descent channel of an inter-section route
     must not *incidentally* graze a section bbox edge.
@@ -1127,8 +1132,8 @@ def _guard_bundle_order_preserved(
     graph: MetroGraph,
     phase: str,
     *,
-    offsets: dict | None = None,
-    routes: list | None = None,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
 ) -> None:
     """Final-phase: at every shared-xy corner where 2 or more bundled
     lines meet, the lines' relative left/right ordering must be
@@ -1169,7 +1174,7 @@ def _guard_merge_port_approach_side(
     graph: MetroGraph,
     phase: str,
     *,
-    offsets: dict | None = None,
+    offsets: dict[tuple[str, str], float] | None = None,
 ) -> None:
     """Final-phase: at every multi-feeder reconvergence merge port, a
     line that re-joins the bundle perpendicular (rising from a section
@@ -1200,7 +1205,7 @@ def _guard_partial_branch_offset_gaps(
     graph: MetroGraph,
     phase: str,
     *,
-    offsets: dict | None = None,
+    offsets: dict[tuple[str, str], float] | None = None,
 ) -> None:
     """Final-phase: under ``compact_offsets``, an independent fan branch
     that carries only a subset of a bundle's lines must place them on
@@ -1230,8 +1235,8 @@ def _guard_fanout_tail_join(
     graph: MetroGraph,
     phase: str,
     *,
-    offsets: dict | None = None,
-    routes: list | None = None,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
 ) -> None:
     """Final-phase: at every single-source fan-out junction, each
     upstream ``port -> junction`` route must hand off to its same-line
@@ -1444,9 +1449,9 @@ def _run_pass_c_guards(
     graph: MetroGraph,
     phase: str,
     *,
-    offsets: dict | None = None,
-    routes: list | None = None,
-) -> tuple[dict, list | None]:
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> tuple[dict[tuple[str, str], float], list[RoutedPath] | None]:
     """Bisection guards run after every Pass C sub-phase boundary in
     ``validate=True`` mode.
 
