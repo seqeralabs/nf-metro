@@ -1025,15 +1025,13 @@ def _create_port_stations(
     port_counter = 0
     exit_port_map: dict[str, str] = {}
 
-    for sec_id, edges in exit_group_edges.items():
+    for sec_id in exit_group_edges:
         side = section_exit_side.get(sec_id, PortSide.RIGHT)
-        all_line_ids = sorted({e.line_id for e in edges})
         port_id = f"{sec_id}__exit_{side.value}_{port_counter}"
         port = Port(
             id=port_id,
             section_id=sec_id,
             side=side,
-            line_ids=all_line_ids,
             is_entry=False,
         )
         graph.add_port(port)
@@ -1042,14 +1040,12 @@ def _create_port_stations(
 
     entry_port_map: dict[tuple[str, PortSide], str] = {}
 
-    for (sec_id, side), edges in entry_group_edges.items():
-        all_line_ids = sorted({e.line_id for e in edges})
+    for sec_id, side in entry_group_edges:
         port_id = f"{sec_id}__entry_{side.value}_{port_counter}"
         port = Port(
             id=port_id,
             section_id=sec_id,
             side=side,
-            line_ids=all_line_ids,
             is_entry=True,
         )
         graph.add_port(port)
