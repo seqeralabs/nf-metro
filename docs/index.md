@@ -65,8 +65,8 @@ nf-metro render [OPTIONS] INPUT_FILE
 | `--theme [nfcore\|light]` | `nfcore` | Visual theme |
 | `--width INTEGER` | auto | SVG width in pixels |
 | `--height INTEGER` | auto | SVG height in pixels |
-| `--x-spacing FLOAT` | `60` | Horizontal spacing between layers |
-| `--y-spacing FLOAT` | `40` | Vertical spacing between tracks |
+| `--x-spacing FLOAT` | auto | Horizontal spacing between layers |
+| `--y-spacing FLOAT` | auto | Vertical spacing between tracks |
 | `--max-layers-per-row INTEGER` | auto | Max layers before folding to next row |
 | `--animate / --no-animate` | off | Add animated balls traveling along lines |
 | `--debug / --no-debug` | off | Show debug overlay |

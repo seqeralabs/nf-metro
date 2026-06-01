@@ -150,7 +150,7 @@ The `nf-metro` micromamba environment has the project installed in editable mode
 
 - Test fixtures: `tests/fixtures/`
 - Example pipelines: `examples/` (including `rnaseq_sections.mmd` with manual grid and `rnaseq_auto.mmd` with fully inferred layout)
-- Topology stress tests: `tests/fixtures/topologies/*.mmd` - 15 fixtures covering fan-out, fan-in, diamonds, folds, mixed port sides, etc. See `tests/fixtures/topologies/README.md` for full inventory and known issues.
+- Topology stress tests: `examples/topologies/*.mmd` - 30 fixtures covering fan-out, fan-in, diamonds, folds, mixed port sides, etc. See `examples/topologies/README.md` for full inventory and known issues.
 - `tests/layout_validator.py` - Programmatic layout checks (section overlap, station containment, port positioning, edge waypoints).
 - `tests/test_topology_validation.py` - Parametrized tests running all validator checks against every topology fixture.
 - `scripts/render_topologies.py` - Batch render all fixtures to `/tmp/nf_metro_topology_renders/`.

@@ -77,8 +77,8 @@ nf-metro render [OPTIONS] INPUT_FILE
 | `--theme [nfcore\|light]` | `nfcore` | Visual theme |
 | `--width INTEGER` | auto | SVG width in pixels |
 | `--height INTEGER` | auto | SVG height in pixels |
-| `--x-spacing FLOAT` | `60` | Horizontal spacing between layers |
-| `--y-spacing FLOAT` | `40` | Vertical spacing between tracks |
+| `--x-spacing FLOAT` | auto | Horizontal spacing between layers (widened from 60 only when wide labels would otherwise collide) |
+| `--y-spacing FLOAT` | auto | Vertical spacing between tracks (derived from the map's content so captioned icons and dense labels don't collide) |
 | `--max-layers-per-row INTEGER` | auto | Max layers before folding to next row |
 | `--animate / --no-animate` | off | Add animated balls traveling along lines |
 | `--debug / --no-debug` | off | Show debug overlay (ports, hidden stations, edge waypoints) |
@@ -134,6 +134,21 @@ Print a summary of the parsed map: sections, lines, stations, and edges.
 nf-metro info INPUT_FILE
 ```
 
+### `nf-metro convert`
+
+Convert a Nextflow `-with-dag` mermaid file to nf-metro `.mmd` format. The output can be rendered directly or hand-tuned first.
+
+```
+nf-metro convert [OPTIONS] INPUT_FILE
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-o`, `--output PATH` | stdout | Output `.mmd` file path |
+| `--title TEXT` | auto | Pipeline title for the converted output |
+
+To convert and render in one step, use the `--from-nextflow` flag on `render` instead. See [Importing from Nextflow](docs/nextflow.md) for details.
+
 ## Examples
 
 The [`examples/`](examples/) directory contains ready-to-render `.mmd` files:
@@ -146,7 +161,7 @@ The [`examples/`](examples/) directory contains ready-to-render `.mmd` files:
 
 ### Topology gallery
 
-The [`examples/topologies/`](examples/topologies/) directory has 15 examples covering a range of layout patterns. See the [topology README](examples/topologies/README.md) for descriptions and rendered previews.
+The [`examples/topologies/`](examples/topologies/) directory has 30 examples covering a range of layout patterns. See the [topology README](examples/topologies/README.md) for descriptions and rendered previews.
 
 A few highlights:
 
@@ -306,15 +321,18 @@ These are automatically rewritten into port-to-port connections with junction st
 |-----------|-------|-------------|
 | `%%metro title: <text>` | Global | Map title |
 | `%%metro logo: <path>` | Global | Logo image (replaces title text) |
+| `%%metro logo_scale: <factor>` | Global | Scale the logo within the legend block (`1.0` = auto-size); values above 1 grow the legend box to contain it |
 | `%%metro style: <name>` | Global | Theme: `dark`, `light` |
 | `%%metro line: <id> \| <name> \| <color> [\| <style>]` | Global | Define a metro line. Optional style: `solid` (default), `dashed`, `dotted` |
 | `%%metro grid: <section> \| <col>,<row>[,<rowspan>[,<colspan>]]` | Global | Pin section to grid position |
-| `%%metro legend: <position>` | Global | Legend position: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, `none` |
+| `%%metro legend: <position>` | Global | Legend position: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, `none` (append `\| canvas`, `\| <dx>,<dy>`, or use `<x>,<y>` for finer placement - see the [guide](docs/guide.md)) |
 | `%%metro line_order: <strategy>` | Global | Line ordering for track assignment: `definition` (default) or `span` (longest-spanning lines get inner tracks) |
-| `%%metro file: <station> \| <label>` | Global | Mark a station as a file terminus with a document icon |
-| `%%metro files: <station> \| <label>` | Global | Mark a station with a stacked-documents icon (e.g. paired files) |
-| `%%metro dir: <station> \| <label>` | Global | Mark a station with a folder icon (e.g. output directory) |
+| `%%metro file: <station> \| <label> [\| <name>]` | Global | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon |
+| `%%metro files: <station> \| <label> [\| <name>]` | Global | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption |
+| `%%metro dir: <station> \| <label> [\| <name>]` | Global | Mark a station with a folder icon (e.g. output directory). Optional `name` caption |
+| `%%metro off_track: <station>[, <station>...]` | Global | Lift the listed stations (typically `file:`/`files:`/`dir:` inputs) above the section's main track, so they drop into their consumer instead of consuming a line-track slot |
 | `%%metro compact_offsets: true` | Global | Use compact per-station offsets instead of global line-priority slots (better for dense maps with few lines) |
+| `%%metro center_ports: true` | Global | Centre inter-section ports on the shorter of the two connected sections (overridden by the `--center-ports` / `--no-center-ports` CLI flag) |
 | `%%metro legend_min_height: <pixels>` | Global | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 | `%%metro entry: <side> \| <lines>` | Section | Entry port hint |
 | `%%metro exit: <side> \| <lines>` | Section | Exit port hint |

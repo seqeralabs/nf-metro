@@ -104,7 +104,6 @@ class Port:
     id: str
     section_id: str
     side: PortSide
-    line_ids: list[str] = field(default_factory=list)
     is_entry: bool = True
     x: float = 0.0
     y: float = 0.0

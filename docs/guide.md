@@ -432,12 +432,24 @@ These go at the top of the file, before `graph LR`.
 | `%%metro file: <station> \| <label> [\| <name>]` | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon. |
 | `%%metro files: <station> \| <label> [\| <name>]` | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption. |
 | `%%metro dir: <station> \| <label> [\| <name>]` | Mark a station with a folder icon (e.g. output directory). Optional `name` caption. |
+| `%%metro off_track: <station>[, <station>...]` | Lift the listed stations above the section's main track (see below) |
 | `%%metro compact_offsets: true` | Compact line offsets within stations (see below) |
+| `%%metro center_ports: true` | Centre inter-section ports on the shorter of the two connected sections, so lines enter/exit at the visual midpoint. Overridden by the `--center-ports` / `--no-center-ports` CLI flag. |
 | `%%metro legend_min_height: <pixels>` | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 
 **Compact offsets.** By default, each line reserves a fixed vertical slot across the whole map based on its declaration order. If you define three lines, every station that carries even one of them is sized to fit all three. This keeps bundles visually consistent but wastes space when most stations only carry one or two lines.
 
 With `%%metro compact_offsets: true`, stations are only as wide as the lines actually passing through them. A station where one line enters and a different line exits renders as a dot (zero offset) rather than a pill. This works well for maps with few lines but many stations, like the [variantbenchmarking](https://github.com/pinin4fjords/nf-metro/blob/main/examples/variantbenchmarking.mmd) example.
+
+**Off-track inputs.** Pipelines often have reference or auxiliary inputs (a FASTA, a GTF, a known-variants VCF) that feed *into* a processing step partway through a section rather than flowing along the main route. By default such an input station would claim a line-track slot on the trunk, pushing the layout around. List its station ID in `%%metro off_track:` and nf-metro lifts it above the section's main track, dropping it down into its consumer:
+
+```text
+%%metro file: ref_in | FASTA | Reference
+%%metro file: gtf_in | GTF | Annotation
+%%metro off_track: ref_in, gtf_in
+```
+
+This pairs naturally with the `file:` / `files:` / `dir:` icon directives - the lifted stations are usually file terminals. The [`off_track_convergence`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/topologies/off_track_convergence.mmd) topology and the [differentialabundance](https://github.com/pinin4fjords/nf-metro/blob/main/examples/differentialabundance.mmd) example both use it.
 
 ### Section directives
 

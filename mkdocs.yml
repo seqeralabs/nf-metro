@@ -33,7 +33,6 @@ markdown_extensions:
       permalink: true
 
 exclude_docs: |
-  REFACTOR_PLAN.md
   WEBSITE_PLAN.md
 
 nav:
