@@ -511,7 +511,7 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
                 if not others:
                     continue
                 trunk_y = others[len(others) // 2]
-            participants.sort(key=lambda s: pre_fan_y[s])
+            participants.sort(key=lambda s: (graph.stations[s].track, s))
             n = len(participants)
             offsets = _fan_offsets(n)
             for sid, off in zip(participants, offsets):
@@ -632,7 +632,7 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
             participants = list(full) + (non_full if mixed_ok else [])
             if len(participants) < 2:
                 continue
-            participants.sort(key=lambda s: graph.stations[s].y)
+            participants.sort(key=lambda s: (graph.stations[s].track, s))
             n = len(participants)
             offsets = _fan_offsets(n)
             for sid, off in zip(participants, offsets):
