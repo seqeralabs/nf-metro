@@ -4615,7 +4615,8 @@ def test_partial_fan_branch_has_no_offset_gap(fixture):
 
 
 # ---------------------------------------------------------------------------
-# Anchor invariant: content placement never moves a trunk (LR port) anchor
+# Anchor invariant: content placement never moves a port anchor (any side,
+# either axis)
 # ---------------------------------------------------------------------------
 
 
@@ -4632,27 +4633,32 @@ _DEPENDENT_PLACEMENT_PHASES = (
 
 
 @pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
-def test_content_placement_leaves_lr_port_anchors_frozen(fixture, monkeypatch):
+def test_content_placement_leaves_port_anchors_frozen(fixture, monkeypatch):
     """Anchors-first invariant: every content-placement phase (fans,
     off-track lift, band-fill, balance, recenter) positions content around
-    the resolved trunk anchors and must not move one.  Wrap each phase to
-    snapshot LR/RL port Ys before/after and assert none move.  Checked in
-    isolation (no full ``validate`` suite) so an unrelated guard cannot
-    pre-empt this assertion."""
+    the resolved anchors and must not move one.  Wrap each phase to snapshot
+    every port's ``(x, y)`` before/after and assert none move - covering all
+    port sides and both axes, not just the LR/RL-Y subset, so a phase that
+    nudged a TOP/BOTTOM port or a port's cross-axis would be caught too.
+    Checked in isolation (no full ``validate`` suite) so an unrelated guard
+    cannot pre-empt this assertion."""
     from nf_metro.layout import engine
-    from nf_metro.layout.phases.guards import _lr_port_anchor_snapshot
+    from nf_metro.layout.phases.guards import _port_anchor_snapshot
 
-    moved: list[tuple[str, str, float]] = []
+    moved: list[tuple[str, str, float, float]] = []
 
     def _make_probe(name: str, orig):
         def probe(graph, *args, **kwargs):
-            before = _lr_port_anchor_snapshot(graph)
+            before = _port_anchor_snapshot(graph)
             result = orig(graph, *args, **kwargs)
-            after = _lr_port_anchor_snapshot(graph)
-            for pid, y0 in before.items():
-                y1 = after.get(pid)
-                if y1 is not None and abs(y1 - y0) > 1.0:
-                    moved.append((name, pid, round(y1 - y0, 2)))
+            after = _port_anchor_snapshot(graph)
+            for pid, (x0, y0) in before.items():
+                coords = after.get(pid)
+                if coords is None:
+                    continue
+                x1, y1 = coords
+                if abs(x1 - x0) > 1.0 or abs(y1 - y0) > 1.0:
+                    moved.append((name, pid, round(x1 - x0, 2), round(y1 - y0, 2)))
             return result
 
         return probe
@@ -4662,15 +4668,27 @@ def test_content_placement_leaves_lr_port_anchors_frozen(fixture, monkeypatch):
 
     _layout(fixture)
     assert not moved, (
-        f"{fixture}: content placement moved LR port anchor(s): {moved[:3]}"
+        f"{fixture}: content placement moved port anchor(s): {moved[:3]}"
     )
 
 
-def test_anchor_guard_catches_a_displaced_port(monkeypatch):
+@pytest.mark.parametrize(
+    "example, sides, axis",
+    [
+        # LR/RL port Y -- the original (subset) coverage.
+        ("differentialabundance.mmd", (PortSide.LEFT, PortSide.RIGHT), "y"),
+        # TOP/BOTTOM port X -- newly covered by the widened snapshot.
+        ("rnaseq_sections.mmd", (PortSide.TOP, PortSide.BOTTOM), "x"),
+        # LR/RL port X (cross-axis) -- also newly covered.
+        ("differentialabundance.mmd", (PortSide.LEFT, PortSide.RIGHT), "x"),
+    ],
+)
+def test_anchor_guard_catches_a_displaced_port(monkeypatch, example, sides, axis):
     """The guard is meaningful, not vacuous: if a content-placement phase
-    moves an LR port anchor, ``compute_layout(validate=True)`` raises.
-    Monkeypatch the balance phase to shove the first LR port after it runs
-    and assert the guard catches it."""
+    moves any port anchor, ``compute_layout(validate=True)`` raises.
+    Monkeypatch the balance phase to shove the first matching port (by side
+    and axis) after it runs and assert the guard catches it.  Parametrised
+    across port sides and both axes to exercise the widened snapshot."""
     from nf_metro.layout import engine
     from nf_metro.layout.phases.balancing import (
         _balance_section_content_around_trunk as _orig_balance,
@@ -4680,14 +4698,13 @@ def test_anchor_guard_catches_a_displaced_port(monkeypatch):
         _orig_balance(graph, *args)
         for pid, st in graph.stations.items():
             port = graph.ports.get(pid)
-            if (
-                st.is_port
-                and port is not None
-                and port.side in (PortSide.LEFT, PortSide.RIGHT)
-            ):
-                st.y += 50.0
+            if st.is_port and port is not None and port.side in sides:
+                if axis == "y":
+                    st.y += 50.0
+                else:
+                    st.x += 50.0
                 break
 
     monkeypatch.setattr(engine, "_balance_section_content_around_trunk", _evil)
-    with pytest.raises(PhaseInvariantError, match="LR port anchor"):
-        _layout_example("differentialabundance.mmd", validate=True)
+    with pytest.raises(PhaseInvariantError, match="port anchor"):
+        _layout_example(example, validate=True)

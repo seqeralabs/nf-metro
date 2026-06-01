@@ -136,7 +136,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_stations_within_bbox,
     _guard_terminus_icons_within_bbox,
     _inter_section_backtrack_legs,
-    _lr_port_anchor_snapshot,
+    _port_anchor_snapshot,
     _route_exit_side,
     _run_pass_c_guards,
     _section_lacks_flow_aligned_port,
@@ -489,8 +489,8 @@ def _run_placement(
     *args: object,
 ) -> None:
     """Run a content-placement phase, asserting (under validate) it left every
-    LR/RL port anchor frozen.  See CONTRACT.md (anchor invariant)."""
-    before = _lr_port_anchor_snapshot(graph) if validate else None
+    port anchor frozen.  See CONTRACT.md (anchor invariant)."""
+    before = _port_anchor_snapshot(graph) if validate else None
     fn(graph, *args)
     if validate and before is not None:
         _guard_anchors_frozen_during_placement(

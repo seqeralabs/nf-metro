@@ -42,37 +42,50 @@ class PhaseInvariantError(Exception):
     """Raised when a layout phase produces invalid intermediate state."""
 
 
-def _lr_port_anchor_snapshot(graph: MetroGraph) -> dict[str, float]:
-    """Y of every LR/RL port station -- the inter-section trunk anchors that
-    content placement positions content around.  Paired with
+def _port_anchor_snapshot(graph: MetroGraph) -> dict[str, tuple[float, float]]:
+    """``(x, y)`` of every port station -- the inter-section anchors that
+    content placement positions content around.
+
+    A port is an anchor on whichever axis its side dictates: LR/RL ports
+    fix the trunk Y, TOP/BOTTOM ports fix the trunk X, and either side's
+    cross-axis (an LR port's X, a TB port's Y) is pinned by the structural
+    port-positioning phases too.  Snapshotting both coordinates of every
+    port therefore covers the full anchor set rather than the LR/RL-Y
+    subset, so the guard catches any anchor movement during placement
+    regardless of port side or axis.  Paired with
     :func:`_guard_anchors_frozen_during_placement`."""
-    out: dict[str, float] = {}
-    for pid, port in graph.ports.items():
-        if port.side in (PortSide.LEFT, PortSide.RIGHT):
-            st = graph.stations.get(pid)
-            if st is not None:
-                out[pid] = st.y
+    out: dict[str, tuple[float, float]] = {}
+    for pid in graph.ports:
+        st = graph.stations.get(pid)
+        if st is not None:
+            out[pid] = (st.x, st.y)
     return out
 
 
 def _guard_anchors_frozen_during_placement(
-    graph: MetroGraph, before: dict[str, float], phase: str
+    graph: MetroGraph, before: dict[str, tuple[float, float]], phase: str
 ) -> None:
-    """A content-placement phase positions content around the resolved trunk
-    anchors and must not move one.  Compare each LR/RL port Y against the
-    snapshot taken before the phase ran (via
-    :func:`_lr_port_anchor_snapshot`) and raise if any moved.  Anchors are
-    set only by port-positioning, the row trunk alignment, grid snapping, the
+    """A content-placement phase positions content around the resolved
+    anchors and must not move one.  Compare each port's ``(x, y)`` against
+    the snapshot taken before the phase ran (via
+    :func:`_port_anchor_snapshot`) and raise if any moved.  Anchors are set
+    only by port-positioning, the row trunk alignment, grid snapping, the
     inter-row cascade and uniform translation -- never by fan / off-track /
     band-fill / balance / recenter placement."""
-    after = _lr_port_anchor_snapshot(graph)
-    for pid, y0 in before.items():
-        y1 = after.get(pid)
-        if y1 is not None and abs(y1 - y0) > COORD_TOLERANCE:
+    after = _port_anchor_snapshot(graph)
+    for pid, (x0, y0) in before.items():
+        coords = after.get(pid)
+        if coords is None:
+            continue
+        x1, y1 = coords
+        if abs(x1 - x0) > COORD_TOLERANCE or abs(y1 - y0) > COORD_TOLERANCE:
+            port = graph.ports.get(pid)
+            side = port.side.value if port is not None else "?"
             raise PhaseInvariantError(
-                f"{phase}: content placement moved LR port anchor {pid!r} "
-                f"from y={y0:.2f} to y={y1:.2f} (delta {y1 - y0:+.2f}); "
-                f"placement must leave trunk anchors frozen"
+                f"{phase}: content placement moved {side} port anchor {pid!r} "
+                f"from (x={x0:.2f}, y={y0:.2f}) to (x={x1:.2f}, y={y1:.2f}) "
+                f"(delta x={x1 - x0:+.2f}, y={y1 - y0:+.2f}); "
+                f"placement must leave anchors frozen"
             )
 
 
