@@ -71,9 +71,9 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
         sec_ids = list(info.get("section_ids", []))
         groups[("row", row)] = (pitch, sec_ids)
         grouped_ids.update(sec_ids)
-    for section in graph.sections.values():
-        if section.id not in grouped_ids:
-            groups[("solo", section.id)] = (y_spacing, [section.id])
+    for sec in graph.sections.values():
+        if sec.id not in grouped_ids:
+            groups[("solo", sec.id)] = (y_spacing, [sec.id])
 
     for pitch, sec_ids in groups.values():
         half = pitch / 2.0

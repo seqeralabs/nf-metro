@@ -213,12 +213,12 @@ def _reindex_section_local(ctx: _OffsetCtx) -> None:
             section_local[sec_id] = {lid: i for i, lid in enumerate(ordered)}
 
     for sid_s, station in graph.stations.items():
-        sec_id = station.section_id
-        if sec_id not in section_local:
+        st_sec = station.section_id
+        if st_sec is None or st_sec not in section_local:
             continue
-        local_pri = section_local[sec_id]
+        local_pri = section_local[st_sec]
         local_max = max(local_pri.values()) if local_pri else 0
-        reverse = sec_id in ctx.reversed_sections
+        reverse = st_sec in ctx.reversed_sections
         for lid in graph.station_lines(sid_s):
             p = local_pri.get(lid, 0)
             if reverse:
@@ -745,10 +745,10 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
             continue
         entry_offs: dict[str, float] = {}
         for lid in graph.station_lines(port_id):
-            exit_off = ctx.offsets.get((exit_port_id, lid))
-            if exit_off is not None:
-                ctx.offsets[(port_id, lid)] = exit_off
-                entry_offs[lid] = exit_off
+            paired_off = ctx.offsets.get((exit_port_id, lid))
+            if paired_off is not None:
+                ctx.offsets[(port_id, lid)] = paired_off
+                entry_offs[lid] = paired_off
         if len(entry_offs) >= 2:
             for e2 in graph.edges_from(port_id):
                 tgt_st = graph.stations.get(e2.target)
@@ -1108,9 +1108,11 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
         min_horiz = min(cur[lid] for lid in horizontal)
 
         new_offs: dict[str, float] = {}
-        for rank, lid in enumerate(sorted(below, key=cur.get), start=1):
+        for rank, lid in enumerate(sorted(below, key=lambda lid: cur[lid]), start=1):
             new_offs[lid] = max_horiz + rank * ctx.offset_step
-        for rank, lid in enumerate(sorted(above, key=cur.get, reverse=True), start=1):
+        for rank, lid in enumerate(
+            sorted(above, key=lambda lid: cur[lid], reverse=True), start=1
+        ):
             new_offs[lid] = min_horiz - rank * ctx.offset_step
 
         if all(

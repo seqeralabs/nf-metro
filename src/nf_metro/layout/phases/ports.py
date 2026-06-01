@@ -486,7 +486,9 @@ def _snap_sole_layer_stations_to_ports(graph: MetroGraph) -> None:
                     for edge in graph.edges_to(current):
                         if edge.source in internal_ids:
                             nexts.add(edge.source)
-                current = next(iter(nexts)) if len(nexts) == 1 else None
+                if len(nexts) != 1:
+                    break
+                current = next(iter(nexts))
 
 
 def _snap_grid_group_entry_ports(graph: MetroGraph) -> None:

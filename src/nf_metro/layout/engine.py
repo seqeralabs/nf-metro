@@ -340,7 +340,7 @@ def compute_layout(
     """
     auto_x = x_spacing is None
     auto_y = y_spacing is None
-    if auto_y:
+    if y_spacing is None:
         y_spacing = compute_min_y_spacing(graph)
     else:
         min_required = compute_min_y_spacing(graph)
@@ -353,7 +353,7 @@ def compute_layout(
                 UserWarning,
                 stacklevel=2,
             )
-    if auto_x:
+    if x_spacing is None:
         x_spacing = X_SPACING
 
     # Optionally reorder lines by section span before layout.

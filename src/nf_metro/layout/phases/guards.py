@@ -795,7 +795,11 @@ def _guard_inter_section_route_no_backtrack(
     ):
         src_sec = resolve_section(graph, graph.stations[rp.edge.source])
         tgt_sec = resolve_section(graph, graph.stations[rp.edge.target])
-        rightward = tgt_sec.grid_col > src_sec.grid_col
+        rightward = (
+            src_sec is not None
+            and tgt_sec is not None
+            and tgt_sec.grid_col > src_sec.grid_col
+        )
         raise PhaseInvariantError(
             f"{phase}: route {rp.edge.source!r}->{rp.edge.target!r} "
             f"line {rp.line_id!r} backtracks x={x1:.1f}->{x2:.1f} "

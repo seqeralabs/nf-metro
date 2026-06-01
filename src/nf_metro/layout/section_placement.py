@@ -12,6 +12,7 @@ __all__ = ["place_sections", "position_ports"]
 
 import warnings
 from collections import defaultdict, deque
+from typing import TypeGuard
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -310,6 +311,8 @@ def place_sections(
     if not graph.sections:
         return
 
+    # auto_layout always populates section_dag before placement runs.
+    assert graph.section_dag is not None
     section_edges = graph.section_dag.section_edges
     col_assign, row_assign = _assign_grid_layout(graph, section_edges)
     min_col, max_col = _compute_section_offsets(
@@ -337,11 +340,13 @@ def _rows_overlap(a: Section, b: Section) -> bool:
 
 def _station_column(
     graph: MetroGraph,
-    station: Station,
+    station: Station | None,
     col_assign: dict[str, int],
     junction_ids: set[str],
 ) -> int | None:
     """Resolve a station's grid column via its section or junction chain."""
+    if station is None:
+        return None
     if station.section_id and station.section_id in col_assign:
         return col_assign[station.section_id]
     # Junction: trace back to its source port's section
@@ -373,7 +378,7 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     adjacent ``(src_row, tgt_row)`` reservation still applies.
     """
 
-    def _is_flow_section(sec: Section | None) -> bool:
+    def _is_flow_section(sec: Section | None) -> TypeGuard[Section]:
         return sec is not None and sec.grid_row_span == 1
 
     # (upper_row, lower_row) -> entry_port_id -> set of line ids
@@ -744,6 +749,8 @@ def _enforce_min_row_gaps(
         # constraint that actually drove the widening.
         if wrap_deficit > header_deficit:
             reason = "to fit an inter-row routing bundle"
+            # wrap_deficit only exceeds 0 when wrap_min was non-None.
+            assert wrap_min is not None
             required_bbox_gap = wrap_min
         else:
             reason = "to clear section headers"

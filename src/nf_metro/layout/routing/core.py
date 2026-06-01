@@ -492,7 +492,7 @@ def _max_offset_at(ctx: _RoutingCtx, station_id: str) -> float:
 
 
 def _tb_x_offset(
-    ctx: _RoutingCtx, station_id: str, line_id: str, section_id: str
+    ctx: _RoutingCtx, station_id: str, line_id: str, section_id: str | None
 ) -> float:
     """Compute the TB-aware X offset for a station.
 
@@ -580,6 +580,8 @@ def _route_inter_section(
         return _route_bottom_exit_junction(edge, src, tgt, i, n, ctx)
 
     if needs_bypass:
+        # needs_bypass is only True when both columns resolved.
+        assert src_col is not None and tgt_col is not None
         # Merge dispatch: trunk gets full bypass to entry port,
         # branches get truncated descent to trunk level.
         if edge.target in ctx.merge.trunk_source:
@@ -602,8 +604,9 @@ def _route_inter_section(
             and tgt_row is not None
             and tgt_row == src_row + 1
         ):
-            exclude = {src.section_id, tgt.section_id}
-            exclude.discard(None)
+            exclude = {
+                sid for sid in (src.section_id, tgt.section_id) if sid is not None
+            }
             if not _h_segment_crosses_other_section(graph, sx, tx, ty, exclude):
                 return _route_l_shape(edge, src, tgt, i, n, ctx)
         return _route_bypass(edge, src, tgt, i, src_col, tgt_col, ctx, src_row)
@@ -684,7 +687,7 @@ def _route_inter_section(
         # source's right edge is fine even if its Y falls within the
         # source's row.
         wrap_hy = inter_row_channel_y(graph, src, tgt, sy, ty, dy, ctx.curve_radius)
-        exclude = {src.section_id} if src.section_id else set()
+        exclude = {src.section_id} if src.section_id else set[str]()
         if _h_segment_crosses_other_section(graph, sx, tx, wrap_hy, exclude):
             if _corridor_is_viable(ctx, src, tgt):
                 return _route_inter_row_gap_corridor(edge, src, tgt, tgt, i, n, ctx)
@@ -732,7 +735,7 @@ def _route_inter_section(
             # is safe even when its bbox spans the route's Y range.
             ep_port = graph.ports.get(ep_id)
             if ep_port and ep_port.side == PortSide.LEFT:
-                exclude = {src.section_id} if src.section_id else set()
+                exclude = {src.section_id} if src.section_id else set[str]()
                 if _h_segment_crosses_other_section(graph, sx, ep.x, ep.y, exclude):
                     # When a clear inter-row / inter-column corridor exists for
                     # this downward cross-row feeder, descend it instead of
@@ -1986,7 +1989,7 @@ def _corridor_is_viable(ctx: _RoutingCtx, src: Station, entry_port: Station) -> 
         return False
     src_col, src_row = _resolve_section_colrow(ctx.graph, src)
     ep_col, ep_row = _resolve_section_colrow(ctx.graph, entry_port)
-    if None in (src_row, ep_row, src_col, ep_col):
+    if src_row is None or ep_row is None or src_col is None or ep_col is None:
         return False
     if ep_row <= src_row:
         return False
@@ -2056,6 +2059,13 @@ def _route_inter_row_gap_corridor(
 
     src_col, src_row = _resolve_section_colrow(ctx.graph, src)
     ep_col, ep_row = _resolve_section_colrow(ctx.graph, entry_port)
+    # Guaranteed by the _corridor_is_viable check at every call site.
+    assert (
+        src_col is not None
+        and src_row is not None
+        and ep_col is not None
+        and ep_row is not None
+    )
 
     # Inter-row gap Y just below the source row (column-restricted so a
     # tall row-span in another column doesn't push the channel down).  Use
@@ -2098,6 +2108,8 @@ def _route_inter_row_gap_corridor(
         vx = _fan_left_entry_descent_x(ctx, ep_col, pos_n, delta)
     if vx is None:
         vx = _corridor_descent_x(ctx, ep_col, ep_row, delta)
+    # _corridor_is_viable confirmed a descent channel exists here.
+    assert vx is not None
 
     # H lead-in right of the source, clear of the source section's edge.
     # When the source is a sectionless junction, fall back to its own X as
@@ -2366,6 +2378,7 @@ def _route_right_entry_wrap(
     )
 
     if cross_row:
+        assert src_col is not None and tgt_col is not None
         hy = bypass_bottom_y(
             ctx.graph, src_col, tgt_col, BYPASS_CLEARANCE, src_row=src_row
         )
@@ -2551,6 +2564,8 @@ def _route_tb_lr_exit(
         and src.section_id == tgt.section_id
     ):
         return None
+    # tgt_is_lr_exit already established tgt_port is a real port.
+    assert tgt_port is not None
 
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     max_src_off = _max_offset_at(ctx, edge.source)
@@ -3111,6 +3126,8 @@ def _apply_diagonal_spread(
     The delta translates both diagonal waypoints (indices 1 and 2) so
     the diagonal segments are parallel but horizontally spread.
     """
+    # Only reached from _spread_diagonal_bundles, which returns early on None.
+    assert ctx.station_offsets is not None
     offsets = [ctx.station_offsets.get((station_id, rp.line_id), 0.0) for rp in group]
     center = sum(offsets) / len(offsets)
 
@@ -3345,12 +3362,16 @@ def _collect_centering_candidates(
         elif in_rp:
             in_diag_end_x = in_rp.points[2][0]
         else:
+            # Reached only via the flat-in case above, which sets flat_in_rp.
+            assert flat_in_rp is not None
             in_diag_end_x = flat_in_rp.points[0][0]
 
         if not multi_diag:
             if out_rp:
                 out_diag_start_x = out_rp.points[1][0]
             else:
+                # Reached only via the flat-out case, which sets flat_out_rp.
+                assert flat_out_rp is not None
                 out_diag_start_x = flat_out_rp.points[-1][0]
 
         in_flat = station.x - in_diag_end_x

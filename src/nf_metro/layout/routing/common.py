@@ -54,7 +54,7 @@ def vertical_direction(dy: float) -> Direction:
 
 def _sections_in_col(
     graph: MetroGraph,
-    col: int,
+    col: int | None,
     row: int | None = None,
     y_band: tuple[float, float] | None = None,
 ) -> list[Section]:
@@ -81,7 +81,7 @@ def _sections_in_col(
     return secs
 
 
-def _sections_in_row(graph: MetroGraph, row: int) -> list[Section]:
+def _sections_in_row(graph: MetroGraph, row: int | None) -> list[Section]:
     """Sections in a specific grid row with non-zero height."""
     return [s for s in graph.sections.values() if s.grid_row == row and s.bbox_h > 0]
 
@@ -97,7 +97,7 @@ def col_right_edge(
 
 
 def col_left_edge(
-    graph: MetroGraph, col: int, default: float = 0.0, row: int | None = None
+    graph: MetroGraph, col: int | None, default: float = 0.0, row: int | None = None
 ) -> float:
     """Leftmost X extent of sections in *col* (optionally a single *row*)."""
     secs = _sections_in_col(graph, col, row)
@@ -105,7 +105,7 @@ def col_left_edge(
 
 
 def row_bottom_edge(
-    graph: MetroGraph, row: int, default: float = 0.0, col: int | None = None
+    graph: MetroGraph, row: int | None, default: float = 0.0, col: int | None = None
 ) -> float:
     """Bottommost Y extent of sections in *row* (optionally a single *col*).
 
@@ -610,7 +610,7 @@ def bypass_bottom_y(
 
 def resolve_section(
     graph: MetroGraph,
-    station: Station,
+    station: Station | None,
     prefer_upstream: bool = True,
 ) -> Section | None:
     """Resolve a station's section, tracing through junctions if needed.
@@ -622,7 +622,11 @@ def resolve_section(
     When *prefer_upstream* is True (default), incoming edges are checked
     first so the junction resolves to the upstream section.  When False,
     both directions are scanned in a single pass with no preference.
+
+    A ``None`` station (e.g. an unresolved lookup) yields ``None``.
     """
+    if station is None:
+        return None
     if station.section_id:
         return graph.sections.get(station.section_id)
 

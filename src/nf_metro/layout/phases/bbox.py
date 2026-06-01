@@ -469,7 +469,7 @@ def _shrink_bboxes_to_content_bottom(
             if other.id == section.id or other.bbox_h <= 0:
                 continue
             o_y_bot = other.bbox_y + other.bbox_h
-            if use_grid and other.grid_row >= 0:
+            if use_grid and my_grid_row is not None and other.grid_row >= 0:
                 o_grid_top = other.grid_row
                 o_grid_bot = other.grid_row + max(1, other.grid_row_span)
                 mate = o_grid_top <= my_grid_row < o_grid_bot

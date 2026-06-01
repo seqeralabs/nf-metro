@@ -473,7 +473,11 @@ def _parse_node(
         m = pattern.match(line)
         if m:
             node_id = m.group(1)
-            label = m.group(2).strip() if m.lastindex >= 2 else node_id
+            label = (
+                m.group(2).strip()
+                if m.lastindex is not None and m.lastindex >= 2
+                else node_id
+            )
             label = _unquote(label)
             # Convert literal \n sequences to real newlines (multi-line labels)
             if "\\n" in label:
@@ -1004,6 +1008,9 @@ def _group_inter_section_edges(
     for edge in inter_section_edges:
         src_sec = graph.section_for_station(edge.source)
         tgt_sec = graph.section_for_station(edge.target)
+        # _classify_edges only files an edge as inter-section when both
+        # endpoints resolve to a section, so neither lookup is None here.
+        assert src_sec is not None and tgt_sec is not None
         entry_side = entry_side_for_line.get((tgt_sec, edge.line_id), PortSide.LEFT)
 
         exit_group_edges.setdefault(src_sec, []).append(edge)
@@ -1077,6 +1084,9 @@ def _rewrite_edges_with_junctions(
     for edge in inter_section_edges:
         src_sec = graph.section_for_station(edge.source)
         tgt_sec = graph.section_for_station(edge.target)
+        # See _classify_edges: inter-section edges always have both
+        # endpoints in a section, so neither lookup is None.
+        assert src_sec is not None and tgt_sec is not None
         entry_side = entry_side_for_line.get((tgt_sec, edge.line_id), PortSide.LEFT)
 
         exit_port_id = exit_port_map[src_sec]

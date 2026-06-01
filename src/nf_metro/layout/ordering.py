@@ -615,7 +615,7 @@ def _equalize_fork_groups(
         line_order_map = {lid: i for i, lid in enumerate(graph.lines)}
         group.sort(
             key=lambda sid: (
-                line_order_map.get(node_primary.get(sid, ""), len(line_order_map)),
+                line_order_map.get(node_primary.get(sid) or "", len(line_order_map)),
                 tracks[sid],
             )
         )
