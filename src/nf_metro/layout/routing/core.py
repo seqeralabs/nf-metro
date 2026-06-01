@@ -3235,7 +3235,6 @@ def _build_bubble_ctx(routes: list[RoutedPath], graph: MetroGraph) -> _BubbleCtx
     )
 
 
-# (new_x, in_routes, flat_in, out_routes, flat_out)
 _StationMoveCandidate = tuple[
     float, list[RoutedPath], list[RoutedPath], list[RoutedPath], list[RoutedPath]
 ]
