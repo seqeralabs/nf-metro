@@ -734,7 +734,7 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
     bypass_count = 0
 
     def _section_layers(section_ids: set[str]) -> dict[str, int]:
-        sub = nx.DiGraph()
+        sub: nx.DiGraph[str] = nx.DiGraph()
         for sid in section_ids:
             sub.add_node(sid)
         for edge in graph.edges:

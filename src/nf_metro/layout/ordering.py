@@ -45,7 +45,7 @@ def assign_tracks(
     if not graph.lines:
         return {sid: float(i) for i, sid in enumerate(graph.stations)}
 
-    G = nx.DiGraph()
+    G: nx.DiGraph[str] = nx.DiGraph()
     for edge in graph.edges:
         G.add_edge(edge.source, edge.target)
     for sid in graph.stations:

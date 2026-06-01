@@ -22,7 +22,7 @@ def assign_layers(graph: MetroGraph) -> dict[str, int]:
 
     Returns a dict mapping station_id -> layer number (0-based).
     """
-    G = nx.DiGraph()
+    G: nx.DiGraph[str] = nx.DiGraph()
     for edge in graph.edges:
         G.add_edge(edge.source, edge.target)
 

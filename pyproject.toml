@@ -41,6 +41,7 @@ dev = [
     "pytest-cov>=4.0",
     "ruff>=0.4",
     "mypy>=1.8",
+    "types-networkx",
 ]
 docs = [
     "mkdocs-material>=9.0",
@@ -77,5 +78,11 @@ files = ["src"]
 mypy_path = "src"
 explicit_package_bases = true
 python_version = "3.10"
-ignore_missing_imports = true
+ignore_missing_imports = false
 strict_optional = true
+
+# drawsvg ships no type information; everything else (click, Pillow,
+# networkx via types-networkx) is typed once the package is installed.
+[[tool.mypy.overrides]]
+module = ["drawsvg"]
+ignore_missing_imports = true

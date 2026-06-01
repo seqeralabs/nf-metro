@@ -20,7 +20,7 @@ def _renumber_sections_by_grid(graph: MetroGraph) -> None:
 
     import networkx as nx
 
-    dag = nx.DiGraph()
+    dag: nx.DiGraph[str] = nx.DiGraph()
     for sid in graph.sections:
         dag.add_node(sid)
     if graph.section_dag:
