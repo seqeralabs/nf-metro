@@ -166,10 +166,10 @@ in pipeline order.
 
 ## Stage table
 
-### Stage 1.1: internal section layout (engine.py:483-490)
+### Stage 1.1: internal section layout
 - **Purpose**: Lay out each section's real stations in section-local
   coordinates via layer/track assignment.
-- **Helper**: `_layout_single_section` (engine.py:3917).
+- **Helper**: `_layout_single_section` (`phases/single_section.py`).
 - **Precondition**: Parser has populated `graph.sections`, `graph.stations`,
   `graph.edges`. Section directions and grid positions inferred by
   `auto_layout`. Ports exist in the graph but are not yet positioned.
@@ -186,10 +186,10 @@ in pipeline order.
   section-local relative layout persist to the end; Stage 2.1 only
   translates them into global coordinates, it does not re-lay them out.
 
-### Stage 1.2: align row Y grids (engine.py:495-496)
+### Stage 1.2: align row Y grids
 - **Purpose**: Snap station Ys to a shared row-wide grid so same-row
   same-direction sections agree on grid pitch and slot count.
-- **Helper**: `_align_row_y_grids` (engine.py:958).
+- **Helper**: `_align_row_y_grids` (`phases/row_align.py`).
 - **Precondition**: Stage 1.1 complete; sections still in local
   coordinates; section subgraphs available.
 - **Postcondition**: Within each `(grid_row, direction)` group, all
@@ -204,7 +204,7 @@ in pipeline order.
 - **Lifecycle:** invariant - the shared per-row Y grid holds at the
   final boundary (re-asserted by Stage 6.4's grid snap).
 
-### Stage 1.3: section placement (engine.py:498-499)
+### Stage 1.3: section placement
 - **Purpose**: Place sections on the canvas grid via topological
   layering of the section DAG.
 - **Helper**: `place_sections` in `section_placement.py`.
@@ -217,10 +217,10 @@ in pipeline order.
 - **Lifecycle:** invariant - the section grid (column/row placement,
   non-overlap) holds at the final boundary.
 
-### Stage 1.4: renumber sections (engine.py:501-502)
+### Stage 1.4: renumber sections
 - **Purpose**: Renumber sections by visual reading order (sweep, col,
   row) so legend / debug numbering follows the eye.
-- **Helper**: `_renumber_sections_by_grid` (engine.py:824).
+- **Helper**: `_renumber_sections_by_grid` (`phases/canvas.py`).
 - **Precondition**: Section grid positions and directions finalised.
 - **Postcondition**: `section.display_number` reflects sweep-major,
   column-then-row order.
@@ -230,7 +230,7 @@ in pipeline order.
 - **Lifecycle:** invariant - `display_number` metadata is final
   (cosmetic, never recomputed).
 
-### Stage 1.5: offset overshoot correction (engine.py:504-535)
+### Stage 1.5: offset overshoot correction
 - **Purpose**: Grow `x_offset`/`y_offset` when section local extents
   reach left/above the canvas origin, so global coords stay positive
   after Stage 2.1.
@@ -244,7 +244,7 @@ in pipeline order.
   end (the canvas top margin is maintained by Stage 6.15 /
   `_shift_graph_into_canvas`).
 
-### Stage 2.1: local-to-global translation (engine.py:537-557)
+### Stage 2.1: local-to-global translation
 - **Purpose**: Translate every real station and section bbox into
   global canvas coordinates.
 - **Helper**: inline.
@@ -262,7 +262,7 @@ in pipeline order.
 - **Lifecycle:** invariant - the global-coordinate regime is permanent;
   every later stage works in global coordinates.
 
-### Stage 3.1: position ports on section boundaries (engine.py:565-570)
+### Stage 3.1: position ports on section boundaries
 - **Purpose**: Place every port on its section's bbox edge at the
   section's nominal centre line for its side.
 - **Helper**: `position_ports` in `section_placement.py`.
@@ -276,11 +276,11 @@ in pipeline order.
 - **Lifecycle:** invariant - ports sit on their bbox edges at the final
   boundary (guarded continuously by `_guard_ports_on_boundaries`).
 
-### Stage 3.2: align LR entry ports (engine.py:572-576)
+### Stage 3.2: align LR entry ports
 - **Purpose**: For LEFT/RIGHT entry ports, set Y to the incoming
   source's Y so the inter-section horizontal run is straight; for
   TOP/BOTTOM entry ports, set X / Y accordingly.
-- **Helper**: `_align_entry_ports` (engine.py:4788), dispatching to
+- **Helper**: `_align_entry_ports` (`phases/ports.py`), dispatching to
   `_align_lr_entry_port` and `_align_tb_entry_port`.
 - **Precondition**: Stage 3.1 placed ports on bbox edges. Junction
   positions are unknown - the helper uses `_resolve_source_xy` to
@@ -295,11 +295,11 @@ in pipeline order.
 - **Lifecycle:** invariant - the entry-port straight-run (no-kink) Y
   holds at the end (re-asserted by Stages 5.5 / 6.16).
 
-### Stage 3.3: shift LR/RL perp-entry internal stations (engine.py:578-582)
+### Stage 3.3: shift LR/RL perp-entry internal stations
 - **Purpose**: When an LR/RL section has a TOP or BOTTOM (perpendicular)
   entry port, shift internal stations' X so the entry port has
   in-section runway before stations begin.
-- **Helper**: `_shift_lr_perp_entry_stations` (engine.py:4520).
+- **Helper**: `_shift_lr_perp_entry_stations` (`phases/single_section.py`).
 - **Precondition**: Stage 3.2 finalised LR/RL entry-port X for perp
   entries.
 - **Postcondition**: Internal stations in such sections sit at least
@@ -311,11 +311,11 @@ in pipeline order.
 - **Lifecycle:** invariant - the perpendicular-entry runway
   (internal-station X clearance) holds at the final boundary.
 
-### Stage 3.4: align fold-section exit ports (engine.py:584-588)
+### Stage 3.4: align fold-section exit ports
 - **Purpose**: For row-spanning (fold) and TB-direction sections,
   shift LEFT/RIGHT exit ports to the target section's entry Y. May
   push the target section down via `_resolve_tb_exit_y`.
-- **Helper**: `_align_exit_ports` (engine.py:5410), dispatching to
+- **Helper**: `_align_exit_ports` (`phases/ports.py`), dispatching to
   `_align_lr_exit_port`.
 - **Precondition**: Entry ports aligned (Stage 3.2); target sections
   positioned (Stage 1.3/4).
@@ -328,10 +328,10 @@ in pipeline order.
 - **Lifecycle:** invariant - the fold/TB exit-port no-kink Y holds at
   the end (re-asserted by Stage 5.5).
 
-### Stage 3.5: top-align sections within each grid row (engine.py:590-594)
+### Stage 3.5: top-align sections within each grid row
 - **Purpose**: Shift sections up so contiguous column groups within a
   row share the same `bbox_y`.
-- **Helper**: `_top_align_row_sections` (engine.py:1275).
+- **Helper**: `_top_align_row_sections` (`phases/row_align.py`).
 - **Precondition**: All Stage-3.4 bbox shifts settled.
 - **Postcondition**: Same-row contiguous-column sections share
   `bbox_y` (and station/port Y shifts by the same delta, preserving
@@ -345,11 +345,11 @@ in pipeline order.
   tops are not guaranteed flush (measured ~40px non-flush on
   `terminal_symmetric_fan` / `trunk_through_fan`).
 
-### Stage 4.1: align ports to downstream (engine.py:603-605)
+### Stage 4.1: align ports to downstream
 - **Purpose**: For non-fold LR/RL sections, pull exit-entry port
   pairs toward the downstream section's internal stations so lines
   flow without detour.
-- **Helper**: `_align_ports_to_downstream` (engine.py:4985).
+- **Helper**: `_align_ports_to_downstream` (`phases/ports.py`).
 - **Precondition**: Section geometry final (Pass A complete).
 - **Postcondition**: Each non-fold LR/RL exit-entry pair Y sits near
   the downstream section's connected station Y.
@@ -360,10 +360,10 @@ in pipeline order.
   section (no-kink) at the final boundary (refined, not undone, by Stage
   5.5).
 
-### Stage 4.2: snap sole-layer stations to ports (engine.py:607-609)
+### Stage 4.2: snap sole-layer stations to ports
 - **Purpose**: When a port-connected station is the only occupant of
   its layer, snap it to the port Y so the connection is horizontal.
-- **Helper**: `_snap_sole_layer_stations_to_ports` (engine.py:5120).
+- **Helper**: `_snap_sole_layer_stations_to_ports` (`phases/ports.py`).
 - **Precondition**: Stage 4.1 settled port Ys.
 - **Postcondition**: Sole-layer port-connected stations share Y with
   their port. Multi-station layers are skipped (would risk collision).
@@ -373,11 +373,11 @@ in pipeline order.
 - **Lifecycle:** invariant - the horizontal sole-layer-station-to-port
   connection holds at the end (re-snapped onto the grid by Stage 6.4).
 
-### Stage 4.3: snap grid-group entry ports (engine.py:611-615)
+### Stage 4.3: snap grid-group entry ports
 - **Purpose**: For grid-group sections (skipped by Stage 4.2), snap entry
   ports to the connected first-internal-station Y - straight
   port-to-station connection.
-- **Helper**: `_snap_grid_group_entry_ports` (engine.py:5237).
+- **Helper**: `_snap_grid_group_entry_ports` (`phases/ports.py`).
 - **Precondition**: Stage 4.2 complete.
 - **Postcondition**: Grid-group entry ports share Y with their first
   connected internal station.
@@ -385,10 +385,10 @@ in pipeline order.
 - **Lifecycle:** invariant - grid-group entry ports share Y with their
   first connected station at the final boundary.
 
-### Stage 4.4: snap grid-group exit ports (engine.py:617-621)
+### Stage 4.4: snap grid-group exit ports
 - **Purpose**: Mirror of Stage 4.3 for exit ports - snap to the downstream
   entry port's Y (which Stage 4.3 just snapped to a grid station).
-- **Helper**: `_snap_grid_group_exit_ports` (engine.py:5284).
+- **Helper**: `_snap_grid_group_exit_ports` (`phases/ports.py`).
 - **Precondition**: Stage 4.3 complete (downstream entry ports snapped).
 - **Postcondition**: Grid-group exit ports share Y with their
   downstream entry port (i.e. with the downstream's connected
@@ -397,10 +397,10 @@ in pipeline order.
 - **Lifecycle:** invariant - grid-group exit ports share Y with their
   downstream entry port at the final boundary.
 
-### Stage 4.5: space ports from termini (engine.py:623-625)
+### Stage 4.5: space ports from termini
 - **Purpose**: Push ports away from terminus stations so a routed
   line clears any file-icon caption / label by at least `y_spacing`.
-- **Helper**: `_space_ports_from_termini` (engine.py:5695).
+- **Helper**: `_space_ports_from_termini` (`phases/ports.py`).
 - **Precondition**: Port Ys settled by Stages 4.1 to 4.4.
 - **Postcondition**: For every (port, terminus) pair in the same
   section, `|port.y - terminus.y| >= y_spacing` (modulo bbox bounds).
@@ -410,11 +410,11 @@ in pipeline order.
 - **Lifecycle:** invariant - the port-to-terminus clearance holds at the
   final boundary.
 
-### Stage 4.6: recompute grid-group bboxes (engine.py:627-632)
+### Stage 4.6: recompute grid-group bboxes
 - **Purpose**: Reset grid-group bboxes to symmetric `max_y_pad`
   padding around final non-port station Y range, then expand for any
   ports outside.
-- **Helper**: `_recompute_grid_group_bboxes` (engine.py:1232).
+- **Helper**: `_recompute_grid_group_bboxes` (`phases/row_align.py`).
 - **Precondition**: Port Ys final (Stage 4.5).
 - **Postcondition**: Each grid-group section bbox snugly bounds its
   content with consistent top/bottom padding.
@@ -422,7 +422,7 @@ in pipeline order.
 - **Lifecycle:** transient - the snug grid-group bbox is superseded by
   the final bbox sizing in Stage 6.13 (bottom) and Stage 6.15a (top).
 
-### Stage 4.7: re-run top-align (engine.py:634-637)
+### Stage 4.7: re-run top-align
 - **Purpose**: Repeat Stage 3.5 after Stage 4.5 expanded bboxes via
   `_expand_bbox_for_y`.
 - **Helper**: `_top_align_row_sections` (re-invoked).
@@ -432,11 +432,11 @@ in pipeline order.
 - **Lifecycle:** transient - superseded by Stage 6.15a (flush row tops,
   as Stage 3.5).
 
-### Stage 4.8: align row trunk Ys (engine.py:639-642)
+### Stage 4.8: align row trunk Ys
 - **Purpose**: Within each row, shift content downward in shallower
   sections so the inter-section trunk bundle passes through at a
   single Y. Bbox tops preserved (heights grow downward).
-- **Helper**: `_align_row_trunk_ys` (engine.py:1414).
+- **Helper**: `_align_row_trunk_ys` (`phases/row_align.py`).
 - **Precondition**: Stage 4.7 done.
 - **Postcondition**: For sections in a row's contiguous column run,
   the trunk Y is the row's deepest pre-pass trunk Y. Row-spanning
@@ -445,7 +445,7 @@ in pipeline order.
 - **Lifecycle:** invariant - the per-row trunk Y is consistent at the
   final boundary (`test_row_trunk_marker_cy_consistent`).
 
-### Stage 4.9: redistribute fan-out siblings (engine.py:644-648)
+### Stage 4.9: redistribute fan-out siblings
 - **Purpose**: For each fan-out column with a unique trunk junction
   (one station carrying the full bundle plus >=2 side branches),
   redistribute side stations symmetrically around the trunk Y. No-op
@@ -487,10 +487,10 @@ in pipeline order.
   full-bundle columns against the final trunk Y (this fan uses the local
   port Y).
 
-### Stage 5.1: position junctions (engine.py:658-659)
+### Stage 5.1: position junctions
 - **Purpose**: Place each junction station in the inter-section gap
   at the exit port's Y (fan-out) or near the entry port (merge).
-- **Helper**: `_position_junctions` (engine.py:4596).
+- **Helper**: `_position_junctions` (`phases/junctions.py`).
 - **Precondition**: All port Ys final (Pass B complete).
 - **Postcondition**: Every junction has finite `(x, y)`. Fan-out
   junctions sit at `exit_port.y` plus a `JUNCTION_MARGIN` X offset
@@ -522,11 +522,11 @@ in pipeline order.
   final" precondition - the anchor uses the consumer's final Y and is
   re-applied by Stages 6.6 / 6.8 (#463).
 
-### Stage 5.3: re-align row bbox tops only (engine.py:665-670)
+### Stage 5.3: re-align row bbox tops only
 - **Purpose**: After Stage 5.2 grew some bboxes upward, grow other
   same-row bboxes upward to match. Station Ys in unlifted sections
   preserved.
-- **Helper**: `_top_align_row_bboxes_only` (engine.py:1348).
+- **Helper**: `_top_align_row_bboxes_only` (`phases/row_align.py`).
 - **Precondition**: Stage 5.2 may have lifted some bboxes.
 - **Postcondition**: Within each row's contiguous column group, all
   bboxes share `bbox_y` (heights extended upward as needed).
@@ -534,11 +534,11 @@ in pipeline order.
 - **Lifecycle:** transient - superseded by Stage 6.15a (flush row tops,
   as Stage 3.5).
 
-### Stage 5.4: compact row content to bbox top (engine.py:672-676)
+### Stage 5.4: compact row content to bbox top
 - **Purpose**: Shift each row's column-group up by the smallest
   above-content slack, then shrink bbox heights to remove the empty
   band. Preserves trunk alignment.
-- **Helper**: `_compact_row_content_to_bbox_top` (engine.py:1540).
+- **Helper**: `_compact_row_content_to_bbox_top` (`phases/row_align.py`).
 - **Precondition**: Bbox tops aligned (Stage 5.3).
 - **Postcondition**: Each row's contiguous column group's bbox top
   sits at `min(content_top) - section_y_padding`. Stations shift up
@@ -549,11 +549,11 @@ in pipeline order.
 - **Lifecycle:** transient - superseded by Stage 6.1 (fans content back
   into the band) and Stage 6.13 (re-sizes the bbox bottom).
 
-### Stage 5.5: snap inter-section port pairs + reposition junctions (engine.py:678-686)
+### Stage 5.5: snap inter-section port pairs + reposition junctions
 - **Purpose**: Snap exit/entry port pairs in the same row to a shared
   Y (the entry's), then re-run Stage 5.1 to put junctions back on the
   exit port.
-- **Helper**: `_snap_inter_section_port_pairs` (engine.py:1641) then
+- **Helper**: `_snap_inter_section_port_pairs` (`phases/balancing.py`) then
   `_position_junctions`.
 - **Precondition**: Row compaction done; port pair Ys may have drifted.
 - **Postcondition**: Within each row, every LEFT/RIGHT exit port and
@@ -565,11 +565,11 @@ in pipeline order.
 - **Lifecycle:** invariant - LR/RL exit-entry port pairs share a Y
   (no-kink) and junctions track their ports at the final boundary.
 
-### Stage 6.1: fan free content upward (engine.py:688-693)
+### Stage 6.1: fan free content upward
 - **Purpose**: When the row's compaction leaves visible empty top
   band but the section has trunk-candidate sibling stations,
   fan those upward into the empty band.
-- **Helper**: `_fan_free_content_upward` (engine.py:1762).
+- **Helper**: `_fan_free_content_upward` (`phases/balancing.py`).
 - **Precondition**: Trunk Y aligned (Stage 4.8). Compaction done
   (Stage 5.4).
 - **Postcondition**: Eligible sections fan stations upward by at most
@@ -587,11 +587,11 @@ in pipeline order.
   non-trunk siblings; this stage moves only full-bundle trunk
   candidates), so it does not override this placement.
 
-### Stage 6.2: fan source inputs upward (engine.py:695-700)
+### Stage 6.2: fan source inputs upward
 - **Purpose**: Companion to Stage 6.1 for source-stack sections (single
   full-bundle trunk + subset-bundle file inputs at the entry column).
   Lift trunk-nearest source inputs into the empty top band.
-- **Helper**: `_fan_source_inputs_upward` (engine.py:1852).
+- **Helper**: `_fan_source_inputs_upward` (`phases/balancing.py`).
 - **Precondition**: Stage 6.1 done.
 - **Postcondition**: Section is top- and bottom-weighted around the
   trunk row instead of stacked below it.
@@ -638,11 +638,11 @@ in pipeline order.
   grid slot at the final boundary (re-asserted canvas-wide by Stage
   6.15).
 
-### Stage 6.5: align TB-section bbox bottoms (engine.py:719-723)
+### Stage 6.5: align TB-section bbox bottoms
 - **Purpose**: Extend TB-section bbox bottom to match downstream
   LR/RL section's bbox bottom so the line doesn't look pinned to the
   TB bbox edge.
-- **Helper**: `_align_tb_section_bbox_bottoms` (engine.py:5550).
+- **Helper**: `_align_tb_section_bbox_bottoms` (`phases/ports.py`).
 - **Precondition**: All station/port Ys final (post-snap).
 - **Postcondition**: For each TB section feeding an LR/RL target,
   `tb.bbox_y + tb.bbox_h >= target.bbox_y + target.bbox_h`.
@@ -730,11 +730,11 @@ in pipeline order.
 - **Lifecycle:** transient - superseded by Stage 6.15a (flush row tops,
   as Stage 3.5).
 
-### Stage 6.10: align terminus to upstream (engine.py:759-763)
+### Stage 6.10: align terminus to upstream
 - **Purpose**: After Stage 6.7 re-pitched fanned columns, a single-station
   downstream column (e.g. a `file` terminus) may have stayed at its
   pre-fan Y. Pin it back onto its sole upstream's Y.
-- **Helper**: `_align_terminus_to_upstream` (engine.py:3860).
+- **Helper**: `_align_terminus_to_upstream` (`phases/single_section.py`).
 - **Precondition**: Stage 6.7 re-centered fans.
 - **Postcondition**: Single-station downstream columns share Y with
   their unique upstream.
@@ -751,7 +751,7 @@ in pipeline order.
 - **Gating**: Early-returns unless **both** `graph._explicit_grid` and
   `graph.center_ports` are set (scoped to explicit-`%%metro grid:` +
   centre-ports pipelines), so it is a no-op on auto-laid graphs.
-- **Helper**: `_balance_section_content_around_trunk` (engine.py:2030).
+- **Helper**: `_balance_section_content_around_trunk` (`phases/balancing.py`).
 - **Precondition**: All earlier 13-phase reshuffles done.
 - **Postcondition**: Sibling count above trunk >= sibling count below
   trunk (where movable), inside bbox.
@@ -765,12 +765,12 @@ in pipeline order.
 - **Lifecycle:** invariant - section content is balanced around the
   trunk (siblings above >= below, where movable) at the final boundary.
 
-### Stage 6.12: recenter loop side stations (engine.py:773-781)
+### Stage 6.12: recenter loop side stations
 - **Purpose**: Recompute the X of fan-out side stations (one trunk
   predecessor, one trunk successor - "loop side" stations like propd,
   dream, DESeq2 around limma) to the midpoint of their actual diagonal
   corner Xs from the routing geometry.
-- **Helper**: `_recenter_loop_side_stations` (engine.py:2297).
+- **Helper**: `_recenter_loop_side_stations` (`phases/balancing.py`).
 - **Precondition**: All Y phases done; routing geometry derivable.
 - **Postcondition**: Loop side stations sit at the visual centre of
   their horizontal loop run.
@@ -782,7 +782,7 @@ in pipeline order.
 - **Lifecycle:** invariant - loop-side stations sit at the visual centre
   of their loop run at the final boundary.
 
-### Stage 6.13: shrink and tighten rows (engine.py:783-794)
+### Stage 6.13: shrink and tighten rows
 - **Purpose**: Shrink each section's bbox bottom to
   `max_content_y + section_y_padding` (phase 1), then pull lower-row
   sections up to close any vertical slack the shrink revealed
@@ -818,7 +818,7 @@ in pipeline order.
   it grows a bbox downward). *liftable:* no - one-shot, order-dependent
   (computes against the final content extent).
 
-### Stage 6.14: shift and propagate loop stations (engine.py:796-806)
+### Stage 6.14: shift and propagate loop stations
 - **Purpose**: Shift sparse loop-side stations (one inbound, one
   outbound, single-line consumer) onto a half-pitch Y when sharing
   the full-row Y with a busier sibling whose inbound bundle would
