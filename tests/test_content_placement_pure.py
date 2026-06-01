@@ -16,10 +16,9 @@ port anchors frozen).  A pure phase governs the same stations and lands each at
 the same Y both times.  Any station the phase moves in either run whose final Y
 differs between the two runs is a purity leak.
 
-The remaining known leaks are pinned as strict xfails below and burned down by
-the #491 follow-up PRs (track sorts, structural slack, structural fallback
-trunks).  ``strict=True`` means a phase that *becomes* pure flips its xfail to
-an xpass and fails the suite, forcing the stale entry to be removed.
+All eight content-placement phases are pure, so this guard admits no
+exceptions: it is the machine-checked counterpart to #487's anchor-frozen guard,
+and a regression that reintroduces a non-anchor read fails it.
 
 Refs #491, #488, #487, #485, #465.
 """
@@ -37,13 +36,6 @@ TOL = 1e-3
 _Coords = dict[str, tuple[float, float]]
 
 CORPUS = content_corpus()
-
-KNOWN_LEAKS: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("_balance_section_content_around_trunk", "examples/differentialabundance"),
-        ("_balance_section_content_around_trunk", "examples/genomic_pipeline"),
-    }
-)
 
 
 def _snapshot(graph: MetroGraph) -> tuple[_Coords, _Coords]:
@@ -118,14 +110,7 @@ def _make_purity_probe(original, leaks: list[tuple[str, float, float]]):
 def _cases():
     for fid, path, is_nf in CORPUS:
         for phase in CONTENT_PLACEMENT_PHASES:
-            marks = (
-                [pytest.mark.xfail(strict=True, reason="#491 known purity leak")]
-                if (phase, fid) in KNOWN_LEAKS
-                else []
-            )
-            yield pytest.param(
-                fid, path, is_nf, phase, id=f"{fid}-{phase}", marks=marks
-            )
+            yield pytest.param(fid, path, is_nf, phase, id=f"{fid}-{phase}")
 
 
 @pytest.mark.parametrize("fid,path,is_nf,phase_name", list(_cases()))

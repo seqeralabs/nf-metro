@@ -414,7 +414,7 @@ def _balance_direct_external_feeder_ys(
             continue
         if src.section_id == section_id:
             continue
-        feeder_ys.append(src.y)
+        feeder_ys.append(_ref_y(graph, cur_id))
     return feeder_ys
 
 
@@ -445,6 +445,15 @@ def _balance_section_content_around_trunk(
         return
     if not graph.center_ports:
         return
+
+    # Decide and place from the frozen reference arrangement, not live geometry:
+    # restore each in-scope station to its reference Y so the lift/swap loop
+    # reads the same structural input regardless of any perturbation.
+    for section in graph.sections.values():
+        for sid in section.station_ids:
+            st = graph.stations.get(sid)
+            if st is not None and not st.is_port:
+                st.y = _ref_y(graph, sid)
 
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
@@ -481,7 +490,7 @@ def _balance_section_content_around_trunk(
             cols[round(graph.stations[sid].x, 3)].append(sid)
 
         section_top_y = min(graph.stations[s].y for s in internal_ids)
-        top_band = section_top_y - section.bbox_y
+        top_band = section_top_y - _ref_bbox_top(graph, section)
         if top_band <= y_spacing + 0.5:
             continue
 
@@ -528,7 +537,7 @@ def _balance_section_content_around_trunk(
         max_iters = len(movable)
         for _ in range(max_iters):
             section_top_y = min(graph.stations[s].y for s in internal_ids)
-            top_band = section_top_y - section.bbox_y
+            top_band = section_top_y - _ref_bbox_top(graph, section)
             if top_band <= y_spacing + 0.5:
                 break
             ys_by_sid = {s: graph.stations[s].y for s in movable}
@@ -560,7 +569,9 @@ def _balance_section_content_around_trunk(
             # Off-track file icons reach ~16 px above centre; on-track
             # markers reach ~9.5 px.  Use the wider reach when relevant.
             marker_clearance = 16.0 if (st and st.off_track) else 9.5
-            min_y = section.bbox_y + max(label_clearance, marker_clearance)
+            min_y = _ref_bbox_top(graph, section) + max(
+                label_clearance, marker_clearance
+            )
             if new_y < min_y - 0.5:
                 if not above:
                     break

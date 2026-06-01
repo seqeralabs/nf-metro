@@ -1009,6 +1009,8 @@ def _place_pass_c_content(
     # empty top band so content sits symmetrically around the trunk.
     # Runs after re-centering and terminus-Y pinning so it sees the
     # final trunk Y.  U-turn-safe and bbox-bounded.
+    # Frozen reference for Stage 6.11 (see _snapshot_placement_refs).
+    _snapshot_placement_refs(graph)
     _run_placement_per_row(
         graph,
         validate,
