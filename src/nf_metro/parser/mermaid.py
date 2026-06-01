@@ -1084,8 +1084,6 @@ def _rewrite_edges_with_junctions(
     for edge in inter_section_edges:
         src_sec = graph.section_for_station(edge.source)
         tgt_sec = graph.section_for_station(edge.target)
-        # See _classify_edges: inter-section edges always have both
-        # endpoints in a section, so neither lookup is None.
         assert src_sec is not None and tgt_sec is not None
         entry_side = entry_side_for_line.get((tgt_sec, edge.line_id), PortSide.LEFT)
 

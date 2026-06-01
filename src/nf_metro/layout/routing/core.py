@@ -580,7 +580,6 @@ def _route_inter_section(
         return _route_bottom_exit_junction(edge, src, tgt, i, n, ctx)
 
     if needs_bypass:
-        # needs_bypass is only True when both columns resolved.
         assert src_col is not None and tgt_col is not None
         # Merge dispatch: trunk gets full bypass to entry port,
         # branches get truncated descent to trunk level.
@@ -2108,7 +2107,6 @@ def _route_inter_row_gap_corridor(
         vx = _fan_left_entry_descent_x(ctx, ep_col, pos_n, delta)
     if vx is None:
         vx = _corridor_descent_x(ctx, ep_col, ep_row, delta)
-    # _corridor_is_viable confirmed a descent channel exists here.
     assert vx is not None
 
     # H lead-in right of the source, clear of the source section's edge.
@@ -2564,7 +2562,6 @@ def _route_tb_lr_exit(
         and src.section_id == tgt.section_id
     ):
         return None
-    # tgt_is_lr_exit already established tgt_port is a real port.
     assert tgt_port is not None
 
     src_off = _get_offset(ctx, edge.source, edge.line_id)
@@ -3362,7 +3359,6 @@ def _collect_centering_candidates(
         elif in_rp:
             in_diag_end_x = in_rp.points[2][0]
         else:
-            # Reached only via the flat-in case above, which sets flat_in_rp.
             assert flat_in_rp is not None
             in_diag_end_x = flat_in_rp.points[0][0]
 
@@ -3370,7 +3366,6 @@ def _collect_centering_candidates(
             if out_rp:
                 out_diag_start_x = out_rp.points[1][0]
             else:
-                # Reached only via the flat-out case, which sets flat_out_rp.
                 assert flat_out_rp is not None
                 out_diag_start_x = flat_out_rp.points[-1][0]
 
