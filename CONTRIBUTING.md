@@ -27,7 +27,7 @@ The diff script returns exit code 2 on "no changes" and 0 on "changes detected" 
 
 ## Runtime validators
 
-`src/nf_metro/layout/engine.py` exposes `_guard_*` functions gated by `compute_layout(graph, validate=True)`. CLI users get the default (`validate=False`); guards run primarily in tests. When you add an invariant, consider whether a matching runtime guard would catch the same class of bug earlier than CI - several guards in `engine.py` already mirror CI tests one-to-one.
+`src/nf_metro/layout/phases/guards.py` defines the `_guard_*` functions (re-exported from `engine.py`), gated by `compute_layout(graph, validate=True)`. CLI users get the default (`validate=False`); guards run primarily in tests. When you add an invariant, consider whether a matching runtime guard would catch the same class of bug earlier than CI - several guards already mirror CI tests one-to-one.
 
 ## Test fixtures
 
