@@ -26,17 +26,15 @@ Refs #491, #488, #487, #485, #465.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-from conftest import CONTENT_PLACEMENT_PHASES, content_corpus
+from conftest import CONTENT_PLACEMENT_PHASES, compute_corpus_layout, content_corpus
 
 import nf_metro.layout.engine as engine
-from nf_metro.convert import convert_nextflow_dag
-from nf_metro.layout.engine import compute_layout
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.model import MetroGraph
 
 TOL = 1e-3
+
+_Coords = dict[str, tuple[float, float]]
 
 CORPUS = content_corpus()
 
@@ -56,13 +54,13 @@ KNOWN_LEAKS: frozenset[tuple[str, str]] = frozenset(
 )
 
 
-def _snapshot(graph) -> tuple[dict, dict]:
+def _snapshot(graph: MetroGraph) -> tuple[_Coords, _Coords]:
     stations = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
     bboxes = {sec.id: (sec.bbox_y, sec.bbox_h) for sec in graph.sections.values()}
     return stations, bboxes
 
 
-def _restore(graph, snap: tuple[dict, dict]) -> None:
+def _restore(graph: MetroGraph, snap: tuple[_Coords, _Coords]) -> None:
     stations, bboxes = snap
     for sid, (x, y) in stations.items():
         st = graph.stations.get(sid)
@@ -74,7 +72,7 @@ def _restore(graph, snap: tuple[dict, dict]) -> None:
             sec.bbox_y, sec.bbox_h = y, h
 
 
-def _perturb(graph) -> None:
+def _perturb(graph: MetroGraph) -> None:
     """Deterministically scramble the non-anchor state.
 
     Every non-port station's Y and every section's bbox top/height is shifted by
@@ -92,19 +90,11 @@ def _perturb(graph) -> None:
         sec.bbox_h += ((j % 3) + 1) * 9.0
 
 
-def _layout(path: Path, is_nextflow: bool) -> None:
-    text = path.read_text()
-    if is_nextflow:
-        text = convert_nextflow_dag(text)
-    graph = parse_metro_mermaid(text)
-    compute_layout(graph, validate=True)
-
-
-def _make_purity_probe(original, leaks: list):
+def _make_purity_probe(original, leaks: list[tuple[str, float, float]]):
     """Wrap ``original`` so each call records any non-anchor-state dependence
     into ``leaks`` and then leaves the genuine single-application result."""
 
-    def probe(graph, *args, **kwargs):
+    def probe(graph: MetroGraph, *args, **kwargs):
         pre = _snapshot(graph)
         before_y = {sid: s.y for sid, s in graph.stations.items()}
 
@@ -148,10 +138,10 @@ def _cases():
 
 @pytest.mark.parametrize("fid,path,is_nf,phase_name", list(_cases()))
 def test_placement_phase_is_pure(fid, path, is_nf, phase_name, monkeypatch):
-    leaks: list = []
+    leaks: list[tuple[str, float, float]] = []
     original = getattr(engine, phase_name)
     monkeypatch.setattr(engine, phase_name, _make_purity_probe(original, leaks))
-    _layout(path, is_nf)
+    compute_corpus_layout(path, is_nf)
 
     assert not leaks, (
         f"{phase_name} is not pure on {fid}: perturbing non-anchor state "

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from nf_metro.convert import convert_nextflow_dag
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
@@ -98,6 +99,17 @@ def content_corpus() -> list[tuple[str, Path, bool]]:
     for p in sorted(_NEXTFLOW.glob("*.mmd")):
         items.append((f"nextflow/{p.stem}", p, True))
     return items
+
+
+def compute_corpus_layout(path: Path, is_nextflow: bool) -> MetroGraph:
+    """Parse a corpus ``.mmd`` (converting from a Nextflow DAG first when
+    ``is_nextflow``) and run the validated layout, returning the graph."""
+    text = path.read_text()
+    if is_nextflow:
+        text = convert_nextflow_dag(text)
+    graph = parse_metro_mermaid(text)
+    compute_layout(graph, validate=True)
+    return graph
 
 
 # --- Parse/layout helpers ---

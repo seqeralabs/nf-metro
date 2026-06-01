@@ -24,26 +24,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from conftest import CONTENT_PLACEMENT_PHASES, content_corpus
+from conftest import CONTENT_PLACEMENT_PHASES, compute_corpus_layout, content_corpus
 
 import nf_metro.layout.engine as engine
-from nf_metro.convert import convert_nextflow_dag
-from nf_metro.layout.engine import compute_layout
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.model import MetroGraph
 
 CORPUS = content_corpus()
 
 
-def _layout(path: Path, is_nextflow: bool):
-    text = path.read_text()
-    if is_nextflow:
-        text = convert_nextflow_dag(text)
-    graph = parse_metro_mermaid(text)
-    compute_layout(graph, validate=True)
-    return graph
-
-
-def _coords(graph) -> dict[str, tuple[float, float]]:
+def _coords(graph: MetroGraph) -> dict[str, tuple[float, float]]:
     return {sid: (round(s.x, 6), round(s.y, 6)) for sid, s in graph.stations.items()}
 
 
@@ -56,7 +45,7 @@ def _baseline(
     fid: str, path: Path, is_nextflow: bool
 ) -> dict[str, tuple[float, float]]:
     if fid not in _BASELINE:
-        _BASELINE[fid] = _coords(_layout(path, is_nextflow))
+        _BASELINE[fid] = _coords(compute_corpus_layout(path, is_nextflow))
     return _BASELINE[fid]
 
 
@@ -74,7 +63,7 @@ def test_placement_phase_is_idempotent(fixture, phase_name, monkeypatch):
         original(graph, *args, **kwargs)
 
     monkeypatch.setattr(engine, phase_name, run_twice)
-    doubled = _coords(_layout(path, is_nextflow))
+    doubled = _coords(compute_corpus_layout(path, is_nextflow))
 
     diff = {
         k: (baseline[k], doubled.get(k))
