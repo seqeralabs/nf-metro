@@ -191,7 +191,10 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
             if len(trunks) != 1:
                 continue
             trunk_sid = trunks[0]
-            trunk_y = graph.stations[trunk_sid].y
+            port_trunk = _section_lr_port_anchor_y(graph, section)
+            trunk_y = (
+                port_trunk if port_trunk is not None else graph.stations[trunk_sid].y
+            )
             # Fan-out siblings: strict subset of bundle (skip full-bundle
             # pass-throughs and orphan stations with no lines).  Require
             # at least one predecessor so source stations (file inputs
