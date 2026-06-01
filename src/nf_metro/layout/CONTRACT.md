@@ -131,6 +131,29 @@ LR port's X, would be caught too). This separation (structural anchors vs.
 dependent placement) is what makes the layout forward-resolvable: content is a
 function of the frozen anchors, not the reverse.
 
+### Content-placement purity
+
+`_guard_anchors_frozen_during_placement` only forbids a content phase from
+*moving* an anchor. A stronger property holds and is machine-checked separately:
+every content-placement phase is a **pure function of (frozen anchors +
+structure)**. The Y it assigns to the stations it governs depends only on the
+frozen port anchors and the section structure (tracks, edges, columns), never on
+the mutable intermediate state earlier phases happen to have left behind
+(current station Y, section `bbox` geometry). This is strictly stronger than the
+idempotence locked by `test_content_placement_idempotent` (#488): purity means
+re-running, re-ordering, *or perturbing the non-anchor state* cannot change a
+phase's output. `tests/test_content_placement_pure.py` (#491) is the guard - it
+perturbs the non-anchor state before each phase and asserts the governed
+stations land identically, the test-time counterpart to the anchor-frozen guard.
+
+The phases that genuinely need an intermediate quantity - the empty-band slack
+in 6.1 / 6.2, the balance arrangement in 6.11 - read it from a frozen *placement
+reference* (`_snapshot_placement_refs` populates `graph._placement_ref_y` /
+`_placement_ref_bbox_top`; phases read it via `_ref_y` / `_ref_bbox_top`)
+captured once right before the consumer, rather than from live geometry. The
+reference equals the live geometry at capture time, so the property was added
+with no change to any render.
+
 ## Stage overview
 
 The pipeline groups into six stages aligned with the coord-regime
@@ -431,9 +454,12 @@ in pipeline order.
 - **Helper**: `_redistribute_fanout_siblings` (`phases/fan_bundles.py`).
 - **Precondition**: Trunk Ys aligned (Stage 4.8).
 - **Postcondition**: In qualifying columns, fan-out siblings sit
-  symmetrically around the trunk station's Y. Linear chains, fan-in
-  structures, and file inputs are left in place.
+  symmetrically around the section's LR/RL port trunk anchor (the trunk
+  station's own Y only when the section has no such port). Linear chains,
+  fan-in structures, and file inputs are left in place.
 - **Invariants preserved**: Trunk station Y. Off-track stations.
+- **Purity**: centres on the frozen port anchor, so the fan does not
+  depend on the trunk station's live Y (#491).
 - **Lifecycle:** transient - superseded by Stage 6.7 / 6.11, which
   re-fan the siblings against the final trunk Y (this fan uses the early
   trunk Y).
@@ -550,6 +576,8 @@ in pipeline order.
   one `y_spacing` slot, balancing content above/below trunk.
 - **Invariants preserved**: Trunk station Y. Off-track stations
   (sections with off-track band are skipped).
+- **Purity**: top slack and anchor are read from the frozen placement
+  reference (see Content-placement purity), not live geometry (#491).
 - **Related tests**: `test_section_top_band_filled`,
   `test_section1_input_above_trunk`.
 - **Lifecycle:** invariant - the filled top band / content balanced
@@ -568,6 +596,8 @@ in pipeline order.
 - **Postcondition**: Section is top- and bottom-weighted around the
   trunk row instead of stacked below it.
 - **Invariants preserved**: Trunk station Y.
+- **Purity**: trunk anchor is the frozen LR/RL port Y and the lift count
+  reads the frozen placement-reference bbox top, not live geometry (#491).
 - **Lifecycle:** invariant - source-stack sections stay
   top-and-bottom-weighted around the trunk at the final boundary.
 
@@ -727,6 +757,10 @@ in pipeline order.
   trunk (where movable), inside bbox.
 - **Invariants preserved**: Trunk station Y. Sections that already
   balance are left alone.
+- **Purity**: an in-scope reset restores every station to its frozen
+  placement-reference Y before the lift/swap loop, and the band gates /
+  feeder check read the reference, so the balance decision does not depend
+  on live geometry (#491).
 - **Related tests**: `test_section_top_band_filled`.
 - **Lifecycle:** invariant - section content is balanced around the
   trunk (siblings above >= below, where movable) at the final boundary.
