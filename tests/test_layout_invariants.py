@@ -4667,9 +4667,7 @@ def test_content_placement_leaves_port_anchors_frozen(fixture, monkeypatch):
         monkeypatch.setattr(engine, name, _make_probe(name, getattr(engine, name)))
 
     _layout(fixture)
-    assert not moved, (
-        f"{fixture}: content placement moved port anchor(s): {moved[:3]}"
-    )
+    assert not moved, f"{fixture}: content placement moved port anchor(s): {moved[:3]}"
 
 
 @pytest.mark.parametrize(
