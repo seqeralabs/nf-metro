@@ -836,8 +836,7 @@ def _place_pass_c_content(
     # All port positions are now final; Stage 5.1 positions junctions
     # once.  Stage 5.2 lifts off-track stations; Stages 5.3 to 5.5
     # then re-align row bbox tops, compact, and re-snap inter-section
-    # port pairs (re-running Stage 5.1 for the junctions that move
-    # with them).  Stage 6 below handles the rest of Pass C.
+    # port pairs.  Stage 6 below handles the rest of Pass C.
 
     # Stage 5.1: Position junction stations in the inter-section gap.
     _position_junctions(graph)
@@ -872,12 +871,8 @@ def _place_pass_c_content(
     # Stage 5.5: Snap inter-section LR/RL port pairs to a common Y so
     # the trunk bundle stays perfectly horizontal across boundaries.
     # Picks the downstream entry port's Y as the anchor since it sits
-    # on the row's aligned trunk grid.  Junctions are re-positioned
-    # afterwards: Stage 5.1 fixed their Y to the pre-compaction exit
-    # port Y, and either the snap pass or ``_compact_row_content_to_bbox_top``
-    # may have moved the exit port since then.
+    # on the row's aligned trunk grid.
     _snap_inter_section_port_pairs(graph)
-    _position_junctions(graph)
     if validate:
         _run_pass_c_guards(graph, "after Stage 5.5")
 
@@ -934,12 +929,7 @@ def _place_pass_c_content(
     # phases compute shifts that don't respect the grid pitch, leaving
     # coordinates at fractional Ys (e.g. 298.785 when the pitch is 55).
     # This final pass restores clean grid positions before validation.
-    # Junctions sit in the inter-section gap with no section_id and are
-    # skipped by the snap pass; re-running _position_junctions after the
-    # snap re-anchors them to the moved exit ports so the L-shape route
-    # doesn't U-turn through a stale junction Y.
     _snap_all_y_to_grid(graph, y_spacing)
-    _position_junctions(graph)
     # On-track consumer Ys are now final/grid-snapped; the off-track
     # reanchor (Stage 6.6 / 6.8) may run from here on.
     graph._consumers_grid_snapped = True
@@ -993,10 +983,6 @@ def _place_pass_c_content(
         # recenter Y as the new anchor and grows the section bbox
         # upward when the lifted band moves above its current top.
         _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
-        # Same canvas-fit safeguard as Stage 5.2 / Stage 6.6: a
-        # reanchor-driven bbox grow can push the topmost section
-        # above the canvas top.
-        _shift_graph_into_canvas(graph, section_y_padding)
 
         # Stage 6.9: Re-run row top-align.  A Stage 6.8 reanchor-
         # driven bbox grow leaves the section's bbox above its row
@@ -1060,13 +1046,8 @@ def _stack_rows(
     # bottom rows away from the bbox bottom), then pull lower rows up
     # to close the slack the shrink revealed.  Bottom-only shrink, so
     # trunk alignment is unaffected; tighten only fires where a rowspan
-    # section's content fell short of its row claim.  Junctions live
-    # in inter-section space and aren't moved by the tighten pass, so
-    # re-run ``_position_junctions`` afterwards to re-anchor them to
-    # the now-shifted exit/entry port Ys (otherwise the trunk dips to
-    # the junction's pre-shift Y and produces an S-kink).
+    # section's content fell short of its row claim.
     _shrink_and_tighten_rows(graph, section_y_padding, section_y_gap)
-    _position_junctions(graph)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.13")
 
@@ -1080,11 +1061,6 @@ def _stack_rows(
     _shift_and_propagate_loop_stations(
         graph, y_spacing, section_y_padding, section_y_gap
     )
-    # The shift can move an exit port off the Y it held when junctions were
-    # last positioned (Stage 6.13).  Re-anchor junctions to the settled port
-    # Ys so a fan-out bundle runs straight from exit to junction instead of
-    # dipping to a stale junction Y and back (#386).
-    _position_junctions(graph)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.14")
 
@@ -1133,8 +1109,10 @@ def _finalize_layout(
     # port off the upstream feeder Y it was snapped to in Stage 3.2,
     # re-introducing an inter-section S-kink.  Re-running the alignment
     # (TB/BT sections only, to leave settled LR/RL geometry untouched)
-    # re-snaps the port to its now-settled feeder.  Junctions are
-    # re-anchored afterwards for the same reason as Stages 6.13/6.14.
+    # re-snaps the port to its now-settled feeder.  Junctions live in
+    # inter-section space and aren't moved by the settling phases, so
+    # re-anchor them to the settled exit/entry port Ys afterwards
+    # (otherwise a fan-out bundle dips to a stale junction Y and back).
     _align_entry_ports(graph, tb_only=True)
     _position_junctions(graph)
     if validate:
