@@ -4035,13 +4035,13 @@ def test_inter_section_route_y_stays_within_row_band(fixture):
 
 # ---------------------------------------------------------------------------
 # Topologically-equivalent siblings share Y or sit symmetrically
-# (audit item 15 / issue #318)
+# (audit item 15 / issue #453)
 # ---------------------------------------------------------------------------
 
 
 # Fixtures known to fail ``test_topological_siblings_share_y_or_symmetric``
-# (audit item 15 / open issue #318).  Tracked separately - the test is
-# added to lock in the invariant so a future fix XPASSes here.
+# (audit item 15).  The sibling-Y defect this dict tracked is resolved, so
+# no fixture is currently exempted; the invariant now holds gallery-wide.
 _XFAIL_SIBLINGS: dict[str, str] = {}
 
 
@@ -4054,9 +4054,9 @@ def test_topological_siblings_share_y_or_symmetric(fixture):
     line_set)`` should share Y, or for >= 3 members be symmetrically
     distributed around their mean Y.
 
-    Catches issue #318: gatk and deepvariant have the same predecessors,
-    successors, and consumed lines but end up at different Ys when they
-    should be mirrored around the trunk.
+    Catches the audit-15 defect (tracked in #453): gatk and deepvariant
+    have the same predecessors, successors, and consumed lines but end up
+    at different Ys when they should be mirrored around the trunk.
     """
     graph = _layout(fixture)
     preds: dict[str, set[str]] = defaultdict(set)

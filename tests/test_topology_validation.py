@@ -279,7 +279,7 @@ class TestFuncprofilerUpstreamDefects:
 #    it, keeping bwa_mem -> samtools_sort -> samtools_index straight.
 # 2. Section 3 (Variant Calling) excessive column gap - GATK
 #    HaplotypeCaller and DeepVariant share column x=772 but are 80px
-#    apart with one empty grid row between them. STILL OPEN (#318).
+#    apart with one empty grid row between them. STILL OPEN (#453).
 # 3. Section 1 -> Section 2/4 inter-section line crossing - Main and
 #    QC Reporting both fanned out from junction __junction_6 and crossed
 #    on the way to their respective targets. FIXED as a side effect of
@@ -293,7 +293,7 @@ VARIANT_CALLING_FILE = EXAMPLES_DIR / "variant_calling.mmd"
 
 _VARIANT_CALLING_XFAIL = pytest.mark.xfail(
     strict=True,
-    reason="known variant_calling layout defect; tracked in #318",
+    reason="known variant_calling layout defect; tracked in #453",
 )
 
 
