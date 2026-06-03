@@ -45,6 +45,15 @@ APPROVED_RADIUS_HELPERS = frozenset(
 )
 
 
+def _is_curve_radii_slot(target: ast.expr) -> bool:
+    """True for a ``<...>.curve_radii[idx]`` subscript assignment target."""
+    return (
+        isinstance(target, ast.Subscript)
+        and isinstance(target.value, ast.Attribute)
+        and target.value.attr == "curve_radii"
+    )
+
+
 def _called_name(call: ast.Call) -> str | None:
     """Return the simple name of a call's callee (``foo`` or ``mod.foo``)."""
     func = call.func
@@ -111,15 +120,28 @@ def _walk_same_scope(node: ast.AST) -> list[ast.AST]:
 
 
 def _record_targets(scope: _Scope, node: ast.AST) -> None:
-    if not isinstance(node, ast.Assign):
+    """Bind names assigned in *node*, modelling plain, annotated and augmented
+    assignment.  ``r += off`` binds ``r`` to a ``BinOp`` so it never resolves to
+    a helper - augmenting a radius is arithmetic by definition, so the slot is
+    rejected whatever the operand."""
+    if isinstance(node, ast.Assign):
+        targets, value = node.targets, node.value
+    elif isinstance(node, ast.AnnAssign):
+        if node.value is None:
+            return  # bare annotation, no binding
+        targets, value = [node.target], node.value
+    elif isinstance(node, ast.AugAssign):
+        targets = [node.target]
+        value = ast.BinOp(left=node.target, op=node.op, right=node.value)
+    else:
         return
-    for target in node.targets:
+    for target in targets:
         if isinstance(target, ast.Name):
-            scope.bind(target.id, node.value)
+            scope.bind(target.id, value)
         elif isinstance(target, (ast.Tuple, ast.List)):
             for elt in target.elts:
                 if isinstance(elt, ast.Name):
-                    scope.bind(elt.id, node.value)
+                    scope.bind(elt.id, value)
 
 
 def _resolves_to_helper(
@@ -193,12 +215,16 @@ class _RadiusSlotFinder(ast.NodeVisitor):
     def visit_Assign(self, node: ast.Assign) -> None:
         # ``rp.curve_radii[idx] = expr`` mutations.
         for target in node.targets:
-            if (
-                isinstance(target, ast.Subscript)
-                and isinstance(target.value, ast.Attribute)
-                and target.value.attr == "curve_radii"
-            ):
+            if _is_curve_radii_slot(target):
                 self.slots.append((node.value.lineno, node.value, self.scope))
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        # ``rp.curve_radii[idx] += expr`` mutations are arithmetic by
+        # definition; record the augmented value so the slot is rejected.
+        if _is_curve_radii_slot(node.target):
+            value = ast.BinOp(left=node.target, op=node.op, right=node.value)
+            self.slots.append((node.value.lineno, value, self.scope))
         self.generic_visit(node)
 
 
@@ -261,6 +287,11 @@ _ACCEPTED = {
             rr = r
             return P(curve_radii=[rr])
     """,
+    "annotated-helper-assignment": """
+        def f():
+            r: float = corner_radius(o, m)
+            return P(curve_radii=[r])
+    """,
     "list-comp-via-name": """
         def f():
             radii = [reference_anchored_radius(0.0, b) for _ in items]
@@ -290,6 +321,17 @@ _REJECTED = {
     "arithmetic-hidden-in-variable": """
         def f():
             r = ctx.curve_radius + off
+            return P(curve_radii=[r])
+    """,
+    "augmented-assignment-on-helper-result": """
+        def f():
+            r = corner_radius(o, m)
+            r += off
+            return P(curve_radii=[r])
+    """,
+    "annotated-arithmetic": """
+        def f():
+            r: float = ctx.curve_radius + off
             return P(curve_radii=[r])
     """,
     "non-helper-call": """
