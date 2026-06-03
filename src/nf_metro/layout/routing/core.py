@@ -60,6 +60,8 @@ from nf_metro.layout.routing.common import (
 )
 from nf_metro.layout.routing.corners import (
     bypass_radii,
+    concentric_corner_radius,
+    corner_outside_sign,
     corner_radius,
     l_shape_radii,
     reference_anchored_radius,
@@ -886,7 +888,7 @@ def _route_bottom_exit_junction(
         x_off = ((n - 1) / 2 - i) * ctx.offset_step
 
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-    r = ctx.curve_radius + x_off
+    r = reference_anchored_radius(x_off, ctx.curve_radius)
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
@@ -944,6 +946,8 @@ def _route_merge_branch(
             (tail_x, by),
         ],
         is_inter_section=True,
+        # One branch line per call: a single descent, so both corners take the
+        # base radius (no bundle to fan concentrically).
         curve_radii=[ctx.curve_radius, ctx.curve_radius],
         offsets_applied=True,
     )
@@ -1380,6 +1384,14 @@ def _nested_target_clear_channel_x(
     return max(s.bbox_x + s.bbox_w for s in secs) + clearance
 
 
+def _unit_step(p: tuple[float, float], q: tuple[float, float]) -> tuple[float, float]:
+    """Unit travel direction from *p* to *q* for an axis-aligned segment."""
+    dx, dy = q[0] - p[0], q[1] - p[1]
+    if abs(dx) >= abs(dy):
+        return (1.0 if dx > 0 else -1.0, 0.0)
+    return (0.0, 1.0 if dy > 0 else -1.0)
+
+
 def _route_stepped_descent(
     edge: Edge,
     src: Station,
@@ -1432,20 +1444,38 @@ def _route_stepped_descent(
         chan_x = ex + SECTION_ROUTE_CLEARANCE
     chan_x += spread
 
+    points = [
+        (sx, sy + src_off),
+        (corner_x, sy + src_off),
+        (corner_x, step_y),
+        (chan_x, step_y),
+        (chan_x, ey + tgt_off),
+        (ex, ey + tgt_off),
+    ]
+    # Each line's vertical legs (and the step_y rung) sit ``spread`` to the
+    # right of / below the innermost line, so the four bends fan as nested
+    # concentric arcs.  Size every corner through the one direction-driven
+    # routine, reading the turn from the route's own geometry; ``spread == 0``
+    # for the innermost line keeps the single-line case at the base radius.
+    radii = [
+        concentric_corner_radius(
+            _unit_step(points[k - 1], points[k]),
+            _unit_step(points[k], points[k + 1]),
+            spread,
+            spread,
+            ctx.curve_radius,
+            min_radius=COORD_TOLERANCE,
+        )
+        for k in range(1, 5)
+    ]
+
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
-        points=[
-            (sx, sy + src_off),
-            (corner_x, sy + src_off),
-            (corner_x, step_y),
-            (chan_x, step_y),
-            (chan_x, ey + tgt_off),
-            (ex, ey + tgt_off),
-        ],
+        points=points,
         is_inter_section=True,
         normalize_exempt=True,
-        curve_radii=[r, r, r, r],
+        curve_radii=radii,
         offsets_applied=True,
     )
 
@@ -3276,7 +3306,7 @@ def _route_perp_entry(
             (drop_x, ty + tgt_off),
             (tx, ty + tgt_off),
         ]
-        radii = [ctx.curve_radius + src_off]
+        radii = [reference_anchored_radius(src_off, ctx.curve_radius)]
     else:
         pts = [
             (sx + src_off, sy),
@@ -3284,7 +3314,10 @@ def _route_perp_entry(
             (drop_x, ty + tgt_off),
             (tx, ty + tgt_off),
         ]
-        radii = [ctx.curve_radius, ctx.curve_radius + src_off]
+        radii = [
+            reference_anchored_radius(0.0, ctx.curve_radius),
+            reference_anchored_radius(src_off, ctx.curve_radius),
+        ]
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
@@ -3405,7 +3438,10 @@ def _route_perp_entry_merged(
                 (tx, ty + tgt_off),
             ],
             offsets_applied=True,
-            curve_radii=[ctx.curve_radius, ctx.curve_radius + src_off],
+            curve_radii=[
+                reference_anchored_radius(0.0, ctx.curve_radius),
+                reference_anchored_radius(src_off, ctx.curve_radius),
+            ],
         )
 
     # Different X (cross-column entry): 3-point L-shape
@@ -4816,25 +4852,6 @@ def _respace_risers_to_trunk(
         )
 
 
-def _corner_outside_sign(
-    turn_in: tuple[float, float], turn_out: tuple[float, float]
-) -> int:
-    """Sign of ``new_x - centre`` that puts a line OUTSIDE a riser-flanking turn.
-
-    *turn_in* / *turn_out* are the travel-direction vectors of the two segments
-    meeting at the corner.  A CCW turn (positive cross) curves outward to the
-    RIGHT of travel; a CW turn (negative cross) outward to the LEFT.  Along the
-    vertical riser leg, right-of-travel is +X when travelling DOWN and -X when
-    travelling UP.  Returns +1 when the larger-X line is the outside one, -1
-    when the smaller-X line is.
-    """
-    cross = turn_in[0] * turn_out[1] - turn_in[1] * turn_out[0]
-    v = turn_in if abs(turn_in[1]) > abs(turn_in[0]) else turn_out
-    right_is_plus_x = v[1] > 0  # DOWN travel: right-of-travel is +X
-    outside_is_right = cross < 0  # CW turn curves outward to the right
-    return 1 if (right_is_plus_x == outside_is_right) else -1
-
-
 def _set_riser_x_and_radii(
     ch: _VChannel,
     new_x: float,
@@ -4875,10 +4892,10 @@ def _set_riser_x_and_radii(
         else:
             turn_in = v_dir
             turn_out = (hx, 0.0)
-        side = _corner_outside_sign(turn_in, turn_out)
+        side = corner_outside_sign(turn_in, turn_out)
         # Outside line (offset sign matches `side`) gets the largest radius;
-        # inner edge gets base.  Magnitude measured from the innermost line.
-        r = base_radius + max_off + off_signed * side
+        # inner edge gets base.  Anchored on the bundle centre (base + max_off).
+        r = reference_anchored_radius(off_signed * side, base_radius + max_off)
         if not (0 <= radius_idx < len(rp.curve_radii)):
             continue
         if not is_lead and not (k + 2 < len(pts)):
