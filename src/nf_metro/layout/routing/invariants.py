@@ -661,36 +661,27 @@ def _route_render_points(
     return out
 
 
-def check_no_collinear_distinct_lines(
-    graph: MetroGraph,
+def _collinear_overlay_violations(
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
+    endpoint_xy: dict[str, tuple[float, float]],
+    *,
+    inter_section: bool,
 ) -> list[CollinearOverlapViolation]:
-    """Return distinct-line inter-section segments drawn exactly on top.
+    """Pairs of distinct-line axis-aligned segments drawn exactly on top.
 
-    Two co-travelling lines that share a bundle must occupy distinct
-    parallel slots (at least ``OFFSET_STEP`` apart laterally).  When a
-    bundling/offset defect collapses them to the same channel they
-    render as one stroke obscuring the other.  This check looks at the
-    final, offset-applied geometry: it flags pairs of DIFFERENT-line
-    axis-aligned inter-section segments whose channel coordinate
-    coincides within ``_COLLINEAR_LATERAL_TOL`` and whose overlap along
-    the axis exceeds ``_COLLINEAR_MIN_SPAN``.
-
-    Legitimate cases are excluded: lines converging onto a shared
-    endpoint port (an unavoidable single approach), tight parallel
-    bundles (>= one ``OFFSET_STEP`` apart never coincide), and short
-    trunk-level lead-ins below the min span.
+    Shared core of the inter- and intra-section collinear-overlay checks.
+    Scans the ``is_inter_section == inter_section`` routes, builds their
+    final offset-applied axis-aligned segments, and flags any
+    different-line pair whose channel coordinate coincides within
+    ``_COLLINEAR_LATERAL_TOL`` and whose overlap along the axis exceeds
+    ``_COLLINEAR_MIN_SPAN``.  Overlaps that merely converge onto a shared
+    endpoint in ``endpoint_xy`` (a port for inter-section routes, any
+    station for intra-section routes) are excused.
     """
-    port_xy = {
-        pid: (graph.stations[pid].x, graph.stations[pid].y)
-        for pid in graph.ports
-        if pid in graph.stations
-    }
-
     segs: list[tuple[str, tuple[str, str], str, float, float, float]] = []
     for rp in routes:
-        if not rp.is_inter_section:
+        if rp.is_inter_section != inter_section:
             continue
         pts = _route_render_points(rp, offsets)
         edge = (rp.edge.source, rp.edge.target)
@@ -717,7 +708,7 @@ def check_no_collinear_distinct_lines(
             span = ohi - olo
             if span <= _COLLINEAR_MIN_SPAN:
                 continue
-            if _converges_at_shared_port(port_xy, ea, eb, ax_a, c_a, olo, ohi):
+            if _converges_at_shared_port(endpoint_xy, ea, eb, ax_a, c_a, olo, ohi):
                 continue
             violations.append(
                 CollinearOverlapViolation(
@@ -731,6 +722,56 @@ def check_no_collinear_distinct_lines(
                 )
             )
     return violations
+
+
+def check_no_collinear_distinct_lines(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[CollinearOverlapViolation]:
+    """Return distinct-line inter-section segments drawn exactly on top.
+
+    Two co-travelling lines that share a bundle must occupy distinct
+    parallel slots (at least ``OFFSET_STEP`` apart laterally).  When a
+    bundling/offset defect collapses them to the same channel they
+    render as one stroke obscuring the other.  This check looks at the
+    final, offset-applied geometry: it flags pairs of DIFFERENT-line
+    axis-aligned inter-section segments whose channel coordinate
+    coincides within ``_COLLINEAR_LATERAL_TOL`` and whose overlap along
+    the axis exceeds ``_COLLINEAR_MIN_SPAN``.
+
+    Legitimate cases are excluded: lines converging onto a shared
+    endpoint port (an unavoidable single approach), tight parallel
+    bundles (>= one ``OFFSET_STEP`` apart never coincide), and short
+    trunk-level lead-ins below the min span.
+    """
+    port_xy = {
+        pid: (graph.stations[pid].x, graph.stations[pid].y)
+        for pid in graph.ports
+        if pid in graph.stations
+    }
+    return _collinear_overlay_violations(routes, offsets, port_xy, inter_section=True)
+
+
+def check_intra_section_collinear_distinct_lines(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[CollinearOverlapViolation]:
+    """Return distinct-line *intra-section* segments drawn exactly on top.
+
+    The intra-section counterpart to
+    :func:`check_no_collinear_distinct_lines` (which only scans
+    ``is_inter_section`` routes).  Two distinct lines running inside one
+    section must keep their parallel slots there too; a collapse hides one
+    line behind another within the section body.  Convergence onto a
+    shared endpoint station (a real merge/fork node, not a boundary port)
+    is excused, so genuine reconvergences are not flagged.
+    """
+    station_xy = {sid: (st.x, st.y) for sid, st in graph.stations.items()}
+    return _collinear_overlay_violations(
+        routes, offsets, station_xy, inter_section=False
+    )
 
 
 def _converges_at_shared_port(

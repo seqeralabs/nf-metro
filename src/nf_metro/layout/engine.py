@@ -122,6 +122,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_merge_port_approach_side,
     _guard_no_artefactual_counter_flow,
     _guard_no_collinear_distinct_lines,
+    _guard_no_intra_section_collinear_distinct_lines,
     _guard_no_label_overlap,
     _guard_no_line_crosses_non_consumer,
     _guard_no_negative_grid_columns,
@@ -1149,6 +1150,9 @@ def _finalize_layout(
             )
             _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
             _guard_no_collinear_distinct_lines(
+                graph, phase, offsets=offsets, routes=routes
+            )
+            _guard_no_intra_section_collinear_distinct_lines(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_fanout_tail_join(graph, phase, offsets=offsets, routes=routes)

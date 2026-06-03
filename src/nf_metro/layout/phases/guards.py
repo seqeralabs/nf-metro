@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from nf_metro.layout.routing.common import RoutedPath
+    from nf_metro.layout.routing.invariants import CollinearOverlapViolation
 
 
 class PhaseInvariantError(Exception):
@@ -1421,6 +1423,45 @@ def _guard_no_collinear_distinct_lines(
         check_no_collinear_distinct_lines,
     )
 
+    _raise_on_collinear_overlay(
+        graph, phase, check_no_collinear_distinct_lines, offsets, routes
+    )
+
+
+def _guard_no_intra_section_collinear_distinct_lines(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: no two distinct lines may render on top within a section.
+
+    Wraps :func:`check_intra_section_collinear_distinct_lines`, the
+    intra-section counterpart to :func:`_guard_no_collinear_distinct_lines`.
+    A bundling/offset defect that collapses two co-travelling lines onto one
+    channel *inside* a section hides one line behind the other.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_intra_section_collinear_distinct_lines,
+    )
+
+    _raise_on_collinear_overlay(
+        graph, phase, check_intra_section_collinear_distinct_lines, offsets, routes
+    )
+
+
+def _raise_on_collinear_overlay(
+    graph: MetroGraph,
+    phase: str,
+    check: Callable[
+        [MetroGraph, list[RoutedPath], dict[tuple[str, str], float]],
+        list[CollinearOverlapViolation],
+    ],
+    offsets: dict[tuple[str, str], float] | None,
+    routes: list[RoutedPath] | None,
+) -> None:
+    """Run a collinear-overlay *check* and raise on the first violation."""
     if offsets is None:
         from nf_metro.layout.routing import compute_station_offsets
 
@@ -1433,7 +1474,7 @@ def _guard_no_collinear_distinct_lines(
         except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
             return
 
-    violations = check_no_collinear_distinct_lines(graph, routes, offsets)
+    violations = check(graph, routes, offsets)
     if not violations:
         return
     first = violations[0]

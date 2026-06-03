@@ -584,6 +584,60 @@ def test_no_collinear_distinct_lines(fixture):
     assert not violations, "; ".join(v.message() for v in violations)
 
 
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_no_intra_section_collinear_distinct_lines(fixture):
+    """Two different lines must never render on top of each other *within*
+    a section either.
+
+    The intra-section counterpart to ``test_no_collinear_distinct_lines``:
+    ``check_no_collinear_distinct_lines`` only scans inter-section routes,
+    so a defect that collapsed two co-travelling lines onto one channel
+    inside a section body would slip through.  Uses the final,
+    offset-applied geometry.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_intra_section_collinear_distinct_lines,
+    )
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    violations = check_intra_section_collinear_distinct_lines(graph, routes, offsets)
+    assert not violations, "; ".join(v.message() for v in violations)
+
+
+def test_intra_section_collinear_check_detects_overlay():
+    """Meaningfulness guard: the intra-section check fires when two distinct
+    lines genuinely coincide on one channel.
+
+    Locks the detector so the corpus test above is not vacuously green: two
+    different-line intra-section runs sharing a horizontal channel over more
+    than ``_COLLINEAR_MIN_SPAN``, with no shared endpoint, must be flagged.
+    """
+    from types import SimpleNamespace
+
+    from nf_metro.layout.routing.common import RoutedPath
+    from nf_metro.layout.routing.invariants import (
+        check_intra_section_collinear_distinct_lines,
+    )
+    from nf_metro.parser.model import Edge
+
+    def _run(src, tgt, line):
+        return RoutedPath(
+            edge=Edge(source=src, target=tgt, line_id=line),
+            line_id=line,
+            points=[(0.0, 100.0), (200.0, 100.0)],
+            is_inter_section=False,
+            offsets_applied=True,
+        )
+
+    graph = SimpleNamespace(stations={})  # no endpoints => no convergence excuse
+    routes = [_run("a", "b", "red"), _run("c", "d", "blue")]
+    violations = check_intra_section_collinear_distinct_lines(graph, routes, {})
+    assert violations, "expected a collinear overlay to be detected"
+    assert {violations[0].line_a, violations[0].line_b} == {"red", "blue"}
+
+
 @pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
 def test_distinct_trunk_not_hidden_behind_exempt(fixture):
     """A distinct-line bypass trunk must not sit within a bundle gap of an
