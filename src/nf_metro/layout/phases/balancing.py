@@ -897,12 +897,12 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
         for key, members in columns.items():
             if len(members) < 2:
                 continue
-            trunk_members: list[str] = []
+            movers: list[str] = []
             anchor_xs: list[float] = []
             for sid in members:
                 st = graph.stations[sid]
                 if abs(st.y - section_trunk_y) <= 0.5:
-                    trunk_members.append(sid)
+                    movers.append(sid)
                     continue
                 # Anchor X must come from a station pass-1 already
                 # placed at the loop midpoint; restrict to the same
@@ -925,14 +925,20 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
                 ]
                 if len(visible_ins) == 1 and len(visible_outs) == 1:
                     anchor_xs.append(st.x)
-            if not trunk_members or not anchor_xs:
+                else:
+                    # Off-trunk column-mate whose extra edge (e.g. an
+                    # exit-port feed alongside the trunk rejoin) failed
+                    # pass 1's single-in/single-out filter.  It still
+                    # belongs to the column and must follow the anchors.
+                    movers.append(sid)
+            if not movers or not anchor_xs:
                 continue
             target_x = sum(anchor_xs) / len(anchor_xs)
             pred_x, succ_x = key
             lo, hi = min(pred_x, succ_x), max(pred_x, succ_x)
             if not (lo <= target_x <= hi):
                 continue
-            for sid in trunk_members:
+            for sid in movers:
                 graph.stations[sid].x = target_x
 
 

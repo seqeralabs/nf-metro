@@ -4305,13 +4305,7 @@ def test_label_x_anchored_to_station_marker_on_horizontal_runs(fixture):
 # Visual stack stations share their column X (issue #348)
 # ---------------------------------------------------------------------------
 
-_XFAIL_VISUAL_STACK: dict[str, str] = {
-    "differentialabundance_default.mmd": (
-        "issue #348: gprofiler2 aligns with upstream input layer rather "
-        "than visual stack-mate grea below it; revisit when stack "
-        "alignment vs upstream alignment is decided"
-    ),
-}
+_XFAIL_VISUAL_STACK: dict[str, str] = {}
 
 
 @pytest.mark.parametrize(
@@ -4322,8 +4316,16 @@ def test_visual_stack_station_xs_share_column(fixture):
     """Stations forming a visual stack must agree in X within 1 px.
 
     A visual stack is a group of stations in the same section sharing
-    predecessor set, successor set, and layer, where at least one pair
-    sits 0 < ΔY <= ``STACK_Y_WINDOW`` (2 * Y_SPACING = 80 px) apart.
+    predecessor set and layer, where at least one pair sits
+    0 < ΔY <= ``STACK_Y_WINDOW`` (2 * Y_SPACING = 80 px) apart.
+
+    The grouping key deliberately omits the successor set: stations in a
+    fan-out column share their feed and layer but routinely differ in
+    where they go next (one rejoins the trunk, another also exits the
+    section).  Keying on successors splits such a column into singletons
+    and lets a mis-placed member slip past (issue #514: ``propd`` shares
+    the ``differential`` column with ``dream``/``limma``/``deseq2`` but
+    its extra exit-port edge gave it a distinct successor set).
 
     The Y-window distinguishes visually-stacked stations (close enough
     in Y that a viewer reads them as a column) from:
@@ -4349,26 +4351,22 @@ def test_visual_stack_station_xs_share_column(fixture):
 
     graph = _layout(fixture)
     preds: dict[str, set[str]] = defaultdict(set)
-    succs: dict[str, set[str]] = defaultdict(set)
     for e in graph.edges:
         preds[e.target].add(e.source)
-        succs[e.source].add(e.target)
 
     offenders: list[str] = []
     for sec in graph.sections.values():
         if sec.bbox_h <= 0:
             continue
         port_ids = set(sec.entry_ports) | set(sec.exit_ports)
-        groups: dict[tuple[frozenset[str], frozenset[str], int], list[str]] = (
-            defaultdict(list)
-        )
+        groups: dict[tuple[frozenset[str], int], list[str]] = defaultdict(list)
         for sid in sec.station_ids:
             if sid in port_ids:
                 continue
             st = graph.stations.get(sid)
             if st is None or st.is_port or st.is_hidden:
                 continue
-            key = (frozenset(preds[sid]), frozenset(succs[sid]), st.layer)
+            key = (frozenset(preds[sid]), st.layer)
             groups[key].append(sid)
         for members in groups.values():
             if len(members) < 2:
