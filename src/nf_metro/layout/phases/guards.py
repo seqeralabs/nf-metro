@@ -1757,6 +1757,39 @@ def _bisection_should_run(guard_name: str, phase: str) -> bool:
         return True
 
 
+def _guard_routing_preserves_non_x(
+    graph: MetroGraph,
+    phase: str,
+    saved_xy: dict[str, tuple[float, float]],
+    saved_bbox: dict[str, tuple[float, float, float, float]],
+) -> None:
+    """Raise if a guard's ``route_edges`` call mutated anything but ``Station.x``.
+
+    ``_run_pass_c_guards`` snapshots and restores only ``Station.x`` because
+    that is the sole graph state ``route_edges`` mutates.  If a future routing
+    change starts moving ``Station.y`` or a section bbox, the X-only restore
+    would leak that mutation into later Pass C stages, silently making
+    ``validate=True`` non-idempotent again (#518).  This fails loudly instead.
+    """
+    for sid, station in graph.stations.items():
+        if abs(station.y - saved_xy[sid][1]) > 1e-6:
+            raise PhaseInvariantError(
+                f"{phase}: guard's route_edges call moved station {sid!r} in Y "
+                f"({saved_xy[sid][1]:.3f} -> {station.y:.3f}); the guard snapshot "
+                "restores X only. Extend the snapshot/restore in "
+                "_run_pass_c_guards to keep the validate flag observational."
+            )
+    for sid, sec in graph.sections.items():
+        now = (sec.bbox_x, sec.bbox_y, sec.bbox_w, sec.bbox_h)
+        if now != saved_bbox[sid]:
+            raise PhaseInvariantError(
+                f"{phase}: guard's route_edges call mutated section {sid!r} bbox "
+                f"({saved_bbox[sid]} -> {now}); the guard snapshot restores "
+                "station X only. Extend the snapshot/restore in "
+                "_run_pass_c_guards to keep the validate flag observational."
+            )
+
+
 def _run_pass_c_guards(
     graph: MetroGraph,
     phase: str,
@@ -1801,10 +1834,26 @@ def _run_pass_c_guards(
     if offsets is None:
         offsets = compute_station_offsets(graph)
     if routes is None:
+        # route_edges' diagonal-centring pass mutates Station.x in place.
+        # That is intended on the final render path (validate=False never
+        # calls this), but a guard must be observational: running it
+        # mid-pipeline would change the input to later Pass C stages.
+        # Snapshot and restore station X around the call.  The snapshot
+        # covers only X because route_edges touches no other graph state;
+        # _guard_routing_preserves_non_x verifies that contract still holds.
+        saved_xy = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
+        saved_bbox = {
+            sid: (sec.bbox_x, sec.bbox_y, sec.bbox_w, sec.bbox_h)
+            for sid, sec in graph.sections.items()
+        }
         try:
             routes = route_edges(graph, station_offsets=offsets)
         except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
             routes = None
+        finally:
+            _guard_routing_preserves_non_x(graph, phase, saved_xy, saved_bbox)
+            for sid, (x, _) in saved_xy.items():
+                graph.stations[sid].x = x
 
     _guard_coordinates_finite(graph, phase)
     _guard_section_bboxes_positive(graph, phase)
