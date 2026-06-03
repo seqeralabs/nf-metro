@@ -17,6 +17,8 @@ from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
 from nf_metro.layout.routing.common import Direction
 from nf_metro.layout.routing.corners import (
     bypass_radii,
+    concentric_corner_radius,
+    corner_outside_sign,
     corner_radius,
     l_shape_radii,
     reference_anchored_radius,
@@ -25,6 +27,24 @@ from nf_metro.layout.routing.corners import (
     tb_entry_corner,
     tb_exit_corner,
 )
+
+# Unit travel vectors for the four cardinal directions (screen coords, +y down).
+RIGHT = (1.0, 0.0)
+LEFT = (-1.0, 0.0)
+DOWN = (0.0, 1.0)
+UP = (0.0, -1.0)
+
+# The eight axis-aligned 90-degree turns, as (turn_in, turn_out).
+ALL_TURNS = [
+    (RIGHT, DOWN),
+    (RIGHT, UP),
+    (LEFT, DOWN),
+    (LEFT, UP),
+    (DOWN, RIGHT),
+    (DOWN, LEFT),
+    (UP, RIGHT),
+    (UP, LEFT),
+]
 
 # ---------------------------------------------------------------------------
 # reversed_offset
@@ -573,3 +593,136 @@ class TestResolveCurveRadii:
         # All should be achievable given 50+ px segments
         for r_eff, r_des in zip(result, radii):
             assert r_eff == pytest.approx(r_des)
+
+
+# ---------------------------------------------------------------------------
+# concentric_corner_radius: the direction-driven nestable-corner routine
+# ---------------------------------------------------------------------------
+
+
+def _arc_centre(
+    turn_in: tuple[float, float],
+    turn_out: tuple[float, float],
+    corner: tuple[float, float],
+    r: float,
+) -> tuple[float, float]:
+    """Centre of the rounded-corner arc.
+
+    For a 90-degree corner the inscribed arc of radius *r* is tangent to both
+    legs and its centre sits at ``corner + r * (turn_out - turn_in)``.  This is
+    the independent ground truth against which concentric radii are checked:
+    a bundle's arcs are concentric iff every line's centre coincides.
+    """
+    ux = turn_out[0] - turn_in[0]
+    uy = turn_out[1] - turn_in[1]
+    return (corner[0] + r * ux, corner[1] + r * uy)
+
+
+class TestConcentricCornerRadius:
+    """The single direction-driven routine for nestable (wholesale-translated)
+    90-degree corners, used in every compass orientation."""
+
+    def test_reference_line_is_base(self):
+        for turn_in, turn_out in ALL_TURNS:
+            assert concentric_corner_radius(turn_in, turn_out, 0.0) == CURVE_RADIUS
+
+    def test_arcs_are_concentric_in_every_orientation(self):
+        # The concentric fan direction is turn-specific: translating each line's
+        # whole corner along ``(ux, uy) = turn_out - turn_in`` keeps every arc
+        # centre fixed.  The routine takes only the X displacement; verified in
+        # EVERY turn orientation against the independent centre.
+        base = CURVE_RADIUS
+        corner0 = (100.0, 100.0)
+        for turn_in, turn_out in ALL_TURNS:
+            ux = turn_out[0] - turn_in[0]
+            uy = turn_out[1] - turn_in[1]
+            centres = []
+            for k in range(4):
+                dx, dy = k * OFFSET_STEP * ux, k * OFFSET_STEP * uy
+                r = concentric_corner_radius(turn_in, turn_out, dx, base)
+                centre = _arc_centre(
+                    turn_in, turn_out, (corner0[0] + dx, corner0[1] + dy), r
+                )
+                centres.append(centre)
+            for c in centres[1:]:
+                assert c[0] == pytest.approx(centres[0][0])
+                assert c[1] == pytest.approx(centres[0][1])
+
+    def test_bundle_is_nested_step_spaced(self):
+        # Adjacent lines differ by exactly one offset step at every corner, so
+        # arcs nest and never cross (monotonic radii), in every orientation.
+        base = CURVE_RADIUS
+        for turn_in, turn_out in ALL_TURNS:
+            ux = turn_out[0] - turn_in[0]
+            radii = [
+                concentric_corner_radius(turn_in, turn_out, k * OFFSET_STEP * ux, base)
+                for k in range(4)
+            ]
+            diffs = [abs(b - a) for a, b in zip(radii, radii[1:])]
+            for diff in diffs:
+                assert diff == pytest.approx(OFFSET_STEP)
+
+    def test_down_and_right_goes_through_one_routine(self):
+        # The user's litmus: a bundle turning between rightward and downward
+        # travel (either order) is sized by the SAME routine and is concentric.
+        base = CURVE_RADIUS
+        for turn_in, turn_out in ((RIGHT, DOWN), (DOWN, RIGHT)):
+            ux = turn_out[0] - turn_in[0]
+            r_inner = concentric_corner_radius(turn_in, turn_out, 0.0, base)
+            r_outer = concentric_corner_radius(
+                turn_in, turn_out, OFFSET_STEP * ux, base
+            )
+            assert r_inner == base
+            assert abs(r_outer - r_inner) == pytest.approx(OFFSET_STEP)
+
+    def test_radius_matches_both_axis_projections(self):
+        # For a concentric fan (whole corner translated along (ux, uy)) the
+        # X- and Y-axis radius derivations agree: base - dx*ux == base - dy*uy.
+        # The routine uses the X projection; this pins that they coincide.
+        base = CURVE_RADIUS
+        for turn_in, turn_out in ALL_TURNS:
+            ux = turn_out[0] - turn_in[0]
+            uy = turn_out[1] - turn_in[1]
+            dx, dy = 2 * OFFSET_STEP * ux, 2 * OFFSET_STEP * uy
+            r = concentric_corner_radius(turn_in, turn_out, dx, base)
+            assert r == pytest.approx(base - dx * ux)
+            assert r == pytest.approx(base - dy * uy)
+
+    def test_min_radius_floors_deep_inside_lines(self):
+        # An inside-of-turn line in a deep bundle can drive radius below zero.
+        base = CURVE_RADIUS
+        # DOWN->RIGHT: ux = +1, so positive dx subtracts -> can go negative.
+        r = concentric_corner_radius(DOWN, RIGHT, 100.0, base, min_radius=0.1)
+        assert r == 0.1
+
+
+class TestCornerOutsideSign:
+    """Riser handedness: which side of the channel takes the larger radius."""
+
+    def test_returns_unit_sign_in_every_orientation(self):
+        for turn_in, turn_out in ALL_TURNS:
+            assert corner_outside_sign(turn_in, turn_out) in (-1, 1)
+
+    def test_matches_reference_formula(self):
+        # Lock-in oracle: re-derive the documented cross-product rule and assert
+        # the routine matches it in every orientation (catches accidental edits).
+        for turn_in, turn_out in ALL_TURNS:
+            cross = turn_in[0] * turn_out[1] - turn_in[1] * turn_out[0]
+            v = turn_in if abs(turn_in[1]) > abs(turn_in[0]) else turn_out
+            expected = 1 if ((v[1] > 0) == (cross < 0)) else -1
+            assert corner_outside_sign(turn_in, turn_out) == expected
+
+    def test_hand_checked_cases(self):
+        # Full handedness table (larger-X line outside = +1, inside = -1).
+        expected = {
+            (RIGHT, DOWN): -1,
+            (RIGHT, UP): -1,
+            (LEFT, DOWN): 1,
+            (LEFT, UP): 1,
+            (DOWN, RIGHT): 1,
+            (DOWN, LEFT): -1,
+            (UP, RIGHT): 1,
+            (UP, LEFT): -1,
+        }
+        for (turn_in, turn_out), want in expected.items():
+            assert corner_outside_sign(turn_in, turn_out) == want

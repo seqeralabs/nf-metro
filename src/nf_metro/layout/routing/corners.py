@@ -154,7 +154,88 @@ def corner_radius(
         ``base_radius + (max_offset - offset)`` when False.
     """
     eff = offset if outside else reversed_offset(offset, max_offset)
-    return base_radius + eff
+    return reference_anchored_radius(eff, base_radius)
+
+
+def corner_outside_sign(
+    turn_in: tuple[float, float], turn_out: tuple[float, float]
+) -> int:
+    """Sign of ``new_x - centre`` that puts a line OUTSIDE a riser-flanking turn.
+
+    A *riser* is a vertical channel whose flanking horizontal legs are held at
+    a shared Y and simply *stretch* to reach each line's vertical X.  Such a
+    corner is NOT a nested-arc bundle (shared-Y horizontals cannot share an arc
+    centre); each line gets its own rounded corner, and this returns the sign
+    that makes the line further OUT (along the channel's perpendicular) take the
+    larger radius.  For nestable bundles whose corner translates wholesale, use
+    :func:`concentric_corner_radius` instead.
+
+    *turn_in* / *turn_out* are the travel-direction vectors of the two segments
+    meeting at the corner.  A CCW turn (positive cross) curves outward to the
+    RIGHT of travel; a CW turn (negative cross) outward to the LEFT.  Along the
+    vertical riser leg, right-of-travel is +X when travelling DOWN and -X when
+    travelling UP.  Returns +1 when the larger-X line is the outside one, -1
+    when the smaller-X line is.
+    """
+    cross = turn_in[0] * turn_out[1] - turn_in[1] * turn_out[0]
+    v = turn_in if abs(turn_in[1]) > abs(turn_in[0]) else turn_out
+    right_is_plus_x = v[1] > 0  # DOWN travel: right-of-travel is +X
+    outside_is_right = cross < 0  # CW turn curves outward to the right
+    return 1 if (right_is_plus_x == outside_is_right) else -1
+
+
+def concentric_corner_radius(
+    turn_in: tuple[float, float],
+    turn_out: tuple[float, float],
+    dx: float,
+    base_radius: float = CURVE_RADIUS,
+    *,
+    min_radius: float | None = None,
+) -> float:
+    """Concentric arc radius for one line of a wholesale-translated 90° corner.
+
+    When a bundle of parallel lines turns a 90° corner and the *entire* corner
+    is translated per line so this line's vertical leg sits *dx* to the side of
+    the reference line, the arcs share a common centre iff::
+
+        radius = base_radius - dx * (turn_out_x - turn_in_x)
+
+    (derived by equating every line's arc centre ``corner + radius *
+    (turn_out - turn_in)``; ``turn_out_x - turn_in_x`` is always +/-1 for a real
+    90° turn, and a valid bundle must fan in X since a pure-Y translation would
+    overlap the vertical legs - so the X displacement alone fixes the radius).
+    This is the single direction-driven entry point for nestable corners: any
+    orientation - right-then-down, down-then-left, etc. - is mapped to the
+    correct signed offset purely from the two travel vectors, so the same
+    routine sizes every such corner regardless of compass direction.
+
+    The arcs are genuinely concentric only when the *whole* corner translates
+    together.  At a *transition* corner - one flanking leg fanned by *dx*, the
+    other pinned at a fixed (e.g. port) offset - this still returns a sensibly
+    nested radius (sized to the fanned leg) but the arcs do not share a centre.
+    Unlike :func:`corner_outside_sign` (risers, shared-Y stretch), this never
+    flattens the bundle to a single radius.
+
+    Parameters
+    ----------
+    turn_in, turn_out : tuple of float
+        Unit travel-direction vectors into and out of the corner (axis-aligned;
+        ``turn_out - turn_in`` has both components +/-1 for a real 90° turn).
+    dx : float
+        This line's signed X displacement from the bundle's reference line.
+    base_radius : float
+        Reference-line radius.
+    min_radius : float or None
+        Optional floor (see :func:`reference_anchored_radius`); inside-of-turn
+        lines fall below *base_radius* and a deep bundle can drive it to zero.
+
+    Returns
+    -------
+    float
+        The concentric radius via :func:`reference_anchored_radius`.
+    """
+    ux = turn_out[0] - turn_in[0]
+    return reference_anchored_radius(-dx * ux, base_radius, min_radius=min_radius)
 
 
 def reference_anchored_radius(
