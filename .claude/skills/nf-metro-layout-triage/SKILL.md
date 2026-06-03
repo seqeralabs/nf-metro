@@ -24,6 +24,76 @@ The tool produces one card per `(fixture, invariant)` pair for these nine invari
 
 If new invariants are added to the suite, the script will still surface them in the page but without a tailored explanation block; add a new finder + explanation entry in `build_review.py` to give them a structured highlight.
 
+## Triaging ad-hoc / one-off checks
+
+You do **not** have to add a committed (x)failing test plus a `find_*` finder
+just to eyeball a candidate check. Two escape hatches drive the page from an
+arbitrary provider:
+
+### `--violations <file.json>` (render cards straight from JSON)
+
+Pass a JSON file shaped like:
+
+```json
+[
+  {
+    "fixture": "rnaseq_sections.mmd",
+    "invariant": "label_vs_foreign_line",
+    "rects": [
+      {"x": 120, "y": 80, "w": 60, "h": 24, "note": "label grazes the qc line"}
+    ],
+    "issue": "The label sits on top of a line it doesn't belong to.",
+    "check": "If the line strikes through the text it's a bug; a graze is Ambiguous."
+  }
+]
+```
+
+```bash
+python .claude/skills/nf-metro-layout-triage/build_review.py \
+    --worktree "$PWD" --output-dir "$OUT" \
+    --violations /tmp/my-candidate-check.json
+```
+
+Each `rect` becomes a red dashed overlay on the rendered fixture. The
+optional `issue` / `check` strings (HTML allowed) become the "Supposed
+issue" / "What to check" blocks. This path skips pytest discovery and the
+`INVARIANT_FINDERS` registry entirely - the only engine work is rendering
+the fixture SVG.
+
+### `--finder-module <path-or-dotted-name>` (register a finder at runtime)
+
+Point the tool at a small Python module exposing a `FINDERS` dict
+(`{invariant: callable(graph, engine) -> list[violator-dict]}`) and/or an
+`EXPLANATIONS` dict (`{invariant: (issue_html, check_html)}`):
+
+```python
+# /tmp/my_finder.py
+def find_offenders(graph, engine):
+    return [{"kind": "rect", "x": ..., "y": ..., "w": ..., "h": ..., "note": "..."}]
+
+FINDERS = {"my_candidate_check": find_offenders}
+EXPLANATIONS = {"my_candidate_check": ("Issue prose...", "What-to-check prose...")}
+```
+
+```bash
+python .claude/skills/nf-metro-layout-triage/build_review.py \
+    --worktree "$PWD" --output-dir "$OUT" \
+    --fail-list /tmp/my-faillist.txt --finder-module /tmp/my_finder.py
+```
+
+These are merged *over* the built-in registries, so the nine built-in
+invariants keep working unchanged. A violator-dict uses the same shape the
+built-in finders emit (`kind`, `x`, `y`, `w`, `h`, `note`).
+
+### Generic explanation fallback
+
+When an invariant has no tailored explanation (no `*_info` block on its
+violators and no matching `EXPLANATIONS` entry), the card simply renders the
+overlay and notes with no prose block - which is the graceful generic path.
+Supply `issue` / `check` in the violations JSON, or an `EXPLANATIONS` entry
+in the finder module, to add prose; otherwise the red overlay plus the
+per-rect `note` strings are enough to classify by eye.
+
 ## Recipe
 
 Assume an nf-metro checkout at `$PWD` (or a worktree off it) and the `nf-metro` micromamba env is available.

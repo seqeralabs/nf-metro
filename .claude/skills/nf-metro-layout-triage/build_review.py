@@ -23,12 +23,32 @@ If ``--fail-list`` is omitted, the script runs pytest in
 ``--collect-only`` / ``-rfX`` mode against
 ``tests/test_layout_invariants.py`` inside ``--worktree`` and parses
 the FAILED / XFAIL lines itself.
+
+Two escape hatches let the tool triage *ad-hoc* checks that aren't
+committed invariants yet, without touching the test suite or this file:
+
+* ``--violations <file.json>`` ingests pre-computed violations of shape
+  ``[{fixture, invariant, rects:[{x,y,w,h,note}], issue, check}]`` and
+  renders cards straight from them, bypassing pytest discovery and the
+  ``INVARIANT_FINDERS`` registry entirely. Per-entry ``issue`` / ``check``
+  strings become the explanation block (falling back to the built-in
+  generic block keyed by ``invariant`` if omitted).
+* ``--finder-module <path-or-dotted-name>`` registers extra finders and
+  explanations at runtime. The module may expose a ``FINDERS`` dict
+  (``{invariant: callable(graph, engine) -> list[violator-dict]}``) and/or
+  an ``EXPLANATIONS`` dict (``{invariant: (issue_html, check_html)}``)
+  that are merged over the built-in registries.
+
+Invariants with no tailored explanation fall back to the generic block;
+ad-hoc checks rely on that path.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
+import importlib
+import importlib.util
 import json
 import os
 import re
@@ -77,6 +97,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Pytest target (relative to worktree) used when --fail-list "
         "is not given. Default: tests/test_layout_invariants.py.",
     )
+    p.add_argument(
+        "--violations",
+        type=Path,
+        default=None,
+        help="Optional path to a JSON file of pre-computed violations of "
+        "shape [{fixture, invariant, rects:[{x,y,w,h,note}], issue, check}]. "
+        "When given, cards are built directly from this file, bypassing "
+        "pytest discovery and the INVARIANT_FINDERS registry. Useful for "
+        "triaging an ad-hoc / one-off check without adding a committed test.",
+    )
+    p.add_argument(
+        "--finder-module",
+        default=None,
+        help="Optional Python module (dotted name or path to a .py file) "
+        "exposing a FINDERS dict {invariant: callable(graph, engine)} and/or "
+        "an EXPLANATIONS dict {invariant: (issue_html, check_html)}. These "
+        "are merged over the built-in registries so a one-off finder can be "
+        "triaged without editing this script.",
+    )
     return p.parse_args(argv)
 
 
@@ -123,6 +162,44 @@ def _setup_imports(worktree: Path) -> dict:
 
 
 _Y_TOL = 1.0
+
+
+# ---------------------------------------------------------------------------
+# Runtime finder-module loading
+# ---------------------------------------------------------------------------
+
+
+def load_finder_module(spec: str):
+    """Import a finder module given either a dotted name or a path to a .py
+    file, and return it. The module may expose ``FINDERS`` and/or
+    ``EXPLANATIONS`` dicts (both optional)."""
+    path = Path(spec)
+    if path.suffix == ".py" or path.exists():
+        path = path.resolve()
+        if not path.is_file():
+            raise SystemExit(f"--finder-module {spec} is not a file")
+        mod_spec = importlib.util.spec_from_file_location(path.stem, path)
+        if mod_spec is None or mod_spec.loader is None:
+            raise SystemExit(f"--finder-module {spec} could not be loaded")
+        module = importlib.util.module_from_spec(mod_spec)
+        mod_spec.loader.exec_module(module)
+        return module
+    return importlib.import_module(spec)
+
+
+def merge_finder_module(module, finders: dict, explanations: dict) -> None:
+    """Merge a finder module's ``FINDERS`` / ``EXPLANATIONS`` over the given
+    registries (mutating them in place). Either attribute may be absent."""
+    extra_finders = getattr(module, "FINDERS", None)
+    if extra_finders:
+        if not isinstance(extra_finders, dict):
+            raise SystemExit("finder-module FINDERS must be a dict")
+        finders.update(extra_finders)
+    extra_explanations = getattr(module, "EXPLANATIONS", None)
+    if extra_explanations:
+        if not isinstance(extra_explanations, dict):
+            raise SystemExit("finder-module EXPLANATIONS must be a dict")
+        explanations.update(extra_explanations)
 
 
 # ---------------------------------------------------------------------------
@@ -956,6 +1033,65 @@ def collect_failures_via_pytest(worktree: Path, target: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def build_rows_from_violations(
+    violations: list[dict], render_svg, annotated_dir: Path
+) -> list[dict]:
+    """Build triage rows directly from a list of pre-computed violation
+    entries of shape ``{fixture, invariant, rects, issue, check}``, bypassing
+    pytest discovery and the finder registry. Each ``rect`` becomes a
+    red-bbox overlay; ``issue`` / ``check`` (if present) become the
+    explanation block."""
+    render_cache: dict[str, tuple[str | None, str | None]] = {}
+    rows: list[dict] = []
+    for i, entry in enumerate(violations):
+        fixture = entry["fixture"]
+        inv = entry.get("invariant", "ad-hoc-check")
+        key = f"{fixture.replace('/', '__')}__{inv}__{i}"
+
+        if fixture not in render_cache:
+            svg_path, err = render_svg(fixture)
+            render_cache[fixture] = (
+                (svg_path.read_text(), None) if svg_path is not None else (None, err)
+            )
+        base_svg, render_err = render_cache[fixture]
+
+        violators = [
+            {
+                "kind": "rect",
+                "x": float(rect["x"]),
+                "y": float(rect["y"]),
+                "w": float(rect["w"]),
+                "h": float(rect["h"]),
+                "note": rect.get("note", ""),
+            }
+            for rect in entry.get("rects", [])
+        ]
+
+        if base_svg is None:
+            annotated_svg = None
+        else:
+            annotated_svg, _ = annotate_svg(base_svg, violators)
+            (annotated_dir / f"{key}.svg").write_text(annotated_svg)
+
+        rows.append(
+            {
+                "key": key,
+                "fixture": fixture,
+                "invariant": inv,
+                "reason": entry.get("reason", ""),
+                "render_error": render_err,
+                "violators": violators,
+                "violator_error": None
+                if violators
+                else "no rects supplied; full fixture shown",
+                "svg": annotated_svg,
+                "issue": entry.get("issue"),
+                "check": entry.get("check"),
+            }
+        )
+    return rows
+
+
 def main() -> int:
     args = parse_args()
     worktree = args.worktree.resolve()
@@ -970,6 +1106,33 @@ def main() -> int:
     resolve_fixture, fixtures_dir = make_resolve_fixture(worktree)
     load_layout = make_load_layout(engine, resolve_fixture, fixtures_dir)
     render_svg = make_render_svg(resolve_fixture, renders_dir)
+
+    finders = dict(INVARIANT_FINDERS)
+    extra_explanations: dict = {}
+    if args.finder_module is not None:
+        module = load_finder_module(args.finder_module)
+        merge_finder_module(module, finders, extra_explanations)
+        print(
+            f"Loaded finder module {args.finder_module}: "
+            f"{len(finders) - len(INVARIANT_FINDERS)} extra finder(s), "
+            f"{len(extra_explanations)} extra explanation(s)",
+            file=sys.stderr,
+        )
+
+    # Ad-hoc path: render cards straight from a violations JSON, skipping
+    # pytest discovery and the finder registry entirely.
+    if args.violations is not None:
+        violations = json.loads(args.violations.read_text())
+        print(
+            f"Loaded {len(violations)} violation entr(ies) from {args.violations}",
+            file=sys.stderr,
+        )
+        rows = build_rows_from_violations(violations, render_svg, annotated_dir)
+        html = build_html(rows, generic_explanations=extra_explanations)
+        out = output_dir / "index.html"
+        out.write_text(html)
+        print(f"Wrote {out} ({out.stat().st_size:,} bytes)", file=sys.stderr)
+        return 0
 
     if args.fail_list is not None:
         fail_text = args.fail_list.read_text()
@@ -1027,7 +1190,7 @@ def main() -> int:
         bbox_attempted += 1
         violators: list[dict] = []
         violator_err: str | None = None
-        finder = INVARIANT_FINDERS.get(inv)
+        finder = finders.get(inv)
         if finder is None:
             bbox_fallback += 1
             violator_err = f"no violator extractor implemented for {inv}"
@@ -1080,7 +1243,7 @@ def main() -> int:
         file=sys.stderr,
     )
 
-    html = build_html(rows)
+    html = build_html(rows, generic_explanations=extra_explanations)
     out = output_dir / "index.html"
     out.write_text(html)
     print(f"Wrote {out} ({out.stat().st_size:,} bytes)", file=sys.stderr)
@@ -1095,7 +1258,117 @@ def main() -> int:
 # ---------------------------------------------------------------------------
 
 
-def _build_explanation_blocks(invariant: str, violators: list[dict]) -> str:
+# Generic (issue, check) explanation pairs keyed by invariant. Finder-module
+# EXPLANATIONS dicts use the same shape and are merged over this at runtime.
+_GENERIC_EXPLANATIONS = {
+    "test_row_trunk_marker_cy_consistent": (
+        "Sections placed side-by-side in the same grid row are "
+        "supposed to share a single trunk Y, so the horizontal rail "
+        "through the row reads as one straight line. The invariant "
+        "reports a drift in this fixture.",
+        "Scan the horizontal trunk across each row. If you can see a "
+        "vertical step inside any section that should run straight, "
+        "it's a bug. If sections are intentionally on different rows, "
+        "the row-grouping heuristic may be wrong and this is "
+        "<strong>not</strong> a bug.",
+    ),
+    "test_no_kink_at_section_boundary": (
+        "An exit port of one section is at a different Y than the "
+        "entry port of the adjacent section, so the line between "
+        "them has a vertical step.",
+        "Look along section boundaries for a visible jog where a "
+        "horizontal continuation should be straight. If adjacent "
+        "sections are intentionally on different rows, the kink may "
+        "be intended.",
+    ),
+    "test_symfan_pairs_share_y": (
+        "A pair of branches feeding from a common point in this "
+        "fixture is supposed to mirror around the trunk Y but does "
+        "not.",
+        "Look for fan-outs with two branches that obviously don't "
+        "sit symmetrically across the trunk. If one branch is "
+        "intentionally weighted, flag as Ambiguous.",
+    ),
+    "test_lines_dont_cross_non_consumer_markers": (
+        "A routed line passes through a station marker it shouldn't "
+        "touch (the station is neither producer nor consumer of "
+        "that line).",
+        "Find any line that visibly crosses through a station "
+        "circle that isn't its endpoint. If the line only grazes a "
+        "corner or the bbox is overly generous, flag as Ambiguous.",
+    ),
+    "test_section_bbox_has_bottom_padding": (
+        "A section's bottom edge sits too close to its lowest "
+        "internal station (less than the required padding).",
+        "Look at section borders. If a station marker or label "
+        "touches the border, it's a bug. If there's visible "
+        "whitespace, flag as Ambiguous.",
+    ),
+    "test_topological_siblings_share_y_or_symmetric": (
+        "Stations sharing the same predecessors, successors and "
+        "line set are supposed to align in Y (or fan symmetrically) "
+        "but don't in this fixture.",
+        "Look for siblings of a common parent that visibly fail to "
+        "align or mirror. If the diagram intentionally cascades "
+        "them, the invariant is mis-identifying siblings - flag "
+        "<strong>not</strong> a bug.",
+    ),
+    "test_label_x_matches_segment_midpoint_on_horizontal_runs": (
+        "A station label is not centred at the midpoint of its "
+        "horizontal segment in this fixture.",
+        "Find labels that visibly drift off the centre of their "
+        "segment. If the run isn't really horizontal, flag "
+        "Ambiguous.",
+    ),
+    "test_stack_station_xs_share_column": (
+        "Stations that should stack in a single column drift "
+        "apart on the X axis in this fixture.",
+        "Look for clusters that visibly fan out where they should "
+        "be a vertical stack. If a grid override is intentional, "
+        "flag Ambiguous.",
+    ),
+    "test_off_track_inputs_above_consumer": (
+        "An off-track input station does not sit above the station it feeds.",
+        "Find off-track inputs whose feed arrow points up instead "
+        "of down. If the layout intentionally puts the input "
+        "below, flag Ambiguous.",
+    ),
+}
+
+
+def _explanation_html(issue_sentences: list[str], check_sentences: list[str]) -> str:
+    if not issue_sentences:
+        return ""
+    issue_html = " ".join(issue_sentences)
+    check_html = " ".join(check_sentences)
+    return (
+        '<div class="block-issue"><strong>Supposed issue:</strong> '
+        + issue_html
+        + "</div>"
+        + '<div class="block-check"><strong>What to check:</strong> '
+        + check_html
+        + "</div>"
+    )
+
+
+def _build_explanation_blocks(
+    invariant: str,
+    violators: list[dict],
+    generic_explanations: dict | None = None,
+    explicit_issue: str | None = None,
+    explicit_check: str | None = None,
+) -> str:
+    # Ad-hoc / violation-JSON entries can supply their own prose directly.
+    if explicit_issue or explicit_check:
+        return _explanation_html(
+            [explicit_issue] if explicit_issue else [],
+            [explicit_check] if explicit_check else [],
+        )
+
+    generic = dict(_GENERIC_EXPLANATIONS)
+    if generic_explanations:
+        generic.update(generic_explanations)
+
     def esc(s) -> str:
         s = str(s)
         return (
@@ -1345,101 +1618,15 @@ def _build_explanation_blocks(invariant: str, violators: list[dict]) -> str:
                 )
 
     if not issue_sentences:
-        _GENERIC = {
-            "test_row_trunk_marker_cy_consistent": (
-                "Sections placed side-by-side in the same grid row are "
-                "supposed to share a single trunk Y, so the horizontal rail "
-                "through the row reads as one straight line. The invariant "
-                "reports a drift in this fixture.",
-                "Scan the horizontal trunk across each row. If you can see a "
-                "vertical step inside any section that should run straight, "
-                "it's a bug. If sections are intentionally on different rows, "
-                "the row-grouping heuristic may be wrong and this is "
-                "<strong>not</strong> a bug.",
-            ),
-            "test_no_kink_at_section_boundary": (
-                "An exit port of one section is at a different Y than the "
-                "entry port of the adjacent section, so the line between "
-                "them has a vertical step.",
-                "Look along section boundaries for a visible jog where a "
-                "horizontal continuation should be straight. If adjacent "
-                "sections are intentionally on different rows, the kink may "
-                "be intended.",
-            ),
-            "test_symfan_pairs_share_y": (
-                "A pair of branches feeding from a common point in this "
-                "fixture is supposed to mirror around the trunk Y but does "
-                "not.",
-                "Look for fan-outs with two branches that obviously don't "
-                "sit symmetrically across the trunk. If one branch is "
-                "intentionally weighted, flag as Ambiguous.",
-            ),
-            "test_lines_dont_cross_non_consumer_markers": (
-                "A routed line passes through a station marker it shouldn't "
-                "touch (the station is neither producer nor consumer of "
-                "that line).",
-                "Find any line that visibly crosses through a station "
-                "circle that isn't its endpoint. If the line only grazes a "
-                "corner or the bbox is overly generous, flag as Ambiguous.",
-            ),
-            "test_section_bbox_has_bottom_padding": (
-                "A section's bottom edge sits too close to its lowest "
-                "internal station (less than the required padding).",
-                "Look at section borders. If a station marker or label "
-                "touches the border, it's a bug. If there's visible "
-                "whitespace, flag as Ambiguous.",
-            ),
-            "test_topological_siblings_share_y_or_symmetric": (
-                "Stations sharing the same predecessors, successors and "
-                "line set are supposed to align in Y (or fan symmetrically) "
-                "but don't in this fixture.",
-                "Look for siblings of a common parent that visibly fail to "
-                "align or mirror. If the diagram intentionally cascades "
-                "them, the invariant is mis-identifying siblings - flag "
-                "<strong>not</strong> a bug.",
-            ),
-            "test_label_x_matches_segment_midpoint_on_horizontal_runs": (
-                "A station label is not centred at the midpoint of its "
-                "horizontal segment in this fixture.",
-                "Find labels that visibly drift off the centre of their "
-                "segment. If the run isn't really horizontal, flag "
-                "Ambiguous.",
-            ),
-            "test_stack_station_xs_share_column": (
-                "Stations that should stack in a single column drift "
-                "apart on the X axis in this fixture.",
-                "Look for clusters that visibly fan out where they should "
-                "be a vertical stack. If a grid override is intentional, "
-                "flag Ambiguous.",
-            ),
-            "test_off_track_inputs_above_consumer": (
-                "An off-track input station does not sit above the station it feeds.",
-                "Find off-track inputs whose feed arrow points up instead "
-                "of down. If the layout intentionally puts the input "
-                "below, flag Ambiguous.",
-            ),
-        }
-        gen = _GENERIC.get(invariant)
+        gen = generic.get(invariant)
         if gen:
             issue_sentences.append(gen[0])
             check_sentences.append(gen[1])
 
-    if not issue_sentences:
-        return ""
-
-    issue_html = " ".join(issue_sentences)
-    check_html = " ".join(check_sentences)
-    return (
-        '<div class="block-issue"><strong>Supposed issue:</strong> '
-        + issue_html
-        + "</div>"
-        + '<div class="block-check"><strong>What to check:</strong> '
-        + check_html
-        + "</div>"
-    )
+    return _explanation_html(issue_sentences, check_sentences)
 
 
-def build_html(rows: list[dict]) -> str:
+def build_html(rows: list[dict], generic_explanations: dict | None = None) -> str:
     fixtures = sorted({r["fixture"] for r in rows})
     invariants = sorted({r["invariant"] for r in rows})
 
@@ -1491,7 +1678,13 @@ def build_html(rows: list[dict]) -> str:
                 f'alt="{esc(fixture)} {esc(inv)}"/>'
             )
 
-        explanation_blocks = _build_explanation_blocks(inv, r["violators"])
+        explanation_blocks = _build_explanation_blocks(
+            inv,
+            r["violators"],
+            generic_explanations=generic_explanations,
+            explicit_issue=r.get("issue"),
+            explicit_check=r.get("check"),
+        )
 
         row_html_parts.append(
             f"""

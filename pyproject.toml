@@ -69,9 +69,10 @@ select = ["E", "F", "I", "W", "ANN"]
 # brevity over fully annotated fixtures and helpers.
 "tests/**" = ["ANN"]
 "scripts/**" = ["ANN"]
-# Generator emits long literal HTML/JS template lines; wrapping them would
-# distort the produced markup rather than improve readability.
-".claude/skills/nf-metro-layout-triage/build_review.py" = ["E501"]
+# Self-contained triage tooling: emits long literal HTML/JS template lines
+# (wrapping them would distort the produced markup) and favours brevity over
+# fully annotated engine-glue helpers, matching the scripts/ convention.
+".claude/skills/nf-metro-layout-triage/build_review.py" = ["E501", "ANN"]
 
 [tool.mypy]
 files = ["src"]
