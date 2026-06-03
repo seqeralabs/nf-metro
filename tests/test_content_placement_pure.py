@@ -113,6 +113,44 @@ def _cases():
             yield pytest.param(fid, path, is_nf, phase, id=f"{fid}-{phase}")
 
 
+def test_content_placement_phases_complete():
+    """Completeness guard (#503): the set of phases actually run through the
+    ``_run_placement`` wrapper in ``_compute_section_layout`` must equal the
+    guarded ``CONTENT_PLACEMENT_PHASES`` set.
+
+    ``_run_placement`` is the single chokepoint every content-placement phase
+    flows through, and it records each ``fn.__name__`` into
+    ``engine._PLACEMENT_PHASES_RUN``.  Rendering the whole corpus (which
+    includes ``center_ports`` fixtures, exercising the gated 6.3 / 6.7 phases)
+    accumulates the ground-truth run set.  Asserting it equals the guarded set
+    means:
+
+    - A new content phase wired through ``_run_placement`` but left out of
+      ``CONTENT_PLACEMENT_PHASES`` shows up as *run but unguarded* and fails
+      here -- forcing the dev to register it, at which point the purity and
+      anchor-frozen guards make it declarative.
+    - A stale name in ``CONTENT_PLACEMENT_PHASES`` that no longer runs shows up
+      as *guarded but never run* and fails too.
+    """
+    engine._PLACEMENT_PHASES_RUN.clear()
+    for _, path, is_nf in CORPUS:
+        compute_corpus_layout(path, is_nf)
+    run = set(engine._PLACEMENT_PHASES_RUN)
+    guarded = set(CONTENT_PLACEMENT_PHASES)
+
+    run_not_guarded = run - guarded
+    guarded_not_run = guarded - run
+    assert not run_not_guarded, (
+        "content-placement phase(s) run through _run_placement but missing from "
+        f"CONTENT_PLACEMENT_PHASES (so unguarded by purity / anchor-frozen): "
+        f"{sorted(run_not_guarded)}. Register them in tests/conftest.py."
+    )
+    assert not guarded_not_run, (
+        "CONTENT_PLACEMENT_PHASES lists phase(s) never run via _run_placement on "
+        f"the corpus (stale entry?): {sorted(guarded_not_run)}."
+    )
+
+
 @pytest.mark.parametrize("fid,path,is_nf,phase_name", list(_cases()))
 def test_placement_phase_is_pure(fid, path, is_nf, phase_name, monkeypatch):
     leaks: list[tuple[str, float, float]] = []

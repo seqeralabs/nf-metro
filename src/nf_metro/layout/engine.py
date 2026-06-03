@@ -487,6 +487,18 @@ def _compute_flat_layout(
         station.y = y_offset + track_rank[station.track] * y_spacing
 
 
+# Names of the content-placement phases observed running through
+# :func:`_run_placement` on the most recent ``_compute_section_layout`` pass.
+# ``_run_placement`` is the single chokepoint every content phase flows through
+# (directly or via :func:`_run_placement_per_row`), so this set is the ground
+# truth for "which phases were actually placed".  The completeness meta-test
+# (``test_content_placement_phases_complete``) asserts it equals the guarded
+# ``CONTENT_PLACEMENT_PHASES`` set, so a new phase wired through the wrapper but
+# left unregistered -- hence outside the purity / anchor-frozen guards -- fails
+# CI.  See CONTRACT.md (anchor invariant) and #503.
+_PLACEMENT_PHASES_RUN: set[str] = set()
+
+
 def _run_placement(
     graph: MetroGraph,
     validate: bool,
@@ -496,6 +508,7 @@ def _run_placement(
 ) -> None:
     """Run a content-placement phase, asserting (under validate) it left every
     port anchor frozen.  See CONTRACT.md (anchor invariant)."""
+    _PLACEMENT_PHASES_RUN.add(fn.__name__)
     before = _port_anchor_snapshot(graph) if validate else None
     fn(graph, *args)
     if validate and before is not None:
