@@ -219,6 +219,10 @@ from nf_metro.layout.phases.single_section import (  # noqa: F401
     _terminus_icons_extend_forward,
     _terminus_y_overhang,
 )
+from nf_metro.layout.phases.snapshots import (
+    capture_phase_snapshot,
+    phase_snapshots_enabled,
+)
 from nf_metro.layout.phases.spacing import (  # noqa: F401
     _MAX_SPREAD_ITERS,
     _SPREAD_SLACK,
@@ -343,6 +347,11 @@ def compute_layout(
     key phases.  Violations raise ``PhaseInvariantError`` instead of
     silently producing broken layouts.
     """
+    # Read the phase-snapshot enable flag once (issue #363) and stash it on
+    # the graph so per-stage call sites can snapshot without signature churn.
+    # Off by default: when unset, each _snap call is a single attribute read.
+    graph._phase_snapshots_enabled = phase_snapshots_enabled()
+
     auto_x = x_spacing is None
     auto_y = y_spacing is None
     if y_spacing is None:
@@ -408,9 +417,22 @@ def compute_layout(
     # render path so an unsupported directive combination fails loudly
     # instead of shipping a silently-broken diagram (issue #424).
     _guard_stations_within_bbox(graph, "final")
+    _snap(graph, "final")
 
     if validate:
         _guard_no_label_overlap(graph, "final")
+
+
+def _snap(graph: MetroGraph, phase_id: str) -> None:
+    """Capture a per-phase coordinate snapshot when enabled (issue #363).
+
+    The enable flag is read once in ``compute_layout`` and stashed on the
+    graph so the per-stage call sites stay signature-free; when disabled
+    this is a single attribute read plus an early return.
+    """
+    capture_phase_snapshot(
+        graph, phase_id, getattr(graph, "_phase_snapshots_enabled", False)
+    )
 
 
 def _layout_once(
@@ -485,6 +507,8 @@ def _compute_flat_layout(
             x_offset + station.layer * x_spacing + layer_extra.get(station.layer, 0)
         )
         station.y = y_offset + track_rank[station.track] * y_spacing
+
+    _snap(graph, "flat")
 
 
 def _run_placement(
@@ -592,6 +616,7 @@ def _compute_section_layout(
         if sub is not None:
             section_subgraphs[sec_id] = sub
 
+    _snap(graph, "1.1")
     if validate:
         _guard_section_bboxes_positive(graph, "after Stage 1.1")
         _guard_no_negative_grid_columns(graph, "after Stage 1.1")
@@ -599,12 +624,15 @@ def _compute_section_layout(
 
     # Stage 1.2: Align Y grids across same-row, same-direction sections
     _align_row_y_grids(graph, section_subgraphs, y_spacing, section_y_padding)
+    _snap(graph, "1.2")
 
     # Stage 1.3: Place sections on the canvas
     place_sections(graph, section_x_gap, section_y_gap)
+    _snap(graph, "1.3")
 
     # Stage 1.4: Renumber sections by visual reading order (row, col)
     _renumber_sections_by_grid(graph)
+    _snap(graph, "1.4")
 
     # Stage 1.5: Adapt x/y_offset for left/top overshoot.
     # Section bboxes extend left of the local origin by at least
@@ -639,6 +667,8 @@ def _compute_section_layout(
             standard_margin = y_offset - section_y_padding
             y_offset += standard_margin - global_top
 
+    _snap(graph, "1.5")
+
     # ---- Stage 2 - Globalise (local -> global coords) ------------------
     # The coord-regime transition.  Owns the post-Stage-2.1 guard
     # checkpoint (finite coords, stations-in-sections, bboxes-positive).
@@ -660,6 +690,7 @@ def _compute_section_layout(
         section.bbox_x += section.offset_x + x_offset
         section.bbox_y += section.offset_y + y_offset
 
+    _snap(graph, "2.1")
     if validate:
         _guard_coordinates_finite(graph, "after Stage 2.1")
         _guard_stations_in_sections(graph, "after Stage 2.1")
@@ -675,6 +706,7 @@ def _compute_section_layout(
     for sec_id, section in graph.sections.items():
         position_ports(section, graph)
 
+    _snap(graph, "3.1")
     if validate:
         _guard_ports_on_boundaries(graph, "after Stage 3.1")
 
@@ -683,24 +715,28 @@ def _compute_section_layout(
     # Uses _resolve_source_xy() to derive junction coordinates
     # on-the-fly, removing the dependency on pre-positioned junctions.
     _align_entry_ports(graph)
+    _snap(graph, "3.2")
 
     # Stage 3.3: Shift internal stations in LR/RL sections with
     # perpendicular (TOP/BOTTOM) entry away from the port.  Needs the
     # aligned port X from Stage 3.2; only moves internal station X, not
     # ports or bboxes.
     _shift_lr_perp_entry_stations(graph, x_spacing)
+    _snap(graph, "3.3")
 
     # Stage 3.4: Align LEFT/RIGHT exit ports on row-spanning (fold)
     # sections with their target's Y so the exit is at the return row.
     # May push target sections down (via _resolve_tb_exit_y), which
     # top-align in the next step corrects.
     _align_exit_ports(graph)
+    _snap(graph, "3.4")
 
     # Stage 3.5: Top-align sections within each grid row.
     # Runs after fold-exit alignment so it corrects any bbox_y shifts
     # from Stage 3.4's target-section push.  Same-row port pairs shift
     # by the same delta, preserving entry-port alignment.
     _top_align_row_sections(graph)
+    _snap(graph, "3.5")
 
     if validate:
         _guard_ports_on_boundaries(graph, "after top-align")
@@ -714,26 +750,31 @@ def _compute_section_layout(
     # Stage 4.1: For non-fold LR/RL sections, pull exit-entry port pairs
     # toward the downstream section's stations so lines flow directly.
     _align_ports_to_downstream(graph)
+    _snap(graph, "4.1")
 
     # Stage 4.2: When a port-connected station is the sole occupant of its
     # layer, snap it to the port Y so the connection is horizontal.
     _snap_sole_layer_stations_to_ports(graph)
+    _snap(graph, "4.2")
 
     # Stage 4.3: For grid-group sections (where Stage 4.2 is skipped), snap
     # entry ports to the Y of their first connected internal station.
     # This produces a straight horizontal port-to-station connection
     # instead of a diagonal from the upstream junction Y.
     _snap_grid_group_entry_ports(graph)
+    _snap(graph, "4.3")
 
     # Stage 4.4: Mirror of Stage 4.3 for exit ports.  Move exit ports of
     # grid-group sections to the Y of the downstream entry port (which
     # Stage 4.3 already snapped to a grid station).  This eliminates detours
     # where lines leave at the section midpoint then route back.
     _snap_grid_group_exit_ports(graph)
+    _snap(graph, "4.4")
 
     # Stage 4.5: Ensure ports maintain at least y_spacing from terminus
     # stations in their section so file icons don't overlap routed lines.
     _space_ports_from_termini(graph, y_spacing)
+    _snap(graph, "4.5")
 
     # Stage 4.6: Recompute bboxes for grid-aligned sections.  Earlier
     # stages (3.2, 3.4, 4.5) may have expanded bboxes for temporary port
@@ -741,16 +782,19 @@ def _compute_section_layout(
     # back toward downstream stations).  Recompute with symmetric
     # padding around the final non-port station range.
     _recompute_grid_group_bboxes(graph)
+    _snap(graph, "4.6")
 
     # Stage 4.7: Re-run top-align after Stage 4.5 may have shifted
     # individual section bbox_y values (via _expand_bbox_for_y) so
     # bbox tops within each row stay flush after port-terminus spacing.
     _top_align_row_sections(graph)
+    _snap(graph, "4.7")
 
     # Stage 4.8: Align trunk Ys across same-row sections.  Shifts
     # content downward in shallower sections so the inter-section bundle
     # passes through at a single Y per row.  Bbox tops are preserved.
     _align_row_trunk_ys(graph)
+    _snap(graph, "4.8")
 
     # The trunk anchors (LR/RL port Ys) are now resolved.  The phases below
     # position content around them and must never move one; ``_run_placement``
@@ -762,6 +806,7 @@ def _compute_section_layout(
     # Scoped to fan-out side branches only: linear chains, fan-in
     # structures, and file inputs are left in place.
     _run_placement(graph, validate, "4.9", _redistribute_fanout_siblings, y_spacing)
+    _snap(graph, "4.9")
 
     # Stage 4.10: Symmetrically fan a column of full-bundle stations
     # around the trunk Y when no unique trunk exists (e.g. Reporting's
@@ -779,6 +824,7 @@ def _compute_section_layout(
     _run_placement(
         graph, validate, "4.10", _redistribute_full_bundle_columns, y_spacing
     )
+    _snap(graph, "4.10")
 
     _settle_pass_c(
         graph,
@@ -846,6 +892,7 @@ def _place_pass_c_content(
 
     # Stage 5.1: Position junction stations in the inter-section gap.
     _position_junctions(graph)
+    _snap(graph, "5.1")
 
     # Stage 5.2: Lift off_track stations above their section's top track.
     # Runs last so it operates on finalised station Ys and bboxes.
@@ -854,6 +901,7 @@ def _place_pass_c_content(
     # the canvas top margin set by Stage 1.5; shift the whole graph
     # down to restore the margin.  No-op when no section overflowed.
     _shift_graph_into_canvas(graph, section_y_padding)
+    _snap(graph, "5.2")
     if validate:
         _run_pass_c_guards(graph, "after Stage 5.2")
 
@@ -863,6 +911,7 @@ def _place_pass_c_content(
     # the empty input-band space lines up across the row.  Station Ys
     # in unlifted sections are preserved.
     _top_align_row_bboxes_only(graph)
+    _snap(graph, "5.3")
     if validate:
         _run_pass_c_guards(graph, "after Stage 5.3")
 
@@ -871,6 +920,7 @@ def _place_pass_c_content(
     # smallest above-content slack, preserving trunk alignment.  Bbox
     # heights shrink correspondingly so the empty top space disappears.
     _compact_row_content_to_bbox_top(graph, section_y_padding, y_spacing)
+    _snap(graph, "5.4")
     if validate:
         _run_pass_c_guards(graph, "after Stage 5.4")
 
@@ -879,6 +929,7 @@ def _place_pass_c_content(
     # Picks the downstream entry port's Y as the anchor since it sits
     # on the row's aligned trunk grid.
     _snap_inter_section_port_pairs(graph)
+    _snap(graph, "5.5")
     if validate:
         _run_pass_c_guards(graph, "after Stage 5.5")
 
@@ -901,6 +952,7 @@ def _place_pass_c_content(
     _run_placement_per_row(
         graph, validate, "6.1", _fan_free_content_upward, section_y_padding, y_spacing
     )
+    _snap(graph, "6.1")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.1")
 
@@ -910,6 +962,7 @@ def _place_pass_c_content(
     # nearest-to-trunk sources into the empty top band so the section
     # is bottom- and top-weighted instead of stacked below the trunk.
     _run_placement_per_row(graph, validate, "6.2", _fan_source_inputs_upward, y_spacing)
+    _snap(graph, "6.2")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.2")
 
@@ -929,6 +982,7 @@ def _place_pass_c_content(
             y_spacing,
             section_y_padding,
         )
+        _snap(graph, "6.3")
         if validate:
             _run_pass_c_guards(graph, "after Stage 6.3")
 
@@ -941,6 +995,7 @@ def _place_pass_c_content(
     # On-track consumer Ys are now final/grid-snapped; the off-track
     # reanchor (Stage 6.6 / 6.8) may run from here on.
     graph._consumers_grid_snapped = True
+    _snap(graph, "6.4")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.4")
 
@@ -949,6 +1004,7 @@ def _place_pass_c_content(
     # section's bbox ends right at the inter-section exit port Y,
     # making the line look pinned to the section edge.
     _align_tb_section_bbox_bottoms(graph)
+    _snap(graph, "6.5")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.5")
 
@@ -963,6 +1019,7 @@ def _place_pass_c_content(
     # Same canvas-fit safeguard as after Stage 5.2: a reanchor-driven
     # bbox grow can push the topmost section above the canvas top.
     _shift_graph_into_canvas(graph, section_y_padding)
+    _snap(graph, "6.6")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.6")
 
@@ -982,6 +1039,7 @@ def _place_pass_c_content(
         _run_placement_per_row(
             graph, validate, "6.7", _recenter_full_bundle_columns, y_spacing
         )
+        _snap(graph, "6.7")
 
         # Stage 6.8: Re-anchor off-track inputs after the recenter.
         # The recenter moves consumers to the final trunk-anchored Y,
@@ -991,12 +1049,14 @@ def _place_pass_c_content(
         # recenter Y as the new anchor and grows the section bbox
         # upward when the lifted band moves above its current top.
         _reanchor_off_track_to_consumer(graph, y_spacing, section_y_padding)
+        _snap(graph, "6.8")
 
         # Stage 6.9: Re-run row top-align.  A Stage 6.8 reanchor-
         # driven bbox grow leaves the section's bbox above its row
         # mates'; pull row mates' bbox tops up to match so the section
         # row stays flush along its top edge.
         _top_align_row_bboxes_only(graph)
+        _snap(graph, "6.9")
         if validate:
             _run_pass_c_guards(graph, "after Stage 6.9")
 
@@ -1005,6 +1065,7 @@ def _place_pass_c_content(
     # pre-fan Y while their sole upstream moved to the trunk.  Pin
     # them back onto the source Y so the connection stays horizontal.
     _align_terminus_to_upstream(graph)
+    _snap(graph, "6.10")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.10")
 
@@ -1024,6 +1085,7 @@ def _place_pass_c_content(
         section_y_padding,
         y_spacing,
     )
+    _snap(graph, "6.11")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.11")
 
@@ -1036,6 +1098,7 @@ def _place_pass_c_content(
     # Reposition each side station to the midpoint of the two diagonal
     # corner Xs derived from the actual routing geometry.
     _run_placement_per_row(graph, validate, "6.12", _recenter_loop_side_stations)
+    _snap(graph, "6.12")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.12")
 
@@ -1058,6 +1121,7 @@ def _stack_rows(
     # trunk alignment is unaffected; tighten only fires where a rowspan
     # section's content fell short of its row claim.
     _shrink_and_tighten_rows(graph, section_y_padding, section_y_gap)
+    _snap(graph, "6.13")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.13")
 
@@ -1071,6 +1135,7 @@ def _stack_rows(
     _shift_and_propagate_loop_stations(
         graph, y_spacing, section_y_padding, section_y_gap
     )
+    _snap(graph, "6.14")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.14")
 
@@ -1098,6 +1163,7 @@ def _finalize_layout(
     # canvas snap below.
     _fit_bboxes_to_content_top(graph, section_y_padding, section_y_gap)
     _shift_graph_into_canvas(graph, section_y_padding)
+    _snap(graph, "6.15a")
 
     # Stage 6.15: Restore canvas-wide grid alignment after all settling.
     # Stage 6.4 snaps to a per-row grid; later helpers (notably
@@ -1109,6 +1175,7 @@ def _finalize_layout(
     # to integer multiples of ``y_spacing``.  No-op when residues are
     # mixed.
     _snap_canvas_y_to_grid(graph, y_spacing, section_y_padding)
+    _snap(graph, "6.15")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.15")
 
@@ -1125,6 +1192,7 @@ def _finalize_layout(
     # (otherwise a fan-out bundle dips to a stale junction Y and back).
     _align_entry_ports(graph, tb_only=True)
     _position_junctions(graph)
+    _snap(graph, "6.16")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.16")
 

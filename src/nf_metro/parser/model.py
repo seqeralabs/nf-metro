@@ -247,6 +247,10 @@ class MetroGraph:
     # _snapshot_placement_refs.
     _placement_ref_y: dict[str, float] = field(default_factory=dict, repr=False)
     _placement_ref_bbox_top: dict[str, float] = field(default_factory=dict, repr=False)
+    # Per-phase coordinate-snapshot enable flag (issue #363).  Set once in
+    # compute_layout from the NF_METRO_PHASE_SNAPSHOTS env var; read by the
+    # _snap hook after each phase.  Off by default (pure observation).
+    _phase_snapshots_enabled: bool = field(default=False, repr=False)
 
     def _invalidate_edge_caches(self) -> None:
         """Reset caches that depend on the edge list."""
