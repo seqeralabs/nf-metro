@@ -624,12 +624,13 @@ class TestConcentricCornerRadius:
 
     def test_reference_line_is_base(self):
         for turn_in, turn_out in ALL_TURNS:
-            assert concentric_corner_radius(turn_in, turn_out, 0.0, 0.0) == CURVE_RADIUS
+            assert concentric_corner_radius(turn_in, turn_out, 0.0) == CURVE_RADIUS
 
     def test_arcs_are_concentric_in_every_orientation(self):
-        # The concentric fan direction is turn-specific: translating each line
-        # along ``(ux, uy) = turn_out - turn_in`` keeps every arc centre fixed.
-        # Verified in EVERY turn orientation against the independent centre.
+        # The concentric fan direction is turn-specific: translating each line's
+        # whole corner along ``(ux, uy) = turn_out - turn_in`` keeps every arc
+        # centre fixed.  The routine takes only the X displacement; verified in
+        # EVERY turn orientation against the independent centre.
         base = CURVE_RADIUS
         corner0 = (100.0, 100.0)
         for turn_in, turn_out in ALL_TURNS:
@@ -638,7 +639,7 @@ class TestConcentricCornerRadius:
             centres = []
             for k in range(4):
                 dx, dy = k * OFFSET_STEP * ux, k * OFFSET_STEP * uy
-                r = concentric_corner_radius(turn_in, turn_out, dx, dy, base)
+                r = concentric_corner_radius(turn_in, turn_out, dx, base)
                 centre = _arc_centre(
                     turn_in, turn_out, (corner0[0] + dx, corner0[1] + dy), r
                 )
@@ -653,11 +654,8 @@ class TestConcentricCornerRadius:
         base = CURVE_RADIUS
         for turn_in, turn_out in ALL_TURNS:
             ux = turn_out[0] - turn_in[0]
-            uy = turn_out[1] - turn_in[1]
             radii = [
-                concentric_corner_radius(
-                    turn_in, turn_out, k * OFFSET_STEP * ux, k * OFFSET_STEP * uy, base
-                )
+                concentric_corner_radius(turn_in, turn_out, k * OFFSET_STEP * ux, base)
                 for k in range(4)
             ]
             diffs = [abs(b - a) for a, b in zip(radii, radii[1:])]
@@ -669,22 +667,24 @@ class TestConcentricCornerRadius:
         # travel (either order) is sized by the SAME routine and is concentric.
         base = CURVE_RADIUS
         for turn_in, turn_out in ((RIGHT, DOWN), (DOWN, RIGHT)):
-            r_inner = concentric_corner_radius(turn_in, turn_out, 0.0, 0.0, base)
+            ux = turn_out[0] - turn_in[0]
+            r_inner = concentric_corner_radius(turn_in, turn_out, 0.0, base)
             r_outer = concentric_corner_radius(
-                turn_in, turn_out, OFFSET_STEP, OFFSET_STEP, base
+                turn_in, turn_out, OFFSET_STEP * ux, base
             )
             assert r_inner == base
             assert abs(r_outer - r_inner) == pytest.approx(OFFSET_STEP)
 
-    def test_x_and_y_projection_agree_when_concentric(self):
-        # For a concentric fan (translation along (ux, uy)), the X- and Y-axis
-        # radius projections agree: base - dx*ux == base - dy*uy.
+    def test_radius_matches_both_axis_projections(self):
+        # For a concentric fan (whole corner translated along (ux, uy)) the
+        # X- and Y-axis radius derivations agree: base - dx*ux == base - dy*uy.
+        # The routine uses the X projection; this pins that they coincide.
         base = CURVE_RADIUS
         for turn_in, turn_out in ALL_TURNS:
             ux = turn_out[0] - turn_in[0]
             uy = turn_out[1] - turn_in[1]
             dx, dy = 2 * OFFSET_STEP * ux, 2 * OFFSET_STEP * uy
-            r = concentric_corner_radius(turn_in, turn_out, dx, dy, base)
+            r = concentric_corner_radius(turn_in, turn_out, dx, base)
             assert r == pytest.approx(base - dx * ux)
             assert r == pytest.approx(base - dy * uy)
 
@@ -692,7 +692,7 @@ class TestConcentricCornerRadius:
         # An inside-of-turn line in a deep bundle can drive radius below zero.
         base = CURVE_RADIUS
         # DOWN->RIGHT: ux = +1, so positive dx subtracts -> can go negative.
-        r = concentric_corner_radius(DOWN, RIGHT, 100.0, 100.0, base, min_radius=0.1)
+        r = concentric_corner_radius(DOWN, RIGHT, 100.0, base, min_radius=0.1)
         assert r == 0.1
 
 

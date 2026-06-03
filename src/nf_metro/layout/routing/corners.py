@@ -188,7 +188,6 @@ def concentric_corner_radius(
     turn_in: tuple[float, float],
     turn_out: tuple[float, float],
     dx: float,
-    dy: float = 0.0,
     base_radius: float = CURVE_RADIUS,
     *,
     min_radius: float | None = None,
@@ -196,30 +195,34 @@ def concentric_corner_radius(
     """Concentric arc radius for one line of a wholesale-translated 90° corner.
 
     When a bundle of parallel lines turns a 90° corner and the *entire* corner
-    (both flanking legs) is translated per line by ``(dx, dy)`` from a chosen
-    reference line, the arcs share a common centre iff::
+    is translated per line so this line's vertical leg sits *dx* to the side of
+    the reference line, the arcs share a common centre iff::
 
         radius = base_radius - dx * (turn_out_x - turn_in_x)
-               = base_radius - dy * (turn_out_y - turn_in_y)
 
     (derived by equating every line's arc centre ``corner + radius *
-    (turn_out - turn_in)``).  This is the single direction-driven entry point
-    for nestable corners: any orientation - right-then-down, down-then-left,
-    etc. - is mapped to the correct signed offset purely from the two travel
-    vectors, so the same routine sizes every such corner regardless of compass
-    direction.  Unlike :func:`corner_outside_sign` (risers, shared-Y stretch),
-    this keeps the bundle's arcs genuinely concentric.
+    (turn_out - turn_in)``; ``turn_out_x - turn_in_x`` is always +/-1 for a real
+    90° turn, and a valid bundle must fan in X since a pure-Y translation would
+    overlap the vertical legs - so the X displacement alone fixes the radius).
+    This is the single direction-driven entry point for nestable corners: any
+    orientation - right-then-down, down-then-left, etc. - is mapped to the
+    correct signed offset purely from the two travel vectors, so the same
+    routine sizes every such corner regardless of compass direction.
+
+    The arcs are genuinely concentric only when the *whole* corner translates
+    together.  At a *transition* corner - one flanking leg fanned by *dx*, the
+    other pinned at a fixed (e.g. port) offset - this still returns a sensibly
+    nested radius (sized to the fanned leg) but the arcs do not share a centre.
+    Unlike :func:`corner_outside_sign` (risers, shared-Y stretch), this never
+    flattens the bundle to a single radius.
 
     Parameters
     ----------
     turn_in, turn_out : tuple of float
         Unit travel-direction vectors into and out of the corner (axis-aligned;
         ``turn_out - turn_in`` has both components +/-1 for a real 90° turn).
-    dx, dy : float
-        This line's corner displacement from the bundle's reference line.  The
-        X projection drives the radius for any 90° turn (``turn_out_x !=
-        turn_in_x`` always holds); *dy* is the fallback for a degenerate corner
-        with no X extent.
+    dx : float
+        This line's signed X displacement from the bundle's reference line.
     base_radius : float
         Reference-line radius.
     min_radius : float or None
@@ -232,9 +235,7 @@ def concentric_corner_radius(
         The concentric radius via :func:`reference_anchored_radius`.
     """
     ux = turn_out[0] - turn_in[0]
-    uy = turn_out[1] - turn_in[1]
-    signed = -dx * ux if ux != 0 else -dy * uy
-    return reference_anchored_radius(signed, base_radius, min_radius=min_radius)
+    return reference_anchored_radius(-dx * ux, base_radius, min_radius=min_radius)
 
 
 def reference_anchored_radius(

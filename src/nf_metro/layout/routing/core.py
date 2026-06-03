@@ -1452,16 +1452,16 @@ def _route_stepped_descent(
         (chan_x, ey + tgt_off),
         (ex, ey + tgt_off),
     ]
-    # Each line's vertical legs (and the step_y rung) sit ``spread`` to the
-    # right of / below the innermost line, so the four bends fan as nested
-    # concentric arcs.  Size every corner through the one direction-driven
-    # routine, reading the turn from the route's own geometry; ``spread == 0``
-    # for the innermost line keeps the single-line case at the base radius.
+    # Each line's vertical legs sit ``spread`` to the right of the innermost
+    # line, so the four bends fan as nested arcs (the two middle rungs are
+    # genuinely concentric; the outer two are transition corners).  Size every
+    # corner through the one direction-driven routine, reading the turn from the
+    # route's own geometry; ``spread == 0`` for the innermost line keeps the
+    # single-line case at the base radius.
     radii = [
         concentric_corner_radius(
             _unit_step(points[k - 1], points[k]),
             _unit_step(points[k], points[k + 1]),
-            spread,
             spread,
             ctx.curve_radius,
             min_radius=COORD_TOLERANCE,
