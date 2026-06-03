@@ -863,7 +863,7 @@ def _route_tb_bottom_exit(
     # have positive length for the corner curves to bite into.
     lo, hi = (sy, ty) if dy >= 0 else (ty, sy)
     hy = min(max(hy, lo + ctx.curve_radius), hi - ctx.curve_radius)
-    jog_r = min(ctx.curve_radius, abs(tx - sx) / 2)
+    jog_r = reference_anchored_radius(0.0, min(ctx.curve_radius, abs(tx - sx) / 2))
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
@@ -936,6 +936,7 @@ def _route_merge_branch(
         lead_x = min(lead_x, min_lead)
     tail_x = lead_x + horizontal.sign * ctx.curve_radius * 2
 
+    r_base = reference_anchored_radius(0.0, ctx.curve_radius)
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
@@ -948,7 +949,7 @@ def _route_merge_branch(
         is_inter_section=True,
         # One branch line per call: a single descent, so both corners take the
         # base radius (no bundle to fan concentrically).
-        curve_radii=[ctx.curve_radius, ctx.curve_radius],
+        curve_radii=[r_base, r_base],
         offsets_applied=True,
     )
 
@@ -1651,7 +1652,7 @@ def _route_l_shape(
     if fan is not None:
         src_off = _get_offset(ctx, edge.source, edge.line_id)
         tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-        r_lead = ctx.curve_radius
+        r_lead = reference_anchored_radius(0.0, ctx.curve_radius)
         return RoutedPath(
             edge=edge,
             line_id=edge.line_id,
@@ -1716,7 +1717,7 @@ def _route_top_entry_l_shape(
     # direction matches dx.  When dx is near-zero (source directly
     # above target), infer direction from the upstream exit port so the
     # line continues with the bundle flow before curving down.
-    r_lead = ctx.curve_radius
+    r_lead = reference_anchored_radius(0.0, ctx.curve_radius)
     if abs(dx) > r_lead:
         lead = horizontal_direction(dx)
     else:
@@ -2757,7 +2758,7 @@ def _route_right_entry_wrap(
     else:
         # Short horizontal lead-in so the first corner (horizontal-to-vertical)
         # gets a smooth curve instead of a sharp right angle at the junction.
-        r_lead = ctx.curve_radius
+        r_lead = reference_anchored_radius(0.0, ctx.curve_radius)
         v1_x = sx + r_lead
 
     # Bake the per-line station offset into the endpoints (mirroring
@@ -5004,7 +5005,7 @@ def _set_port_approach_x(ch: _VChannel, new_x: float) -> None:
         return
     for radius_idx in (k - 1, k):
         if 0 <= radius_idx < len(rp.curve_radii):
-            rp.curve_radii[radius_idx] = CURVE_RADIUS
+            rp.curve_radii[radius_idx] = reference_anchored_radius(0.0, CURVE_RADIUS)
 
 
 def _normalize_bypass_trunks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
