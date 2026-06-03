@@ -157,6 +157,52 @@ def corner_radius(
     return base_radius + eff
 
 
+def reference_anchored_radius(
+    signed_offset: float,
+    base_radius: float = CURVE_RADIUS,
+    *,
+    min_radius: float | None = None,
+) -> float:
+    """Concentric arc radius anchored on a *reference* line, not the innermost.
+
+    ``corner_radius`` anchors the bundle's innermost line at *base_radius* so
+    every radius is ``>= base_radius``.  The TOP-entry staircase into a port
+    instead anchors a chosen **reference line** (the one kept continuous with
+    its bundle-mates at the upstream junction) at *base_radius*, then offsets
+    every other line by its signed perpendicular displacement from that
+    reference.  Because that reference is interior to the bundle, lines on the
+    inside of a turn fall **below** the base radius (``signed_offset < 0``).
+
+    Both forms encode the same concentricity invariant ``radius - displacement
+    = const``; they differ only in which line is pinned to *base_radius*.  This
+    helper is the single source of truth for the reference-anchored variant.
+
+    Parameters
+    ----------
+    signed_offset : float
+        Perpendicular displacement of this line from the reference line at the
+        corner, signed by the inside/outside sense of the turn (positive on the
+        outside, negative on the inside).  The reference line itself has
+        ``signed_offset == 0`` and therefore radius *base_radius*.
+    base_radius : float
+        Reference-line radius (the bundle-wide concentric centre offset).
+    min_radius : float or None
+        Optional floor.  Tight converging jogs onto a shared port point can
+        drive ``base_radius + signed_offset`` to zero or below; pass a small
+        positive floor (e.g. ``COORD_TOLERANCE``) to keep the arc renderable.
+        ``None`` (default) applies no floor.
+
+    Returns
+    -------
+    float
+        ``base_radius + signed_offset`` (clamped up to *min_radius* if given).
+    """
+    r = base_radius + signed_offset
+    if min_radius is not None:
+        return max(min_radius, r)
+    return r
+
+
 # ---------------------------------------------------------------------------
 # Standard inter-section L-shape (horizontal -> vertical -> horizontal)
 # ---------------------------------------------------------------------------

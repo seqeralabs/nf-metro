@@ -531,6 +531,7 @@ def bypass_bottom_y(
     clearance: float = BYPASS_CLEARANCE,
     src_row: int | None = None,
     cross_row: bool = False,
+    tgt_row: int | None = None,
 ) -> float:
     """Bottom Y for a bypass route around intervening sections.
 
@@ -540,6 +541,13 @@ def bypass_bottom_y(
     sections in the same row are considered so that bypass routes
     stay within their row.
 
+    When *tgt_row* is the bottommost grid row, there is nothing below
+    it to clear: routing below "everything" would dive past the canvas
+    floor and then loop back up to the target's entry port.  In that
+    case the channel is placed in the inter-row gap ABOVE the target
+    row instead, so the route descends into that gap and approaches the
+    entry without overshooting.
+
     When there are no intervening sections (adjacent-column bypass),
     falls back to the shorter of the source/target endpoint sections
     so the route hugs the smaller box rather than being pushed down
@@ -548,6 +556,14 @@ def bypass_bottom_y(
     lo, hi = min(src_col, tgt_col), max(src_col, tgt_col)
 
     if cross_row:
+        rows = [s.grid_row for s in graph.sections.values() if s.bbox_w > 0]
+        if tgt_row is not None and rows and tgt_row == max(rows) and tgt_row > 0:
+            # Target is in the bottommost row: route in the gap ABOVE it
+            # rather than below the whole canvas (which would overshoot
+            # and loop back up to the entry port).
+            upper_bottom = row_bottom_edge(graph, tgt_row - 1, default=0.0)
+            lower_top = row_top_edge(graph, tgt_row, default=upper_bottom)
+            return _center_inter_row_channel(upper_bottom, lower_top)
         # Route below ALL sections in the column range.
         all_in_range = [
             s
@@ -584,13 +600,17 @@ def bypass_bottom_y(
         else:
             return clearance
 
-    # Keep the bypass at least HEADER_CLEARANCE above any different-row
+    # Keep the bypass at least HEADER_CLEARANCE above any LOWER-row
     # section header_top; the stacked-line bundle otherwise crowds the
     # badge.  Midpoint fallback for inter-row gaps too tight to satisfy
     # both clearances (layout placement should normally prevent this).
+    # Only sections in rows BELOW the source row constrain a bypass that
+    # runs below the source row -- sections in rows above it sit far over
+    # the bypass and clamping toward them would shove the channel up
+    # through every intervening row.
     if src_row is not None:
         for s in graph.sections.values():
-            if s.bbox_w > 0 and lo <= s.grid_col <= hi and s.grid_row != src_row:
+            if s.bbox_w > 0 and lo <= s.grid_col <= hi and s.grid_row > src_row:
                 header_top = s.bbox_y - SECTION_HEADER_PROTRUSION
                 row_bottom = candidate - clearance
                 safe_cap = header_top - HEADER_CLEARANCE
