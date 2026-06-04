@@ -43,6 +43,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Minimal two-line pipeline with no sections.",
     ),
     (
+        "centered_tracks",
+        EXAMPLES_DIR,
+        "Demonstrates the opt-in `%%metro centered_tracks: true` mode: the "
+        "shared trunk sits on the vertical midline and each line's exclusive "
+        "callers distribute symmetrically above and below it, giving a "
+        "balanced stacked-rails weave instead of a top-anchored downward "
+        "cascade.",
+    ),
+    (
         "rnaseq_auto",
         EXAMPLES_DIR,
         "Demonstrates fully auto-inferred layout: no `%%metro grid:` directives "

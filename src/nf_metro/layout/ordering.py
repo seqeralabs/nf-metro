@@ -66,10 +66,30 @@ def assign_tracks(
         else:
             node_primary[sid] = None
 
-    # Step 2: Fixed-gap base tracks per line
+    # Step 2: Fixed-gap base tracks per line.  In centred mode the bases
+    # are symmetric about zero so the weave balances around the midline;
+    # otherwise they stack downward from the top line (legacy behaviour).
+    centered = bool(getattr(graph, "centered_tracks", False))
+    n_lines = len(line_order)
     line_base: dict[str, float] = {}
     for i, lid in enumerate(line_order):
-        line_base[lid] = i * line_gap
+        if centered:
+            line_base[lid] = (i - (n_lines - 1) / 2) * line_gap
+        else:
+            line_base[lid] = i * line_gap
+
+    # In centred mode a shared (multi-line) station should sit on the mean
+    # of its lines' base tracks (the bundle midline) rather than snap to
+    # its single highest-priority line's base, which would pull every trunk
+    # station up to the top line.  Single-line stations keep their own
+    # line's (now symmetric) base so exclusive callers fan above/below.
+    node_base: dict[str, float] = {}
+    if centered:
+        for sid in graph.stations:
+            node_lines = graph.station_lines(sid)
+            bases = [line_base[ln] for ln in node_lines if ln in line_base]
+            if bases:
+                node_base[sid] = sum(bases) / len(bases)
 
     # Step 3: Group nodes by (layer, primary_line).  Off-track stations
     # are excluded from grouping: their Y is overwritten by the Stage 5.2
@@ -99,9 +119,12 @@ def assign_tracks(
             base = line_base[lid]
 
             if len(nodes) == 1:
+                # Centred mode: a shared (multi-line) station anchors on the
+                # mean of its lines' bases so the trunk stays on the midline.
+                single_base = node_base.get(nodes[0], base) if centered else base
                 tracks[nodes[0]] = _place_single_node(
                     nodes[0],
-                    base,
+                    single_base,
                     line_gap,
                     G,
                     tracks,

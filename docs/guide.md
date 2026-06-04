@@ -435,6 +435,7 @@ These go at the top of the file, before `graph LR`.
 | `%%metro off_track: <station>[, <station>...]` | Lift the listed stations above the section's main track (see below) |
 | `%%metro compact_offsets: true` | Compact line offsets within stations (see below) |
 | `%%metro center_ports: true` | Centre inter-section ports on the shorter of the two connected sections, so lines enter/exit at the visual midpoint. Overridden by the `--center-ports` / `--no-center-ports` CLI flag. |
+| `%%metro centered_tracks: true` | Balance the weave so the shared trunk sits on the vertical midline and each line's exclusive stations distribute symmetrically above and below it, instead of the default top-anchored downward cascade (see [centered_tracks](https://github.com/pinin4fjords/nf-metro/blob/main/examples/centered_tracks.mmd) example) |
 | `%%metro legend_min_height: <pixels>` | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 
 **Compact offsets.** By default, each line reserves a fixed vertical slot across the whole map based on its declaration order. If you define three lines, every station that carries even one of them is sized to fit all three. This keeps bundles visually consistent but wastes space when most stations only carry one or two lines.

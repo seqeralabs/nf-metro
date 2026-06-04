@@ -196,6 +196,11 @@ class MetroGraph:
     diamond_style: str = "straight"  # "straight" or "symmetric"
     compact_offsets: bool = False
     center_ports: bool = False
+    # Opt-in balanced track layout: when True, line base-tracks are placed
+    # symmetrically about zero and shared (multi-line) stations are centred
+    # on the mean of their lines' base tracks, so a section's weave is
+    # balanced above and below the shared trunk instead of cascading down.
+    centered_tracks: bool = False
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
     # Placement modifiers for the bundled legend+logo block. The corner/edge

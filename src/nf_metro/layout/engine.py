@@ -108,6 +108,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _ensure_routes,
     _guard_anchors_frozen_during_placement,
     _guard_bundle_order_preserved,
+    _guard_centered_tracks_balanced,
     _guard_coordinates_finite,
     _guard_entry_approach_from_port_side,
     _guard_explicit_grid_directions,
@@ -423,6 +424,7 @@ def compute_layout(
     if validate:
         _guard_no_label_overlap(graph, "final")
         _guard_file_icon_no_name_label(graph, "final")
+        _guard_centered_tracks_balanced(graph, "final")
 
 
 def _snap(graph: MetroGraph, phase_id: str) -> None:

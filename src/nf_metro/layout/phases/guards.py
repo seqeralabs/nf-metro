@@ -232,6 +232,33 @@ def _guard_stations_within_bbox(graph: MetroGraph, phase: str) -> None:
         raise PhaseInvariantError(detail)
 
 
+def _guard_centered_tracks_balanced(graph: MetroGraph, phase: str) -> None:
+    """When ``centered_tracks`` is on, the line base tracks must be symmetric
+    about zero so the weave balances around the shared-trunk midline.
+
+    The feature's contract is that line base-tracks are placed at
+    ``(i - (N-1)/2) * line_gap``, whose mean is exactly zero.  A non-zero
+    mean would mean the centring computation drifted (e.g. an off-by-one in
+    the symmetric formula) and the trunk would no longer sit on the midline.
+    No-op when the flag is off, fewer than two lines exist, or there are no
+    lines at all (nothing to balance).
+    """
+    if not getattr(graph, "centered_tracks", False):
+        return
+    n = len(graph.lines)
+    if n < 2:
+        return
+    from nf_metro.layout.constants import LINE_GAP
+
+    bases = [(i - (n - 1) / 2) * LINE_GAP for i in range(n)]
+    mean = sum(bases) / n
+    if abs(mean) > GUARD_TOLERANCE:
+        raise PhaseInvariantError(
+            f"{phase}: centered_tracks base tracks not symmetric about zero "
+            f"(mean={mean:.3f}, bases={bases})"
+        )
+
+
 def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
     """After Stage 3.1+: ports must sit on their section's bounding box edge."""
     tolerance = GUARD_TOLERANCE

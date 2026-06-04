@@ -333,6 +333,7 @@ These are automatically rewritten into port-to-port connections with junction st
 | `%%metro off_track: <station>[, <station>...]` | Global | Lift the listed stations (typically `file:`/`files:`/`dir:` inputs) above the section's main track, so they drop into their consumer instead of consuming a line-track slot |
 | `%%metro compact_offsets: true` | Global | Use compact per-station offsets instead of global line-priority slots (better for dense maps with few lines) |
 | `%%metro center_ports: true` | Global | Centre inter-section ports on the shorter of the two connected sections (overridden by the `--center-ports` / `--no-center-ports` CLI flag) |
+| `%%metro centered_tracks: true` | Global | Balance the weave: place line tracks symmetrically about the centre so the shared trunk sits on the midline and each line's exclusive stations distribute above and below it, instead of the default top-anchored downward cascade |
 | `%%metro legend_min_height: <pixels>` | Global | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 | `%%metro entry: <side> \| <lines>` | Section | Entry port hint |
 | `%%metro exit: <side> \| <lines>` | Section | Exit port hint |

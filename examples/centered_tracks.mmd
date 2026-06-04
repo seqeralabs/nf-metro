@@ -1,0 +1,37 @@
+%%metro title: Centered Tracks Demo
+%%metro style: dark
+%%metro centered_tracks: true
+%%metro line: dna | DNA samples | #4CAF50
+%%metro line: rna | RNA samples | #2196F3
+%%metro line: cfdna | cfDNA samples | #E91E63
+
+graph LR
+    fastqc[FastQC]
+    align[Alignment]
+    markdup[MarkDuplicates]
+    summary[Summary]
+
+    bwa[BWA-only call]
+    cnv[CNV call]
+    splice[Splice call]
+    fusion[Fusion call]
+    pileup[Pileup call]
+    lowfreq[Low-freq call]
+
+    fastqc -->|dna,rna,cfdna| align
+    align -->|dna,rna,cfdna| markdup
+
+    markdup -->|dna| bwa
+    markdup -->|dna| cnv
+    bwa -->|dna| summary
+    cnv -->|dna| summary
+
+    markdup -->|rna| splice
+    markdup -->|rna| fusion
+    splice -->|rna| summary
+    fusion -->|rna| summary
+
+    markdup -->|cfdna| pileup
+    markdup -->|cfdna| lowfreq
+    pileup -->|cfdna| summary
+    lowfreq -->|cfdna| summary
