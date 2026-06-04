@@ -315,7 +315,15 @@ def _layout_section_rails(
     # last slot centre.
     rails_bottom = rails_top + (max(slot_offset.values()) if slot_offset else 0.0)
     bbox_y = box_top
-    bbox_h = (rails_bottom - box_top) + section_y_padding
+    # Below-rail station labels hang under the bottom rail; the bbox must
+    # contain them so a section stacked below this one clears them (the
+    # stacking gap is measured bbox-to-bbox).  Reserve max(section_y_padding,
+    # below-rail label band) so the box always wraps its labels.  With the
+    # default 50px padding this is a no-op for short/level labels, but it grows
+    # the box for a long or steeply-angled label whose footprint exceeds the
+    # padding.
+    bottom_pad = max(section_y_padding, _below_rail_label_band(graph, real_ids))
+    bbox_h = (rails_bottom - box_top) + bottom_pad
     section.bbox_x = bbox_x
     section.bbox_y = bbox_y
     section.bbox_w = bbox_w
@@ -323,6 +331,41 @@ def _layout_section_rails(
     section.direction = "LR"
 
     return bbox_y + bbox_h
+
+
+def _below_rail_label_band(
+    graph: MetroGraph,
+    real_ids: list[str],
+) -> float:
+    """Vertical room a section's below-rail labels need under the bottom rail.
+
+    A rail label is offset ``LABEL_OFFSET`` from the rail then occupies its own
+    text footprint.  For an angled (diagonal) label the footprint that hangs
+    downward is ``height*cos(angle) + width*sin(angle)``.  Returns the worst
+    such band over the section's labelled stations (0 if none), so the caller
+    can keep the section bbox tall enough to contain every hanging label.
+    """
+    import math
+
+    from nf_metro.layout.constants import LABEL_OFFSET
+    from nf_metro.layout.labels import _label_text_height, label_text_width
+
+    angle = abs(graph.label_angle or 0.0)
+    cos_a = abs(math.cos(math.radians(angle)))
+    sin_a = abs(math.sin(math.radians(angle)))
+
+    band = 0.0
+    for sid in real_ids:
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or st.off_track:
+            continue
+        if st.is_terminus and not st.label.strip():
+            continue
+        h = _label_text_height(st.label)
+        w = label_text_width(st.label)
+        footprint = h * cos_a + w * sin_a if angle else h
+        band = max(band, LABEL_OFFSET + footprint)
+    return band
 
 
 def _label_aware_x_spacing(
@@ -408,9 +451,12 @@ def _rail_slot_offsets(
             n_slots += 1
 
     # A combo's members hug within their shared slot: spread them symmetrically
-    # about the slot centre with a tight gap (a fraction of the rail pitch) so
-    # the bundle reads as two/few adjacent lines, not separate rails.
-    bundle_gap = min(y_spacing * 0.18, 6.0)
+    # about the slot centre, one OFFSET_STEP apart (the same pitch the normal
+    # router uses for parallel lines in a bundle), so the sub-lines abut and the
+    # bundle reads as a single track rather than separate rails.
+    from nf_metro.layout.constants import OFFSET_STEP
+
+    bundle_gap = OFFSET_STEP
     members_in_slot: dict[int, list[str]] = {}
     for lid in lines:
         members_in_slot.setdefault(slot_index[lid], []).append(lid)

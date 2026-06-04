@@ -72,19 +72,6 @@ class LabelPlacement:
     obstacle_bbox: tuple[float, float, float, float] | None = None
 
 
-def _rail_span_offsets(station: "Station") -> tuple[float, float] | None:
-    """Return (min_off, max_off) of a rail-mode spanning station's pill.
-
-    In rail mode a multi-line station's pill spans from ``rail_top_y`` to
-    ``rail_bottom_y``; offsetting a label from those edges (rather than from
-    ``station.y`` at the pill centre) keeps the label clear of every rail the
-    pill crosses.  Returns None for non-rail / single-rail stations.
-    """
-    if station.rail_top_y is None or station.rail_bottom_y is None:
-        return None
-    return (station.rail_top_y - station.y, station.rail_bottom_y - station.y)
-
-
 def _rail_panel_extents(graph: "MetroGraph") -> dict[str, tuple[float, float]]:
     """Per-rail-section (top_rail_y, bottom_rail_y) from the rail Y map.
 
@@ -110,27 +97,50 @@ def _rail_label_side(
 ) -> bool | None:
     """Forced above/below side for a rail-mode single-rail station label.
 
-    A label sitting between two rails reads as noise in the bundle, so each
-    single-rail station's label is pushed *outward*: a station on (or above)
-    the panel's mid-line labels above its own rail, one below the mid-line
-    labels below.  This keeps a column of single-rail stations from stacking
-    their labels on one panel edge while still avoiding the inter-rail gaps.
-    Returns True (above) / False (below), or None when the rule doesn't apply
-    (non-rail section, or a multi-rail spanning station which uses its span).
+    A label beside a middle rail reads as noise in the bundle, so each
+    single-rail station's label is pushed *outward* to the panel edge (see
+    ``_rail_panel_label_offsets``): a station in the panel's top half labels
+    above (clearing the topmost rail), one in the bottom half labels below
+    (clearing the bottommost rail).  Splitting by half keeps a column of
+    single-rail stations from stacking every label on one panel edge.  Returns
+    True (above) / False (below), or None when the rule doesn't apply (non-rail
+    section, or a multi-rail spanning station which keeps layer alternation).
     """
     if not station.section_id:
         return None
     if station.rail_top_y is not None and station.rail_bottom_y is not None:
-        return None  # spanning pill: handled by _rail_span_offsets
+        return None  # spanning pill: keeps layer alternation
     extent = panel_extents.get(station.section_id)
     if extent is None:
         return None
     top_y, bot_y = extent
     mid = (top_y + bot_y) / 2
-    # Top-half rails label above their own rail, bottom-half below.  The
-    # mid rail (== mid) defaults to below so it never overlaps a top-rail
-    # label that drops down into the gap.
+    # Top-half rails label above (out the top of the panel), bottom-half below.
+    # The mid rail (== mid) defaults to below so it never collides with a
+    # top-half label dropping into the panel.
     return station.y < mid - 0.5
+
+
+def _rail_panel_label_offsets(
+    station: "Station",
+    panel_extents: dict[str, tuple[float, float]],
+) -> tuple[float, float] | None:
+    """Label offsets (min_off, max_off) clearing the WHOLE rail panel.
+
+    A rail-mode label must never sit beside a middle rail: an above label has
+    to clear the panel's topmost rail and a below label its bottommost rail,
+    whatever rail(s) the station itself occupies.  Returns offsets measured
+    from ``station.y`` to the panel's top/bottom rail (so ``_try_place`` lands
+    the label outside the rail stack), or None when the station is not in a
+    known rail panel.
+    """
+    if not station.section_id:
+        return None
+    extent = panel_extents.get(station.section_id)
+    if extent is None:
+        return None
+    top_y, bot_y = extent
+    return (top_y - station.y, bot_y - station.y)
 
 
 def _label_bbox(
@@ -530,9 +540,13 @@ def _trial_cost(
             max_off = max(line_offs) if line_offs else 0.0
         else:
             min_off = max_off = 0.0
-        rail_span = _rail_span_offsets(station)
-        if rail_span is not None:
-            min_off, max_off = rail_span
+        rail_panel = (
+            _rail_panel_label_offsets(station, panel_extents)
+            if panel_extents is not None
+            else None
+        )
+        if rail_panel is not None:
+            min_off, max_off = rail_panel
 
         start_above = station.layer % 2 == 1
         if flip:
@@ -737,9 +751,9 @@ def place_labels(
             max_off = max(line_offs) if line_offs else 0.0
         else:
             min_off = max_off = 0.0
-        rail_span = _rail_span_offsets(station)
-        if rail_span is not None:
-            min_off, max_off = rail_span
+        rail_panel = _rail_panel_label_offsets(station, panel_extents)
+        if rail_panel is not None:
+            min_off, max_off = rail_panel
         rail_side = _rail_label_side(station, panel_extents)
 
         # Check if this is a TB section station (horizontal pill)

@@ -57,6 +57,47 @@ def _line_rail_y(graph: MetroGraph, station_id: str, line_id: str) -> float:
     return st.y
 
 
+def _off_track_drop_stagger(
+    graph: MetroGraph,
+    feeder: object,
+    edge: object,
+    rail_y: float,
+) -> float:
+    """Horizontal offset for an off-track feeder line's vertical drop.
+
+    Several lines feeding the same consumer from one off-track input would
+    otherwise drop on the same X and overlap in the vertical leg (merging into
+    one fat line).  Each feeding line instead drops on its own X, ordered by
+    its target rail Y (top rail leftmost), one OFFSET_STEP apart and centred on
+    the feeder, so the bundle stays as parallel lines and the elbows form a
+    tidy staircase into the rails.
+    """
+    from nf_metro.layout.constants import OFFSET_STEP
+
+    feeder_id = feeder.id  # type: ignore[attr-defined]
+    consumer_id = (
+        edge.target if edge.source == feeder_id else edge.source  # type: ignore[attr-defined]
+    )
+    # Sibling feeder lines: every line carried by an edge between this feeder
+    # and the same consumer, ordered by their target rail Y.
+    sib_rails: list[tuple[float, str]] = []
+    for e in graph.edges:
+        if {e.source, e.target} != {feeder_id, consumer_id}:
+            continue
+        on_rail_id = e.target if e.source == feeder_id else e.source
+        sib_rails.append((_line_rail_y(graph, on_rail_id, e.line_id), e.line_id))
+    # Order the drop Xs so the bundle does NOT twist through the drop->rail
+    # elbow: the line landing on the LOWER rail (larger Y) drops on the LEFT
+    # (smaller X), matching the left/right ordering the rightward outgoing run
+    # expects (a D->R corner maps the down run's left side to the run's bottom).
+    sib_rails.sort(reverse=True)
+    order = [lid for _y, lid in sib_rails]
+    if edge.line_id not in order or len(order) <= 1:  # type: ignore[attr-defined]
+        return 0.0
+    k = order.index(edge.line_id)  # type: ignore[attr-defined]
+    return (k - (len(order) - 1) / 2.0) * OFFSET_STEP
+
+
 def _diagonal_placement(
     sx: float,
     tx: float,
@@ -120,31 +161,31 @@ def route_rail_edges(
             continue
 
         # Off-track input: the source sits above the rails and feeds into the
-        # target's rail with an S-curve (drop, then a curved transition into
-        # the rail) rather than a flat run on the rail.
+        # target's rail.  Drop straight down (a clean perpendicular crossing of
+        # any rails above the target reads far better than a steep diagonal
+        # merge), then turn onto the rail with a rounded elbow and run flat into
+        # the consumer.  Sibling feeder lines (a bundle feeding the same
+        # consumer) drop on staggered Xs - one per rail, lower rails turning
+        # later - so the bundle stays two parallel lines and never merges.
         off_src = src.off_track and not tgt.off_track
         off_tgt = tgt.off_track and not src.off_track
         if off_src or off_tgt:
             feeder = src if off_src else tgt
             on_rail = tgt if off_src else src
             rail_y = _line_rail_y(graph, on_rail.id, edge.line_id)
-            # An S-curve: leave the feeder vertically, curve through a midpoint
-            # X, then arrive horizontally onto the rail.  The two interior
-            # waypoints give the corner-smoother two bends (an S).
-            mid_x = (feeder.x + on_rail.x) / 2
-            s_points = [
-                (feeder.x, feeder.y),
-                (feeder.x, (feeder.y + rail_y) / 2),
-                (mid_x, rail_y),
+            drop_x = feeder.x + _off_track_drop_stagger(graph, feeder, edge, rail_y)
+            l_points = [
+                (drop_x, feeder.y),
+                (drop_x, rail_y),
                 (on_rail.x, rail_y),
             ]
             if off_tgt:
-                s_points.reverse()
+                l_points.reverse()
             routes.append(
                 RoutedPath(
                     edge=edge,
                     line_id=edge.line_id,
-                    points=s_points,
+                    points=l_points,
                     offsets_applied=True,
                 )
             )

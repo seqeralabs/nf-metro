@@ -1184,6 +1184,7 @@ def _terminus_icon_centers(
     first_offset: float,
     step: float,
     bundle_center: float,
+    is_rail: bool = False,
 ) -> list[tuple[float, float]]:
     """Centre coordinates for a terminus station's file icons.
 
@@ -1194,6 +1195,13 @@ def _terminus_icon_centers(
     the outside of the diagram.
     """
     is_tb = section_dir in ("TB", "BT")
+    # A rail-mode off-track input parks above the rails and feeds straight down
+    # into its consumer's rail (see routing/rail.py), so its icon sits directly
+    # on the station coordinate (centred on the drop X) rather than marching
+    # sideways.  Gated on the rail flag so normal-mode off-track feeders (which
+    # the standard router handles) are untouched.
+    if station.off_track and is_rail:
+        return [(station.x, station.y - (first_offset + i * step)) for i in range(n)]
     # Sinks sit at the end of the flow and extend forwards; sources sit at
     # the start and extend backwards.  RL/BT reverse the forward direction.
     extends_forward = is_source if section_dir in ("RL", "BT") else not is_source
@@ -1263,6 +1271,7 @@ def _render_terminus_icons(
         icon_gap + icon_half_flow,
         icon_step,
         bundle_center,
+        is_rail=graph.station_is_rail(station.id),
     )
 
     # Captions sitting at the same Y overlap when their estimated
