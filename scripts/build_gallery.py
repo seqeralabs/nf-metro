@@ -94,6 +94,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "cross-column feeder dropping straight into its consumer section.",
     ),
     (
+        "legend_combo",
+        EXAMPLES_DIR,
+        "Demonstrates `%%metro legend_combo:`: a normal (blue) and tumor (red) "
+        "line travel together as a tumor-normal pair. The combo renders one "
+        "legend row with a striped red+blue swatch and suppresses the "
+        "individual normal/tumor rows; the standalone QC line keeps its own row.",
+    ),
+    (
         "tb_file_termini",
         EXAMPLES_DIR,
         "A `%%metro direction: TB` reporting section whose file outputs are "

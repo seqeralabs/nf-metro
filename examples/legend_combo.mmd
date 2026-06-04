@@ -1,0 +1,26 @@
+%%metro title: Tumor-Normal Calling
+%%metro style: dark
+%%metro line: normal | Normal | #2196F3
+%%metro line: tumor | Tumor | #E53935
+%%metro line: qc | Quality Control | #4CAF50 | dashed
+%%metro legend_combo: normal, tumor | Tumor-normal pair
+
+graph LR
+    fastq[FASTQ]
+    align[Alignment]
+    markdup[MarkDuplicates]
+    bqsr[BQSR]
+    fastqc[FastQC]
+    call[Somatic Calling]
+    annotate[Annotate]
+    multiqc[MultiQC]
+
+    fastq -->|normal,tumor| align
+    align -->|normal,tumor| markdup
+    markdup -->|normal,tumor| bqsr
+    bqsr -->|normal,tumor| call
+    call -->|tumor| annotate
+
+    fastq -->|qc| fastqc
+    fastqc -->|qc| multiqc
+    annotate -->|qc| multiqc

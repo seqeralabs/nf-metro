@@ -4,9 +4,11 @@ from __future__ import annotations
 
 __all__ = ["compute_legend_dimensions", "render_legend"]
 
+from dataclasses import dataclass
+
 import drawsvg as draw
 
-from nf_metro.parser.model import MetroGraph
+from nf_metro.parser.model import MetroGraph, MetroLine
 from nf_metro.render.constants import (
     LEGEND_BORDER_RADIUS,
     LEGEND_CHAR_WIDTH_RATIO,
@@ -20,6 +22,42 @@ from nf_metro.render.constants import (
     line_style_kwargs,
 )
 from nf_metro.render.style import Theme
+
+
+@dataclass
+class _LegendRow:
+    """One row of the legend: a label plus the line(s) its swatch shows."""
+
+    label: str
+    lines: tuple[MetroLine, ...]
+
+
+def _legend_rows(graph: MetroGraph) -> list[_LegendRow]:
+    """Return the ordered legend rows for a graph.
+
+    Each metro line that is not part of a ``legend_combo`` gets its own row
+    (preserving definition order, as before). Each combo named in
+    ``graph.legend_combos`` becomes a single row whose swatch shows all the
+    constituent lines as adjacent stripes; the constituent lines are omitted
+    from their own individual rows. With no combos this is exactly one row per
+    line, byte-identical to the prior behaviour.
+    """
+    combined_ids: set[str] = set()
+    for line_ids, _label in graph.legend_combos:
+        combined_ids.update(line_ids)
+
+    rows: list[_LegendRow] = []
+    for ml in graph.lines.values():
+        if ml.id in combined_ids:
+            continue
+        rows.append(_LegendRow(label=ml.display_name, lines=(ml,)))
+
+    for line_ids, label in graph.legend_combos:
+        members = tuple(graph.lines[lid] for lid in line_ids if lid in graph.lines)
+        if members:
+            rows.append(_LegendRow(label=label, lines=members))
+
+    return rows
 
 
 def _scale_logo_to_content(
@@ -42,6 +80,7 @@ def _scale_logo_to_content(
 
 def _legend_metrics(
     graph: MetroGraph,
+    rows: list[_LegendRow],
     logo_size: tuple[float, float] | None,
 ) -> tuple[float, float, float, float]:
     """Return (text_block_h, content_h, logo_w, logo_h) for the legend.
@@ -50,7 +89,7 @@ def _legend_metrics(
     text block and a (possibly enlarged) logo.
     """
     line_height = LEGEND_LINE_HEIGHT
-    text_block_h = max(len(graph.lines) * line_height, graph.legend_min_height)
+    text_block_h = max(len(rows) * line_height, graph.legend_min_height)
     logo_w = logo_h = 0.0
     if logo_size:
         logo_w, logo_h = _scale_logo_to_content(
@@ -73,19 +112,62 @@ def compute_legend_dimensions(
     if not graph.lines:
         return (0.0, 0.0)
 
+    rows = _legend_rows(graph)
+    if not rows:
+        return (0.0, 0.0)
+
     padding = LEGEND_PADDING
     swatch_width = LEGEND_SWATCH_WIDTH
     text_offset = swatch_width + LEGEND_TEXT_GAP
 
-    max_name_len = max(len(ml.display_name) for ml in graph.lines.values())
+    max_name_len = max(len(row.label) for row in rows)
     char_width = theme.legend_font_size * LEGEND_CHAR_WIDTH_RATIO
 
-    _text_h, content_height, logo_w, _logo_h = _legend_metrics(graph, logo_size)
+    _text_h, content_height, logo_w, _logo_h = _legend_metrics(graph, rows, logo_size)
     logo_gap = LOGO_GAP if logo_size else 0.0
 
     width = padding * 2 + logo_w + logo_gap + text_offset + max_name_len * char_width
     height = padding * 2 + content_height
     return (width, height)
+
+
+def _render_swatch(
+    d: draw.Drawing,
+    row: _LegendRow,
+    theme: Theme,
+    x0: float,
+    entry_y: float,
+    swatch_width: float,
+) -> None:
+    """Draw the colour swatch for a row.
+
+    A single-line row draws one horizontal segment (as before). A combo row
+    draws each constituent line as a stripe at a small vertical offset, so the
+    swatch reads as a little bundle of adjacent lines, each honouring its style.
+    """
+    n = len(row.lines)
+    if n == 1:
+        offsets = [0.0]
+    else:
+        # Spread the stripes symmetrically about the entry centre, packed
+        # tightly so they read as a single travelling-together bundle.
+        spacing = min(theme.line_width + 1.0, LEGEND_LINE_HEIGHT / (n + 1))
+        offsets = [(i - (n - 1) / 2.0) * spacing for i in range(n)]
+
+    for ml, dy in zip(row.lines, offsets):
+        dash_kw = line_style_kwargs(ml.style)
+        d.append(
+            draw.Line(
+                x0,
+                entry_y + dy,
+                x0 + swatch_width,
+                entry_y + dy,
+                stroke=ml.color,
+                stroke_width=theme.line_width,
+                stroke_linecap="round",
+                **dash_kw,
+            )
+        )
 
 
 def render_legend(
@@ -106,12 +188,18 @@ def render_legend(
     if not graph.lines:
         return
 
+    rows = _legend_rows(graph)
+    if not rows:
+        return
+
     line_height = LEGEND_LINE_HEIGHT
     padding = LEGEND_PADDING
     swatch_width = LEGEND_SWATCH_WIDTH
     text_offset = swatch_width + LEGEND_TEXT_GAP
 
-    text_block_h, content_height, scaled_w, scaled_h = _legend_metrics(graph, logo_size)
+    text_block_h, content_height, scaled_w, scaled_h = _legend_metrics(
+        graph, rows, logo_size
+    )
 
     legend_width, legend_height = compute_legend_dimensions(
         graph, theme, logo_size=logo_size
@@ -150,28 +238,22 @@ def render_legend(
     # Line entries, vertically centred within the content area (which can be
     # taller than the text block when an enlarged logo grows the box).
     text_top = y + padding + (content_height - text_block_h) / 2
-    for i, metro_line in enumerate(graph.lines.values()):
+    for i, row in enumerate(rows):
         entry_y = text_top + i * line_height + line_height / 2
 
-        # Color swatch (line segment)
-        dash_kw = line_style_kwargs(metro_line.style)
-        d.append(
-            draw.Line(
-                x + padding + logo_offset,
-                entry_y,
-                x + padding + logo_offset + swatch_width,
-                entry_y,
-                stroke=metro_line.color,
-                stroke_width=theme.line_width,
-                stroke_linecap="round",
-                **dash_kw,
-            )
+        _render_swatch(
+            d,
+            row,
+            theme,
+            x + padding + logo_offset,
+            entry_y,
+            swatch_width,
         )
 
         # Label
         d.append(
             draw.Text(
-                metro_line.display_name,
+                row.label,
                 theme.legend_font_size,
                 x + padding + logo_offset + text_offset,
                 entry_y,
