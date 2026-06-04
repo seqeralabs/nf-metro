@@ -114,6 +114,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_fan_bundles_coincide_or_separate,
     _guard_fanout_junction_shares_exit_port_y,
     _guard_fanout_tail_join,
+    _guard_feeder_exits_section_through_side,
     _guard_file_icon_no_name_label,
     _guard_inter_row_run_clearance,
     _guard_inter_section_descent_edge_clearance,
@@ -1245,6 +1246,9 @@ def _finalize_layout(
             )
             _guard_routes_enter_sections_at_ports(graph, phase, routes=routes)
             _guard_no_route_through_section(
+                graph, phase, routes=routes, offsets=offsets
+            )
+            _guard_feeder_exits_section_through_side(
                 graph, phase, routes=routes, offsets=offsets
             )
             _guard_entry_approach_from_port_side(graph, phase, routes=routes)
