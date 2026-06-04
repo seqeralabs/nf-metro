@@ -48,6 +48,32 @@ def _check_unsupported_input(text: str) -> None:
         )
 
 
+_GRAPH_DIRECTION_PATTERN = re.compile(r"^graph\s+([A-Za-z]{2})\b")
+
+
+def _warn_if_non_lr_primary(graph_line: str) -> None:
+    """Warn when the `graph` header declares a primary direction other than LR.
+
+    nf-metro lays the section meta-graph out left-to-right; any other Mermaid
+    direction (TB/TD/BT/RL) is not honoured. A bare ``graph`` (no direction,
+    Mermaid-defaults to LR) is fine and warns nothing. Per-section
+    flow is controlled separately by ``%%metro direction:`` and is unaffected.
+    """
+    m = _GRAPH_DIRECTION_PATTERN.match(graph_line)
+    if not m:
+        return
+    direction = m.group(1).upper()
+    if direction == "LR":
+        return
+    warnings.warn(
+        f"nf-metro honours only 'graph LR' as the primary layout direction; "
+        f"the declared direction '{direction}' was ignored and the map is laid "
+        f"out left-to-right. Use per-section '%%metro direction:' directives to "
+        f"control individual section flow.",
+        stacklevel=2,
+    )
+
+
 def _validate_edge_annotations(graph: MetroGraph) -> None:
     """Validate that all edges have metro line annotations.
 
@@ -131,8 +157,13 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
             _parse_directive(stripped, graph, current_section_id)
             continue
 
-        # Skip regular comments and graph declaration
-        if stripped.startswith("%%") or stripped.startswith("graph "):
+        # Graph declaration
+        if stripped.startswith("graph "):
+            _warn_if_non_lr_primary(stripped)
+            continue
+
+        # Skip regular comments
+        if stripped.startswith("%%"):
             continue
 
         # Try edge first (contains arrow)

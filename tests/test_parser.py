@@ -977,3 +977,29 @@ def test_no_duplicate_edges_after_resolve_sections():
     assert len(edge_keys) == len(set(edge_keys)), (
         f"Duplicate edges found: {[k for k in edge_keys if edge_keys.count(k) > 1]}"
     )
+
+
+@pytest.mark.parametrize("direction", ["TB", "TD", "BT", "RL"])
+def test_non_lr_primary_direction_warns(direction):
+    """A non-LR `graph` header warns that only LR primary is honoured (#525)."""
+    text = (
+        "%%metro line: a | A | #0570b0\n"
+        f"graph {direction}\n"
+        "    subgraph s1 [One]\n"
+        "        x[X]\n"
+        "        y[Y]\n"
+        "        x -->|a| y\n"
+        "    end\n"
+    )
+    with pytest.warns(UserWarning, match=f"'{direction}'.*ignored"):
+        parse_metro_mermaid(text)
+
+
+@pytest.mark.parametrize("header", ["graph LR", "graph", "graph    LR"])
+def test_lr_primary_direction_does_not_warn(header, recwarn):
+    """`graph LR` (or a bare `graph`) is the honoured primary; no warning (#525)."""
+    parse_metro_mermaid(f"{header}\n    subgraph s1 [One]\n        x[X]\n    end\n")
+    direction_warnings = [
+        w for w in recwarn.list if "primary layout direction" in str(w.message)
+    ]
+    assert direction_warnings == []
