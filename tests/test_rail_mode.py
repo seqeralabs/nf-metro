@@ -407,10 +407,10 @@ def test_rail_mode_labels_alternate_above_and_below():
     assert saw_multi, "demo must contain a section with several station labels"
 
 
-def test_off_track_input_feeds_in_with_short_clean_s_curve():
-    """An off-track input parks just left of (and above) its consumer column
-    so the feeder is a short S-curve, not a long diagonal traverse from the
-    section's left edge."""
+def test_off_track_input_feeds_in_with_clean_drop_and_elbow():
+    """An off-track input drops straight down from its icon then turns onto the
+    consumer's rail with a single elbow: a clean L (vertical leg + horizontal
+    leg), near its consumer, not a long diagonal traverse from the left edge."""
     from nf_metro.layout.routing import route_edges
 
     graph = _rail_graph()
@@ -426,16 +426,16 @@ def test_off_track_input_feeds_in_with_short_clean_s_curve():
             continue
         if rp.edge.source not in off_tracks and rp.edge.target not in off_tracks:
             continue
-        feeder = src if rp.edge.source in off_tracks else tgt
         consumer = tgt if rp.edge.source in off_tracks else src
         checked += 1
-        # The feeder must sit close to its consumer in X (within one column),
-        # so the drop is a short S-curve rather than a long diagonal.
-        assert abs(feeder.x - consumer.x) <= consumer.x, "sanity"
-        # Multi-point S-curve, and the horizontal reach is modest (< the full
-        # section width) -- the feeder is near the consumer, not at layer 0.
-        assert len(rp.points) >= 3
-        xs = [x for x, _ in rp.points]
+        # An off-track feed is exactly drop + elbow + horizontal: three points,
+        # a vertical first leg (shared X) and a horizontal last leg (shared Y).
+        pts = rp.points if rp.edge.source in off_tracks else list(reversed(rp.points))
+        assert len(pts) == 3, f"off-track feed not a 3-point L: {pts}"
+        assert abs(pts[0][0] - pts[1][0]) < 0.5, f"first leg not vertical: {pts}"
+        assert abs(pts[1][1] - pts[2][1]) < 0.5, f"last leg not horizontal: {pts}"
+        # The horizontal reach stays within the section (feeder near consumer).
+        xs = [x for x, _ in pts]
         sec = graph.sections.get(consumer.section_id)
         if sec and sec.bbox_w > 0:
             assert (max(xs) - min(xs)) < sec.bbox_w, (
@@ -443,6 +443,114 @@ def test_off_track_input_feeds_in_with_short_clean_s_curve():
                 f"{sec.bbox_w}px section -- too long a traverse"
             )
     assert checked, "expected at least one off-track feeder edge"
+
+
+def test_off_track_bundle_feeders_do_not_merge():
+    """Several lines feeding from one off-track input each drop on their own X
+    (one per target rail), so the bundle stays distinct parallel lines in the
+    vertical leg rather than collapsing into one fat merged line."""
+    from nf_metro.layout.routing import route_edges
+
+    graph = _rail_graph()
+    routes = route_edges(graph)
+    off_tracks = {st.id for st in graph.stations.values() if st.off_track}
+
+    # Group off-track feeds by (feeder, consumer); the demo's samples_csv feeds
+    # bqsr on two lines (pair_n, pair_t) -- a 2-line bundle.
+    drops: dict[tuple[str, str], list[float]] = {}
+    for rp in routes:
+        if rp.edge.source not in off_tracks and rp.edge.target not in off_tracks:
+            continue
+        feeder = rp.edge.source if rp.edge.source in off_tracks else rp.edge.target
+        consumer = rp.edge.target if rp.edge.source in off_tracks else rp.edge.source
+        pts = rp.points if rp.edge.source in off_tracks else list(reversed(rp.points))
+        drops.setdefault((feeder, consumer), []).append(round(pts[0][0], 2))
+
+    multi = {k: v for k, v in drops.items() if len(v) >= 2}
+    assert multi, "demo must contain a multi-line off-track bundle feed"
+    for key, drop_xs in multi.items():
+        assert len(set(drop_xs)) == len(drop_xs), (
+            f"{key}: bundle feeder lines share a drop X {drop_xs} -- they merge"
+        )
+
+
+def test_rail_labels_clear_the_whole_panel_never_beside_a_middle_rail():
+    """Every rail-mode station label sits ABOVE the panel's topmost rail or
+    BELOW its bottommost rail - never beside a middle rail (which would have
+    the label collide with the lines).  This holds even for a station that
+    only occupies middle rails (its label still clears the outer rails)."""
+    from nf_metro.layout.labels import _label_bbox, place_labels
+
+    graph = _rail_graph()
+    rails = _section_line_rails(graph)
+    placements = place_labels(graph)
+
+    checked = 0
+    for lp in placements:
+        st = graph.stations.get(lp.station_id)
+        if st is None or st.is_port or not st.label.strip():
+            continue
+        if st.is_terminus and not st.label.strip():
+            continue
+        section_rails = rails.get(st.section_id)
+        if not section_rails or len(section_rails) < 2:
+            continue
+        top_rail = min(section_rails.values())
+        bot_rail = max(section_rails.values())
+        x0, y0, x1, y1 = _label_bbox(lp)
+        # The label's nearest edge to the rail band must be outside it: an
+        # above label's bottom edge is at/above the top rail; a below label's
+        # top edge is at/below the bottom rail.  A small tolerance covers the
+        # descender clearance baked into placement.
+        tol = 6.0
+        clears_top = y1 <= top_rail + tol
+        clears_bottom = y0 >= bot_rail - tol
+        assert clears_top or clears_bottom, (
+            f"{st.section_id}/{st.id}: label y[{y0:.1f},{y1:.1f}] sits beside a "
+            f"middle rail (rail band [{top_rail:.1f},{bot_rail:.1f}])"
+        )
+        checked += 1
+    assert checked, "expected at least one labelled rail station"
+
+
+def test_stacked_rail_section_bbox_contains_hanging_labels():
+    """A rail section's bbox reserves room for its below-rail labels so a
+    section stacked beneath it clears them.  A long, steeply-angled label whose
+    footprint exceeds the default padding grows the box; a section below then
+    keeps a positive header gap (no clash)."""
+    from nf_metro.layout import compute_layout
+    from nf_metro.layout.constants import SECTION_HEADER_PROTRUSION
+
+    src = (
+        "%%metro title: t\n"
+        "%%metro style: dark\n"
+        "%%metro rail_mode: true\n"
+        "%%metro label_angle: 45\n"
+        "%%metro line: a | A | #2db572\n"
+        "%%metro line: b | B | #0570b0\n"
+        "%%metro grid: top | 0,0\n"
+        "%%metro grid: bot | 0,1\n"
+        "graph LR\n"
+        "    subgraph top [Top]\n"
+        "        t1[Start]\n"
+        "        t2[An extremely long station label name to overflow the pad]\n"
+        "        t1 -->|a,b| t2\n"
+        "    end\n"
+        "    subgraph bot [Bottom]\n"
+        "        u1[Go]\n"
+        "        u2[End]\n"
+        "        u1 -->|a,b| u2\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(src)
+    compute_layout(graph, validate=True)
+    top = graph.sections["top"]
+    bot = graph.sections["bot"]
+    # The long-label section's bbox grew well past a bare two-rail panel.
+    assert top.bbox_h > 200, f"top bbox did not reserve label band: {top.bbox_h}"
+    # The lower section's header (badge top) clears the upper section's box.
+    gap = (bot.bbox_y - SECTION_HEADER_PROTRUSION) - (top.bbox_y + top.bbox_h)
+    assert gap >= 0, f"lower header overlaps the section above: gap {gap:.1f}px"
 
 
 def test_rail_mode_off_by_default_leaves_graph_unchanged():
@@ -785,6 +893,27 @@ def test_combo_lines_share_one_rail_slot():
     ]
     assert all(abs(o - bundle_centre) >= y_spacing - 1.0 for o in non_combo), (
         "a non-combo rail is closer than a full pitch to the bundle"
+    )
+
+
+def test_combo_bundle_sublines_hug_at_one_offset_step():
+    """A legend_combo bundle's sub-lines sit exactly one OFFSET_STEP apart -
+    the same tight pitch the normal router uses for parallel lines in a bundle -
+    so the bundle reads as a single track, not two spaced-apart rails."""
+    from nf_metro.layout.constants import OFFSET_STEP
+    from nf_metro.layout.rail_mode import _rail_slot_offsets, _section_lines_in_order
+
+    graph = _rail_graph()
+    section = graph.sections["calling"]
+    lines = _section_lines_in_order(graph, section)
+    members = _combo_member_ids(graph)
+    slot_offset, _ = _rail_slot_offsets(graph, lines, 40.0)
+
+    member_offsets = sorted(slot_offset[lid] for lid in members if lid in slot_offset)
+    assert len(member_offsets) == 2, "demo's combo bundle has two members"
+    gap = member_offsets[1] - member_offsets[0]
+    assert abs(gap - OFFSET_STEP) < 1e-6, (
+        f"combo sub-lines {gap}px apart; expected one OFFSET_STEP ({OFFSET_STEP}px)"
     )
 
 
