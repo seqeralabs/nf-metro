@@ -937,7 +937,40 @@ def place_labels(
         placements, graph, station_offsets, allow_hyphenation=allow_hyphenation
     )
 
+    if graph.label_angle:
+        _apply_rail_label_angle(placements, graph, float(graph.label_angle))
+
     return [p for p in placements if p.obstacle_bbox is None]
+
+
+def _apply_rail_label_angle(
+    placements: list[LabelPlacement],
+    graph: MetroGraph,
+    label_angle: float,
+) -> None:
+    """Tilt rail-section station labels by *label_angle* degrees.
+
+    Only rail-mode panels are affected (the normal layout path has its own
+    diagonal-label machinery).  An angled label is anchored at the pill X and
+    its current vertical offset and rotated about that anchor with
+    ``text-anchor=start`` so the tilted text trails away from the station;
+    the rail column step is sized for the rotated label's horizontal
+    projection by ``_label_aware_x_spacing`` so the panel packs tighter.
+    """
+    for p in placements:
+        if p.obstacle_bbox is not None or not p.station_id:
+            continue
+        st = graph.stations.get(p.station_id)
+        if st is None or st.is_port:
+            continue
+        if not (st.section_id and graph.is_rail_section(st.section_id)):
+            continue
+        # Blank termini render as icons, not text; leave them alone.
+        if st.is_terminus and not st.label.strip():
+            continue
+        p.angle = label_angle
+        p.text_anchor = "start"
+        p.x = st.x
 
 
 # Upper bound on wrapping rounds.  Each round narrows one offending label by

@@ -290,6 +290,11 @@ def _parse_directive(
     elif content.startswith("center_ports:"):
         val = content[len("center_ports:") :].strip().lower()
         graph.center_ports = val in ("true", "yes", "1")
+    elif content.startswith("label_angle:"):
+        try:
+            graph.label_angle = float(content[len("label_angle:") :].strip())
+        except ValueError:
+            pass
     elif content.startswith("rail_mode:"):
         val = content[len("rail_mode:") :].strip().lower()
         graph.rail_mode = val in ("true", "yes", "1")

@@ -221,6 +221,10 @@ class MetroGraph:
     # ``rail_mode: true`` flag is equivalent to "every section is a rail
     # section".  Use ``is_rail_section``/``has_rail_sections`` to query.
     rail_sections: set[str] = field(default_factory=set)
+    # Station label rotation in degrees, clockwise.  None means "horizontal".
+    # In rail mode an angled label's horizontal footprint is its width times
+    # cos(angle), so angled-label rail panels pack tighter than horizontal ones.
+    label_angle: float | None = None
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
     # Placement modifiers for the bundled legend+logo block. The corner/edge

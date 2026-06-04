@@ -576,3 +576,136 @@ def test_no_rail_directive_default_off_byte_identical():
         s.rail_top_y is None and s.rail_bottom_y is None for s in g.stations.values()
     )
     assert "nf-metro-rail-knob" not in svg
+
+
+# ---------------------------------------------------------------------------
+# Convergence corners: 45-degree diagonals, not square right-angle bends
+# ---------------------------------------------------------------------------
+
+
+def _is_axis_aligned(p0, p1) -> bool:
+    """True when the segment p0->p1 is purely horizontal or purely vertical."""
+    return abs(p0[0] - p1[0]) < 0.5 or abs(p0[1] - p1[1]) < 0.5
+
+
+def test_rail_convergence_segments_are_diagonal_not_square():
+    """Where rails fan out from a single input or fan in to a single output,
+    the rail eases between rail Ys on a 45-degree diagonal segment (a segment
+    that changes BOTH x and y), not a square right-angle vertical jog."""
+    graph = _rail_graph()
+    from nf_metro.layout.routing import route_edges
+
+    routes = route_edges(graph)
+    diagonals = 0
+    for route in routes:
+        src = graph.stations.get(route.edge.source)
+        tgt = graph.stations.get(route.edge.target)
+        # Off-track feeders deliberately use an S-curve; not a convergence.
+        if (src and src.off_track) or (tgt and tgt.off_track):
+            continue
+        pts = route.points
+        # A convergence route changes rail Y between its endpoints.
+        if abs(pts[0][1] - pts[-1][1]) < 0.5:
+            continue
+        # Some interior segment must be a true diagonal (changes both x and y);
+        # a square jog would have only axis-aligned segments.
+        has_diag = any(not _is_axis_aligned(a, b) for a, b in zip(pts, pts[1:]))
+        assert has_diag, (
+            f"convergence {route.edge.source}->{route.edge.target} "
+            f"({route.line_id}) uses square bends, not a diagonal: {pts}"
+        )
+        # And no purely-vertical interior jog between the rails (the old
+        # square-bend signature).
+        interior = list(zip(pts, pts[1:]))[1:-1]
+        for a, b in interior:
+            assert not (abs(a[0] - b[0]) < 0.5 and abs(a[1] - b[1]) >= 0.5), (
+                f"convergence {route.edge.source}->{route.edge.target} "
+                f"has a square vertical jog {a}->{b}"
+            )
+        diagonals += 1
+    assert diagonals > 0, "expected at least one diagonal convergence route"
+
+
+def test_rail_fan_out_diagonal_eases_off_the_shared_input():
+    """The CRAM fan-out rails (deepvariant up, strelka down) leave the shared
+    input point on a diagonal then run flat -- the diagonal is biased early
+    (toward the fork) so most of the column is a straight rail."""
+    graph = _rail_graph()
+    from nf_metro.layout.routing import route_edges
+
+    routes = {(r.edge.source, r.edge.target, r.line_id): r for r in route_edges(graph)}
+    # cram_in -> align carries deepvariant (top) and strelka (bottom): both
+    # change rail Y and must contain a diagonal.
+    for line in ("deepvariant", "strelka"):
+        rp = routes.get(("cram_in", "align", line))
+        assert rp is not None, f"missing cram_in->align route for {line}"
+        pts = rp.points
+        assert abs(pts[0][1] - pts[-1][1]) > 0.5, "expected a rail-Y change"
+        assert any(not _is_axis_aligned(a, b) for a, b in zip(pts, pts[1:])), (
+            f"cram_in->align ({line}) is not diagonal: {pts}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Angled labels: tighter column spacing via the rotated horizontal projection
+# ---------------------------------------------------------------------------
+
+
+def _calling_column_step(angle: float) -> float:
+    g = parse_metro_mermaid(RAIL_MMD.read_text())
+    g.label_angle = angle
+    compute_layout(g)
+    xs = sorted(
+        {
+            round(s.x, 2)
+            for s in g.stations.values()
+            if s.section_id == "calling" and not s.is_port and not s.off_track
+        }
+    )
+    steps = [b - a for a, b in zip(xs, xs[1:])]
+    assert steps, "expected multiple columns in the calling section"
+    return steps[0]
+
+
+def test_angled_label_column_pitch_is_tighter_than_horizontal():
+    """An angled-label rail panel packs columns tighter than the same panel
+    with horizontal labels, because a diagonal label's horizontal footprint
+    is width*cos(angle)."""
+    horizontal = _calling_column_step(0.0)
+    angled = _calling_column_step(45.0)
+    assert angled < horizontal - 1.0, (
+        f"angled pitch {angled:.1f} not tighter than horizontal {horizontal:.1f}"
+    )
+
+
+def test_label_angle_directive_parses():
+    g = parse_metro_mermaid(RAIL_MMD.read_text())
+    assert g.label_angle == 45.0
+
+
+def test_angled_rail_labels_render_rotated():
+    """With label_angle set, rail-section station labels render with a
+    rotate() transform (so the tilted text is actually drawn)."""
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+
+    g = _rail_graph()
+    assert g.label_angle == 45.0
+    svg = render_svg(g, THEMES["nfcore"])
+    assert "rotate(45" in svg, "expected rotated label transforms in the SVG"
+
+
+def test_label_angle_default_off_byte_identical():
+    """label_angle support must not change a render with no directive: a graph
+    without label_angle produces an identical SVG before and after this change
+    (label_angle is None -> no rotation, no spacing change)."""
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+
+    src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
+    g = parse_metro_mermaid(src)
+    assert g.label_angle is None
+    compute_layout(g)
+    svg = render_svg(g, THEMES["nfcore"])
+    assert "rotate(45" not in svg
+    assert "rotate(" not in svg
