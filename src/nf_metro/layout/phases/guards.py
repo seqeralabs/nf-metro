@@ -233,13 +233,21 @@ def _guard_stations_within_bbox(graph: MetroGraph, phase: str) -> None:
 
 
 def _guard_centered_tracks_balanced(graph: MetroGraph, phase: str) -> None:
-    """When ``centered_tracks`` is on, the line base tracks must be symmetric
-    about zero so the weave balances around the shared-trunk midline.
+    """When ``centered_tracks`` is on, the weave must balance about the trunk.
 
-    The feature's contract is that line base-tracks are placed at
-    ``(i - (N-1)/2) * line_gap``, whose mean is exactly zero.  A non-zero
-    mean would mean the centring computation drifted (e.g. an off-by-one in
-    the symmetric formula) and the trunk would no longer sit on the midline.
+    Two invariants are enforced:
+
+    1. The line base tracks are placed symmetrically at
+       ``(i - (N-1)/2) * line_gap``, whose mean is exactly zero, so the
+       shared trunk sits on the vertical midline.
+    2. Each line's *exclusive run* (stations carrying only that one line)
+       lands on the correct side of its section's shared trunk: a line
+       above the centre keeps its exclusive stations at-or-above the trunk
+       and a line below the centre keeps them at-or-below it.  This catches
+       a regression where the fork-equalize pass collapses an exclusive run
+       back onto the trunk midline, leaving the panel top/centre-heavy
+       instead of symmetric.
+
     No-op when the flag is off, fewer than two lines exist, or there are no
     lines at all (nothing to balance).
     """
@@ -257,6 +265,62 @@ def _guard_centered_tracks_balanced(graph: MetroGraph, phase: str) -> None:
             f"{phase}: centered_tracks base tracks not symmetric about zero "
             f"(mean={mean:.3f}, bases={bases})"
         )
+
+    # Sign of each line's symmetric base: <0 above the trunk, >0 below it,
+    # 0 on the centre.  Y increases downward, so an above-centre line wants
+    # its exclusive stations at smaller Y than the trunk.
+    line_index = {lid: i for i, lid in enumerate(graph.lines)}
+    line_sign = {lid: (i - (n - 1) / 2) for lid, i in line_index.items()}
+
+    # Real (visible, on-track, non-port) stations grouped by section.
+    by_section: dict[str | None, list[str]] = {}
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or st.off_track:
+            continue
+        by_section.setdefault(st.section_id, []).append(sid)
+
+    # A non-centre line's exclusive station must be displaced to its side
+    # of the trunk; a zero/negative displacement means the run has
+    # collapsed onto (or crossed) the trunk midline.  Any genuine offset is
+    # a whole track unit (one section y-spacing of pixels), far larger than
+    # the guard tolerance, so a tolerance floor cleanly separates "offset"
+    # from "collapsed" independent of the absolute y-spacing in use.
+    min_offset = GUARD_TOLERANCE
+    for members in by_section.values():
+        # Skip sections with no vertical spread: an un-laid-out graph (all
+        # Y == 0) or a genuinely flat single-track section has no weave to
+        # balance, and the side check is only meaningful once coordinates
+        # have been assigned.
+        member_ys = [graph.stations[s].y for s in members]
+        if max(member_ys) - min(member_ys) <= GUARD_TOLERANCE:
+            continue
+        # The trunk is the set of multi-line stations; use their mean Y.
+        trunk_ys = [
+            graph.stations[s].y for s in members if len(graph.station_lines(s)) >= 2
+        ]
+        if not trunk_ys:
+            continue
+        trunk_y = sum(trunk_ys) / len(trunk_ys)
+        for s in members:
+            lines = graph.station_lines(s)
+            if len(lines) != 1:
+                continue
+            sign = line_sign.get(lines[0], 0.0)
+            if abs(sign) < 1e-9:
+                continue  # centre line: exclusive stations belong on trunk
+            # signed_offset > 0 means "on this line's side"; Y grows
+            # downward, so an above-centre line (sign<0) wants smaller Y.
+            dy = graph.stations[s].y - trunk_y
+            signed_offset = -dy if sign < 0 else dy
+            if signed_offset <= min_offset:
+                side = "above" if sign < 0 else "below"
+                raise PhaseInvariantError(
+                    f"{phase}: centered_tracks exclusive station '{s}' on "
+                    f"{side}-centre line '{lines[0]}' is not offset to its "
+                    f"side of the trunk (y={graph.stations[s].y:.1f}, "
+                    f"trunk_y={trunk_y:.1f}, signed_offset={signed_offset:.1f}, "
+                    f"required>={min_offset:.1f})"
+                )
 
 
 def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:

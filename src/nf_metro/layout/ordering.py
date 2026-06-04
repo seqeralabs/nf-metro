@@ -158,7 +158,14 @@ def assign_tracks(
         # Equalize cross-line fork groups at this layer so downstream
         # placement sees corrected positions.
         _equalize_fork_groups(
-            layer_idx, layers, tracks, G, graph, node_primary, line_gap
+            layer_idx,
+            layers,
+            tracks,
+            G,
+            graph,
+            node_primary,
+            line_gap,
+            line_base=line_base if centered else None,
         )
 
     return tracks
@@ -583,6 +590,8 @@ def _equalize_fork_groups(
     graph: MetroGraph,
     node_primary: dict[str, str | None],
     line_gap: float,
+    *,
+    line_base: dict[str, float] | None = None,
 ) -> None:
     """Redistribute cross-line fork siblings to equidistant spacing.
 
@@ -596,6 +605,14 @@ def _equalize_fork_groups(
     positions (one *line_gap* apart), preserving their track ordering.
     Groups where all members share the same primary line (diamonds /
     fan-outs already handled by ``_place_fan_out``) are skipped.
+
+    In centred mode (*line_base* supplied), a fork group whose members are
+    all single-line exclusive stations is instead pinned to each member's
+    own line's symmetric base track.  Consecutive repacking would collapse
+    those exclusive runs toward the trunk midline (e.g. the bottom line's
+    run snapping up onto the centre), defeating the balanced weave; pinning
+    to the line base keeps each exclusive run on its own rail above/below
+    the shared trunk.
     """
     layer_nodes = [sid for sid, lyr in layers.items() if lyr == layer and sid in tracks]
     if len(layer_nodes) < 2:
@@ -631,6 +648,19 @@ def _equalize_fork_groups(
         primaries = {node_primary.get(sid) for sid in group}
         primaries.discard(None)
         if len(primaries) < 2:
+            continue
+
+        # Centred mode: when every member is a single-line exclusive
+        # station, pin each to its own line's symmetric base rail rather
+        # than repacking them consecutively (which would drag exclusive
+        # runs toward the trunk midline and unbalance the weave).
+        if line_base is not None and all(
+            len(graph.station_lines(sid)) == 1 for sid in group
+        ):
+            for sid in group:
+                primary = node_primary.get(sid)
+                if primary is not None and primary in line_base:
+                    tracks[sid] = line_base[primary]
             continue
 
         # Sort by primary line order first, then by current track position

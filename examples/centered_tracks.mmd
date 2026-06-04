@@ -11,27 +11,22 @@ graph LR
     markdup[MarkDuplicates]
     summary[Summary]
 
-    bwa[BWA-only call]
     cnv[CNV call]
+    sv[SV call]
     splice[Splice call]
     fusion[Fusion call]
     pileup[Pileup call]
-    lowfreq[Low-freq call]
 
     fastqc -->|dna,rna,cfdna| align
     align -->|dna,rna,cfdna| markdup
 
-    markdup -->|dna| bwa
     markdup -->|dna| cnv
-    bwa -->|dna| summary
-    cnv -->|dna| summary
+    cnv -->|dna| sv
+    sv -->|dna| summary
 
     markdup -->|rna| splice
-    markdup -->|rna| fusion
-    splice -->|rna| summary
+    splice -->|rna| fusion
     fusion -->|rna| summary
 
     markdup -->|cfdna| pileup
-    markdup -->|cfdna| lowfreq
     pileup -->|cfdna| summary
-    lowfreq -->|cfdna| summary

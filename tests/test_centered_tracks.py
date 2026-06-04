@@ -61,6 +61,52 @@ def _trunk_ids() -> set[str]:
     return {"in", "mid", "out"}
 
 
+# A fork weave where the middle line runs straight through the shared
+# trunk while the top and bottom lines each split off a short exclusive run
+# at the same layer, then rejoin.  The two exclusive runs are on distinct
+# lines, so they form a 2-member cross-line fork group -- the case the
+# fork-equalize pass repacks into consecutive tracks, collapsing the bottom
+# run onto the trunk instead of leaving it on the bottom rail.  Each
+# exclusive run carries two stations so we assert the whole run (not just
+# the leaf) rides its line's symmetric rail.
+_FORK_WEAVE_SRC = """\
+%%metro line: top | Top | #4CAF50
+%%metro line: mid | Mid | #2196F3
+%%metro line: bot | Bot | #E91E63
+
+graph LR
+    cram[Cram]
+    fb[Freebayes]
+    st[Strelka]
+    out[Out]
+
+    tA[TopA]
+    tB[TopB]
+    bA[BotA]
+    bB[BotB]
+
+    cram -->|top,mid,bot| fb
+    fb -->|top,mid,bot| st
+
+    st -->|mid| out
+
+    st -->|top| tA
+    tA -->|top| tB
+    tB -->|top| out
+
+    st -->|bot| bA
+    bA -->|bot| bB
+    bB -->|bot| out
+"""
+
+
+def _fork_weave_graph(centered: bool):
+    src = _FORK_WEAVE_SRC
+    if centered:
+        src = "%%metro centered_tracks: true\n" + src
+    return parse_metro_mermaid(src)
+
+
 def test_flag_off_default():
     """Absent the directive the graph defaults to uncentered tracks."""
     graph = _weave_graph(centered=False)
@@ -150,6 +196,90 @@ def test_guard_balanced_runs_and_no_ops():
         "graph LR\n x[X]\n y[Y]\n x -->|a| y\n"
     )
     _guard_centered_tracks_balanced(single, "test")  # <2 lines -> no-op
+
+
+def _line_base_sign(graph, lid: str) -> float:
+    """Sign of line ``lid``'s symmetric base track (above/centre/below)."""
+    order = list(graph.lines.keys())
+    n = len(order)
+    base = order.index(lid) - (n - 1) / 2
+    return 0.0 if abs(base) < 1e-9 else (1.0 if base > 0 else -1.0)
+
+
+def test_fork_weave_exclusive_runs_ride_their_line_rail():
+    """A line's exclusive run must sit on its line's symmetric base rail.
+
+    The cross-line fork (top/mid/bot exclusive runs all diverging from the
+    same trunk station) used to be repacked into consecutive tracks by the
+    fork-equalize pass, collapsing the bottom line's run onto the trunk.
+    Each exclusive station must instead match its own line's base track, so
+    the top run rides above the trunk, the bottom run below, and the middle
+    run on the centre.
+    """
+    graph = _fork_weave_graph(centered=True)
+    layers = assign_layers(graph)
+    tracks = assign_tracks(graph, layers)
+
+    line_base = {
+        lid: (i - (len(graph.lines) - 1) / 2)
+        for i, lid in enumerate(graph.lines.keys())
+    }
+    exclusive = {
+        "tA": "top",
+        "tB": "top",
+        "bA": "bot",
+        "bB": "bot",
+    }
+    for sid, lid in exclusive.items():
+        assert tracks[sid] == line_base[lid], (
+            sid,
+            lid,
+            tracks[sid],
+            line_base[lid],
+        )
+
+
+def test_fork_weave_layout_each_line_run_on_correct_side():
+    """End-to-end: each exclusive run's final Y sits on the correct side of
+    the trunk (top above, bottom below, middle on the centre)."""
+    graph = _fork_weave_graph(centered=True)
+    compute_layout(graph, validate=True)
+
+    trunk_y = {graph.stations[t].y for t in ("cram", "fb", "st", "out")}
+    assert len(trunk_y) == 1, trunk_y
+    ty = next(iter(trunk_y))
+
+    runs = {"top": ("tA", "tB"), "bot": ("bA", "bB")}
+    for lid, members in runs.items():
+        sign = _line_base_sign(graph, lid)
+        for sid in members:
+            dy = graph.stations[sid].y - ty
+            if sign < 0:
+                assert dy < -1.0, (sid, lid, graph.stations[sid].y, ty)
+            elif sign > 0:
+                assert dy > 1.0, (sid, lid, graph.stations[sid].y, ty)
+            else:
+                assert abs(dy) < 1.0, (sid, lid, graph.stations[sid].y, ty)
+
+
+def test_guard_flags_collapsed_exclusive_run():
+    """The balance guard must fire when an exclusive run has collapsed onto
+    the trunk midline instead of riding its line's rail."""
+    import pytest
+
+    from nf_metro.layout.engine import _guard_centered_tracks_balanced
+    from nf_metro.layout.phases.guards import PhaseInvariantError
+
+    graph = _fork_weave_graph(centered=True)
+    compute_layout(graph, validate=False)
+
+    # Force the bottom exclusive run onto the trunk Y (the regression).
+    trunk_y = graph.stations["st"].y
+    for sid in ("bA", "bB"):
+        graph.stations[sid].y = trunk_y
+
+    with pytest.raises(PhaseInvariantError, match="not offset to its side"):
+        _guard_centered_tracks_balanced(graph, "test")
 
 
 def test_demo_fixture_balanced_and_valid():
