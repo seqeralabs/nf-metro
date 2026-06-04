@@ -45,6 +45,25 @@ def test_render_contains_line_color():
     assert "#ff0000" in svg
 
 
+def test_label_angle_emits_rotate_transform():
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro label_angle: 45\n"
+        "graph LR\n"
+        "    a[Alpha]\n"
+        "    b[Beta]\n"
+        "    a -->|main| b\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    assert "rotate(45" in svg
+
+
+def test_label_angle_default_no_rotate():
+    svg = _render_simple()
+    assert "rotate(" not in svg
+
+
 def test_render_nfcore_theme_background():
     svg = _render_simple()
     assert NFCORE_THEME.background_color in svg

@@ -358,11 +358,15 @@ def render_svg(
     # Compute labels early so section bbox expansions are applied
     # before section boxes are drawn and canvas bounds are computed.
     icon_obstacles = _compute_icon_obstacles(graph, theme, station_offsets)
+    label_angle = (
+        graph.label_angle if graph.label_angle is not None else theme.label_angle
+    )
     labels = place_labels(
         graph,
         station_offsets=station_offsets,
         icon_obstacles=icon_obstacles,
         routes=routes,
+        label_angle=label_angle,
     )
 
     max_x, max_y = _compute_canvas_bounds(graph, routes, debug)
@@ -1257,7 +1261,27 @@ def _render_labels(
             label_data["data-station-id"] = label.station_id
             label_data["class_"] = "nf-metro-station-label"
 
-        if label.dominant_baseline:
+        if label.angle:
+            # Diagonal labels (#527): anchor at the pill and rotate about
+            # the anchor.  text-anchor=start so the tilted text trails
+            # away from the station.
+            d.append(
+                draw.Text(
+                    text,
+                    theme.label_font_size,
+                    label.x,
+                    label.y,
+                    fill=theme.label_color,
+                    font_family=theme.label_font_family,
+                    font_weight=theme.label_font_weight,
+                    text_anchor=label.text_anchor or "start",
+                    dominant_baseline="auto",
+                    line_height=LABEL_LINE_HEIGHT,
+                    transform=f"rotate({label.angle},{label.x},{label.y})",
+                    **label_data,
+                )
+            )
+        elif label.dominant_baseline:
             # Custom placement (e.g. TB vertical stations: right-side labels)
             d.append(
                 draw.Text(

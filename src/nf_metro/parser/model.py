@@ -198,6 +198,9 @@ class MetroGraph:
     center_ports: bool = False
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
+    # Opt-in diagonal station labels (#527). None means "use the theme
+    # default" (0 = horizontal); a directive value overrides the theme.
+    label_angle: float | None = None
     # Placement modifiers for the bundled legend+logo block. The corner/edge
     # keyword lives in legend_position; these refine where that block lands.
     legend_anchor: str = "content"  # "content" (section bbox) or "canvas"

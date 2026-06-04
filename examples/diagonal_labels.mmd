@@ -1,0 +1,36 @@
+%%metro title: Diagonal Labels (dense trunk)
+%%metro style: dark
+%%metro label_angle: 45
+%%metro line: germline | Germline | #0570b0
+%%metro line: tumor_only | Tumor only | #d62728
+%%metro line: somatic | Tumor-normal pair | #756bb1
+%%metro file: fastq_in | FASTQ
+%%metro file: cram_out | CRAM
+
+graph LR
+    subgraph preprocessing [Pre-processing]
+        fastq_in[ ]
+        fastqc[FastQC]
+        fastp[FastP]
+        umi[UMI consensus]
+        bwa[BWA-MEM]
+        merge_index[samtools merge/index]
+        markdup[MarkDuplicates]
+        bqsr[BaseRecalibrator]
+        applybqsr[ApplyBQSR]
+        mosdepth[mosdepth]
+        ngscheckmate[NGSCheckmate]
+        cram_out[ ]
+
+        fastq_in -->|germline,tumor_only,somatic| fastqc
+        fastqc -->|germline,tumor_only,somatic| fastp
+        fastp -->|germline,tumor_only,somatic| umi
+        umi -->|germline,tumor_only,somatic| bwa
+        bwa -->|germline,tumor_only,somatic| merge_index
+        merge_index -->|germline,tumor_only,somatic| markdup
+        markdup -->|germline,tumor_only,somatic| bqsr
+        bqsr -->|germline,tumor_only,somatic| applybqsr
+        applybqsr -->|germline,tumor_only,somatic| mosdepth
+        mosdepth -->|germline,tumor_only,somatic| ngscheckmate
+        ngscheckmate -->|germline,tumor_only,somatic| cram_out
+    end

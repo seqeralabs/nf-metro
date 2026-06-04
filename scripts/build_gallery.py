@@ -62,6 +62,13 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "collector fan-in descending a shared inter-column corridor.",
     ),
     (
+        "diagonal_labels",
+        EXAMPLES_DIR,
+        "Opt-in diagonal station labels (#527) via `%%metro label_angle: 45`: a "
+        "dense single-trunk pre-processing section whose station names tilt "
+        "below the line so closely-spaced stations stay legible.",
+    ),
+    (
         "longread_variant_calling",
         EXAMPLES_DIR,
         "Dense long-read variant-calling pipeline (six lines, nine sections): "

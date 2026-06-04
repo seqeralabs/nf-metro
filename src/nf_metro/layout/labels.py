@@ -14,6 +14,7 @@ __all__ = [
     "place_labels",
 ]
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
@@ -78,6 +79,8 @@ def _label_bbox(
     """Return (x_min, y_min, x_max, y_max) bounding box for a label."""
     if placement.obstacle_bbox is not None:
         return placement.obstacle_bbox
+    if placement.angle:
+        return _rotated_label_bbox(placement)
     w = label_text_width(placement.text)
     text_h = _label_text_height(placement.text)
 
@@ -104,6 +107,44 @@ def _label_bbox(
         y_max = placement.y + text_h
 
     return (x_min, y_min, x_max, y_max)
+
+
+def _rotated_label_bbox(
+    placement: LabelPlacement,
+) -> tuple[float, float, float, float]:
+    """Axis-aligned bounding box of a label rotated about its anchor.
+
+    The label text starts at the anchor ``(x, y)`` (``text_anchor="start"``)
+    and reads horizontally before being rotated clockwise by ``angle``
+    degrees about that anchor -- matching the SVG ``rotate(angle, x, y)``
+    transform the renderer emits.  We rotate the four corners of the
+    upright text box and take their min/max as the collision box, so the
+    diagonal footprint is approximated by its enclosing rectangle.
+    """
+    w = label_text_width(placement.text)
+    text_h = _label_text_height(placement.text)
+    # Upright box for text_anchor="start", baseline at y: text occupies
+    # x in [x, x+w] and y in roughly [y - text_h, y] (ascenders above the
+    # baseline).  Centre the box vertically on the baseline a touch so the
+    # footprint is symmetric enough for collision purposes.
+    corners = [
+        (placement.x, placement.y - text_h),
+        (placement.x + w, placement.y - text_h),
+        (placement.x + w, placement.y),
+        (placement.x, placement.y),
+    ]
+    rad = math.radians(placement.angle)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    ax, ay = placement.x, placement.y
+    xs: list[float] = []
+    ys: list[float] = []
+    for cx, cy in corners:
+        dx, dy = cx - ax, cy - ay
+        rx = ax + dx * cos_a - dy * sin_a
+        ry = ay + dx * sin_a + dy * cos_a
+        xs.append(rx)
+        ys.append(ry)
+    return (min(xs), min(ys), max(xs), max(ys))
 
 
 def _boxes_overlap(
@@ -540,6 +581,7 @@ def place_labels(
     icon_obstacles: list[tuple[float, float, float, float]] | None = None,
     routes: list["RoutedPath"] | None = None,
     allow_hyphenation: bool = True,
+    label_angle: float = 0.0,
 ) -> list[LabelPlacement]:
     """Place horizontal labels alternating above/below stations.
 
@@ -699,6 +741,28 @@ def place_labels(
                         tb_sec.bbox_w = old_right - lx_min
                     if lx_max > tb_sec.bbox_x + tb_sec.bbox_w:
                         tb_sec.bbox_w = lx_max - tb_sec.bbox_x
+            placements.append(candidate)
+            continue
+
+        # Opt-in diagonal labels (#527): for non-TB sections, anchor the
+        # label at the bottom of the pill and tilt it.  All angled labels
+        # sit below the trunk on the same side (like real transit maps),
+        # which lets densely-spaced stations share a compact horizontal
+        # line without their long names colliding.
+        if label_angle:
+            candidate = LabelPlacement(
+                station_id=station.id,
+                text=station.label,
+                x=station.x,
+                y=station.y + max_off + label_offset,
+                above=False,
+                angle=label_angle,
+                text_anchor="start",
+            )
+            if station.section_id:
+                sec = graph.sections.get(station.section_id)
+                if sec is not None and sec.bbox_w > 0:
+                    _grow_section_for_box(sec, _label_bbox(candidate))
             placements.append(candidate)
             continue
 
@@ -881,8 +945,9 @@ def _wrap_overlapping_labels(
         and p.obstacle_bbox is None
         and graph.stations.get(p.station_id) is not None
     }
-    # Only re-flow single-line labels; respect any author-chosen breaks.
-    wrappable = {sid for sid, p in by_id.items() if "\n" not in p.text}
+    # Only re-flow single-line, un-rotated labels; respect any author-chosen
+    # breaks and leave angled labels (#527) to spread rather than wrap.
+    wrappable = {sid for sid, p in by_id.items() if "\n" not in p.text and not p.angle}
     if not wrappable:
         return
 
@@ -956,6 +1021,27 @@ def _expand_sections_for_wrapped_labels(
             sec.bbox_y = y_min - margin
         if y_max + margin > sec.bbox_y + sec.bbox_h:
             sec.bbox_h = (y_max + margin) - sec.bbox_y
+
+
+def _grow_section_for_box(
+    sec: Section,
+    box: tuple[float, float, float, float],
+    margin: float = LABEL_BBOX_MARGIN,
+) -> None:
+    """Grow a section bbox so it contains the given label box (plus margin)."""
+    x_min, y_min, x_max, y_max = box
+    if x_min - margin < sec.bbox_x:
+        old_right = sec.bbox_x + sec.bbox_w
+        sec.bbox_x = x_min - margin
+        sec.bbox_w = old_right - sec.bbox_x
+    if x_max + margin > sec.bbox_x + sec.bbox_w:
+        sec.bbox_w = (x_max + margin) - sec.bbox_x
+    if y_min - margin < sec.bbox_y:
+        old_bottom = sec.bbox_y + sec.bbox_h
+        sec.bbox_y = y_min - margin
+        sec.bbox_h = old_bottom - sec.bbox_y
+    if y_max + margin > sec.bbox_y + sec.bbox_h:
+        sec.bbox_h = (y_max + margin) - sec.bbox_y
 
 
 def _avoid_diagonal_routes(

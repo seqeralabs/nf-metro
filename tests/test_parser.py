@@ -33,6 +33,24 @@ def test_parse_line_order_default():
     assert graph.line_order == "definition"
 
 
+def test_parse_label_angle():
+    text = "%%metro label_angle: 45\ngraph LR\n"
+    graph = parse_metro_mermaid(text)
+    assert graph.label_angle == 45.0
+
+
+def test_parse_label_angle_default_none():
+    text = "graph LR\n"
+    graph = parse_metro_mermaid(text)
+    assert graph.label_angle is None
+
+
+def test_parse_label_angle_invalid_ignored():
+    text = "%%metro label_angle: sideways\ngraph LR\n"
+    graph = parse_metro_mermaid(text)
+    assert graph.label_angle is None
+
+
 def test_parse_line_order_invalid_ignored():
     text = "%%metro line_order: invalid\ngraph LR\n"
     graph = parse_metro_mermaid(text)

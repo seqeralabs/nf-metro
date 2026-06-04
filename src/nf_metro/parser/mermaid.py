@@ -259,6 +259,11 @@ def _parse_directive(
     elif content.startswith("center_ports:"):
         val = content[len("center_ports:") :].strip().lower()
         graph.center_ports = val in ("true", "yes", "1")
+    elif content.startswith("label_angle:"):
+        try:
+            graph.label_angle = float(content[len("label_angle:") :].strip())
+        except ValueError:
+            pass
     elif content.startswith("legend_min_height:"):
         try:
             graph.legend_min_height = float(
