@@ -353,6 +353,27 @@ def compute_layout(
     # Off by default: when unset, each _snap call is a single attribute read.
     graph._phase_snapshots_enabled = phase_snapshots_enabled()
 
+    # Opt-in rail mode runs a dedicated, self-contained layout pipeline and
+    # returns early so the normal phase pipeline below is never touched when
+    # rail mode is off (default).  See layout/rail_mode.py.
+    if graph.rail_mode:
+        from nf_metro.layout.rail_mode import compute_rail_layout
+
+        rail_y = y_spacing if y_spacing is not None else compute_min_y_spacing(graph)
+        rail_x = x_spacing if x_spacing is not None else X_SPACING
+        compute_rail_layout(
+            graph,
+            x_spacing=rail_x,
+            y_spacing=rail_y,
+            x_offset=x_offset,
+            y_offset=y_offset,
+            section_x_padding=section_x_padding,
+            section_y_padding=section_y_padding,
+            section_y_gap=section_y_gap,
+        )
+        _guard_stations_within_bbox(graph, "final")
+        return
+
     auto_x = x_spacing is None
     auto_y = y_spacing is None
     if y_spacing is None:

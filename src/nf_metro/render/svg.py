@@ -888,6 +888,59 @@ def _render_bridged_edge(
     d.append(path)
 
 
+def _station_data_attrs(graph: MetroGraph, station: Station) -> dict[str, str]:
+    """SVG data-attributes shared by every station marker.
+
+    Values that flow from user content (label, section name) are HTML-escaped
+    because drawsvg does not escape unknown kwargs.
+    """
+    data = {
+        "class_": "nf-metro-station",
+        "data-station-id": station.id,
+        "data-station-lines": ",".join(graph.station_lines(station.id)),
+        "data-station-label": html.escape(station.label or station.id),
+    }
+    if station.section_id:
+        data["data-section-id"] = station.section_id
+        sec_obj = graph.sections.get(station.section_id)
+        if sec_obj:
+            data["data-section-name"] = html.escape(sec_obj.name)
+    return data
+
+
+def _render_rail_pill(
+    d: draw.Drawing,
+    graph: MetroGraph,
+    station: Station,
+    theme: Theme,
+    r: float,
+) -> None:
+    """Render a rail-mode spanning station as one vertical pill.
+
+    The pill runs from the station's top rail Y to its bottom rail Y at the
+    station's column X, so it visibly bridges every rail the station serves.
+    """
+    top_y = station.rail_top_y if station.rail_top_y is not None else station.y
+    bot_y = station.rail_bottom_y if station.rail_bottom_y is not None else station.y
+    w = r * 2
+    h = (bot_y - top_y) + r * 2
+    station_data = _station_data_attrs(graph, station)
+    d.append(
+        draw.Rectangle(
+            station.x - w / 2,
+            top_y - r,
+            w,
+            h,
+            rx=r,
+            ry=r,
+            fill=theme.station_fill,
+            stroke=theme.station_stroke,
+            stroke_width=theme.station_stroke_width,
+            **station_data,
+        )
+    )
+
+
 def _render_stations(
     d: draw.Drawing,
     graph: MetroGraph,
@@ -907,6 +960,13 @@ def _render_stations(
             continue
 
         r = theme.station_radius
+
+        # Rail mode: a station spanning more than one rail draws as a single
+        # vertical pill from its top rail Y to its bottom rail Y.  Single-rail
+        # stations fall through to the normal (zero-span) pill below.
+        if station.rail_top_y is not None and station.rail_bottom_y is not None:
+            _render_rail_pill(d, graph, station, theme, r)
+            continue
 
         # Determine if this is a TB vertical station (rotated pill)
         is_tb_vert = False
@@ -930,20 +990,7 @@ def _render_stations(
 
         span = max_off - min_off
 
-        # Hand-escape values that flow from user content into XML attributes.
-        # drawsvg does not escape unknown kwargs, so an unescaped "&" or "<"
-        # in a section name or station label breaks XML well-formedness.
-        station_data = {
-            "class_": "nf-metro-station",
-            "data-station-id": station.id,
-            "data-station-lines": ",".join(graph.station_lines(station.id)),
-            "data-station-label": html.escape(station.label or station.id),
-        }
-        if station.section_id:
-            station_data["data-section-id"] = station.section_id
-            sec_obj = graph.sections.get(station.section_id)
-            if sec_obj:
-                station_data["data-section-name"] = html.escape(sec_obj.name)
+        station_data = _station_data_attrs(graph, station)
 
         # Non-process terminus stations: filled rectangle
         # (same size as pill, no rounding)

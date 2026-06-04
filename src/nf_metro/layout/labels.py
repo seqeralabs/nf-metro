@@ -72,6 +72,19 @@ class LabelPlacement:
     obstacle_bbox: tuple[float, float, float, float] | None = None
 
 
+def _rail_span_offsets(station: "Station") -> tuple[float, float] | None:
+    """Return (min_off, max_off) of a rail-mode spanning station's pill.
+
+    In rail mode a multi-line station's pill spans from ``rail_top_y`` to
+    ``rail_bottom_y``; offsetting a label from those edges (rather than from
+    ``station.y`` at the pill centre) keeps the label clear of every rail the
+    pill crosses.  Returns None for non-rail / single-rail stations.
+    """
+    if station.rail_top_y is None or station.rail_bottom_y is None:
+        return None
+    return (station.rail_top_y - station.y, station.rail_bottom_y - station.y)
+
+
 def _label_bbox(
     placement: LabelPlacement,
 ) -> tuple[float, float, float, float]:
@@ -468,6 +481,9 @@ def _trial_cost(
             max_off = max(line_offs) if line_offs else 0.0
         else:
             min_off = max_off = 0.0
+        rail_span = _rail_span_offsets(station)
+        if rail_span is not None:
+            min_off, max_off = rail_span
 
         start_above = station.layer % 2 == 1
         if flip:
@@ -651,6 +667,9 @@ def place_labels(
             max_off = max(line_offs) if line_offs else 0.0
         else:
             min_off = max_off = 0.0
+        rail_span = _rail_span_offsets(station)
+        if rail_span is not None:
+            min_off, max_off = rail_span
 
         # Check if this is a TB section station (horizontal pill)
         is_tb_vert = False

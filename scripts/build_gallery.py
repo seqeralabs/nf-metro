@@ -107,6 +107,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "stacking each section in its own grid row. Regression fixture for "
         "#250 (cross-column junction routes were going backward in X).",
     ),
+    (
+        "rail_mode",
+        EXAMPLES_DIR,
+        "Opt-in `%%metro rail_mode: true`: lines run as fixed parallel "
+        "horizontal rails and a station shared by several lines draws as one "
+        "vertical pill spanning those rails (the nf-core/sarek "
+        '"Example analysis pathways" subway idiom). Line-exclusive callers '
+        "sit on their own rail; the rails never converge to a point.",
+    ),
     # --- Simple topologies ---
     (
         "single_section",

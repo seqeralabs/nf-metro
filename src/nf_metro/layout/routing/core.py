@@ -156,6 +156,11 @@ def route_edges(
     Detects cross-row edges (large Y gap relative to X gap) and routes
     them through a vertical connector at the fold edge.
     """
+    if graph.rail_mode:
+        from nf_metro.layout.routing.rail import route_rail_edges
+
+        return route_rail_edges(graph)
+
     ctx = _build_routing_context(graph, diagonal_run, curve_radius, station_offsets)
     routes: list[RoutedPath] = []
 

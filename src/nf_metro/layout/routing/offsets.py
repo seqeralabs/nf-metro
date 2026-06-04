@@ -1307,6 +1307,11 @@ def compute_station_offsets(
 
     Returns dict mapping (station_id, line_id) -> y_offset.
     """
+    # Rail mode bakes absolute rail Ys into the route points and the pill
+    # span, so per-line offsets are not used; return an empty map.
+    if graph.rail_mode:
+        return {}
+
     ctx = _build_offset_ctx(graph, offset_step)
     _compute_base_offsets(ctx)
     _reindex_section_local(ctx)

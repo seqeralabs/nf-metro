@@ -86,6 +86,13 @@ class Station:
     y: float = 0.0
     layer: int = 0
     track: float = 0.0
+    # Rail-mode span (set by the rail-mode layout when MetroGraph.rail_mode
+    # is on).  ``rail_top_y``/``rail_bottom_y`` are the Y of the topmost and
+    # bottommost rails this station's lines occupy; when they differ the
+    # renderer draws one vertical pill spanning that range.  None means the
+    # station was not laid out in rail mode (normal pill rules apply).
+    rail_top_y: float | None = None
+    rail_bottom_y: float | None = None
 
     @property
     def is_terminus(self) -> bool:
@@ -196,6 +203,12 @@ class MetroGraph:
     diamond_style: str = "straight"  # "straight" or "symmetric"
     compact_offsets: bool = False
     center_ports: bool = False
+    # Opt-in "rail mode": LR sections are laid out as fixed parallel
+    # horizontal rails (one per line) and a multi-line station renders as a
+    # single vertical pill spanning the rails it serves, instead of the
+    # lines converging to a point.  Off by default; the normal layout /
+    # render path is untouched when False.  See docs and examples/rail_mode.mmd.
+    rail_mode: bool = False
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
     # Placement modifiers for the bundled legend+logo block. The corner/edge

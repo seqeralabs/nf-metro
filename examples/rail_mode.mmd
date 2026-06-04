@@ -1,0 +1,32 @@
+%%metro title: Rail mode: variant-calling pathways
+%%metro style: dark
+%%metro rail_mode: true
+%%metro line: deepvariant | DeepVariant | #2db572
+%%metro line: haplotypecaller | HaplotypeCaller (GATK) | #0570b0
+%%metro line: strelka | Strelka2 | #e63946
+%%metro legend: bl
+
+graph LR
+    subgraph calling [Example analysis pathways]
+        align[Alignment]
+        markdup[Mark duplicates]
+        bqsr[BQSR]
+        dv[DeepVariant]
+        hc[HaplotypeCaller]
+        strelka_call[Strelka2]
+        norm[Normalize]
+        vep[Annotate]
+
+        align -->|deepvariant,haplotypecaller,strelka| markdup
+        markdup -->|deepvariant,haplotypecaller,strelka| bqsr
+
+        bqsr -->|deepvariant| dv
+        bqsr -->|haplotypecaller| hc
+        bqsr -->|strelka| strelka_call
+
+        dv -->|deepvariant| norm
+        hc -->|haplotypecaller| norm
+        strelka_call -->|strelka| norm
+
+        norm -->|deepvariant,haplotypecaller,strelka| vep
+    end
