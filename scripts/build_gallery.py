@@ -45,9 +45,10 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "striped_line",
         EXAMPLES_DIR,
-        "Striped / composite multi-colour line (#529): the tumor-normal pair "
-        "route renders as two adjacent coloured ribbons (red + blue) alongside "
-        "normal single-colour lines.",
+        "Striped / composite multi-colour line (#529): the tumor (red) and "
+        "normal (blue) samples run on separate single-colour routes, then "
+        "converge into a striped tumor-normal pair line drawn as two adjacent "
+        "coloured ribbons (red + blue) through paired somatic calling.",
     ),
     (
         "rnaseq_auto",

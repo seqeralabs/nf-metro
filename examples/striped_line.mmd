@@ -6,30 +6,27 @@
 %%metro legend: bl
 
 graph LR
-    subgraph qc [QC & Trimming]
-        cat_fastq[cat fastq]
-        fastqc[FastQC]
-        trim[Trim Galore!]
+    subgraph prep [Per-sample prep]
+        %%metro exit: right | tumor, normal
+        tumor_align[Align tumor]
+        tumor_markdup[MarkDup tumor]
+        normal_align[Align normal]
+        normal_markdup[MarkDup normal]
 
-        cat_fastq -->|tumor,normal| fastqc
-        fastqc -->|tumor,normal| trim
+        tumor_align -->|tumor| tumor_markdup
+        normal_align -->|normal| normal_markdup
     end
 
-    subgraph align [Alignment]
-        bwa[BWA-MEM]
-        markdup[MarkDuplicates]
-
-        bwa -->|tumor,normal| markdup
-    end
-
-    subgraph calling [Somatic Variant Calling]
+    subgraph calling [Paired somatic calling]
+        %%metro entry: left | tumor, normal
+        %%metro exit: right | pair
+        match[Match tumor-normal]
         mutect2[Mutect2]
-        filter[FilterMutectCalls]
         annotate[VEP]
 
-        mutect2 -->|pair| filter
-        filter -->|pair| annotate
+        match -->|pair| mutect2
+        mutect2 -->|pair| annotate
     end
 
-    trim -->|tumor,normal| bwa
-    markdup -->|pair| mutect2
+    tumor_markdup -->|tumor| match
+    normal_markdup -->|normal| match
