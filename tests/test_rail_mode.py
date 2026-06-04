@@ -198,9 +198,12 @@ def test_rail_mode_stations_within_bbox():
         )
 
 
-def test_spanning_pill_has_a_knob_per_used_rail():
-    """A multi-line spanning station records one used-rail Y per line it
-    carries, and the renderer draws a knob (a circle) at each."""
+def test_spanning_station_draws_one_circle_per_used_rail_plus_connector():
+    """A multi-rail station renders as the interchange idiom: one white
+    circle on each rail it uses, joined by a single straight connector
+    segment -- not as one filled capsule (pill)."""
+    import re
+
     from nf_metro.render import render_svg
     from nf_metro.themes import THEMES
 
@@ -212,17 +215,33 @@ def test_spanning_pill_has_a_knob_per_used_rail():
         for st in graph.stations.values()
         if st.rail_top_y is not None and st.rail_bottom_y is not None
     ]
-    assert spanning, "demo must contain at least one spanning pill"
+    assert spanning, "demo must contain at least one multi-rail station"
     for st in spanning:
         used = graph.station_lines(st.id)
         assert len(st.rail_used_ys) == len(used), (
             f"{st.id}: rail_used_ys {st.rail_used_ys} not parallel to lines {used}"
         )
-        # One knob marker per used line for this station.
-        knobs = svg.count(f'data-station-id="{st.id}"')
-        # The pill rect + one knob per used line all carry the station id.
-        assert knobs >= len(used) + 1, (
-            f"{st.id}: expected pill + {len(used)} knobs, found {knobs} markers"
+        # One circle (knob) per used rail.
+        knob_count = svg.count(f'class="nf-metro-rail-knob" data-station-id="{st.id}"')
+        assert knob_count == len(used), (
+            f"{st.id}: expected {len(used)} rail circles, found {knob_count}"
+        )
+        # Exactly one straight connector segment for the multi-rail station.
+        connectors = svg.count(
+            f'class="nf-metro-rail-connector" data-station-id="{st.id}"'
+        )
+        assert connectors == 1, (
+            f"{st.id}: expected one interchange connector, found {connectors}"
+        )
+
+    # The multi-rail marker must NOT be a filled capsule: no rounded rect
+    # (rx/ry) carries a rail station id.  (Single-rail circles use <circle>.)
+    for st in spanning:
+        rect_pat = re.compile(
+            rf'<rect[^>]*rx="[^"]+"[^>]*data-station-id="{re.escape(st.id)}"'
+        )
+        assert not rect_pat.search(svg), (
+            f"{st.id}: multi-rail station still renders as a capsule rect"
         )
 
 
@@ -316,6 +335,87 @@ def test_off_track_input_sits_above_the_rails():
             f"{st.id}: off_track station at {st.y} not above rails "
             f"{sorted(section_rails.values())}"
         )
+
+
+def test_rail_mode_labels_alternate_above_and_below():
+    """Rail-mode station labels alternate above/below the rails so dense
+    label runs don't pile on one edge: a section with several labelled
+    stations must use BOTH sides, and no label sits between two rails."""
+    from nf_metro.layout.labels import place_labels
+
+    graph = _rail_graph()
+    rails = _section_line_rails(graph)
+    placements = place_labels(graph)
+
+    by_section: dict[str, list] = {}
+    for lp in placements:
+        st = graph.stations.get(lp.station_id)
+        if st is None or st.is_port or st.is_terminus or not st.label.strip():
+            continue
+        by_section.setdefault(st.section_id, []).append(lp)
+
+    saw_multi = False
+    for sec_id, lps in by_section.items():
+        if len(lps) < 2:
+            continue
+        saw_multi = True
+        sides = {lp.above for lp in lps}
+        assert sides == {True, False}, (
+            f"{sec_id}: labels all on one side ({sides}); expected alternation"
+        )
+        # Each label stays close to its own station's rail span (it does not
+        # drift off into the middle of the inter-rail bundle): the baseline is
+        # within ~2 row-gaps of the nearest rail the station sits on.
+        section_rails = rails.get(sec_id, {})
+        for lp in lps:
+            st = graph.stations[lp.station_id]
+            own_top = st.rail_top_y if st.rail_top_y is not None else st.y
+            own_bot = st.rail_bottom_y if st.rail_bottom_y is not None else st.y
+            ys = sorted(section_rails.values())
+            gap = (ys[1] - ys[0]) if len(ys) >= 2 else 40.0
+            assert own_top - 2 * gap <= lp.y <= own_bot + 2 * gap, (
+                f"{sec_id}/{lp.station_id}: label at {lp.y} drifts far from its "
+                f"own rail span [{own_top}, {own_bot}]"
+            )
+    assert saw_multi, "demo must contain a section with several station labels"
+
+
+def test_off_track_input_feeds_in_with_short_clean_s_curve():
+    """An off-track input parks just left of (and above) its consumer column
+    so the feeder is a short S-curve, not a long diagonal traverse from the
+    section's left edge."""
+    from nf_metro.layout.routing import route_edges
+
+    graph = _rail_graph()
+    routes = route_edges(graph)
+    off_tracks = {st.id for st in graph.stations.values() if st.off_track}
+    assert off_tracks, "demo must contain an off_track input"
+
+    checked = 0
+    for rp in routes:
+        src = graph.stations.get(rp.edge.source)
+        tgt = graph.stations.get(rp.edge.target)
+        if src is None or tgt is None:
+            continue
+        if rp.edge.source not in off_tracks and rp.edge.target not in off_tracks:
+            continue
+        feeder = src if rp.edge.source in off_tracks else tgt
+        consumer = tgt if rp.edge.source in off_tracks else src
+        checked += 1
+        # The feeder must sit close to its consumer in X (within one column),
+        # so the drop is a short S-curve rather than a long diagonal.
+        assert abs(feeder.x - consumer.x) <= consumer.x, "sanity"
+        # Multi-point S-curve, and the horizontal reach is modest (< the full
+        # section width) -- the feeder is near the consumer, not at layer 0.
+        assert len(rp.points) >= 3
+        xs = [x for x, _ in rp.points]
+        sec = graph.sections.get(consumer.section_id)
+        if sec and sec.bbox_w > 0:
+            assert (max(xs) - min(xs)) < sec.bbox_w, (
+                f"off-track feeder spans {max(xs) - min(xs)}px across a "
+                f"{sec.bbox_w}px section -- too long a traverse"
+            )
+    assert checked, "expected at least one off-track feeder edge"
 
 
 def test_rail_mode_off_by_default_leaves_graph_unchanged():

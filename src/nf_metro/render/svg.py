@@ -915,47 +915,50 @@ def _render_rail_pill(
     theme: Theme,
     r: float,
 ) -> None:
-    """Render a rail-mode spanning station as one vertical pill with knobs.
+    """Render a rail-mode multi-rail station as the metro interchange idiom.
 
-    The pill runs from the station's top rail Y to its bottom rail Y at the
-    station's column X, so it visibly bridges every rail in that range.  A
-    small filled knob is drawn where the pill meets each rail the station
-    *uses* (``rail_used_ys``); a rail that falls within the span but is not
-    used carries no knob and reads as passing behind the pill.
+    Instead of one capsule the station draws as a *white circle on each rail
+    it uses* joined by a thin straight connector segment running between the
+    topmost and bottommost used rails (the classic metro / nf-core-sarek
+    interchange link).  A rail that falls within the span but is NOT used by
+    the station gets no circle; the connector passes behind it without a knob.
     """
-    top_y = station.rail_top_y if station.rail_top_y is not None else station.y
-    bot_y = station.rail_bottom_y if station.rail_bottom_y is not None else station.y
-    w = r * 2
-    h = (bot_y - top_y) + r * 2
+    used_ys = [y for y in station.rail_used_ys] or [station.y]
+    top_y = min(used_ys)
+    bot_y = max(used_ys)
     station_data = _station_data_attrs(graph, station)
-    d.append(
-        draw.Rectangle(
-            station.x - w / 2,
-            top_y - r,
-            w,
-            h,
-            rx=r,
-            ry=r,
-            fill=theme.station_fill,
-            stroke=theme.station_stroke,
-            stroke_width=theme.station_stroke_width,
-            **station_data,
-        )
-    )
 
-    # Knobs: one per used rail, coloured by the line that uses it.  Keyed by
-    # the station's served-line order, which is parallel to rail_used_ys.
+    # The interchange connector: a thin neutral straight segment behind the
+    # circles, spanning only the rails the station actually uses.  It carries
+    # the station data attrs (id, label, section) so the multi-rail station
+    # stays identifiable for hover/selection now that there is no pill rect.
+    if bot_y - top_y > 0.5:
+        d.append(
+            draw.Line(
+                station.x,
+                top_y,
+                station.x,
+                bot_y,
+                stroke=theme.station_stroke,
+                stroke_width=theme.station_stroke_width * 2,
+                **{
+                    **station_data,
+                    "class_": "nf-metro-rail-connector",
+                },
+            )
+        )
+
+    # A white circle at each used rail (matching the normal station marker:
+    # white fill, theme station stroke).  Keyed by the station's served-line
+    # order, which is parallel to rail_used_ys.
     served = graph.station_lines(station.id)
-    knob_r = r * 0.62
     for lid, y in zip(served, station.rail_used_ys):
-        line = graph.lines.get(lid)
-        knob_fill = line.color if line else FALLBACK_LINE_COLOR
         d.append(
             draw.Circle(
                 station.x,
                 y,
-                knob_r,
-                fill=knob_fill,
+                r,
+                fill=theme.station_fill,
                 stroke=theme.station_stroke,
                 stroke_width=theme.station_stroke_width,
                 **{

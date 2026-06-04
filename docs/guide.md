@@ -436,7 +436,7 @@ These go at the top of the file, before `graph LR`.
 | `%%metro compact_offsets: true` | Compact line offsets within stations (see below) |
 | `%%metro center_ports: true` | Centre inter-section ports on the shorter of the two connected sections, so lines enter/exit at the visual midpoint. Overridden by the `--center-ports` / `--no-center-ports` CLI flag. |
 | `%%metro legend_min_height: <pixels>` | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
-| `%%metro rail_mode: true` | Lay the whole graph out as fixed parallel rails with spanning pills (see below) |
+| `%%metro rail_mode: true` | Lay the whole graph out as fixed parallel rails with interchange-style stations (see below) |
 | `%%metro rail_section: <id>[, <id>...]` | Lay only the listed section(s) out in rail mode; the rest of the map uses normal layout (repeatable) |
 
 **Compact offsets.** By default, each line reserves a fixed vertical slot across the whole map based on its declaration order. If you define three lines, every station that carries even one of them is sized to fit all three. This keeps bundles visually consistent but wastes space when most stations only carry one or two lines.
@@ -453,7 +453,7 @@ With `%%metro compact_offsets: true`, stations are only as wide as the lines act
 
 This pairs naturally with the `file:` / `files:` / `dir:` icon directives - the lifted stations are usually file terminals. The [`off_track_convergence`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/topologies/off_track_convergence.mmd) topology and the [differentialabundance](https://github.com/pinin4fjords/nf-metro/blob/main/examples/differentialabundance.mmd) example both use it.
 
-**Rail mode.** In normal layout a station shared by several lines is a single point and the lines converge to it. *Rail mode* instead gives each line a fixed, evenly-spaced horizontal rail and renders a multi-line station as one vertical pill spanning the rails it serves - the rails never converge (the nf-core/sarek "Example analysis pathways" subway idiom). Turn it on for the whole map with `%%metro rail_mode: true` (see the [`rail_mode`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/rail_mode.mmd) example).
+**Rail mode.** In normal layout a station shared by several lines is a single point and the lines converge to it. *Rail mode* instead gives each line a fixed, evenly-spaced horizontal rail and renders a multi-line station as the classic metro interchange: a white circle on each rail the station uses, joined by a straight connector segment - the rails never converge (the nf-core/sarek "Example analysis pathways" subway idiom). Station labels alternate above and below the rails so dense runs stay readable. Turn it on for the whole map with `%%metro rail_mode: true` (see the [`rail_mode`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/rail_mode.mmd) example).
 
 To mix the two styles in one map, mark individual sections instead:
 

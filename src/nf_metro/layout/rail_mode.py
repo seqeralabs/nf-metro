@@ -3,9 +3,10 @@
 In normal layout a station shared by several metro lines is a single point
 and the lines converge (bundle) to that one Y.  Rail mode instead lays each
 line out as a fixed, evenly-spaced horizontal *rail* across the section and
-renders a multi-line station as one vertical *pill* spanning the rails it
-serves.  The rails do not converge: a line runs straight along its rail and
-only the station pill bridges across rails.
+renders a multi-line station as the classic metro *interchange*: a circle on
+each rail the station uses, joined by a straight connector segment.  The
+rails do not converge: a line runs straight along its rail and only the
+interchange connector bridges across rails.
 
 This module is a self-contained pipeline, run by ``compute_layout`` only when
 ``MetroGraph.rail_mode`` is True, so the normal layout path is untouched.
@@ -223,6 +224,13 @@ def _layout_section_rails(
         for sid in section.station_ids
         if (st := graph.stations.get(sid)) is not None and not st.is_port
     ]
+
+    # Widen the column step so a column's widest label fits between its
+    # neighbours without wrapping.  Labels sit above/below the rails centred
+    # on the station X, so a column needs roughly half the widest label of it
+    # and of each neighbour to clear; using the per-column widest label as the
+    # step keeps the rails evenly spaced while giving long names room.
+    x_spacing = _label_aware_x_spacing(graph, real_ids, layers, x_spacing)
     # Off-track input stations sit ABOVE the top rail and feed in with an
     # S-curve (see routing/rail.py), so reserve a band above the rails for
     # them.  rails_top is shifted down by that band; the off-track band Y is
@@ -242,7 +250,20 @@ def _layout_section_rails(
         st.x = x_offset + section_x_padding + layer * x_spacing
 
         if st.off_track:
-            # Park above the rails; the router draws the S-curve feeder.
+            # Park above the rails just to the left of the consumer column, so
+            # the router draws a short, clean S-curve down into the rail rather
+            # than a long diagonal traverse from layer 0.  The consumer's layer
+            # determines the X; the off-track input sits half a column before it.
+            consumer_layer = min(
+                (
+                    layers.get(e.target, layer)
+                    for e in graph.edges_from(sid)
+                    if e.target in layers
+                ),
+                default=layer + 1,
+            )
+            feed_layer = max(0.0, consumer_layer - 0.5)
+            st.x = x_offset + section_x_padding + feed_layer * x_spacing
             st.y = off_track_y
             st.track = 0.0
             st.rail_used_ys = []
@@ -296,6 +317,37 @@ def _layout_section_rails(
     section.direction = "LR"
 
     return bbox_y + bbox_h
+
+
+def _label_aware_x_spacing(
+    graph: MetroGraph,
+    real_ids: list[str],
+    layers: dict[str, int],
+    x_spacing: float,
+) -> float:
+    """Return a column step wide enough that no column's label wraps.
+
+    Labels render centred on a station's X, so two adjacent columns' labels
+    each consume half their own width either side of the column line.  Taking
+    the widest label across the section and requiring the step to seat half of
+    it plus half its neighbour (i.e. the full widest label, plus a small gap)
+    keeps every label on one line while the rails stay evenly spaced.
+    """
+    from nf_metro.layout.constants import LABEL_MARGIN
+    from nf_metro.layout.labels import label_text_width
+
+    widest = 0.0
+    for sid in real_ids:
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or st.off_track:
+            continue
+        # Blank termini render as icons, not text labels, so don't size to them.
+        if st.is_terminus and not st.label.strip():
+            continue
+        widest = max(widest, label_text_width(st.label))
+    if widest <= 0.0:
+        return x_spacing
+    return max(x_spacing, widest + LABEL_MARGIN * 2)
 
 
 def _section_layers(graph: MetroGraph, section: Section) -> dict[str, int]:
