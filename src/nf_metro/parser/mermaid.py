@@ -227,12 +227,14 @@ def _parse_directive(
                 raw_style = parts[3].strip().lower()
                 if raw_style in VALID_LINE_STYLES:
                     style = raw_style
+            colors = [c.strip() for c in parts[2].split(",") if c.strip()]
             graph.add_line(
                 MetroLine(
                     id=parts[0].strip(),
                     display_name=parts[1].strip(),
-                    color=parts[2].strip(),
+                    color=colors[0] if colors else parts[2].strip(),
                     style=style,
+                    colors=colors,
                 )
             )
     elif content.startswith("entry:"):

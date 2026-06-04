@@ -59,6 +59,7 @@ from nf_metro.render.constants import (
     SECTION_NUM_FONT_SIZE,
     SECTION_NUM_Y_OFFSET,
     SECTION_STROKE_WIDTH,
+    STRIPE_RIBBON_WIDTH_RATIO,
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
@@ -752,57 +753,169 @@ def _render_edges(
 
     for route, pts in zip(routes, polylines):
         line = graph.lines.get(route.line_id)
-        color = line.color if line else FALLBACK_LINE_COLOR
+        colors = line.colors if line else [FALLBACK_LINE_COLOR]
         style_kw = line_style_kwargs(line.style) if line else {}
         class_name = f"metro-line-{route.line_id}"
         breaks = bridges.get(id(route))
 
-        if breaks:
-            _render_bridged_edge(
-                d, pts, route, breaks, color, style_kw, class_name, theme, curve_radius
+        # For a striped/composite line, paint one parallel ribbon per colour,
+        # each thinner and shifted perpendicular to the route so the ribbons
+        # sit side by side and span roughly the normal line width. A single
+        # colour falls through unchanged (offset 0.0, full width).
+        for color, offset, width in _ribbon_layers(colors, theme.line_width):
+            ribbon_pts = _offset_polyline(pts, offset)
+            _draw_ribbon(
+                d,
+                ribbon_pts,
+                route,
+                breaks,
+                color,
+                width,
+                style_kw,
+                class_name,
+                theme,
+                curve_radius,
             )
-        elif len(pts) == 2:
-            d.append(
-                draw.Line(
-                    pts[0][0],
-                    pts[0][1],
-                    pts[1][0],
-                    pts[1][1],
-                    stroke=color,
-                    stroke_width=theme.line_width,
-                    stroke_linecap="round",
-                    class_=class_name,
-                    **{"data-line-id": route.line_id},
-                    **style_kw,
-                )
-            )
-        elif len(pts) >= 3:
-            path = draw.Path(
+
+
+def _ribbon_layers(
+    colors: list[str], line_width: float
+) -> list[tuple[str, float, float]]:
+    """Return ``(color, perp_offset, stroke_width)`` per ribbon for a line.
+
+    A single colour yields one full-width ribbon at zero offset (identical to
+    the historical render). Multiple colours render as ``n`` adjacent ribbons
+    centred on the route. Each ribbon is a touch narrower than a normal line
+    and the ribbons sit edge-to-edge, so the composite reads clearly as two
+    (or more) parallel coloured lines.
+    """
+    n = len(colors)
+    if n <= 1:
+        return [(colors[0], 0.0, line_width)]
+    ribbon_w = line_width * STRIPE_RIBBON_WIDTH_RATIO
+    layers: list[tuple[str, float, float]] = []
+    for i, color in enumerate(colors):
+        offset = (i - (n - 1) / 2.0) * ribbon_w
+        layers.append((color, offset, ribbon_w))
+    return layers
+
+
+def _offset_polyline(
+    pts: list[tuple[float, float]], offset: float
+) -> list[tuple[float, float]]:
+    """Shift a polyline by a constant perpendicular distance.
+
+    Each vertex moves along the averaged normal of its adjacent segments so
+    the offset path stays roughly parallel through corners. This is a simple
+    constant-offset approximation (issue #529); on tight corners the ribbons
+    can converge slightly, which is acceptable for the striped demo.
+    """
+    if offset == 0.0 or len(pts) < 2:
+        return pts
+
+    def seg_normal(
+        a: tuple[float, float], b: tuple[float, float]
+    ) -> tuple[float, float]:
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        length = (dx * dx + dy * dy) ** 0.5
+        if length == 0:
+            return (0.0, 0.0)
+        # Left-hand normal of the direction (dx, dy).
+        return (-dy / length, dx / length)
+
+    out: list[tuple[float, float]] = []
+    n = len(pts)
+    for i in range(n):
+        if i == 0:
+            nx, ny = seg_normal(pts[0], pts[1])
+        elif i == n - 1:
+            nx, ny = seg_normal(pts[-2], pts[-1])
+        else:
+            n1 = seg_normal(pts[i - 1], pts[i])
+            n2 = seg_normal(pts[i], pts[i + 1])
+            mx, my = n1[0] + n2[0], n1[1] + n2[1]
+            mlen = (mx * mx + my * my) ** 0.5
+            if mlen == 0:
+                nx, ny = n1
+            else:
+                # Scale by 1/cos(half-angle) so the offset path keeps a
+                # constant perpendicular distance through the corner.
+                nx, ny = mx / mlen, my / mlen
+                cos_half = nx * n1[0] + ny * n1[1]
+                if cos_half > 1e-6:
+                    nx, ny = nx / cos_half, ny / cos_half
+        out.append((pts[i][0] + nx * offset, pts[i][1] + ny * offset))
+    return out
+
+
+def _draw_ribbon(
+    d: draw.Drawing,
+    pts: list[tuple[float, float]],
+    route: RoutedPath,
+    breaks: list[BridgeBreak] | None,
+    color: str,
+    width: float,
+    style_kw: dict[str, str],
+    class_name: str,
+    theme: Theme,
+    curve_radius: float,
+) -> None:
+    """Draw a single coloured ribbon for a route at the given stroke width."""
+    if breaks:
+        _render_bridged_edge(
+            d,
+            pts,
+            route,
+            breaks,
+            color,
+            width,
+            style_kw,
+            class_name,
+            theme,
+            curve_radius,
+        )
+    elif len(pts) == 2:
+        d.append(
+            draw.Line(
+                pts[0][0],
+                pts[0][1],
+                pts[1][0],
+                pts[1][1],
                 stroke=color,
-                stroke_width=theme.line_width,
-                fill="none",
+                stroke_width=width,
                 stroke_linecap="round",
-                stroke_linejoin="round",
                 class_=class_name,
                 **{"data-line-id": route.line_id},
                 **style_kw,
             )
-            path.M(*pts[0])
+        )
+    elif len(pts) >= 3:
+        path = draw.Path(
+            stroke=color,
+            stroke_width=width,
+            fill="none",
+            stroke_linecap="round",
+            stroke_linejoin="round",
+            class_=class_name,
+            **{"data-line-id": route.line_id},
+            **style_kw,
+        )
+        path.M(*pts[0])
 
-            resolved = resolve_curve_radii(
-                pts, route.curve_radii, default_radius=curve_radius
-            )
-            before, after, curved = _curve_tangents(pts, resolved)
+        resolved = resolve_curve_radii(
+            pts, route.curve_radii, default_radius=curve_radius
+        )
+        before, after, curved = _curve_tangents(pts, resolved)
 
-            for i in range(1, len(pts) - 1):
-                if curved[i]:
-                    path.L(*before[i])
-                    path.Q(pts[i][0], pts[i][1], *after[i])
-                else:
-                    path.L(*pts[i])
+        for i in range(1, len(pts) - 1):
+            if curved[i]:
+                path.L(*before[i])
+                path.Q(pts[i][0], pts[i][1], *after[i])
+            else:
+                path.L(*pts[i])
 
-            path.L(*pts[-1])
-            d.append(path)
+        path.L(*pts[-1])
+        d.append(path)
 
 
 def _curve_tangents(
@@ -844,6 +957,7 @@ def _render_bridged_edge(
     route: RoutedPath,
     breaks: list[BridgeBreak],
     color: str,
+    width: float,
     style_kw: dict[str, str],
     class_name: str,
     theme: Theme,
@@ -861,7 +975,7 @@ def _render_bridged_edge(
 
     path = draw.Path(
         stroke=color,
-        stroke_width=theme.line_width,
+        stroke_width=width,
         fill="none",
         stroke_linecap="round",
         stroke_linejoin="round",

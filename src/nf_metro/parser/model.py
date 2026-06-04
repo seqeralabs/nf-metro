@@ -54,12 +54,32 @@ VALID_ICON_TYPES = (ICON_TYPE_FILE, ICON_TYPE_FILES, ICON_TYPE_DIR)
 
 @dataclass
 class MetroLine:
-    """A metro line (colored route through the graph)."""
+    """A metro line (colored route through the graph).
+
+    A line is normally a single colour. To express a striped / composite
+    multi-colour line (e.g. nf-core/sarek's "tumor-normal pair"), the colour
+    field may carry several comma-separated colours; the parser splits them
+    into ``colors`` and ``color`` keeps the first for single-colour callers.
+    """
 
     id: str
     display_name: str
     color: str
     style: str = "solid"
+    # All colours for this line; one entry for a normal line, two or more for
+    # a striped/composite line. ``color`` is always ``colors[0]``.
+    colors: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.colors:
+            self.colors = [self.color]
+        else:
+            self.color = self.colors[0]
+
+    @property
+    def is_striped(self) -> bool:
+        """True when the line renders as parallel multi-colour ribbons."""
+        return len(self.colors) > 1
 
 
 @dataclass

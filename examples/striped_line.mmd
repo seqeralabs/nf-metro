@@ -1,0 +1,35 @@
+%%metro title: Striped line demo (#529)
+%%metro style: dark
+%%metro line: tumor | Tumor (somatic) | #d62728
+%%metro line: normal | Normal (germline) | #0570b0
+%%metro line: pair | Tumor-normal pair | #d62728,#0570b0
+%%metro legend: bl
+
+graph LR
+    subgraph qc [QC & Trimming]
+        cat_fastq[cat fastq]
+        fastqc[FastQC]
+        trim[Trim Galore!]
+
+        cat_fastq -->|tumor,normal| fastqc
+        fastqc -->|tumor,normal| trim
+    end
+
+    subgraph align [Alignment]
+        bwa[BWA-MEM]
+        markdup[MarkDuplicates]
+
+        bwa -->|tumor,normal| markdup
+    end
+
+    subgraph calling [Somatic Variant Calling]
+        mutect2[Mutect2]
+        filter[FilterMutectCalls]
+        annotate[VEP]
+
+        mutect2 -->|pair| filter
+        filter -->|pair| annotate
+    end
+
+    trim -->|tumor,normal| bwa
+    markdup -->|pair| mutect2

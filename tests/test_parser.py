@@ -72,6 +72,33 @@ def test_parse_lines():
     assert graph.lines["alt"].color == "#0000ff"
 
 
+def test_parse_single_color_line_not_striped():
+    text = "%%metro line: main | Main Line | #ff0000\ngraph LR\n"
+    graph = parse_metro_mermaid(text)
+    line = graph.lines["main"]
+    assert line.colors == ["#ff0000"]
+    assert line.color == "#ff0000"
+    assert line.is_striped is False
+
+
+def test_parse_multi_color_striped_line():
+    text = "%%metro line: pair | Tumor-normal | #d62728,#0570b0\ngraph LR\n"
+    graph = parse_metro_mermaid(text)
+    line = graph.lines["pair"]
+    assert line.colors == ["#d62728", "#0570b0"]
+    # color keeps the first colour for single-colour callers.
+    assert line.color == "#d62728"
+    assert line.is_striped is True
+
+
+def test_parse_multi_color_striped_line_with_style():
+    text = "%%metro line: pair | Pair | #d62728, #0570b0 | dashed\ngraph LR\n"
+    graph = parse_metro_mermaid(text)
+    line = graph.lines["pair"]
+    assert line.colors == ["#d62728", "#0570b0"]
+    assert line.style == "dashed"
+
+
 def test_parse_line_style_dashed():
     text = "%%metro line: opt | Optional | #aaaaaa | dashed\ngraph LR\n"
     graph = parse_metro_mermaid(text)

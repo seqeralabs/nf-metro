@@ -43,6 +43,13 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Minimal two-line pipeline with no sections.",
     ),
     (
+        "striped_line",
+        EXAMPLES_DIR,
+        "Striped / composite multi-colour line (#529): the tumor-normal pair "
+        "route renders as two adjacent coloured ribbons (red + blue) alongside "
+        "normal single-colour lines.",
+    ),
+    (
         "rnaseq_auto",
         EXAMPLES_DIR,
         "Demonstrates fully auto-inferred layout: no `%%metro grid:` directives "

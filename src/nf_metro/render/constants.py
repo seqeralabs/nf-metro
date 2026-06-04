@@ -165,6 +165,13 @@ WATERMARK_Y_INSET: float = 8.0
 FALLBACK_LINE_COLOR: str = "#888888"
 """Color used when a line has no explicit color defined."""
 
+STRIPE_RIBBON_WIDTH_RATIO: float = 0.8
+"""Per-ribbon width (as a fraction of line_width) for a striped/composite line.
+
+Ribbons sit edge-to-edge centred on the route, so an n-colour line spans
+``n * STRIPE_RIBBON_WIDTH_RATIO * line_width``.
+"""
+
 TERMINUS_FONT_COLOR: str = "#000000"
 """Font color for terminus file icon labels."""
 

@@ -16,6 +16,7 @@ from nf_metro.render.constants import (
     LEGEND_TEXT_GAP,
     LOGO_GAP,
     LOGO_SCALE_FACTOR,
+    STRIPE_RIBBON_WIDTH_RATIO,
     TEXT_VCENTER_DY,
     line_style_kwargs,
 )
@@ -153,20 +154,31 @@ def render_legend(
     for i, metro_line in enumerate(graph.lines.values()):
         entry_y = text_top + i * line_height + line_height / 2
 
-        # Color swatch (line segment)
+        # Color swatch (line segment). A striped/composite line draws one
+        # thinner segment per colour, stacked to span the normal line width.
         dash_kw = line_style_kwargs(metro_line.style)
-        d.append(
-            draw.Line(
-                x + padding + logo_offset,
-                entry_y,
-                x + padding + logo_offset + swatch_width,
-                entry_y,
-                stroke=metro_line.color,
-                stroke_width=theme.line_width,
-                stroke_linecap="round",
-                **dash_kw,
-            )
+        swatch_x0 = x + padding + logo_offset
+        swatch_x1 = swatch_x0 + swatch_width
+        n_colors = len(metro_line.colors)
+        ribbon_w = (
+            theme.line_width
+            if n_colors == 1
+            else theme.line_width * STRIPE_RIBBON_WIDTH_RATIO
         )
+        for i, color in enumerate(metro_line.colors):
+            ribbon_y = entry_y + (i - (n_colors - 1) / 2.0) * ribbon_w
+            d.append(
+                draw.Line(
+                    swatch_x0,
+                    ribbon_y,
+                    swatch_x1,
+                    ribbon_y,
+                    stroke=color,
+                    stroke_width=ribbon_w,
+                    stroke_linecap="round" if n_colors == 1 else "butt",
+                    **dash_kw,
+                )
+            )
 
         # Label
         d.append(

@@ -109,6 +109,39 @@ def test_render_solid_line_no_dasharray():
     assert "stroke-dasharray" not in svg
 
 
+def test_render_striped_line_draws_both_colors():
+    """A multi-colour line paints a ribbon of each colour (#529)."""
+    graph = parse_metro_mermaid(
+        "%%metro title: Stripe Test\n"
+        "%%metro line: pair | Pair | #d62728,#0570b0\n"
+        "graph LR\n"
+        "    a[Input]\n"
+        "    b[Output]\n"
+        "    a -->|pair| b\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    # Both ribbon colours present (edge ribbons + legend swatch).
+    assert svg.count("#d62728") >= 2
+    assert svg.count("#0570b0") >= 2
+
+
+def test_render_single_color_line_one_stroke():
+    """A single-colour line still paints exactly one stroke per route+swatch."""
+    graph = parse_metro_mermaid(
+        "%%metro title: Solo Test\n"
+        "%%metro line: main | Main | #abcdef\n"
+        "graph LR\n"
+        "    a[Input]\n"
+        "    b[Output]\n"
+        "    a -->|main| b\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    # One edge stroke + one legend swatch.
+    assert svg.count("#abcdef") == 2
+
+
 def test_render_empty_graph():
     graph = parse_metro_mermaid("graph LR\n")
     svg = render_svg(graph, NFCORE_THEME)
