@@ -69,6 +69,40 @@ def _residual_label_overlaps(
                 s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h = bx, by, bw, bh
 
 
+def _placed_name_label_station_ids(graph: MetroGraph) -> set[str]:
+    """Return station ids that ``place_labels`` emits a name label for.
+
+    Runs the same offset/route/label pipeline the renderer uses, snapshotting
+    and restoring station coordinates and section bboxes so the probe leaves
+    no geometry behind (mirroring :func:`_residual_label_overlaps`).  Returns
+    an empty set if routing/placement raises.
+    """
+    from nf_metro.layout.labels import place_labels
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+    pos_snapshot = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
+    bbox_snapshot = {
+        sid: (s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h)
+        for sid, s in graph.sections.items()
+    }
+    try:
+        offsets = compute_station_offsets(graph)
+        routes = route_edges(graph, station_offsets=offsets)
+        placements = place_labels(graph, station_offsets=offsets, routes=routes)
+        return {p.station_id for p in placements if p.station_id}
+    except Exception:
+        return set()
+    finally:
+        for sid, (x, y) in pos_snapshot.items():
+            st = graph.stations.get(sid)
+            if st is not None:
+                st.x, st.y = x, y
+        for sid, (bx, by, bw, bh) in bbox_snapshot.items():
+            s = graph.sections.get(sid)
+            if s is not None:
+                s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h = bx, by, bw, bh
+
+
 def _spread_bump(
     graph: MetroGraph,
     residual: list[LabelOverlap],

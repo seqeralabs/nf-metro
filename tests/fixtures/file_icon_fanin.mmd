@@ -1,0 +1,42 @@
+%%metro title: Reference Bundle Fan-In
+%%metro style: dark
+%%metro line: sample | Sample | #2db572
+%%metro line: somatic | Somatic | #e63946
+%%metro line: germline | Germline | #457b9d
+%%metro file: ref_fa | FASTA | Reference
+%%metro file: dbsnp | VCF | dbSNP
+%%metro file: intervals | BED | Targets
+%%metro file: pon | VCF | PoN
+
+graph LR
+    subgraph prep [Read Prep]
+        reads[Reads]
+        trim[Trim]
+        reads -->|sample,somatic,germline| trim
+    end
+
+    subgraph refbuild [Reference Resources]
+        ref_fa[Reference]
+        dbsnp[dbSNP]
+        intervals[Targets]
+        pon[PoN]
+        index[Build Index]
+        ref_fa -->|sample,somatic,germline| index
+        dbsnp -->|somatic,germline| index
+        intervals -->|sample,somatic,germline| index
+        pon -->|somatic| index
+    end
+
+    subgraph call [Variant Calling]
+        align[Align]
+        somatic_call[Mutect2]
+        germline_call[HaplotypeCaller]
+        merge[Merge]
+        align -->|sample,somatic,germline| somatic_call
+        align -->|germline| germline_call
+        somatic_call -->|somatic| merge
+        germline_call -->|germline| merge
+    end
+
+    trim -->|sample,somatic,germline| align
+    index -->|sample,somatic,germline| align

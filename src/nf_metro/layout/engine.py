@@ -114,6 +114,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_fan_bundles_coincide_or_separate,
     _guard_fanout_junction_shares_exit_port_y,
     _guard_fanout_tail_join,
+    _guard_file_icon_no_name_label,
     _guard_inter_row_run_clearance,
     _guard_inter_section_descent_edge_clearance,
     _guard_inter_section_route_no_backtrack,
@@ -421,6 +422,7 @@ def compute_layout(
 
     if validate:
         _guard_no_label_overlap(graph, "final")
+        _guard_file_icon_no_name_label(graph, "final")
 
 
 def _snap(graph: MetroGraph, phase_id: str) -> None:

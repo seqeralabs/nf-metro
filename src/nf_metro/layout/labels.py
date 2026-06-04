@@ -556,7 +556,10 @@ def place_labels(
         (
             s
             for s in graph.stations.values()
-            if not s.is_port and not s.is_hidden and s.label.strip()
+            if not s.is_port
+            and not s.is_hidden
+            and not s.is_terminus
+            and s.label.strip()
         ),
         key=lambda s: (s.layer, s.track),
     )

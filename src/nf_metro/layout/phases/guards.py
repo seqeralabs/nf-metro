@@ -32,7 +32,10 @@ from nf_metro.layout.phases._common import (
 )
 from nf_metro.layout.phases.bbox import _section_fit_top
 from nf_metro.layout.phases.single_section import _terminus_y_overhang
-from nf_metro.layout.phases.spacing import _residual_label_overlaps
+from nf_metro.layout.phases.spacing import (
+    _placed_name_label_station_ids,
+    _residual_label_overlaps,
+)
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
 if TYPE_CHECKING:
@@ -1890,3 +1893,24 @@ def _guard_no_label_overlap(graph: MetroGraph, phase: str) -> None:
         f"{kind} {ov.b!r} by ({ov.ox:.1f}, {ov.oy:.1f})px after wrapping and "
         f"spreading; {len(residual)} overlap(s) total"
     )
+
+
+def _guard_file_icon_no_name_label(graph: MetroGraph, phase: str) -> None:
+    """Raise if a file-icon station also receives a separate name label.
+
+    A ``%%metro file:`` station renders its caption(s) beneath the icon
+    (``terminus_names``); per #93 the file directive owns the station's
+    labelling entirely.  A second node-name label would overprint that
+    caption and the converging tracks, so no ``is_terminus`` station may
+    appear among the placed name labels regardless of its node label text.
+    """
+    terminus_ids = {s.id for s in graph.stations.values() if s.is_terminus}
+    if not terminus_ids:
+        return
+    offenders = sorted(terminus_ids & _placed_name_label_station_ids(graph))
+    if offenders:
+        raise PhaseInvariantError(
+            f"{phase}: file-icon station(s) {offenders} also got a separate "
+            f"name label, overprinting the icon caption and tracks; a "
+            f"%%metro file: station must not carry a node-name label"
+        )
