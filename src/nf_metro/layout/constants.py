@@ -311,6 +311,14 @@ SVG ``dominant-baseline: auto`` places the alphabetic baseline at the
 label's Y coordinate; descenders extend below.  This constant accounts
 for that so the visual gap matches ``LABEL_OFFSET``."""
 
+DIAGONAL_LABEL_OFFSET: float = 9.0
+"""Extra downward drop for angled labels (#527), on top of ``LABEL_OFFSET``.
+
+Angled labels are anchored below the pill and tilt down-right; their text
+baseline starts at the anchor, so without an extra drop the first glyph
+sits too close to the marker.  This bumps the anchor down a touch so there
+is a clear gap between the pill and the tilted text."""
+
 TB_PILL_EDGE_OFFSET: float = 5.0
 """Pill edge offset for TB vertical station labels."""
 

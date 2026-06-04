@@ -20,7 +20,10 @@ from nf_metro.layout.phases._common import (
     _ref_y,
     _set_section_bbox_top,
 )
-from nf_metro.layout.phases.single_section import _terminus_y_overhang
+from nf_metro.layout.phases.single_section import (
+    _terminus_y_overhang,
+    angled_label_reach,
+)
 from nf_metro.parser.model import MetroGraph, Section, Station
 
 
@@ -371,11 +374,16 @@ def _predict_section_content_bottom(
     from a structural extent.
     """
     section_dir = section.direction or "LR"
+    # Angled labels (#527) hang below LR/RL stations; their reach must be
+    # part of the content bottom so the shrink phase and the inter-row
+    # cascade keep the row below clear.  0 for horizontal-label layouts.
+    label_angle = graph.label_angle or 0.0 if section_dir in ("LR", "RL") else 0.0
     content_bots = [
         graph.stations[sid].y
         + max(
             section_y_padding,
             _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1],
+            angled_label_reach(graph.stations[sid], label_angle),
         )
         for sid in section.station_ids
         if (

@@ -22,6 +22,7 @@ from nf_metro.layout.constants import (
     CHAR_WIDTH,
     COLLISION_MULTIPLIER,
     DESCENDER_CLEARANCE,
+    DIAGONAL_LABEL_OFFSET,
     FONT_HEIGHT,
     LABEL_BBOX_MARGIN,
     LABEL_LINE_HEIGHT,
@@ -147,18 +148,99 @@ def _rotated_label_bbox(
     return (min(xs), min(ys), max(xs), max(ys))
 
 
+def _label_corners(
+    placement: LabelPlacement,
+) -> list[tuple[float, float]]:
+    """Return the four corners of a label's (possibly rotated) box.
+
+    For an angled label the corners are the upright text box rotated about
+    its anchor, matching the renderer's ``rotate(angle, x, y)`` transform.
+    For a horizontal label (or one carrying an explicit ``obstacle_bbox``)
+    the corners are those of its axis-aligned bounding box.  Used by the
+    oriented overlap test so densely-spaced parallel diagonal labels pack
+    by their true (narrow) footprint rather than their enclosing AABB.
+    """
+    if placement.obstacle_bbox is not None or not placement.angle:
+        x0, y0, x1, y1 = _label_bbox(placement)
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    w = label_text_width(placement.text)
+    text_h = _label_text_height(placement.text)
+    corners = [
+        (placement.x, placement.y - text_h),
+        (placement.x + w, placement.y - text_h),
+        (placement.x + w, placement.y),
+        (placement.x, placement.y),
+    ]
+    rad = math.radians(placement.angle)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    ax, ay = placement.x, placement.y
+    out: list[tuple[float, float]] = []
+    for cx, cy in corners:
+        dx, dy = cx - ax, cy - ay
+        out.append((ax + dx * cos_a - dy * sin_a, ay + dx * sin_a + dy * cos_a))
+    return out
+
+
+def _obb_separation(
+    a: list[tuple[float, float]],
+    b: list[tuple[float, float]],
+) -> float:
+    """Minimum separating gap between two convex quads via SAT.
+
+    Returns the largest gap found over all candidate separating axes
+    (positive when the quads are apart, <= 0 when they overlap).  Both
+    quads are convex (label rectangles), so the separating-axis theorem
+    using each quad's edge normals is exact.
+    """
+
+    def axes(quad: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        res = []
+        for i in range(len(quad)):
+            x1, y1 = quad[i]
+            x2, y2 = quad[(i + 1) % len(quad)]
+            nx, ny = -(y2 - y1), (x2 - x1)
+            length = math.hypot(nx, ny)
+            if length > 1e-9:
+                res.append((nx / length, ny / length))
+        return res
+
+    best_gap = -math.inf
+    for ax, ay in axes(a) + axes(b):
+        a_proj = [px * ax + py * ay for px, py in a]
+        b_proj = [px * ax + py * ay for px, py in b]
+        gap = max(min(b_proj) - max(a_proj), min(a_proj) - max(b_proj))
+        best_gap = max(best_gap, gap)
+    return best_gap
+
+
 def _boxes_overlap(
     a: tuple[float, float, float, float],
     b: tuple[float, float, float, float],
     margin: float = LABEL_MARGIN,
 ) -> bool:
-    """Check if two bounding boxes overlap."""
+    """Check if two axis-aligned bounding boxes overlap."""
     return not (
         a[2] + margin < b[0]
         or b[2] + margin < a[0]
         or a[3] + margin < b[1]
         or b[3] + margin < a[1]
     )
+
+
+def _placements_overlap(
+    a: LabelPlacement,
+    b: LabelPlacement,
+    margin: float = LABEL_MARGIN,
+) -> bool:
+    """Overlap test honouring label rotation.
+
+    When either label is angled, an oriented (separating-axis) test packs
+    parallel diagonal labels by their true footprint; otherwise it falls
+    back to the cheap AABB test so horizontal layouts are unchanged.
+    """
+    if a.angle or b.angle:
+        return _obb_separation(_label_corners(a), _label_corners(b)) < margin
+    return _boxes_overlap(_label_bbox(a), _label_bbox(b), margin)
 
 
 class LabelOverlap(NamedTuple):
@@ -221,10 +303,18 @@ def find_label_overlaps(
         for j in range(i + 1, len(boxes)):
             pb, bb = boxes[j]
             ox, oy = _intrusion(ba, bb)
-            if ox > eps and oy > eps:
-                overlaps.append(
-                    LabelOverlap("label", pa.station_id, pb.station_id, ox, oy)
-                )
+            if ox <= eps or oy <= eps:
+                continue
+            # Angled labels pack as parallel diagonal strips: the AABBs
+            # overlap long before the tilted text does, so confirm with the
+            # oriented test before reporting (and spreading).  The reported
+            # ox/oy stay the AABB intrusion -- a safe upper bound for the
+            # spread bump.
+            if (pa.angle or pb.angle) and _obb_separation(
+                _label_corners(pa), _label_corners(pb)
+            ) >= LABEL_MARGIN:
+                continue
+            overlaps.append(LabelOverlap("label", pa.station_id, pb.station_id, ox, oy))
 
     # Reuse the engine's pill geometry (returns None for ports, hidden
     # stations, and junctions, none of which render a marker to collide with).
@@ -754,7 +844,7 @@ def place_labels(
                 station_id=station.id,
                 text=station.label,
                 x=station.x,
-                y=station.y + max_off + label_offset,
+                y=station.y + max_off + label_offset + DIAGONAL_LABEL_OFFSET,
                 above=False,
                 angle=label_angle,
                 text_anchor="start",
@@ -1357,8 +1447,7 @@ def _has_collision(
     existing: list[LabelPlacement],
 ) -> bool:
     """Check if a candidate label collides with any existing placement."""
-    cbox = _label_bbox(candidate)
     for placed in existing:
-        if _boxes_overlap(cbox, _label_bbox(placed)):
+        if _placements_overlap(candidate, placed):
             return True
     return False

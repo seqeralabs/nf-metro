@@ -323,7 +323,12 @@ def check_label_overlap(
         offsets, routes = precomputed
 
     try:
-        placements = place_labels(graph, station_offsets=offsets, routes=routes)
+        placements = place_labels(
+            graph,
+            station_offsets=offsets,
+            routes=routes,
+            label_angle=graph.label_angle or 0.0,
+        )
     except Exception as e:
         return [
             Violation(

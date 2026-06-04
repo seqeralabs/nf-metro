@@ -35,6 +35,12 @@ def _probe_label_placements(
     from nf_metro.layout.labels import place_labels
     from nf_metro.layout.routing import compute_station_offsets, route_edges
 
+    # Resolve the effective label angle so the spread search sizes column
+    # spacing for the same (possibly rotated, hence narrower) footprint the
+    # renderer will draw.  graph.label_angle is None when no directive set it;
+    # the theme default is horizontal (0), so None -> 0 here (#527).
+    label_angle = graph.label_angle or 0.0
+
     pos_snapshot = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
     bbox_snapshot = {
         sid: (s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h)
@@ -48,6 +54,7 @@ def _probe_label_placements(
             station_offsets=offsets,
             routes=routes,
             allow_hyphenation=allow_hyphenation,
+            label_angle=label_angle,
         )
         return offsets, placements
     except Exception:

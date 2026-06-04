@@ -2162,7 +2162,12 @@ def test_no_label_overlap(fixture):
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    placements = place_labels(graph, station_offsets=offsets, routes=routes)
+    placements = place_labels(
+        graph,
+        station_offsets=offsets,
+        routes=routes,
+        label_angle=graph.label_angle or 0.0,
+    )
     overlaps = find_label_overlaps(graph, placements, offsets)
     assert not overlaps, "; ".join(
         f"{ov.a!r} overlaps {ov.kind} {ov.b!r} by ({ov.ox:.1f}, {ov.oy:.1f})px"
@@ -4249,7 +4254,9 @@ def test_label_x_anchored_to_station_marker_on_horizontal_runs(fixture):
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    labels = place_labels(graph, station_offsets=offsets)
+    labels = place_labels(
+        graph, station_offsets=offsets, label_angle=graph.label_angle or 0.0
+    )
     label_by_sid = {lp.station_id: lp for lp in labels}
 
     in_routes: dict[str, list] = defaultdict(list)

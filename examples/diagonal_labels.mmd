@@ -5,7 +5,9 @@
 %%metro line: tumor_only | Tumor only | #d62728
 %%metro line: somatic | Tumor-normal pair | #756bb1
 %%metro file: fastq_in | FASTQ
-%%metro file: cram_out | CRAM
+%%metro file: vcf_out | VCF
+%%metro grid: preprocessing | 0,0
+%%metro grid: variant_calling | 0,1
 
 graph LR
     subgraph preprocessing [Pre-processing]
@@ -20,7 +22,6 @@ graph LR
         applybqsr[ApplyBQSR]
         mosdepth[mosdepth]
         ngscheckmate[NGSCheckmate]
-        cram_out[ ]
 
         fastq_in -->|germline,tumor_only,somatic| fastqc
         fastqc -->|germline,tumor_only,somatic| fastp
@@ -32,5 +33,28 @@ graph LR
         bqsr -->|germline,tumor_only,somatic| applybqsr
         applybqsr -->|germline,tumor_only,somatic| mosdepth
         mosdepth -->|germline,tumor_only,somatic| ngscheckmate
-        ngscheckmate -->|germline,tumor_only,somatic| cram_out
     end
+
+    subgraph variant_calling [Variant calling]
+        %%metro entry: left | germline, tumor_only, somatic
+        split[split by analysis]
+        deepvariant[GATK]
+        mutect[Mutect2]
+        strelka[Strelka2]
+        merge_vcf[merge VCFs]
+        vcf_out[ ]
+
+        split -->|germline| deepvariant
+        split -->|tumor_only| mutect
+        split -->|somatic| strelka
+        deepvariant -->|germline| merge_vcf
+        mutect -->|tumor_only| merge_vcf
+        strelka -->|somatic| merge_vcf
+        merge_vcf -->|germline,tumor_only,somatic| vcf_out
+    end
+
+    %% The dense angled-label trunk feeds the variant-calling section in the
+    %% row below, which fans out to three callers (one per line) and fans
+    %% back in at merge VCFs -- exercising the vertical room the hanging
+    %% angled labels need above the row below.
+    ngscheckmate -->|germline,tumor_only,somatic| split
