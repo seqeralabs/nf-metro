@@ -24,6 +24,7 @@ from nf_metro.layout.constants import (
     EDGE_TO_BUNDLE_CLEARANCE,
     FOLD_MARGIN,
     ICON_TERMINUS_FORK_LEAD,
+    INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     JUNCTION_MARGIN,
     MERGE_ROUTE_MARGIN,
@@ -2393,18 +2394,18 @@ def _route_inter_row_gap_corridor(
     elif gap_bottom > gap_top:
         gy_base = _center_inter_row_channel(gap_top, gap_bottom)
     else:
-        gy_base = gap_top + EDGE_TO_BUNDLE_CLEARANCE
+        gy_base = gap_top + INTER_ROW_EDGE_CLEARANCE
     # Outer line sits at LARGER y in this leftward run (CW D->L corner).
     gy = gy_base + delta
     # Keep every staggered line inside the clearance band: at least
-    # EDGE_TO_BUNDLE_CLEARANCE below the source-row bottom and clear of the
+    # INTER_ROW_EDGE_CLEARANCE below the source-row bottom and clear of the
     # next row's header badge.  In a tight gap the band is narrower than the
     # bundle, so the per-line stagger collapses rather than grazing an edge.
     # Skipped for fan feeders, which share the wrap sibling's (unclamped)
     # band so the two bundles' H legs coincide.
     if fan is None and gap_bottom > gap_top:
         gy = min(
-            max(gy, gap_top + EDGE_TO_BUNDLE_CLEARANCE),
+            max(gy, gap_top + INTER_ROW_EDGE_CLEARANCE),
             gap_bottom - INTER_ROW_HEADER_CLEARANCE,
         )
 

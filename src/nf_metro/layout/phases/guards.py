@@ -12,6 +12,7 @@ from nf_metro.layout.constants import (
     EDGE_TO_BUNDLE_CLEARANCE,
     GUARD_TOLERANCE,
     ICON_HALF_HEIGHT,
+    INTER_ROW_EDGE_CLEARANCE,
     OFFSET_STEP,
     ROW_BAND_SLACK,
     SECTION_Y_GAP,
@@ -1259,7 +1260,7 @@ def _guard_inter_row_run_clearance(
     routes: list[RoutedPath] | None = None,
 ) -> None:
     """After routing: a horizontal leg of an inter-*row* route must keep
-    ``EDGE_TO_BUNDLE_CLEARANCE`` from its source section's near bbox edge.
+    ``INTER_ROW_EDGE_CLEARANCE`` from its source section's near bbox edge.
 
     An inter-section bundle that crosses grid rows (e.g. a right-exit
     wrapping down to a left-entry below) lands its horizontal run in the
@@ -1294,19 +1295,19 @@ def _guard_inter_row_run_clearance(
             if xhi <= left + tol or xlo >= right - tol:
                 continue  # run doesn't overlap the source section in X
             y = y0
-            if bottom + tol < y < bottom + EDGE_TO_BUNDLE_CLEARANCE - tol:
+            if bottom + tol < y < bottom + INTER_ROW_EDGE_CLEARANCE - tol:
                 raise PhaseInvariantError(
                     f"{phase}: inter-row run of {rp.edge.source!r}->"
                     f"{rp.edge.target!r} line {rp.line_id!r} at y={y:.1f} sits "
                     f"{y - bottom:.1f}px below source section {src_sec.id!r} "
-                    f"bottom={bottom:.1f} (< {EDGE_TO_BUNDLE_CLEARANCE})"
+                    f"bottom={bottom:.1f} (< {INTER_ROW_EDGE_CLEARANCE})"
                 )
-            if top - EDGE_TO_BUNDLE_CLEARANCE + tol < y < top - tol:
+            if top - INTER_ROW_EDGE_CLEARANCE + tol < y < top - tol:
                 raise PhaseInvariantError(
                     f"{phase}: inter-row run of {rp.edge.source!r}->"
                     f"{rp.edge.target!r} line {rp.line_id!r} at y={y:.1f} sits "
                     f"{top - y:.1f}px above source section {src_sec.id!r} "
-                    f"top={top:.1f} (< {EDGE_TO_BUNDLE_CLEARANCE})"
+                    f"top={top:.1f} (< {INTER_ROW_EDGE_CLEARANCE})"
                 )
 
 
