@@ -5,28 +5,41 @@
 %%metro line: haplotypecaller | HaplotypeCaller (GATK) | #0570b0
 %%metro line: strelka | Strelka2 | #e63946
 %%metro legend: bl
+%%metro file: cram_in | CRAM
+%%metro file: samples_csv | CSV | Samples
+%%metro file: vcf_out | VCF
+%%metro off_track: samples_csv
 
 graph LR
-    subgraph calling [Example analysis pathways]
+    subgraph calling [Variant calling]
+        cram_in[ ]
         align[Alignment]
         markdup[Mark duplicates]
         bqsr[BQSR]
+        samples_csv[ ]
         dv[DeepVariant]
         hc[HaplotypeCaller]
         strelka_call[Strelka2]
-        norm[Normalize]
-        vep[Annotate]
+        concord[SNP concordance]
 
+        cram_in -->|deepvariant,haplotypecaller,strelka| align
         align -->|deepvariant,haplotypecaller,strelka| markdup
         markdup -->|deepvariant,haplotypecaller,strelka| bqsr
+        samples_csv -->|haplotypecaller| bqsr
 
         bqsr -->|deepvariant| dv
         bqsr -->|haplotypecaller| hc
         bqsr -->|strelka| strelka_call
 
-        dv -->|deepvariant| norm
-        hc -->|haplotypecaller| norm
-        strelka_call -->|strelka| norm
+        dv -->|deepvariant| concord
+        strelka_call -->|strelka| concord
+    end
+
+    subgraph annotate [Annotation and output]
+        norm[Normalize]
+        vep[Annotate]
+        vcf_out[ ]
 
         norm -->|deepvariant,haplotypecaller,strelka| vep
+        vep -->|deepvariant,haplotypecaller,strelka| vcf_out
     end

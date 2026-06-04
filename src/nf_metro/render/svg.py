@@ -915,10 +915,13 @@ def _render_rail_pill(
     theme: Theme,
     r: float,
 ) -> None:
-    """Render a rail-mode spanning station as one vertical pill.
+    """Render a rail-mode spanning station as one vertical pill with knobs.
 
     The pill runs from the station's top rail Y to its bottom rail Y at the
-    station's column X, so it visibly bridges every rail the station serves.
+    station's column X, so it visibly bridges every rail in that range.  A
+    small filled knob is drawn where the pill meets each rail the station
+    *uses* (``rail_used_ys``); a rail that falls within the span but is not
+    used carries no knob and reads as passing behind the pill.
     """
     top_y = station.rail_top_y if station.rail_top_y is not None else station.y
     bot_y = station.rail_bottom_y if station.rail_bottom_y is not None else station.y
@@ -940,6 +943,29 @@ def _render_rail_pill(
         )
     )
 
+    # Knobs: one per used rail, coloured by the line that uses it.  Keyed by
+    # the station's served-line order, which is parallel to rail_used_ys.
+    served = graph.station_lines(station.id)
+    knob_r = r * 0.62
+    for lid, y in zip(served, station.rail_used_ys):
+        line = graph.lines.get(lid)
+        knob_fill = line.color if line else FALLBACK_LINE_COLOR
+        d.append(
+            draw.Circle(
+                station.x,
+                y,
+                knob_r,
+                fill=knob_fill,
+                stroke=theme.station_stroke,
+                stroke_width=theme.station_stroke_width,
+                **{
+                    "class_": "nf-metro-rail-knob",
+                    "data-station-id": station.id,
+                    "data-line-id": lid,
+                },
+            )
+        )
+
 
 def _render_stations(
     d: draw.Drawing,
@@ -960,6 +986,15 @@ def _render_stations(
             continue
 
         r = theme.station_radius
+
+        # Rail mode: a blank terminus (file/dir/report node with no text
+        # label) renders as its icon at the rail convergence, not a bare pill,
+        # with the rails meeting at the icon (as in normal mode).
+        if graph.rail_mode and station.is_terminus and not station.label.strip():
+            icon_group = draw.Group(**{"data-station-id": station.id})
+            _render_terminus_icons(icon_group, station, graph, theme, r, 0.0, 0.0)
+            d.append(icon_group)
+            continue
 
         # Rail mode: a station spanning more than one rail draws as a single
         # vertical pill from its top rail Y to its bottom rail Y.  Single-rail

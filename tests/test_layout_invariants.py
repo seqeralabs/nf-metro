@@ -129,8 +129,10 @@ def _discover_fixtures() -> list[str]:
     examples, addressable via :func:`_resolve_fixture`.
 
     Excludes Nextflow-format flowcharts under ``tests/fixtures/nextflow/``
-    (those are parser inputs, not layout inputs) and any file lacking a
-    ``%%metro`` directive.
+    (those are parser inputs, not layout inputs), any file lacking a
+    ``%%metro`` directive, and opt-in rail-mode fixtures (which run a
+    dedicated layout pipeline with its own geometry contract; see
+    ``tests/test_rail_mode.py``).
     """
     roots = [
         (FIXTURES, ""),
@@ -147,6 +149,8 @@ def _discover_fixtures() -> list[str]:
         for p in sorted(root.glob("*.mmd")):
             text = p.read_text(errors="ignore")
             if "%%metro" not in text:
+                continue
+            if "rail_mode: true" in text:
                 continue
             # Address all examples paths through the ``examples`` resolver
             # without the leading ``examples/`` so tests can pick up either

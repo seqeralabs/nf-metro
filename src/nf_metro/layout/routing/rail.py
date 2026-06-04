@@ -34,21 +34,26 @@ def _line_rail_y(graph: MetroGraph, station_id: str, line_id: str) -> float:
     st = graph.stations.get(station_id)
     if st is None:
         return 0.0
+
+    # Ports carry an averaged Y; resolve to the line's own rail in the port's
+    # section so inter-section legs stay on the correct rail per line.
+    port = graph.ports.get(station_id)
+    if port is not None:
+        section_rails = graph._rail_y.get(port.section_id, {})
+        if line_id in section_rails:
+            return section_rails[line_id]
+
     if st.rail_top_y is None or st.rail_bottom_y is None:
         return st.y
 
-    # Recover this line's rail within the station's span.  The station's
-    # served lines are evenly spaced from rail_top_y to rail_bottom_y in
-    # line-definition order, so interpolate the line's index.
+    # Each served line's rail Y is recorded directly in rail_used_ys, parallel
+    # to the station's served-line order, so look it up rather than assuming
+    # the used rails evenly fill the span (a station may span a rail it does
+    # not use, which would break an interpolated estimate).
     served = _station_lines_in_order(graph, station_id)
-    if line_id not in served:
-        return st.y
-    n = len(served)
-    if n <= 1:
-        return st.y
-    idx = served.index(line_id)
-    frac = idx / (n - 1)
-    return st.rail_top_y + frac * (st.rail_bottom_y - st.rail_top_y)
+    if line_id in served and len(st.rail_used_ys) == len(served):
+        return st.rail_used_ys[served.index(line_id)]
+    return st.y
 
 
 def route_rail_edges(graph: MetroGraph) -> list[RoutedPath]:
@@ -65,6 +70,37 @@ def route_rail_edges(graph: MetroGraph) -> list[RoutedPath]:
         src = graph.stations.get(edge.source)
         tgt = graph.stations.get(edge.target)
         if src is None or tgt is None:
+            continue
+
+        # Off-track input: the source sits above the rails and feeds into the
+        # target's rail with an S-curve (drop, then a curved transition into
+        # the rail) rather than a flat run on the rail.
+        off_src = src.off_track and not tgt.off_track
+        off_tgt = tgt.off_track and not src.off_track
+        if off_src or off_tgt:
+            feeder = src if off_src else tgt
+            on_rail = tgt if off_src else src
+            rail_y = _line_rail_y(graph, on_rail.id, edge.line_id)
+            # An S-curve: leave the feeder vertically, curve through a midpoint
+            # X, then arrive horizontally onto the rail.  The two interior
+            # waypoints give the corner-smoother two bends (an S).
+            mid_x = (feeder.x + on_rail.x) / 2
+            s_points = [
+                (feeder.x, feeder.y),
+                (feeder.x, (feeder.y + rail_y) / 2),
+                (mid_x, rail_y),
+                (on_rail.x, rail_y),
+            ]
+            if off_tgt:
+                s_points.reverse()
+            routes.append(
+                RoutedPath(
+                    edge=edge,
+                    line_id=edge.line_id,
+                    points=s_points,
+                    offsets_applied=True,
+                )
+            )
             continue
 
         y_src = _line_rail_y(graph, edge.source, edge.line_id)

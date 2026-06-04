@@ -30,9 +30,18 @@ def _section_line_rails(graph):
     for st in graph.stations.values():
         if st.is_port or st.is_hidden:
             continue
+        if st.off_track or (st.is_terminus and not st.label.strip()):
+            # Converge to a point; contribute no rail evidence.
+            continue
         lines = graph.station_lines(st.id)
         if len(lines) == 1:
             rails.setdefault(st.section_id, {})[lines[0]] = st.y
+        elif st.rail_used_ys and len(st.rail_used_ys) == len(lines):
+            # A spanning pill records each used line's rail Y directly, which
+            # lets us reconstruct rails even in sections with no single-line
+            # stations.
+            for lid, y in zip(lines, st.rail_used_ys):
+                rails.setdefault(st.section_id, {})[lid] = y
     return rails
 
 
@@ -54,6 +63,10 @@ def test_each_line_runs_on_a_single_fixed_rail():
     by_section_line: dict[tuple[str, str], set[float]] = {}
     for st in graph.stations.values():
         if st.is_port or st.is_hidden:
+            continue
+        # Off-track inputs sit above the rails and blank termini converge the
+        # rails to their icon; both legitimately meet lines off the rail Y.
+        if st.off_track or (st.is_terminus and not st.label.strip()):
             continue
         for lid in graph.station_lines(st.id):
             y = _line_rail_y(graph, st.id, lid)
@@ -91,6 +104,13 @@ def test_multi_line_station_span_covers_exactly_its_lines_rails():
 
     for st in graph.stations.values():
         if st.is_port or st.is_hidden:
+            continue
+        # Off-track inputs and blank termini converge to a point (an icon /
+        # an above-rail feeder), so they are deliberately not spanning pills.
+        if st.off_track or (st.is_terminus and not st.label.strip()):
+            assert st.rail_top_y is None and st.rail_bottom_y is None, (
+                f"{st.id}: off-track/blank-terminus must not be a spanning pill"
+            )
             continue
         lines = graph.station_lines(st.id)
         line_rails = rails.get(st.section_id, {})
@@ -134,6 +154,16 @@ def test_rail_routes_are_straight_horizontal_at_rail_y():
     routes = route_edges(graph)
     assert routes
     for route in routes:
+        src = graph.stations.get(route.edge.source)
+        tgt = graph.stations.get(route.edge.target)
+        # Off-track feeders deliberately leave the rail with an S-curve;
+        # exempt them from the straight-horizontal invariant.
+        if (src and src.off_track) or (tgt and tgt.off_track):
+            assert len(route.points) >= 3, (
+                f"off_track feeder {route.edge.source}->{route.edge.target} "
+                "should be a multi-point S-curve"
+            )
+            continue
         ys = {round(y, 2) for _, y in route.points}
         src_y = _line_rail_y(graph, route.edge.source, route.line_id)
         tgt_y = _line_rail_y(graph, route.edge.target, route.line_id)
@@ -165,6 +195,126 @@ def test_rail_mode_stations_within_bbox():
         assert sec.bbox_y - 1.0 <= top, f"{st.id} top {top} above bbox {sec.bbox_y}"
         assert bot <= sec.bbox_y + sec.bbox_h + 1.0, (
             f"{st.id} bottom {bot} below bbox {sec.bbox_y + sec.bbox_h}"
+        )
+
+
+def test_spanning_pill_has_a_knob_per_used_rail():
+    """A multi-line spanning station records one used-rail Y per line it
+    carries, and the renderer draws a knob (a circle) at each."""
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+
+    graph = _rail_graph()
+    svg = render_svg(graph, THEMES["nfcore"])
+
+    spanning = [
+        st
+        for st in graph.stations.values()
+        if st.rail_top_y is not None and st.rail_bottom_y is not None
+    ]
+    assert spanning, "demo must contain at least one spanning pill"
+    for st in spanning:
+        used = graph.station_lines(st.id)
+        assert len(st.rail_used_ys) == len(used), (
+            f"{st.id}: rail_used_ys {st.rail_used_ys} not parallel to lines {used}"
+        )
+        # One knob marker per used line for this station.
+        knobs = svg.count(f'data-station-id="{st.id}"')
+        # The pill rect + one knob per used line all carry the station id.
+        assert knobs >= len(used) + 1, (
+            f"{st.id}: expected pill + {len(used)} knobs, found {knobs} markers"
+        )
+
+
+def test_knob_absent_on_a_rail_the_span_crosses_but_does_not_use():
+    """A pill that spans a rail belonging to a line it does NOT use draws no
+    knob on that rail -- the rail reads as passing behind the pill."""
+    graph = _rail_graph()
+
+    rails = _section_line_rails(graph)
+    found = False
+    for st in graph.stations.values():
+        if st.rail_top_y is None or st.rail_bottom_y is None:
+            continue
+        used = set(graph.station_lines(st.id))
+        line_rails = rails.get(st.section_id, {})
+        # Lines whose rail falls strictly inside this pill's span.
+        crossing = {
+            lid
+            for lid, y in line_rails.items()
+            if st.rail_top_y - 0.5 < y < st.rail_bottom_y + 0.5
+        }
+        passing_behind = crossing - used
+        if not passing_behind:
+            continue
+        found = True
+        # None of the passing-behind lines may have a used-rail Y on this
+        # station (no knob), while every used line must.
+        for lid in passing_behind:
+            assert line_rails[lid] not in [
+                round(y, 2) for y in (round(v, 2) for v in st.rail_used_ys)
+            ], f"{st.id}: knob drawn on non-used rail for {lid}"
+    assert found, "demo must contain a pill that spans a rail of a line it does not use"
+
+
+def test_blank_terminus_renders_icon_not_pill():
+    """A blank file-terminus serving several lines renders as its file icon
+    (a path with the terminus fold), not as a bare spanning pill."""
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+
+    graph = _rail_graph()
+    svg = render_svg(graph, THEMES["nfcore"])
+
+    blank_termini = [
+        st
+        for st in graph.stations.values()
+        if st.is_terminus and not st.label.strip() and not st.is_port
+    ]
+    assert blank_termini, "demo must contain a blank file-terminus"
+    for st in blank_termini:
+        # A blank terminus must not be marked as a spanning pill.
+        assert st.rail_top_y is None and st.rail_bottom_y is None, (
+            f"{st.id}: blank terminus marked as spanning pill"
+        )
+    # The CRAM/CSV/VCF icon chip labels must appear as rendered text.
+    for chip in ("CRAM", "CSV", "VCF"):
+        assert chip in svg, f"expected file-icon chip {chip!r} in rail-mode SVG"
+
+
+def test_stacked_sections_do_not_overlap():
+    """Two or more stacked rail-mode sections occupy disjoint vertical bands
+    (bbox-wise), so neither section's content reaches into the other."""
+    graph = _rail_graph()
+    boxes = sorted(
+        (
+            (s.bbox_y, s.bbox_y + s.bbox_h, s.id)
+            for s in graph.sections.values()
+            if s.bbox_h > 0 and (not s.is_implicit or s.station_ids)
+        ),
+        key=lambda b: b[0],
+    )
+    assert len(boxes) >= 2, "demo must contain at least two stacked sections"
+    for (top_a, bot_a, id_a), (top_b, bot_b, id_b) in zip(boxes, boxes[1:]):
+        assert bot_a <= top_b + 0.5, (
+            f"sections {id_a} and {id_b} overlap: {bot_a} > {top_b}"
+        )
+
+
+def test_off_track_input_sits_above_the_rails():
+    """An off_track input station is parked above every rail in its section
+    (it feeds in with an S-curve rather than sitting on a rail)."""
+    graph = _rail_graph()
+    rails = _section_line_rails(graph)
+    off_tracks = [st for st in graph.stations.values() if st.off_track]
+    assert off_tracks, "demo must contain an off_track input"
+    for st in off_tracks:
+        section_rails = rails.get(st.section_id, {})
+        if not section_rails:
+            continue
+        assert st.y < min(section_rails.values()) - 0.5, (
+            f"{st.id}: off_track station at {st.y} not above rails "
+            f"{sorted(section_rails.values())}"
         )
 
 

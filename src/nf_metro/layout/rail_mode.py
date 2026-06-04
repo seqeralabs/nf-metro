@@ -107,6 +107,11 @@ def compute_rail_layout(
         )
         cursor_top = bottom + section_y_gap
 
+    # Stash the per-section rail map so the dedicated router can resolve a
+    # port's Y to its line's rail (rather than the port's stored average Y),
+    # keeping inter-section legs on the right rail per line.
+    graph._rail_y = rail_y  # type: ignore[attr-defined]
+
     _position_ports_and_junctions(graph, rail_y)
 
 
@@ -146,11 +151,32 @@ def _layout_section_rails(
         for sid in section.station_ids
         if (st := graph.stations.get(sid)) is not None and not st.is_port
     ]
+    # Off-track input stations sit ABOVE the top rail and feed in with an
+    # S-curve (see routing/rail.py), so reserve a band above the rails for
+    # them.  rails_top is shifted down by that band; the off-track band Y is
+    # computed from the original box-content top.
+    off_track_ids = [sid for sid in real_ids if graph.stations[sid].off_track]
+    off_track_band = y_spacing if off_track_ids else 0.0
+    rails_top += off_track_band
+    if off_track_band:
+        per_line_y = {lid: rails_top + i * y_spacing for i, lid in enumerate(lines)}
+        rail_y[section.id] = per_line_y
+    off_track_y = box_top + section_y_padding
+
     for sid in real_ids:
         st = graph.stations[sid]
         layer = layers.get(sid, 0)
         st.layer = layer
         st.x = x_offset + section_x_padding + layer * x_spacing
+
+        if st.off_track:
+            # Park above the rails; the router draws the S-curve feeder.
+            st.y = off_track_y
+            st.track = 0.0
+            st.rail_used_ys = []
+            st.rail_top_y = None
+            st.rail_bottom_y = None
+            continue
 
         st_lines = _station_lines_in_order(graph, sid)
         ys = [per_line_y[lid] for lid in st_lines if lid in per_line_y]
@@ -162,20 +188,35 @@ def _layout_section_rails(
         bot_y = max(ys)
         st.y = (top_y + bot_y) / 2
         st.track = 0.0
-        if len(set(ys)) > 1:
-            st.rail_top_y = top_y
-            st.rail_bottom_y = bot_y
-        else:
+        # A blank terminus (file/dir/report icon with no text label) renders
+        # as its icon at the rail convergence, so the lines meet at a single
+        # point rather than spanning a pill: no span, no per-rail knobs.
+        is_blank_terminus = st.is_terminus and not st.label.strip()
+        if is_blank_terminus:
+            st.rail_used_ys = [st.y for _ in ys]
             st.rail_top_y = None
             st.rail_bottom_y = None
+        else:
+            # Record the rails this station actually uses (in line order) so
+            # the renderer can draw a knob on each; rails that merely pass
+            # behind the pill get no knob.
+            st.rail_used_ys = list(ys)
+            if len(set(ys)) > 1:
+                st.rail_top_y = top_y
+                st.rail_bottom_y = bot_y
+            else:
+                st.rail_top_y = None
+                st.rail_bottom_y = None
 
-    # Section bbox: span columns and rails with symmetric padding.
+    # Section bbox: span columns and rails with symmetric padding.  rails_top
+    # already includes the off-track band, so the box top stays at box_top and
+    # the box height covers padding + band + rails + padding.
     max_layer = max((layers.get(sid, 0) for sid in real_ids), default=0)
     bbox_x = x_offset
     bbox_w = section_x_padding * 2 + max_layer * x_spacing
     rails_bottom = rails_top + (n_rails - 1) * y_spacing
     bbox_y = box_top
-    bbox_h = section_y_padding + (rails_bottom - rails_top) + section_y_padding
+    bbox_h = (rails_bottom - box_top) + section_y_padding
     section.bbox_x = bbox_x
     section.bbox_y = bbox_y
     section.bbox_w = bbox_w

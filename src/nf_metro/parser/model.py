@@ -93,6 +93,12 @@ class Station:
     # station was not laid out in rail mode (normal pill rules apply).
     rail_top_y: float | None = None
     rail_bottom_y: float | None = None
+    # Rail Ys this station actually *uses* (one per line it carries), set
+    # alongside rail_top_y/rail_bottom_y in rail mode.  A spanning pill draws
+    # a knob at each of these Ys; a rail that falls within the pill's span but
+    # is absent here belongs to a line the station does not use and passes
+    # behind the pill with no knob.  Empty when not laid out in rail mode.
+    rail_used_ys: list[float] = field(default_factory=list)
 
     @property
     def is_terminus(self) -> bool:
@@ -264,6 +270,10 @@ class MetroGraph:
     # compute_layout from the NF_METRO_PHASE_SNAPSHOTS env var; read by the
     # _snap hook after each phase.  Off by default (pure observation).
     _phase_snapshots_enabled: bool = field(default=False, repr=False)
+    # Per-section rail-Y map (section_id -> {line_id: rail_y}), set by the
+    # rail-mode layout so the dedicated router can resolve a port's per-line
+    # rail Y.  Empty when rail mode is off.
+    _rail_y: dict[str, dict[str, float]] = field(default_factory=dict, repr=False)
 
     def _invalidate_edge_caches(self) -> None:
         """Reset caches that depend on the edge list."""
