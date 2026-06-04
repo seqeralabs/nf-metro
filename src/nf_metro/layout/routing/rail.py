@@ -16,6 +16,7 @@ from __future__ import annotations
 
 __all__ = ["route_rail_edges"]
 
+from nf_metro.layout.constants import DIAGONAL_RUN, MIN_STRAIGHT_EDGE
 from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.parser.model import MetroGraph
 
@@ -54,6 +55,45 @@ def _line_rail_y(graph: MetroGraph, station_id: str, line_id: str) -> float:
     if line_id in served and len(st.rail_used_ys) == len(served):
         return st.rail_used_ys[served.index(line_id)]
     return st.y
+
+
+def _diagonal_placement(
+    sx: float,
+    tx: float,
+    sy: float,
+    ty: float,
+    is_fork: bool,
+    is_join: bool,
+) -> tuple[float, float]:
+    """X coordinates of a 45-degree diagonal joining two rails along an X run.
+
+    The diagonal climbs/falls between rail Ys at 45 degrees, so its horizontal
+    span equals the vertical rail separation ``|ty - sy|`` (clamped to the
+    available run so it never inverts).  The flat lead-in/out keeps a minimum
+    straight stub at each end; the diagonal is biased toward the fan's shared
+    convergence point (the fork source or the join target) so a rail eases off
+    the fan early and runs flat the rest of the column.
+    """
+    dx = tx - sx
+    sign = 1.0 if dx >= 0 else -1.0
+    span = abs(dx)
+    diag = min(abs(ty - sy), DIAGONAL_RUN)
+    # Keep a straight stub at each end, shrinking the diagonal if the column is
+    # too narrow to seat both stubs plus the diagonal.
+    stub = MIN_STRAIGHT_EDGE
+    if diag + 2 * stub > span:
+        diag = max(0.0, span - 2 * stub)
+        if diag <= 0.0:
+            stub = span / 2
+    if is_fork and not is_join:
+        diag_start = sx + sign * stub
+    elif is_join and not is_fork:
+        diag_start = tx - sign * (stub + diag)
+    else:
+        mid = (sx + tx) / 2
+        diag_start = mid - sign * diag / 2
+    diag_end = diag_start + sign * diag
+    return diag_start, diag_end
 
 
 def route_rail_edges(
@@ -116,14 +156,23 @@ def route_rail_edges(
         if abs(y_src - y_tgt) < 0.5:
             points = [(src.x, y_src), (tgt.x, y_src)]
         else:
-            # Run horizontally at the source rail, then a short vertical jog
-            # near the target, then into the target.  Keeps every leg
-            # axis-aligned (no diagonal) so the rail look is preserved.
-            mid_x = (src.x + tgt.x) / 2
+            # The endpoints sit on different rails: this is a fan-out (the
+            # source is a shared convergence point, e.g. the CRAM input) or a
+            # fan-in (the target is a shared collector, e.g. the VCF output).
+            # Ease between the two rails with a 45-degree diagonal transition -
+            # the metro-map convention used by the normal router - rather than
+            # a square right-angle jog.  Bias the diagonal toward whichever
+            # endpoint is the shared convergence point so the rail leaves/joins
+            # the fan on a diagonal and runs flat the rest of the way.
+            is_fork = len(graph.edges_from(edge.source)) > 1
+            is_join = len(graph.edges_to(edge.target)) > 1
+            diag_start_x, diag_end_x = _diagonal_placement(
+                src.x, tgt.x, y_src, y_tgt, is_fork, is_join
+            )
             points = [
                 (src.x, y_src),
-                (mid_x, y_src),
-                (mid_x, y_tgt),
+                (diag_start_x, y_src),
+                (diag_end_x, y_tgt),
                 (tgt.x, y_tgt),
             ]
 
