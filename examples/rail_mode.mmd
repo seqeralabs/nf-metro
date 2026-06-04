@@ -1,10 +1,12 @@
-%%metro title: Rail mode: variant-calling pathways
+%%metro title: Rail mode: variant-calling sample routes
 %%metro style: dark
 %%metro rail_mode: true
 %%metro label_angle: 45
-%%metro line: deepvariant | DeepVariant | #2db572
-%%metro line: haplotypecaller | HaplotypeCaller (GATK) | #0570b0
-%%metro line: strelka | Strelka2 | #e63946
+%%metro line: germline | Germline | #2db572
+%%metro line: tumor_only | Tumour-only | #f4a300
+%%metro line: pair_n | Pair (normal) | #0570b0
+%%metro line: pair_t | Pair (tumour) | #e63946
+%%metro legend_combo: pair_n, pair_t | Tumour-normal pair
 %%metro legend: bl
 %%metro file: cram_in | CRAM
 %%metro file: samples_csv | CSV | Samples
@@ -18,22 +20,19 @@ graph LR
         markdup[Mark duplicates]
         bqsr[BQSR]
         samples_csv[ ]
-        dv[DeepVariant]
-        hc[HaplotypeCaller]
-        strelka_call[Strelka2]
-        concord[SNP concordance]
+        callvar[Call variants]
+        somatic[Somatic filter]
+        concord[Concordance]
 
-        cram_in -->|deepvariant,haplotypecaller,strelka| align
-        align -->|deepvariant,haplotypecaller,strelka| markdup
-        markdup -->|deepvariant,haplotypecaller,strelka| bqsr
-        samples_csv -->|haplotypecaller| bqsr
+        cram_in -->|germline,tumor_only,pair_n,pair_t| align
+        align -->|germline,tumor_only,pair_n,pair_t| markdup
+        markdup -->|germline,tumor_only,pair_n,pair_t| bqsr
+        samples_csv -->|pair_n,pair_t| bqsr
 
-        bqsr -->|deepvariant| dv
-        bqsr -->|haplotypecaller| hc
-        bqsr -->|strelka| strelka_call
-
-        dv -->|deepvariant| concord
-        strelka_call -->|strelka| concord
+        bqsr -->|germline,tumor_only,pair_n,pair_t| callvar
+        callvar -->|tumor_only,pair_n,pair_t| somatic
+        callvar -->|germline| concord
+        somatic -->|pair_n,pair_t| concord
     end
 
     subgraph annotate [Annotation and output]
@@ -41,6 +40,6 @@ graph LR
         vep[Annotate]
         vcf_out[ ]
 
-        norm -->|deepvariant,haplotypecaller,strelka| vep
-        vep -->|deepvariant,haplotypecaller,strelka| vcf_out
+        norm -->|germline,tumor_only,pair_n,pair_t| vep
+        vep -->|germline,tumor_only,pair_n,pair_t| vcf_out
     end

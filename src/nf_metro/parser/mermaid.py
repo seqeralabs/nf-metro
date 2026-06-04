@@ -308,6 +308,8 @@ def _parse_directive(
             )
         except ValueError:
             pass
+    elif content.startswith("legend_combo:"):
+        _parse_legend_combo_directive(content[len("legend_combo:") :].strip(), graph)
     elif content.startswith("legend:"):
         _parse_legend_directive(content[len("legend:") :].strip(), graph)
     elif content.startswith("off_track:"):
@@ -457,6 +459,48 @@ def _parse_legend_directive(value: str, graph: MetroGraph) -> None:
             "'dx,dy'. Ignoring.",
             stacklevel=2,
         )
+
+
+def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro legend_combo: lineA, lineB[, ...] | Display Label.
+
+    Stores a (line_ids, label) entry on ``graph.legend_combos``. The named
+    lines are rendered as a single combined legend row and (in rail mode)
+    share a single rail slot. A combo referencing unknown lines is warned
+    about and ignored; unknown members of an otherwise-valid combo are
+    dropped (with a warning) and the remaining members kept.
+    """
+    parts = value.split("|", 1)
+    if len(parts) != 2:
+        warnings.warn(
+            f"Invalid legend_combo {value!r}; expected 'lineA, lineB | Display Label'.",
+            stacklevel=2,
+        )
+        return
+    ids_raw, label = parts[0], parts[1].strip()
+    line_ids = [s.strip() for s in ids_raw.split(",") if s.strip()]
+    if len(line_ids) < 2 or not label:
+        warnings.warn(
+            f"Invalid legend_combo {value!r}; expected at least two line IDs "
+            "and a non-empty label.",
+            stacklevel=2,
+        )
+        return
+    known = [lid for lid in line_ids if lid in graph.lines]
+    unknown = [lid for lid in line_ids if lid not in graph.lines]
+    if unknown:
+        warnings.warn(
+            f"legend_combo {label!r} references unknown line(s) "
+            f"{', '.join(unknown)}; ignoring those.",
+            stacklevel=2,
+        )
+    if len(known) < 2:
+        warnings.warn(
+            f"legend_combo {label!r} has fewer than two known lines; ignoring.",
+            stacklevel=2,
+        )
+        return
+    graph.legend_combos.append((tuple(known), label))
 
 
 def _parse_logo_scale_directive(value: str, graph: MetroGraph) -> None:

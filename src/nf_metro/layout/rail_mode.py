@@ -202,7 +202,10 @@ def _layout_section_rails(
 ) -> float:
     """Lay out one section's rails and stations; return its bbox bottom Y."""
     lines = _section_lines_in_order(graph, section)
-    n_rails = max(1, len(lines))
+    # Lines sharing a legend_combo collapse onto a single rail slot (a tight
+    # bundle), so the slot count - not the line count - drives rail spacing and
+    # the bbox height.  With no combos this is one slot per line as before.
+    slot_offset, _n_slots = _rail_slot_offsets(graph, lines, y_spacing)
 
     # The section-number badge renders just above the bbox top edge (outside
     # the box), so the box itself hugs content: the top rail sits exactly
@@ -211,7 +214,7 @@ def _layout_section_rails(
     # this section's bbox begins.
     box_top = section_top + SECTION_HEADER_PROTRUSION
     rails_top = box_top + section_y_padding
-    per_line_y = {lid: rails_top + i * y_spacing for i, lid in enumerate(lines)}
+    per_line_y = {lid: rails_top + slot_offset[lid] for lid in lines}
     rail_y[section.id] = per_line_y
 
     # X by longest-path layer over the *whole* graph restricted to this
@@ -239,7 +242,7 @@ def _layout_section_rails(
     off_track_band = y_spacing if off_track_ids else 0.0
     rails_top += off_track_band
     if off_track_band:
-        per_line_y = {lid: rails_top + i * y_spacing for i, lid in enumerate(lines)}
+        per_line_y = {lid: rails_top + slot_offset[lid] for lid in lines}
         rail_y[section.id] = per_line_y
     off_track_y = box_top + section_y_padding
 
@@ -307,7 +310,10 @@ def _layout_section_rails(
     max_layer = max((layers.get(sid, 0) for sid in real_ids), default=0)
     bbox_x = x_offset
     bbox_w = section_x_padding * 2 + max_layer * x_spacing
-    rails_bottom = rails_top + (n_rails - 1) * y_spacing
+    # The lowest rail Y is the largest per-line offset below rails_top (which
+    # is a bundle sub-rail when the bottom slot is a combo), not simply the
+    # last slot centre.
+    rails_bottom = rails_top + (max(slot_offset.values()) if slot_offset else 0.0)
     bbox_y = box_top
     bbox_h = (rails_bottom - box_top) + section_y_padding
     section.bbox_x = bbox_x
@@ -357,6 +363,69 @@ def _label_aware_x_spacing(
     if widest <= 0.0:
         return x_spacing
     return max(x_spacing, widest + LABEL_MARGIN * 2)
+
+
+def _rail_slot_offsets(
+    graph: MetroGraph,
+    lines: list[str],
+    y_spacing: float,
+) -> tuple[dict[str, float], int]:
+    """Map each line to a Y offset (from the top rail) and return the slot count.
+
+    Each line normally occupies its own evenly-spaced rail slot.  Lines that
+    are members of the same ``legend_combo`` instead share a SINGLE slot,
+    drawn as a tight adjacent bundle: the slot's lines hug each other with a
+    small sub-offset about the slot centre rather than spreading across full
+    rail pitches.  With no combos this is exactly ``i * y_spacing`` per line in
+    order, identical to the un-bundled layout.
+
+    Returns ``(per_line_offset, n_slots)`` where ``n_slots`` is the number of
+    distinct rail slots (non-combo lines + one per combo with members present).
+    """
+    # Build line -> combo-key, keeping only combos whose members appear here.
+    line_combo: dict[str, int] = {}
+    for ci, (combo_ids, _label) in enumerate(graph.legend_combos):
+        members = [lid for lid in combo_ids if lid in lines]
+        if len(members) >= 2:
+            for lid in members:
+                line_combo[lid] = ci
+
+    # Walk the lines in order, allocating one slot per non-combo line and one
+    # slot per combo (at the position of its first-encountered member).
+    slot_of_combo: dict[int, int] = {}
+    slot_index: dict[str, int] = {}
+    n_slots = 0
+    for lid in lines:
+        ci = line_combo.get(lid)
+        if ci is None:
+            slot_index[lid] = n_slots
+            n_slots += 1
+        elif ci in slot_of_combo:
+            slot_index[lid] = slot_of_combo[ci]
+        else:
+            slot_of_combo[ci] = n_slots
+            slot_index[lid] = n_slots
+            n_slots += 1
+
+    # A combo's members hug within their shared slot: spread them symmetrically
+    # about the slot centre with a tight gap (a fraction of the rail pitch) so
+    # the bundle reads as two/few adjacent lines, not separate rails.
+    bundle_gap = min(y_spacing * 0.18, 6.0)
+    members_in_slot: dict[int, list[str]] = {}
+    for lid in lines:
+        members_in_slot.setdefault(slot_index[lid], []).append(lid)
+
+    per_line_offset: dict[str, float] = {}
+    for lid in lines:
+        slot = slot_index[lid]
+        members = members_in_slot[slot]
+        base = slot * y_spacing
+        if len(members) == 1:
+            per_line_offset[lid] = base
+        else:
+            k = members.index(lid)
+            per_line_offset[lid] = base + (k - (len(members) - 1) / 2.0) * bundle_gap
+    return per_line_offset, max(1, n_slots)
 
 
 def _section_layers(graph: MetroGraph, section: Section) -> dict[str, int]:

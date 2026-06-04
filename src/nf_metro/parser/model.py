@@ -221,6 +221,12 @@ class MetroGraph:
     # ``rail_mode: true`` flag is equivalent to "every section is a rail
     # section".  Use ``is_rail_section``/``has_rail_sections`` to query.
     rail_sections: set[str] = field(default_factory=set)
+    # Combined-lines legend entries (%%metro legend_combo:). Each is a
+    # (line_ids, label) tuple: the named lines render as one combined legend
+    # row, and in rail mode they share a single rail slot drawn as a tight
+    # adjacent bundle instead of separate evenly-spaced rails. Empty (and
+    # therefore inert) unless a legend_combo directive is present.
+    legend_combos: list[tuple[tuple[str, ...], str]] = field(default_factory=list)
     # Station label rotation in degrees, clockwise.  None means "horizontal".
     # In rail mode an angled label's horizontal footprint is its width times
     # cos(angle), so angled-label rail panels pack tighter than horizontal ones.

@@ -26,6 +26,8 @@ def _section_line_rails(graph):
     line sits.  We reconstruct it from single-line stations plus the spanning
     pills' top/bottom rails.
     """
+    from nf_metro.layout.rail_mode import _station_lines_in_order
+
     rails: dict[str, dict[str, float]] = {}
     for st in graph.stations.values():
         if st.is_port or st.is_hidden:
@@ -33,7 +35,9 @@ def _section_line_rails(graph):
         if st.off_track or (st.is_terminus and not st.label.strip()):
             # Converge to a point; contribute no rail evidence.
             continue
-        lines = graph.station_lines(st.id)
+        # rail_used_ys is parallel to the line-definition order, so reconstruct
+        # rails with that ordering (not edge-discovery order).
+        lines = _station_lines_in_order(graph, st.id)
         if len(lines) == 1:
             rails.setdefault(st.section_id, {})[lines[0]] = st.y
         elif st.rail_used_ys and len(st.rail_used_ys) == len(lines):
@@ -83,17 +87,40 @@ def test_each_line_runs_on_a_single_fixed_rail():
     )
 
 
+def _combo_member_ids(graph) -> set[str]:
+    members: set[str] = set()
+    for line_ids, _label in graph.legend_combos:
+        if len([lid for lid in line_ids if lid in graph.lines]) >= 2:
+            members.update(line_ids)
+    return members
+
+
 def test_rails_are_evenly_spaced_and_distinct():
-    """A section's lines occupy distinct, evenly-spaced rails."""
+    """A section's rail SLOTS are distinct and evenly spaced.
+
+    Each non-combo line occupies its own slot; combo members share one slot
+    (a tight bundle), so even spacing is asserted over the slot CENTRES (one
+    Y per non-combo line plus the bundle centre), not over every line's rail.
+    """
     graph = _rail_graph()
     rails = _section_line_rails(graph)
+    members = _combo_member_ids(graph)
     assert rails, "expected at least one section with single-line stations"
     for sec_id, line_rails in rails.items():
-        ys = sorted(line_rails.values())
-        assert len(set(ys)) == len(ys), f"{sec_id}: rails not distinct: {ys}"
+        # Collapse combo members in this section to their bundle centre.
+        bundle_ys = [y for lid, y in line_rails.items() if lid in members]
+        slot_ys = [y for lid, y in line_rails.items() if lid not in members]
+        if bundle_ys:
+            slot_ys.append(sum(bundle_ys) / len(bundle_ys))
+        ys = sorted(slot_ys)
+        assert len(set(round(y, 2) for y in ys)) == len(ys), (
+            f"{sec_id}: rail slots not distinct: {ys}"
+        )
         if len(ys) >= 3:
             gaps = [round(b - a, 2) for a, b in zip(ys, ys[1:])]
-            assert len(set(gaps)) == 1, f"{sec_id}: rails not evenly spaced: {gaps}"
+            assert max(gaps) - min(gaps) < 1.0, (
+                f"{sec_id}: rail slots not evenly spaced: {gaps}"
+            )
 
 
 def test_multi_line_station_span_covers_exactly_its_lines_rails():
@@ -627,16 +654,16 @@ def test_rail_convergence_segments_are_diagonal_not_square():
 
 
 def test_rail_fan_out_diagonal_eases_off_the_shared_input():
-    """The CRAM fan-out rails (deepvariant up, strelka down) leave the shared
+    """The CRAM fan-out rails (germline up, pair_t down) leave the shared
     input point on a diagonal then run flat -- the diagonal is biased early
     (toward the fork) so most of the column is a straight rail."""
     graph = _rail_graph()
     from nf_metro.layout.routing import route_edges
 
     routes = {(r.edge.source, r.edge.target, r.line_id): r for r in route_edges(graph)}
-    # cram_in -> align carries deepvariant (top) and strelka (bottom): both
+    # cram_in -> align carries germline (top) and pair_t (bottom): both
     # change rail Y and must contain a diagonal.
-    for line in ("deepvariant", "strelka"):
+    for line in ("germline", "pair_t"):
         rp = routes.get(("cram_in", "align", line))
         assert rp is not None, f"missing cram_in->align route for {line}"
         pts = rp.points
@@ -709,3 +736,135 @@ def test_label_angle_default_off_byte_identical():
     svg = render_svg(g, THEMES["nfcore"])
     assert "rotate(45" not in svg
     assert "rotate(" not in svg
+
+
+# ---------------------------------------------------------------------------
+# legend_combo bundling: combo lines share ONE rail slot (a tight bundle)
+# ---------------------------------------------------------------------------
+
+
+def test_legend_combo_directive_parses():
+    g = parse_metro_mermaid(RAIL_MMD.read_text())
+    assert g.legend_combos == [(("pair_n", "pair_t"), "Tumour-normal pair")]
+
+
+def test_combo_lines_share_one_rail_slot():
+    """Lines that are members of a legend_combo occupy a single rail slot
+    drawn as a tight adjacent bundle, so the rail-slot count equals the
+    distinct non-combo lines plus one slot per combo -- not one per line."""
+    from nf_metro.layout.rail_mode import _rail_slot_offsets, _section_lines_in_order
+
+    graph = _rail_graph()
+    y_spacing = 40.0
+    section = graph.sections["calling"]
+    lines = _section_lines_in_order(graph, section)
+    members = _combo_member_ids(graph)
+    assert members, "demo must contain a legend_combo"
+
+    slot_offset, n_slots = _rail_slot_offsets(graph, lines, y_spacing)
+
+    expected = len([lid for lid in lines if lid not in members]) + 1
+    assert n_slots == expected, (
+        f"expected {expected} rail slots (non-combo lines + 1 per combo), got {n_slots}"
+    )
+    # All combo members in the section land on the SAME slot centre: their
+    # offsets differ by less than a full rail pitch (they hug as a bundle).
+    member_offsets = [slot_offset[lid] for lid in members if lid in slot_offset]
+    assert len(member_offsets) >= 2
+    assert max(member_offsets) - min(member_offsets) < y_spacing, (
+        f"combo members did not bundle onto one slot: {member_offsets}"
+    )
+    # ...and they are NOT coincident (a visible two-line bundle, not one rail).
+    assert max(member_offsets) - min(member_offsets) > 0.5, (
+        "combo members collapsed to a single coincident rail"
+    )
+    # A non-combo line is a full rail pitch away from the bundle centre.
+    bundle_centre = sum(member_offsets) / len(member_offsets)
+    non_combo = [
+        slot_offset[lid] for lid in lines if lid not in members and lid in slot_offset
+    ]
+    assert all(abs(o - bundle_centre) >= y_spacing - 1.0 for o in non_combo), (
+        "a non-combo rail is closer than a full pitch to the bundle"
+    )
+
+
+def test_cross_track_station_knob_spans_the_bundle():
+    """A cross-track (spanning) station that uses the bundle draws a knob on
+    each of the bundle's hugging sub-rails -- its span reaches the bundle
+    slot."""
+    from nf_metro.layout.rail_mode import _station_lines_in_order
+
+    graph = _rail_graph()
+    members = _combo_member_ids(graph)
+    # `align` carries every line, so it must place a knob on each bundle sub-rail.
+    st = graph.stations["align"]
+    served = _station_lines_in_order(graph, st.id)
+    member_ys = [y for lid, y in zip(served, st.rail_used_ys) if lid in members]
+    assert len(member_ys) == len(members), (
+        f"spanning station missing a bundle knob: {member_ys}"
+    )
+    # The bundle knobs are adjacent (within a pitch) and distinct.
+    assert 0.5 < max(member_ys) - min(member_ys) < 40.0
+
+
+def test_interchange_link_uses_station_fill_not_dark_stroke():
+    """The cross-track interchange link renders WHITE (the station fill), not
+    the dark station stroke -- the dark stroke is only the outer boundary.
+
+    The white link bar fills the interior; a separate dark layer paints the
+    outline.  Assert the white interior bar is present (station fill stroke)
+    and that the connector is no longer a lone dark line cutting across."""
+    import re
+
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+
+    graph = _rail_graph()
+    theme = THEMES["nfcore"]
+    svg = render_svg(graph, theme)
+
+    spanning = [
+        st
+        for st in graph.stations.values()
+        if st.rail_top_y is not None and st.rail_bottom_y is not None
+    ]
+    assert spanning, "demo must contain a multi-rail (cross-track) station"
+
+    # The link bars render as round-capped <path> elements (drawsvg emits Line
+    # as a path).  A white (station-fill) interior bar must be drawn for the
+    # glyph, joining the circles in white rather than dark.
+    fill = re.escape(theme.station_fill)
+    white_vbar = re.compile(rf'<path[^>]*stroke="{fill}"[^>]*stroke-linecap="round"')
+    assert white_vbar.search(svg), (
+        f"expected a white ({theme.station_fill}) interchange link bar; "
+        "the connector must render with the station fill, not the dark stroke"
+    )
+
+    # The dark outline layer carries the connector class so the glyph keeps a
+    # continuous dark outer boundary behind the white interior.
+    stroke = re.escape(theme.station_stroke)
+    dark_connector = re.compile(
+        rf'stroke="{stroke}"[^>]*stroke-linecap="round"[^>]*nf-metro-rail-connector'
+    )
+    assert dark_connector.search(svg), (
+        "expected a dark outline layer (connector class) behind the white link"
+    )
+
+
+def test_legend_combo_default_off_byte_identical():
+    """Adding legend_combo parsing/render must not change a render that has no
+    legend_combo directive: byte-for-byte identical SVG, no combo state."""
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+
+    src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
+    g = parse_metro_mermaid(src)
+    assert g.legend_combos == []
+    compute_layout(g)
+    svg1 = render_svg(g, THEMES["nfcore"])
+
+    g2 = parse_metro_mermaid(src)
+    g2.legend_combos = []  # explicit no-op
+    compute_layout(g2)
+    svg2 = render_svg(g2, THEMES["nfcore"])
+    assert svg1 == svg2

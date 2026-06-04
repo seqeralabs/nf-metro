@@ -917,57 +917,95 @@ def _render_rail_pill(
 ) -> None:
     """Render a rail-mode multi-rail station as the metro interchange idiom.
 
-    Instead of one capsule the station draws as a *white circle on each rail
-    it uses* joined by a thin straight connector segment running between the
-    topmost and bottommost used rails (the classic metro / nf-core-sarek
-    interchange link).  A rail that falls within the span but is NOT used by
-    the station gets no circle; the connector passes behind it without a knob.
+    The station draws as a *white circle on each rail it uses* joined by a
+    *white link* running between the topmost and bottommost used rails - a
+    continuous outlined white interchange (the classic metro / nf-core-sarek
+    idiom).  The link is the station fill colour (not a dark stroke), so it
+    reads as connecting the circles; the dark station stroke forms the OUTER
+    boundary of the whole circles+link glyph rather than cutting across it.
+
+    The glyph is built in two stacked layers so the dark outline is continuous
+    and never gaps where the link meets a circle: first a dark layer (the link
+    bar plus a disc at each used rail, each grown by the stroke width) paints
+    the union's outer boundary, then a white layer of the same shapes (at the
+    true radii) paints the interior on top.  A rail that falls within the span
+    but is NOT used by the station gets no circle; the link passes behind it.
     """
     used_ys = [y for y in station.rail_used_ys] or [station.y]
     top_y = min(used_ys)
     bot_y = max(used_ys)
     station_data = _station_data_attrs(graph, station)
 
-    # The interchange connector: a thin neutral straight segment behind the
-    # circles, spanning only the rails the station actually uses.  It carries
-    # the station data attrs (id, label, section) so the multi-rail station
-    # stays identifiable for hover/selection now that there is no pill rect.
-    if bot_y - top_y > 0.5:
+    sw = theme.station_stroke_width
+    # Circles are slightly larger than the bare marker so each used rail reads
+    # as a distinct knob along the white link; the link bar is a touch narrower
+    # than the circles so the knobs bulge out of it like a real interchange.
+    knob_r = r * 1.2
+    bar_half = r * 0.85
+    # rail_used_ys is recorded parallel to the line-definition order (see
+    # rail_mode._layout_section_rails), so zip the knobs against that same
+    # order rather than the edge-discovery order of graph.station_lines.
+    from nf_metro.layout.rail_mode import _station_lines_in_order
+
+    served = _station_lines_in_order(graph, station.id)
+
+    def _link_bar(width: float, stroke: str, **extra: object) -> None:
+        # A round-capped line of the given width is a capsule; used here only
+        # for its straight body between top and bottom used rails (the caps are
+        # covered by the circles), so it joins the knobs with no seam.
+        if bot_y - top_y <= 0.5:
+            return
         d.append(
             draw.Line(
                 station.x,
                 top_y,
                 station.x,
                 bot_y,
-                stroke=theme.station_stroke,
-                stroke_width=theme.station_stroke_width * 2,
-                **{
-                    **station_data,
-                    "class_": "nf-metro-rail-connector",
-                },
+                stroke=stroke,
+                stroke_width=width,
+                stroke_linecap="round",
+                **extra,
             )
         )
 
-    # A white circle at each used rail (matching the normal station marker:
-    # white fill, theme station stroke).  Keyed by the station's served-line
-    # order, which is parallel to rail_used_ys.
-    served = graph.station_lines(station.id)
-    for lid, y in zip(served, station.rail_used_ys):
-        d.append(
-            draw.Circle(
-                station.x,
-                y,
-                r,
-                fill=theme.station_fill,
-                stroke=theme.station_stroke,
-                stroke_width=theme.station_stroke_width,
-                **{
-                    "class_": "nf-metro-rail-knob",
-                    "data-station-id": station.id,
-                    "data-line-id": lid,
-                },
+    def _knobs(radius: float, fill: str, stroke: str, **extra: object) -> None:
+        for lid, y in zip(served, station.rail_used_ys):
+            d.append(
+                draw.Circle(
+                    station.x,
+                    y,
+                    radius,
+                    fill=fill,
+                    stroke=stroke,
+                    stroke_width=0,
+                    **{**extra, "data-line-id": lid},
+                )
             )
-        )
+
+    # Dark outer-boundary layer: the link bar and the knob discs grown by the
+    # stroke width, all painted in the station stroke colour.  Their union is
+    # the continuous dark outline of the finished glyph.
+    _link_bar(
+        (bar_half + sw) * 2,
+        theme.station_stroke,
+        **{**station_data, "class_": "nf-metro-rail-connector"},
+    )
+    _knobs(
+        knob_r + sw,
+        theme.station_stroke,
+        theme.station_stroke,
+        **{"class_": "nf-metro-rail-knob-outline", "data-station-id": station.id},
+    )
+
+    # White interior layer: the same shapes at their true radii, filling the
+    # interior of the outlined union with the station fill.
+    _link_bar(bar_half * 2, theme.station_fill)
+    _knobs(
+        knob_r,
+        theme.station_fill,
+        theme.station_fill,
+        **{"class_": "nf-metro-rail-knob", "data-station-id": station.id},
+    )
 
 
 def _render_stations(
