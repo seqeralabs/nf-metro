@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from nf_metro.parser.model import MetroGraph
 
 if TYPE_CHECKING:
-    from nf_metro.layout.labels import LabelOverlap
+    from nf_metro.layout.labels import LabelOverlap, LabelPlacement
 
 # Cap on spread-loop passes.  Each pass strictly widens the binding axis,
 # so a handful suffices to clear any realistic crowding before giving up.
@@ -18,29 +18,23 @@ _MAX_SPREAD_ITERS = 6
 _SPREAD_SLACK = 4.0
 
 
-def _residual_label_overlaps(
+def _probe_label_placements(
     graph: MetroGraph, *, allow_hyphenation: bool
-) -> list[LabelOverlap]:
-    """Place labels at the current layout and report leftover overlaps.
+) -> tuple[dict[tuple[str, str], float], list[LabelPlacement]] | None:
+    """Run the renderer's offset/route/label pipeline at the current layout.
 
-    Runs the same offset/route/label pipeline the renderer uses (so the
-    wrapping pass has already fired) and returns the overlaps that wrapping
-    could not resolve.  Returns an empty list if routing/placement raises,
-    so a transient routing failure never blocks layout.
+    Returns the computed ``(station_offsets, placements)`` so callers can
+    inspect the settled labelling the renderer would draw, or ``None`` if
+    routing/placement raises (a transient failure never blocks layout).
 
-    The spread loop calls this with ``allow_hyphenation=False`` so residual
-    overlaps surface (to be cleared by widening spacing rather than by
-    hard-breaking words); the final guard calls it with True to validate the
-    settled, fully wrapped state the renderer will draw.
+    Routing and placement mutate the graph (route_edges nudges station X for
+    bundle separation; place_labels expands section bboxes to fit labels).
+    This probe snapshots station coordinates and section bboxes and restores
+    them, so it never leaks those mutations into the positioned state.
     """
-    from nf_metro.layout.labels import find_label_overlaps, place_labels
+    from nf_metro.layout.labels import place_labels
     from nf_metro.layout.routing import compute_station_offsets, route_edges
 
-    # Routing and placement mutate the graph (route_edges nudges station X
-    # for bundle separation; place_labels expands section bboxes to fit
-    # labels).  This probe must not leak those mutations, or a clean graph
-    # would drift from its positioned state.  Snapshot station coordinates
-    # and section bboxes, and restore them after measuring.
     pos_snapshot = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
     bbox_snapshot = {
         sid: (s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h)
@@ -55,9 +49,9 @@ def _residual_label_overlaps(
             routes=routes,
             allow_hyphenation=allow_hyphenation,
         )
-        return find_label_overlaps(graph, placements, offsets)
+        return offsets, placements
     except Exception:
-        return []
+        return None
     finally:
         for sid, (x, y) in pos_snapshot.items():
             st = graph.stations.get(sid)
@@ -67,40 +61,42 @@ def _residual_label_overlaps(
             s = graph.sections.get(sid)
             if s is not None:
                 s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h = bx, by, bw, bh
+
+
+def _residual_label_overlaps(
+    graph: MetroGraph, *, allow_hyphenation: bool
+) -> list[LabelOverlap]:
+    """Place labels at the current layout and report leftover overlaps.
+
+    Returns the overlaps that wrapping could not resolve, or an empty list if
+    routing/placement raises.
+
+    The spread loop calls this with ``allow_hyphenation=False`` so residual
+    overlaps surface (to be cleared by widening spacing rather than by
+    hard-breaking words); the final guard calls it with True to validate the
+    settled, fully wrapped state the renderer will draw.
+    """
+    from nf_metro.layout.labels import find_label_overlaps
+
+    probe = _probe_label_placements(graph, allow_hyphenation=allow_hyphenation)
+    if probe is None:
+        return []
+    offsets, placements = probe
+    return find_label_overlaps(graph, placements, offsets)
 
 
 def _placed_name_label_station_ids(graph: MetroGraph) -> set[str]:
     """Return station ids that ``place_labels`` emits a name label for.
 
-    Runs the same offset/route/label pipeline the renderer uses, snapshotting
-    and restoring station coordinates and section bboxes so the probe leaves
-    no geometry behind (mirroring :func:`_residual_label_overlaps`).  Returns
-    an empty set if routing/placement raises.
+    Probes with the renderer-faithful ``allow_hyphenation=True`` so the result
+    reflects the settled labelling that will actually be drawn.  Returns an
+    empty set if routing/placement raises.
     """
-    from nf_metro.layout.labels import place_labels
-    from nf_metro.layout.routing import compute_station_offsets, route_edges
-
-    pos_snapshot = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
-    bbox_snapshot = {
-        sid: (s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h)
-        for sid, s in graph.sections.items()
-    }
-    try:
-        offsets = compute_station_offsets(graph)
-        routes = route_edges(graph, station_offsets=offsets)
-        placements = place_labels(graph, station_offsets=offsets, routes=routes)
-        return {p.station_id for p in placements if p.station_id}
-    except Exception:
+    probe = _probe_label_placements(graph, allow_hyphenation=True)
+    if probe is None:
         return set()
-    finally:
-        for sid, (x, y) in pos_snapshot.items():
-            st = graph.stations.get(sid)
-            if st is not None:
-                st.x, st.y = x, y
-        for sid, (bx, by, bw, bh) in bbox_snapshot.items():
-            s = graph.sections.get(sid)
-            if s is not None:
-                s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h = bx, by, bw, bh
+    _offsets, placements = probe
+    return {p.station_id for p in placements if p.station_id}
 
 
 def _spread_bump(

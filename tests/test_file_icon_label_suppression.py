@@ -19,7 +19,7 @@ import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.labels import place_labels
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.phases.spacing import _placed_name_label_station_ids
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, Station
 
@@ -36,26 +36,15 @@ _FILE_ICON_FIXTURES = [
 ]
 
 
-def _placed_label_ids(graph: MetroGraph) -> set[str]:
-    """Return station ids that ``place_labels`` emits a name label for."""
-    compute_layout(graph)
-    station_offsets = compute_station_offsets(graph)
-    routes = route_edges(graph, station_offsets=station_offsets)
-    placements = place_labels(graph, station_offsets=station_offsets, routes=routes)
-    return {p.station_id for p in placements if p.station_id}
-
-
-@pytest.mark.parametrize(
-    "fixture", _FILE_ICON_FIXTURES, ids=lambda p: p.name
-)
+@pytest.mark.parametrize("fixture", _FILE_ICON_FIXTURES, ids=lambda p: p.name)
 def test_file_icon_stations_have_no_name_label(fixture: Path) -> None:
     """A file-icon station must not also receive a node-name label."""
     graph = parse_metro_mermaid(fixture.read_text())
     terminus_ids = {s.id for s in graph.stations.values() if s.is_terminus}
     assert terminus_ids, f"{fixture.name} has no file-icon stations to exercise"
 
-    labelled = _placed_label_ids(graph)
-    offenders = sorted(terminus_ids & labelled)
+    compute_layout(graph)
+    offenders = sorted(terminus_ids & _placed_name_label_station_ids(graph))
     assert not offenders, (
         f"{fixture.name}: file-icon stations also got a name label "
         f"(overlaps caption/tracks): {offenders}"
