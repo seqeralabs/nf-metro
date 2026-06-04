@@ -116,6 +116,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         '"Example analysis pathways" subway idiom). Line-exclusive callers '
         "sit on their own rail; the rails never converge to a point.",
     ),
+    (
+        "rail_section",
+        EXAMPLES_DIR,
+        "Per-section rail mode (`%%metro rail_section: <id>`): a connected "
+        "trunk of three normal sections renders with the usual converging "
+        "metro routing, while a separate disconnected panel is laid out as "
+        "parallel rails with spanning pills. Mixed normal + rail layout in one "
+        "map.",
+    ),
     # --- Simple topologies ---
     (
         "single_section",

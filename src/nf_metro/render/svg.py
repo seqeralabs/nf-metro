@@ -990,7 +990,11 @@ def _render_stations(
         # Rail mode: a blank terminus (file/dir/report node with no text
         # label) renders as its icon at the rail convergence, not a bare pill,
         # with the rails meeting at the icon (as in normal mode).
-        if graph.rail_mode and station.is_terminus and not station.label.strip():
+        if (
+            graph.station_is_rail(station.id)
+            and station.is_terminus
+            and not station.label.strip()
+        ):
             icon_group = draw.Group(**{"data-station-id": station.id})
             _render_terminus_icons(icon_group, station, graph, theme, r, 0.0, 0.0)
             d.append(icon_group)

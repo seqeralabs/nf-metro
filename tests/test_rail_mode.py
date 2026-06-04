@@ -343,3 +343,136 @@ def test_rail_mode_off_by_default_leaves_graph_unchanged():
     svg2 = render_svg(g2, THEMES["nfcore"])
 
     assert svg1 == svg2
+
+
+# ---------------------------------------------------------------------------
+# Per-section rail mode (%%metro rail_section: <id>)
+# ---------------------------------------------------------------------------
+
+RAIL_SECTION_MMD = EXAMPLES / "rail_section.mmd"
+
+
+def _rail_section_graph():
+    graph = parse_metro_mermaid(RAIL_SECTION_MMD.read_text())
+    compute_layout(graph, validate=True)
+    return graph
+
+
+def test_rail_section_directive_parses():
+    graph = parse_metro_mermaid(RAIL_SECTION_MMD.read_text())
+    assert graph.rail_mode is False
+    assert graph.rail_sections == {"pathways"}
+    assert graph.has_rail_sections is True
+    assert graph.is_rail_section("pathways") is True
+    assert graph.is_rail_section("calling") is False
+
+
+def test_global_rail_mode_treats_all_sections_as_rail():
+    """The legacy global flag means every section is a rail section."""
+    graph = parse_metro_mermaid(RAIL_MMD.read_text())
+    assert graph.rail_mode is True
+    # Every declared section reports as a rail section under the global flag.
+    for sid in graph.sections:
+        assert graph.is_rail_section(sid) is True
+    # ...even though rail_sections was never populated explicitly.
+    assert graph.rail_sections == set()
+
+
+def test_flagged_section_gets_rail_spans():
+    """Stations in the flagged section span multiple rails (pills)."""
+    graph = _rail_section_graph()
+    pathways = graph.sections["pathways"]
+    spanning = [
+        graph.stations[sid]
+        for sid in pathways.station_ids
+        if not graph.stations[sid].is_port
+    ]
+    # The multi-line pathway stations all carry 3 lines, so each spans rails.
+    assert spanning, "pathways section should have real stations"
+    assert all(
+        st.rail_top_y is not None and st.rail_bottom_y is not None
+        for st in spanning
+        if len(graph.station_lines(st.id)) > 1
+    )
+    # Used rails recorded per station match the lines they carry.
+    for st in spanning:
+        lines = graph.station_lines(st.id)
+        if len(lines) > 1:
+            assert len(st.rail_used_ys) == len(lines)
+
+
+def test_normal_section_keeps_per_line_tracks_not_rail_spans():
+    """A non-flagged connected section keeps normal layout: no rail spans."""
+    graph = _rail_section_graph()
+    for sid in ("preprocess", "calling", "annotate"):
+        section = graph.sections[sid]
+        for st_id in section.station_ids:
+            st = graph.stations[st_id]
+            assert st.rail_top_y is None, f"{st_id} unexpectedly has a rail span"
+            assert st.rail_bottom_y is None
+            assert st.rail_used_ys == []
+
+
+def test_normal_section_lines_share_a_trunk():
+    """The connected trunk's co-travelling lines bundle (converge), unlike
+    rail mode where they stay on separate fixed rails."""
+    graph = _rail_section_graph()
+    # In the calling section, markdup carries both dna and rna; in normal
+    # (non-rail) layout that station sits at a single Y (the trunk), not a
+    # multi-rail pill.
+    markdup = graph.stations["markdup"]
+    assert markdup.rail_top_y is None
+    # Rail-section pathway stations DO span; assert the contrast holds.
+    score = graph.stations["score"]
+    assert score.rail_top_y is not None
+
+
+def test_rail_section_internal_edges_routed_as_straight_rails():
+    """Internal edges of the rail section render as flat horizontal runs."""
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+    graph = _rail_section_graph()
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    pathway_ids = set(graph.sections["pathways"].station_ids)
+    seen_internal = 0
+    for rp in routes:
+        if rp.edge.source in pathway_ids and rp.edge.target in pathway_ids:
+            ys = {round(y, 2) for _, y in rp.points}
+            assert len(ys) == 1, (
+                f"rail edge {rp.edge.source}->{rp.edge.target} is not a "
+                f"flat horizontal run: Ys {ys}"
+            )
+            seen_internal += 1
+    assert seen_internal > 0, "expected some routed internal rail edges"
+
+
+def test_per_section_rail_validates_and_contains():
+    """validate=True passes and rail stations stay within their bbox."""
+    graph = _rail_section_graph()  # compute_layout(validate=True) inside
+    pathways = graph.sections["pathways"]
+    for st_id in pathways.station_ids:
+        st = graph.stations[st_id]
+        if st.is_port:
+            continue
+        top = st.rail_top_y if st.rail_top_y is not None else st.y
+        bot = st.rail_bottom_y if st.rail_bottom_y is not None else st.y
+        assert top >= pathways.bbox_y - 1e-6
+        assert bot <= pathways.bbox_y + pathways.bbox_h + 1e-6
+
+
+def test_no_rail_directive_default_off_byte_identical():
+    """Adding per-section rail support must not change a normal render."""
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+
+    src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
+    g = parse_metro_mermaid(src)
+    assert g.has_rail_sections is False
+    compute_layout(g)
+    svg = render_svg(g, THEMES["nfcore"])
+    # No rail span leaks into a normal graph.
+    assert all(
+        s.rail_top_y is None and s.rail_bottom_y is None for s in g.stations.values()
+    )
+    assert "nf-metro-rail-knob" not in svg

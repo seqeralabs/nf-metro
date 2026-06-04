@@ -434,6 +434,27 @@ def compute_layout(
             break  # can't widen the binding axis (e.g. pinned) -- give up
         x_spacing, y_spacing = new_x, new_y
 
+    # Per-section rail mode: the normal pipeline has positioned every
+    # section's bbox and inter-section ports.  Now overwrite the *internal*
+    # geometry of each rail-flagged section with the rail-mode layout (rails
+    # + spanning pills), anchored at the bbox the placement chose.  Non-rail
+    # sections and all inter-section placement keep the normal machinery.
+    if graph.rail_sections and not graph.rail_mode:
+        from nf_metro.layout.rail_mode import retrofit_section_rails
+
+        for sid in graph.rail_sections:
+            section = graph.sections.get(sid)
+            if section is None:
+                continue
+            retrofit_section_rails(
+                graph,
+                section,
+                x_spacing=x_spacing,
+                y_spacing=y_spacing,
+                section_x_padding=section_x_padding,
+                section_y_padding=section_y_padding,
+            )
+
     # Always-on backstop (independent of ``validate``): the settled layout
     # must never leave a station outside its own section bbox.  Runs on the
     # render path so an unsupported directive combination fails loudly

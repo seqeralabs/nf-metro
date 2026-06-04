@@ -132,7 +132,11 @@ def _discover_fixtures() -> list[str]:
     (those are parser inputs, not layout inputs), any file lacking a
     ``%%metro`` directive, and opt-in rail-mode fixtures (which run a
     dedicated layout pipeline with its own geometry contract; see
-    ``tests/test_rail_mode.py``).
+    ``tests/test_rail_mode.py``).  This covers both the global
+    ``rail_mode: true`` flag and per-section ``rail_section:`` directives:
+    a mixed fixture's rail sections carry spanning-pill geometry the corpus
+    invariants don't model, so the whole fixture is routed to the dedicated
+    rail tests instead.
     """
     roots = [
         (FIXTURES, ""),
@@ -150,7 +154,7 @@ def _discover_fixtures() -> list[str]:
             text = p.read_text(errors="ignore")
             if "%%metro" not in text:
                 continue
-            if "rail_mode: true" in text:
+            if "rail_mode: true" in text or "rail_section:" in text:
                 continue
             # Address all examples paths through the ``examples`` resolver
             # without the leading ``examples/`` so tests can pick up either

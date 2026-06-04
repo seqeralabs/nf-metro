@@ -1,0 +1,61 @@
+%%metro title: Mixed mode: connected trunk + rail panel
+%%metro style: dark
+%%metro line: dna | DNA workflow | #0570b0
+%%metro line: rna | RNA workflow | #2db572
+%%metro line: deepvariant | DeepVariant | #2db572
+%%metro line: haplotypecaller | HaplotypeCaller | #0570b0
+%%metro line: strelka | Strelka2 | #e63946
+%%metro legend: bl
+%%metro file: reads_in | FASTQ
+%%metro file: report_out | Report
+
+%%metro rail_section: pathways
+
+%%metro grid: preprocess | 0,0
+%%metro grid: calling | 1,0
+%%metro grid: annotate | 2,0
+%%metro grid: pathways | 0,1
+
+graph LR
+    subgraph preprocess [Pre-processing]
+        reads_in[ ]
+        trim[Trim adapters]
+        align[Align]
+
+        reads_in -->|dna,rna| trim
+        trim -->|dna,rna| align
+    end
+
+    subgraph calling [Variant calling]
+        markdup[Mark duplicates]
+        bqsr[BQSR]
+        callvar[Call variants]
+
+        markdup -->|dna,rna| bqsr
+        bqsr -->|dna,rna| callvar
+    end
+
+    subgraph annotate [Annotation]
+        norm[Normalize]
+        vep[Annotate]
+        report_out[ ]
+
+        norm -->|dna,rna| vep
+        vep -->|dna,rna| report_out
+    end
+
+    align -->|dna,rna| markdup
+    callvar -->|dna,rna| norm
+
+    subgraph pathways [Pathway analysis]
+        gene_in[Gene sets]
+        score[Score]
+        enrich[Enrichment]
+        summary[Summary]
+
+        gene_in -->|deepvariant,haplotypecaller,strelka| score
+        score -->|deepvariant,haplotypecaller,strelka| enrich
+        enrich -->|deepvariant| summary
+        enrich -->|haplotypecaller| summary
+        enrich -->|strelka| summary
+    end

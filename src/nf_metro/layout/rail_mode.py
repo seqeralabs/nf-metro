@@ -115,6 +115,78 @@ def compute_rail_layout(
     _position_ports_and_junctions(graph, rail_y)
 
 
+def retrofit_section_rails(
+    graph: MetroGraph,
+    section: Section,
+    *,
+    x_spacing: float = X_SPACING,
+    y_spacing: float,
+    section_x_padding: float = SECTION_X_PADDING,
+    section_y_padding: float = SECTION_Y_PADDING,
+) -> None:
+    """Re-lay one already-placed section as parallel rails (per-section mode).
+
+    The normal layout pipeline has already positioned this section's bbox via
+    section placement.  This function overwrites the section's *internal*
+    geometry (station X/Y, rail spans, used-Ys) and its internal edge routing
+    with the rail-mode layout, anchored at the section's existing bbox
+    top-left, and resizes the bbox to hug the resulting rails.  Inter-section
+    placement, ports, and routing are left to the normal machinery.
+
+    Used by ``compute_layout`` when ``graph.is_rail_section(section.id)`` is
+    True but the graph is not in the legacy global rail mode.
+    """
+    # ``_layout_section_rails`` anchors the box top at
+    # ``section_top + SECTION_HEADER_PROTRUSION`` and positions stations from
+    # ``x_offset``; feeding it the placement-chosen bbox top-left (offsetting
+    # the header protrusion back out) keeps the box where placement put it
+    # while the rails fill it.
+    box_left = section.bbox_x
+    box_top = section.bbox_y
+    rail_y = graph._rail_y  # type: ignore[attr-defined]
+    _layout_section_rails(
+        graph,
+        section,
+        rail_y,
+        x_spacing=x_spacing,
+        x_offset=box_left,
+        section_top=box_top - SECTION_HEADER_PROTRUSION,
+        section_x_padding=section_x_padding,
+        section_y_padding=section_y_padding,
+        y_spacing=y_spacing,
+    )
+
+    # Re-position this section's own ports onto their line rails so the normal
+    # router still draws sensible inter-section legs (no-op when the rail
+    # section is disconnected, which is the supported case).
+    _position_section_ports(graph, section, rail_y.get(section.id, {}))
+
+
+def _position_section_ports(
+    graph: MetroGraph,
+    section: Section,
+    per_line: dict[str, float],
+) -> None:
+    """Snap one rail section's boundary ports onto their connecting line rail."""
+    for port_id in section.port_ids:
+        port = graph.ports.get(port_id)
+        st = graph.stations.get(port_id)
+        if port is None or st is None:
+            continue
+        lines = _station_lines_in_order(graph, port_id)
+        ys = [per_line[lid] for lid in lines if lid in per_line]
+        if ys:
+            st.y = sum(ys) / len(ys)
+        if port.side is PortSide.LEFT:
+            st.x = section.bbox_x
+        elif port.side is PortSide.RIGHT:
+            st.x = section.bbox_x + section.bbox_w
+        else:
+            st.x = section.bbox_x + section.bbox_w / 2
+        port.x = st.x
+        port.y = st.y
+
+
 def _layout_section_rails(
     graph: MetroGraph,
     section: Section,

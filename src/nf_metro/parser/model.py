@@ -215,6 +215,12 @@ class MetroGraph:
     # lines converging to a point.  Off by default; the normal layout /
     # render path is untouched when False.  See docs and examples/rail_mode.mmd.
     rail_mode: bool = False
+    # Per-section rail mode (opt-in).  Section IDs listed here are laid out as
+    # parallel rails with spanning pills (the rail-mode geometry) while the
+    # rest of the graph uses the normal layout pipeline.  The legacy global
+    # ``rail_mode: true`` flag is equivalent to "every section is a rail
+    # section".  Use ``is_rail_section``/``has_rail_sections`` to query.
+    rail_sections: set[str] = field(default_factory=set)
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
     # Placement modifiers for the bundled legend+logo block. The corner/edge
@@ -383,6 +389,31 @@ class MetroGraph:
                     stations.append(edge.target)
                     seen.add(edge.target)
         return stations
+
+    @property
+    def has_rail_sections(self) -> bool:
+        """True if any section is laid out in rail mode (global flag or per-section)."""
+        return self.rail_mode or bool(self.rail_sections)
+
+    def is_rail_section(self, section_id: str) -> bool:
+        """True if *section_id* should be laid out in rail mode.
+
+        The legacy global ``rail_mode`` flag treats every section as a rail
+        section; otherwise only sections named via ``%%metro rail_section:``
+        (collected in ``rail_sections``) are rail sections.
+        """
+        return self.rail_mode or section_id in self.rail_sections
+
+    def station_is_rail(self, station_id: str) -> bool:
+        """True if a station belongs to a rail-mode section."""
+        if self.rail_mode:
+            return True
+        st = self.stations.get(station_id)
+        return (
+            st is not None
+            and st.section_id is not None
+            and st.section_id in self.rail_sections
+        )
 
     def section_for_station(self, station_id: str) -> str | None:
         """Return the section ID containing a station, or None."""

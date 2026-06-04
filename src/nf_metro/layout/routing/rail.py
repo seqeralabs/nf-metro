@@ -56,17 +56,24 @@ def _line_rail_y(graph: MetroGraph, station_id: str, line_id: str) -> float:
     return st.y
 
 
-def route_rail_edges(graph: MetroGraph) -> list[RoutedPath]:
-    """Route every edge as a straight horizontal run along its line's rail.
+def route_rail_edges(
+    graph: MetroGraph,
+    edges: list | None = None,
+) -> list[RoutedPath]:
+    """Route edges as straight horizontal runs along their line's rail.
 
     The two endpoints of an edge are on the same line, hence the same rail,
     so each route is two points at a common Y.  When the endpoints' resolved
     rail Ys differ slightly (e.g. a port at a section's mid rail vs. a pill's
     own rail), a short vertical jog at the source X joins them so the run
     stays axis-aligned rather than diagonal.
+
+    When *edges* is None every edge in the graph is routed (legacy global
+    rail mode).  In per-section rail mode the caller passes just that
+    section's internal edges so the normal router handles the rest.
     """
     routes: list[RoutedPath] = []
-    for edge in graph.edges:
+    for edge in edges if edges is not None else graph.edges:
         src = graph.stations.get(edge.source)
         tgt = graph.stations.get(edge.target)
         if src is None or tgt is None:

@@ -161,11 +161,37 @@ def route_edges(
 
         return route_rail_edges(graph)
 
+    # Per-section rail mode: route each rail section's internal edges with the
+    # dedicated rail router (straight rails, no bundling) and let the normal
+    # router handle every other edge.  An edge is "internal" to a rail section
+    # when both endpoints are non-port stations of that section.
+    rail_routes: list[RoutedPath] = []
+    rail_internal: set[tuple[str, str, str]] = set()
+    if graph.rail_sections:
+        from nf_metro.layout.routing.rail import route_rail_edges
+
+        rail_edges = []
+        for edge in graph.edges:
+            src = graph.stations.get(edge.source)
+            tgt = graph.stations.get(edge.target)
+            if src is None or tgt is None or src.is_port or tgt.is_port:
+                continue
+            if (
+                src.section_id == tgt.section_id
+                and src.section_id is not None
+                and graph.is_rail_section(src.section_id)
+            ):
+                rail_edges.append(edge)
+                rail_internal.add((edge.source, edge.target, edge.line_id))
+        rail_routes = route_rail_edges(graph, rail_edges)
+
     ctx = _build_routing_context(graph, diagonal_run, curve_radius, station_offsets)
-    routes: list[RoutedPath] = []
+    routes: list[RoutedPath] = list(rail_routes)
 
     for edge in graph.edges:
         if (edge.source, edge.target, edge.line_id) in ctx.skip_edges:
+            continue
+        if (edge.source, edge.target, edge.line_id) in rail_internal:
             continue
 
         src = graph.stations.get(edge.source)
