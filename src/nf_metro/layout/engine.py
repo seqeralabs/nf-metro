@@ -354,6 +354,13 @@ def compute_layout(
     # Off by default: when unset, each _snap call is a single attribute read.
     graph._phase_snapshots_enabled = phase_snapshots_enabled()
 
+    # A diagonal label angle drives one graph-wide column pitch shared by every
+    # section, so spacing is a property of the whole render, not of any one
+    # section.  Used as the default x_spacing when the caller didn't pin one.
+    from nf_metro.layout.labels import diagonal_label_pitch
+
+    default_x_spacing = diagonal_label_pitch(graph, X_SPACING)
+
     auto_x = x_spacing is None
     auto_y = y_spacing is None
     if y_spacing is None:
@@ -370,7 +377,7 @@ def compute_layout(
                 stacklevel=2,
             )
     if x_spacing is None:
-        x_spacing = X_SPACING
+        x_spacing = default_x_spacing
 
     # Optionally reorder lines by section span before layout.
     # Must happen here (on the full graph) before section subgraphs are

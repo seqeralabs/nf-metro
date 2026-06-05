@@ -35,6 +35,7 @@ from nf_metro.layout.constants import (
     TB_LABEL_H_SPACING,
     TB_LINE_Y_OFFSET,
     TB_PILL_EDGE_OFFSET,
+    X_SPACING,
 )
 from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.parser.model import MetroGraph
@@ -57,6 +58,45 @@ def _label_text_height(label: str) -> float:
     if n == 1:
         return FONT_HEIGHT
     return FONT_HEIGHT + (n - 1) * FONT_HEIGHT * LABEL_LINE_HEIGHT
+
+
+def diagonal_label_pitch(graph: "MetroGraph", fallback: float) -> float:
+    """Graph-wide column pitch for diagonal (angled) station labels.
+
+    All diagonal labels are drawn at the same angle, so adjacent columns'
+    labels are PARALLEL and collide only by their PERPENDICULAR separation, not
+    along their length.  Giving adjacent labels a clear text-row of space
+    between them means a perpendicular separation of ~2x the label height (the
+    row itself plus an equal gap); the column pitch that yields that is
+    ``2 * height / sin(angle)``, floored at a marker-collision minimum.
+
+    This is computed once over the whole graph (the tallest label drives it) so
+    every section shares one consistent pitch rather than each section sizing
+    its own.  Returns *fallback* when no label angle is set or no labels exist.
+    """
+    import math
+
+    from nf_metro.layout.constants import STATION_RADIUS_APPROX
+
+    angle = graph.label_angle or 0.0
+    if not angle:
+        return fallback
+    sin_a = abs(math.sin(math.radians(angle)))
+    if sin_a < 1e-6:
+        return fallback
+    tallest = 0.0
+    for st in graph.stations.values():
+        if st.is_port or st.is_hidden or st.off_track:
+            continue
+        if st.is_terminus and not st.label.strip():
+            continue
+        if not st.label.strip():
+            continue
+        tallest = max(tallest, _label_text_height(st.label))
+    if tallest <= 0.0:
+        return fallback
+    marker_floor = STATION_RADIUS_APPROX * 3.0
+    return max(marker_floor, (tallest * 2.0) / sin_a)
 
 
 @dataclass
@@ -510,6 +550,38 @@ def _compute_port_label_preference(
     return result
 
 
+def _diagonal_prefer_above(graph: MetroGraph, station: Station) -> bool:
+    """Whether a tilted label should flip above the trunk for *station*.
+
+    Diagonal labels otherwise always hang below the trunk.  When a fork
+    sibling sits directly below a station (same column, a lower track) and
+    nothing sits above it, the below label would cross that branch's route, so
+    flip it above where it is clear.  Conservative: fires only for a station
+    that is the top of a same-column stack in an LR/RL section.
+    """
+    if not station.section_id:
+        return False
+    sec = graph.sections.get(station.section_id)
+    if sec is None or sec.direction not in ("LR", "RL"):
+        return False
+    below = above = False
+    for other in graph.stations.values():
+        if (
+            other is station
+            or other.is_port
+            or other.is_hidden
+            or other.section_id != station.section_id
+        ):
+            continue
+        if abs(other.x - station.x) > X_SPACING * 0.5:
+            continue
+        if other.y > station.y + 1:
+            below = True
+        elif other.y < station.y - 1:
+            above = True
+    return below and not above
+
+
 def _apply_edge_override(
     station: Station,
     start_above: bool,
@@ -840,15 +912,28 @@ def place_labels(
         # which lets densely-spaced stations share a compact horizontal
         # line without their long names colliding.
         if label_angle:
-            candidate = LabelPlacement(
-                station_id=station.id,
-                text=station.label,
-                x=station.x,
-                y=station.y + max_off + label_offset + DIAGONAL_LABEL_OFFSET,
-                above=False,
-                angle=label_angle,
-                text_anchor="start",
-            )
+            if _diagonal_prefer_above(graph, station):
+                # Mirror the tilt across the trunk: anchor at the pill top and
+                # read up-and-to-the-right, clearing a fork sibling below.
+                candidate = LabelPlacement(
+                    station_id=station.id,
+                    text=station.label,
+                    x=station.x,
+                    y=station.y + min_off - label_offset - DIAGONAL_LABEL_OFFSET,
+                    above=True,
+                    angle=-label_angle,
+                    text_anchor="start",
+                )
+            else:
+                candidate = LabelPlacement(
+                    station_id=station.id,
+                    text=station.label,
+                    x=station.x,
+                    y=station.y + max_off + label_offset + DIAGONAL_LABEL_OFFSET,
+                    above=False,
+                    angle=label_angle,
+                    text_anchor="start",
+                )
             if station.section_id:
                 sec = graph.sections.get(station.section_id)
                 if sec is not None and sec.bbox_w > 0:
