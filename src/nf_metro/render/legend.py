@@ -32,23 +32,43 @@ class _LegendRow:
     lines: tuple[MetroLine, ...]
 
 
+def _combo_standalone_members(graph: MetroGraph, line_ids: tuple[str, ...]) -> set[str]:
+    """Return combo members that also travel alone somewhere.
+
+    A member is "stand-alone" if it traverses an edge that is not shared by
+    every other member of the combo, i.e. the line breaks away from the bundle
+    to a destination the rest do not reach. Such a line keeps its own legend
+    row in addition to the combo row, so the diagram's lone segment is labelled.
+    """
+    edges_by_line: dict[str, set[tuple[str, str]]] = {lid: set() for lid in line_ids}
+    for e in graph.edges:
+        if e.line_id in edges_by_line:
+            edges_by_line[e.line_id].add((e.source, e.target))
+
+    nonempty = [edges for edges in edges_by_line.values() if edges]
+    shared = set.intersection(*nonempty) if nonempty else set()
+    return {lid for lid in line_ids if edges_by_line[lid] - shared}
+
+
 def _legend_rows(graph: MetroGraph) -> list[_LegendRow]:
     """Return the ordered legend rows for a graph.
 
-    Each metro line that is not part of a ``legend_combo`` gets its own row
-    (preserving definition order, as before). Each combo named in
-    ``graph.legend_combos`` becomes a single row whose swatch shows all the
-    constituent lines as adjacent stripes; the constituent lines are omitted
-    from their own individual rows. With no combos this is exactly one row per
-    line, byte-identical to the prior behaviour.
+    Each metro line that is not part of a ``legend_combo`` gets its own row, in
+    definition order. Each combo named in ``graph.legend_combos`` becomes a
+    single row whose swatch shows its constituent lines as adjacent stripes. A
+    constituent line is suppressed from its own individual row only while it
+    travels entirely within the bundle; if it has a stand-alone segment it
+    keeps its individual row too (see ``_combo_standalone_members``).
     """
-    combined_ids: set[str] = set()
+    suppressed_ids: set[str] = set()
     for line_ids, _label in graph.legend_combos:
-        combined_ids.update(line_ids)
+        suppressed_ids.update(
+            set(line_ids) - _combo_standalone_members(graph, line_ids)
+        )
 
     rows: list[_LegendRow] = []
     for ml in graph.lines.values():
-        if ml.id in combined_ids:
+        if ml.id in suppressed_ids:
             continue
         rows.append(_LegendRow(label=ml.display_name, lines=(ml,)))
 
@@ -103,16 +123,20 @@ def compute_legend_dimensions(
     graph: MetroGraph,
     theme: Theme,
     logo_size: tuple[float, float] | None = None,
+    rows: list[_LegendRow] | None = None,
 ) -> tuple[float, float]:
     """Compute the width and height of the legend without rendering it.
 
     Returns (width, height). Returns (0, 0) if there are no lines.
     logo_size is the original (width, height) of the logo image if present.
+    ``rows`` may be passed by a caller that already built them (see
+    ``render_legend``) to avoid recomputing.
     """
     if not graph.lines:
         return (0.0, 0.0)
 
-    rows = _legend_rows(graph)
+    if rows is None:
+        rows = _legend_rows(graph)
     if not rows:
         return (0.0, 0.0)
 
@@ -141,17 +165,15 @@ def _render_swatch(
 ) -> None:
     """Draw the colour swatch for a row.
 
-    A single-line row draws one horizontal segment (as before). A combo row
-    draws each constituent line as a stripe at a small vertical offset, so the
-    swatch reads as a little bundle of adjacent lines, each honouring its style.
+    A single-line row draws one horizontal segment. A combo row draws each
+    constituent line as a stripe at a small vertical offset, so the swatch
+    reads as a bundle of adjacent lines, each honouring its style.
     """
     n = len(row.lines)
     if n == 1:
         offsets = [0.0]
     else:
-        # Spread the stripes symmetrically about the entry centre, packed
-        # tightly so they read as a single travelling-together bundle.
-        spacing = min(theme.line_width + 1.0, LEGEND_LINE_HEIGHT / (n + 1))
+        spacing = min(theme.line_width, LEGEND_LINE_HEIGHT / (n + 1))
         offsets = [(i - (n - 1) / 2.0) * spacing for i in range(n)]
 
     for ml, dy in zip(row.lines, offsets):
@@ -202,7 +224,7 @@ def render_legend(
     )
 
     legend_width, legend_height = compute_legend_dimensions(
-        graph, theme, logo_size=logo_size
+        graph, theme, logo_size=logo_size, rows=rows
     )
 
     # Background

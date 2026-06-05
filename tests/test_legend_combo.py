@@ -43,9 +43,7 @@ def _render_swatches_and_texts(graph):
 def test_combo_row_renders_multicolour_swatch_and_label():
     graph = _parse("%%metro legend_combo: normal, tumor | Tumor-normal pair\n")
     colors, texts = _render_swatches_and_texts(graph)
-    # The combo label appears exactly once.
     assert texts.count("Tumor-normal pair") == 1
-    # Both constituent colours are drawn as swatch stripes.
     assert "#2196F3" in colors
     assert "#E53935" in colors
 
@@ -53,30 +51,41 @@ def test_combo_row_renders_multicolour_swatch_and_label():
 def test_combo_constituent_lines_suppressed_from_individual_rows():
     graph = _parse("%%metro legend_combo: normal, tumor | Tumor-normal pair\n")
     _colors, texts = _render_swatches_and_texts(graph)
-    # The individual line names are NOT rendered as their own rows.
     assert "Normal" not in texts
     assert "Tumor" not in texts
     assert "Tumor-normal pair" in texts
 
 
+def test_combo_member_with_standalone_segment_keeps_its_row():
+    mmd = (
+        _BASE
+        + "%%metro legend_combo: normal, tumor | Tumor-normal pair\n"
+        + "graph LR\n"
+        + "    a -->|normal,tumor| b\n"
+        + "    b -->|tumor| c\n"
+    )
+    graph = parse_metro_mermaid(mmd)
+    _colors, texts = _render_swatches_and_texts(graph)
+    assert "Tumor-normal pair" in texts
+    assert "Tumor" in texts
+    assert "Normal" not in texts
+
+
 def test_non_combo_line_still_gets_its_row():
     graph = _parse("%%metro legend_combo: normal, tumor | Tumor-normal pair\n")
     _colors, texts = _render_swatches_and_texts(graph)
-    # The QC line is not in any combo and keeps its own row.
     assert "Quality Control" in texts
 
 
 def test_default_off_byte_identical_legend():
     """With no legend_combo directive the legend SVG is byte-identical."""
-    graph = _parse()  # no combo directive
+    graph = _parse()
     d = draw.Drawing(400, 400)
     render_legend(d, graph, NFCORE_THEME, 0.0, 0.0)
     svg = d.as_svg()
-    # Each line renders exactly one swatch + one label, in definition order.
     colors, texts = _render_swatches_and_texts(graph)
     assert texts == ["Normal", "Tumor", "Quality Control"]
     assert colors == ["#2196F3", "#E53935", "#4CAF50"]
-    # And nothing combined leaked in.
     assert "Tumor-normal pair" not in svg
 
 
@@ -84,7 +93,6 @@ def test_combo_with_unknown_line_warns_and_ignores():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         graph = _parse("%%metro legend_combo: normal, nope | Pair\n")
-    # Unknown member dropped; fewer than two known lines -> combo ignored.
     assert graph.legend_combos == []
     assert any("unknown" in str(w.message).lower() for w in caught)
 

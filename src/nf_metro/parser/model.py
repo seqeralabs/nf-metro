@@ -198,9 +198,7 @@ class MetroGraph:
     center_ports: bool = False
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
-    # Combined-lines legend entries (%%metro legend_combo:). Each is a
-    # (line_ids, label) pair: the named lines are rendered as a single legend
-    # row with a multi-stripe swatch, and are suppressed from their own rows.
+    # %%metro legend_combo entries: (line_ids, label) pairs.
     legend_combos: list[tuple[tuple[str, ...], str]] = field(default_factory=list)
     # Placement modifiers for the bundled legend+logo block. The corner/edge
     # keyword lives in legend_position; these refine where that block lands.

@@ -98,8 +98,9 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         EXAMPLES_DIR,
         "Demonstrates `%%metro legend_combo:`: a normal (blue) and tumor (red) "
         "line travel together as a tumor-normal pair. The combo renders one "
-        "legend row with a striped red+blue swatch and suppresses the "
-        "individual normal/tumor rows; the standalone QC line keeps its own row.",
+        "legend row with a striped red+blue swatch. Normal travels only within "
+        "the bundle so its individual row is suppressed, while tumor breaks "
+        "away alone to Annotate and keeps its own row; the QC line is unaffected.",
     ),
     (
         "tb_file_termini",
