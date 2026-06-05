@@ -103,6 +103,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "cross-column feeder dropping straight into its consumer section.",
     ),
     (
+        "legend_combo",
+        EXAMPLES_DIR,
+        "Demonstrates `%%metro legend_combo:`: a normal (blue) and tumor (red) "
+        "line travel together as a tumor-normal pair. The combo renders one "
+        "legend row with a striped red+blue swatch. Normal travels only within "
+        "the bundle so its individual row is suppressed, while tumor breaks "
+        "away alone to Annotate and keeps its own row; the QC line is unaffected.",
+    ),
+    (
         "tb_file_termini",
         EXAMPLES_DIR,
         "A `%%metro direction: TB` reporting section whose file outputs are "

@@ -48,6 +48,32 @@ def _check_unsupported_input(text: str) -> None:
         )
 
 
+_GRAPH_DIRECTION_PATTERN = re.compile(r"^graph\s+([A-Za-z]{2})\b")
+
+
+def _warn_if_non_lr_primary(graph_line: str) -> None:
+    """Warn when the `graph` header declares a primary direction other than LR.
+
+    nf-metro lays the section meta-graph out left-to-right; any other Mermaid
+    direction (TB/TD/BT/RL) is not honoured. A bare ``graph`` (no direction,
+    Mermaid-defaults to LR) is fine and warns nothing. Per-section
+    flow is controlled separately by ``%%metro direction:`` and is unaffected.
+    """
+    m = _GRAPH_DIRECTION_PATTERN.match(graph_line)
+    if not m:
+        return
+    direction = m.group(1).upper()
+    if direction == "LR":
+        return
+    warnings.warn(
+        f"nf-metro honours only 'graph LR' as the primary layout direction; "
+        f"the declared direction '{direction}' was ignored and the map is laid "
+        f"out left-to-right. Use per-section '%%metro direction:' directives to "
+        f"control individual section flow.",
+        stacklevel=2,
+    )
+
+
 def _validate_edge_annotations(graph: MetroGraph) -> None:
     """Validate that all edges have metro line annotations.
 
@@ -131,8 +157,13 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
             _parse_directive(stripped, graph, current_section_id)
             continue
 
-        # Skip regular comments and graph declaration
-        if stripped.startswith("%%") or stripped.startswith("graph "):
+        # Graph declaration
+        if stripped.startswith("graph "):
+            _warn_if_non_lr_primary(stripped)
+            continue
+
+        # Skip regular comments
+        if stripped.startswith("%%"):
             continue
 
         # Try edge first (contains arrow)
@@ -271,6 +302,8 @@ def _parse_directive(
             )
         except ValueError:
             pass
+    elif content.startswith("legend_combo:"):
+        _parse_legend_combo_directive(content[len("legend_combo:") :].strip(), graph)
     elif content.startswith("legend:"):
         _parse_legend_directive(content[len("legend:") :].strip(), graph)
     elif content.startswith("off_track:"):
@@ -439,6 +472,48 @@ def _parse_logo_scale_directive(value: str, graph: MetroGraph) -> None:
         )
         return
     graph.logo_scale = scale
+
+
+def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro legend_combo: lineA, lineB[, ...] | Display Label.
+
+    Stores a (line_ids, label) entry on ``graph.legend_combos``. The named
+    lines are rendered as a single combined legend row and suppressed from
+    their own individual rows. A combo referencing unknown lines is warned
+    about and ignored; unknown members of an otherwise-valid combo are
+    dropped (with a warning) and the remaining members kept.
+    """
+    parts = value.split("|", 1)
+    if len(parts) != 2:
+        warnings.warn(
+            f"Invalid legend_combo {value!r}; expected 'lineA, lineB | Display Label'.",
+            stacklevel=2,
+        )
+        return
+    ids_raw, label = parts[0], parts[1].strip()
+    line_ids = [s.strip() for s in ids_raw.split(",") if s.strip()]
+    if len(line_ids) < 2 or not label:
+        warnings.warn(
+            f"Invalid legend_combo {value!r}; expected at least two line IDs "
+            "and a non-empty label.",
+            stacklevel=2,
+        )
+        return
+    known = [lid for lid in line_ids if lid in graph.lines]
+    unknown = [lid for lid in line_ids if lid not in graph.lines]
+    if unknown:
+        warnings.warn(
+            f"legend_combo {label!r} references unknown line(s) "
+            f"{', '.join(unknown)}; ignoring those.",
+            stacklevel=2,
+        )
+    if len(known) < 2:
+        warnings.warn(
+            f"legend_combo {label!r} has fewer than two known lines; ignoring.",
+            stacklevel=2,
+        )
+        return
+    graph.legend_combos.append((tuple(known), label))
 
 
 # Regex patterns for node shapes

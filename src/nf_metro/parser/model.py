@@ -201,6 +201,8 @@ class MetroGraph:
     # Opt-in diagonal station labels (#527). None means "use the theme
     # default" (0 = horizontal); a directive value overrides the theme.
     label_angle: float | None = None
+    # %%metro legend_combo entries: (line_ids, label) pairs.
+    legend_combos: list[tuple[tuple[str, ...], str]] = field(default_factory=list)
     # Placement modifiers for the bundled legend+logo block. The corner/edge
     # keyword lives in legend_position; these refine where that block lands.
     legend_anchor: str = "content"  # "content" (section bbox) or "canvas"
