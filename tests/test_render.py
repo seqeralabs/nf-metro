@@ -1,5 +1,6 @@
 """Tests for SVG rendering."""
 
+import re
 import xml.etree.ElementTree as ET
 
 from nf_metro.layout.engine import compute_layout
@@ -568,7 +569,7 @@ def test_render_icon_type_guide_fixtures():
         assert root.tag.endswith("svg") or "svg" in root.tag
 
 
-# --- Terminus icon orientation (issue #254) ---
+# --- Terminus icon orientation ---
 
 
 def _station(x=100.0, y=50.0):
@@ -602,9 +603,8 @@ def test_terminus_icons_rl_mirror_lr():
 def test_terminus_icons_tb_march_along_y():
     """TB termini stack icons vertically, centred on the bundle X.
 
-    Regression test for #254: in a TB section the line arrives from
-    above/below, so icons must be displaced along Y (the flow axis), not
-    along X as for LR.
+    In a TB section the line arrives from above/below, so icons must be
+    displaced along Y (the flow axis), not along X as for LR.
     """
     st = _station()
     # Sink at the bottom of a TB flow: icons extend downward.
@@ -694,3 +694,96 @@ def test_render_tb_terminus_pill_is_horizontal():
     width = float(re.search(r'width="([0-9.]+)"', rect).group(1))
     height = float(re.search(r'height="([0-9.]+)"', rect).group(1))
     assert width > height, f"TB terminus pill not horizontal: {width=} {height=}"
+
+
+def test_render_group_label_caption_and_underline():
+    """A %%metro group: directive emits a caption and underline; layout
+    coordinates are untouched relative to the same graph without groups."""
+    base_src = (
+        "%%metro line: main | Main | #2db572\n"
+        "graph LR\n"
+        "    subgraph s [Callers]\n"
+        "        a[Alpha]\n"
+        "        b[Beta]\n"
+        "        a -->|main| b\n"
+        "    end\n"
+    )
+    grouped_src = "%%metro group: Family | a, b\n" + base_src
+
+    base_graph = parse_metro_mermaid(base_src)
+    compute_layout(base_graph)
+    base_svg = render_svg(base_graph, NFCORE_THEME)
+
+    grouped_graph = parse_metro_mermaid(grouped_src)
+    compute_layout(grouped_graph)
+    # Station coordinates must be identical: groups are purely annotative.
+    assert {sid: (st.x, st.y) for sid, st in grouped_graph.stations.items()} == {
+        sid: (st.x, st.y) for sid, st in base_graph.stations.items()
+    }
+
+    grouped_svg = render_svg(grouped_graph, NFCORE_THEME)
+    assert "Family" in grouped_svg
+    assert "nf-metro-group-label" in grouped_svg
+    assert "nf-metro-group-underline" in grouped_svg
+    # The base render has neither marker.
+    assert "nf-metro-group-label" not in base_svg
+
+
+def _section_box_bottoms(svg: str) -> dict[str, float]:
+    """Map each rendered section box id to its bbox bottom edge (y + h)."""
+    bottoms: dict[str, float] = {}
+    for m in re.finditer(
+        r'<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" '
+        r'height="([\d.]+)"[^>]*nf-metro-section-box[^>]*'
+        r'data-section-id="(\w+)"',
+        svg,
+    ):
+        _x, y, _w, h, sid = m.groups()
+        bottoms[sid] = float(y) + float(h)
+    return bottoms
+
+
+def test_render_group_band_stays_inside_section_box():
+    """A below group band (bracket + caption) must sit clear of the section
+    box's bottom edge: the engine grows the bbox to reserve room so the band
+    never overlaps or crosses the boundary."""
+    src = (
+        "%%metro line: main | Main | #2db572\n"
+        "%%metro group: Callers | a, b, c\n"
+        "graph LR\n"
+        "    subgraph s [Variant Calling]\n"
+        "        a[Alpha]\n"
+        "        b[Beta]\n"
+        "        c[Gamma]\n"
+        "        a -->|main| b\n"
+        "        b -->|main| c\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(src)
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+
+    section_bottom = _section_box_bottoms(svg)["s"]
+
+    # Caption text: hanging baseline, so its bottom edge is text_y + font_size.
+    cap = re.search(
+        r'<text x="[\d.]+" y="([\d.]+)" font-size="([\d.]+)"'
+        r"[^>]*nf-metro-group-label",
+        svg,
+    )
+    assert cap is not None
+    caption_bottom = float(cap.group(1)) + float(cap.group(2))
+
+    # Bracket rule + ticks: gather every y coordinate in the path data.
+    bracket = re.search(r'<path d="([^"]*)"[^>]*nf-metro-group-underline', svg)
+    assert bracket is not None
+    ys = [
+        float(v.split(",")[1]) for v in re.findall(r"[\d.]+,[\d.]+", bracket.group(1))
+    ]
+    bracket_bottom = max(ys)
+
+    band_bottom = max(caption_bottom, bracket_bottom)
+    assert band_bottom <= section_bottom, (
+        f"group band bottom {band_bottom:.1f} crosses section box bottom "
+        f"{section_bottom:.1f}"
+    )

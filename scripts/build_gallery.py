@@ -81,7 +81,7 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "diagonal_labels",
         EXAMPLES_DIR,
-        "Opt-in diagonal station labels (#527) via `%%metro label_angle: 45`: a "
+        "Opt-in diagonal station labels via `%%metro label_angle: 45`: a "
         "dense pre-processing trunk whose tilted names pack tighter than "
         "horizontal labels would, feeding a variant-calling section in the row "
         "below that fans out to three callers and back in -- the reserved "
@@ -122,7 +122,7 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "file_icons",
         EXAMPLES_DIR,
-        "Terminus icon variants for #532: single-sheet `%%metro file:`, "
+        "Terminus icon variants: single-sheet `%%metro file:`, "
         "stacked `%%metro files:` for multiplicity, the `%%metro dir:` folder, "
         "and the optional `| banner` format strip.",
     ),
@@ -139,15 +139,22 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "tb_file_termini",
         EXAMPLES_DIR,
         "A `%%metro direction: TB` reporting section whose file outputs are "
-        "line termini. Regression fixture for #254 (terminus file icons now "
-        "orient to a vertical flow, with the connector entering from the top).",
+        "line termini. Regression fixture: terminus file icons orient to a "
+        "vertical flow, with the connector entering from the top.",
     ),
     (
         "genomeassembly_staggered",
         EXAMPLES_DIR,
         "sanger-tol/genomeassembly with explicit `%%metro grid:` directives "
-        "stacking each section in its own grid row. Regression fixture for "
-        "#250 (cross-column junction routes were going backward in X).",
+        "stacking each section in its own grid row. Regression fixture: "
+        "cross-column junction routes were going backward in X.",
+    ),
+    (
+        "group_labels",
+        EXAMPLES_DIR,
+        "Annotative `%%metro group:` band captions labelling sarek-style "
+        "sub-families of callers (SNPs & Indels / SV & CNV / MSI) within a "
+        "single section, without splitting them apart.",
     ),
     (
         "disconnected_components",
@@ -209,7 +216,7 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         TOPOLOGIES_DIR,
         "A two-column fan whose station labels are wider than the column "
         "pitch; the engine wraps the labels and widens spacing so they "
-        "don't collide (issue #405).",
+        "don't collide.",
     ),
     # --- Branching and multipath ---
     (
@@ -297,7 +304,7 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "The horizontal run sits centred in the inter-row gap, clear of both "
         "the section above and the next row's header.",
     ),
-    # --- #484 regression isolation ---
+    # --- Complex auto-layout regression isolation ---
     (
         "route_around_intervening",
         TOPOLOGIES_DIR,

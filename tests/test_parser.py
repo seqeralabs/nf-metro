@@ -178,7 +178,7 @@ def test_parse_edges():
 
 
 def test_parse_edges_no_label():
-    """Unannotated edges raise a clear error (issue #75)."""
+    """Unannotated edges raise a clear error."""
     text = "graph LR\n    a --> b\n"
     with pytest.raises(ValueError, match="no metro line annotation"):
         parse_metro_mermaid(text)
@@ -502,8 +502,8 @@ def test_empty_section_removed():
 def test_empty_section_removed_render():
     """An empty-section graph can be rendered without error.
 
-    End-to-end regression test for issue #51: ensure the full
-    parse -> layout -> render pipeline doesn't crash.
+    End-to-end regression test: ensure the full parse -> layout -> render
+    pipeline doesn't crash.
     """
     from nf_metro.layout.engine import compute_layout
     from nf_metro.render.svg import render_svg
@@ -594,7 +594,7 @@ def test_hidden_station_in_section():
     assert graph.stations["_branch"].section_id == "sec1"
 
 
-# --- Edge validation tests (issue #75) ---
+# --- Edge validation tests ---
 
 
 def test_unannotated_edge_error_message_includes_stations():
@@ -997,9 +997,47 @@ def test_no_duplicate_edges_after_resolve_sections():
     )
 
 
+def test_parse_group_directive():
+    text = (
+        "%%metro group: SNPs & Indels | a, b, c\n"
+        "%%metro group: SV & CNV | d, e | above\n"
+        "graph LR\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert len(graph.groups) == 2
+    g0, g1 = graph.groups
+    assert g0.label == "SNPs & Indels"
+    assert g0.station_ids == ["a", "b", "c"]
+    assert g0.position == "below"
+    assert g1.label == "SV & CNV"
+    assert g1.station_ids == ["d", "e"]
+    assert g1.position == "above"
+
+
+def test_parse_group_directive_quoted_label():
+    text = '%%metro group: "Callers (somatic)" | x\ngraph LR\n'
+    graph = parse_metro_mermaid(text)
+    assert len(graph.groups) == 1
+    assert graph.groups[0].label == "Callers (somatic)"
+
+
+def test_parse_group_directive_invalid_ignored():
+    text = "%%metro group: NoStations\ngraph LR\n"
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid(text)
+    assert graph.groups == []
+
+
+def test_parse_group_directive_bad_position_defaults_below():
+    text = "%%metro group: G | a | sideways\ngraph LR\n"
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid(text)
+    assert graph.groups[0].position == "below"
+
+
 @pytest.mark.parametrize("direction", ["TB", "TD", "BT", "RL"])
 def test_non_lr_primary_direction_warns(direction):
-    """A non-LR `graph` header warns that only LR primary is honoured (#525)."""
+    """A non-LR `graph` header warns that only LR primary is honoured."""
     text = (
         "%%metro line: a | A | #0570b0\n"
         f"graph {direction}\n"
@@ -1015,7 +1053,7 @@ def test_non_lr_primary_direction_warns(direction):
 
 @pytest.mark.parametrize("header", ["graph LR", "graph", "graph    LR"])
 def test_lr_primary_direction_does_not_warn(header, recwarn):
-    """`graph LR` (or a bare `graph`) is the honoured primary; no warning (#525)."""
+    """`graph LR` (or a bare `graph`) is the honoured primary; no warning."""
     parse_metro_mermaid(f"{header}\n    subgraph s1 [One]\n        x[X]\n    end\n")
     direction_warnings = [
         w for w in recwarn.list if "primary layout direction" in str(w.message)
