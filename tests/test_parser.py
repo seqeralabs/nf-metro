@@ -1099,3 +1099,14 @@ def test_fold_threshold_keeps_wide_chain_on_one_row():
     )
     rows_raised = {s.grid_row for s in raised.sections.values() if s.station_ids}
     assert rows_raised == {0}, f"fold_threshold should keep one row, got {rows_raised}"
+
+
+def test_max_station_columns_arg_overrides_fold_threshold():
+    """An explicit caller value (the --max-layers-per-row CLI flag) wins over a
+    fold_threshold directive, matching the CLI-overrides-directive convention."""
+    graph = parse_metro_mermaid(
+        "%%metro fold_threshold: 100\n" + _wide_section_chain(),
+        max_station_columns=15,
+    )
+    rows = {s.grid_row for s in graph.sections.values() if s.station_ids}
+    assert max(rows) > 0, "explicit max_station_columns=15 should force a wrap"

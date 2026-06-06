@@ -132,8 +132,15 @@ def _validate_edge_annotations(graph: MetroGraph) -> None:
         )
 
 
-def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
-    """Parse a Mermaid graph definition with %%metro directives."""
+def parse_metro_mermaid(
+    text: str, max_station_columns: int | None = None
+) -> MetroGraph:
+    """Parse a Mermaid graph definition with %%metro directives.
+
+    ``max_station_columns`` is the row-wrap width supplied by the caller (the
+    ``--max-layers-per-row`` CLI flag). When ``None``, a ``%%metro
+    fold_threshold`` directive supplies the width, falling back to 15.
+    """
     _check_unsupported_input(text)
 
     graph = MetroGraph()
@@ -196,13 +203,16 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
 
         from nf_metro.layout.auto_layout import infer_section_layout
 
-        # A %%metro fold_threshold directive overrides the row-wrap width so a
-        # long horizontal trunk of sections can stay on one row.
-        eff_cols = (
-            graph.fold_threshold
-            if graph.fold_threshold is not None
-            else max_station_columns
-        )
+        # Row-wrap width precedence: an explicit caller value (the
+        # --max-layers-per-row CLI flag) wins over a %%metro fold_threshold
+        # directive, which in turn overrides the default of 15. Raising it
+        # keeps a long horizontal trunk of sections on a single row.
+        if max_station_columns is not None:
+            eff_cols = max_station_columns
+        elif graph.fold_threshold is not None:
+            eff_cols = graph.fold_threshold
+        else:
+            eff_cols = 15
         infer_section_layout(graph, max_station_columns=eff_cols)
         _insert_terminus_convergence_stations(graph)
         _resolve_sections(graph)
