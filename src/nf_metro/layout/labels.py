@@ -74,8 +74,6 @@ def diagonal_label_pitch(graph: "MetroGraph", fallback: float) -> float:
     every section shares one consistent pitch rather than each section sizing
     its own.  Returns *fallback* when no label angle is set or no labels exist.
     """
-    import math
-
     from nf_metro.layout.constants import STATION_RADIUS_APPROX
 
     angle = graph.label_angle or 0.0
@@ -158,33 +156,12 @@ def _rotated_label_bbox(
     The label text starts at the anchor ``(x, y)`` (``text_anchor="start"``)
     and reads horizontally before being rotated clockwise by ``angle``
     degrees about that anchor -- matching the SVG ``rotate(angle, x, y)``
-    transform the renderer emits.  We rotate the four corners of the
-    upright text box and take their min/max as the collision box, so the
-    diagonal footprint is approximated by its enclosing rectangle.
+    transform the renderer emits.  The enclosing rectangle of the rotated
+    corners approximates the diagonal footprint for collision purposes.
     """
-    w = label_text_width(placement.text)
-    text_h = _label_text_height(placement.text)
-    # Upright box for text_anchor="start", baseline at y: text occupies
-    # x in [x, x+w] and y in roughly [y - text_h, y] (ascenders above the
-    # baseline).  Centre the box vertically on the baseline a touch so the
-    # footprint is symmetric enough for collision purposes.
-    corners = [
-        (placement.x, placement.y - text_h),
-        (placement.x + w, placement.y - text_h),
-        (placement.x + w, placement.y),
-        (placement.x, placement.y),
-    ]
-    rad = math.radians(placement.angle)
-    cos_a, sin_a = math.cos(rad), math.sin(rad)
-    ax, ay = placement.x, placement.y
-    xs: list[float] = []
-    ys: list[float] = []
-    for cx, cy in corners:
-        dx, dy = cx - ax, cy - ay
-        rx = ax + dx * cos_a - dy * sin_a
-        ry = ay + dx * sin_a + dy * cos_a
-        xs.append(rx)
-        ys.append(ry)
+    corners = _label_corners(placement)
+    xs = [c[0] for c in corners]
+    ys = [c[1] for c in corners]
     return (min(xs), min(ys), max(xs), max(ys))
 
 
@@ -745,7 +722,7 @@ def place_labels(
     allow_hyphenation: bool = True,
     label_angle: float = 0.0,
 ) -> list[LabelPlacement]:
-    """Place horizontal labels alternating above/below stations.
+    """Place station labels, alternating above/below stations.
 
     Strategy:
     1. Default: alternate above/below based on layer index.
@@ -755,6 +732,10 @@ def place_labels(
     Per-section trial: for each LR/RL section with multiple stations,
     both alternation patterns are tested and the one with fewer
     collisions is used.
+
+    When ``label_angle`` is non-zero, LR/RL section labels are instead
+    anchored at the pill and tilted (transit-map style); they hang on one
+    side and pack by their narrow rotated footprint.
     """
     sorted_stations = sorted(
         (
