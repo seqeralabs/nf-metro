@@ -196,7 +196,14 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
 
         from nf_metro.layout.auto_layout import infer_section_layout
 
-        infer_section_layout(graph, max_station_columns=max_station_columns)
+        # A %%metro fold_threshold directive overrides the row-wrap width so a
+        # long horizontal trunk of sections can stay on one row.
+        eff_cols = (
+            graph.fold_threshold
+            if graph.fold_threshold is not None
+            else max_station_columns
+        )
+        infer_section_layout(graph, max_station_columns=eff_cols)
         _insert_terminus_convergence_stations(graph)
         _resolve_sections(graph)
         _insert_bypass_stations(graph)
@@ -308,6 +315,11 @@ def _parse_directive(
         graph.center_ports = val in ("true", "yes", "1")
     elif content.startswith("line_spread:"):
         _parse_line_spread_directive(content[len("line_spread:") :].strip(), graph)
+    elif content.startswith("fold_threshold:"):
+        try:
+            graph.fold_threshold = int(content[len("fold_threshold:") :].strip())
+        except ValueError:
+            pass
     elif content.startswith("label_angle:"):
         try:
             graph.label_angle = float(content[len("label_angle:") :].strip())
