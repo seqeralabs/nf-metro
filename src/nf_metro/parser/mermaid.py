@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import warnings
+from typing import Literal
 
 from nf_metro.parser.model import (
     MARKER_FILL_OPEN,
@@ -28,6 +29,7 @@ from nf_metro.parser.model import (
     PortSide,
     Section,
     Station,
+    StationGroup,
 )
 
 
@@ -325,6 +327,8 @@ def _parse_directive(
     elif content.startswith("off_track:"):
         ids = [s.strip() for s in content[len("off_track:") :].split(",")]
         graph._pending_off_track.extend(sid for sid in ids if sid)
+    elif content.startswith("group:"):
+        _parse_group_directive(content[len("group:") :].strip(), graph)
     elif content.startswith("marker_legend:"):
         _parse_marker_legend_directive(content[len("marker_legend:") :].strip(), graph)
     elif content.startswith("marker:"):
@@ -481,6 +485,47 @@ def _parse_legend_directive(value: str, graph: MetroGraph) -> None:
             "'dx,dy'. Ignoring.",
             stacklevel=2,
         )
+
+
+def _parse_group_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro group: Label | station1, station2[, ...] [| above|below].
+
+    Stores an annotative caption spanning the listed stations.  The optional
+    third field selects whether the caption renders ``below`` (default) or
+    ``above`` the spanned stations.  Purely decorative; does not affect layout.
+    """
+    parts = value.split("|")
+    if len(parts) < 2:
+        warnings.warn(
+            f"group directive {value!r} needs 'Label | station1, station2'. Ignoring.",
+            stacklevel=2,
+        )
+        return
+    label = _unquote(parts[0].strip())
+    station_ids = [s.strip() for s in parts[1].split(",") if s.strip()]
+    if not label or not station_ids:
+        warnings.warn(
+            f"group directive {value!r} needs a label and at least one station. "
+            "Ignoring.",
+            stacklevel=2,
+        )
+        return
+    position: Literal["above", "below"] = "below"
+    if len(parts) >= 3:
+        raw_pos = parts[2].strip().lower()
+        if raw_pos == "above":
+            position = "above"
+        elif raw_pos == "below":
+            position = "below"
+        elif raw_pos:
+            warnings.warn(
+                f"group position {raw_pos!r} not recognised; expected "
+                "'above' or 'below'. Using 'below'.",
+                stacklevel=2,
+            )
+    graph.groups.append(
+        StationGroup(label=label, station_ids=station_ids, position=position)
+    )
 
 
 def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:

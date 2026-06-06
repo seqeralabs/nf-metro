@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 
 class RowGridInfo(TypedDict):
@@ -187,6 +187,20 @@ class Edge:
 
 
 @dataclass
+class StationGroup:
+    """An annotative caption spanning a set of stations within a section.
+
+    Purely decorative: it groups related stations (e.g. variant-caller
+    families) under a shared caption rendered beneath (or above) the
+    spanned stations' x-extent.  It does not influence layout coordinates.
+    """
+
+    label: str
+    station_ids: list[str] = field(default_factory=list)
+    position: Literal["above", "below"] = "below"
+
+
+@dataclass
 class Port:
     """A synthetic entry/exit point on a section boundary.
 
@@ -270,6 +284,7 @@ class MetroGraph:
     sections: dict[str, Section] = field(default_factory=dict)
     ports: dict[str, Port] = field(default_factory=dict)
     junctions: list[str] = field(default_factory=list)
+    groups: list[StationGroup] = field(default_factory=list)
     grid_overrides: dict[str, tuple[int, int, int, int]] = field(default_factory=dict)
     # Section IDs that received an explicit %%metro grid: directive (i.e.
     # the user laid out the grid manually, as opposed to auto_layout
@@ -288,7 +303,7 @@ class MetroGraph:
     line_spread_overrides: dict[str, LineSpread] = field(default_factory=dict)
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
-    # Opt-in diagonal station labels (#527). None means "use the theme
+    # Opt-in diagonal station labels. None means "use the theme
     # default" (0 = horizontal); a directive value overrides the theme.
     label_angle: float | None = None
     # %%metro legend_combo entries: (line_ids, label) pairs.
@@ -300,7 +315,7 @@ class MetroGraph:
     legend_at: tuple[float, float] | None = None  # absolute top-left override
     logo_path: str = ""
     logo_scale: float = 1.0  # multiplies the logo size within the legend block
-    # Marker-key captions from %%metro marker_legend: (issue #530). When
+    # Marker-key captions from %%metro marker_legend:. When
     # non-empty, the legend renders a marker key below the line key.
     marker_legend: list[MarkerLegendEntry] = field(default_factory=list)
     # Section dependency graph (populated by auto_layout)
@@ -349,7 +364,7 @@ class MetroGraph:
     # _snapshot_placement_refs.
     _placement_ref_y: dict[str, float] = field(default_factory=dict, repr=False)
     _placement_ref_bbox_top: dict[str, float] = field(default_factory=dict, repr=False)
-    # Per-phase coordinate-snapshot enable flag (issue #363).  Set once in
+    # Per-phase coordinate-snapshot enable flag.  Set once in
     # compute_layout from the NF_METRO_PHASE_SNAPSHOTS env var; read by the
     # _snap hook after each phase.  Off by default (pure observation).
     _phase_snapshots_enabled: bool = field(default=False, repr=False)
