@@ -12,9 +12,15 @@ import re
 import warnings
 
 from nf_metro.parser.model import (
+    MARKER_FILL_OPEN,
+    MARKER_FILL_SOLID,
+    MARKER_SHAPE_CIRCLE,
     VALID_ICON_TYPES,
     VALID_LINE_STYLES,
+    VALID_MARKER_SHAPES,
     Edge,
+    MarkerLegendEntry,
+    MarkerStyle,
     MetroGraph,
     MetroLine,
     Port,
@@ -214,6 +220,12 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
         if station:
             station.off_track = True
 
+    # Apply pending per-station marker styles
+    for station_id, marker in graph._pending_markers.items():
+        station = graph.stations.get(station_id)
+        if station:
+            station.marker = marker
+
     return graph
 
 
@@ -293,6 +305,11 @@ def _parse_directive(
     elif content.startswith("centered_tracks:"):
         val = content[len("centered_tracks:") :].strip().lower()
         graph.centered_tracks = val in ("true", "yes", "1")
+    elif content.startswith("label_angle:"):
+        try:
+            graph.label_angle = float(content[len("label_angle:") :].strip())
+        except ValueError:
+            pass
     elif content.startswith("legend_min_height:"):
         try:
             graph.legend_min_height = float(
@@ -300,11 +317,17 @@ def _parse_directive(
             )
         except ValueError:
             pass
+    elif content.startswith("legend_combo:"):
+        _parse_legend_combo_directive(content[len("legend_combo:") :].strip(), graph)
     elif content.startswith("legend:"):
         _parse_legend_directive(content[len("legend:") :].strip(), graph)
     elif content.startswith("off_track:"):
         ids = [s.strip() for s in content[len("off_track:") :].split(",")]
         graph._pending_off_track.extend(sid for sid in ids if sid)
+    elif content.startswith("marker_legend:"):
+        _parse_marker_legend_directive(content[len("marker_legend:") :].strip(), graph)
+    elif content.startswith("marker:"):
+        _parse_marker_directive(content[len("marker:") :].strip(), graph)
     elif ":" in content and content.split(":", 1)[0] in VALID_ICON_TYPES:
         icon_type, rest = content.split(":", 1)
         parts = rest.strip().split("|")
@@ -468,6 +491,98 @@ def _parse_logo_scale_directive(value: str, graph: MetroGraph) -> None:
         )
         return
     graph.logo_scale = scale
+
+
+def _parse_marker_style(spec: str) -> MarkerStyle | None:
+    """Parse a ``shape, fill`` marker spec into a MarkerStyle.
+
+    ``shape`` defaults to ``circle`` and ``fill`` to ``solid`` when omitted.
+    An unknown shape is rejected (returns None with a warning); any fill
+    string other than ``open``/``solid`` is taken as a literal colour.
+    """
+    parts = [p.strip() for p in spec.split(",")]
+    shape = parts[0].lower() if parts and parts[0] else MARKER_SHAPE_CIRCLE
+    fill = parts[1] if len(parts) >= 2 and parts[1] else MARKER_FILL_SOLID
+    if shape not in VALID_MARKER_SHAPES:
+        warnings.warn(
+            f"Unknown marker shape {shape!r}; expected one of "
+            f"{'/'.join(VALID_MARKER_SHAPES)}. Ignoring.",
+            stacklevel=2,
+        )
+        return None
+    # Normalise the fill keywords to lowercase; leave literal colours as-is.
+    if fill.lower() in (MARKER_FILL_OPEN, MARKER_FILL_SOLID):
+        fill = fill.lower()
+    return MarkerStyle(shape=shape, fill=fill)
+
+
+def _parse_marker_directive(value: str, graph: MetroGraph) -> None:
+    """Parse ``%%metro marker: node_id | shape, fill``."""
+    node_part, sep, style_part = value.partition("|")
+    node_id = node_part.strip()
+    if not node_id:
+        return
+    style = _parse_marker_style(style_part.strip() if sep else "")
+    if style is not None:
+        graph._pending_markers[node_id] = style
+
+
+def _parse_marker_legend_directive(value: str, graph: MetroGraph) -> None:
+    """Parse ``%%metro marker_legend: shape, fill | Caption``."""
+    style_part, sep, caption = value.partition("|")
+    if not sep:
+        warnings.warn(
+            "marker_legend directive needs a caption: "
+            "'shape, fill | Caption'. Ignoring.",
+            stacklevel=2,
+        )
+        return
+    style = _parse_marker_style(style_part.strip())
+    caption = caption.strip()
+    if style is not None and caption:
+        graph.marker_legend.append(MarkerLegendEntry(style=style, caption=caption))
+
+
+def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro legend_combo: lineA, lineB[, ...] | Display Label.
+
+    Stores a (line_ids, label) entry on ``graph.legend_combos``. The named
+    lines are rendered as a single combined legend row and suppressed from
+    their own individual rows. A combo referencing unknown lines is warned
+    about and ignored; unknown members of an otherwise-valid combo are
+    dropped (with a warning) and the remaining members kept.
+    """
+    parts = value.split("|", 1)
+    if len(parts) != 2:
+        warnings.warn(
+            f"Invalid legend_combo {value!r}; expected 'lineA, lineB | Display Label'.",
+            stacklevel=2,
+        )
+        return
+    ids_raw, label = parts[0], parts[1].strip()
+    line_ids = [s.strip() for s in ids_raw.split(",") if s.strip()]
+    if len(line_ids) < 2 or not label:
+        warnings.warn(
+            f"Invalid legend_combo {value!r}; expected at least two line IDs "
+            "and a non-empty label.",
+            stacklevel=2,
+        )
+        return
+    known = [lid for lid in line_ids if lid in graph.lines]
+    unknown = [lid for lid in line_ids if lid not in graph.lines]
+    if unknown:
+        warnings.warn(
+            f"legend_combo {label!r} references unknown line(s) "
+            f"{', '.join(unknown)}; ignoring those.",
+            stacklevel=2,
+        )
+    if len(known) < 2:
+        warnings.warn(
+            f"legend_combo {label!r} has fewer than two known lines; ignoring.",
+            stacklevel=2,
+        )
+        return
+    graph.legend_combos.append((tuple(known), label))
 
 
 # Regex patterns for node shapes

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 
 from nf_metro.layout.constants import (
@@ -116,6 +117,8 @@ def _compute_fork_join_gaps(
     divergences are suppressed because there are no diagonal transitions
     and the extra spacing is purely wasteful.
     """
+    label_angle = (full_graph or sub).label_angle or 0.0
+
     out_targets: dict[str, set[str]] = defaultdict(set)
     in_sources: dict[str, set[str]] = defaultdict(set)
 
@@ -283,6 +286,28 @@ def _compute_fork_join_gaps(
         bubble_extra = max(
             0.0, (bubble_label_half * 2 + DIAGONAL_RUN - x_spacing) / 1.5
         )
+
+        # Angled labels (label_angle) hang to the lower-right of each fan
+        # caller; the fan-out/fan-in diagonal on that side must start past
+        # the tilted text or it rakes the label.  Reserve the caller
+        # label's rightward reach (the narrow rotated footprint, not the
+        # full horizontal width) as extra column room.  Unlike the
+        # horizontal-label case above this applies to any multi-track fan,
+        # not only wide (3+) ones, since a single hanging name is enough to
+        # clash with the convergence diagonal.
+        if label_angle:
+            cos_a = abs(math.cos(math.radians(label_angle)))
+            adj_layer = layer + 1 if layer in fork_layers else layer - 1
+            angled_reach = 0.0
+            for sid, lyr in layers.items():
+                if lyr == adj_layer and sid in tracks and tracks[sid] not in fj_tracks:
+                    station = sub.stations.get(sid)
+                    if station and station.label.strip():
+                        angled_reach = max(
+                            angled_reach, label_text_width(station.label) * cos_a
+                        )
+            bubble_extra = max(bubble_extra, angled_reach)
+
         layer_gap[layer] = max(base_gap, fj_label_half + bubble_extra)
 
     cumulative = 0.0

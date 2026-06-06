@@ -115,6 +115,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_fan_bundles_coincide_or_separate,
     _guard_fanout_junction_shares_exit_port_y,
     _guard_fanout_tail_join,
+    _guard_feeder_exits_section_through_side,
     _guard_file_icon_no_name_label,
     _guard_inter_row_run_clearance,
     _guard_inter_section_descent_edge_clearance,
@@ -354,6 +355,31 @@ def compute_layout(
     # Off by default: when unset, each _snap call is a single attribute read.
     graph._phase_snapshots_enabled = phase_snapshots_enabled()
 
+    # Diagonal labels are a horizontal-trunk feature: a TB section places its
+    # labels beside vertical pills, where the same tilt doesn't read, so an
+    # angled graph that also has a TB section would mix tilted and horizontal
+    # labels on one map.  Decline the angle outright in that case (warn and
+    # fall back to horizontal everywhere) rather than ship a mixed-orientation
+    # map.  Mutating graph.label_angle makes both layout and the renderer agree.
+    if graph.label_angle and any(
+        sec.direction == "TB" for sec in graph.sections.values()
+    ):
+        warnings.warn(
+            f"label_angle={graph.label_angle!r} ignored: diagonal labels are "
+            f"not applied to a graph containing a TB section (the whole map "
+            f"would need to tilt to stay consistent). Labels stay horizontal.",
+            UserWarning,
+            stacklevel=2,
+        )
+        graph.label_angle = 0.0
+
+    # A diagonal label angle drives one graph-wide column pitch shared by every
+    # section, so spacing is a property of the whole render, not of any one
+    # section.  Used as the default x_spacing when the caller didn't pin one.
+    from nf_metro.layout.labels import diagonal_label_pitch
+
+    default_x_spacing = diagonal_label_pitch(graph, X_SPACING)
+
     auto_x = x_spacing is None
     auto_y = y_spacing is None
     if y_spacing is None:
@@ -370,7 +396,7 @@ def compute_layout(
                 stacklevel=2,
             )
     if x_spacing is None:
-        x_spacing = X_SPACING
+        x_spacing = default_x_spacing
 
     # Optionally reorder lines by section span before layout.
     # Must happen here (on the full graph) before section subgraphs are
@@ -1247,6 +1273,9 @@ def _finalize_layout(
             )
             _guard_routes_enter_sections_at_ports(graph, phase, routes=routes)
             _guard_no_route_through_section(
+                graph, phase, routes=routes, offsets=offsets
+            )
+            _guard_feeder_exits_section_through_side(
                 graph, phase, routes=routes, offsets=offsets
             )
             _guard_entry_approach_from_port_side(graph, phase, routes=routes)

@@ -24,6 +24,7 @@ from nf_metro.layout.constants import (
     EDGE_TO_BUNDLE_CLEARANCE,
     FOLD_MARGIN,
     ICON_TERMINUS_FORK_LEAD,
+    INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     JUNCTION_MARGIN,
     MERGE_ROUTE_MARGIN,
@@ -2393,18 +2394,18 @@ def _route_inter_row_gap_corridor(
     elif gap_bottom > gap_top:
         gy_base = _center_inter_row_channel(gap_top, gap_bottom)
     else:
-        gy_base = gap_top + EDGE_TO_BUNDLE_CLEARANCE
+        gy_base = gap_top + INTER_ROW_EDGE_CLEARANCE
     # Outer line sits at LARGER y in this leftward run (CW D->L corner).
     gy = gy_base + delta
     # Keep every staggered line inside the clearance band: at least
-    # EDGE_TO_BUNDLE_CLEARANCE below the source-row bottom and clear of the
+    # INTER_ROW_EDGE_CLEARANCE below the source-row bottom and clear of the
     # next row's header badge.  In a tight gap the band is narrower than the
     # bundle, so the per-line stagger collapses rather than grazing an edge.
     # Skipped for fan feeders, which share the wrap sibling's (unclamped)
     # band so the two bundles' H legs coincide.
     if fan is None and gap_bottom > gap_top:
         gy = min(
-            max(gy, gap_top + EDGE_TO_BUNDLE_CLEARANCE),
+            max(gy, gap_top + INTER_ROW_EDGE_CLEARANCE),
             gap_bottom - INTER_ROW_HEADER_CLEARANCE,
         )
 
@@ -5322,10 +5323,14 @@ def _restack_htrunk(
         return
     max_off = (n - 1) * step
     off = inner * step
-    # An innermost trunk turns on the INSIDE of both flanking corners; the
-    # outermost turns on the OUTSIDE.  For a downward dip the inner line is
-    # the inside of the turn (smaller radius); same parity on both corners.
-    r = corner_radius(off, max_off, outside=False, base_radius=base_radius)
+    # An innermost trunk turns on the INSIDE of both flanking corners (smaller
+    # radius), the outermost on the OUTSIDE (larger); same parity on both
+    # corners of a dip.  ``off`` grows from 0 at the innermost line, so the
+    # radius is base_radius + off (innermost = base_radius, the tightest) --
+    # the concentric nesting.  Using the reversed (outside=False) offset here
+    # inverts that, giving the inside line the LARGEST radius and tearing the
+    # bundle apart at the dip corners.
+    r = corner_radius(off, max_off, outside=True, base_radius=base_radius)
     if 0 <= k - 1 < len(rp.curve_radii):
         rp.curve_radii[k - 1] = r
     if k < len(rp.curve_radii) and k + 2 < len(pts):

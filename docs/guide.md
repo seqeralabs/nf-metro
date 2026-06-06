@@ -333,7 +333,80 @@ The label inside an icon is meant for a short type chip (e.g. `CSV`, `FASTQ`). T
 
 The name is rendered as a caption directly below the icon. If multiple labels are listed (`FASTQ, BAM`), the same name applies to all of them.
 
-## 6. Hidden stations
+## 6. Per-station markers
+
+By default every station is drawn as a uniform pill. The `%%metro marker:` directive overrides one station's marker so it can encode a tool attribute - mandatory vs optional, hardware-accelerated, expanded in another diagram - through its shape and fill:
+
+```text
+%%metro marker: node_id | shape, fill
+```
+
+- **`shape`** is `circle` (fully rounded), `square` (sharp corners), or `pill` (a flat-edged capsule running along the line, handy for flagging a step whose detail is shown in a separate diagram). Every shape still spans the line bundle, so it covers all the lines passing through the station.
+- **`fill`** is `open` (a hollow marker in the background colour), `solid` (the default station fill), or any literal colour - a name (`red`) or hex (`#4CAF50`).
+
+`shape` defaults to `circle` and `fill` to `solid`, so `%%metro marker: node_id |` gives a solid circle. The directive may appear before or after the node is defined.
+
+To explain the markers, add a key below the line legend with `%%metro marker_legend:`, one row per shape/fill combination:
+
+```text
+%%metro marker_legend: shape, fill | Caption
+```
+
+Here a two-line variant-calling pipeline uses square (mandatory), open-circle (optional), pill (expanded elsewhere) and coloured-square (hardware-accelerated) markers, with a matching key:
+
+```text
+%%metro title: Per-station marker styles
+%%metro style: dark
+%%metro line: germline | Germline calling | #0570b0
+%%metro line: somatic | Somatic calling | #e63946
+%%metro legend: bl
+
+%%metro marker: bwa | square, solid
+%%metro marker: markdup | square, solid
+%%metro marker: bqsr | square, #4CAF50
+%%metro marker: haplotypecaller | square, #4CAF50
+%%metro marker: mutect2 | square, #1f4e79
+%%metro marker: cnvkit | pill, open
+%%metro marker: vep | circle, open
+%%metro marker: snpeff | circle, open
+
+%%metro marker_legend: square, solid | Mandatory
+%%metro marker_legend: circle, open | Optional
+%%metro marker_legend: pill, open | Expanded elsewhere
+%%metro marker_legend: square, #4CAF50 | Parabricks accelerated
+%%metro marker_legend: square, #1f4e79 | Sentieon accelerated
+
+graph LR
+    subgraph alignment [Alignment & preprocessing]
+        bwa[BWA-MEM]
+        markdup[MarkDuplicates]
+        bqsr[BQSR]
+
+        bwa -->|germline,somatic| markdup
+        markdup -->|germline,somatic| bqsr
+    end
+
+    subgraph calling [Variant calling & annotation]
+        haplotypecaller[HaplotypeCaller]
+        mutect2[Mutect2]
+        cnvkit[CNVkit]
+        snpeff[SnpEff]
+        vep[VEP]
+
+        haplotypecaller -->|germline| snpeff
+        mutect2 -->|somatic| vep
+        mutect2 -->|somatic| cnvkit
+    end
+
+    bqsr -->|germline| haplotypecaller
+    bqsr -->|somatic| mutect2
+```
+
+![Per-station markers](assets/renders/marker_styles.svg)
+
+Stations with no `%%metro marker:` keep the default pill, so the feature is entirely opt-in.
+
+## 7. Hidden stations
 
 Sometimes you need a branching or merging point in the graph that doesn't represent a real pipeline step. For example, lines might diverge at a point where no tool is actually run. Adding a visible station there clutters the diagram with a meaningless marker.
 
@@ -397,7 +470,7 @@ The lines still fork at the same point, but there is no marker or label. This gi
 
 Use `--debug` to see hidden stations as dashed circles: `nf-metro render --debug pipeline.mmd -o debug.svg`
 
-## 7. Putting it all together
+## 8. Putting it all together
 
 The nf-core/rnaseq example at [`examples/rnaseq_auto.mmd`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/rnaseq_auto.mmd) combines all of these patterns in a real-world pipeline:
 

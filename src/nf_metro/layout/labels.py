@@ -14,6 +14,7 @@ __all__ = [
     "place_labels",
 ]
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
@@ -21,6 +22,7 @@ from nf_metro.layout.constants import (
     CHAR_WIDTH,
     COLLISION_MULTIPLIER,
     DESCENDER_CLEARANCE,
+    DIAGONAL_LABEL_OFFSET,
     FONT_HEIGHT,
     LABEL_BBOX_MARGIN,
     LABEL_LINE_HEIGHT,
@@ -33,6 +35,7 @@ from nf_metro.layout.constants import (
     TB_LABEL_H_SPACING,
     TB_LINE_Y_OFFSET,
     TB_PILL_EDGE_OFFSET,
+    X_SPACING,
 )
 from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.parser.model import MetroGraph
@@ -57,6 +60,43 @@ def _label_text_height(label: str) -> float:
     return FONT_HEIGHT + (n - 1) * FONT_HEIGHT * LABEL_LINE_HEIGHT
 
 
+def diagonal_label_pitch(graph: "MetroGraph", fallback: float) -> float:
+    """Graph-wide column pitch for diagonal (angled) station labels.
+
+    All diagonal labels are drawn at the same angle, so adjacent columns'
+    labels are PARALLEL and collide only by their PERPENDICULAR separation, not
+    along their length.  Giving adjacent labels a clear text-row of space
+    between them means a perpendicular separation of ~2x the label height (the
+    row itself plus an equal gap); the column pitch that yields that is
+    ``2 * height / sin(angle)``, floored at a marker-collision minimum.
+
+    This is computed once over the whole graph (the tallest label drives it) so
+    every section shares one consistent pitch rather than each section sizing
+    its own.  Returns *fallback* when no label angle is set or no labels exist.
+    """
+    from nf_metro.layout.constants import STATION_RADIUS_APPROX
+
+    angle = graph.label_angle or 0.0
+    if not angle:
+        return fallback
+    sin_a = abs(math.sin(math.radians(angle)))
+    if sin_a < 1e-6:
+        return fallback
+    tallest = 0.0
+    for st in graph.stations.values():
+        if st.is_port or st.is_hidden or st.off_track:
+            continue
+        if st.is_terminus and not st.label.strip():
+            continue
+        if not st.label.strip():
+            continue
+        tallest = max(tallest, _label_text_height(st.label))
+    if tallest <= 0.0:
+        return fallback
+    marker_floor = STATION_RADIUS_APPROX * 3.0
+    return max(marker_floor, (tallest * 2.0) / sin_a)
+
+
 @dataclass
 class LabelPlacement:
     """Placement information for a station label."""
@@ -78,6 +118,8 @@ def _label_bbox(
     """Return (x_min, y_min, x_max, y_max) bounding box for a label."""
     if placement.obstacle_bbox is not None:
         return placement.obstacle_bbox
+    if placement.angle:
+        return _rotated_label_bbox(placement)
     w = label_text_width(placement.text)
     text_h = _label_text_height(placement.text)
 
@@ -106,18 +148,116 @@ def _label_bbox(
     return (x_min, y_min, x_max, y_max)
 
 
+def _rotated_label_bbox(
+    placement: LabelPlacement,
+) -> tuple[float, float, float, float]:
+    """Axis-aligned bounding box of a label rotated about its anchor.
+
+    The label text starts at the anchor ``(x, y)`` (``text_anchor="start"``)
+    and reads horizontally before being rotated clockwise by ``angle``
+    degrees about that anchor -- matching the SVG ``rotate(angle, x, y)``
+    transform the renderer emits.  The enclosing rectangle of the rotated
+    corners approximates the diagonal footprint for collision purposes.
+    """
+    corners = _label_corners(placement)
+    xs = [c[0] for c in corners]
+    ys = [c[1] for c in corners]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _label_corners(
+    placement: LabelPlacement,
+) -> list[tuple[float, float]]:
+    """Return the four corners of a label's (possibly rotated) box.
+
+    For an angled label the corners are the upright text box rotated about
+    its anchor, matching the renderer's ``rotate(angle, x, y)`` transform.
+    For a horizontal label (or one carrying an explicit ``obstacle_bbox``)
+    the corners are those of its axis-aligned bounding box.  Used by the
+    oriented overlap test so densely-spaced parallel diagonal labels pack
+    by their true (narrow) footprint rather than their enclosing AABB.
+    """
+    if placement.obstacle_bbox is not None or not placement.angle:
+        x0, y0, x1, y1 = _label_bbox(placement)
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    w = label_text_width(placement.text)
+    text_h = _label_text_height(placement.text)
+    corners = [
+        (placement.x, placement.y - text_h),
+        (placement.x + w, placement.y - text_h),
+        (placement.x + w, placement.y),
+        (placement.x, placement.y),
+    ]
+    rad = math.radians(placement.angle)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    ax, ay = placement.x, placement.y
+    out: list[tuple[float, float]] = []
+    for cx, cy in corners:
+        dx, dy = cx - ax, cy - ay
+        out.append((ax + dx * cos_a - dy * sin_a, ay + dx * sin_a + dy * cos_a))
+    return out
+
+
+def _obb_separation(
+    a: list[tuple[float, float]],
+    b: list[tuple[float, float]],
+) -> float:
+    """Minimum separating gap between two convex quads via SAT.
+
+    Returns the largest gap found over all candidate separating axes
+    (positive when the quads are apart, <= 0 when they overlap).  Both
+    quads are convex (label rectangles), so the separating-axis theorem
+    using each quad's edge normals is exact.
+    """
+
+    def axes(quad: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        res = []
+        for i in range(len(quad)):
+            x1, y1 = quad[i]
+            x2, y2 = quad[(i + 1) % len(quad)]
+            nx, ny = -(y2 - y1), (x2 - x1)
+            length = math.hypot(nx, ny)
+            if length > 1e-9:
+                res.append((nx / length, ny / length))
+        return res
+
+    best_gap = -math.inf
+    for ax, ay in axes(a) + axes(b):
+        a_proj = [px * ax + py * ay for px, py in a]
+        b_proj = [px * ax + py * ay for px, py in b]
+        gap = max(min(b_proj) - max(a_proj), min(a_proj) - max(b_proj))
+        best_gap = max(best_gap, gap)
+    return best_gap
+
+
 def _boxes_overlap(
     a: tuple[float, float, float, float],
     b: tuple[float, float, float, float],
     margin: float = LABEL_MARGIN,
 ) -> bool:
-    """Check if two bounding boxes overlap."""
+    """Check if two axis-aligned bounding boxes overlap."""
     return not (
         a[2] + margin < b[0]
         or b[2] + margin < a[0]
         or a[3] + margin < b[1]
         or b[3] + margin < a[1]
     )
+
+
+def _placements_overlap(
+    a: LabelPlacement,
+    b: LabelPlacement,
+    margin: float = LABEL_MARGIN,
+) -> bool:
+    """Overlap test honouring label rotation.
+
+    When either label is angled, an oriented (separating-axis) test packs
+    parallel diagonal labels by their true footprint; otherwise it falls
+    back to the cheap AABB test so horizontal layouts are unchanged.
+    """
+    if a.angle or b.angle:
+        return _obb_separation(_label_corners(a), _label_corners(b)) < margin
+    return _boxes_overlap(_label_bbox(a), _label_bbox(b), margin)
 
 
 class LabelOverlap(NamedTuple):
@@ -180,10 +320,18 @@ def find_label_overlaps(
         for j in range(i + 1, len(boxes)):
             pb, bb = boxes[j]
             ox, oy = _intrusion(ba, bb)
-            if ox > eps and oy > eps:
-                overlaps.append(
-                    LabelOverlap("label", pa.station_id, pb.station_id, ox, oy)
-                )
+            if ox <= eps or oy <= eps:
+                continue
+            # Angled labels pack as parallel diagonal strips: the AABBs
+            # overlap long before the tilted text does, so confirm with the
+            # oriented test before reporting (and spreading).  The reported
+            # ox/oy stay the AABB intrusion -- a safe upper bound for the
+            # spread bump.
+            if (pa.angle or pb.angle) and _obb_separation(
+                _label_corners(pa), _label_corners(pb)
+            ) >= LABEL_MARGIN:
+                continue
+            overlaps.append(LabelOverlap("label", pa.station_id, pb.station_id, ox, oy))
 
     # Reuse the engine's pill geometry (returns None for ports, hidden
     # stations, and junctions, none of which render a marker to collide with).
@@ -379,6 +527,38 @@ def _compute_port_label_preference(
     return result
 
 
+def _diagonal_prefer_above(graph: MetroGraph, station: Station) -> bool:
+    """Whether a tilted label should flip above the trunk for *station*.
+
+    Diagonal labels otherwise always hang below the trunk.  When a fork
+    sibling sits directly below a station (same column, a lower track) and
+    nothing sits above it, the below label would cross that branch's route, so
+    flip it above where it is clear.  Conservative: fires only for a station
+    that is the top of a same-column stack in an LR/RL section.
+    """
+    if not station.section_id:
+        return False
+    sec = graph.sections.get(station.section_id)
+    if sec is None or sec.direction not in ("LR", "RL"):
+        return False
+    below = above = False
+    for other in graph.stations.values():
+        if (
+            other is station
+            or other.is_port
+            or other.is_hidden
+            or other.section_id != station.section_id
+        ):
+            continue
+        if abs(other.x - station.x) > X_SPACING * 0.5:
+            continue
+        if other.y > station.y + 1:
+            below = True
+        elif other.y < station.y - 1:
+            above = True
+    return below and not above
+
+
 def _apply_edge_override(
     station: Station,
     start_above: bool,
@@ -540,8 +720,9 @@ def place_labels(
     icon_obstacles: list[tuple[float, float, float, float]] | None = None,
     routes: list["RoutedPath"] | None = None,
     allow_hyphenation: bool = True,
+    label_angle: float = 0.0,
 ) -> list[LabelPlacement]:
-    """Place horizontal labels alternating above/below stations.
+    """Place station labels, alternating above/below stations.
 
     Strategy:
     1. Default: alternate above/below based on layer index.
@@ -551,6 +732,10 @@ def place_labels(
     Per-section trial: for each LR/RL section with multiple stations,
     both alternation patterns are tested and the one with fewer
     collisions is used.
+
+    When ``label_angle`` is non-zero, LR/RL section labels are instead
+    anchored at the pill and tilted (transit-map style); they hang on one
+    side and pack by their narrow rotated footprint.
     """
     sorted_stations = sorted(
         (
@@ -699,6 +884,41 @@ def place_labels(
                         tb_sec.bbox_w = old_right - lx_min
                     if lx_max > tb_sec.bbox_x + tb_sec.bbox_w:
                         tb_sec.bbox_w = lx_max - tb_sec.bbox_x
+            placements.append(candidate)
+            continue
+
+        # Opt-in diagonal labels (#527): for non-TB sections, anchor the
+        # label at the bottom of the pill and tilt it.  All angled labels
+        # sit below the trunk on the same side (like real transit maps),
+        # which lets densely-spaced stations share a compact horizontal
+        # line without their long names colliding.
+        if label_angle:
+            if _diagonal_prefer_above(graph, station):
+                # Mirror the tilt across the trunk: anchor at the pill top and
+                # read up-and-to-the-right, clearing a fork sibling below.
+                candidate = LabelPlacement(
+                    station_id=station.id,
+                    text=station.label,
+                    x=station.x,
+                    y=station.y + min_off - label_offset - DIAGONAL_LABEL_OFFSET,
+                    above=True,
+                    angle=-label_angle,
+                    text_anchor="start",
+                )
+            else:
+                candidate = LabelPlacement(
+                    station_id=station.id,
+                    text=station.label,
+                    x=station.x,
+                    y=station.y + max_off + label_offset + DIAGONAL_LABEL_OFFSET,
+                    above=False,
+                    angle=label_angle,
+                    text_anchor="start",
+                )
+            if station.section_id:
+                sec = graph.sections.get(station.section_id)
+                if sec is not None and sec.bbox_w > 0:
+                    _grow_section_for_box(sec, _label_bbox(candidate))
             placements.append(candidate)
             continue
 
@@ -881,8 +1101,9 @@ def _wrap_overlapping_labels(
         and p.obstacle_bbox is None
         and graph.stations.get(p.station_id) is not None
     }
-    # Only re-flow single-line labels; respect any author-chosen breaks.
-    wrappable = {sid for sid, p in by_id.items() if "\n" not in p.text}
+    # Only re-flow single-line, un-rotated labels; respect any author-chosen
+    # breaks and leave angled labels (#527) to spread rather than wrap.
+    wrappable = {sid for sid, p in by_id.items() if "\n" not in p.text and not p.angle}
     if not wrappable:
         return
 
@@ -956,6 +1177,27 @@ def _expand_sections_for_wrapped_labels(
             sec.bbox_y = y_min - margin
         if y_max + margin > sec.bbox_y + sec.bbox_h:
             sec.bbox_h = (y_max + margin) - sec.bbox_y
+
+
+def _grow_section_for_box(
+    sec: Section,
+    box: tuple[float, float, float, float],
+    margin: float = LABEL_BBOX_MARGIN,
+) -> None:
+    """Grow a section bbox so it contains the given label box (plus margin)."""
+    x_min, y_min, x_max, y_max = box
+    if x_min - margin < sec.bbox_x:
+        old_right = sec.bbox_x + sec.bbox_w
+        sec.bbox_x = x_min - margin
+        sec.bbox_w = old_right - sec.bbox_x
+    if x_max + margin > sec.bbox_x + sec.bbox_w:
+        sec.bbox_w = (x_max + margin) - sec.bbox_x
+    if y_min - margin < sec.bbox_y:
+        old_bottom = sec.bbox_y + sec.bbox_h
+        sec.bbox_y = y_min - margin
+        sec.bbox_h = old_bottom - sec.bbox_y
+    if y_max + margin > sec.bbox_y + sec.bbox_h:
+        sec.bbox_h = (y_max + margin) - sec.bbox_y
 
 
 def _avoid_diagonal_routes(
@@ -1271,8 +1513,7 @@ def _has_collision(
     existing: list[LabelPlacement],
 ) -> bool:
     """Check if a candidate label collides with any existing placement."""
-    cbox = _label_bbox(candidate)
     for placed in existing:
-        if _boxes_overlap(cbox, _label_bbox(placed)):
+        if _placements_overlap(candidate, placed):
             return True
     return False

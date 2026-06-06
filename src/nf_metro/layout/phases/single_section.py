@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import math
+
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
+    DIAGONAL_LABEL_OFFSET,
     ENTRY_SHIFT_LR,
     ENTRY_SHIFT_TB,
     ENTRY_SHIFT_TB_CROSS,
@@ -25,7 +28,7 @@ from nf_metro.layout.constants import (
     TERMINUS_ICON_CLEARANCE_V,
     TERMINUS_WIDTH,
 )
-from nf_metro.layout.labels import label_text_width
+from nf_metro.layout.labels import _label_text_height, label_text_width
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
 from nf_metro.layout.phases._common import _build_section_subgraph
@@ -237,6 +240,22 @@ def _layout_single_section(
     section.bbox_w = (max(xs) - min(xs)) + section_x_padding * 2
     bbox_top = y_min - y_pad
     bbox_bot = y_max + y_pad
+    # Angled labels (#527) hang below the lowest stations; reserve their
+    # vertical reach so section/row placement keeps the row below clear.
+    if section.direction in ("LR", "RL"):
+        label_angle = graph.label_angle or 0.0
+        angled_pad = _angled_label_bottom_padding(sub, label_angle)
+        if angled_pad > 0:
+            bbox_bot = max(bbox_bot, y_max + section_y_padding + angled_pad)
+        # The angled label of the rightmost station overhangs to the right;
+        # grow the bbox right edge so it matches the rendered box and the
+        # inter-section feeder routes outside it (#527).
+        angled_right_edge = _angled_label_right_edge(sub, label_angle)
+        if angled_right_edge > 0:
+            right_edge = max(
+                section.bbox_x + section.bbox_w, angled_right_edge + LABEL_BBOX_MARGIN
+            )
+            section.bbox_w = right_edge - section.bbox_x
     if bypass_v_ys:
         # When V sits beyond the real-station extent, use curve-only
         # clearance rather than full label padding: V has no marker,
@@ -347,6 +366,76 @@ def _multiline_label_padding(sub: MetroGraph) -> float:
             extra = n * FONT_HEIGHT * LABEL_LINE_HEIGHT
             max_extra = max(max_extra, extra)
     return max_extra
+
+
+def angled_label_reach(station: Station, label_angle: float) -> float:
+    """Vertical reach below a station's marker of its hanging angled label.
+
+    Angled labels (#527) anchor below the pill and tilt down, so a long
+    name reaches well below the marker by ``anchor_drop + width*sin(angle)``.
+    Returns 0 when the angle is 0 or the station carries no name label, so
+    horizontal-label layouts are unaffected.
+    """
+    if not label_angle:
+        return 0.0
+    if station.is_port or station.is_hidden or station.is_terminus:
+        return 0.0
+    if not station.label.strip():
+        return 0.0
+    sin_a = abs(math.sin(math.radians(label_angle)))
+    return (
+        LABEL_OFFSET + DIAGONAL_LABEL_OFFSET + label_text_width(station.label) * sin_a
+    )
+
+
+def angled_label_right_reach(station: Station, label_angle: float) -> float:
+    """Horizontal reach to the right of a station's marker of its angled label.
+
+    An angled label (#527) is anchored at the station X and tilted clockwise,
+    so its rotated text box extends right of the marker.  The renderer grows
+    the section bbox to contain that box; computing the same reach here lets
+    layout finalise the section's right edge *before* routing runs, so the
+    inter-section feeder turns down outside the drawn box rather than crossing
+    its bottom edge.  Matches the rotated-AABB right extent used by the
+    renderer (``width*cos(angle) + height*sin(angle)``).  Returns 0 when the
+    angle is 0 or the station carries no name label.
+    """
+    if not label_angle:
+        return 0.0
+    if station.is_port or station.is_hidden or station.is_terminus:
+        return 0.0
+    if not station.label.strip():
+        return 0.0
+    rad = math.radians(label_angle)
+    return label_text_width(station.label) * abs(math.cos(rad)) + _label_text_height(
+        station.label
+    ) * abs(math.sin(rad))
+
+
+def _angled_label_right_edge(sub: MetroGraph, label_angle: float) -> float:
+    """Rightmost X any station's angled label reaches (absolute, not a delta).
+
+    Each station's reach is measured from its own X, so the section's required
+    right edge is ``max(station.x + reach)``.  Returns 0 when no labels are
+    angled.
+    """
+    return max(
+        (s.x + angled_label_right_reach(s, label_angle) for s in sub.stations.values()),
+        default=0.0,
+    )
+
+
+def _angled_label_bottom_padding(sub: MetroGraph, label_angle: float) -> float:
+    """Worst-case angled-label reach below the lowest station in a section.
+
+    Used during single-section layout to reserve the vertical extent the
+    hanging angled labels need, so section/row placement keeps the row below
+    clear.  0 when no labels are angled.
+    """
+    return max(
+        (angled_label_reach(s, label_angle) for s in sub.stations.values()),
+        default=0.0,
+    )
 
 
 def _normalize_min(sub: MetroGraph, axis: str) -> None:

@@ -46,6 +46,15 @@ class PortSide(Enum):
 
 VALID_LINE_STYLES = ("solid", "dashed", "dotted")
 
+MARKER_SHAPE_CIRCLE = "circle"
+MARKER_SHAPE_SQUARE = "square"
+MARKER_SHAPE_PILL = "pill"
+VALID_MARKER_SHAPES = (MARKER_SHAPE_CIRCLE, MARKER_SHAPE_SQUARE, MARKER_SHAPE_PILL)
+
+# Fill keywords; any other value is treated as a literal colour (named or hex).
+MARKER_FILL_OPEN = "open"
+MARKER_FILL_SOLID = "solid"
+
 ICON_TYPE_FILE = "file"
 ICON_TYPE_FILES = "files"
 ICON_TYPE_DIR = "dir"
@@ -62,6 +71,30 @@ class MetroLine:
     style: str = "solid"
 
 
+@dataclass(frozen=True)
+class MarkerStyle:
+    """Per-station marker shape and fill.
+
+    ``shape`` is one of :data:`VALID_MARKER_SHAPES`: ``circle`` (fully rounded),
+    ``square`` (sharp corners), or ``pill`` (a flat-edged capsule elongated
+    along the line, used to flag a station whose detail is shown elsewhere).
+    ``fill`` is ``open`` (background-coloured interior), ``solid`` (the theme's
+    default station fill), or a literal colour (named or hex). When ``fill`` is
+    a literal colour the marker is drawn filled with that colour.
+    """
+
+    shape: str = MARKER_SHAPE_CIRCLE
+    fill: str = MARKER_FILL_SOLID
+
+
+@dataclass
+class MarkerLegendEntry:
+    """A caption for a marker shape/fill combination in the marker key."""
+
+    style: MarkerStyle
+    caption: str
+
+
 @dataclass
 class Station:
     """A node/station in the metro map."""
@@ -71,6 +104,8 @@ class Station:
     section_id: str | None = None
     is_port: bool = False
     is_hidden: bool = False
+    # Per-station marker style from %%metro marker:; None = default pill.
+    marker: MarkerStyle | None = None
     # When True, the station is lifted above the section's top track in a
     # final layout phase.  Used for file-input nodes that would otherwise
     # consume a line-track Y slot.
@@ -203,6 +238,11 @@ class MetroGraph:
     centered_tracks: bool = False
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
+    # Opt-in diagonal station labels (#527). None means "use the theme
+    # default" (0 = horizontal); a directive value overrides the theme.
+    label_angle: float | None = None
+    # %%metro legend_combo entries: (line_ids, label) pairs.
+    legend_combos: list[tuple[tuple[str, ...], str]] = field(default_factory=list)
     # Placement modifiers for the bundled legend+logo block. The corner/edge
     # keyword lives in legend_position; these refine where that block lands.
     legend_anchor: str = "content"  # "content" (section bbox) or "canvas"
@@ -210,6 +250,9 @@ class MetroGraph:
     legend_at: tuple[float, float] | None = None  # absolute top-left override
     logo_path: str = ""
     logo_scale: float = 1.0  # multiplies the logo size within the legend block
+    # Marker-key captions from %%metro marker_legend: (issue #530). When
+    # non-empty, the legend renders a marker key below the line key.
+    marker_legend: list[MarkerLegendEntry] = field(default_factory=list)
     # Section dependency graph (populated by auto_layout)
     section_dag: SectionDAG | None = None
     # Section IDs that had explicit %%metro direction: directives
@@ -220,6 +263,9 @@ class MetroGraph:
     )
     # Pending off-track marks: station_ids to lift above section top track
     _pending_off_track: list[str] = field(default_factory=list)
+    # Pending per-station marker styles: station_id -> MarkerStyle, applied
+    # after parse so directives may precede or follow the node definition.
+    _pending_markers: dict[str, MarkerStyle] = field(default_factory=dict)
     # Lazy caches keyed off the edge list; invalidated on edge mutation.
     _station_lines_cache: dict[str, list[str]] | None = field(default=None, repr=False)
     _edges_from_cache: dict[str, list[Edge]] | None = field(default=None, repr=False)

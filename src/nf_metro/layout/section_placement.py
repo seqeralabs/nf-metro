@@ -17,6 +17,7 @@ from typing import TypeGuard
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     EDGE_TO_BUNDLE_CLEARANCE,
+    INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MERGE_GAP_MIN,
     MIN_INTER_SECTION_GAP,
@@ -365,7 +366,7 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     (LEFT/RIGHT) entry port wraps through the inter-row gap as a
     horizontal run (see ``_route_left_entry_wrap``).  To keep that run
     clear of both bounding obstacles it needs a band of
-    ``EDGE_TO_BUNDLE_CLEARANCE`` below the upper bbox bottom, the bundle
+    ``INTER_ROW_EDGE_CLEARANCE`` below the upper bbox bottom, the bundle
     span, and ``INTER_ROW_HEADER_CLEARANCE`` above the lower row (clearing
     its header badge, not just the bbox edge); a narrow gap squeezes the
     bundle flush against a box.  Returns, per adjacent
@@ -430,7 +431,7 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     for gap, ports in per_gap.items():
         widest = max(len(lines) for lines in ports.values())
         span = (widest - 1) * OFFSET_STEP
-        minimums[gap] = EDGE_TO_BUNDLE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE
+        minimums[gap] = INTER_ROW_EDGE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE
     return minimums
 
 

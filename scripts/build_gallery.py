@@ -71,6 +71,23 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "collector fan-in descending a shared inter-column corridor.",
     ),
     (
+        "marker_styles",
+        EXAMPLES_DIR,
+        "Per-station marker shapes & fills encoding tool attributes "
+        "(mandatory/optional/accelerated/expanded-elsewhere) with a marker key "
+        "alongside the line legend. Demonstrates `%%metro marker:` and "
+        "`%%metro marker_legend:`.",
+    ),
+    (
+        "diagonal_labels",
+        EXAMPLES_DIR,
+        "Opt-in diagonal station labels (#527) via `%%metro label_angle: 45`: a "
+        "dense pre-processing trunk whose tilted names pack tighter than "
+        "horizontal labels would, feeding a variant-calling section in the row "
+        "below that fans out to three callers and back in -- the reserved "
+        "vertical room keeps the hanging labels clear of the row beneath.",
+    ),
+    (
         "longread_variant_calling",
         EXAMPLES_DIR,
         "Dense long-read variant-calling pipeline (six lines, nine sections): "
@@ -101,6 +118,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "supports `| dx,dy` offsets and absolute `x,y` placement; the block "
         "auto-avoids sections and routes. The QC line shows a downward "
         "cross-column feeder dropping straight into its consumer section.",
+    ),
+    (
+        "legend_combo",
+        EXAMPLES_DIR,
+        "Demonstrates `%%metro legend_combo:`: a normal (blue) and tumor (red) "
+        "line travel together as a tumor-normal pair. The combo renders one "
+        "legend row with a striped red+blue swatch. Normal travels only within "
+        "the bundle so its individual row is suppressed, while tumor breaks "
+        "away alone to Annotate and keeps its own row; the QC line is unaffected.",
     ),
     (
         "tb_file_termini",
@@ -376,7 +402,12 @@ def render_guide_examples() -> None:
             print(f"  {mmd_path.stem}: FAIL - {e}")
 
     # Top-level examples referenced directly from the guide
-    for stem in ("rnaseq_auto", "variantbenchmarking", "variantbenchmarking_auto"):
+    for stem in (
+        "rnaseq_auto",
+        "variantbenchmarking",
+        "variantbenchmarking_auto",
+        "marker_styles",
+    ):
         mmd_path = EXAMPLES_DIR / f"{stem}.mmd"
         if not mmd_path.exists():
             continue

@@ -12,6 +12,7 @@ from nf_metro.layout.constants import (
     EDGE_TO_BUNDLE_CLEARANCE,
     GUARD_TOLERANCE,
     ICON_HALF_HEIGHT,
+    INTER_ROW_EDGE_CLEARANCE,
     OFFSET_STEP,
     ROW_BAND_SLACK,
     SECTION_Y_GAP,
@@ -1097,6 +1098,91 @@ def _guard_no_route_through_section(
         )
 
 
+def _guard_feeder_exits_section_through_side(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list[RoutedPath] | None = None,
+    offsets: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """After routing: an inter-section feeder must leave its source section
+    through a vertical side, never across the box's top or bottom edge.
+
+    A feeder that turns down out of its source section to reach a row below
+    must do so *outside* the section's drawn right (or left) edge, then loop
+    around -- otherwise its vertical run crosses the box's bottom edge while
+    inside the box's x-range and visibly passes through the section frame.
+
+    The source section bbox grows to contain the rightmost station's angled
+    label (#527), so the feeder's turn-down X must clear that grown edge.
+    Detected by checking whether any route segment crosses the source
+    section's horizontal top/bottom edge line strictly inside the box's
+    x-range (issue #527, feeder-through-bottom).
+    """
+    from nf_metro.layout.constants import LABEL_BBOX_MARGIN
+    from nf_metro.layout.phases.single_section import (
+        angled_label_reach,
+        angled_label_right_reach,
+    )
+
+    label_angle = graph.label_angle or 0.0
+
+    def _drawn_box(sec: Section) -> tuple[float, float, float, float]:
+        """Box edges as the renderer will draw them, including the right/
+        bottom growth for the section's angled labels (#527).  Measuring
+        against the *grown* box gives the guard teeth even if a future change
+        drops the layout-time growth: the feeder must clear the rendered box.
+        """
+        bx0, by0 = sec.bbox_x, sec.bbox_y
+        bx1 = bx0 + sec.bbox_w
+        by1 = by0 + sec.bbox_h
+        if label_angle and sec.direction in ("LR", "RL"):
+            for sid in sec.station_ids:
+                st = graph.stations.get(sid)
+                if st is None:
+                    continue
+                right = st.x + angled_label_right_reach(st, label_angle)
+                if right + LABEL_BBOX_MARGIN > bx1:
+                    bx1 = right + LABEL_BBOX_MARGIN
+                bot = st.y + angled_label_reach(st, label_angle)
+                if bot + LABEL_BBOX_MARGIN > by1:
+                    by1 = bot + LABEL_BBOX_MARGIN
+        return bx0, by0, bx1, by1
+
+    routes = _ensure_routes(graph, routes)
+    tol = GUARD_TOLERANCE
+    for rp in routes:
+        src = graph.stations.get(rp.edge.source)
+        tgt = graph.stations.get(rp.edge.target)
+        if src is None or tgt is None or src.section_id is None:
+            continue
+        if src.section_id == tgt.section_id:
+            continue
+        sec = graph.sections.get(src.section_id)
+        if sec is None or sec.bbox_w <= 0 or sec.bbox_h <= 0:
+            continue
+        bx0, by0, bx1, by1 = _drawn_box(sec)
+        pts = rp.points
+        for i in range(len(pts) - 1):
+            (x0, y0), (x1, y1) = pts[i], pts[i + 1]
+            for edge_y, name in ((by0, "top"), (by1, "bottom")):
+                lo, hi = min(y0, y1), max(y0, y1)
+                if not (lo < edge_y - tol and hi > edge_y + tol):
+                    continue  # segment does not straddle this edge line
+                if abs(y1 - y0) < tol:
+                    continue
+                t = (edge_y - y0) / (y1 - y0)
+                cross_x = x0 + t * (x1 - x0)
+                if bx0 + tol < cross_x < bx1 - tol:
+                    raise PhaseInvariantError(
+                        f"{phase}: feeder {rp.edge.source!r}->{rp.edge.target!r} "
+                        f"line {rp.line_id!r} crosses section {src.section_id!r} "
+                        f"{name} edge (y={edge_y:.1f}) at x={cross_x:.1f} inside "
+                        f"the box x-range [{bx0:.1f}, {bx1:.1f}]; it must exit "
+                        f"through a vertical side, clear of the drawn box"
+                    )
+
+
 def _entry_approach_offenders(
     graph: MetroGraph, routes: list[RoutedPath]
 ) -> list[tuple[RoutedPath, str, str]]:
@@ -1350,7 +1436,7 @@ def _guard_inter_row_run_clearance(
     routes: list[RoutedPath] | None = None,
 ) -> None:
     """After routing: a horizontal leg of an inter-*row* route must keep
-    ``EDGE_TO_BUNDLE_CLEARANCE`` from its source section's near bbox edge.
+    ``INTER_ROW_EDGE_CLEARANCE`` from its source section's near bbox edge.
 
     An inter-section bundle that crosses grid rows (e.g. a right-exit
     wrapping down to a left-entry below) lands its horizontal run in the
@@ -1385,19 +1471,19 @@ def _guard_inter_row_run_clearance(
             if xhi <= left + tol or xlo >= right - tol:
                 continue  # run doesn't overlap the source section in X
             y = y0
-            if bottom + tol < y < bottom + EDGE_TO_BUNDLE_CLEARANCE - tol:
+            if bottom + tol < y < bottom + INTER_ROW_EDGE_CLEARANCE - tol:
                 raise PhaseInvariantError(
                     f"{phase}: inter-row run of {rp.edge.source!r}->"
                     f"{rp.edge.target!r} line {rp.line_id!r} at y={y:.1f} sits "
                     f"{y - bottom:.1f}px below source section {src_sec.id!r} "
-                    f"bottom={bottom:.1f} (< {EDGE_TO_BUNDLE_CLEARANCE})"
+                    f"bottom={bottom:.1f} (< {INTER_ROW_EDGE_CLEARANCE})"
                 )
-            if top - EDGE_TO_BUNDLE_CLEARANCE + tol < y < top - tol:
+            if top - INTER_ROW_EDGE_CLEARANCE + tol < y < top - tol:
                 raise PhaseInvariantError(
                     f"{phase}: inter-row run of {rp.edge.source!r}->"
                     f"{rp.edge.target!r} line {rp.line_id!r} at y={y:.1f} sits "
                     f"{top - y:.1f}px above source section {src_sec.id!r} "
-                    f"top={top:.1f} (< {EDGE_TO_BUNDLE_CLEARANCE})"
+                    f"top={top:.1f} (< {INTER_ROW_EDGE_CLEARANCE})"
                 )
 
 

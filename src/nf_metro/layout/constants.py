@@ -232,12 +232,24 @@ Section headers (numbered circle + label) are rendered above bbox_y by
 approximately SECTION_HEADER_PROTRUSION (~26px).  This constant adds a
 small margin so routing channels don't overlap the header zone."""
 
-INTER_ROW_HEADER_CLEARANCE: float = SECTION_HEADER_PROTRUSION + EDGE_TO_BUNDLE_CLEARANCE
+INTER_ROW_EDGE_CLEARANCE: float = 26.0
+"""Minimum distance between an inter-row wrap channel and the *box edge*
+it runs beneath (the upper section's bbox bottom).
+
+The universal ``EDGE_TO_BUNDLE_CLEARANCE`` (16px) is the floor for a line
+sitting beside a bundle; a horizontal inter-row run sitting that close to
+a *section box edge* reads as running flush along the underside of the
+box.  This wider margin gives the run a visibly clear gap below the box.
+It is the box-edge counterpart of ``INTER_ROW_HEADER_CLEARANCE`` on the
+lower side, keeping the channel's two margins symmetric about the real
+obstacles (box edge above, header badge below)."""
+
+INTER_ROW_HEADER_CLEARANCE: float = SECTION_HEADER_PROTRUSION + INTER_ROW_EDGE_CLEARANCE
 """Distance from a section's bbox top to an inter-row channel above it.
 
 An adjacent-row wrap channel approaching a section from above must clear
 the header *badge* (which protrudes ``SECTION_HEADER_PROTRUSION`` above
-``bbox_y``) by ``EDGE_TO_BUNDLE_CLEARANCE``, the same margin the source
+``bbox_y``) by ``INTER_ROW_EDGE_CLEARANCE``, the same margin the source
 side keeps from its bbox bottom.  Section placement reserves this band
 (``_wrap_bundle_row_minimums``) and routing centres within it
 (``_center_inter_row_channel``); the single definition keeps the two in
@@ -310,6 +322,14 @@ DESCENDER_CLEARANCE: float = 3.0
 SVG ``dominant-baseline: auto`` places the alphabetic baseline at the
 label's Y coordinate; descenders extend below.  This constant accounts
 for that so the visual gap matches ``LABEL_OFFSET``."""
+
+DIAGONAL_LABEL_OFFSET: float = 9.0
+"""Extra downward drop for angled labels (#527), on top of ``LABEL_OFFSET``.
+
+Angled labels are anchored below the pill and tilt down-right; their text
+baseline starts at the anchor, so without an extra drop the first glyph
+sits too close to the marker.  This bumps the anchor down a touch so there
+is a clear gap between the pill and the tilted text."""
 
 TB_PILL_EDGE_OFFSET: float = 5.0
 """Pill edge offset for TB vertical station labels."""

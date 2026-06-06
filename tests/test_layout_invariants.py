@@ -22,6 +22,7 @@ from conftest import CONTENT_PLACEMENT_PHASES
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
+    INTER_ROW_EDGE_CLEARANCE,
     MIN_STATION_FLAT_LENGTH,
     ROW_BAND_SLACK,
     SECTION_HEADER_PROTRUSION,
@@ -1861,12 +1862,12 @@ def test_inter_row_run_clears_source_section(fixture):
     When an inter-section bundle crosses grid rows (e.g. a right-exit that
     wraps down to a left-entry in the row below), its horizontal run lands
     in the inter-row gap.  That run must keep at least
-    ``EDGE_TO_BUNDLE_CLEARANCE`` from the source section's near edge so it
+    ``INTER_ROW_EDGE_CLEARANCE`` from the source section's near edge so it
     doesn't read as "running along under the box".
     """
     graph = _layout(fixture)
     routes = route_edges(graph)
-    A = EDGE_TO_BUNDLE_CLEARANCE
+    A = INTER_ROW_EDGE_CLEARANCE
     for rp in routes:
         if not rp.is_inter_section:
             continue
@@ -2162,7 +2163,12 @@ def test_no_label_overlap(fixture):
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    placements = place_labels(graph, station_offsets=offsets, routes=routes)
+    placements = place_labels(
+        graph,
+        station_offsets=offsets,
+        routes=routes,
+        label_angle=graph.label_angle or 0.0,
+    )
     overlaps = find_label_overlaps(graph, placements, offsets)
     assert not overlaps, "; ".join(
         f"{ov.a!r} overlaps {ov.kind} {ov.b!r} by ({ov.ox:.1f}, {ov.oy:.1f})px"
@@ -4249,7 +4255,9 @@ def test_label_x_anchored_to_station_marker_on_horizontal_runs(fixture):
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    labels = place_labels(graph, station_offsets=offsets)
+    labels = place_labels(
+        graph, station_offsets=offsets, label_angle=graph.label_angle or 0.0
+    )
     label_by_sid = {lp.station_id: lp for lp in labels}
 
     in_routes: dict[str, list] = defaultdict(list)

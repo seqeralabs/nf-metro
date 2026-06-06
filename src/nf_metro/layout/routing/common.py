@@ -14,6 +14,7 @@ from nf_metro.layout.constants import (
     DEFAULT_LINE_PRIORITY,
     EDGE_TO_BUNDLE_CLEARANCE,
     HEADER_CLEARANCE,
+    INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     OFFSET_STEP,
     SECTION_HEADER_PROTRUSION,
@@ -741,14 +742,14 @@ def _center_inter_row_channel(upper_bottom: float, lower_top: float) -> float:
     """Y for a horizontal channel in the gap between two stacked rows.
 
     The channel is centred in the band that keeps
-    :data:`EDGE_TO_BUNDLE_CLEARANCE` ("constant A") above the bbox bottom
-    of the row above and :data:`INTER_ROW_HEADER_CLEARANCE` above the row
-    below -- the latter clears the *header badge* (numbered circle +
-    label) rather than just the bbox edge, so the run doesn't graze the
-    next-row label.  When the gap is too narrow to satisfy both margins
-    the channel biases to ``hi`` so it still clears the badge.
+    :data:`INTER_ROW_EDGE_CLEARANCE` above the bbox bottom of the row
+    above and :data:`INTER_ROW_HEADER_CLEARANCE` above the row below --
+    the latter clears the *header badge* (numbered circle + label) rather
+    than just the bbox edge, so the run doesn't graze the next-row label.
+    When the gap is too narrow to satisfy both margins the channel biases
+    to ``hi`` so it still clears the badge.
     """
-    lo = upper_bottom + EDGE_TO_BUNDLE_CLEARANCE
+    lo = upper_bottom + INTER_ROW_EDGE_CLEARANCE
     hi = lower_top - INTER_ROW_HEADER_CLEARANCE
     if lo <= hi:
         return (lo + hi) / 2

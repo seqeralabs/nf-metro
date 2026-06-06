@@ -1,0 +1,61 @@
+%%metro title: Diagonal Labels (dense trunk)
+%%metro style: dark
+%%metro label_angle: 45
+%%metro line: germline | Germline | #0570b0
+%%metro line: tumor_only | Tumor only | #d62728
+%%metro line: somatic | Tumor-normal pair | #756bb1
+%%metro file: fastq_in | FASTQ
+%%metro file: vcf_out | VCF
+%%metro grid: preprocessing | 0,0
+%%metro grid: variant_calling | 0,1
+
+graph LR
+    subgraph preprocessing [Pre-processing]
+        %%metro exit: right | germline, tumor_only, somatic
+        fastq_in[ ]
+        fastqc[FastQC]
+        fastp[FastP]
+        umi[UMI consensus]
+        bwa[BWA-MEM]
+        merge_index[samtools merge/index]
+        markdup[MarkDuplicates]
+        bqsr[BaseRecalibrator]
+        applybqsr[ApplyBQSR]
+        mosdepth[mosdepth]
+        ngscheckmate[NGSCheckmate]
+
+        fastq_in -->|germline,tumor_only,somatic| fastqc
+        fastqc -->|germline,tumor_only,somatic| fastp
+        fastp -->|germline,tumor_only,somatic| umi
+        umi -->|germline,tumor_only,somatic| bwa
+        bwa -->|germline,tumor_only,somatic| merge_index
+        merge_index -->|germline,tumor_only,somatic| markdup
+        markdup -->|germline,tumor_only,somatic| bqsr
+        bqsr -->|germline,tumor_only,somatic| applybqsr
+        applybqsr -->|germline,tumor_only,somatic| mosdepth
+        mosdepth -->|germline,tumor_only,somatic| ngscheckmate
+    end
+
+    subgraph variant_calling [Variant calling]
+        %%metro entry: left | germline, tumor_only, somatic
+        split[split by analysis]
+        deepvariant[GATK]
+        mutect[Mutect2]
+        strelka[Strelka2]
+        merge_vcf[merge VCFs]
+        vcf_out[ ]
+
+        split -->|germline| deepvariant
+        split -->|tumor_only| mutect
+        split -->|somatic| strelka
+        deepvariant -->|germline| merge_vcf
+        mutect -->|tumor_only| merge_vcf
+        strelka -->|somatic| merge_vcf
+        merge_vcf -->|germline,tumor_only,somatic| vcf_out
+    end
+
+    %% The dense angled-label trunk feeds the variant-calling section in the
+    %% row below, which fans out to three callers (one per line) and fans
+    %% back in at merge VCFs -- exercising the vertical room the hanging
+    %% angled labels need above the row below.
+    ngscheckmate -->|germline,tumor_only,somatic| split
