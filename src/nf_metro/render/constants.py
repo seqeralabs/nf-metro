@@ -266,6 +266,45 @@ ANIMATION_BALL_OPACITY: float = 0.9
 SECTION_LABEL_REGION_RATIO: float = 0.5
 """Fraction of section width used as the label region."""
 
+# ---------------------------------------------------------------------------
+# Intra-section station group captions
+# ---------------------------------------------------------------------------
+GROUP_LABEL_FONT_SCALE: float = 0.95
+"""Group caption font size as a fraction of the station label font size."""
+
+GROUP_LABEL_GAP: float = 34.0
+"""Gap between the spanned stations' marker extent and the group caption.
+
+Wide enough to clear a station-label row placed on the same side as the
+caption, so the band reads as a separate annotation."""
+
+GROUP_LABEL_LABEL_CLEARANCE: float = 8.0
+"""Gap between the deepest spanned station *label* and the group caption.
+
+Used in place of ``GROUP_LABEL_GAP`` when the band is positioned off the
+station labels' own extent (the labels already carry their full footprint, so
+only a small clearance is needed) -- keeps the band hugging the labels rather
+than the larger marker-row gap, which over-shoots for diagonal labels."""
+
+GROUP_LABEL_UNDERLINE_GAP: float = 5.0
+"""Gap between the group caption text and its bracket rule."""
+
+GROUP_LABEL_UNDERLINE_OPACITY: float = 0.45
+"""Opacity of the subtle bracket rule drawn for a group caption."""
+
+GROUP_LABEL_UNDERLINE_WIDTH: float = 1.5
+"""Stroke width of the group caption bracket rule."""
+
+GROUP_LABEL_TICK_LENGTH: float = 5.0
+"""Length of the inward end-ticks that turn a group rule into a bracket.
+
+The ticks point back towards the spanned stations so the bracket reads as
+embracing exactly that contiguous run."""
+
+GROUP_LABEL_BAND_PADDING: float = 10.0
+"""Clearance reserved between the lowest group-band element and the bottom
+edge of the enclosing section box, so the band always sits inside the box."""
+
 ICON_CLEARANCE_MARGIN: float = 4.0
 """Extra clearance around terminus icons when computing section bounds."""
 

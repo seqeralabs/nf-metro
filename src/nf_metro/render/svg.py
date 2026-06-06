@@ -8,13 +8,13 @@ import html
 import textwrap
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import drawsvg as draw
 
 from nf_metro.layout.constants import LABEL_LINE_HEIGHT
 from nf_metro.layout.geometry import segment_intersects_bbox
-from nf_metro.layout.labels import LabelPlacement, place_labels
+from nf_metro.layout.labels import LabelPlacement, _label_bbox, place_labels
 from nf_metro.layout.routing import RoutedPath, compute_station_offsets, route_edges
 from nf_metro.layout.routing.corners import resolve_curve_radii
 from nf_metro.parser.model import (
@@ -44,6 +44,14 @@ from nf_metro.render.constants import (
     DEBUG_WAYPOINT_RADIUS,
     FALLBACK_LINE_COLOR,
     FILES_ICON_OFFSET_RATIO,
+    GROUP_LABEL_BAND_PADDING,
+    GROUP_LABEL_FONT_SCALE,
+    GROUP_LABEL_GAP,
+    GROUP_LABEL_LABEL_CLEARANCE,
+    GROUP_LABEL_TICK_LENGTH,
+    GROUP_LABEL_UNDERLINE_GAP,
+    GROUP_LABEL_UNDERLINE_OPACITY,
+    GROUP_LABEL_UNDERLINE_WIDTH,
     ICON_BBOX_MARGIN,
     ICON_CLEARANCE_MARGIN,
     ICON_INTER_GAP,
@@ -377,7 +385,33 @@ def render_svg(
         label_angle=graph.label_angle or 0.0,
     )
 
+    # Per-station rendered label (top, bottom) Y, so group bands clear the
+    # (possibly diagonal) station labels rather than just the markers.
+    label_extents: dict[str, tuple[float, float]] = {}
+    for p in labels:
+        if p.station_id:
+            _, ly0, _, ly1 = _label_bbox(p)
+            label_extents[p.station_id] = (ly0, ly1)
+
+    group_bands = (
+        _group_bands(graph, theme, station_offsets, label_extents)
+        if graph.groups
+        else []
+    )
+
+    # Reserve room inside section boxes for below group bands before bboxes
+    # feed the section render and the canvas-bounds computation.
+    if group_bands:
+        _reserve_section_space_for_groups(graph, group_bands)
+
     max_x, max_y = _compute_canvas_bounds(graph, routes, debug)
+
+    # Group captions can extend below/right of the content; grow the canvas
+    # so they are not clipped.
+    if group_bands:
+        g_max_x, g_max_y = _group_caption_bounds(group_bands)
+        max_x = max(max_x, g_max_x)
+        max_y = max(max_y, g_max_y)
 
     # Compute legend and logo dimensions
     logo_w, logo_h = (0.0, 0.0)
@@ -473,6 +507,10 @@ def render_svg(
 
     # Draw labels
     _render_labels(d, labels, theme)
+
+    # Annotative intra-section group captions.
+    if group_bands:
+        _render_station_groups(d, theme, group_bands)
 
     # Debug overlay (ports, hidden stations, edge waypoints)
     if debug:
@@ -1504,7 +1542,7 @@ def _render_labels(
             label_data["class_"] = "nf-metro-station-label"
 
         if label.angle:
-            # Diagonal labels (#527): anchor at the pill and rotate about
+            # Diagonal labels: anchor at the pill and rotate about
             # the anchor.  text-anchor=start so the tilted text trails
             # away from the station.
             d.append(
@@ -1557,6 +1595,350 @@ def _render_labels(
                     **label_data,
                 )
             )
+
+
+def _station_marker_extent(
+    station: Station,
+    graph: MetroGraph,
+    theme: Theme,
+    station_offsets: dict[tuple[str, str], float],
+) -> tuple[float, float, float, float]:
+    """Return ``(x_left, x_right, y_top, y_bottom)`` of a station's marker.
+
+    Mirrors the pill geometry in ``_render_stations`` so group captions can
+    clear the actual rendered marker, including the per-line offset spread.
+    """
+    r = theme.station_radius
+    is_tb = False
+    if station.section_id:
+        sec = graph.sections.get(station.section_id)
+        if sec and sec.direction == "TB":
+            is_tb = True
+
+    line_offsets = [
+        station_offsets.get((station.id, lid), 0.0)
+        for lid in graph.station_lines(station.id)
+    ]
+    min_off = min(line_offsets) if line_offsets else 0.0
+    max_off = max(line_offsets) if line_offsets else 0.0
+
+    x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb)
+    return (x, x + w, y, y + h)
+
+
+class _GroupBand(NamedTuple):
+    """Resolved render geometry for one annotative station-group caption.
+
+    ``rule_y`` is the bracket rule (drawn directly against the spanned run);
+    ``tick_dy`` is the signed length of the inward end-ticks (pointing back
+    towards the stations); ``text_y``/``baseline`` place the caption clear of
+    the rule on the far side; ``band_far_y`` is the band's outermost edge
+    (largest ``y`` for a below band, smallest for an above band) used for
+    bbox/canvas reservation.
+    """
+
+    label: str
+    x_left: float
+    x_right: float
+    rule_y: float
+    tick_dy: float
+    text_y: float
+    baseline: str
+    band_far_y: float
+    section_id: str | None
+
+
+class _RawGroup(NamedTuple):
+    """A group's resolved horizontal span and outer reference Y, before the
+    bracket gap and common-rule alignment are applied."""
+
+    label: str
+    x_left: float
+    x_right: float
+    section_id: str | None
+    position: str
+    ref: float
+    ref_is_label: bool
+
+
+def _group_bands(
+    graph: MetroGraph,
+    theme: Theme,
+    station_offsets: dict[tuple[str, str], float],
+    label_extents: dict[str, tuple[float, float]] | None = None,
+) -> list[_GroupBand]:
+    """Resolve per-group band geometry.
+
+    For a ``below`` band the bracket rule hugs the bottom of the spanned
+    run, its end-ticks point up towards the stations, and the caption sits
+    beneath the rule; an ``above`` band mirrors this. Groups whose members
+    are all missing/hidden are skipped.
+
+    ``label_extents`` maps a station id to its rendered label's ``(top, bottom)``
+    Y.  When given, a below band is dropped beneath the deepest member label
+    (and an above band lifted above the highest), so diagonal station labels
+    that hang past the markers do not collide with the band.
+    """
+    caption_font = theme.label_font_size * GROUP_LABEL_FONT_SCALE
+
+    # First pass: resolve each group's horizontal span and the natural outer
+    # reference (deepest member label/marker for a below band, highest for an
+    # above band) before the bracket gap is applied.
+    raw: list[_RawGroup] = []
+    for group in graph.groups:
+        members = [
+            graph.stations[sid]
+            for sid in group.station_ids
+            if sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not graph.stations[sid].is_hidden
+        ]
+        if not members:
+            continue
+        extents = [
+            _station_marker_extent(s, graph, theme, station_offsets) for s in members
+        ]
+
+        x_left = min(e[0] for e in extents)
+        x_right = max(e[1] for e in extents)
+        section_id = members[0].section_id
+
+        # Member label extremes, so the band clears the (possibly diagonal)
+        # station labels rather than just the markers.
+        member_label_tops = [
+            label_extents[s.id][0]
+            for s in members
+            if label_extents and s.id in label_extents
+        ]
+        member_label_bottoms = [
+            label_extents[s.id][1]
+            for s in members
+            if label_extents and s.id in label_extents
+        ]
+
+        if group.position == "above":
+            marker_top = min(e[2] for e in extents)
+            label_ref = min(member_label_tops) if member_label_tops else None
+            ref = min([marker_top, *member_label_tops])
+            ref_is_label = label_ref is not None and label_ref <= marker_top
+        else:
+            marker_bottom = max(e[3] for e in extents)
+            label_ref = max(member_label_bottoms) if member_label_bottoms else None
+            ref = max([marker_bottom, *member_label_bottoms])
+            ref_is_label = label_ref is not None and label_ref >= marker_bottom
+        raw.append(
+            _RawGroup(
+                label=group.label,
+                x_left=x_left,
+                x_right=x_right,
+                section_id=section_id,
+                position=group.position,
+                ref=ref,
+                ref_is_label=ref_is_label,
+            )
+        )
+
+    # Align all bands sharing a (section, side) to a common rule line, so a
+    # row of group captions reads off one level rather than stepping with each
+    # group's own member-label depth.  Below bands align to the deepest ref,
+    # above bands to the highest.  Track whether that common extreme is a
+    # station label (vs a bare marker): a label already carries its full
+    # footprint, so the band hugs it with a small clearance instead of the
+    # wider marker-row gap, which over-shoots for diagonal labels.
+    common_ref: dict[tuple[str | None, str], float] = {}
+    common_is_label: dict[tuple[str | None, str], bool] = {}
+    for rec in raw:
+        key = (rec.section_id, rec.position)
+        ref = rec.ref
+        more_extreme = (
+            key not in common_ref
+            or (rec.position == "above" and ref < common_ref[key])
+            or (rec.position != "above" and ref > common_ref[key])
+        )
+        if rec.position == "above":
+            common_ref[key] = min(common_ref.get(key, ref), ref)
+        else:
+            common_ref[key] = max(common_ref.get(key, ref), ref)
+        if more_extreme:
+            common_is_label[key] = rec.ref_is_label
+
+    out: list[_GroupBand] = []
+    for rec in raw:
+        key = (rec.section_id, rec.position)
+        ref = common_ref[key]
+        gap = (
+            GROUP_LABEL_LABEL_CLEARANCE if common_is_label.get(key) else GROUP_LABEL_GAP
+        )
+        if rec.position == "above":
+            rule_y = ref - gap
+            tick_dy = GROUP_LABEL_TICK_LENGTH  # ticks point down to stations
+            text_y = rule_y - GROUP_LABEL_UNDERLINE_GAP
+            baseline = "auto"
+            band_far_y = text_y - caption_font
+        else:
+            rule_y = ref + gap
+            tick_dy = -GROUP_LABEL_TICK_LENGTH  # ticks point up to stations
+            text_y = rule_y + GROUP_LABEL_UNDERLINE_GAP
+            baseline = "hanging"
+            band_far_y = text_y + caption_font
+        out.append(
+            _GroupBand(
+                rec.label,
+                rec.x_left,
+                rec.x_right,
+                rule_y,
+                tick_dy,
+                text_y,
+                baseline,
+                band_far_y,
+                rec.section_id,
+            )
+        )
+    return out
+
+
+def _group_caption_bounds(bands: list[_GroupBand]) -> tuple[float, float]:
+    """Return the max ``(x, y)`` reached by any group band."""
+    max_x = 0.0
+    max_y = 0.0
+    for band in bands:
+        max_x = max(max_x, band.x_right)
+        max_y = max(max_y, band.rule_y, band.text_y, band.band_far_y)
+    return max_x, max_y
+
+
+def _reserve_section_space_for_groups(
+    graph: MetroGraph,
+    bands: list[_GroupBand],
+) -> None:
+    """Grow section bboxes so each ``below`` group band sits inside its box.
+
+    Annotative bands are placed at render time from station coordinates, so
+    the layout engine has no chance to reserve room for them.  Without this
+    the caption and bracket overlap (or fall outside) the section's bottom
+    edge.
+    """
+    needed_bottom: dict[str, float] = {}
+    for band in bands:
+        if band.section_id is None or band.tick_dy >= 0:
+            continue  # above bands grow upward; handled via canvas bounds
+        needed_bottom[band.section_id] = max(
+            needed_bottom.get(band.section_id, band.band_far_y),
+            band.band_far_y,
+        )
+    for sid, far_y in needed_bottom.items():
+        sec = graph.sections.get(sid)
+        if sec is None or sec.is_implicit:
+            continue
+        target_bottom = far_y + GROUP_LABEL_BAND_PADDING
+        if target_bottom > sec.bbox_y + sec.bbox_h:
+            sec.bbox_h = target_bottom - sec.bbox_y
+
+
+def _reserve_rail_space_for_termini(graph: MetroGraph, theme: Theme) -> None:
+    """Grow rail-section boxes to contain their terminus file icons.
+
+    Rail-section bboxes are sized to the station columns only, so a terminus
+    station's icons (which march outward past the last station) can be cut by
+    the box edge.  Grow the box so the icons sit inside with clearance.  Gated
+    on rail sections, leaving normal-mode fixtures byte-identical.
+    """
+    if not graph.has_rail_sections:
+        return
+    clearance = ICON_STATION_GAP * 2
+    r = theme.station_radius
+    hw = theme.terminus_width / 2
+    hh = theme.terminus_height / 2
+    caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
+    for station in graph.stations.values():
+        if not (graph.station_is_rail(station.id) and station.is_terminus):
+            continue
+        sec = graph.sections.get(station.section_id) if station.section_id else None
+        if sec is None or sec.is_implicit:
+            continue
+        n = len(station.terminus_labels)
+        names = station.terminus_names or [""] * n
+        name_widths = [
+            len(nm) * caption_font_size * 0.55 if nm else 0.0 for nm in names
+        ]
+        is_tb = sec.direction in ("TB", "BT")
+        if is_tb:
+            step = theme.terminus_height + ICON_INTER_GAP
+            half_flow = hh
+        else:
+            step = caption_aware_icon_step(names, name_widths, theme.terminus_width)
+            half_flow = hw
+        centers = _terminus_icon_centers(
+            station,
+            sec.direction,
+            not graph.edges_to(station.id),
+            n,
+            r + ICON_STATION_GAP + half_flow,
+            step,
+            0.0,
+            is_rail=True,
+        )
+        for cx, cy in centers:
+            left, right = cx - hw - clearance, cx + hw + clearance
+            top, bot = cy - hh - clearance, cy + hh + clearance
+            if left < sec.bbox_x:
+                sec.bbox_w = sec.bbox_x + sec.bbox_w - left
+                sec.bbox_x = left
+            if right > sec.bbox_x + sec.bbox_w:
+                sec.bbox_w = right - sec.bbox_x
+            if top < sec.bbox_y:
+                sec.bbox_h = sec.bbox_y + sec.bbox_h - top
+                sec.bbox_y = top
+            if bot > sec.bbox_y + sec.bbox_h:
+                sec.bbox_h = bot - sec.bbox_y
+
+
+def _render_station_groups(
+    d: draw.Drawing,
+    theme: Theme,
+    bands: list[_GroupBand],
+) -> None:
+    """Render annotative captions spanning groups of stations.
+
+    Each group's caption is centred on the x-extent of its (visible) member
+    stations.  A bracket rule (with inward end-ticks) hugs the spanned run so
+    the band reads as embracing exactly those stations, with the caption set
+    clear of the rule on the far side.  Coordinates are read-only: this never
+    moves stations.
+    """
+    caption_font = theme.label_font_size * GROUP_LABEL_FONT_SCALE
+    for band in bands:
+        cx = (band.x_left + band.x_right) / 2
+        # Bracket: a horizontal rule across the run with short inward end-ticks
+        # pointing back towards the stations.
+        bracket = draw.Path(
+            stroke=theme.section_label_color,
+            stroke_width=GROUP_LABEL_UNDERLINE_WIDTH,
+            stroke_opacity=GROUP_LABEL_UNDERLINE_OPACITY,
+            fill="none",
+            stroke_linecap="round",
+            stroke_linejoin="round",
+            class_="nf-metro-group-underline",
+        )
+        bracket.M(band.x_left, band.rule_y + band.tick_dy)
+        bracket.L(band.x_left, band.rule_y)
+        bracket.L(band.x_right, band.rule_y)
+        bracket.L(band.x_right, band.rule_y + band.tick_dy)
+        d.append(bracket)
+        d.append(
+            draw.Text(
+                band.label,
+                caption_font,
+                cx,
+                band.text_y,
+                fill=theme.section_label_color,
+                font_family=theme.label_font_family,
+                font_weight="bold",
+                text_anchor="middle",
+                dominant_baseline=band.baseline,
+                class_="nf-metro-group-label",
+            )
+        )
 
 
 def _grid_bbox_bounds(
