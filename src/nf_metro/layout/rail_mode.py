@@ -436,18 +436,20 @@ def _label_aware_x_spacing(
     it plus half its neighbour (i.e. the full widest label, plus a small gap)
     keeps every label on one line while the rails stay evenly spaced.
     """
-    import math
-
     from nf_metro.layout.constants import LABEL_MARGIN
     from nf_metro.layout.labels import label_text_width
 
-    # A diagonal (angled) label's HORIZONTAL footprint is its width times
-    # cos(angle), so an angled-label panel only needs to seat that projection
-    # between columns and can pack noticeably tighter than horizontal text.
-    # Gated on angle != 0 so non-angled panels are unchanged.
-    angle = graph.label_angle or 0.0
-    h_factor = abs(math.cos(math.radians(angle))) if angle else 1.0
+    # Diagonal labels are all drawn at the same angle, so adjacent columns'
+    # labels are parallel and collide only by their perpendicular separation,
+    # not along their length.  They therefore share the one graph-wide pitch
+    # compute_layout already resolved (labels.diagonal_label_pitch, passed in as
+    # x_spacing), so every section -- rail and normal -- packs to the same tight
+    # column step instead of each rail widening to seat its label's full width.
+    if graph.label_angle:
+        return x_spacing
 
+    # Horizontal labels render centred on the station X, so the step must seat
+    # the full widest label (plus a small gap) to keep every label on one line.
     widest = 0.0
     for sid in real_ids:
         st = graph.stations.get(sid)
@@ -456,7 +458,7 @@ def _label_aware_x_spacing(
         # Blank termini render as icons, not text labels, so don't size to them.
         if st.is_blank_terminus:
             continue
-        widest = max(widest, label_text_width(st.label) * h_factor)
+        widest = max(widest, label_text_width(st.label))
     if widest <= 0.0:
         return x_spacing
     return max(x_spacing, widest + LABEL_MARGIN * 2)

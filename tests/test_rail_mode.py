@@ -122,6 +122,92 @@ def test_rails_are_evenly_spaced_and_distinct():
             )
 
 
+def test_diagonal_rail_section_packs_to_graph_pitch_not_label_width():
+    """Diagonal-labelled rail sections share the one tight graph column pitch.
+
+    Adjacent diagonal labels are parallel, so a rail panel need not widen each
+    column to seat its label's full width (which it must for horizontal text).
+    The angled path returns the passed-in graph pitch untouched; clearing the
+    angle restores the label-width widening, proving the gate has teeth.
+    """
+    from nf_metro.layout.labels import label_text_width
+    from nf_metro.layout.rail_mode import _label_aware_x_spacing
+
+    graph = parse_metro_mermaid(RAIL_MMD.read_text())
+    assert graph.label_angle, "rail_mode.mmd opts into 45-degree labels"
+    sec = next(s for s in graph.sections.values() if graph.is_rail_section(s.id))
+    real_ids = [
+        sid
+        for sid in sec.station_ids
+        if (st := graph.stations.get(sid)) is not None and not st.is_port
+    ]
+    widest = max(
+        label_text_width(graph.stations[sid].label)
+        for sid in real_ids
+        if not graph.stations[sid].is_blank_terminus
+    )
+    pitch = 39.6
+    assert widest > pitch, "fixture must carry a label wider than the pitch"
+
+    # Angled: the graph pitch passes straight through, however wide the labels.
+    assert _label_aware_x_spacing(graph, real_ids, {}, pitch) == pitch
+    # Horizontal: the same panel widens to seat the full widest label.
+    graph.label_angle = None
+    assert _label_aware_x_spacing(graph, real_ids, {}, pitch) > pitch
+
+
+def test_spread_residual_drops_rail_section_overlaps(monkeypatch):
+    """The spread loop's residual-overlap report excludes any overlap touching
+    a rail-section station.
+
+    Rail crowding is resolved by the rail layout's own column pitch, not by
+    widening the global X spacing; counting it would needlessly bloat the
+    normal sections.  The added filter drops overlaps whose either endpoint is
+    a rail-section station and keeps the rest.
+    """
+    import nf_metro.layout.labels as labels_mod
+    from nf_metro.layout.labels import LabelOverlap
+    from nf_metro.layout.phases.spacing import _residual_label_overlaps
+
+    mmd = (
+        "%%metro title: mixed\n"
+        "%%metro label_angle: 45\n"
+        "%%metro line: a | A | #ff0000\n"
+        "%%metro line: b | B | #0000ff\n"
+        "%%metro line_spread: rails | rails_sec\n"
+        "graph LR\n"
+        "    subgraph normal [Normal]\n"
+        "        n1[Trim]\n"
+        "        n2[Align]\n"
+        "        n3[Sort]\n"
+        "        n1 -->|a| n2\n"
+        "        n2 -->|a| n3\n"
+        "    end\n"
+        "    subgraph rails_sec [Rails]\n"
+        "        r1[CallerOne]\n"
+        "        r2[CallerTwo]\n"
+        "        r1 -->|a,b| r2\n"
+        "    end\n"
+        "    n3 -->|a| r1\n"
+    )
+    graph = parse_metro_mermaid(mmd)
+    compute_layout(graph)
+    assert graph.has_rail_sections and graph.is_rail_section("rails_sec")
+
+    # Inject synthetic overlaps: one touching a rail station (must be dropped),
+    # one purely between normal stations (must survive).
+    rail_norm = LabelOverlap("label", "r1", "n1", 20.0, 0.0)
+    norm_norm = LabelOverlap("label", "n1", "n2", 15.0, 0.0)
+    monkeypatch.setattr(
+        labels_mod, "find_label_overlaps", lambda *a, **k: [rail_norm, norm_norm]
+    )
+
+    residual = _residual_label_overlaps(graph, allow_hyphenation=False)
+    pairs = {(o.a, o.b) for o in residual}
+    assert ("n1", "n2") in pairs, "normal-only overlap must be kept"
+    assert ("r1", "n1") not in pairs, "rail-touching overlap must be dropped"
+
+
 def test_multi_line_station_span_covers_exactly_its_lines_rails():
     """A spanning pill's drawn span (rail_top_y..rail_bottom_y) equals the
     Y range of the rails its lines occupy -- no more, no less."""
