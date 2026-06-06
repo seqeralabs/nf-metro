@@ -56,6 +56,18 @@ LOGO_GAP: float = 12.0
 LEGEND_BORDER_RADIUS: int = 6
 """Corner radius for legend background rectangle."""
 
+LEGEND_MARKER_GAP: float = 10.0
+"""Vertical gap between the line key and the marker key."""
+
+LEGEND_MARKER_RADIUS: float = 6.0
+"""Half-size of a marker-key swatch glyph."""
+
+LEGEND_MARKER_PILL_RATIO: float = 1.7
+"""Half-width of a ``pill`` swatch as a multiple of the swatch half-size."""
+
+MARKER_PILL_LENGTH_RATIO: float = 4.0
+"""Length of a ``pill`` marker along the line, as a multiple of the station radius."""
+
 # ---------------------------------------------------------------------------
 # SVG drawing
 # ---------------------------------------------------------------------------

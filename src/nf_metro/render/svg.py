@@ -21,6 +21,8 @@ from nf_metro.parser.model import (
     ICON_TYPE_DIR,
     ICON_TYPE_FILE,
     ICON_TYPE_FILES,
+    MARKER_SHAPE_PILL,
+    MarkerStyle,
     MetroGraph,
     PortSide,
     Section,
@@ -52,6 +54,7 @@ from nf_metro.render.constants import (
     LEGEND_INSET,
     LEGEND_ROUTE_CLEARANCE,
     LOGO_Y_STANDALONE,
+    MARKER_PILL_LENGTH_RATIO,
     SECTION_BOX_RADIUS,
     SECTION_LABEL_REGION_RATIO,
     SECTION_LABEL_TEXT_OFFSET,
@@ -73,7 +76,13 @@ from nf_metro.render.icons import (
     render_files_icon,
     render_folder_icon,
 )
-from nf_metro.render.legend import compute_legend_dimensions, render_legend
+from nf_metro.render.legend import (
+    compute_legend_dimensions,
+    marker_corner_radius,
+    marker_fill_color,
+    marker_stroke_color,
+    render_legend,
+)
 from nf_metro.render.style import Theme
 
 
@@ -889,6 +898,88 @@ def _render_bridged_edge(
     d.append(path)
 
 
+def _pill_box(
+    station: Station,
+    r: float,
+    min_off: float,
+    max_off: float,
+    is_tb_vert: bool,
+    flow_len: float | None = None,
+) -> tuple[float, float, float, float]:
+    """Return ``(x, y, w, h)`` for the bundle-spanning pill at a station.
+
+    The pill covers every line passing through the station: it spans the line
+    bundle across the section's flow axis (wide for TB sections where lines
+    arrive vertically, tall otherwise) and is centred on the bundle mid-offset.
+    ``flow_len`` overrides the extent along the flow axis (default ``2 * r``),
+    elongating the glyph along the line.
+    """
+    span = max_off - min_off
+    mid = (min_off + max_off) / 2
+    flow = r * 2 if flow_len is None else flow_len
+    if is_tb_vert:
+        w, h = span + r * 2, flow
+        cx, cy = station.x + mid, station.y
+    else:
+        w, h = flow, span + r * 2
+        cx, cy = station.x, station.y + mid
+    return cx - w / 2, cy - h / 2, w, h
+
+
+def _append_terminus_icons(
+    d: draw.Drawing,
+    station: Station,
+    graph: MetroGraph,
+    theme: Theme,
+    r: float,
+    min_off: float,
+    max_off: float,
+) -> None:
+    """Render a station's terminus icons into their own data-tagged group."""
+    icon_group = draw.Group(**{"data-station-id": station.id})
+    _render_terminus_icons(icon_group, station, graph, theme, r, min_off, max_off)
+    d.append(icon_group)
+
+
+def _render_marker_station(
+    d: draw.Drawing,
+    marker: MarkerStyle,
+    theme: Theme,
+    station: Station,
+    r: float,
+    min_off: float,
+    max_off: float,
+    is_tb_vert: bool,
+    station_data: dict[str, str],
+) -> None:
+    """Draw a shape/fill marker glyph over the station's line bundle.
+
+    ``circle`` and ``square`` keep the bundle-spanning pill geometry, varying
+    only the corner rounding. ``pill`` is elongated along the line (a capsule
+    in the opposite orientation to the default station pill) while still
+    growing across the bundle to cover every track it spans.
+    """
+    flow_len = (
+        r * MARKER_PILL_LENGTH_RATIO if marker.shape == MARKER_SHAPE_PILL else None
+    )
+    x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb_vert, flow_len=flow_len)
+    rx = marker_corner_radius(marker.shape, r)
+    d.append(
+        draw.Rectangle(
+            x,
+            y,
+            w,
+            h,
+            rx=rx,
+            ry=rx,
+            fill=marker_fill_color(marker.fill, theme),
+            stroke=marker_stroke_color(theme),
+            stroke_width=theme.station_stroke_width,
+            **station_data,
+        )
+    )
+
+
 def _render_stations(
     d: draw.Drawing,
     graph: MetroGraph,
@@ -929,8 +1020,6 @@ def _render_stations(
         else:
             min_off = max_off = 0.0
 
-        span = max_off - min_off
-
         # Hand-escape values that flow from user content into XML attributes.
         # drawsvg does not escape unknown kwargs, so an unescaped "&" or "<"
         # in a section name or station label breaks XML well-formedness.
@@ -946,47 +1035,33 @@ def _render_stations(
             if sec_obj:
                 station_data["data-section-name"] = html.escape(sec_obj.name)
 
-        # Non-process terminus stations: filled rectangle
-        # (same size as pill, no rounding)
+        if station.marker is not None:
+            _render_marker_station(
+                d,
+                station.marker,
+                theme,
+                station,
+                r,
+                min_off,
+                max_off,
+                is_tb_vert,
+                station_data,
+            )
+            if station.is_terminus:
+                _append_terminus_icons(d, station, graph, theme, r, min_off, max_off)
+            continue
+
+        x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb_vert)
+
+        # Blank terminus stations get an unrounded nub; everything else a pill.
         is_blank_terminus = station.is_terminus and not station.label.strip()
         if is_blank_terminus:
-            # Match the section flow axis: a horizontal nub for TB/BT (lines
-            # arrive vertically), a vertical nub otherwise.
-            if is_tb_vert:
-                w = span + r * 2
-                h = r * 2
-                cx = station.x + (min_off + max_off) / 2
-                cy = station.y
-            else:
-                w = r * 2
-                h = span + r * 2
-                cx = station.x
-                cy = station.y + (min_off + max_off) / 2
             d.append(
                 draw.Rectangle(
-                    cx - w / 2,
-                    cy - h / 2,
+                    x,
+                    y,
                     w,
                     h,
-                    fill=theme.station_fill,
-                    stroke=theme.station_stroke,
-                    stroke_width=theme.station_stroke_width,
-                    **station_data,
-                )
-            )
-        elif is_tb_vert:
-            # Horizontal pill: lines spread along X axis
-            w = span + r * 2
-            h = r * 2
-            cx = station.x + (min_off + max_off) / 2
-            d.append(
-                draw.Rectangle(
-                    cx - w / 2,
-                    station.y - h / 2,
-                    w,
-                    h,
-                    rx=r,
-                    ry=r,
                     fill=theme.station_fill,
                     stroke=theme.station_stroke,
                     stroke_width=theme.station_stroke_width,
@@ -994,14 +1069,10 @@ def _render_stations(
                 )
             )
         else:
-            # Vertical pill: lines spread along Y axis
-            w = r * 2
-            h = span + r * 2
-            cy = station.y + (min_off + max_off) / 2
             d.append(
                 draw.Rectangle(
-                    station.x - w / 2,
-                    cy - h / 2,
+                    x,
+                    y,
                     w,
                     h,
                     rx=r,
@@ -1014,11 +1085,7 @@ def _render_stations(
             )
 
         if station.is_terminus:
-            icon_group = draw.Group(**{"data-station-id": station.id})
-            _render_terminus_icons(
-                icon_group, station, graph, theme, r, min_off, max_off
-            )
-            d.append(icon_group)
+            _append_terminus_icons(d, station, graph, theme, r, min_off, max_off)
 
 
 def caption_aware_icon_step(

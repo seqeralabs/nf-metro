@@ -12,9 +12,15 @@ import re
 import warnings
 
 from nf_metro.parser.model import (
+    MARKER_FILL_OPEN,
+    MARKER_FILL_SOLID,
+    MARKER_SHAPE_CIRCLE,
     VALID_ICON_TYPES,
     VALID_LINE_STYLES,
+    VALID_MARKER_SHAPES,
     Edge,
+    MarkerLegendEntry,
+    MarkerStyle,
     MetroGraph,
     MetroLine,
     Port,
@@ -214,6 +220,12 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
         if station:
             station.off_track = True
 
+    # Apply pending per-station marker styles
+    for station_id, marker in graph._pending_markers.items():
+        station = graph.stations.get(station_id)
+        if station:
+            station.marker = marker
+
     return graph
 
 
@@ -309,6 +321,10 @@ def _parse_directive(
     elif content.startswith("off_track:"):
         ids = [s.strip() for s in content[len("off_track:") :].split(",")]
         graph._pending_off_track.extend(sid for sid in ids if sid)
+    elif content.startswith("marker_legend:"):
+        _parse_marker_legend_directive(content[len("marker_legend:") :].strip(), graph)
+    elif content.startswith("marker:"):
+        _parse_marker_directive(content[len("marker:") :].strip(), graph)
     elif ":" in content and content.split(":", 1)[0] in VALID_ICON_TYPES:
         icon_type, rest = content.split(":", 1)
         parts = rest.strip().split("|")
@@ -472,6 +488,56 @@ def _parse_logo_scale_directive(value: str, graph: MetroGraph) -> None:
         )
         return
     graph.logo_scale = scale
+
+
+def _parse_marker_style(spec: str) -> MarkerStyle | None:
+    """Parse a ``shape, fill`` marker spec into a MarkerStyle.
+
+    ``shape`` defaults to ``circle`` and ``fill`` to ``solid`` when omitted.
+    An unknown shape is rejected (returns None with a warning); any fill
+    string other than ``open``/``solid`` is taken as a literal colour.
+    """
+    parts = [p.strip() for p in spec.split(",")]
+    shape = parts[0].lower() if parts and parts[0] else MARKER_SHAPE_CIRCLE
+    fill = parts[1] if len(parts) >= 2 and parts[1] else MARKER_FILL_SOLID
+    if shape not in VALID_MARKER_SHAPES:
+        warnings.warn(
+            f"Unknown marker shape {shape!r}; expected one of "
+            f"{'/'.join(VALID_MARKER_SHAPES)}. Ignoring.",
+            stacklevel=2,
+        )
+        return None
+    # Normalise the fill keywords to lowercase; leave literal colours as-is.
+    if fill.lower() in (MARKER_FILL_OPEN, MARKER_FILL_SOLID):
+        fill = fill.lower()
+    return MarkerStyle(shape=shape, fill=fill)
+
+
+def _parse_marker_directive(value: str, graph: MetroGraph) -> None:
+    """Parse ``%%metro marker: node_id | shape, fill``."""
+    node_part, sep, style_part = value.partition("|")
+    node_id = node_part.strip()
+    if not node_id:
+        return
+    style = _parse_marker_style(style_part.strip() if sep else "")
+    if style is not None:
+        graph._pending_markers[node_id] = style
+
+
+def _parse_marker_legend_directive(value: str, graph: MetroGraph) -> None:
+    """Parse ``%%metro marker_legend: shape, fill | Caption``."""
+    style_part, sep, caption = value.partition("|")
+    if not sep:
+        warnings.warn(
+            "marker_legend directive needs a caption: "
+            "'shape, fill | Caption'. Ignoring.",
+            stacklevel=2,
+        )
+        return
+    style = _parse_marker_style(style_part.strip())
+    caption = caption.strip()
+    if style is not None and caption:
+        graph.marker_legend.append(MarkerLegendEntry(style=style, caption=caption))
 
 
 def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:

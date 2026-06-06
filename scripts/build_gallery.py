@@ -62,6 +62,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "collector fan-in descending a shared inter-column corridor.",
     ),
     (
+        "marker_styles",
+        EXAMPLES_DIR,
+        "Per-station marker shapes & fills encoding tool attributes "
+        "(mandatory/optional/accelerated/expanded-elsewhere) with a marker key "
+        "alongside the line legend. Demonstrates `%%metro marker:` and "
+        "`%%metro marker_legend:`.",
+    ),
+    (
         "diagonal_labels",
         EXAMPLES_DIR,
         "Opt-in diagonal station labels (#527) via `%%metro label_angle: 45`: a "
@@ -385,7 +393,12 @@ def render_guide_examples() -> None:
             print(f"  {mmd_path.stem}: FAIL - {e}")
 
     # Top-level examples referenced directly from the guide
-    for stem in ("rnaseq_auto", "variantbenchmarking", "variantbenchmarking_auto"):
+    for stem in (
+        "rnaseq_auto",
+        "variantbenchmarking",
+        "variantbenchmarking_auto",
+        "marker_styles",
+    ):
         mmd_path = EXAMPLES_DIR / f"{stem}.mmd"
         if not mmd_path.exists():
             continue

@@ -2,17 +2,34 @@
 
 from __future__ import annotations
 
-__all__ = ["compute_legend_dimensions", "render_legend"]
+__all__ = [
+    "compute_legend_dimensions",
+    "marker_corner_radius",
+    "marker_fill_color",
+    "marker_stroke_color",
+    "render_legend",
+]
 
 from dataclasses import dataclass
 
 import drawsvg as draw
 
-from nf_metro.parser.model import MetroGraph, MetroLine
+from nf_metro.parser.model import (
+    MARKER_FILL_OPEN,
+    MARKER_FILL_SOLID,
+    MARKER_SHAPE_CIRCLE,
+    MARKER_SHAPE_PILL,
+    MARKER_SHAPE_SQUARE,
+    MetroGraph,
+    MetroLine,
+)
 from nf_metro.render.constants import (
     LEGEND_BORDER_RADIUS,
     LEGEND_CHAR_WIDTH_RATIO,
     LEGEND_LINE_HEIGHT,
+    LEGEND_MARKER_GAP,
+    LEGEND_MARKER_PILL_RATIO,
+    LEGEND_MARKER_RADIUS,
     LEGEND_PADDING,
     LEGEND_SWATCH_WIDTH,
     LEGEND_TEXT_GAP,
@@ -22,6 +39,42 @@ from nf_metro.render.constants import (
     line_style_kwargs,
 )
 from nf_metro.render.style import Theme
+
+
+def marker_fill_color(fill: str, theme: Theme) -> str:
+    """Resolve a marker fill keyword/colour to an SVG fill value.
+
+    ``open`` renders the theme's open-marker interior (falling back to the
+    background, or white on transparent themes); ``solid`` uses the default
+    station fill; anything else is taken as a literal colour.
+    """
+    if fill == MARKER_FILL_OPEN:
+        if theme.marker_open_fill:
+            return theme.marker_open_fill
+        if theme.background_color and theme.background_color != "none":
+            return theme.background_color
+        return "#ffffff"
+    if fill == MARKER_FILL_SOLID:
+        return theme.station_fill
+    return fill
+
+
+def marker_corner_radius(shape: str, r: float) -> float:
+    """Corner radius for a marker glyph of half-size ``r``.
+
+    ``square`` is left with sharp corners; every other shape rounds fully
+    (``r``), giving circles, capsules and stadium-ended pills.
+    """
+    return 0.0 if shape == MARKER_SHAPE_SQUARE else r
+
+
+def marker_stroke_color(theme: Theme) -> str:
+    """Resolve the outline colour for marker glyphs and their swatches.
+
+    A dedicated light outline keeps dark-filled markers visible against a
+    dark background; an empty ``marker_stroke`` inherits ``station_stroke``.
+    """
+    return theme.marker_stroke or theme.station_stroke
 
 
 @dataclass
@@ -109,7 +162,13 @@ def _legend_metrics(
     text block and a (possibly enlarged) logo.
     """
     line_height = LEGEND_LINE_HEIGHT
-    text_block_h = max(len(rows) * line_height, graph.legend_min_height)
+    line_block_h = len(rows) * line_height
+    marker_block_h = (
+        LEGEND_MARKER_GAP + len(graph.marker_legend) * line_height
+        if graph.marker_legend
+        else 0.0
+    )
+    text_block_h = max(line_block_h + marker_block_h, graph.legend_min_height)
     logo_w = logo_h = 0.0
     if logo_size:
         logo_w, logo_h = _scale_logo_to_content(
@@ -145,6 +204,8 @@ def compute_legend_dimensions(
     text_offset = swatch_width + LEGEND_TEXT_GAP
 
     max_name_len = max(len(row.label) for row in rows)
+    if graph.marker_legend:
+        max_name_len = max(max_name_len, *(len(e.caption) for e in graph.marker_legend))
     char_width = theme.legend_font_size * LEGEND_CHAR_WIDTH_RATIO
 
     _text_h, content_height, logo_w, _logo_h = _legend_metrics(graph, rows, logo_size)
@@ -278,6 +339,77 @@ def render_legend(
                 row.label,
                 theme.legend_font_size,
                 x + padding + logo_offset + text_offset,
+                entry_y,
+                fill=theme.legend_text_color,
+                font_family=theme.label_font_family,
+                dy=TEXT_VCENTER_DY,
+            )
+        )
+
+    if graph.marker_legend:
+        _render_marker_key(
+            d,
+            graph,
+            theme,
+            x + padding + logo_offset,
+            text_top + len(rows) * line_height + LEGEND_MARKER_GAP,
+            text_offset,
+            line_height,
+        )
+
+
+def _render_marker_key(
+    d: draw.Drawing,
+    graph: MetroGraph,
+    theme: Theme,
+    left_x: float,
+    top_y: float,
+    text_offset: float,
+    line_height: float,
+) -> None:
+    """Render the marker shape/fill key rows below the line legend."""
+    swatch_cx = left_x + LEGEND_SWATCH_WIDTH / 2
+    r = LEGEND_MARKER_RADIUS
+    stroke = marker_stroke_color(theme)
+    for i, entry in enumerate(graph.marker_legend):
+        entry_y = top_y + i * line_height + line_height / 2
+        fill = marker_fill_color(entry.style.fill, theme)
+        if entry.style.shape == MARKER_SHAPE_CIRCLE:
+            d.append(
+                draw.Circle(
+                    swatch_cx,
+                    entry_y,
+                    r,
+                    fill=fill,
+                    stroke=stroke,
+                    stroke_width=theme.station_stroke_width,
+                )
+            )
+        else:
+            half_w = (
+                r * LEGEND_MARKER_PILL_RATIO
+                if entry.style.shape == MARKER_SHAPE_PILL
+                else r
+            )
+            rx = marker_corner_radius(entry.style.shape, r)
+            d.append(
+                draw.Rectangle(
+                    swatch_cx - half_w,
+                    entry_y - r,
+                    half_w * 2,
+                    r * 2,
+                    rx=rx,
+                    ry=rx,
+                    fill=fill,
+                    stroke=stroke,
+                    stroke_width=theme.station_stroke_width,
+                )
+            )
+        d.append(
+            draw.Text(
+                entry.caption,
+                theme.legend_font_size,
+                left_x + text_offset,
                 entry_y,
                 fill=theme.legend_text_color,
                 font_family=theme.label_font_family,
