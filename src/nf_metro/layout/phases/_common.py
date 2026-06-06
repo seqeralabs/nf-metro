@@ -570,6 +570,7 @@ def _build_section_subgraph(graph: MetroGraph, section: Section) -> MetroGraph:
     sub = MetroGraph()
     sub.lines = graph.lines  # Share line definitions
     sub.diamond_style = graph.diamond_style
+    sub.line_spread = graph.section_line_spread(section.id)
 
     # Collect port IDs for this section
     port_ids = section.port_ids
