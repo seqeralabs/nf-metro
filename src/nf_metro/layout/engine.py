@@ -972,12 +972,6 @@ def _place_pass_c_content(
     """Stage 5.1 through Stage 6.12: position junctions, lift off-track
     inputs, settle vertical content, and recenter fans / loop-side
     stations within each section."""
-    # Capture each section's structural content-bottom (as a height below
-    # its bbox top) before the opportunistic content-compaction phases run,
-    # so the inter-row cascade (Stage 6.13 phase 2) stacks lower rows from a
-    # structural prediction rather than the post-compaction settled extent.
-    _snapshot_struct_heights_below_top(graph, section_y_padding)
-
     # ---- Stage 5 - Pass C: Junctions & off-track lift ------------------
     # All port positions are now final; Stage 5.1 positions junctions
     # once.  Stage 5.2 lifts off-track stations; Stages 5.3 to 5.5
@@ -998,6 +992,16 @@ def _place_pass_c_content(
     _snap(graph, "5.2")
     if validate:
         _run_pass_c_guards(graph, "after Stage 5.2")
+
+    # Capture each section's structural content-bottom (as a height below its
+    # bbox top) before the opportunistic content-compaction phases run, so the
+    # inter-row cascade (Stage 6.13 phase 2) stacks lower rows from a structural
+    # prediction rather than the post-compaction settled extent.  Runs *after*
+    # the off-track lift (Stage 5.2): lifting an input above the trunk raises
+    # the section's bbox top, and capturing before that would understate the
+    # content height below the (then lower) top, making the cascade stack the
+    # row below too high.
+    _snapshot_struct_heights_below_top(graph, section_y_padding)
 
     # Stage 5.3: Re-align bbox tops within each grid row after off-track
     # lifting expanded some sections upward.  Unlike Stages 3.5 / 4.7 which
