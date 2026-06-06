@@ -509,12 +509,55 @@ def test_render_mixed_icon_types():
     assert root.tag.endswith("svg") or "svg" in root.tag
 
 
+def test_file_icon_banner_option():
+    """The `| banner` option flips the per-icon banner flag and styling."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: aln_out | BAM | Alignments | banner\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        run[Run]\n"
+        "        aln_out[ ]\n"
+        "        run -->|main| aln_out\n"
+        "    end\n"
+    )
+    station = graph.stations["aln_out"]
+    assert station.terminus_icon_banners == [True]
+    # The caption (third field) is still parsed alongside the banner option.
+    assert station.terminus_names == ["Alignments"]
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    from nf_metro.render.constants import ICON_BANNER_FILL
+
+    assert ICON_BANNER_FILL in svg
+
+
+def test_file_icon_no_banner_by_default():
+    """A plain %%metro file: directive does not enable the banner."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: reads_in | FASTQ\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    station = graph.stations["reads_in"]
+    assert station.terminus_icon_banners == [False]
+
+
 def test_render_icon_type_guide_fixtures():
     """Guide examples for files and dir icons render without errors."""
     from pathlib import Path
 
     examples = Path(__file__).parent.parent / "examples" / "guide"
-    for fname in ("05c_files_icon.mmd", "05d_folder_icon.mmd"):
+    for fname in (
+        "05c_files_icon.mmd",
+        "05d_folder_icon.mmd",
+        "05f_banner_labels.mmd",
+    ):
         fpath = examples / fname
         assert fpath.exists(), f"Missing fixture: {fpath}"
         text = fpath.read_text()

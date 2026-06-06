@@ -210,9 +210,10 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
             continue
         if graph.edges_to(station_id) and graph.edges_from(station_id):
             continue
-        station.terminus_labels = [label for label, _, _ in entries]
-        station.terminus_icon_types = [icon_type for _, icon_type, _ in entries]
-        station.terminus_names = [name for _, _, name in entries]
+        station.terminus_labels = [label for label, _, _, _ in entries]
+        station.terminus_icon_types = [icon_type for _, icon_type, _, _ in entries]
+        station.terminus_names = [name for _, _, name, _ in entries]
+        station.terminus_icon_banners = [banner for _, _, _, banner in entries]
 
     # Apply pending off-track marks
     for station_id in graph._pending_off_track:
@@ -335,8 +336,16 @@ def _parse_directive(
             # Optional third field: human-readable caption rendered below the
             # icon. A single name applies to all labels from this directive.
             name = parts[2].strip() if len(parts) >= 3 else ""
+            # Optional fourth field: comma-separated icon options. "banner"
+            # renders the format label as bold white text on a dark banner.
+            options = (
+                {o.strip().lower() for o in parts[3].split(",")}
+                if len(parts) >= 4
+                else set()
+            )
+            banner = "banner" in options
             graph._pending_terminus.setdefault(station_id, []).extend(
-                (label, icon_type, name) for label in labels
+                (label, icon_type, name, banner) for label in labels
             )
 
 

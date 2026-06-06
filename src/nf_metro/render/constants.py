@@ -219,6 +219,14 @@ ICON_FOLD_CREASE_RATIO: float = 0.6
 ICON_TEXT_OFFSET_RATIO: float = 0.15
 """Vertical text offset as a fraction of icon height."""
 
+ICON_LABEL_CHAR_WIDTH_RATIO: float = 0.6
+"""Estimated glyph width as a fraction of font size, used to shrink the icon
+label font so it keeps clear of the icon's left/right edges."""
+
+ICON_LABEL_CLEARANCE: float = 2.5
+"""Minimum horizontal clearance (px per side) between the icon label and the
+icon's left/right edges; the label font shrinks to honour it."""
+
 FILES_ICON_OFFSET_RATIO: float = 0.15
 """Offset of the back page as a fraction of icon width/height (stacked files icon)."""
 
@@ -227,6 +235,18 @@ FOLDER_TAB_HEIGHT_RATIO: float = 0.2
 
 FOLDER_TAB_WIDTH_RATIO: float = 0.4
 """Width of the folder tab as a fraction of total icon width."""
+
+ICON_BANNER_HEIGHT_RATIO: float = 0.38
+"""Height of the banner strip as a fraction of icon height (banner style)."""
+
+ICON_BANNER_BOTTOM_MARGIN_RATIO: float = 0.16
+"""White space left below the banner strip, as a fraction of icon height."""
+
+ICON_BANNER_FILL: str = "#222222"
+"""Fill colour of the banner strip drawn across the icon foot (banner style)."""
+
+ICON_BANNER_TEXT_COLOR: str = "#ffffff"
+"""Text colour of the bold label on the banner strip (banner style)."""
 
 # ---------------------------------------------------------------------------
 # Animation styling

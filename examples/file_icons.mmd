@@ -1,0 +1,31 @@
+%%metro title: File Icon Variants (#532)
+%%metro style: dark
+%%metro line: main | Pipeline | #4CAF50
+
+%%metro file: ref_in | FASTA | Reference
+%%metro files: reads_in | FASTQ | Reads
+%%metro files: aln_out | BAM | Alignments | banner
+%%metro file: report_out | HTML | Report
+%%metro dir: results_out | Results
+
+graph LR
+    subgraph inputs [Inputs]
+        ref_in[ ]
+        reads_in[ ]
+        align[Align]
+        ref_in -->|main| align
+        reads_in -->|main| align
+    end
+
+    subgraph outputs [Outputs]
+        %%metro entry: left | main
+        collect[Collect]
+        aln_out[ ]
+        report_out[ ]
+        results_out[ ]
+        collect -->|main| aln_out
+        collect -->|main| report_out
+        collect -->|main| results_out
+    end
+
+    align -->|main| collect

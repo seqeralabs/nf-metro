@@ -111,6 +111,13 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "cross-column feeder dropping straight into its consumer section.",
     ),
     (
+        "file_icons",
+        EXAMPLES_DIR,
+        "Terminus icon variants for #532: single-sheet `%%metro file:`, "
+        "stacked `%%metro files:` for multiplicity, the `%%metro dir:` folder, "
+        "and the optional `| banner` format strip.",
+    ),
+    (
         "legend_combo",
         EXAMPLES_DIR,
         "Demonstrates `%%metro legend_combo:`: a normal (blue) and tumor (red) "

@@ -58,7 +58,11 @@ MARKER_FILL_SOLID = "solid"
 ICON_TYPE_FILE = "file"
 ICON_TYPE_FILES = "files"
 ICON_TYPE_DIR = "dir"
-VALID_ICON_TYPES = (ICON_TYPE_FILE, ICON_TYPE_FILES, ICON_TYPE_DIR)
+VALID_ICON_TYPES = (
+    ICON_TYPE_FILE,
+    ICON_TYPE_FILES,
+    ICON_TYPE_DIR,
+)
 
 
 @dataclass
@@ -116,6 +120,10 @@ class Station:
     # caption outside the icon (e.g. "Samples" below a CSV file icon).
     # Parallel list to terminus_labels; empty string means no caption.
     terminus_names: list[str] = field(default_factory=list)
+    # Per-icon flag (parallel to terminus_labels): render the format label as
+    # bold white text on a dark banner inside the icon (transit-map style).
+    # Default False keeps the plain centred label.
+    terminus_icon_banners: list[bool] = field(default_factory=list)
     # Populated by layout engine
     x: float = 0.0
     y: float = 0.0
@@ -252,8 +260,9 @@ class MetroGraph:
     section_dag: SectionDAG | None = None
     # Section IDs that had explicit %%metro direction: directives
     _explicit_directions: set[str] = field(default_factory=set)
-    # Pending terminus designations: station_id -> list of (label, icon_type)
-    _pending_terminus: dict[str, list[tuple[str, str, str]]] = field(
+    # Pending terminus designations: station_id ->
+    # list of (label, icon_type, name, banner)
+    _pending_terminus: dict[str, list[tuple[str, str, str, bool]]] = field(
         default_factory=dict
     )
     # Pending off-track marks: station_ids to lift above section top track

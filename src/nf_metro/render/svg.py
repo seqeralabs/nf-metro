@@ -1184,6 +1184,7 @@ def _render_terminus_icons(
         station.terminus_labels
     )
     names = station.terminus_names or [""] * len(station.terminus_labels)
+    banners = station.terminus_icon_banners or [False] * len(station.terminus_labels)
 
     caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
     name_widths = [len(n) * caption_font_size * 0.55 if n else 0.0 for n in names]
@@ -1221,6 +1222,7 @@ def _render_terminus_icons(
     for i, label in enumerate(station.terminus_labels):
         icon_type = icon_types[i] if i < len(icon_types) else ICON_TYPE_FILE
         name = names[i] if i < len(names) else ""
+        banner = banners[i] if i < len(banners) else False
 
         icon_cx, icon_cy = centers[i]
 
@@ -1257,9 +1259,13 @@ def _render_terminus_icons(
         if icon_type == ICON_TYPE_DIR:
             render_folder_icon(d, **common)
         elif icon_type == ICON_TYPE_FILES:
-            render_files_icon(d, **common, fold_size=theme.terminus_fold_size)
+            render_files_icon(
+                d, **common, fold_size=theme.terminus_fold_size, banner=banner
+            )
         else:
-            render_file_icon(d, **common, fold_size=theme.terminus_fold_size)
+            render_file_icon(
+                d, **common, fold_size=theme.terminus_fold_size, banner=banner
+            )
 
         # Optional caption rendered below the icon so the type chip
         # inside the icon stays readable.
