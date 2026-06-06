@@ -3,10 +3,12 @@
 In normal layout a station shared by several metro lines is a single point
 and the lines converge (bundle) to that one Y.  Rail mode instead lays each
 line out as a fixed, evenly-spaced horizontal *rail* across the section and
-renders a multi-line station as the classic metro *interchange*: a circle on
-each rail the station uses, joined by a straight connector segment.  The
-rails do not converge: a line runs straight along its rail and only the
-interchange connector bridges across rails.
+renders a station several lines *pass through* as the classic metro
+*interchange*: a circle on each rail the station uses, joined by a straight
+connector segment.  Co-travelling lines stay on their own rails rather than
+bundling to one Y; they converge only at a genuine fan-in/out to a single
+node (e.g. a file terminus all lines reach), eased in with 45-degree
+diagonals.
 
 This module is a self-contained pipeline, run by ``compute_layout`` only for
 sections whose ``line_spread`` resolves to ``rails`` (``graph.is_rail_section``),

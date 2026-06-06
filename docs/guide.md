@@ -541,7 +541,7 @@ This pairs naturally with the `file:` / `files:` / `dir:` icon directives - the 
 
 - **`bundle`** (the default) merges every line sharing a station onto a single trunk track; a line that detours to its own station dips off the trunk and back. Line base-tracks stack downward from the first line, so the shared trunk sits at the top and detours cascade below it.
 - **`centered`** also merges lines onto one trunk, but balances that bundle about the midline: the shared trunk sits on the vertical centre and each line's exclusive stations distribute symmetrically above and below it, instead of the top-anchored downward cascade.
-- **`rails`** does not merge at all. Each line gets a fixed, evenly-spaced horizontal rail and a multi-line station renders as the classic metro interchange: a white circle on each rail the station uses, joined by a straight connector segment - the rails never converge (the nf-core/sarek "Example analysis pathways" subway idiom). Station labels alternate above and below the rails so dense runs stay readable.
+- **`rails`** keeps co-travelling lines on separate parallel rails rather than bundling them onto a trunk. Each line gets a fixed, evenly-spaced horizontal rail, and a station several lines *pass through* renders as the classic metro interchange: a white circle on each rail the station uses, joined by a straight connector segment (the nf-core/sarek "Example analysis pathways" subway idiom). Lines converge only at a genuine single-node fan-in/out - e.g. a file terminus all lines reach - where the rails ease together with 45-degree diagonals. Station labels alternate above and below the rails so dense runs stay readable.
 
 The bare directive sets the graph-wide default:
 
