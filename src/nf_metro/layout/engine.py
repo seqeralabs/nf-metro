@@ -354,6 +354,24 @@ def compute_layout(
     # Off by default: when unset, each _snap call is a single attribute read.
     graph._phase_snapshots_enabled = phase_snapshots_enabled()
 
+    # Diagonal labels are a horizontal-trunk feature: a TB section places its
+    # labels beside vertical pills, where the same tilt doesn't read, so an
+    # angled graph that also has a TB section would mix tilted and horizontal
+    # labels on one map.  Decline the angle outright in that case (warn and
+    # fall back to horizontal everywhere) rather than ship a mixed-orientation
+    # map.  Mutating graph.label_angle makes both layout and the renderer agree.
+    if graph.label_angle and any(
+        sec.direction == "TB" for sec in graph.sections.values()
+    ):
+        warnings.warn(
+            f"label_angle={graph.label_angle!r} ignored: diagonal labels are "
+            f"not applied to a graph containing a TB section (the whole map "
+            f"would need to tilt to stay consistent). Labels stay horizontal.",
+            UserWarning,
+            stacklevel=2,
+        )
+        graph.label_angle = 0.0
+
     # A diagonal label angle drives one graph-wide column pitch shared by every
     # section, so spacing is a property of the whole render, not of any one
     # section.  Used as the default x_spacing when the caller didn't pin one.

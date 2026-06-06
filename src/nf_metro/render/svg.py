@@ -358,15 +358,12 @@ def render_svg(
     # Compute labels early so section bbox expansions are applied
     # before section boxes are drawn and canvas bounds are computed.
     icon_obstacles = _compute_icon_obstacles(graph, theme, station_offsets)
-    label_angle = (
-        graph.label_angle if graph.label_angle is not None else theme.label_angle
-    )
     labels = place_labels(
         graph,
         station_offsets=station_offsets,
         icon_obstacles=icon_obstacles,
         routes=routes,
-        label_angle=label_angle,
+        label_angle=graph.label_angle or 0.0,
     )
 
     max_x, max_y = _compute_canvas_bounds(graph, routes, debug)

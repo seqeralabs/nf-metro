@@ -28,11 +28,6 @@ class Theme:
     label_font_family: str
     label_font_size: float
     label_font_weight: str
-    # Station label rotation in degrees, clockwise (#527).  0 keeps the
-    # historical horizontal labels; a positive angle tilts text downward to
-    # the right so dense trunks fit on a compact horizontal line.  A
-    # %%metro label_angle: directive overrides this per-diagram.
-    label_angle: float = 0.0
     title_color: str
     title_font_size: float
     section_fill: str

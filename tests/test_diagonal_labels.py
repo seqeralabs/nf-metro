@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from nf_metro.layout.constants import DIAGONAL_LABEL_OFFSET, LABEL_OFFSET
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.labels import find_label_overlaps, place_labels
@@ -62,6 +64,43 @@ def test_angled_trunk_packs_tighter_than_horizontal():
     assert angled < horizontal, (
         f"angled pitch {angled:.1f} not tighter than horizontal {horizontal:.1f}"
     )
+
+
+def test_label_angle_declined_on_tb_section():
+    """A graph with any TB section ignores label_angle and stays horizontal.
+
+    Diagonal labels suit horizontal trunks; a TB section labels vertical pills
+    side-on, where the same tilt reads wrong.  Rather than mix tilted and
+    horizontal labels on one map, the engine declines the angle entirely
+    (warns and falls back to horizontal everywhere).
+    """
+    text = """\
+%%metro label_angle: 45
+%%metro line: main | Main | #ff0000
+%%metro grid: flow | 0,0
+%%metro grid: qc | 0,1
+graph LR
+    subgraph flow [Flow]
+        a[AlignmentStep]
+        b[MarkDuplicates]
+        a -->|main| b
+    end
+    subgraph qc [QC]
+        %%metro direction: TB
+        %%metro entry: top | main
+        q1[MultiQC]
+        q2[Report]
+        q1 -->|main| q2
+    end
+    b -->|main| q1
+"""
+    graph = parse_metro_mermaid(text)
+    with pytest.warns(UserWarning, match="TB section"):
+        compute_layout(graph)
+    assert graph.label_angle == 0.0
+
+    svg = render_svg(graph, NFCORE_THEME)
+    assert "rotate(" not in svg
 
 
 def test_angled_label_offset_clears_pill():
