@@ -155,6 +155,10 @@ MIN_STRAIGHT_PORT: float = 5.0
 MIN_STRAIGHT_EDGE: float = 10.0
 """Minimum straight track for non-port edges."""
 
+RAIL_TERMINUS_FAN_LEAD: float = 16.0
+"""Flat lead a rail-mode blank terminus's fan runs along its convergence Y
+before fanning out to the rails, so the bundle reads as entering/leaving it."""
+
 MIN_STATION_FLAT_LENGTH: float = 20.0
 """Minimum length of the visible horizontal flat segment THROUGH a station.
 

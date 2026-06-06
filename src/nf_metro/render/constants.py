@@ -68,6 +68,12 @@ LEGEND_MARKER_PILL_RATIO: float = 1.7
 MARKER_PILL_LENGTH_RATIO: float = 4.0
 """Length of a ``pill`` marker along the line, as a multiple of the station radius."""
 
+RAIL_KNOB_RADIUS_RATIO: float = 1.35
+"""Rail-interchange knob circle radius, as a multiple of the station radius."""
+
+RAIL_LINK_HALF_WIDTH_RATIO: float = 0.7
+"""Rail-interchange connector bar half-width, as a multiple of the station radius."""
+
 # ---------------------------------------------------------------------------
 # SVG drawing
 # ---------------------------------------------------------------------------

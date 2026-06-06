@@ -108,6 +108,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _ensure_routes,
     _guard_anchors_frozen_during_placement,
     _guard_bundle_order_preserved,
+    _guard_centered_line_spread_balanced,
     _guard_coordinates_finite,
     _guard_entry_approach_from_port_side,
     _guard_explicit_grid_directions,
@@ -232,7 +233,7 @@ from nf_metro.layout.phases.spacing import (  # noqa: F401
     _residual_label_overlaps,
     _spread_bump,
 )
-from nf_metro.parser.model import MetroGraph
+from nf_metro.parser.model import LineSpread, MetroGraph
 
 # ---------------------------------------------------------------------------
 # Stage-boundary guards
@@ -374,11 +375,33 @@ def compute_layout(
         graph.label_angle = 0.0
 
     # A diagonal label angle drives one graph-wide column pitch shared by every
-    # section, so spacing is a property of the whole render, not of any one
-    # section.  Used as the default x_spacing when the caller didn't pin one.
+    # section (rail and normal alike), so spacing is a property of the whole
+    # render, not of any one section.  Used as the default x_spacing when the
+    # caller didn't pin one.
     from nf_metro.layout.labels import diagonal_label_pitch
 
     default_x_spacing = diagonal_label_pitch(graph, X_SPACING)
+
+    # Opt-in rail mode runs a dedicated, self-contained layout pipeline and
+    # returns early so the normal phase pipeline below is never touched when
+    # rail mode is off (default).  See layout/rail_mode.py.
+    if graph.line_spread is LineSpread.RAILS:
+        from nf_metro.layout.rail_mode import compute_rail_layout
+
+        rail_y = y_spacing if y_spacing is not None else compute_min_y_spacing(graph)
+        rail_x = x_spacing if x_spacing is not None else default_x_spacing
+        compute_rail_layout(
+            graph,
+            x_spacing=rail_x,
+            y_spacing=rail_y,
+            x_offset=x_offset,
+            y_offset=y_offset,
+            section_x_padding=section_x_padding,
+            section_y_padding=section_y_padding,
+            section_y_gap=section_y_gap,
+        )
+        _guard_stations_within_bbox(graph, "final")
+        return
 
     auto_x = x_spacing is None
     auto_y = y_spacing is None
@@ -440,6 +463,32 @@ def compute_layout(
             break  # can't widen the binding axis (e.g. pinned) -- give up
         x_spacing, y_spacing = new_x, new_y
 
+    # Per-section rail mode: the normal pipeline has positioned every
+    # section's bbox and inter-section ports.  Now overwrite the *internal*
+    # geometry of each rail-flagged section with the rail-mode layout (rails
+    # + spanning pills), anchored at the bbox the placement chose.  Non-rail
+    # sections and all inter-section placement keep the normal machinery.
+    rail_section_ids = [
+        sid
+        for sid, mode in graph.line_spread_overrides.items()
+        if mode is LineSpread.RAILS
+    ]
+    if rail_section_ids and graph.line_spread is not LineSpread.RAILS:
+        from nf_metro.layout.rail_mode import retrofit_section_rails
+
+        for sid in rail_section_ids:
+            section = graph.sections.get(sid)
+            if section is None:
+                continue
+            retrofit_section_rails(
+                graph,
+                section,
+                x_spacing=x_spacing,
+                y_spacing=y_spacing,
+                section_x_padding=section_x_padding,
+                section_y_padding=section_y_padding,
+            )
+
     # Always-on backstop (independent of ``validate``): the settled layout
     # must never leave a station outside its own section bbox.  Runs on the
     # render path so an unsupported directive combination fails loudly
@@ -450,6 +499,7 @@ def compute_layout(
     if validate:
         _guard_no_label_overlap(graph, "final")
         _guard_file_icon_no_name_label(graph, "final")
+        _guard_centered_line_spread_balanced(graph, "final")
 
 
 def _snap(graph: MetroGraph, phase_id: str) -> None:

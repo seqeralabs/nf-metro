@@ -130,8 +130,14 @@ def _discover_fixtures() -> list[str]:
     examples, addressable via :func:`_resolve_fixture`.
 
     Excludes Nextflow-format flowcharts under ``tests/fixtures/nextflow/``
-    (those are parser inputs, not layout inputs) and any file lacking a
-    ``%%metro`` directive.
+    (those are parser inputs, not layout inputs), any file lacking a
+    ``%%metro`` directive, and any fixture using ``line_spread: rails`` (which
+    runs a dedicated layout pipeline with its own geometry contract; see
+    ``tests/test_rail_mode.py``).  The substring match catches both the
+    graph-wide ``line_spread: rails`` and the per-section
+    ``line_spread: rails | <id>`` form: a mixed fixture's rail sections carry
+    spanning-pill geometry the corpus invariants don't model, so the whole
+    fixture is routed to the dedicated rail tests instead.
     """
     roots = [
         (FIXTURES, ""),
@@ -148,6 +154,8 @@ def _discover_fixtures() -> list[str]:
         for p in sorted(root.glob("*.mmd")):
             text = p.read_text(errors="ignore")
             if "%%metro" not in text:
+                continue
+            if "line_spread: rails" in text:
                 continue
             # Address all examples paths through the ``examples`` resolver
             # without the leading ``examples/`` so tests can pick up either

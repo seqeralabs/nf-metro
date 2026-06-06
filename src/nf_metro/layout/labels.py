@@ -86,7 +86,7 @@ def diagonal_label_pitch(graph: "MetroGraph", fallback: float) -> float:
     for st in graph.stations.values():
         if st.is_port or st.is_hidden or st.off_track:
             continue
-        if st.is_terminus and not st.label.strip():
+        if st.is_blank_terminus:
             continue
         if not st.label.strip():
             continue
@@ -110,6 +110,77 @@ class LabelPlacement:
     text_anchor: str = "middle"
     dominant_baseline: str = ""  # Empty means use above/below logic
     obstacle_bbox: tuple[float, float, float, float] | None = None
+
+
+def _rail_panel_extents(graph: "MetroGraph") -> dict[str, tuple[float, float]]:
+    """Per-rail-section (top_rail_y, bottom_rail_y) from the rail Y map.
+
+    Used to offset rail-mode station labels to the whole panel's outer edge
+    so a label always clears every rail rather than landing between two of
+    them.  Returns an empty map when the graph has no rail sections.
+    """
+    rail_y = graph._rail_y
+    extents: dict[str, tuple[float, float]] = {}
+    if not rail_y:
+        return extents
+    for sec_id, per_line in rail_y.items():
+        if not per_line:
+            continue
+        ys = list(per_line.values())
+        extents[sec_id] = (min(ys), max(ys))
+    return extents
+
+
+def _rail_label_side(
+    station: "Station",
+    panel_extents: dict[str, tuple[float, float]],
+) -> bool | None:
+    """Forced above/below side for a rail-mode single-rail station label.
+
+    A label beside a middle rail reads as noise in the bundle, so each
+    single-rail station's label is pushed *outward* to the panel edge (see
+    ``_rail_panel_label_offsets``): a station in the panel's top half labels
+    above (clearing the topmost rail), one in the bottom half labels below
+    (clearing the bottommost rail).  Splitting by half keeps a column of
+    single-rail stations from stacking every label on one panel edge.  Returns
+    True (above) / False (below), or None when the rule doesn't apply (non-rail
+    section, or a multi-rail spanning station which keeps layer alternation).
+    """
+    if not station.section_id:
+        return None
+    if station.rail_top_y is not None and station.rail_bottom_y is not None:
+        return None  # spanning pill: keeps layer alternation
+    extent = panel_extents.get(station.section_id)
+    if extent is None:
+        return None
+    top_y, bot_y = extent
+    mid = (top_y + bot_y) / 2
+    # Top-half rails label above (out the top of the panel), bottom-half below.
+    # The mid rail (== mid) defaults to below so it never collides with a
+    # top-half label dropping into the panel.
+    return station.y < mid - 0.5
+
+
+def _rail_panel_label_offsets(
+    station: "Station",
+    panel_extents: dict[str, tuple[float, float]],
+) -> tuple[float, float] | None:
+    """Label offsets (min_off, max_off) clearing the WHOLE rail panel.
+
+    A rail-mode label must never sit beside a middle rail: an above label has
+    to clear the panel's topmost rail and a below label its bottommost rail,
+    whatever rail(s) the station itself occupies.  Returns offsets measured
+    from ``station.y`` to the panel's top/bottom rail (so ``_try_place`` lands
+    the label outside the rail stack), or None when the station is not in a
+    known rail panel.
+    """
+    if not station.section_id:
+        return None
+    extent = panel_extents.get(station.section_id)
+    if extent is None:
+        return None
+    top_y, bot_y = extent
+    return (top_y - station.y, bot_y - station.y)
 
 
 def _label_bbox(
@@ -617,6 +688,7 @@ def _trial_cost(
     flip: bool,
     icon_obstacles: list[tuple[float, float, float, float]] | None = None,
     port_pref: dict[str, bool] | None = None,
+    panel_extents: dict[str, tuple[float, float]] | None = None,
 ) -> float:
     """Count label collision cost for a section using the given alternation.
 
@@ -648,10 +720,23 @@ def _trial_cost(
             max_off = max(line_offs) if line_offs else 0.0
         else:
             min_off = max_off = 0.0
+        rail_panel = (
+            _rail_panel_label_offsets(station, panel_extents)
+            if panel_extents is not None
+            else None
+        )
+        if rail_panel is not None:
+            min_off, max_off = rail_panel
 
         start_above = station.layer % 2 == 1
         if flip:
             start_above = not start_above
+
+        rail_side = (
+            _rail_label_side(station, panel_extents)
+            if panel_extents is not None
+            else None
+        )
 
         start_above = _apply_edge_override(
             station,
@@ -663,6 +748,9 @@ def _trial_cost(
 
         if port_pref and station.id in port_pref:
             start_above = port_pref[station.id]
+
+        if rail_side is not None:
+            start_above = rail_side
 
         candidate = _try_place(
             station, label_offset, start_above, placements, min_off, max_off
@@ -790,6 +878,10 @@ def place_labels(
     # off-Y ports, so labels avoid overlapping diagonal port routes.
     port_pref = _compute_port_label_preference(graph, max_dx=PORT_LABEL_MAX_DX)
 
+    # Rail-mode panels: offset labels to the whole panel's outer edge so they
+    # alternate above the top rail / below the bottom rail (never between rails).
+    panel_extents = _rail_panel_extents(graph)
+
     # Trial both alternation patterns per section, pick the better one.
     section_flip: dict[str, bool] = {}
     sec_groups: dict[str, list[Station]] = {}
@@ -808,10 +900,18 @@ def place_labels(
             sections_with_multiline,
         )
         cost_default = _trial_cost(
-            *args, flip=False, icon_obstacles=icon_obstacles, port_pref=port_pref
+            *args,
+            flip=False,
+            icon_obstacles=icon_obstacles,
+            port_pref=port_pref,
+            panel_extents=panel_extents,
         )
         cost_flipped = _trial_cost(
-            *args, flip=True, icon_obstacles=icon_obstacles, port_pref=port_pref
+            *args,
+            flip=True,
+            icon_obstacles=icon_obstacles,
+            port_pref=port_pref,
+            panel_extents=panel_extents,
         )
         if cost_flipped < cost_default:
             section_flip[sec_id] = True
@@ -836,6 +936,10 @@ def place_labels(
             max_off = max(line_offs) if line_offs else 0.0
         else:
             min_off = max_off = 0.0
+        rail_panel = _rail_panel_label_offsets(station, panel_extents)
+        if rail_panel is not None:
+            min_off, max_off = rail_panel
+        rail_side = _rail_label_side(station, panel_extents)
 
         # Check if this is a TB section station (horizontal pill)
         is_tb_vert = False
@@ -942,6 +1046,12 @@ def place_labels(
         # Override when a port route would clash with the label.
         if station.id in port_pref:
             start_above = port_pref[station.id]
+
+        # Rail mode: force single-rail labels outward (above their own rail in
+        # the top half, below in the bottom half) so they never sit between
+        # rails and a column of branch stations spreads its labels vertically.
+        if rail_side is not None:
+            start_above = rail_side
 
         safe_above, safe_below = safe_offsets.get(
             station.id, (label_offset, label_offset)
@@ -1061,7 +1171,57 @@ def place_labels(
         placements, graph, station_offsets, allow_hyphenation=allow_hyphenation
     )
 
+    if graph.label_angle:
+        _apply_rail_label_angle(
+            placements, graph, float(graph.label_angle), panel_extents
+        )
+
     return [p for p in placements if p.obstacle_bbox is None]
+
+
+_RAIL_LABEL_PANEL_CLEARANCE = 4.0
+
+
+def _apply_rail_label_angle(
+    placements: list[LabelPlacement],
+    graph: MetroGraph,
+    label_angle: float,
+    panel_extents: dict[str, tuple[float, float]] | None = None,
+) -> None:
+    """Tilt rail-section station labels by *label_angle* degrees.
+
+    Only rail-mode panels are affected (the normal layout path has its own
+    diagonal-label machinery).  An angled label is anchored at the pill X and
+    its current vertical offset and rotated about that anchor with
+    ``text-anchor=start`` so the tilted text trails away from the station;
+    the rail column step is sized for the rotated label's horizontal
+    projection by ``_label_aware_x_spacing`` so the panel packs tighter.
+    """
+    for p in placements:
+        if p.obstacle_bbox is not None or not p.station_id:
+            continue
+        st = graph.stations.get(p.station_id)
+        if st is None or st.is_port:
+            continue
+        if not (st.section_id and graph.is_rail_section(st.section_id)):
+            continue
+        # Blank termini render as icons, not text; leave them alone.
+        if st.is_blank_terminus:
+            continue
+        p.angle = label_angle
+        p.text_anchor = "start"
+        p.x = st.x
+        # Tilting adds vertical extent; nudge the anchor so the rotated label
+        # still clears the whole rail panel (above its top rail / below its
+        # bottom rail) rather than dipping back beside a middle rail.
+        extent = panel_extents.get(st.section_id) if panel_extents else None
+        if extent is not None:
+            top_y, bot_y = extent
+            _, by0, _, by1 = _label_bbox(p)
+            if p.above and by1 > top_y - _RAIL_LABEL_PANEL_CLEARANCE:
+                p.y -= by1 - (top_y - _RAIL_LABEL_PANEL_CLEARANCE)
+            elif not p.above and by0 < bot_y + _RAIL_LABEL_PANEL_CLEARANCE:
+                p.y += (bot_y + _RAIL_LABEL_PANEL_CLEARANCE) - by0
 
 
 # Upper bound on wrapping rounds.  Each round narrows one offending label by
