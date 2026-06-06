@@ -520,6 +520,7 @@ These go at the top of the file, before `graph LR`.
 | `%%metro off_track: <station>[, <station>...]` | Lift the listed stations above the section's main track (see below) |
 | `%%metro compact_offsets: true` | Compact line offsets within stations (see below) |
 | `%%metro center_ports: true` | Centre inter-section ports on the shorter of the two connected sections, so lines enter/exit at the visual midpoint. Overridden by the `--center-ports` / `--no-center-ports` CLI flag. |
+| `%%metro line_spread: <mode>[ \| <id>...]` | How lines sharing a station relate vertically (see below). `<mode>` is `bundle` (default), `centered`, or `rails`. The bare form sets the graph default; `<mode> \| sectionA, sectionB` overrides those sections. Overridden by the `--line-spread` CLI flag. |
 | `%%metro legend_min_height: <pixels>` | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 
 **Compact offsets.** By default, each line reserves a fixed vertical slot across the whole map based on its declaration order. If you define three lines, every station that carries even one of them is sized to fit all three. This keeps bundles visually consistent but wastes space when most stations only carry one or two lines.
@@ -535,6 +536,27 @@ With `%%metro compact_offsets: true`, stations are only as wide as the lines act
 ```
 
 This pairs naturally with the `file:` / `files:` / `dir:` icon directives - the lifted stations are usually file terminals. The [`off_track_convergence`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/topologies/off_track_convergence.mmd) topology and the [differentialabundance](https://github.com/pinin4fjords/nf-metro/blob/main/examples/differentialabundance.mmd) example both use it.
+
+**Line spread.** `%%metro line_spread:` controls how lines that share a station relate to each other vertically. It has three modes:
+
+- **`bundle`** (the default) merges every line sharing a station onto a single trunk track; a line that detours to its own station dips off the trunk and back. Line base-tracks stack downward from the first line, so the shared trunk sits at the top and detours cascade below it.
+- **`centered`** also merges lines onto one trunk, but balances that bundle about the midline: the shared trunk sits on the vertical centre and each line's exclusive stations distribute symmetrically above and below it, instead of the top-anchored downward cascade.
+- **`rails`** does not merge at all. Each line gets a fixed, evenly-spaced horizontal rail and a multi-line station renders as the classic metro interchange: a white circle on each rail the station uses, joined by a straight connector segment - the rails never converge (the nf-core/sarek "Example analysis pathways" subway idiom). Station labels alternate above and below the rails so dense runs stay readable.
+
+The bare directive sets the graph-wide default:
+
+```text
+%%metro line_spread: rails
+```
+
+Append `| <section>, ...` to override individual sections, so one map can mix modes - a `bundle` trunk feeding a `rails` analysis panel, say:
+
+```text
+%%metro line_spread: centered
+%%metro line_spread: rails | pathways
+```
+
+Here every section defaults to `centered` while `pathways` is laid out as parallel rails; ordinary section placement positions both. The [`line_spread`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/line_spread.mmd) example shows all three modes in one map via per-section overrides. For `rails`, inter-section edges into or out of a rail section are not yet supported - a rail section should be self-contained.
 
 ### Section directives
 

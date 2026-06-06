@@ -333,6 +333,7 @@ These are automatically rewritten into port-to-port connections with junction st
 | `%%metro off_track: <station>[, <station>...]` | Global | Lift the listed stations (typically `file:`/`files:`/`dir:` inputs) above the section's main track, so they drop into their consumer instead of consuming a line-track slot |
 | `%%metro compact_offsets: true` | Global | Use compact per-station offsets instead of global line-priority slots (better for dense maps with few lines) |
 | `%%metro center_ports: true` | Global | Centre inter-section ports on the shorter of the two connected sections (overridden by the `--center-ports` / `--no-center-ports` CLI flag) |
+| `%%metro line_spread: <mode>[ \| <section>...]` | Global / Section | How lines sharing a station relate vertically: `bundle` (default) merges them onto one trunk that cascades downward, `centered` balances that bundle about the midline, `rails` draws each line as a parallel rail with shared stations as interchanges. Bare form sets the graph default; the `\| <section>, ...` form overrides named sections. Overridden by the `--line-spread` CLI flag |
 | `%%metro legend_min_height: <pixels>` | Global | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 | `%%metro entry: <side> \| <lines>` | Section | Entry port hint |
 | `%%metro exit: <side> \| <lines>` | Section | Exit port hint |

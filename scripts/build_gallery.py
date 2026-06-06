@@ -43,6 +43,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Minimal two-line pipeline with no sections.",
     ),
     (
+        "line_spread",
+        EXAMPLES_DIR,
+        "Demonstrates the `%%metro line_spread:` axis with one per-section "
+        "override per section: `bundle` (default) merges shared lines onto one "
+        "trunk that cascades downward, `centered` balances that bundle about "
+        "the midline, and `rails` draws each line as a parallel rail with "
+        "shared stations as interchanges.",
+    ),
+    (
         "rnaseq_auto",
         EXAMPLES_DIR,
         "Demonstrates fully auto-inferred layout: no `%%metro grid:` directives "
