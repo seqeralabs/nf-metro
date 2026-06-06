@@ -5323,10 +5323,14 @@ def _restack_htrunk(
         return
     max_off = (n - 1) * step
     off = inner * step
-    # An innermost trunk turns on the INSIDE of both flanking corners; the
-    # outermost turns on the OUTSIDE.  For a downward dip the inner line is
-    # the inside of the turn (smaller radius); same parity on both corners.
-    r = corner_radius(off, max_off, outside=False, base_radius=base_radius)
+    # An innermost trunk turns on the INSIDE of both flanking corners (smaller
+    # radius), the outermost on the OUTSIDE (larger); same parity on both
+    # corners of a dip.  ``off`` grows from 0 at the innermost line, so the
+    # radius is base_radius + off (innermost = base_radius, the tightest) --
+    # the concentric nesting.  Using the reversed (outside=False) offset here
+    # inverts that, giving the inside line the LARGEST radius and tearing the
+    # bundle apart at the dip corners.
+    r = corner_radius(off, max_off, outside=True, base_radius=base_radius)
     if 0 <= k - 1 < len(rp.curve_radii):
         rp.curve_radii[k - 1] = r
     if k < len(rp.curve_radii) and k + 2 < len(pts):
