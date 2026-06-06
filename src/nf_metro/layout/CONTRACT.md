@@ -212,8 +212,19 @@ in pipeline order.
   positions from `auto_layout`. Still all local-coord.
 - **Postcondition**: Every section has `offset_x`, `offset_y` set such
   that `(local + offset)` lands sections on a non-overlapping grid.
+- **Disconnected graphs**: When the section meta-graph has 2+
+  weakly-connected components and the author pinned no explicit
+  `%%metro grid:` positions, each component is placed in its own local
+  column grid (so a wide component never inflates another's columns)
+  and the components are stacked vertically in a deterministic order
+  (ascending min original row, then descending size, then smallest
+  section id), left-aligned and separated by `section_y_gap`. Any
+  explicit grid override falls back to the shared single-grid path.
 - **Invariants preserved**: Station local coords unchanged. Bboxes
   still local-coord.
+- **Runtime guard**: `_guard_independent_components_disjoint` (under
+  `validate=True`) asserts stacked components occupy disjoint vertical
+  bands.
 - **Lifecycle:** invariant - the section grid (column/row placement,
   non-overlap) holds at the final boundary.
 

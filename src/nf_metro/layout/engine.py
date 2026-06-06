@@ -116,6 +116,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_fanout_tail_join,
     _guard_feeder_exits_section_through_side,
     _guard_file_icon_no_name_label,
+    _guard_independent_components_disjoint,
     _guard_inter_row_run_clearance,
     _guard_inter_section_descent_edge_clearance,
     _guard_inter_section_route_no_backtrack,
@@ -670,6 +671,8 @@ def _compute_section_layout(
     # Stage 1.3: Place sections on the canvas
     place_sections(graph, section_x_gap, section_y_gap)
     _snap(graph, "1.3")
+    if validate:
+        _guard_independent_components_disjoint(graph, "after Stage 1.3")
 
     # Stage 1.4: Renumber sections by visual reading order (row, col)
     _renumber_sections_by_grid(graph)

@@ -1479,13 +1479,19 @@ def _compute_row_boundary_segments(
 
 def _compute_col_boundary_xs(
     col_bounds: dict[int, tuple[float, float]],
+    sections: list[Section] | None = None,
 ) -> list[tuple[int, int, float]]:
     """Return ``(col_a, col_b, mid_x)`` triples for consecutive grid columns
     whose bbox X ranges don't overlap.
 
-    Columns don't overlap like rows do (there's no column-axis analogue
-    of a fold), so a single canvas-spanning line per pair suffices; the
-    overlap guard is defensive.
+    Columns don't overlap like rows do within a single shared grid (there's
+    no column-axis analogue of a fold), so a single canvas-spanning line per
+    pair normally suffices.  When the section graph splits into independent
+    components, each component is placed in its own local column grid and the
+    components reuse the same ``grid_col`` indices in different X bands; a
+    midpoint computed from the merged per-column X bounds can then land
+    inside another component's section.  Any such boundary is dropped so the
+    overlay never cuts a section bbox.
     """
     result: list[tuple[int, int, float]] = []
     sorted_cols = sorted(col_bounds)
@@ -1495,7 +1501,13 @@ def _compute_col_boundary_xs(
         left = col_bounds[cb][0]
         if right >= left:
             continue
-        result.append((ca, cb, (right + left) / 2))
+        mid_x = (right + left) / 2
+        if sections is not None and any(
+            sec.grid_col_span == 1 and sec.bbox_x < mid_x < sec.bbox_x + sec.bbox_w
+            for sec in sections
+        ):
+            continue
+        result.append((ca, cb, mid_x))
     return result
 
 
@@ -1569,7 +1581,7 @@ def _render_debug_overlay(
             all_y1 = max(b[1] for b in row_bounds.values()) + 20
         grid_color = "rgba(255, 255, 0, 0.5)"
 
-        for ca, cb, mid_x in _compute_col_boundary_xs(col_bounds):
+        for ca, cb, mid_x in _compute_col_boundary_xs(col_bounds, sections):
             d.append(
                 draw.Line(
                     mid_x,

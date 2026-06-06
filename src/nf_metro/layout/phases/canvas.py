@@ -67,11 +67,14 @@ def _renumber_sections_by_grid(graph: MetroGraph) -> None:
             sweep[sid] = 0
 
     # Disconnected components: number each flow fully before the next,
-    # ordered by the root's grid_row so top flows come first.
+    # ordered by the topmost grid_row so top flows come first.
+    from nf_metro.layout.section_placement import _weakly_connected_components
+
+    section_edges = graph.section_dag.section_edges if graph.section_dag else set()
     comp_idx: dict[str, int] = {}
     for rank, comp in enumerate(
         sorted(
-            nx.weakly_connected_components(dag),
+            _weakly_connected_components(graph, section_edges),
             key=lambda c: min(graph.sections[sid].grid_row for sid in c),
         )
     ):

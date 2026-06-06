@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
+    COMPONENT_BAND_OVERLAP_TOLERANCE,
     COORD_TOLERANCE,
     EDGE_TO_BUNDLE_CLEARANCE,
     GUARD_TOLERANCE,
@@ -289,6 +290,49 @@ def _guard_no_negative_grid_columns(graph: MetroGraph, phase: str) -> None:
             f"{phase}: sections at negative grid columns "
             f"(serpentine packer ran off the left edge): {offenders}"
         )
+
+
+def _guard_independent_components_disjoint(graph: MetroGraph, phase: str) -> None:
+    """After Stage 1.3: independently-stacked components must not overlap.
+
+    When the section meta-graph splits into 2+ weakly-connected components
+    and the author pinned no explicit ``%%metro grid:`` positions,
+    :func:`place_sections` lays each component out in its own local column
+    grid and stacks the components vertically.  Stacking is only correct if
+    the components occupy disjoint vertical bands; an off-by-one in the
+    stacking cursor would let one component's bbox overlap another's,
+    producing tangled, ambiguous output.  This guard fails loudly if the
+    stacked bands ever overlap.
+
+    No-op for single-component graphs and for explicit-grid graphs (which
+    deliberately keep the shared grid and may interleave components).
+    """
+    from nf_metro.layout.section_placement import (
+        _component_extent,
+        _weakly_connected_components,
+    )
+
+    if not graph.sections or graph.section_dag is None or graph._explicit_grid:
+        return
+
+    components = _weakly_connected_components(graph, graph.section_dag.section_edges)
+    if len(components) <= 1:
+        return
+
+    def band(comp: set[str]) -> tuple[float, float]:
+        _, top, bottom = _component_extent([graph.sections[s] for s in comp])
+        return top, bottom
+
+    bands = sorted((band(c), c) for c in components)
+    for (lo_band, lo_comp), (hi_band, hi_comp) in zip(bands, bands[1:]):
+        # Bands are sorted by top edge; overlap if the lower band's bottom
+        # protrudes past the next band's top.
+        if lo_band[1] > hi_band[0] + COMPONENT_BAND_OVERLAP_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: independently-stacked components overlap vertically: "
+                f"{sorted(lo_comp)} (band {lo_band[0]:.1f}..{lo_band[1]:.1f}) "
+                f"vs {sorted(hi_comp)} (band {hi_band[0]:.1f}..{hi_band[1]:.1f})"
+            )
 
 
 def _guard_explicit_grid_directions(graph: MetroGraph, phase: str) -> None:

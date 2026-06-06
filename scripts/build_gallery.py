@@ -133,6 +133,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "stacking each section in its own grid row. Regression fixture for "
         "#250 (cross-column junction routes were going backward in X).",
     ),
+    (
+        "disconnected_components",
+        EXAMPLES_DIR,
+        "A connected three-section trunk plus a separate, wide disconnected "
+        "section. Each weakly-connected component of the section graph is "
+        "placed in its own local column grid and the components are stacked "
+        "vertically, so the wide panel never inflates the trunk's columns or "
+        "flings its later sections to the right.",
+    ),
     # --- Simple topologies ---
     (
         "single_section",

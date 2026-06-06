@@ -481,6 +481,10 @@ from untouched ones when checking column-companion consensus."""
 GUARD_TOLERANCE: float = 5.0
 """Tolerance for stage-boundary invariant checks (port-on-boundary, etc.)."""
 
+COMPONENT_BAND_OVERLAP_TOLERANCE: float = 0.5
+"""Slack permitted when checking that independently-stacked disconnected
+components occupy disjoint vertical bands."""
+
 # ---------------------------------------------------------------------------
 # Canvas-wide grid snap
 # ---------------------------------------------------------------------------

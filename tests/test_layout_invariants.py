@@ -4711,7 +4711,7 @@ def test_debug_grid_overlay_boundaries_outside_section_bboxes(fixture):
                     f"row {ra}|{rb} segment y={y:.1f} x={x_start:.0f}..{x_end:.0f} "
                     f"cuts {sec.id!r} (row={sec.grid_row}, y={y0:.1f}..{y1:.1f})"
                 )
-    for ca, cb, mid_x in _compute_col_boundary_xs(col_bounds):
+    for ca, cb, mid_x in _compute_col_boundary_xs(col_bounds, sections):
         for sec in sections:
             if sec.grid_col_span != 1:
                 continue
