@@ -44,6 +44,24 @@ class PortSide(Enum):
     BOTTOM = "bottom"
 
 
+class LineSpread(str, Enum):
+    """How lines sharing a station relate to each other vertically.
+
+    A single axis the user controls per graph and per section:
+
+    - ``BUNDLE`` merges shared lines onto one trunk track; detours cascade
+      downward from the top line (the default).
+    - ``CENTERED`` also merges, but balances the bundle about the midline so
+      the shared trunk sits centred and exclusive callers fan above and below.
+    - ``RAILS`` does not merge: each line keeps its own parallel rail and a
+      shared station renders as an interchange spanning the rails it uses.
+    """
+
+    BUNDLE = "bundle"
+    CENTERED = "centered"
+    RAILS = "rails"
+
+
 VALID_LINE_STYLES = ("solid", "dashed", "dotted")
 
 MARKER_SHAPE_CIRCLE = "circle"
@@ -129,11 +147,34 @@ class Station:
     y: float = 0.0
     layer: int = 0
     track: float = 0.0
+    # Rail-mode span (set by the rail-mode layout for a section whose
+    # ``line_spread`` resolves to ``rails``).  ``rail_top_y``/``rail_bottom_y``
+    # are the Y of the topmost and bottommost rails this station's lines
+    # occupy; when they differ the renderer draws one vertical pill spanning
+    # that range.  None means the station was not laid out in rail mode
+    # (normal pill rules apply).
+    rail_top_y: float | None = None
+    rail_bottom_y: float | None = None
+    # Rail Ys this station actually *uses* (one per line it carries), set
+    # alongside rail_top_y/rail_bottom_y in rail mode.  A spanning pill draws
+    # a knob at each of these Ys; a rail that falls within the pill's span but
+    # is absent here belongs to a line the station does not use and passes
+    # behind the pill with no knob.  Empty when not laid out in rail mode.
+    rail_used_ys: list[float] = field(default_factory=list)
 
     @property
     def is_terminus(self) -> bool:
         """Station has one or more file icons."""
         return len(self.terminus_labels) > 0
+
+    @property
+    def is_blank_terminus(self) -> bool:
+        """A file-icon station with no text label of its own.
+
+        Rendered as its icon (and an unrounded nub) at the line convergence
+        rather than a labelled pill, so layout and routing treat it specially.
+        """
+        return self.is_terminus and not self.label.strip()
 
 
 @dataclass
@@ -239,6 +280,12 @@ class MetroGraph:
     diamond_style: str = "straight"  # "straight" or "symmetric"
     compact_offsets: bool = False
     center_ports: bool = False
+    # Vertical relationship between lines sharing a station (see LineSpread).
+    # ``line_spread`` is the graph-wide default; ``line_spread_overrides`` maps
+    # a section id to a mode that wins over the default for that section.
+    # Query via ``section_line_spread`` / ``is_rail_section`` / ``station_is_rail``.
+    line_spread: LineSpread = LineSpread.BUNDLE
+    line_spread_overrides: dict[str, LineSpread] = field(default_factory=dict)
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
     # Opt-in diagonal station labels (#527). None means "use the theme
@@ -306,6 +353,10 @@ class MetroGraph:
     # compute_layout from the NF_METRO_PHASE_SNAPSHOTS env var; read by the
     # _snap hook after each phase.  Off by default (pure observation).
     _phase_snapshots_enabled: bool = field(default=False, repr=False)
+    # Per-section rail-Y map (section_id -> {line_id: rail_y}), set by the
+    # rail-mode layout so the dedicated router can resolve a port's per-line
+    # rail Y.  Empty when rail mode is off.
+    _rail_y: dict[str, dict[str, float]] = field(default_factory=dict, repr=False)
 
     def _invalidate_edge_caches(self) -> None:
         """Reset caches that depend on the edge list."""
@@ -384,6 +435,16 @@ class MetroGraph:
             self._station_lines_cache = {sid: sorted(lids) for sid, lids in idx.items()}
         return self._station_lines_cache.get(station_id, [])
 
+    def station_lines_ordered(self, station_id: str) -> list[str]:
+        """Line IDs on a station in line-definition priority order.
+
+        ``station_lines`` returns them alphabetically; rail-mode rendering and
+        routing need definition order so a multi-line station's knobs and slots
+        line up with the legend and the parallel rails.
+        """
+        lines = set(self.station_lines(station_id))
+        return [lid for lid in self.lines if lid in lines]
+
     def edges_from(self, station_id: str) -> list[Edge]:
         """Return edges whose ``source`` is *station_id* (lazy adjacency cache)."""
         if self._edges_from_cache is None:
@@ -415,6 +476,29 @@ class MetroGraph:
                     stations.append(edge.target)
                     seen.add(edge.target)
         return stations
+
+    def section_line_spread(self, section_id: str | None) -> LineSpread:
+        """Resolved line-spread mode for a section (override beats the default)."""
+        if section_id is not None and section_id in self.line_spread_overrides:
+            return self.line_spread_overrides[section_id]
+        return self.line_spread
+
+    @property
+    def has_rail_sections(self) -> bool:
+        """True if any section is laid out in rail mode (global default or override)."""
+        return self.line_spread is LineSpread.RAILS or any(
+            mode is LineSpread.RAILS for mode in self.line_spread_overrides.values()
+        )
+
+    def is_rail_section(self, section_id: str | None) -> bool:
+        """True if *section_id* resolves to rail mode."""
+        return self.section_line_spread(section_id) is LineSpread.RAILS
+
+    def station_is_rail(self, station_id: str) -> bool:
+        """True if a station belongs to a rail-mode section."""
+        st = self.stations.get(station_id)
+        section_id = st.section_id if st is not None else None
+        return self.is_rail_section(section_id)
 
     def section_for_station(self, station_id: str) -> str | None:
         """Return the section ID containing a station, or None."""

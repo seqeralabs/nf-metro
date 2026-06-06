@@ -19,6 +19,7 @@ from nf_metro.parser.model import (
     VALID_LINE_STYLES,
     VALID_MARKER_SHAPES,
     Edge,
+    LineSpread,
     MarkerLegendEntry,
     MarkerStyle,
     MetroGraph,
@@ -303,6 +304,8 @@ def _parse_directive(
     elif content.startswith("center_ports:"):
         val = content[len("center_ports:") :].strip().lower()
         graph.center_ports = val in ("true", "yes", "1")
+    elif content.startswith("line_spread:"):
+        _parse_line_spread_directive(content[len("line_spread:") :].strip(), graph)
     elif content.startswith("label_angle:"):
         try:
             graph.label_angle = float(content[len("label_angle:") :].strip())
@@ -480,6 +483,48 @@ def _parse_legend_directive(value: str, graph: MetroGraph) -> None:
         )
 
 
+def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro legend_combo: lineA, lineB[, ...] | Display Label.
+
+    Stores a (line_ids, label) entry on ``graph.legend_combos``. The named
+    lines are rendered as a single combined legend row and (in rail mode)
+    share a single rail slot. A combo referencing unknown lines is warned
+    about and ignored; unknown members of an otherwise-valid combo are
+    dropped (with a warning) and the remaining members kept.
+    """
+    parts = value.split("|", 1)
+    if len(parts) != 2:
+        warnings.warn(
+            f"Invalid legend_combo {value!r}; expected 'lineA, lineB | Display Label'.",
+            stacklevel=2,
+        )
+        return
+    ids_raw, label = parts[0], parts[1].strip()
+    line_ids = [s.strip() for s in ids_raw.split(",") if s.strip()]
+    if len(line_ids) < 2 or not label:
+        warnings.warn(
+            f"Invalid legend_combo {value!r}; expected at least two line IDs "
+            "and a non-empty label.",
+            stacklevel=2,
+        )
+        return
+    known = [lid for lid in line_ids if lid in graph.lines]
+    unknown = [lid for lid in line_ids if lid not in graph.lines]
+    if unknown:
+        warnings.warn(
+            f"legend_combo {label!r} references unknown line(s) "
+            f"{', '.join(unknown)}; ignoring those.",
+            stacklevel=2,
+        )
+    if len(known) < 2:
+        warnings.warn(
+            f"legend_combo {label!r} has fewer than two known lines; ignoring.",
+            stacklevel=2,
+        )
+        return
+    graph.legend_combos.append((tuple(known), label))
+
+
 def _parse_logo_scale_directive(value: str, graph: MetroGraph) -> None:
     """Parse %%metro logo_scale: <factor> (1.0 = default auto-size)."""
     try:
@@ -549,46 +594,31 @@ def _parse_marker_legend_directive(value: str, graph: MetroGraph) -> None:
         graph.marker_legend.append(MarkerLegendEntry(style=style, caption=caption))
 
 
-def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:
-    """Parse %%metro legend_combo: lineA, lineB[, ...] | Display Label.
+def _parse_line_spread_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro line_spread: <mode>[ | section[, section...]].
 
-    Stores a (line_ids, label) entry on ``graph.legend_combos``. The named
-    lines are rendered as a single combined legend row and suppressed from
-    their own individual rows. A combo referencing unknown lines is warned
-    about and ignored; unknown members of an otherwise-valid combo are
-    dropped (with a warning) and the remaining members kept.
+    Bare ``line_spread: <mode>`` sets the graph-wide default; the piped form
+    ``line_spread: <mode> | sectionA, sectionB`` records a per-section override
+    that wins over the default for those sections. ``<mode>`` is one of
+    ``bundle`` / ``centered`` / ``rails``; an unrecognised mode is warned about
+    and ignored.
     """
-    parts = value.split("|", 1)
-    if len(parts) != 2:
+    mode_raw, _, sids_raw = value.partition("|")
+    try:
+        mode = LineSpread(mode_raw.strip().lower())
+    except ValueError:
+        valid = ", ".join(m.value for m in LineSpread)
         warnings.warn(
-            f"Invalid legend_combo {value!r}; expected 'lineA, lineB | Display Label'.",
+            f"Invalid line_spread mode {mode_raw.strip()!r}; expected one of {valid}.",
             stacklevel=2,
         )
         return
-    ids_raw, label = parts[0], parts[1].strip()
-    line_ids = [s.strip() for s in ids_raw.split(",") if s.strip()]
-    if len(line_ids) < 2 or not label:
-        warnings.warn(
-            f"Invalid legend_combo {value!r}; expected at least two line IDs "
-            "and a non-empty label.",
-            stacklevel=2,
-        )
-        return
-    known = [lid for lid in line_ids if lid in graph.lines]
-    unknown = [lid for lid in line_ids if lid not in graph.lines]
-    if unknown:
-        warnings.warn(
-            f"legend_combo {label!r} references unknown line(s) "
-            f"{', '.join(unknown)}; ignoring those.",
-            stacklevel=2,
-        )
-    if len(known) < 2:
-        warnings.warn(
-            f"legend_combo {label!r} has fewer than two known lines; ignoring.",
-            stacklevel=2,
-        )
-        return
-    graph.legend_combos.append((tuple(known), label))
+    section_ids = [s.strip() for s in sids_raw.split(",") if s.strip()]
+    if section_ids:
+        for sid in section_ids:
+            graph.line_spread_overrides[sid] = mode
+    else:
+        graph.line_spread = mode
 
 
 # Regex patterns for node shapes

@@ -10,6 +10,7 @@ import click
 from nf_metro import __version__
 from nf_metro.layout import PhaseInvariantError, compute_layout
 from nf_metro.parser import parse_metro_mermaid
+from nf_metro.parser.model import LineSpread
 from nf_metro.render import render_svg
 from nf_metro.render.html import render_html
 from nf_metro.themes import THEMES
@@ -103,6 +104,15 @@ def cli() -> None:
     "the value of the %%metro center_ports: directive (if any) is used.",
 )
 @click.option(
+    "--line-spread",
+    type=click.Choice([m.value for m in LineSpread]),
+    default=None,
+    help="How lines sharing a station relate vertically: 'bundle' (default) "
+    "merges onto one trunk, 'centered' balances the bundle about the midline, "
+    "'rails' draws parallel rails with interchange stations. Overrides the "
+    "graph-wide %%metro line_spread: directive (per-section overrides stay).",
+)
+@click.option(
     "--section-x-gap",
     type=float,
     default=None,
@@ -142,6 +152,7 @@ def render(
     line_order: str | None,
     straight_diamonds: bool,
     center_ports: bool | None,
+    line_spread: str | None,
     section_x_gap: float | None,
     section_y_gap: float | None,
     from_nextflow: bool,
@@ -171,6 +182,9 @@ def render(
 
     if center_ports is not None:
         graph.center_ports = center_ports
+
+    if line_spread is not None:
+        graph.line_spread = LineSpread(line_spread)
 
     if logo is not None:
         graph.logo_path = str(logo)
