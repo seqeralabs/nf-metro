@@ -327,8 +327,8 @@ These are automatically rewritten into port-to-port connections with junction st
 | `%%metro grid: <section> \| <col>,<row>[,<rowspan>[,<colspan>]]` | Global | Pin section to grid position |
 | `%%metro legend: <position>` | Global | Legend position: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, `none` (append `\| canvas`, `\| <dx>,<dy>`, or use `<x>,<y>` for finer placement - see the [guide](docs/guide.md)) |
 | `%%metro line_order: <strategy>` | Global | Line ordering for track assignment: `definition` (default) or `span` (longest-spanning lines get inner tracks) |
-| `%%metro file: <station> \| <label> [\| <name>]` | Global | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon |
-| `%%metro files: <station> \| <label> [\| <name>]` | Global | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption |
+| `%%metro file: <station> \| <label> [\| <name>] [\| banner]` | Global | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon; optional `banner` draws the label on a dark strip across the icon |
+| `%%metro files: <station> \| <label> [\| <name>] [\| banner]` | Global | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption; optional `banner` strip |
 | `%%metro dir: <station> \| <label> [\| <name>]` | Global | Mark a station with a folder icon (e.g. output directory). Optional `name` caption |
 | `%%metro off_track: <station>[, <station>...]` | Global | Lift the listed stations (typically `file:`/`files:`/`dir:` inputs) above the section's main track, so they drop into their consumer instead of consuming a line-track slot |
 | `%%metro compact_offsets: true` | Global | Use compact per-station offsets instead of global line-priority slots (better for dense maps with few lines) |

@@ -333,6 +333,18 @@ The label inside an icon is meant for a short type chip (e.g. `CSV`, `FASTQ`). T
 
 The name is rendered as a caption directly below the icon. If multiple labels are listed (`FASTQ, BAM`), the same name applies to all of them.
 
+### Banner labels
+
+To make a format stand out, add `banner` as a fourth field to a `file:` or `files:` directive. The format label then renders as bold white text on a dark strip across the lower part of the icon, transit-map "format chip" style, while the white document stays visible:
+
+```text
+%%metro files: aln_out | BAM | Alignments | banner
+```
+
+![Banner labels example](assets/renders/05f_banner_labels.svg)
+
+Any `name` caption (third field) still renders below the icon, so `| <name> | banner` keeps the caption and `| | banner` applies the strip with no caption. `banner` is not supported on `dir:` (folder) icons.
+
 ## 6. Per-station markers
 
 By default every station is drawn as a uniform pill. The `%%metro marker:` directive overrides one station's marker so it can encode a tool attribute - mandatory vs optional, hardware-accelerated, expanded in another diagram - through its shape and fill:
@@ -502,8 +514,8 @@ These go at the top of the file, before `graph LR`.
 | `%%metro grid: <section> \| <col>,<row>[,<rowspan>[,<colspan>]]` | Pin a section to a grid position |
 | `%%metro legend: <position>` | Position the legend (and its embedded logo). Keyword: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, or `none` (a bare keyword auto-relocates if it would overlap a section or route). Add `\| canvas` to anchor the keyword to the canvas margin, or `\| <dx>,<dy>` to nudge it; both pin the block exactly (warning on overlap rather than relocating). Use `<x>,<y>` for absolute top-left coordinates. |
 | `%%metro line_order: <strategy>` | Line ordering for track assignment: `definition` (default, preserves `.mmd` order) or `span` (longest-spanning lines get inner tracks) |
-| `%%metro file: <station> \| <label> [\| <name>]` | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon. |
-| `%%metro files: <station> \| <label> [\| <name>]` | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption. |
+| `%%metro file: <station> \| <label> [\| <name>] [\| banner]` | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon; optional `banner` draws the label on a dark strip across the icon. |
+| `%%metro files: <station> \| <label> [\| <name>] [\| banner]` | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption; optional `banner` strip. |
 | `%%metro dir: <station> \| <label> [\| <name>]` | Mark a station with a folder icon (e.g. output directory). Optional `name` caption. |
 | `%%metro off_track: <station>[, <station>...]` | Lift the listed stations above the section's main track (see below) |
 | `%%metro compact_offsets: true` | Compact line offsets within stations (see below) |
