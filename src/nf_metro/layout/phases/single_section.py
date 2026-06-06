@@ -454,9 +454,7 @@ def _mirror_rl(sub: MetroGraph) -> None:
     Anchors on non-terminus stations so adding terminus layers
     extends leftward without shifting the entry point.
     """
-    non_term = [
-        s for s in sub.stations.values() if not (s.is_terminus and not s.label.strip())
-    ]
+    non_term = [s for s in sub.stations.values() if not (s.is_blank_terminus)]
     anchor_stations = non_term if non_term else list(sub.stations.values())
     max_x_val = max(s.x for s in anchor_stations)
     for s in sub.stations.values():

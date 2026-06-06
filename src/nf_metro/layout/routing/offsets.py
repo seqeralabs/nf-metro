@@ -16,7 +16,7 @@ from nf_metro.layout.routing.invariants import (
     distinct_offset_levels,
 )
 from nf_metro.layout.routing.reversal import detect_reversed_sections
-from nf_metro.parser.model import MetroGraph, PortSide
+from nf_metro.parser.model import LineSpread, MetroGraph, PortSide
 
 # Tolerances used across offset phases
 _SAME_Y_TOLERANCE: float = SAME_Y_TOLERANCE
@@ -1307,6 +1307,11 @@ def compute_station_offsets(
 
     Returns dict mapping (station_id, line_id) -> y_offset.
     """
+    # Rail mode bakes absolute rail Ys into the route points and the pill
+    # span, so per-line offsets are not used; return an empty map.
+    if graph.line_spread is LineSpread.RAILS:
+        return {}
+
     ctx = _build_offset_ctx(graph, offset_step)
     _compute_base_offsets(ctx)
     _reindex_section_local(ctx)

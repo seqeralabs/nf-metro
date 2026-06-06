@@ -55,6 +55,8 @@ from nf_metro.render.constants import (
     LEGEND_ROUTE_CLEARANCE,
     LOGO_Y_STANDALONE,
     MARKER_PILL_LENGTH_RATIO,
+    RAIL_KNOB_RADIUS_RATIO,
+    RAIL_LINK_HALF_WIDTH_RATIO,
     SECTION_BOX_RADIUS,
     SECTION_LABEL_REGION_RATIO,
     SECTION_LABEL_TEXT_OFFSET,
@@ -980,6 +982,154 @@ def _render_marker_station(
     )
 
 
+def _station_data_attrs(graph: MetroGraph, station: Station) -> dict[str, str]:
+    """SVG data-attributes shared by every station marker.
+
+    Values that flow from user content (label, section name) are HTML-escaped
+    because drawsvg does not escape unknown kwargs.
+    """
+    data = {
+        "class_": "nf-metro-station",
+        "data-station-id": station.id,
+        "data-station-lines": ",".join(graph.station_lines(station.id)),
+        "data-station-label": html.escape(station.label or station.id),
+    }
+    if station.section_id:
+        data["data-section-id"] = station.section_id
+        sec_obj = graph.sections.get(station.section_id)
+        if sec_obj:
+            data["data-section-name"] = html.escape(sec_obj.name)
+    return data
+
+
+def _render_rail_pill(
+    d: draw.Drawing,
+    graph: MetroGraph,
+    station: Station,
+    theme: Theme,
+    r: float,
+) -> None:
+    """Render a rail-mode multi-rail station as the metro interchange idiom.
+
+    The station draws as a *white circle on each rail it uses* joined by a
+    *white link* running between the topmost and bottommost used rails - a
+    continuous outlined white interchange (the classic metro / nf-core-sarek
+    idiom).  The link is the station fill colour (not a dark stroke), so it
+    reads as connecting the circles; the dark station stroke forms the OUTER
+    boundary of the whole circles+link glyph rather than cutting across it.
+
+    The glyph is built in two stacked layers so the dark outline is continuous
+    and never gaps where the link meets a circle: first a dark layer (the link
+    bar plus a disc at each used rail, each grown by the stroke width) paints
+    the union's outer boundary, then a white layer of the same shapes (at the
+    true radii) paints the interior on top.  A rail that falls within the span
+    but is NOT used by the station gets no circle; the link passes behind it.
+    """
+    used_ys = [y for y in station.rail_used_ys] or [station.y]
+    top_y = min(used_ys)
+    bot_y = max(used_ys)
+    station_data = _station_data_attrs(graph, station)
+
+    sw = theme.station_stroke_width
+    # Circles are slightly larger than the bare marker so each used rail reads
+    # as a distinct knob along the white link; the link bar is a touch narrower
+    # than the circles so the knobs bulge out of it like a real interchange.
+    knob_r = r * RAIL_KNOB_RADIUS_RATIO
+    bar_half = r * RAIL_LINK_HALF_WIDTH_RATIO
+    # rail_used_ys is recorded parallel to the line-definition order (see
+    # rail_mode._layout_section_rails), so zip the knobs against that same
+    # order rather than the alphabetical order of graph.station_lines.
+    served = graph.station_lines_ordered(station.id)
+
+    def _link_bar(width: float, stroke: str, **extra: object) -> None:
+        # A round-capped line of the given width is a capsule; used here only
+        # for its straight body between top and bottom used rails (the caps are
+        # covered by the circles), so it joins the knobs with no seam.
+        if bot_y - top_y <= 0.5:
+            return
+        d.append(
+            draw.Line(
+                station.x,
+                top_y,
+                station.x,
+                bot_y,
+                stroke=stroke,
+                stroke_width=width,
+                stroke_linecap="round",
+                **extra,
+            )
+        )
+
+    def _knobs(radius: float, fill: str, stroke: str, **extra: object) -> None:
+        # Only rails the station USES get a knob; a rail that falls within the
+        # connector's span but belongs to a line this station does not use
+        # passes behind the bar (no knob), so the interchange reads as not
+        # stopping there.
+        for lid, y in zip(served, station.rail_used_ys):
+            d.append(
+                draw.Circle(
+                    station.x,
+                    y,
+                    radius,
+                    fill=fill,
+                    stroke=stroke,
+                    stroke_width=0,
+                    **{**extra, "data-line-id": lid},
+                )
+            )
+
+    # Dark outer-boundary layer: the link bar and the knob discs grown by the
+    # stroke width, all painted in the station stroke colour.  Their union is
+    # the continuous dark outline of the finished glyph.
+    _link_bar(
+        (bar_half + sw) * 2,
+        theme.station_stroke,
+        **{**station_data, "class_": "nf-metro-rail-connector"},
+    )
+    _knobs(
+        knob_r + sw,
+        theme.station_stroke,
+        theme.station_stroke,
+        **{"class_": "nf-metro-rail-knob-outline", "data-station-id": station.id},
+    )
+
+    # White interior layer: the same shapes at their true radii, filling the
+    # interior of the outlined union with the station fill.
+    _link_bar(bar_half * 2, theme.station_fill)
+    _knobs(
+        knob_r,
+        theme.station_fill,
+        theme.station_fill,
+        **{"class_": "nf-metro-rail-knob", "data-station-id": station.id},
+    )
+
+
+def _draw_blank_terminus_nub(
+    d: draw.Drawing,
+    station: Station,
+    r: float,
+    min_off: float,
+    max_off: float,
+    station_data: dict[str, str],
+    theme: Theme,
+    is_tb_vert: bool = False,
+) -> None:
+    """Draw a blank terminus's unrounded nub (a sharp-cornered station rect)."""
+    bx, by, bw, bh = _pill_box(station, r, min_off, max_off, is_tb_vert)
+    d.append(
+        draw.Rectangle(
+            bx,
+            by,
+            bw,
+            bh,
+            fill=theme.station_fill,
+            stroke=theme.station_stroke,
+            stroke_width=theme.station_stroke_width,
+            **station_data,
+        )
+    )
+
+
 def _render_stations(
     d: draw.Drawing,
     graph: MetroGraph,
@@ -999,6 +1149,42 @@ def _render_stations(
             continue
 
         r = theme.station_radius
+
+        # Rail mode: a blank terminus terminates its converged bundle exactly
+        # like any other render -- the standard unrounded nub (via _pill_box)
+        # spanning the bundle, plus the file icon -- rather than a rail-specific
+        # glyph.  The only difference is the span comes from the rail bundle
+        # (rail mode does not use station_offsets).  An off-track input drops in
+        # vertically (no horizontal fan), so it gets the icon only.
+        if graph.station_is_rail(station.id) and station.is_blank_terminus:
+            if station.off_track:
+                _append_terminus_icons(d, station, graph, theme, r, 0.0, 0.0)
+                continue
+            used = station.rail_used_ys or [station.y]
+            t_min = min(used) - station.y
+            t_max = max(used) - station.y
+            _draw_blank_terminus_nub(
+                d, station, r, t_min, t_max, _station_data_attrs(graph, station), theme
+            )
+            _append_terminus_icons(d, station, graph, theme, r, t_min, t_max)
+            continue
+
+        # Rail mode: a multi-rail station draws as a spanning interchange; a
+        # single-rail station draws as one knob centred on its rail.  Both go
+        # through _render_rail_pill (its link bar self-suppresses with no span),
+        # so a single stop sits exactly on the rail rather than being shifted by
+        # the normal-mode parallel-line station_offsets, which don't apply once
+        # a line is pinned to a fixed rail.  Marked stations keep their glyph.
+        if (
+            graph.station_is_rail(station.id)
+            and station.marker is None
+            and not station.is_terminus
+        ):
+            _render_rail_pill(d, graph, station, theme, r)
+            continue
+        if station.rail_top_y is not None and station.rail_bottom_y is not None:
+            _render_rail_pill(d, graph, station, theme, r)
+            continue
 
         # Determine if this is a TB vertical station (rotated pill)
         is_tb_vert = False
@@ -1020,20 +1206,7 @@ def _render_stations(
         else:
             min_off = max_off = 0.0
 
-        # Hand-escape values that flow from user content into XML attributes.
-        # drawsvg does not escape unknown kwargs, so an unescaped "&" or "<"
-        # in a section name or station label breaks XML well-formedness.
-        station_data = {
-            "class_": "nf-metro-station",
-            "data-station-id": station.id,
-            "data-station-lines": ",".join(graph.station_lines(station.id)),
-            "data-station-label": html.escape(station.label or station.id),
-        }
-        if station.section_id:
-            station_data["data-section-id"] = station.section_id
-            sec_obj = graph.sections.get(station.section_id)
-            if sec_obj:
-                station_data["data-section-name"] = html.escape(sec_obj.name)
+        station_data = _station_data_attrs(graph, station)
 
         if station.marker is not None:
             _render_marker_station(
@@ -1054,19 +1227,9 @@ def _render_stations(
         x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb_vert)
 
         # Blank terminus stations get an unrounded nub; everything else a pill.
-        is_blank_terminus = station.is_terminus and not station.label.strip()
-        if is_blank_terminus:
-            d.append(
-                draw.Rectangle(
-                    x,
-                    y,
-                    w,
-                    h,
-                    fill=theme.station_fill,
-                    stroke=theme.station_stroke,
-                    stroke_width=theme.station_stroke_width,
-                    **station_data,
-                )
+        if station.is_blank_terminus:
+            _draw_blank_terminus_nub(
+                d, station, r, min_off, max_off, station_data, theme, is_tb_vert
             )
         else:
             d.append(
@@ -1125,6 +1288,7 @@ def _terminus_icon_centers(
     first_offset: float,
     step: float,
     bundle_center: float,
+    is_rail: bool = False,
 ) -> list[tuple[float, float]]:
     """Centre coordinates for a terminus station's file icons.
 
@@ -1135,6 +1299,13 @@ def _terminus_icon_centers(
     the outside of the diagram.
     """
     is_tb = section_dir in ("TB", "BT")
+    # A rail-mode off-track input parks above the rails and feeds straight down
+    # into its consumer's rail (see routing/rail.py), so its icon sits directly
+    # on the station coordinate (centred on the drop X) rather than marching
+    # sideways.  Gated on the rail flag so normal-mode off-track feeders (which
+    # the standard router handles) are untouched.
+    if station.off_track and is_rail:
+        return [(station.x, station.y - (first_offset + i * step)) for i in range(n)]
     # Sinks sit at the end of the flow and extend forwards; sources sit at
     # the start and extend backwards.  RL/BT reverse the forward direction.
     extends_forward = is_source if section_dir in ("RL", "BT") else not is_source
@@ -1205,6 +1376,7 @@ def _render_terminus_icons(
         icon_gap + icon_half_flow,
         icon_step,
         bundle_center,
+        is_rail=graph.station_is_rail(station.id),
     )
 
     # Captions sitting at the same Y overlap when their estimated
