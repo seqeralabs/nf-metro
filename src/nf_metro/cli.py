@@ -65,7 +65,8 @@ def cli() -> None:
     "--max-layers-per-row",
     type=int,
     default=None,
-    help="Max layers before folding to next row (default: auto)",
+    help="Max layers before folding to next row (default: auto). Overrides "
+    "the %%metro fold_threshold: directive.",
 )
 @click.option(
     "--animate/--no-animate",
@@ -169,7 +170,7 @@ def render(
     try:
         graph = parse_metro_mermaid(
             text,
-            max_station_columns=max_layers_per_row or 15,
+            max_station_columns=max_layers_per_row,
         )
     except ValueError as e:
         raise click.ClickException(str(e))

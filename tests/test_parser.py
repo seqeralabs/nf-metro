@@ -1059,3 +1059,54 @@ def test_lr_primary_direction_does_not_warn(header, recwarn):
         w for w in recwarn.list if "primary layout direction" in str(w.message)
     ]
     assert direction_warnings == []
+
+
+def _wide_section_chain() -> str:
+    """A linear chain of six sections (24 station-columns total), wide enough
+    that the default row-wrap threshold (15) folds it onto multiple rows."""
+    lines = ["%%metro line: a | A | #0570b0", "graph LR"]
+    for i in range(6):
+        lines.append(f"    subgraph s{i} [Section {i}]")
+        for j in range(4):
+            lines.append(f"        n{i}_{j}[N{i}{j}]")
+        for j in range(3):
+            lines.append(f"        n{i}_{j} -->|a| n{i}_{j + 1}")
+        lines.append("    end")
+    for i in range(5):
+        lines.append(f"    n{i}_3 -->|a| n{i + 1}_0")
+    return "\n".join(lines) + "\n"
+
+
+def test_fold_threshold_directive_parsed():
+    graph = parse_metro_mermaid("%%metro fold_threshold: 40\ngraph LR\n")
+    assert graph.fold_threshold == 40
+
+
+def test_fold_threshold_invalid_ignored():
+    graph = parse_metro_mermaid("%%metro fold_threshold: wide\ngraph LR\n")
+    assert graph.fold_threshold is None
+
+
+def test_fold_threshold_keeps_wide_chain_on_one_row():
+    """The default threshold wraps a wide section chain onto multiple rows; a
+    high fold_threshold keeps every section on row 0."""
+    default = parse_metro_mermaid(_wide_section_chain())
+    rows_default = {s.grid_row for s in default.sections.values() if s.station_ids}
+    assert max(rows_default) > 0, "wide chain should wrap at the default threshold"
+
+    raised = parse_metro_mermaid(
+        "%%metro fold_threshold: 100\n" + _wide_section_chain()
+    )
+    rows_raised = {s.grid_row for s in raised.sections.values() if s.station_ids}
+    assert rows_raised == {0}, f"fold_threshold should keep one row, got {rows_raised}"
+
+
+def test_max_station_columns_arg_overrides_fold_threshold():
+    """An explicit caller value (the --max-layers-per-row CLI flag) wins over a
+    fold_threshold directive, matching the CLI-overrides-directive convention."""
+    graph = parse_metro_mermaid(
+        "%%metro fold_threshold: 100\n" + _wide_section_chain(),
+        max_station_columns=15,
+    )
+    rows = {s.grid_row for s in graph.sections.values() if s.station_ids}
+    assert max(rows) > 0, "explicit max_station_columns=15 should force a wrap"
