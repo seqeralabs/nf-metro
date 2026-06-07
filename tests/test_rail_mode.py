@@ -1168,9 +1168,10 @@ def test_rail_above_labels_do_not_overlap_section_above():
     """Above-rail labels must not grow the panel box up into the section stacked
     above it.  The band is reserved during layout, so the rendered box top stays
     where placement put it and the section boxes stay disjoint."""
+    from layout_validator import check_section_overlap
+
     from nf_metro.render import render_svg
     from nf_metro.themes import THEMES
-    from tests.layout_validator import check_section_overlap
 
     graph = parse_metro_mermaid(_STACKED_RAIL_MMD)
     compute_layout(graph)
