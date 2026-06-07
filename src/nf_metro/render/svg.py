@@ -21,6 +21,8 @@ from nf_metro.parser.model import (
     ICON_TYPE_DIR,
     ICON_TYPE_FILE,
     ICON_TYPE_FILES,
+    MARKER_FILL_OPEN,
+    MARKER_FILL_SOLID,
     MARKER_SHAPE_PILL,
     MarkerStyle,
     MetroGraph,
@@ -1040,12 +1042,25 @@ def _station_data_attrs(graph: MetroGraph, station: Station) -> dict[str, str]:
     return data
 
 
+def _rail_marker_fill(marker: MarkerStyle | None, theme: Theme) -> str | None:
+    """Interior tint for a spanning rail interchange carrying a marker.
+
+    Only a marker with a literal colour fill (not the ``open`` / ``solid``
+    keywords) tints the interchange; keyword fills and unmarked stations keep
+    the default interior so their glyph is unchanged.
+    """
+    if marker is None or marker.fill in (MARKER_FILL_OPEN, MARKER_FILL_SOLID):
+        return None
+    return marker_fill_color(marker.fill, theme)
+
+
 def _render_rail_pill(
     d: draw.Drawing,
     graph: MetroGraph,
     station: Station,
     theme: Theme,
     r: float,
+    fill_override: str | None = None,
 ) -> None:
     """Render a rail-mode multi-rail station as the metro interchange idiom.
 
@@ -1062,7 +1077,12 @@ def _render_rail_pill(
     the union's outer boundary, then a white layer of the same shapes (at the
     true radii) paints the interior on top.  A rail that falls within the span
     but is NOT used by the station gets no circle; the link passes behind it.
+
+    ``fill_override`` tints the interior layer (link bar + knobs) with a marker
+    fill colour while keeping the interchange shape and dark outline, so a
+    spanning rail station can carry its ``%%metro marker:`` colour.
     """
+    interior_fill = fill_override if fill_override is not None else theme.station_fill
     used_ys = [y for y in station.rail_used_ys] or [station.y]
     top_y = min(used_ys)
     bot_y = max(used_ys)
@@ -1132,12 +1152,12 @@ def _render_rail_pill(
     )
 
     # White interior layer: the same shapes at their true radii, filling the
-    # interior of the outlined union with the station fill.
-    _link_bar(bar_half * 2, theme.station_fill)
+    # interior of the outlined union with the interior fill.
+    _link_bar(bar_half * 2, interior_fill)
     _knobs(
         knob_r,
-        theme.station_fill,
-        theme.station_fill,
+        interior_fill,
+        interior_fill,
         **{"class_": "nf-metro-rail-knob", "data-station-id": station.id},
     )
 
@@ -1221,7 +1241,9 @@ def _render_stations(
             _render_rail_pill(d, graph, station, theme, r)
             continue
         if station.rail_top_y is not None and station.rail_bottom_y is not None:
-            _render_rail_pill(d, graph, station, theme, r)
+            _render_rail_pill(
+                d, graph, station, theme, r, _rail_marker_fill(station.marker, theme)
+            )
             continue
 
         # Determine if this is a TB vertical station (rotated pill)
