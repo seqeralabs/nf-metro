@@ -132,7 +132,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_negative_grid_columns,
     _guard_no_route_through_section,
     _guard_no_station_overlap,
-    _guard_off_track_inputs_above_consumer,
+    _guard_off_track_above_anchor,
     _guard_partial_branch_offset_gaps,
     _guard_ports_on_boundaries,
     _guard_rail_above_label_band,
@@ -1300,7 +1300,7 @@ def _finalize_layout(
         phase = "after final"
         offsets, routes = _run_pass_c_guards(graph, phase)
         _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
-        _guard_off_track_inputs_above_consumer(graph, phase)
+        _guard_off_track_above_anchor(graph, phase)
         _guard_fanout_junction_shares_exit_port_y(graph, phase)
         _guard_merge_port_approach_side(graph, phase, offsets=offsets)
         _guard_partial_branch_offset_gaps(graph, phase, offsets=offsets)

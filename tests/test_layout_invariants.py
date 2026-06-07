@@ -28,6 +28,7 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_Y_GAP,
     SECTION_Y_PADDING,
+    X_SPACING,
 )
 from nf_metro.layout.engine import (
     PhaseInvariantError,
@@ -42,6 +43,7 @@ from nf_metro.layout.phases.bbox import (
     _section_fit_top,
 )
 from nf_metro.layout.phases.off_track import (
+    _off_track_anchor_of,
     _off_track_fit_top,
     _off_track_groups,
     _reanchor_off_track_to_consumer,
@@ -185,6 +187,45 @@ def _fixtures_with(predicate) -> list[str]:
 
 
 _FIXTURES_WITH_OFF_TRACK = _fixtures_with(lambda t: "off_track:" in t)
+
+
+def _off_track_output_sinks(graph: MetroGraph) -> dict[str, str]:
+    """Map each off-track *output* (producer-fed sink) to its producer.
+
+    Built on production's :func:`_off_track_anchor_of`, which resolves an
+    input to its consumer and a sink to its producer.  An off-track station
+    whose anchor it also feeds (an out-edge to the anchor) is an input; the
+    rest are producer-fed sinks.
+    """
+    sinks: dict[str, str] = {}
+    for off_id, anchor_id in _off_track_anchor_of(graph).items():
+        if any(e.target == anchor_id for e in graph.edges_from(off_id)):
+            continue
+        sinks[off_id] = anchor_id
+    return sinks
+
+
+def _off_track_roles(text: str) -> tuple[bool, bool]:
+    """Return ``(has_input, has_output)`` for a fixture's off-track stations.
+
+    The ``off_track:`` directive is identical for both roles; only the edge
+    direction distinguishes an input (feeds an on-track consumer) from a
+    producer-fed sink, so classification needs the parsed graph.
+    """
+    try:
+        g = parse_metro_mermaid(text)
+    except Exception:
+        return (False, False)
+    sinks = _off_track_output_sinks(g)
+    anchored = set(_off_track_anchor_of(g))
+    return (bool(anchored - sinks.keys()), bool(sinks))
+
+
+_OFF_TRACK_ROLES = {
+    f: _off_track_roles(_fixture_text(f)) for f in _FIXTURES_WITH_OFF_TRACK
+}
+_FIXTURES_WITH_OFF_TRACK_INPUT = [f for f, r in _OFF_TRACK_ROLES.items() if r[0]]
+_FIXTURES_WITH_OFF_TRACK_OUTPUT = [f for f, r in _OFF_TRACK_ROLES.items() if r[1]]
 _FIXTURES_MULTI_SECTION = _fixtures_with(lambda t: t.count("subgraph") >= 2)
 _FIXTURES_COMPACT = _fixtures_with(lambda t: "compact_offsets: true" in t)
 
@@ -917,7 +958,7 @@ def test_top_entry_lead_corner_concentric(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK)
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_INPUT)
 def test_off_track_inputs_above_consumer(fixture):
     """Off-track input stations (declared via ``%%metro off_track:``)
     must sit at least one ``y_spacing`` slot above their on-track
@@ -953,6 +994,81 @@ def test_off_track_inputs_above_consumer(fixture):
             f"Off-track {off_id} y={off_st.y} not above consumer "
             f"{consumer_id} y={cons_st.y}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Off-track outputs sit above and adjacent to their producer (#573)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_OUTPUT)
+def test_off_track_outputs_above_and_adjacent_to_producer(fixture):
+    """Off-track *output* stations (producer-fed sinks, declared via
+    ``%%metro off_track:``) must hang clear of the trunk and adjacent to
+    their producer: above it (smaller Y) and lifted by only a bounded
+    number of ``y_spacing`` slots.
+
+    A correctly-anchored sink sits one pitch above its producer (more if a
+    crowded column bumps it clear of a trunk band), so a gap above two
+    pitches means it was misanchored to the section's topmost on-track
+    station and stranded far from the step that writes it (issue #573).
+    Mirror of ``test_off_track_inputs_above_consumer``.
+    """
+    graph = _layout(fixture)
+    y_spacing = compute_min_y_spacing(graph)
+    producer_of = _off_track_output_sinks(graph)
+
+    assert producer_of, f"{fixture}: no off-track output sinks found"
+
+    for off_id, prod_id in producer_of.items():
+        off_st = graph.stations[off_id]
+        prod_st = graph.stations[prod_id]
+        gap = prod_st.y - off_st.y
+        assert gap > _Y_TOL, (
+            f"{fixture}: off-track output {off_id} y={off_st.y} not above "
+            f"producer {prod_id} y={prod_st.y}"
+        )
+        assert gap <= 2 * y_spacing + _Y_TOL, (
+            f"{fixture}: off-track output {off_id} lifted {gap:.0f}px above "
+            f"producer {prod_id} (more than 2 slots) - likely misanchored to "
+            f"the section's topmost station instead of its producer"
+        )
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_OUTPUT)
+def test_off_track_output_owns_its_column(fixture):
+    """An off-track output must occupy its own column, clear of every
+    on-track station in its section.
+
+    An output is laid out one layer past its producer - the same column as
+    the producer's on-track successor - so without the column-reservation
+    pass its hanging icon overlaps that station and the riser leaving it.
+    The pass pushes later on-track stations one column right; assert the
+    output's X is at least half a column from any on-track same-section
+    station (issue #573).
+    """
+    graph = _layout(fixture)
+    junction_ids = set(graph.junctions)
+    producer_of = _off_track_output_sinks(graph)
+    assert producer_of, f"{fixture}: no off-track output sinks found"
+
+    for off_id in producer_of:
+        off_st = graph.stations[off_id]
+        for sid in graph.sections[off_st.section_id].station_ids:
+            st = graph.stations.get(sid)
+            if (
+                st is None
+                or st.off_track
+                or st.is_port
+                or st.is_hidden
+                or sid in junction_ids
+            ):
+                continue
+            assert abs(off_st.x - st.x) > X_SPACING * 0.5, (
+                f"{fixture}: off-track output {off_id} x={off_st.x} shares a "
+                f"column with on-track {sid} x={st.x}; its icon overlaps the "
+                f"station and the riser leaving it"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1012,7 +1128,12 @@ def test_reanchor_off_track_bbox_fit_is_reversible(fixture):
             for stations in by_consumer.values()
             for st in stations
         )
-        ideal_top = highest - SECTION_Y_PADDING
+        # The fit hugs the off-track band but clamps up to any on-track
+        # content (or non-TOP port) sitting higher than the band, so the
+        # ideal is the fit-top contract itself, not a bare band-minus-pad.
+        # For input fixtures the band is the topmost content and the two
+        # coincide; an output sink can sit below higher on-track branches.
+        ideal_top = _off_track_fit_top(graph, section, highest, SECTION_Y_PADDING)
         assert section.bbox_y == pytest.approx(ideal_top, abs=_Y_TOL), (
             f"{fixture}/{sec_id}: bbox top {section.bbox_y:.1f} does not hug "
             f"the off-track band (expected {ideal_top:.1f}); grow-only left "

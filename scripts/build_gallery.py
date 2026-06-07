@@ -110,6 +110,16 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "default port placement.",
     ),
     (
+        "off_track_outputs",
+        EXAMPLES_DIR,
+        "Off-track file artefacts hung above a pre-processing trunk at the "
+        "step that writes each one: `%%metro off_track:` on a producer-fed "
+        "sink anchors it to its producer (not the section top), mirroring the "
+        "off-track input mechanism for outputs. Each output gets its own "
+        "column clear of the next station, and a step writing several files "
+        "(MarkDup here) stacks them above it.",
+    ),
+    (
         "legend_logo_placement",
         EXAMPLES_DIR,
         "Demonstrates positioning the bundled legend+logo block: `%%metro "
