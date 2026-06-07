@@ -575,6 +575,42 @@ def _guard_rail_above_label_band(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _guard_rail_stations_seat_on_rails(graph: MetroGraph, phase: str) -> None:
+    """Every rail station's used-rail Ys must land on its lines' fixed rails.
+
+    A rail station records ``rail_used_ys`` parallel to its line order
+    (``rail_mode._layout_section_rails``); the renderer draws a knob at each so
+    the glyph seats on every line it carries.  If a used-rail Y drifts off its
+    line's rail (``graph._rail_y``), the knob, and a coloured-marker
+    interchange's fill, would float off the rail.  Verify the seating directly.
+    """
+    if not graph.has_rail_sections:
+        return
+    tol = 1.0
+    for section in graph.sections.values():
+        if not graph.is_rail_section(section.id):
+            continue
+        per_line = graph._rail_y.get(section.id) or {}
+        if not per_line:
+            continue
+        for sid in section.station_ids:
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.off_track or st.is_blank_terminus:
+                continue
+            lines = graph.station_lines_ordered(sid)
+            if len(st.rail_used_ys) != len(lines):
+                continue
+            for lid, y in zip(lines, st.rail_used_ys):
+                rail_y = per_line.get(lid)
+                if rail_y is None:
+                    continue
+                if abs(y - rail_y) > tol:
+                    raise PhaseInvariantError(
+                        f"{phase}: rail station {sid!r} seats line {lid!r} at "
+                        f"y={y:.1f}, off its rail {rail_y:.1f}"
+                    )
+
+
 def _guard_terminus_icons_within_bbox(graph: MetroGraph, phase: str) -> None:
     """Final phase: TB/BT terminus file icons must fit inside the section bbox.
 

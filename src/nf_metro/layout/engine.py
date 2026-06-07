@@ -137,6 +137,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_partial_branch_offset_gaps,
     _guard_ports_on_boundaries,
     _guard_rail_above_label_band,
+    _guard_rail_stations_seat_on_rails,
     _guard_routes_enter_sections_at_ports,
     _guard_row_gaps,
     _guard_row_trunk_cy_consistent,
@@ -513,6 +514,7 @@ def compute_layout(
         _guard_file_icon_no_name_label(graph, "final")
         _guard_centered_line_spread_balanced(graph, "final")
         _guard_rail_above_label_band(graph, "final")
+        _guard_rail_stations_seat_on_rails(graph, "final")
         _guard_single_trunk_off_track_step(graph, "final")
 
 
