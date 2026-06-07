@@ -1071,18 +1071,26 @@ def _render_rail_pill(
     reads as connecting the circles; the dark station stroke forms the OUTER
     boundary of the whole circles+link glyph rather than cutting across it.
 
-    The glyph is built in two stacked layers so the dark outline is continuous
-    and never gaps where the link meets a circle: first a dark layer (the link
+    The glyph is built in two stacked layers so the outline is continuous and
+    never gaps where the link meets a circle: first an outline layer (the link
     bar plus a disc at each used rail, each grown by the stroke width) paints
-    the union's outer boundary, then a white layer of the same shapes (at the
-    true radii) paints the interior on top.  A rail that falls within the span
-    but is NOT used by the station gets no circle; the link passes behind it.
+    the union's outer boundary, then an interior layer of the same shapes (at
+    the true radii) paints the interior on top.  A rail that falls within the
+    span but is NOT used by the station gets no circle; the link passes behind
+    it.
 
     ``fill_override`` tints the interior layer (link bar + knobs) with a marker
-    fill colour while keeping the interchange shape and dark outline, so a
-    spanning rail station can carry its ``%%metro marker:`` colour.
+    fill colour while keeping the interchange shape, so a spanning rail station
+    can carry its ``%%metro marker:`` colour.  A tinted interchange takes the
+    light marker outline (``marker_stroke``) so the fill reads against the dark
+    background, matching every other coloured marker glyph.
     """
     interior_fill = fill_override if fill_override is not None else theme.station_fill
+    outline = (
+        marker_stroke_color(theme)
+        if fill_override is not None
+        else theme.station_stroke
+    )
     used_ys = [y for y in station.rail_used_ys] or [station.y]
     top_y = min(used_ys)
     bot_y = max(used_ys)
@@ -1136,18 +1144,18 @@ def _render_rail_pill(
                 )
             )
 
-    # Dark outer-boundary layer: the link bar and the knob discs grown by the
-    # stroke width, all painted in the station stroke colour.  Their union is
-    # the continuous dark outline of the finished glyph.
+    # Outer-boundary layer: the link bar and the knob discs grown by the stroke
+    # width, all painted in the outline colour.  Their union is the continuous
+    # outline of the finished glyph.
     _link_bar(
         (bar_half + sw) * 2,
-        theme.station_stroke,
+        outline,
         **{**station_data, "class_": "nf-metro-rail-connector"},
     )
     _knobs(
         knob_r + sw,
-        theme.station_stroke,
-        theme.station_stroke,
+        outline,
+        outline,
         **{"class_": "nf-metro-rail-knob-outline", "data-station-id": station.id},
     )
 

@@ -1339,3 +1339,87 @@ def test_rail_station_markers_seat_on_their_rails():
         )
         checked += 1
     assert checked, "fixture must render rail-station knobs"
+
+
+# ---------------------------------------------------------------------------
+# Coloured subset interchange: seats on its spanned rails with a light outline
+# ---------------------------------------------------------------------------
+
+RAIL_MARKER_SUBSET_MMD = FIXTURES / "rail_marker_subset_interchange.mmd"
+
+
+def _rail_elements_for_station(svg: str, station_id: str, css_class: str):
+    """The ``css_class`` rail SVG elements drawn for ``station_id``."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(svg)
+    return [
+        el
+        for el in root.iter()
+        if el.attrib.get("class") == css_class
+        and el.attrib.get("data-station-id") == station_id
+    ]
+
+
+def test_coloured_subset_interchange_knobs_seat_on_spanned_rails():
+    """A coloured marker on a station that uses a strict subset of the rails
+    draws its interchange knobs centred on exactly the rails it carries, not
+    on the rail bundle's geometric centre."""
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+
+    graph = parse_metro_mermaid(RAIL_MARKER_SUBSET_MMD.read_text())
+    compute_layout(graph)
+
+    hub = graph.stations["hub"]
+    assert hub.marker is not None and hub.marker.fill == "#1f4e79"
+    spanned = sorted([graph.stations["src_a"].y, graph.stations["src_c"].y])
+
+    svg = render_svg(graph, THEMES["nfcore"])
+    knob_cys = sorted(
+        float(el.attrib["cy"])
+        for el in _rail_elements_for_station(svg, "hub", "nf-metro-rail-knob")
+    )
+    assert len(knob_cys) == len(spanned), (
+        f"hub must draw one knob per carried rail, got {knob_cys}"
+    )
+    for got, want in zip(knob_cys, spanned):
+        assert abs(got - want) <= 1.0, (
+            f"hub interchange knob at cy={got:.2f} is off its rail {want:.2f}"
+        )
+
+
+def test_coloured_spanning_interchange_has_light_outline():
+    """A coloured-marker interchange takes the theme's light marker outline so
+    the fill reads against the dark background, instead of the dark station
+    stroke that an untinted interchange uses."""
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+
+    theme = THEMES["nfcore"]
+    graph = parse_metro_mermaid(RAIL_MARKER_SUBSET_MMD.read_text())
+    compute_layout(graph)
+
+    svg = render_svg(graph, theme)
+
+    outline_strokes = {
+        el.attrib.get("stroke")
+        for el in _rail_elements_for_station(svg, "hub", "nf-metro-rail-knob-outline")
+    }
+    assert outline_strokes == {theme.marker_stroke}, (
+        f"coloured interchange outline must use the light marker stroke "
+        f"{theme.marker_stroke!r}, got {outline_strokes}"
+    )
+
+    connectors = _rail_elements_for_station(svg, "hub", "nf-metro-rail-connector")
+    assert connectors and all(
+        el.attrib.get("stroke") == theme.marker_stroke for el in connectors
+    ), "coloured interchange link-bar outline must use the light marker stroke"
+
+    unmarked = {
+        el.attrib.get("stroke")
+        for el in _rail_elements_for_station(svg, "src_a", "nf-metro-rail-knob-outline")
+    }
+    assert unmarked == {theme.station_stroke}, (
+        f"an untinted interchange must keep the dark station stroke, got {unmarked}"
+    )
