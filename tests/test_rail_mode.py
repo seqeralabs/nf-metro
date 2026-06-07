@@ -1098,3 +1098,84 @@ def test_legend_combo_default_off_byte_identical():
     compute_layout(g2)
     svg2 = render_svg(g2, THEMES["nfcore"])
     assert svg1 == svg2
+
+
+# A normal section stacked above a per-section rail panel.  The panel's top rail
+# (germline) carries a long-named station (g1) and two short ones (g2, g3); the
+# bottom rail (tumour) carries t1.  g1 shares its column with t1, the others are
+# alone.  Used to pin both rail-label invariants below.
+_STACKED_RAIL_MMD = (
+    "%%metro title: stacked rail\n"
+    "%%metro label_angle: 45\n"
+    "%%metro line_spread: rails | calling\n"
+    "%%metro grid: top | 0,0\n"
+    "%%metro grid: calling | 0,1\n"
+    "%%metro line: a | A | #2db572\n"
+    "%%metro line: g | Germline | #0570b0\n"
+    "%%metro line: t | Tumor only | #d62728\n"
+    "graph LR\n"
+    "    subgraph top [Top]\n"
+    "        s1[Alpha]\n"
+    "        s2[Beta]\n"
+    "        s1 -->|a| s2\n"
+    "    end\n"
+    "    subgraph calling [Calling]\n"
+    "        c0[ ]\n"
+    "        g1[A Very Long Germline Caller Name]\n"
+    "        t1[Tumor Tool]\n"
+    "        g2[Caller Two]\n"
+    "        g3[Caller Three]\n"
+    "        sink[ ]\n"
+    "        c0 -->|g| g1\n"
+    "        c0 -->|t| t1\n"
+    "        g1 -->|g| g2\n"
+    "        g2 -->|g| g3\n"
+    "        g3 -->|g| sink\n"
+    "        t1 -->|t| sink\n"
+    "    end\n"
+)
+
+
+def test_rail_top_rail_label_above_lower_rail_below():
+    """In a rail panel a single-rail station on the top rail labels above and a
+    lower-rail single-rail station labels below, regardless of whether a fork
+    sibling happens to sit in the same column."""
+    from nf_metro.layout.labels import place_labels
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+    graph = parse_metro_mermaid(_STACKED_RAIL_MMD)
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    placements = {
+        p.station_id: p
+        for p in place_labels(
+            graph,
+            station_offsets=offsets,
+            routes=routes,
+            label_angle=graph.label_angle or 0.0,
+        )
+        if p.station_id
+    }
+    # g2/g3 sit alone in their columns, so the only thing pushing them above is
+    # the top-rail rule (a fork-sibling heuristic would leave them below).
+    assert placements["g2"].above, "top-rail station g2 must label above"
+    assert placements["g3"].above, "top-rail station g3 must label above"
+    assert not placements["t1"].above, "bottom-rail station t1 must label below"
+
+
+def test_rail_above_labels_do_not_overlap_section_above():
+    """Above-rail labels must not grow the panel box up into the section stacked
+    above it.  The band is reserved during layout, so the rendered box top stays
+    where placement put it and the section boxes stay disjoint."""
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+    from tests.layout_validator import check_section_overlap
+
+    graph = parse_metro_mermaid(_STACKED_RAIL_MMD)
+    compute_layout(graph)
+    # render_svg grows section bboxes to fit labels; a missing above-band shows
+    # up here as the panel box climbing into the section above it.
+    render_svg(graph, THEMES["nfcore"])
+    overlaps = check_section_overlap(graph)
+    assert not overlaps, f"section boxes overlap after label growth: {overlaps}"

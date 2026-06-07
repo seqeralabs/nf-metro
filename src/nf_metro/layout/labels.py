@@ -131,34 +131,46 @@ def _rail_panel_extents(graph: "MetroGraph") -> dict[str, tuple[float, float]]:
     return extents
 
 
+def _rail_above_threshold(graph: "MetroGraph", section_id: str) -> float | None:
+    """Y below which a single-rail station counts as sitting on the top rail.
+
+    Midway between the topmost rail and the next rail down, so only stations
+    on the top rail fall above it.  ``None`` when the section has fewer than
+    two distinct rails (no meaningful top/non-top split).
+    """
+    per_line = graph._rail_y.get(section_id)
+    if not per_line:
+        return None
+    ys = sorted(set(per_line.values()))
+    if len(ys) < 2:
+        return None
+    return (ys[0] + ys[1]) / 2
+
+
 def _rail_label_side(
+    graph: "MetroGraph",
     station: "Station",
-    panel_extents: dict[str, tuple[float, float]],
 ) -> bool | None:
     """Forced above/below side for a rail-mode single-rail station label.
 
-    A label beside a middle rail reads as noise in the bundle, so each
+    A label beside an inner rail reads as noise in the bundle, so each
     single-rail station's label is pushed *outward* to the panel edge (see
-    ``_rail_panel_label_offsets``): a station in the panel's top half labels
-    above (clearing the topmost rail), one in the bottom half labels below
-    (clearing the bottommost rail).  Splitting by half keeps a column of
-    single-rail stations from stacking every label on one panel edge.  Returns
-    True (above) / False (below), or None when the rule doesn't apply (non-rail
-    section, or a multi-rail spanning station which keeps layer alternation).
+    ``_rail_panel_label_offsets``): a station on the topmost rail labels above
+    (clearing the panel's top), every other single-rail station labels below
+    (clearing the bottommost rail).  This keeps top-rail names out of the
+    bundle and reads like a transit map where the outer line's stops are named
+    on the outside.  Returns True (above) / False (below), or None when the
+    rule doesn't apply (non-rail section, or a multi-rail spanning station
+    which keeps layer alternation).
     """
     if not station.section_id:
         return None
     if station.rail_top_y is not None and station.rail_bottom_y is not None:
         return None  # spanning pill: keeps layer alternation
-    extent = panel_extents.get(station.section_id)
-    if extent is None:
+    threshold = _rail_above_threshold(graph, station.section_id)
+    if threshold is None:
         return None
-    top_y, bot_y = extent
-    mid = (top_y + bot_y) / 2
-    # Top-half rails label above (out the top of the panel), bottom-half below.
-    # The mid rail (== mid) defaults to below so it never collides with a
-    # top-half label dropping into the panel.
-    return station.y < mid - 0.5
+    return station.y < threshold
 
 
 def _rail_panel_label_offsets(
@@ -733,9 +745,7 @@ def _trial_cost(
             start_above = not start_above
 
         rail_side = (
-            _rail_label_side(station, panel_extents)
-            if panel_extents is not None
-            else None
+            _rail_label_side(graph, station) if panel_extents is not None else None
         )
 
         start_above = _apply_edge_override(
@@ -939,7 +949,7 @@ def place_labels(
         rail_panel = _rail_panel_label_offsets(station, panel_extents)
         if rail_panel is not None:
             min_off, max_off = rail_panel
-        rail_side = _rail_label_side(station, panel_extents)
+        rail_side = _rail_label_side(graph, station)
 
         # Check if this is a TB section station (horizontal pill)
         is_tb_vert = False
@@ -997,7 +1007,16 @@ def place_labels(
         # which lets densely-spaced stations share a compact horizontal
         # line without their long names colliding.
         if label_angle:
-            if _diagonal_prefer_above(graph, station):
+            # In a rail panel the side is dictated by the station's rail (top
+            # rail above, every other single-rail station below) so top-line
+            # names sit outside the bundle; elsewhere a tilted label flips above
+            # only to clear a fork sibling sitting directly below it.
+            diag_above = (
+                rail_side
+                if rail_side is not None
+                else _diagonal_prefer_above(graph, station)
+            )
+            if diag_above:
                 # Mirror the tilt across the trunk: anchor at the pill top and
                 # read up-and-to-the-right, clearing a fork sibling below.
                 candidate = LabelPlacement(

@@ -256,6 +256,18 @@ def _layout_section_rails(
         rail_y[section.id] = per_line_y
     off_track_y = box_top + section_y_padding
 
+    # Top-rail station labels hang ABOVE the top rail (see labels._rail_label_side),
+    # so reserve a band for them between the box top and the top rail.  Pushing
+    # the rails down by the band keeps the labels inside the box -- the box top
+    # (and thus the gap to the section above) stays put, instead of place_labels
+    # growing the box upward at render time and overlapping the section above.
+    above_ids = _rail_above_label_stations(graph, real_ids, per_line_y)
+    above_band = _rail_label_band(graph, above_ids)
+    rails_top += above_band
+    if above_band:
+        per_line_y = {lid: rails_top + slot_offset[lid] for lid in lines}
+        rail_y[section.id] = per_line_y
+
     # A blank terminus that fans across rails needs its own horizontal room so
     # the fan S-curves keep their shape regardless of the shared column pitch.
     # Reserve it as extra gap AFTER the first column (a head/source terminus)
@@ -376,7 +388,8 @@ def _layout_section_rails(
     # default 50px padding this is a no-op for short/level labels, but it grows
     # the box for a long or steeply-angled label whose footprint exceeds the
     # padding.
-    bottom_pad = max(section_y_padding, _below_rail_label_band(graph, real_ids))
+    below_ids = [sid for sid in real_ids if sid not in above_ids]
+    bottom_pad = max(section_y_padding, _rail_label_band(graph, below_ids))
     bbox_h = (rails_bottom - box_top) + bottom_pad
     section.bbox_x = bbox_x
     section.bbox_y = bbox_y
@@ -387,17 +400,18 @@ def _layout_section_rails(
     return bbox_y + bbox_h
 
 
-def _below_rail_label_band(
+def _rail_label_band(
     graph: MetroGraph,
-    real_ids: list[str],
+    ids: list[str] | set[str],
 ) -> float:
-    """Vertical room a section's below-rail labels need under the bottom rail.
+    """Vertical room a set of rail-station labels need clear of their rail.
 
     A rail label is offset ``LABEL_OFFSET`` from the rail then occupies its own
-    text footprint.  For an angled (diagonal) label the footprint that hangs
-    downward is ``height*cos(angle) + width*sin(angle)``.  Returns the worst
-    such band over the section's labelled stations (0 if none), so the caller
-    can keep the section bbox tall enough to contain every hanging label.
+    text footprint.  For an angled (diagonal) label the footprint is
+    ``height*cos(angle) + width*sin(angle)``.  Returns the worst such band over
+    the given stations (0 if none), so the caller can reserve enough room above
+    the top rail (for above-labels) or below the bottom rail (for below-labels)
+    that the section bbox contains every label.
     """
     import math
 
@@ -409,7 +423,7 @@ def _below_rail_label_band(
     sin_a = abs(math.sin(math.radians(angle)))
 
     band = 0.0
-    for sid in real_ids:
+    for sid in ids:
         st = graph.stations.get(sid)
         if st is None or st.is_port or st.off_track:
             continue
@@ -420,6 +434,39 @@ def _below_rail_label_band(
         footprint = h * cos_a + w * sin_a if angle else h
         band = max(band, LABEL_OFFSET + footprint)
     return band
+
+
+def _rail_above_label_stations(
+    graph: MetroGraph,
+    real_ids: list[str],
+    per_line_y: dict[str, float],
+) -> set[str]:
+    """Single-rail stations whose labels hang above (those on the top rail).
+
+    Mirrors ``labels._rail_label_side``: a station sitting on the topmost rail
+    labels above; a spanning (multi-rail) station keeps layer alternation and is
+    excluded.  Uses each station's line rail Y (station ``y`` is not yet
+    assigned when this runs) against the top-rail threshold.
+    """
+    if not per_line_y:
+        return set()
+    ys = sorted(set(per_line_y.values()))
+    if len(ys) < 2:
+        return set()
+    threshold = (ys[0] + ys[1]) / 2
+    above: set[str] = set()
+    for sid in real_ids:
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or st.off_track or st.is_blank_terminus:
+            continue
+        station_ys = {
+            per_line_y[lid]
+            for lid in graph.station_lines_ordered(sid)
+            if lid in per_line_y
+        }
+        if len(station_ys) == 1 and next(iter(station_ys)) < threshold:
+            above.add(sid)
+    return above
 
 
 def _label_aware_x_spacing(

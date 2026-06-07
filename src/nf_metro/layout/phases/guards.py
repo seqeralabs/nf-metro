@@ -527,6 +527,49 @@ def _guard_section_top_padding(
             )
 
 
+def _guard_rail_above_label_band(graph: MetroGraph, phase: str) -> None:
+    """A rail section must reserve room above its top rail for above-hanging labels.
+
+    Single-rail stations on a panel's top rail are labelled above the top rail
+    (``labels._rail_label_side``); the engine reserves a band for them by pushing
+    the rails down (``rail_mode._layout_section_rails``).  If that band is smaller
+    than the labels' footprint, ``place_labels`` grows the panel box upward at
+    render time and can climb into the section stacked above it.  Verify the
+    reservation independently of the code that makes it.
+    """
+    if not graph.has_rail_sections:
+        return
+    # Function-local: a module-level import would close a layout import cycle.
+    from nf_metro.layout.rail_mode import (
+        _rail_above_label_stations,
+        _rail_label_band,
+    )
+
+    tol = 1.0
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or not graph.is_rail_section(section.id):
+            continue
+        per_line = graph._rail_y.get(section.id) or {}
+        if not per_line:
+            continue
+        real_ids = [
+            sid
+            for sid in section.station_ids
+            if (st := graph.stations.get(sid)) is not None and not st.is_port
+        ]
+        above_ids = _rail_above_label_stations(graph, real_ids, per_line)
+        if not above_ids:
+            continue
+        needed = _rail_label_band(graph, above_ids)
+        reserved = min(per_line.values()) - section.bbox_y
+        if reserved + tol < needed:
+            raise PhaseInvariantError(
+                f"{phase}: rail section {section.id!r} reserves {reserved:.1f}px "
+                f"above its top rail but its above-labels need {needed:.1f}px; "
+                f"render-time label growth would climb out of the box"
+            )
+
+
 def _guard_terminus_icons_within_bbox(graph: MetroGraph, phase: str) -> None:
     """Final phase: TB/BT terminus file icons must fit inside the section bbox.
 
