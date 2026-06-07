@@ -1,0 +1,28 @@
+%%metro title: Banner Labels
+%%metro style: dark
+%%metro file: reads_in | FASTQ | Reads
+%%metro files: aln_out | BAM | Alignments | banner
+%%metro file: report_out | HTML | Report
+%%metro line: main | Main | #4CAF50
+%%metro line: qc | Quality Control | #2196F3
+
+graph LR
+    subgraph analysis [Analysis]
+        reads_in[ ]
+        trim[Trimming]
+        align[Alignment]
+        quant[Quantification]
+        reads_in -->|main,qc| trim
+        trim -->|main| align
+        align -->|main| quant
+    end
+
+    subgraph reporting [Reporting]
+        multiqc[MultiQC]
+        aln_out[ ]
+        report_out[ ]
+        align -->|main| aln_out
+        trim -->|qc| multiqc
+        quant -->|qc| multiqc
+        multiqc -->|qc| report_out
+    end

@@ -21,7 +21,7 @@ from nf_metro.layout.constants import (
     LINE_GAP,
     SIDE_BRANCH_NUDGE,
 )
-from nf_metro.parser.model import MetroGraph
+from nf_metro.parser.model import LineSpread, MetroGraph
 
 
 def assign_tracks(
@@ -66,10 +66,30 @@ def assign_tracks(
         else:
             node_primary[sid] = None
 
-    # Step 2: Fixed-gap base tracks per line
+    # Step 2: Fixed-gap base tracks per line.  In centred mode the bases
+    # are symmetric about zero so the weave balances around the midline;
+    # otherwise they stack downward from the top line.
+    centered = graph.line_spread is LineSpread.CENTERED
+    n_lines = len(line_order)
     line_base: dict[str, float] = {}
     for i, lid in enumerate(line_order):
-        line_base[lid] = i * line_gap
+        if centered:
+            line_base[lid] = (i - (n_lines - 1) / 2) * line_gap
+        else:
+            line_base[lid] = i * line_gap
+
+    # In centred mode a shared (multi-line) station should sit on the mean
+    # of its lines' base tracks (the bundle midline) rather than snap to
+    # its single highest-priority line's base, which would pull every trunk
+    # station up to the top line.  Single-line stations keep their own
+    # line's (now symmetric) base so exclusive callers fan above/below.
+    node_base: dict[str, float] = {}
+    if centered:
+        for sid in graph.stations:
+            node_lines = graph.station_lines(sid)
+            bases = [line_base[ln] for ln in node_lines if ln in line_base]
+            if bases:
+                node_base[sid] = sum(bases) / len(bases)
 
     # Step 3: Group nodes by (layer, primary_line).  Off-track stations
     # are excluded from grouping: their Y is overwritten by the Stage 5.2
@@ -99,9 +119,12 @@ def assign_tracks(
             base = line_base[lid]
 
             if len(nodes) == 1:
+                # Centred mode: a shared (multi-line) station anchors on the
+                # mean of its lines' bases so the trunk stays on the midline.
+                single_base = node_base.get(nodes[0], base) if centered else base
                 tracks[nodes[0]] = _place_single_node(
                     nodes[0],
-                    base,
+                    single_base,
                     line_gap,
                     G,
                     tracks,
@@ -135,7 +158,14 @@ def assign_tracks(
         # Equalize cross-line fork groups at this layer so downstream
         # placement sees corrected positions.
         _equalize_fork_groups(
-            layer_idx, layers, tracks, G, graph, node_primary, line_gap
+            layer_idx,
+            layers,
+            tracks,
+            G,
+            graph,
+            node_primary,
+            line_gap,
+            line_base=line_base if centered else None,
         )
 
     return tracks
@@ -388,6 +418,98 @@ def _is_diamond_fanout(nodes: list[str], G: nx.DiGraph[str]) -> bool:
     return len(common_succs) > 0
 
 
+def _uneven_reconverging_branches(
+    nodes: list[str], G: nx.DiGraph[str], graph: MetroGraph | None
+) -> dict[str, int] | None:
+    """Return per-branch chain lengths when *nodes* form an uneven reconverging diamond.
+
+    A reconverging diamond rejoins at a shared node, but (unlike a classic
+    ``_is_diamond_fanout``) that node need not be an immediate successor: each
+    branch may run as a simple chain through several stations before merging.
+    When the branches reach that single shared reconvergence point in differing
+    numbers of hops, the fork is *uneven*: the short branch should hold the
+    trunk while the longer branch drops below it.
+
+    Detection requires that every branch is a linear chain converging on one
+    common merge node, and that the branch nodes, their shared predecessors,
+    and the merge's feeders are all real (visible, non-port) stations.  Forks
+    whose branches fan out further, or whose members are synthetic port/
+    junction/phantom nodes, keep their existing placement.
+
+    Returns a mapping ``branch -> chain length`` when the fork qualifies,
+    otherwise ``None``.
+    """
+    if graph is None or len(nodes) < 2:
+        return None
+
+    def _is_real(sid: str) -> bool:
+        st = graph.stations.get(sid)
+        return st is not None and not st.is_port and not st.is_hidden
+
+    if not all(_is_real(n) for n in nodes):
+        return None
+
+    shared_preds = set(G.predecessors(nodes[0]))
+    for node in nodes[1:]:
+        shared_preds &= set(G.predecessors(node))
+    if not shared_preds or not all(_is_real(p) for p in shared_preds):
+        return None
+
+    immediate_common = set(G.successors(nodes[0]))
+    for node in nodes[1:]:
+        immediate_common &= set(G.successors(node))
+    if immediate_common:
+        return None
+
+    chains = {
+        node: chain
+        for node in nodes
+        if (chain := _linear_chain_to_merge(node, G)) is not None
+    }
+    if len(chains) != len(nodes):
+        return None
+
+    merges = {chain[-1] for chain in chains.values()}
+    if len(merges) != 1:
+        return None
+    merge = merges.pop()
+    if not all(_is_real(p) for p in G.predecessors(merge)):
+        return None
+
+    hops = {node: len(chain) for node, chain in chains.items()}
+    if len(set(hops.values())) < 2:
+        return None
+    return hops
+
+
+def _linear_chain_to_merge(branch: str, G: nx.DiGraph[str]) -> list[str] | None:
+    """Return the linear chain from *branch* up to its reconvergence node.
+
+    A branch qualifies when it runs as a simple chain -- one successor per
+    step and (past the fork) one predecessor per step -- until it reaches a
+    node with more than one predecessor (the reconvergence point).  The
+    returned list runs from *branch* through to that reconvergence node.
+
+    Returns ``None`` when the branch forks, dead-ends, or loops before
+    reconverging.
+    """
+    chain = [branch]
+    node = branch
+    seen = {branch}
+    while True:
+        succs = list(G.successors(node))
+        if len(succs) != 1:
+            return None
+        nxt = succs[0]
+        if nxt in seen:
+            return None
+        chain.append(nxt)
+        if G.in_degree(nxt) > 1:
+            return chain
+        seen.add(nxt)
+        node = nxt
+
+
 def _trunk_fanout_node(nodes: list[str], graph: MetroGraph | None) -> str | None:
     """Return the unique fan-out node carrying a strict superset of all siblings.
 
@@ -530,6 +652,22 @@ def _place_fan_out(
             tracks[node] = anchor - i * fan_spacing
         return
 
+    # Uneven reconverging diamond: branches rejoin at a shared descendant
+    # after differing numbers of hops.  Keep the shortest branch on the
+    # trunk and drop the longer branches below, so the short branch reads
+    # as the through-line rather than floating on a symmetric loop.
+    uneven_hops = (
+        _uneven_reconverging_branches(nodes, G, graph) if straight_diamonds else None
+    )
+    if uneven_hops is not None:
+        ordered = sorted(
+            nodes, key=lambda node: (uneven_hops[node], bary.get(node, base))
+        )
+        tracks[ordered[0]] = anchor
+        for i, node in enumerate(ordered[1:], 1):
+            tracks[node] = anchor + i * fan_spacing
+        return
+
     # Trunk-anchored placement: when one node carries a strict superset
     # of every sibling's line set, it's the bundle trunk.  Pin it at
     # anchor and fan the side branches below so the trunk stays straight
@@ -560,6 +698,8 @@ def _equalize_fork_groups(
     graph: MetroGraph,
     node_primary: dict[str, str | None],
     line_gap: float,
+    *,
+    line_base: dict[str, float] | None = None,
 ) -> None:
     """Redistribute cross-line fork siblings to equidistant spacing.
 
@@ -573,6 +713,14 @@ def _equalize_fork_groups(
     positions (one *line_gap* apart), preserving their track ordering.
     Groups where all members share the same primary line (diamonds /
     fan-outs already handled by ``_place_fan_out``) are skipped.
+
+    In centred mode (*line_base* supplied), a fork group whose members are
+    all single-line exclusive stations is instead pinned to each member's
+    own line's symmetric base track.  Consecutive repacking would collapse
+    those exclusive runs toward the trunk midline (e.g. the bottom line's
+    run snapping up onto the centre), defeating the balanced weave; pinning
+    to the line base keeps each exclusive run on its own rail above/below
+    the shared trunk.
     """
     layer_nodes = [sid for sid, lyr in layers.items() if lyr == layer and sid in tracks]
     if len(layer_nodes) < 2:
@@ -608,6 +756,19 @@ def _equalize_fork_groups(
         primaries = {node_primary.get(sid) for sid in group}
         primaries.discard(None)
         if len(primaries) < 2:
+            continue
+
+        # Centred mode: when every member is a single-line exclusive
+        # station, pin each to its own line's symmetric base rail rather
+        # than repacking them consecutively (which would drag exclusive
+        # runs toward the trunk midline and unbalance the weave).
+        if line_base is not None and all(
+            len(graph.station_lines(sid)) == 1 for sid in group
+        ):
+            for sid in group:
+                primary = node_primary.get(sid)
+                if primary is not None and primary in line_base:
+                    tracks[sid] = line_base[primary]
             continue
 
         # Sort by primary line order first, then by current track position

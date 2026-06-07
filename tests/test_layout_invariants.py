@@ -28,6 +28,7 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_Y_GAP,
     SECTION_Y_PADDING,
+    X_SPACING,
 )
 from nf_metro.layout.engine import (
     PhaseInvariantError,
@@ -35,6 +36,8 @@ from nf_metro.layout.engine import (
     compute_min_y_spacing,
     is_loop_side_branch_station,
 )
+from nf_metro.layout.geometry import segment_intersects_bbox
+from nf_metro.layout.labels import _label_bbox, place_labels
 from nf_metro.layout.phases._common import _grow_section_bbox_upward
 from nf_metro.layout.phases.bbox import (
     _section_band_is_empty,
@@ -42,14 +45,23 @@ from nf_metro.layout.phases.bbox import (
     _section_fit_top,
 )
 from nf_metro.layout.phases.off_track import (
+    _off_track_anchor_of,
     _off_track_fit_top,
     _off_track_groups,
+    _off_track_output_below,
     _reanchor_off_track_to_consumer,
+    _section_distinct_trunk_ys,
 )
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import resolve_section
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
+from nf_metro.render.svg import (
+    _compute_icon_obstacles,
+    _icon_obstacles_by_station,
+    apply_route_offsets,
+)
+from nf_metro.themes import THEMES
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
@@ -130,8 +142,14 @@ def _discover_fixtures() -> list[str]:
     examples, addressable via :func:`_resolve_fixture`.
 
     Excludes Nextflow-format flowcharts under ``tests/fixtures/nextflow/``
-    (those are parser inputs, not layout inputs) and any file lacking a
-    ``%%metro`` directive.
+    (those are parser inputs, not layout inputs), any file lacking a
+    ``%%metro`` directive, and any fixture using ``line_spread: rails`` (which
+    runs a dedicated layout pipeline with its own geometry contract; see
+    ``tests/test_rail_mode.py``).  The substring match catches both the
+    graph-wide ``line_spread: rails`` and the per-section
+    ``line_spread: rails | <id>`` form: a mixed fixture's rail sections carry
+    spanning-pill geometry the corpus invariants don't model, so the whole
+    fixture is routed to the dedicated rail tests instead.
     """
     roots = [
         (FIXTURES, ""),
@@ -148,6 +166,8 @@ def _discover_fixtures() -> list[str]:
         for p in sorted(root.glob("*.mmd")):
             text = p.read_text(errors="ignore")
             if "%%metro" not in text:
+                continue
+            if "line_spread: rails" in text:
                 continue
             # Address all examples paths through the ``examples`` resolver
             # without the leading ``examples/`` so tests can pick up either
@@ -177,6 +197,45 @@ def _fixtures_with(predicate) -> list[str]:
 
 
 _FIXTURES_WITH_OFF_TRACK = _fixtures_with(lambda t: "off_track:" in t)
+
+
+def _off_track_output_sinks(graph: MetroGraph) -> dict[str, str]:
+    """Map each off-track *output* (producer-fed sink) to its producer.
+
+    Built on production's :func:`_off_track_anchor_of`, which resolves an
+    input to its consumer and a sink to its producer.  An off-track station
+    whose anchor it also feeds (an out-edge to the anchor) is an input; the
+    rest are producer-fed sinks.
+    """
+    sinks: dict[str, str] = {}
+    for off_id, anchor_id in _off_track_anchor_of(graph).items():
+        if any(e.target == anchor_id for e in graph.edges_from(off_id)):
+            continue
+        sinks[off_id] = anchor_id
+    return sinks
+
+
+def _off_track_roles(text: str) -> tuple[bool, bool]:
+    """Return ``(has_input, has_output)`` for a fixture's off-track stations.
+
+    The ``off_track:`` directive is identical for both roles; only the edge
+    direction distinguishes an input (feeds an on-track consumer) from a
+    producer-fed sink, so classification needs the parsed graph.
+    """
+    try:
+        g = parse_metro_mermaid(text)
+    except Exception:
+        return (False, False)
+    sinks = _off_track_output_sinks(g)
+    anchored = set(_off_track_anchor_of(g))
+    return (bool(anchored - sinks.keys()), bool(sinks))
+
+
+_OFF_TRACK_ROLES = {
+    f: _off_track_roles(_fixture_text(f)) for f in _FIXTURES_WITH_OFF_TRACK
+}
+_FIXTURES_WITH_OFF_TRACK_INPUT = [f for f, r in _OFF_TRACK_ROLES.items() if r[0]]
+_FIXTURES_WITH_OFF_TRACK_OUTPUT = [f for f, r in _OFF_TRACK_ROLES.items() if r[1]]
 _FIXTURES_MULTI_SECTION = _fixtures_with(lambda t: t.count("subgraph") >= 2)
 _FIXTURES_COMPACT = _fixtures_with(lambda t: "compact_offsets: true" in t)
 
@@ -215,6 +274,44 @@ def _fixtures_with_bypass() -> list[str]:
 
 
 _FIXTURES_WITH_BYPASS = _fixtures_with_bypass()
+
+
+def _fixtures_with_downward_output() -> list[str]:
+    """Fixtures whose layout routes at least one off-track output below its
+    producer (a downward-branch output; see
+    :func:`_off_track_output_below`).
+    """
+    out: list[str] = []
+    for name in _FIXTURES_WITH_OFF_TRACK_OUTPUT:
+        try:
+            g = _layout(name)
+        except Exception:
+            continue
+        if _off_track_output_below(g):
+            out.append(name)
+    return out
+
+
+_FIXTURES_WITH_DOWNWARD_OUTPUT = _fixtures_with_downward_output()
+
+
+def _fixtures_with_above_output() -> list[str]:
+    """Off-track-output fixtures that lift at least one output *above* its
+    producer, excluding any whose only outputs route downward.
+    """
+    out: list[str] = []
+    for name in _FIXTURES_WITH_OFF_TRACK_OUTPUT:
+        try:
+            g = _layout(name)
+        except Exception:
+            continue
+        below = _off_track_output_below(g)
+        if any(o not in below for o in _off_track_output_sinks(g)):
+            out.append(name)
+    return out
+
+
+_FIXTURES_WITH_ABOVE_OUTPUT = _fixtures_with_above_output()
 
 
 # Pre-existing layout regressions surfaced by parametrizing single-fixture
@@ -909,7 +1006,7 @@ def test_top_entry_lead_corner_concentric(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK)
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_INPUT)
 def test_off_track_inputs_above_consumer(fixture):
     """Off-track input stations (declared via ``%%metro off_track:``)
     must sit at least one ``y_spacing`` slot above their on-track
@@ -945,6 +1042,661 @@ def test_off_track_inputs_above_consumer(fixture):
             f"Off-track {off_id} y={off_st.y} not above consumer "
             f"{consumer_id} y={cons_st.y}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Off-track outputs sit above and adjacent to their producer (#573)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_ABOVE_OUTPUT)
+def test_off_track_outputs_above_and_adjacent_to_producer(fixture):
+    """Off-track *output* stations (producer-fed sinks, declared via
+    ``%%metro off_track:``) must hang clear of the trunk and adjacent to
+    their producer: above it (smaller Y) and lifted by only a bounded
+    number of ``y_spacing`` slots.
+
+    A correctly-anchored sink sits one pitch above its producer (more if a
+    crowded column bumps it clear of a trunk band), so a gap above two
+    pitches means it was misanchored to the section's topmost on-track
+    station and stranded far from the step that writes it (issue #573).
+    Mirror of ``test_off_track_inputs_above_consumer``.
+    """
+    graph = _layout(fixture)
+    y_spacing = compute_min_y_spacing(graph)
+    producer_of = _off_track_output_sinks(graph)
+    below = _off_track_output_below(graph)
+
+    assert producer_of, f"{fixture}: no off-track output sinks found"
+
+    above_producers = {
+        off_id: prod_id
+        for off_id, prod_id in producer_of.items()
+        if off_id not in below
+    }
+
+    for off_id, prod_id in above_producers.items():
+        off_st = graph.stations[off_id]
+        prod_st = graph.stations[prod_id]
+        gap = prod_st.y - off_st.y
+        assert gap > _Y_TOL, (
+            f"{fixture}: off-track output {off_id} y={off_st.y} not above "
+            f"producer {prod_id} y={prod_st.y}"
+        )
+        assert gap <= 2 * y_spacing + _Y_TOL, (
+            f"{fixture}: off-track output {off_id} lifted {gap:.0f}px above "
+            f"producer {prod_id} (more than 2 slots) - likely misanchored to "
+            f"the section's topmost station instead of its producer"
+        )
+
+
+def test_single_trunk_off_track_step_not_inflated_by_diagonal_band():
+    """On a single-trunk diagonal-label section, an off-track output hangs
+    one plain off-track step above its producer, not the diagonal-inflated
+    pitch (issue #580).
+
+    ``label_angle`` makes the spread loop widen the graph-wide ``y_spacing``
+    so hanging angled labels clear the row below.  A section that is a single
+    horizontal trunk has no parallel tracks, so that widened pitch is wasted
+    vertical room when used as the off-track lift step: it detaches the icon
+    far above the trunk.  The lift step for such a section must stay at the
+    base content pitch (``compute_min_y_spacing``).
+    """
+    fixture = "diagonal_single_trunk_off_track.mmd"
+    graph = _layout(fixture)
+    base_step = compute_min_y_spacing(graph)
+    producer_of = _off_track_output_sinks(graph)
+    assert producer_of, f"{fixture}: no off-track output sinks found"
+
+    junction_ids = set(graph.junctions)
+    for off_id, prod_id in producer_of.items():
+        off_st = graph.stations[off_id]
+        prod_st = graph.stations[prod_id]
+        section = graph.sections[off_st.section_id]
+        distinct_trunk_ys = _section_distinct_trunk_ys(graph, section, junction_ids)
+        assert len(distinct_trunk_ys) == 1, (
+            f"{fixture}: section {section.id} is not single-trunk "
+            f"(trunk Ys {sorted(distinct_trunk_ys)})"
+        )
+        gap = prod_st.y - off_st.y
+        assert gap == pytest.approx(base_step, abs=_Y_TOL), (
+            f"{fixture}: off-track output {off_id} sits {gap:.0f}px above its "
+            f"producer {prod_id} on a single-trunk section, inflated past the "
+            f"base off-track step of {base_step:.0f}px by the diagonal-label band"
+        )
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_OUTPUT)
+def test_off_track_output_icon_clears_on_track_markers(fixture):
+    """An off-track output's icon must not overlap an on-track station's marker.
+
+    An output hangs in a row above or below the trunk, so its icon may share a
+    column's X with an on-track station as long as the two sit in different rows
+    (their marker boxes don't overlap).  Assert no on-track same-section marker
+    overlaps the icon box in both axes.
+    """
+    theme = THEMES["nfcore"]
+    icon_half_w = theme.terminus_width / 2
+    icon_half_h = theme.terminus_height / 2
+    r = theme.station_radius
+
+    graph = _layout(fixture)
+    junction_ids = set(graph.junctions)
+    producer_of = _off_track_output_sinks(graph)
+    assert producer_of, f"{fixture}: no off-track output sinks found"
+
+    for off_id in producer_of:
+        off_st = graph.stations[off_id]
+        for sid in graph.sections[off_st.section_id].station_ids:
+            st = graph.stations.get(sid)
+            if (
+                st is None
+                or st.off_track
+                or st.is_port
+                or st.is_hidden
+                or sid in junction_ids
+            ):
+                continue
+            x_overlap = abs(off_st.x - st.x) < icon_half_w + r
+            y_overlap = abs(off_st.y - st.y) < icon_half_h + r
+            assert not (x_overlap and y_overlap), (
+                f"{fixture}: off-track output {off_id} icon "
+                f"({off_st.x:.1f},{off_st.y:.1f}) overlaps on-track marker "
+                f"{sid} ({st.x:.1f},{st.y:.1f})"
+            )
+
+
+def test_off_track_placeholder_does_not_displace_on_track_rows():
+    """On-track placement is independent of off-track output placeholders.
+
+    Off-track stations carry a placeholder Y until the Stage 5.2 lift; that
+    placeholder must not occupy an on-track cell and cascade an on-track
+    sibling onto a phantom row.  The lower arm of the
+    ``bwa -> {convert, markdup} -> bqsr`` diamond therefore sits exactly one
+    grid row below the trunk.
+    """
+    graph = _layout("off_track_outputs.mmd")
+    y_spacing = compute_min_y_spacing(graph)
+    trunk_y = graph.stations["convert"].y
+    arm_drop = graph.stations["markdup"].y - trunk_y
+    assert arm_drop == pytest.approx(y_spacing, abs=_Y_TOL), (
+        f"diamond lower arm sits {arm_drop:.0f}px below the trunk; expected "
+        f"one {y_spacing:.0f}px row (an off-track placeholder cascaded it onto "
+        f"a phantom extra row)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Off-track outputs on a downward branch drop below their producer
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_DOWNWARD_OUTPUT)
+def test_off_track_outputs_below_downward_branch_producer(fixture):
+    """An off-track output whose producer sits on a downward branch must
+    drop *below* its producer and stay below the section's top trunk row,
+    so it runs straight down instead of crossing back over the trunk.
+
+    The output must sit below the producer (larger Y) and below the section's
+    topmost on-track station (the trunk row), and stay adjacent (within a
+    bounded number of ``y_spacing`` slots) so it isn't stranded.
+    """
+    graph = _layout(fixture)
+    y_spacing = compute_min_y_spacing(graph)
+    junction_ids = set(graph.junctions)
+    producer_of = _off_track_output_sinks(graph)
+    below = _off_track_output_below(graph)
+    downward = {o: p for o, p in producer_of.items() if o in below}
+
+    assert downward, f"{fixture}: no downward off-track outputs found"
+
+    for off_id, prod_id in downward.items():
+        off_st = graph.stations[off_id]
+        prod_st = graph.stations[prod_id]
+        gap = off_st.y - prod_st.y
+        assert gap > _Y_TOL, (
+            f"{fixture}: downward off-track output {off_id} y={off_st.y} "
+            f"not below producer {prod_id} y={prod_st.y}"
+        )
+        assert gap <= 2 * y_spacing + _Y_TOL, (
+            f"{fixture}: downward off-track output {off_id} dropped {gap:.0f}px "
+            f"below producer {prod_id} (more than 2 slots) - stranded from "
+            f"the step that writes it"
+        )
+
+        section = graph.sections[off_st.section_id]
+        trunk_ys = [
+            graph.stations[sid].y
+            for sid in section.station_ids
+            if (s := graph.stations.get(sid)) is not None
+            and not s.off_track
+            and not s.is_port
+            and not s.is_hidden
+            and sid not in junction_ids
+        ]
+        top_trunk_y = min(trunk_ys)
+        assert off_st.y > top_trunk_y + _Y_TOL, (
+            f"{fixture}: downward off-track output {off_id} y={off_st.y} "
+            f"did not clear the section's top trunk row y={top_trunk_y}; it "
+            f"crosses back over the trunk"
+        )
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_DOWNWARD_OUTPUT)
+def test_downward_off_track_output_route_clears_producer_label(fixture):
+    """A downward off-track output's route clears its producer's name label
+    and keeps a normal-slope diagonal.
+
+    The producer's label sits below it, on the side the output drops toward, so
+    the descent turns down past the label's far edge.  With the output two
+    columns out there is room for the diagonal to keep its standard run rather
+    than steepen toward a near-vertical drop, so each diagonal segment's
+    horizontal run stays comparable to its vertical drop.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    theme = THEMES["nfcore"]
+    icon_obstacles = _compute_icon_obstacles(graph, theme, offsets)
+    placements = place_labels(
+        graph,
+        station_offsets=offsets,
+        icon_obstacles=icon_obstacles,
+        routes=routes,
+        label_angle=graph.label_angle or 0.0,
+    )
+    bbox_of = {p.station_id: _label_bbox(p) for p in placements}
+
+    producer_of = _off_track_output_sinks(graph)
+    below = _off_track_output_below(graph)
+    downward = {o: p for o, p in producer_of.items() if o in below}
+    assert downward, f"{fixture}: no downward off-track outputs found"
+
+    route_by_endpoints = {(r.edge.source, r.edge.target): r for r in routes}
+
+    for off_id, prod_id in downward.items():
+        label_bbox = bbox_of.get(prod_id)
+        if label_bbox is None:
+            continue
+        route = route_by_endpoints.get((prod_id, off_id))
+        assert route is not None, (
+            f"{fixture}: no route for downward output {prod_id} -> {off_id}"
+        )
+        pts = route.points
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+            assert not segment_intersects_bbox(x1, y1, x2, y2, label_bbox), (
+                f"{fixture}: downward off-track output route "
+                f"{prod_id} -> {off_id} segment ({x1:.1f},{y1:.1f})->"
+                f"({x2:.1f},{y2:.1f}) crosses producer {prod_id} label "
+                f"bbox {tuple(round(v, 1) for v in label_bbox)}"
+            )
+            dx, dy = abs(x2 - x1), abs(y2 - y1)
+            if dx > _Y_TOL and dy > _Y_TOL:
+                assert dx >= 0.5 * dy, (
+                    f"{fixture}: downward off-track output route "
+                    f"{prod_id} -> {off_id} diagonal segment "
+                    f"({x1:.1f},{y1:.1f})->({x2:.1f},{y2:.1f}) is near-vertical "
+                    f"(dx={dx:.1f}, dy={dy:.1f}); it should keep its slope"
+                )
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_OUTPUT)
+def test_off_track_output_routes_share_flat_tail(fixture):
+    """Every off-track output in a section hangs off its producer with the
+    same flat tail after the diagonal.
+
+    Each output route is a horizontal lead, a standard-slope diagonal, then a
+    flat tail into the icon.  The tail length must be identical across a
+    section's outputs so the icons read as a consistent set; a variable
+    per-output column reservation makes the tail depend on each layer's
+    width, stranding some icons far past their diagonal and pulling others
+    almost onto it.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    route_by_endpoints = {(r.edge.source, r.edge.target): r for r in routes}
+
+    producer_of = _off_track_output_sinks(graph)
+    assert producer_of, f"{fixture}: no off-track output sinks found"
+
+    tails_by_section: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for off_id, prod_id in producer_of.items():
+        route = route_by_endpoints.get((prod_id, off_id))
+        if route is None or len(route.points) < 2:
+            continue
+        (x1, _y1), (x2, _y2) = route.points[-2], route.points[-1]
+        sec_id = graph.stations[off_id].section_id
+        tails_by_section[sec_id].append((off_id, abs(x2 - x1)))
+
+    # The icon offset is uniform, so the nominal tails match; the last segment
+    # measured here is post corner-smoothing, which can shave up to a corner
+    # radius off an output whose diagonal meets the tail near a tight turn.
+    # Allow that, while still catching the old variable-column bug (tens of px).
+    tail_tol = CURVE_RADIUS + _Y_TOL
+    for sec_id, tails in tails_by_section.items():
+        if len(tails) < 2:
+            continue
+        lengths = [t for _, t in tails]
+        spread = max(lengths) - min(lengths)
+        rounded = [(o, round(t, 1)) for o, t in tails]
+        assert spread <= tail_tol, (
+            f"{fixture}/{sec_id}: off-track output flat tails differ by "
+            f"{spread:.1f}px (>{tail_tol}); tails {rounded} are not consistent"
+        )
+
+
+# ---------------------------------------------------------------------------
+# A metro line must never pass through a file / terminus icon
+# ---------------------------------------------------------------------------
+
+
+def _segments_crossing_icons(
+    graph: MetroGraph,
+) -> list[tuple[str, str, str, str]]:
+    """Return ``(line, src, tgt, icon_station)`` for every routed segment
+    that crosses a file icon's drawn bbox other than the segment that
+    starts or ends at that icon's own station.
+    """
+    from nf_metro.layout.geometry import segment_intersects_bbox
+
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
+    hits: list[tuple[str, str, str, str]] = []
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        src, tgt = r.edge.source, r.edge.target
+        for sid, bbox in boxes.items():
+            if src == sid or tgt == sid:
+                continue
+            for k in range(len(pts) - 1):
+                p1, p2 = pts[k], pts[k + 1]
+                if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
+                    hits.append((r.line_id, src, tgt, sid))
+                    break
+    return hits
+
+
+def test_leaf_file_icon_crossing_fixture_crosses_without_auto_lift(monkeypatch):
+    """The problem-1 fixture genuinely puts a line across the icon when the
+    auto-off-track corrective re-run is suppressed.
+
+    Guards against the fixture silently ceasing to exercise the fix: with the
+    crossing-sink detector neutralised, the unmarked leaf icon must still be
+    raked by a non-terminating line.
+    """
+    import nf_metro.layout.engine as engine_module
+
+    monkeypatch.setattr(
+        engine_module, "_line_crossed_file_icon_sinks", lambda graph: set()
+    )
+    graph = _layout("leaf_file_icon_on_trunk.mmd")
+    assert not graph.stations["bam_out"].off_track
+    assert _segments_crossing_icons(graph), (
+        "fixture no longer crosses its icon without auto-lift; it can't "
+        "exercise the keep-lines-out-of-icons fix"
+    )
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_no_line_crosses_file_icon(fixture):
+    """No routed line segment may pass through a file / terminus icon's drawn
+    bbox, except the segment that terminates at (or originates from) that
+    icon's own station.
+
+    A leaf file-icon sink the layout would otherwise rake a line across is
+    auto-lifted off the trunk, so the settled layout is clear by
+    construction.
+    """
+    graph = _layout(fixture)
+    hits = _segments_crossing_icons(graph)
+    assert not hits, f"{fixture}: line(s) cross a file icon: " + "; ".join(
+        f"{ln} on {s}->{t} crosses {icon}" for ln, s, t, icon in hits
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sibling off-track output icons must not overlap each other
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK)
+def test_off_track_output_icons_do_not_overlap(fixture):
+    """Two off-track output icon bboxes in one section never overlap.
+
+    Outputs hanging off nearby producers stack so their drawn boxes -- icon
+    plus any under-icon caption -- stay clear of each other.
+    """
+    graph = _layout(fixture)
+    sinks = set(_off_track_output_sinks(graph))
+    if len(sinks) < 2:
+        pytest.skip(f"{fixture}: fewer than two off-track output sinks")
+    offsets = compute_station_offsets(graph)
+    boxes = {
+        sid: b
+        for sid, b in _icon_obstacles_by_station(
+            graph, THEMES["nfcore"], offsets
+        ).items()
+        if sid in sinks
+    }
+    items = list(boxes.items())
+    tol = 0.5
+    for i, (s1, (x1, y1, X1, Y1)) in enumerate(items):
+        for s2, (x2, y2, X2, Y2) in items[i + 1 :]:
+            overlap = (
+                x1 < X2 - tol and x2 < X1 - tol and y1 < Y2 - tol and y2 < Y1 - tol
+            )
+            assert not overlap, (
+                f"{fixture}: off-track output icons {s1!r} and {s2!r} overlap: "
+                f"({x1:.1f},{y1:.1f},{X1:.1f},{Y1:.1f}) vs "
+                f"({x2:.1f},{y2:.1f},{X2:.1f},{Y2:.1f})"
+            )
+
+
+def test_captioned_sibling_outputs_clear_caption_band():
+    """Same-column captioned off-track outputs reserve their caption band.
+
+    Two captioned outputs stacked in one column must keep their full drawn
+    boxes -- icon plus the under-icon caption that reaches below each icon --
+    apart, not merely the bare icon half-heights.
+    """
+    graph = _layout("captioned_sibling_outputs.mmd")
+    sinks = set(_off_track_output_sinks(graph))
+    assert len(sinks) >= 2
+    offsets = compute_station_offsets(graph)
+    boxes = {
+        sid: b
+        for sid, b in _icon_obstacles_by_station(
+            graph, THEMES["nfcore"], offsets
+        ).items()
+        if sid in sinks
+    }
+    items = list(boxes.items())
+    for i, (s1, (x1, y1, X1, Y1)) in enumerate(items):
+        for s2, (x2, y2, X2, Y2) in items[i + 1 :]:
+            overlap = x1 < X2 and x2 < X1 and y1 < Y2 and y2 < Y1
+            assert not overlap, (
+                f"captioned outputs {s1!r}/{s2!r} overlap: "
+                f"({x1:.1f},{y1:.1f},{X1:.1f},{Y1:.1f}) vs "
+                f"({x2:.1f},{y2:.1f},{X2:.1f},{Y2:.1f})"
+            )
+
+
+# ---------------------------------------------------------------------------
+# An off-track output's route must not cross a non-producer trunk marker
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_OUTPUT)
+def test_off_track_output_route_clears_non_producer_markers(fixture):
+    """An off-track output's S-curve must not cross a trunk station's marker.
+
+    An output icon hangs in the gap just past its own producer.  When the
+    output's horizontal extent overruns that gap the up-right diagonal rakes
+    across the next on-track station's marker (and adjacent outputs bunch).
+    The producer's trunk gap widens to fit the output, so the only marker an
+    output route may touch is its own producer's.
+    """
+    theme = THEMES["nfcore"]
+    r = theme.station_radius
+    graph = _layout(fixture)
+    junction_ids = set(graph.junctions)
+    producer_of = _off_track_output_sinks(graph)
+    assert producer_of, f"{fixture}: no off-track output sinks found"
+
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    route_by_endpoints = {(rt.edge.source, rt.edge.target): rt for rt in routes}
+
+    for off_id, prod_id in producer_of.items():
+        route = route_by_endpoints.get((prod_id, off_id))
+        if route is None:
+            continue
+        pts = apply_route_offsets(route, offsets)
+        sec_id = graph.stations[off_id].section_id
+        for sid in graph.sections[sec_id].station_ids:
+            if sid in (off_id, prod_id) or sid in junction_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.off_track or st.is_port or st.is_hidden:
+                continue
+            marker_box = (st.x - r, st.y - r, st.x + r, st.y + r)
+            for k in range(len(pts) - 1):
+                p1, p2 = pts[k], pts[k + 1]
+                assert not segment_intersects_bbox(
+                    p1[0], p1[1], p2[0], p2[1], marker_box
+                ), (
+                    f"{fixture}: off-track output {off_id!r} route (from "
+                    f"producer {prod_id!r}) crosses non-producer marker {sid!r} "
+                    f"at ({st.x:.1f},{st.y:.1f})"
+                )
+
+
+def test_off_track_output_route_guard_catches_a_crossing():
+    """The runtime guard fires when an output's route rakes a non-producer marker.
+
+    Locks the guard's teeth: an output dragged past the trunk stations that
+    follow its producer has its producer-to-icon route cross their markers, and
+    ``_guard_off_track_output_clears_non_producer`` must raise rather than pass.
+    """
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_off_track_output_clears_non_producer,
+    )
+
+    graph = _layout("diagonal_single_trunk_off_track.mmd")
+    # Drag the BAM output well past its producer so the route to its icon rakes
+    # the intervening trunk markers (merge/markdup/bqsr ...).
+    graph.stations["bam_out"].x = graph.stations["applybqsr"].x + 20
+
+    with pytest.raises(PhaseInvariantError, match="non-producer marker"):
+        _guard_off_track_output_clears_non_producer(graph, "test")
+
+
+# ---------------------------------------------------------------------------
+# A producer's label clears an off-track output icon above its fork/join bubble
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK)
+def test_off_track_output_clears_station_labels(fixture):
+    """No on-track station label overlaps an off-track output icon.
+
+    A fork/join bubble carrying an output above it must leave its stations'
+    labels clear of the output icon; the column gap widens to fit them.
+    """
+    graph = _layout(fixture)
+    sinks = set(_off_track_output_sinks(graph))
+    if not sinks:
+        pytest.skip(f"{fixture}: no off-track output sinks")
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    icon_boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
+    labels = place_labels(
+        graph,
+        station_offsets=offsets,
+        icon_obstacles=list(icon_boxes.values()),
+        routes=routes,
+        label_angle=graph.label_angle or 0.0,
+    )
+    sink_boxes = {sid: b for sid, b in icon_boxes.items() if sid in sinks}
+    tol = 0.5
+    for p in labels:
+        if not p.station_id or p.station_id in sinks:
+            continue
+        lx0, ly0, lx1, ly1 = _label_bbox(p)
+        for oid, (bx0, by0, bx1, by1) in sink_boxes.items():
+            overlap = (
+                lx0 < bx1 - tol
+                and bx0 < lx1 - tol
+                and ly0 < by1 - tol
+                and by0 < ly1 - tol
+            )
+            assert not overlap, (
+                f"{fixture}: label of {p.station_id!r} overlaps off-track "
+                f"output icon {oid!r}: label "
+                f"({lx0:.1f},{ly0:.1f},{lx1:.1f},{ly1:.1f}) vs icon "
+                f"({bx0:.1f},{by0:.1f},{bx1:.1f},{by1:.1f})"
+            )
+
+
+# ---------------------------------------------------------------------------
+# A fork/join bubble's station labels clear the convergence/divergence diagonal
+# ---------------------------------------------------------------------------
+
+
+_FIXTURES_WITH_BUBBLE_OUTPUT = _fixtures_with(
+    lambda t: "off_track:" in t and "-->|" in t
+)
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_BUBBLE_OUTPUT)
+def test_bubble_label_clears_convergence_diagonal(fixture):
+    """A fork/join bubble station's label must not overlap a sibling branch's
+    convergence (or divergence) diagonal.
+
+    A two-branch bubble (fork ``-> {a, b} ->`` join) carrying an off-track
+    output above it can be squeezed so the on-trunk branch's diagonal label
+    rakes the off-trunk branch's slanted convergence segment.  The bubble's
+    column gap must hold enough room that each branch label clears the other
+    branch's diagonal.
+    """
+    graph = _layout(fixture)
+    junction_ids = set(graph.junctions)
+
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    labels = place_labels(
+        graph,
+        station_offsets=offsets,
+        routes=routes,
+        label_angle=graph.label_angle or 0.0,
+    )
+    label_box = {p.station_id: _label_bbox(p) for p in labels if p.station_id}
+
+    def _diagonal_segments(route):
+        pts = apply_route_offsets(route, offsets)
+        segs = []
+        for k in range(len(pts) - 1):
+            (x1, y1), (x2, y2) = pts[k], pts[k + 1]
+            if abs(x2 - x1) > 0.5 and abs(y2 - y1) > 0.5:
+                segs.append((x1, y1, x2, y2))
+        return segs
+
+    tol = 0.5
+    checked = False
+    for section in graph.sections.values():
+        sec_sids = set(section.station_ids)
+
+        def _internal(eid):
+            return eid in sec_sids and not graph.stations[eid].is_port
+
+        for jid in section.station_ids:
+            join = graph.stations.get(jid)
+            if join is None or join.is_port or join.off_track or jid in junction_ids:
+                continue
+            preds = [
+                e.source
+                for e in graph.edges_to(jid)
+                if _internal(e.source) and not graph.stations[e.source].off_track
+            ]
+            if len(preds) < 2:
+                continue
+            # A bubble: the converging branches sit on different tracks.
+            branch_ys = {round(graph.stations[p].y, 1) for p in preds}
+            if len(branch_ys) < 2:
+                continue
+            checked = True
+            for branch_id in preds:
+                route = next(
+                    (
+                        rt
+                        for rt in routes
+                        if rt.edge.source == branch_id and rt.edge.target == jid
+                    ),
+                    None,
+                )
+                if route is None:
+                    continue
+                for other_id in preds:
+                    if other_id == branch_id:
+                        continue
+                    box = label_box.get(other_id)
+                    if box is None:
+                        continue
+                    bx0, by0, bx1, by1 = box
+                    label_rect = (bx0 - tol, by0 - tol, bx1 + tol, by1 + tol)
+                    for x1, y1, x2, y2 in _diagonal_segments(route):
+                        assert not segment_intersects_bbox(
+                            x1, y1, x2, y2, label_rect
+                        ), (
+                            f"{fixture}: label of bubble station {other_id!r} "
+                            f"overlaps the {branch_id!r}->{jid!r} convergence "
+                            f"diagonal"
+                        )
+    if not checked:
+        pytest.skip(f"{fixture}: no multi-branch bubble")
 
 
 # ---------------------------------------------------------------------------
@@ -988,6 +1740,7 @@ def test_reanchor_off_track_bbox_fit_is_reversible(fixture):
     graph = _layout(fixture)
     y_spacing = compute_min_y_spacing(graph)
     groups = _off_track_groups(graph)
+    below = _off_track_output_below(graph)
     assert groups, f"{fixture}: no off-track sections"
 
     for sec_id in groups:
@@ -999,12 +1752,24 @@ def test_reanchor_off_track_bbox_fit_is_reversible(fixture):
 
     for sec_id, (_fallback, by_consumer) in groups.items():
         section = graph.sections[sec_id]
-        highest = min(
+        # The top fit is driven only by the up-direction (above-anchor)
+        # band; sections whose off-track all drop downward do not touch the
+        # top, so there is nothing to reclaim.
+        up_ys = [
             graph.stations[st.id].y
             for stations in by_consumer.values()
             for st in stations
-        )
-        ideal_top = highest - SECTION_Y_PADDING
+            if st.id not in below
+        ]
+        if not up_ys:
+            continue
+        highest = min(up_ys)
+        # The fit hugs the off-track band but clamps up to any on-track
+        # content (or non-TOP port) sitting higher than the band, so the
+        # ideal is the fit-top contract itself, not a bare band-minus-pad.
+        # For input fixtures the band is the topmost content and the two
+        # coincide; an output sink can sit below higher on-track branches.
+        ideal_top = _off_track_fit_top(graph, section, highest, SECTION_Y_PADDING)
         assert section.bbox_y == pytest.approx(ideal_top, abs=_Y_TOL), (
             f"{fixture}/{sec_id}: bbox top {section.bbox_y:.1f} does not hug "
             f"the off-track band (expected {ideal_top:.1f}); grow-only left "
@@ -4172,8 +4937,6 @@ def test_station_x_within_column_tolerance(fixture):
     """
     import statistics
 
-    from nf_metro.layout.constants import X_SPACING
-
     x_spacing = X_SPACING
     graph = _layout(fixture, x_spacing=x_spacing)
 
@@ -4711,7 +5474,7 @@ def test_debug_grid_overlay_boundaries_outside_section_bboxes(fixture):
                     f"row {ra}|{rb} segment y={y:.1f} x={x_start:.0f}..{x_end:.0f} "
                     f"cuts {sec.id!r} (row={sec.grid_row}, y={y0:.1f}..{y1:.1f})"
                 )
-    for ca, cb, mid_x in _compute_col_boundary_xs(col_bounds):
+    for ca, cb, mid_x in _compute_col_boundary_xs(col_bounds, sections):
         for sec in sections:
             if sec.grid_col_span != 1:
                 continue

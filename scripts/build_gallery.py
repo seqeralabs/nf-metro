@@ -43,6 +43,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Minimal two-line pipeline with no sections.",
     ),
     (
+        "line_spread",
+        EXAMPLES_DIR,
+        "Demonstrates the `%%metro line_spread:` axis with one per-section "
+        "override per section: `bundle` (default) merges shared lines onto one "
+        "trunk that cascades downward, `centered` balances that bundle about "
+        "the midline, and `rails` draws each line as a parallel rail with "
+        "shared stations as interchanges.",
+    ),
+    (
         "rnaseq_auto",
         EXAMPLES_DIR,
         "Demonstrates fully auto-inferred layout: no `%%metro grid:` directives "
@@ -62,9 +71,17 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "collector fan-in descending a shared inter-column corridor.",
     ),
     (
+        "marker_styles",
+        EXAMPLES_DIR,
+        "Per-station marker shapes & fills encoding tool attributes "
+        "(mandatory/optional/accelerated/expanded-elsewhere) with a marker key "
+        "alongside the line legend. Demonstrates `%%metro marker:` and "
+        "`%%metro marker_legend:`.",
+    ),
+    (
         "diagonal_labels",
         EXAMPLES_DIR,
-        "Opt-in diagonal station labels (#527) via `%%metro label_angle: 45`: a "
+        "Opt-in diagonal station labels via `%%metro label_angle: 45`: a "
         "dense pre-processing trunk whose tilted names pack tighter than "
         "horizontal labels would, feeding a variant-calling section in the row "
         "below that fans out to three callers and back in -- the reserved "
@@ -93,6 +110,16 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "default port placement.",
     ),
     (
+        "off_track_outputs",
+        EXAMPLES_DIR,
+        "Off-track file artefacts hung above a pre-processing trunk at the "
+        "step that writes each one: `%%metro off_track:` on a producer-fed "
+        "sink anchors it to its producer (not the section top), mirroring the "
+        "off-track input mechanism for outputs. Each output gets its own "
+        "column clear of the next station, and a step writing several files "
+        "(MarkDup here) stacks them above it.",
+    ),
+    (
         "legend_logo_placement",
         EXAMPLES_DIR,
         "Demonstrates positioning the bundled legend+logo block: `%%metro "
@@ -101,6 +128,13 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "supports `| dx,dy` offsets and absolute `x,y` placement; the block "
         "auto-avoids sections and routes. The QC line shows a downward "
         "cross-column feeder dropping straight into its consumer section.",
+    ),
+    (
+        "file_icons",
+        EXAMPLES_DIR,
+        "Terminus icon variants: single-sheet `%%metro file:`, "
+        "stacked `%%metro files:` for multiplicity, the `%%metro dir:` folder, "
+        "and the optional `| banner` format strip.",
     ),
     (
         "legend_combo",
@@ -115,15 +149,40 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "tb_file_termini",
         EXAMPLES_DIR,
         "A `%%metro direction: TB` reporting section whose file outputs are "
-        "line termini. Regression fixture for #254 (terminus file icons now "
-        "orient to a vertical flow, with the connector entering from the top).",
+        "line termini. Regression fixture: terminus file icons orient to a "
+        "vertical flow, with the connector entering from the top.",
     ),
     (
         "genomeassembly_staggered",
         EXAMPLES_DIR,
         "sanger-tol/genomeassembly with explicit `%%metro grid:` directives "
-        "stacking each section in its own grid row. Regression fixture for "
-        "#250 (cross-column junction routes were going backward in X).",
+        "stacking each section in its own grid row. Regression fixture: "
+        "cross-column junction routes were going backward in X.",
+    ),
+    (
+        "group_labels",
+        EXAMPLES_DIR,
+        "Annotative `%%metro group:` band captions labelling sarek-style "
+        "sub-families of callers (SNPs & Indels / SV & CNV / MSI) within a "
+        "single section, without splitting them apart.",
+    ),
+    (
+        "sarek_metro",
+        EXAMPLES_DIR,
+        "Integration showcase: a sarek-style variant-calling pipeline drawn "
+        "with diagonal (45-degree) labels for tight column packing, an "
+        "off-track FASTQ input, file termini, marker styles, and a "
+        "`%%metro line_spread: rails` panel where each caller keeps its own "
+        "rail and shared stations render as interchanges.",
+    ),
+    (
+        "disconnected_components",
+        EXAMPLES_DIR,
+        "A connected three-section trunk plus a separate, wide disconnected "
+        "section. Each weakly-connected component of the section graph is "
+        "placed in its own local column grid and the components are stacked "
+        "vertically, so the wide panel never inflates the trunk's columns or "
+        "flings its later sections to the right.",
     ),
     # --- Simple topologies ---
     (
@@ -176,7 +235,7 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         TOPOLOGIES_DIR,
         "A two-column fan whose station labels are wider than the column "
         "pitch; the engine wraps the labels and widens spacing so they "
-        "don't collide (issue #405).",
+        "don't collide.",
     ),
     # --- Branching and multipath ---
     (
@@ -264,7 +323,7 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "The horizontal run sits centred in the inter-row gap, clear of both "
         "the section above and the next row's header.",
     ),
-    # --- #484 regression isolation ---
+    # --- Complex auto-layout regression isolation ---
     (
         "route_around_intervening",
         TOPOLOGIES_DIR,
@@ -385,7 +444,12 @@ def render_guide_examples() -> None:
             print(f"  {mmd_path.stem}: FAIL - {e}")
 
     # Top-level examples referenced directly from the guide
-    for stem in ("rnaseq_auto", "variantbenchmarking", "variantbenchmarking_auto"):
+    for stem in (
+        "rnaseq_auto",
+        "variantbenchmarking",
+        "variantbenchmarking_auto",
+        "marker_styles",
+    ):
         mmd_path = EXAMPLES_DIR / f"{stem}.mmd"
         if not mmd_path.exists():
             continue

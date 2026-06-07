@@ -10,17 +10,26 @@ from __future__ import annotations
 
 import re
 import warnings
+from typing import Literal
 
 from nf_metro.parser.model import (
+    MARKER_FILL_OPEN,
+    MARKER_FILL_SOLID,
+    MARKER_SHAPE_CIRCLE,
     VALID_ICON_TYPES,
     VALID_LINE_STYLES,
+    VALID_MARKER_SHAPES,
     Edge,
+    LineSpread,
+    MarkerLegendEntry,
+    MarkerStyle,
     MetroGraph,
     MetroLine,
     Port,
     PortSide,
     Section,
     Station,
+    StationGroup,
 )
 
 
@@ -123,8 +132,15 @@ def _validate_edge_annotations(graph: MetroGraph) -> None:
         )
 
 
-def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
-    """Parse a Mermaid graph definition with %%metro directives."""
+def parse_metro_mermaid(
+    text: str, max_station_columns: int | None = None
+) -> MetroGraph:
+    """Parse a Mermaid graph definition with %%metro directives.
+
+    ``max_station_columns`` is the row-wrap width supplied by the caller (the
+    ``--max-layers-per-row`` CLI flag). When ``None``, a ``%%metro
+    fold_threshold`` directive supplies the width, falling back to 15.
+    """
     _check_unsupported_input(text)
 
     graph = MetroGraph()
@@ -187,7 +203,17 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
 
         from nf_metro.layout.auto_layout import infer_section_layout
 
-        infer_section_layout(graph, max_station_columns=max_station_columns)
+        # Row-wrap width precedence: an explicit caller value (the
+        # --max-layers-per-row CLI flag) wins over a %%metro fold_threshold
+        # directive, which in turn overrides the default of 15. Raising it
+        # keeps a long horizontal trunk of sections on a single row.
+        if max_station_columns is not None:
+            eff_cols = max_station_columns
+        elif graph.fold_threshold is not None:
+            eff_cols = graph.fold_threshold
+        else:
+            eff_cols = 15
+        infer_section_layout(graph, max_station_columns=eff_cols)
         _insert_terminus_convergence_stations(graph)
         _resolve_sections(graph)
         _insert_bypass_stations(graph)
@@ -204,15 +230,22 @@ def parse_metro_mermaid(text: str, max_station_columns: int = 15) -> MetroGraph:
             continue
         if graph.edges_to(station_id) and graph.edges_from(station_id):
             continue
-        station.terminus_labels = [label for label, _, _ in entries]
-        station.terminus_icon_types = [icon_type for _, icon_type, _ in entries]
-        station.terminus_names = [name for _, _, name in entries]
+        station.terminus_labels = [label for label, _, _, _ in entries]
+        station.terminus_icon_types = [icon_type for _, icon_type, _, _ in entries]
+        station.terminus_names = [name for _, _, name, _ in entries]
+        station.terminus_icon_banners = [banner for _, _, _, banner in entries]
 
     # Apply pending off-track marks
     for station_id in graph._pending_off_track:
         station = graph.stations.get(station_id)
         if station:
             station.off_track = True
+
+    # Apply pending per-station marker styles
+    for station_id, marker in graph._pending_markers.items():
+        station = graph.stations.get(station_id)
+        if station:
+            station.marker = marker
 
     return graph
 
@@ -282,6 +315,12 @@ def _parse_directive(
         _parse_grid_directive(content, graph)
     elif content.startswith("logo_scale:"):
         _parse_logo_scale_directive(content[len("logo_scale:") :].strip(), graph)
+    elif content.startswith("font_scale:"):
+        _parse_font_scale_directive(content[len("font_scale:") :].strip(), graph)
+    elif content.startswith("legend_logo_gap:"):
+        _parse_legend_logo_gap_directive(
+            content[len("legend_logo_gap:") :].strip(), graph
+        )
     elif content.startswith("logo:"):
         graph.logo_path = content[len("logo:") :].strip()
     elif content.startswith("compact_offsets:"):
@@ -290,6 +329,13 @@ def _parse_directive(
     elif content.startswith("center_ports:"):
         val = content[len("center_ports:") :].strip().lower()
         graph.center_ports = val in ("true", "yes", "1")
+    elif content.startswith("line_spread:"):
+        _parse_line_spread_directive(content[len("line_spread:") :].strip(), graph)
+    elif content.startswith("fold_threshold:"):
+        try:
+            graph.fold_threshold = int(content[len("fold_threshold:") :].strip())
+        except ValueError:
+            pass
     elif content.startswith("label_angle:"):
         try:
             graph.label_angle = float(content[len("label_angle:") :].strip())
@@ -309,6 +355,12 @@ def _parse_directive(
     elif content.startswith("off_track:"):
         ids = [s.strip() for s in content[len("off_track:") :].split(",")]
         graph._pending_off_track.extend(sid for sid in ids if sid)
+    elif content.startswith("group:"):
+        _parse_group_directive(content[len("group:") :].strip(), graph)
+    elif content.startswith("marker_legend:"):
+        _parse_marker_legend_directive(content[len("marker_legend:") :].strip(), graph)
+    elif content.startswith("marker:"):
+        _parse_marker_directive(content[len("marker:") :].strip(), graph)
     elif ":" in content and content.split(":", 1)[0] in VALID_ICON_TYPES:
         icon_type, rest = content.split(":", 1)
         parts = rest.strip().split("|")
@@ -319,8 +371,16 @@ def _parse_directive(
             # Optional third field: human-readable caption rendered below the
             # icon. A single name applies to all labels from this directive.
             name = parts[2].strip() if len(parts) >= 3 else ""
+            # Optional fourth field: comma-separated icon options. "banner"
+            # renders the format label as bold white text on a dark banner.
+            options = (
+                {o.strip().lower() for o in parts[3].split(",")}
+                if len(parts) >= 4
+                else set()
+            )
+            banner = "banner" in options
             graph._pending_terminus.setdefault(station_id, []).extend(
-                (label, icon_type, name) for label in labels
+                (label, icon_type, name, banner) for label in labels
             )
 
 
@@ -455,31 +515,53 @@ def _parse_legend_directive(value: str, graph: MetroGraph) -> None:
         )
 
 
-def _parse_logo_scale_directive(value: str, graph: MetroGraph) -> None:
-    """Parse %%metro logo_scale: <factor> (1.0 = default auto-size)."""
-    try:
-        scale = float(value)
-    except ValueError:
+def _parse_group_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro group: Label | station1, station2[, ...] [| above|below].
+
+    Stores an annotative caption spanning the listed stations.  The optional
+    third field selects whether the caption renders ``below`` (default) or
+    ``above`` the spanned stations.  Purely decorative; does not affect layout.
+    """
+    parts = value.split("|")
+    if len(parts) < 2:
         warnings.warn(
-            f"Invalid logo_scale {value!r}; expected a positive number.",
+            f"group directive {value!r} needs 'Label | station1, station2'. Ignoring.",
             stacklevel=2,
         )
         return
-    if scale <= 0:
+    label = _unquote(parts[0].strip())
+    station_ids = [s.strip() for s in parts[1].split(",") if s.strip()]
+    if not label or not station_ids:
         warnings.warn(
-            f"logo_scale must be positive, got {value!r}; ignoring.",
+            f"group directive {value!r} needs a label and at least one station. "
+            "Ignoring.",
             stacklevel=2,
         )
         return
-    graph.logo_scale = scale
+    position: Literal["above", "below"] = "below"
+    if len(parts) >= 3:
+        raw_pos = parts[2].strip().lower()
+        if raw_pos == "above":
+            position = "above"
+        elif raw_pos == "below":
+            position = "below"
+        elif raw_pos:
+            warnings.warn(
+                f"group position {raw_pos!r} not recognised; expected "
+                "'above' or 'below'. Using 'below'.",
+                stacklevel=2,
+            )
+    graph.groups.append(
+        StationGroup(label=label, station_ids=station_ids, position=position)
+    )
 
 
 def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:
     """Parse %%metro legend_combo: lineA, lineB[, ...] | Display Label.
 
     Stores a (line_ids, label) entry on ``graph.legend_combos``. The named
-    lines are rendered as a single combined legend row and suppressed from
-    their own individual rows. A combo referencing unknown lines is warned
+    lines are rendered as a single combined legend row and (in rail mode)
+    share a single rail slot. A combo referencing unknown lines is warned
     about and ignored; unknown members of an otherwise-valid combo are
     dropped (with a warning) and the remaining members kept.
     """
@@ -514,6 +596,126 @@ def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:
         )
         return
     graph.legend_combos.append((tuple(known), label))
+
+
+def _parse_numeric_directive(
+    value: str, name: str, *, allow_zero: bool
+) -> float | None:
+    """Parse a numeric %%metro directive value, warning and returning None if invalid.
+
+    ``allow_zero`` admits 0 (a gap may legitimately be zero); otherwise the value
+    must be strictly positive (a scale factor cannot be zero).
+    """
+    try:
+        num = float(value)
+    except ValueError:
+        warnings.warn(f"Invalid {name} {value!r}; expected a number.", stacklevel=3)
+        return None
+    if num < 0 or (num == 0 and not allow_zero):
+        constraint = "non-negative" if allow_zero else "positive"
+        warnings.warn(
+            f"{name} must be {constraint}, got {value!r}; ignoring.", stacklevel=3
+        )
+        return None
+    return num
+
+
+def _parse_logo_scale_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro logo_scale: <factor> (1.0 = default auto-size)."""
+    scale = _parse_numeric_directive(value, "logo_scale", allow_zero=False)
+    if scale is not None:
+        graph.logo_scale = scale
+
+
+def _parse_legend_logo_gap_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro legend_logo_gap: <px> (horizontal gap logo->legend entries)."""
+    gap = _parse_numeric_directive(value, "legend_logo_gap", allow_zero=True)
+    if gap is not None:
+        graph.legend_logo_gap = gap
+
+
+def _parse_font_scale_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro font_scale: <factor> (1.0 = default text sizes)."""
+    scale = _parse_numeric_directive(value, "font_scale", allow_zero=False)
+    if scale is not None:
+        graph.font_scale = scale
+
+
+def _parse_marker_style(spec: str) -> MarkerStyle | None:
+    """Parse a ``shape, fill`` marker spec into a MarkerStyle.
+
+    ``shape`` defaults to ``circle`` and ``fill`` to ``solid`` when omitted.
+    An unknown shape is rejected (returns None with a warning); any fill
+    string other than ``open``/``solid`` is taken as a literal colour.
+    """
+    parts = [p.strip() for p in spec.split(",")]
+    shape = parts[0].lower() if parts and parts[0] else MARKER_SHAPE_CIRCLE
+    fill = parts[1] if len(parts) >= 2 and parts[1] else MARKER_FILL_SOLID
+    if shape not in VALID_MARKER_SHAPES:
+        warnings.warn(
+            f"Unknown marker shape {shape!r}; expected one of "
+            f"{'/'.join(VALID_MARKER_SHAPES)}. Ignoring.",
+            stacklevel=2,
+        )
+        return None
+    # Normalise the fill keywords to lowercase; leave literal colours as-is.
+    if fill.lower() in (MARKER_FILL_OPEN, MARKER_FILL_SOLID):
+        fill = fill.lower()
+    return MarkerStyle(shape=shape, fill=fill)
+
+
+def _parse_marker_directive(value: str, graph: MetroGraph) -> None:
+    """Parse ``%%metro marker: node_id | shape, fill``."""
+    node_part, sep, style_part = value.partition("|")
+    node_id = node_part.strip()
+    if not node_id:
+        return
+    style = _parse_marker_style(style_part.strip() if sep else "")
+    if style is not None:
+        graph._pending_markers[node_id] = style
+
+
+def _parse_marker_legend_directive(value: str, graph: MetroGraph) -> None:
+    """Parse ``%%metro marker_legend: shape, fill | Caption``."""
+    style_part, sep, caption = value.partition("|")
+    if not sep:
+        warnings.warn(
+            "marker_legend directive needs a caption: "
+            "'shape, fill | Caption'. Ignoring.",
+            stacklevel=2,
+        )
+        return
+    style = _parse_marker_style(style_part.strip())
+    caption = caption.strip()
+    if style is not None and caption:
+        graph.marker_legend.append(MarkerLegendEntry(style=style, caption=caption))
+
+
+def _parse_line_spread_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro line_spread: <mode>[ | section[, section...]].
+
+    Bare ``line_spread: <mode>`` sets the graph-wide default; the piped form
+    ``line_spread: <mode> | sectionA, sectionB`` records a per-section override
+    that wins over the default for those sections. ``<mode>`` is one of
+    ``bundle`` / ``centered`` / ``rails``; an unrecognised mode is warned about
+    and ignored.
+    """
+    mode_raw, _, sids_raw = value.partition("|")
+    try:
+        mode = LineSpread(mode_raw.strip().lower())
+    except ValueError:
+        valid = ", ".join(m.value for m in LineSpread)
+        warnings.warn(
+            f"Invalid line_spread mode {mode_raw.strip()!r}; expected one of {valid}.",
+            stacklevel=2,
+        )
+        return
+    section_ids = [s.strip() for s in sids_raw.split(",") if s.strip()]
+    if section_ids:
+        for sid in section_ids:
+            graph.line_spread_overrides[sid] = mode
+    else:
+        graph.line_spread = mode
 
 
 # Regex patterns for node shapes

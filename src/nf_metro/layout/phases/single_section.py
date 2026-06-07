@@ -28,7 +28,11 @@ from nf_metro.layout.constants import (
     TERMINUS_ICON_CLEARANCE_V,
     TERMINUS_WIDTH,
 )
-from nf_metro.layout.labels import _label_text_height, label_text_width
+from nf_metro.layout.labels import (
+    _label_text_height,
+    active_font_scale,
+    label_text_width,
+)
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
 from nf_metro.layout.phases._common import _build_section_subgraph
@@ -36,6 +40,7 @@ from nf_metro.layout.phases.off_track import (
     _align_phantom_pass_throughs,
     _compute_fork_join_gaps,
     _insert_phantom_pass_throughs,
+    _space_off_track_outputs,
 )
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
@@ -147,6 +152,10 @@ def _layout_single_section(
     if not layers:
         return None
 
+    output_extra, output_layer_push = _space_off_track_outputs(
+        sub, layers, tracks, x_spacing
+    )
+
     # Snap phantom pass-throughs' successors to the pass-through track
     # so the trunk line stays horizontal past bypassed stations.
     _align_phantom_pass_throughs(sub, tracks)
@@ -192,11 +201,23 @@ def _layout_single_section(
                 f"missing from rank map {sorted(track_rank)}"
             )
         rank = track_rank.get(station.track, 0.0)
+        output_offset = output_extra.get(sid, 0.0)
+        layer_push = output_layer_push.get(station.layer, 0.0)
         if section.direction == "TB":
             station.x = rank * x_spacing
-            station.y = station.layer * y_spacing + layer_extra.get(station.layer, 0)
+            station.y = (
+                station.layer * y_spacing
+                + layer_extra.get(station.layer, 0)
+                + layer_push
+                + output_offset
+            )
         else:
-            station.x = station.layer * x_spacing + layer_extra.get(station.layer, 0)
+            station.x = (
+                station.layer * x_spacing
+                + layer_extra.get(station.layer, 0)
+                + layer_push
+                + output_offset
+            )
             station.y = rank * effective_y_spacing
 
     # Resolve same-cell station collisions: two stations on the same line
@@ -301,7 +322,14 @@ def _resolve_station_collisions(
         primary, secondary, primary_step, step = "x", "y", x_spacing, y_spacing
 
     EPS = 0.5
-    real = [s for s in sub.stations.values() if not s.is_port and not s.is_hidden]
+    # Off-track stations carry a placeholder Y here (the off-track lift in
+    # Stage 5.2 overwrites it); letting that placeholder occupy a cell would
+    # cascade on-track siblings off their true rows.
+    real = [
+        s
+        for s in sub.stations.values()
+        if not s.is_port and not s.is_hidden and not s.off_track
+    ]
     if len(real) < 2:
         return
 
@@ -341,29 +369,31 @@ def _multiline_track_spacing(sub: MetroGraph, y_spacing: float) -> float:
     for both labels plus clearance.  Returns *y_spacing* unchanged when
     no multi-line labels are present.
     """
-    max_text_h = FONT_HEIGHT
+    font_height = FONT_HEIGHT * active_font_scale()
+    max_text_h = font_height
     for s in sub.stations.values():
         n = s.label.count("\n")
         if n > 0:
-            h = FONT_HEIGHT + n * FONT_HEIGHT * LABEL_LINE_HEIGHT
+            h = font_height + n * font_height * LABEL_LINE_HEIGHT
             max_text_h = max(max_text_h, h)
 
-    if max_text_h <= FONT_HEIGHT:
+    if max_text_h <= font_height:
         return y_spacing  # no multi-line labels
 
     # Worst case: adjacent tracks with labels facing inward.
     # Each side needs label_offset + its text height.
-    min_gap = LABEL_OFFSET + max_text_h + LABEL_OFFSET + FONT_HEIGHT + LABEL_MARGIN
+    min_gap = LABEL_OFFSET + max_text_h + LABEL_OFFSET + font_height + LABEL_MARGIN
     return max(y_spacing, min_gap)
 
 
 def _multiline_label_padding(sub: MetroGraph) -> float:
     """Return extra bbox Y padding for the tallest multi-line label."""
+    font_height = FONT_HEIGHT * active_font_scale()
     max_extra = 0.0
     for s in sub.stations.values():
         n = s.label.count("\n")
         if n > 0:
-            extra = n * FONT_HEIGHT * LABEL_LINE_HEIGHT
+            extra = n * font_height * LABEL_LINE_HEIGHT
             max_extra = max(max_extra, extra)
     return max_extra
 
@@ -454,9 +484,7 @@ def _mirror_rl(sub: MetroGraph) -> None:
     Anchors on non-terminus stations so adding terminus layers
     extends leftward without shifting the entry point.
     """
-    non_term = [
-        s for s in sub.stations.values() if not (s.is_terminus and not s.label.strip())
-    ]
+    non_term = [s for s in sub.stations.values() if not (s.is_blank_terminus)]
     anchor_stations = non_term if non_term else list(sub.stations.values())
     max_x_val = max(s.x for s in anchor_stations)
     for s in sub.stations.values():
@@ -769,7 +797,9 @@ def _terminus_icon_clearance_vertical(
     if n_icons <= 1:
         return TERMINUS_ICON_CLEARANCE_V
     caption_room = (
-        ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT if names and any(names) else 0.0
+        ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT * active_font_scale()
+        if names and any(names)
+        else 0.0
     )
     step = 2 * ICON_HALF_HEIGHT + ICON_INTER_GAP + caption_room
     return TERMINUS_ICON_CLEARANCE_V + (n_icons - 1) * step

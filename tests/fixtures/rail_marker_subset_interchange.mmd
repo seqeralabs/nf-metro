@@ -1,0 +1,24 @@
+%%metro title: Coloured subset interchange on rails
+%%metro style: dark
+%%metro line_spread: rails
+%%metro line: line_a | Line A | #2db572
+%%metro line: line_b | Line B | #f4a300
+%%metro line: line_c | Line C | #e4509a
+%%metro marker: hub | circle, #1f4e79
+
+graph LR
+    subgraph proc [Process]
+        src_a[SrcA]
+        src_b[SrcB]
+        src_c[SrcC]
+        hub[Hub]
+        sink_a[SinkA]
+        sink_b[SinkB]
+        sink_c[SinkC]
+
+        src_a -->|line_a| hub
+        src_c -->|line_c| hub
+        hub -->|line_a| sink_a
+        hub -->|line_c| sink_c
+        src_b -->|line_b| sink_b
+    end

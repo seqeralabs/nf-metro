@@ -1,0 +1,16 @@
+%%metro title: Rail interchange with coloured marker
+%%metro style: dark
+%%metro line_spread: rails
+%%metro line: line_a | Line A | #2db572
+%%metro line: line_b | Line B | #f4a300
+%%metro marker: interchange | circle, #1f4e79
+
+graph LR
+    subgraph proc [Process]
+        src[Source]
+        interchange[Interchange]
+        sink[Sink]
+
+        src -->|line_a,line_b| interchange
+        interchange -->|line_a,line_b| sink
+    end

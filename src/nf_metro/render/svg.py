@@ -7,20 +7,30 @@ __all__ = ["apply_route_offsets", "render_svg"]
 import html
 import textwrap
 import warnings
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import drawsvg as draw
 
-from nf_metro.layout.constants import LABEL_LINE_HEIGHT
+from nf_metro.layout.constants import LABEL_LINE_HEIGHT, Y_SPACING
 from nf_metro.layout.geometry import segment_intersects_bbox
-from nf_metro.layout.labels import LabelPlacement, place_labels
+from nf_metro.layout.labels import (
+    LabelPlacement,
+    _label_bbox,
+    font_scale_context,
+    place_labels,
+)
 from nf_metro.layout.routing import RoutedPath, compute_station_offsets, route_edges
 from nf_metro.layout.routing.corners import resolve_curve_radii
 from nf_metro.parser.model import (
     ICON_TYPE_DIR,
     ICON_TYPE_FILE,
     ICON_TYPE_FILES,
+    MARKER_FILL_OPEN,
+    MARKER_FILL_SOLID,
+    MARKER_SHAPE_PILL,
+    MarkerStyle,
     MetroGraph,
     PortSide,
     Section,
@@ -42,6 +52,14 @@ from nf_metro.render.constants import (
     DEBUG_WAYPOINT_RADIUS,
     FALLBACK_LINE_COLOR,
     FILES_ICON_OFFSET_RATIO,
+    GROUP_LABEL_BAND_PADDING,
+    GROUP_LABEL_FONT_SCALE,
+    GROUP_LABEL_GAP,
+    GROUP_LABEL_LABEL_CLEARANCE,
+    GROUP_LABEL_TICK_LENGTH,
+    GROUP_LABEL_UNDERLINE_GAP,
+    GROUP_LABEL_UNDERLINE_OPACITY,
+    GROUP_LABEL_UNDERLINE_WIDTH,
     ICON_BBOX_MARGIN,
     ICON_CLEARANCE_MARGIN,
     ICON_INTER_GAP,
@@ -52,6 +70,9 @@ from nf_metro.render.constants import (
     LEGEND_INSET,
     LEGEND_ROUTE_CLEARANCE,
     LOGO_Y_STANDALONE,
+    MARKER_PILL_LENGTH_RATIO,
+    RAIL_KNOB_RADIUS_RATIO,
+    RAIL_LINK_HALF_WIDTH_RATIO,
     SECTION_BOX_RADIUS,
     SECTION_LABEL_REGION_RATIO,
     SECTION_LABEL_TEXT_OFFSET,
@@ -73,7 +94,13 @@ from nf_metro.render.icons import (
     render_files_icon,
     render_folder_icon,
 )
-from nf_metro.render.legend import compute_legend_dimensions, render_legend
+from nf_metro.render.legend import (
+    compute_legend_dimensions,
+    marker_corner_radius,
+    marker_fill_color,
+    marker_stroke_color,
+    render_legend,
+)
 from nf_metro.render.style import Theme
 
 
@@ -255,17 +282,20 @@ def _position_legend(
     return legend_x, legend_y, legend_w, legend_h, show_legend
 
 
-def _compute_icon_obstacles(
+def _icon_obstacles_by_station(
     graph: MetroGraph,
     theme: Theme,
     station_offsets: dict[tuple[str, str], float],
-) -> list[tuple[float, float, float, float]]:
-    """Compute bounding boxes for terminus file icons.
+) -> dict[str, tuple[float, float, float, float]]:
+    """Compute each terminus file icon's bounding box, keyed by station id.
 
-    These are passed to the label placer as obstacles so labels maintain
-    clearance from adjacent icons.
+    The box covers the icon row(s) and any caption text beneath, with a
+    clearance margin -- the same geometry the label placer treats as an
+    obstacle.  Keyed by station so a caller can attribute a box to the
+    station whose icon it is (e.g. to exempt that station's own terminating
+    segment from a line-crosses-icon check).
     """
-    obstacles: list[tuple[float, float, float, float]] = []
+    obstacles: dict[str, tuple[float, float, float, float]] = {}
     margin = ICON_CLEARANCE_MARGIN
 
     for station in graph.stations.values():
@@ -318,16 +348,23 @@ def _compute_icon_obstacles(
         if any(station.terminus_names or []):
             y_max += ICON_NAME_GAP + theme.label_font_size * ICON_NAME_FONT_SCALE
 
-        obstacles.append(
-            (
-                x_min - margin,
-                y_min - margin,
-                x_max + margin,
-                y_max + margin,
-            )
+        obstacles[station.id] = (
+            x_min - margin,
+            y_min - margin,
+            x_max + margin,
+            y_max + margin,
         )
 
     return obstacles
+
+
+def _compute_icon_obstacles(
+    graph: MetroGraph,
+    theme: Theme,
+    station_offsets: dict[tuple[str, str], float],
+) -> list[tuple[float, float, float, float]]:
+    """Bounding boxes for terminus file icons, as label-placement obstacles."""
+    return list(_icon_obstacles_by_station(graph, theme, station_offsets).values())
 
 
 def render_svg(
@@ -348,6 +385,50 @@ def render_svg(
     if not graph.stations:
         return '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
 
+    scaled_theme = _scale_theme_fonts(theme, graph.font_scale)
+    with font_scale_context(graph.font_scale):
+        return _render_svg_scaled(
+            graph,
+            scaled_theme,
+            width=width,
+            height=height,
+            padding=padding,
+            animate=animate,
+            debug=debug,
+            legend_position=legend_position,
+        )
+
+
+def _scale_theme_fonts(theme: Theme, scale: float) -> Theme:
+    """Return a theme with every text size multiplied by ``scale``.
+
+    Returns the theme unchanged at ``scale == 1.0`` so the default render
+    is identical to the unscaled theme.
+    """
+    if scale == 1.0:
+        return theme
+    return replace(
+        theme,
+        label_font_size=theme.label_font_size * scale,
+        title_font_size=theme.title_font_size * scale,
+        section_label_font_size=theme.section_label_font_size * scale,
+        legend_font_size=theme.legend_font_size * scale,
+        terminus_font_size=theme.terminus_font_size * scale,
+    )
+
+
+def _render_svg_scaled(
+    graph: MetroGraph,
+    theme: Theme,
+    *,
+    width: int | None,
+    height: int | None,
+    padding: float,
+    animate: bool,
+    debug: bool,
+    legend_position: str | None,
+) -> str:
+    """Render body, run with ``theme`` fonts and label metrics already scaled."""
     effective_legend_position = (
         legend_position if legend_position is not None else graph.legend_position
     )
@@ -366,7 +447,33 @@ def render_svg(
         label_angle=graph.label_angle or 0.0,
     )
 
+    # Per-station rendered label (top, bottom) Y, so group bands clear the
+    # (possibly diagonal) station labels rather than just the markers.
+    label_extents: dict[str, tuple[float, float]] = {}
+    for p in labels:
+        if p.station_id:
+            _, ly0, _, ly1 = _label_bbox(p)
+            label_extents[p.station_id] = (ly0, ly1)
+
+    group_bands = (
+        _group_bands(graph, theme, station_offsets, label_extents)
+        if graph.groups
+        else []
+    )
+
+    # Reserve room inside section boxes for below group bands before bboxes
+    # feed the section render and the canvas-bounds computation.
+    if group_bands:
+        _reserve_section_space_for_groups(graph, group_bands)
+
     max_x, max_y = _compute_canvas_bounds(graph, routes, debug)
+
+    # Group captions can extend below/right of the content; grow the canvas
+    # so they are not clipped.
+    if group_bands:
+        g_max_x, g_max_y = _group_caption_bounds(group_bands)
+        max_x = max(max_x, g_max_x)
+        max_y = max(max_y, g_max_y)
 
     # Compute legend and logo dimensions
     logo_w, logo_h = (0.0, 0.0)
@@ -462,6 +569,10 @@ def render_svg(
 
     # Draw labels
     _render_labels(d, labels, theme)
+
+    # Annotative intra-section group captions.
+    if group_bands:
+        _render_station_groups(d, theme, group_bands)
 
     # Debug overlay (ports, hidden stations, edge waypoints)
     if debug:
@@ -889,6 +1000,265 @@ def _render_bridged_edge(
     d.append(path)
 
 
+def _pill_box(
+    station: Station,
+    r: float,
+    min_off: float,
+    max_off: float,
+    is_tb_vert: bool,
+    flow_len: float | None = None,
+) -> tuple[float, float, float, float]:
+    """Return ``(x, y, w, h)`` for the bundle-spanning pill at a station.
+
+    The pill covers every line passing through the station: it spans the line
+    bundle across the section's flow axis (wide for TB sections where lines
+    arrive vertically, tall otherwise) and is centred on the bundle mid-offset.
+    ``flow_len`` overrides the extent along the flow axis (default ``2 * r``),
+    elongating the glyph along the line.
+    """
+    span = max_off - min_off
+    mid = (min_off + max_off) / 2
+    flow = r * 2 if flow_len is None else flow_len
+    if is_tb_vert:
+        w, h = span + r * 2, flow
+        cx, cy = station.x + mid, station.y
+    else:
+        w, h = flow, span + r * 2
+        cx, cy = station.x, station.y + mid
+    return cx - w / 2, cy - h / 2, w, h
+
+
+def _append_terminus_icons(
+    d: draw.Drawing,
+    station: Station,
+    graph: MetroGraph,
+    theme: Theme,
+    r: float,
+    min_off: float,
+    max_off: float,
+) -> None:
+    """Render a station's terminus icons into their own data-tagged group."""
+    icon_group = draw.Group(**{"data-station-id": station.id})
+    _render_terminus_icons(icon_group, station, graph, theme, r, min_off, max_off)
+    d.append(icon_group)
+
+
+def _render_marker_station(
+    d: draw.Drawing,
+    marker: MarkerStyle,
+    theme: Theme,
+    station: Station,
+    r: float,
+    min_off: float,
+    max_off: float,
+    is_tb_vert: bool,
+    station_data: dict[str, str],
+) -> None:
+    """Draw a shape/fill marker glyph over the station's line bundle.
+
+    ``circle`` and ``square`` keep the bundle-spanning pill geometry, varying
+    only the corner rounding. ``pill`` is elongated along the line (a capsule
+    in the opposite orientation to the default station pill) while still
+    growing across the bundle to cover every track it spans.
+    """
+    flow_len = (
+        r * MARKER_PILL_LENGTH_RATIO if marker.shape == MARKER_SHAPE_PILL else None
+    )
+    x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb_vert, flow_len=flow_len)
+    rx = marker_corner_radius(marker.shape, r)
+    d.append(
+        draw.Rectangle(
+            x,
+            y,
+            w,
+            h,
+            rx=rx,
+            ry=rx,
+            fill=marker_fill_color(marker.fill, theme),
+            stroke=marker_stroke_color(theme),
+            stroke_width=theme.station_stroke_width,
+            **station_data,
+        )
+    )
+
+
+def _station_data_attrs(graph: MetroGraph, station: Station) -> dict[str, str]:
+    """SVG data-attributes shared by every station marker.
+
+    Values that flow from user content (label, section name) are HTML-escaped
+    because drawsvg does not escape unknown kwargs.
+    """
+    data = {
+        "class_": "nf-metro-station",
+        "data-station-id": station.id,
+        "data-station-lines": ",".join(graph.station_lines(station.id)),
+        "data-station-label": html.escape(station.label or station.id),
+    }
+    if station.section_id:
+        data["data-section-id"] = station.section_id
+        sec_obj = graph.sections.get(station.section_id)
+        if sec_obj:
+            data["data-section-name"] = html.escape(sec_obj.name)
+    return data
+
+
+def _rail_marker_fill(marker: MarkerStyle | None, theme: Theme) -> str | None:
+    """Interior tint for a spanning rail interchange carrying a marker.
+
+    Only a marker with a literal colour fill (not the ``open`` / ``solid``
+    keywords) tints the interchange; keyword fills and unmarked stations keep
+    the default interior so their glyph is unchanged.
+    """
+    if marker is None or marker.fill in (MARKER_FILL_OPEN, MARKER_FILL_SOLID):
+        return None
+    return marker_fill_color(marker.fill, theme)
+
+
+def _render_rail_pill(
+    d: draw.Drawing,
+    graph: MetroGraph,
+    station: Station,
+    theme: Theme,
+    r: float,
+    fill_override: str | None = None,
+) -> None:
+    """Render a rail-mode multi-rail station as the metro interchange idiom.
+
+    The station draws as a *white circle on each rail it uses* joined by a
+    *white link* running between the topmost and bottommost used rails - a
+    continuous outlined white interchange (the classic metro / nf-core-sarek
+    idiom).  The link is the station fill colour (not a dark stroke), so it
+    reads as connecting the circles; the dark station stroke forms the OUTER
+    boundary of the whole circles+link glyph rather than cutting across it.
+
+    The glyph is built in two stacked layers so the outline is continuous and
+    never gaps where the link meets a circle: first an outline layer (the link
+    bar plus a disc at each used rail, each grown by the stroke width) paints
+    the union's outer boundary, then an interior layer of the same shapes (at
+    the true radii) paints the interior on top.  A rail that falls within the
+    span but is NOT used by the station gets no circle; the link passes behind
+    it.
+
+    ``fill_override`` tints the interior layer (link bar + knobs) with a marker
+    fill colour while keeping the interchange shape, so a spanning rail station
+    can carry its ``%%metro marker:`` colour.  A tinted interchange takes the
+    light marker outline (``marker_stroke``) so the fill reads against the dark
+    background, matching every other coloured marker glyph.
+    """
+    interior_fill = fill_override if fill_override is not None else theme.station_fill
+    outline = (
+        marker_stroke_color(theme)
+        if fill_override is not None
+        else theme.station_stroke
+    )
+    used_ys = [y for y in station.rail_used_ys] or [station.y]
+    top_y = min(used_ys)
+    bot_y = max(used_ys)
+    station_data = _station_data_attrs(graph, station)
+
+    sw = theme.station_stroke_width
+    # A spanning interchange draws each used rail as a knob slightly larger than
+    # the bare marker, bulging out of a slightly narrower link bar like a real
+    # metro interchange.  A non-bridging station (a single used rail, hence no
+    # link bar) has nothing to bulge from, so its lone marker uses the standard
+    # radius rather than the inflated interchange knob size.
+    is_spanning = (bot_y - top_y) > 0.5
+    knob_r = r * RAIL_KNOB_RADIUS_RATIO if is_spanning else r
+    bar_half = r * RAIL_LINK_HALF_WIDTH_RATIO
+    # rail_used_ys is recorded parallel to the line-definition order (see
+    # rail_mode._layout_section_rails), so zip the knobs against that same
+    # order rather than the alphabetical order of graph.station_lines.
+    served = graph.station_lines_ordered(station.id)
+
+    def _link_bar(width: float, stroke: str, **extra: object) -> None:
+        # A round-capped line of the given width is a capsule; used here only
+        # for its straight body between top and bottom used rails (the caps are
+        # covered by the circles), so it joins the knobs with no seam.
+        if bot_y - top_y <= 0.5:
+            return
+        d.append(
+            draw.Line(
+                station.x,
+                top_y,
+                station.x,
+                bot_y,
+                stroke=stroke,
+                stroke_width=width,
+                stroke_linecap="round",
+                **extra,
+            )
+        )
+
+    def _knobs(radius: float, fill: str, stroke: str, **extra: object) -> None:
+        # Only rails the station USES get a knob; a rail that falls within the
+        # connector's span but belongs to a line this station does not use
+        # passes behind the bar (no knob), so the interchange reads as not
+        # stopping there.
+        for lid, y in zip(served, station.rail_used_ys):
+            d.append(
+                draw.Circle(
+                    station.x,
+                    y,
+                    radius,
+                    fill=fill,
+                    stroke=stroke,
+                    stroke_width=0,
+                    **{**extra, "data-line-id": lid},
+                )
+            )
+
+    # Outer-boundary layer: the link bar and the knob discs grown by the stroke
+    # width, all painted in the outline colour.  Their union is the continuous
+    # outline of the finished glyph.
+    _link_bar(
+        (bar_half + sw) * 2,
+        outline,
+        **{**station_data, "class_": "nf-metro-rail-connector"},
+    )
+    _knobs(
+        knob_r + sw,
+        outline,
+        outline,
+        **{"class_": "nf-metro-rail-knob-outline", "data-station-id": station.id},
+    )
+
+    # White interior layer: the same shapes at their true radii, filling the
+    # interior of the outlined union with the interior fill.
+    _link_bar(bar_half * 2, interior_fill)
+    _knobs(
+        knob_r,
+        interior_fill,
+        interior_fill,
+        **{"class_": "nf-metro-rail-knob", "data-station-id": station.id},
+    )
+
+
+def _draw_blank_terminus_nub(
+    d: draw.Drawing,
+    station: Station,
+    r: float,
+    min_off: float,
+    max_off: float,
+    station_data: dict[str, str],
+    theme: Theme,
+    is_tb_vert: bool = False,
+) -> None:
+    """Draw a blank terminus's unrounded nub (a sharp-cornered station rect)."""
+    bx, by, bw, bh = _pill_box(station, r, min_off, max_off, is_tb_vert)
+    d.append(
+        draw.Rectangle(
+            bx,
+            by,
+            bw,
+            bh,
+            fill=theme.station_fill,
+            stroke=theme.station_stroke,
+            stroke_width=theme.station_stroke_width,
+            **station_data,
+        )
+    )
+
+
 def _render_stations(
     d: draw.Drawing,
     graph: MetroGraph,
@@ -909,6 +1279,44 @@ def _render_stations(
 
         r = theme.station_radius
 
+        # Rail mode: a blank terminus terminates its converged bundle exactly
+        # like any other render -- the standard unrounded nub (via _pill_box)
+        # spanning the bundle, plus the file icon -- rather than a rail-specific
+        # glyph.  The only difference is the span comes from the rail bundle
+        # (rail mode does not use station_offsets).  An off-track input drops in
+        # vertically (no horizontal fan), so it gets the icon only.
+        if graph.station_is_rail(station.id) and station.is_blank_terminus:
+            if station.off_track:
+                _append_terminus_icons(d, station, graph, theme, r, 0.0, 0.0)
+                continue
+            used = station.rail_used_ys or [station.y]
+            t_min = min(used) - station.y
+            t_max = max(used) - station.y
+            _draw_blank_terminus_nub(
+                d, station, r, t_min, t_max, _station_data_attrs(graph, station), theme
+            )
+            _append_terminus_icons(d, station, graph, theme, r, t_min, t_max)
+            continue
+
+        # Rail mode: a multi-rail station draws as a spanning interchange; a
+        # single-rail station draws as one knob centred on its rail.  Both go
+        # through _render_rail_pill (its link bar self-suppresses with no span),
+        # so a single stop sits exactly on the rail rather than being shifted by
+        # the normal-mode parallel-line station_offsets, which don't apply once
+        # a line is pinned to a fixed rail.  Marked stations keep their glyph.
+        if (
+            graph.station_is_rail(station.id)
+            and station.marker is None
+            and not station.is_terminus
+        ):
+            _render_rail_pill(d, graph, station, theme, r)
+            continue
+        if station.rail_top_y is not None and station.rail_bottom_y is not None:
+            _render_rail_pill(
+                d, graph, station, theme, r, _rail_marker_fill(station.marker, theme)
+            )
+            continue
+
         # Determine if this is a TB vertical station (rotated pill)
         is_tb_vert = False
         if station.section_id:
@@ -916,7 +1324,11 @@ def _render_stations(
             if sec and sec.direction == "TB":
                 is_tb_vert = True
 
-        if station_offsets:
+        # A rail station is pinned to its rail Y; the parallel-line bundle
+        # offsets do not apply (the rail-pill path above ignores them too), so a
+        # marked single-rail station's glyph must seat on the rail rather than
+        # ride the bundle's mid-offset.
+        if station_offsets and not graph.station_is_rail(station.id):
             line_offsets = [
                 station_offsets.get((station.id, lid), 0.0)
                 for lid in graph.station_lines(station.id)
@@ -929,79 +1341,42 @@ def _render_stations(
         else:
             min_off = max_off = 0.0
 
-        span = max_off - min_off
+        station_data = _station_data_attrs(graph, station)
 
-        # Hand-escape values that flow from user content into XML attributes.
-        # drawsvg does not escape unknown kwargs, so an unescaped "&" or "<"
-        # in a section name or station label breaks XML well-formedness.
-        station_data = {
-            "class_": "nf-metro-station",
-            "data-station-id": station.id,
-            "data-station-lines": ",".join(graph.station_lines(station.id)),
-            "data-station-label": html.escape(station.label or station.id),
-        }
-        if station.section_id:
-            station_data["data-section-id"] = station.section_id
-            sec_obj = graph.sections.get(station.section_id)
-            if sec_obj:
-                station_data["data-section-name"] = html.escape(sec_obj.name)
-
-        # Non-process terminus stations: filled rectangle
-        # (same size as pill, no rounding)
-        is_blank_terminus = station.is_terminus and not station.label.strip()
-        if is_blank_terminus:
-            # Match the section flow axis: a horizontal nub for TB/BT (lines
-            # arrive vertically), a vertical nub otherwise.
-            if is_tb_vert:
-                w = span + r * 2
-                h = r * 2
-                cx = station.x + (min_off + max_off) / 2
-                cy = station.y
-            else:
-                w = r * 2
-                h = span + r * 2
-                cx = station.x
-                cy = station.y + (min_off + max_off) / 2
-            d.append(
-                draw.Rectangle(
-                    cx - w / 2,
-                    cy - h / 2,
-                    w,
-                    h,
-                    fill=theme.station_fill,
-                    stroke=theme.station_stroke,
-                    stroke_width=theme.station_stroke_width,
-                    **station_data,
-                )
+        if graph.station_is_rail(station.id) and (min_off, max_off) != (0.0, 0.0):
+            raise AssertionError(
+                f"rail station {station.id!r} marker glyph offset "
+                f"({min_off}, {max_off}) would lift it off its rail"
             )
-        elif is_tb_vert:
-            # Horizontal pill: lines spread along X axis
-            w = span + r * 2
-            h = r * 2
-            cx = station.x + (min_off + max_off) / 2
-            d.append(
-                draw.Rectangle(
-                    cx - w / 2,
-                    station.y - h / 2,
-                    w,
-                    h,
-                    rx=r,
-                    ry=r,
-                    fill=theme.station_fill,
-                    stroke=theme.station_stroke,
-                    stroke_width=theme.station_stroke_width,
-                    **station_data,
-                )
+
+        if station.marker is not None:
+            _render_marker_station(
+                d,
+                station.marker,
+                theme,
+                station,
+                r,
+                min_off,
+                max_off,
+                is_tb_vert,
+                station_data,
+            )
+            if station.is_terminus:
+                _append_terminus_icons(d, station, graph, theme, r, min_off, max_off)
+            continue
+
+        x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb_vert)
+
+        # Blank terminus stations get an unrounded nub; everything else a pill.
+        if station.is_blank_terminus:
+            _draw_blank_terminus_nub(
+                d, station, r, min_off, max_off, station_data, theme, is_tb_vert
             )
         else:
-            # Vertical pill: lines spread along Y axis
-            w = r * 2
-            h = span + r * 2
-            cy = station.y + (min_off + max_off) / 2
             d.append(
                 draw.Rectangle(
-                    station.x - w / 2,
-                    cy - h / 2,
+                    x,
+                    y,
                     w,
                     h,
                     rx=r,
@@ -1014,11 +1389,7 @@ def _render_stations(
             )
 
         if station.is_terminus:
-            icon_group = draw.Group(**{"data-station-id": station.id})
-            _render_terminus_icons(
-                icon_group, station, graph, theme, r, min_off, max_off
-            )
-            d.append(icon_group)
+            _append_terminus_icons(d, station, graph, theme, r, min_off, max_off)
 
 
 def caption_aware_icon_step(
@@ -1058,6 +1429,7 @@ def _terminus_icon_centers(
     first_offset: float,
     step: float,
     bundle_center: float,
+    is_rail: bool = False,
 ) -> list[tuple[float, float]]:
     """Centre coordinates for a terminus station's file icons.
 
@@ -1068,6 +1440,13 @@ def _terminus_icon_centers(
     the outside of the diagram.
     """
     is_tb = section_dir in ("TB", "BT")
+    # A rail-mode off-track input parks above the rails and feeds straight down
+    # into its consumer's rail (see routing/rail.py), so its icon sits directly
+    # on the station coordinate (centred on the drop X) rather than marching
+    # sideways.  Gated on the rail flag so normal-mode off-track feeders (which
+    # the standard router handles) are untouched.
+    if station.off_track and is_rail:
+        return [(station.x, station.y - (first_offset + i * step)) for i in range(n)]
     # Sinks sit at the end of the flow and extend forwards; sources sit at
     # the start and extend backwards.  RL/BT reverse the forward direction.
     extends_forward = is_source if section_dir in ("RL", "BT") else not is_source
@@ -1117,6 +1496,7 @@ def _render_terminus_icons(
         station.terminus_labels
     )
     names = station.terminus_names or [""] * len(station.terminus_labels)
+    banners = station.terminus_icon_banners or [False] * len(station.terminus_labels)
 
     caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
     name_widths = [len(n) * caption_font_size * 0.55 if n else 0.0 for n in names]
@@ -1137,6 +1517,7 @@ def _render_terminus_icons(
         icon_gap + icon_half_flow,
         icon_step,
         bundle_center,
+        is_rail=graph.station_is_rail(station.id),
     )
 
     # Captions sitting at the same Y overlap when their estimated
@@ -1154,6 +1535,7 @@ def _render_terminus_icons(
     for i, label in enumerate(station.terminus_labels):
         icon_type = icon_types[i] if i < len(icon_types) else ICON_TYPE_FILE
         name = names[i] if i < len(names) else ""
+        banner = banners[i] if i < len(banners) else False
 
         icon_cx, icon_cy = centers[i]
 
@@ -1190,9 +1572,13 @@ def _render_terminus_icons(
         if icon_type == ICON_TYPE_DIR:
             render_folder_icon(d, **common)
         elif icon_type == ICON_TYPE_FILES:
-            render_files_icon(d, **common, fold_size=theme.terminus_fold_size)
+            render_files_icon(
+                d, **common, fold_size=theme.terminus_fold_size, banner=banner
+            )
         else:
-            render_file_icon(d, **common, fold_size=theme.terminus_fold_size)
+            render_file_icon(
+                d, **common, fold_size=theme.terminus_fold_size, banner=banner
+            )
 
         # Optional caption rendered below the icon so the type chip
         # inside the icon stays readable.
@@ -1259,7 +1645,7 @@ def _render_labels(
             label_data["class_"] = "nf-metro-station-label"
 
         if label.angle:
-            # Diagonal labels (#527): anchor at the pill and rotate about
+            # Diagonal labels: anchor at the pill and rotate about
             # the anchor.  text-anchor=start so the tilted text trails
             # away from the station.
             d.append(
@@ -1312,6 +1698,350 @@ def _render_labels(
                     **label_data,
                 )
             )
+
+
+def _station_marker_extent(
+    station: Station,
+    graph: MetroGraph,
+    theme: Theme,
+    station_offsets: dict[tuple[str, str], float],
+) -> tuple[float, float, float, float]:
+    """Return ``(x_left, x_right, y_top, y_bottom)`` of a station's marker.
+
+    Mirrors the pill geometry in ``_render_stations`` so group captions can
+    clear the actual rendered marker, including the per-line offset spread.
+    """
+    r = theme.station_radius
+    is_tb = False
+    if station.section_id:
+        sec = graph.sections.get(station.section_id)
+        if sec and sec.direction == "TB":
+            is_tb = True
+
+    line_offsets = [
+        station_offsets.get((station.id, lid), 0.0)
+        for lid in graph.station_lines(station.id)
+    ]
+    min_off = min(line_offsets) if line_offsets else 0.0
+    max_off = max(line_offsets) if line_offsets else 0.0
+
+    x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb)
+    return (x, x + w, y, y + h)
+
+
+class _GroupBand(NamedTuple):
+    """Resolved render geometry for one annotative station-group caption.
+
+    ``rule_y`` is the bracket rule (drawn directly against the spanned run);
+    ``tick_dy`` is the signed length of the inward end-ticks (pointing back
+    towards the stations); ``text_y``/``baseline`` place the caption clear of
+    the rule on the far side; ``band_far_y`` is the band's outermost edge
+    (largest ``y`` for a below band, smallest for an above band) used for
+    bbox/canvas reservation.
+    """
+
+    label: str
+    x_left: float
+    x_right: float
+    rule_y: float
+    tick_dy: float
+    text_y: float
+    baseline: str
+    band_far_y: float
+    section_id: str | None
+
+
+class _RawGroup(NamedTuple):
+    """A group's resolved horizontal span and outer reference Y, before the
+    bracket gap and common-rule alignment are applied."""
+
+    label: str
+    x_left: float
+    x_right: float
+    section_id: str | None
+    position: str
+    ref: float
+    ref_is_label: bool
+
+
+def _group_bands(
+    graph: MetroGraph,
+    theme: Theme,
+    station_offsets: dict[tuple[str, str], float],
+    label_extents: dict[str, tuple[float, float]] | None = None,
+) -> list[_GroupBand]:
+    """Resolve per-group band geometry.
+
+    For a ``below`` band the bracket rule hugs the bottom of the spanned
+    run, its end-ticks point up towards the stations, and the caption sits
+    beneath the rule; an ``above`` band mirrors this. Groups whose members
+    are all missing/hidden are skipped.
+
+    ``label_extents`` maps a station id to its rendered label's ``(top, bottom)``
+    Y.  When given, a below band is dropped beneath the deepest member label
+    (and an above band lifted above the highest), so diagonal station labels
+    that hang past the markers do not collide with the band.
+    """
+    caption_font = theme.label_font_size * GROUP_LABEL_FONT_SCALE
+
+    # First pass: resolve each group's horizontal span and the natural outer
+    # reference (deepest member label/marker for a below band, highest for an
+    # above band) before the bracket gap is applied.
+    raw: list[_RawGroup] = []
+    for group in graph.groups:
+        members = [
+            graph.stations[sid]
+            for sid in group.station_ids
+            if sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not graph.stations[sid].is_hidden
+        ]
+        if not members:
+            continue
+        extents = [
+            _station_marker_extent(s, graph, theme, station_offsets) for s in members
+        ]
+
+        x_left = min(e[0] for e in extents)
+        x_right = max(e[1] for e in extents)
+        section_id = members[0].section_id
+
+        # Member label extremes, so the band clears the (possibly diagonal)
+        # station labels rather than just the markers.
+        member_label_tops = [
+            label_extents[s.id][0]
+            for s in members
+            if label_extents and s.id in label_extents
+        ]
+        member_label_bottoms = [
+            label_extents[s.id][1]
+            for s in members
+            if label_extents and s.id in label_extents
+        ]
+
+        if group.position == "above":
+            marker_top = min(e[2] for e in extents)
+            label_ref = min(member_label_tops) if member_label_tops else None
+            ref = min([marker_top, *member_label_tops])
+            ref_is_label = label_ref is not None and label_ref <= marker_top
+        else:
+            marker_bottom = max(e[3] for e in extents)
+            label_ref = max(member_label_bottoms) if member_label_bottoms else None
+            ref = max([marker_bottom, *member_label_bottoms])
+            ref_is_label = label_ref is not None and label_ref >= marker_bottom
+        raw.append(
+            _RawGroup(
+                label=group.label,
+                x_left=x_left,
+                x_right=x_right,
+                section_id=section_id,
+                position=group.position,
+                ref=ref,
+                ref_is_label=ref_is_label,
+            )
+        )
+
+    # Align all bands sharing a (section, side) to a common rule line, so a
+    # row of group captions reads off one level rather than stepping with each
+    # group's own member-label depth.  Below bands align to the deepest ref,
+    # above bands to the highest.  Track whether that common extreme is a
+    # station label (vs a bare marker): a label already carries its full
+    # footprint, so the band hugs it with a small clearance instead of the
+    # wider marker-row gap, which over-shoots for diagonal labels.
+    common_ref: dict[tuple[str | None, str], float] = {}
+    common_is_label: dict[tuple[str | None, str], bool] = {}
+    for rec in raw:
+        key = (rec.section_id, rec.position)
+        ref = rec.ref
+        more_extreme = (
+            key not in common_ref
+            or (rec.position == "above" and ref < common_ref[key])
+            or (rec.position != "above" and ref > common_ref[key])
+        )
+        if rec.position == "above":
+            common_ref[key] = min(common_ref.get(key, ref), ref)
+        else:
+            common_ref[key] = max(common_ref.get(key, ref), ref)
+        if more_extreme:
+            common_is_label[key] = rec.ref_is_label
+
+    out: list[_GroupBand] = []
+    for rec in raw:
+        key = (rec.section_id, rec.position)
+        ref = common_ref[key]
+        gap = (
+            GROUP_LABEL_LABEL_CLEARANCE if common_is_label.get(key) else GROUP_LABEL_GAP
+        )
+        if rec.position == "above":
+            rule_y = ref - gap
+            tick_dy = GROUP_LABEL_TICK_LENGTH  # ticks point down to stations
+            text_y = rule_y - GROUP_LABEL_UNDERLINE_GAP
+            baseline = "auto"
+            band_far_y = text_y - caption_font
+        else:
+            rule_y = ref + gap
+            tick_dy = -GROUP_LABEL_TICK_LENGTH  # ticks point up to stations
+            text_y = rule_y + GROUP_LABEL_UNDERLINE_GAP
+            baseline = "hanging"
+            band_far_y = text_y + caption_font
+        out.append(
+            _GroupBand(
+                rec.label,
+                rec.x_left,
+                rec.x_right,
+                rule_y,
+                tick_dy,
+                text_y,
+                baseline,
+                band_far_y,
+                rec.section_id,
+            )
+        )
+    return out
+
+
+def _group_caption_bounds(bands: list[_GroupBand]) -> tuple[float, float]:
+    """Return the max ``(x, y)`` reached by any group band."""
+    max_x = 0.0
+    max_y = 0.0
+    for band in bands:
+        max_x = max(max_x, band.x_right)
+        max_y = max(max_y, band.rule_y, band.text_y, band.band_far_y)
+    return max_x, max_y
+
+
+def _reserve_section_space_for_groups(
+    graph: MetroGraph,
+    bands: list[_GroupBand],
+) -> None:
+    """Grow section bboxes so each ``below`` group band sits inside its box.
+
+    Annotative bands are placed at render time from station coordinates, so
+    the layout engine has no chance to reserve room for them.  Without this
+    the caption and bracket overlap (or fall outside) the section's bottom
+    edge.
+    """
+    needed_bottom: dict[str, float] = {}
+    for band in bands:
+        if band.section_id is None or band.tick_dy >= 0:
+            continue  # above bands grow upward; handled via canvas bounds
+        needed_bottom[band.section_id] = max(
+            needed_bottom.get(band.section_id, band.band_far_y),
+            band.band_far_y,
+        )
+    for sid, far_y in needed_bottom.items():
+        sec = graph.sections.get(sid)
+        if sec is None or sec.is_implicit:
+            continue
+        target_bottom = far_y + GROUP_LABEL_BAND_PADDING
+        if target_bottom > sec.bbox_y + sec.bbox_h:
+            sec.bbox_h = target_bottom - sec.bbox_y
+
+
+def _reserve_rail_space_for_termini(graph: MetroGraph, theme: Theme) -> None:
+    """Grow rail-section boxes to contain their terminus file icons.
+
+    Rail-section bboxes are sized to the station columns only, so a terminus
+    station's icons (which march outward past the last station) can be cut by
+    the box edge.  Grow the box so the icons sit inside with clearance.  Gated
+    on rail sections, leaving normal-mode fixtures byte-identical.
+    """
+    if not graph.has_rail_sections:
+        return
+    clearance = ICON_STATION_GAP * 2
+    r = theme.station_radius
+    hw = theme.terminus_width / 2
+    hh = theme.terminus_height / 2
+    caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
+    for station in graph.stations.values():
+        if not (graph.station_is_rail(station.id) and station.is_terminus):
+            continue
+        sec = graph.sections.get(station.section_id) if station.section_id else None
+        if sec is None or sec.is_implicit:
+            continue
+        n = len(station.terminus_labels)
+        names = station.terminus_names or [""] * n
+        name_widths = [
+            len(nm) * caption_font_size * 0.55 if nm else 0.0 for nm in names
+        ]
+        is_tb = sec.direction in ("TB", "BT")
+        if is_tb:
+            step = theme.terminus_height + ICON_INTER_GAP
+            half_flow = hh
+        else:
+            step = caption_aware_icon_step(names, name_widths, theme.terminus_width)
+            half_flow = hw
+        centers = _terminus_icon_centers(
+            station,
+            sec.direction,
+            not graph.edges_to(station.id),
+            n,
+            r + ICON_STATION_GAP + half_flow,
+            step,
+            0.0,
+            is_rail=True,
+        )
+        for cx, cy in centers:
+            left, right = cx - hw - clearance, cx + hw + clearance
+            top, bot = cy - hh - clearance, cy + hh + clearance
+            if left < sec.bbox_x:
+                sec.bbox_w = sec.bbox_x + sec.bbox_w - left
+                sec.bbox_x = left
+            if right > sec.bbox_x + sec.bbox_w:
+                sec.bbox_w = right - sec.bbox_x
+            if top < sec.bbox_y:
+                sec.bbox_h = sec.bbox_y + sec.bbox_h - top
+                sec.bbox_y = top
+            if bot > sec.bbox_y + sec.bbox_h:
+                sec.bbox_h = bot - sec.bbox_y
+
+
+def _render_station_groups(
+    d: draw.Drawing,
+    theme: Theme,
+    bands: list[_GroupBand],
+) -> None:
+    """Render annotative captions spanning groups of stations.
+
+    Each group's caption is centred on the x-extent of its (visible) member
+    stations.  A bracket rule (with inward end-ticks) hugs the spanned run so
+    the band reads as embracing exactly those stations, with the caption set
+    clear of the rule on the far side.  Coordinates are read-only: this never
+    moves stations.
+    """
+    caption_font = theme.label_font_size * GROUP_LABEL_FONT_SCALE
+    for band in bands:
+        cx = (band.x_left + band.x_right) / 2
+        # Bracket: a horizontal rule across the run with short inward end-ticks
+        # pointing back towards the stations.
+        bracket = draw.Path(
+            stroke=theme.section_label_color,
+            stroke_width=GROUP_LABEL_UNDERLINE_WIDTH,
+            stroke_opacity=GROUP_LABEL_UNDERLINE_OPACITY,
+            fill="none",
+            stroke_linecap="round",
+            stroke_linejoin="round",
+            class_="nf-metro-group-underline",
+        )
+        bracket.M(band.x_left, band.rule_y + band.tick_dy)
+        bracket.L(band.x_left, band.rule_y)
+        bracket.L(band.x_right, band.rule_y)
+        bracket.L(band.x_right, band.rule_y + band.tick_dy)
+        d.append(bracket)
+        d.append(
+            draw.Text(
+                band.label,
+                caption_font,
+                cx,
+                band.text_y,
+                fill=theme.section_label_color,
+                font_family=theme.label_font_family,
+                font_weight="bold",
+                text_anchor="middle",
+                dominant_baseline=band.baseline,
+                class_="nf-metro-group-label",
+            )
+        )
 
 
 def _grid_bbox_bounds(
@@ -1412,13 +2142,19 @@ def _compute_row_boundary_segments(
 
 def _compute_col_boundary_xs(
     col_bounds: dict[int, tuple[float, float]],
+    sections: list[Section] | None = None,
 ) -> list[tuple[int, int, float]]:
     """Return ``(col_a, col_b, mid_x)`` triples for consecutive grid columns
     whose bbox X ranges don't overlap.
 
-    Columns don't overlap like rows do (there's no column-axis analogue
-    of a fold), so a single canvas-spanning line per pair suffices; the
-    overlap guard is defensive.
+    Columns don't overlap like rows do within a single shared grid (there's
+    no column-axis analogue of a fold), so a single canvas-spanning line per
+    pair normally suffices.  When the section graph splits into independent
+    components, each component is placed in its own local column grid and the
+    components reuse the same ``grid_col`` indices in different X bands; a
+    midpoint computed from the merged per-column X bounds can then land
+    inside another component's section.  Any such boundary is dropped so the
+    overlay never cuts a section bbox.
     """
     result: list[tuple[int, int, float]] = []
     sorted_cols = sorted(col_bounds)
@@ -1428,8 +2164,54 @@ def _compute_col_boundary_xs(
         left = col_bounds[cb][0]
         if right >= left:
             continue
-        result.append((ca, cb, (right + left) / 2))
+        mid_x = (right + left) / 2
+        if sections is not None and any(
+            sec.grid_col_span == 1 and sec.bbox_x < mid_x < sec.bbox_x + sec.bbox_w
+            for sec in sections
+        ):
+            continue
+        result.append((ca, cb, mid_x))
     return result
+
+
+def _draw_debug_y_grid(
+    d: draw.Drawing,
+    *,
+    x_start: float,
+    x_end: float,
+    base_y: float,
+    slot_spacing: float,
+    n_slots: int,
+    label: str,
+    debug_font: str,
+    debug_font_size: float,
+) -> None:
+    """Draw horizontal grid-slot lines, labelling the topmost one."""
+    for i in range(n_slots):
+        y = base_y + i * slot_spacing
+        d.append(
+            draw.Line(
+                x_start,
+                y,
+                x_end,
+                y,
+                stroke=DEBUG_ROW_GRID_COLOR,
+                stroke_width=0.75,
+                stroke_dasharray="4,6",
+            )
+        )
+        if i == 0:
+            d.append(
+                draw.Text(
+                    label,
+                    debug_font_size,
+                    x_start - 4,
+                    y,
+                    fill=DEBUG_ROW_GRID_COLOR,
+                    font_family=debug_font,
+                    text_anchor="end",
+                )
+            )
 
 
 def _render_debug_overlay(
@@ -1502,7 +2284,7 @@ def _render_debug_overlay(
             all_y1 = max(b[1] for b in row_bounds.values()) + 20
         grid_color = "rgba(255, 255, 0, 0.5)"
 
-        for ca, cb, mid_x in _compute_col_boundary_xs(col_bounds):
+        for ca, cb, mid_x in _compute_col_boundary_xs(col_bounds, sections):
             d.append(
                 draw.Line(
                     mid_x,
@@ -1556,61 +2338,70 @@ def _render_debug_overlay(
                 )
             )
 
-    # Shared Y grid lines: horizontal lines at each grid slot position
-    # within each row group (populated by _align_row_y_grids in engine.py).
+    # Horizontal grid-slot lines. Multi-section row groups use the shared
+    # slot spacing from _align_row_y_grids; every other section falls back to
+    # the global Y pitch so single-section diagrams still show their grid.
     grid_info = graph._row_y_grid_info
-    if grid_info and sections:
-        for row, info in grid_info.items():
-            slot_spacing = info["slot_spacing"]
-            sec_ids = info["section_ids"]
-            ref_secs = [graph.sections[sid] for sid in sec_ids if sid in graph.sections]
-            if not ref_secs:
-                continue
-            # Collect all non-port station Y positions in the group
-            # to determine the actual grid line range.
-            all_station_ys: list[float] = []
-            for sec in ref_secs:
-                for sid in sec.station_ids:
-                    st = graph.stations.get(sid)
-                    if st and not st.is_port:
-                        all_station_ys.append(st.y)
-            if not all_station_ys:
-                continue
-            base_y = min(all_station_ys)
-            max_y = max(all_station_ys)
-            n_slots = (
-                int(round((max_y - base_y) / slot_spacing)) + 1
-                if slot_spacing > 0
-                else 1
-            )
-            # X span: from leftmost to rightmost section in the group
-            x_start = min(s.bbox_x for s in ref_secs) - 10
-            x_end = max(s.bbox_x + s.bbox_w for s in ref_secs) + 10
-            for i in range(n_slots):
-                y = base_y + i * slot_spacing
-                d.append(
-                    draw.Line(
-                        x_start,
-                        y,
-                        x_end,
-                        y,
-                        stroke=DEBUG_ROW_GRID_COLOR,
-                        stroke_width=0.75,
-                        stroke_dasharray="4,6",
-                    )
-                )
-                if i == 0:
-                    d.append(
-                        draw.Text(
-                            f"row {row} grid",
-                            debug_font_size,
-                            x_start - 4,
-                            y,
-                            fill=DEBUG_ROW_GRID_COLOR,
-                            font_family=debug_font,
-                            text_anchor="end",
-                        )
-                    )
+    grouped_sec_ids: set[str] = set()
+    for row, info in grid_info.items():
+        slot_spacing = info["slot_spacing"]
+        sec_ids = info["section_ids"]
+        ref_secs = [graph.sections[sid] for sid in sec_ids if sid in graph.sections]
+        if not ref_secs:
+            continue
+        grouped_sec_ids.update(s.id for s in ref_secs)
+        all_station_ys: list[float] = []
+        for sec in ref_secs:
+            for sid in sec.station_ids:
+                st = graph.stations.get(sid)
+                if st and not st.is_port:
+                    all_station_ys.append(st.y)
+        if not all_station_ys:
+            continue
+        base_y = min(all_station_ys)
+        max_y = max(all_station_ys)
+        n_slots = (
+            int(round((max_y - base_y) / slot_spacing)) + 1 if slot_spacing > 0 else 1
+        )
+        x_start = min(s.bbox_x for s in ref_secs) - 10
+        x_end = max(s.bbox_x + s.bbox_w for s in ref_secs) + 10
+        _draw_debug_y_grid(
+            d,
+            x_start=x_start,
+            x_end=x_end,
+            base_y=base_y,
+            slot_spacing=slot_spacing,
+            n_slots=n_slots,
+            label=f"row {row} grid",
+            debug_font=debug_font,
+            debug_font_size=debug_font_size,
+        )
+
+    for sec in sections:
+        if sec.id in grouped_sec_ids:
+            continue
+        sec_ys = [
+            st.y
+            for sid in sec.station_ids
+            for st in (graph.stations.get(sid),)
+            if st and not st.is_port
+        ]
+        if not sec_ys:
+            continue
+        base_y = min(sec_ys)
+        max_y = max(sec_ys)
+        n_slots = int(round((max_y - base_y) / Y_SPACING)) + 1
+        _draw_debug_y_grid(
+            d,
+            x_start=sec.bbox_x - 10,
+            x_end=sec.bbox_x + sec.bbox_w + 10,
+            base_y=base_y,
+            slot_spacing=Y_SPACING,
+            n_slots=n_slots,
+            label=f"row {sec.grid_row} grid",
+            debug_font=debug_font,
+            debug_font_size=debug_font_size,
+        )
 
     # Hidden stations: dashed-outline circles with labels
     for station in graph.stations.values():

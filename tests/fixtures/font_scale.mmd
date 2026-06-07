@@ -1,0 +1,18 @@
+%%metro title: Font Scale Fixture
+%%metro line: main | Main | #3b82f6
+%%metro line: alt | Alternative | #e63946
+%%metro file: report | QC
+
+graph LR
+    subgraph proc [Processing]
+        load[Load Samples]
+        align[Align Reads]
+        filter[Filter\nVariants]
+        report[ ]
+
+        load -->|main| align
+        load -->|alt| align
+        align -->|main| filter
+        align -->|alt| filter
+        filter -->|main| report
+    end

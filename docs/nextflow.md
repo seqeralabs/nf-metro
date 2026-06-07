@@ -340,6 +340,8 @@ Two additional icon variants are available for common Nextflow patterns:
 - **`%%metro files:`** renders a stacked-documents icon, useful for paired-end reads or multi-file inputs (e.g. `%%metro files: reads_in | FASTQ`)
 - **`%%metro dir:`** renders a folder icon, useful for directory outputs like `publishDir` results (e.g. `%%metro dir: results_out | Results`)
 
+Add `banner` as a fourth field to a `file:` or `files:` directive to draw the format label on a dark strip across the icon, for when the format should stand out (e.g. `%%metro files: aln_out | BAM | Alignments | banner`).
+
 ## How the converter works
 
 Nextflow's `-with-dag` output contains three types of nodes: processes (the actual pipeline steps), channels/values (data plumbing), and operators (Nextflow internals like `mix` and `collect`). Here is the raw DAG for the flat pipeline example:

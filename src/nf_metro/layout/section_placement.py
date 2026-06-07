@@ -41,13 +41,23 @@ def _assign_grid_layout(
     """Assign grid columns and rows to each section.
 
     Returns (col_assign, row_assign) dicts mapping section IDs to positions.
+    Only sections in ``graph.sections`` participate; callers laying out a
+    single weakly-connected component scope ``graph.sections`` to it (via
+    ``_scoped_sections``) so its grid is computed in isolation.
     """
     section_ids = list(graph.sections.keys())
 
-    # Topological layering (columns)
+    # Topological layering (columns).  ``section_edges`` is a set, so iterate
+    # it in a stable (sorted) order: the adjacency lists it builds drive the
+    # BFS queue and the column-group ordering below, and a hash-randomised
+    # traversal order would otherwise make row assignment depend on
+    # PYTHONHASHSEED.
+    section_set = set(section_ids)
     in_degree: dict[str, int] = {sid: 0 for sid in section_ids}
     adj: dict[str, list[str]] = {sid: [] for sid in section_ids}
-    for src, tgt in section_edges:
+    for src, tgt in sorted(section_edges):
+        if src not in section_set or tgt not in section_set:
+            continue
         adj[src].append(tgt)
         in_degree[tgt] += 1
 
@@ -76,6 +86,8 @@ def _assign_grid_layout(
 
     # Apply grid overrides
     for sid, (col, row, rowspan, colspan) in graph.grid_overrides.items():
+        if sid not in section_ids:
+            continue
         if sid in graph.sections:
             graph.sections[sid].grid_col = col
             graph.sections[sid].grid_row = row
@@ -90,15 +102,19 @@ def _assign_grid_layout(
 
     # Assign rows within each column (order by section number, then by id)
     row_assign: dict[str, int] = {}
-    for col, sids in sorted(col_groups.items()):
+    for col, col_sids in sorted(col_groups.items()):
         explicit = [
             (sid, graph.sections[sid].grid_row)
-            for sid in sids
+            for sid in col_sids
             if graph.sections[sid].grid_row >= 0
         ]
-        auto = [sid for sid in sids if graph.sections[sid].grid_row < 0]
+        auto = [sid for sid in col_sids if graph.sections[sid].grid_row < 0]
 
-        auto.sort(key=lambda s: graph.sections[s].number)
+        # Pack auto-row sections by definition number, with the section id as
+        # a deterministic tie-break.  ``col_sids`` derives from a set-built
+        # adjacency, so sorting on number alone would leave equal-numbered
+        # sections in hash-randomised order and flip their rows run-to-run.
+        auto.sort(key=lambda s: (graph.sections[s].number, s))
 
         used_rows: set[int] = set()
         for sid, row in explicit:
@@ -128,11 +144,18 @@ def _compute_section_offsets(
     """Compute pixel offsets for each section from grid assignments.
 
     Returns (min_col, max_col) for use by downstream gap enforcement.
+
+    The set of sections handled is exactly ``col_assign``'s keys.  In the
+    single-grid path that is every section; in the per-component path it is
+    one weakly-connected component, so other components' sections are left
+    untouched and never inflate this component's column widths.
     """
+    scoped = {sid: graph.sections[sid] for sid in col_assign if sid in graph.sections}
+
     min_col = min(col_assign.values()) if col_assign else 0
     max_col = max(col_assign.values()) if col_assign else 0
-    for sid in graph.sections:
-        cspan = graph.sections[sid].grid_col_span
+    for sid in scoped:
+        cspan = scoped[sid].grid_col_span
         col = col_assign.get(sid, 0)
         min_col = min(min_col, col)
         max_col = max(max_col, col + cspan - 1)
@@ -145,7 +168,7 @@ def _compute_section_offsets(
         return section.bbox_x + section.bbox_w + SECTION_X_PADDING
 
     col_widths: dict[int, float] = defaultdict(float)
-    for sid, section in graph.sections.items():
+    for sid, section in scoped.items():
         if section.grid_col_span == 1:
             col = col_assign.get(sid, 0)
             col_widths[col] = max(col_widths[col], _effective_width(section))
@@ -155,7 +178,7 @@ def _compute_section_offsets(
             col_widths[c] = 0.0
 
     # Expand columns if a spanning section exceeds spanned column widths
-    for sid, section in graph.sections.items():
+    for sid, section in scoped.items():
         cspan = section.grid_col_span
         if cspan <= 1:
             continue
@@ -176,13 +199,13 @@ def _compute_section_offsets(
 
     # Global row heights (only single-row non-TB sections)
     max_row = max(row_assign.values()) if row_assign else 0
-    for sid in graph.sections:
-        span = graph.sections[sid].grid_row_span
+    for sid in scoped:
+        span = scoped[sid].grid_row_span
         row = row_assign.get(sid, 0)
         max_row = max(max_row, row + span - 1)
 
     row_heights: dict[int, float] = defaultdict(float)
-    for sid, section in graph.sections.items():
+    for sid, section in scoped.items():
         if section.grid_row_span == 1 and section.direction != "TB":
             row = row_assign.get(sid, 0)
             row_heights[row] = max(row_heights[row], section.bbox_h)
@@ -192,7 +215,7 @@ def _compute_section_offsets(
             row_heights[r] = 0.0
 
     # Expand rows if a spanning section exceeds spanned row heights
-    for sid, section in graph.sections.items():
+    for sid, section in scoped.items():
         rspan = section.grid_row_span
         if rspan <= 1:
             continue
@@ -214,7 +237,7 @@ def _compute_section_offsets(
     tb_sections = sorted(
         [
             (sid, section)
-            for sid, section in graph.sections.items()
+            for sid, section in scoped.items()
             if section.direction == "TB" and section.grid_row_span == 1
         ],
         key=lambda x: row_assign.get(x[0], 0),
@@ -237,12 +260,12 @@ def _compute_section_offsets(
 
     # Right-align columns containing RL or TB sections
     right_align_cols: set[int] = set()
-    for sid, section in graph.sections.items():
+    for sid, section in scoped.items():
         if section.direction in ("RL", "TB") and section.grid_col_span == 1:
             right_align_cols.add(col_assign.get(sid, 0))
 
     # Set section offsets and adjust for spanning
-    for sid, section in graph.sections.items():
+    for sid, section in scoped.items():
         section.grid_col = col_assign.get(sid, 0)
         section.grid_row = row_assign.get(sid, 0)
         section.offset_x = col_offsets.get(section.grid_col, 0)
@@ -259,16 +282,14 @@ def _compute_section_offsets(
     # A section that spans multiple columns may have a different local
     # bbox_x from internal layout, causing its left edge to be offset
     # from single-span sections in the same starting column.
-    for section in graph.sections.values():
+    for section in scoped.values():
         if section.grid_col_span <= 1:
             continue
         col = section.grid_col
         # Find the representative left edge from single-span sections
         # in the same column.
         peers = [
-            s
-            for s in graph.sections.values()
-            if s.grid_col == col and s.grid_col_span == 1
+            s for s in scoped.values() if s.grid_col == col and s.grid_col_span == 1
         ]
         if not peers:
             continue
@@ -298,6 +319,80 @@ def _compute_section_offsets(
     return min_col, max_col
 
 
+def _weakly_connected_components(
+    graph: MetroGraph,
+    section_edges: set[tuple[str, str]],
+) -> list[set[str]]:
+    """Partition sections into weakly-connected components.
+
+    Treats inter-section edges as undirected.  Each returned set is one
+    group of sections with no inter-section edge to any other group.
+    """
+    import networkx as nx
+
+    meta: nx.Graph[str] = nx.Graph()
+    meta.add_nodes_from(graph.sections)
+    for src, tgt in sorted(section_edges):
+        if src in graph.sections and tgt in graph.sections:
+            meta.add_edge(src, tgt)
+    # ``nx.connected_components`` yields ``set`` objects in a traversal order
+    # that depends on hash iteration; return them in a stable order (by
+    # smallest member id) so any downstream iteration that does not re-sort
+    # is still deterministic.  Callers that need a particular stacking order
+    # re-sort on their own key.
+    return sorted(
+        (set(c) for c in nx.connected_components(meta)),
+        key=lambda c: min(c),
+    )
+
+
+def _component_extent(sections: list[Section]) -> tuple[float, float, float]:
+    """Global ``(left, top, bottom)`` bounding extent of placed sections.
+
+    Coordinates are in canvas space (``offset`` + local ``bbox``), so the
+    extent is comparable across components placed in separate local grids.
+    """
+    left = min(s.offset_x + s.bbox_x for s in sections)
+    top = min(s.offset_y + s.bbox_y for s in sections)
+    bottom = max(s.offset_y + s.bbox_y + s.bbox_h for s in sections)
+    return left, top, bottom
+
+
+def _place_section_group(
+    graph: MetroGraph,
+    section_edges: set[tuple[str, str]],
+    section_x_gap: float,
+    section_y_gap: float,
+    sids: set[str] | None,
+) -> None:
+    """Run column-grid placement for one section group (or all sections).
+
+    With ``sids`` set, ``graph.sections`` is temporarily restricted to that
+    weakly-connected component so its column widths and row heights are
+    computed in isolation from the other components.  ``None`` places every
+    section in one shared grid.
+    """
+    from contextlib import nullcontext
+
+    from nf_metro.layout.phases._common import _scoped_sections
+
+    scope = _scoped_sections(graph, sorted(sids)) if sids is not None else nullcontext()
+    with scope:
+        col_assign, row_assign = _assign_grid_layout(graph, section_edges)
+        min_col, max_col = _compute_section_offsets(
+            graph, col_assign, row_assign, section_x_gap, section_y_gap
+        )
+        _enforce_min_column_gaps(
+            graph, col_assign, min_col, max_col, requested_gap=section_x_gap
+        )
+        _enforce_min_row_gaps(
+            graph,
+            row_assign,
+            requested_gap=section_y_gap,
+            wrap_min_by_pair=_wrap_bundle_row_minimums(graph),
+        )
+
+
 def place_sections(
     graph: MetroGraph,
     section_x_gap: float = PLACEMENT_X_GAP,
@@ -308,6 +403,18 @@ def place_sections(
     Builds a meta-graph of section dependencies, assigns columns
     via topological layering, assigns rows within columns, then
     computes pixel offsets for each section.
+
+    Disconnected graphs (two or more weakly-connected components in the
+    section meta-graph) are placed one component at a time, each in its own
+    local column grid, then stacked vertically so a wide component never
+    inflates another component's column widths.  Components are stacked in
+    a deterministic order -- ascending minimum original grid row, then
+    descending section count, then the lexicographically smallest section
+    id as a final tie-break -- left-aligned and separated by
+    ``section_y_gap``.  A single-component graph, or any graph carrying an
+    explicit ``%%metro grid:`` override (where the author may have
+    deliberately interleaved components in one shared grid), falls back to
+    the legacy single-grid placement and is unaffected.
     """
     if not graph.sections:
         return
@@ -315,19 +422,43 @@ def place_sections(
     # auto_layout always populates section_dag before placement runs.
     assert graph.section_dag is not None
     section_edges = graph.section_dag.section_edges
-    col_assign, row_assign = _assign_grid_layout(graph, section_edges)
-    min_col, max_col = _compute_section_offsets(
-        graph, col_assign, row_assign, section_x_gap, section_y_gap
+
+    components = _weakly_connected_components(graph, section_edges)
+    if len(components) <= 1 or graph._explicit_grid:
+        _place_section_group(graph, section_edges, section_x_gap, section_y_gap, None)
+        return
+
+    # Deterministic stacking order: top-most original row first, then the
+    # larger components, then a stable id tie-break.  ``grid_row`` is the
+    # row auto_layout assigns before placement runs; it is valid here even
+    # though per-component placement has not yet recomputed offsets.
+    def _min_row(comp: set[str]) -> int:
+        return min(graph.sections[sid].grid_row for sid in comp)
+
+    ordered = sorted(
+        components,
+        key=lambda comp: (_min_row(comp), -len(comp), min(comp)),
     )
-    _enforce_min_column_gaps(
-        graph, col_assign, min_col, max_col, requested_gap=section_x_gap
-    )
-    _enforce_min_row_gaps(
-        graph,
-        row_assign,
-        requested_gap=section_y_gap,
-        wrap_min_by_pair=_wrap_bundle_row_minimums(graph),
-    )
+
+    # Anchor the stack to the first (top) component's natural top-left, so it
+    # keeps the origin a single-grid layout would give it; later components are
+    # left-aligned to that edge and stacked below.
+    origin_left = 0.0
+    stack_y = 0.0
+    for idx, comp in enumerate(ordered):
+        _place_section_group(graph, section_edges, section_x_gap, section_y_gap, comp)
+        # Sort members so the translation never depends on set hash order.
+        comp_secs = [graph.sections[sid] for sid in sorted(comp)]
+        left, top, bottom = _component_extent(comp_secs)
+        if idx == 0:
+            origin_left = left
+            stack_y = top
+        dx = origin_left - left
+        dy = stack_y - top
+        for s in comp_secs:
+            s.offset_y += dy
+            s.offset_x += dx
+        stack_y += (bottom - top) + section_y_gap
 
 
 def _rows_overlap(a: Section, b: Section) -> bool:
