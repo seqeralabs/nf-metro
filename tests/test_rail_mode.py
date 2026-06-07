@@ -1136,10 +1136,10 @@ _STACKED_RAIL_MMD = (
 )
 
 
-def test_rail_top_rail_label_above_lower_rail_below():
-    """In a rail panel a single-rail station on the top rail labels above and a
-    lower-rail single-rail station labels below, regardless of whether a fork
-    sibling happens to sit in the same column."""
+def test_diagonal_rail_labels_all_hang_above_the_bundle():
+    """In a rail panel with a label angle every station label hangs above the
+    topmost rail (top- and bottom-rail stations alike), so they read as a tidy
+    row of angled names above the bundle rather than splitting either side."""
     from nf_metro.layout.labels import place_labels
     from nf_metro.layout.routing import compute_station_offsets, route_edges
 
@@ -1157,11 +1157,9 @@ def test_rail_top_rail_label_above_lower_rail_below():
         )
         if p.station_id
     }
-    # g2/g3 sit alone in their columns, so the only thing pushing them above is
-    # the top-rail rule (a fork-sibling heuristic would leave them below).
     assert placements["g2"].above, "top-rail station g2 must label above"
     assert placements["g3"].above, "top-rail station g3 must label above"
-    assert not placements["t1"].above, "bottom-rail station t1 must label below"
+    assert placements["t1"].above, "bottom-rail station t1 must label above"
 
 
 def test_rail_above_labels_do_not_overlap_section_above():
@@ -1234,3 +1232,110 @@ def test_spanning_rail_station_marker_tints_interchange():
     assert unmarked and all(fill == default_fill for fill in unmarked), (
         f"unmarked spanning station must keep the default fill, got {unmarked}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Diagonal rail labels: tidy row above the rail bundle; markers seat on rails
+# ---------------------------------------------------------------------------
+
+RAIL_DIAGONAL_LABELS_MMD = FIXTURES / "rail_diagonal_labels.mmd"
+RAIL_SINGLE_LINE_CALLERS_MMD = FIXTURES / "rail_single_line_callers.mmd"
+
+
+def _diagonal_label_placements(graph):
+    """Lay out *graph* and return its non-terminus rail-station label boxes.
+
+    Returns a list of ``(station_id, section_id, bbox_top, bbox_bottom)``,
+    where the bbox is the angled label's enclosing box (so the bottom edge is
+    the visible baseline of the tilted text).
+    """
+    from nf_metro.layout.labels import _label_corners, place_labels
+    from nf_metro.layout.routing.rail import route_rail_edges
+
+    compute_layout(graph, validate=True)
+    routes = route_rail_edges(graph)
+    placements = place_labels(
+        graph, routes=routes, label_angle=graph.label_angle or 0.0
+    )
+    out: list[tuple[str, str, float, float]] = []
+    for lp in placements:
+        st = graph.stations.get(lp.station_id)
+        if st is None or st.is_port or st.is_terminus or not st.label.strip():
+            continue
+        ys = [c[1] for c in _label_corners(lp)]
+        out.append((st.id, st.section_id, min(ys), max(ys)))
+    return out
+
+
+def test_diagonal_rail_labels_sit_above_the_bundle_on_a_common_baseline():
+    """With a label angle, every rail-section station label hangs ABOVE the
+    section's topmost rail and the labels share one bottom-edge baseline, so
+    they read as a tidy row of angled names above the rail bundle."""
+    graph = parse_metro_mermaid(RAIL_DIAGONAL_LABELS_MMD.read_text())
+    assert graph.line_spread is LineSpread.RAILS
+    assert graph.label_angle
+
+    by_section: dict[str, list[tuple[str, float, float]]] = {}
+    for sid, sec_id, top, bot in _diagonal_label_placements(graph):
+        by_section.setdefault(sec_id, []).append((sid, top, bot))
+
+    rails = _section_line_rails(graph)
+    checked = 0
+    for sec_id, labels in by_section.items():
+        if len(labels) < 2:
+            continue
+        section_rails = rails.get(sec_id)
+        assert section_rails, f"{sec_id}: no reconstructable rails"
+        top_rail = min(section_rails.values())
+
+        baselines = [bot for _sid, _top, bot in labels]
+        spread = max(baselines) - min(baselines)
+        assert spread <= 2.0, (
+            f"{sec_id}: diagonal label baselines not aligned (spread {spread:.1f}px)"
+        )
+        for sid, _top, bot in labels:
+            assert bot <= top_rail + 1.0, (
+                f"{sec_id}/{sid}: label baseline {bot:.1f} not above top rail "
+                f"{top_rail:.1f}"
+            )
+        checked += 1
+    assert checked, "fixture must have a section with several diagonal labels"
+
+
+def test_rail_station_markers_seat_on_their_rails():
+    """Every rail-station marker knob sits on one of the rails the station
+    carries: the rendered knob centre matches a line's fixed rail Y.  This
+    holds for spanning interchanges and for single-line callers parked on a
+    non-top rail alike."""
+    import xml.etree.ElementTree as ET
+
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+
+    graph = parse_metro_mermaid(RAIL_SINGLE_LINE_CALLERS_MMD.read_text())
+    compute_layout(graph, validate=True)
+    rails = _section_line_rails(graph)
+
+    svg = render_svg(graph, THEMES["nfcore"])
+    root = ET.fromstring(svg)
+
+    tol = 1.0
+    checked = 0
+    for el in root.iter():
+        if el.attrib.get("class") != "nf-metro-rail-knob":
+            continue
+        sid = el.attrib.get("data-station-id")
+        st = graph.stations.get(sid) if sid else None
+        if st is None or st.is_terminus:
+            continue
+        section_rails = rails.get(st.section_id)
+        if not section_rails:
+            continue
+        cy = float(el.attrib["cy"])
+        nearest = min(section_rails.values(), key=lambda r: abs(r - cy))
+        assert abs(nearest - cy) <= tol, (
+            f"{sid}: marker knob at cy={cy:.2f} is off every rail "
+            f"(nearest {nearest:.2f})"
+        )
+        checked += 1
+    assert checked, "fixture must render rail-station knobs"
