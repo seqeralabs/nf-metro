@@ -317,6 +317,10 @@ def _parse_directive(
         _parse_logo_scale_directive(content[len("logo_scale:") :].strip(), graph)
     elif content.startswith("font_scale:"):
         _parse_font_scale_directive(content[len("font_scale:") :].strip(), graph)
+    elif content.startswith("legend_logo_gap:"):
+        _parse_legend_logo_gap_directive(
+            content[len("legend_logo_gap:") :].strip(), graph
+        )
     elif content.startswith("logo:"):
         graph.logo_path = content[len("logo:") :].strip()
     elif content.startswith("compact_offsets:"):
@@ -621,6 +625,13 @@ def _parse_logo_scale_directive(value: str, graph: MetroGraph) -> None:
     scale = _parse_numeric_directive(value, "logo_scale", allow_zero=False)
     if scale is not None:
         graph.logo_scale = scale
+
+
+def _parse_legend_logo_gap_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro legend_logo_gap: <px> (horizontal gap logo->legend entries)."""
+    gap = _parse_numeric_directive(value, "legend_logo_gap", allow_zero=True)
+    if gap is not None:
+        graph.legend_logo_gap = gap
 
 
 def _parse_font_scale_directive(value: str, graph: MetroGraph) -> None:

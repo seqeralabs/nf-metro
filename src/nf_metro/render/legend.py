@@ -133,6 +133,17 @@ def _legend_rows(graph: MetroGraph) -> list[_LegendRow]:
     return rows
 
 
+def _logo_gap(graph: MetroGraph) -> float:
+    """Horizontal gap between the embedded logo and the legend entries.
+
+    An explicit ``%%metro legend_logo_gap:`` wins; otherwise the default gap
+    tracks ``font_scale`` so an enlarged logo keeps proportional breathing room.
+    """
+    if graph.legend_logo_gap is not None:
+        return graph.legend_logo_gap
+    return LOGO_GAP * graph.font_scale
+
+
 def _scale_logo_to_content(
     logo_size: tuple[float, float], text_block_height: float, scale: float = 1.0
 ) -> tuple[float, float]:
@@ -209,7 +220,7 @@ def compute_legend_dimensions(
     char_width = theme.legend_font_size * LEGEND_CHAR_WIDTH_RATIO
 
     _text_h, content_height, logo_w, _logo_h = _legend_metrics(graph, rows, logo_size)
-    logo_gap = LOGO_GAP if logo_size else 0.0
+    logo_gap = _logo_gap(graph) if logo_size else 0.0
 
     width = padding * 2 + logo_w + logo_gap + text_offset + max_name_len * char_width
     height = padding * 2 + content_height
@@ -316,7 +327,7 @@ def render_legend(
                 embed=True,
             )
         )
-        logo_offset = scaled_w + LOGO_GAP
+        logo_offset = scaled_w + _logo_gap(graph)
 
     # Line entries, vertically centred within the content area (which can be
     # taller than the text block when an enlarged logo grows the box).

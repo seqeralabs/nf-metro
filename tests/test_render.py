@@ -4,6 +4,8 @@ import pathlib
 import re
 import xml.etree.ElementTree as ET
 
+import pytest
+
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Station
@@ -210,6 +212,38 @@ def test_logo_scale_default_no_change():
     # Should not raise and should produce a positive-size legend.
     w, h = compute_legend_dimensions(g, NFCORE_THEME, logo_size=logo)
     assert w > 0 and h > 0
+
+
+def test_legend_logo_gap_widens_block():
+    """`legend_logo_gap` adds horizontal room between the logo and the entries."""
+    from nf_metro.render.legend import LOGO_GAP, compute_legend_dimensions
+
+    base = (
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n    a[A]\n    b[B]\n    a -->|main| b\n"
+    )
+    logo = (320.0, 120.0)
+
+    g1 = parse_metro_mermaid(base)
+    w1, _ = compute_legend_dimensions(g1, NFCORE_THEME, logo_size=logo)
+
+    gap = LOGO_GAP + 30.0
+    g2 = parse_metro_mermaid(f"%%metro legend_logo_gap: {gap}\n" + base)
+    w2, _ = compute_legend_dimensions(g2, NFCORE_THEME, logo_size=logo)
+
+    assert w2 == pytest.approx(w1 + 30.0)
+
+
+def test_legend_logo_gap_default_is_logo_gap():
+    """Without the directive (and font_scale 1.0) the gap is the base LOGO_GAP."""
+    from nf_metro.render.legend import LOGO_GAP, _logo_gap
+
+    g = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n    a[A]\n    b[B]\n    a -->|main| b\n"
+    )
+    assert g.legend_logo_gap is None
+    assert _logo_gap(g) == pytest.approx(LOGO_GAP)
 
 
 def _font_sizes(svg):

@@ -994,6 +994,28 @@ def test_parse_font_scale_nonpositive_ignored():
     assert graph.font_scale == 1.0
 
 
+def test_parse_legend_logo_gap():
+    graph = parse_metro_mermaid("%%metro legend_logo_gap: 40\ngraph LR\n")
+    assert graph.legend_logo_gap == 40.0
+
+
+def test_parse_legend_logo_gap_default():
+    graph = parse_metro_mermaid("graph LR\n")
+    assert graph.legend_logo_gap is None
+
+
+def test_parse_legend_logo_gap_invalid_ignored():
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid("%%metro legend_logo_gap: wide\ngraph LR\n")
+    assert graph.legend_logo_gap is None
+
+
+def test_parse_legend_logo_gap_negative_ignored():
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid("%%metro legend_logo_gap: -5\ngraph LR\n")
+    assert graph.legend_logo_gap is None
+
+
 def test_no_duplicate_edges_after_resolve_sections():
     """Multiple inter-section edges to the same section should not create
     duplicate (source, target, line_id) triples after _resolve_sections."""
