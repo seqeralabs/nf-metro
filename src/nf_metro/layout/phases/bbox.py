@@ -13,7 +13,7 @@ from nf_metro.layout.constants import (
     MIN_STRAIGHT_PORT,
     SECTION_HEADER_PROTRUSION,
 )
-from nf_metro.layout.labels import label_text_width
+from nf_metro.layout.labels import font_scale_context, label_text_width
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _content_station_ys,
@@ -378,20 +378,24 @@ def _predict_section_content_bottom(
     # part of the content bottom so the shrink phase and the inter-row
     # cascade keep the row below clear.  0 for horizontal-label layouts.
     label_angle = graph.label_angle or 0.0 if section_dir in ("LR", "RL") else 0.0
-    content_bots = [
-        graph.stations[sid].y
-        + max(
-            section_y_padding,
-            _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1],
-            angled_label_reach(graph.stations[sid], label_angle),
-        )
-        for sid in section.station_ids
-        if (
-            sid in graph.stations
-            and not graph.stations[sid].is_port
-            and not sid.startswith("__bypass_")
-        )
-    ]
+    # The label-reach metric scales with the graph's font; bind it from the
+    # graph so the prediction is reproducible whether or not a layout-wide
+    # font-scale context is active at the call site.
+    with font_scale_context(graph.font_scale):
+        content_bots = [
+            graph.stations[sid].y
+            + max(
+                section_y_padding,
+                _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1],
+                angled_label_reach(graph.stations[sid], label_angle),
+            )
+            for sid in section.station_ids
+            if (
+                sid in graph.stations
+                and not graph.stations[sid].is_port
+                and not sid.startswith("__bypass_")
+            )
+        ]
     if not content_bots:
         return None
     content_bot = max(content_bots)

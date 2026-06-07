@@ -28,7 +28,11 @@ from nf_metro.layout.constants import (
     TERMINUS_ICON_CLEARANCE_V,
     TERMINUS_WIDTH,
 )
-from nf_metro.layout.labels import _label_text_height, label_text_width
+from nf_metro.layout.labels import (
+    _label_text_height,
+    active_font_scale,
+    label_text_width,
+)
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
 from nf_metro.layout.phases._common import _build_section_subgraph
@@ -365,29 +369,31 @@ def _multiline_track_spacing(sub: MetroGraph, y_spacing: float) -> float:
     for both labels plus clearance.  Returns *y_spacing* unchanged when
     no multi-line labels are present.
     """
-    max_text_h = FONT_HEIGHT
+    font_height = FONT_HEIGHT * active_font_scale()
+    max_text_h = font_height
     for s in sub.stations.values():
         n = s.label.count("\n")
         if n > 0:
-            h = FONT_HEIGHT + n * FONT_HEIGHT * LABEL_LINE_HEIGHT
+            h = font_height + n * font_height * LABEL_LINE_HEIGHT
             max_text_h = max(max_text_h, h)
 
-    if max_text_h <= FONT_HEIGHT:
+    if max_text_h <= font_height:
         return y_spacing  # no multi-line labels
 
     # Worst case: adjacent tracks with labels facing inward.
     # Each side needs label_offset + its text height.
-    min_gap = LABEL_OFFSET + max_text_h + LABEL_OFFSET + FONT_HEIGHT + LABEL_MARGIN
+    min_gap = LABEL_OFFSET + max_text_h + LABEL_OFFSET + font_height + LABEL_MARGIN
     return max(y_spacing, min_gap)
 
 
 def _multiline_label_padding(sub: MetroGraph) -> float:
     """Return extra bbox Y padding for the tallest multi-line label."""
+    font_height = FONT_HEIGHT * active_font_scale()
     max_extra = 0.0
     for s in sub.stations.values():
         n = s.label.count("\n")
         if n > 0:
-            extra = n * FONT_HEIGHT * LABEL_LINE_HEIGHT
+            extra = n * font_height * LABEL_LINE_HEIGHT
             max_extra = max(max_extra, extra)
     return max_extra
 
@@ -791,7 +797,9 @@ def _terminus_icon_clearance_vertical(
     if n_icons <= 1:
         return TERMINUS_ICON_CLEARANCE_V
     caption_room = (
-        ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT if names and any(names) else 0.0
+        ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT * active_font_scale()
+        if names and any(names)
+        else 0.0
     )
     step = 2 * ICON_HALF_HEIGHT + ICON_INTER_GAP + caption_room
     return TERMINUS_ICON_CLEARANCE_V + (n_icons - 1) * step

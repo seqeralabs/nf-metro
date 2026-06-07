@@ -315,6 +315,8 @@ def _parse_directive(
         _parse_grid_directive(content, graph)
     elif content.startswith("logo_scale:"):
         _parse_logo_scale_directive(content[len("logo_scale:") :].strip(), graph)
+    elif content.startswith("font_scale:"):
+        _parse_font_scale_directive(content[len("font_scale:") :].strip(), graph)
     elif content.startswith("logo:"):
         graph.logo_path = content[len("logo:") :].strip()
     elif content.startswith("compact_offsets:"):
@@ -592,23 +594,40 @@ def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:
     graph.legend_combos.append((tuple(known), label))
 
 
+def _parse_numeric_directive(
+    value: str, name: str, *, allow_zero: bool
+) -> float | None:
+    """Parse a numeric %%metro directive value, warning and returning None if invalid.
+
+    ``allow_zero`` admits 0 (a gap may legitimately be zero); otherwise the value
+    must be strictly positive (a scale factor cannot be zero).
+    """
+    try:
+        num = float(value)
+    except ValueError:
+        warnings.warn(f"Invalid {name} {value!r}; expected a number.", stacklevel=3)
+        return None
+    if num < 0 or (num == 0 and not allow_zero):
+        constraint = "non-negative" if allow_zero else "positive"
+        warnings.warn(
+            f"{name} must be {constraint}, got {value!r}; ignoring.", stacklevel=3
+        )
+        return None
+    return num
+
+
 def _parse_logo_scale_directive(value: str, graph: MetroGraph) -> None:
     """Parse %%metro logo_scale: <factor> (1.0 = default auto-size)."""
-    try:
-        scale = float(value)
-    except ValueError:
-        warnings.warn(
-            f"Invalid logo_scale {value!r}; expected a positive number.",
-            stacklevel=2,
-        )
-        return
-    if scale <= 0:
-        warnings.warn(
-            f"logo_scale must be positive, got {value!r}; ignoring.",
-            stacklevel=2,
-        )
-        return
-    graph.logo_scale = scale
+    scale = _parse_numeric_directive(value, "logo_scale", allow_zero=False)
+    if scale is not None:
+        graph.logo_scale = scale
+
+
+def _parse_font_scale_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro font_scale: <factor> (1.0 = default text sizes)."""
+    scale = _parse_numeric_directive(value, "font_scale", allow_zero=False)
+    if scale is not None:
+        graph.font_scale = scale
 
 
 def _parse_marker_style(spec: str) -> MarkerStyle | None:

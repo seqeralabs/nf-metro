@@ -7,6 +7,7 @@ __all__ = ["apply_route_offsets", "render_svg"]
 import html
 import textwrap
 import warnings
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -14,7 +15,12 @@ import drawsvg as draw
 
 from nf_metro.layout.constants import LABEL_LINE_HEIGHT, Y_SPACING
 from nf_metro.layout.geometry import segment_intersects_bbox
-from nf_metro.layout.labels import LabelPlacement, _label_bbox, place_labels
+from nf_metro.layout.labels import (
+    LabelPlacement,
+    _label_bbox,
+    font_scale_context,
+    place_labels,
+)
 from nf_metro.layout.routing import RoutedPath, compute_station_offsets, route_edges
 from nf_metro.layout.routing.corners import resolve_curve_radii
 from nf_metro.parser.model import (
@@ -379,6 +385,50 @@ def render_svg(
     if not graph.stations:
         return '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
 
+    scaled_theme = _scale_theme_fonts(theme, graph.font_scale)
+    with font_scale_context(graph.font_scale):
+        return _render_svg_scaled(
+            graph,
+            scaled_theme,
+            width=width,
+            height=height,
+            padding=padding,
+            animate=animate,
+            debug=debug,
+            legend_position=legend_position,
+        )
+
+
+def _scale_theme_fonts(theme: Theme, scale: float) -> Theme:
+    """Return a theme with every text size multiplied by ``scale``.
+
+    Returns the theme unchanged at ``scale == 1.0`` so the default render
+    is identical to the unscaled theme.
+    """
+    if scale == 1.0:
+        return theme
+    return replace(
+        theme,
+        label_font_size=theme.label_font_size * scale,
+        title_font_size=theme.title_font_size * scale,
+        section_label_font_size=theme.section_label_font_size * scale,
+        legend_font_size=theme.legend_font_size * scale,
+        terminus_font_size=theme.terminus_font_size * scale,
+    )
+
+
+def _render_svg_scaled(
+    graph: MetroGraph,
+    theme: Theme,
+    *,
+    width: int | None,
+    height: int | None,
+    padding: float,
+    animate: bool,
+    debug: bool,
+    legend_position: str | None,
+) -> str:
+    """Render body, run with ``theme`` fonts and label metrics already scaled."""
     effective_legend_position = (
         legend_position if legend_position is not None else graph.legend_position
     )

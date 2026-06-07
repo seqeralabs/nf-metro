@@ -972,6 +972,28 @@ def test_parse_logo_scale_nonpositive_ignored():
     assert graph.logo_scale == 1.0
 
 
+def test_parse_font_scale():
+    graph = parse_metro_mermaid("%%metro font_scale: 1.4\ngraph LR\n")
+    assert graph.font_scale == 1.4
+
+
+def test_parse_font_scale_default():
+    graph = parse_metro_mermaid("graph LR\n")
+    assert graph.font_scale == 1.0
+
+
+def test_parse_font_scale_invalid_ignored():
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid("%%metro font_scale: huge\ngraph LR\n")
+    assert graph.font_scale == 1.0
+
+
+def test_parse_font_scale_nonpositive_ignored():
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid("%%metro font_scale: 0\ngraph LR\n")
+    assert graph.font_scale == 1.0
+
+
 def test_no_duplicate_edges_after_resolve_sections():
     """Multiple inter-section edges to the same section should not create
     duplicate (source, target, line_id) triples after _resolve_sections."""

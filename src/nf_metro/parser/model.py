@@ -320,6 +320,10 @@ class MetroGraph:
     legend_at: tuple[float, float] | None = None  # absolute top-left override
     logo_path: str = ""
     logo_scale: float = 1.0  # multiplies the logo size within the legend block
+    # Multiplies every text size for the render (station labels, title,
+    # section labels, legend, terminus/icon captions) and the label-width
+    # metrics that drive layout spacing, so render and layout scale together.
+    font_scale: float = 1.0
     # Marker-key captions from %%metro marker_legend:. When
     # non-empty, the legend renders a marker key below the line key.
     marker_legend: list[MarkerLegendEntry] = field(default_factory=list)

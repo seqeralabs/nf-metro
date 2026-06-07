@@ -9,14 +9,17 @@ from __future__ import annotations
 __all__ = [
     "LabelOverlap",
     "LabelPlacement",
+    "active_font_scale",
     "find_label_overlaps",
+    "font_scale_context",
     "label_text_width",
     "place_labels",
 ]
 
 import math
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import TYPE_CHECKING, Iterator, Literal, NamedTuple
 
 from nf_metro.layout.constants import (
     CHAR_WIDTH,
@@ -45,19 +48,46 @@ if TYPE_CHECKING:
     from nf_metro.parser.model import Section, Station
 
 
+_ACTIVE_FONT_SCALE: float = 1.0
+
+
+def active_font_scale() -> float:
+    """Font-size multiplier in effect for the current layout/render pass.
+
+    Set via ``font_scale_context`` around ``compute_layout`` and
+    ``render_svg`` so the label-width metrics below reserve room that
+    matches the scaled rendered text.  Defaults to 1.0 (a no-op).
+    """
+    return _ACTIVE_FONT_SCALE
+
+
+@contextmanager
+def font_scale_context(scale: float) -> Iterator[None]:
+    """Apply ``scale`` to the label metrics for the duration of the block."""
+    global _ACTIVE_FONT_SCALE
+    previous = _ACTIVE_FONT_SCALE
+    _ACTIVE_FONT_SCALE = scale
+    try:
+        yield
+    finally:
+        _ACTIVE_FONT_SCALE = previous
+
+
 def label_text_width(label: str) -> float:
     """Pixel width of the widest line in a (possibly multi-line) label."""
+    char_width = CHAR_WIDTH * _ACTIVE_FONT_SCALE
     if "\n" not in label:
-        return len(label) * CHAR_WIDTH
-    return max(len(line) for line in label.split("\n")) * CHAR_WIDTH
+        return len(label) * char_width
+    return max(len(line) for line in label.split("\n")) * char_width
 
 
 def _label_text_height(label: str) -> float:
     """Pixel height of a (possibly multi-line) label."""
+    font_height = FONT_HEIGHT * _ACTIVE_FONT_SCALE
     n = label.count("\n") + 1
     if n == 1:
-        return FONT_HEIGHT
-    return FONT_HEIGHT + (n - 1) * FONT_HEIGHT * LABEL_LINE_HEIGHT
+        return font_height
+    return font_height + (n - 1) * font_height * LABEL_LINE_HEIGHT
 
 
 def diagonal_label_pitch(

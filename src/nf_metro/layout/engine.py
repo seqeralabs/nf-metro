@@ -290,9 +290,12 @@ def compute_min_y_spacing(
     The result is applied uniformly to the whole render -- the grid
     stays global, no per-section overrides.
     """
-    icon_below = ICON_HALF_HEIGHT + ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT
+    from nf_metro.layout.labels import active_font_scale
+
+    scale = active_font_scale()
+    icon_below = ICON_HALF_HEIGHT + ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT * scale
     icon_above = ICON_HALF_HEIGHT
-    label_extent = LABEL_OFFSET + FONT_HEIGHT + DESCENDER_CLEARANCE
+    label_extent = LABEL_OFFSET + FONT_HEIGHT * scale + DESCENDER_CLEARANCE
     clearance = ICON_STACK_LABEL_CLEARANCE
 
     pitch_icon_icon = icon_above + icon_below + clearance
@@ -363,6 +366,38 @@ def compute_layout(
     # the graph so per-stage call sites can snapshot without signature churn.
     # Off by default: when unset, each _snap call is a single attribute read.
     graph._phase_snapshots_enabled = phase_snapshots_enabled()
+
+    from nf_metro.layout.labels import font_scale_context
+
+    with font_scale_context(graph.font_scale):
+        _compute_layout_scaled(
+            graph,
+            x_spacing=x_spacing,
+            y_spacing=y_spacing,
+            x_offset=x_offset,
+            y_offset=y_offset,
+            section_x_padding=section_x_padding,
+            section_y_padding=section_y_padding,
+            section_x_gap=section_x_gap,
+            section_y_gap=section_y_gap,
+            validate=validate,
+        )
+
+
+def _compute_layout_scaled(
+    graph: MetroGraph,
+    *,
+    x_spacing: float | None,
+    y_spacing: float | None,
+    x_offset: float,
+    y_offset: float,
+    section_x_padding: float,
+    section_y_padding: float,
+    section_x_gap: float,
+    section_y_gap: float,
+    validate: bool,
+) -> None:
+    """Layout body, run under the graph's active font-scale context."""
 
     # Diagonal labels are a horizontal-trunk feature: a TB section places its
     # labels beside vertical pills, where the same tilt doesn't read, so an

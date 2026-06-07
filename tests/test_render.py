@@ -1,5 +1,6 @@
 """Tests for SVG rendering."""
 
+import pathlib
 import re
 import xml.etree.ElementTree as ET
 
@@ -209,6 +210,74 @@ def test_logo_scale_default_no_change():
     # Should not raise and should produce a positive-size legend.
     w, h = compute_legend_dimensions(g, NFCORE_THEME, logo_size=logo)
     assert w > 0 and h > 0
+
+
+def _font_sizes(svg):
+    """Distinct numeric font-size values appearing in an SVG string."""
+    return {float(v) for v in re.findall(r'font-size="([0-9.]+)"', svg)}
+
+
+def _load_font_scale_fixture(scale=None):
+    text = pathlib.Path(__file__).parent.joinpath("fixtures/font_scale.mmd").read_text()
+    if scale is not None:
+        text = f"%%metro font_scale: {scale}\n" + text
+    graph = parse_metro_mermaid(text)
+    compute_layout(graph)
+    return graph
+
+
+def test_font_scale_multiplies_all_text_sizes():
+    """`font_scale: N` renders every text class at N times the default size."""
+    scale = 2.0
+    g1 = _load_font_scale_fixture()
+    svg1 = render_svg(g1, NFCORE_THEME)
+    g2 = _load_font_scale_fixture(scale)
+    svg2 = render_svg(g2, NFCORE_THEME)
+
+    for size in (
+        NFCORE_THEME.label_font_size,
+        NFCORE_THEME.title_font_size,
+        NFCORE_THEME.section_label_font_size,
+        NFCORE_THEME.legend_font_size,
+        NFCORE_THEME.terminus_font_size,
+    ):
+        assert size in _font_sizes(svg1)
+        assert size * scale in _font_sizes(svg2)
+
+
+def test_font_scale_widens_label_driven_layout():
+    """A larger font reserves proportionally more layout room.
+
+    Label-width metrics must scale with the font so bigger text doesn't
+    overflow its box: a scaled render's section is wider and each station
+    reserves a wider label.
+    """
+    from nf_metro.layout.labels import font_scale_context, label_text_width
+
+    scale = 2.0
+    g1 = _load_font_scale_fixture()
+    g2 = _load_font_scale_fixture(scale)
+
+    sec1 = g1.sections["proc"]
+    sec2 = g2.sections["proc"]
+    assert sec2.bbox_w > sec1.bbox_w
+
+    label = "Load Samples"
+    with font_scale_context(1.0):
+        base_w = label_text_width(label)
+    with font_scale_context(scale):
+        scaled_w = label_text_width(label)
+    assert scaled_w == base_w * scale
+
+
+def test_font_scale_default_is_noop():
+    """Without `font_scale`, the graph and render match the unscaled default."""
+    g = _load_font_scale_fixture()
+    assert g.font_scale == 1.0
+    svg_default = render_svg(g, NFCORE_THEME)
+    g_explicit = _load_font_scale_fixture(1.0)
+    svg_explicit = render_svg(g_explicit, NFCORE_THEME)
+    assert svg_default == svg_explicit
 
 
 def test_render_file_size():
