@@ -178,7 +178,7 @@ def test_parse_edges():
 
 
 def test_parse_edges_no_label():
-    """Unannotated edges raise a clear error (issue #75)."""
+    """Unannotated edges raise a clear error."""
     text = "graph LR\n    a --> b\n"
     with pytest.raises(ValueError, match="no metro line annotation"):
         parse_metro_mermaid(text)
@@ -502,8 +502,8 @@ def test_empty_section_removed():
 def test_empty_section_removed_render():
     """An empty-section graph can be rendered without error.
 
-    End-to-end regression test for issue #51: ensure the full
-    parse -> layout -> render pipeline doesn't crash.
+    End-to-end regression test: ensure the full parse -> layout -> render
+    pipeline doesn't crash.
     """
     from nf_metro.layout.engine import compute_layout
     from nf_metro.render.svg import render_svg
@@ -594,7 +594,7 @@ def test_hidden_station_in_section():
     assert graph.stations["_branch"].section_id == "sec1"
 
 
-# --- Edge validation tests (issue #75) ---
+# --- Edge validation tests ---
 
 
 def test_unannotated_edge_error_message_includes_stations():
@@ -972,6 +972,50 @@ def test_parse_logo_scale_nonpositive_ignored():
     assert graph.logo_scale == 1.0
 
 
+def test_parse_font_scale():
+    graph = parse_metro_mermaid("%%metro font_scale: 1.4\ngraph LR\n")
+    assert graph.font_scale == 1.4
+
+
+def test_parse_font_scale_default():
+    graph = parse_metro_mermaid("graph LR\n")
+    assert graph.font_scale == 1.0
+
+
+def test_parse_font_scale_invalid_ignored():
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid("%%metro font_scale: huge\ngraph LR\n")
+    assert graph.font_scale == 1.0
+
+
+def test_parse_font_scale_nonpositive_ignored():
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid("%%metro font_scale: 0\ngraph LR\n")
+    assert graph.font_scale == 1.0
+
+
+def test_parse_legend_logo_gap():
+    graph = parse_metro_mermaid("%%metro legend_logo_gap: 40\ngraph LR\n")
+    assert graph.legend_logo_gap == 40.0
+
+
+def test_parse_legend_logo_gap_default():
+    graph = parse_metro_mermaid("graph LR\n")
+    assert graph.legend_logo_gap is None
+
+
+def test_parse_legend_logo_gap_invalid_ignored():
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid("%%metro legend_logo_gap: wide\ngraph LR\n")
+    assert graph.legend_logo_gap is None
+
+
+def test_parse_legend_logo_gap_negative_ignored():
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid("%%metro legend_logo_gap: -5\ngraph LR\n")
+    assert graph.legend_logo_gap is None
+
+
 def test_no_duplicate_edges_after_resolve_sections():
     """Multiple inter-section edges to the same section should not create
     duplicate (source, target, line_id) triples after _resolve_sections."""
@@ -997,9 +1041,47 @@ def test_no_duplicate_edges_after_resolve_sections():
     )
 
 
+def test_parse_group_directive():
+    text = (
+        "%%metro group: SNPs & Indels | a, b, c\n"
+        "%%metro group: SV & CNV | d, e | above\n"
+        "graph LR\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert len(graph.groups) == 2
+    g0, g1 = graph.groups
+    assert g0.label == "SNPs & Indels"
+    assert g0.station_ids == ["a", "b", "c"]
+    assert g0.position == "below"
+    assert g1.label == "SV & CNV"
+    assert g1.station_ids == ["d", "e"]
+    assert g1.position == "above"
+
+
+def test_parse_group_directive_quoted_label():
+    text = '%%metro group: "Callers (somatic)" | x\ngraph LR\n'
+    graph = parse_metro_mermaid(text)
+    assert len(graph.groups) == 1
+    assert graph.groups[0].label == "Callers (somatic)"
+
+
+def test_parse_group_directive_invalid_ignored():
+    text = "%%metro group: NoStations\ngraph LR\n"
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid(text)
+    assert graph.groups == []
+
+
+def test_parse_group_directive_bad_position_defaults_below():
+    text = "%%metro group: G | a | sideways\ngraph LR\n"
+    with pytest.warns(UserWarning):
+        graph = parse_metro_mermaid(text)
+    assert graph.groups[0].position == "below"
+
+
 @pytest.mark.parametrize("direction", ["TB", "TD", "BT", "RL"])
 def test_non_lr_primary_direction_warns(direction):
-    """A non-LR `graph` header warns that only LR primary is honoured (#525)."""
+    """A non-LR `graph` header warns that only LR primary is honoured."""
     text = (
         "%%metro line: a | A | #0570b0\n"
         f"graph {direction}\n"
@@ -1015,9 +1097,60 @@ def test_non_lr_primary_direction_warns(direction):
 
 @pytest.mark.parametrize("header", ["graph LR", "graph", "graph    LR"])
 def test_lr_primary_direction_does_not_warn(header, recwarn):
-    """`graph LR` (or a bare `graph`) is the honoured primary; no warning (#525)."""
+    """`graph LR` (or a bare `graph`) is the honoured primary; no warning."""
     parse_metro_mermaid(f"{header}\n    subgraph s1 [One]\n        x[X]\n    end\n")
     direction_warnings = [
         w for w in recwarn.list if "primary layout direction" in str(w.message)
     ]
     assert direction_warnings == []
+
+
+def _wide_section_chain() -> str:
+    """A linear chain of six sections (24 station-columns total), wide enough
+    that the default row-wrap threshold (15) folds it onto multiple rows."""
+    lines = ["%%metro line: a | A | #0570b0", "graph LR"]
+    for i in range(6):
+        lines.append(f"    subgraph s{i} [Section {i}]")
+        for j in range(4):
+            lines.append(f"        n{i}_{j}[N{i}{j}]")
+        for j in range(3):
+            lines.append(f"        n{i}_{j} -->|a| n{i}_{j + 1}")
+        lines.append("    end")
+    for i in range(5):
+        lines.append(f"    n{i}_3 -->|a| n{i + 1}_0")
+    return "\n".join(lines) + "\n"
+
+
+def test_fold_threshold_directive_parsed():
+    graph = parse_metro_mermaid("%%metro fold_threshold: 40\ngraph LR\n")
+    assert graph.fold_threshold == 40
+
+
+def test_fold_threshold_invalid_ignored():
+    graph = parse_metro_mermaid("%%metro fold_threshold: wide\ngraph LR\n")
+    assert graph.fold_threshold is None
+
+
+def test_fold_threshold_keeps_wide_chain_on_one_row():
+    """The default threshold wraps a wide section chain onto multiple rows; a
+    high fold_threshold keeps every section on row 0."""
+    default = parse_metro_mermaid(_wide_section_chain())
+    rows_default = {s.grid_row for s in default.sections.values() if s.station_ids}
+    assert max(rows_default) > 0, "wide chain should wrap at the default threshold"
+
+    raised = parse_metro_mermaid(
+        "%%metro fold_threshold: 100\n" + _wide_section_chain()
+    )
+    rows_raised = {s.grid_row for s in raised.sections.values() if s.station_ids}
+    assert rows_raised == {0}, f"fold_threshold should keep one row, got {rows_raised}"
+
+
+def test_max_station_columns_arg_overrides_fold_threshold():
+    """An explicit caller value (the --max-layers-per-row CLI flag) wins over a
+    fold_threshold directive, matching the CLI-overrides-directive convention."""
+    graph = parse_metro_mermaid(
+        "%%metro fold_threshold: 100\n" + _wide_section_chain(),
+        max_station_columns=15,
+    )
+    rows = {s.grid_row for s in graph.sections.values() if s.station_ids}
+    assert max(rows) > 0, "explicit max_station_columns=15 should force a wrap"

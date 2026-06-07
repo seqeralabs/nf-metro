@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 
 class RowGridInfo(TypedDict):
@@ -44,12 +44,43 @@ class PortSide(Enum):
     BOTTOM = "bottom"
 
 
+class LineSpread(str, Enum):
+    """How lines sharing a station relate to each other vertically.
+
+    A single axis the user controls per graph and per section:
+
+    - ``BUNDLE`` merges shared lines onto one trunk track; detours cascade
+      downward from the top line (the default).
+    - ``CENTERED`` also merges, but balances the bundle about the midline so
+      the shared trunk sits centred and exclusive callers fan above and below.
+    - ``RAILS`` does not merge: each line keeps its own parallel rail and a
+      shared station renders as an interchange spanning the rails it uses.
+    """
+
+    BUNDLE = "bundle"
+    CENTERED = "centered"
+    RAILS = "rails"
+
+
 VALID_LINE_STYLES = ("solid", "dashed", "dotted")
+
+MARKER_SHAPE_CIRCLE = "circle"
+MARKER_SHAPE_SQUARE = "square"
+MARKER_SHAPE_PILL = "pill"
+VALID_MARKER_SHAPES = (MARKER_SHAPE_CIRCLE, MARKER_SHAPE_SQUARE, MARKER_SHAPE_PILL)
+
+# Fill keywords; any other value is treated as a literal colour (named or hex).
+MARKER_FILL_OPEN = "open"
+MARKER_FILL_SOLID = "solid"
 
 ICON_TYPE_FILE = "file"
 ICON_TYPE_FILES = "files"
 ICON_TYPE_DIR = "dir"
-VALID_ICON_TYPES = (ICON_TYPE_FILE, ICON_TYPE_FILES, ICON_TYPE_DIR)
+VALID_ICON_TYPES = (
+    ICON_TYPE_FILE,
+    ICON_TYPE_FILES,
+    ICON_TYPE_DIR,
+)
 
 
 @dataclass
@@ -62,6 +93,30 @@ class MetroLine:
     style: str = "solid"
 
 
+@dataclass(frozen=True)
+class MarkerStyle:
+    """Per-station marker shape and fill.
+
+    ``shape`` is one of :data:`VALID_MARKER_SHAPES`: ``circle`` (fully rounded),
+    ``square`` (sharp corners), or ``pill`` (a flat-edged capsule elongated
+    along the line, used to flag a station whose detail is shown elsewhere).
+    ``fill`` is ``open`` (background-coloured interior), ``solid`` (the theme's
+    default station fill), or a literal colour (named or hex). When ``fill`` is
+    a literal colour the marker is drawn filled with that colour.
+    """
+
+    shape: str = MARKER_SHAPE_CIRCLE
+    fill: str = MARKER_FILL_SOLID
+
+
+@dataclass
+class MarkerLegendEntry:
+    """A caption for a marker shape/fill combination in the marker key."""
+
+    style: MarkerStyle
+    caption: str
+
+
 @dataclass
 class Station:
     """A node/station in the metro map."""
@@ -71,6 +126,8 @@ class Station:
     section_id: str | None = None
     is_port: bool = False
     is_hidden: bool = False
+    # Per-station marker style from %%metro marker:; None = default pill.
+    marker: MarkerStyle | None = None
     # When True, the station is lifted above the section's top track in a
     # final layout phase.  Used for file-input nodes that would otherwise
     # consume a line-track Y slot.
@@ -81,16 +138,43 @@ class Station:
     # caption outside the icon (e.g. "Samples" below a CSV file icon).
     # Parallel list to terminus_labels; empty string means no caption.
     terminus_names: list[str] = field(default_factory=list)
+    # Per-icon flag (parallel to terminus_labels): render the format label as
+    # bold white text on a dark banner inside the icon (transit-map style).
+    # Default False keeps the plain centred label.
+    terminus_icon_banners: list[bool] = field(default_factory=list)
     # Populated by layout engine
     x: float = 0.0
     y: float = 0.0
     layer: int = 0
     track: float = 0.0
+    # Rail-mode span (set by the rail-mode layout for a section whose
+    # ``line_spread`` resolves to ``rails``).  ``rail_top_y``/``rail_bottom_y``
+    # are the Y of the topmost and bottommost rails this station's lines
+    # occupy; when they differ the renderer draws one vertical pill spanning
+    # that range.  None means the station was not laid out in rail mode
+    # (normal pill rules apply).
+    rail_top_y: float | None = None
+    rail_bottom_y: float | None = None
+    # Rail Ys this station actually *uses* (one per line it carries), set
+    # alongside rail_top_y/rail_bottom_y in rail mode.  A spanning pill draws
+    # a knob at each of these Ys; a rail that falls within the pill's span but
+    # is absent here belongs to a line the station does not use and passes
+    # behind the pill with no knob.  Empty when not laid out in rail mode.
+    rail_used_ys: list[float] = field(default_factory=list)
 
     @property
     def is_terminus(self) -> bool:
         """Station has one or more file icons."""
         return len(self.terminus_labels) > 0
+
+    @property
+    def is_blank_terminus(self) -> bool:
+        """A file-icon station with no text label of its own.
+
+        Rendered as its icon (and an unrounded nub) at the line convergence
+        rather than a labelled pill, so layout and routing treat it specially.
+        """
+        return self.is_terminus and not self.label.strip()
 
 
 @dataclass
@@ -100,6 +184,20 @@ class Edge:
     source: str
     target: str
     line_id: str
+
+
+@dataclass
+class StationGroup:
+    """An annotative caption spanning a set of stations within a section.
+
+    Purely decorative: it groups related stations (e.g. variant-caller
+    families) under a shared caption rendered beneath (or above) the
+    spanned stations' x-extent.  It does not influence layout coordinates.
+    """
+
+    label: str
+    station_ids: list[str] = field(default_factory=list)
+    position: Literal["above", "below"] = "below"
 
 
 @dataclass
@@ -186,6 +284,7 @@ class MetroGraph:
     sections: dict[str, Section] = field(default_factory=dict)
     ports: dict[str, Port] = field(default_factory=dict)
     junctions: list[str] = field(default_factory=list)
+    groups: list[StationGroup] = field(default_factory=list)
     grid_overrides: dict[str, tuple[int, int, int, int]] = field(default_factory=dict)
     # Section IDs that received an explicit %%metro grid: directive (i.e.
     # the user laid out the grid manually, as opposed to auto_layout
@@ -196,9 +295,20 @@ class MetroGraph:
     diamond_style: str = "straight"  # "straight" or "symmetric"
     compact_offsets: bool = False
     center_ports: bool = False
+    # Max station-columns a section row may reach before the auto-layout wraps
+    # it onto the next row. None falls back to 15; raise it to keep a long
+    # horizontal trunk of sections on a single row. Overridden by the
+    # --max-layers-per-row CLI flag.
+    fold_threshold: int | None = None
+    # Vertical relationship between lines sharing a station (see LineSpread).
+    # ``line_spread`` is the graph-wide default; ``line_spread_overrides`` maps
+    # a section id to a mode that wins over the default for that section.
+    # Query via ``section_line_spread`` / ``is_rail_section`` / ``station_is_rail``.
+    line_spread: LineSpread = LineSpread.BUNDLE
+    line_spread_overrides: dict[str, LineSpread] = field(default_factory=dict)
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
-    # Opt-in diagonal station labels (#527). None means "use the theme
+    # Opt-in diagonal station labels. None means "use the theme
     # default" (0 = horizontal); a directive value overrides the theme.
     label_angle: float | None = None
     # %%metro legend_combo entries: (line_ids, label) pairs.
@@ -210,16 +320,28 @@ class MetroGraph:
     legend_at: tuple[float, float] | None = None  # absolute top-left override
     logo_path: str = ""
     logo_scale: float = 1.0  # multiplies the logo size within the legend block
+    legend_logo_gap: float | None = None  # px gap between logo and legend entries
+    # Multiplies every text size for the render (station labels, title,
+    # section labels, legend, terminus/icon captions) and the label-width
+    # metrics that drive layout spacing, so render and layout scale together.
+    font_scale: float = 1.0
+    # Marker-key captions from %%metro marker_legend:. When
+    # non-empty, the legend renders a marker key below the line key.
+    marker_legend: list[MarkerLegendEntry] = field(default_factory=list)
     # Section dependency graph (populated by auto_layout)
     section_dag: SectionDAG | None = None
     # Section IDs that had explicit %%metro direction: directives
     _explicit_directions: set[str] = field(default_factory=set)
-    # Pending terminus designations: station_id -> list of (label, icon_type)
-    _pending_terminus: dict[str, list[tuple[str, str, str]]] = field(
+    # Pending terminus designations: station_id ->
+    # list of (label, icon_type, name, banner)
+    _pending_terminus: dict[str, list[tuple[str, str, str, bool]]] = field(
         default_factory=dict
     )
     # Pending off-track marks: station_ids to lift above section top track
     _pending_off_track: list[str] = field(default_factory=list)
+    # Pending per-station marker styles: station_id -> MarkerStyle, applied
+    # after parse so directives may precede or follow the node definition.
+    _pending_markers: dict[str, MarkerStyle] = field(default_factory=dict)
     # Lazy caches keyed off the edge list; invalidated on edge mutation.
     _station_lines_cache: dict[str, list[str]] | None = field(default=None, repr=False)
     _edges_from_cache: dict[str, list[Edge]] | None = field(default=None, repr=False)
@@ -252,10 +374,19 @@ class MetroGraph:
     # _snapshot_placement_refs.
     _placement_ref_y: dict[str, float] = field(default_factory=dict, repr=False)
     _placement_ref_bbox_top: dict[str, float] = field(default_factory=dict, repr=False)
-    # Per-phase coordinate-snapshot enable flag (issue #363).  Set once in
+    # Per-phase coordinate-snapshot enable flag.  Set once in
     # compute_layout from the NF_METRO_PHASE_SNAPSHOTS env var; read by the
     # _snap hook after each phase.  Off by default (pure observation).
     _phase_snapshots_enabled: bool = field(default=False, repr=False)
+    # Per-section rail-Y map (section_id -> {line_id: rail_y}), set by the
+    # rail-mode layout so the dedicated router can resolve a port's per-line
+    # rail Y.  Empty when rail mode is off.
+    _rail_y: dict[str, dict[str, float]] = field(default_factory=dict, repr=False)
+    # Content pitch from compute_min_y_spacing, before the spread loop widens
+    # y_spacing for diagonal labels.  A single-trunk section's off-track lift
+    # step uses this base pitch so a widened pitch doesn't strand the icon far
+    # above the trunk.  None until compute_layout records it.
+    _base_y_spacing: float | None = field(default=None, repr=False)
 
     def _invalidate_edge_caches(self) -> None:
         """Reset caches that depend on the edge list."""
@@ -334,6 +465,16 @@ class MetroGraph:
             self._station_lines_cache = {sid: sorted(lids) for sid, lids in idx.items()}
         return self._station_lines_cache.get(station_id, [])
 
+    def station_lines_ordered(self, station_id: str) -> list[str]:
+        """Line IDs on a station in line-definition priority order.
+
+        ``station_lines`` returns them alphabetically; rail-mode rendering and
+        routing need definition order so a multi-line station's knobs and slots
+        line up with the legend and the parallel rails.
+        """
+        lines = set(self.station_lines(station_id))
+        return [lid for lid in self.lines if lid in lines]
+
     def edges_from(self, station_id: str) -> list[Edge]:
         """Return edges whose ``source`` is *station_id* (lazy adjacency cache)."""
         if self._edges_from_cache is None:
@@ -365,6 +506,29 @@ class MetroGraph:
                     stations.append(edge.target)
                     seen.add(edge.target)
         return stations
+
+    def section_line_spread(self, section_id: str | None) -> LineSpread:
+        """Resolved line-spread mode for a section (override beats the default)."""
+        if section_id is not None and section_id in self.line_spread_overrides:
+            return self.line_spread_overrides[section_id]
+        return self.line_spread
+
+    @property
+    def has_rail_sections(self) -> bool:
+        """True if any section is laid out in rail mode (global default or override)."""
+        return self.line_spread is LineSpread.RAILS or any(
+            mode is LineSpread.RAILS for mode in self.line_spread_overrides.values()
+        )
+
+    def is_rail_section(self, section_id: str | None) -> bool:
+        """True if *section_id* resolves to rail mode."""
+        return self.section_line_spread(section_id) is LineSpread.RAILS
+
+    def station_is_rail(self, station_id: str) -> bool:
+        """True if a station belongs to a rail-mode section."""
+        st = self.stations.get(station_id)
+        section_id = st.section_id if st is not None else None
+        return self.is_rail_section(section_id)
 
     def section_for_station(self, station_id: str) -> str | None:
         """Return the section ID containing a station, or None."""

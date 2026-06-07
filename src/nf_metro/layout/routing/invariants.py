@@ -37,7 +37,7 @@ from nf_metro.layout.routing.common import (
     horizontal_direction,
     vertical_direction,
 )
-from nf_metro.parser.model import MetroGraph, PortSide
+from nf_metro.parser.model import Edge, MetroGraph, PortSide
 
 # Segments shorter than this are sub-pixel artefacts of per-line
 # offsets and carry no meaningful direction of travel.
@@ -769,8 +769,27 @@ def check_intra_section_collinear_distinct_lines(
     is excused, so genuine reconvergences are not flagged.
     """
     station_xy = {sid: (st.x, st.y) for sid, st in graph.stations.items()}
+    # Edges internal to a rail-mode section legitimately run several
+    # co-travelling lines on parallel rails; the rail router (not this
+    # normal-pass geometry) renders them, so they are not an overlay defect.
+    # Drop them before the overlay scan.
+    if getattr(graph, "has_rail_sections", False):
+        routes = [r for r in routes if not _edge_in_rail_section(graph, r.edge)]
     return _collinear_overlay_violations(
         routes, offsets, station_xy, inter_section=False
+    )
+
+
+def _edge_in_rail_section(graph: MetroGraph, edge: Edge) -> bool:
+    """True when both endpoints of *edge* are real stations of one rail section."""
+    src = graph.stations.get(edge.source)
+    tgt = graph.stations.get(edge.target)
+    if src is None or tgt is None or src.is_port or tgt.is_port:
+        return False
+    return (
+        src.section_id is not None
+        and src.section_id == tgt.section_id
+        and graph.is_rail_section(src.section_id)
     )
 
 

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or usage help
+    url: https://github.com/pinin4fjords/nf-metro/discussions
+    about: Ask how to author a .mmd, use a directive, or render a pipeline. Open a discussion rather than an issue.
+  - name: Mermaid + %%metro input format
+    url: https://github.com/pinin4fjords/nf-metro/blob/main/CLAUDE.md
+    about: Reference for the supported Mermaid subset and %%metro directives before filing a bug.

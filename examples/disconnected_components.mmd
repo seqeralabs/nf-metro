@@ -1,0 +1,40 @@
+%%metro title: Disconnected Components
+%%metro style: dark
+%%metro line: main | Main Pipeline | #e63946
+%%metro line: aux | Auxiliary Report | #0570b0
+
+graph LR
+    subgraph ingest [Ingest]
+        in1[Read Input]
+        in2[Validate]
+        in1 -->|main| in2
+    end
+
+    subgraph process [Process]
+        pr1[Align]
+        pr2[Filter]
+        pr1 -->|main| pr2
+    end
+
+    subgraph results [Results]
+        re1[Summarise]
+        re2[Publish]
+        re1 -->|main| re2
+    end
+
+    subgraph wide_report [Standalone QC Report]
+        w1[Collect]
+        w2[Aggregate]
+        w3[Annotate]
+        w4[Normalise]
+        w5[Visualise]
+        w6[Export]
+        w1 -->|aux| w2
+        w2 -->|aux| w3
+        w3 -->|aux| w4
+        w4 -->|aux| w5
+        w5 -->|aux| w6
+    end
+
+    in2 -->|main| pr1
+    pr2 -->|main| re1

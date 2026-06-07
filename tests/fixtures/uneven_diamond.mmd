@@ -1,0 +1,18 @@
+%%metro title: Uneven Diamond
+%%metro style: dark
+%%metro line: vc | Variant Calling | #ff0000
+
+graph LR
+    samtools_vc[Samtools]
+    varlociraptor[Varlociraptor]
+    finalise[Finalise]
+    normalise[Normalise]
+    consensus[Consensus]
+    merge[Merge]
+
+    samtools_vc -->|vc| varlociraptor
+    samtools_vc -->|vc| finalise
+    varlociraptor -->|vc| merge
+    finalise -->|vc| normalise
+    normalise -->|vc| consensus
+    consensus -->|vc| merge

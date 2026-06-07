@@ -1,0 +1,28 @@
+%%metro title: Off-track outputs along a single trunk
+%%metro line: core | Core | #2e8b57
+%%metro files: cram_a | CRAM
+%%metro files: cram_b | CRAM
+%%metro files: cram_c | CRAM
+%%metro off_track: cram_a
+%%metro off_track: cram_b
+%%metro off_track: cram_c
+
+graph LR
+    subgraph proc [Recalibration]
+        samtools[samtools]
+        prepare_recal[prepare recalibration]
+        applybqsr[applybqsr]
+        done[mosdepth]
+
+        samtools -->|core| prepare_recal
+        prepare_recal -->|core| applybqsr
+        applybqsr -->|core| done
+
+        samtools -->|core| cram_a
+        prepare_recal -->|core| cram_b
+        applybqsr -->|core| cram_c
+
+        cram_a[ ]
+        cram_b[ ]
+        cram_c[ ]
+    end

@@ -38,7 +38,6 @@ DEFAULT_TOLERANCE = 1.0
 # loosens the inter-row gap, never overlaps.
 KNOWN_DIVERGENT: dict[str, float] = {
     "differentialabundance.mmd": 150.0,
-    "differentialabundance_default.mmd": 120.0,
     "variantbenchmarking.mmd": 20.0,
     "variantbenchmarking_auto.mmd": 20.0,
     "genomic_pipeline.mmd": 5.0,
@@ -110,6 +109,53 @@ def test_known_divergent_fixtures_actually_diverge(name: str) -> None:
     assert worst > DEFAULT_TOLERANCE, (
         f"{name}: divergence {worst:.2f}px no longer exceeds the default "
         f"tolerance; remove it from KNOWN_DIVERGENT"
+    )
+
+
+def test_off_track_lift_not_under_predicted() -> None:
+    """A section with a lifted off-track input must not under-predict its
+    content height below the bbox top.
+
+    The off-track lift (Stage 5.2) raises a section's bbox top to seat the
+    lifted input above the trunk.  The structural snapshot is taken after that
+    lift, so the stored height-below-top reflects the raised top.  Were it
+    captured before, the row-ending section here (``top``) would store a height
+    ~40px short of settled (the unsafe direction), and the inter-row cascade
+    would stack the row below it that much too high.
+    """
+    mmd = (
+        "%%metro title: off-track two-row\n"
+        "%%metro line: a | A | #ff0000\n"
+        "%%metro file: in_csv | CSV\n"
+        "%%metro off_track: in_csv\n"
+        "%%metro grid: top | 0,0\n"
+        "%%metro grid: bot | 0,1\n"
+        "graph LR\n"
+        "    subgraph top [Top]\n"
+        "        in_csv[ ]\n"
+        "        t1[Step One]\n"
+        "        t2[Step Two]\n"
+        "        in_csv -->|a| t1\n"
+        "        t1 -->|a| t2\n"
+        "    end\n"
+        "    subgraph bot [Bottom]\n"
+        "        b1[Bee One]\n"
+        "        b2[Bee Two]\n"
+        "        b1 -->|a| b2\n"
+        "    end\n"
+        "    t2 -->|a| b1\n"
+    )
+    graph = parse_metro_mermaid(mmd)
+    compute_layout(graph)
+    top = graph.sections["top"]
+    struct_h = graph._struct_height_below_top.get("top")
+    settled_h = _settled_height_below_top(graph, top)
+    assert struct_h is not None and settled_h is not None
+    # Safe direction only: structural must not fall short of settled (a shortfall
+    # makes the cascade stack the row below too high and risk overlap).
+    assert struct_h >= settled_h - DEFAULT_TOLERANCE, (
+        f"off-track section under-predicted: struct {struct_h:.1f} < settled "
+        f"{settled_h:.1f}; snapshot must run after the off-track lift"
     )
 
 

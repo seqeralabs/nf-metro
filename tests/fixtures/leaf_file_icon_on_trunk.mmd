@@ -1,0 +1,16 @@
+%%metro title: Leaf file icon on a continuing trunk
+%%metro line: main | Main | #3b82f6
+%%metro line: index | Index | #e63946
+%%metro file: bam_out | BAM
+
+graph LR
+    subgraph proc [Processing]
+        align[Align]
+        bam_out[ ]
+        sort[Sort]
+        markdup[MarkDup]
+
+        align -->|index| bam_out
+        align -->|main| sort
+        sort -->|index| markdup
+    end

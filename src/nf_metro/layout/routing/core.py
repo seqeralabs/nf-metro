@@ -27,6 +27,7 @@ from nf_metro.layout.constants import (
     INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     JUNCTION_MARGIN,
+    LABEL_BBOX_MARGIN,
     MERGE_ROUTE_MARGIN,
     MIN_STATION_FLAT_LENGTH,
     MIN_STRAIGHT_EDGE,
@@ -70,7 +71,7 @@ from nf_metro.layout.routing.corners import (
     tb_entry_corner,
     tb_exit_corner,
 )
-from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Station
+from nf_metro.parser.model import Edge, LineSpread, MetroGraph, Port, PortSide, Station
 
 # ---------------------------------------------------------------------------
 # Routing context: pre-computed state shared by all handlers
@@ -157,11 +158,42 @@ def route_edges(
     Detects cross-row edges (large Y gap relative to X gap) and routes
     them through a vertical connector at the fold edge.
     """
+    if graph.line_spread is LineSpread.RAILS:
+        from nf_metro.layout.routing.rail import route_rail_edges
+
+        return route_rail_edges(graph)
+
+    # Per-section rail mode: route each rail section's internal edges with the
+    # dedicated rail router (straight rails, no bundling) and let the normal
+    # router handle every other edge.  An edge is "internal" to a rail section
+    # when both endpoints are non-port stations of that section.
+    rail_routes: list[RoutedPath] = []
+    rail_internal: set[tuple[str, str, str]] = set()
+    if graph.has_rail_sections:
+        from nf_metro.layout.routing.rail import route_rail_edges
+
+        rail_edges = []
+        for edge in graph.edges:
+            src = graph.stations.get(edge.source)
+            tgt = graph.stations.get(edge.target)
+            if src is None or tgt is None or src.is_port or tgt.is_port:
+                continue
+            if (
+                src.section_id == tgt.section_id
+                and src.section_id is not None
+                and graph.is_rail_section(src.section_id)
+            ):
+                rail_edges.append(edge)
+                rail_internal.add((edge.source, edge.target, edge.line_id))
+        rail_routes = route_rail_edges(graph, rail_edges)
+
     ctx = _build_routing_context(graph, diagonal_run, curve_radius, station_offsets)
-    routes: list[RoutedPath] = []
+    routes: list[RoutedPath] = list(rail_routes)
 
     for edge in graph.edges:
         if (edge.source, edge.target, edge.line_id) in ctx.skip_edges:
+            continue
+        if (edge.source, edge.target, edge.line_id) in rail_internal:
             continue
 
         src = graph.stations.get(edge.source)
@@ -3675,8 +3707,15 @@ def _route_diagonal(
         src_min = max(src_min, ICON_TERMINUS_FORK_LEAD)
     if tgt.is_terminus and edge.target in ctx.join_stations:
         tgt_min = max(tgt_min, ICON_TERMINUS_FORK_LEAD)
+    # A downward off-track output drops on the same side as its producer's name
+    # label, so the descent turns down past the label's far edge to stay clear
+    # of the text.
+    drop_label_clearance = 0.0
+    if tgt.off_track and ty > sy + COORD_TOLERANCE_FINE and src.label.strip():
+        drop_label_clearance = label_text_width(src.label) / 2 + LABEL_BBOX_MARGIN
+        src_min = max(src_min, drop_label_clearance)
     if src_min + tgt_min + ctx.diagonal_run > abs(dx):
-        src_min = min_straight
+        src_min = max(min_straight, drop_label_clearance)
         tgt_min = min_straight
 
     # Side-branch ascents: override the fork bias so the diagonal lands

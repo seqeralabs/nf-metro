@@ -10,6 +10,7 @@ import click
 from nf_metro import __version__
 from nf_metro.layout import PhaseInvariantError, compute_layout
 from nf_metro.parser import parse_metro_mermaid
+from nf_metro.parser.model import LineSpread
 from nf_metro.render import render_svg
 from nf_metro.render.html import render_html
 from nf_metro.themes import THEMES
@@ -64,7 +65,8 @@ def cli() -> None:
     "--max-layers-per-row",
     type=int,
     default=None,
-    help="Max layers before folding to next row (default: auto)",
+    help="Max layers before folding to next row (default: auto). Overrides "
+    "the %%metro fold_threshold: directive.",
 )
 @click.option(
     "--animate/--no-animate",
@@ -101,6 +103,15 @@ def cli() -> None:
     help="Centre inter-section ports on the shorter of the two connected "
     "sections, so lines enter/exit at the visual midpoint. When unset, "
     "the value of the %%metro center_ports: directive (if any) is used.",
+)
+@click.option(
+    "--line-spread",
+    type=click.Choice([m.value for m in LineSpread]),
+    default=None,
+    help="How lines sharing a station relate vertically: 'bundle' (default) "
+    "merges onto one trunk, 'centered' balances the bundle about the midline, "
+    "'rails' draws parallel rails with interchange stations. Overrides the "
+    "graph-wide %%metro line_spread: directive (per-section overrides stay).",
 )
 @click.option(
     "--section-x-gap",
@@ -142,6 +153,7 @@ def render(
     line_order: str | None,
     straight_diamonds: bool,
     center_ports: bool | None,
+    line_spread: str | None,
     section_x_gap: float | None,
     section_y_gap: float | None,
     from_nextflow: bool,
@@ -158,7 +170,7 @@ def render(
     try:
         graph = parse_metro_mermaid(
             text,
-            max_station_columns=max_layers_per_row or 15,
+            max_station_columns=max_layers_per_row,
         )
     except ValueError as e:
         raise click.ClickException(str(e))
@@ -171,6 +183,9 @@ def render(
 
     if center_ports is not None:
         graph.center_ports = center_ports
+
+    if line_spread is not None:
+        graph.line_spread = LineSpread(line_spread)
 
     if logo is not None:
         graph.logo_path = str(logo)

@@ -1,0 +1,21 @@
+%%metro title: Output above a fork/join bubble
+%%metro line: main | Main | #3b82f6
+%%metro off_track: bam_out
+
+%%metro file: bam_out | BAM
+
+graph LR
+    subgraph proc [Processing]
+        mapping[Mapping]
+        convert[Convert]
+        markdups[MarkDuplicates]
+        mosdepth[Mosdepth]
+        bam_out[ ]
+
+        mapping -->|main| convert
+        mapping -->|main| markdups
+        convert -->|main| mosdepth
+        markdups -->|main| mosdepth
+
+        convert -->|main| bam_out
+    end

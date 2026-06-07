@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
+    COMPONENT_BAND_OVERLAP_TOLERANCE,
     COORD_TOLERANCE,
     EDGE_TO_BUNDLE_CLEARANCE,
     GUARD_TOLERANCE,
@@ -32,12 +33,17 @@ from nf_metro.layout.phases._common import (
     routes_through_unrelated_sections,
 )
 from nf_metro.layout.phases.bbox import _section_fit_top
+from nf_metro.layout.phases.off_track import (
+    _is_single_trunk_lr_section,
+    _off_track_anchor_of,
+    _off_track_output_below,
+)
 from nf_metro.layout.phases.single_section import _terminus_y_overhang
 from nf_metro.layout.phases.spacing import (
     _placed_name_label_station_ids,
     _residual_label_overlaps,
 )
-from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import LineSpread, MetroGraph, PortSide, Section, Station
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -233,6 +239,105 @@ def _guard_stations_within_bbox(graph: MetroGraph, phase: str) -> None:
         raise PhaseInvariantError(detail)
 
 
+def _guard_centered_line_spread_balanced(graph: MetroGraph, phase: str) -> None:
+    """Each ``centered`` section's weave must balance about its trunk.
+
+    Two invariants are enforced for every section resolving to ``centered``
+    (the graph-wide ``line_spread`` default or a per-section override):
+
+    1. The line base tracks are placed symmetrically at
+       ``(i - (N-1)/2) * line_gap``, whose mean is exactly zero, so the
+       shared trunk sits on the vertical midline.
+    2. Each line's *exclusive run* (stations carrying only that one line)
+       lands on the correct side of its section's shared trunk: a line
+       above the centre keeps its exclusive stations at-or-above the trunk
+       and a line below the centre keeps them at-or-below it.  This catches
+       a regression where the fork-equalize pass collapses an exclusive run
+       back onto the trunk midline, leaving the panel top/centre-heavy
+       instead of symmetric.
+
+    No-op when no section is centered, fewer than two lines exist, or there
+    are no lines at all (nothing to balance).
+    """
+    centered_anywhere = graph.line_spread is LineSpread.CENTERED or any(
+        mode is LineSpread.CENTERED for mode in graph.line_spread_overrides.values()
+    )
+    if not centered_anywhere:
+        return
+    n = len(graph.lines)
+    if n < 2:
+        return
+    from nf_metro.layout.constants import LINE_GAP
+
+    bases = [(i - (n - 1) / 2) * LINE_GAP for i in range(n)]
+    mean = sum(bases) / n
+    if abs(mean) > GUARD_TOLERANCE:
+        raise PhaseInvariantError(
+            f"{phase}: centered line_spread base tracks not symmetric about zero "
+            f"(mean={mean:.3f}, bases={bases})"
+        )
+
+    # Sign of each line's symmetric base: <0 above the trunk, >0 below it,
+    # 0 on the centre.  Y increases downward, so an above-centre line wants
+    # its exclusive stations at smaller Y than the trunk.
+    line_index = {lid: i for i, lid in enumerate(graph.lines)}
+    line_sign = {lid: (i - (n - 1) / 2) for lid, i in line_index.items()}
+
+    # Real (visible, on-track, non-port) stations grouped by section.
+    by_section: dict[str | None, list[str]] = {}
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or st.off_track:
+            continue
+        by_section.setdefault(st.section_id, []).append(sid)
+
+    # A non-centre line's exclusive station must be displaced to its side
+    # of the trunk; a zero/negative displacement means the run has
+    # collapsed onto (or crossed) the trunk midline.  Any genuine offset is
+    # a whole track unit (one section y-spacing of pixels), far larger than
+    # the guard tolerance, so a tolerance floor cleanly separates "offset"
+    # from "collapsed" independent of the absolute y-spacing in use.
+    min_offset = GUARD_TOLERANCE
+    for sec_id, members in by_section.items():
+        # Only centered sections must straddle; a bundle or rails section in
+        # the same graph legitimately cascades or runs as parallel rails.
+        if graph.section_line_spread(sec_id) is not LineSpread.CENTERED:
+            continue
+        # Skip sections with no vertical spread: an un-laid-out graph (all
+        # Y == 0) or a genuinely flat single-track section has no weave to
+        # balance, and the side check is only meaningful once coordinates
+        # have been assigned.
+        member_ys = [graph.stations[s].y for s in members]
+        if max(member_ys) - min(member_ys) <= GUARD_TOLERANCE:
+            continue
+        # The trunk is the set of multi-line stations; use their mean Y.
+        trunk_ys = [
+            graph.stations[s].y for s in members if len(graph.station_lines(s)) >= 2
+        ]
+        if not trunk_ys:
+            continue
+        trunk_y = sum(trunk_ys) / len(trunk_ys)
+        for s in members:
+            lines = graph.station_lines(s)
+            if len(lines) != 1:
+                continue
+            sign = line_sign.get(lines[0], 0.0)
+            if abs(sign) < 1e-9:
+                continue  # centre line: exclusive stations belong on trunk
+            # signed_offset > 0 means "on this line's side"; Y grows
+            # downward, so an above-centre line (sign<0) wants smaller Y.
+            dy = graph.stations[s].y - trunk_y
+            signed_offset = -dy if sign < 0 else dy
+            if signed_offset <= min_offset:
+                side = "above" if sign < 0 else "below"
+                raise PhaseInvariantError(
+                    f"{phase}: centered line_spread exclusive station '{s}' on "
+                    f"{side}-centre line '{lines[0]}' is not offset to its "
+                    f"side of the trunk (y={graph.stations[s].y:.1f}, "
+                    f"trunk_y={trunk_y:.1f}, signed_offset={signed_offset:.1f}, "
+                    f"required>={min_offset:.1f})"
+                )
+
+
 def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
     """After Stage 3.1+: ports must sit on their section's bounding box edge."""
     tolerance = GUARD_TOLERANCE
@@ -289,6 +394,49 @@ def _guard_no_negative_grid_columns(graph: MetroGraph, phase: str) -> None:
             f"{phase}: sections at negative grid columns "
             f"(serpentine packer ran off the left edge): {offenders}"
         )
+
+
+def _guard_independent_components_disjoint(graph: MetroGraph, phase: str) -> None:
+    """After Stage 1.3: independently-stacked components must not overlap.
+
+    When the section meta-graph splits into 2+ weakly-connected components
+    and the author pinned no explicit ``%%metro grid:`` positions,
+    :func:`place_sections` lays each component out in its own local column
+    grid and stacks the components vertically.  Stacking is only correct if
+    the components occupy disjoint vertical bands; an off-by-one in the
+    stacking cursor would let one component's bbox overlap another's,
+    producing tangled, ambiguous output.  This guard fails loudly if the
+    stacked bands ever overlap.
+
+    No-op for single-component graphs and for explicit-grid graphs (which
+    deliberately keep the shared grid and may interleave components).
+    """
+    from nf_metro.layout.section_placement import (
+        _component_extent,
+        _weakly_connected_components,
+    )
+
+    if not graph.sections or graph.section_dag is None or graph._explicit_grid:
+        return
+
+    components = _weakly_connected_components(graph, graph.section_dag.section_edges)
+    if len(components) <= 1:
+        return
+
+    def band(comp: set[str]) -> tuple[float, float]:
+        _, top, bottom = _component_extent([graph.sections[s] for s in comp])
+        return top, bottom
+
+    bands = sorted((band(c), c) for c in components)
+    for (lo_band, lo_comp), (hi_band, hi_comp) in zip(bands, bands[1:]):
+        # Bands are sorted by top edge; overlap if the lower band's bottom
+        # protrudes past the next band's top.
+        if lo_band[1] > hi_band[0] + COMPONENT_BAND_OVERLAP_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: independently-stacked components overlap vertically: "
+                f"{sorted(lo_comp)} (band {lo_band[0]:.1f}..{lo_band[1]:.1f}) "
+                f"vs {sorted(hi_comp)} (band {hi_band[0]:.1f}..{hi_band[1]:.1f})"
+            )
 
 
 def _guard_explicit_grid_directions(graph: MetroGraph, phase: str) -> None:
@@ -384,6 +532,85 @@ def _guard_section_top_padding(
             )
 
 
+def _guard_rail_above_label_band(graph: MetroGraph, phase: str) -> None:
+    """A rail section must reserve room above its top rail for above-hanging labels.
+
+    Single-rail stations on a panel's top rail are labelled above the top rail
+    (``labels._rail_label_side``); the engine reserves a band for them by pushing
+    the rails down (``rail_mode._layout_section_rails``).  If that band is smaller
+    than the labels' footprint, ``place_labels`` grows the panel box upward at
+    render time and can climb into the section stacked above it.  Verify the
+    reservation independently of the code that makes it.
+    """
+    if not graph.has_rail_sections:
+        return
+    # Function-local: a module-level import would close a layout import cycle.
+    from nf_metro.layout.rail_mode import (
+        _rail_above_label_stations,
+        _rail_label_band,
+    )
+
+    tol = 1.0
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or not graph.is_rail_section(section.id):
+            continue
+        per_line = graph._rail_y.get(section.id) or {}
+        if not per_line:
+            continue
+        real_ids = [
+            sid
+            for sid in section.station_ids
+            if (st := graph.stations.get(sid)) is not None and not st.is_port
+        ]
+        above_ids = _rail_above_label_stations(graph, real_ids, per_line)
+        if not above_ids:
+            continue
+        needed = _rail_label_band(graph, above_ids)
+        reserved = min(per_line.values()) - section.bbox_y
+        if reserved + tol < needed:
+            raise PhaseInvariantError(
+                f"{phase}: rail section {section.id!r} reserves {reserved:.1f}px "
+                f"above its top rail but its above-labels need {needed:.1f}px; "
+                f"render-time label growth would climb out of the box"
+            )
+
+
+def _guard_rail_stations_seat_on_rails(graph: MetroGraph, phase: str) -> None:
+    """Every rail station's used-rail Ys must land on its lines' fixed rails.
+
+    A rail station records ``rail_used_ys`` parallel to its line order
+    (``rail_mode._layout_section_rails``); the renderer draws a knob at each so
+    the glyph seats on every line it carries.  If a used-rail Y drifts off its
+    line's rail (``graph._rail_y``), the knob, and a coloured-marker
+    interchange's fill, would float off the rail.  Verify the seating directly.
+    """
+    if not graph.has_rail_sections:
+        return
+    tol = 1.0
+    for section in graph.sections.values():
+        if not graph.is_rail_section(section.id):
+            continue
+        per_line = graph._rail_y.get(section.id) or {}
+        if not per_line:
+            continue
+        for sid in section.station_ids:
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.off_track or st.is_blank_terminus:
+                continue
+            lines = graph.station_lines_ordered(sid)
+            if len(st.rail_used_ys) != len(lines):
+                continue
+            for lid, y in zip(lines, st.rail_used_ys):
+                rail_y = per_line.get(lid)
+                if rail_y is None:
+                    continue
+                if abs(y - rail_y) > tol:
+                    raise PhaseInvariantError(
+                        f"{phase}: rail station {sid!r} seats line {lid!r} at "
+                        f"y={y:.1f}, off its rail {rail_y:.1f}"
+                    )
+
+
 def _guard_terminus_icons_within_bbox(graph: MetroGraph, phase: str) -> None:
     """Final phase: TB/BT terminus file icons must fit inside the section bbox.
 
@@ -414,6 +641,46 @@ def _guard_terminus_icons_within_bbox(graph: MetroGraph, phase: str) -> None:
                     f"{st.y - above:.1f}, above section {section.id!r} bbox "
                     f"top {top:.1f}"
                 )
+
+
+def _guard_single_trunk_off_track_step(graph: MetroGraph, phase: str) -> None:
+    """Single-trunk sections lift off-track stations by the base pitch.
+
+    A section that is a single horizontal trunk has no parallel tracks, so
+    its off-track lift step stays at the base content pitch
+    (``graph._base_y_spacing``) rather than the spread-widened ``y_spacing``
+    (issue #580).  When the base pitch is recorded (auto ``y_spacing``), each
+    off-track station in such a section must sit an integer number of base
+    steps above its anchor, never at a wider pitch that would strand the icon
+    far above the trunk.
+    """
+    base = graph._base_y_spacing
+    if base is None or base <= 0:
+        return
+    anchor_of = _off_track_anchor_of(graph)
+    junction_ids = graph.junction_ids
+    tol = 1.0
+    for off_id, anchor_id in anchor_of.items():
+        off_st = graph.stations.get(off_id)
+        anchor = graph.stations.get(anchor_id)
+        if off_st is None or anchor is None:
+            continue
+        section = graph.sections.get(off_st.section_id or "")
+        if section is None or not _is_single_trunk_lr_section(
+            graph, section, junction_ids
+        ):
+            continue
+        gap = anchor.y - off_st.y
+        if gap <= tol:
+            continue
+        nearest_multiple = round(gap / base) * base
+        if abs(gap - nearest_multiple) > tol:
+            raise PhaseInvariantError(
+                f"{phase}: off-track {off_id!r} sits {gap:.1f}px above anchor "
+                f"{anchor_id!r} on single-trunk section {section.id!r}, not an "
+                f"integer multiple of the base step {base:.1f} -- the widened "
+                f"diagonal-label pitch leaked into the lift"
+            )
 
 
 def _guard_no_station_overlap(
@@ -519,6 +786,140 @@ def _guard_no_line_crosses_non_consumer(
                         f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
                         f"({p1[0]:.1f},{p1[1]:.1f})->"
                         f"({p2[0]:.1f},{p2[1]:.1f})"
+                    )
+
+
+def _guard_no_line_crosses_file_icon(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: no rendered line segment may pass through a file /
+    terminus icon's drawn bbox, except the one segment that legitimately
+    terminates at (or originates from) that icon's station.
+
+    A metro line raking across a file icon reads as the route running
+    through the artefact.  Only the segment that arrives at (or leaves
+    from) the icon's own station is exempt -- that line is meant to touch
+    it.  Every other segment crossing the icon box is a violation, even
+    one belonging to a line the icon's station also carries, since a
+    different edge of that line is still raking the artefact.
+    """
+    from nf_metro.render.svg import _icon_obstacles_by_station, apply_route_offsets
+    from nf_metro.themes import THEMES
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        # route_edges' diagonal-centring pass mutates Station.x in place;
+        # a guard must stay observational, so snapshot and restore X
+        # around the call (mirrors _run_pass_c_guards).
+        saved_x = {sid: s.x for sid, s in graph.stations.items()}
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+        finally:
+            for sid, x in saved_x.items():
+                graph.stations[sid].x = x
+
+    icon_boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
+    if not icon_boxes:
+        return
+    index = BBoxXIndex(list(icon_boxes.items()))
+
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        src, tgt, line_id = r.edge.source, r.edge.target, r.line_id
+        for k in range(len(pts) - 1):
+            p1, p2 = pts[k], pts[k + 1]
+            for sid, bbox in index.query_x_range(min(p1[0], p2[0]), max(p1[0], p2[0])):
+                if src == sid or tgt == sid:
+                    continue
+                if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
+                    raise PhaseInvariantError(
+                        f"{phase}: line {line_id!r} on edge {src!r} -> {tgt!r} "
+                        f"crosses file icon of {sid!r} "
+                        f"bbox ({bbox[0]:.1f},{bbox[1]:.1f})-"
+                        f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
+                        f"({p1[0]:.1f},{p1[1]:.1f})->({p2[0]:.1f},{p2[1]:.1f})"
+                    )
+
+
+def _guard_off_track_output_clears_non_producer(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: an off-track output's route crosses only its producer.
+
+    An off-track output icon hangs in the trunk gap just past its producer.
+    When the output's horizontal extent overruns that gap, its up-right
+    diagonal rakes across the next on-track station's marker.  Because every
+    trunk station carries the same line, :func:`_guard_no_line_crosses_non_consumer`
+    exempts that crossing (the marker's station consumes the line); this guard
+    closes the gap by checking the output route against same-section trunk
+    markers regardless of line membership, exempting only the producer.
+    """
+    from nf_metro.render.svg import apply_route_offsets
+
+    producer_of = {
+        off_id: anchor_id
+        for off_id, anchor_id in _off_track_anchor_of(graph).items()
+        if not any(e.target == anchor_id for e in graph.edges_from(off_id))
+    }
+    if not producer_of:
+        return
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+
+    junction_ids = graph.junction_ids
+    route_by_endpoints = {(r.edge.source, r.edge.target): r for r in routes}
+    for off_id, prod_id in producer_of.items():
+        route = route_by_endpoints.get((prod_id, off_id))
+        if route is None:
+            continue
+        pts = apply_route_offsets(route, offsets)
+        sec_id = graph.stations[off_id].section_id
+        section = graph.sections.get(sec_id) if sec_id else None
+        if section is None:
+            continue
+        for sid in section.station_ids:
+            if sid in (off_id, prod_id) or sid in junction_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.off_track or st.is_port or st.is_hidden:
+                continue
+            bbox = _station_marker_bbox(graph, sid, offsets=offsets)
+            if bbox is None:
+                continue
+            for k in range(len(pts) - 1):
+                p1, p2 = pts[k], pts[k + 1]
+                if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
+                    raise PhaseInvariantError(
+                        f"{phase}: off-track output {off_id!r} route from "
+                        f"producer {prod_id!r} crosses non-producer marker "
+                        f"{sid!r} bbox ({bbox[0]:.1f},{bbox[1]:.1f})-"
+                        f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
+                        f"({p1[0]:.1f},{p1[1]:.1f})->({p2[0]:.1f},{p2[1]:.1f})"
                     )
 
 
@@ -1667,38 +2068,35 @@ def _guard_fanout_tail_join(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
-def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> None:
-    """After Stage 4.5 and final: off-track input stations must sit at
-    least ``GUARD_TOLERANCE`` above (smaller Y than) their on-track
-    consumer.
-    """
-    junction_ids = graph.junction_ids
-    consumer_of: dict[str, str] = {}
-    for edge in graph.edges:
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if (
-            src is None
-            or tgt is None
-            or not src.off_track
-            or src.is_port
-            or src.id in junction_ids
-            or tgt.is_port
-            or tgt.id in junction_ids
-            or tgt.off_track
-        ):
-            continue
-        consumer_of.setdefault(src.id, tgt.id)
+def _guard_off_track_clear_of_anchor(graph: MetroGraph, phase: str) -> None:
+    """At final: every off-track station must sit at least ``GUARD_TOLERANCE``
+    clear of its anchor on the expected side.
 
-    for off_id, consumer_id in consumer_of.items():
+    An input's anchor is its consumer, a producer-fed sink's anchor is its
+    producer; :func:`_off_track_anchor_of` resolves which, so the same Y
+    relationship is enforced for both roles.  Outputs are normally lifted
+    above (smaller Y) their producer, but an output whose producer sits on a
+    downward branch is dropped below it (:func:`_off_track_output_below`); such
+    outputs are required to sit below (larger Y) so a downward-branch output
+    does not cross back over the trunk.
+    """
+    below = _off_track_output_below(graph)
+    for off_id, anchor_id in _off_track_anchor_of(graph).items():
         off_st = graph.stations.get(off_id)
-        cons_st = graph.stations.get(consumer_id)
-        if off_st is None or cons_st is None:
+        anchor_st = graph.stations.get(anchor_id)
+        if off_st is None or anchor_st is None:
             continue
-        if not (off_st.y < cons_st.y - GUARD_TOLERANCE):
+        if off_id in below:
+            if not (off_st.y > anchor_st.y + GUARD_TOLERANCE):
+                raise PhaseInvariantError(
+                    f"{phase}: downward off-track output {off_id!r} "
+                    f"y={off_st.y:.1f} not below anchor {anchor_id!r} "
+                    f"y={anchor_st.y:.1f}"
+                )
+        elif not (off_st.y < anchor_st.y - GUARD_TOLERANCE):
             raise PhaseInvariantError(
                 f"{phase}: off-track {off_id!r} y={off_st.y:.1f} "
-                f"not above consumer {consumer_id!r} y={cons_st.y:.1f}"
+                f"not above anchor {anchor_id!r} y={anchor_st.y:.1f}"
             )
 
 
@@ -1903,9 +2301,9 @@ def _run_pass_c_guards(
     Always excluded from the bisection set (only meaningful at the
     final boundary):
 
-    * ``_guard_off_track_inputs_above_consumer`` -- Stage 6.4's snap-
-      to-grid shifts the on-track consumer Y by up to half a pitch
-      before Stage 6.6 re-anchors the off-track input.
+    * ``_guard_off_track_clear_of_anchor`` -- Stage 6.4's snap-to-grid
+      shifts the on-track anchor (consumer or producer) Y by up to half
+      a pitch before Stage 6.6 re-anchors the off-track station.
     * ``_guard_row_trunk_cy_consistent`` -- the row trunk Y is only
       finalised once Stage 6.7 has re-centred ``center_ports`` graphs.
     * ``_guard_inter_section_routes_in_row_band`` -- row-band height
