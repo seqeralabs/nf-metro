@@ -42,6 +42,7 @@ from nf_metro.layout.phases._common import (  # noqa: F401
     _fan_offsets,
     _grid_group_section_ids,
     _grid_rows_top_to_bottom,
+    _grow_section_bbox_downward,
     _grow_section_bbox_upward,
     _max_stations_per_layer,
     _route_crosses_section_boundary,
@@ -132,7 +133,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_negative_grid_columns,
     _guard_no_route_through_section,
     _guard_no_station_overlap,
-    _guard_off_track_above_anchor,
+    _guard_off_track_clear_of_anchor,
     _guard_partial_branch_offset_gaps,
     _guard_ports_on_boundaries,
     _guard_rail_above_label_band,
@@ -170,7 +171,8 @@ from nf_metro.layout.phases.off_track import (  # noqa: F401
     _insert_phantom_pass_throughs,
     _lift_off_track_stations,
     _off_track_groups,
-    _place_off_track_above_consumers,
+    _off_track_output_below,
+    _place_off_track_relative_to_anchors,
     _reanchor_off_track_to_consumer,
 )
 from nf_metro.layout.phases.ports import (  # noqa: F401
@@ -1318,7 +1320,7 @@ def _finalize_layout(
         phase = "after final"
         offsets, routes = _run_pass_c_guards(graph, phase)
         _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
-        _guard_off_track_above_anchor(graph, phase)
+        _guard_off_track_clear_of_anchor(graph, phase)
         _guard_fanout_junction_shares_exit_port_y(graph, phase)
         _guard_merge_port_approach_side(graph, phase, offsets=offsets)
         _guard_partial_branch_offset_gaps(graph, phase, offsets=offsets)

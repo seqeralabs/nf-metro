@@ -36,7 +36,7 @@ from nf_metro.layout.phases.off_track import (
     _align_phantom_pass_throughs,
     _compute_fork_join_gaps,
     _insert_phantom_pass_throughs,
-    _space_off_track_output_columns,
+    _space_off_track_outputs,
 )
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
@@ -134,8 +134,6 @@ def _layout_single_section(
 
     layers = assign_layers(sub)
 
-    _space_off_track_output_columns(sub, layers)
-
     # Use entry-top ordering when the immediate predecessor section is
     # horizontal (LR/RL), so the entry-connected station stays at the
     # top and aligns with the upstream exit station (#165).  Skip for
@@ -149,6 +147,8 @@ def _layout_single_section(
 
     if not layers:
         return None
+
+    output_extra = _space_off_track_outputs(sub, layers, tracks)
 
     # Snap phantom pass-throughs' successors to the pass-through track
     # so the trunk line stays horizontal past bypassed stations.
@@ -195,11 +195,20 @@ def _layout_single_section(
                 f"missing from rank map {sorted(track_rank)}"
             )
         rank = track_rank.get(station.track, 0.0)
+        output_offset = output_extra.get(sid, 0.0)
         if section.direction == "TB":
             station.x = rank * x_spacing
-            station.y = station.layer * y_spacing + layer_extra.get(station.layer, 0)
+            station.y = (
+                station.layer * y_spacing
+                + layer_extra.get(station.layer, 0)
+                + output_offset
+            )
         else:
-            station.x = station.layer * x_spacing + layer_extra.get(station.layer, 0)
+            station.x = (
+                station.layer * x_spacing
+                + layer_extra.get(station.layer, 0)
+                + output_offset
+            )
             station.y = rank * effective_y_spacing
 
     # Resolve same-cell station collisions: two stations on the same line

@@ -9,16 +9,32 @@ from nf_metro.layout.constants import (
     DIAGONAL_RUN,
     EXIT_GAP_MULTIPLIER,
     ICON_HALF_HEIGHT,
+    LABEL_BBOX_MARGIN,
+    MIN_STRAIGHT_EDGE,
     OFFSET_STEP,
     SECTION_Y_PADDING,
+    X_SPACING,
 )
 from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.phases._common import (
     _content_station_ys,
+    _grow_section_bbox_downward,
     _grow_section_bbox_upward,
     _set_section_bbox_top,
 )
 from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
+
+# A producer this far below the section's top trunk row is treated as
+# sitting on a downward branch, so its off-track output drops below it
+# rather than lifting back across the trunk.  Sized below a full Y slot so
+# it ignores offset/rounding noise on a flat trunk yet fires on any genuine
+# one-slot downward branch.
+_DOWNWARD_BRANCH_SLOP: float = ICON_HALF_HEIGHT
+
+# Flat run reserved on the output icon's side after the diagonal, before the
+# icon.  Half a station gap: enough for the line to read as a settled
+# horizontal approach into the icon, without stretching the section.
+_OUTPUT_TAIL: float = X_SPACING / 2
 
 
 def _insert_phantom_pass_throughs(
@@ -73,47 +89,74 @@ def _insert_phantom_pass_throughs(
             )
 
 
-def _space_off_track_output_columns(
+def _off_track_output_lead(
+    producer: Station,
+    n_out_targets: int,
+    is_downward: bool,
+) -> float:
+    """Flat run reserved on the producer's side of an off-track output diagonal.
+
+    Mirrors the straight-run length the router holds before the
+    producer-to-output diagonal: a multi-target producer keeps the diagonal
+    past half its name label, and a downward drop keeps it past the label's
+    far edge (which sits below the producer, on the side the output drops
+    toward).  A non-forking producer reserves only the base edge straight.
+    """
+    lead = MIN_STRAIGHT_EDGE
+    if producer.label.strip():
+        if n_out_targets > 1:
+            lead = max(lead, label_text_width(producer.label) / 2)
+        if is_downward:
+            lead = max(lead, label_text_width(producer.label) / 2 + LABEL_BBOX_MARGIN)
+    return lead
+
+
+def _space_off_track_outputs(
     sub: MetroGraph,
     layers: dict[str, int],
-) -> None:
-    """Reserve a clear column for each off-track output's hanging icon.
+    tracks: dict[str, float],
+) -> dict[str, float]:
+    """Per-output X offset so each off-track output hangs at a consistent run.
 
-    An off-track output is laid out one layer past its producer -- the same
-    column as the producer's on-track successor -- so its icon, hanging
-    toward the next station, overlaps that station and the riser leaving it.
-    Each producer feeding an off-track output reserves its output's column
-    by pushing every later on-track station one column further right (a
-    station past ``k`` such producers moves ``k`` columns), while the output
-    itself is pinned one column past its producer, so it owns the column
-    between them.
+    Each off-track output hangs off its producer with the same S-shape: a flat
+    run (the producer-label clearance), a standard-slope diagonal, then a fixed
+    flat tail (``_OUTPUT_TAIL``) into the icon.  The icon is placed at
+    ``producer.x + lead + DIAGONAL_RUN + _OUTPUT_TAIL`` so the tail after the
+    diagonal is exactly ``_OUTPUT_TAIL`` for every output.
 
-    Mutates ``layers`` in place.  A no-op when no on-track station feeds an
-    off-track target (every off-track input is a source, so input-only
-    sections are untouched).
+    Returns a map of each output station id to the X offset it gets on top of
+    its layer base; the output sits at its producer's layer, so its base X
+    equals the producer's X and the offset is the full run.  On-track stations
+    keep their own columns -- the output hangs in a row above or below the
+    trunk, so it shares X with the next station without overlapping it.  Empty
+    when no on-track station feeds an off-track output.
     """
-    producer_layer_of_output: dict[str, int] = {}
-    producer_layers: set[int] = set()
+    on_track_tracks = [
+        t
+        for sid, t in tracks.items()
+        if not sub.stations[sid].off_track and not sub.stations[sid].is_hidden
+    ]
+    top_track = min(on_track_tracks) if on_track_tracks else 0.0
+
+    output_extra: dict[str, float] = {}
     for sid, station in sub.stations.items():
         if station.off_track or station.is_hidden or sid not in layers:
             continue
-        for edge in sub.edges_from(sid):
-            target = sub.stations.get(edge.target)
-            if target is not None and target.off_track and not target.is_hidden:
-                producer_layer_of_output[edge.target] = layers[sid]
-                producer_layers.add(layers[sid])
-    if not producer_layers:
-        return
+        targets = [
+            e.target
+            for e in sub.edges_from(sid)
+            if e.target in sub.stations and not sub.stations[e.target].is_hidden
+        ]
+        for target_id in targets:
+            target = sub.stations[target_id]
+            if not target.off_track:
+                continue
+            is_downward = tracks.get(sid, top_track) > top_track
+            lead = _off_track_output_lead(station, len(targets), is_downward)
+            output_extra[target_id] = lead + DIAGONAL_RUN + _OUTPUT_TAIL
+            layers[target_id] = layers[sid]
 
-    def _columns_reserved_before(layer: int) -> int:
-        return sum(1 for pl in producer_layers if pl < layer)
-
-    for sid in layers:
-        producer_layer = producer_layer_of_output.get(sid)
-        if producer_layer is not None:
-            layers[sid] = producer_layer + 1 + _columns_reserved_before(producer_layer)
-        else:
-            layers[sid] += _columns_reserved_before(layers[sid])
+    return output_extra
 
 
 def _align_phantom_pass_throughs(
@@ -410,6 +453,58 @@ def _off_track_anchor_of(graph: MetroGraph) -> dict[str, str]:
     return anchor_of
 
 
+def _off_track_output_below(graph: MetroGraph) -> set[str]:
+    """Off-track outputs whose producer sits on a downward branch.
+
+    An off-track output (a producer-fed sink) is normally lifted *above*
+    its producer.  When the producer sits below the section's top trunk
+    row -- i.e. it is on a downward branch off the trunk -- lifting the
+    output up forces it back across the trunk to sit above it.  Such an
+    output is instead dropped *below* its producer so a downward-branch
+    output runs straight down.
+
+    The trunk row is taken to be the topmost on-track station Y in the
+    section (the same fallback anchor :func:`_off_track_groups` uses).  A
+    producer more than one ``y_spacing``-equivalent slot below that row is
+    treated as a downward branch; the slot floor keeps a flat trunk (every
+    on-track station at one Y) inferring no downward outputs.
+
+    Only outputs (sinks) are considered; off-track inputs always lift above
+    their consumer.
+    """
+    junction_ids = graph.junction_ids
+    anchor_of = _off_track_anchor_of(graph)
+
+    section_top_y: dict[str, float] = {}
+    for section in graph.sections.values():
+        ys = [
+            graph.stations[sid].y
+            for sid in section.station_ids
+            if sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not graph.stations[sid].off_track
+            and sid not in junction_ids
+        ]
+        if ys:
+            section_top_y[section.id] = min(ys)
+
+    below: set[str] = set()
+    for off_id, anchor_id in anchor_of.items():
+        off_st = graph.stations.get(off_id)
+        anchor_st = graph.stations.get(anchor_id)
+        if off_st is None or anchor_st is None or not off_st.section_id:
+            continue
+        # Inputs feed their anchor; only producer-fed sinks may drop down.
+        if any(e.target == anchor_id for e in graph.edges_from(off_id)):
+            continue
+        top_y = section_top_y.get(off_st.section_id)
+        if top_y is None:
+            continue
+        if anchor_st.y > top_y + _DOWNWARD_BRANCH_SLOP:
+            below.add(off_id)
+    return below
+
+
 def _off_track_groups(
     graph: MetroGraph,
 ) -> dict[str, tuple[str, dict[str, list[Station]]]]:
@@ -503,9 +598,9 @@ def _off_track_lift_step(
 
     A section that is a single horizontal trunk has no parallel tracks, so the
     diagonal-label band that widened the graph-wide ``y_spacing`` is wasted
-    vertical room here: it would strand the off-track icon far above the trunk
-    (issue #580).  Such a section lifts by the base content pitch
-    (``graph._base_y_spacing``) instead.
+    vertical room here: it would strand the off-track icon far above the trunk.
+    Such a section lifts by the base content pitch (``graph._base_y_spacing``)
+    instead.
 
     Multi-track sections, and any section with no recorded base pitch, keep the
     passed-in ``y_spacing``.  The base only applies when strictly smaller, so an
@@ -519,30 +614,38 @@ def _off_track_lift_step(
     return base
 
 
-def _place_off_track_above_consumers(
+def _place_off_track_relative_to_anchors(
     graph: MetroGraph,
     y_spacing: float,
     section_id: str,
     fallback_consumer_id: str,
     by_consumer: dict[str, list[Station]],
-) -> float | None:
-    """Place each off-track input ``n*y_spacing`` above its consumer.
+    below: set[str] | None = None,
+) -> tuple[float | None, float | None]:
+    """Place each off-track station ``n*y_spacing`` from its anchor.
 
-    Multiple inputs feeding the same consumer stack upward in
-    ``y_spacing`` steps.  When the natural ``consumer_y - k*y_spacing``
-    slot would put the icon on top of another trunk station's line band
-    in the same column (e.g. ``net_in`` at the gsea-trunk Y when
-    decoupler sits one slot below gsea at non-savepoint params), the
-    slot is bumped upward by additional ``y_spacing`` steps until the
-    icon's vertical bbox clears every line-bearing track in its column
-    and every sibling off-track already placed in the same column.
+    Stations not in ``below`` lift *above* their anchor (smaller Y);
+    those in ``below`` -- producer-fed outputs on a downward branch --
+    drop *below* it (larger Y) so they run straight down instead of
+    crossing back over the trunk.
 
-    Returns the smallest assigned Y (topmost lifted station), or
-    ``None`` when no stations were placed.
+    Multiple stations sharing an anchor stack in ``y_spacing`` steps away
+    from it.  When the natural slot would put the icon on top of another
+    trunk station's line band in the same column (e.g. ``net_in`` at the
+    gsea-trunk Y when decoupler sits one slot below gsea at non-savepoint
+    params), the slot is bumped further from the anchor by additional
+    ``y_spacing`` steps until the icon's vertical bbox clears every
+    line-bearing track in its column and every sibling off-track already
+    placed in the same column.
+
+    Returns ``(highest_y, lowest_y)`` -- the topmost above-anchor Y and
+    the bottommost below-anchor Y -- with ``None`` for a direction that
+    placed no stations.
     """
     section = graph.sections.get(section_id)
     sec_dir = section.direction if section is not None else "LR"
     junction_ids = graph.junction_ids
+    below = below or set()
 
     step = _off_track_lift_step(graph, section, junction_ids, y_spacing)
 
@@ -566,18 +669,22 @@ def _place_off_track_above_consumers(
     )
 
     highest_y: float | None = None
+    lowest_y: float | None = None
     for consumer_id, stations in ordered_consumers:
         anchor_id = consumer_id if consumer_id else fallback_consumer_id
         anchor = graph.stations.get(anchor_id)
         if anchor is None:
             continue
         consumer_y = anchor.y
-        # Preserve original Y order: input closest to the top stays
-        # topmost in the stack.
+        # Preserve original Y order: station closest to the trunk stays
+        # innermost in the stack.
         stations.sort(key=lambda s: s.y)
-        n = len(stations)
-        for i, st in enumerate(stations):
-            base_step = n - i
+        up_stations = [s for s in stations if s.id not in below]
+        down_stations = [s for s in stations if s.id in below]
+
+        n_up = len(up_stations)
+        for i, st in enumerate(up_stations):
+            base_step = n_up - i
             candidate_y = consumer_y - base_step * step
             if section is not None and sec_dir in ("LR", "RL"):
                 candidate_y = _bump_off_track_clear_of_trunks(
@@ -588,12 +695,32 @@ def _place_off_track_above_consumers(
                     section,
                     junction_ids,
                     sibling_ys=used_ys_per_col[round(st.x, 1)],
+                    direction=-1,
                 )
             st.y = candidate_y
             used_ys_per_col[round(st.x, 1)].append(st.y)
             if highest_y is None or st.y < highest_y:
                 highest_y = st.y
-    return highest_y
+
+        for i, st in enumerate(down_stations):
+            base_step = i + 1
+            candidate_y = consumer_y + base_step * step
+            if section is not None and sec_dir in ("LR", "RL"):
+                candidate_y = _bump_off_track_clear_of_trunks(
+                    graph,
+                    st,
+                    candidate_y,
+                    step,
+                    section,
+                    junction_ids,
+                    sibling_ys=used_ys_per_col[round(st.x, 1)],
+                    direction=1,
+                )
+            st.y = candidate_y
+            used_ys_per_col[round(st.x, 1)].append(st.y)
+            if lowest_y is None or st.y > lowest_y:
+                lowest_y = st.y
+    return highest_y, lowest_y
 
 
 def _bump_off_track_clear_of_trunks(
@@ -604,8 +731,9 @@ def _bump_off_track_clear_of_trunks(
     section: Section,
     junction_ids: set[str],
     sibling_ys: list[float] | None = None,
+    direction: int = -1,
 ) -> float:
-    """Return ``candidate_y`` raised so the off-track icon clears any
+    """Return ``candidate_y`` shifted so the off-track icon clears any
     trunk line track passing through the icon's X column.
 
     The renderer places an off-track icon at the station's Y with file-
@@ -614,8 +742,9 @@ def _bump_off_track_clear_of_trunks(
     trunk station downstream of the icon (LR: higher X; RL: lower X)
     has tracks at Y values inside ``[candidate_y - icon_half,
     candidate_y + icon_half]``, the segment from the section's entry
-    port to that trunk crosses the icon.  Bump up by ``step``
-    increments until the band clears.
+    port to that trunk crosses the icon.  Bump away from the anchor
+    (``direction`` -1 = up, +1 = down) by ``step`` increments until the
+    band clears.
 
     ``sibling_ys`` is a list of Ys already taken by other off-track
     inputs in the same column - the bump must also clear those (within
@@ -687,7 +816,7 @@ def _bump_off_track_clear_of_trunks(
     y = candidate_y
     steps = 0
     while _overlaps(y) and steps < MAX_STEPS:
-        y -= step
+        y += direction * step
         steps += 1
     return y
 
@@ -720,18 +849,20 @@ def _lift_off_track_stations(
     if not groups:
         return
 
+    below = _off_track_output_below(graph)
     for sec_id, (fallback_id, by_consumer) in groups.items():
         section = graph.sections.get(sec_id)
         if section is None:
             continue
-        highest_y = _place_off_track_above_consumers(
-            graph, y_spacing, sec_id, fallback_id, by_consumer
+        highest_y, lowest_y = _place_off_track_relative_to_anchors(
+            graph, y_spacing, sec_id, fallback_id, by_consumer, below
         )
-        if highest_y is None:
-            continue
-        new_bbox_top = highest_y - section_y_padding
-        if new_bbox_top < section.bbox_y:
-            _grow_section_bbox_upward(graph, section, new_bbox_top)
+        if highest_y is not None:
+            new_bbox_top = highest_y - section_y_padding
+            if new_bbox_top < section.bbox_y:
+                _grow_section_bbox_upward(graph, section, new_bbox_top)
+        if lowest_y is not None:
+            _grow_section_bbox_downward(graph, section, lowest_y + section_y_padding)
 
 
 def _off_track_fit_top(
@@ -807,15 +938,22 @@ def _reanchor_off_track_to_consumer(
             "snap, otherwise off-track icons re-anchor to non-final Ys"
         )
     groups = _off_track_groups(graph)
+    if not groups:
+        return
+
+    below = _off_track_output_below(graph)
     for sec_id, (fallback_id, by_consumer) in groups.items():
-        highest_y = _place_off_track_above_consumers(
-            graph, y_spacing, sec_id, fallback_id, by_consumer
+        highest_y, lowest_y = _place_off_track_relative_to_anchors(
+            graph, y_spacing, sec_id, fallback_id, by_consumer, below
         )
-        if highest_y is None:
-            continue
         section = graph.sections.get(sec_id)
         if section is None:
             continue
-        desired_top = _off_track_fit_top(graph, section, highest_y, section_y_padding)
-        if abs(desired_top - section.bbox_y) > 0.5:
-            _set_section_bbox_top(graph, section, desired_top)
+        if highest_y is not None:
+            desired_top = _off_track_fit_top(
+                graph, section, highest_y, section_y_padding
+            )
+            if abs(desired_top - section.bbox_y) > 0.5:
+                _set_section_bbox_top(graph, section, desired_top)
+        if lowest_y is not None:
+            _grow_section_bbox_downward(graph, section, lowest_y + section_y_padding)

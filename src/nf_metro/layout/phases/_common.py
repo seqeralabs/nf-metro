@@ -612,6 +612,20 @@ def _build_section_subgraph(graph: MetroGraph, section: Section) -> MetroGraph:
     return sub
 
 
+def _pull_section_ports_to_edge(
+    graph: MetroGraph, section: Section, side: PortSide, edge_y: float
+) -> None:
+    """Move every port on *side* of *section* to *edge_y*."""
+    for pid in section.entry_ports + section.exit_ports:
+        port = graph.ports.get(pid)
+        port_st = graph.stations.get(pid)
+        if not port or not port_st:
+            continue
+        if port.side == side:
+            port_st.y = edge_y
+            port.y = edge_y
+
+
 def _set_section_bbox_top(
     graph: MetroGraph, section: Section, new_bbox_top: float
 ) -> None:
@@ -623,14 +637,7 @@ def _set_section_bbox_top(
     """
     section.bbox_h += section.bbox_y - new_bbox_top
     section.bbox_y = new_bbox_top
-    for pid in section.entry_ports + section.exit_ports:
-        port = graph.ports.get(pid)
-        port_st = graph.stations.get(pid)
-        if not port or not port_st:
-            continue
-        if port.side == PortSide.TOP:
-            port_st.y = section.bbox_y
-            port.y = port_st.y
+    _pull_section_ports_to_edge(graph, section, PortSide.TOP, section.bbox_y)
 
 
 def _grow_section_bbox_upward(
@@ -643,3 +650,18 @@ def _grow_section_bbox_upward(
     :func:`_set_section_bbox_top` for the bidirectional primitive.
     """
     _set_section_bbox_top(graph, section, new_bbox_top)
+
+
+def _grow_section_bbox_downward(
+    graph: MetroGraph, section: Section, new_bbox_bottom: float
+) -> None:
+    """Expand a section's bbox downward to *new_bbox_bottom* and pull BOTTOM
+    ports along.  Grow-only: a *new_bbox_bottom* at or above the current
+    bottom edge is a no-op, so the box is never raised.
+    """
+    if new_bbox_bottom <= section.bbox_y + section.bbox_h:
+        return
+    section.bbox_h = new_bbox_bottom - section.bbox_y
+    _pull_section_ports_to_edge(
+        graph, section, PortSide.BOTTOM, section.bbox_y + section.bbox_h
+    )

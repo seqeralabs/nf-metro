@@ -36,6 +36,7 @@ from nf_metro.layout.phases.bbox import _section_fit_top
 from nf_metro.layout.phases.off_track import (
     _is_single_trunk_lr_section,
     _off_track_anchor_of,
+    _off_track_output_below,
 )
 from nf_metro.layout.phases.single_section import _terminus_y_overhang
 from nf_metro.layout.phases.spacing import (
@@ -1897,20 +1898,32 @@ def _guard_fanout_tail_join(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
-def _guard_off_track_above_anchor(graph: MetroGraph, phase: str) -> None:
+def _guard_off_track_clear_of_anchor(graph: MetroGraph, phase: str) -> None:
     """At final: every off-track station must sit at least ``GUARD_TOLERANCE``
-    above (smaller Y than) its anchor.
+    clear of its anchor on the expected side.
 
     An input's anchor is its consumer, a producer-fed sink's anchor is its
     producer; :func:`_off_track_anchor_of` resolves which, so the same Y
-    relationship is enforced for both roles (#573).
+    relationship is enforced for both roles.  Outputs are normally lifted
+    above (smaller Y) their producer, but an output whose producer sits on a
+    downward branch is dropped below it (:func:`_off_track_output_below`); such
+    outputs are required to sit below (larger Y) so a downward-branch output
+    does not cross back over the trunk.
     """
+    below = _off_track_output_below(graph)
     for off_id, anchor_id in _off_track_anchor_of(graph).items():
         off_st = graph.stations.get(off_id)
         anchor_st = graph.stations.get(anchor_id)
         if off_st is None or anchor_st is None:
             continue
-        if not (off_st.y < anchor_st.y - GUARD_TOLERANCE):
+        if off_id in below:
+            if not (off_st.y > anchor_st.y + GUARD_TOLERANCE):
+                raise PhaseInvariantError(
+                    f"{phase}: downward off-track output {off_id!r} "
+                    f"y={off_st.y:.1f} not below anchor {anchor_id!r} "
+                    f"y={anchor_st.y:.1f}"
+                )
+        elif not (off_st.y < anchor_st.y - GUARD_TOLERANCE):
             raise PhaseInvariantError(
                 f"{phase}: off-track {off_id!r} y={off_st.y:.1f} "
                 f"not above anchor {anchor_id!r} y={anchor_st.y:.1f}"
@@ -2118,7 +2131,7 @@ def _run_pass_c_guards(
     Always excluded from the bisection set (only meaningful at the
     final boundary):
 
-    * ``_guard_off_track_above_anchor`` -- Stage 6.4's snap-to-grid
+    * ``_guard_off_track_clear_of_anchor`` -- Stage 6.4's snap-to-grid
       shifts the on-track anchor (consumer or producer) Y by up to half
       a pitch before Stage 6.6 re-anchors the off-track station.
     * ``_guard_row_trunk_cy_consistent`` -- the row trunk Y is only
