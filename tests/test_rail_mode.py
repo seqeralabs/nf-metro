@@ -1239,6 +1239,30 @@ def test_spanning_rail_station_marker_tints_interchange():
 # ---------------------------------------------------------------------------
 
 RAIL_SINGLE_LINE_CALLERS_MMD = FIXTURES / "rail_single_line_callers.mmd"
+RAIL_PITCH_VS_LABELS_MMD = FIXTURES / "rail_pitch_vs_labels.mmd"
+
+
+def test_rail_pitch_stays_at_base_when_labels_widen_y_spacing():
+    """Rails sit one base grid pitch apart regardless of label-driven spacing.
+
+    A marker collision elsewhere makes the spread loop widen the global
+    ``y_spacing`` for between-station label clearance.  Rail labels hang above
+    or below the bundle, not between the rails, so that widening must not push
+    the rails apart: the rail-to-rail gap stays at the base pitch.
+    """
+    from nf_metro.layout.engine import compute_min_y_spacing
+
+    graph = parse_metro_mermaid(RAIL_PITCH_VS_LABELS_MMD.read_text())
+    base = compute_min_y_spacing(graph)
+    compute_layout(graph)
+    rail_ys = sorted(graph._rail_y.get("calling", {}).values())
+    assert len(rail_ys) >= 2, "fixture must lay out at least two rails"
+    gaps = [rail_ys[i + 1] - rail_ys[i] for i in range(len(rail_ys) - 1)]
+    assert max(gaps) <= base + 1.0, (
+        f"rails spaced {max(gaps):.1f}px apart, beyond the base pitch "
+        f"{base:.1f}px; a label-driven y_spacing widening leaked into the "
+        f"rail gap"
+    )
 
 
 def _diagonal_label_placements(graph):
