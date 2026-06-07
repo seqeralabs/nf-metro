@@ -313,7 +313,14 @@ def _resolve_station_collisions(
         primary, secondary, primary_step, step = "x", "y", x_spacing, y_spacing
 
     EPS = 0.5
-    real = [s for s in sub.stations.values() if not s.is_port and not s.is_hidden]
+    # Off-track stations carry a placeholder Y here (the off-track lift in
+    # Stage 5.2 overwrites it); letting that placeholder occupy a cell would
+    # cascade on-track siblings off their true rows.
+    real = [
+        s
+        for s in sub.stations.values()
+        if not s.is_port and not s.is_hidden and not s.off_track
+    ]
     if len(real) < 2:
         return
 

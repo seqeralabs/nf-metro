@@ -1162,6 +1162,26 @@ def test_off_track_output_icon_clears_on_track_markers(fixture):
             )
 
 
+def test_off_track_placeholder_does_not_displace_on_track_rows():
+    """On-track placement is independent of off-track output placeholders.
+
+    Off-track stations carry a placeholder Y until the Stage 5.2 lift; that
+    placeholder must not occupy an on-track cell and cascade an on-track
+    sibling onto a phantom row.  The lower arm of the
+    ``bwa -> {convert, markdup} -> bqsr`` diamond therefore sits exactly one
+    grid row below the trunk.
+    """
+    graph = _layout("off_track_outputs.mmd")
+    y_spacing = compute_min_y_spacing(graph)
+    trunk_y = graph.stations["convert"].y
+    arm_drop = graph.stations["markdup"].y - trunk_y
+    assert arm_drop == pytest.approx(y_spacing, abs=_Y_TOL), (
+        f"diamond lower arm sits {arm_drop:.0f}px below the trunk; expected "
+        f"one {y_spacing:.0f}px row (an off-track placeholder cascaded it onto "
+        f"a phantom extra row)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Off-track outputs on a downward branch drop below their producer
 # ---------------------------------------------------------------------------
