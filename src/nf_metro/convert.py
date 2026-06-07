@@ -256,6 +256,115 @@ def _break_cycles(
 # ---------------------------------------------------------------------------
 # Section and line assignment
 # ---------------------------------------------------------------------------
+@dataclass
+class _SectionAssignment:
+    """Mapping of kept process nodes to sections.
+
+    The three fields are mutually consistent views of the same grouping:
+    ``node_section[nid]`` is the section key for node ``nid``, ``names[key]``
+    is that section's display name, and ``nodes[key]`` lists the node ids
+    in that section.
+    """
+
+    node_section: dict[str, str] = field(default_factory=dict)
+    names: dict[str, str] = field(default_factory=dict)
+    nodes: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
+
+
+def _assign_sections(
+    kept_ids: set[str], dag: _ParsedDag, title: str
+) -> _SectionAssignment:
+    """Group kept process nodes into sections.
+
+    Processes inside a named subgraph are assigned to that subgraph's section.
+    Processes outside any subgraph go into a synthesised section: ``__pipeline``
+    (named after the title) when there are no subgraphs at all, otherwise
+    ``__reporting``.
+    """
+    assignment = _SectionAssignment()
+
+    for nid in sorted(kept_ids):
+        node = dag.nodes[nid]
+        if node.subgraph and node.subgraph in dag.subgraphs:
+            sg = dag.subgraphs[node.subgraph]
+            assignment.node_section[nid] = node.subgraph
+            assignment.names[node.subgraph] = sg.short_name
+            assignment.nodes[node.subgraph].append(nid)
+
+    unassigned = sorted(nid for nid in kept_ids if nid not in assignment.node_section)
+    if unassigned:
+        if not assignment.names:
+            auto_key = "__pipeline"
+            assignment.names[auto_key] = title or "Pipeline"
+        else:
+            auto_key = "__reporting"
+            assignment.names[auto_key] = "Reporting"
+        for nid in unassigned:
+            assignment.node_section[nid] = auto_key
+            assignment.nodes[auto_key].append(nid)
+
+    return assignment
+
+
+def _classify_edges(
+    edges: list[tuple[str, str]], node_section: dict[str, str]
+) -> tuple[dict[str, list[tuple[str, str]]], list[tuple[str, str]]]:
+    """Partition edges into per-section intra edges and inter-section edges.
+
+    Edges whose endpoints lack a section assignment are dropped.
+    """
+    intra_edges: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    inter_edges: list[tuple[str, str]] = []
+
+    for src, tgt in edges:
+        src_sec = node_section.get(src)
+        tgt_sec = node_section.get(tgt)
+        if src_sec and tgt_sec:
+            if src_sec == tgt_sec:
+                intra_edges[src_sec].append((src, tgt))
+            else:
+                inter_edges.append((src, tgt))
+
+    return intra_edges, inter_edges
+
+
+def _order_section_nodes(
+    section_nodes: dict[str, list[str]], edges: list[tuple[str, str]]
+) -> dict[str, list[str]]:
+    """Topologically order the nodes within each section (Kahn's algorithm).
+
+    Ordering uses every edge whose endpoints both fall inside the section
+    (intra and inter alike). Nodes not reachable by the sort are appended in
+    their original order.
+    """
+    section_node_order: dict[str, list[str]] = {}
+    for sec_key, nids in section_nodes.items():
+        local_nodes = set(nids)
+        local_adj: dict[str, list[str]] = {n: [] for n in nids}
+        local_in: dict[str, int] = {n: 0 for n in nids}
+
+        for src, tgt in edges:
+            if src in local_nodes and tgt in local_nodes:
+                local_adj[src].append(tgt)
+                local_in[tgt] += 1
+
+        q = deque(n for n in nids if local_in[n] == 0)
+        ordered: list[str] = []
+        while q:
+            n = q.popleft()
+            ordered.append(n)
+            for succ in local_adj[n]:
+                local_in[succ] -= 1
+                if local_in[succ] == 0:
+                    q.append(succ)
+        for n in nids:
+            if n not in ordered:
+                ordered.append(n)
+        section_node_order[sec_key] = ordered
+
+    return section_node_order
+
+
 def _topological_order(
     section_ids: list[str],
     edges: list[tuple[str, str]],
@@ -354,6 +463,200 @@ def _allocate_station_ids(
 
 
 # ---------------------------------------------------------------------------
+# Line assignment
+# ---------------------------------------------------------------------------
+@dataclass
+class _LineAssignment:
+    """Metro lines and the edge groupings that feed emission.
+
+    ``main`` carries adjacent flow; ``bypass_lines`` keys a ``(src_sec,
+    tgt_sec)`` section pair to its ``(id, name, color)``; ``spur`` (when
+    present) carries dead-end branches. ``edge_line`` maps every emitted edge
+    to its line id, and ``main_inter_edges`` / ``bypass_groups`` partition the
+    inter-section edges for emission order.
+    """
+
+    main: tuple[str, str, str]
+    spur: tuple[str, str, str] | None
+    bypass_lines: dict[tuple[str, str], tuple[str, str, str]]
+    edge_line: dict[tuple[str, str], str]
+    main_inter_edges: list[tuple[str, str]]
+    bypass_groups: dict[tuple[str, str], list[tuple[str, str]]]
+
+
+def _assign_lines(
+    kept_ids: set[str],
+    edges: list[tuple[str, str]],
+    intra_edges: dict[str, list[tuple[str, str]]],
+    inter_edges: list[tuple[str, str]],
+    node_section: dict[str, str],
+    section_names: dict[str, str],
+    section_order: list[str],
+) -> _LineAssignment:
+    """Build metro lines and map each edge to its line.
+
+    Dead-end processes (mid-pipeline processes with no successors, excluding
+    the last section) branch off onto a ``spur`` line. Inter-section edges
+    spanning two or more sections become per-pair ``bypass`` lines; adjacent
+    inter-section edges stay on ``main``.
+    """
+    section_rank = {sid: i for i, sid in enumerate(section_order)}
+
+    successors_map: dict[str, set[str]] = defaultdict(set)
+    for src, tgt in edges:
+        successors_map[src].add(tgt)
+
+    last_section = section_order[-1] if section_order else None
+    dead_ends: set[str] = set()
+    for nid in kept_ids:
+        if not successors_map.get(nid) and node_section.get(nid) != last_section:
+            dead_ends.add(nid)
+
+    spur_edges: set[tuple[str, str]] = set()
+    for src, tgt in edges:
+        if tgt in dead_ends:
+            spur_edges.add((src, tgt))
+
+    bypass_groups: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
+    main_inter_edges: list[tuple[str, str]] = []
+    for src, tgt in inter_edges:
+        if (src, tgt) in spur_edges:
+            continue
+        src_sec = node_section[src]
+        tgt_sec = node_section[tgt]
+        span = abs(section_rank.get(tgt_sec, 0) - section_rank.get(src_sec, 0))
+        if span >= 2:
+            bypass_groups[(src_sec, tgt_sec)].append((src, tgt))
+        else:
+            main_inter_edges.append((src, tgt))
+
+    color_idx = 0
+    main_line_id = "main"
+    main = (main_line_id, "Main", LINE_COLORS[color_idx % len(LINE_COLORS)])
+    color_idx += 1
+
+    bypass_lines: dict[tuple[str, str], tuple[str, str, str]] = {}
+    for src_sec, tgt_sec in sorted(bypass_groups.keys()):
+        src_name = _humanize_label(section_names[src_sec], abbreviate=False)
+        tgt_name = _humanize_label(section_names[tgt_sec], abbreviate=False)
+        line_id = _sanitize_id(f"{section_names[src_sec]}_{section_names[tgt_sec]}")
+        line_name = f"{src_name} - {tgt_name}"
+        line_color = LINE_COLORS[color_idx % len(LINE_COLORS)]
+        color_idx += 1
+        bypass_lines[(src_sec, tgt_sec)] = (line_id, line_name, line_color)
+
+    spur: tuple[str, str, str] | None = None
+    spur_line_id = ""
+    if spur_edges:
+        spur_line_id = "spur"
+        spur = (spur_line_id, "Spur", LINE_COLORS[color_idx % len(LINE_COLORS)])
+        color_idx += 1
+
+    edge_line: dict[tuple[str, str], str] = {}
+    for _sec_key, sec_edges in intra_edges.items():
+        for e in sec_edges:
+            edge_line[e] = spur_line_id if e in spur_edges else main_line_id
+    for e in main_inter_edges:
+        edge_line[e] = main_line_id
+    for (src_sec, tgt_sec), bp_edges in bypass_groups.items():
+        line_id = bypass_lines[(src_sec, tgt_sec)][0]
+        for e in bp_edges:
+            edge_line[e] = line_id
+    for e in spur_edges:
+        if e not in edge_line:
+            edge_line[e] = spur_line_id
+
+    return _LineAssignment(
+        main=main,
+        spur=spur,
+        bypass_lines=bypass_lines,
+        edge_line=edge_line,
+        main_inter_edges=main_inter_edges,
+        bypass_groups=bypass_groups,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Title inference and emission
+# ---------------------------------------------------------------------------
+def _infer_title(section_names: dict[str, str], section_order: list[str]) -> str:
+    """Derive a pipeline title from the section names."""
+    if len(section_names) == 1 and "__pipeline" in section_names:
+        return "Pipeline"
+    named_secs = [
+        _humanize_label(section_names[k])
+        for k in section_order
+        if not k.startswith("__")
+    ]
+    if named_secs:
+        return " / ".join(named_secs) + " Pipeline"
+    return "Pipeline"
+
+
+def _emit_mmd(
+    title: str,
+    section_order: list[str],
+    section_names: dict[str, str],
+    section_node_order: dict[str, list[str]],
+    intra_edges: dict[str, list[tuple[str, str]]],
+    lines: _LineAssignment,
+    station_ids: dict[str, str],
+    nodes: dict[str, _NfNode],
+) -> str:
+    """Assemble the nf-metro ``.mmd`` text from the resolved layout."""
+    main_line_id, main_line_name, main_color = lines.main
+
+    out: list[str] = []
+    out.append(f"%%metro title: {title}")
+    out.append("%%metro style: dark")
+    out.append("%%metro line_order: span")
+    out.append(f"%%metro line: {main_line_id} | {main_line_name} | {main_color}")
+    if lines.spur:
+        spur_id, spur_name, spur_color = lines.spur
+        out.append(f"%%metro line: {spur_id} | {spur_name} | {spur_color}")
+    for (_src_sec, _tgt_sec), (lid, lname, lcolor) in sorted(
+        lines.bypass_lines.items(), key=lambda x: x[1][0]
+    ):
+        out.append(f"%%metro line: {lid} | {lname} | {lcolor}")
+    out.append("")
+    out.append("graph LR")
+
+    for sec_key in section_order:
+        sec_name = section_names[sec_key]
+        sec_id = _sanitize_id(sec_name)
+        display = _humanize_label(sec_name, abbreviate=False)
+        ordered_nodes = section_node_order.get(sec_key, [])
+
+        out.append(f"    subgraph {sec_id} [{display}]")
+
+        for nid in ordered_nodes:
+            label = _humanize_label(nodes[nid].label)
+            out.append(f"        {station_ids[nid]}([{label}])")
+
+        sec_edges = intra_edges.get(sec_key, [])
+        if sec_edges:
+            out.append("")
+            for src, tgt in sec_edges:
+                lid = lines.edge_line.get((src, tgt), main_line_id)
+                out.append(f"        {station_ids[src]} -->|{lid}| {station_ids[tgt]}")
+
+        out.append("    end")
+        out.append("")
+
+    all_inter = lines.main_inter_edges[:]
+    for bp_edges in lines.bypass_groups.values():
+        all_inter.extend(bp_edges)
+
+    if all_inter:
+        out.append("    %% Inter-section edges")
+        for src, tgt in all_inter:
+            lid = lines.edge_line.get((src, tgt), main_line_id)
+            out.append(f"    {station_ids[src]} -->|{lid}| {station_ids[tgt]}")
+
+    return "\n".join(out) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 def convert_nextflow_dag(text: str, title: str = "") -> str:
@@ -373,258 +676,46 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
     """
     dag = _parse_nextflow_mermaid(text)
 
-    # Classify: keep process (stadium) nodes, drop everything else
+    # Keep process (stadium) nodes, drop everything else
     kept_ids = {nid for nid, node in dag.nodes.items() if node.shape == "stadium"}
     if not kept_ids:
         return "%%metro title: Empty Pipeline\n\ngraph LR\n"
 
-    # Reconnect edges through dropped nodes
     edges = _reconnect_edges(kept_ids, dag.edges)
-
-    # Break cycles if any
     edges = _break_cycles(kept_ids, edges)
 
-    # Map processes to sections
-    # node_id -> section_key (sg_key for subgraph processes, auto-key for unassigned)
-    node_section: dict[str, str] = {}
-    section_names: dict[str, str] = {}  # section_key -> display name
-    section_nodes: dict[str, list[str]] = defaultdict(list)  # section_key -> [node_ids]
+    sections = _assign_sections(kept_ids, dag, title)
+    section_order = _topological_order(
+        list(sections.names.keys()), edges, sections.node_section
+    )
 
-    for nid in sorted(kept_ids):
-        node = dag.nodes[nid]
-        if node.subgraph and node.subgraph in dag.subgraphs:
-            sg = dag.subgraphs[node.subgraph]
-            node_section[nid] = node.subgraph
-            section_names[node.subgraph] = sg.short_name
-            section_nodes[node.subgraph].append(nid)
-        # Unassigned processes handled below
+    intra_edges, inter_edges = _classify_edges(edges, sections.node_section)
+    lines = _assign_lines(
+        kept_ids,
+        edges,
+        intra_edges,
+        inter_edges,
+        sections.node_section,
+        sections.names,
+        section_order,
+    )
 
-    # Group unassigned processes
-    unassigned = sorted(nid for nid in kept_ids if nid not in node_section)
-    if unassigned:
-        if not section_names:
-            # No subworkflows at all (flat pipeline)
-            auto_key = "__pipeline"
-            section_names[auto_key] = title or "Pipeline"
-            for nid in unassigned:
-                node_section[nid] = auto_key
-                section_nodes[auto_key].append(nid)
-        else:
-            # Has subworkflows but some processes are unassigned
-            auto_key = "__reporting"
-            section_names[auto_key] = "Reporting"
-            for nid in unassigned:
-                node_section[nid] = auto_key
-                section_nodes[auto_key].append(nid)
-
-    # Build section ordering
-    section_keys = list(section_names.keys())
-    section_order = _topological_order(section_keys, edges, node_section)
-    section_rank = {sid: i for i, sid in enumerate(section_order)}
-
-    # Classify edges: intra-section vs inter-section
-    intra_edges: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    inter_edges: list[tuple[str, str]] = []
-
-    for src, tgt in edges:
-        src_sec = node_section.get(src)
-        tgt_sec = node_section.get(tgt)
-        if src_sec and tgt_sec:
-            if src_sec == tgt_sec:
-                intra_edges[src_sec].append((src, tgt))
-            else:
-                inter_edges.append((src, tgt))
-
-    # Detect dead-end processes: mid-pipeline processes with no successors.
-    # These get placed on a "spur" line so they branch off perpendicularly.
-    # Terminal processes (in the last section) are excluded.
-    successors_map: dict[str, set[str]] = defaultdict(set)
-    for src, tgt in edges:
-        successors_map[src].add(tgt)
-
-    last_section = section_order[-1] if section_order else None
-    dead_ends: set[str] = set()
-    for nid in kept_ids:
-        if not successors_map.get(nid) and node_section.get(nid) != last_section:
-            dead_ends.add(nid)
-
-    # Edges targeting a dead-end are "spur" edges
-    spur_edges: set[tuple[str, str]] = set()
-    for src, tgt in edges:
-        if tgt in dead_ends:
-            spur_edges.add((src, tgt))
-
-    # Detect bypass lines: inter-section edges spanning 2+ sections
-    bypass_groups: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
-    main_inter_edges: list[tuple[str, str]] = []
-
-    for src, tgt in inter_edges:
-        if (src, tgt) in spur_edges:
-            continue  # handled separately
-        src_sec = node_section[src]
-        tgt_sec = node_section[tgt]
-        src_rank = section_rank.get(src_sec, 0)
-        tgt_rank = section_rank.get(tgt_sec, 0)
-        span = abs(tgt_rank - src_rank)
-        if span >= 2:
-            bypass_groups[(src_sec, tgt_sec)].append((src, tgt))
-        else:
-            main_inter_edges.append((src, tgt))
-
-    # Build metro lines
-    color_idx = 0
-    main_line_id = "main"
-    main_line_name = "Main"
-    main_color = LINE_COLORS[color_idx % len(LINE_COLORS)]
-    color_idx += 1
-
-    bypass_lines: dict[tuple[str, str], tuple[str, str, str]] = {}
-    for src_sec, tgt_sec in sorted(bypass_groups.keys()):
-        src_name = _humanize_label(section_names[src_sec], abbreviate=False)
-        tgt_name = _humanize_label(section_names[tgt_sec], abbreviate=False)
-        line_id = _sanitize_id(f"{section_names[src_sec]}_{section_names[tgt_sec]}")
-        line_name = f"{src_name} - {tgt_name}"
-        line_color = LINE_COLORS[color_idx % len(LINE_COLORS)]
-        color_idx += 1
-        bypass_lines[(src_sec, tgt_sec)] = (line_id, line_name, line_color)
-
-    # Spur line (for dead-end branches)
-    spur_line_id = ""
-    spur_line_name = ""
-    spur_color = ""
-    if spur_edges:
-        spur_line_id = "spur"
-        spur_line_name = "Spur"
-        spur_color = LINE_COLORS[color_idx % len(LINE_COLORS)]
-        color_idx += 1
-
-    # Build edge -> line_id mapping
-    edge_line: dict[tuple[str, str], str] = {}
-
-    # All intra-section edges get main line (unless they target a dead end)
-    for sec_key, sec_edges in intra_edges.items():
-        for e in sec_edges:
-            if e in spur_edges:
-                edge_line[e] = spur_line_id
-            else:
-                edge_line[e] = main_line_id
-
-    # Adjacent inter-section edges get main line
-    for e in main_inter_edges:
-        edge_line[e] = main_line_id
-
-    # Bypass edges get their bypass line
-    for (src_sec, tgt_sec), bp_edges in bypass_groups.items():
-        line_id = bypass_lines[(src_sec, tgt_sec)][0]
-        for e in bp_edges:
-            edge_line[e] = line_id
-
-    # Spur edges targeting dead ends (inter-section ones not caught above)
-    for e in spur_edges:
-        if e not in edge_line:
-            edge_line[e] = spur_line_id
-
-    # Order nodes within each section topologically
-    section_node_order: dict[str, list[str]] = {}
-    for sec_key, nids in section_nodes.items():
-        # Build local adjacency
-        local_nodes = set(nids)
-        local_adj: dict[str, list[str]] = {n: [] for n in nids}
-        local_in: dict[str, int] = {n: 0 for n in nids}
-
-        # Use all edges (intra + inter) for ordering
-        for src, tgt in edges:
-            if src in local_nodes and tgt in local_nodes:
-                local_adj[src].append(tgt)
-                local_in[tgt] += 1
-
-        # Kahn's
-        q = deque(n for n in nids if local_in[n] == 0)
-        ordered: list[str] = []
-        while q:
-            n = q.popleft()
-            ordered.append(n)
-            for succ in local_adj[n]:
-                local_in[succ] -= 1
-                if local_in[succ] == 0:
-                    q.append(succ)
-        # Add any remaining
-        for n in nids:
-            if n not in ordered:
-                ordered.append(n)
-        section_node_order[sec_key] = ordered
-
+    section_node_order = _order_section_nodes(sections.nodes, edges)
     station_ids = _allocate_station_ids(section_order, section_node_order, dag.nodes)
 
-    # Infer title
     if not title:
-        if len(section_names) == 1 and "__pipeline" in section_names:
-            title = "Pipeline"
-        else:
-            named_secs = [
-                _humanize_label(section_names[k])
-                for k in section_order
-                if not k.startswith("__")
-            ]
-            if named_secs:
-                title = " / ".join(named_secs) + " Pipeline"
-            else:
-                title = "Pipeline"
+        title = _infer_title(sections.names, section_order)
 
-    # Generate .mmd output
-    out: list[str] = []
-    out.append(f"%%metro title: {title}")
-    out.append("%%metro style: dark")
-    out.append("%%metro line_order: span")
-    out.append(f"%%metro line: {main_line_id} | {main_line_name} | {main_color}")
-    if spur_line_id:
-        out.append(f"%%metro line: {spur_line_id} | {spur_line_name} | {spur_color}")
-    for (_src_sec, _tgt_sec), (lid, lname, lcolor) in sorted(
-        bypass_lines.items(), key=lambda x: x[1][0]
-    ):
-        out.append(f"%%metro line: {lid} | {lname} | {lcolor}")
-    out.append("")
-    out.append("graph LR")
-
-    # Emit sections
-    for sec_key in section_order:
-        sec_name = section_names[sec_key]
-        sec_id = _sanitize_id(sec_name)
-        display = _humanize_label(sec_name, abbreviate=False)
-        ordered_nodes = section_node_order.get(sec_key, [])
-
-        out.append(f"    subgraph {sec_id} [{display}]")
-
-        # Station declarations
-        for nid in ordered_nodes:
-            node = dag.nodes[nid]
-            label = _humanize_label(node.label)
-            out.append(f"        {station_ids[nid]}([{label}])")
-
-        # Intra-section edges
-        sec_edges = intra_edges.get(sec_key, [])
-        if sec_edges:
-            out.append("")
-            for src, tgt in sec_edges:
-                lid = edge_line.get((src, tgt), main_line_id)
-                out.append(f"        {station_ids[src]} -->|{lid}| {station_ids[tgt]}")
-
-        out.append("    end")
-        out.append("")
-
-    # Inter-section edges
-    all_inter = main_inter_edges[:]
-    for bp_edges in bypass_groups.values():
-        all_inter.extend(bp_edges)
-
-    if all_inter:
-        out.append("    %% Inter-section edges")
-        for src, tgt in all_inter:
-            lid = edge_line.get((src, tgt), main_line_id)
-            out.append(f"    {station_ids[src]} -->|{lid}| {station_ids[tgt]}")
-
-    # Ensure trailing newline
-    return "\n".join(out) + "\n"
+    return _emit_mmd(
+        title,
+        section_order,
+        sections.names,
+        section_node_order,
+        intra_edges,
+        lines,
+        station_ids,
+        dag.nodes,
+    )
 
 
 def is_nextflow_dag(text: str) -> bool:
