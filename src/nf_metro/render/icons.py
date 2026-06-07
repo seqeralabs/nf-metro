@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-__all__ = ["render_file_icon", "render_files_icon", "render_folder_icon"]
+__all__ = [
+    "render_file_icon",
+    "render_files_icon",
+    "render_folder_icon",
+]
 
 import drawsvg as draw
 
@@ -10,11 +14,166 @@ from nf_metro.render.constants import (
     FILES_ICON_OFFSET_RATIO,
     FOLDER_TAB_HEIGHT_RATIO,
     FOLDER_TAB_WIDTH_RATIO,
+    ICON_BANNER_BOTTOM_MARGIN_RATIO,
+    ICON_BANNER_FILL,
+    ICON_BANNER_HEIGHT_RATIO,
+    ICON_BANNER_TEXT_COLOR,
     ICON_FOLD_CREASE_RATIO,
     ICON_FOLD_OVERLAY_OPACITY,
+    ICON_LABEL_CHAR_WIDTH_RATIO,
+    ICON_LABEL_CLEARANCE,
+    ICON_LABEL_LINE_HEIGHT_RATIO,
     ICON_TEXT_OFFSET_RATIO,
     TEXT_VCENTER_DY,
 )
+
+
+def _label_text_width(label: str, font_size: float) -> float:
+    """Estimated rendered width of ``label`` at ``font_size``."""
+    return len(label) * font_size * ICON_LABEL_CHAR_WIDTH_RATIO
+
+
+def _fit_label_font(label: str, font_size: float, width: float) -> float:
+    """Shrink ``font_size`` so ``label`` keeps ``ICON_LABEL_CLEARANCE`` clear of
+    the icon's left/right edges; returns ``font_size`` unchanged when it fits."""
+    max_width = width - 2 * ICON_LABEL_CLEARANCE
+    text_width = _label_text_width(label, font_size)
+    if max_width > 0 and text_width > max_width:
+        return font_size * max_width / text_width
+    return font_size
+
+
+def _split_icon_label_tokens(label: str) -> list[str]:
+    """Split ``label`` at ``/`` and whitespace, keeping the separator on the token.
+
+    A ``/`` stays as a trailing character and a whitespace break becomes a
+    trailing space, so concatenating the tokens of a line reconstructs the
+    original spacing (``BAM/`` + ``CRAM`` -> ``BAM/CRAM``; ``FASTQ `` + ``BAM``
+    -> ``FASTQ BAM``). A label with no break point yields a single token,
+    signalling the caller to keep it on one shrink-to-fit line rather than
+    break a word mid-character."""
+    tokens: list[str] = []
+    buf = ""
+    for ch in label:
+        buf += ch
+        if ch == "/":
+            tokens.append(buf)
+            buf = ""
+        elif ch.isspace():
+            if buf.strip():
+                tokens.append(buf.strip() + " ")
+            buf = ""
+    if buf.strip():
+        tokens.append(buf.strip())
+    return tokens
+
+
+def _wrap_icon_label(label: str, font_size: float, width: float) -> list[str]:
+    """Break ``label`` into stacked lines each fitting the icon's usable width.
+
+    Splits are made on ``/`` then whitespace so format names like ``BAM/CRAM``
+    break at the slash. A label that fits, or that has no break point (a single
+    word), stays on one line so it shrinks to fit instead of breaking mid-word.
+    """
+    max_width = width - 2 * ICON_LABEL_CLEARANCE
+    if max_width <= 0 or _label_text_width(label, font_size) <= max_width:
+        return [label]
+
+    tokens = _split_icon_label_tokens(label)
+    if len(tokens) <= 1:
+        return [label]
+
+    lines: list[str] = []
+    current = ""
+    for token in tokens:
+        if current and _label_text_width(current + token, font_size) > max_width:
+            lines.append(current)
+            current = token
+        else:
+            current += token
+    if current:
+        lines.append(current)
+    return [stripped for line in lines if (stripped := line.rstrip())] or [label]
+
+
+def _append_icon_label(
+    d: draw.Drawing,
+    label: str,
+    cx: float,
+    text_y: float,
+    width: float,
+    font_size: float,
+    font_color: str,
+    font_family: str,
+) -> None:
+    """Render the format label as bold coloured text centred at ``text_y``.
+
+    A label that fits the icon's usable width renders as a single line. A wider
+    label wraps onto stacked lines split on ``/`` or whitespace, centred
+    vertically around ``text_y``; a label with no break point shrinks to fit so
+    the font stays legible instead of breaking a word mid-character."""
+    if not label:
+        return
+    lines = _wrap_icon_label(label, font_size, width)
+    line_height = font_size * ICON_LABEL_LINE_HEIGHT_RATIO
+    top_y = text_y - line_height * (len(lines) - 1) / 2
+    for i, line in enumerate(lines):
+        d.append(
+            draw.Text(
+                line,
+                _fit_label_font(line, font_size, width),
+                cx,
+                top_y + i * line_height,
+                fill=font_color,
+                font_family=font_family,
+                font_weight="bold",
+                text_anchor="middle",
+                dy=TEXT_VCENTER_DY,
+            )
+        )
+
+
+def _append_icon_banner_band(
+    d: draw.Drawing,
+    label: str,
+    cx: float,
+    cy: float,
+    width: float,
+    height: float,
+    font_size: float,
+    font_family: str,
+) -> None:
+    """Render a dark banner strip with bold white text across the icon.
+
+    The strip spans the icon width and sits in the lower portion, leaving
+    white document visible both above and below it. Used when a terminus
+    directive sets the ``banner`` option.
+    """
+    if not label:
+        return
+    band_h = height * ICON_BANNER_HEIGHT_RATIO
+    band_bottom = cy + height / 2 - height * ICON_BANNER_BOTTOM_MARGIN_RATIO
+    band_top = band_bottom - band_h
+    d.append(
+        draw.Rectangle(
+            cx - width / 2,
+            band_top,
+            width,
+            band_h,
+            fill=ICON_BANNER_FILL,
+            stroke="none",
+        )
+    )
+    _append_icon_label(
+        d,
+        label,
+        cx,
+        (band_top + band_bottom) / 2,
+        width,
+        font_size,
+        ICON_BANNER_TEXT_COLOR,
+        font_family,
+    )
 
 
 def train_icon_path(x: float, y: float, size: float = 12.0) -> str:
@@ -39,6 +198,7 @@ def render_file_icon(
     font_size: float,
     font_color: str,
     font_family: str,
+    banner: bool = False,
 ) -> None:
     """Render a file/document icon with a dog-ear fold at top-right.
 
@@ -105,22 +265,16 @@ def render_file_icon(
     crease.L(x1, y0 + f)
     d.append(crease)
 
-    # Extension label centered in the body (shifted down slightly to
-    # account for fold taking up top-right space)
-    text_y = cy + f * ICON_TEXT_OFFSET_RATIO
-    d.append(
-        draw.Text(
-            label,
-            font_size,
-            cx,
-            text_y,
-            fill=font_color,
-            font_family=font_family,
-            font_weight="bold",
-            text_anchor="middle",
-            dy=TEXT_VCENTER_DY,
+    if banner:
+        _append_icon_banner_band(
+            d, label, cx, cy, width, height, font_size, font_family
         )
-    )
+    else:
+        # Label centred in the body, shifted down slightly to clear the fold.
+        text_y = cy + f * ICON_TEXT_OFFSET_RATIO
+        _append_icon_label(
+            d, label, cx, text_y, width, font_size, font_color, font_family
+        )
 
 
 def render_files_icon(
@@ -138,18 +292,22 @@ def render_files_icon(
     font_size: float,
     font_color: str,
     font_family: str,
+    banner: bool = False,
 ) -> None:
     """Render a stacked-files icon (two overlapping documents).
 
-    The icon is centered on (cx, cy). A slightly offset back page is drawn
-    first, then a front page (identical to the single file icon) on top.
+    The front page (identical to the single file icon, and the one carrying the
+    label) is centered on (cx, cy) so a files icon's left edge lines up with
+    single file icons sharing a row; the back page peeks up and to the right,
+    into the open space ahead of the icon, so it never crowds the icon to its
+    left.
     """
     off = width * FILES_ICON_OFFSET_RATIO
 
-    # Back page (offset up-left)
+    # Back page (peeks up-right behind the centered front page)
     render_file_icon(
         d,
-        cx=cx - off,
+        cx=cx + off,
         cy=cy - off,
         width=width,
         height=height,
@@ -164,11 +322,11 @@ def render_files_icon(
         font_family=font_family,
     )
 
-    # Front page (main position)
+    # Front page (centered on the icon anchor)
     render_file_icon(
         d,
-        cx=cx + off,
-        cy=cy + off,
+        cx=cx,
+        cy=cy,
         width=width,
         height=height,
         fold_size=fold_size,
@@ -180,6 +338,7 @@ def render_files_icon(
         font_size=font_size,
         font_color=font_color,
         font_family=font_family,
+        banner=banner,
     )
 
 
@@ -255,16 +414,4 @@ def render_folder_icon(
 
     # Label centered in the body
     text_y = (body_top + y1) / 2
-    d.append(
-        draw.Text(
-            label,
-            font_size,
-            cx,
-            text_y,
-            fill=font_color,
-            font_family=font_family,
-            font_weight="bold",
-            text_anchor="middle",
-            dy=TEXT_VCENTER_DY,
-        )
-    )
+    _append_icon_label(d, label, cx, text_y, width, font_size, font_color, font_family)

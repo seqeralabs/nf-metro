@@ -1,0 +1,50 @@
+%%metro title: Per-station marker styles
+%%metro style: dark
+%%metro line: germline | Germline calling | #0570b0
+%%metro line: somatic | Somatic calling | #e63946
+%%metro legend: bl
+
+%% Per-station marker shapes & fills: square = mandatory, circle = optional,
+%% coloured square = hardware-accelerated, pill = a step whose detail is
+%% expanded in a separate panel.
+%%metro marker: bwa | square, solid
+%%metro marker: markdup | square, solid
+%%metro marker: bqsr | square, #4CAF50
+%%metro marker: haplotypecaller | square, #4CAF50
+%%metro marker: mutect2 | square, #1f4e79
+%%metro marker: cnvkit | pill, open
+%%metro marker: vep | circle, open
+%%metro marker: snpeff | circle, open
+
+%% Marker key captions.
+%%metro marker_legend: square, solid | Mandatory
+%%metro marker_legend: circle, open | Optional
+%%metro marker_legend: pill, open | Expanded elsewhere
+%%metro marker_legend: square, #4CAF50 | Parabricks accelerated
+%%metro marker_legend: square, #1f4e79 | Sentieon accelerated
+
+graph LR
+    subgraph alignment [Alignment & preprocessing]
+        bwa[BWA-MEM]
+        markdup[MarkDuplicates]
+        bqsr[BQSR]
+
+        bwa -->|germline,somatic| markdup
+        markdup -->|germline,somatic| bqsr
+    end
+
+    subgraph calling [Variant calling & annotation]
+        haplotypecaller[HaplotypeCaller]
+        mutect2[Mutect2]
+        cnvkit[CNVkit]
+        snpeff[SnpEff]
+        vep[VEP]
+
+        haplotypecaller -->|germline| snpeff
+        mutect2 -->|somatic| vep
+        mutect2 -->|somatic| cnvkit
+    end
+
+    %% Inter-section edges
+    bqsr -->|germline| haplotypecaller
+    bqsr -->|somatic| mutect2

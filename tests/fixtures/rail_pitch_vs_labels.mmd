@@ -1,0 +1,39 @@
+%%metro title: rail pitch vs labels
+%%metro label_angle: 45
+%%metro line_spread: rails | calling
+%%metro grid: intro | 0,0
+%%metro grid: calling | 0,1
+%%metro line: core | Core | #2db572
+%%metro line: g | Germline | #0570b0
+%%metro line: t | Tumour | #d62728
+
+%%metro files: bam_out | BAM/CRAM
+%%metro off_track: bam_out
+%%metro marker: bx | square, solid
+%%metro marker: by | square, solid
+
+graph LR
+    subgraph intro [Intro]
+        a[Map]
+        bx[Convert]
+        by[MarkDup]
+        z[Merge]
+        bam_out[ ]
+        a -->|core| bx
+        a -->|core| by
+        bx -->|core| z
+        by -->|core| z
+        a -->|core| bam_out
+    end
+    subgraph calling [Calling]
+        c0[ ]
+        gc[Germline Caller]
+        tc[Tumour Caller]
+        sh[Shared]
+        sink[ ]
+        c0 -->|g| gc
+        gc -->|g| sh
+        c0 -->|t| tc
+        tc -->|t| sh
+        sh -->|g,t| sink
+    end

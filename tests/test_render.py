@@ -1,6 +1,10 @@
 """Tests for SVG rendering."""
 
+import pathlib
+import re
 import xml.etree.ElementTree as ET
+
+import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -208,6 +212,106 @@ def test_logo_scale_default_no_change():
     # Should not raise and should produce a positive-size legend.
     w, h = compute_legend_dimensions(g, NFCORE_THEME, logo_size=logo)
     assert w > 0 and h > 0
+
+
+def test_legend_logo_gap_widens_block():
+    """`legend_logo_gap` adds horizontal room between the logo and the entries."""
+    from nf_metro.render.legend import LOGO_GAP, compute_legend_dimensions
+
+    base = (
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n    a[A]\n    b[B]\n    a -->|main| b\n"
+    )
+    logo = (320.0, 120.0)
+
+    g1 = parse_metro_mermaid(base)
+    w1, _ = compute_legend_dimensions(g1, NFCORE_THEME, logo_size=logo)
+
+    gap = LOGO_GAP + 30.0
+    g2 = parse_metro_mermaid(f"%%metro legend_logo_gap: {gap}\n" + base)
+    w2, _ = compute_legend_dimensions(g2, NFCORE_THEME, logo_size=logo)
+
+    assert w2 == pytest.approx(w1 + 30.0)
+
+
+def test_legend_logo_gap_default_is_logo_gap():
+    """Without the directive (and font_scale 1.0) the gap is the base LOGO_GAP."""
+    from nf_metro.render.legend import LOGO_GAP, _logo_gap
+
+    g = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n    a[A]\n    b[B]\n    a -->|main| b\n"
+    )
+    assert g.legend_logo_gap is None
+    assert _logo_gap(g) == pytest.approx(LOGO_GAP)
+
+
+def _font_sizes(svg):
+    """Distinct numeric font-size values appearing in an SVG string."""
+    return {float(v) for v in re.findall(r'font-size="([0-9.]+)"', svg)}
+
+
+def _load_font_scale_fixture(scale=None):
+    text = pathlib.Path(__file__).parent.joinpath("fixtures/font_scale.mmd").read_text()
+    if scale is not None:
+        text = f"%%metro font_scale: {scale}\n" + text
+    graph = parse_metro_mermaid(text)
+    compute_layout(graph)
+    return graph
+
+
+def test_font_scale_multiplies_all_text_sizes():
+    """`font_scale: N` renders every text class at N times the default size."""
+    scale = 2.0
+    g1 = _load_font_scale_fixture()
+    svg1 = render_svg(g1, NFCORE_THEME)
+    g2 = _load_font_scale_fixture(scale)
+    svg2 = render_svg(g2, NFCORE_THEME)
+
+    for size in (
+        NFCORE_THEME.label_font_size,
+        NFCORE_THEME.title_font_size,
+        NFCORE_THEME.section_label_font_size,
+        NFCORE_THEME.legend_font_size,
+        NFCORE_THEME.terminus_font_size,
+    ):
+        assert size in _font_sizes(svg1)
+        assert size * scale in _font_sizes(svg2)
+
+
+def test_font_scale_widens_label_driven_layout():
+    """A larger font reserves proportionally more layout room.
+
+    Label-width metrics must scale with the font so bigger text doesn't
+    overflow its box: a scaled render's section is wider and each station
+    reserves a wider label.
+    """
+    from nf_metro.layout.labels import font_scale_context, label_text_width
+
+    scale = 2.0
+    g1 = _load_font_scale_fixture()
+    g2 = _load_font_scale_fixture(scale)
+
+    sec1 = g1.sections["proc"]
+    sec2 = g2.sections["proc"]
+    assert sec2.bbox_w > sec1.bbox_w
+
+    label = "Load Samples"
+    with font_scale_context(1.0):
+        base_w = label_text_width(label)
+    with font_scale_context(scale):
+        scaled_w = label_text_width(label)
+    assert scaled_w == base_w * scale
+
+
+def test_font_scale_default_is_noop():
+    """Without `font_scale`, the graph and render match the unscaled default."""
+    g = _load_font_scale_fixture()
+    assert g.font_scale == 1.0
+    svg_default = render_svg(g, NFCORE_THEME)
+    g_explicit = _load_font_scale_fixture(1.0)
+    svg_explicit = render_svg(g_explicit, NFCORE_THEME)
+    assert svg_default == svg_explicit
 
 
 def test_render_file_size():
@@ -425,6 +529,49 @@ def test_render_file_icon_no_name_no_caption():
     assert "FASTQ" in svg
 
 
+def test_wide_file_icon_label_wraps_within_icon_width():
+    """A file-icon label wider than the glyph wraps onto stacked lines, each
+    of which fits the icon width rather than overflowing it."""
+    from pathlib import Path
+
+    from nf_metro.render.constants import (
+        ICON_LABEL_CHAR_WIDTH_RATIO,
+        ICON_LABEL_CLEARANCE,
+    )
+
+    fixture = Path(__file__).parent / "fixtures" / "icon_caption_wrap.mmd"
+    graph = parse_metro_mermaid(fixture.read_text())
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+
+    pieces = re.findall(r'font-size="([0-9.]+)"[^>]*>([^<]*BAM[^<]*|CRAM)</text>', svg)
+    assert pieces, "wrapped BAM/CRAM label pieces not found in SVG"
+    assert all("BAM/CRAM" not in text for _, text in pieces), (
+        "label must wrap rather than render as a single over-wide line"
+    )
+
+    max_width = NFCORE_THEME.terminus_width - 2 * ICON_LABEL_CLEARANCE
+    tolerance = 1.0
+    for font_size, text in pieces:
+        line_width = len(text) * float(font_size) * ICON_LABEL_CHAR_WIDTH_RATIO
+        assert line_width <= max_width + tolerance, (
+            f"wrapped line {text!r} width {line_width:.1f} exceeds "
+            f"icon usable width {max_width:.1f}"
+        )
+
+
+def test_icon_label_wrap_keeps_separators():
+    """Wrapping keeps a ``/`` joined to its left token and restores the space
+    between whitespace-separated words; labels that fit or have no break point
+    stay on one line."""
+    from nf_metro.render.icons import _wrap_icon_label
+
+    assert _wrap_icon_label("BAM/CRAM", 12.0, 40.0) == ["BAM/", "CRAM"]
+    assert _wrap_icon_label("FASTQ to BAM", 12.0, 70.0) == ["FASTQ to", "BAM"]
+    assert _wrap_icon_label("BAM/CRAM", 12.0, 999.0) == ["BAM/CRAM"]
+    assert _wrap_icon_label("Results", 12.0, 40.0) == ["Results"]
+
+
 def test_render_multi_icon_fixture():
     """The 05b_multi_icons.mmd example renders without errors."""
     from pathlib import Path
@@ -509,12 +656,55 @@ def test_render_mixed_icon_types():
     assert root.tag.endswith("svg") or "svg" in root.tag
 
 
+def test_file_icon_banner_option():
+    """The `| banner` option flips the per-icon banner flag and styling."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: aln_out | BAM | Alignments | banner\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        run[Run]\n"
+        "        aln_out[ ]\n"
+        "        run -->|main| aln_out\n"
+        "    end\n"
+    )
+    station = graph.stations["aln_out"]
+    assert station.terminus_icon_banners == [True]
+    # The caption (third field) is still parsed alongside the banner option.
+    assert station.terminus_names == ["Alignments"]
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    from nf_metro.render.constants import ICON_BANNER_FILL
+
+    assert ICON_BANNER_FILL in svg
+
+
+def test_file_icon_no_banner_by_default():
+    """A plain %%metro file: directive does not enable the banner."""
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro file: reads_in | FASTQ\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        "        reads_in[ ]\n"
+        "        trim[Trim]\n"
+        "        reads_in -->|main| trim\n"
+        "    end\n"
+    )
+    station = graph.stations["reads_in"]
+    assert station.terminus_icon_banners == [False]
+
+
 def test_render_icon_type_guide_fixtures():
     """Guide examples for files and dir icons render without errors."""
     from pathlib import Path
 
     examples = Path(__file__).parent.parent / "examples" / "guide"
-    for fname in ("05c_files_icon.mmd", "05d_folder_icon.mmd"):
+    for fname in (
+        "05c_files_icon.mmd",
+        "05d_folder_icon.mmd",
+        "05f_banner_labels.mmd",
+    ):
         fpath = examples / fname
         assert fpath.exists(), f"Missing fixture: {fpath}"
         text = fpath.read_text()
@@ -525,7 +715,7 @@ def test_render_icon_type_guide_fixtures():
         assert root.tag.endswith("svg") or "svg" in root.tag
 
 
-# --- Terminus icon orientation (issue #254) ---
+# --- Terminus icon orientation ---
 
 
 def _station(x=100.0, y=50.0):
@@ -559,9 +749,8 @@ def test_terminus_icons_rl_mirror_lr():
 def test_terminus_icons_tb_march_along_y():
     """TB termini stack icons vertically, centred on the bundle X.
 
-    Regression test for #254: in a TB section the line arrives from
-    above/below, so icons must be displaced along Y (the flow axis), not
-    along X as for LR.
+    In a TB section the line arrives from above/below, so icons must be
+    displaced along Y (the flow axis), not along X as for LR.
     """
     st = _station()
     # Sink at the bottom of a TB flow: icons extend downward.
@@ -651,3 +840,96 @@ def test_render_tb_terminus_pill_is_horizontal():
     width = float(re.search(r'width="([0-9.]+)"', rect).group(1))
     height = float(re.search(r'height="([0-9.]+)"', rect).group(1))
     assert width > height, f"TB terminus pill not horizontal: {width=} {height=}"
+
+
+def test_render_group_label_caption_and_underline():
+    """A %%metro group: directive emits a caption and underline; layout
+    coordinates are untouched relative to the same graph without groups."""
+    base_src = (
+        "%%metro line: main | Main | #2db572\n"
+        "graph LR\n"
+        "    subgraph s [Callers]\n"
+        "        a[Alpha]\n"
+        "        b[Beta]\n"
+        "        a -->|main| b\n"
+        "    end\n"
+    )
+    grouped_src = "%%metro group: Family | a, b\n" + base_src
+
+    base_graph = parse_metro_mermaid(base_src)
+    compute_layout(base_graph)
+    base_svg = render_svg(base_graph, NFCORE_THEME)
+
+    grouped_graph = parse_metro_mermaid(grouped_src)
+    compute_layout(grouped_graph)
+    # Station coordinates must be identical: groups are purely annotative.
+    assert {sid: (st.x, st.y) for sid, st in grouped_graph.stations.items()} == {
+        sid: (st.x, st.y) for sid, st in base_graph.stations.items()
+    }
+
+    grouped_svg = render_svg(grouped_graph, NFCORE_THEME)
+    assert "Family" in grouped_svg
+    assert "nf-metro-group-label" in grouped_svg
+    assert "nf-metro-group-underline" in grouped_svg
+    # The base render has neither marker.
+    assert "nf-metro-group-label" not in base_svg
+
+
+def _section_box_bottoms(svg: str) -> dict[str, float]:
+    """Map each rendered section box id to its bbox bottom edge (y + h)."""
+    bottoms: dict[str, float] = {}
+    for m in re.finditer(
+        r'<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" '
+        r'height="([\d.]+)"[^>]*nf-metro-section-box[^>]*'
+        r'data-section-id="(\w+)"',
+        svg,
+    ):
+        _x, y, _w, h, sid = m.groups()
+        bottoms[sid] = float(y) + float(h)
+    return bottoms
+
+
+def test_render_group_band_stays_inside_section_box():
+    """A below group band (bracket + caption) must sit clear of the section
+    box's bottom edge: the engine grows the bbox to reserve room so the band
+    never overlaps or crosses the boundary."""
+    src = (
+        "%%metro line: main | Main | #2db572\n"
+        "%%metro group: Callers | a, b, c\n"
+        "graph LR\n"
+        "    subgraph s [Variant Calling]\n"
+        "        a[Alpha]\n"
+        "        b[Beta]\n"
+        "        c[Gamma]\n"
+        "        a -->|main| b\n"
+        "        b -->|main| c\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(src)
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+
+    section_bottom = _section_box_bottoms(svg)["s"]
+
+    # Caption text: hanging baseline, so its bottom edge is text_y + font_size.
+    cap = re.search(
+        r'<text x="[\d.]+" y="([\d.]+)" font-size="([\d.]+)"'
+        r"[^>]*nf-metro-group-label",
+        svg,
+    )
+    assert cap is not None
+    caption_bottom = float(cap.group(1)) + float(cap.group(2))
+
+    # Bracket rule + ticks: gather every y coordinate in the path data.
+    bracket = re.search(r'<path d="([^"]*)"[^>]*nf-metro-group-underline', svg)
+    assert bracket is not None
+    ys = [
+        float(v.split(",")[1]) for v in re.findall(r"[\d.]+,[\d.]+", bracket.group(1))
+    ]
+    bracket_bottom = max(ys)
+
+    band_bottom = max(caption_bottom, bracket_bottom)
+    assert band_bottom <= section_bottom, (
+        f"group band bottom {band_bottom:.1f} crosses section box bottom "
+        f"{section_bottom:.1f}"
+    )

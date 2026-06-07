@@ -1,0 +1,67 @@
+%%metro title: Line spread modes
+%%metro style: dark
+%%metro line: dna | DNA | #4CAF50
+%%metro line: rna | RNA | #2196F3
+%%metro line: cfdna | cfDNA | #E91E63
+
+%%metro line_spread: bundle
+%%metro line_spread: centered | centered_sec
+%%metro line_spread: rails | rails_sec
+
+%% Rail panel input/output files: the rails fan out from the CRAM terminus and
+%% fan back in to the VCF terminus (a fan-in), each meeting a buffer-stop marker.
+%% rna skips Filter, so Filter is a partial interchange: the rna rail bridges
+%% straight over its connector rather than stopping there.
+%%metro file: r_in | CRAM
+%%metro file: r_out | VCF
+
+%%metro grid: bundle_sec | 0,0
+%%metro grid: centered_sec | 1,0
+%%metro grid: rails_sec | 2,0
+
+graph LR
+    subgraph bundle_sec [bundle]
+        b_in[Input]
+        b_dna[DNA]
+        b_rna[RNA]
+        b_cf[cfDNA]
+        b_out[QC]
+
+        b_in -->|dna| b_dna
+        b_in -->|rna| b_rna
+        b_in -->|cfdna| b_cf
+        b_dna -->|dna| b_out
+        b_rna -->|rna| b_out
+        b_cf -->|cfdna| b_out
+    end
+
+    subgraph centered_sec [centered]
+        c_in[Align]
+        c_dna[DNA]
+        c_rna[RNA]
+        c_cf[cfDNA]
+        c_out[Merge]
+
+        c_in -->|dna| c_dna
+        c_in -->|rna| c_rna
+        c_in -->|cfdna| c_cf
+        c_dna -->|dna| c_out
+        c_rna -->|rna| c_out
+        c_cf -->|cfdna| c_out
+    end
+
+    subgraph rails_sec [rails]
+        r_in[ ]
+        r_call[Call]
+        r_filter[Filter]
+        r_annotate[Annotate]
+        r_out[ ]
+
+        r_in -->|dna,rna,cfdna| r_call
+        r_call -->|dna,cfdna| r_filter
+        r_call -->|rna| r_annotate
+        r_filter -->|dna,cfdna| r_annotate
+        r_annotate -->|dna,rna,cfdna| r_out
+    end
+
+    b_out -->|dna,rna,cfdna| c_in

@@ -56,3 +56,10 @@ class Theme:
     terminus_font_color: str = ""  # empty = inherit label_color
     # Bridge glyph at non-merging line crossings
     bridge_glyph: bool = True
+    # Interior fill for "open" markers (%%metro marker: ... | open). Empty
+    # falls back to the background colour, or white on transparent themes.
+    marker_open_fill: str = ""
+    # Outline for marker glyphs (%%metro marker:) and their legend swatches.
+    # A light outline keeps dark-filled markers visible against a dark
+    # background. Empty inherits station_stroke.
+    marker_stroke: str = ""

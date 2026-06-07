@@ -56,6 +56,24 @@ LOGO_GAP: float = 12.0
 LEGEND_BORDER_RADIUS: int = 6
 """Corner radius for legend background rectangle."""
 
+LEGEND_MARKER_GAP: float = 10.0
+"""Vertical gap between the line key and the marker key."""
+
+LEGEND_MARKER_RADIUS: float = 6.0
+"""Half-size of a marker-key swatch glyph."""
+
+LEGEND_MARKER_PILL_RATIO: float = 1.7
+"""Half-width of a ``pill`` swatch as a multiple of the swatch half-size."""
+
+MARKER_PILL_LENGTH_RATIO: float = 4.0
+"""Length of a ``pill`` marker along the line, as a multiple of the station radius."""
+
+RAIL_KNOB_RADIUS_RATIO: float = 1.35
+"""Rail-interchange knob circle radius, as a multiple of the station radius."""
+
+RAIL_LINK_HALF_WIDTH_RATIO: float = 0.7
+"""Rail-interchange connector bar half-width, as a multiple of the station radius."""
+
 # ---------------------------------------------------------------------------
 # SVG drawing
 # ---------------------------------------------------------------------------
@@ -207,6 +225,18 @@ ICON_FOLD_CREASE_RATIO: float = 0.6
 ICON_TEXT_OFFSET_RATIO: float = 0.15
 """Vertical text offset as a fraction of icon height."""
 
+ICON_LABEL_CHAR_WIDTH_RATIO: float = 0.6
+"""Estimated glyph width as a fraction of font size, used to shrink the icon
+label font so it keeps clear of the icon's left/right edges."""
+
+ICON_LABEL_CLEARANCE: float = 2.5
+"""Minimum horizontal clearance (px per side) between the icon label and the
+icon's left/right edges; the label font shrinks to honour it."""
+
+ICON_LABEL_LINE_HEIGHT_RATIO: float = 1.1
+"""Baseline-to-baseline spacing of wrapped icon-label lines, as a multiple of
+the font size."""
+
 FILES_ICON_OFFSET_RATIO: float = 0.15
 """Offset of the back page as a fraction of icon width/height (stacked files icon)."""
 
@@ -215,6 +245,18 @@ FOLDER_TAB_HEIGHT_RATIO: float = 0.2
 
 FOLDER_TAB_WIDTH_RATIO: float = 0.4
 """Width of the folder tab as a fraction of total icon width."""
+
+ICON_BANNER_HEIGHT_RATIO: float = 0.38
+"""Height of the banner strip as a fraction of icon height (banner style)."""
+
+ICON_BANNER_BOTTOM_MARGIN_RATIO: float = 0.16
+"""White space left below the banner strip, as a fraction of icon height."""
+
+ICON_BANNER_FILL: str = "#222222"
+"""Fill colour of the banner strip drawn across the icon foot (banner style)."""
+
+ICON_BANNER_TEXT_COLOR: str = "#ffffff"
+"""Text colour of the bold label on the banner strip (banner style)."""
 
 # ---------------------------------------------------------------------------
 # Animation styling
@@ -227,6 +269,45 @@ ANIMATION_BALL_OPACITY: float = 0.9
 # ---------------------------------------------------------------------------
 SECTION_LABEL_REGION_RATIO: float = 0.5
 """Fraction of section width used as the label region."""
+
+# ---------------------------------------------------------------------------
+# Intra-section station group captions
+# ---------------------------------------------------------------------------
+GROUP_LABEL_FONT_SCALE: float = 0.95
+"""Group caption font size as a fraction of the station label font size."""
+
+GROUP_LABEL_GAP: float = 34.0
+"""Gap between the spanned stations' marker extent and the group caption.
+
+Wide enough to clear a station-label row placed on the same side as the
+caption, so the band reads as a separate annotation."""
+
+GROUP_LABEL_LABEL_CLEARANCE: float = 8.0
+"""Gap between the deepest spanned station *label* and the group caption.
+
+Used in place of ``GROUP_LABEL_GAP`` when the band is positioned off the
+station labels' own extent (the labels already carry their full footprint, so
+only a small clearance is needed) -- keeps the band hugging the labels rather
+than the larger marker-row gap, which over-shoots for diagonal labels."""
+
+GROUP_LABEL_UNDERLINE_GAP: float = 5.0
+"""Gap between the group caption text and its bracket rule."""
+
+GROUP_LABEL_UNDERLINE_OPACITY: float = 0.45
+"""Opacity of the subtle bracket rule drawn for a group caption."""
+
+GROUP_LABEL_UNDERLINE_WIDTH: float = 1.5
+"""Stroke width of the group caption bracket rule."""
+
+GROUP_LABEL_TICK_LENGTH: float = 5.0
+"""Length of the inward end-ticks that turn a group rule into a bracket.
+
+The ticks point back towards the spanned stations so the bracket reads as
+embracing exactly that contiguous run."""
+
+GROUP_LABEL_BAND_PADDING: float = 10.0
+"""Clearance reserved between the lowest group-band element and the bottom
+edge of the enclosing section box, so the band always sits inside the box."""
 
 ICON_CLEARANCE_MARGIN: float = 4.0
 """Extra clearance around terminus icons when computing section bounds."""

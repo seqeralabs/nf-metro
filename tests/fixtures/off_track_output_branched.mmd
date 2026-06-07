@@ -1,0 +1,22 @@
+%%metro title: Off-track output from a low branch
+%%metro line: top | Top | #1f77b4
+%%metro line: mid | Mid | #2ca02c
+%%metro line: bot | Bot | #d62728
+%%metro off_track: bam_out
+
+graph LR
+    subgraph preprocess [Pre-processing]
+        start[Start]
+        t1[TopStep]
+        m1[MidStep]
+        b1[BotA]
+        b2[BotB]
+        markdup[MarkDup]
+        start -->|top| t1
+        start -->|mid| m1
+        start -->|bot| b1
+        b1 -->|bot| b2
+        b2 -->|bot| markdup
+        markdup -->|bot| bam_out
+        bam_out[bam/cram]
+    end

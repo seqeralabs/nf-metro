@@ -1,0 +1,76 @@
+name: Bug report
+description: A render, layout, or parse result that is wrong. Bring a minimized repro.
+title: "[bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. This project lives on a "dense bug -> isolated fixture" loop:
+        the fastest path to a fix is a **minimized `.mmd`** that reproduces the problem with as
+        few lines, lines/stations, and directives as possible. A 200-line pipeline `.mmd` that
+        "looks wrong somewhere" is much harder to act on than a 10-line fixture that isolates it.
+  - type: textarea
+    id: minimized-mmd
+    attributes:
+      label: Minimized .mmd repro
+      description: >
+        The smallest `.mmd` that still shows the bug. Strip unrelated sections, lines, and
+        `%%metro` directives until removing anything more makes the bug disappear.
+      render: text
+      placeholder: |
+        %%metro title: Repro
+        %%metro line: l1 | Line 1 | #ff0000 | solid
+
+        graph LR
+            a[A] -->|l1| b[B]
+            b -->|l1| c[C]
+    validations:
+      required: true
+  - type: input
+    id: render-command
+    attributes:
+      label: Render command used
+      description: The exact `nf-metro` (or `python -m nf_metro`) invocation, including any flags.
+      placeholder: "nf-metro render repro.mmd -o out.svg --x-spacing 60 --y-spacing 40"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: What the render or layout should produce. Describe the geometry/visual you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: >
+        What actually happened. Attach the rendered SVG/PNG if you can, and quote any
+        error or warning text verbatim.
+    validations:
+      required: true
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Suspected subsystem
+      description: Best guess at where the bug lives. Leave as "Not sure" if unknown.
+      options:
+        - Not sure
+        - parser (Mermaid + %%metro parsing)
+        - layout (engine, phases, ordering)
+        - routing (edge routing)
+        - render (SVG, themes, legend, icons)
+        - cli (command-line interface)
+        - convert (Nextflow DAG / external-format conversion)
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: nf-metro version / commit
+      description: Output of `nf-metro --version`, or the git commit you ran against.
+    validations:
+      required: false

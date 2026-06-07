@@ -82,7 +82,7 @@ Stages split into three regimes:
 | after Stage 3.1 | ports-on-boundaries |
 | after top-align (Stage 3.5) | ports-on-boundaries |
 | after each Pass C sub-stage (bisection) | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
-| after final | bisection set (all unconditional) + off-track-above-consumer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
+| after final | bisection set (all unconditional) + off-track-above-anchor, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
 Bisection checkpoints fire after every Pass C sub-stage (see the
 `# Stage 5.2:` through `# Stage 6.16:` comments in
@@ -212,8 +212,19 @@ in pipeline order.
   positions from `auto_layout`. Still all local-coord.
 - **Postcondition**: Every section has `offset_x`, `offset_y` set such
   that `(local + offset)` lands sections on a non-overlapping grid.
+- **Disconnected graphs**: When the section meta-graph has 2+
+  weakly-connected components and the author pinned no explicit
+  `%%metro grid:` positions, each component is placed in its own local
+  column grid (so a wide component never inflates another's columns)
+  and the components are stacked vertically in a deterministic order
+  (ascending min original row, then descending size, then smallest
+  section id), left-aligned and separated by `section_y_gap`. Any
+  explicit grid override falls back to the shared single-grid path.
 - **Invariants preserved**: Station local coords unchanged. Bboxes
   still local-coord.
+- **Runtime guard**: `_guard_independent_components_disjoint` (under
+  `validate=True`) asserts stacked components occupy disjoint vertical
+  bands.
 - **Lifecycle:** invariant - the section grid (column/row placement,
   non-overlap) holds at the final boundary.
 
@@ -502,25 +513,32 @@ in pipeline order.
   after every later port move).
 
 ### Stage 5.2: lift off-track stations (engine.py)
-- **Purpose**: Lift off-track file-input stations to the row above
-  their consumer, stacking when multiple inputs share one consumer.
-  Grow bbox upward; nudge same-section TOP ports back to new edge.
+- **Purpose**: Lift off-track file artefacts to the row above their
+  anchor, stacking when several share one anchor. An input's anchor is
+  its consumer; a producer-fed sink's anchor is its producer (see
+  `_off_track_anchor_of`). Grow bbox upward; nudge same-section TOP
+  ports back to new edge.
 - **Helper**: `_lift_off_track_stations`.
 - **Precondition**: Stage 5.1 complete; all on-track Ys final.
 - **Postcondition**: Each off-track station sits at
-  `consumer.y - n*y_spacing` (n = stack rank). Section bbox extends
-  upward to fit.  May leave the topmost section above the canvas
-  margin -- ``_shift_graph_into_canvas`` runs immediately afterwards
-  to restore the margin (called explicitly by the caller, not by
-  the helper).
+  `anchor.y - n*step` (n = stack rank). The lift `step` is `y_spacing`
+  for multi-track sections; a single-trunk LR/RL section (one distinct
+  on-track Y) uses the base content pitch `graph._base_y_spacing`
+  instead, so the diagonal-label widening of `y_spacing` doesn't strand
+  the icon far above the trunk (issue #580, helper
+  `_off_track_lift_step`). Section bbox extends upward to fit.  May leave
+  the topmost section above the canvas margin --
+  ``_shift_graph_into_canvas`` runs immediately afterwards to restore the
+  margin (called explicitly by the caller, not by the helper).
 - **Invariants preserved**: On-track station Y. Other sections' Ys
   (only the canvas Y-offset may shift the world uniformly).
 - **Related tests**: `test_off_track_inputs_above_consumer`,
+  `test_off_track_outputs_above_and_adjacent_to_producer`,
   `test_off_track_icons_ordered_by_consumer_y`.
-- **Lifecycle:** invariant - off-track inputs sit a pitch above their
-  consumer at the final boundary. *liftable:* only behind a "consumers
-  final" precondition - the anchor uses the consumer's final Y and is
-  re-applied by Stages 6.6 / 6.8 (#463).
+- **Lifecycle:** invariant - off-track stations sit a pitch above their
+  anchor at the final boundary. *liftable:* only behind a "consumers
+  final" precondition - the anchor uses the consumer/producer's final Y
+  and is re-applied by Stages 6.6 / 6.8 (#463).
 
 ### Stage 5.3: re-align row bbox tops only
 - **Purpose**: After Stage 5.2 grew some bboxes upward, grow other
@@ -651,8 +669,9 @@ in pipeline order.
   downstream LR/RL target at the final boundary.
 
 ### Stage 6.6: reanchor off-track to consumer (engine.py)
-- **Purpose**: Re-pin each off-track input at `consumer.y - n*y_spacing`
-  using the consumer's final snapped Y (Stage 5.2 used pre-snap Ys).
+- **Purpose**: Re-pin each off-track station at `anchor.y - n*y_spacing`
+  using the anchor's final snapped Y (Stage 5.2 used pre-snap Ys); the
+  anchor is the consumer for an input, the producer for a sink.
   Recompute the section top to fit the band (grow **or** shrink).
 - **Helper**: `_reanchor_off_track_to_consumer`.
 - **Precondition**: Stage 6.4 snapped consumers to grid. Enforced
@@ -660,18 +679,19 @@ in pipeline order.
   Stage 6.4 snap); the helper raises `PhaseInvariantError` if it runs
   while unset, so the dependence on snapped consumers is no longer
   implicit in call position (#463).
-- **Postcondition**: Off-track inputs sit `n * y_spacing` above their
-  consumer's final Y. The section top hugs the off-track band with one
+- **Postcondition**: Off-track stations sit `n * y_spacing` above their
+  anchor's final Y. The section top hugs the off-track band with one
   `section_y_padding` band (recompute-to-fit, so re-running is
   order-independent). May leave the topmost section above the canvas
   margin -- ``_shift_graph_into_canvas`` runs immediately afterwards
   (called explicitly by the caller, not by the helper).
 - **Invariants preserved**: On-track station Y.
 - **Related tests**: `test_off_track_inputs_above_consumer`,
+  `test_off_track_outputs_above_and_adjacent_to_producer`,
   `test_reanchor_off_track_requires_snapped_consumers`,
   `test_reanchor_off_track_bbox_fit_is_reversible`.
-- **Lifecycle:** invariant - off-track inputs sit a pitch above their
-  consumer's final Y. *liftable:* as a **precondition-gated** invariant
+- **Lifecycle:** invariant - off-track stations sit a pitch above their
+  anchor's final Y. *liftable:* as a **precondition-gated** invariant
   (#463): the bbox fit is now reversible, but the helper *raises* when
   `_consumers_grid_snapped` is unset, so a run-anytime `maintain()` pass
   must check that flag and skip while consumers are pre-snap rather than

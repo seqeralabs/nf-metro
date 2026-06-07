@@ -11,6 +11,7 @@ from nf_metro.layout.constants import (
     OFFSET_STEP,
     STATION_RADIUS_APPROX,
 )
+from nf_metro.layout.labels import active_font_scale
 from nf_metro.layout.phases._common import (
     _classify_multi_station_ys,
     _classify_section_station_ys,
@@ -118,7 +119,7 @@ def _align_row_y_grids(
             (max_lines - 1) * OFFSET_STEP
             + 2 * STATION_RADIUS_APPROX
             + LABEL_OFFSET
-            + FONT_HEIGHT
+            + FONT_HEIGHT * active_font_scale()
         )
         effective_y_spacing = max(y_spacing, min_track_gap)
 

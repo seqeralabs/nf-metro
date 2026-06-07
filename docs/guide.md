@@ -333,7 +333,92 @@ The label inside an icon is meant for a short type chip (e.g. `CSV`, `FASTQ`). T
 
 The name is rendered as a caption directly below the icon. If multiple labels are listed (`FASTQ, BAM`), the same name applies to all of them.
 
-## 6. Hidden stations
+### Banner labels
+
+To make a format stand out, add `banner` as a fourth field to a `file:` or `files:` directive. The format label then renders as bold white text on a dark strip across the lower part of the icon, transit-map "format chip" style, while the white document stays visible:
+
+```text
+%%metro files: aln_out | BAM | Alignments | banner
+```
+
+![Banner labels example](assets/renders/05f_banner_labels.svg)
+
+Any `name` caption (third field) still renders below the icon, so `| <name> | banner` keeps the caption and `| | banner` applies the strip with no caption. `banner` is not supported on `dir:` (folder) icons.
+
+## 6. Per-station markers
+
+By default every station is drawn as a uniform pill. The `%%metro marker:` directive overrides one station's marker so it can encode a tool attribute - mandatory vs optional, hardware-accelerated, expanded in another diagram - through its shape and fill:
+
+```text
+%%metro marker: node_id | shape, fill
+```
+
+- **`shape`** is `circle` (fully rounded), `square` (sharp corners), or `pill` (a flat-edged capsule running along the line, handy for flagging a step whose detail is shown in a separate diagram). Every shape still spans the line bundle, so it covers all the lines passing through the station.
+- **`fill`** is `open` (a hollow marker in the background colour), `solid` (the default station fill), or any literal colour - a name (`red`) or hex (`#4CAF50`).
+
+`shape` defaults to `circle` and `fill` to `solid`, so `%%metro marker: node_id |` gives a solid circle. The directive may appear before or after the node is defined.
+
+To explain the markers, add a key below the line legend with `%%metro marker_legend:`, one row per shape/fill combination:
+
+```text
+%%metro marker_legend: shape, fill | Caption
+```
+
+Here a two-line variant-calling pipeline uses square (mandatory), open-circle (optional), pill (expanded elsewhere) and coloured-square (hardware-accelerated) markers, with a matching key:
+
+```text
+%%metro title: Per-station marker styles
+%%metro style: dark
+%%metro line: germline | Germline calling | #0570b0
+%%metro line: somatic | Somatic calling | #e63946
+%%metro legend: bl
+
+%%metro marker: bwa | square, solid
+%%metro marker: markdup | square, solid
+%%metro marker: bqsr | square, #4CAF50
+%%metro marker: haplotypecaller | square, #4CAF50
+%%metro marker: mutect2 | square, #1f4e79
+%%metro marker: cnvkit | pill, open
+%%metro marker: vep | circle, open
+%%metro marker: snpeff | circle, open
+
+%%metro marker_legend: square, solid | Mandatory
+%%metro marker_legend: circle, open | Optional
+%%metro marker_legend: pill, open | Expanded elsewhere
+%%metro marker_legend: square, #4CAF50 | Parabricks accelerated
+%%metro marker_legend: square, #1f4e79 | Sentieon accelerated
+
+graph LR
+    subgraph alignment [Alignment & preprocessing]
+        bwa[BWA-MEM]
+        markdup[MarkDuplicates]
+        bqsr[BQSR]
+
+        bwa -->|germline,somatic| markdup
+        markdup -->|germline,somatic| bqsr
+    end
+
+    subgraph calling [Variant calling & annotation]
+        haplotypecaller[HaplotypeCaller]
+        mutect2[Mutect2]
+        cnvkit[CNVkit]
+        snpeff[SnpEff]
+        vep[VEP]
+
+        haplotypecaller -->|germline| snpeff
+        mutect2 -->|somatic| vep
+        mutect2 -->|somatic| cnvkit
+    end
+
+    bqsr -->|germline| haplotypecaller
+    bqsr -->|somatic| mutect2
+```
+
+![Per-station markers](assets/renders/marker_styles.svg)
+
+Stations with no `%%metro marker:` keep the default pill, so the feature is entirely opt-in.
+
+## 7. Hidden stations
 
 Sometimes you need a branching or merging point in the graph that doesn't represent a real pipeline step. For example, lines might diverge at a point where no tool is actually run. Adding a visible station there clutters the diagram with a meaningless marker.
 
@@ -397,7 +482,7 @@ The lines still fork at the same point, but there is no marker or label. This gi
 
 Use `--debug` to see hidden stations as dashed circles: `nf-metro render --debug pipeline.mmd -o debug.svg`
 
-## 7. Putting it all together
+## 8. Putting it all together
 
 The nf-core/rnaseq example at [`examples/rnaseq_auto.mmd`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/rnaseq_auto.mmd) combines all of these patterns in a real-world pipeline:
 
@@ -429,12 +514,14 @@ These go at the top of the file, before `graph LR`.
 | `%%metro grid: <section> \| <col>,<row>[,<rowspan>[,<colspan>]]` | Pin a section to a grid position |
 | `%%metro legend: <position>` | Position the legend (and its embedded logo). Keyword: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, or `none` (a bare keyword auto-relocates if it would overlap a section or route). Add `\| canvas` to anchor the keyword to the canvas margin, or `\| <dx>,<dy>` to nudge it; both pin the block exactly (warning on overlap rather than relocating). Use `<x>,<y>` for absolute top-left coordinates. |
 | `%%metro line_order: <strategy>` | Line ordering for track assignment: `definition` (default, preserves `.mmd` order) or `span` (longest-spanning lines get inner tracks) |
-| `%%metro file: <station> \| <label> [\| <name>]` | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon. |
-| `%%metro files: <station> \| <label> [\| <name>]` | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption. |
+| `%%metro fold_threshold: <columns>` | Max station-columns a section row may reach before the auto-layout wraps it onto the next row (default 15). Raise it to keep a long horizontal trunk of sections on a single row. Overridden by the `--max-layers-per-row` CLI flag. |
+| `%%metro file: <station> \| <label> [\| <name>] [\| banner]` | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon; optional `banner` draws the label on a dark strip across the icon. |
+| `%%metro files: <station> \| <label> [\| <name>] [\| banner]` | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption; optional `banner` strip. |
 | `%%metro dir: <station> \| <label> [\| <name>]` | Mark a station with a folder icon (e.g. output directory). Optional `name` caption. |
-| `%%metro off_track: <station>[, <station>...]` | Lift the listed stations above the section's main track (see below) |
+| `%%metro off_track: <station>[, <station>...]` | Lift the listed stations above the section's main track, anchored to their consumer (inputs) or producer (output artefacts) (see below) |
 | `%%metro compact_offsets: true` | Compact line offsets within stations (see below) |
 | `%%metro center_ports: true` | Centre inter-section ports on the shorter of the two connected sections, so lines enter/exit at the visual midpoint. Overridden by the `--center-ports` / `--no-center-ports` CLI flag. |
+| `%%metro line_spread: <mode>[ \| <id>...]` | How lines sharing a station relate vertically (see below). `<mode>` is `bundle` (default), `centered`, or `rails`. The bare form sets the graph default; `<mode> \| sectionA, sectionB` overrides those sections. Overridden by the `--line-spread` CLI flag. |
 | `%%metro legend_min_height: <pixels>` | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 
 **Compact offsets.** By default, each line reserves a fixed vertical slot across the whole map based on its declaration order. If you define three lines, every station that carries even one of them is sized to fit all three. This keeps bundles visually consistent but wastes space when most stations only carry one or two lines.
@@ -450,6 +537,36 @@ With `%%metro compact_offsets: true`, stations are only as wide as the lines act
 ```
 
 This pairs naturally with the `file:` / `files:` / `dir:` icon directives - the lifted stations are usually file terminals. The [`off_track_convergence`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/topologies/off_track_convergence.mmd) topology and the [differentialabundance](https://github.com/pinin4fjords/nf-metro/blob/main/examples/differentialabundance.mmd) example both use it.
+
+**Off-track outputs.** The same directive works for file *artefacts* written part-way through a section (a `bam`/`cram` dumped after a mapping step, say). A producer-fed sink - a station with an incoming edge from an on-track step and no on-track consumer - is anchored above its **producer** rather than the section top, so the artefact hangs off the trunk right where it is written:
+
+```text
+%%metro file: bam_mapped | BAM
+%%metro off_track: bam_mapped
+```
+
+The [off_track_outputs](https://github.com/pinin4fjords/nf-metro/blob/main/examples/off_track_outputs.mmd) example hangs several such artefacts above a pre-processing trunk.
+
+**Line spread.** `%%metro line_spread:` controls how lines that share a station relate to each other vertically. It has three modes:
+
+- **`bundle`** (the default) merges every line sharing a station onto a single trunk track; a line that detours to its own station dips off the trunk and back. Line base-tracks stack downward from the first line, so the shared trunk sits at the top and detours cascade below it.
+- **`centered`** also merges lines onto one trunk, but balances that bundle about the midline: the shared trunk sits on the vertical centre and each line's exclusive stations distribute symmetrically above and below it, instead of the top-anchored downward cascade.
+- **`rails`** keeps co-travelling lines on separate parallel rails rather than bundling them onto a trunk. Each line gets a fixed, evenly-spaced horizontal rail, and a station several lines *pass through* renders as the classic metro interchange: a white circle on each rail the station uses, joined by a straight connector segment (the nf-core/sarek "Example analysis pathways" subway idiom). Lines converge only at a genuine single-node fan-in/out - e.g. a file terminus all lines reach - where the rails ease together with 45-degree diagonals. Station labels alternate above and below the rails so dense runs stay readable.
+
+The bare directive sets the graph-wide default:
+
+```text
+%%metro line_spread: rails
+```
+
+Append `| <section>, ...` to override individual sections, so one map can mix modes - a `bundle` trunk feeding a `rails` analysis panel, say:
+
+```text
+%%metro line_spread: centered
+%%metro line_spread: rails | pathways
+```
+
+Here every section defaults to `centered` while `pathways` is laid out as parallel rails; ordinary section placement positions both. The [`line_spread`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/line_spread.mmd) example shows all three modes in one map via per-section overrides. For `rails`, inter-section edges into or out of a rail section are not yet supported - a rail section should be self-contained.
 
 ### Section directives
 

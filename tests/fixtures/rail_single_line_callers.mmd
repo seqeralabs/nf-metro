@@ -1,0 +1,23 @@
+%%metro title: Rail single-line callers
+%%metro style: dark
+%%metro line_spread: rails
+%%metro label_angle: 45
+%%metro line: germline | Germline | #2db572
+%%metro line: tumor | Tumour | #f4a300
+%%metro line: pair | Pair | #0570b0
+
+graph LR
+    subgraph calling [Variant calling]
+        bqsr[BQSR]
+        haplo[HaplotypeCaller]
+        mutect[Mutect2]
+        strelka[Strelka]
+        merge[Merge]
+
+        bqsr -->|germline| haplo
+        bqsr -->|tumor| mutect
+        bqsr -->|pair| strelka
+        haplo -->|germline| merge
+        mutect -->|tumor| merge
+        strelka -->|pair| merge
+    end
