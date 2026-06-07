@@ -1,0 +1,76 @@
+name: New directive design
+description: Propose a new %%metro directive or CLI control, with its stability tier and intent classification.
+title: "[directive]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this to propose a new `%%metro` directive (or a CLI flag with a directive twin).
+        Before adding a control surface, we classify two things: which **stability tier** it
+        belongs to (see #561), and whether it expresses **authored meaning** about the pipeline
+        or merely a **render preference** (see #549 and #553). Getting these right up front keeps
+        the control surface from proliferating and keeps committed `.mmd` files reproducible.
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed directive / control
+      description: Name, grammar, and what it does. Show the syntax you would write in a `.mmd`.
+      placeholder: "%%metro <name>: <args>"
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivating case
+      description: >
+        What render or pipeline can you not currently express well? Include a `.mmd` snippet
+        and, ideally, the suboptimal render you get today.
+    validations:
+      required: true
+  - type: dropdown
+    id: stability-tier
+    attributes:
+      label: Proposed stability tier
+      description: "Which tier should this ship in? See the feature-tiers issue (#561)."
+      options:
+        - core (stable, broadly useful, supported long-term)
+        - advanced (stable but niche / power-user)
+        - experimental (may change or be removed)
+    validations:
+      required: true
+  - type: dropdown
+    id: intent-classification
+    attributes:
+      label: Authored meaning vs render preference
+      description: >
+        Does this directive state something true about the pipeline (authored meaning, e.g. "these
+        two steps are alternatives"), or does it only tune how the diagram looks (render preference,
+        e.g. spacing/offset)? See #549 and #553. Render preferences ideally have both a directive and
+        a CLI flag so committed `.mmd` files stay reproducible.
+      options:
+        - Authored meaning (a fact about the pipeline/workflow)
+        - Render preference (a visual/layout tuning knob)
+        - Mixed / unsure (explain below)
+    validations:
+      required: true
+  - type: textarea
+    id: classification-rationale
+    attributes:
+      label: Classification rationale
+      description: >
+        Justify the tier and the meaning-vs-preference choice. If it is a render preference, say
+        whether it needs a matching CLI flag (and vice versa) so renders stay reproducible from the
+        committed `.mmd`.
+    validations:
+      required: true
+  - type: textarea
+    id: interactions
+    attributes:
+      label: Interactions and alternatives
+      description: >
+        How does this interact with existing directives / auto-layout? Could auto-layout infer it
+        instead of asking the author to spell it out? Any simpler alternative considered?
+    validations:
+      required: false

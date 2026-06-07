@@ -42,6 +42,7 @@ from nf_metro.layout.phases._common import (  # noqa: F401
     _fan_offsets,
     _grid_group_section_ids,
     _grid_rows_top_to_bottom,
+    _grow_section_bbox_downward,
     _grow_section_bbox_upward,
     _max_stations_per_layer,
     _route_crosses_section_boundary,
@@ -108,6 +109,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _ensure_routes,
     _guard_anchors_frozen_during_placement,
     _guard_bundle_order_preserved,
+    _guard_centered_line_spread_balanced,
     _guard_coordinates_finite,
     _guard_entry_approach_from_port_side,
     _guard_explicit_grid_directions,
@@ -116,6 +118,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_fanout_tail_join,
     _guard_feeder_exits_section_through_side,
     _guard_file_icon_no_name_label,
+    _guard_independent_components_disjoint,
     _guard_inter_row_run_clearance,
     _guard_inter_section_descent_edge_clearance,
     _guard_inter_section_route_no_backtrack,
@@ -126,19 +129,24 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_collinear_distinct_lines,
     _guard_no_intra_section_collinear_distinct_lines,
     _guard_no_label_overlap,
+    _guard_no_line_crosses_file_icon,
     _guard_no_line_crosses_non_consumer,
     _guard_no_negative_grid_columns,
     _guard_no_route_through_section,
     _guard_no_station_overlap,
-    _guard_off_track_inputs_above_consumer,
+    _guard_off_track_clear_of_anchor,
+    _guard_off_track_output_clears_non_producer,
     _guard_partial_branch_offset_gaps,
     _guard_ports_on_boundaries,
+    _guard_rail_above_label_band,
+    _guard_rail_stations_seat_on_rails,
     _guard_routes_enter_sections_at_ports,
     _guard_row_gaps,
     _guard_row_trunk_cy_consistent,
     _guard_section_bboxes_positive,
     _guard_section_top_padding,
     _guard_serpentine_no_backtrack,
+    _guard_single_trunk_off_track_step,
     _guard_station_x_column_drift,
     _guard_stations_in_sections,
     _guard_stations_within_bbox,
@@ -165,8 +173,10 @@ from nf_metro.layout.phases.off_track import (  # noqa: F401
     _compute_fork_join_gaps,
     _insert_phantom_pass_throughs,
     _lift_off_track_stations,
+    _line_crossed_file_icon_sinks,
     _off_track_groups,
-    _place_off_track_above_consumers,
+    _off_track_output_below,
+    _place_off_track_relative_to_anchors,
     _reanchor_off_track_to_consumer,
 )
 from nf_metro.layout.phases.ports import (  # noqa: F401
@@ -231,7 +241,7 @@ from nf_metro.layout.phases.spacing import (  # noqa: F401
     _residual_label_overlaps,
     _spread_bump,
 )
-from nf_metro.parser.model import MetroGraph
+from nf_metro.parser.model import LineSpread, MetroGraph
 
 # ---------------------------------------------------------------------------
 # Stage-boundary guards
@@ -280,9 +290,12 @@ def compute_min_y_spacing(
     The result is applied uniformly to the whole render -- the grid
     stays global, no per-section overrides.
     """
-    icon_below = ICON_HALF_HEIGHT + ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT
+    from nf_metro.layout.labels import active_font_scale
+
+    scale = active_font_scale()
+    icon_below = ICON_HALF_HEIGHT + ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT * scale
     icon_above = ICON_HALF_HEIGHT
-    label_extent = LABEL_OFFSET + FONT_HEIGHT + DESCENDER_CLEARANCE
+    label_extent = LABEL_OFFSET + FONT_HEIGHT * scale + DESCENDER_CLEARANCE
     clearance = ICON_STACK_LABEL_CLEARANCE
 
     pitch_icon_icon = icon_above + icon_below + clearance
@@ -354,6 +367,38 @@ def compute_layout(
     # Off by default: when unset, each _snap call is a single attribute read.
     graph._phase_snapshots_enabled = phase_snapshots_enabled()
 
+    from nf_metro.layout.labels import font_scale_context
+
+    with font_scale_context(graph.font_scale):
+        _compute_layout_scaled(
+            graph,
+            x_spacing=x_spacing,
+            y_spacing=y_spacing,
+            x_offset=x_offset,
+            y_offset=y_offset,
+            section_x_padding=section_x_padding,
+            section_y_padding=section_y_padding,
+            section_x_gap=section_x_gap,
+            section_y_gap=section_y_gap,
+            validate=validate,
+        )
+
+
+def _compute_layout_scaled(
+    graph: MetroGraph,
+    *,
+    x_spacing: float | None,
+    y_spacing: float | None,
+    x_offset: float,
+    y_offset: float,
+    section_x_padding: float,
+    section_y_padding: float,
+    section_x_gap: float,
+    section_y_gap: float,
+    validate: bool,
+) -> None:
+    """Layout body, run under the graph's active font-scale context."""
+
     # Diagonal labels are a horizontal-trunk feature: a TB section places its
     # labels beside vertical pills, where the same tilt doesn't read, so an
     # angled graph that also has a TB section would mix tilted and horizontal
@@ -373,16 +418,44 @@ def compute_layout(
         graph.label_angle = 0.0
 
     # A diagonal label angle drives one graph-wide column pitch shared by every
-    # section, so spacing is a property of the whole render, not of any one
-    # section.  Used as the default x_spacing when the caller didn't pin one.
+    # section (rail and normal alike), so spacing is a property of the whole
+    # render, not of any one section.  Used as the default x_spacing when the
+    # caller didn't pin one.
     from nf_metro.layout.labels import diagonal_label_pitch
 
     default_x_spacing = diagonal_label_pitch(graph, X_SPACING)
 
+    # Opt-in rail mode runs a dedicated, self-contained layout pipeline and
+    # returns early so the normal phase pipeline below is never touched when
+    # rail mode is off (default).  See layout/rail_mode.py.
+    if graph.line_spread is LineSpread.RAILS:
+        from nf_metro.layout.rail_mode import compute_rail_layout
+
+        rail_y = y_spacing if y_spacing is not None else compute_min_y_spacing(graph)
+        rail_x = x_spacing if x_spacing is not None else default_x_spacing
+        compute_rail_layout(
+            graph,
+            x_spacing=rail_x,
+            y_spacing=rail_y,
+            x_offset=x_offset,
+            y_offset=y_offset,
+            section_x_padding=section_x_padding,
+            section_y_padding=section_y_padding,
+            section_y_gap=section_y_gap,
+        )
+        _guard_stations_within_bbox(graph, "final")
+        return
+
     auto_x = x_spacing is None
     auto_y = y_spacing is None
     if y_spacing is None:
+        # The base content pitch before the spread loop widens it for
+        # diagonal labels.  A single-trunk section's off-track lift step
+        # stays at this base so a widened pitch doesn't strand the icon far
+        # above the trunk (issue #580).  Only recorded when y_spacing is
+        # auto-resolved; an explicit pin is honoured verbatim.
         y_spacing = compute_min_y_spacing(graph)
+        graph._base_y_spacing = y_spacing
     else:
         min_required = compute_min_y_spacing(graph)
         if y_spacing < min_required - 1e-6:
@@ -439,6 +512,62 @@ def compute_layout(
             break  # can't widen the binding axis (e.g. pinned) -- give up
         x_spacing, y_spacing = new_x, new_y
 
+    # Assure file-icon leaf sinks off the trunk by construction: a leaf icon
+    # the laid-out routes rake a line across is taken off-track and the layout
+    # re-run once, so the off-track machinery lifts it clear of the passing
+    # line.  Keyed on an observed crossing (not on icon presence), so an
+    # end-of-chain terminus that already sits clear is never disturbed.
+    crossed_sinks = _line_crossed_file_icon_sinks(graph)
+    if crossed_sinks:
+        for sid in crossed_sinks:
+            graph.stations[sid].off_track = True
+        _layout_once(
+            graph,
+            x_spacing=x_spacing,
+            y_spacing=y_spacing,
+            x_offset=x_offset,
+            y_offset=y_offset,
+            section_x_padding=section_x_padding,
+            section_y_padding=section_y_padding,
+            section_x_gap=section_x_gap,
+            section_y_gap=section_y_gap,
+            validate=validate,
+        )
+
+    # Per-section rail mode: the normal pipeline has positioned every
+    # section's bbox and inter-section ports.  Now overwrite the *internal*
+    # geometry of each rail-flagged section with the rail-mode layout (rails
+    # + spanning pills), anchored at the bbox the placement chose.  Non-rail
+    # sections and all inter-section placement keep the normal machinery.
+    rail_section_ids = [
+        sid
+        for sid, mode in graph.line_spread_overrides.items()
+        if mode is LineSpread.RAILS
+    ]
+    if rail_section_ids and graph.line_spread is not LineSpread.RAILS:
+        from nf_metro.layout.labels import diagonal_label_pitch_by_section
+        from nf_metro.layout.rail_mode import retrofit_section_rails
+
+        section_pitch_map = diagonal_label_pitch_by_section(graph, x_spacing)
+        # Rails sit one base grid pitch apart and their labels hang above or
+        # below the bundle, so the diagonal-label widening of the global
+        # y_spacing (the spread loop, for between-station label clearance) must
+        # not also push the rails apart.  Column X still uses the label-aware
+        # pitch, where horizontal label room genuinely matters.
+        rail_pitch = getattr(graph, "_base_y_spacing", y_spacing)
+        for sid in rail_section_ids:
+            section = graph.sections.get(sid)
+            if section is None:
+                continue
+            retrofit_section_rails(
+                graph,
+                section,
+                x_spacing=section_pitch_map.get(sid, x_spacing),
+                y_spacing=rail_pitch,
+                section_x_padding=section_x_padding,
+                section_y_padding=section_y_padding,
+            )
+
     # Always-on backstop (independent of ``validate``): the settled layout
     # must never leave a station outside its own section bbox.  Runs on the
     # render path so an unsupported directive combination fails loudly
@@ -449,6 +578,11 @@ def compute_layout(
     if validate:
         _guard_no_label_overlap(graph, "final")
         _guard_file_icon_no_name_label(graph, "final")
+        _guard_no_line_crosses_file_icon(graph, "final")
+        _guard_centered_line_spread_balanced(graph, "final")
+        _guard_rail_above_label_band(graph, "final")
+        _guard_rail_stations_seat_on_rails(graph, "final")
+        _guard_single_trunk_off_track_step(graph, "final")
 
 
 def _snap(graph: MetroGraph, phase_id: str) -> None:
@@ -649,10 +783,18 @@ def _compute_section_layout(
     # overshoot.  All work in section-local coordinates.
 
     # Stage 1.1: Lay out each section independently (real stations only, no ports)
+    from nf_metro.layout.labels import diagonal_label_pitch_by_section
+
+    section_pitch_map = diagonal_label_pitch_by_section(graph, x_spacing)
     section_subgraphs: dict[str, MetroGraph] = {}
     for sec_id, section in graph.sections.items():
         sub = _layout_single_section(
-            graph, section, x_spacing, y_spacing, section_x_padding, section_y_padding
+            graph,
+            section,
+            section_pitch_map.get(sec_id, x_spacing),
+            y_spacing,
+            section_x_padding,
+            section_y_padding,
         )
         if sub is not None:
             section_subgraphs[sec_id] = sub
@@ -670,6 +812,8 @@ def _compute_section_layout(
     # Stage 1.3: Place sections on the canvas
     place_sections(graph, section_x_gap, section_y_gap)
     _snap(graph, "1.3")
+    if validate:
+        _guard_independent_components_disjoint(graph, "after Stage 1.3")
 
     # Stage 1.4: Renumber sections by visual reading order (row, col)
     _renumber_sections_by_grid(graph)
@@ -919,12 +1063,6 @@ def _place_pass_c_content(
     """Stage 5.1 through Stage 6.12: position junctions, lift off-track
     inputs, settle vertical content, and recenter fans / loop-side
     stations within each section."""
-    # Capture each section's structural content-bottom (as a height below
-    # its bbox top) before the opportunistic content-compaction phases run,
-    # so the inter-row cascade (Stage 6.13 phase 2) stacks lower rows from a
-    # structural prediction rather than the post-compaction settled extent.
-    _snapshot_struct_heights_below_top(graph, section_y_padding)
-
     # ---- Stage 5 - Pass C: Junctions & off-track lift ------------------
     # All port positions are now final; Stage 5.1 positions junctions
     # once.  Stage 5.2 lifts off-track stations; Stages 5.3 to 5.5
@@ -945,6 +1083,16 @@ def _place_pass_c_content(
     _snap(graph, "5.2")
     if validate:
         _run_pass_c_guards(graph, "after Stage 5.2")
+
+    # Capture each section's structural content-bottom (as a height below its
+    # bbox top) before the opportunistic content-compaction phases run, so the
+    # inter-row cascade (Stage 6.13 phase 2) stacks lower rows from a structural
+    # prediction rather than the post-compaction settled extent.  Runs *after*
+    # the off-track lift (Stage 5.2): lifting an input above the trunk raises
+    # the section's bbox top, and capturing before that would understate the
+    # content height below the (then lower) top, making the cascade stack the
+    # row below too high.
+    _snapshot_struct_heights_below_top(graph, section_y_padding)
 
     # Stage 5.3: Re-align bbox tops within each grid row after off-track
     # lifting expanded some sections upward.  Unlike Stages 3.5 / 4.7 which
@@ -1241,7 +1389,7 @@ def _finalize_layout(
         phase = "after final"
         offsets, routes = _run_pass_c_guards(graph, phase)
         _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
-        _guard_off_track_inputs_above_consumer(graph, phase)
+        _guard_off_track_clear_of_anchor(graph, phase)
         _guard_fanout_junction_shares_exit_port_y(graph, phase)
         _guard_merge_port_approach_side(graph, phase, offsets=offsets)
         _guard_partial_branch_offset_gaps(graph, phase, offsets=offsets)
@@ -1255,6 +1403,9 @@ def _finalize_layout(
         _guard_terminus_icons_within_bbox(graph, phase)
         if routes is not None:
             _guard_inter_section_routes_in_row_band(
+                graph, phase, offsets=offsets, routes=routes
+            )
+            _guard_off_track_output_clears_non_producer(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)

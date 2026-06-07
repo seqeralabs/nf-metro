@@ -67,6 +67,14 @@ SECTION_X_PADDING: float = 50.0
 SECTION_Y_PADDING: float = 50.0
 """Vertical padding around section content."""
 
+RAIL_ABOVE_LABEL_TOP_PAD: float = 20.0
+"""Padding between a rail section's box top and its above-rail label band.
+
+The angled above-rail labels already reserve their full tilted footprint as a
+band; only a thin label corner reaches the band's top, so the box hugs that
+corner with less room than the full SECTION_Y_PADDING used above flat content.
+"""
+
 SECTION_X_GAP: float = 50.0
 """Horizontal gap between section columns (engine-level)."""
 
@@ -154,6 +162,10 @@ MIN_STRAIGHT_PORT: float = 5.0
 
 MIN_STRAIGHT_EDGE: float = 10.0
 """Minimum straight track for non-port edges."""
+
+RAIL_TERMINUS_FAN_LEAD: float = 16.0
+"""Flat lead a rail-mode blank terminus's fan runs along its convergence Y
+before fanning out to the rails, so the bundle reads as entering/leaving it."""
 
 MIN_STATION_FLAT_LENGTH: float = 20.0
 """Minimum length of the visible horizontal flat segment THROUGH a station.
@@ -480,6 +492,10 @@ from untouched ones when checking column-companion consensus."""
 # ---------------------------------------------------------------------------
 GUARD_TOLERANCE: float = 5.0
 """Tolerance for stage-boundary invariant checks (port-on-boundary, etc.)."""
+
+COMPONENT_BAND_OVERLAP_TOLERANCE: float = 0.5
+"""Slack permitted when checking that independently-stacked disconnected
+components occupy disjoint vertical bands."""
 
 # ---------------------------------------------------------------------------
 # Canvas-wide grid snap

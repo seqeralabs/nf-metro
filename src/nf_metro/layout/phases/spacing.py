@@ -82,6 +82,11 @@ def _residual_label_overlaps(
     overlaps surface (to be cleared by widening spacing rather than by
     hard-breaking words); the final guard calls it with True to validate the
     settled, fully wrapped state the renderer will draw.
+
+    Overlaps involving a rail-section station are dropped: rail sections run a
+    dedicated layout with their own column pitch, so widening the normal global
+    X spacing cannot fix them and would only needlessly bloat the normal
+    sections.
     """
     from nf_metro.layout.labels import find_label_overlaps
 
@@ -89,7 +94,15 @@ def _residual_label_overlaps(
     if probe is None:
         return []
     offsets, placements = probe
-    return find_label_overlaps(graph, placements, offsets)
+    overlaps = find_label_overlaps(graph, placements, offsets)
+    if not graph.has_rail_sections:
+        return overlaps
+
+    def _in_rail(station_id: str) -> bool:
+        st = graph.stations.get(station_id)
+        return bool(st and st.section_id and graph.is_rail_section(st.section_id))
+
+    return [o for o in overlaps if not (_in_rail(o.a) or _in_rail(o.b))]
 
 
 def _placed_name_label_station_ids(graph: MetroGraph) -> set[str]:

@@ -1,0 +1,34 @@
+%%metro title: Variant Calling with Group Bands
+%%metro style: dark
+%%metro line: caller | Variant Calling | #2db572
+
+%%metro group: SNPs & Indels | freebayes, haplotypecaller, mutect2
+%%metro group: SV & CNV | manta, cnvkit
+%%metro group: MSI | msisensorpro
+
+graph LR
+    subgraph preprocess [Pre-processing]
+        markdup[MarkDuplicates]
+        recal[BaseRecalibrator]
+
+        markdup -->|caller| recal
+    end
+
+    subgraph calling [Variant Calling]
+        freebayes[FreeBayes]
+        haplotypecaller[HaplotypeCaller]
+        mutect2[Mutect2]
+        manta[Manta]
+        cnvkit[CNVkit]
+        msisensorpro[MSIsensorpro]
+
+        %% The callers sit in one horizontal row; the group bands beneath
+        %% caption contiguous families along the x-axis (sarek-style).
+        freebayes -->|caller| haplotypecaller
+        haplotypecaller -->|caller| mutect2
+        mutect2 -->|caller| manta
+        manta -->|caller| cnvkit
+        cnvkit -->|caller| msisensorpro
+    end
+
+    recal -->|caller| freebayes

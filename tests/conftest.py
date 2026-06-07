@@ -86,7 +86,16 @@ def content_corpus() -> list[tuple[str, Path, bool]]:
 
     Shared by the declarative-property tests (idempotence and purity) so they
     exercise the same fixtures.
+
+    Fixtures with a ``rails`` line-spread section are excluded: a rail section's
+    internal geometry is produced by the self-contained rail pipeline (which
+    overwrites the normal content-placement phases), so the per-phase
+    idempotence/purity contract those tests assert does not apply to it.
     """
+
+    def _uses_rails(path: Path) -> bool:
+        return "line_spread: rails" in path.read_text()
+
     items: list[tuple[str, Path, bool]] = []
     for d, tag in [
         (_EXAMPLES, "examples"),
@@ -95,6 +104,8 @@ def content_corpus() -> list[tuple[str, Path, bool]]:
         (_ROOT / "tests" / "fixtures", "tests"),
     ]:
         for p in sorted(d.glob("*.mmd")):
+            if _uses_rails(p):
+                continue
             items.append((f"{tag}/{p.stem}", p, False))
     for p in sorted(_NEXTFLOW.glob("*.mmd")):
         items.append((f"nextflow/{p.stem}", p, True))
