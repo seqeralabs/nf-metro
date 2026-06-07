@@ -629,7 +629,9 @@ def _guard_single_trunk_off_track_step(graph: MetroGraph, phase: str) -> None:
         if off_st is None or anchor is None:
             continue
         section = graph.sections.get(off_st.section_id or "")
-        if not _is_single_trunk_lr_section(graph, section, junction_ids):
+        if section is None or not _is_single_trunk_lr_section(
+            graph, section, junction_ids
+        ):
             continue
         gap = anchor.y - off_st.y
         if gap <= tol:
