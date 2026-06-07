@@ -29,6 +29,7 @@ from nf_metro.layout.constants import (
     DIAGONAL_RUN,
     MIN_STRAIGHT_EDGE,
     OFFSET_STEP,
+    RAIL_ABOVE_LABEL_TOP_PAD,
     SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
     SECTION_Y_GAP,
@@ -263,6 +264,12 @@ def _layout_section_rails(
     # growing the box upward at render time and overlapping the section above.
     above_ids = _rail_above_label_stations(graph, real_ids, per_line_y)
     above_band = _rail_label_band(graph, above_ids)
+    # The angled band only reaches the box top with a thin label corner, so the
+    # box hugs it with RAIL_ABOVE_LABEL_TOP_PAD rather than the full content
+    # padding.  Off-track inputs anchor their own band to box_top +
+    # section_y_padding, so leave the larger pad when they are present.
+    if above_band and not off_track_ids:
+        rails_top -= max(0.0, section_y_padding - RAIL_ABOVE_LABEL_TOP_PAD)
     rails_top += above_band
     if above_band:
         per_line_y = {lid: rails_top + slot_offset[lid] for lid in lines}
@@ -288,6 +295,33 @@ def _layout_section_rails(
     tail_fan = any(_fans(sid) for sid in real_ids if layers.get(sid, 0) == max_layer)
     head_extra = max(0.0, _TERMINUS_FAN_ROOM - x_spacing) if head_fan else 0.0
     tail_extra = max(0.0, _TERMINUS_FAN_ROOM - x_spacing) if tail_fan else 0.0
+
+    # A sink terminus marches its file icons rightward from the last column.
+    # The normal-section layout reserves room for them via
+    # _adjust_terminus_icon_clearance; the rail pipeline otherwise leaves only
+    # the standard padding, so a multi-icon terminus would clamp its icons on
+    # top of one another at the section's right edge.  Reserve the icon
+    # clearance beyond the standard padding (right side only, without shifting
+    # the terminus itself).
+    from nf_metro.layout.phases.single_section import _terminus_icon_clearance
+
+    tail_icon_extra = 0.0
+    for sid in real_ids:
+        st = graph.stations.get(sid)
+        if (
+            st is None
+            or st.is_port
+            or st.off_track
+            or len(st.terminus_labels) <= 1
+            or layers.get(sid, 0) != max_layer
+            or graph.edges_from(sid)  # sink only: its icons extend rightward
+        ):
+            continue
+        need = _terminus_icon_clearance(
+            len(st.terminus_labels), st.terminus_names or None
+        )
+        tail_icon_extra = max(tail_icon_extra, need - section_x_padding)
+    tail_icon_extra = max(0.0, tail_icon_extra)
 
     def _layer_x(layer: float) -> float:
         x = x_offset + section_x_padding + layer * x_spacing
@@ -375,7 +409,13 @@ def _layout_section_rails(
     # the box height covers padding + band + rails + padding.  The terminus fan
     # room widens the column span, so include it.
     bbox_x = x_offset
-    bbox_w = section_x_padding * 2 + max_layer * x_spacing + head_extra + tail_extra
+    bbox_w = (
+        section_x_padding * 2
+        + max_layer * x_spacing
+        + head_extra
+        + tail_extra
+        + tail_icon_extra
+    )
     # The lowest rail Y is the largest per-line offset below rails_top (which
     # is a bundle sub-rail when the bottom slot is a combo), not simply the
     # last slot centre.

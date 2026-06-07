@@ -1107,10 +1107,13 @@ def _render_rail_pill(
     station_data = _station_data_attrs(graph, station)
 
     sw = theme.station_stroke_width
-    # Circles are slightly larger than the bare marker so each used rail reads
-    # as a distinct knob along the white link; the link bar is a touch narrower
-    # than the circles so the knobs bulge out of it like a real interchange.
-    knob_r = r * RAIL_KNOB_RADIUS_RATIO
+    # A spanning interchange draws each used rail as a knob slightly larger than
+    # the bare marker, bulging out of a slightly narrower link bar like a real
+    # metro interchange.  A non-bridging station (a single used rail, hence no
+    # link bar) has nothing to bulge from, so its lone marker uses the standard
+    # radius rather than the inflated interchange knob size.
+    is_spanning = (bot_y - top_y) > 0.5
+    knob_r = r * RAIL_KNOB_RADIUS_RATIO if is_spanning else r
     bar_half = r * RAIL_LINK_HALF_WIDTH_RATIO
     # rail_used_ys is recorded parallel to the line-definition order (see
     # rail_mode._layout_section_rails), so zip the knobs against that same
@@ -1271,7 +1274,11 @@ def _render_stations(
             if sec and sec.direction == "TB":
                 is_tb_vert = True
 
-        if station_offsets:
+        # A rail station is pinned to its rail Y; the parallel-line bundle
+        # offsets do not apply (the rail-pill path above ignores them too), so a
+        # marked single-rail station's glyph must seat on the rail rather than
+        # ride the bundle's mid-offset.
+        if station_offsets and not graph.station_is_rail(station.id):
             line_offsets = [
                 station_offsets.get((station.id, lid), 0.0)
                 for lid in graph.station_lines(station.id)
@@ -1285,6 +1292,12 @@ def _render_stations(
             min_off = max_off = 0.0
 
         station_data = _station_data_attrs(graph, station)
+
+        if graph.station_is_rail(station.id) and (min_off, max_off) != (0.0, 0.0):
+            raise AssertionError(
+                f"rail station {station.id!r} marker glyph offset "
+                f"({min_off}, {max_off}) would lift it off its rail"
+            )
 
         if station.marker is not None:
             _render_marker_station(

@@ -1324,6 +1324,39 @@ def test_diagonal_rail_above_labels_share_a_common_baseline():
     assert below_seen, "fixture must also have a label below the bundle"
 
 
+def test_above_rail_label_bottom_right_corner_seats_at_station():
+    """An above-bundle diagonal rail label anchors its bottom-right corner at
+    its station marker, so the name rises up-and-to-the-left out of the stop."""
+    from nf_metro.layout.labels import _label_corners, place_labels
+    from nf_metro.layout.routing.rail import route_rail_edges
+
+    graph = parse_metro_mermaid(_STACKED_RAIL_MMD)
+    compute_layout(graph)
+    routes = route_rail_edges(graph)
+    placements = {
+        p.station_id: p
+        for p in place_labels(graph, routes=routes, label_angle=graph.label_angle)
+        if p.station_id
+    }
+
+    checked = 0
+    for sid in ("g1", "g2", "g3"):
+        lp = placements[sid]
+        assert lp.above, f"{sid} must be an above-bundle label"
+        st = graph.stations[sid]
+        corners = _label_corners(lp)
+        br = max(corners, key=lambda c: (c[1], c[0]))
+        assert abs(br[0] - st.x) <= 1.0, (
+            f"{sid}: label bottom-right x={br[0]:.1f} not at station x={st.x:.1f}"
+        )
+        assert -1.0 <= st.y - br[1] <= 30.0, (
+            f"{sid}: label bottom-right y={br[1]:.1f} not seated above station "
+            f"y={st.y:.1f}"
+        )
+        checked += 1
+    assert checked == 3
+
+
 def test_rail_station_markers_seat_on_their_rails():
     """Every rail-station marker knob sits on one of the rails the station
     carries: the rendered knob centre matches a line's fixed rail Y.  This
@@ -1361,6 +1394,43 @@ def test_rail_station_markers_seat_on_their_rails():
         )
         checked += 1
     assert checked, "fixture must render rail-station knobs"
+
+
+RAIL_MARKED_SINGLE_LINE_MMD = FIXTURES / "rail_marked_single_line.mmd"
+
+
+def test_single_rail_marker_glyph_seats_on_its_rail():
+    """A single-rail station carrying a ``%%metro marker:`` draws its glyph
+    centred on the station's rail Y, not shifted off the rail by the bundle's
+    parallel-line offset."""
+    import xml.etree.ElementTree as ET
+
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+
+    graph = parse_metro_mermaid(RAIL_MARKED_SINGLE_LINE_MMD.read_text())
+    compute_layout(graph, validate=True)
+
+    haplo = graph.stations["haplo"]
+    assert haplo.marker is not None
+    assert haplo.rail_top_y is None and haplo.rail_bottom_y is None
+    rail_y = haplo.y
+
+    svg = render_svg(graph, THEMES["nfcore"])
+    root = ET.fromstring(svg)
+
+    glyph_cy = None
+    for el in root.iter():
+        if el.attrib.get("class") != "nf-metro-station":
+            continue
+        if el.attrib.get("data-station-id") != "haplo":
+            continue
+        glyph_cy = float(el.attrib["y"]) + float(el.attrib["height"]) / 2
+        break
+    assert glyph_cy is not None, "marked single-rail station must draw a glyph"
+    assert abs(glyph_cy - rail_y) <= 1.0, (
+        f"marker glyph centre cy={glyph_cy:.2f} is off the rail y={rail_y:.2f}"
+    )
 
 
 # ---------------------------------------------------------------------------

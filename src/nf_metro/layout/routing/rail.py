@@ -188,7 +188,14 @@ def route_rail_edges(
         y_src = _line_rail_y(graph, edge.source, edge.line_id)
         y_tgt = _line_rail_y(graph, edge.target, edge.line_id)
 
-        if abs(y_src - y_tgt) < 0.5:
+        # Endpoints within a line-stroke of each other are the same rail for
+        # drawing purposes: route straight rather than easing a sub-stroke
+        # diagonal.  This catches a terminus-bundle slot that lands a fraction
+        # off its line's rail (the bundle packs lines tighter than the rail
+        # pitch), which would otherwise jitter the line as it enters the
+        # terminus.  Real rail transitions are a full pitch (or a combo
+        # sub-rail) apart, well above this tolerance.
+        if abs(y_src - y_tgt) < 2.0:
             points = [(src.x, y_src), (tgt.x, y_src)]
         else:
             # The endpoints sit on different rails: this is a fan-out (the

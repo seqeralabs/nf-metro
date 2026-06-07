@@ -67,6 +67,14 @@ SECTION_X_PADDING: float = 50.0
 SECTION_Y_PADDING: float = 50.0
 """Vertical padding around section content."""
 
+RAIL_ABOVE_LABEL_TOP_PAD: float = 20.0
+"""Padding between a rail section's box top and its above-rail label band.
+
+The angled above-rail labels already reserve their full tilted footprint as a
+band; only a thin label corner reaches the band's top, so the box hugs that
+corner with less room than the full SECTION_Y_PADDING used above flat content.
+"""
+
 SECTION_X_GAP: float = 50.0
 """Horizontal gap between section columns (engine-level)."""
 

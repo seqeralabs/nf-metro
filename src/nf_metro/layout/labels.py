@@ -305,11 +305,17 @@ def _label_corners(
         return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
     w = label_text_width(placement.text)
     text_h = _label_text_height(placement.text)
+    if placement.text_anchor == "end":
+        left, right = placement.x - w, placement.x
+    elif placement.text_anchor == "middle":
+        left, right = placement.x - w / 2, placement.x + w / 2
+    else:
+        left, right = placement.x, placement.x + w
     corners = [
-        (placement.x, placement.y - text_h),
-        (placement.x + w, placement.y - text_h),
-        (placement.x + w, placement.y),
-        (placement.x, placement.y),
+        (left, placement.y - text_h),
+        (right, placement.y - text_h),
+        (right, placement.y),
+        (left, placement.y),
     ]
     rad = math.radians(placement.angle)
     cos_a, sin_a = math.cos(rad), math.sin(rad)
@@ -1250,11 +1256,12 @@ def _apply_rail_label_angle(
     """Tilt rail-section station labels by *label_angle* degrees.
 
     Only rail-mode panels are affected (the normal layout path has its own
-    diagonal-label machinery).  An angled label is anchored at the pill X and
-    its current vertical offset and rotated about that anchor with
-    ``text-anchor=start`` so the tilted text trails away from the station;
-    the rail column step is sized for the rotated label's horizontal
-    projection by ``_label_aware_x_spacing`` so the panel packs tighter.
+    diagonal-label machinery).  A below-bundle label trails down-and-right from
+    the pill (``text-anchor=start``); an above-bundle label trails up-and-left
+    with its bottom-right corner at the pill (``text-anchor=end``), so each
+    name leads directly into its station marker.  The rail column step is sized
+    for the rotated label's horizontal projection by ``_label_aware_x_spacing``
+    so the panel packs tighter.
     """
     for p in placements:
         if p.obstacle_bbox is not None or not p.station_id:
@@ -1268,11 +1275,14 @@ def _apply_rail_label_angle(
         if st.is_blank_terminus:
             continue
         p.angle = label_angle
-        p.text_anchor = "start"
         p.x = st.x
+        # An above-bundle label rises up-and-to-the-left with its bottom-right
+        # corner seated at the pill; a below-bundle label trails down-and-right
+        # from the pill.
+        p.text_anchor = "end" if p.above else "start"
         # Tilting adds vertical extent; nudge the anchor so the rotated label
-        # still clears the whole rail panel (above its top rail / below its
-        # bottom rail) rather than dipping back beside a middle rail.
+        # clears the whole rail panel (above its top rail / below its bottom
+        # rail) rather than dipping back beside a middle rail.
         extent = panel_extents.get(st.section_id) if panel_extents else None
         if extent is not None:
             top_y, bot_y = extent
