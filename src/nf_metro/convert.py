@@ -294,11 +294,10 @@ def _assign_sections(
     unassigned = sorted(nid for nid in kept_ids if nid not in assignment.node_section)
     if unassigned:
         if not assignment.names:
-            auto_key = "__pipeline"
-            assignment.names[auto_key] = title or "Pipeline"
+            auto_key, auto_name = "__pipeline", title or "Pipeline"
         else:
-            auto_key = "__reporting"
-            assignment.names[auto_key] = "Reporting"
+            auto_key, auto_name = "__reporting", "Reporting"
+        assignment.names[auto_key] = auto_name
         for nid in unassigned:
             assignment.node_section[nid] = auto_key
             assignment.nodes[auto_key].append(nid)
