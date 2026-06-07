@@ -36,6 +36,7 @@ from nf_metro.layout.phases.off_track import (
     _align_phantom_pass_throughs,
     _compute_fork_join_gaps,
     _insert_phantom_pass_throughs,
+    _space_off_track_output_columns,
 )
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
@@ -132,6 +133,10 @@ def _layout_single_section(
     _insert_phantom_pass_throughs(graph, section, sub)
 
     layers = assign_layers(sub)
+
+    # Reserve a clear column for each off-track output's hanging icon by
+    # pushing later on-track stations one column right.
+    _space_off_track_output_columns(sub, layers)
 
     # Use entry-top ordering when the immediate predecessor section is
     # horizontal (LR/RL), so the entry-connected station stays at the

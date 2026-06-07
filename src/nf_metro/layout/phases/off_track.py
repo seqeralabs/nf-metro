@@ -73,6 +73,49 @@ def _insert_phantom_pass_throughs(
             )
 
 
+def _space_off_track_output_columns(
+    sub: MetroGraph,
+    layers: dict[str, int],
+) -> None:
+    """Reserve a clear column for each off-track output's hanging icon.
+
+    An off-track output is laid out one layer past its producer -- the same
+    column as the producer's on-track successor -- so its icon, hanging
+    toward the next station, overlaps that station and the riser leaving it.
+    For every producer feeding an off-track output, shift every later
+    on-track station one column right while pinning the output one column
+    past its producer, so the output owns the column between them.
+
+    Mutates ``layers`` in place.  A no-op when no on-track station feeds an
+    off-track target (every off-track input is a source, so input-only
+    sections are untouched).
+    """
+    producer_layer_of_output: dict[str, int] = {}
+    producer_layers: set[int] = set()
+    for sid, station in sub.stations.items():
+        if station.off_track or station.is_hidden or sid not in layers:
+            continue
+        for edge in sub.edges_from(sid):
+            target = sub.stations.get(edge.target)
+            if target is not None and target.off_track and not target.is_hidden:
+                producer_layer_of_output[edge.target] = layers[sid]
+                producer_layers.add(layers[sid])
+    if not producer_layers:
+        return
+
+    sorted_layers = sorted(producer_layers)
+
+    def _shift(layer: int) -> int:
+        return sum(1 for pl in sorted_layers if pl < layer)
+
+    for sid in list(layers):
+        producer_layer = producer_layer_of_output.get(sid)
+        if producer_layer is not None:
+            layers[sid] = producer_layer + 1 + _shift(producer_layer)
+        else:
+            layers[sid] += _shift(layers[sid])
+
+
 def _align_phantom_pass_throughs(
     sub: MetroGraph,
     tracks: dict[str, float],

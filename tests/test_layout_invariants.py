@@ -28,6 +28,7 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_Y_GAP,
     SECTION_Y_PADDING,
+    X_SPACING,
 )
 from nf_metro.layout.engine import (
     PhaseInvariantError,
@@ -1032,6 +1033,42 @@ def test_off_track_outputs_above_and_adjacent_to_producer(fixture):
             f"producer {prod_id} (more than 2 slots) - likely misanchored to "
             f"the section's topmost station instead of its producer"
         )
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_OUTPUT)
+def test_off_track_output_owns_its_column(fixture):
+    """An off-track output must occupy its own column, clear of every
+    on-track station in its section.
+
+    An output is laid out one layer past its producer - the same column as
+    the producer's on-track successor - so without the column-reservation
+    pass its hanging icon overlaps that station and the riser leaving it.
+    The pass pushes later on-track stations one column right; assert the
+    output's X is at least half a column from any on-track same-section
+    station (issue #573).
+    """
+    graph = _layout(fixture)
+    junction_ids = set(graph.junctions)
+    producer_of = _off_track_output_sinks(graph)
+    assert producer_of, f"{fixture}: no off-track output sinks found"
+
+    for off_id in producer_of:
+        off_st = graph.stations[off_id]
+        for sid in graph.sections[off_st.section_id].station_ids:
+            st = graph.stations.get(sid)
+            if (
+                st is None
+                or st.off_track
+                or st.is_port
+                or st.is_hidden
+                or sid in junction_ids
+            ):
+                continue
+            assert abs(off_st.x - st.x) > X_SPACING * 0.5, (
+                f"{fixture}: off-track output {off_id} x={off_st.x} shares a "
+                f"column with on-track {sid} x={st.x}; its icon overlaps the "
+                f"station and the riser leaving it"
+            )
 
 
 # ---------------------------------------------------------------------------

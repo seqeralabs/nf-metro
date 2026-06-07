@@ -17,9 +17,9 @@ graph LR
         markdup -->|main| bqsr
         bqsr -->|main| ready
         bwa -->|main| bam_mapped
-        bam_mapped[mapped BAM]
+        bam_mapped[ ]
         markdup -->|main| cram_md
-        cram_md[dedup CRAM]
+        cram_md[ ]
         bqsr -->|main| cram_recal
-        cram_recal[recal CRAM]
+        cram_recal[ ]
     end
