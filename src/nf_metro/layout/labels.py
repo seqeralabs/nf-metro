@@ -60,8 +60,12 @@ def _label_text_height(label: str) -> float:
     return FONT_HEIGHT + (n - 1) * FONT_HEIGHT * LABEL_LINE_HEIGHT
 
 
-def diagonal_label_pitch(graph: "MetroGraph", fallback: float) -> float:
-    """Graph-wide column pitch for diagonal (angled) station labels.
+def diagonal_label_pitch(
+    graph: "MetroGraph",
+    fallback: float,
+    section_ids: "set[str] | None" = None,
+) -> float:
+    """Column pitch for diagonal (angled) station labels.
 
     All diagonal labels are drawn at the same angle, so adjacent columns'
     labels are PARALLEL and collide only by their PERPENDICULAR separation, not
@@ -70,9 +74,12 @@ def diagonal_label_pitch(graph: "MetroGraph", fallback: float) -> float:
     row itself plus an equal gap); the column pitch that yields that is
     ``2 * height / sin(angle)``, floored at a marker-collision minimum.
 
-    This is computed once over the whole graph (the tallest label drives it) so
-    every section shares one consistent pitch rather than each section sizing
-    its own.  Returns *fallback* when no label angle is set or no labels exist.
+    The tallest qualifying label drives the pitch so every column in scope
+    shares one consistent pitch rather than each column sizing its own.  With
+    *section_ids* the scope is restricted to stations in those sections, so a
+    disconnected component's tall labels do not inflate another component's
+    pitch (issue #581); ``None`` scopes the whole graph.  Returns *fallback*
+    when no label angle is set or no qualifying label exists in scope.
     """
     from nf_metro.layout.constants import STATION_RADIUS_APPROX
 
@@ -84,6 +91,8 @@ def diagonal_label_pitch(graph: "MetroGraph", fallback: float) -> float:
         return fallback
     tallest = 0.0
     for st in graph.stations.values():
+        if section_ids is not None and st.section_id not in section_ids:
+            continue
         if st.is_port or st.is_hidden or st.off_track:
             continue
         if st.is_blank_terminus:
@@ -95,6 +104,36 @@ def diagonal_label_pitch(graph: "MetroGraph", fallback: float) -> float:
         return fallback
     marker_floor = STATION_RADIUS_APPROX * 3.0
     return max(marker_floor, (tallest * 2.0) / sin_a)
+
+
+def diagonal_label_pitch_by_section(
+    graph: "MetroGraph", fallback: float
+) -> dict[str, float]:
+    """Per-section diagonal-label column pitch, scoped per component.
+
+    A diagonal label angle drives the column pitch off the tallest label in
+    scope.  Scoping that to each weakly-connected component of the section
+    meta-graph stops one component's tall labels (e.g. a disconnected rail
+    panel) inflating another component's columns (issue #581).  Each section
+    maps to its component's pitch.
+
+    Returns an empty map -- a signal to keep the single graph-wide pitch and
+    stay byte-identical -- unless the graph both carries a label angle and
+    splits into two or more components.
+    """
+    if not graph.label_angle or graph.section_dag is None:
+        return {}
+    from nf_metro.layout.section_placement import _weakly_connected_components
+
+    components = _weakly_connected_components(graph, graph.section_dag.section_edges)
+    if len(components) <= 1:
+        return {}
+    per_section: dict[str, float] = {}
+    for comp in components:
+        pitch = diagonal_label_pitch(graph, fallback, section_ids=comp)
+        for sid in comp:
+            per_section[sid] = pitch
+    return per_section
 
 
 @dataclass

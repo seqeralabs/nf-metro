@@ -309,3 +309,77 @@ def test_angled_trunk_pitch_at_marker_floor():
         graph, station_offsets=offsets, routes=routes, label_angle=45.0
     )
     assert not find_label_overlaps(graph, placements, offsets)
+
+
+_COMPONENT_PITCH_TRUNK_BLOCK = """\
+    subgraph trunk [Trunk]
+        a[Trim]
+        b[Align]
+        c[Call]
+        a -->|dna| b
+        b -->|dna| c
+    end
+"""
+
+_COMPONENT_PITCH_RAIL_BLOCK = """\
+    subgraph panel [Panel]
+        x[Gene sets\\nreference\\ndatabase]
+        y[Score\\nenrichment\\nper set]
+        z[Enrichment\\nstatistical\\ntesting]
+        x -->|rna| y
+        y -->|rna| z
+    end
+"""
+
+
+def _component_graph(with_panel: bool) -> str:
+    """Diagonal-label graph: a normal trunk, optionally plus a tall rail panel.
+
+    Both components are grid-pinned to separate rows so the disconnected panel
+    stacks below the trunk rather than auto-placing into its band.
+    """
+    directives = [
+        "%%metro label_angle: 45",
+        "%%metro line: dna | DNA | #0570b0",
+        "%%metro grid: trunk | 0,0",
+    ]
+    body = _COMPONENT_PITCH_TRUNK_BLOCK
+    if with_panel:
+        directives += [
+            "%%metro line: rna | RNA | #2db572",
+            "%%metro line_spread: rails | panel",
+            "%%metro grid: panel | 0,1",
+        ]
+        body += _COMPONENT_PITCH_RAIL_BLOCK
+    return "\n".join(directives) + "\ngraph LR\n" + body
+
+
+def _component_trunk_pitch(text: str) -> float:
+    """Mean adjacent-station X pitch of the ``trunk`` section."""
+    graph = parse_metro_mermaid(text)
+    compute_layout(graph, validate=True)
+    xs = sorted(
+        s.x
+        for s in graph.stations.values()
+        if s.section_id == "trunk" and not s.is_port and not s.is_hidden
+    )
+    deltas = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)]
+    return sum(deltas) / len(deltas)
+
+
+def test_disconnected_rail_panel_does_not_inflate_trunk_pitch():
+    """A disconnected rail panel's tall labels must not widen the trunk (#581).
+
+    With diagonal labels the column pitch derives from the tallest label in
+    scope.  When a normal multi-station trunk and a ``rails`` panel with much
+    taller (multi-line) labels form two disconnected components, the panel's
+    pitch must stay local to the panel: the trunk's column pitch must equal
+    what it would be with the panel absent, not be inflated by the panel.
+    """
+    trunk_alone = _component_trunk_pitch(_component_graph(with_panel=False))
+    trunk_with_panel = _component_trunk_pitch(_component_graph(with_panel=True))
+
+    assert trunk_with_panel == pytest.approx(trunk_alone, abs=0.5), (
+        f"trunk pitch {trunk_with_panel:.1f} with disconnected rail panel "
+        f"differs from {trunk_alone:.1f} without it (panel inflated the trunk)"
+    )
