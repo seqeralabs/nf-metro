@@ -513,6 +513,12 @@ def compute_layout(
         from nf_metro.layout.rail_mode import retrofit_section_rails
 
         section_pitch_map = diagonal_label_pitch_by_section(graph, x_spacing)
+        # Rails sit one base grid pitch apart and their labels hang above or
+        # below the bundle, so the diagonal-label widening of the global
+        # y_spacing (the spread loop, for between-station label clearance) must
+        # not also push the rails apart.  Column X still uses the label-aware
+        # pitch, where horizontal label room genuinely matters.
+        rail_pitch = getattr(graph, "_base_y_spacing", y_spacing)
         for sid in rail_section_ids:
             section = graph.sections.get(sid)
             if section is None:
@@ -521,7 +527,7 @@ def compute_layout(
                 graph,
                 section,
                 x_spacing=section_pitch_map.get(sid, x_spacing),
-                y_spacing=y_spacing,
+                y_spacing=rail_pitch,
                 section_x_padding=section_x_padding,
                 section_y_padding=section_y_padding,
             )
