@@ -426,6 +426,37 @@ def test_render_file_icon_no_name_no_caption():
     assert "FASTQ" in svg
 
 
+def test_wide_file_icon_label_wraps_within_icon_width():
+    """A file-icon label wider than the glyph wraps onto stacked lines, each
+    of which fits the icon width rather than overflowing it."""
+    from pathlib import Path
+
+    from nf_metro.render.constants import (
+        ICON_LABEL_CHAR_WIDTH_RATIO,
+        ICON_LABEL_CLEARANCE,
+    )
+
+    fixture = Path(__file__).parent / "fixtures" / "icon_caption_wrap.mmd"
+    graph = parse_metro_mermaid(fixture.read_text())
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+
+    pieces = re.findall(r'font-size="([0-9.]+)"[^>]*>([^<]*BAM[^<]*|CRAM)</text>', svg)
+    assert pieces, "wrapped BAM/CRAM label pieces not found in SVG"
+    assert all("BAM/CRAM" not in text for _, text in pieces), (
+        "label must wrap rather than render as a single over-wide line"
+    )
+
+    max_width = NFCORE_THEME.terminus_width - 2 * ICON_LABEL_CLEARANCE
+    tolerance = 1.0
+    for font_size, text in pieces:
+        line_width = len(text) * float(font_size) * ICON_LABEL_CHAR_WIDTH_RATIO
+        assert line_width <= max_width + tolerance, (
+            f"wrapped line {text!r} width {line_width:.1f} exceeds "
+            f"icon usable width {max_width:.1f}"
+        )
+
+
 def test_render_multi_icon_fixture():
     """The 05b_multi_icons.mmd example renders without errors."""
     from pathlib import Path

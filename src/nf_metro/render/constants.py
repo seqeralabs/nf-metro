@@ -233,6 +233,10 @@ ICON_LABEL_CLEARANCE: float = 2.5
 """Minimum horizontal clearance (px per side) between the icon label and the
 icon's left/right edges; the label font shrinks to honour it."""
 
+ICON_LABEL_LINE_HEIGHT_RATIO: float = 1.1
+"""Baseline-to-baseline spacing of wrapped icon-label lines, as a multiple of
+the font size."""
+
 FILES_ICON_OFFSET_RATIO: float = 0.15
 """Offset of the back page as a fraction of icon width/height (stacked files icon)."""
 

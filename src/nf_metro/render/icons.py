@@ -22,19 +22,75 @@ from nf_metro.render.constants import (
     ICON_FOLD_OVERLAY_OPACITY,
     ICON_LABEL_CHAR_WIDTH_RATIO,
     ICON_LABEL_CLEARANCE,
+    ICON_LABEL_LINE_HEIGHT_RATIO,
     ICON_TEXT_OFFSET_RATIO,
     TEXT_VCENTER_DY,
 )
+
+
+def _label_text_width(label: str, font_size: float) -> float:
+    """Estimated rendered width of ``label`` at ``font_size``."""
+    return len(label) * font_size * ICON_LABEL_CHAR_WIDTH_RATIO
 
 
 def _fit_label_font(label: str, font_size: float, width: float) -> float:
     """Shrink ``font_size`` so ``label`` keeps ``ICON_LABEL_CLEARANCE`` clear of
     the icon's left/right edges; returns ``font_size`` unchanged when it fits."""
     max_width = width - 2 * ICON_LABEL_CLEARANCE
-    text_width = len(label) * font_size * ICON_LABEL_CHAR_WIDTH_RATIO
+    text_width = _label_text_width(label, font_size)
     if max_width > 0 and text_width > max_width:
         return font_size * max_width / text_width
     return font_size
+
+
+def _split_icon_label_tokens(label: str) -> list[str]:
+    """Split ``label`` at ``/`` (kept as a trailing separator) and whitespace.
+
+    A label with no such break point yields a single token, signalling the
+    caller to keep the label on one shrink-to-fit line rather than break a word
+    mid-character."""
+    tokens: list[str] = []
+    buf = ""
+    for ch in label:
+        buf += ch
+        if ch == "/":
+            tokens.append(buf)
+            buf = ""
+        elif ch.isspace():
+            if buf.strip():
+                tokens.append(buf.strip())
+            buf = ""
+    if buf.strip():
+        tokens.append(buf.strip())
+    return tokens
+
+
+def _wrap_icon_label(label: str, font_size: float, width: float) -> list[str]:
+    """Break ``label`` into stacked lines each fitting the icon's usable width.
+
+    Splits are made on ``/`` then whitespace so format names like ``BAM/CRAM``
+    break at the slash. A label that fits, or that has no break point (a single
+    word), stays on one line so it shrinks to fit instead of breaking mid-word.
+    """
+    max_width = width - 2 * ICON_LABEL_CLEARANCE
+    if max_width <= 0 or _label_text_width(label, font_size) <= max_width:
+        return [label]
+
+    tokens = _split_icon_label_tokens(label)
+    if len(tokens) <= 1:
+        return [label]
+
+    lines: list[str] = []
+    current = ""
+    for token in tokens:
+        if current and _label_text_width(current + token, font_size) > max_width:
+            lines.append(current)
+            current = token
+        else:
+            current += token
+    if current:
+        lines.append(current)
+    return [line for line in lines if line] or [label]
 
 
 def _append_icon_label(
@@ -47,23 +103,47 @@ def _append_icon_label(
     font_color: str,
     font_family: str,
 ) -> None:
-    """Render the format label as bold coloured text centred at ``text_y``,
-    shrinking the font to stay clear of the icon's left/right edges."""
+    """Render the format label as bold coloured text centred at ``text_y``.
+
+    A label that fits the icon's usable width renders as a single line. A wider
+    label wraps onto stacked lines (splitting on ``/`` or whitespace, then
+    characters) centred vertically around ``text_y``, so the font stays legible
+    instead of shrinking to a sliver."""
     if not label:
         return
-    d.append(
-        draw.Text(
-            label,
-            _fit_label_font(label, font_size, width),
-            cx,
-            text_y,
-            fill=font_color,
-            font_family=font_family,
-            font_weight="bold",
-            text_anchor="middle",
-            dy=TEXT_VCENTER_DY,
+    lines = _wrap_icon_label(label, font_size, width)
+    if len(lines) == 1:
+        d.append(
+            draw.Text(
+                label,
+                _fit_label_font(label, font_size, width),
+                cx,
+                text_y,
+                fill=font_color,
+                font_family=font_family,
+                font_weight="bold",
+                text_anchor="middle",
+                dy=TEXT_VCENTER_DY,
+            )
         )
-    )
+        return
+
+    line_height = font_size * ICON_LABEL_LINE_HEIGHT_RATIO
+    top_y = text_y - line_height * (len(lines) - 1) / 2
+    for i, line in enumerate(lines):
+        d.append(
+            draw.Text(
+                line,
+                _fit_label_font(line, font_size, width),
+                cx,
+                top_y + i * line_height,
+                fill=font_color,
+                font_family=font_family,
+                font_weight="bold",
+                text_anchor="middle",
+                dy=TEXT_VCENTER_DY,
+            )
+        )
 
 
 def _append_icon_banner_band(
