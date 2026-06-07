@@ -44,11 +44,14 @@ def _fit_label_font(label: str, font_size: float, width: float) -> float:
 
 
 def _split_icon_label_tokens(label: str) -> list[str]:
-    """Split ``label`` at ``/`` (kept as a trailing separator) and whitespace.
+    """Split ``label`` at ``/`` and whitespace, keeping the separator on the token.
 
-    A label with no such break point yields a single token, signalling the
-    caller to keep the label on one shrink-to-fit line rather than break a word
-    mid-character."""
+    A ``/`` stays as a trailing character and a whitespace break becomes a
+    trailing space, so concatenating the tokens of a line reconstructs the
+    original spacing (``BAM/`` + ``CRAM`` -> ``BAM/CRAM``; ``FASTQ `` + ``BAM``
+    -> ``FASTQ BAM``). A label with no break point yields a single token,
+    signalling the caller to keep it on one shrink-to-fit line rather than
+    break a word mid-character."""
     tokens: list[str] = []
     buf = ""
     for ch in label:
@@ -58,7 +61,7 @@ def _split_icon_label_tokens(label: str) -> list[str]:
             buf = ""
         elif ch.isspace():
             if buf.strip():
-                tokens.append(buf.strip())
+                tokens.append(buf.strip() + " ")
             buf = ""
     if buf.strip():
         tokens.append(buf.strip())
@@ -90,7 +93,7 @@ def _wrap_icon_label(label: str, font_size: float, width: float) -> list[str]:
             current += token
     if current:
         lines.append(current)
-    return [line for line in lines if line] or [label]
+    return [stripped for line in lines if (stripped := line.rstrip())] or [label]
 
 
 def _append_icon_label(
@@ -106,28 +109,12 @@ def _append_icon_label(
     """Render the format label as bold coloured text centred at ``text_y``.
 
     A label that fits the icon's usable width renders as a single line. A wider
-    label wraps onto stacked lines (splitting on ``/`` or whitespace, then
-    characters) centred vertically around ``text_y``, so the font stays legible
-    instead of shrinking to a sliver."""
+    label wraps onto stacked lines split on ``/`` or whitespace, centred
+    vertically around ``text_y``; a label with no break point shrinks to fit so
+    the font stays legible instead of breaking a word mid-character."""
     if not label:
         return
     lines = _wrap_icon_label(label, font_size, width)
-    if len(lines) == 1:
-        d.append(
-            draw.Text(
-                label,
-                _fit_label_font(label, font_size, width),
-                cx,
-                text_y,
-                fill=font_color,
-                font_family=font_family,
-                font_weight="bold",
-                text_anchor="middle",
-                dy=TEXT_VCENTER_DY,
-            )
-        )
-        return
-
     line_height = font_size * ICON_LABEL_LINE_HEIGHT_RATIO
     top_y = text_y - line_height * (len(lines) - 1) / 2
     for i, line in enumerate(lines):

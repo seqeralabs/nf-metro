@@ -457,6 +457,18 @@ def test_wide_file_icon_label_wraps_within_icon_width():
         )
 
 
+def test_icon_label_wrap_keeps_separators():
+    """Wrapping keeps a ``/`` joined to its left token and restores the space
+    between whitespace-separated words; labels that fit or have no break point
+    stay on one line."""
+    from nf_metro.render.icons import _wrap_icon_label
+
+    assert _wrap_icon_label("BAM/CRAM", 12.0, 40.0) == ["BAM/", "CRAM"]
+    assert _wrap_icon_label("FASTQ to BAM", 12.0, 70.0) == ["FASTQ to", "BAM"]
+    assert _wrap_icon_label("BAM/CRAM", 12.0, 999.0) == ["BAM/CRAM"]
+    assert _wrap_icon_label("Results", 12.0, 40.0) == ["Results"]
+
+
 def test_render_multi_icon_fixture():
     """The 05b_multi_icons.mmd example renders without errors."""
     from pathlib import Path
