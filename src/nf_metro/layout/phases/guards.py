@@ -33,6 +33,7 @@ from nf_metro.layout.phases._common import (
     routes_through_unrelated_sections,
 )
 from nf_metro.layout.phases.bbox import _section_fit_top
+from nf_metro.layout.phases.off_track import _off_track_anchor_of
 from nf_metro.layout.phases.single_section import _terminus_y_overhang
 from nf_metro.layout.phases.spacing import (
     _placed_name_label_station_ids,
@@ -1810,89 +1811,23 @@ def _guard_fanout_tail_join(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
-def _guard_off_track_inputs_above_consumer(graph: MetroGraph, phase: str) -> None:
-    """After Stage 4.5 and final: off-track input stations must sit at
-    least ``GUARD_TOLERANCE`` above (smaller Y than) their on-track
-    consumer.
-    """
-    junction_ids = graph.junction_ids
-    consumer_of: dict[str, str] = {}
-    for edge in graph.edges:
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if (
-            src is None
-            or tgt is None
-            or not src.off_track
-            or src.is_port
-            or src.id in junction_ids
-            or tgt.is_port
-            or tgt.id in junction_ids
-            or tgt.off_track
-        ):
-            continue
-        consumer_of.setdefault(src.id, tgt.id)
+def _guard_off_track_above_anchor(graph: MetroGraph, phase: str) -> None:
+    """At final: every off-track station must sit at least ``GUARD_TOLERANCE``
+    above (smaller Y than) its anchor.
 
-    for off_id, consumer_id in consumer_of.items():
+    An input's anchor is its consumer, a producer-fed sink's anchor is its
+    producer; :func:`_off_track_anchor_of` resolves which, so the same Y
+    relationship is enforced for both roles (#573).
+    """
+    for off_id, anchor_id in _off_track_anchor_of(graph).items():
         off_st = graph.stations.get(off_id)
-        cons_st = graph.stations.get(consumer_id)
-        if off_st is None or cons_st is None:
+        anchor_st = graph.stations.get(anchor_id)
+        if off_st is None or anchor_st is None:
             continue
-        if not (off_st.y < cons_st.y - GUARD_TOLERANCE):
+        if not (off_st.y < anchor_st.y - GUARD_TOLERANCE):
             raise PhaseInvariantError(
                 f"{phase}: off-track {off_id!r} y={off_st.y:.1f} "
-                f"not above consumer {consumer_id!r} y={cons_st.y:.1f}"
-            )
-
-
-def _guard_off_track_outputs_above_producer(graph: MetroGraph, phase: str) -> None:
-    """At final: off-track output sinks must sit at least ``GUARD_TOLERANCE``
-    above (smaller Y than) their on-track producer.
-
-    The sink-side mirror of :func:`_guard_off_track_inputs_above_consumer`
-    (#573).  An off-track *output* is a producer-fed sink: it has an in-edge
-    from an on-track same-section station and no on-track same-section
-    consumer (which would make it an input, anchored to that consumer
-    instead).
-    """
-    junction_ids = graph.junction_ids
-
-    def _on_track_same_section(st: Station | None, section_id: str | None) -> bool:
-        return (
-            st is not None
-            and not st.is_port
-            and st.id not in junction_ids
-            and not st.off_track
-            and st.section_id == section_id
-        )
-
-    producer_of: dict[str, str] = {}
-    has_on_track_consumer: set[str] = set()
-    for edge in graph.edges:
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if src is not None and src.off_track and not src.is_port:
-            if src.id not in junction_ids and _on_track_same_section(
-                tgt, src.section_id
-            ):
-                has_on_track_consumer.add(src.id)
-        if tgt is not None and tgt.off_track and not tgt.is_port:
-            if tgt.id not in junction_ids and _on_track_same_section(
-                src, tgt.section_id
-            ):
-                producer_of.setdefault(tgt.id, edge.source)
-
-    for sink_id, producer_id in producer_of.items():
-        if sink_id in has_on_track_consumer:
-            continue  # produced-and-consumed: anchored as an input
-        sink_st = graph.stations.get(sink_id)
-        prod_st = graph.stations.get(producer_id)
-        if sink_st is None or prod_st is None:
-            continue
-        if not (sink_st.y < prod_st.y - GUARD_TOLERANCE):
-            raise PhaseInvariantError(
-                f"{phase}: off-track output {sink_id!r} y={sink_st.y:.1f} "
-                f"not above producer {producer_id!r} y={prod_st.y:.1f}"
+                f"not above anchor {anchor_id!r} y={anchor_st.y:.1f}"
             )
 
 
@@ -2097,12 +2032,9 @@ def _run_pass_c_guards(
     Always excluded from the bisection set (only meaningful at the
     final boundary):
 
-    * ``_guard_off_track_inputs_above_consumer`` -- Stage 6.4's snap-
-      to-grid shifts the on-track consumer Y by up to half a pitch
-      before Stage 6.6 re-anchors the off-track input.
-    * ``_guard_off_track_outputs_above_producer`` -- the sink-side
-      mirror, anchored to the producer rather than the consumer; same
-      Stage 6.4/6.6 settling window as the input guard above.
+    * ``_guard_off_track_above_anchor`` -- Stage 6.4's snap-to-grid
+      shifts the on-track anchor (consumer or producer) Y by up to half
+      a pitch before Stage 6.6 re-anchors the off-track station.
     * ``_guard_row_trunk_cy_consistent`` -- the row trunk Y is only
       finalised once Stage 6.7 has re-centred ``center_ports`` graphs.
     * ``_guard_inter_section_routes_in_row_band`` -- row-band height

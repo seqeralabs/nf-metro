@@ -42,6 +42,7 @@ from nf_metro.layout.phases.bbox import (
     _section_fit_top,
 )
 from nf_metro.layout.phases.off_track import (
+    _off_track_anchor_of,
     _off_track_fit_top,
     _off_track_groups,
     _reanchor_off_track_to_consumer,
@@ -187,49 +188,43 @@ def _fixtures_with(predicate) -> list[str]:
 _FIXTURES_WITH_OFF_TRACK = _fixtures_with(lambda t: "off_track:" in t)
 
 
+def _off_track_output_sinks(graph: MetroGraph) -> dict[str, str]:
+    """Map each off-track *output* (producer-fed sink) to its producer.
+
+    Built on production's :func:`_off_track_anchor_of`, which resolves an
+    input to its consumer and a sink to its producer.  An off-track station
+    whose anchor it also feeds (an out-edge to the anchor) is an input; the
+    rest are producer-fed sinks.
+    """
+    sinks: dict[str, str] = {}
+    for off_id, anchor_id in _off_track_anchor_of(graph).items():
+        if any(e.target == anchor_id for e in graph.edges_from(off_id)):
+            continue
+        sinks[off_id] = anchor_id
+    return sinks
+
+
 def _off_track_roles(text: str) -> tuple[bool, bool]:
     """Return ``(has_input, has_output)`` for a fixture's off-track stations.
 
-    An off-track *input* feeds an on-track same-section consumer; an
-    off-track *output* is a producer-fed sink (in-edge from an on-track
-    same-section producer, no on-track consumer).  Classified from the
-    parsed graph rather than text because the directive (``off_track:``)
-    is identical for both roles and only the edge direction distinguishes
-    them.
+    The ``off_track:`` directive is identical for both roles; only the edge
+    direction distinguishes an input (feeds an on-track consumer) from a
+    producer-fed sink, so classification needs the parsed graph.
     """
     try:
         g = parse_metro_mermaid(text)
     except Exception:
         return (False, False)
-    junction_ids = g.junction_ids
-
-    def _on_track(other_id: str, section_id: str | None) -> bool:
-        o = g.stations.get(other_id)
-        return (
-            o is not None
-            and not o.is_port
-            and o.id not in junction_ids
-            and not o.off_track
-            and o.section_id == section_id
-        )
-
-    has_input = has_output = False
-    for sid, st in g.stations.items():
-        if not st.off_track or st.is_port or sid in junction_ids or not st.section_id:
-            continue
-        if any(_on_track(e.target, st.section_id) for e in g.edges_from(sid)):
-            has_input = True
-        elif any(_on_track(e.source, st.section_id) for e in g.edges_to(sid)):
-            has_output = True
-    return (has_input, has_output)
+    sinks = _off_track_output_sinks(g)
+    anchored = set(_off_track_anchor_of(g))
+    return (bool(anchored - sinks.keys()), bool(sinks))
 
 
-_FIXTURES_WITH_OFF_TRACK_INPUT = [
-    f for f in _FIXTURES_WITH_OFF_TRACK if _off_track_roles(_fixture_text(f))[0]
-]
-_FIXTURES_WITH_OFF_TRACK_OUTPUT = [
-    f for f in _FIXTURES_WITH_OFF_TRACK if _off_track_roles(_fixture_text(f))[1]
-]
+_OFF_TRACK_ROLES = {
+    f: _off_track_roles(_fixture_text(f)) for f in _FIXTURES_WITH_OFF_TRACK
+}
+_FIXTURES_WITH_OFF_TRACK_INPUT = [f for f, r in _OFF_TRACK_ROLES.items() if r[0]]
+_FIXTURES_WITH_OFF_TRACK_OUTPUT = [f for f, r in _OFF_TRACK_ROLES.items() if r[1]]
 _FIXTURES_MULTI_SECTION = _fixtures_with(lambda t: t.count("subgraph") >= 2)
 _FIXTURES_COMPACT = _fixtures_with(lambda t: "compact_offsets: true" in t)
 
@@ -1005,38 +1000,6 @@ def test_off_track_inputs_above_consumer(fixture):
 # ---------------------------------------------------------------------------
 
 
-def _producer_fed_sinks(graph: MetroGraph) -> dict[str, str]:
-    """Map each off-track output sink to its on-track same-section producer.
-
-    A producer-fed sink has an in-edge from an on-track same-section
-    station and no on-track same-section consumer (which would make it an
-    input instead).
-    """
-    junction_ids = set(graph.junctions)
-
-    def _on_track(other_id: str, section_id: str | None) -> bool:
-        o = graph.stations.get(other_id)
-        return (
-            o is not None
-            and not o.is_port
-            and o.id not in junction_ids
-            and not o.off_track
-            and o.section_id == section_id
-        )
-
-    producer_of: dict[str, str] = {}
-    for sid, st in graph.stations.items():
-        if not st.off_track or st.is_port or sid in junction_ids or not st.section_id:
-            continue
-        if any(_on_track(e.target, st.section_id) for e in graph.edges_from(sid)):
-            continue  # has an on-track consumer -> it's an input, not a sink
-        for edge in graph.edges_to(sid):
-            if _on_track(edge.source, st.section_id):
-                producer_of.setdefault(sid, edge.source)
-                break
-    return producer_of
-
-
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_OUTPUT)
 def test_off_track_outputs_above_and_adjacent_to_producer(fixture):
     """Off-track *output* stations (producer-fed sinks, declared via
@@ -1044,14 +1007,15 @@ def test_off_track_outputs_above_and_adjacent_to_producer(fixture):
     their producer: above it (smaller Y) and lifted by only a bounded
     number of ``y_spacing`` slots.
 
-    Catches the misanchoring where a sink is pinned to the section's
-    topmost on-track station instead of its producer, stranding the
-    artefact far from the step that writes it (issue #573).  Mirror of
-    ``test_off_track_inputs_above_consumer``.
+    A correctly-anchored sink sits one pitch above its producer (more if a
+    crowded column bumps it clear of a trunk band), so a gap above two
+    pitches means it was misanchored to the section's topmost on-track
+    station and stranded far from the step that writes it (issue #573).
+    Mirror of ``test_off_track_inputs_above_consumer``.
     """
     graph = _layout(fixture)
     y_spacing = compute_min_y_spacing(graph)
-    producer_of = _producer_fed_sinks(graph)
+    producer_of = _off_track_output_sinks(graph)
 
     assert producer_of, f"{fixture}: no off-track output sinks found"
 

@@ -82,7 +82,7 @@ Stages split into three regimes:
 | after Stage 3.1 | ports-on-boundaries |
 | after top-align (Stage 3.5) | ports-on-boundaries |
 | after each Pass C sub-stage (bisection) | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
-| after final | bisection set (all unconditional) + off-track-above-consumer, off-track-above-producer, row-trunk-cy-consistent, inter-section-routes-in-row-band |
+| after final | bisection set (all unconditional) + off-track-above-anchor, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
 Bisection checkpoints fire after every Pass C sub-stage (see the
 `# Stage 5.2:` through `# Stage 6.16:` comments in
