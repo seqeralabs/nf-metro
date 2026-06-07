@@ -296,15 +296,18 @@ def render_files_icon(
 ) -> None:
     """Render a stacked-files icon (two overlapping documents).
 
-    The icon is centered on (cx, cy). A slightly offset back page is drawn
-    first, then a front page (identical to the single file icon) on top.
+    The front page (identical to the single file icon, and the one carrying the
+    label) is centered on (cx, cy) so a files icon's left edge lines up with
+    single file icons sharing a row; the back page peeks up and to the right,
+    into the open space ahead of the icon, so it never crowds the icon to its
+    left.
     """
     off = width * FILES_ICON_OFFSET_RATIO
 
-    # Back page (offset up-left)
+    # Back page (peeks up-right behind the centered front page)
     render_file_icon(
         d,
-        cx=cx - off,
+        cx=cx + off,
         cy=cy - off,
         width=width,
         height=height,
@@ -319,11 +322,11 @@ def render_files_icon(
         font_family=font_family,
     )
 
-    # Front page (main position)
+    # Front page (centered on the icon anchor)
     render_file_icon(
         d,
-        cx=cx + off,
-        cy=cy + off,
+        cx=cx,
+        cy=cy,
         width=width,
         height=height,
         fold_size=fold_size,
