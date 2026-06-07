@@ -131,14 +131,15 @@ def _rail_panel_extents(graph: "MetroGraph") -> dict[str, tuple[float, float]]:
     return extents
 
 
-def _rail_above_threshold(graph: "MetroGraph", section_id: str) -> float | None:
+def _rail_above_threshold(per_line: dict[str, float] | None) -> float | None:
     """Y below which a single-rail station counts as sitting on the top rail.
 
-    Midway between the topmost rail and the next rail down, so only stations
-    on the top rail fall above it.  ``None`` when the section has fewer than
-    two distinct rails (no meaningful top/non-top split).
+    ``per_line`` maps a section's line ids to their rail Y.  The threshold sits
+    midway between the topmost rail and the next rail down, so only stations on
+    the top rail fall above it.  ``None`` when there are fewer than two distinct
+    rails (no meaningful top/non-top split).  Shared by ``_rail_label_side`` and
+    ``rail_mode._rail_above_label_stations`` so both apply one definition.
     """
-    per_line = graph._rail_y.get(section_id)
     if not per_line:
         return None
     ys = sorted(set(per_line.values()))
@@ -167,7 +168,7 @@ def _rail_label_side(
         return None
     if station.rail_top_y is not None and station.rail_bottom_y is not None:
         return None  # spanning pill: keeps layer alternation
-    threshold = _rail_above_threshold(graph, station.section_id)
+    threshold = _rail_above_threshold(graph._rail_y.get(station.section_id))
     if threshold is None:
         return None
     return station.y < threshold
@@ -744,9 +745,7 @@ def _trial_cost(
         if flip:
             start_above = not start_above
 
-        rail_side = (
-            _rail_label_side(graph, station) if panel_extents is not None else None
-        )
+        rail_side = _rail_label_side(graph, station)
 
         start_above = _apply_edge_override(
             station,

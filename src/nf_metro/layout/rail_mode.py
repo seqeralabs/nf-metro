@@ -448,12 +448,11 @@ def _rail_above_label_stations(
     excluded.  Uses each station's line rail Y (station ``y`` is not yet
     assigned when this runs) against the top-rail threshold.
     """
-    if not per_line_y:
+    from nf_metro.layout.labels import _rail_above_threshold
+
+    threshold = _rail_above_threshold(per_line_y)
+    if threshold is None:
         return set()
-    ys = sorted(set(per_line_y.values()))
-    if len(ys) < 2:
-        return set()
-    threshold = (ys[0] + ys[1]) / 2
     above: set[str] = set()
     for sid in real_ids:
         st = graph.stations.get(sid)
