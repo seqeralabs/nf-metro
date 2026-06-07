@@ -115,7 +115,9 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Off-track file artefacts hung above a pre-processing trunk at the "
         "step that writes each one: `%%metro off_track:` on a producer-fed "
         "sink anchors it to its producer (not the section top), mirroring the "
-        "off-track input mechanism for outputs.",
+        "off-track input mechanism for outputs. Each output gets its own "
+        "column clear of the next station, and a step writing several files "
+        "(MarkDup here) stacks them above it.",
     ),
     (
         "legend_logo_placement",

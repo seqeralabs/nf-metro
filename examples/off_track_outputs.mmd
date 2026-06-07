@@ -1,9 +1,10 @@
 %%metro title: Off-track outputs
 %%metro line: main | Pre-processing | #3b82f6
-%%metro off_track: bam_mapped, cram_md, cram_recal
+%%metro off_track: bam_mapped, dedup_cram, dup_metrics, recal_cram
 %%metro file: bam_mapped | BAM
-%%metro file: cram_md | CRAM
-%%metro file: cram_recal | CRAM
+%%metro file: dedup_cram | CRAM
+%%metro file: dup_metrics | TXT
+%%metro file: recal_cram | CRAM
 
 graph LR
     subgraph preprocess [Pre-processing]
@@ -18,8 +19,10 @@ graph LR
         bqsr -->|main| ready
         bwa -->|main| bam_mapped
         bam_mapped[ ]
-        markdup -->|main| cram_md
-        cram_md[ ]
-        bqsr -->|main| cram_recal
-        cram_recal[ ]
+        markdup -->|main| dedup_cram
+        dedup_cram[ ]
+        markdup -->|main| dup_metrics
+        dup_metrics[ ]
+        bqsr -->|main| recal_cram
+        recal_cram[ ]
     end
