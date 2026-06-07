@@ -933,3 +933,45 @@ def test_render_group_band_stays_inside_section_box():
         f"group band bottom {band_bottom:.1f} crosses section box bottom "
         f"{section_bottom:.1f}"
     )
+
+
+def test_standalone_nodes_render_as_unlinked_labels():
+    """Edge-less nodes in a section render as a compact column, not routed lines.
+
+    A node defined inside a subgraph but referenced by no edge lists a tool
+    without joining the line graph: it gets a marker and label, stacks in a
+    single column inside the section box, and creates no edge to route.
+    """
+    standalone = ["samtools", "bcftools", "bwa"]
+    src = (
+        "%%metro title: Tools\n"
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n"
+        "    subgraph sec1 [Alignment]\n"
+        "        a[Input]\n"
+        "        b[Aligned]\n"
+        "        a -->|main| b\n"
+        + "".join(f"        {t}[{t}]\n" for t in standalone)
+        + "    end\n"
+    )
+    graph = parse_metro_mermaid(src)
+
+    linked = {e.source for e in graph.edges} | {e.target for e in graph.edges}
+    assert not (set(standalone) & linked), "standalone nodes must spawn no edges"
+    assert all(graph.stations[t].section_id == "sec1" for t in standalone)
+
+    compute_layout(graph)
+
+    sec = graph.sections["sec1"]
+    xs = {round(graph.stations[t].x, 1) for t in standalone}
+    ys = [graph.stations[t].y for t in standalone]
+    assert len(xs) == 1, f"unlinked tools should share one column, got {xs}"
+    assert len(set(ys)) == len(ys), "unlinked tools should occupy distinct rows"
+    for t in standalone:
+        st = graph.stations[t]
+        assert sec.bbox_x <= st.x <= sec.bbox_x + sec.bbox_w
+        assert sec.bbox_y <= st.y <= sec.bbox_y + sec.bbox_h
+
+    svg = render_svg(graph, NFCORE_THEME)
+    for t in standalone:
+        assert t in svg
