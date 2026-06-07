@@ -1180,3 +1180,57 @@ def test_rail_above_labels_do_not_overlap_section_above():
     render_svg(graph, THEMES["nfcore"])
     overlaps = check_section_overlap(graph)
     assert not overlaps, f"section boxes overlap after label growth: {overlaps}"
+
+
+# ---------------------------------------------------------------------------
+# Coloured-marker fill on a spanning rail interchange (#586)
+# ---------------------------------------------------------------------------
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+RAIL_MARKER_FILL_MMD = FIXTURES / "rail_marker_fill.mmd"
+
+
+def _knob_fills_for_station(svg: str, station_id: str) -> list[str]:
+    """The interior-knob fill colours drawn for ``station_id`` in ``svg``."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(svg)
+    fills: list[str] = []
+    for el in root.iter():
+        if el.attrib.get("class") != "nf-metro-rail-knob":
+            continue
+        if el.attrib.get("data-station-id") != station_id:
+            continue
+        fills.append(el.attrib.get("fill", ""))
+    return fills
+
+
+def test_spanning_rail_station_marker_tints_interchange():
+    """A spanning rail station carrying a coloured marker tints its
+    interchange knobs (and link bar) with the marker fill, while keeping the
+    interchange shape; unmarked spanning stations keep the default fill."""
+    from nf_metro.render import render_svg
+    from nf_metro.themes import THEMES
+
+    graph = parse_metro_mermaid(RAIL_MARKER_FILL_MMD.read_text())
+    compute_layout(graph)
+
+    interchange = graph.stations["interchange"]
+    assert interchange.rail_top_y is not None
+    assert interchange.rail_bottom_y is not None
+    assert interchange.marker is not None
+    assert interchange.marker.fill == "#1f4e79"
+
+    svg = render_svg(graph, THEMES["nfcore"])
+
+    marked = _knob_fills_for_station(svg, "interchange")
+    assert marked, "interchange must draw rail knobs"
+    assert all(fill == "#1f4e79" for fill in marked), (
+        f"coloured marker must tint the interchange knobs, got {marked}"
+    )
+
+    default_fill = THEMES["nfcore"].station_fill
+    unmarked = _knob_fills_for_station(svg, "src")
+    assert unmarked and all(fill == default_fill for fill in unmarked), (
+        f"unmarked spanning station must keep the default fill, got {unmarked}"
+    )
