@@ -12,7 +12,7 @@ from typing import Any, NamedTuple
 
 import drawsvg as draw
 
-from nf_metro.layout.constants import LABEL_LINE_HEIGHT
+from nf_metro.layout.constants import LABEL_LINE_HEIGHT, Y_SPACING
 from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.labels import LabelPlacement, _label_bbox, place_labels
 from nf_metro.layout.routing import RoutedPath, compute_station_offsets, route_edges
@@ -2093,6 +2093,46 @@ def _compute_col_boundary_xs(
     return result
 
 
+def _draw_debug_y_grid(
+    d: draw.Drawing,
+    *,
+    x_start: float,
+    x_end: float,
+    base_y: float,
+    slot_spacing: float,
+    n_slots: int,
+    label: str,
+    debug_font: str,
+    debug_font_size: float,
+) -> None:
+    """Draw horizontal grid-slot lines, labelling the topmost one."""
+    for i in range(n_slots):
+        y = base_y + i * slot_spacing
+        d.append(
+            draw.Line(
+                x_start,
+                y,
+                x_end,
+                y,
+                stroke=DEBUG_ROW_GRID_COLOR,
+                stroke_width=0.75,
+                stroke_dasharray="4,6",
+            )
+        )
+        if i == 0:
+            d.append(
+                draw.Text(
+                    label,
+                    debug_font_size,
+                    x_start - 4,
+                    y,
+                    fill=DEBUG_ROW_GRID_COLOR,
+                    font_family=debug_font,
+                    text_anchor="end",
+                )
+            )
+
+
 def _render_debug_overlay(
     d: draw.Drawing,
     graph: MetroGraph,
@@ -2217,61 +2257,70 @@ def _render_debug_overlay(
                 )
             )
 
-    # Shared Y grid lines: horizontal lines at each grid slot position
-    # within each row group (populated by _align_row_y_grids in engine.py).
+    # Horizontal grid-slot lines. Multi-section row groups use the shared
+    # slot spacing from _align_row_y_grids; every other section falls back to
+    # the global Y pitch so single-section diagrams still show their grid.
     grid_info = graph._row_y_grid_info
-    if grid_info and sections:
-        for row, info in grid_info.items():
-            slot_spacing = info["slot_spacing"]
-            sec_ids = info["section_ids"]
-            ref_secs = [graph.sections[sid] for sid in sec_ids if sid in graph.sections]
-            if not ref_secs:
-                continue
-            # Collect all non-port station Y positions in the group
-            # to determine the actual grid line range.
-            all_station_ys: list[float] = []
-            for sec in ref_secs:
-                for sid in sec.station_ids:
-                    st = graph.stations.get(sid)
-                    if st and not st.is_port:
-                        all_station_ys.append(st.y)
-            if not all_station_ys:
-                continue
-            base_y = min(all_station_ys)
-            max_y = max(all_station_ys)
-            n_slots = (
-                int(round((max_y - base_y) / slot_spacing)) + 1
-                if slot_spacing > 0
-                else 1
-            )
-            # X span: from leftmost to rightmost section in the group
-            x_start = min(s.bbox_x for s in ref_secs) - 10
-            x_end = max(s.bbox_x + s.bbox_w for s in ref_secs) + 10
-            for i in range(n_slots):
-                y = base_y + i * slot_spacing
-                d.append(
-                    draw.Line(
-                        x_start,
-                        y,
-                        x_end,
-                        y,
-                        stroke=DEBUG_ROW_GRID_COLOR,
-                        stroke_width=0.75,
-                        stroke_dasharray="4,6",
-                    )
-                )
-                if i == 0:
-                    d.append(
-                        draw.Text(
-                            f"row {row} grid",
-                            debug_font_size,
-                            x_start - 4,
-                            y,
-                            fill=DEBUG_ROW_GRID_COLOR,
-                            font_family=debug_font,
-                            text_anchor="end",
-                        )
-                    )
+    grouped_sec_ids: set[str] = set()
+    for row, info in grid_info.items():
+        slot_spacing = info["slot_spacing"]
+        sec_ids = info["section_ids"]
+        ref_secs = [graph.sections[sid] for sid in sec_ids if sid in graph.sections]
+        if not ref_secs:
+            continue
+        grouped_sec_ids.update(s.id for s in ref_secs)
+        all_station_ys: list[float] = []
+        for sec in ref_secs:
+            for sid in sec.station_ids:
+                st = graph.stations.get(sid)
+                if st and not st.is_port:
+                    all_station_ys.append(st.y)
+        if not all_station_ys:
+            continue
+        base_y = min(all_station_ys)
+        max_y = max(all_station_ys)
+        n_slots = (
+            int(round((max_y - base_y) / slot_spacing)) + 1 if slot_spacing > 0 else 1
+        )
+        x_start = min(s.bbox_x for s in ref_secs) - 10
+        x_end = max(s.bbox_x + s.bbox_w for s in ref_secs) + 10
+        _draw_debug_y_grid(
+            d,
+            x_start=x_start,
+            x_end=x_end,
+            base_y=base_y,
+            slot_spacing=slot_spacing,
+            n_slots=n_slots,
+            label=f"row {row} grid",
+            debug_font=debug_font,
+            debug_font_size=debug_font_size,
+        )
+
+    for sec in sections:
+        if sec.id in grouped_sec_ids:
+            continue
+        sec_ys = [
+            st.y
+            for sid in sec.station_ids
+            for st in (graph.stations.get(sid),)
+            if st and not st.is_port
+        ]
+        if not sec_ys:
+            continue
+        base_y = min(sec_ys)
+        max_y = max(sec_ys)
+        n_slots = int(round((max_y - base_y) / Y_SPACING)) + 1
+        _draw_debug_y_grid(
+            d,
+            x_start=sec.bbox_x - 10,
+            x_end=sec.bbox_x + sec.bbox_w + 10,
+            base_y=base_y,
+            slot_spacing=Y_SPACING,
+            n_slots=n_slots,
+            label=f"row {sec.grid_row} grid",
+            debug_font=debug_font,
+            debug_font_size=debug_font_size,
+        )
 
     # Hidden stations: dashed-outline circles with labels
     for station in graph.stations.values():
