@@ -1,0 +1,20 @@
+%%metro title: Captioned sibling outputs
+%%metro line: main | Main | #3b82f6
+%%metro off_track: cram_normal, cram_tumor
+%%metro file: cram_normal | CRAM | normal
+%%metro file: cram_tumor | CRAM | tumor
+
+graph LR
+    subgraph proc [Processing]
+        align[Align]
+        markdup[MarkDup]
+        ready[Ready]
+        cram_normal[ ]
+        cram_tumor[ ]
+
+        align -->|main| markdup
+        markdup -->|main| ready
+
+        markdup -->|main| cram_normal
+        markdup -->|main| cram_tumor
+    end

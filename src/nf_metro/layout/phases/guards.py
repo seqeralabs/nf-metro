@@ -753,6 +753,69 @@ def _guard_no_line_crosses_non_consumer(
                     )
 
 
+def _guard_no_line_crosses_file_icon(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: no rendered line segment may pass through a file /
+    terminus icon's drawn bbox, except the one segment that legitimately
+    terminates at (or originates from) that icon's station.
+
+    A metro line raking across a file icon reads as the route running
+    through the artefact.  Only the segment that arrives at (or leaves
+    from) the icon's own station is exempt -- that line is meant to touch
+    it.  Every other segment crossing the icon box is a violation, even
+    one belonging to a line the icon's station also carries, since a
+    different edge of that line is still raking the artefact.
+    """
+    from nf_metro.render.svg import _icon_obstacles_by_station, apply_route_offsets
+    from nf_metro.themes import THEMES
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        # route_edges' diagonal-centring pass mutates Station.x in place;
+        # a guard must stay observational, so snapshot and restore X
+        # around the call (mirrors _run_pass_c_guards).
+        saved_x = {sid: s.x for sid, s in graph.stations.items()}
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+        finally:
+            for sid, x in saved_x.items():
+                graph.stations[sid].x = x
+
+    icon_boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
+    if not icon_boxes:
+        return
+    index = BBoxXIndex(list(icon_boxes.items()))
+
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        src, tgt, line_id = r.edge.source, r.edge.target, r.line_id
+        for k in range(len(pts) - 1):
+            p1, p2 = pts[k], pts[k + 1]
+            for sid, bbox in index.query_x_range(min(p1[0], p2[0]), max(p1[0], p2[0])):
+                if src == sid or tgt == sid:
+                    continue
+                if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
+                    raise PhaseInvariantError(
+                        f"{phase}: line {line_id!r} on edge {src!r} -> {tgt!r} "
+                        f"crosses file icon of {sid!r} "
+                        f"bbox ({bbox[0]:.1f},{bbox[1]:.1f})-"
+                        f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
+                        f"({p1[0]:.1f},{p1[1]:.1f})->({p2[0]:.1f},{p2[1]:.1f})"
+                    )
+
+
 def _guard_row_trunk_cy_consistent(
     graph: MetroGraph,
     phase: str,

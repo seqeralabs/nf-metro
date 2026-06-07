@@ -129,6 +129,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_collinear_distinct_lines,
     _guard_no_intra_section_collinear_distinct_lines,
     _guard_no_label_overlap,
+    _guard_no_line_crosses_file_icon,
     _guard_no_line_crosses_non_consumer,
     _guard_no_negative_grid_columns,
     _guard_no_route_through_section,
@@ -170,6 +171,7 @@ from nf_metro.layout.phases.off_track import (  # noqa: F401
     _compute_fork_join_gaps,
     _insert_phantom_pass_throughs,
     _lift_off_track_stations,
+    _line_crossed_file_icon_sinks,
     _off_track_groups,
     _off_track_output_below,
     _place_off_track_relative_to_anchors,
@@ -473,6 +475,28 @@ def compute_layout(
             break  # can't widen the binding axis (e.g. pinned) -- give up
         x_spacing, y_spacing = new_x, new_y
 
+    # Assure file-icon leaf sinks off the trunk by construction: a leaf icon
+    # the laid-out routes rake a line across is taken off-track and the layout
+    # re-run once, so the off-track machinery lifts it clear of the passing
+    # line.  Keyed on an observed crossing (not on icon presence), so an
+    # end-of-chain terminus that already sits clear is never disturbed.
+    crossed_sinks = _line_crossed_file_icon_sinks(graph)
+    if crossed_sinks:
+        for sid in crossed_sinks:
+            graph.stations[sid].off_track = True
+        _layout_once(
+            graph,
+            x_spacing=x_spacing,
+            y_spacing=y_spacing,
+            x_offset=x_offset,
+            y_offset=y_offset,
+            section_x_padding=section_x_padding,
+            section_y_padding=section_y_padding,
+            section_x_gap=section_x_gap,
+            section_y_gap=section_y_gap,
+            validate=validate,
+        )
+
     # Per-section rail mode: the normal pipeline has positioned every
     # section's bbox and inter-section ports.  Now overwrite the *internal*
     # geometry of each rail-flagged section with the rail-mode layout (rails
@@ -511,6 +535,7 @@ def compute_layout(
     if validate:
         _guard_no_label_overlap(graph, "final")
         _guard_file_icon_no_name_label(graph, "final")
+        _guard_no_line_crosses_file_icon(graph, "final")
         _guard_centered_line_spread_balanced(graph, "final")
         _guard_rail_above_label_band(graph, "final")
         _guard_single_trunk_off_track_step(graph, "final")

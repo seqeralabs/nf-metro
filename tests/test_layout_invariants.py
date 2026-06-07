@@ -56,7 +56,11 @@ from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import resolve_section
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
-from nf_metro.render.svg import _compute_icon_obstacles
+from nf_metro.render.svg import (
+    _compute_icon_obstacles,
+    _icon_obstacles_by_station,
+    apply_route_offsets,
+)
 from nf_metro.themes import THEMES
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -1335,6 +1339,190 @@ def test_off_track_output_routes_share_flat_tail(fixture):
             f"{spread:.1f}px (>{_Y_TOL}); tails {[(o, round(t, 1)) for o, t in tails]} "
             f"are not consistent"
         )
+
+
+# ---------------------------------------------------------------------------
+# A metro line must never pass through a file / terminus icon
+# ---------------------------------------------------------------------------
+
+
+def _segments_crossing_icons(
+    graph: MetroGraph,
+) -> list[tuple[str, str, str, str]]:
+    """Return ``(line, src, tgt, icon_station)`` for every routed segment
+    that crosses a file icon's drawn bbox other than the segment that
+    starts or ends at that icon's own station.
+    """
+    from nf_metro.layout.geometry import segment_intersects_bbox
+
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
+    hits: list[tuple[str, str, str, str]] = []
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        src, tgt = r.edge.source, r.edge.target
+        for sid, bbox in boxes.items():
+            if src == sid or tgt == sid:
+                continue
+            for k in range(len(pts) - 1):
+                p1, p2 = pts[k], pts[k + 1]
+                if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
+                    hits.append((r.line_id, src, tgt, sid))
+                    break
+    return hits
+
+
+def test_leaf_file_icon_crossing_fixture_crosses_without_auto_lift(monkeypatch):
+    """The problem-1 fixture genuinely puts a line across the icon when the
+    auto-off-track corrective re-run is suppressed.
+
+    Guards against the fixture silently ceasing to exercise the fix: with the
+    crossing-sink detector neutralised, the unmarked leaf icon must still be
+    raked by a non-terminating line.
+    """
+    import nf_metro.layout.engine as engine_module
+
+    monkeypatch.setattr(
+        engine_module, "_line_crossed_file_icon_sinks", lambda graph: set()
+    )
+    graph = _layout("leaf_file_icon_on_trunk.mmd")
+    assert not graph.stations["bam_out"].off_track
+    assert _segments_crossing_icons(graph), (
+        "fixture no longer crosses its icon without auto-lift; it can't "
+        "exercise the keep-lines-out-of-icons fix"
+    )
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_no_line_crosses_file_icon(fixture):
+    """No routed line segment may pass through a file / terminus icon's drawn
+    bbox, except the segment that terminates at (or originates from) that
+    icon's own station.
+
+    A leaf file-icon sink the layout would otherwise rake a line across is
+    auto-lifted off the trunk, so the settled layout is clear by
+    construction.
+    """
+    graph = _layout(fixture)
+    hits = _segments_crossing_icons(graph)
+    assert not hits, f"{fixture}: line(s) cross a file icon: " + "; ".join(
+        f"{ln} on {s}->{t} crosses {icon}" for ln, s, t, icon in hits
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sibling off-track output icons must not overlap each other
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK)
+def test_off_track_output_icons_do_not_overlap(fixture):
+    """Two off-track output icon bboxes in one section never overlap.
+
+    Outputs hanging off nearby producers stack so their drawn boxes -- icon
+    plus any under-icon caption -- stay clear of each other.
+    """
+    graph = _layout(fixture)
+    sinks = set(_off_track_output_sinks(graph))
+    if len(sinks) < 2:
+        pytest.skip(f"{fixture}: fewer than two off-track output sinks")
+    offsets = compute_station_offsets(graph)
+    boxes = {
+        sid: b
+        for sid, b in _icon_obstacles_by_station(
+            graph, THEMES["nfcore"], offsets
+        ).items()
+        if sid in sinks
+    }
+    items = list(boxes.items())
+    tol = 0.5
+    for i, (s1, (x1, y1, X1, Y1)) in enumerate(items):
+        for s2, (x2, y2, X2, Y2) in items[i + 1 :]:
+            overlap = (
+                x1 < X2 - tol and x2 < X1 - tol and y1 < Y2 - tol and y2 < Y1 - tol
+            )
+            assert not overlap, (
+                f"{fixture}: off-track output icons {s1!r} and {s2!r} overlap: "
+                f"({x1:.1f},{y1:.1f},{X1:.1f},{Y1:.1f}) vs "
+                f"({x2:.1f},{y2:.1f},{X2:.1f},{Y2:.1f})"
+            )
+
+
+def test_captioned_sibling_outputs_clear_caption_band():
+    """Same-column captioned off-track outputs reserve their caption band.
+
+    Two captioned outputs stacked in one column must keep their full drawn
+    boxes -- icon plus the under-icon caption that reaches below each icon --
+    apart, not merely the bare icon half-heights.
+    """
+    graph = _layout("captioned_sibling_outputs.mmd")
+    sinks = set(_off_track_output_sinks(graph))
+    assert len(sinks) >= 2
+    offsets = compute_station_offsets(graph)
+    boxes = {
+        sid: b
+        for sid, b in _icon_obstacles_by_station(
+            graph, THEMES["nfcore"], offsets
+        ).items()
+        if sid in sinks
+    }
+    items = list(boxes.items())
+    for i, (s1, (x1, y1, X1, Y1)) in enumerate(items):
+        for s2, (x2, y2, X2, Y2) in items[i + 1 :]:
+            overlap = x1 < X2 and x2 < X1 and y1 < Y2 and y2 < Y1
+            assert not overlap, (
+                f"captioned outputs {s1!r}/{s2!r} overlap: "
+                f"({x1:.1f},{y1:.1f},{X1:.1f},{Y1:.1f}) vs "
+                f"({x2:.1f},{y2:.1f},{X2:.1f},{Y2:.1f})"
+            )
+
+
+# ---------------------------------------------------------------------------
+# A producer's label clears an off-track output icon above its fork/join bubble
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK)
+def test_off_track_output_clears_station_labels(fixture):
+    """No on-track station label overlaps an off-track output icon.
+
+    A fork/join bubble carrying an output above it must leave its stations'
+    labels clear of the output icon; the column gap widens to fit them.
+    """
+    graph = _layout(fixture)
+    sinks = set(_off_track_output_sinks(graph))
+    if not sinks:
+        pytest.skip(f"{fixture}: no off-track output sinks")
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    icon_boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
+    labels = place_labels(
+        graph,
+        station_offsets=offsets,
+        icon_obstacles=list(icon_boxes.values()),
+        routes=routes,
+        label_angle=graph.label_angle or 0.0,
+    )
+    sink_boxes = {sid: b for sid, b in icon_boxes.items() if sid in sinks}
+    tol = 0.5
+    for p in labels:
+        if not p.station_id or p.station_id in sinks:
+            continue
+        lx0, ly0, lx1, ly1 = _label_bbox(p)
+        for oid, (bx0, by0, bx1, by1) in sink_boxes.items():
+            overlap = (
+                lx0 < bx1 - tol
+                and bx0 < lx1 - tol
+                and ly0 < by1 - tol
+                and by0 < ly1 - tol
+            )
+            assert not overlap, (
+                f"{fixture}: label of {p.station_id!r} overlaps off-track "
+                f"output icon {oid!r}: label "
+                f"({lx0:.1f},{ly0:.1f},{lx1:.1f},{ly1:.1f}) vs icon "
+                f"({bx0:.1f},{by0:.1f},{bx1:.1f},{by1:.1f})"
+            )
 
 
 # ---------------------------------------------------------------------------

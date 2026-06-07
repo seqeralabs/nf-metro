@@ -276,17 +276,20 @@ def _position_legend(
     return legend_x, legend_y, legend_w, legend_h, show_legend
 
 
-def _compute_icon_obstacles(
+def _icon_obstacles_by_station(
     graph: MetroGraph,
     theme: Theme,
     station_offsets: dict[tuple[str, str], float],
-) -> list[tuple[float, float, float, float]]:
-    """Compute bounding boxes for terminus file icons.
+) -> dict[str, tuple[float, float, float, float]]:
+    """Compute each terminus file icon's bounding box, keyed by station id.
 
-    These are passed to the label placer as obstacles so labels maintain
-    clearance from adjacent icons.
+    The box covers the icon row(s) and any caption text beneath, with a
+    clearance margin -- the same geometry the label placer treats as an
+    obstacle.  Keyed by station so a caller can attribute a box to the
+    station whose icon it is (e.g. to exempt that station's own terminating
+    segment from a line-crosses-icon check).
     """
-    obstacles: list[tuple[float, float, float, float]] = []
+    obstacles: dict[str, tuple[float, float, float, float]] = {}
     margin = ICON_CLEARANCE_MARGIN
 
     for station in graph.stations.values():
@@ -339,16 +342,23 @@ def _compute_icon_obstacles(
         if any(station.terminus_names or []):
             y_max += ICON_NAME_GAP + theme.label_font_size * ICON_NAME_FONT_SCALE
 
-        obstacles.append(
-            (
-                x_min - margin,
-                y_min - margin,
-                x_max + margin,
-                y_max + margin,
-            )
+        obstacles[station.id] = (
+            x_min - margin,
+            y_min - margin,
+            x_max + margin,
+            y_max + margin,
         )
 
     return obstacles
+
+
+def _compute_icon_obstacles(
+    graph: MetroGraph,
+    theme: Theme,
+    station_offsets: dict[tuple[str, str], float],
+) -> list[tuple[float, float, float, float]]:
+    """Bounding boxes for terminus file icons, as label-placement obstacles."""
+    return list(_icon_obstacles_by_station(graph, theme, station_offsets).values())
 
 
 def render_svg(

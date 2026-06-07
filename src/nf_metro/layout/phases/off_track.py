@@ -8,6 +8,8 @@ from collections import defaultdict
 from nf_metro.layout.constants import (
     DIAGONAL_RUN,
     EXIT_GAP_MULTIPLIER,
+    ICON_CAPTION_FONT_HEIGHT,
+    ICON_CAPTION_GAP,
     ICON_HALF_HEIGHT,
     LABEL_BBOX_MARGIN,
     MIN_STRAIGHT_EDGE,
@@ -410,6 +412,65 @@ def _compute_fork_join_gaps(
     return layer_extra
 
 
+def _line_crossed_file_icon_sinks(graph: MetroGraph) -> set[str]:
+    """Leaf file-icon sinks whose icon a non-terminating line rakes across.
+
+    Runs against a laid-out graph: routes the edges, builds each terminus
+    icon's drawn bbox, and returns the id of every leaf file-icon sink
+    (``is_terminus`` with an in-edge and no out-edge) whose box is crossed
+    by a line segment that neither starts nor ends at that station and is
+    not one of the station's own lines.
+
+    These are the sinks an auto-lift must take off the trunk: leaving them
+    on a line-track row puts the icon under a passing line.  A sink whose
+    icon no line crosses is left alone, so an end-of-chain terminus that
+    already sits clear is never lifted.
+    """
+    from nf_metro.layout.geometry import segment_intersects_bbox
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+    from nf_metro.render.svg import _icon_obstacles_by_station, apply_route_offsets
+    from nf_metro.themes import THEMES
+
+    offsets = compute_station_offsets(graph)
+    # route_edges' diagonal-centring pass mutates Station.x in place; this is
+    # a read-only probe, so snapshot and restore X around the call.
+    saved_x = {sid: s.x for sid, s in graph.stations.items()}
+    try:
+        routes = route_edges(graph, station_offsets=offsets)
+    except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+        return set()
+    finally:
+        for sid, x in saved_x.items():
+            graph.stations[sid].x = x
+
+    icon_boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
+    leaf_sinks = {
+        sid
+        for sid in icon_boxes
+        if (st := graph.stations.get(sid)) is not None
+        and not st.off_track
+        and graph.edges_to(sid)
+        and not graph.edges_from(sid)
+    }
+    if not leaf_sinks:
+        return set()
+
+    crossed: set[str] = set()
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        src, tgt = r.edge.source, r.edge.target
+        for sid in leaf_sinks - crossed:
+            if src == sid or tgt == sid:
+                continue
+            bbox = icon_boxes[sid]
+            for k in range(len(pts) - 1):
+                p1, p2 = pts[k], pts[k + 1]
+                if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
+                    crossed.add(sid)
+                    break
+    return crossed
+
+
 def _off_track_anchor_of(graph: MetroGraph) -> dict[str, str]:
     """Map each off-track station to the on-track same-section station it
     hangs next to.
@@ -799,17 +860,25 @@ def _bump_off_track_clear_of_trunks(
     if not trunk_offsets_at_x and not sib_ys:
         return candidate_y
 
+    # A captioned icon's drawn box reaches below its centre by the caption
+    # gap plus a caption line; a same-column sibling must clear that reach,
+    # not just the bare icon half-heights, or the upper icon's caption
+    # crashes into the lower icon.
+    caption_reach = (
+        ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT
+        if (off_st.terminus_names and any(off_st.terminus_names))
+        else 0.0
+    )
+    sibling_clearance = 2 * ICON_HALF_HEIGHT + caption_reach + MARGIN
+
     def _overlaps(y: float) -> bool:
         top = y - ICON_HALF_HEIGHT - MARGIN
         bot = y + ICON_HALF_HEIGHT + MARGIN
         for tl_y_lo, tl_y_hi in zip(trunk_offsets_at_x[::2], trunk_offsets_at_x[1::2]):
             if not (bot < tl_y_lo or tl_y_hi < top):
                 return True
-        # Sibling clearance: keep at least 2 * ICON_HALF_HEIGHT + MARGIN between
-        # icon centres in the same column so the icon bboxes don't
-        # touch.
         for sy in sib_ys:
-            if abs(sy - y) < 2 * ICON_HALF_HEIGHT + MARGIN:
+            if abs(sy - y) < sibling_clearance:
                 return True
         return False
 
