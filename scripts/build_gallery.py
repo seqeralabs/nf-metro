@@ -167,6 +167,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "single section, without splitting them apart.",
     ),
     (
+        "sarek_metro",
+        EXAMPLES_DIR,
+        "Integration showcase: a sarek-style variant-calling pipeline drawn "
+        "with diagonal (45-degree) labels for tight column packing, an "
+        "off-track FASTQ input, file termini, marker styles, and a "
+        "`%%metro line_spread: rails` panel where each caller keeps its own "
+        "rail and shared stations render as interchanges.",
+    ),
+    (
         "disconnected_components",
         EXAMPLES_DIR,
         "A connected three-section trunk plus a separate, wide disconnected "
