@@ -1136,10 +1136,10 @@ _STACKED_RAIL_MMD = (
 )
 
 
-def test_diagonal_rail_labels_all_hang_above_the_bundle():
-    """In a rail panel with a label angle every station label hangs above the
-    topmost rail (top- and bottom-rail stations alike), so they read as a tidy
-    row of angled names above the bundle rather than splitting either side."""
+def test_diagonal_rail_labels_top_rail_above_others_below():
+    """In a rail panel with a label angle, a single-rail station on the topmost
+    rail labels above the bundle while every other single-rail station labels
+    below, so each name sits outside the bundle on the side nearest its rail."""
     from nf_metro.layout.labels import place_labels
     from nf_metro.layout.routing import compute_station_offsets, route_edges
 
@@ -1159,7 +1159,7 @@ def test_diagonal_rail_labels_all_hang_above_the_bundle():
     }
     assert placements["g2"].above, "top-rail station g2 must label above"
     assert placements["g3"].above, "top-rail station g3 must label above"
-    assert placements["t1"].above, "bottom-rail station t1 must label above"
+    assert not placements["t1"].above, "bottom-rail station t1 must label below"
 
 
 def test_rail_above_labels_do_not_overlap_section_above():
@@ -1238,7 +1238,6 @@ def test_spanning_rail_station_marker_tints_interchange():
 # Diagonal rail labels: tidy row above the rail bundle; markers seat on rails
 # ---------------------------------------------------------------------------
 
-RAIL_DIAGONAL_LABELS_MMD = FIXTURES / "rail_diagonal_labels.mmd"
 RAIL_SINGLE_LINE_CALLERS_MMD = FIXTURES / "rail_single_line_callers.mmd"
 
 
@@ -1267,39 +1266,38 @@ def _diagonal_label_placements(graph):
     return out
 
 
-def test_diagonal_rail_labels_sit_above_the_bundle_on_a_common_baseline():
-    """With a label angle, every rail-section station label hangs ABOVE the
-    section's topmost rail and the labels share one bottom-edge baseline, so
-    they read as a tidy row of angled names above the rail bundle."""
-    graph = parse_metro_mermaid(RAIL_DIAGONAL_LABELS_MMD.read_text())
-    assert graph.line_spread is LineSpread.RAILS
+def test_diagonal_rail_above_labels_share_a_common_baseline():
+    """The diagonal labels that hang above the bundle (top-rail stations) share
+    one bottom-edge baseline above the section's topmost rail, so they read as a
+    tidy row; the other rails' labels hang below and are not part of that row."""
+    graph = parse_metro_mermaid(_STACKED_RAIL_MMD)
     assert graph.label_angle
 
-    by_section: dict[str, list[tuple[str, float, float]]] = {}
-    for sid, sec_id, top, bot in _diagonal_label_placements(graph):
-        by_section.setdefault(sec_id, []).append((sid, top, bot))
-
+    placements = _diagonal_label_placements(graph)
     rails = _section_line_rails(graph)
-    checked = 0
-    for sec_id, labels in by_section.items():
-        if len(labels) < 2:
-            continue
+    above_by_section: dict[str, list[float]] = {}
+    below_seen = False
+    for _sid, sec_id, _top, bot in placements:
         section_rails = rails.get(sec_id)
-        assert section_rails, f"{sec_id}: no reconstructable rails"
+        if not section_rails:
+            continue
         top_rail = min(section_rails.values())
+        if bot <= top_rail + 1.0:
+            above_by_section.setdefault(sec_id, []).append(bot)
+        else:
+            below_seen = True
 
-        baselines = [bot for _sid, _top, bot in labels]
+    checked = 0
+    for sec_id, baselines in above_by_section.items():
+        if len(baselines) < 2:
+            continue
         spread = max(baselines) - min(baselines)
         assert spread <= 2.0, (
-            f"{sec_id}: diagonal label baselines not aligned (spread {spread:.1f}px)"
+            f"{sec_id}: above-label baselines not aligned (spread {spread:.1f}px)"
         )
-        for sid, _top, bot in labels:
-            assert bot <= top_rail + 1.0, (
-                f"{sec_id}/{sid}: label baseline {bot:.1f} not above top rail "
-                f"{top_rail:.1f}"
-            )
         checked += 1
-    assert checked, "fixture must have a section with several diagonal labels"
+    assert checked, "fixture must have a section with >=2 above (top-rail) labels"
+    assert below_seen, "fixture must also have a label below the bundle"
 
 
 def test_rail_station_markers_seat_on_their_rails():

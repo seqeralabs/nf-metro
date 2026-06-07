@@ -443,13 +443,11 @@ def _rail_above_label_stations(
 ) -> set[str]:
     """Stations whose labels hang above the top rail (so the box reserves room).
 
-    With a diagonal label angle every rail-panel label is forced above the
-    topmost rail on a shared baseline (see ``labels.place_labels``), so the band
-    above the rails must clear *every* label-bearing station, not just those on
-    the top rail.  Without an angle the rule mirrors ``labels._rail_label_side``:
-    only a station sitting on the topmost rail labels above; a spanning
-    (multi-rail) station keeps layer alternation and is excluded.  Uses each
-    station's line rail Y (station ``y`` is not yet assigned when this runs).
+    Mirrors ``labels._rail_label_side``: only a single-rail station sitting on
+    the topmost rail labels above; every other single-rail station labels below
+    and a spanning (multi-rail) station keeps layer alternation, so both are
+    excluded.  Uses each station's line rail Y (station ``y`` is not yet
+    assigned when this runs).
     """
     from nf_metro.layout.labels import _rail_above_threshold
 
@@ -458,9 +456,6 @@ def _rail_above_label_stations(
         if st is None or st.is_port or st.off_track or st.is_blank_terminus:
             return False
         return bool(st.label.strip())
-
-    if graph.label_angle:
-        return {sid for sid in real_ids if _labelled(sid)}
 
     threshold = _rail_above_threshold(per_line_y)
     if threshold is None:
