@@ -42,4 +42,8 @@ nav:
   - nf-core Pipelines: pipelines/index.md
   - Gallery: gallery/index.md
   - Internals:
+    - Architecture: dev/architecture.md
     - Layout pipeline: dev/layout_pipeline.md
+    - Routing: dev/routing.md
+    - Parser: dev/parser.md
+    - Testing: dev/testing.md
