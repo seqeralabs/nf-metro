@@ -461,18 +461,22 @@ def _uneven_reconverging_branches(
     if immediate_common:
         return None
 
-    chains = {node: _linear_chain_to_merge(node, G) for node in nodes}
-    if any(chain is None for chain in chains.values()):
+    chains = {
+        node: chain
+        for node in nodes
+        if (chain := _linear_chain_to_merge(node, G)) is not None
+    }
+    if len(chains) != len(nodes):
         return None
 
-    merges = {chain[-1] for chain in chains.values() if chain}
+    merges = {chain[-1] for chain in chains.values()}
     if len(merges) != 1:
         return None
     merge = merges.pop()
     if not all(_is_real(p) for p in G.predecessors(merge)):
         return None
 
-    hops = {node: len(chain) for node, chain in chains.items() if chain}
+    hops = {node: len(chain) for node, chain in chains.items()}
     if len(set(hops.values())) < 2:
         return None
     return hops
@@ -500,7 +504,7 @@ def _linear_chain_to_merge(branch: str, G: nx.DiGraph[str]) -> list[str] | None:
         if nxt in seen:
             return None
         chain.append(nxt)
-        if len(list(G.predecessors(nxt))) > 1:
+        if G.in_degree(nxt) > 1:
             return chain
         seen.add(nxt)
         node = nxt
