@@ -9,7 +9,7 @@ import click
 
 from nf_metro import __version__
 from nf_metro.layout import PhaseInvariantError, compute_layout
-from nf_metro.parser import parse_metro_mermaid
+from nf_metro.parser import ERROR, parse_metro_mermaid, validate_graph
 from nf_metro.render import render_svg
 from nf_metro.render.html import render_html
 from nf_metro.themes import THEMES
@@ -276,28 +276,12 @@ def validate(input_file: Path) -> None:
         click.echo(f"Parse error: {e}", err=True)
         raise SystemExit(1)
 
-    errors = []
-
-    # Check that all edge line_ids reference defined lines
-    for edge in graph.edges:
-        if edge.line_id != "default" and edge.line_id not in graph.lines:
-            errors.append(
-                f"Edge {edge.source} -> {edge.target} references "
-                f"undefined line '{edge.line_id}'"
-            )
-
-    # Check that section station IDs exist
-    for section in graph.sections.values():
-        for sid in section.station_ids:
-            if sid not in graph.stations:
-                errors.append(
-                    f"Section '{section.name}' references unknown station '{sid}'"
-                )
+    errors = [issue for issue in validate_graph(graph) if issue.severity == ERROR]
 
     if errors:
         click.echo("Validation errors:", err=True)
-        for err in errors:
-            click.echo(f"  - {err}", err=True)
+        for issue in errors:
+            click.echo(f"  - {issue.message}", err=True)
         raise SystemExit(1)
 
     click.echo(
