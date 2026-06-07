@@ -1045,17 +1045,14 @@ def place_labels(
         # which lets densely-spaced stations share a compact horizontal
         # line without their long names colliding.
         if label_angle:
-            # In a rail panel every tilted label hangs ABOVE the topmost rail:
-            # the above anchor resolves to ``top_rail - label_offset -
-            # DIAGONAL_LABEL_OFFSET`` (``min_off`` reaches the panel's top rail),
-            # so all the panel's labels share one bottom-edge baseline and read
-            # as a tidy row of angled names above the rail bundle.  Outside a
-            # rail panel a tilted label hangs below the trunk and flips above
-            # only to clear a fork sibling sitting directly below it.
+            # In a rail panel every tilted label hangs ABOVE the topmost rail
+            # on a shared baseline (the above anchor measures from ``min_off``,
+            # the panel's top rail), so the panel's labels read as a tidy row of
+            # angled names above the bundle.  Outside a rail panel a tilted label
+            # hangs below the trunk and flips above only to clear a fork sibling
+            # sitting directly below it.
             in_rail_panel = station.section_id in panel_extents
-            diag_above = (
-                True if in_rail_panel else _diagonal_prefer_above(graph, station)
-            )
+            diag_above = in_rail_panel or _diagonal_prefer_above(graph, station)
             if diag_above:
                 # Mirror the tilt across the trunk: anchor at the pill top and
                 # read up-and-to-the-right, clearing a fork sibling below.

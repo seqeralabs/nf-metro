@@ -455,14 +455,12 @@ def _rail_above_label_stations(
 
     def _labelled(sid: str) -> bool:
         st = graph.stations.get(sid)
-        return not (st is None or st.is_port or st.off_track or st.is_blank_terminus)
+        if st is None or st.is_port or st.off_track or st.is_blank_terminus:
+            return False
+        return bool(st.label.strip())
 
     if graph.label_angle:
-        return {
-            sid
-            for sid in real_ids
-            if _labelled(sid) and graph.stations[sid].label.strip()
-        }
+        return {sid for sid in real_ids if _labelled(sid)}
 
     threshold = _rail_above_threshold(per_line_y)
     if threshold is None:
