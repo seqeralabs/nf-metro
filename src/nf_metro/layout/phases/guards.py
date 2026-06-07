@@ -34,8 +34,8 @@ from nf_metro.layout.phases._common import (
 )
 from nf_metro.layout.phases.bbox import _section_fit_top
 from nf_metro.layout.phases.off_track import (
+    _is_single_trunk_lr_section,
     _off_track_anchor_of,
-    _section_distinct_trunk_ys,
 )
 from nf_metro.layout.phases.single_section import _terminus_y_overhang
 from nf_metro.layout.phases.spacing import (
@@ -612,10 +612,10 @@ def _guard_single_trunk_off_track_step(graph: MetroGraph, phase: str) -> None:
     A section that is a single horizontal trunk has no parallel tracks, so
     its off-track lift step stays at the base content pitch
     (``graph._base_y_spacing``) rather than the spread-widened ``y_spacing``
-    (issue #580).  When the base pitch was recorded (auto ``y_spacing``) and
-    is below the widened pitch, each off-track station in such a section must
-    sit an integer number of base steps above its anchor, never at the wider
-    pitch that would strand the icon far above the trunk.
+    (issue #580).  When the base pitch is recorded (auto ``y_spacing``), each
+    off-track station in such a section must sit an integer number of base
+    steps above its anchor, never at a wider pitch that would strand the icon
+    far above the trunk.
     """
     base = graph._base_y_spacing
     if base is None or base <= 0:
@@ -629,15 +629,13 @@ def _guard_single_trunk_off_track_step(graph: MetroGraph, phase: str) -> None:
         if off_st is None or anchor is None:
             continue
         section = graph.sections.get(off_st.section_id or "")
-        if section is None or section.direction not in ("LR", "RL"):
-            continue
-        if len(_section_distinct_trunk_ys(graph, section, junction_ids)) > 1:
+        if not _is_single_trunk_lr_section(graph, section, junction_ids):
             continue
         gap = anchor.y - off_st.y
         if gap <= tol:
             continue
-        steps = gap / base
-        if abs(steps - round(steps)) > tol / base:
+        nearest_multiple = round(gap / base) * base
+        if abs(gap - nearest_multiple) > tol:
             raise PhaseInvariantError(
                 f"{phase}: off-track {off_id!r} sits {gap:.1f}px above anchor "
                 f"{anchor_id!r} on single-trunk section {section.id!r}, not an "

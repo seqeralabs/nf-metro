@@ -47,6 +47,7 @@ from nf_metro.layout.phases.off_track import (
     _off_track_fit_top,
     _off_track_groups,
     _reanchor_off_track_to_consumer,
+    _section_distinct_trunk_ys,
 )
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import resolve_section
@@ -1058,15 +1059,7 @@ def test_single_trunk_off_track_step_not_inflated_by_diagonal_band():
         off_st = graph.stations[off_id]
         prod_st = graph.stations[prod_id]
         section = graph.sections[off_st.section_id]
-        distinct_trunk_ys = {
-            round(graph.stations[sid].y, 1)
-            for sid in section.station_ids
-            if (st := graph.stations.get(sid)) is not None
-            and not st.is_port
-            and not st.is_hidden
-            and not st.off_track
-            and sid not in junction_ids
-        }
+        distinct_trunk_ys = _section_distinct_trunk_ys(graph, section, junction_ids)
         assert len(distinct_trunk_ys) == 1, (
             f"{fixture}: section {section.id} is not single-trunk "
             f"(trunk Ys {sorted(distinct_trunk_ys)})"

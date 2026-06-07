@@ -480,6 +480,19 @@ def _section_distinct_trunk_ys(
     }
 
 
+def _is_single_trunk_lr_section(
+    graph: MetroGraph,
+    section: Section | None,
+    junction_ids: set[str],
+) -> bool:
+    """An LR/RL section laid out as one horizontal trunk (no parallel tracks)."""
+    return (
+        section is not None
+        and section.direction in ("LR", "RL")
+        and len(_section_distinct_trunk_ys(graph, section, junction_ids)) == 1
+    )
+
+
 def _off_track_lift_step(
     graph: MetroGraph,
     section: Section | None,
@@ -488,22 +501,20 @@ def _off_track_lift_step(
 ) -> float:
     """Per-section vertical step for lifting off-track stations.
 
-    A section that is a single horizontal trunk (one distinct on-track Y)
-    has no parallel tracks, so the diagonal-label band that widened the
-    graph-wide ``y_spacing`` is wasted vertical room here: it would strand
-    the off-track icon far above the trunk (issue #580).  Such a section
-    lifts by the base content pitch (``graph._base_y_spacing``) instead.
+    A section that is a single horizontal trunk has no parallel tracks, so the
+    diagonal-label band that widened the graph-wide ``y_spacing`` is wasted
+    vertical room here: it would strand the off-track icon far above the trunk
+    (issue #580).  Such a section lifts by the base content pitch
+    (``graph._base_y_spacing``) instead.
 
-    Multi-track sections, and any section with no recorded base pitch, keep
-    the passed-in ``y_spacing``.  The base is clamped to ``y_spacing`` so an
+    Multi-track sections, and any section with no recorded base pitch, keep the
+    passed-in ``y_spacing``.  The base only applies when strictly smaller, so an
     explicit ``y_spacing`` below the base is never widened by this path.
     """
-    if section is None or section.direction not in ("LR", "RL"):
-        return y_spacing
     base = graph._base_y_spacing
     if base is None or base >= y_spacing:
         return y_spacing
-    if len(_section_distinct_trunk_ys(graph, section, junction_ids)) > 1:
+    if not _is_single_trunk_lr_section(graph, section, junction_ids):
         return y_spacing
     return base
 
@@ -589,7 +600,7 @@ def _bump_off_track_clear_of_trunks(
     graph: MetroGraph,
     off_st: Station,
     candidate_y: float,
-    y_spacing: float,
+    step: float,
     section: Section,
     junction_ids: set[str],
     sibling_ys: list[float] | None = None,
@@ -603,16 +614,16 @@ def _bump_off_track_clear_of_trunks(
     trunk station downstream of the icon (LR: higher X; RL: lower X)
     has tracks at Y values inside ``[candidate_y - icon_half,
     candidate_y + icon_half]``, the segment from the section's entry
-    port to that trunk crosses the icon.  Bump up by ``y_spacing``
-    steps until the band clears.
+    port to that trunk crosses the icon.  Bump up by ``step``
+    increments until the band clears.
 
     ``sibling_ys`` is a list of Ys already taken by other off-track
     inputs in the same column - the bump must also clear those (within
-    one ``y_spacing`` slot) so two icons don't end up in the same row.
+    one ``step`` slot) so two icons don't end up in the same row.
 
     Capped at six steps to avoid runaway lifts.
     """
-    if y_spacing <= 0:
+    if step <= 0:
         return candidate_y
 
     # Match the renderer's terminus icon height and add a small margin
@@ -676,7 +687,7 @@ def _bump_off_track_clear_of_trunks(
     y = candidate_y
     steps = 0
     while _overlaps(y) and steps < MAX_STEPS:
-        y -= y_spacing
+        y -= step
         steps += 1
     return y
 
