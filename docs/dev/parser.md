@@ -50,11 +50,15 @@ it recognises:
 | `direction:` | section flow `LR` / `RL` / `TB` |
 | `grid:` | manual section grid placement |
 | `compact_offsets:` / `center_ports:` | bundle layout toggles |
+| `line_spread:` | how shared lines relate vertically (`bundle` / `centered` / `rails`), graph-wide or per-section |
+| `fold_threshold:` | station count at which long chains wrap into serpentine rows |
 | `off_track:` | mark stations to lift above the section's top track |
 | `label_angle:` | diagonal station-label angle |
-| `legend:` / `legend_min_height:` / `legend_combo:` | legend block |
+| `legend:` / `legend_min_height:` / `legend_combo:` / `legend_logo_gap:` | legend block |
 | `logo:` / `logo_scale:` | logo path and scaling |
+| `font_scale:` | global font scaling |
 | `group:` | annotative caption spanning stations |
+| `marker:` / `marker_legend:` | per-station marker shape/fill styling and its legend caption |
 | `file:` / `files:` / `dir:` | terminus file-icon designation |
 
 Note that `entry:` / `exit:` do **not** create `Port` objects at parse

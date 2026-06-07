@@ -9,6 +9,24 @@ Lines are drawn as horizontal runs joined by 45-degree diagonal
 transitions; inter-section edges use L-shaped (horizontal + vertical)
 routing.
 
+## Rail mode short-circuit
+
+Before the normal dispatch, `route_edges` checks the graph's
+`line_spread` (a `LineSpread` of `BUNDLE` / `CENTERED` / `RAILS`):
+
+- When `line_spread is LineSpread.RAILS`, the whole graph is routed by
+  `route_rail_edges` in
+  [`routing/rail.py`](https://github.com/pinin4fjords/nf-metro/blob/main/src/nf_metro/layout/routing/rail.py)
+  and `route_edges` returns early.
+- When only some sections opt into rails (`has_rail_sections`), the
+  edges internal to those rail sections are routed by `route_rail_edges`
+  up front; the rest fall through to the normal handler chain below.
+
+Rail routing does not bundle: each line runs along a single fixed
+horizontal rail Y (assigned in `layout/rail_mode.py`), so each edge is a
+straight horizontal run at its line's rail Y, and shared stations render
+as interchange pills bridging the rails.
+
 ## Dispatch order
 
 `route_edges` first builds a `_RoutingCtx` (a dataclass of shared
@@ -96,3 +114,4 @@ dispatcher handles those degenerate cases directly.
 | `offsets.py` | per-station Y offsets for parallel lines |
 | `reversal.py` | fold/reversal (serpentine row) routing |
 | `invariants.py` | runtime routing guards |
+| `rail.py` | `route_rail_edges` straight-rail router for rail mode |
