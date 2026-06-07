@@ -1,0 +1,25 @@
+%%metro title: Off-track outputs
+%%metro line: main | Pre-processing | #3b82f6
+%%metro off_track: bam_mapped, cram_md, cram_recal
+%%metro file: bam_mapped | BAM
+%%metro file: cram_md | CRAM
+%%metro file: cram_recal | CRAM
+
+graph LR
+    subgraph preprocess [Pre-processing]
+        fastq[FASTQ]
+        bwa[BWA-MEM]
+        markdup[MarkDup]
+        bqsr[BQSR]
+        ready[Ready]
+        fastq -->|main| bwa
+        bwa -->|main| markdup
+        markdup -->|main| bqsr
+        bqsr -->|main| ready
+        bwa -->|main| bam_mapped
+        bam_mapped[mapped BAM]
+        markdup -->|main| cram_md
+        cram_md[dedup CRAM]
+        bqsr -->|main| cram_recal
+        cram_recal[recal CRAM]
+    end

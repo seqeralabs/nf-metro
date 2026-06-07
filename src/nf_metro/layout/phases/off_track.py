@@ -324,16 +324,61 @@ def _compute_fork_join_gaps(
     return layer_extra
 
 
+def _off_track_anchor_of(graph: MetroGraph) -> dict[str, str]:
+    """Map each off-track station to the on-track same-section station it
+    hangs next to.
+
+    For an off-track *input*, the anchor is its consumer (the on-track
+    station it feeds via an out-edge).  For an off-track *output* (a
+    producer-fed sink with no on-track consumer), the anchor is its
+    producer (the on-track station feeding it via an in-edge).  Both are
+    placed *above* their anchor by the placement pass.
+
+    Off-track stations with neither an on-track consumer nor producer get
+    no entry; the caller falls back to the section's topmost on-track
+    station.
+    """
+    junction_ids = graph.junction_ids
+
+    def _on_track_neighbour(off_st: Station, edges: list[Edge]) -> str | None:
+        for edge in edges:
+            other_id = edge.target if edge.source == off_st.id else edge.source
+            other = graph.stations.get(other_id)
+            if other is None or other.is_port or other.off_track:
+                continue
+            if other.id in junction_ids or other.section_id != off_st.section_id:
+                continue
+            return other.id
+        return None
+
+    anchor_of: dict[str, str] = {}
+    for sid, off_st in graph.stations.items():
+        if not off_st.off_track or off_st.is_port or sid in junction_ids:
+            continue
+        if not off_st.section_id:
+            continue
+        consumer = _on_track_neighbour(off_st, graph.edges_from(sid))
+        if consumer is not None:
+            anchor_of[sid] = consumer
+            continue
+        producer = _on_track_neighbour(off_st, graph.edges_to(sid))
+        if producer is not None:
+            anchor_of[sid] = producer
+    return anchor_of
+
+
 def _off_track_groups(
     graph: MetroGraph,
 ) -> dict[str, tuple[str, dict[str, list[Station]]]]:
-    """Group off-track stations by section and consumer.
+    """Group off-track stations by section and anchor.
 
-    Returns a mapping ``section_id -> (fallback_consumer_id, groups)``
-    where ``groups`` maps consumer-station-id (or ``""`` for inputs with
-    no same-section consumer) to a list of off-track stations feeding
-    that consumer.  ``fallback_consumer_id`` is the topmost on-track
-    station in the section, used as the anchor for the ``""`` bucket.
+    Returns a mapping ``section_id -> (fallback_anchor_id, groups)`` where
+    ``groups`` maps anchor-station-id (or ``""`` for off-track stations
+    with neither an on-track consumer nor producer) to a list of off-track
+    stations hanging off that anchor.  An input's anchor is its consumer; a
+    producer-fed sink's anchor is its producer (see
+    :func:`_off_track_anchor_of`).  ``fallback_anchor_id`` is the topmost
+    on-track station in the section, used for the ``""`` bucket.
     """
     junction_ids = graph.junction_ids
 
@@ -345,19 +390,7 @@ def _off_track_groups(
             continue
         by_section[st.section_id].append(st)
 
-    consumer_of: dict[str, str] = {}
-    for off_stations in by_section.values():
-        for off_st in off_stations:
-            for edge in graph.edges_from(off_st.id):
-                tgt = graph.stations.get(edge.target)
-                if tgt is None:
-                    continue
-                if tgt.is_port or tgt.id in junction_ids or tgt.off_track:
-                    continue
-                if off_st.section_id != tgt.section_id:
-                    continue
-                consumer_of.setdefault(off_st.id, tgt.id)
-                break
+    anchor_of = _off_track_anchor_of(graph)
 
     result: dict[str, tuple[str, dict[str, list[Station]]]] = {}
     for sec_id, off_stations in by_section.items():
@@ -377,7 +410,7 @@ def _off_track_groups(
         fallback_id = min(anchor_pairs)[1]
         groups: dict[str, list[Station]] = defaultdict(list)
         for st in off_stations:
-            groups[consumer_of.get(st.id, "")].append(st)
+            groups[anchor_of.get(st.id, "")].append(st)
         result[sec_id] = (fallback_id, groups)
     return result
 

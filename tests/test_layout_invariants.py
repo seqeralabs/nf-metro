@@ -185,6 +185,51 @@ def _fixtures_with(predicate) -> list[str]:
 
 
 _FIXTURES_WITH_OFF_TRACK = _fixtures_with(lambda t: "off_track:" in t)
+
+
+def _off_track_roles(text: str) -> tuple[bool, bool]:
+    """Return ``(has_input, has_output)`` for a fixture's off-track stations.
+
+    An off-track *input* feeds an on-track same-section consumer; an
+    off-track *output* is a producer-fed sink (in-edge from an on-track
+    same-section producer, no on-track consumer).  Classified from the
+    parsed graph rather than text because the directive (``off_track:``)
+    is identical for both roles and only the edge direction distinguishes
+    them.
+    """
+    try:
+        g = parse_metro_mermaid(text)
+    except Exception:
+        return (False, False)
+    junction_ids = g.junction_ids
+
+    def _on_track(other_id: str, section_id: str | None) -> bool:
+        o = g.stations.get(other_id)
+        return (
+            o is not None
+            and not o.is_port
+            and o.id not in junction_ids
+            and not o.off_track
+            and o.section_id == section_id
+        )
+
+    has_input = has_output = False
+    for sid, st in g.stations.items():
+        if not st.off_track or st.is_port or sid in junction_ids or not st.section_id:
+            continue
+        if any(_on_track(e.target, st.section_id) for e in g.edges_from(sid)):
+            has_input = True
+        elif any(_on_track(e.source, st.section_id) for e in g.edges_to(sid)):
+            has_output = True
+    return (has_input, has_output)
+
+
+_FIXTURES_WITH_OFF_TRACK_INPUT = [
+    f for f in _FIXTURES_WITH_OFF_TRACK if _off_track_roles(_fixture_text(f))[0]
+]
+_FIXTURES_WITH_OFF_TRACK_OUTPUT = [
+    f for f in _FIXTURES_WITH_OFF_TRACK if _off_track_roles(_fixture_text(f))[1]
+]
 _FIXTURES_MULTI_SECTION = _fixtures_with(lambda t: t.count("subgraph") >= 2)
 _FIXTURES_COMPACT = _fixtures_with(lambda t: "compact_offsets: true" in t)
 
@@ -917,7 +962,7 @@ def test_top_entry_lead_corner_concentric(fixture):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK)
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_INPUT)
 def test_off_track_inputs_above_consumer(fixture):
     """Off-track input stations (declared via ``%%metro off_track:``)
     must sit at least one ``y_spacing`` slot above their on-track
@@ -952,6 +997,76 @@ def test_off_track_inputs_above_consumer(fixture):
         assert off_st.y < cons_st.y - _Y_TOL, (
             f"Off-track {off_id} y={off_st.y} not above consumer "
             f"{consumer_id} y={cons_st.y}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Off-track outputs sit above and adjacent to their producer (#573)
+# ---------------------------------------------------------------------------
+
+
+def _producer_fed_sinks(graph: MetroGraph) -> dict[str, str]:
+    """Map each off-track output sink to its on-track same-section producer.
+
+    A producer-fed sink has an in-edge from an on-track same-section
+    station and no on-track same-section consumer (which would make it an
+    input instead).
+    """
+    junction_ids = set(graph.junctions)
+
+    def _on_track(other_id: str, section_id: str | None) -> bool:
+        o = graph.stations.get(other_id)
+        return (
+            o is not None
+            and not o.is_port
+            and o.id not in junction_ids
+            and not o.off_track
+            and o.section_id == section_id
+        )
+
+    producer_of: dict[str, str] = {}
+    for sid, st in graph.stations.items():
+        if not st.off_track or st.is_port or sid in junction_ids or not st.section_id:
+            continue
+        if any(_on_track(e.target, st.section_id) for e in graph.edges_from(sid)):
+            continue  # has an on-track consumer -> it's an input, not a sink
+        for edge in graph.edges_to(sid):
+            if _on_track(edge.source, st.section_id):
+                producer_of.setdefault(sid, edge.source)
+                break
+    return producer_of
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_OUTPUT)
+def test_off_track_outputs_above_and_adjacent_to_producer(fixture):
+    """Off-track *output* stations (producer-fed sinks, declared via
+    ``%%metro off_track:``) must hang clear of the trunk and adjacent to
+    their producer: above it (smaller Y) and lifted by only a bounded
+    number of ``y_spacing`` slots.
+
+    Catches the misanchoring where a sink is pinned to the section's
+    topmost on-track station instead of its producer, stranding the
+    artefact far from the step that writes it (issue #573).  Mirror of
+    ``test_off_track_inputs_above_consumer``.
+    """
+    graph = _layout(fixture)
+    y_spacing = compute_min_y_spacing(graph)
+    producer_of = _producer_fed_sinks(graph)
+
+    assert producer_of, f"{fixture}: no off-track output sinks found"
+
+    for off_id, prod_id in producer_of.items():
+        off_st = graph.stations[off_id]
+        prod_st = graph.stations[prod_id]
+        gap = prod_st.y - off_st.y
+        assert gap > _Y_TOL, (
+            f"{fixture}: off-track output {off_id} y={off_st.y} not above "
+            f"producer {prod_id} y={prod_st.y}"
+        )
+        assert gap <= 2 * y_spacing + _Y_TOL, (
+            f"{fixture}: off-track output {off_id} lifted {gap:.0f}px above "
+            f"producer {prod_id} (more than 2 slots) - likely misanchored to "
+            f"the section's topmost station instead of its producer"
         )
 
 
@@ -1012,7 +1127,12 @@ def test_reanchor_off_track_bbox_fit_is_reversible(fixture):
             for stations in by_consumer.values()
             for st in stations
         )
-        ideal_top = highest - SECTION_Y_PADDING
+        # The fit hugs the off-track band but clamps up to any on-track
+        # content (or non-TOP port) sitting higher than the band, so the
+        # ideal is the fit-top contract itself, not a bare band-minus-pad.
+        # For input fixtures the band is the topmost content and the two
+        # coincide; an output sink can sit below higher on-track branches.
+        ideal_top = _off_track_fit_top(graph, section, highest, SECTION_Y_PADDING)
         assert section.bbox_y == pytest.approx(ideal_top, abs=_Y_TOL), (
             f"{fixture}/{sec_id}: bbox top {section.bbox_y:.1f} does not hug "
             f"the off-track band (expected {ideal_top:.1f}); grow-only left "

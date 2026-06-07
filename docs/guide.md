@@ -518,7 +518,7 @@ These go at the top of the file, before `graph LR`.
 | `%%metro file: <station> \| <label> [\| <name>] [\| banner]` | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon; optional `banner` draws the label on a dark strip across the icon. |
 | `%%metro files: <station> \| <label> [\| <name>] [\| banner]` | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption; optional `banner` strip. |
 | `%%metro dir: <station> \| <label> [\| <name>]` | Mark a station with a folder icon (e.g. output directory). Optional `name` caption. |
-| `%%metro off_track: <station>[, <station>...]` | Lift the listed stations above the section's main track (see below) |
+| `%%metro off_track: <station>[, <station>...]` | Lift the listed stations above the section's main track, anchored to their consumer (inputs) or producer (output artefacts) (see below) |
 | `%%metro compact_offsets: true` | Compact line offsets within stations (see below) |
 | `%%metro center_ports: true` | Centre inter-section ports on the shorter of the two connected sections, so lines enter/exit at the visual midpoint. Overridden by the `--center-ports` / `--no-center-ports` CLI flag. |
 | `%%metro line_spread: <mode>[ \| <id>...]` | How lines sharing a station relate vertically (see below). `<mode>` is `bundle` (default), `centered`, or `rails`. The bare form sets the graph default; `<mode> \| sectionA, sectionB` overrides those sections. Overridden by the `--line-spread` CLI flag. |
@@ -537,6 +537,15 @@ With `%%metro compact_offsets: true`, stations are only as wide as the lines act
 ```
 
 This pairs naturally with the `file:` / `files:` / `dir:` icon directives - the lifted stations are usually file terminals. The [`off_track_convergence`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/topologies/off_track_convergence.mmd) topology and the [differentialabundance](https://github.com/pinin4fjords/nf-metro/blob/main/examples/differentialabundance.mmd) example both use it.
+
+**Off-track outputs.** The same directive works for file *artefacts* written part-way through a section (a `bam`/`cram` dumped after a mapping step, say). A producer-fed sink - a station with an incoming edge from an on-track step and no on-track consumer - is anchored above its **producer** rather than the section top, so the artefact hangs off the trunk right where it is written:
+
+```text
+%%metro file: bam_mapped | BAM
+%%metro off_track: bam_mapped
+```
+
+The [off_track_outputs](https://github.com/pinin4fjords/nf-metro/blob/main/examples/off_track_outputs.mmd) example hangs several such artefacts above a pre-processing trunk.
 
 **Line spread.** `%%metro line_spread:` controls how lines that share a station relate to each other vertically. It has three modes:
 
