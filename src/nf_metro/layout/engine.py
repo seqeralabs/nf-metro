@@ -478,7 +478,7 @@ def compute_layout(
         from nf_metro.layout.labels import diagonal_label_pitch_by_section
         from nf_metro.layout.rail_mode import retrofit_section_rails
 
-        section_x_spacing = diagonal_label_pitch_by_section(graph, x_spacing)
+        section_pitch_map = diagonal_label_pitch_by_section(graph, x_spacing)
         for sid in rail_section_ids:
             section = graph.sections.get(sid)
             if section is None:
@@ -486,7 +486,7 @@ def compute_layout(
             retrofit_section_rails(
                 graph,
                 section,
-                x_spacing=section_x_spacing.get(sid, x_spacing),
+                x_spacing=section_pitch_map.get(sid, x_spacing),
                 y_spacing=y_spacing,
                 section_x_padding=section_x_padding,
                 section_y_padding=section_y_padding,
@@ -706,13 +706,13 @@ def _compute_section_layout(
     # Stage 1.1: Lay out each section independently (real stations only, no ports)
     from nf_metro.layout.labels import diagonal_label_pitch_by_section
 
-    section_x_spacing = diagonal_label_pitch_by_section(graph, x_spacing)
+    section_pitch_map = diagonal_label_pitch_by_section(graph, x_spacing)
     section_subgraphs: dict[str, MetroGraph] = {}
     for sec_id, section in graph.sections.items():
         sub = _layout_single_section(
             graph,
             section,
-            section_x_spacing.get(sec_id, x_spacing),
+            section_pitch_map.get(sec_id, x_spacing),
             y_spacing,
             section_x_padding,
             section_y_padding,

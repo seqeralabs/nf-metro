@@ -368,7 +368,7 @@ def _component_trunk_pitch(text: str) -> float:
 
 
 def test_disconnected_rail_panel_does_not_inflate_trunk_pitch():
-    """A disconnected rail panel's tall labels must not widen the trunk (#581).
+    """A disconnected rail panel's tall labels must not widen the trunk.
 
     With diagonal labels the column pitch derives from the tallest label in
     scope.  When a normal multi-station trunk and a ``rails`` panel with much

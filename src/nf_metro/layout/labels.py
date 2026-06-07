@@ -78,8 +78,8 @@ def diagonal_label_pitch(
     shares one consistent pitch rather than each column sizing its own.  With
     *section_ids* the scope is restricted to stations in those sections, so a
     disconnected component's tall labels do not inflate another component's
-    pitch (issue #581); ``None`` scopes the whole graph.  Returns *fallback*
-    when no label angle is set or no qualifying label exists in scope.
+    pitch; ``None`` scopes the whole graph.  Returns *fallback* when no label
+    angle is set or no qualifying label exists in scope.
     """
     from nf_metro.layout.constants import STATION_RADIUS_APPROX
 
@@ -114,12 +114,12 @@ def diagonal_label_pitch_by_section(
     A diagonal label angle drives the column pitch off the tallest label in
     scope.  Scoping that to each weakly-connected component of the section
     meta-graph stops one component's tall labels (e.g. a disconnected rail
-    panel) inflating another component's columns (issue #581).  Each section
-    maps to its component's pitch.
+    panel) inflating another component's columns.  Each section maps to its
+    component's pitch.
 
-    Returns an empty map -- a signal to keep the single graph-wide pitch and
-    stay byte-identical -- unless the graph both carries a label angle and
-    splits into two or more components.
+    Returns an empty map -- the signal for callers to keep the single
+    graph-wide pitch -- unless the graph both carries a label angle and splits
+    into two or more components.
     """
     if not graph.label_angle or graph.section_dag is None:
         return {}
