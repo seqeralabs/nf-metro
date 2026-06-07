@@ -1073,6 +1073,28 @@ def test_straight_diamond_merge_returns_to_trunk():
     assert graph.stations["d"].y == graph.stations["a"].y
 
 
+def test_uneven_reconverging_diamond_short_branch_on_trunk():
+    """An uneven reconverging diamond keeps its short branch on the trunk.
+
+    samtools_vc forks into a one-hop branch (varlociraptor) and a three-hop
+    branch (finalise -> normalise -> consensus) that both rejoin at merge.
+    The short branch shares the trunk Y with the fork and join nodes, and
+    the long branch sits exactly one y-spacing below the trunk.
+    """
+    text = (
+        Path(__file__).resolve().parent / "fixtures" / "uneven_diamond.mmd"
+    ).read_text()
+    graph = parse_metro_mermaid(text)
+    y_spacing = 40.0
+    compute_layout(graph, y_spacing=y_spacing)
+
+    trunk_y = graph.stations["samtools_vc"].y
+    assert graph.stations["varlociraptor"].y == trunk_y
+    assert graph.stations["merge"].y == trunk_y
+    for long_branch in ("finalise", "normalise", "consensus"):
+        assert graph.stations[long_branch].y == trunk_y + y_spacing
+
+
 def _terminal_full_bundle_text():
     """Two full-bundle terminal stations fed from upstream methods.
 
