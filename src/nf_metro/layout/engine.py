@@ -142,6 +142,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_section_bboxes_positive,
     _guard_section_top_padding,
     _guard_serpentine_no_backtrack,
+    _guard_single_trunk_off_track_step,
     _guard_station_x_column_drift,
     _guard_stations_in_sections,
     _guard_stations_within_bbox,
@@ -407,7 +408,13 @@ def compute_layout(
     auto_x = x_spacing is None
     auto_y = y_spacing is None
     if y_spacing is None:
+        # The base content pitch before the spread loop widens it for
+        # diagonal labels.  A single-trunk section's off-track lift step
+        # stays at this base so a widened pitch doesn't strand the icon far
+        # above the trunk (issue #580).  Only recorded when y_spacing is
+        # auto-resolved; an explicit pin is honoured verbatim.
         y_spacing = compute_min_y_spacing(graph)
+        graph._base_y_spacing = y_spacing
     else:
         min_required = compute_min_y_spacing(graph)
         if y_spacing < min_required - 1e-6:
@@ -502,6 +509,7 @@ def compute_layout(
         _guard_file_icon_no_name_label(graph, "final")
         _guard_centered_line_spread_balanced(graph, "final")
         _guard_rail_above_label_band(graph, "final")
+        _guard_single_trunk_off_track_step(graph, "final")
 
 
 def _snap(graph: MetroGraph, phase_id: str) -> None:

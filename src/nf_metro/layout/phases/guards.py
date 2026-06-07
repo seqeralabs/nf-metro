@@ -33,7 +33,10 @@ from nf_metro.layout.phases._common import (
     routes_through_unrelated_sections,
 )
 from nf_metro.layout.phases.bbox import _section_fit_top
-from nf_metro.layout.phases.off_track import _off_track_anchor_of
+from nf_metro.layout.phases.off_track import (
+    _off_track_anchor_of,
+    _section_distinct_trunk_ys,
+)
 from nf_metro.layout.phases.single_section import _terminus_y_overhang
 from nf_metro.layout.phases.spacing import (
     _placed_name_label_station_ids,
@@ -601,6 +604,46 @@ def _guard_terminus_icons_within_bbox(graph: MetroGraph, phase: str) -> None:
                     f"{st.y - above:.1f}, above section {section.id!r} bbox "
                     f"top {top:.1f}"
                 )
+
+
+def _guard_single_trunk_off_track_step(graph: MetroGraph, phase: str) -> None:
+    """Single-trunk sections lift off-track stations by the base pitch.
+
+    A section that is a single horizontal trunk has no parallel tracks, so
+    its off-track lift step stays at the base content pitch
+    (``graph._base_y_spacing``) rather than the spread-widened ``y_spacing``
+    (issue #580).  When the base pitch was recorded (auto ``y_spacing``) and
+    is below the widened pitch, each off-track station in such a section must
+    sit an integer number of base steps above its anchor, never at the wider
+    pitch that would strand the icon far above the trunk.
+    """
+    base = graph._base_y_spacing
+    if base is None or base <= 0:
+        return
+    anchor_of = _off_track_anchor_of(graph)
+    junction_ids = graph.junction_ids
+    tol = 1.0
+    for off_id, anchor_id in anchor_of.items():
+        off_st = graph.stations.get(off_id)
+        anchor = graph.stations.get(anchor_id)
+        if off_st is None or anchor is None:
+            continue
+        section = graph.sections.get(off_st.section_id or "")
+        if section is None or section.direction not in ("LR", "RL"):
+            continue
+        if len(_section_distinct_trunk_ys(graph, section, junction_ids)) > 1:
+            continue
+        gap = anchor.y - off_st.y
+        if gap <= tol:
+            continue
+        steps = gap / base
+        if abs(steps - round(steps)) > tol / base:
+            raise PhaseInvariantError(
+                f"{phase}: off-track {off_id!r} sits {gap:.1f}px above anchor "
+                f"{anchor_id!r} on single-trunk section {section.id!r}, not an "
+                f"integer multiple of the base step {base:.1f} -- the widened "
+                f"diagonal-label pitch leaked into the lift"
+            )
 
 
 def _guard_no_station_overlap(

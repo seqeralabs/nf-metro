@@ -458,6 +458,56 @@ def _off_track_groups(
     return result
 
 
+def _section_distinct_trunk_ys(
+    graph: MetroGraph,
+    section: Section,
+    junction_ids: set[str],
+) -> set[float]:
+    """Distinct Y values of a section's on-track (trunk) stations.
+
+    On-track means a real, visible station: not a port, hidden phantom,
+    junction, or off-track artefact.  Used to detect single-trunk sections
+    (one distinct Y), which carry no parallel tracks.
+    """
+    return {
+        round(st.y, 1)
+        for sid in section.station_ids
+        if (st := graph.stations.get(sid)) is not None
+        and not st.is_port
+        and not st.is_hidden
+        and not st.off_track
+        and sid not in junction_ids
+    }
+
+
+def _off_track_lift_step(
+    graph: MetroGraph,
+    section: Section | None,
+    junction_ids: set[str],
+    y_spacing: float,
+) -> float:
+    """Per-section vertical step for lifting off-track stations.
+
+    A section that is a single horizontal trunk (one distinct on-track Y)
+    has no parallel tracks, so the diagonal-label band that widened the
+    graph-wide ``y_spacing`` is wasted vertical room here: it would strand
+    the off-track icon far above the trunk (issue #580).  Such a section
+    lifts by the base content pitch (``graph._base_y_spacing``) instead.
+
+    Multi-track sections, and any section with no recorded base pitch, keep
+    the passed-in ``y_spacing``.  The base is clamped to ``y_spacing`` so an
+    explicit ``y_spacing`` below the base is never widened by this path.
+    """
+    if section is None or section.direction not in ("LR", "RL"):
+        return y_spacing
+    base = graph._base_y_spacing
+    if base is None or base >= y_spacing:
+        return y_spacing
+    if len(_section_distinct_trunk_ys(graph, section, junction_ids)) > 1:
+        return y_spacing
+    return base
+
+
 def _place_off_track_above_consumers(
     graph: MetroGraph,
     y_spacing: float,
@@ -482,6 +532,8 @@ def _place_off_track_above_consumers(
     section = graph.sections.get(section_id)
     sec_dir = section.direction if section is not None else "LR"
     junction_ids = graph.junction_ids
+
+    step = _off_track_lift_step(graph, section, junction_ids, y_spacing)
 
     # Track already-placed off-track Ys per column so a bumped icon
     # doesn't crash into a sibling off-track already at the desired Y.
@@ -515,13 +567,13 @@ def _place_off_track_above_consumers(
         n = len(stations)
         for i, st in enumerate(stations):
             base_step = n - i
-            candidate_y = consumer_y - base_step * y_spacing
+            candidate_y = consumer_y - base_step * step
             if section is not None and sec_dir in ("LR", "RL"):
                 candidate_y = _bump_off_track_clear_of_trunks(
                     graph,
                     st,
                     candidate_y,
-                    y_spacing,
+                    step,
                     section,
                     junction_ids,
                     sibling_ys=used_ys_per_col[round(st.x, 1)],

@@ -1035,6 +1035,50 @@ def test_off_track_outputs_above_and_adjacent_to_producer(fixture):
         )
 
 
+def test_single_trunk_off_track_step_not_inflated_by_diagonal_band():
+    """On a single-trunk diagonal-label section, an off-track output hangs
+    one plain off-track step above its producer, not the diagonal-inflated
+    pitch (issue #580).
+
+    ``label_angle`` makes the spread loop widen the graph-wide ``y_spacing``
+    so hanging angled labels clear the row below.  A section that is a single
+    horizontal trunk has no parallel tracks, so that widened pitch is wasted
+    vertical room when used as the off-track lift step: it detaches the icon
+    far above the trunk.  The lift step for such a section must stay at the
+    base content pitch (``compute_min_y_spacing``).
+    """
+    fixture = "diagonal_single_trunk_off_track.mmd"
+    graph = _layout(fixture)
+    base_step = compute_min_y_spacing(graph)
+    producer_of = _off_track_output_sinks(graph)
+    assert producer_of, f"{fixture}: no off-track output sinks found"
+
+    junction_ids = set(graph.junctions)
+    for off_id, prod_id in producer_of.items():
+        off_st = graph.stations[off_id]
+        prod_st = graph.stations[prod_id]
+        section = graph.sections[off_st.section_id]
+        distinct_trunk_ys = {
+            round(graph.stations[sid].y, 1)
+            for sid in section.station_ids
+            if (st := graph.stations.get(sid)) is not None
+            and not st.is_port
+            and not st.is_hidden
+            and not st.off_track
+            and sid not in junction_ids
+        }
+        assert len(distinct_trunk_ys) == 1, (
+            f"{fixture}: section {section.id} is not single-trunk "
+            f"(trunk Ys {sorted(distinct_trunk_ys)})"
+        )
+        gap = prod_st.y - off_st.y
+        assert gap == pytest.approx(base_step, abs=_Y_TOL), (
+            f"{fixture}: off-track output {off_id} sits {gap:.0f}px above its "
+            f"producer {prod_id} on a single-trunk section, inflated past the "
+            f"base off-track step of {base_step:.0f}px by the diagonal-label band"
+        )
+
+
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_OUTPUT)
 def test_off_track_output_owns_its_column(fixture):
     """An off-track output must occupy its own column, clear of every

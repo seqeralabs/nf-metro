@@ -377,6 +377,11 @@ class MetroGraph:
     # rail-mode layout so the dedicated router can resolve a port's per-line
     # rail Y.  Empty when rail mode is off.
     _rail_y: dict[str, dict[str, float]] = field(default_factory=dict, repr=False)
+    # Content pitch from compute_min_y_spacing, before the spread loop widens
+    # y_spacing for diagonal labels.  A single-trunk section's off-track lift
+    # step uses this base pitch so a widened pitch doesn't strand the icon far
+    # above the trunk.  None until compute_layout records it.
+    _base_y_spacing: float | None = field(default=None, repr=False)
 
     def _invalidate_edge_caches(self) -> None:
         """Reset caches that depend on the edge list."""

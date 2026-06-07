@@ -521,11 +521,15 @@ in pipeline order.
 - **Helper**: `_lift_off_track_stations`.
 - **Precondition**: Stage 5.1 complete; all on-track Ys final.
 - **Postcondition**: Each off-track station sits at
-  `anchor.y - n*y_spacing` (n = stack rank). Section bbox extends
-  upward to fit.  May leave the topmost section above the canvas
-  margin -- ``_shift_graph_into_canvas`` runs immediately afterwards
-  to restore the margin (called explicitly by the caller, not by
-  the helper).
+  `anchor.y - n*step` (n = stack rank). The lift `step` is `y_spacing`
+  for multi-track sections; a single-trunk LR/RL section (one distinct
+  on-track Y) uses the base content pitch `graph._base_y_spacing`
+  instead, so the diagonal-label widening of `y_spacing` doesn't strand
+  the icon far above the trunk (issue #580, helper
+  `_off_track_lift_step`). Section bbox extends upward to fit.  May leave
+  the topmost section above the canvas margin --
+  ``_shift_graph_into_canvas`` runs immediately afterwards to restore the
+  margin (called explicitly by the caller, not by the helper).
 - **Invariants preserved**: On-track station Y. Other sections' Ys
   (only the canvas Y-offset may shift the world uniformly).
 - **Related tests**: `test_off_track_inputs_above_consumer`,
