@@ -82,9 +82,11 @@ def _space_off_track_output_columns(
     An off-track output is laid out one layer past its producer -- the same
     column as the producer's on-track successor -- so its icon, hanging
     toward the next station, overlaps that station and the riser leaving it.
-    For every producer feeding an off-track output, shift every later
-    on-track station one column right while pinning the output one column
-    past its producer, so the output owns the column between them.
+    Each producer feeding an off-track output reserves its output's column
+    by pushing every later on-track station one column further right (a
+    station past ``k`` such producers moves ``k`` columns), while the output
+    itself is pinned one column past its producer, so it owns the column
+    between them.
 
     Mutates ``layers`` in place.  A no-op when no on-track station feeds an
     off-track target (every off-track input is a source, so input-only
@@ -103,17 +105,15 @@ def _space_off_track_output_columns(
     if not producer_layers:
         return
 
-    sorted_layers = sorted(producer_layers)
+    def _columns_reserved_before(layer: int) -> int:
+        return sum(1 for pl in producer_layers if pl < layer)
 
-    def _shift(layer: int) -> int:
-        return sum(1 for pl in sorted_layers if pl < layer)
-
-    for sid in list(layers):
+    for sid in layers:
         producer_layer = producer_layer_of_output.get(sid)
         if producer_layer is not None:
-            layers[sid] = producer_layer + 1 + _shift(producer_layer)
+            layers[sid] = producer_layer + 1 + _columns_reserved_before(producer_layer)
         else:
-            layers[sid] += _shift(layers[sid])
+            layers[sid] += _columns_reserved_before(layers[sid])
 
 
 def _align_phantom_pass_throughs(

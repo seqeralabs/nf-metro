@@ -134,8 +134,6 @@ def _layout_single_section(
 
     layers = assign_layers(sub)
 
-    # Reserve a clear column for each off-track output's hanging icon by
-    # pushing later on-track stations one column right.
     _space_off_track_output_columns(sub, layers)
 
     # Use entry-top ordering when the immediate predecessor section is
