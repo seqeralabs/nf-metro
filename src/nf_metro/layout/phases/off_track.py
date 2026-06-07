@@ -15,9 +15,10 @@ from nf_metro.layout.constants import (
     MIN_STRAIGHT_EDGE,
     OFFSET_STEP,
     SECTION_Y_PADDING,
+    TERMINUS_WIDTH,
     X_SPACING,
 )
-from nf_metro.layout.labels import label_text_width
+from nf_metro.layout.labels import _label_text_height, label_text_width
 from nf_metro.layout.phases._common import (
     _content_station_ys,
     _grow_section_bbox_downward,
@@ -37,6 +38,12 @@ _DOWNWARD_BRANCH_SLOP: float = ICON_HALF_HEIGHT
 # icon.  Half a station gap: enough for the line to read as a settled
 # horizontal approach into the icon, without stretching the section.
 _OUTPUT_TAIL: float = X_SPACING / 2
+
+# How far past its station the following producer must sit so the next
+# output's divergence passes cleanly under this output's icon (the next
+# diagonal dips beneath the icon rather than clearing its full width, so this
+# is about one glyph-width, not the icon's whole extent).
+_ICON_RIGHT_REACH: float = TERMINUS_WIDTH
 
 
 def _insert_phantom_pass_throughs(
@@ -93,23 +100,19 @@ def _insert_phantom_pass_throughs(
 
 def _off_track_output_lead(
     producer: Station,
-    n_out_targets: int,
     is_downward: bool,
 ) -> float:
     """Flat run reserved on the producer's side of an off-track output diagonal.
 
-    Mirrors the straight-run length the router holds before the
-    producer-to-output diagonal: a multi-target producer keeps the diagonal
-    past half its name label, and a downward drop keeps it past the label's
-    far edge (which sits below the producer, on the side the output drops
-    toward).  A non-forking producer reserves only the base edge straight.
+    An upward output rises away from the producer's name label, so it needs
+    only the base straight edge before the diagonal -- a constant lead that
+    keeps every upward output the same distance from its producer.  A downward
+    drop turns toward the label, so it holds the diagonal past the label's far
+    edge to clear the text.
     """
     lead = MIN_STRAIGHT_EDGE
-    if producer.label.strip():
-        if n_out_targets > 1:
-            lead = max(lead, label_text_width(producer.label) / 2)
-        if is_downward:
-            lead = max(lead, label_text_width(producer.label) / 2 + LABEL_BBOX_MARGIN)
+    if is_downward and producer.label.strip():
+        lead = max(lead, label_text_width(producer.label) / 2 + LABEL_BBOX_MARGIN)
     return lead
 
 
@@ -117,8 +120,9 @@ def _space_off_track_outputs(
     sub: MetroGraph,
     layers: dict[str, int],
     tracks: dict[str, float],
-) -> dict[str, float]:
-    """Per-output X offset so each off-track output hangs at a consistent run.
+    x_spacing: float = X_SPACING,
+) -> tuple[dict[str, float], dict[int, float]]:
+    """Per-output X offset, plus a per-layer push to widen producer gaps.
 
     Each off-track output hangs off its producer with the same S-shape: a flat
     run (the producer-label clearance), a standard-slope diagonal, then a fixed
@@ -126,12 +130,23 @@ def _space_off_track_outputs(
     ``producer.x + lead + DIAGONAL_RUN + _OUTPUT_TAIL`` so the tail after the
     diagonal is exactly ``_OUTPUT_TAIL`` for every output.
 
-    Returns a map of each output station id to the X offset it gets on top of
-    its layer base; the output sits at its producer's layer, so its base X
-    equals the producer's X and the offset is the full run.  On-track stations
-    keep their own columns -- the output hangs in a row above or below the
-    trunk, so it shares X with the next station without overlapping it.  Empty
-    when no on-track station feeds an off-track output.
+    Returns ``(output_extra, layer_push)``:
+
+    * ``output_extra`` maps each output station id to the X offset it gets on
+      top of its layer base; the output sits at its producer's layer, so its
+      base X equals the producer's X and the offset is the full run.
+    * ``layer_push`` is a cumulative per-layer X push (analogous to the
+      fork/join ``layer_extra``) that widens the trunk gap *after* a producer
+      whose off-track output's horizontal extent (icon right edge plus margin)
+      would otherwise overrun the normal one-pitch gap to the next station.
+      Without it the output's up-right S-curve crosses the intervening trunk
+      station and adjacent outputs bunch together.  The push is conditional:
+      a producer whose output fits inside the normal gap adds nothing, so the
+      trunk is never widened where no output needs the room.
+
+    On-track stations keep their own columns; the output hangs in a row above
+    or below the trunk.  ``output_extra`` is empty when no on-track station
+    feeds an off-track output.
     """
     on_track_tracks = [
         t
@@ -141,6 +156,12 @@ def _space_off_track_outputs(
     top_track = min(on_track_tracks) if on_track_tracks else 0.0
 
     output_extra: dict[str, float] = {}
+    # Clearance each output demands before the next station: the full output
+    # run out to its icon's right edge, so the following output's divergence
+    # clears this icon rather than raking it.  The lead is constant for upward
+    # outputs, so the demand is uniform and every divergence sits the same
+    # distance before its successor.
+    layer_demand: dict[int, float] = defaultdict(float)
     for sid, station in sub.stations.items():
         if station.off_track or station.is_hidden or sid not in layers:
             continue
@@ -149,16 +170,38 @@ def _space_off_track_outputs(
             for e in sub.edges_from(sid)
             if e.target in sub.stations and not sub.stations[e.target].is_hidden
         ]
+        # A fork producer's branches already spread through its diverge gap, so
+        # an output beside them needs no extra trunk room; only a linear
+        # producer's single onward edge has to make space for its divergence.
+        on_track_succ = sum(1 for t in targets if not sub.stations[t].off_track)
         for target_id in targets:
             target = sub.stations[target_id]
             if not target.off_track:
                 continue
             is_downward = tracks.get(sid, top_track) > top_track
-            lead = _off_track_output_lead(station, len(targets), is_downward)
+            lead = _off_track_output_lead(station, is_downward)
             output_extra[target_id] = lead + DIAGONAL_RUN + _OUTPUT_TAIL
-            layers[target_id] = layers[sid]
+            producer_layer = layers[sid]
+            layers[target_id] = producer_layer
+            if on_track_succ <= 1:
+                clearance = lead + DIAGONAL_RUN + _OUTPUT_TAIL + _ICON_RIGHT_REACH
+                layer_demand[producer_layer] = max(
+                    layer_demand[producer_layer], clearance
+                )
 
-    return output_extra
+    layer_push: dict[int, float] = {}
+    if layer_demand:
+        max_layer = max(layers.values())
+        cumulative = 0.0
+        for layer in range(max_layer + 1):
+            layer_push[layer] = cumulative
+            # The producer's output occupies its own column gap; only the
+            # excess beyond a normal pitch shifts the layers that follow.
+            excess = layer_demand.get(layer, 0.0) - x_spacing
+            if excess > 0:
+                cumulative += excess
+
+    return output_extra, layer_push
 
 
 def _align_phantom_pass_throughs(
@@ -180,6 +223,87 @@ def _align_phantom_pass_throughs(
             succ = next(iter(succs))
             if succ in tracks:
                 tracks[succ] = tracks[sid]
+
+
+def _forced_branch_label_reach(
+    layer: int,
+    fork_layers: set[int],
+    join_layers: set[int],
+    out_targets: dict[str, set[str]],
+    in_sources: dict[str, set[str]],
+    layers: dict[str, int],
+    tracks: dict[str, float],
+    sub: MetroGraph,
+    full_graph: MetroGraph | None,
+    label_angle: float,
+) -> float:
+    """Horizontal reach of a two-branch bubble's forced-down branch label.
+
+    In a two-branch bubble (``fork -> {top, bottom} -> join``) the top branch
+    sits on the trunk track and normally labels above it, clear of the
+    convergence/divergence diagonal.  An off-track output anchored at the bubble
+    and lifted above the trunk blocks that upward flip, forcing the top branch's
+    angled label down into the bubble where it rakes the bottom branch's
+    diagonal.  Returns the forced label's tilted X-extent (lower-right corner of
+    the rotated text box) so the caller can widen the bubble enough for the
+    diagonal to start past the text; ``0.0`` when no branch label is forced
+    down.
+    """
+    graph = full_graph or sub
+    peer_map = out_targets if layer in fork_layers else in_sources
+    fork_join_ids = [sid for sid, lyr in layers.items() if lyr == layer]
+    rad = math.radians(label_angle)
+    cos_a, sin_a = abs(math.cos(rad)), abs(math.sin(rad))
+
+    reach = 0.0
+    for fj_id in fork_join_ids:
+        branches = peer_map.get(fj_id, set())
+        branch_tracks = {tracks[b] for b in branches if b in tracks}
+        if len(branch_tracks) != 2:
+            continue
+        top_track = min(branch_tracks)
+        if not _bubble_anchor_has_lifted_output(graph, fj_id, branches):
+            continue
+        for branch_id in branches:
+            if tracks.get(branch_id) != top_track:
+                continue
+            station = sub.stations.get(branch_id)
+            if station and station.label.strip():
+                footprint = (
+                    label_text_width(station.label) * cos_a
+                    + _label_text_height(station.label) * sin_a
+                )
+                reach = max(reach, footprint)
+    return reach
+
+
+def _bubble_anchor_has_lifted_output(
+    graph: MetroGraph,
+    fork_join_id: str,
+    branches: set[str],
+) -> bool:
+    """Whether an off-track output is lifted above the bubble's top branch.
+
+    The output is the producer-fed sink (no on-track consumer) that drops
+    *above* the trunk, anchored at the fork/join station or at the bubble's
+    top branch itself.  Such a sink occupies the column above the top branch
+    and blocks that branch's angled label from flipping up.
+    """
+    below = _off_track_output_below(graph)
+    anchor_of = _off_track_anchor_of(graph)
+    candidate_anchors = {fork_join_id} | branches
+    for off_id, anchor_id in anchor_of.items():
+        if anchor_id not in candidate_anchors:
+            continue
+        off_st = graph.stations.get(off_id)
+        if off_st is None or not off_st.off_track:
+            continue
+        if any(e.target == anchor_id for e in graph.edges_from(off_id)):
+            continue
+        if off_id in below:
+            continue
+        return True
+    return False
 
 
 def _compute_fork_join_gaps(
@@ -376,14 +500,33 @@ def _compute_fork_join_gaps(
         )
 
         # Angled labels (label_angle) hang to the lower-right of each fan
-        # caller; the fan-out/fan-in diagonal on that side must start past
-        # the tilted text or it rakes the label.  Reserve the caller
-        # label's rightward reach (the narrow rotated footprint, not the
-        # full horizontal width) as extra column room.  Unlike the
-        # horizontal-label case above this applies to any multi-track fan,
-        # not only wide (3+) ones, since a single hanging name is enough to
-        # clash with the convergence diagonal.
-        if label_angle:
+        # caller; the fan-out/fan-in diagonal must start past the tilted text
+        # or it rakes the label.  This only bites once a branch label sits
+        # *inside* the bubble, which needs three or more branches (two or more
+        # off-trunk tracks): the middle branch then has a diagonal on both
+        # sides.  A 2-branch fork places both labels outside the bubble (above
+        # the top branch, below the bottom one), so the convergence diagonal
+        # never crosses them and no extra room is needed.
+        has_interior_branch = False
+        if layer in fork_layers:
+            for fsid, ftgts in out_targets.items():
+                if layers.get(fsid) == layer and fsid in tracks:
+                    off = sum(
+                        1 for t in ftgts if t in tracks and tracks[t] != tracks[fsid]
+                    )
+                    if off >= 2:
+                        has_interior_branch = True
+                        break
+        if not has_interior_branch and layer in join_layers:
+            for jsid, jsrcs in in_sources.items():
+                if layers.get(jsid) == layer and jsid in tracks:
+                    off = sum(
+                        1 for s in jsrcs if s in tracks and tracks[s] != tracks[jsid]
+                    )
+                    if off >= 2:
+                        has_interior_branch = True
+                        break
+        if label_angle and has_interior_branch:
             cos_a = abs(math.cos(math.radians(label_angle)))
             adj_layer = layer + 1 if layer in fork_layers else layer - 1
             angled_reach = 0.0
@@ -396,7 +539,42 @@ def _compute_fork_join_gaps(
                         )
             bubble_extra = max(bubble_extra, angled_reach)
 
-        layer_gap[layer] = max(base_gap, fj_label_half + bubble_extra)
+        # A two-branch bubble places both branch labels outside it (above the
+        # top branch, below the bottom), so the convergence/divergence diagonal
+        # clears them.  But when an off-track output hangs directly above the
+        # top (on-trunk) branch, that branch's angled label cannot flip up and
+        # is forced down into the bubble, where it rakes the other branch's
+        # diagonal.  Widen the bubble by the forced label's horizontal reach so
+        # the diagonal starts past the tilted text.
+        if label_angle and not has_interior_branch:
+            forced_reach = _forced_branch_label_reach(
+                layer,
+                fork_layers,
+                join_layers,
+                out_targets,
+                in_sources,
+                layers,
+                tracks,
+                sub,
+                full_graph,
+                label_angle,
+            )
+            bubble_extra = max(bubble_extra, forced_reach)
+
+        # The router (``_route_diagonal``) reserves the fork/join station's
+        # label half-width as straight run so the diagonal starts past the
+        # (possibly tilted) label, but it abandons that clearance when the
+        # column gap can't also fit the diagonal run plus the branch-side
+        # minimum straight.  Reserve a gap that keeps the clearance, so the
+        # fork/join label never overlaps the divergence/convergence diagonal.
+        # A whole pitch already sits between the columns, so subtract it; the
+        # 1px cushion absorbs float rounding in the router's drop test.
+        routing_clearance = (
+            fj_label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE - x_spacing + 1.0
+        )
+        layer_gap[layer] = max(
+            base_gap, fj_label_half + bubble_extra, routing_clearance
+        )
 
     cumulative = 0.0
     layer_extra: dict[int, float] = {}

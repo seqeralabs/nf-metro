@@ -148,7 +148,9 @@ def _layout_single_section(
     if not layers:
         return None
 
-    output_extra = _space_off_track_outputs(sub, layers, tracks)
+    output_extra, output_layer_push = _space_off_track_outputs(
+        sub, layers, tracks, x_spacing
+    )
 
     # Snap phantom pass-throughs' successors to the pass-through track
     # so the trunk line stays horizontal past bypassed stations.
@@ -196,17 +198,20 @@ def _layout_single_section(
             )
         rank = track_rank.get(station.track, 0.0)
         output_offset = output_extra.get(sid, 0.0)
+        layer_push = output_layer_push.get(station.layer, 0.0)
         if section.direction == "TB":
             station.x = rank * x_spacing
             station.y = (
                 station.layer * y_spacing
                 + layer_extra.get(station.layer, 0)
+                + layer_push
                 + output_offset
             )
         else:
             station.x = (
                 station.layer * x_spacing
                 + layer_extra.get(station.layer, 0)
+                + layer_push
                 + output_offset
             )
             station.y = rank * effective_y_spacing

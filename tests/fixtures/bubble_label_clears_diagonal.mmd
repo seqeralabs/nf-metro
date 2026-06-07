@@ -1,0 +1,25 @@
+%%metro title: Bubble label clears the convergence diagonal
+%%metro label_angle: 45
+%%metro line: core | Core | #2e8b57
+%%metro files: bam_out | BAM/CRAM
+%%metro off_track: bam_out
+%%metro marker: convert | square, solid
+%%metro marker: markdup | square, solid
+
+graph LR
+    subgraph proc [Processing]
+        bbsplit[BBsplit]
+        mapping[mapping]
+        convert[convert]
+        markdup[markduplicates]
+        merge[mosdepth]
+        bam_out[ ]
+
+        bbsplit -->|core| mapping
+        mapping -->|core| convert
+        mapping -->|core| markdup
+        convert -->|core| merge
+        markdup -->|core| merge
+
+        bbsplit -->|core| bam_out
+    end

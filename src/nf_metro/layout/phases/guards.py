@@ -852,6 +852,77 @@ def _guard_no_line_crosses_file_icon(
                     )
 
 
+def _guard_off_track_output_clears_non_producer(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: an off-track output's route crosses only its producer.
+
+    An off-track output icon hangs in the trunk gap just past its producer.
+    When the output's horizontal extent overruns that gap, its up-right
+    diagonal rakes across the next on-track station's marker.  Because every
+    trunk station carries the same line, :func:`_guard_no_line_crosses_non_consumer`
+    exempts that crossing (the marker's station consumes the line); this guard
+    closes the gap by checking the output route against same-section trunk
+    markers regardless of line membership, exempting only the producer.
+    """
+    from nf_metro.render.svg import apply_route_offsets
+
+    producer_of = {
+        off_id: anchor_id
+        for off_id, anchor_id in _off_track_anchor_of(graph).items()
+        if not any(e.target == anchor_id for e in graph.edges_from(off_id))
+    }
+    if not producer_of:
+        return
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+
+    junction_ids = graph.junction_ids
+    route_by_endpoints = {(r.edge.source, r.edge.target): r for r in routes}
+    for off_id, prod_id in producer_of.items():
+        route = route_by_endpoints.get((prod_id, off_id))
+        if route is None:
+            continue
+        pts = apply_route_offsets(route, offsets)
+        sec_id = graph.stations[off_id].section_id
+        section = graph.sections.get(sec_id) if sec_id else None
+        if section is None:
+            continue
+        for sid in section.station_ids:
+            if sid in (off_id, prod_id) or sid in junction_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.off_track or st.is_port or st.is_hidden:
+                continue
+            bbox = _station_marker_bbox(graph, sid, offsets=offsets)
+            if bbox is None:
+                continue
+            for k in range(len(pts) - 1):
+                p1, p2 = pts[k], pts[k + 1]
+                if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
+                    raise PhaseInvariantError(
+                        f"{phase}: off-track output {off_id!r} route from "
+                        f"producer {prod_id!r} crosses non-producer marker "
+                        f"{sid!r} bbox ({bbox[0]:.1f},{bbox[1]:.1f})-"
+                        f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
+                        f"({p1[0]:.1f},{p1[1]:.1f})->({p2[0]:.1f},{p2[1]:.1f})"
+                    )
+
+
 def _guard_row_trunk_cy_consistent(
     graph: MetroGraph,
     phase: str,

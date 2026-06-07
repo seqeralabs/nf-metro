@@ -135,6 +135,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_route_through_section,
     _guard_no_station_overlap,
     _guard_off_track_clear_of_anchor,
+    _guard_off_track_output_clears_non_producer,
     _guard_partial_branch_offset_gaps,
     _guard_ports_on_boundaries,
     _guard_rail_above_label_band,
@@ -1367,6 +1368,9 @@ def _finalize_layout(
         _guard_terminus_icons_within_bbox(graph, phase)
         if routes is not None:
             _guard_inter_section_routes_in_row_band(
+                graph, phase, offsets=offsets, routes=routes
+            )
+            _guard_off_track_output_clears_non_producer(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)

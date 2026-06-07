@@ -1,0 +1,25 @@
+%%metro title: Forced bubble label clears the convergence diagonal
+%%metro label_angle: 45
+%%metro line: core | Core | #2e8b57
+%%metro file: mapped_out | BAM/CRAM
+%%metro off_track: mapped_out
+%%metro marker: convert | square, solid
+%%metro marker: markdup | square, solid
+
+graph LR
+    subgraph proc [Processing]
+        prep[prep]
+        mapping[mapping]
+        convert[convert]
+        markdup[markduplicates]
+        mosdepth[mosdepth]
+        mapped_out[ ]
+
+        prep -->|core| mapping
+        mapping -->|core| convert
+        mapping -->|core| markdup
+        convert -->|core| mosdepth
+        markdup -->|core| mosdepth
+
+        mapping -->|core| mapped_out
+    end

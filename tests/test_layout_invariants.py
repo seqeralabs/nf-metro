@@ -1329,15 +1329,20 @@ def test_off_track_output_routes_share_flat_tail(fixture):
         sec_id = graph.stations[off_id].section_id
         tails_by_section[sec_id].append((off_id, abs(x2 - x1)))
 
+    # The icon offset is uniform, so the nominal tails match; the last segment
+    # measured here is post corner-smoothing, which can shave up to a corner
+    # radius off an output whose diagonal meets the tail near a tight turn.
+    # Allow that, while still catching the old variable-column bug (tens of px).
+    tail_tol = CURVE_RADIUS + _Y_TOL
     for sec_id, tails in tails_by_section.items():
         if len(tails) < 2:
             continue
         lengths = [t for _, t in tails]
         spread = max(lengths) - min(lengths)
-        assert spread <= _Y_TOL, (
+        rounded = [(o, round(t, 1)) for o, t in tails]
+        assert spread <= tail_tol, (
             f"{fixture}/{sec_id}: off-track output flat tails differ by "
-            f"{spread:.1f}px (>{_Y_TOL}); tails {[(o, round(t, 1)) for o, t in tails]} "
-            f"are not consistent"
+            f"{spread:.1f}px (>{tail_tol}); tails {rounded} are not consistent"
         )
 
 
@@ -1479,6 +1484,77 @@ def test_captioned_sibling_outputs_clear_caption_band():
 
 
 # ---------------------------------------------------------------------------
+# An off-track output's route must not cross a non-producer trunk marker
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_OUTPUT)
+def test_off_track_output_route_clears_non_producer_markers(fixture):
+    """An off-track output's S-curve must not cross a trunk station's marker.
+
+    An output icon hangs in the gap just past its own producer.  When the
+    output's horizontal extent overruns that gap the up-right diagonal rakes
+    across the next on-track station's marker (and adjacent outputs bunch).
+    The producer's trunk gap widens to fit the output, so the only marker an
+    output route may touch is its own producer's.
+    """
+    theme = THEMES["nfcore"]
+    r = theme.station_radius
+    graph = _layout(fixture)
+    junction_ids = set(graph.junctions)
+    producer_of = _off_track_output_sinks(graph)
+    assert producer_of, f"{fixture}: no off-track output sinks found"
+
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    route_by_endpoints = {(rt.edge.source, rt.edge.target): rt for rt in routes}
+
+    for off_id, prod_id in producer_of.items():
+        route = route_by_endpoints.get((prod_id, off_id))
+        if route is None:
+            continue
+        pts = apply_route_offsets(route, offsets)
+        sec_id = graph.stations[off_id].section_id
+        for sid in graph.sections[sec_id].station_ids:
+            if sid in (off_id, prod_id) or sid in junction_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.off_track or st.is_port or st.is_hidden:
+                continue
+            marker_box = (st.x - r, st.y - r, st.x + r, st.y + r)
+            for k in range(len(pts) - 1):
+                p1, p2 = pts[k], pts[k + 1]
+                assert not segment_intersects_bbox(
+                    p1[0], p1[1], p2[0], p2[1], marker_box
+                ), (
+                    f"{fixture}: off-track output {off_id!r} route (from "
+                    f"producer {prod_id!r}) crosses non-producer marker {sid!r} "
+                    f"at ({st.x:.1f},{st.y:.1f})"
+                )
+
+
+def test_off_track_output_route_guard_catches_a_crossing():
+    """The runtime guard fires when an output's route rakes a non-producer marker.
+
+    Locks the guard's teeth: an output dragged past the trunk stations that
+    follow its producer has its producer-to-icon route cross their markers, and
+    ``_guard_off_track_output_clears_non_producer`` must raise rather than pass.
+    """
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_off_track_output_clears_non_producer,
+    )
+
+    graph = _layout("diagonal_single_trunk_off_track.mmd")
+    # Drag the BAM output well past its producer so the route to its icon rakes
+    # the intervening trunk markers (merge/markdup/bqsr ...).
+    graph.stations["bam_out"].x = graph.stations["applybqsr"].x + 20
+
+    with pytest.raises(PhaseInvariantError, match="non-producer marker"):
+        _guard_off_track_output_clears_non_producer(graph, "test")
+
+
+# ---------------------------------------------------------------------------
 # A producer's label clears an off-track output icon above its fork/join bubble
 # ---------------------------------------------------------------------------
 
@@ -1523,6 +1599,104 @@ def test_off_track_output_clears_station_labels(fixture):
                 f"({lx0:.1f},{ly0:.1f},{lx1:.1f},{ly1:.1f}) vs icon "
                 f"({bx0:.1f},{by0:.1f},{bx1:.1f},{by1:.1f})"
             )
+
+
+# ---------------------------------------------------------------------------
+# A fork/join bubble's station labels clear the convergence/divergence diagonal
+# ---------------------------------------------------------------------------
+
+
+_FIXTURES_WITH_BUBBLE_OUTPUT = _fixtures_with(
+    lambda t: "off_track:" in t and "-->|" in t
+)
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_BUBBLE_OUTPUT)
+def test_bubble_label_clears_convergence_diagonal(fixture):
+    """A fork/join bubble station's label must not overlap a sibling branch's
+    convergence (or divergence) diagonal.
+
+    A two-branch bubble (fork ``-> {a, b} ->`` join) carrying an off-track
+    output above it can be squeezed so the on-trunk branch's diagonal label
+    rakes the off-trunk branch's slanted convergence segment.  The bubble's
+    column gap must hold enough room that each branch label clears the other
+    branch's diagonal.
+    """
+    graph = _layout(fixture)
+    junction_ids = set(graph.junctions)
+
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    labels = place_labels(
+        graph,
+        station_offsets=offsets,
+        routes=routes,
+        label_angle=graph.label_angle or 0.0,
+    )
+    label_box = {p.station_id: _label_bbox(p) for p in labels if p.station_id}
+
+    def _diagonal_segments(route):
+        pts = apply_route_offsets(route, offsets)
+        segs = []
+        for k in range(len(pts) - 1):
+            (x1, y1), (x2, y2) = pts[k], pts[k + 1]
+            if abs(x2 - x1) > 0.5 and abs(y2 - y1) > 0.5:
+                segs.append((x1, y1, x2, y2))
+        return segs
+
+    tol = 0.5
+    checked = False
+    for section in graph.sections.values():
+        sec_sids = set(section.station_ids)
+
+        def _internal(eid):
+            return eid in sec_sids and not graph.stations[eid].is_port
+
+        for jid in section.station_ids:
+            join = graph.stations.get(jid)
+            if join is None or join.is_port or join.off_track or jid in junction_ids:
+                continue
+            preds = [
+                e.source
+                for e in graph.edges_to(jid)
+                if _internal(e.source) and not graph.stations[e.source].off_track
+            ]
+            if len(preds) < 2:
+                continue
+            # A bubble: the converging branches sit on different tracks.
+            branch_ys = {round(graph.stations[p].y, 1) for p in preds}
+            if len(branch_ys) < 2:
+                continue
+            checked = True
+            for branch_id in preds:
+                route = next(
+                    (
+                        rt
+                        for rt in routes
+                        if rt.edge.source == branch_id and rt.edge.target == jid
+                    ),
+                    None,
+                )
+                if route is None:
+                    continue
+                for other_id in preds:
+                    if other_id == branch_id:
+                        continue
+                    box = label_box.get(other_id)
+                    if box is None:
+                        continue
+                    bx0, by0, bx1, by1 = box
+                    label_rect = (bx0 - tol, by0 - tol, bx1 + tol, by1 + tol)
+                    for x1, y1, x2, y2 in _diagonal_segments(route):
+                        assert not segment_intersects_bbox(
+                            x1, y1, x2, y2, label_rect
+                        ), (
+                            f"{fixture}: label of bubble station {other_id!r} "
+                            f"overlaps the {branch_id!r}->{jid!r} convergence "
+                            f"diagonal"
+                        )
+    if not checked:
+        pytest.skip(f"{fixture}: no multi-branch bubble")
 
 
 # ---------------------------------------------------------------------------
