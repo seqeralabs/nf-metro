@@ -788,17 +788,21 @@ def _guard_no_coincident_station_coords(
     render as per-rail knobs across the rail bundle, so a shared centre is
     not a visual collision there.
     """
+    exempt_rail = graph.has_rail_sections
     placed: list[tuple[str, float, float]] = []
     for sid, st in graph.stations.items():
-        if st.is_port or st.is_hidden or graph.station_is_rail(sid):
+        if st.is_port or st.is_hidden or (exempt_rail and graph.station_is_rail(sid)):
             continue
-        for other, ox, oy in placed:
-            if abs(st.x - ox) <= tolerance and abs(st.y - oy) <= tolerance:
-                raise PhaseInvariantError(
-                    f"{phase}: {sid!r} and {other!r} share coordinate "
-                    f"({st.x:.1f}, {st.y:.1f})"
-                )
         placed.append((sid, st.x, st.y))
+    placed.sort(key=lambda p: p[1])
+    for i, (sid, x, y) in enumerate(placed):
+        for oid, ox, oy in placed[i + 1 :]:
+            if ox - x > tolerance:
+                break  # Sorted by x; no further coincidence possible.
+            if abs(y - oy) <= tolerance:
+                raise PhaseInvariantError(
+                    f"{phase}: {sid!r} and {oid!r} share coordinate ({x:.1f}, {y:.1f})"
+                )
 
 
 def _guard_no_line_crosses_non_consumer(
