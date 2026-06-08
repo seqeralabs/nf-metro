@@ -397,6 +397,14 @@ def _resolve_section_col(graph: MetroGraph, station: Station) -> int | None:
     return None
 
 
+def _resolve_section_row(graph: MetroGraph, station: Station) -> int | None:
+    """Resolve the grid row for a port or junction station."""
+    sec = resolve_section(graph, station, prefer_upstream=False)
+    if sec and sec.grid_row >= 0:
+        return sec.grid_row
+    return None
+
+
 def _resolve_section_colrow(
     graph: MetroGraph, station: Station
 ) -> tuple[int | None, int | None]:
