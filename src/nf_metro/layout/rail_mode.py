@@ -230,7 +230,7 @@ def _layout_section_rails(
     # head/tail terminus depth checks (column X is assigned separately).
     import networkx as nx
 
-    from nf_metro.layout.layers import assign_layers
+    from nf_metro.layout.layers import assign_layers, build_station_digraph
     from nf_metro.layout.phases._common import _build_section_subgraph
 
     section_dag = _build_section_subgraph(graph, section)
@@ -286,12 +286,7 @@ def _layout_section_rails(
     # and no two distinct stations share an X.
     decl_index = {sid: i for i, sid in enumerate(section.station_ids)}
     real_set = set(real_ids)
-    dag: nx.DiGraph[str] = nx.DiGraph()
-    for edge in section_dag.edges:
-        dag.add_edge(edge.source, edge.target)
-    for sid in section_dag.stations:
-        if sid not in dag:
-            dag.add_node(sid)
+    dag = build_station_digraph(section_dag)
     topo = nx.lexicographical_topological_sort(dag, key=lambda n: decl_index.get(n, 0))
     on_rail_ids = [
         sid for sid in topo if sid in real_set and not graph.stations[sid].off_track
