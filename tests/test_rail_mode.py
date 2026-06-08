@@ -616,6 +616,41 @@ def test_rail_labels_clear_the_whole_panel_never_beside_a_middle_rail():
     assert checked, "expected at least one labelled rail station"
 
 
+def test_angled_rail_labels_do_not_rake_lower_rail_markers():
+    """A 45-degree below-bundle rail label must clear the pills of the panel's
+    lower rails, not just their centre lines.
+
+    A lone lower-rail station sits one rail down and a column over from an
+    upper-rail station whose down-right label, cleared only to the rail centre,
+    would rake the lower station's marker.  Clearing to the pill edge keeps
+    every angled label off every marker."""
+    from nf_metro.layout.labels import find_label_overlaps, place_labels
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+    graph = parse_metro_mermaid((EXAMPLES / "sarek_metro.mmd").read_text())
+    assert graph.is_rail_section("calling"), "sarek_metro flags 'calling' as rails"
+    assert graph.label_angle, "sarek_metro opts into 45-degree labels"
+    compute_layout(graph)
+
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    placements = place_labels(
+        graph,
+        station_offsets=offsets,
+        routes=routes,
+        label_angle=graph.label_angle,
+    )
+    marker_overlaps = [
+        ov
+        for ov in find_label_overlaps(graph, placements, offsets)
+        if ov.kind == "marker"
+    ]
+    assert not marker_overlaps, "\n".join(
+        f"label {ov.a!r} rakes marker {ov.b!r} by ({ov.ox:.1f}, {ov.oy:.1f})px"
+        for ov in marker_overlaps
+    )
+
+
 def test_stacked_rail_section_bbox_contains_hanging_labels():
     """A rail section's bbox reserves room for its below-rail labels so a
     section stacked beneath it clears them.  A long, steeply-angled label whose

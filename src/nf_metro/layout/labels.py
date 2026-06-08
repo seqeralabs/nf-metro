@@ -1268,7 +1268,7 @@ def place_labels(
 
     if graph.label_angle:
         _apply_rail_label_angle(
-            placements, graph, float(graph.label_angle), panel_extents
+            placements, graph, float(graph.label_angle), station_offsets
         )
 
     return [p for p in placements if p.obstacle_bbox is None]
@@ -1277,11 +1277,44 @@ def place_labels(
 _RAIL_LABEL_PANEL_CLEARANCE = 4.0
 
 
+def _rail_panel_marker_extents(
+    graph: MetroGraph,
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> dict[str, tuple[float, float]]:
+    """Per-rail-section (top_marker_y, bottom_marker_y) from rendered pills.
+
+    Reports the topmost pill top and bottommost pill bottom across every
+    visible station in the panel (rather than the rail-centre Ys of
+    :func:`_rail_panel_extents`).  A diagonal label cleared only to the rail
+    centre rakes the markers of lone lower-rail stations whose pills extend
+    past that centre; clearing to the pill edge keeps the angled text off
+    those markers.  Returns an empty map when the graph has no rail sections.
+    """
+    from nf_metro.layout.engine import _station_marker_bbox
+
+    extents: dict[str, tuple[float, float]] = {}
+    if not graph._rail_y:
+        return extents
+    for sid, st in graph.stations.items():
+        if not st.section_id or not graph.is_rail_section(st.section_id):
+            continue
+        mb = _station_marker_bbox(graph, sid, station_offsets)
+        if mb is None:
+            continue
+        _, m_top, _, m_bot = mb
+        cur = extents.get(st.section_id)
+        if cur is None:
+            extents[st.section_id] = (m_top, m_bot)
+        else:
+            extents[st.section_id] = (min(cur[0], m_top), max(cur[1], m_bot))
+    return extents
+
+
 def _apply_rail_label_angle(
     placements: list[LabelPlacement],
     graph: MetroGraph,
     label_angle: float,
-    panel_extents: dict[str, tuple[float, float]] | None = None,
+    station_offsets: dict[tuple[str, str], float] | None = None,
 ) -> None:
     """Tilt rail-section station labels by *label_angle* degrees.
 
@@ -1292,7 +1325,12 @@ def _apply_rail_label_angle(
     name leads directly into its station marker.  The rail column step is sized
     for the rotated label's horizontal projection by ``_label_aware_x_spacing``
     so the panel packs tighter.
+
+    The clearance is measured to the panel's outer *pill* edges, not its rail
+    centres, so a down-right label never rakes the marker of a lone lower-rail
+    station sitting one rail down and a column over.
     """
+    panel_extents = _rail_panel_marker_extents(graph, station_offsets)
     for p in placements:
         if p.obstacle_bbox is not None or not p.station_id:
             continue
@@ -1311,9 +1349,10 @@ def _apply_rail_label_angle(
         # from the pill.
         p.text_anchor = "end" if p.above else "start"
         # Tilting adds vertical extent; nudge the anchor so the rotated label
-        # clears the whole rail panel (above its top rail / below its bottom
-        # rail) rather than dipping back beside a middle rail.
-        extent = panel_extents.get(st.section_id) if panel_extents else None
+        # clears the whole rail panel (above its top pill / below its bottom
+        # pill) rather than dipping back over a middle rail or a lower-rail
+        # marker.
+        extent = panel_extents.get(st.section_id)
         if extent is not None:
             top_y, bot_y = extent
             _, by0, _, by1 = _label_bbox(p)
