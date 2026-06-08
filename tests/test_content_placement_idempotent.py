@@ -9,19 +9,19 @@ Idempotence is a fixed-point property and is strictly weaker than *purity*
 (output a function of frozen anchors + structure only); the stronger property
 is checked by ``test_content_placement_pure`` (#491).
 
-Mechanism: monkeypatch the engine's reference to one placement phase with a
-wrapper that invokes it twice, run the full layout (with the anchor guard
-active), and assert every station coordinate matches the single-application
-baseline.  A phase that reads its own prior output (e.g. selecting/sorting by
-current Y) diverges on the second call and fails here.
+Mechanism: monkeypatch every placement phase with a probe that applies it once,
+snapshots the result, applies it a second time on that result, records any
+station the second application moves, then restores the single-application
+snapshot so the rest of the pipeline runs unperturbed.  Because each probe is
+self-contained, all eight share one layout pass and a failure names the
+offending phase.  A phase that reads its own prior output (e.g. selecting or
+sorting by current Y) moves content on the second call and fails here.
 
 Covers the whole render corpus so any fixture that exercises a phase
 participates.  Refs #488, #465.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import pytest
 from conftest import CONTENT_PLACEMENT_PHASES, compute_corpus_layout, content_corpus
@@ -31,46 +31,90 @@ from nf_metro.parser.model import MetroGraph
 
 CORPUS = content_corpus()
 
+TOL = 1e-6
 
-def _coords(graph: MetroGraph) -> dict[str, tuple[float, float]]:
-    return {sid: (round(s.x, 6), round(s.y, 6)) for sid, s in graph.stations.items()}
-
-
-# The single-pass baseline depends only on the fixture, so compute it once per
-# fixture rather than re-running it for each of the eight phases.
-_BASELINE: dict[str, dict[str, tuple[float, float]]] = {}
+_Coords = dict[str, tuple[float, float]]
 
 
-def _baseline(
-    fid: str, path: Path, is_nextflow: bool
-) -> dict[str, tuple[float, float]]:
-    if fid not in _BASELINE:
-        _BASELINE[fid] = _coords(compute_corpus_layout(path, is_nextflow))
-    return _BASELINE[fid]
+def _snapshot(graph: MetroGraph) -> tuple[_Coords, _Coords]:
+    stations = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
+    bboxes = {sec.id: (sec.bbox_y, sec.bbox_h) for sec in graph.sections.values()}
+    return stations, bboxes
 
 
-@pytest.mark.parametrize("phase_name", CONTENT_PLACEMENT_PHASES)
-@pytest.mark.parametrize("fixture", CORPUS, ids=[fid for fid, _, _ in CORPUS])
-def test_placement_phase_is_idempotent(fixture, phase_name, monkeypatch):
-    fid, path, is_nextflow = fixture
+def _restore(graph: MetroGraph, snap: tuple[_Coords, _Coords]) -> None:
+    stations, bboxes = snap
+    for sid, (x, y) in stations.items():
+        st = graph.stations.get(sid)
+        if st is not None:
+            st.x, st.y = x, y
+    for sid, (y, h) in bboxes.items():
+        sec = graph.sections.get(sid)
+        if sec is not None:
+            sec.bbox_y, sec.bbox_h = y, h
 
-    baseline = _baseline(fid, path, is_nextflow)
 
-    original = getattr(engine, phase_name)
+def _make_idempotence_probe(original, diffs: list[tuple[str, tuple, tuple]]):
+    """Wrap ``original`` so each call checks ``P(P(x)) == P(x)`` locally and
+    then leaves the genuine single-application result for the pipeline.
 
-    def run_twice(graph, *args, **kwargs):
+    Apply the phase once and snapshot its output; apply it again on that output
+    and record any station whose coordinate moves on the second application;
+    then restore the single-application snapshot so the rest of the pipeline
+    runs exactly as it would unprobed.  Being self-contained, every phase's
+    probe coexists in one layout pass and isolates non-idempotence to the phase
+    that caused it.
+    """
+
+    def probe(graph: MetroGraph, *args, **kwargs):
         original(graph, *args, **kwargs)
+        snap1 = _snapshot(graph)
+        after1 = snap1[0]
+
         original(graph, *args, **kwargs)
+        after2 = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
 
-    monkeypatch.setattr(engine, phase_name, run_twice)
-    doubled = _coords(compute_corpus_layout(path, is_nextflow))
+        for sid, (x1, y1) in after1.items():
+            x2, y2 = after2.get(sid, (x1, y1))
+            if abs(x2 - x1) > TOL or abs(y2 - y1) > TOL:
+                diffs.append((sid, (x1, y1), (x2, y2)))
 
-    diff = {
-        k: (baseline[k], doubled.get(k))
-        for k in baseline
-        if baseline[k] != doubled.get(k)
-    }
-    assert doubled == baseline, (
-        f"{phase_name} is not idempotent on {fid}: applying it twice moved "
-        f"content. Differing stations: {diff}"
+        _restore(graph, snap1)
+
+    return probe
+
+
+@pytest.mark.parametrize(
+    "fid,path,is_nextflow", CORPUS, ids=[fid for fid, _, _ in CORPUS]
+)
+def test_placement_phase_is_idempotent(fid, path, is_nextflow, monkeypatch):
+    """Every content-placement phase is idempotent on ``fid``.
+
+    The probe checks ``P(P(x)) == P(x)`` directly at each phase and restores the
+    single-application result, so all eight probes share one layout pass and a
+    failure names the offending phase.  This is the literal property the file
+    asserts, checked in isolation at the phase rather than inferred from the
+    cascaded final layout, and covers the same (fixture, phase) pairs at
+    one-eighth the layout cost.
+    """
+    diffs_by_phase: dict[str, list[tuple[str, tuple, tuple]]] = {}
+    for phase_name in CONTENT_PLACEMENT_PHASES:
+        diffs_by_phase[phase_name] = []
+        original = getattr(engine, phase_name)
+        monkeypatch.setattr(
+            engine,
+            phase_name,
+            _make_idempotence_probe(original, diffs_by_phase[phase_name]),
+        )
+
+    compute_corpus_layout(path, is_nextflow)
+
+    non_idempotent = {name: diffs for name, diffs in diffs_by_phase.items() if diffs}
+    assert not non_idempotent, (
+        f"content-placement phase(s) not idempotent on {fid}: applying twice "
+        f"moved content. Stations per phase (station: first -> second): "
+        + "; ".join(
+            f"{name}: {[(s, a, b) for s, a, b in diffs[:8]]}"
+            for name, diffs in non_idempotent.items()
+        )
     )

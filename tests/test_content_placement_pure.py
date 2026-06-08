@@ -107,12 +107,6 @@ def _make_purity_probe(original, leaks: list[tuple[str, float, float]]):
     return probe
 
 
-def _cases():
-    for fid, path, is_nf in CORPUS:
-        for phase in CONTENT_PLACEMENT_PHASES:
-            yield pytest.param(fid, path, is_nf, phase, id=f"{fid}-{phase}")
-
-
 def test_content_placement_phases_complete():
     """Completeness guard (#503): the set of phases actually run through the
     ``_run_placement`` wrapper in ``_compute_section_layout`` must equal the
@@ -151,16 +145,33 @@ def test_content_placement_phases_complete():
     )
 
 
-@pytest.mark.parametrize("fid,path,is_nf,phase_name", list(_cases()))
-def test_placement_phase_is_pure(fid, path, is_nf, phase_name, monkeypatch):
-    leaks: list[tuple[str, float, float]] = []
-    original = getattr(engine, phase_name)
-    monkeypatch.setattr(engine, phase_name, _make_purity_probe(original, leaks))
+@pytest.mark.parametrize("fid,path,is_nf", CORPUS, ids=[fid for fid, _, _ in CORPUS])
+def test_placement_phase_is_pure(fid, path, is_nf, monkeypatch):
+    """Every content-placement phase is pure on ``fid``.
+
+    Each phase's purity probe is self-contained -- it snapshots, measures, and
+    restores the genuine single-application result around its own phase call --
+    so all eight coexist in one layout pass without perturbing the pipeline or
+    each other.  This checks the same (fixture, phase) coverage as eight
+    separate runs would, at one-eighth the layout cost.
+    """
+    leaks_by_phase: dict[str, list[tuple[str, float, float]]] = {}
+    for phase_name in CONTENT_PLACEMENT_PHASES:
+        leaks_by_phase[phase_name] = []
+        original = getattr(engine, phase_name)
+        monkeypatch.setattr(
+            engine, phase_name, _make_purity_probe(original, leaks_by_phase[phase_name])
+        )
+
     compute_corpus_layout(path, is_nf)
 
-    assert not leaks, (
-        f"{phase_name} is not pure on {fid}: perturbing non-anchor state "
-        f"(current Y + section bbox) changed where it placed content. "
-        f"Leaks (station: baseline_y -> perturbed_y): "
-        f"{[(s, round(a, 1), round(b, 1)) for s, a, b in leaks[:8]]}"
+    impure = {name: leaks for name, leaks in leaks_by_phase.items() if leaks}
+    assert not impure, (
+        f"content-placement phase(s) not pure on {fid}: perturbing non-anchor "
+        f"state (current Y + section bbox) changed where they placed content. "
+        f"Leaks per phase (station: baseline_y -> perturbed_y): "
+        + "; ".join(
+            f"{name}: {[(s, round(a, 1), round(b, 1)) for s, a, b in leaks[:8]]}"
+            for name, leaks in impure.items()
+        )
     )
