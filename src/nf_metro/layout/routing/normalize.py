@@ -916,16 +916,16 @@ def _plan_trunk_band(band: list[_HTrunk]) -> list[list[_HTrunk]]:
     h_rank = {id(sg): r for r, sg in enumerate(h_ttb)}
     feats = {id(sg): _trunk_slot_features(sg) for sg in slot_groups}
 
-    def _key(perm: tuple[list[_HTrunk], ...]) -> tuple[int, ...]:
+    def _key(perm: list[list[_HTrunk]]) -> tuple[int, ...]:
         # Tie-break by position in the heuristic order: the heuristic itself
         # scores (0, 1, .. m-1), the lexicographically smallest tuple, so an
         # already-optimal band reproduces the heuristic order exactly.
         return (
-            _band_order_crossings(list(perm), feats),
+            _band_order_crossings(perm, feats),
             *(h_rank[id(sg)] for sg in perm),
         )
 
-    best_ttb = list(min(itertools.permutations(h_ttb), key=_key))
+    best_ttb = min((list(p) for p in itertools.permutations(h_ttb)), key=_key)
     return list(reversed(best_ttb)) if dips else best_ttb
 
 
