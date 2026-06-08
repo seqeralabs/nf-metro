@@ -156,9 +156,7 @@ class ProgressState:
 def build_page(model: MapModel) -> str:
     halos = "\n".join(
         f'<g class="halo pending" id="halo-{html.escape(st["id"])}">'
-        f'<circle cx="{st["x"]}" cy="{st["y"]}" r="20"/>'
-        f'<text x="{st["x"]}" y="{st["y"] - 26}" text-anchor="middle">'
-        f"{html.escape(st['label'])}</text>"
+        f'<circle class="led" cx="{st["x"]}" cy="{st["y"]}" r="7"/>'
         f"</g>"
         for st in model.stations
     )
@@ -196,19 +194,25 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .wrap {{ position: relative; width: {width}px; height: {height}px; }}
   .wrap > svg {{ position: absolute; top: 0; left: 0; }}
   .overlay {{ pointer-events: none; }}
-  .halo circle {{ fill: none; stroke-width: 4px;
-                 transition: stroke 0.3s, opacity 0.3s; }}
-  .halo text {{ fill: #e6e9f0; font-size: 11px; font-weight: 600; opacity: 0;
-               transition: opacity 0.3s; paint-order: stroke;
-               stroke: #0b1021; stroke-width: 3px; }}
-  .halo.pending circle {{ stroke: #3a4a6b; opacity: 0.25; }}
-  .halo.queued  circle {{ stroke: #f0a000; opacity: 0.5; }}
-  .halo.running circle {{ stroke: #f0a000; opacity: 1;
-                         animation: pulse 1.1s ease-in-out infinite; }}
-  .halo.running text, .halo.failed text, .halo.queued text {{ opacity: 1; }}
-  .halo.done    circle {{ stroke: #2bb673; opacity: 1; }}
-  .halo.failed  circle {{ stroke: #ff4d4d; opacity: 1; }}
-  @keyframes pulse {{ 0%,100% {{ stroke-width: 4px; }} 50% {{ stroke-width: 9px; }} }}
+  .led {{ --c: #3a4a6b; fill: var(--c); transform-box: fill-box;
+         transform-origin: center; transition: fill 0.3s, opacity 0.3s;
+         filter: drop-shadow(0 0 4px var(--c)) drop-shadow(0 0 10px var(--c)); }}
+  .halo text {{ fill: #cfe0ff; font-size: 11px; font-weight: 600; opacity: 0;
+               letter-spacing: 0.04em; transition: opacity 0.3s;
+               paint-order: stroke; stroke: #04060c; stroke-width: 3px; }}
+  .halo.pending .led {{ --c: #2a3656; opacity: 0.45; }}
+  .halo.queued  .led {{ --c: #ffb020; opacity: 0.7; }}
+  .halo.running .led {{ --c: #ffc23a; animation: led-pulse 1.1s ease-in-out infinite; }}
+  .halo.done    .led {{ --c: #2bee92; }}
+  .halo.failed  .led {{ --c: #ff4d4d; animation: led-pulse 0.7s ease-in-out infinite; }}
+  .halo.running text, .halo.failed text, .halo.queued text,
+  .halo.done text {{ opacity: 1; }}
+  @keyframes led-pulse {{
+    0%,100% {{ transform: scale(1);
+      filter: drop-shadow(0 0 4px var(--c)) drop-shadow(0 0 9px var(--c)); }}
+    50%     {{ transform: scale(1.35);
+      filter: drop-shadow(0 0 7px var(--c)) drop-shadow(0 0 18px var(--c)); }}
+  }}
 </style>
 </head>
 <body>
@@ -234,11 +238,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     document.getElementById('run-state').textContent = data.run.state;
     for (const [sid, s] of Object.entries(data.stations)) {{
       const g = document.getElementById('halo-' + sid);
-      if (!g) continue;
-      g.setAttribute('class', 'halo ' + s.state);
-      const label = g.querySelector('text');
-      const base = label.textContent.replace(/ \\d+\\/\\d+$/, '');
-      label.textContent = s.total ? base + ' ' + s.done + '/' + s.total : base;
+      if (g) g.setAttribute('class', 'halo ' + s.state);
     }}
   }};
 </script>
