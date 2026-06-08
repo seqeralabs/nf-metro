@@ -471,21 +471,16 @@ def _guard_tall_anchor_stack_well_formed(graph: MetroGraph, phase: str) -> None:
     a vertical (TB/BT) direction would dangle beside empty space or force a
     perpendicular port on an LR sink. No-op when the packer did not fire.
     """
-    from nf_metro.layout.auto_layout import _detect_tall_anchor_chain
+    from nf_metro.layout.auto_layout import (
+        _detect_tall_anchor_chain,
+        _transitive_successors,
+    )
 
     anchor = _detect_tall_anchor_chain(graph)
     if anchor is None or graph.section_dag is None:
         return
 
-    successors = graph.section_dag.successors
-    tail: set[str] = set()
-    queue = list(successors.get(anchor, set()))
-    while queue:
-        sid = queue.pop()
-        if sid in tail:
-            continue
-        tail.add(sid)
-        queue.extend(successors.get(sid, set()))
+    tail = _transitive_successors(anchor, graph.section_dag.successors)
 
     horizontal = {"LR", "RL"}
     non_horizontal = {

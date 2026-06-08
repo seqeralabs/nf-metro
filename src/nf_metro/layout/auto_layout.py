@@ -91,54 +91,13 @@ def _build_section_dag(
     return dict(successors), dict(predecessors), dict(edge_lines)
 
 
-def _estimate_section_layers(graph: MetroGraph, section_id: str) -> int:
-    """Estimate the number of station layers (horizontal span) for a section.
+def _internal_station_depths(
+    graph: MetroGraph, section_id: str
+) -> dict[str, int] | None:
+    """Longest-path depth of each station through a section's internal edges.
 
-    Computes the longest path through internal edges via topological DP.
-    Returns at least 1.
-    """
-    section = graph.sections[section_id]
-    station_ids = set(section.station_ids)
-
-    # Build adjacency for internal edges only
-    adj: dict[str, set[str]] = defaultdict(set)
-    has_pred: set[str] = set()
-    for edge in graph.edges:
-        if edge.source in station_ids and edge.target in station_ids:
-            adj[edge.source].add(edge.target)
-            has_pred.add(edge.target)
-
-    if not adj:
-        return max(len(station_ids), 1)
-
-    # BFS longest path from roots
-    roots = station_ids - has_pred
-    if not roots:
-        return len(station_ids)
-
-    longest: dict[str, int] = {sid: 0 for sid in station_ids}
-    queue: deque[str] = deque(roots)
-    visited: set[str] = set()
-
-    while queue:
-        node = queue.popleft()
-        if node in visited:
-            continue
-        visited.add(node)
-        for succ in adj.get(node, set()):
-            if longest[node] + 1 > longest[succ]:
-                longest[succ] = longest[node] + 1
-            queue.append(succ)
-
-    return max(longest.values()) + 1  # +1: convert 0-indexed depth to layer count
-
-
-def _estimate_section_height(graph: MetroGraph, section_id: str) -> int:
-    """Estimate a section's vertical extent as its widest internal layer.
-
-    Counts the stations sharing the busiest longest-path depth (the broadest
-    fan), the orthogonal counterpart to ``_estimate_section_layers``. Returns
-    at least 1.
+    Returns ``None`` when the section has no internal edges or contains a
+    cycle (no roots), so callers fall back to a station count.
     """
     section = graph.sections[section_id]
     station_ids = set(section.station_ids)
@@ -151,11 +110,10 @@ def _estimate_section_height(graph: MetroGraph, section_id: str) -> int:
             has_pred.add(edge.target)
 
     if not adj:
-        return max(len(station_ids), 1)
-
+        return None
     roots = station_ids - has_pred
     if not roots:
-        return len(station_ids)
+        return None
 
     depth: dict[str, int] = {sid: 0 for sid in station_ids}
     queue: deque[str] = deque(roots)
@@ -169,10 +127,34 @@ def _estimate_section_height(graph: MetroGraph, section_id: str) -> int:
             if depth[node] + 1 > depth[succ]:
                 depth[succ] = depth[node] + 1
             queue.append(succ)
+    return depth
 
+
+def _estimate_section_layers(graph: MetroGraph, section_id: str) -> int:
+    """Estimate the number of station layers (horizontal span) for a section.
+
+    Computes the longest path through internal edges via topological DP.
+    Returns at least 1.
+    """
+    depth = _internal_station_depths(graph, section_id)
+    if depth is None:
+        return max(len(graph.sections[section_id].station_ids), 1)
+    return max(depth.values()) + 1  # +1: convert 0-indexed depth to layer count
+
+
+def _estimate_section_height(graph: MetroGraph, section_id: str) -> int:
+    """Estimate a section's vertical extent as its widest internal layer.
+
+    Counts the stations sharing the busiest longest-path depth (the broadest
+    fan), the orthogonal counterpart to ``_estimate_section_layers``. Returns
+    at least 1.
+    """
+    depth = _internal_station_depths(graph, section_id)
+    if depth is None:
+        return max(len(graph.sections[section_id].station_ids), 1)
     per_layer: dict[int, int] = defaultdict(int)
-    for sid in station_ids:
-        per_layer[depth[sid]] += 1
+    for d in depth.values():
+        per_layer[d] += 1
     return max(per_layer.values())
 
 
@@ -217,9 +199,7 @@ def _detect_tall_anchor_chain(graph: MetroGraph) -> str | None:
         return None
     # A unique tall section: a second comparably tall fan would want its own
     # column, which the single-anchor stack cannot express.
-    if any(
-        s != anchor and heights[s] >= TALL_ANCHOR_MIN_HEIGHT for s in section_ids
-    ):
+    if any(s != anchor and heights[s] >= TALL_ANCHOR_MIN_HEIGHT for s in section_ids):
         return None
     # The anchor must sit mid-spine: a non-empty head (upstream) to form the
     # header row and a non-empty tail (downstream) to stack beside it.
@@ -233,7 +213,6 @@ def _place_with_tall_anchor(
     graph: MetroGraph,
     col_assign: dict[str, int],
     anchor: str,
-    successors: dict[str, set[str]],
 ) -> tuple[set[str], set[str], set[str]]:
     """Place a tall-anchor chain: header row, tall anchor, stacked tail.
 
@@ -370,13 +349,11 @@ def _assign_grid_positions(
         topo_col_width[col] = max(_estimate_section_layers(graph, sid) for sid in sids)
 
     # --- Tall-anchor vertical stack ---
-    # A single-source/single-sink chain dominated by one section that is much
-    # taller than wide (a large fan, e.g. a many-way caller block) packs more
-    # compactly by stacking the narrow downstream chain vertically beside the
-    # tall anchor than by giving every section its own topological column.
+    # Stack the narrow downstream chain in the shadow of one dominant tall-
+    # narrow fan instead of giving every section its own topological column.
     anchor = _detect_tall_anchor_chain(graph)
     if anchor is not None:
-        return _place_with_tall_anchor(graph, col_assign, anchor, successors)
+        return _place_with_tall_anchor(graph, col_assign, anchor)
 
     # --- Convergence-based row split ---
     # Detect sections with predecessors spanning 2+ non-adjacent topo columns.

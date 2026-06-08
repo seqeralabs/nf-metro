@@ -41,9 +41,7 @@ def _section_columns(graph) -> set[int]:
     for section in graph.sections.values():
         if section.grid_col < 0:
             continue
-        for col in range(
-            section.grid_col, section.grid_col + section.grid_col_span
-        ):
+        for col in range(section.grid_col, section.grid_col + section.grid_col_span):
             cols.add(col)
     return cols
 
