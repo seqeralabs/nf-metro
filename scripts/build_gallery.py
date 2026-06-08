@@ -217,6 +217,12 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Section-level fork-join: fan-out then reconverge.",
     ),
     (
+        "uneven_diamond",
+        TOPOLOGIES_DIR,
+        "Node-level fork-join whose branches differ in length; each branch "
+        "holds its own track instead of collapsing the shorter ones together.",
+    ),
+    (
         "terminal_symmetric_fan",
         TOPOLOGIES_DIR,
         "A terminal section whose entry fans into equal-rank sinks; the "
