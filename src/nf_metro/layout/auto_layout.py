@@ -359,22 +359,30 @@ def _assign_grid_positions(
     # Detect sections with predecessors spanning 2+ non-adjacent topo columns.
     # These are natural "convergence points" that should drop to a return row
     # along with their downstream sections, instead of extending the top row.
-    convergence_result = _detect_convergence_split(
-        col_assign,
-        col_groups,
-        successors,
-        predecessors,
-    )
-    if convergence_result is not None:
-        return _place_with_convergence(
-            graph,
-            col_groups,
-            topo_col_width,
+    #
+    # A purely linear spine (one section per topo column) that fits the fold
+    # threshold stays unsplit: splitting it only bends the flow into a
+    # backward-reading serpentine for no readability gain.
+    single_row_width = sum(topo_col_width.values())
+    is_linear_spine = all(len(sids) == 1 for sids in col_groups.values())
+    chain_fits_one_row = is_linear_spine and single_row_width <= max_station_columns
+    if not chain_fits_one_row:
+        convergence_result = _detect_convergence_split(
             col_assign,
+            col_groups,
             successors,
             predecessors,
-            convergence_result,
         )
+        if convergence_result is not None:
+            return _place_with_convergence(
+                graph,
+                col_groups,
+                topo_col_width,
+                col_assign,
+                successors,
+                predecessors,
+                convergence_result,
+            )
 
     # Greedily pack topo columns into row bands.
     # When overflow is detected, the overflowing column becomes the fold
@@ -466,6 +474,18 @@ def _assign_grid_positions(
         min_col = min(col for col, _ in folded.values())
         if min_col < 0:
             folded = {sid: (col - min_col, row) for sid, (col, row) in folded.items()}
+
+    # A chain judged to fit one row must not have folded: the packer's
+    # overflow test uses the same threshold, so a multi-row result means the
+    # fit decision and the packer disagree.
+    if chain_fits_one_row and any(row != 0 for _, row in folded.values()):
+        from nf_metro.layout.phases.guards import PhaseInvariantError
+
+        rows = sorted({row for _, row in folded.values()})
+        raise PhaseInvariantError(
+            f"linear section spine fits one row (width {single_row_width} "
+            f"<= {max_station_columns}) but packed across rows {rows}"
+        )
 
     # Write results to grid_overrides and section fields
     for sid, (col, row) in folded.items():

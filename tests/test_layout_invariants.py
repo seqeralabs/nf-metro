@@ -5969,3 +5969,107 @@ def test_cross_row_top_entry_bundle_corners_are_concentric():
             f"corner C{k + 1} arc centres are {gap:.2f}px apart "
             f"(non-concentric): {a} vs {b}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Linear section spine should not fold when it fits one row
+# ---------------------------------------------------------------------------
+
+# A linear section spine threads one section per topo column; forward "skip"
+# edges over that spine create a convergence point. When the whole flow fits
+# comfortably in a single row, splitting it onto a return row only bends the
+# flow backward, so every section must land in grid row 0. These fixtures are
+# such chains.
+_LINEAR_SPINE_FITS_ONE_ROW = {
+    "single_skip": """%%metro title: Single Skip
+%%metro line: m | M | #0570b0
+graph LR
+    subgraph a [A]
+        a1[A1]
+    end
+    subgraph b [B]
+        b1[B1]
+    end
+    subgraph c [C]
+        c1[C1]
+    end
+    subgraph d [D]
+        d1[D1]
+    end
+    a1 -->|m| b1
+    b1 -->|m| c1
+    c1 -->|m| d1
+    a1 -->|m| c1
+    b1 -->|m| d1
+""",
+    "genomeassembly_shape": """%%metro title: Genomeassembly Shape
+%%metro line: m | M | #0570b0
+graph LR
+    subgraph raw [Raw]
+        r1[R1]
+        r2[R2]
+        r1 -->|m| r2
+    end
+    subgraph purge [Purge]
+        p1[P1]
+        p2[P2]
+        p1 -->|m| p2
+    end
+    subgraph polish [Polish]
+        o1[O1]
+        o2[O2]
+        o1 -->|m| o2
+    end
+    subgraph scaffold [Scaffold]
+        s1[S1]
+        s2[S2]
+        s1 -->|m| s2
+    end
+    subgraph qc [QC]
+        q1[Q1]
+    end
+    r2 -->|m| p1
+    p2 -->|m| o1
+    o2 -->|m| s1
+    s2 -->|m| q1
+    r2 -->|m| o1
+    r2 -->|m| s1
+    p2 -->|m| s1
+    r2 -->|m| q1
+    p2 -->|m| q1
+    o2 -->|m| q1
+""",
+}
+
+
+@pytest.mark.parametrize("name", sorted(_LINEAR_SPINE_FITS_ONE_ROW))
+def test_linear_spine_fitting_one_row_is_single_row(name):
+    """A linear section spine that fits the fold threshold stays in one row.
+
+    Forward skip edges over an already-linear chain of sections form a
+    convergence point, but splitting the chain onto a return row when it
+    fits a single row only bends the flow backward.  Each fixture here is a
+    one-section-per-column spine whose total width is well under the
+    threshold; every section must sit in grid row 0.
+    """
+    graph = parse_metro_mermaid(_LINEAR_SPINE_FITS_ONE_ROW[name])
+    rows = {sec.grid_row for sec in graph.sections.values()}
+    assert rows == {0}, (
+        f"{name}: linear spine fitting one row spread across rows "
+        f"{sorted(rows)}; expected all sections in row 0"
+    )
+
+
+def test_genomeassembly_auto_layout_is_single_row():
+    """The de-pinned genomeassembly example must auto-lay-out in one row.
+
+    Its sections form a single chain (Raw assembly -> Purging -> Polishing
+    -> Scaffolding -> Genome QC) that fits one row; auto-layout must
+    reproduce the single-row flow rather than fold it.
+    """
+    graph = parse_metro_mermaid((EXAMPLES / "genomeassembly.mmd").read_text())
+    rows = {sec.grid_row for sec in graph.sections.values()}
+    assert rows == {0}, (
+        f"genomeassembly sections spread across rows {sorted(rows)}; "
+        f"expected a single row"
+    )
