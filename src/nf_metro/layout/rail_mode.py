@@ -15,8 +15,9 @@ sections whose ``line_spread`` resolves to ``rails`` (``graph.is_rail_section``)
 so the normal layout path is untouched for every other section.
 
 Scope (MVP): LR sections.  Each section's lines get rails centred about the
-section trunk Y; stations are placed by longest-path layer (X) and anchored to
-span their lines' rail range (Y).  Sections are stacked vertically in grid-row
+section trunk Y; stations are placed one per column in declaration-priority
+topological order (X) and anchored to span their lines' rail range (Y).
+Sections are stacked vertically in grid-row
 order.  Ports/junctions are positioned at their connecting rail Y so that the
 dedicated rail-mode router (see ``routing/rail.py``) can draw straight rails.
 """
@@ -225,12 +226,15 @@ def _layout_section_rails(
     per_line_y = {lid: rails_top + slot_offset[lid] for lid in lines}
     rail_y[section.id] = per_line_y
 
-    # X by longest-path layer over this section's internal stations, so a
-    # station's column reflects its in-section depth.
+    # Longest-path layer over this section's internal stations, used below for
+    # head/tail terminus depth checks (column X is assigned separately).
+    import networkx as nx
+
     from nf_metro.layout.layers import assign_layers
     from nf_metro.layout.phases._common import _build_section_subgraph
 
-    layers = assign_layers(_build_section_subgraph(graph, section))
+    section_dag = _build_section_subgraph(graph, section)
+    layers = assign_layers(section_dag)
 
     # Place real stations.
     real_ids = [
@@ -275,19 +279,29 @@ def _layout_section_rails(
         per_line_y = {lid: rails_top + slot_offset[lid] for lid in lines}
         rail_y[section.id] = per_line_y
 
-    # Rails are designed for one distinct station per column.  The longest-path
-    # layer orders stations by depth, but distinct stations on different rails
-    # can share a layer; taking X straight from the layer would stack them in a
-    # single column.  Rank the on-rail stations by (layer, declaration order) and
-    # give each its own column, so a rail's internal order and the authored
-    # cross-rail order are both preserved while no two distinct stations share X.
+    # Rails place one distinct station per column.  Order the columns by a
+    # topological sort that breaks ties on declaration order, so the columns
+    # follow the order stations are authored in (the intended reading) while
+    # always respecting edge direction; each on-rail station gets its own column
+    # and no two distinct stations share an X.
     decl_index = {sid: i for i, sid in enumerate(section.station_ids)}
-    on_rail_ids = [sid for sid in real_ids if not graph.stations[sid].off_track]
-    ordered_cols = sorted(
-        on_rail_ids, key=lambda sid: (layers.get(sid, 0), decl_index.get(sid, 0))
-    )
-    cols: dict[str, int] = {sid: i for i, sid in enumerate(ordered_cols)}
-    max_col = len(ordered_cols) - 1 if ordered_cols else 0
+    real_set = set(real_ids)
+    dag: nx.DiGraph[str] = nx.DiGraph()
+    for edge in section_dag.edges:
+        dag.add_edge(edge.source, edge.target)
+    for sid in section_dag.stations:
+        if sid not in dag:
+            dag.add_node(sid)
+    topo = nx.lexicographical_topological_sort(dag, key=lambda n: decl_index.get(n, 0))
+    on_rail_ids = [
+        sid for sid in topo if sid in real_set and not graph.stations[sid].off_track
+    ]
+    seen = set(on_rail_ids)
+    on_rail_ids += [
+        sid for sid in real_ids if sid not in seen and not graph.stations[sid].off_track
+    ]
+    cols: dict[str, int] = {sid: i for i, sid in enumerate(on_rail_ids)}
+    max_col = len(on_rail_ids) - 1 if on_rail_ids else 0
 
     # A blank terminus that fans across rails needs its own horizontal room so
     # the fan S-curves keep their shape regardless of the shared column pitch.
