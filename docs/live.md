@@ -40,6 +40,12 @@ matched against the **fully-qualified** process name:
 - Only stations with a `process:` directive change state; everything else is
   drawn but stays neutral. Plumbing processes (versions dumps, samplesheet
   checks) are typically left unmapped on purpose.
+- The mapping is **many-to-one**: a station may represent several processes,
+  but a given process should light up **one** station. If a process matches the
+  patterns of two stations its progress is duplicated on the map, so
+  `check-mapping` reports that as a failure - keep each station's patterns
+  specific enough not to overlap (lean on the scope prefix,
+  `NFCORE_RNASEQ:RNASEQ:ALIGN:...`, when a tool recurs).
 - The directive is pure metadata: it never affects the rendered map.
 
 ## 2. Serve the map
@@ -78,8 +84,9 @@ blank map.
 ## 3. Keep the mapping honest
 
 The risk with any mapping is drift: a new process the map can't show (silently
-invisible), or a station pattern that matches nothing (stale). `check-mapping`
-makes drift loud so CI can gate on it:
+invisible), a station pattern that matches nothing (stale), or a process whose
+patterns match more than one station (duplicated progress). `check-mapping`
+makes all three loud so CI can gate on them:
 
 ```bash
 # Export the pipeline's process graph, then lint the map against it
@@ -92,6 +99,8 @@ Processes with no station (invisible): 1
   - BWA_MEM
 Station patterns matching no process (stale): 1
   - align: NFCORE_RNASEQ:RNASEQ:OLD_ALIGNER
+Processes matching more than one station (duplicates progress): 1
+  - FASTQC: align, qc
 ```
 
 It exits non-zero when it finds drift. Options:
@@ -113,9 +122,13 @@ but are not treated as failures since they may be intentional.
   point the run at `http://localhost:8080/events`.
 - **Security.** `/events` is unauthenticated by default and the server binds
   `127.0.0.1`. When binding a non-local interface (`--host 0.0.0.0`), set
-  `--token` so only your run can post events.
+  `--token` so only your run can post events. The token can be sent as the
+  `X-Metro-Token` header or a `?token=` query param; prefer the header where you
+  can, since a URL with the token lands in shell history and process listings.
 - **Run lifecycle.** A `started` event resets the map, so re-running a pipeline
-  re-animates a fresh map. The server tracks one run at a time.
+  re-animates a fresh map. The server tracks one run at a time. Unrecognised or
+  malformed event payloads are accepted and ignored (the endpoint always returns
+  200) so a Nextflow version emitting extra event types can't stall a run.
 - **No denominator.** Nextflow's task count is dynamic, so the per-station
   count is "done / submitted so far", not a fixed percentage.
 

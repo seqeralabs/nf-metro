@@ -39,20 +39,27 @@ def process_names_from_dag(text: str) -> list[str]:
 class MappingReport:
     """Outcome of :func:`check_mapping`.
 
-    ``unmapped_processes`` and ``dead_patterns`` are failures (drift); they
-    drive the linter's non-zero exit. ``unmapped_stations`` is informational -
-    a station with no pattern simply never lights up, which may be intentional.
+    ``unmapped_processes``, ``dead_patterns`` and ``ambiguous_processes`` are
+    failures (drift); they drive the linter's non-zero exit. ``ambiguous_processes``
+    maps a process to the >1 stations it matched: the mapping is meant to be
+    many-to-one (a station stands for several processes, not the reverse), so a
+    process lighting up more than one station duplicates that task's progress on
+    the map. ``unmapped_stations`` is informational - a station with no pattern
+    simply never lights up, which may be intentional.
     """
 
     unmapped_processes: list[str] = field(default_factory=list)
     dead_patterns: list[tuple[str, str]] = field(default_factory=list)
+    ambiguous_processes: dict[str, list[str]] = field(default_factory=dict)
     unmapped_stations: list[str] = field(default_factory=list)
     matched: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
         """True when there is no drift (failures), ignoring warnings."""
-        return not self.unmapped_processes and not self.dead_patterns
+        return not (
+            self.unmapped_processes or self.dead_patterns or self.ambiguous_processes
+        )
 
 
 def check_mapping(
@@ -96,6 +103,11 @@ def check_mapping(
             if (station_id, pattern) not in matched_patterns:
                 report.dead_patterns.append((station_id, pattern))
 
+    report.ambiguous_processes = {
+        process: sorted(set(hits))
+        for process, hits in report.matched.items()
+        if len(set(hits)) > 1
+    }
     report.unmapped_processes.sort()
     report.dead_patterns.sort()
     return report

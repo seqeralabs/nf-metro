@@ -456,6 +456,14 @@ def check_mapping_cmd(
         )
         for sid, pat in report.dead_patterns:
             click.echo(f"  - {sid}: {pat}", err=True)
+    if report.ambiguous_processes:
+        click.echo(
+            f"Processes matching more than one station (duplicates progress): "
+            f"{len(report.ambiguous_processes)}",
+            err=True,
+        )
+        for name, sids in report.ambiguous_processes.items():
+            click.echo(f"  - {name}: {', '.join(sids)}", err=True)
     if report.unmapped_stations:
         click.echo(
             f"Stations with no mapping (never light up): "

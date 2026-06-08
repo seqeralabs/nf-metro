@@ -45,6 +45,19 @@ def test_check_mapping_clean():
     assert report.ok
     assert report.unmapped_processes == []
     assert report.dead_patterns == []
+    assert report.ambiguous_processes == {}
+
+
+def test_check_mapping_flags_process_matching_multiple_stations():
+    # Both 'qc' and 'report' patterns match FASTQC -> its progress would show
+    # in two places, which violates the many-to-one contract.
+    report = check_mapping(
+        {"qc": ["FASTQC"], "report": ["FASTQC", "MULTIQC"]},
+        station_ids=["qc", "report"],
+        process_names=["FASTQC", "MULTIQC"],
+    )
+    assert not report.ok
+    assert report.ambiguous_processes == {"FASTQC": ["qc", "report"]}
 
 
 def test_check_mapping_flags_unmapped_process():
