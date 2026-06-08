@@ -338,7 +338,7 @@ def label_glyph_ink_bbox(
     character so labels claim ample collision room, but the rendered text is
     narrower than that.  This shrinks the horizontal span to
     ``LABEL_GLYPH_INK_RATIO`` of the reserved width about the box centre, and
-    -- for a standard above/below label -- replaces the vertical span with the
+    (for a standard above/below label) replaces the vertical span with the
     renderer's true ink band (:func:`_label_ink_y_band`), which stacks wrapped
     lines downward rather than growing upward from the anchor.  A route grazing
     only the empty reserved margin clears this box; a route striking through
@@ -588,6 +588,18 @@ def find_wrapped_label_trunk_strikes(
         return []
     from nf_metro.render.svg import apply_route_offsets
 
+    # Every line's horizontal runs at their drawn Y: (line_id, x_lo, x_hi, y).
+    trunks: list[tuple[str, float, float, float]] = []
+    for route in routes:
+        pts = (
+            apply_route_offsets(route, station_offsets)
+            if station_offsets is not None
+            else route.points
+        )
+        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+            if abs(by - ay) <= tol:
+                trunks.append((route.line_id, min(ax, bx), max(ax, bx), ay))
+
     strikes: list[tuple[str, float, str]] = []
     for p in placements:
         if p.obstacle_bbox is not None or p.angle or "\n" not in p.text:
@@ -597,26 +609,12 @@ def find_wrapped_label_trunk_strikes(
             continue
         served = set(graph.station_lines(st.id))
         x0, ytop, x1, ybot = label_glyph_ink_bbox(p)
-        for route in routes:
-            if route.line_id in served:
+        for line_id, seg_lo, seg_hi, y in trunks:
+            if line_id in served or seg_hi < x0 - tol or seg_lo > x1 + tol:
                 continue
-            pts = (
-                apply_route_offsets(route, station_offsets)
-                if station_offsets is not None
-                else route.points
-            )
-            for (ax, ay), (bx, by) in zip(pts, pts[1:]):
-                if abs(by - ay) > tol:
-                    continue
-                seg_lo, seg_hi = (ax, bx) if ax <= bx else (bx, ax)
-                if seg_hi < x0 - tol or seg_lo > x1 + tol:
-                    continue
-                if ytop - tol <= ay <= ybot + tol:
-                    strikes.append((p.station_id, ay, route.line_id))
-                    break
-            else:
-                continue
-            break
+            if ytop - tol <= y <= ybot + tol:
+                strikes.append((p.station_id, y, line_id))
+                break
     return strikes
 
 
@@ -659,10 +657,9 @@ def _lift_wrapped_labels_off_foreign_trunks(
     stacks crowded labels onto extra lines that grow the block toward the row
     above (above placement) or below.  A label the push-out drove toward a
     neighbouring track can then overrun a metro line the station does not
-    serve.  Restoring the label to the anchor ``_try_place`` gives it un-pushed
-    (the closest it naturally sits to its own pill) keeps the grown block
-    clear; a graze with a neighbouring label is preferable to a line drawn
-    through the name.
+    serve.  Restoring the label to its un-pushed anchor (the closest it
+    naturally sits to its own pill) keeps the grown block clear; a graze with a
+    neighbouring label is preferable to a line drawn through the name.
     """
     struck = {
         sid
@@ -1196,17 +1193,8 @@ def place_labels(
     placements: list[LabelPlacement] = _make_obstacle_placements(icon_obstacles)
 
     for i, station in enumerate(sorted_stations):
-        # Compute the vertical extent of the station pill so labels
-        # are offset from the pill edge, not from station.y.
-        if station_offsets:
-            line_offs = [
-                station_offsets.get((station.id, lid), 0.0)
-                for lid in graph.station_lines(station.id)
-            ]
-            min_off = min(line_offs) if line_offs else 0.0
-            max_off = max(line_offs) if line_offs else 0.0
-        else:
-            min_off = max_off = 0.0
+        # Offset labels from the pill edge (outermost served line), not station.y.
+        min_off, max_off = _pill_offsets(graph, station, station_offsets)
         rail_panel = _rail_panel_label_offsets(station, panel_extents)
         if rail_panel is not None:
             min_off, max_off = rail_panel

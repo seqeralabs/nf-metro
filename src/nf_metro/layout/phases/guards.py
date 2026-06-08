@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
@@ -936,6 +937,33 @@ def _guard_no_line_crosses_file_icon(
                     )
 
 
+@contextmanager
+def _restoring_layout_geometry(graph: MetroGraph) -> Iterator[None]:
+    """Restore station coords and section bboxes on exit.
+
+    route_edges' diagonal-centring nudges Station.x and place_labels expands
+    section bboxes to fit labels, so a guard that re-routes and re-places to
+    inspect the drawn geometry must undo those mutations: validate=True must
+    not perturb the settled layout.
+    """
+    pos = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
+    bbox = {
+        sid: (s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h)
+        for sid, s in graph.sections.items()
+    }
+    try:
+        yield
+    finally:
+        for sid, (x, y) in pos.items():
+            st = graph.stations.get(sid)
+            if st is not None:
+                st.x, st.y = x, y
+        for sid, (bx, by, bw, bh) in bbox.items():
+            s = graph.sections.get(sid)
+            if s is not None:
+                s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h = bx, by, bw, bh
+
+
 def _guard_no_line_strikes_label(
     graph: MetroGraph,
     phase: str,
@@ -966,24 +994,14 @@ def _guard_no_line_strikes_label(
 
         offsets = compute_station_offsets(graph)
 
-    # route_edges' diagonal-centring nudges Station.x and place_labels expands
-    # section bboxes to fit labels; the renderer draws labels on exactly that
-    # mutated geometry, so the guard must too.  Snapshot station coords and
-    # section bboxes, run the crossing check, then restore -- the guard stays
-    # observational (validate=True must not perturb the settled layout).
-    pos_snapshot = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
-    bbox_snapshot = {
-        sid: (s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h)
-        for sid, s in graph.sections.items()
-    }
-    if routes is None:
-        from nf_metro.layout.routing import route_edges
+    with _restoring_layout_geometry(graph):
+        if routes is None:
+            from nf_metro.layout.routing import route_edges
 
-        try:
-            routes = route_edges(graph, station_offsets=offsets)
-        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
-            return
-    try:
+            try:
+                routes = route_edges(graph, station_offsets=offsets)
+            except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+                return
         placements = place_labels(
             graph,
             station_offsets=offsets,
@@ -1025,15 +1043,6 @@ def _guard_no_line_strikes_label(
                             f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
                             f"({p1[0]:.1f},{p1[1]:.1f})->({p2[0]:.1f},{p2[1]:.1f})"
                         )
-    finally:
-        for sid, (x, y) in pos_snapshot.items():
-            st = graph.stations.get(sid)
-            if st is not None:
-                st.x, st.y = x, y
-        for sid, (bx, by, bw, bh) in bbox_snapshot.items():
-            s = graph.sections.get(sid)
-            if s is not None:
-                s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h = bx, by, bw, bh
 
 
 def _guard_no_wrapped_label_trunk_strike(
@@ -1067,19 +1076,14 @@ def _guard_no_wrapped_label_trunk_strike(
 
         offsets = compute_station_offsets(graph)
 
-    pos_snapshot = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
-    bbox_snapshot = {
-        sid: (s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h)
-        for sid, s in graph.sections.items()
-    }
-    if routes is None:
-        from nf_metro.layout.routing import route_edges
+    with _restoring_layout_geometry(graph):
+        if routes is None:
+            from nf_metro.layout.routing import route_edges
 
-        try:
-            routes = route_edges(graph, station_offsets=offsets)
-        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
-            return
-    try:
+            try:
+                routes = route_edges(graph, station_offsets=offsets)
+            except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+                return
         placements = place_labels(
             graph,
             station_offsets=offsets,
@@ -1094,15 +1098,6 @@ def _guard_no_wrapped_label_trunk_strike(
                 f"{phase}: wrapped label of {sid!r} overruns foreign trunk "
                 f"{line_id!r} at y={y:.1f}; {len(strikes)} strike(s) total"
             )
-    finally:
-        for sid, (x, y) in pos_snapshot.items():
-            st = graph.stations.get(sid)
-            if st is not None:
-                st.x, st.y = x, y
-        for sid, (bx, by, bw, bh) in bbox_snapshot.items():
-            s = graph.sections.get(sid)
-            if s is not None:
-                s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h = bx, by, bw, bh
 
 
 def _guard_off_track_output_clears_non_producer(
