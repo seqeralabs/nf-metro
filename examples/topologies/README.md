@@ -42,6 +42,7 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `fold_stacked_branch.mmd` | stacked branches feeding through fold |
 | `u_turn_fold.mmd` | fold with side line joining mid-trunk and leaving pre-end |
 | `wide_label_fan.mmd` | wide station labels / auto label-wrap + column-spread (issue #405) |
+| `wrapped_label_trunk.mmd` | wrapped label on a lower track pulled off the metro line above (issue #617) |
 | `route_around_intervening.mmd` | inter-section line detouring around an intervening section box (issue #484) |
 | `self_crossing_bridge.mmd` | same-colour self-crossing bridge glyph (issue #484) |
 | `convergence_stacked_sink.mmd` | convergence return-row stacked-sibling migration (issue #484) |

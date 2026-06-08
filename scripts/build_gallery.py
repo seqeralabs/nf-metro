@@ -243,6 +243,13 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "pitch; the engine wraps the labels and widens spacing so they "
         "don't collide.",
     ),
+    (
+        "wrapped_label_trunk",
+        TOPOLOGIES_DIR,
+        "A wrapped station label on a lower track whose block would grow into "
+        "the metro line on the track above; the label is pulled back to its "
+        "un-pushed anchor so the name clears the line.",
+    ),
     # --- Branching and multipath ---
     (
         "asymmetric_tree",
