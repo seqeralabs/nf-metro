@@ -1,0 +1,28 @@
+%%metro title: Live Demo Pipeline
+%%metro line: qc    | Quality control | #f0a000 | solid
+%%metro line: align | Alignment       | #3a86ff | solid
+%%metro line: quant | Quantification  | #2bb673 | solid
+
+%% Tie each station to the Nextflow process(es) it represents. The pattern is
+%% a regex matched against the fully-qualified process name, so a bare name
+%% matches a scoped one (FASTQC matches NFCORE_RNASEQ:RNASEQ:FASTQC). Repeat
+%% the directive to attach several patterns to one station.
+%%metro process: input   | SAMPLESHEET
+%%metro process: trim    | TRIMGALORE
+%%metro process: fastqc  | FASTQC
+%%metro process: index   | GENOME_INDEX
+%%metro process: star    | STAR_ALIGN
+%%metro process: sort    | SAMTOOLS_SORT
+%%metro process: salmon  | SALMON_QUANT
+%%metro process: multiqc | MULTIQC
+
+graph LR
+    input[Samplesheet] -->|qc,align,quant| trim[Trim Galore]
+    trim -->|qc| fastqc[FastQC]
+    trim -->|align,quant| index[Genome index]
+    index -->|align| star[STAR]
+    star -->|align| sort[Samtools sort]
+    index -->|quant| salmon[Salmon]
+    fastqc -->|qc| multiqc[MultiQC]
+    sort -->|align| multiqc
+    salmon -->|quant| multiqc
