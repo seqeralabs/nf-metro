@@ -375,6 +375,16 @@ Wrapping narrows a label to clear a collision; this stops it shrinking past
 a legible width.  A single word longer than the budget is hard-broken with a
 hyphen (the last-resort split), but never below this many characters."""
 
+LABEL_GLYPH_INK_RATIO: float = 0.75
+"""Fraction of the reserved label width occupied by drawn glyph ink.
+
+``label_text_width`` reserves ``CHAR_WIDTH`` (9px) per character so labels
+get generous collision room, but the rendered text at ``label_font_size``
+covers appreciably less than that.  Routing-vs-label crossing checks model
+the glyph ink as the centred sub-box ``center +/- half_width * this`` so a
+line clipping only the empty reserved margin is not mistaken for one striking
+through the text."""
+
 # ---------------------------------------------------------------------------
 # Ordering
 # ---------------------------------------------------------------------------
