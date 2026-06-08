@@ -135,6 +135,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_negative_grid_columns,
     _guard_no_route_through_section,
     _guard_no_station_overlap,
+    _guard_no_wrapped_label_trunk_strike,
     _guard_off_track_clear_of_anchor,
     _guard_off_track_output_clears_non_producer,
     _guard_partial_branch_offset_gaps,
@@ -597,6 +598,7 @@ def _compute_layout_scaled(
 
     if validate:
         _guard_no_label_overlap(graph, "final")
+        _guard_no_wrapped_label_trunk_strike(graph, "final")
         _guard_file_icon_no_name_label(graph, "final")
         _guard_no_line_crosses_file_icon(graph, "final")
         _guard_centered_line_spread_balanced(graph, "final")

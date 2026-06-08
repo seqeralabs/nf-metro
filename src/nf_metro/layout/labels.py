@@ -303,22 +303,52 @@ def _label_bbox(
     return (x_min, y_min, x_max, y_max)
 
 
+# Fraction of the font height the alphabetic baseline sits below the glyph
+# top.  Matches the renderer's dominant-baseline auto/hanging placement
+# closely enough to tell a line striking the name's ink from one clearing it.
+_GLYPH_ASCENT_RATIO = 0.8
+
+
+def _label_ink_y_band(placement: LabelPlacement) -> tuple[float, float]:
+    """Approximate ``(y_top, y_bottom)`` of a label's drawn glyph ink.
+
+    Mirrors the renderer: a multi-line *above* label stacks downward from a
+    raised first-line baseline (dominant-baseline auto), so the block grows
+    upward from the pill; a *below* label hangs its first line at ``y`` and
+    stacks downward.  Tighter and lower than ``_label_bbox``, which models an
+    above block as ``[y - text_h, y]`` (the full height above the anchor) and
+    so reads ~one line-height too high for a wrapped label.
+    """
+    font_height = FONT_HEIGHT * _ACTIVE_FONT_SCALE
+    n = placement.text.count("\n") + 1
+    line_spacing = font_height * LABEL_LINE_HEIGHT
+    ascent = font_height * _GLYPH_ASCENT_RATIO
+    if placement.above:
+        first_baseline = placement.y - (n - 1) * line_spacing
+        return first_baseline - ascent, placement.y + (font_height - ascent)
+    return placement.y, placement.y + (n - 1) * line_spacing + font_height
+
+
 def label_glyph_ink_bbox(
     placement: LabelPlacement,
 ) -> tuple[float, float, float, float]:
-    """Return the label's drawn-glyph box, horizontally tightened to the ink.
+    """Return the label's drawn-glyph box, tightened to where text is inked.
 
     The reserved box from :func:`_label_bbox` budgets ``CHAR_WIDTH`` per
     character so labels claim ample collision room, but the rendered text is
     narrower than that.  This shrinks the horizontal span to
-    ``LABEL_GLYPH_INK_RATIO`` of the reserved width about the box centre,
-    approximating where the glyphs are actually inked.  A route grazing only
-    the empty reserved margin clears this box; a route striking through the
-    text intersects it.  Vertical bounds match the reserved box.
+    ``LABEL_GLYPH_INK_RATIO`` of the reserved width about the box centre, and
+    -- for a standard above/below label -- replaces the vertical span with the
+    renderer's true ink band (:func:`_label_ink_y_band`), which stacks wrapped
+    lines downward rather than growing upward from the anchor.  A route grazing
+    only the empty reserved margin clears this box; a route striking through
+    the text intersects it.
     """
     x0, y0, x1, y1 = _label_bbox(placement)
     center = (x0 + x1) / 2
     ink_half = (x1 - x0) / 2 * LABEL_GLYPH_INK_RATIO
+    if not placement.angle and not placement.dominant_baseline:
+        y0, y1 = _label_ink_y_band(placement)
     return (center - ink_half, y0, center + ink_half, y1)
 
 
@@ -533,36 +563,11 @@ def find_label_overlaps(
     return overlaps
 
 
-# Fraction of the font height the alphabetic baseline sits below the glyph
-# top.  Matches the renderer's dominant-baseline auto/hanging placement
-# closely enough to tell a line striking the name's ink from one clearing it.
-_GLYPH_ASCENT_RATIO = 0.8
-
-
-def _label_ink_y_band(p: LabelPlacement) -> tuple[float, float]:
-    """Approximate ``(y_top, y_bottom)`` of a label's drawn glyph ink.
-
-    Mirrors the renderer: a multi-line *above* label stacks downward from a
-    raised first-line baseline (dominant-baseline auto), so its ink grows
-    upward from the pill; a *below* label hangs its first line at ``p.y`` and
-    stacks downward.  Tighter than ``_label_bbox`` (which models an above
-    block as ``[y - text_h, y]``), so a trunk-strike test sees the name's real
-    ink rather than the looser collision box.
-    """
-    font_height = FONT_HEIGHT * _ACTIVE_FONT_SCALE
-    n = p.text.count("\n") + 1
-    line_spacing = font_height * LABEL_LINE_HEIGHT
-    ascent = font_height * _GLYPH_ASCENT_RATIO
-    if p.above:
-        first_baseline = p.y - (n - 1) * line_spacing
-        return first_baseline - ascent, p.y + (font_height - ascent)
-    return p.y, p.y + (n - 1) * line_spacing + font_height
-
-
 def find_wrapped_label_trunk_strikes(
     graph: MetroGraph,
     placements: list[LabelPlacement],
     routes: list["RoutedPath"] | None,
+    station_offsets: dict[tuple[str, str], float] | None = None,
     tol: float = 0.75,
 ) -> list[tuple[str, float, str]]:
     """Find multi-line labels whose ink overruns a foreign horizontal trunk.
@@ -573,12 +578,16 @@ def find_wrapped_label_trunk_strikes(
     Single-line labels and a label's own served lines never count: a station
     sits on its own line by construction and its name is offset clear of it.
 
-    Returns ``(station_id, trunk_y, line_id)`` for each strike.  Shared by the
-    render-time lift, the runtime guard, and the layout invariant test so all
-    agree on what "a line strikes a wrapped label" means.
+    Routes are measured at their drawn Y (``station_offsets`` applied) so this
+    sees the same geometry as ``_guard_no_line_strikes_label``.  Returns
+    ``(station_id, trunk_y, line_id)`` for each strike, shared by the
+    render-time lift, that guard, and the layout invariant test so all agree
+    on what "a line strikes a wrapped label" means.
     """
     if not routes:
         return []
+    from nf_metro.render.svg import apply_route_offsets
+
     strikes: list[tuple[str, float, str]] = []
     for p in placements:
         if p.obstacle_bbox is not None or p.angle or "\n" not in p.text:
@@ -587,12 +596,15 @@ def find_wrapped_label_trunk_strikes(
         if st is None or st.is_port:
             continue
         served = set(graph.station_lines(st.id))
-        x0, _, x1, _ = _label_bbox(p)
-        ytop, ybot = _label_ink_y_band(p)
+        x0, ytop, x1, ybot = label_glyph_ink_bbox(p)
         for route in routes:
             if route.line_id in served:
                 continue
-            pts = route.points
+            pts = (
+                apply_route_offsets(route, station_offsets)
+                if station_offsets is not None
+                else route.points
+            )
             for (ax, ay), (bx, by) in zip(pts, pts[1:]):
                 if abs(by - ay) > tol:
                     continue
@@ -652,9 +664,12 @@ def _lift_wrapped_labels_off_foreign_trunks(
     clear; a graze with a neighbouring label is preferable to a line drawn
     through the name.
     """
-    struck = {sid for sid, _y, _lid in find_wrapped_label_trunk_strikes(
-        graph, placements, routes
-    )}
+    struck = {
+        sid
+        for sid, _y, _lid in find_wrapped_label_trunk_strikes(
+            graph, placements, routes, station_offsets
+        )
+    }
     if not struck:
         return
     for p in placements:
