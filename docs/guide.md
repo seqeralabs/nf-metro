@@ -510,21 +510,32 @@ These go at the top of the file, before `graph LR`.
 | Directive | Description |
 |-----------|-------------|
 | `%%metro title: <text>` | Map title |
-| `%%metro logo: <path>` | Logo image, bundled into the legend (or top-left if there is no legend). Use `--logo` CLI flag to override per-render. |
+| `%%metro logo: <path>` | Logo image, bundled into the legend (or top-left if there is no legend). |
 | `%%metro logo_scale: <factor>` | Scale the logo within the legend block (`1.0` = default auto-size). Values above 1 grow the legend box to contain the logo. |
-| `%%metro style: <name>` | Theme: `dark` (default) or `light` |
+| `%%metro style: <name>` | Theme: `dark` (default, the nfcore theme) or `light`. Selects the render theme unless `--theme` is passed. |
 | `%%metro line: <id> \| <name> \| <color> [\| <style>]` | Define a metro line. Optional style: `solid` (default), `dashed`, or `dotted` |
 | `%%metro grid: <section> \| <col>,<row>[,<rowspan>[,<colspan>]]` | Pin a section to a grid position |
 | `%%metro legend: <position>` | Position the legend (and its embedded logo). Keyword: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, or `none` (a bare keyword auto-relocates if it would overlap a section or route). Add `\| canvas` to anchor the keyword to the canvas margin, or `\| <dx>,<dy>` to nudge it; both pin the block exactly (warning on overlap rather than relocating). Use `<x>,<y>` for absolute top-left coordinates. |
 | `%%metro line_order: <strategy>` | Line ordering for track assignment: `definition` (default, preserves `.mmd` order) or `span` (longest-spanning lines get inner tracks) |
-| `%%metro fold_threshold: <columns>` | Max station-columns a section row may reach before the auto-layout wraps it onto the next row (default 15). Raise it to keep a long horizontal trunk of sections on a single row. Overridden by the `--max-layers-per-row` CLI flag. |
+| `%%metro diamond_style: <mode>` | Fork-join (diamond) layout: `straight` (default) keeps the top branch on the main track; `symmetric` fans the branches evenly |
+| `%%metro fold_threshold: <columns>` | Max station-columns a section row may reach before the auto-layout wraps it onto the next row (default 15). Raise it to keep a long horizontal trunk of sections on a single row. |
+| `%%metro x_spacing: <pixels>` | Horizontal spacing between layers (default: auto - widened from 60 only when wide labels would collide) |
+| `%%metro y_spacing: <pixels>` | Vertical spacing between tracks (default: auto - derived from the map's content) |
+| `%%metro section_x_gap: <pixels>` | Horizontal gap between sections (default: 50) |
+| `%%metro section_y_gap: <pixels>` | Vertical gap between sections (default: 50) |
+| `%%metro label_angle: <degrees>` | Station-label angle (0 = horizontal). Overrides the theme default |
+| `%%metro font_scale: <factor>` | Scale every text size and the label-width metrics that drive layout spacing (`1.0` = default) |
+| `%%metro legend_logo_gap: <pixels>` | Horizontal gap between the logo and the legend entries |
+| `%%metro width: <pixels>` | Output width in pixels (default: auto from content) |
+| `%%metro height: <pixels>` | Output height in pixels (default: auto from content) |
+| `%%metro animate: true` | Add animated balls traveling along the metro lines |
 | `%%metro file: <station> \| <label> [\| <name>] [\| banner]` | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon; optional `banner` draws the label on a dark strip across the icon. |
 | `%%metro files: <station> \| <label> [\| <name>] [\| banner]` | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption; optional `banner` strip. |
 | `%%metro dir: <station> \| <label> [\| <name>]` | Mark a station with a folder icon (e.g. output directory). Optional `name` caption. |
 | `%%metro off_track: <station>[, <station>...]` | Lift the listed stations above the section's main track, anchored to their consumer (inputs) or producer (output artefacts) (see below) |
 | `%%metro compact_offsets: true` | Compact line offsets within stations (see below) |
-| `%%metro center_ports: true` | Centre inter-section ports on the shorter of the two connected sections, so lines enter/exit at the visual midpoint. Overridden by the `--center-ports` / `--no-center-ports` CLI flag. |
-| `%%metro line_spread: <mode>[ \| <id>...]` | How lines sharing a station relate vertically (see below). `<mode>` is `bundle` (default), `centered`, or `rails`. The bare form sets the graph default; `<mode> \| sectionA, sectionB` overrides those sections. Overridden by the `--line-spread` CLI flag. |
+| `%%metro center_ports: true` | Centre inter-section ports on the shorter of the two connected sections, so lines enter/exit at the visual midpoint. |
+| `%%metro line_spread: <mode>[ \| <id>...]` | How lines sharing a station relate vertically (see below). `<mode>` is `bundle` (default), `centered`, or `rails`. The bare form sets the graph default; `<mode> \| sectionA, sectionB` overrides those sections. |
 | `%%metro legend_min_height: <pixels>` | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 
 **Compact offsets.** By default, each line reserves a fixed vertical slot across the whole map based on its declaration order. If you define three lines, every station that carries even one of them is sized to fit all three. This keeps bundles visually consistent but wastes space when most stations only carry one or two lines.
@@ -582,6 +593,41 @@ These go inside `subgraph` blocks.
 | `%%metro direction: <dir>` | Internal flow direction: `LR`, `RL`, or `TB` |
 
 Entry/exit hints tell the layout engine which side of the section box lines should enter or leave from. Most of the time you can **omit these entirely** and let the auto-layout engine figure it out. They are useful when you want lines to exit from different sides of the same section (e.g., right for some lines, bottom for others).
+
+## CLI flags and directive precedence
+
+Every layout and render option can be set two ways: a `%%metro` directive in the file, or the matching `nf-metro render` CLI flag. They share one precedence rule:
+
+> **CLI flag (when passed) → `%%metro` directive → built-in default.**
+
+Set the directive in your committed `.mmd` so the map reproduces from the file alone, and reach for the flag only to tweak a single render without editing the file. The two planes always use the same name (the flag is the kebab-cased directive); a directive and its flag are defined from one registry, so they cannot drift apart.
+
+| Directive | CLI flag | Default |
+|-----------|----------|---------|
+| `title:` | `--title` | (none) |
+| `style:` | `--theme` | `nfcore` |
+| `logo:` | `--logo` | (none) |
+| `x_spacing:` | `--x-spacing` | auto |
+| `y_spacing:` | `--y-spacing` | auto |
+| `section_x_gap:` | `--section-x-gap` | 50 |
+| `section_y_gap:` | `--section-y-gap` | 50 |
+| `fold_threshold:` | `--fold-threshold` | auto (15) |
+| `diamond_style:` | `--diamond-style` | `straight` |
+| `line_order:` | `--line-order` | `definition` |
+| `center_ports:` | `--center-ports` / `--no-center-ports` | false |
+| `compact_offsets:` | `--compact-offsets` / `--no-compact-offsets` | false |
+| `line_spread:` | `--line-spread` | `bundle` |
+| `label_angle:` | `--label-angle` | theme default (0) |
+| `font_scale:` | `--font-scale` | 1.0 |
+| `logo_scale:` | `--logo-scale` | 1.0 |
+| `legend:` | `--legend` | auto |
+| `legend_min_height:` | `--legend-min-height` | 0 |
+| `legend_logo_gap:` | `--legend-logo-gap` | auto |
+| `width:` | `--width` | auto |
+| `height:` | `--height` | auto |
+| `animate:` | `--animate` / `--no-animate` | off |
+
+`--output`, `--format`, `--from-nextflow`, and `--debug` have no directive: they select the output target or a diagnostic overlay rather than describing the diagram.
 
 ## Tips
 

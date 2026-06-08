@@ -58,22 +58,36 @@ Render a Mermaid metro map definition to SVG or interactive HTML.
 nf-metro render [OPTIONS] INPUT_FILE
 ```
 
+Every layout/render option below also has a `%%metro` directive twin; an explicitly-passed flag overrides the directive (see the [precedence table](guide.md#cli-flags-and-directive-precedence) in the guide).
+
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-o`, `--output PATH` | `<input>.<format>` | Output file path |
 | `--format [svg\|html]` | `svg` | Output format: `svg` or interactive `html` |
-| `--theme [nfcore\|light]` | `nfcore` | Visual theme |
-| `--width INTEGER` | auto | SVG width in pixels |
-| `--height INTEGER` | auto | SVG height in pixels |
+| `--theme [nfcore\|light]` | from `style:`, else `nfcore` | Visual theme |
+| `--debug / --no-debug` | off | Show debug overlay |
+| `--from-nextflow` | off | Convert Nextflow `-with-dag` input before rendering |
+| `--logo PATH` | none | Logo image path |
+| `--title TEXT` | none | Pipeline title |
+| `--legend TEXT` | auto | Legend+logo position (keyword, `keyword \| canvas`, `keyword \| dx,dy`, or `x,y`) |
+| `--line-spread [bundle\|centered\|rails]` | `bundle` | How shared lines relate vertically |
 | `--x-spacing FLOAT` | auto | Horizontal spacing between layers |
 | `--y-spacing FLOAT` | auto | Vertical spacing between tracks |
-| `--max-layers-per-row INTEGER` | auto | Max layers before folding to next row |
+| `--section-x-gap FLOAT` | 50 | Horizontal gap between sections |
+| `--section-y-gap FLOAT` | 50 | Vertical gap between sections |
+| `--fold-threshold INTEGER` | auto (15) | Max station-columns per row before folding |
+| `--diamond-style [straight\|symmetric]` | `straight` | Fork-join layout |
+| `--line-order [definition\|span]` | `definition` | Line ordering for track assignment |
+| `--center-ports / --no-center-ports` | off | Centre inter-section ports on the shorter section |
+| `--compact-offsets / --no-compact-offsets` | off | Size stations only for the lines passing through |
+| `--label-angle FLOAT` | theme default | Station-label angle in degrees |
+| `--font-scale FLOAT` | 1.0 | Scale text and label-driven layout spacing |
+| `--logo-scale FLOAT` | 1.0 | Scale the logo within the legend |
+| `--legend-min-height FLOAT` | 0 | Minimum legend content height in pixels |
+| `--legend-logo-gap FLOAT` | auto | Gap between logo and legend entries |
+| `--width INTEGER` | auto | Output width in pixels |
+| `--height INTEGER` | auto | Output height in pixels |
 | `--animate / --no-animate` | off | Add animated balls traveling along lines |
-| `--debug / --no-debug` | off | Show debug overlay |
-| `--logo PATH` | none | Logo image path (overrides `%%metro logo:` directive) |
-| `--center-ports / --no-center-ports` | off | Centre inter-section ports on the shorter of the two connected sections |
-| `--from-nextflow` | off | Convert Nextflow `-with-dag` input before rendering |
-| `--title TEXT` | none | Pipeline title (used with `--from-nextflow`) |
 
 #### Interactive HTML output
 

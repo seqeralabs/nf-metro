@@ -168,6 +168,17 @@ enclosing section, and the icon keys `file` / `files` / `dir` need the
 key itself to choose the icon type. A key matching none of these is
 ignored with a `UserWarning`.
 
+The simple scalar / bool / enum knobs that also have a CLI flag (spacing,
+gaps, `diamond_style`, scales, `width` / `height` / `animate`, ...) are not
+hand-written handlers. They are declared once in `nf_metro.options`
+(`LayoutOption` / `LAYOUT_OPTIONS`); `_make_layout_option_handler` generates a
+directive handler from each entry (parsing via `coerce`, writing the named
+`MetroGraph` field), and `nf_metro.cli` generates the matching `click` flag
+from the same registry. Adding such an option means one registry entry, not a
+handler plus a flag plus a docs row. `tests/test_options_parity.py` guards that
+every registry option exists in both planes. The bespoke handlers below carry
+grammar (fields, sections, coordinates) the generic registry can't express.
+
 The directives `_apply_directive` recognises:
 
 | Directive | Effect |
@@ -179,8 +190,11 @@ The directives `_apply_directive` recognises:
 | `direction:` | section flow `LR` / `RL` / `TB` |
 | `grid:` | manual section grid placement |
 | `compact_offsets:` / `center_ports:` | bundle layout toggles |
+| `diamond_style:` | fork-join layout `straight` / `symmetric` |
 | `line_spread:` | how shared lines relate vertically (`bundle` / `centered` / `rails`), graph-wide or per-section |
 | `fold_threshold:` | station count at which long chains wrap into serpentine rows |
+| `x_spacing:` / `y_spacing:` / `section_x_gap:` / `section_y_gap:` | layout spacing and section gaps |
+| `width:` / `height:` / `animate:` | render output size and animation toggle |
 | `off_track:` | mark stations to lift above the section's top track |
 | `label_angle:` | diagonal station-label angle |
 | `legend:` / `legend_min_height:` / `legend_combo:` / `legend_logo_gap:` | legend block |
