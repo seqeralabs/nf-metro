@@ -24,6 +24,7 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `fan_in_merge.mmd` | same-line fan-in / merge-junction routing |
 | `multi_input_convergence.mmd` | single-line multi-source convergence |
 | `section_diamond.mmd` | section-level fork-join |
+| `uneven_diamond.mmd` | fork-join with unequal-length branches / distinct track per branch (issue #610) |
 | `shared_sink_parallel.mmd` | parallel multi-line branches with shared source and sink |
 | `asymmetric_tree.mmd` | unbalanced branching / variable branch depth |
 | `complex_multipath.mmd` | per-line route variation / bundle slot reservation |
@@ -95,6 +96,10 @@ Same-line convergence: one line fans out from the source to all downstream secti
 A section-level fork-join: one source fans out to two parallel sections, which then reconverge into a single sink. Tests both fan-out junction creation and fan-in routing in the same topology.
 
 ![Section Diamond](section_diamond.png)
+
+### Uneven Diamond
+
+A node-level fork-join where one branch (`b`) runs through an extra station before rejoining the shared sink while the other two branches (`a`, `c`) reach it directly. The branch length difference must not collapse the shorter branches onto a single track: each of the three branches gets a distinct track (issue #610).
 
 ---
 

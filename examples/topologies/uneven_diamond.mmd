@@ -1,0 +1,12 @@
+%%metro title: Uneven fork-join diamond
+%%metro line: a | A | #f0a000 | solid
+%%metro line: b | B | #3a86ff | solid
+%%metro line: c | C | #2bb673 | solid
+graph LR
+    hub[Hub] -->|a| la[Leaf A]
+    hub -->|b| lb[Leaf B]
+    lb  -->|b| lb2[Leaf B2]
+    hub -->|c| lc[Leaf C]
+    la  -->|a| sink[Sink]
+    lb2 -->|b| sink
+    lc  -->|c| sink

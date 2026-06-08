@@ -126,6 +126,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_inter_section_routes_in_row_band,
     _guard_merge_port_approach_side,
     _guard_no_artefactual_counter_flow,
+    _guard_no_coincident_station_coords,
     _guard_no_collinear_distinct_lines,
     _guard_no_intra_section_collinear_distinct_lines,
     _guard_no_label_overlap,

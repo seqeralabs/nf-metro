@@ -48,6 +48,7 @@ def validate_layout(graph: MetroGraph) -> list[Violation]:
     violations.extend(check_station_containment(graph))
     violations.extend(check_port_boundary(graph))
     violations.extend(check_coordinate_sanity(graph))
+    violations.extend(check_coincident_stations(graph))
     violations.extend(check_minimum_section_spacing(graph))
 
     # Compute offsets + routes once for all routing-dependent checks.
@@ -246,6 +247,44 @@ def check_coordinate_sanity(
                         context={"station": sid, "coordinate": coord_name},
                     )
                 )
+
+    return violations
+
+
+def check_coincident_stations(
+    graph: MetroGraph, tolerance: float = 1.0
+) -> list[Violation]:
+    """Check that no two distinct visible stations share a coordinate.
+
+    Two real (non-port, non-hidden) stations placed within *tolerance* of
+    the same ``(x, y)`` render their pill markers on top of each other.
+    Rail-mode stations are exempt: their markers render as per-rail knobs
+    distributed across the rail bundle, so a shared station centre is not a
+    visual collision there.
+    """
+    violations: list[Violation] = []
+
+    placed: list[tuple[str, float, float]] = []
+    for sid, station in graph.stations.items():
+        if station.is_port or station.is_hidden:
+            continue
+        if graph.station_is_rail(sid):
+            continue
+        for other, ox, oy in placed:
+            if abs(station.x - ox) <= tolerance and abs(station.y - oy) <= tolerance:
+                violations.append(
+                    Violation(
+                        check="coincident_stations",
+                        severity=Severity.ERROR,
+                        message=(
+                            f"Stations '{other}' and '{sid}' share coordinate "
+                            f"({station.x:.1f}, {station.y:.1f})"
+                        ),
+                        context={"stations": [other, sid]},
+                    )
+                )
+                break
+        placed.append((sid, station.x, station.y))
 
     return violations
 

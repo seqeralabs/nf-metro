@@ -776,6 +776,31 @@ def _guard_no_station_overlap(
                 )
 
 
+def _guard_no_coincident_station_coords(
+    graph: MetroGraph, phase: str, *, tolerance: float = 1.0
+) -> None:
+    """Final-phase: no two distinct visible stations may share a centre.
+
+    Offset-independent companion to ``_guard_no_station_overlap``: it reads
+    ``Station.x``/``.y`` directly, so it catches branches collapsed onto the
+    same track even where per-line routing offsets nudge the marker bboxes
+    just clear of each other.  Rail-mode stations are exempt -- their markers
+    render as per-rail knobs across the rail bundle, so a shared centre is
+    not a visual collision there.
+    """
+    placed: list[tuple[str, float, float]] = []
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or graph.station_is_rail(sid):
+            continue
+        for other, ox, oy in placed:
+            if abs(st.x - ox) <= tolerance and abs(st.y - oy) <= tolerance:
+                raise PhaseInvariantError(
+                    f"{phase}: {sid!r} and {other!r} share coordinate "
+                    f"({st.x:.1f}, {st.y:.1f})"
+                )
+        placed.append((sid, st.x, st.y))
+
+
 def _guard_no_line_crosses_non_consumer(
     graph: MetroGraph,
     phase: str,
@@ -2310,6 +2335,7 @@ checkpoint in ``_compute_section_layout``.
 _BISECTION_FIRST_VALID: dict[str, str] = {
     "_guard_stations_in_sections": "after Stage 5.3",
     "_guard_no_station_overlap": "after Stage 6.4",
+    "_guard_no_coincident_station_coords": "after Stage 6.4",
     "_guard_no_line_crosses_non_consumer": "after Stage 6.14",
 }
 
@@ -2436,6 +2462,8 @@ def _run_pass_c_guards(
     _guard_ports_on_boundaries(graph, phase)
     if _bisection_should_run("_guard_no_station_overlap", phase):
         _guard_no_station_overlap(graph, phase, offsets=offsets)
+    if _bisection_should_run("_guard_no_coincident_station_coords", phase):
+        _guard_no_coincident_station_coords(graph, phase)
     if routes is not None and _bisection_should_run(
         "_guard_no_line_crosses_non_consumer", phase
     ):

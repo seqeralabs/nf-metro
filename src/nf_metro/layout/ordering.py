@@ -740,12 +740,21 @@ def _equalize_fork_groups(
         if succs:
             succ_groups[succs].append(sid)
 
-    # Merge both groupings, deduplicating by sorted member tuple
+    # Merge both groupings, deduplicating by sorted member tuple.  A
+    # convergent (successor) group that is a proper subset of a common-
+    # predecessor fork is dropped: the larger fork already spaces all its
+    # branches, and repacking the subset consecutively would ignore the
+    # intervening siblings (longer branches that reach the shared sink via
+    # extra stations) and collapse the subset onto their tracks.
+    pred_member_sets = [set(g) for g in pred_groups.values() if len(g) >= 2]
     all_groups: dict[tuple[str, ...], list[str]] = {}
-    for group in list(pred_groups.values()) + list(succ_groups.values()):
-        key = tuple(sorted(group))
-        if key not in all_groups:
-            all_groups[key] = group
+    for group in pred_groups.values():
+        all_groups.setdefault(tuple(sorted(group)), group)
+    for group in succ_groups.values():
+        members = set(group)
+        if any(members < fork for fork in pred_member_sets):
+            continue
+        all_groups.setdefault(tuple(sorted(group)), group)
 
     for group in all_groups.values():
         if len(group) < 2:
