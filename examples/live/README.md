@@ -1,5 +1,8 @@
 # Live progress demo
 
+> **Experimental.** The `%%metro process:` directive and the `nf-metro serve` /
+> `check-mapping` commands may change without notice.
+
 Light up a metro map in real time as a Nextflow pipeline runs - no Seqera
 Platform, no plugin. Stock Nextflow `-with-weblog` posts task events to
 `nf-metro serve`, which draws a status overlay on top of the static map:

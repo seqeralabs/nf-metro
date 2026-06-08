@@ -70,8 +70,6 @@ def test_check_mapping_ignore_suppresses_unmapped():
         process_names=["TRIMGALORE", "DUMPSOFTWAREVERSIONS"],
         ignore=[".*DUMPSOFTWAREVERSIONS"],
     )
-    # TRIMGALORE maps; the ignored plumbing process is not reported. The other
-    # patterns are 'dead' here because this short process list doesn't hit them.
     assert report.unmapped_processes == []
 
 
@@ -91,7 +89,5 @@ def test_check_mapping_reports_unmapped_stations():
         station_ids=["trim", "decorative"],
         process_names=["TRIMGALORE"],
     )
-    # Informational only: an unmapped station never lights up but isn't a
-    # failure (may be intentional).
-    assert report.ok
+    assert report.ok  # an unmapped station is reported but is not a failure
     assert report.unmapped_stations == ["decorative"]

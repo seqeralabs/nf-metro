@@ -181,6 +181,17 @@ def _parse_nextflow_mermaid(text: str) -> _ParsedDag:
     return dag
 
 
+def process_node_labels(text: str) -> list[str]:
+    """Labels of the process nodes in a Nextflow ``-with-dag`` flowchart.
+
+    Nextflow renders processes as stadium nodes; channel and operator nodes are
+    excluded. Deduplicated and sorted. Used by the live-progress check-mapping
+    linter to learn which processes a pipeline actually runs.
+    """
+    dag = _parse_nextflow_mermaid(text)
+    return sorted({n.label for n in dag.nodes.values() if n.shape == "stadium"})
+
+
 # ---------------------------------------------------------------------------
 # Node classification and edge reconnection
 # ---------------------------------------------------------------------------

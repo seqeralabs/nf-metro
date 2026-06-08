@@ -336,7 +336,7 @@ def serve(
     theme: str | None,
     token: str | None,
 ) -> None:
-    """Serve a live-progress view of a metro map.
+    """Serve a live-progress view of a metro map. [experimental]
 
     Renders the map once and serves it at http://HOST:PORT/. Point a Nextflow
     run's weblog at the events endpoint to light up stations as tasks run:
@@ -370,7 +370,8 @@ def serve(
         )
 
     httpd = serve_map(graph, theme_obj, host=host, port=port, token=token)
-    display_host = "localhost" if host in ("127.0.0.1", "0.0.0.0") else host
+    display_host = "localhost" if host == "127.0.0.1" else host
+    click.echo("nf-metro live progress (experimental)")
     click.echo(f"Mapped stations: {', '.join(mapped) or '(none)'}")
     click.echo(
         f"Serving http://{display_host}:{port}/  "
@@ -412,7 +413,7 @@ def check_mapping_cmd(
     processes_file: Path | None,
     ignore: tuple[str, ...],
 ) -> None:
-    """Check a map's `%%metro process:` mapping against a pipeline's processes.
+    """Check a map's `%%metro process:` mapping against the processes. [experimental]
 
     Reports processes the map can't show (drift) and station patterns that
     match nothing (stale), exiting non-zero if any are found so CI can gate on

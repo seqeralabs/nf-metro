@@ -89,11 +89,14 @@ class ProgressState:
         return "pending", done, total
 
     def snapshot(self) -> dict[str, Any]:
-        stations = {}
-        for sid, t in self.tasks.items():
-            state, done, total = self._station_state(t)
-            stations[sid] = {"state": state, "done": done, "total": total}
-        return {"run": dict(self.run), "stations": stations}
+        # Locked: reads the task-id sets that ingest() mutates from other
+        # handler threads, which would otherwise race set iteration.
+        with self.lock:
+            stations = {}
+            for sid, t in self.tasks.items():
+                state, done, total = self._station_state(t)
+                stations[sid] = {"state": state, "done": done, "total": total}
+            return {"run": dict(self.run), "stations": stations}
 
     def ingest(self, payload: dict[str, Any]) -> None:
         event = payload.get("event")

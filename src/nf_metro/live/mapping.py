@@ -28,14 +28,11 @@ def stations_for_process(process: str, mapping: dict[str, list[str]]) -> list[st
 def process_names_from_dag(text: str) -> list[str]:
     """Process names from a Nextflow ``-with-dag`` Mermaid flowchart.
 
-    Returns the labels of the stadium-shaped nodes (Nextflow renders processes
-    as stadiums), deduplicated and sorted. Channel/operator nodes are dropped.
+    Thin wrapper over :func:`nf_metro.convert.process_node_labels`.
     """
-    from nf_metro.convert import _parse_nextflow_mermaid
+    from nf_metro.convert import process_node_labels
 
-    dag = _parse_nextflow_mermaid(text)
-    names = {node.label for node in dag.nodes.values() if node.shape == "stadium"}
-    return sorted(names)
+    return process_node_labels(text)
 
 
 @dataclass
