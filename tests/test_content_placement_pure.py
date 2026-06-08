@@ -26,34 +26,20 @@ Refs #491, #488, #487, #485, #465.
 from __future__ import annotations
 
 import pytest
-from conftest import CONTENT_PLACEMENT_PHASES, compute_corpus_layout, content_corpus
+from conftest import (
+    CONTENT_PLACEMENT_PHASES,
+    compute_corpus_layout,
+    content_corpus,
+    restore_graph_state,
+    snapshot_graph_state,
+)
 
 import nf_metro.layout.engine as engine
 from nf_metro.parser.model import MetroGraph
 
 TOL = 1e-3
 
-_Coords = dict[str, tuple[float, float]]
-
 CORPUS = content_corpus()
-
-
-def _snapshot(graph: MetroGraph) -> tuple[_Coords, _Coords]:
-    stations = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
-    bboxes = {sec.id: (sec.bbox_y, sec.bbox_h) for sec in graph.sections.values()}
-    return stations, bboxes
-
-
-def _restore(graph: MetroGraph, snap: tuple[_Coords, _Coords]) -> None:
-    stations, bboxes = snap
-    for sid, (x, y) in stations.items():
-        st = graph.stations.get(sid)
-        if st is not None:
-            st.x, st.y = x, y
-    for sid, (y, h) in bboxes.items():
-        sec = graph.sections.get(sid)
-        if sec is not None:
-            sec.bbox_y, sec.bbox_h = y, h
 
 
 def _perturb(graph: MetroGraph) -> None:
@@ -79,7 +65,7 @@ def _make_purity_probe(original, leaks: list[tuple[str, float, float]]):
     into ``leaks`` and then leaves the genuine single-application result."""
 
     def probe(graph: MetroGraph, *args, **kwargs):
-        pre = _snapshot(graph)
+        pre = snapshot_graph_state(graph)
         before_y = {sid: s.y for sid, s in graph.stations.items()}
 
         original(graph, *args, **kwargs)
@@ -88,7 +74,7 @@ def _make_purity_probe(original, leaks: list[tuple[str, float, float]]):
             sid for sid in base_after if abs(base_after[sid] - before_y[sid]) > TOL
         }
 
-        _restore(graph, pre)
+        restore_graph_state(graph, pre)
         _perturb(graph)
         pert_before = {sid: s.y for sid, s in graph.stations.items()}
         original(graph, *args, **kwargs)
@@ -101,7 +87,7 @@ def _make_purity_probe(original, leaks: list[tuple[str, float, float]]):
             if abs(base_after[sid] - pert_after[sid]) > TOL:
                 leaks.append((sid, base_after[sid], pert_after[sid]))
 
-        _restore(graph, pre)
+        restore_graph_state(graph, pre)
         original(graph, *args, **kwargs)
 
     return probe

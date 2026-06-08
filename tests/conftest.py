@@ -123,6 +123,35 @@ def compute_corpus_layout(path: Path, is_nextflow: bool) -> MetroGraph:
     return graph
 
 
+# --- Mutable-geometry snapshot/restore ---
+#
+# The declarative-property tests (purity #491, idempotence #488) probe a single
+# layout phase by mutating station/section geometry, measuring, then putting the
+# graph back so the rest of the pipeline runs unperturbed.
+
+Coords = dict[str, tuple[float, float]]
+
+
+def snapshot_graph_state(graph: MetroGraph) -> tuple[Coords, Coords]:
+    """Capture every station ``(x, y)`` and section ``(bbox_y, bbox_h)``."""
+    stations = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
+    bboxes = {sec.id: (sec.bbox_y, sec.bbox_h) for sec in graph.sections.values()}
+    return stations, bboxes
+
+
+def restore_graph_state(graph: MetroGraph, snap: tuple[Coords, Coords]) -> None:
+    """Write a :func:`snapshot_graph_state` result back onto ``graph``."""
+    stations, bboxes = snap
+    for sid, (x, y) in stations.items():
+        st = graph.stations.get(sid)
+        if st is not None:
+            st.x, st.y = x, y
+    for sid, (y, h) in bboxes.items():
+        sec = graph.sections.get(sid)
+        if sec is not None:
+            sec.bbox_y, sec.bbox_h = y, h
+
+
 # --- Parse/layout helpers ---
 
 

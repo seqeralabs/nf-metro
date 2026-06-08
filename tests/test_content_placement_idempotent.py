@@ -24,7 +24,13 @@ participates.  Refs #488, #465.
 from __future__ import annotations
 
 import pytest
-from conftest import CONTENT_PLACEMENT_PHASES, compute_corpus_layout, content_corpus
+from conftest import (
+    CONTENT_PLACEMENT_PHASES,
+    compute_corpus_layout,
+    content_corpus,
+    restore_graph_state,
+    snapshot_graph_state,
+)
 
 import nf_metro.layout.engine as engine
 from nf_metro.parser.model import MetroGraph
@@ -33,53 +39,31 @@ CORPUS = content_corpus()
 
 TOL = 1e-6
 
-_Coords = dict[str, tuple[float, float]]
+_Point = tuple[float, float]
+_Diff = tuple[str, _Point | None, _Point | None]
 
 
-def _snapshot(graph: MetroGraph) -> tuple[_Coords, _Coords]:
-    stations = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
-    bboxes = {sec.id: (sec.bbox_y, sec.bbox_h) for sec in graph.sections.values()}
-    return stations, bboxes
-
-
-def _restore(graph: MetroGraph, snap: tuple[_Coords, _Coords]) -> None:
-    stations, bboxes = snap
-    for sid, (x, y) in stations.items():
-        st = graph.stations.get(sid)
-        if st is not None:
-            st.x, st.y = x, y
-    for sid, (y, h) in bboxes.items():
-        sec = graph.sections.get(sid)
-        if sec is not None:
-            sec.bbox_y, sec.bbox_h = y, h
-
-
-def _make_idempotence_probe(original, diffs: list[tuple[str, tuple, tuple]]):
-    """Wrap ``original`` so each call checks ``P(P(x)) == P(x)`` locally and
-    then leaves the genuine single-application result for the pipeline.
-
-    Apply the phase once and snapshot its output; apply it again on that output
-    and record any station whose coordinate moves on the second application;
-    then restore the single-application snapshot so the rest of the pipeline
-    runs exactly as it would unprobed.  Being self-contained, every phase's
-    probe coexists in one layout pass and isolates non-idempotence to the phase
-    that caused it.
-    """
+def _make_idempotence_probe(original, diffs: list[_Diff]):
+    """Wrap ``original`` to check ``P(P(x)) == P(x)`` locally, recording into
+    ``diffs`` any station added, removed or moved by the second application."""
 
     def probe(graph: MetroGraph, *args, **kwargs):
         original(graph, *args, **kwargs)
-        snap1 = _snapshot(graph)
+        snap1 = snapshot_graph_state(graph)
         after1 = snap1[0]
 
         original(graph, *args, **kwargs)
-        after2 = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
+        after2 = snapshot_graph_state(graph)[0]
 
         for sid, (x1, y1) in after1.items():
-            x2, y2 = after2.get(sid, (x1, y1))
-            if abs(x2 - x1) > TOL or abs(y2 - y1) > TOL:
-                diffs.append((sid, (x1, y1), (x2, y2)))
+            if sid not in after2:
+                diffs.append((sid, (x1, y1), None))
+            elif abs(after2[sid][0] - x1) > TOL or abs(after2[sid][1] - y1) > TOL:
+                diffs.append((sid, (x1, y1), after2[sid]))
+        for sid in after2.keys() - after1.keys():
+            diffs.append((sid, None, after2[sid]))
 
-        _restore(graph, snap1)
+        restore_graph_state(graph, snap1)
 
     return probe
 
@@ -97,7 +81,7 @@ def test_placement_phase_is_idempotent(fid, path, is_nextflow, monkeypatch):
     cascaded final layout, and covers the same (fixture, phase) pairs at
     one-eighth the layout cost.
     """
-    diffs_by_phase: dict[str, list[tuple[str, tuple, tuple]]] = {}
+    diffs_by_phase: dict[str, list[_Diff]] = {}
     for phase_name in CONTENT_PLACEMENT_PHASES:
         diffs_by_phase[phase_name] = []
         original = getattr(engine, phase_name)
