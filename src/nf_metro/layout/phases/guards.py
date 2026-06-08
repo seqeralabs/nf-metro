@@ -1852,6 +1852,38 @@ def _guard_inter_row_run_clearance(
                 )
 
 
+def _guard_trunk_bands_crossing_optimal(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """After routing: every same-direction inter-row trunk band carries the
+    line order that minimises crossings between its slots.
+
+    Sibling corridors sharing one inter-row gap stack in a Y order chosen by
+    :func:`_plan_trunk_band`.  When two slots are ordered so that one's
+    peel-off risers needlessly cross the other's trunk leg, swapping them would
+    strictly reduce crossings.  This guard fails loudly if a future change ever
+    leaves a band in such an avoidable-crossing order.
+    """
+    from nf_metro.layout.constants import CURVE_RADIUS, DIAGONAL_RUN
+    from nf_metro.layout.routing.context import _build_routing_context
+    from nf_metro.layout.routing.normalize import _suboptimal_trunk_bands
+
+    routes = _ensure_routes(graph, routes)
+    ctx = _build_routing_context(graph, DIAGONAL_RUN, CURVE_RADIUS, offsets)
+    bad = _suboptimal_trunk_bands(routes, ctx)
+    if bad:
+        y, cur, best = bad[0]
+        raise PhaseInvariantError(
+            f"{phase}: inter-row trunk band near y={y:.1f} has {cur} crossings; "
+            f"reordering its slots reaches {best}. A sibling-corridor band is "
+            f"stacked in an avoidable-crossing order."
+        )
+
+
 def _guard_inter_section_descent_edge_clearance(
     graph: MetroGraph,
     phase: str,

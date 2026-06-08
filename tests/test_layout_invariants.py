@@ -954,6 +954,35 @@ def test_opposite_direction_trunks_on_separate_bands(fixture):
 
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_inter_row_trunk_bands_crossing_optimal(fixture):
+    """Sibling corridors sharing one inter-row gap stack in the Y order that
+    minimises crossings between their peel-off risers and trunk legs.
+
+    Two corridors dipping into one gap (e.g. from different junction fans) are
+    ordered by ``_plan_trunk_band``.  When the realized order lets one slot's
+    risers needlessly cross another slot's leg, swapping the two strictly
+    reduces crossings; the planner must pick the crossing-minimal order so no
+    such avoidable swap remains in the routed output.
+    """
+    from nf_metro.layout.constants import CURVE_RADIUS, DIAGONAL_RUN
+    from nf_metro.layout.routing.core import (
+        _build_routing_context,
+        _suboptimal_trunk_bands,
+    )
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    ctx = _build_routing_context(graph, DIAGONAL_RUN, CURVE_RADIUS, offsets)
+
+    bad = _suboptimal_trunk_bands(routes, ctx)
+    assert not bad, (
+        f"{fixture}: inter-row trunk band(s) ordered with avoidable crossings "
+        + ", ".join(f"y={y:.1f} ({cur}->{best} crossings)" for y, cur, best in bad)
+    )
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_top_entry_lead_corner_concentric(fixture):
     """A multi-line TOP-entry L-shape must turn its lead-in corner
     concentrically: co-routed lines share one bend centre.

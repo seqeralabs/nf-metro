@@ -75,6 +75,7 @@ from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
 )
 from nf_metro.layout.routing.normalize import (  # noqa: F401
     _align_peeloff_riser_gaps,
+    _band_order_crossings,
     _build_gap_intervals,
     _clamp_inter_row_band_top,
     _clear_channel_x_in_band,
@@ -102,6 +103,7 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _restack_trunk_band,
     _set_port_approach_x,
     _set_riser_x_and_radii,
+    _suboptimal_trunk_bands,
     _VChannel,
 )
 from nf_metro.layout.routing.postprocess import (  # noqa: F401

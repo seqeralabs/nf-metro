@@ -152,6 +152,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_stations_within_bbox,
     _guard_tall_anchor_stack_well_formed,
     _guard_terminus_icons_within_bbox,
+    _guard_trunk_bands_crossing_optimal,
     _inter_section_backtrack_legs,
     _port_anchor_snapshot,
     _route_exit_side,
@@ -1450,6 +1451,9 @@ def _finalize_layout(
             _guard_serpentine_no_backtrack(graph, phase, routes=routes)
             _guard_no_artefactual_counter_flow(graph, phase, routes=routes)
             _guard_inter_row_run_clearance(graph, phase, routes=routes)
+            _guard_trunk_bands_crossing_optimal(
+                graph, phase, offsets=offsets, routes=routes
+            )
             _guard_inter_section_descent_edge_clearance(graph, phase, routes=routes)
             _guard_fan_bundles_coincide_or_separate(
                 graph, phase, offsets=offsets, routes=routes
