@@ -124,10 +124,6 @@ def compute_corpus_layout(path: Path, is_nextflow: bool) -> MetroGraph:
 
 
 # --- Mutable-geometry snapshot/restore ---
-#
-# The declarative-property tests (purity #491, idempotence #488) probe a single
-# layout phase by mutating station/section geometry, measuring, then putting the
-# graph back so the rest of the pipeline runs unperturbed.
 
 Coords = dict[str, tuple[float, float]]
 
