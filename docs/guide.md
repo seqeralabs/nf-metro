@@ -40,6 +40,9 @@ A few things to notice:
 - **Stations** use Mermaid node syntax: `node_id[Label]`.
 - **Edges** carry a line ID: `source -->|line_id| target`. An edge can carry multiple lines at once: `a -->|line1,line2| b`.
 
+!!! tip "Declare each station on its own line"
+    Give every station one labelled line of its own (`fastqc[FastQC]`) and use **bare ids** in edges (`fastqc -->|qc| multiqc`). Because most stations are shared by several edges, this keeps each label in exactly one place, and it gives `%%metro` directives (`file:`, `marker:`, `off_track:`, ...) a clear node to anchor to. nf-metro also accepts inline-shaped endpoints (`fastqc[FastQC] -->|qc| multiqc[MultiQC]`) for Mermaid compatibility, but avoid them in committed maps: a station can only carry its inline label on one of its edges, so mixing the two styles fragments where a label lives.
+
 Without sections, all stations sit on a single track. That works for simple pipelines, but real workflows have logical groupings.
 
 ## 2. Grouping stations into sections
