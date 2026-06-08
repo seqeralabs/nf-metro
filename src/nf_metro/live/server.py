@@ -26,10 +26,9 @@ SVG_DIM_RE = re.compile(r'<svg[^>]*?\bwidth="([\d.]+)"[^>]*?\bheight="([\d.]+)"'
 
 
 class StationGeom(TypedDict):
-    """An overlaid station: its id/label and its centre in SVG pixel space."""
+    """An overlaid station: its id and its centre in SVG pixel space."""
 
     id: str
-    label: str
     x: float
     y: float
 
@@ -47,7 +46,7 @@ class MapModel:
         self.height = float(dim.group(2)) if dim else float(graph.height or 600)
 
         self.stations: list[StationGeom] = [
-            {"id": s.id, "label": s.label, "x": round(s.x, 1), "y": round(s.y, 1)}
+            {"id": s.id, "x": round(s.x, 1), "y": round(s.y, 1)}
             for s in graph.stations.values()
             if not s.is_port and s.id in self.mapping
         ]
@@ -197,16 +196,11 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .led {{ --c: #3a4a6b; fill: var(--c); transform-box: fill-box;
          transform-origin: center; transition: fill 0.3s, opacity 0.3s;
          filter: drop-shadow(0 0 4px var(--c)) drop-shadow(0 0 10px var(--c)); }}
-  .halo text {{ fill: #cfe0ff; font-size: 11px; font-weight: 600; opacity: 0;
-               letter-spacing: 0.04em; transition: opacity 0.3s;
-               paint-order: stroke; stroke: #04060c; stroke-width: 3px; }}
   .halo.pending .led {{ --c: #2a3656; opacity: 0.45; }}
   .halo.queued  .led {{ --c: #ffb020; opacity: 0.7; }}
   .halo.running .led {{ --c: #ffc23a; animation: led-pulse 1.1s ease-in-out infinite; }}
   .halo.done    .led {{ --c: #2bee92; }}
   .halo.failed  .led {{ --c: #ff4d4d; animation: led-pulse 0.7s ease-in-out infinite; }}
-  .halo.running text, .halo.failed text, .halo.queued text,
-  .halo.done text {{ opacity: 1; }}
   @keyframes led-pulse {{
     0%,100% {{ transform: scale(1);
       filter: drop-shadow(0 0 4px var(--c)) drop-shadow(0 0 9px var(--c)); }}
@@ -220,8 +214,8 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   <div id="run">Run: <b id="run-name">waiting for events</b> &middot;
        <span id="run-state">idle</span></div>
   <div class="legend">
-    <span><i style="border-color:#f0a000"></i>running</span>
-    <span><i style="border-color:#2bb673"></i>done</span>
+    <span><i style="border-color:#ffc23a"></i>running</span>
+    <span><i style="border-color:#2bee92"></i>done</span>
     <span><i style="border-color:#ff4d4d"></i>failed</span>
   </div>
 </header>

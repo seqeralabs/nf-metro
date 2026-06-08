@@ -104,9 +104,9 @@ def check_mapping(
                 report.dead_patterns.append((station_id, pattern))
 
     report.ambiguous_processes = {
-        process: sorted(set(hits))
-        for process, hits in report.matched.items()
-        if len(set(hits)) > 1
+        process: stations
+        for process in sorted(report.matched)
+        if len(stations := sorted(set(report.matched[process]))) > 1
     }
     report.unmapped_processes.sort()
     report.dead_patterns.sort()
