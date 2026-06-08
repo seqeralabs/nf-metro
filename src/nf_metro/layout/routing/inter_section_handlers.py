@@ -41,6 +41,7 @@ from nf_metro.layout.routing.context import (
     _has_intervening_sections,
     _resolve_section_col,
     _resolve_section_colrow,
+    _resolve_section_row,
     _RoutingCtx,
     _tb_x_offset,
 )
@@ -56,7 +57,6 @@ from nf_metro.layout.routing.normalize import (
     _gap_channel_base,
     _h_segment_crosses_other_section,
     _has_other_row_section_in_col_range,
-    _resolve_section_row,
 )
 from nf_metro.parser.model import (
     Edge,

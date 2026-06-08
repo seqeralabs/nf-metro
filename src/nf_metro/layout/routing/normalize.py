@@ -20,7 +20,6 @@ from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
     column_gap_edges,
-    resolve_section,
     row_bottom_edge,
     row_top_edge,
     symmetric_bundle_midpoint,
@@ -36,16 +35,7 @@ from nf_metro.layout.routing.corners import (
 )
 from nf_metro.parser.model import (
     MetroGraph,
-    Station,
 )
-
-
-def _resolve_section_row(graph: MetroGraph, station: Station) -> int | None:
-    """Resolve the grid row for a port or junction station."""
-    sec = resolve_section(graph, station, prefer_upstream=False)
-    if sec and sec.grid_row >= 0:
-        return sec.grid_row
-    return None
 
 
 @dataclass
