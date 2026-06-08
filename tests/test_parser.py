@@ -1146,7 +1146,7 @@ def test_fold_threshold_keeps_wide_chain_on_one_row():
 
 
 def test_max_station_columns_arg_overrides_fold_threshold():
-    """An explicit caller value (the --max-layers-per-row CLI flag) wins over a
+    """An explicit caller value (the --fold-threshold CLI flag) wins over a
     fold_threshold directive, matching the CLI-overrides-directive convention."""
     graph = parse_metro_mermaid(
         "%%metro fold_threshold: 100\n" + _wide_section_chain(),

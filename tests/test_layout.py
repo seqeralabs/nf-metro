@@ -1311,8 +1311,8 @@ def test_off_track_convergence_keeps_consumer_on_trunk():
         )
 
 
-def test_cli_straight_diamonds_default(tmp_path):
-    """--straight-diamonds is on by default."""
+def test_cli_diamond_style_default(tmp_path):
+    """diamond_style defaults to straight (no flag needed)."""
     from click.testing import CliRunner
 
     from nf_metro.cli import cli
@@ -1325,8 +1325,8 @@ def test_cli_straight_diamonds_default(tmp_path):
     assert result.exit_code == 0, result.output
 
 
-def test_cli_no_straight_diamonds(tmp_path):
-    """--no-straight-diamonds reverts to symmetric behaviour."""
+def test_cli_diamond_style_symmetric(tmp_path):
+    """--diamond-style symmetric reverts to symmetric behaviour."""
     from click.testing import CliRunner
 
     from nf_metro.cli import cli
@@ -1336,7 +1336,7 @@ def test_cli_no_straight_diamonds(tmp_path):
     out = tmp_path / "out.svg"
     runner = CliRunner()
     result = runner.invoke(
-        cli, ["render", str(mmd), "-o", str(out), "--no-straight-diamonds"]
+        cli, ["render", str(mmd), "-o", str(out), "--diamond-style", "symmetric"]
     )
     assert result.exit_code == 0, result.output
 
