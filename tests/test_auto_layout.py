@@ -267,7 +267,7 @@ def test_explicit_grid_section_keeps_lr_against_auto_successor_below():
 @pytest.mark.parametrize(
     "fixture",
     [
-        "genomic_pipeline.mmd",
+        "sarek_metro.mmd",
         "genomeassembly_staggered.mmd",
         "topologies/stacked_lr_serpentine.mmd",
         "topologies/around_section_below.mmd",

@@ -461,6 +461,66 @@ def _guard_explicit_grid_directions(graph: MetroGraph, phase: str) -> None:
         )
 
 
+def _guard_tall_anchor_stack_well_formed(graph: MetroGraph, phase: str) -> None:
+    """A tall-anchor vertical stack keeps its anchor's downstream chain
+    stacked in one column within the anchor's row span, all horizontal.
+
+    The vertical-stack packer relies on every stacked section flowing
+    horizontally so the inter-section router carriage-returns each drop; a
+    section that slipped out of the anchor's column, off its row span, or into
+    a vertical (TB/BT) direction would dangle beside empty space or force a
+    perpendicular port on an LR sink. No-op when the packer did not fire.
+    """
+    from nf_metro.layout.auto_layout import _detect_tall_anchor_chain
+
+    anchor = _detect_tall_anchor_chain(graph)
+    if anchor is None or graph.section_dag is None:
+        return
+
+    successors = graph.section_dag.successors
+    tail: set[str] = set()
+    queue = list(successors.get(anchor, set()))
+    while queue:
+        sid = queue.pop()
+        if sid in tail:
+            continue
+        tail.add(sid)
+        queue.extend(successors.get(sid, set()))
+
+    horizontal = {"LR", "RL"}
+    non_horizontal = {
+        sid: graph.sections[sid].direction
+        for sid in (anchor, *tail)
+        if graph.sections[sid].direction not in horizontal
+    }
+    if non_horizontal:
+        raise PhaseInvariantError(
+            f"{phase}: tall-anchor stack sections are not horizontal-flow: "
+            f"{non_horizontal}"
+        )
+
+    tail_cols = {graph.sections[sid].grid_col for sid in tail}
+    if len(tail_cols) != 1:
+        raise PhaseInvariantError(
+            f"{phase}: tall-anchor tail spans columns {sorted(tail_cols)}; "
+            f"expected a single stacked column"
+        )
+
+    anchor_sec = graph.sections[anchor]
+    span_top = anchor_sec.grid_row
+    span_bottom = anchor_sec.grid_row + anchor_sec.grid_row_span - 1
+    escaped = {
+        sid: graph.sections[sid].grid_row
+        for sid in tail
+        if not span_top <= graph.sections[sid].grid_row <= span_bottom
+    }
+    if escaped:
+        raise PhaseInvariantError(
+            f"{phase}: tall-anchor tail rows {escaped} fall outside the anchor "
+            f"{anchor!r} row span [{span_top}, {span_bottom}]"
+        )
+
+
 def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> None:
     """Final phase: column-overlapping adjacent-row section pairs must
     keep at least ``section_y_gap`` between the upper section's bbox

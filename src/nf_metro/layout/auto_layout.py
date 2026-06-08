@@ -133,6 +133,167 @@ def _estimate_section_layers(graph: MetroGraph, section_id: str) -> int:
     return max(longest.values()) + 1  # +1: convert 0-indexed depth to layer count
 
 
+def _estimate_section_height(graph: MetroGraph, section_id: str) -> int:
+    """Estimate a section's vertical extent as its widest internal layer.
+
+    Counts the stations sharing the busiest longest-path depth (the broadest
+    fan), the orthogonal counterpart to ``_estimate_section_layers``. Returns
+    at least 1.
+    """
+    section = graph.sections[section_id]
+    station_ids = set(section.station_ids)
+
+    adj: dict[str, set[str]] = defaultdict(set)
+    has_pred: set[str] = set()
+    for edge in graph.edges:
+        if edge.source in station_ids and edge.target in station_ids:
+            adj[edge.source].add(edge.target)
+            has_pred.add(edge.target)
+
+    if not adj:
+        return max(len(station_ids), 1)
+
+    roots = station_ids - has_pred
+    if not roots:
+        return len(station_ids)
+
+    depth: dict[str, int] = {sid: 0 for sid in station_ids}
+    queue: deque[str] = deque(roots)
+    visited: set[str] = set()
+    while queue:
+        node = queue.popleft()
+        if node in visited:
+            continue
+        visited.add(node)
+        for succ in adj.get(node, set()):
+            if depth[node] + 1 > depth[succ]:
+                depth[succ] = depth[node] + 1
+            queue.append(succ)
+
+    per_layer: dict[int, int] = defaultdict(int)
+    for sid in station_ids:
+        per_layer[depth[sid]] += 1
+    return max(per_layer.values())
+
+
+# A section qualifies as a tall anchor when its fan is at least this many
+# stations deep and at least this many times taller than it is wide. The fan
+# then has enough vertical room to host the downstream chain stacked beside it.
+TALL_ANCHOR_MIN_HEIGHT = 10
+TALL_ANCHOR_ASPECT_RATIO = 2.0
+
+
+def _detect_tall_anchor_chain(graph: MetroGraph) -> str | None:
+    """Return the section to anchor a vertical-stack layout, or ``None``.
+
+    Qualifies when the section meta-graph is a single-source/single-sink chain
+    whose unique tallest section is a dominant tall-narrow fan (a mid-spine
+    section with both upstream and downstream neighbours). The narrow tail
+    downstream of that anchor can then stack vertically in its shadow.
+    """
+    dag = graph.section_dag
+    if dag is None or len(graph.sections) < 3:
+        return None
+    # A single explicit pin is manual layout intent for the whole map; the
+    # vertical-stack packer owns every section's cell, so it must not run
+    # alongside hand-placed grids.
+    if graph._explicit_grid:
+        return None
+    successors, predecessors = dag.successors, dag.predecessors
+    section_ids = list(graph.sections)
+
+    sources = [s for s in section_ids if not predecessors.get(s)]
+    sinks = [s for s in section_ids if not successors.get(s)]
+    if len(sources) != 1 or len(sinks) != 1:
+        return None
+
+    heights = {s: _estimate_section_height(graph, s) for s in section_ids}
+    widths = {s: _estimate_section_layers(graph, s) for s in section_ids}
+    anchor = max(section_ids, key=lambda s: heights[s])
+
+    if heights[anchor] < TALL_ANCHOR_MIN_HEIGHT:
+        return None
+    if heights[anchor] < TALL_ANCHOR_ASPECT_RATIO * widths[anchor]:
+        return None
+    # A unique tall section: a second comparably tall fan would want its own
+    # column, which the single-anchor stack cannot express.
+    if any(
+        s != anchor and heights[s] >= TALL_ANCHOR_MIN_HEIGHT for s in section_ids
+    ):
+        return None
+    # The anchor must sit mid-spine: a non-empty head (upstream) to form the
+    # header row and a non-empty tail (downstream) to stack beside it.
+    if not predecessors.get(anchor) or not successors.get(anchor):
+        return None
+
+    return anchor
+
+
+def _place_with_tall_anchor(
+    graph: MetroGraph,
+    col_assign: dict[str, int],
+    anchor: str,
+    successors: dict[str, set[str]],
+) -> tuple[set[str], set[str], set[str]]:
+    """Place a tall-anchor chain: header row, tall anchor, stacked tail.
+
+    The sections upstream of the anchor occupy row 0 (a header that spans the
+    grid width); the anchor sits below in column 0 spanning the tail's rows;
+    the downstream sections stack vertically in column 1, ordered by topo
+    column. No TB bridge is created -- every section keeps horizontal flow and
+    the inter-section router carriage-returns each stacked connection.
+    """
+    anchor_col = col_assign[anchor]
+    head = sorted(
+        (s for s in col_assign if col_assign[s] < anchor_col),
+        key=lambda s: col_assign[s],
+    )
+    tail = sorted(
+        (s for s in col_assign if col_assign[s] > anchor_col),
+        key=lambda s: col_assign[s],
+    )
+
+    folded: dict[str, tuple[int, int, int, int]] = {}
+
+    # Header row: one section per upstream column, left to right.
+    for col, sid in enumerate(head):
+        folded[sid] = (col, 0, 1, 1)
+    grid_width = max(len(head), 2)
+
+    # Tail stacks in the last column on rows below the header.
+    tail_col = grid_width - 1
+    for row, sid in enumerate(tail, start=1):
+        folded[sid] = (tail_col, row, 1, 1)
+
+    # Anchor sits in column 0, spanning every tail row.
+    folded[anchor] = (0, 1, max(len(tail), 1), 1)
+
+    # A lone header section spans the full width so its column is not inflated
+    # by the wide upstream block (the narrow anchor/tail columns set the width).
+    if len(head) == 1:
+        col, row, _rspan, _cspan = folded[head[0]]
+        folded[head[0]] = (col, row, 1, grid_width)
+
+    for sid, (col, row, rspan, cspan) in folded.items():
+        graph.grid_overrides[sid] = (col, row, rspan, cspan)
+        section = graph.sections[sid]
+        section.grid_col = col
+        section.grid_row = row
+        section.grid_row_span = rspan
+        section.grid_col_span = cspan
+
+    # Pin the anchor and its stacked tail to horizontal flow: each connects to
+    # the section below via a carriage-return wrap, so direction inference must
+    # not reorient a single-successor-below section to TB (which would force a
+    # perpendicular TOP entry on the LR sink). Registering them as fixed
+    # directions makes _infer_directions leave them LR.
+    for sid in [anchor, *tail]:
+        graph.sections[sid].direction = "LR"
+        graph._explicit_directions.add(sid)
+
+    return set(), set(), set()
+
+
 def _assign_grid_positions(
     graph: MetroGraph,
     successors: dict[str, set[str]],
@@ -207,6 +368,15 @@ def _assign_grid_positions(
     topo_col_width: dict[int, int] = {}
     for col, sids in col_groups.items():
         topo_col_width[col] = max(_estimate_section_layers(graph, sid) for sid in sids)
+
+    # --- Tall-anchor vertical stack ---
+    # A single-source/single-sink chain dominated by one section that is much
+    # taller than wide (a large fan, e.g. a many-way caller block) packs more
+    # compactly by stacking the narrow downstream chain vertically beside the
+    # tall anchor than by giving every section its own topological column.
+    anchor = _detect_tall_anchor_chain(graph)
+    if anchor is not None:
+        return _place_with_tall_anchor(graph, col_assign, anchor, successors)
 
     # --- Convergence-based row split ---
     # Detect sections with predecessors spanning 2+ non-adjacent topo columns.

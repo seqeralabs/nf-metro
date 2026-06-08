@@ -150,6 +150,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_station_x_column_drift,
     _guard_stations_in_sections,
     _guard_stations_within_bbox,
+    _guard_tall_anchor_stack_well_formed,
     _guard_terminus_icons_within_bbox,
     _inter_section_backtrack_legs,
     _port_anchor_snapshot,
@@ -821,6 +822,7 @@ def _compute_section_layout(
         _guard_section_bboxes_positive(graph, "after Stage 1.1")
         _guard_no_negative_grid_columns(graph, "after Stage 1.1")
         _guard_explicit_grid_directions(graph, "after Stage 1.1")
+        _guard_tall_anchor_stack_well_formed(graph, "after Stage 1.1")
 
     # Stage 1.2: Align Y grids across same-row, same-direction sections
     _align_row_y_grids(graph, section_subgraphs, y_spacing, section_y_padding)
