@@ -241,6 +241,15 @@ def _apply_pending_metadata(graph: MetroGraph) -> None:
         if station:
             station.marker = marker
 
+    for station_id, pattern in graph._pending_process:
+        if station_id in graph.stations:
+            graph.process_mapping.setdefault(station_id, []).append(pattern)
+        else:
+            warnings.warn(
+                f"%%metro process: unknown station id {station_id!r}; ignoring",
+                stacklevel=2,
+            )
+
 
 def _apply_node(
     node_id: str,
