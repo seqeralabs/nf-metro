@@ -275,6 +275,20 @@ def _layout_section_rails(
         per_line_y = {lid: rails_top + slot_offset[lid] for lid in lines}
         rail_y[section.id] = per_line_y
 
+    # Rails are designed for one distinct station per column.  The longest-path
+    # layer orders stations by depth, but distinct stations on different rails
+    # can share a layer; taking X straight from the layer would stack them in a
+    # single column.  Rank the on-rail stations by (layer, declaration order) and
+    # give each its own column, so a rail's internal order and the authored
+    # cross-rail order are both preserved while no two distinct stations share X.
+    decl_index = {sid: i for i, sid in enumerate(section.station_ids)}
+    on_rail_ids = [sid for sid in real_ids if not graph.stations[sid].off_track]
+    ordered_cols = sorted(
+        on_rail_ids, key=lambda sid: (layers.get(sid, 0), decl_index.get(sid, 0))
+    )
+    cols: dict[str, int] = {sid: i for i, sid in enumerate(ordered_cols)}
+    max_col = len(ordered_cols) - 1 if ordered_cols else 0
+
     # A blank terminus that fans across rails needs its own horizontal room so
     # the fan S-curves keep their shape regardless of the shared column pitch.
     # Reserve it as extra gap AFTER the first column (a head/source terminus)
@@ -323,41 +337,40 @@ def _layout_section_rails(
         tail_icon_extra = max(tail_icon_extra, need - section_x_padding)
     tail_icon_extra = max(0.0, tail_icon_extra)
 
-    def _layer_x(layer: float) -> float:
-        x = x_offset + section_x_padding + layer * x_spacing
-        if layer >= 1:
+    def _col_x(col: float) -> float:
+        x = x_offset + section_x_padding + col * x_spacing
+        if col >= 1:
             x += head_extra
-        if layer == max_layer:
+        if col == max_col:
             x += tail_extra
         return x
 
     for sid in real_ids:
         st = graph.stations[sid]
-        layer = layers.get(sid, 0)
-        st.layer = layer
-        st.x = _layer_x(layer)
 
         if st.off_track:
             # Park above the rails just to the left of the consumer column, so
             # the router draws a short, clean S-curve down into the rail rather
-            # than a long diagonal traverse from layer 0.  The consumer's layer
-            # determines the X; the off-track input sits half a column before it.
-            consumer_layer = min(
-                (
-                    layers.get(e.target, layer)
-                    for e in graph.edges_from(sid)
-                    if e.target in layers
-                ),
-                default=layer + 1,
+            # than a long diagonal traverse from the section head.  The consumer's
+            # column determines the X; the off-track input sits half a column
+            # before it.
+            consumer_col = min(
+                (cols[e.target] for e in graph.edges_from(sid) if e.target in cols),
+                default=max_col + 1,
             )
-            feed_layer = max(0.0, consumer_layer - 0.5)
-            st.x = _layer_x(feed_layer)
+            feed_col = max(0.0, consumer_col - 0.5)
+            st.layer = consumer_col
+            st.x = _col_x(feed_col)
             st.y = off_track_y
             st.track = 0.0
             st.rail_used_ys = []
             st.rail_top_y = None
             st.rail_bottom_y = None
             continue
+
+        col = cols[sid]
+        st.layer = col
+        st.x = _col_x(col)
 
         st_lines = graph.station_lines_ordered(sid)
         ys = [per_line_y[lid] for lid in st_lines if lid in per_line_y]
@@ -411,7 +424,7 @@ def _layout_section_rails(
     bbox_x = x_offset
     bbox_w = (
         section_x_padding * 2
-        + max_layer * x_spacing
+        + max_col * x_spacing
         + head_extra
         + tail_extra
         + tail_icon_extra

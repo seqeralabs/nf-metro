@@ -338,6 +338,40 @@ def _guard_centered_line_spread_balanced(graph: MetroGraph, phase: str) -> None:
                 )
 
 
+def _guard_rail_one_station_per_column(graph: MetroGraph, phase: str) -> None:
+    """Rails place one distinct station per column.
+
+    ``line_spread: rails`` is a one-station-per-X layout: each column holds a
+    single station.  A genuine interchange is one shared station, so it occupies
+    a single column legitimately; two *distinct* on-rail stations sharing a
+    column stack their markers and labels and read as a false interchange.
+    Flag any rails section where two visible on-rail stations share an X.
+    No-op when no section resolves to rails.
+    """
+    rails_anywhere = graph.line_spread is LineSpread.RAILS or any(
+        mode is LineSpread.RAILS for mode in graph.line_spread_overrides.values()
+    )
+    if not rails_anywhere:
+        return
+    by_section: dict[str | None, list[str]] = {}
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or st.off_track:
+            continue
+        by_section.setdefault(st.section_id, []).append(sid)
+    for sec_id, members in by_section.items():
+        if graph.section_line_spread(sec_id) is not LineSpread.RAILS:
+            continue
+        ordered = sorted(members, key=lambda m: graph.stations[m].x)
+        for a, b in zip(ordered, ordered[1:]):
+            xa, xb = graph.stations[a].x, graph.stations[b].x
+            if abs(xb - xa) <= GUARD_TOLERANCE:
+                raise PhaseInvariantError(
+                    f"{phase}: rails section '{sec_id}' places distinct stations "
+                    f"'{a}' and '{b}' in the same column (x={xa:.1f}); rails "
+                    f"require one station per column"
+                )
+
+
 def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
     """After Stage 3.1+: ports must sit on their section's bounding box edge."""
     tolerance = GUARD_TOLERANCE

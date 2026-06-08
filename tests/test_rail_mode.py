@@ -1515,3 +1515,53 @@ def test_coloured_spanning_interchange_has_light_outline():
     assert unmarked == {theme.station_stroke}, (
         f"an untinted interchange must keep the dark station stroke, got {unmarked}"
     )
+
+
+SAREK_MMD = EXAMPLES / "sarek_metro.mmd"
+
+
+def test_rails_place_one_station_per_column_on_sarek():
+    """Distinct stations on different rails never share a column (#576).
+
+    The sarek calling panel runs three routes whose rail-specific stations land
+    on shared topological layers; rails must give each its own column rather
+    than stacking them.  Fails on a layer-X layout where same-layer stations
+    collide.  Uses the render path: validate=True trips an unrelated Stage-6.14
+    rail transient that the content corpus excludes for rails.
+    """
+    graph = parse_metro_mermaid(SAREK_MMD.read_text())
+    compute_layout(graph)
+    section = graph.sections["calling"]
+    xs: dict[int, str] = {}
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or st.is_hidden or st.off_track:
+            continue
+        key = round(st.x)
+        clash = next((k for k in xs if abs(k - key) <= 1), None)
+        assert clash is None, f"{sid} shares column x={st.x:.1f} with {xs[clash]}"
+        xs[key] = sid
+
+
+def test_rail_one_per_column_guard_catches_a_collision():
+    """The guard rejects two distinct on-rail stations sharing a column."""
+    import pytest
+
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_rail_one_station_per_column,
+    )
+    from nf_metro.parser.model import MetroGraph, Section, Station
+
+    graph = MetroGraph()
+    graph.line_spread = LineSpread.RAILS
+    graph.sections["s"] = Section(id="s", name="S", station_ids=["a", "b"])
+    for sid in ("a", "b"):
+        st = Station(id=sid, label=sid.upper())
+        st.x = 100.0
+        st.y = 10.0 if sid == "a" else 50.0
+        st.section_id = "s"
+        graph.stations[sid] = st
+
+    with pytest.raises(PhaseInvariantError, match="one station per column"):
+        _guard_rail_one_station_per_column(graph, "test")
