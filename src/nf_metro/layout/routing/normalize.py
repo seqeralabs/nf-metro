@@ -6,6 +6,7 @@ import functools
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -802,16 +803,26 @@ def _normalize_bypass_trunks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     _dogleg_off_exempt_trunks(routes, ctx, skip=bundled)
 
 
-def _trunk_slot_features(
-    slot: list[_HTrunk],
-) -> tuple[list[float], list[float], list[tuple[float, float]]]:
+class _SlotFeatures(NamedTuple):
+    """Riser leg xs and trunk x-spans for one slot.
+
+    ``below`` / ``above`` are the xs of risers whose far end drops below /
+    rises above the band; ``spans`` is each trunk's ``(x_lo, x_hi)``.
+    """
+
+    below: list[float]
+    above: list[float]
+    spans: list[tuple[float, float]]
+
+
+def _trunk_slot_features(slot: list[_HTrunk]) -> _SlotFeatures:
     """Riser xs (below / above the band) and x-spans for one line's trunk slot.
 
-    Each horizontal trunk is flanked by two vertical legs; a leg's far
-    endpoint sits either below the trunk (continuing toward the lower row or a
-    peel-off target) or above it (rising to the source row / junction).
-    Returns ``(below_xs, above_xs, spans)`` accumulated over every trunk on the
-    slot; the risers score against other slots' trunk legs to count crossings.
+    Each horizontal trunk is flanked by two vertical legs; a leg's far endpoint
+    sits either below the trunk (continuing toward the lower row or a peel-off
+    target) or above it (rising to the source row / junction).  The two legs
+    can split (one up, one down at a peel-off), so they are classified
+    individually rather than from the trunk's single ``dips_down`` flag.
     """
     below: list[float] = []
     above: list[float] = []
@@ -828,37 +839,42 @@ def _trunk_slot_features(
                 below.append(leg_x)
             elif far_y < t.y - COORD_TOLERANCE:
                 above.append(leg_x)
-    return below, above, spans
+    return _SlotFeatures(below, above, spans)
 
 
-def _trunk_pair_crossings(
-    upper: tuple[list[float], list[float], list[tuple[float, float]]],
-    lower: tuple[list[float], list[float], list[tuple[float, float]]],
-) -> int:
+def _trunk_pair_crossings(upper: _SlotFeatures, lower: _SlotFeatures) -> int:
     """Crossings between two trunk slots when *upper* sits above *lower*.
 
     *upper*'s downward risers cross *lower*'s trunk leg wherever they pass
     through its x-span; *lower*'s upward risers cross *upper*'s leg likewise.
     Risers grazing a span endpoint (a shared corner) are not crossings.
     """
-    below_u, _above_u, span_u = upper
-    _below_l, above_l, span_l = lower
 
     def _within(x: float, spans: list[tuple[float, float]]) -> bool:
         return any(lo + COORD_TOLERANCE < x < hi - COORD_TOLERANCE for lo, hi in spans)
 
-    return sum(_within(x, span_l) for x in below_u) + sum(
-        _within(x, span_u) for x in above_l
+    return sum(_within(x, lower.spans) for x in upper.below) + sum(
+        _within(x, upper.spans) for x in lower.above
     )
 
 
-def _band_order_crossings(order_top_to_bottom: list[list[_HTrunk]]) -> int:
-    """Total riser/leg crossings for a top-to-bottom ordering of trunk slots."""
-    feats = [_trunk_slot_features(sg) for sg in order_top_to_bottom]
+def _band_order_crossings(
+    order_top_to_bottom: list[list[_HTrunk]],
+    feats: dict[int, _SlotFeatures] | None = None,
+) -> int:
+    """Total riser/leg crossings for a top-to-bottom ordering of trunk slots.
+
+    *feats* optionally supplies each slot's features keyed by ``id(slot)`` so a
+    permutation search extracts them once instead of per candidate ordering.
+    """
+    if feats is None:
+        feats = {id(sg): _trunk_slot_features(sg) for sg in order_top_to_bottom}
     return sum(
-        _trunk_pair_crossings(feats[i], feats[j])
-        for i in range(len(feats))
-        for j in range(i + 1, len(feats))
+        _trunk_pair_crossings(
+            feats[id(order_top_to_bottom[i])], feats[id(order_top_to_bottom[j])]
+        )
+        for i in range(len(order_top_to_bottom))
+        for j in range(i + 1, len(order_top_to_bottom))
     )
 
 
@@ -898,12 +914,16 @@ def _plan_trunk_band(band: list[_HTrunk]) -> list[list[_HTrunk]]:
     dips = band[0].dips_down
     h_ttb = list(reversed(heuristic)) if dips else heuristic
     h_rank = {id(sg): r for r, sg in enumerate(h_ttb)}
+    feats = {id(sg): _trunk_slot_features(sg) for sg in slot_groups}
 
     def _key(perm: tuple[list[_HTrunk], ...]) -> tuple[int, ...]:
         # Tie-break by position in the heuristic order: the heuristic itself
         # scores (0, 1, .. m-1), the lexicographically smallest tuple, so an
         # already-optimal band reproduces the heuristic order exactly.
-        return (_band_order_crossings(list(perm)), *(h_rank[id(sg)] for sg in perm))
+        return (
+            _band_order_crossings(list(perm), feats),
+            *(h_rank[id(sg)] for sg in perm),
+        )
 
     best_ttb = list(min(itertools.permutations(h_ttb), key=_key))
     return list(reversed(best_ttb)) if dips else best_ttb
@@ -915,7 +935,7 @@ def _suboptimal_trunk_bands(
     """Same-direction inter-row trunk bands whose realized Y order leaves
     avoidable crossings: ``(band y, current crossings, best achievable)``.
 
-    Reconstructs the bands the way :func:`_normalize_bypass_trunks` does, then
+    Reconstructs the bands :func:`_normalize_bypass_trunks` reorders, then
     checks each realized top-to-bottom order against the crossing-minimal
     permutation.  An empty result means every band is crossing-optimal.
     """
@@ -927,15 +947,19 @@ def _suboptimal_trunk_bands(
     for grp in groups:
         if len({id(t.route) for t in grp}) < 2:
             continue
+        if not any(not t.route.normalize_exempt for t in grp):
+            continue  # handler-owned all-exempt groups: the planner leaves them
         for sign in (1, -1):
             band = [t for t in grp if t.sign_x == sign]
             slots = _coincident_trunk_slots(band)
             if len(slots) < 2 or len(slots) > _MAX_BAND_PERMUTE:
                 continue
+            feats = {id(sg): _trunk_slot_features(sg) for sg in slots}
             realized = sorted(slots, key=lambda sg: min(t.y for t in sg))
-            cur = _band_order_crossings(realized)
+            cur = _band_order_crossings(realized, feats)
             best = min(
-                _band_order_crossings(list(p)) for p in itertools.permutations(slots)
+                _band_order_crossings(list(p), feats)
+                for p in itertools.permutations(slots)
             )
             if best < cur:
                 out.append((min(t.y for t in band), cur, best))
