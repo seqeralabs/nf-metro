@@ -312,3 +312,159 @@ def info(input_file: Path) -> None:
         click.echo(
             f"  [{section.number}] {section.name}: {len(section.station_ids)} stations"
         )
+
+
+@cli.command()
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--port", type=int, default=8080, help="Port to listen on.")
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    help="Interface to bind. Default 127.0.0.1 (local only); "
+    "use 0.0.0.0 to accept connections from other hosts.",
+)
+@click.option("--theme", type=str, default=None, help="Theme name (nfcore, light).")
+@click.option(
+    "--token",
+    default=None,
+    help="If set, /events POSTs must supply ?token=... or an X-Metro-Token header.",
+)
+def serve(
+    input_file: Path,
+    port: int,
+    host: str,
+    theme: str | None,
+    token: str | None,
+) -> None:
+    """Serve a live-progress view of a metro map.
+
+    Renders the map once and serves it at http://HOST:PORT/. Point a Nextflow
+    run's weblog at the events endpoint to light up stations as tasks run:
+
+        nextflow run ... -with-weblog http://HOST:PORT/events
+
+    Stations are tied to processes with `%%metro process:` directives in the
+    map; only mapped stations change state. Use `nf-metro check-mapping` to
+    verify the mapping covers the pipeline.
+    """
+    from nf_metro.live.server import serve as serve_map
+
+    try:
+        graph = parse_metro_mermaid(input_file.read_text())
+        compute_layout(graph)
+    except (ValueError, PhaseInvariantError) as e:
+        raise click.ClickException(str(e))
+
+    theme_obj = _resolve_theme(theme, graph)
+    mapped = sorted(graph.process_mapping)
+    if not mapped:
+        click.echo(
+            "Warning: no %%metro process: directives; no station will update.",
+            err=True,
+        )
+    if host == "0.0.0.0":  # noqa: S104 - explicit opt-in, warned
+        click.echo(
+            "Binding 0.0.0.0: reachable from other hosts; "
+            "use --token to restrict /events.",
+            err=True,
+        )
+
+    httpd = serve_map(graph, theme_obj, host=host, port=port, token=token)
+    display_host = "localhost" if host in ("127.0.0.1", "0.0.0.0") else host
+    click.echo(f"Mapped stations: {', '.join(mapped) or '(none)'}")
+    click.echo(
+        f"Serving http://{display_host}:{port}/  "
+        "(POST Nextflow weblog events to /events)"
+    )
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("\nbye")
+    finally:
+        httpd.server_close()
+
+
+@cli.command(name="check-mapping")
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--dag",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Nextflow `-with-dag` mermaid file; process names are read from its "
+    "stadium nodes.",
+)
+@click.option(
+    "--processes",
+    "processes_file",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Newline-delimited process names (e.g. captured from a run). "
+    "Authoritative alternative to --dag.",
+)
+@click.option(
+    "--ignore",
+    multiple=True,
+    help="Regex for processes deliberately left unmapped (plumbing). Repeatable.",
+)
+def check_mapping_cmd(
+    input_file: Path,
+    dag: Path | None,
+    processes_file: Path | None,
+    ignore: tuple[str, ...],
+) -> None:
+    """Check a map's `%%metro process:` mapping against a pipeline's processes.
+
+    Reports processes the map can't show (drift) and station patterns that
+    match nothing (stale), exiting non-zero if any are found so CI can gate on
+    map fidelity. Supply the pipeline's processes via --dag (a `nextflow
+    -with-dag` export) or --processes (a newline-delimited list).
+    """
+    from nf_metro.live.mapping import check_mapping, process_names_from_dag
+
+    if not dag and not processes_file:
+        raise click.ClickException("provide --dag or --processes")
+
+    graph = parse_metro_mermaid(input_file.read_text())
+    station_ids = [s.id for s in graph.stations.values() if not s.is_port]
+    if dag is not None:
+        process_names = process_names_from_dag(dag.read_text())
+    else:
+        assert processes_file is not None
+        process_names = [
+            line.strip()
+            for line in processes_file.read_text().splitlines()
+            if line.strip()
+        ]
+
+    report = check_mapping(
+        graph.process_mapping, station_ids, process_names, ignore=list(ignore)
+    )
+
+    if report.unmapped_processes:
+        click.echo(
+            f"Processes with no station (invisible): {len(report.unmapped_processes)}",
+            err=True,
+        )
+        for name in report.unmapped_processes:
+            click.echo(f"  - {name}", err=True)
+    if report.dead_patterns:
+        click.echo(
+            f"Station patterns matching no process (stale): "
+            f"{len(report.dead_patterns)}",
+            err=True,
+        )
+        for sid, pat in report.dead_patterns:
+            click.echo(f"  - {sid}: {pat}", err=True)
+    if report.unmapped_stations:
+        click.echo(
+            f"Stations with no mapping (never light up): "
+            f"{', '.join(report.unmapped_stations)}"
+        )
+
+    if report.ok:
+        click.echo(
+            f"Mapping OK: {len(report.matched)}/{len(process_names)} "
+            "processes map to a station."
+        )
+    else:
+        raise SystemExit(1)
