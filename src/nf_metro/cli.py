@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import click
 
 from nf_metro import __version__
 from nf_metro.layout import PhaseInvariantError, compute_layout
+from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
 from nf_metro.parser import ERROR, parse_metro_mermaid, validate_graph
-from nf_metro.parser.model import LineSpread
+from nf_metro.parser.directives import apply_legend_directive
+from nf_metro.parser.model import LineSpread, MetroGraph
 from nf_metro.render import render_svg
 from nf_metro.render.html import render_html
+from nf_metro.render.style import Theme
 from nf_metro.themes import THEMES
 
 
@@ -20,6 +24,66 @@ from nf_metro.themes import THEMES
 @click.version_option(version=__version__)
 def cli() -> None:
     """nf-metro: Generate metro-map-style SVG diagrams from Mermaid definitions."""
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _layout_cli_option(opt: LayoutOption) -> Callable[..., Any]:
+    """Build the ``click.option`` decorator for a registry option.
+
+    All default to ``None`` so an omitted flag leaves the directive value in
+    place; a set flag overrides it (the CLI half of the cascade in
+    :mod:`nf_metro.options`).
+    """
+    if opt.kind == "bool":
+        no_flag = "--no-" + opt.name.replace("_", "-")
+        return click.option(
+            f"{opt.cli_flag}/{no_flag}", opt.name, default=None, help=opt.help
+        )
+    ctype: Any = (
+        click.Choice(opt.choices)
+        if opt.kind == "choice"
+        else {
+            "int": int,
+            "float": float,
+            "str": str,
+        }[opt.kind]
+    )
+    return click.option(opt.cli_flag, opt.name, type=ctype, default=None, help=opt.help)
+
+
+def layout_cli_options(f: _F) -> _F:
+    """Attach a CLI flag for every registry option, in declaration order."""
+    for opt in reversed(LAYOUT_OPTIONS):
+        f = _layout_cli_option(opt)(f)
+    return f
+
+
+def _apply_layout_overrides(graph: MetroGraph, opts: dict[str, object]) -> None:
+    """Write each explicitly-set CLI option onto its graph field.
+
+    Parse-time options (``fold_threshold``) are skipped: their value reaches
+    the graph through ``parse_metro_mermaid`` instead.
+    """
+    for opt in LAYOUT_OPTIONS:
+        if opt.parse_time:
+            continue
+        value = opts.get(opt.name)
+        if value is not None:
+            setattr(graph, opt.target_attr, value)
+
+
+# Maps legacy `style:` values onto theme keys (the nfcore theme is the dark one).
+_STYLE_THEME_ALIASES = {"dark": "nfcore"}
+
+
+def _resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
+    """Pick the theme: an explicit ``--theme`` wins over the ``style:`` directive."""
+    if theme is not None:
+        return THEMES[theme]
+    name = graph.style.strip().lower()
+    return THEMES.get(_STYLE_THEME_ALIASES.get(name, name), THEMES["nfcore"])
 
 
 @cli.command()
@@ -42,36 +106,8 @@ def cli() -> None:
 @click.option(
     "--theme",
     type=click.Choice(list(THEMES.keys())),
-    default="nfcore",
-    help="Visual theme (default: nfcore)",
-)
-@click.option("--width", type=int, default=None, help="SVG width in pixels")
-@click.option("--height", type=int, default=None, help="SVG height in pixels")
-@click.option(
-    "--x-spacing",
-    type=float,
     default=None,
-    help="Horizontal spacing between layers (default: auto - widened from "
-    "60 only when wide labels would otherwise collide)",
-)
-@click.option(
-    "--y-spacing",
-    type=float,
-    default=None,
-    help="Vertical spacing between tracks (default: auto - derived from "
-    "the map's content so captioned icons and dense labels don't collide)",
-)
-@click.option(
-    "--max-layers-per-row",
-    type=int,
-    default=None,
-    help="Max layers before folding to next row (default: auto). Overrides "
-    "the %%metro fold_threshold: directive.",
-)
-@click.option(
-    "--animate/--no-animate",
-    default=False,
-    help="Add animated balls traveling along lines",
+    help="Visual theme (default: from the %%metro style: directive, else nfcore).",
 )
 @click.option(
     "--debug/--no-debug",
@@ -82,27 +118,7 @@ def cli() -> None:
     "--logo",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Logo image path (overrides %%metro logo: directive)",
-)
-@click.option(
-    "--line-order",
-    type=click.Choice(["definition", "span"]),
-    default=None,
-    help="Line ordering strategy: 'definition' (default) preserves .mmd order, "
-    "'span' sorts by section span (longest first)",
-)
-@click.option(
-    "--straight-diamonds/--no-straight-diamonds",
-    default=True,
-    help="Keep top branch of diamond fork-joins on the main track (default: on). "
-    "Use --no-straight-diamonds for symmetric fan-out.",
-)
-@click.option(
-    "--center-ports/--no-center-ports",
-    default=None,
-    help="Centre inter-section ports on the shorter of the two connected "
-    "sections, so lines enter/exit at the visual midpoint. When unset, "
-    "the value of the %%metro center_ports: directive (if any) is used.",
+    help="Logo image path (overrides the %%metro logo: directive).",
 )
 @click.option(
     "--line-spread",
@@ -114,16 +130,11 @@ def cli() -> None:
     "graph-wide %%metro line_spread: directive (per-section overrides stay).",
 )
 @click.option(
-    "--section-x-gap",
-    type=float,
+    "--legend",
     default=None,
-    help="Horizontal gap between sections (default: 50)",
-)
-@click.option(
-    "--section-y-gap",
-    type=float,
-    default=None,
-    help="Vertical gap between sections (default: 40)",
+    help="Position the legend+logo block (overrides the %%metro legend: "
+    "directive). Keyword (bl/br/tl/tr/bottom/right/none), '<keyword> | canvas', "
+    "'<keyword> | dx,dy', or absolute 'x,y'.",
 )
 @click.option(
     "--from-nextflow",
@@ -135,29 +146,21 @@ def cli() -> None:
     "--title",
     type=str,
     default=None,
-    help="Pipeline title (used with --from-nextflow)",
+    help="Pipeline title (overrides the %%metro title: directive).",
 )
+@layout_cli_options
 def render(
     input_file: Path,
     output: Path | None,
     format_: str,
-    theme: str,
-    width: int | None,
-    height: int | None,
-    x_spacing: float | None,
-    y_spacing: float | None,
-    max_layers_per_row: int | None,
-    animate: bool,
+    theme: str | None,
     debug: bool,
     logo: Path | None,
-    line_order: str | None,
-    straight_diamonds: bool,
-    center_ports: bool | None,
     line_spread: str | None,
-    section_x_gap: float | None,
-    section_y_gap: float | None,
+    legend: str | None,
     from_nextflow: bool,
     title: str | None,
+    **layout_opts: object,
 ) -> None:
     """Render a Mermaid metro map definition to SVG or interactive HTML."""
     text = input_file.read_text()
@@ -167,61 +170,40 @@ def render(
 
         text = convert_nextflow_dag(text, title=title or "")
 
+    fold = layout_opts.get("fold_threshold")
     try:
         graph = parse_metro_mermaid(
             text,
-            max_station_columns=max_layers_per_row,
+            max_station_columns=fold if isinstance(fold, int) else None,
         )
     except ValueError as e:
         raise click.ClickException(str(e))
 
-    if line_order is not None:
-        graph.line_order = line_order
-
-    if not straight_diamonds:
-        graph.diamond_style = "symmetric"
-
-    if center_ports is not None:
-        graph.center_ports = center_ports
+    _apply_layout_overrides(graph, layout_opts)
 
     if line_spread is not None:
         graph.line_spread = LineSpread(line_spread)
-
     if logo is not None:
         graph.logo_path = str(logo)
+    if legend is not None:
+        apply_legend_directive(legend, graph)
+    if title is not None:
+        graph.title = title
 
-    layout_kwargs: dict[str, Any] = dict(
-        x_spacing=x_spacing,
-        y_spacing=y_spacing,
-    )
-    if section_x_gap is not None:
-        layout_kwargs["section_x_gap"] = section_x_gap
-    if section_y_gap is not None:
-        layout_kwargs["section_y_gap"] = section_y_gap
     try:
-        compute_layout(graph, **layout_kwargs)
+        compute_layout(graph)
     except PhaseInvariantError as e:
         raise click.ClickException(str(e))
 
-    theme_obj = THEMES[theme]
+    theme_obj = _resolve_theme(theme, graph)
 
     if output is None:
         output = input_file.with_suffix(f".{format_}")
 
     if format_ == "html":
-        content = render_html(
-            graph,
-            theme_obj,
-            width=width,
-            height=height,
-            animate=animate,
-            debug=debug,
-            embed_basename=output.name,
-        )
+        content = render_html(graph, theme_obj, debug=debug, embed_basename=output.name)
     else:
-        content = render_svg(
-            graph, theme_obj, width=width, height=height, animate=animate, debug=debug
-        )
+        content = render_svg(graph, theme_obj, debug=debug)
 
     output.write_text(content if content.endswith("\n") else content + "\n")
     click.echo(

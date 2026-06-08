@@ -295,10 +295,19 @@ class MetroGraph:
     diamond_style: str = "straight"  # "straight" or "symmetric"
     compact_offsets: bool = False
     center_ports: bool = False
+    # None = auto; compute_layout resolves spacing and section gaps.
+    x_spacing: float | None = None
+    y_spacing: float | None = None
+    section_x_gap: float | None = None
+    section_y_gap: float | None = None
+    # None/False = auto/off; the renderer resolves these.
+    width: int | None = None
+    height: int | None = None
+    animate: bool = False
     # Max station-columns a section row may reach before the auto-layout wraps
     # it onto the next row. None falls back to 15; raise it to keep a long
     # horizontal trunk of sections on a single row. Overridden by the
-    # --max-layers-per-row CLI flag.
+    # --fold-threshold CLI flag.
     fold_threshold: int | None = None
     # Vertical relationship between lines sharing a station (see LineSpread).
     # ``line_spread`` is the graph-wide default; ``line_spread_overrides`` maps

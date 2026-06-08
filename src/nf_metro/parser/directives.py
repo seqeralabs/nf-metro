@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
-from typing import Literal, TypeVar
+from typing import Literal
 
+from nf_metro.options import INVALID, LAYOUT_OPTIONS, LayoutOption, coerce
 from nf_metro.parser.grammar import _split_csv, _unquote
 from nf_metro.parser.model import (
     MARKER_FILL_OPEN,
@@ -29,8 +30,6 @@ from nf_metro.parser.model import (
     StationGroup,
 )
 
-_Number = TypeVar("_Number", int, float)
-
 
 def _warn_directive(key: str, message: str) -> None:
     """Warn about a %%metro directive; every directive warning uses this."""
@@ -40,27 +39,6 @@ def _warn_directive(key: str, message: str) -> None:
 def _warn_malformed(key: str, value: str, expected: str) -> None:
     """Warn that a directive's payload is unusable and is being ignored."""
     _warn_directive(key, f"ignoring {value!r}; expected {expected}")
-
-
-def _parse_bool(value: str) -> bool | None:
-    """Parse a boolean directive flag; ``None`` for an unrecognised value."""
-    token = value.strip().lower()
-    if token in ("true", "yes", "1"):
-        return True
-    if token in ("false", "no", "0", ""):
-        return False
-    return None
-
-
-def _parse_number(
-    key: str, value: str, cast: Callable[[str], _Number]
-) -> _Number | None:
-    """Parse a numeric directive value; warn and return ``None`` if not a number."""
-    try:
-        return cast(value)
-    except ValueError:
-        _warn_malformed(key, value, "a number")
-        return None
 
 
 def _split_fields(value: str) -> list[str]:
@@ -82,48 +60,6 @@ def _dir_style(value: str, graph: MetroGraph) -> None:
 
 def _dir_logo(value: str, graph: MetroGraph) -> None:
     graph.logo_path = value
-
-
-def _dir_line_order(value: str, graph: MetroGraph) -> None:
-    order = value.lower()
-    if order in ("definition", "span"):
-        graph.line_order = order
-    else:
-        _warn_malformed("line_order", value, "'definition' or 'span'")
-
-
-def _dir_compact_offsets(value: str, graph: MetroGraph) -> None:
-    flag = _parse_bool(value)
-    if flag is None:
-        _warn_malformed("compact_offsets", value, "a boolean (true/false)")
-    else:
-        graph.compact_offsets = flag
-
-
-def _dir_center_ports(value: str, graph: MetroGraph) -> None:
-    flag = _parse_bool(value)
-    if flag is None:
-        _warn_malformed("center_ports", value, "a boolean (true/false)")
-    else:
-        graph.center_ports = flag
-
-
-def _dir_fold_threshold(value: str, graph: MetroGraph) -> None:
-    threshold = _parse_number("fold_threshold", value, int)
-    if threshold is not None:
-        graph.fold_threshold = threshold
-
-
-def _dir_label_angle(value: str, graph: MetroGraph) -> None:
-    angle = _parse_number("label_angle", value, float)
-    if angle is not None:
-        graph.label_angle = angle
-
-
-def _dir_legend_min_height(value: str, graph: MetroGraph) -> None:
-    height = _parse_number("legend_min_height", value, float)
-    if height is not None:
-        graph.legend_min_height = height
 
 
 def _dir_off_track(value: str, graph: MetroGraph) -> None:
@@ -247,7 +183,7 @@ def _parse_xy(text: str) -> tuple[float, float] | None:
         return None
 
 
-def _parse_legend_directive(value: str, graph: MetroGraph) -> None:
+def apply_legend_directive(value: str, graph: MetroGraph) -> None:
     """Parse the %%metro legend: directive positioning the legend+logo block.
 
     Grammar (the keyword forms stay content-anchored with the content-overlap
@@ -383,45 +319,6 @@ def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:
     graph.legend_combos.append((tuple(known), label))
 
 
-def _parse_nonneg_number(value: str, name: str, *, allow_zero: bool) -> float | None:
-    """Parse a numeric %%metro directive value, warning and returning None if invalid.
-
-    ``allow_zero`` admits 0 (a gap may legitimately be zero); otherwise the value
-    must be strictly positive (a scale factor cannot be zero).
-    """
-    try:
-        num = float(value)
-    except ValueError:
-        _warn_directive(name, f"invalid {value!r}; expected a number")
-        return None
-    if num < 0 or (num == 0 and not allow_zero):
-        constraint = "non-negative" if allow_zero else "positive"
-        _warn_directive(name, f"must be {constraint}, got {value!r}; ignoring")
-        return None
-    return num
-
-
-def _parse_logo_scale_directive(value: str, graph: MetroGraph) -> None:
-    """Parse %%metro logo_scale: <factor> (1.0 = default auto-size)."""
-    scale = _parse_nonneg_number(value, "logo_scale", allow_zero=False)
-    if scale is not None:
-        graph.logo_scale = scale
-
-
-def _parse_legend_logo_gap_directive(value: str, graph: MetroGraph) -> None:
-    """Parse %%metro legend_logo_gap: <px> (horizontal gap logo->legend entries)."""
-    gap = _parse_nonneg_number(value, "legend_logo_gap", allow_zero=True)
-    if gap is not None:
-        graph.legend_logo_gap = gap
-
-
-def _parse_font_scale_directive(value: str, graph: MetroGraph) -> None:
-    """Parse %%metro font_scale: <factor> (1.0 = default text sizes)."""
-    scale = _parse_nonneg_number(value, "font_scale", allow_zero=False)
-    if scale is not None:
-        graph.font_scale = scale
-
-
 def _parse_marker_style(key: str, spec: str) -> MarkerStyle | None:
     """Parse a ``shape, fill`` marker spec into a MarkerStyle.
 
@@ -498,35 +395,51 @@ def _parse_line_spread_directive(value: str, graph: MetroGraph) -> None:
         graph.line_spread = mode
 
 
-# Graph-wide directives: keyed by exact name, each a (value, graph) handler.
-# Order is irrelevant - a key that is a prefix of another (``legend`` vs
-# ``legend_combo``) cannot shadow it. The section-scoped keys
-# (entry/exit/direction) and the file/files/dir icon keys are NOT here: they
-# need the enclosing section or the key itself, and are handled in
-# _apply_directive / _apply_scoped_directive.
+def _make_layout_option_handler(
+    opt: LayoutOption,
+) -> Callable[[str, MetroGraph], None]:
+    """Build the directive handler for a registry option.
+
+    The handler parses the payload via :func:`coerce`, writing the option's
+    graph field on success or warning (and leaving the default) on a malformed
+    value.  This is the directive half of the single-definition cascade in
+    :mod:`nf_metro.options`; the CLI half lives in :mod:`nf_metro.cli`.
+    """
+
+    def handler(value: str, graph: MetroGraph) -> None:
+        result, expected = coerce(opt, value)
+        if result is INVALID:
+            _warn_malformed(opt.name, value, expected)
+        else:
+            setattr(graph, opt.target_attr, result)
+
+    return handler
+
+
+# Graph-wide directives, keyed by exact name. The simple scalar/bool/enum
+# knobs are generated from the LAYOUT_OPTIONS registry (shared with the CLI);
+# the bespoke handlers below carry grammar the generic registry can't express.
+# Section-scoped (entry/exit/direction) and icon (file/files/dir) keys are
+# dispatched separately in _apply_directive / _apply_scoped_directive.
 _GLOBAL_DIRECTIVE_HANDLERS: dict[str, Callable[[str, MetroGraph], None]] = {
-    "title": _dir_title,
-    "style": _dir_style,
-    "logo": _dir_logo,
-    "line_order": _dir_line_order,
-    "line": _dir_line,
-    "compact_offsets": _dir_compact_offsets,
-    "center_ports": _dir_center_ports,
-    "fold_threshold": _dir_fold_threshold,
-    "label_angle": _dir_label_angle,
-    "legend_min_height": _dir_legend_min_height,
-    "off_track": _dir_off_track,
-    "grid": _parse_grid_directive,
-    "logo_scale": _parse_logo_scale_directive,
-    "font_scale": _parse_font_scale_directive,
-    "legend_logo_gap": _parse_legend_logo_gap_directive,
-    "line_spread": _parse_line_spread_directive,
-    "legend_combo": _parse_legend_combo_directive,
-    "legend": _parse_legend_directive,
-    "group": _parse_group_directive,
-    "marker_legend": _parse_marker_legend_directive,
-    "marker": _parse_marker_directive,
+    opt.name: _make_layout_option_handler(opt) for opt in LAYOUT_OPTIONS
 }
+_GLOBAL_DIRECTIVE_HANDLERS.update(
+    {
+        "title": _dir_title,
+        "style": _dir_style,
+        "logo": _dir_logo,
+        "line": _dir_line,
+        "off_track": _dir_off_track,
+        "grid": _parse_grid_directive,
+        "line_spread": _parse_line_spread_directive,
+        "legend_combo": _parse_legend_combo_directive,
+        "legend": apply_legend_directive,
+        "group": _parse_group_directive,
+        "marker_legend": _parse_marker_legend_directive,
+        "marker": _parse_marker_directive,
+    }
+)
 
 # Directives that act on the enclosing subgraph rather than the whole graph.
 _SCOPED_DIRECTIVES = ("entry", "exit", "direction")

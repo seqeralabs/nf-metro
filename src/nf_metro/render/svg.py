@@ -373,17 +373,27 @@ def render_svg(
     width: int | None = None,
     height: int | None = None,
     padding: float = CANVAS_PADDING,
-    animate: bool = False,
+    animate: bool | None = None,
     debug: bool = False,
     legend_position: str | None = None,
 ) -> str:
     """Render a metro map graph to an SVG string.
+
+    ``width``, ``height``, and ``animate`` fall back to the graph's fields
+    (set by directive or CLI flag) when left unset.
 
     If ``legend_position`` is given it overrides ``graph.legend_position``
     for this render only, without mutating the graph.
     """
     if not graph.stations:
         return '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
+
+    if width is None:
+        width = graph.width
+    if height is None:
+        height = graph.height
+    if animate is None:
+        animate = graph.animate
 
     scaled_theme = _scale_theme_fonts(theme, graph.font_scale)
     with font_scale_context(graph.font_scale):

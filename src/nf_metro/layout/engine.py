@@ -342,18 +342,22 @@ def compute_layout(
     section_gap: float = SECTION_GAP,
     section_x_padding: float = SECTION_X_PADDING,
     section_y_padding: float = SECTION_Y_PADDING,
-    section_x_gap: float = SECTION_X_GAP,
-    section_y_gap: float = SECTION_Y_GAP,
+    section_x_gap: float | None = None,
+    section_y_gap: float | None = None,
     validate: bool = _VALIDATE_DEFAULT,
 ) -> None:
     """Compute layout positions for all stations in the graph.
 
-    When ``y_spacing`` is ``None`` (the default) it is derived from the
-    graph's content via ``compute_min_y_spacing`` so renders adapt to
-    captioned icons and labelled stations automatically.  Pass an
-    explicit numeric value to override.
+    The spacing and section-gap arguments default to ``None``, meaning "read
+    the graph's field" (``graph.x_spacing`` etc., set by a ``%%metro``
+    directive).  An explicit value passed here overrides that field, so the
+    cascade is CLI flag > directive > auto/default.
 
-    If the explicit value is below the minimum the content needs, a
+    When ``y_spacing`` resolves to ``None`` it is derived from the graph's
+    content via ``compute_min_y_spacing`` so renders adapt to captioned icons
+    and labelled stations automatically.
+
+    If an explicit value is below the minimum the content needs, a
     ``UserWarning`` is emitted: the render is honoured at the requested
     pitch, but labels and captioned file-icons may collide.  Omit
     ``y_spacing`` to let the engine pick a safe value.
@@ -362,6 +366,19 @@ def compute_layout(
     key phases.  Violations raise ``PhaseInvariantError`` instead of
     silently producing broken layouts.
     """
+    if x_spacing is None:
+        x_spacing = graph.x_spacing
+    if y_spacing is None:
+        y_spacing = graph.y_spacing
+    if section_x_gap is None:
+        section_x_gap = (
+            graph.section_x_gap if graph.section_x_gap is not None else SECTION_X_GAP
+        )
+    if section_y_gap is None:
+        section_y_gap = (
+            graph.section_y_gap if graph.section_y_gap is not None else SECTION_Y_GAP
+        )
+
     # Read the phase-snapshot enable flag once (issue #363) and stash it on
     # the graph so per-stage call sites can snapshot without signature churn.
     # Off by default: when unset, each _snap call is a single attribute read.

@@ -23,7 +23,7 @@ def render_html(
     theme: Theme,
     width: int | None = None,
     height: int | None = None,
-    animate: bool = False,
+    animate: bool | None = None,
     debug: bool = False,
     embed_basename: str = "metro_map.html",
 ) -> str:
