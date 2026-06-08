@@ -328,14 +328,14 @@ def test_around_section_below_dispatched_for_cross_row_left_entry():
     right of target, and an intervening section in the middle row whose
     bbox falls in the inter-row channel's Y range.
     """
-    import nf_metro.layout.routing.core as core
+    import nf_metro.layout.routing.inter_section_handlers as ish
 
     fixture = Path(__file__).parent.parent / "examples" / "topologies"
     fixture = fixture / "around_section_below.mmd"
     graph = parse_metro_mermaid(fixture.read_text())
     compute_layout(graph)
 
-    real = core._route_around_section_below
+    real = ish._route_around_section_below
     captured: list = []
 
     def hook(edge, src, tgt, entry_port, i, n, ctx):
@@ -343,11 +343,11 @@ def test_around_section_below_dispatched_for_cross_row_left_entry():
         captured.append(result)
         return result
 
-    core._route_around_section_below = hook
+    ish._route_around_section_below = hook
     try:
         route_edges(graph)
     finally:
-        core._route_around_section_below = real
+        ish._route_around_section_below = real
 
     assert captured, "_route_around_section_below was not dispatched"
     for r in captured:

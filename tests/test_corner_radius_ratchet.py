@@ -1,9 +1,9 @@
-"""Ratchet: every corner radius in routing/core.py comes from corners.py.
+"""Ratchet: every corner radius in the routing handlers comes from corners.py.
 
 #508 centralised all corner-radius computation onto the ``routing/corners.py``
 helper family (``reference_anchored_radius`` as the single formula).  This test
 machine-enforces that it *stays* centralised: every value that reaches a
-``RoutedPath.curve_radii`` slot in ``routing/core.py`` must trace back -
+``RoutedPath.curve_radii`` slot in the routing handler modules must trace back -
 directly, through a same-scope name/alias hop, or through a tuple-unpack - to a
 call of one of those helpers.  Inline ``base +/- offset`` arithmetic (or a bare
 ``ctx.curve_radius`` / ``CURVE_RADIUS`` literal) feeding a radius slot fails,
@@ -23,9 +23,22 @@ from pathlib import Path
 
 import pytest
 
-CORE_PATH = Path(__file__).resolve().parents[1] / (
-    "src/nf_metro/layout/routing/core.py"
-)
+_ROUTING_DIR = Path(__file__).resolve().parents[1] / "src/nf_metro/layout/routing"
+
+# The handler family that route_edges dispatches through.  Corner radii are
+# written across these modules; every one must trace to a corners.py helper.
+ROUTING_PATHS = [
+    _ROUTING_DIR / name
+    for name in (
+        "core.py",
+        "context.py",
+        "inter_section_handlers.py",
+        "tb_handlers.py",
+        "intra_handlers.py",
+        "postprocess.py",
+        "normalize.py",
+    )
+]
 
 # corners.py entry points that legitimately *produce* (or clamp) a corner
 # radius.  ``reference_anchored_radius`` is the single underlying formula; the
@@ -228,9 +241,9 @@ class _RadiusSlotFinder(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def _find_radius_slots() -> list[tuple[int, ast.expr, _Scope]]:
+def _find_radius_slots(path: Path) -> list[tuple[int, ast.expr, _Scope]]:
     # Module-level assignments share the root scope.
-    tree = ast.parse(CORE_PATH.read_text(), filename=str(CORE_PATH))
+    tree = ast.parse(path.read_text(), filename=str(path))
     finder = _RadiusSlotFinder()
     _collect_assignments(finder.scope, tree.body)
     finder.visit(tree)
@@ -238,22 +251,24 @@ def _find_radius_slots() -> list[tuple[int, ast.expr, _Scope]]:
 
 
 def test_every_curve_radius_traces_to_a_corners_helper() -> None:
-    slots = _find_radius_slots()
+    per_file = {path: _find_radius_slots(path) for path in ROUTING_PATHS}
+    total = sum(len(slots) for slots in per_file.values())
 
-    # Guard against the finder silently matching nothing (e.g. core.py moved).
-    assert len(slots) >= 18, (
-        f"expected to find many curve_radii sites, found {len(slots)} - "
-        "the finder may be broken or core.py restructured"
+    # Guard against the finder silently matching nothing (e.g. modules moved).
+    assert total >= 18, (
+        f"expected to find many curve_radii sites, found {total} - "
+        "the finder may be broken or the routing modules restructured"
     )
 
     violations = [
-        lineno
+        f"{path.name}:{lineno}"
+        for path, slots in per_file.items()
         for lineno, value, scope in slots
         if not _resolves_to_helper(value, scope)
     ]
     assert not violations, (
         "curve_radii values not traceable to a corners.py helper at "
-        f"{CORE_PATH.name} lines {sorted(violations)}. Every corner radius must "
+        f"{sorted(violations)}. Every corner radius must "
         "flow through one of "
         f"{sorted(APPROVED_RADIUS_HELPERS)} (#508/#515); wrap a bare base radius "
         "as reference_anchored_radius(0.0, base) rather than using it raw or "

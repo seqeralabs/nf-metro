@@ -55,10 +55,16 @@ The pipeline is: **Parse** -> **Layout** -> **Render**
 #### Routing subpackage (`src/nf_metro/layout/routing/`)
 Edge routing with horizontal runs and 45-degree diagonal transitions. Inter-section edges use L-shaped (horizontal + vertical) routing. Junction stations get horizontal offset for visual line separation in bundles.
 
-- `core.py` - Main `route_edges()` dispatcher. Pre-computes all shared state into a `_RoutingCtx` dataclass, then dispatches each edge through handler functions in priority order: `_route_inter_section` -> `_route_tb_internal` -> `_route_tb_lr_exit` -> `_route_tb_lr_entry` -> `_route_perp_entry` -> `_route_intra_section`. First handler that returns a result wins.
+- `core.py` - Thin `route_edges()` dispatcher. Builds the `_RoutingCtx`, then dispatches each edge through handler functions in priority order: `_route_inter_section` -> `_route_tb_internal` -> `_route_tb_lr_exit` -> `_route_tb_lr_entry` -> `_route_perp_entry` -> `_route_entry_runway` -> `_route_intra_section` (first handler that returns a result wins), and runs the post-routing passes. The handler families and passes live in sibling modules and are re-exported from `core` for backward-compatible imports.
+- `context.py` - `_RoutingCtx`, the context builder (`_build_routing_context`), per-station offset helpers, and shared section-geometry helpers (`_resolve_section_col`, `_has_intervening_sections`, `compute_junction_fan_info`, ...).
+- `inter_section_handlers.py` - Handler 1 family: bypass, left/right entry wraps, around-section, inter-row corridors, stepped descent, L-shape.
+- `tb_handlers.py` - TB section handlers (TB internal, TB L/R exit + entry, perpendicular entry) and `_compute_diagonal_placement`.
+- `intra_handlers.py` - Entry-runway and in-section diagonal handlers.
+- `postprocess.py` - Diagonal bundle spread and bubble-station centring.
+- `normalize.py` - Channel and trunk normalization passes (`_normalize_gap_channels`, htrunk restacking, riser/port-approach alignment, ...).
 - `common.py` - Shared types (`RoutedPath`) and helper functions (`compute_bundle_info`, `inter_column_channel_x`, etc.).
 - `corners.py` - Corner radius computation and curve smoothing.
-- `inter_section.py` - Simplified inter-section routing (used by tests).
+- `inter_section.py` - Simplified inter-section routing (used by tests; distinct from `inter_section_handlers.py`).
 - `offsets.py` - Per-station Y offset computation for parallel lines.
 - `reversal.py` - Fold/reversal edge routing (serpentine row transitions).
 
