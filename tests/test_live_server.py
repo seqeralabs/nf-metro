@@ -2,13 +2,22 @@
 
 import json
 import threading
+import types
 import urllib.request
 import warnings
 
 import pytest
 
 from nf_metro.layout import compute_layout
-from nf_metro.live.server import MapModel, ProgressState, build_page, serve
+from nf_metro.live import server as server_mod
+from nf_metro.live.server import (
+    MapModel,
+    ProgressState,
+    _weblog_command,
+    build_page,
+    run_lifecycle,
+    serve,
+)
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.themes import THEMES
 
@@ -119,3 +128,143 @@ def test_http_smoke(token):
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_run_ended_tracks_terminal_state():
+    state = ProgressState(_model())
+    assert not state.run_ended.is_set()
+    state.ingest({"event": "completed"})
+    assert state.run_ended.is_set()
+    state.ingest({"event": "started", "runName": "r"})
+    assert not state.run_ended.is_set()
+    state.ingest({"event": "error"})
+    assert state.run_ended.is_set()
+
+
+def test_weblog_command_appends_when_absent():
+    assert _weblog_command(["nextflow", "run", "x"], "http://h/events") == [
+        "nextflow",
+        "run",
+        "x",
+        "-with-weblog",
+        "http://h/events",
+    ]
+
+
+def test_weblog_command_keeps_caller_supplied():
+    cmd = ["nextflow", "run", "x", "-with-weblog", "http://other/events"]
+    assert _weblog_command(cmd, "http://h/events") == cmd
+
+
+class _FakeProc:
+    last_cmd: list[str] | None = None
+
+    def __init__(self, cmd):
+        _FakeProc.last_cmd = cmd
+
+    def wait(self):
+        return 0
+
+    def poll(self):
+        return 0
+
+
+def _fake_server():
+    s = types.SimpleNamespace()
+    s.state = types.SimpleNamespace(run_ended=threading.Event())
+    s.serve_forever = lambda: None
+    s.calls = []
+    s.shutdown = lambda: s.calls.append("shutdown")
+    s.server_close = lambda: s.calls.append("close")
+    return s
+
+
+def test_run_lifecycle_stops_after_complete(monkeypatch):
+    monkeypatch.setattr(server_mod.time, "sleep", lambda s: None)
+    srv = _fake_server()
+    srv.state.run_ended.set()  # run already finished
+    run_lifecycle(
+        srv,
+        "http://x/",
+        "http://x/events",
+        shutdown_after_complete=True,
+        grace=0,
+        echo=lambda m: None,
+    )
+    assert srv.calls == ["shutdown", "close"]
+
+
+def test_run_lifecycle_launch_wires_weblog(monkeypatch):
+    monkeypatch.setattr(server_mod.time, "sleep", lambda s: None)
+    monkeypatch.setattr(server_mod.subprocess, "Popen", _FakeProc)
+    srv = _fake_server()
+    run_lifecycle(
+        srv,
+        "http://h/",
+        "http://h/events",
+        launch_cmd=("nextflow", "run", "x"),
+        shutdown_after_complete=True,
+        grace=0,
+        echo=lambda m: None,
+    )
+    assert _FakeProc.last_cmd == [
+        "nextflow",
+        "run",
+        "x",
+        "-with-weblog",
+        "http://h/events",
+    ]
+    assert srv.calls == ["shutdown", "close"]
+
+
+def test_run_lifecycle_opens_browser(monkeypatch):
+    monkeypatch.setattr(server_mod.time, "sleep", lambda s: None)
+    opened = []
+    monkeypatch.setattr(server_mod.webbrowser, "open", lambda u: opened.append(u))
+    srv = _fake_server()
+    srv.state.run_ended.set()
+    run_lifecycle(
+        srv,
+        "http://page/",
+        "http://page/events",
+        shutdown_after_complete=True,
+        grace=0,
+        open_browser=True,
+        echo=lambda m: None,
+    )
+    assert opened == ["http://page/"]
+
+
+def test_serve_cli_wires_launch_and_prints_url(monkeypatch, tmp_path):
+    from click.testing import CliRunner
+
+    from nf_metro import cli as cli_mod
+
+    mmd = tmp_path / "m.mmd"
+    mmd.write_text(
+        "%%metro line: a | A | #ff0000 | solid\n"
+        "%%metro process: x | FOO\n"
+        "graph LR\n"
+        "    a1[A] -->|a| x[X]\n"
+    )
+    calls = {}
+
+    def fake_serve_map(graph, theme, host=None, port=None, token=None):
+        return object()
+
+    def fake_lifecycle(httpd, page_url, events_url, **kw):
+        calls.update(page_url=page_url, events_url=events_url, **kw)
+
+    monkeypatch.setattr("nf_metro.live.server.serve", fake_serve_map)
+    monkeypatch.setattr("nf_metro.live.server.run_lifecycle", fake_lifecycle)
+
+    result = CliRunner().invoke(
+        cli_mod.cli,
+        ["serve", str(mmd), "--port", "9999", "--open", "--", "nextflow", "run", "p"],
+    )
+    assert result.exit_code == 0, result.output
+    assert calls["launch_cmd"] == ("nextflow", "run", "p")
+    assert calls["open_browser"] is True
+    assert calls["page_url"] == "http://127.0.0.1:9999/"
+    assert calls["events_url"] == "http://127.0.0.1:9999/events"
+    assert "▶ Open: http://127.0.0.1:9999/" in result.output

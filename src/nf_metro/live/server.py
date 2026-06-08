@@ -12,8 +12,12 @@ import html
 import json
 import queue
 import re
+import subprocess
 import threading
+import time
 import urllib.parse
+import webbrowser
+from collections.abc import Callable, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, TypedDict
 
@@ -72,6 +76,9 @@ class ProgressState:
             for st in model.stations
         }
         self.subscribers: set[queue.Queue[str]] = set()
+        # Set when the run reaches a terminal state (completed/error); cleared
+        # when a fresh run starts. Lets the CLI auto-stop after a run finishes.
+        self.run_ended = threading.Event()
 
     def _station_state(self, t: dict[str, set[int]]) -> tuple[str, int, int]:
         total = len(t["submitted"]) or (len(t["done"]) + len(t["failed"]))
@@ -106,8 +113,10 @@ class ProgressState:
                 for t in self.tasks.values():
                     for s in t.values():
                         s.clear()
+                self.run_ended.clear()
             elif event in ("completed", "error"):
                 self.run["state"] = "error" if event == "error" else "complete"
+                self.run_ended.set()
             else:
                 self._ingest_task(event, trace)
         self._broadcast()
@@ -311,18 +320,89 @@ def make_handler(
     return Handler
 
 
+class MetroServer(ThreadingHTTPServer):
+    """A serving HTTP server that carries its ProgressState.
+
+    Exposing ``state`` lets :func:`run_lifecycle` wait on the run's terminal
+    event to auto-stop, without a side channel.
+    """
+
+    state: ProgressState
+
+
 def serve(
     graph: MetroGraph,
     theme: Theme,
     host: str = "127.0.0.1",
     port: int = 8080,
     token: str | None = None,
-) -> ThreadingHTTPServer:
-    """Build the model and return a serving ``ThreadingHTTPServer``.
+) -> MetroServer:
+    """Build the model and return a serving ``MetroServer``.
 
     The caller drives the server (``serve_forever``); separating construction
     makes the handler and state testable without binding a socket.
     """
     model = MapModel(graph, theme)
     state = ProgressState(model)
-    return ThreadingHTTPServer((host, port), make_handler(model, state, token))
+    httpd = MetroServer((host, port), make_handler(model, state, token))
+    httpd.state = state
+    return httpd
+
+
+def _weblog_command(launch_cmd: Sequence[str], events_url: str) -> list[str]:
+    """The launch command with ``-with-weblog <events_url>`` appended.
+
+    Left untouched if the caller already passed their own ``-with-weblog``.
+    """
+    cmd = list(launch_cmd)
+    if "-with-weblog" not in cmd:
+        cmd += ["-with-weblog", events_url]
+    return cmd
+
+
+def run_lifecycle(
+    httpd: MetroServer,
+    page_url: str,
+    events_url: str,
+    *,
+    launch_cmd: Sequence[str] = (),
+    shutdown_after_complete: bool = False,
+    grace: float = 10.0,
+    open_browser: bool = False,
+    echo: Callable[[str], None] = print,
+) -> None:
+    """Run the server and tie its lifetime to the workflow.
+
+    Serves in a background thread. When ``launch_cmd`` is given it runs that
+    command (a ``nextflow run ...``) with the weblog wired up and waits for it
+    to exit; otherwise the run is launched separately. With
+    ``shutdown_after_complete`` the server stops ``grace`` seconds after the
+    run's terminal event (or after the launched command exits); otherwise it
+    serves until interrupted. Always tears the server down on the way out.
+    """
+    if open_browser:
+        webbrowser.open(page_url)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+    proc: subprocess.Popen[bytes] | None = None
+    try:
+        if launch_cmd:
+            proc = subprocess.Popen(_weblog_command(launch_cmd, events_url))
+            proc.wait()
+            echo(f"\nWorkflow finished. Map still live at {page_url}")
+        if shutdown_after_complete:
+            if not launch_cmd:
+                httpd.state.run_ended.wait()
+            echo(f"Shutting down in {grace:g}s ...")
+            time.sleep(grace)
+        else:
+            echo("Press Ctrl-C to stop.")
+            while True:
+                time.sleep(3600)
+    except KeyboardInterrupt:
+        echo("\nStopping.")
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+        httpd.shutdown()
+        httpd.server_close()

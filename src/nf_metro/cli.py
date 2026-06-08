@@ -314,7 +314,7 @@ def info(input_file: Path) -> None:
         )
 
 
-@cli.command()
+@cli.command(context_settings={"ignore_unknown_options": True})
 @click.argument("input_file", type=click.Path(exists=True, path_type=Path))
 @click.option("--port", type=int, default=8080, help="Port to listen on.")
 @click.option(
@@ -329,12 +329,33 @@ def info(input_file: Path) -> None:
     default=None,
     help="If set, /events POSTs must supply ?token=... or an X-Metro-Token header.",
 )
+@click.option(
+    "--open", "open_browser", is_flag=True, help="Open the live page in a browser."
+)
+@click.option(
+    "--shutdown-after-complete",
+    is_flag=True,
+    help="Stop the server shortly after the run's completed/error event "
+    "(or after the launched command exits).",
+)
+@click.option(
+    "--shutdown-grace",
+    type=float,
+    default=10.0,
+    help="Seconds to keep the map up after the run finishes "
+    "(with --shutdown-after-complete).",
+)
+@click.argument("launch_cmd", nargs=-1, type=click.UNPROCESSED)
 def serve(
     input_file: Path,
     port: int,
     host: str,
     theme: str | None,
     token: str | None,
+    open_browser: bool,
+    shutdown_after_complete: bool,
+    shutdown_grace: float,
+    launch_cmd: tuple[str, ...],
 ) -> None:
     """Serve a live-progress view of a metro map. [experimental]
 
@@ -343,10 +364,17 @@ def serve(
 
         nextflow run ... -with-weblog http://HOST:PORT/events
 
+    Or launch the run in one step (the weblog is wired up automatically) and
+    have the server open a browser and stop itself when the run finishes:
+
+        nf-metro serve map.mmd --open --shutdown-after-complete -- \\
+            nextflow run my/pipeline -profile docker
+
     Stations are tied to processes with `%%metro process:` directives in the
     map; only mapped stations change state. Use `nf-metro check-mapping` to
     verify the mapping covers the pipeline.
     """
+    from nf_metro.live.server import run_lifecycle
     from nf_metro.live.server import serve as serve_map
 
     try:
@@ -370,19 +398,31 @@ def serve(
         )
 
     httpd = serve_map(graph, theme_obj, host=host, port=port, token=token)
-    display_host = "localhost" if host == "127.0.0.1" else host
+    # Local subprocesses post to a concrete loopback address, not 0.0.0.0.
+    run_host = "127.0.0.1" if host in ("127.0.0.1", "0.0.0.0") else host
+    page_url = f"http://{run_host}:{port}/"
+    events_url = f"{page_url}events"
+    if token:
+        events_url += f"?token={token}"
+
     click.echo("nf-metro live progress (experimental)")
     click.echo(f"Mapped stations: {', '.join(mapped) or '(none)'}")
-    click.echo(
-        f"Serving http://{display_host}:{port}/  "
-        "(POST Nextflow weblog events to /events)"
+    click.echo("")
+    click.echo(f"    ▶ Open: {page_url}")
+    click.echo("")
+    if not launch_cmd:
+        click.echo(f"Send Nextflow weblog events to {events_url}")
+
+    run_lifecycle(
+        httpd,
+        page_url,
+        events_url,
+        launch_cmd=launch_cmd,
+        shutdown_after_complete=shutdown_after_complete,
+        grace=shutdown_grace,
+        open_browser=open_browser,
+        echo=click.echo,
     )
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        click.echo("\nbye")
-    finally:
-        httpd.server_close()
 
 
 @cli.command(name="check-mapping")
