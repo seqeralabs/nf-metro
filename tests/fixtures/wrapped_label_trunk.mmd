@@ -1,0 +1,14 @@
+%%metro title: Wrapped label overlaps track above
+%%metro line: qc    | Quality control | #f0a000 | solid
+%%metro line: align | Alignment       | #3a86ff | solid
+%%metro line: quant | Quantification  | #2bb673 | solid
+graph LR
+    input[Samplesheet] -->|qc,align,quant| trim[Trim Galore]
+    trim -->|qc| fastqc[FastQC]
+    trim -->|align,quant| index[Genome index]
+    index -->|align| star[STAR]
+    star -->|align| sort[Samtools sort]
+    index -->|quant| salmon[Salmon]
+    fastqc -->|qc| multiqc[MultiQC]
+    sort -->|align| multiqc
+    salmon -->|quant| multiqc

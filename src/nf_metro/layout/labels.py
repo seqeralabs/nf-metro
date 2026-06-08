@@ -512,6 +512,150 @@ def find_label_overlaps(
     return overlaps
 
 
+# Fraction of the font height the alphabetic baseline sits below the glyph
+# top.  Matches the renderer's dominant-baseline auto/hanging placement
+# closely enough to tell a line striking the name's ink from one clearing it.
+_GLYPH_ASCENT_RATIO = 0.8
+
+
+def _label_ink_y_band(p: LabelPlacement) -> tuple[float, float]:
+    """Approximate ``(y_top, y_bottom)`` of a label's drawn glyph ink.
+
+    Mirrors the renderer: a multi-line *above* label stacks downward from a
+    raised first-line baseline (dominant-baseline auto), so its ink grows
+    upward from the pill; a *below* label hangs its first line at ``p.y`` and
+    stacks downward.  Tighter than ``_label_bbox`` (which models an above
+    block as ``[y - text_h, y]``), so a trunk-strike test sees the name's real
+    ink rather than the looser collision box.
+    """
+    font_height = FONT_HEIGHT * _ACTIVE_FONT_SCALE
+    n = p.text.count("\n") + 1
+    line_spacing = font_height * LABEL_LINE_HEIGHT
+    ascent = font_height * _GLYPH_ASCENT_RATIO
+    if p.above:
+        first_baseline = p.y - (n - 1) * line_spacing
+        return first_baseline - ascent, p.y + (font_height - ascent)
+    return p.y, p.y + (n - 1) * line_spacing + font_height
+
+
+def find_wrapped_label_trunk_strikes(
+    graph: MetroGraph,
+    placements: list[LabelPlacement],
+    routes: list["RoutedPath"] | None,
+    tol: float = 0.75,
+) -> list[tuple[str, float, str]]:
+    """Find multi-line labels whose ink overruns a foreign horizontal trunk.
+
+    A wrapped label stacks its extra lines toward the row above (an above
+    label) or below, so its block can grow across a metro line the station
+    does not serve when that line runs horizontally over the label's width.
+    Single-line labels and a label's own served lines never count: a station
+    sits on its own line by construction and its name is offset clear of it.
+
+    Returns ``(station_id, trunk_y, line_id)`` for each strike.  Shared by the
+    render-time lift, the runtime guard, and the layout invariant test so all
+    agree on what "a line strikes a wrapped label" means.
+    """
+    if not routes:
+        return []
+    strikes: list[tuple[str, float, str]] = []
+    for p in placements:
+        if p.obstacle_bbox is not None or p.angle or "\n" not in p.text:
+            continue
+        st = graph.stations.get(p.station_id)
+        if st is None or st.is_port:
+            continue
+        served = set(graph.station_lines(st.id))
+        x0, _, x1, _ = _label_bbox(p)
+        ytop, ybot = _label_ink_y_band(p)
+        for route in routes:
+            if route.line_id in served:
+                continue
+            pts = route.points
+            for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+                if abs(by - ay) > tol:
+                    continue
+                seg_lo, seg_hi = (ax, bx) if ax <= bx else (bx, ax)
+                if seg_hi < x0 - tol or seg_lo > x1 + tol:
+                    continue
+                if ytop - tol <= ay <= ybot + tol:
+                    strikes.append((p.station_id, ay, route.line_id))
+                    break
+            else:
+                continue
+            break
+    return strikes
+
+
+def _pill_offsets(
+    graph: MetroGraph,
+    station: "Station",
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> tuple[float, float]:
+    """``(min_off, max_off)``: the pill's top/bottom edge offsets from
+    ``station.y``.
+
+    A multi-line station spreads its served lines around ``station.y``; a
+    label measures from the outermost line so it clears the whole pill.
+    Mirrors the per-station offset the placement loop computes.
+    """
+    if not station_offsets:
+        return 0.0, 0.0
+    offs = [
+        station_offsets.get((station.id, lid), 0.0)
+        for lid in graph.station_lines(station.id)
+    ]
+    if not offs:
+        return 0.0, 0.0
+    return min(offs), max(offs)
+
+
+def _lift_wrapped_labels_off_foreign_trunks(
+    placements: list[LabelPlacement],
+    graph: MetroGraph,
+    routes: list["RoutedPath"] | None,
+    station_offsets: dict[tuple[str, str], float] | None,
+    safe_offsets: dict[str, tuple[float, float]],
+    label_offset: float,
+) -> None:
+    """Pull a wrapped label back to its un-pushed anchor when its block
+    overruns a foreign trunk.
+
+    place_labels settles each label's side and any both-sides-collision
+    push-out from single-line geometry; ``_wrap_overlapping_labels`` then
+    stacks crowded labels onto extra lines that grow the block toward the row
+    above (above placement) or below.  A label the push-out drove toward a
+    neighbouring track can then overrun a metro line the station does not
+    serve.  Restoring the label to the anchor ``_try_place`` gives it un-pushed
+    (the closest it naturally sits to its own pill) keeps the grown block
+    clear; a graze with a neighbouring label is preferable to a line drawn
+    through the name.
+    """
+    struck = {sid for sid, _y, _lid in find_wrapped_label_trunk_strikes(
+        graph, placements, routes
+    )}
+    if not struck:
+        return
+    for p in placements:
+        if p.station_id not in struck:
+            continue
+        st = graph.stations.get(p.station_id)
+        if st is None:
+            continue
+        min_off, max_off = _pill_offsets(graph, st, station_offsets)
+        safe_above, safe_below = safe_offsets.get(
+            p.station_id, (label_offset, label_offset)
+        )
+        if p.above:
+            base_y = st.y + min_off - safe_above - DESCENDER_CLEARANCE
+            if base_y > p.y:  # base sits closer to the pill than the push-out
+                p.y = base_y
+        else:
+            base_y = st.y + max_off + safe_below
+            if base_y < p.y:
+                p.y = base_y
+
+
 def _wrap_text_to_chars(text: str, max_chars: int) -> str:
     """Word-wrap ``text`` so no line exceeds ``max_chars`` characters.
 
@@ -893,6 +1037,7 @@ def place_labels(
     routes: list["RoutedPath"] | None = None,
     allow_hyphenation: bool = True,
     label_angle: float = 0.0,
+    lift_wrapped_off_trunks: bool = True,
 ) -> list[LabelPlacement]:
     """Place station labels, alternating above/below stations.
 
@@ -908,6 +1053,12 @@ def place_labels(
     When ``label_angle`` is non-zero, LR/RL section labels are instead
     anchored at the pill and tilted (transit-map style); they hang on one
     side and pack by their narrow rotated footprint.
+
+    ``lift_wrapped_off_trunks`` runs a final render-time pass that pulls a
+    wrapped label back to its un-pushed anchor when its grown block overruns a
+    foreign trunk.  Callers measuring overlaps for the layout (the spacing
+    search probe) pass False so the engine sees the pre-lift geometry and the
+    deliberate neighbour graze never trips the label-overlap guard.
     """
     sorted_stations = sorted(
         (
@@ -1265,6 +1416,11 @@ def place_labels(
     _wrap_overlapping_labels(
         placements, graph, station_offsets, allow_hyphenation=allow_hyphenation
     )
+
+    if lift_wrapped_off_trunks:
+        _lift_wrapped_labels_off_foreign_trunks(
+            placements, graph, routes, station_offsets, safe_offsets, label_offset
+        )
 
     if graph.label_angle:
         _apply_rail_label_angle(

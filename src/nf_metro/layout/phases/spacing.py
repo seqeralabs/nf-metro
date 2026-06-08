@@ -31,6 +31,11 @@ def _probe_label_placements(
     bundle separation; place_labels expands section bboxes to fit labels).
     This probe snapshots station coordinates and section bboxes and restores
     them, so it never leaks those mutations into the positioned state.
+
+    The render-time wrapped-label trunk lift is held off here so the spacing
+    search and the label-overlap guard reason about the unlifted geometry; the
+    lift only moves a label closer to its own pill and never changes which
+    labels overlap their neighbours in a way the search should react to.
     """
     from nf_metro.layout.labels import place_labels
     from nf_metro.layout.routing import compute_station_offsets, route_edges
@@ -55,6 +60,7 @@ def _probe_label_placements(
             routes=routes,
             allow_hyphenation=allow_hyphenation,
             label_angle=label_angle,
+            lift_wrapped_off_trunks=False,
         )
         return offsets, placements
     except Exception:

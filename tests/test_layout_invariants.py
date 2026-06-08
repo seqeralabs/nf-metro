@@ -37,7 +37,11 @@ from nf_metro.layout.engine import (
     is_loop_side_branch_station,
 )
 from nf_metro.layout.geometry import segment_intersects_bbox
-from nf_metro.layout.labels import _label_bbox, place_labels
+from nf_metro.layout.labels import (
+    _label_bbox,
+    find_wrapped_label_trunk_strikes,
+    place_labels,
+)
 from nf_metro.layout.phases._common import _grow_section_bbox_upward
 from nf_metro.layout.phases.bbox import (
     _section_band_is_empty,
@@ -6101,4 +6105,36 @@ def test_genomeassembly_auto_layout_is_single_row():
     assert rows == {0}, (
         f"genomeassembly sections spread across rows {sorted(rows)}; "
         f"expected a single row"
+    )
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_wrapped_label_clears_foreign_trunk(fixture):
+    """No wrapped (multi-line) label's ink overruns a foreign metro trunk.
+
+    A label that wraps stacks its extra lines toward the row above (above
+    placement) or below, so its block grows toward a neighbouring track.  When
+    a collision push-out has already nudged the label toward that track, the
+    grown block can land on a metro line the station does not serve, drawing
+    the name straight through the line.  The renderer's pull-back keeps the
+    label at its un-pushed anchor (closest to its own pill) so the block stays
+    clear, accepting a graze with a neighbouring label rather than a line
+    striking through the text.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    theme = THEMES["nfcore"]
+    icon_obstacles = _compute_icon_obstacles(graph, theme, offsets)
+    placements = place_labels(
+        graph,
+        station_offsets=offsets,
+        icon_obstacles=icon_obstacles,
+        routes=routes,
+        label_angle=graph.label_angle or 0.0,
+    )
+    strikes = find_wrapped_label_trunk_strikes(graph, placements, routes)
+    assert not strikes, (
+        f"{fixture}: wrapped label(s) overrun a foreign trunk: "
+        + ", ".join(f"{sid} crosses line {lid} at y={y:.1f}" for sid, y, lid in strikes)
     )
