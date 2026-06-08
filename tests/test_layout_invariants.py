@@ -37,7 +37,7 @@ from nf_metro.layout.engine import (
     is_loop_side_branch_station,
 )
 from nf_metro.layout.geometry import segment_intersects_bbox
-from nf_metro.layout.labels import _label_bbox, place_labels
+from nf_metro.layout.labels import _label_bbox, label_glyph_ink_bbox, place_labels
 from nf_metro.layout.phases._common import _grow_section_bbox_upward
 from nf_metro.layout.phases.bbox import (
     _section_band_is_empty,
@@ -1269,6 +1269,102 @@ def test_off_track_outputs_below_downward_branch_producer(fixture):
             f"did not clear the section's top trunk row y={top_trunk_y}; it "
             f"crosses back over the trunk"
         )
+
+
+# Fixtures where a foreign fan/bypass diagonal rakes a wide label's glyph ink.
+# Clearing the diagonal needs the column widened so its corner seats clear of
+# the label, but the required amount depends on which side ``place_labels``
+# lands the label (a label flipped away from the diagonal is not struck), which
+# is only known after routing -- the column-sizing phase runs before that.  The
+# runtime guard ``_guard_no_line_strikes_label`` flags these; the widening
+# auto-fix is tracked as a follow-up.
+_LABEL_STRIKE_DIAGONAL_XFAIL = {
+    "topologies/funcprofiler_upstream.mmd": "fan diagonal rakes 'FMH FunProfiler'",
+    "guide/06a_without_hidden.mmd": "bypass diagonal rakes 'Quantification'",
+    "guide/06b_with_hidden.mmd": "bypass diagonal rakes 'Quantification'",
+    "da_pipeline.mmd": "bypass diagonal rakes 'annotate'",
+}
+
+_LABEL_STRIKE_FIXTURES = _params_with_xfails(ALL_FIXTURES, _LABEL_STRIKE_DIAGONAL_XFAIL)
+
+
+def _label_glyph_strikes(fixture: str) -> list[tuple[str, str]]:
+    """Return ``(station_id, line_id)`` pairs where a foreign line strikes a label.
+
+    Mirrors the renderer: ``route_edges`` mutates Station.x via diagonal
+    centring and the renderer places labels on that mutated geometry, so the
+    label glyph-ink boxes are built without restoring X.  A pair is reported
+    when a segment of a line the station does not carry (and which is not an
+    endpoint of the segment's edge) crosses the label's glyph-ink box.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    theme = THEMES["nfcore"]
+    icon_obstacles = _compute_icon_obstacles(graph, theme, offsets)
+    placements = place_labels(
+        graph,
+        station_offsets=offsets,
+        icon_obstacles=icon_obstacles,
+        routes=routes,
+        label_angle=graph.label_angle or 0.0,
+    )
+    strikes: list[tuple[str, str]] = []
+    for p in placements:
+        station = graph.stations.get(p.station_id)
+        if station is None or not station.label.strip():
+            continue
+        ink = label_glyph_ink_bbox(p)
+        carried = set(graph.station_lines(p.station_id))
+        for r in routes:
+            if r.edge.source == p.station_id or r.edge.target == p.station_id:
+                continue
+            if r.line_id in carried:
+                continue
+            pts = apply_route_offsets(r, offsets)
+            if any(
+                segment_intersects_bbox(x1, y1, x2, y2, ink)
+                for (x1, y1), (x2, y2) in zip(pts, pts[1:])
+            ):
+                strikes.append((p.station_id, r.line_id))
+                break
+    return strikes
+
+
+@pytest.mark.parametrize("fixture", _LABEL_STRIKE_FIXTURES)
+def test_no_line_strikes_through_label(fixture):
+    """No foreign line crosses a station label's glyph ink.
+
+    A line a station does not carry dipping, fanning, or running across that
+    station's name label reads as a strike-through.  The check models the label
+    by its glyph ink rather than the full reserved box, so a line clipping only
+    the empty reserved margin (an acceptable graze) is not flagged.
+    """
+    strikes = _label_glyph_strikes(fixture)
+    assert not strikes, (
+        f"{fixture}: foreign lines strike label glyph ink: "
+        + ", ".join(f"{lid!r} over {sid!r}" for sid, lid in strikes)
+    )
+
+
+def test_label_strike_guard_catches_a_strike():
+    """The runtime guard fires on a genuine glyph strike and clears a graze.
+
+    Locks the guard's teeth and its glyph-ink discrimination: a fixture whose
+    fan diagonal rakes a wide label's glyphs must raise, while one where a line
+    only clips a label's empty reserved margin must pass.
+    """
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_no_line_strikes_label,
+    )
+
+    struck = _layout("topologies/funcprofiler_upstream.mmd")
+    with pytest.raises(PhaseInvariantError, match="strikes through label"):
+        _guard_no_line_strikes_label(struck, "test")
+
+    grazed = _layout("variantbenchmarking.mmd")
+    _guard_no_line_strikes_label(grazed, "test")
 
 
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_DOWNWARD_OUTPUT)

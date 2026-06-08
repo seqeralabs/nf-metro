@@ -12,6 +12,7 @@ __all__ = [
     "active_font_scale",
     "find_label_overlaps",
     "font_scale_context",
+    "label_glyph_ink_bbox",
     "label_text_width",
     "place_labels",
 ]
@@ -28,6 +29,7 @@ from nf_metro.layout.constants import (
     DIAGONAL_LABEL_OFFSET,
     FONT_HEIGHT,
     LABEL_BBOX_MARGIN,
+    LABEL_GLYPH_INK_RATIO,
     LABEL_LINE_HEIGHT,
     LABEL_MARGIN,
     LABEL_NUDGE_MAX,
@@ -299,6 +301,25 @@ def _label_bbox(
         y_max = placement.y + text_h
 
     return (x_min, y_min, x_max, y_max)
+
+
+def label_glyph_ink_bbox(
+    placement: LabelPlacement,
+) -> tuple[float, float, float, float]:
+    """Return the label's drawn-glyph box, horizontally tightened to the ink.
+
+    The reserved box from :func:`_label_bbox` budgets ``CHAR_WIDTH`` per
+    character so labels claim ample collision room, but the rendered text is
+    narrower than that.  This shrinks the horizontal span to
+    ``LABEL_GLYPH_INK_RATIO`` of the reserved width about the box centre,
+    approximating where the glyphs are actually inked.  A route grazing only
+    the empty reserved margin clears this box; a route striking through the
+    text intersects it.  Vertical bounds match the reserved box.
+    """
+    x0, y0, x1, y1 = _label_bbox(placement)
+    center = (x0 + x1) / 2
+    ink_half = (x1 - x0) / 2 * LABEL_GLYPH_INK_RATIO
+    return (center - ink_half, y0, center + ink_half, y1)
 
 
 def _rotated_label_bbox(
@@ -1261,6 +1282,7 @@ def place_labels(
 
     if routes:
         _avoid_diagonal_routes(placements, graph, routes, station_offsets)
+        _avoid_horizontal_strikethrough(placements, graph, routes, station_offsets)
 
     _wrap_overlapping_labels(
         placements, graph, station_offsets, allow_hyphenation=allow_hyphenation
@@ -1533,6 +1555,87 @@ def _avoid_diagonal_routes(
             )
         siblings = [p for p in placements if p is not placement]
         if _has_collision(trial, siblings) or hits(_label_bbox(trial)):
+            continue
+        placement.x, placement.y, placement.above = trial.x, trial.y, trial.above
+
+
+def _avoid_horizontal_strikethrough(
+    placements: list[LabelPlacement],
+    graph: MetroGraph,
+    routes: list["RoutedPath"],
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> None:
+    """Flip a label off a foreign horizontal trunk that strikes its glyph ink.
+
+    A label hanging on the side of its station where another line's horizontal
+    run passes reads as struck through.  ``_avoid_diagonal_routes`` ignores
+    horizontal segments because labels normally clear the trunk they sit on;
+    this catches the case a *foreign* trunk (a line the station does not carry,
+    not an edge endpoint) crosses the label's glyph ink, and flips the label to
+    the opposite side when that side is free of label and ink collisions.
+    """
+    foreign: list[tuple[str, tuple[float, float, float, float]]] = []
+    for route in routes:
+        pts = list(route.points)
+        if station_offsets and not route.offsets_applied and pts:
+            so = station_offsets.get((route.edge.source, route.line_id), 0.0)
+            to = station_offsets.get((route.edge.target, route.line_id), 0.0)
+            pts[0] = (pts[0][0], pts[0][1] + so)
+            pts[-1] = (pts[-1][0], pts[-1][1] + to)
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+            if abs(y2 - y1) >= max(abs(x2 - x1), 1.0) * 0.05:
+                continue
+            foreign.append((route.line_id, (min(x1, x2), y1, max(x1, x2), y2)))
+    if not foreign:
+        return
+
+    for placement in [p for p in placements if p.obstacle_bbox is None]:
+        if placement.dominant_baseline or placement.angle:
+            continue
+        station = graph.stations.get(placement.station_id)
+        if station is None:
+            continue
+        carried = set(graph.station_lines(station.id))
+        ink = label_glyph_ink_bbox(placement)
+
+        def strikes(box: tuple[float, float, float, float]) -> bool:
+            for line_id, (sx1, sy1, sx2, sy2) in foreign:
+                if line_id in carried:
+                    continue
+                if segment_intersects_bbox(sx1, sy1, sx2, sy2, box):
+                    return True
+            return False
+
+        if not strikes(ink):
+            continue
+        if station_offsets:
+            offs = [
+                station_offsets.get((station.id, lid), 0.0)
+                for lid in graph.station_lines(station.id)
+            ]
+            min_off, max_off = (min(offs), max(offs)) if offs else (0.0, 0.0)
+        else:
+            min_off = max_off = 0.0
+        if placement.above:
+            gap = max((station.y + min_off) - placement.y, LABEL_OFFSET)
+            trial = LabelPlacement(
+                station_id=placement.station_id,
+                text=placement.text,
+                x=placement.x,
+                y=station.y + max_off + gap,
+                above=False,
+            )
+        else:
+            gap = max(placement.y - (station.y + max_off), LABEL_OFFSET)
+            trial = LabelPlacement(
+                station_id=placement.station_id,
+                text=placement.text,
+                x=placement.x,
+                y=station.y + min_off - gap,
+                above=True,
+            )
+        siblings = [p for p in placements if p is not placement]
+        if _has_collision(trial, siblings) or strikes(label_glyph_ink_bbox(trial)):
             continue
         placement.x, placement.y, placement.above = trial.x, trial.y, trial.above
 
