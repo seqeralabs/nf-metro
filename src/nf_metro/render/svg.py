@@ -1281,7 +1281,9 @@ def _draw_blank_terminus_nub(
     )
 
 
-def _station_group_attrs(graph: MetroGraph, theme: Theme, station: Station) -> dict:
+def _station_group_attrs(
+    graph: MetroGraph, theme: Theme, station: Station
+) -> dict[str, Any]:
     """Attributes for a station's wrapping ``<g>`` element.
 
     Makes each station one addressable DOM node carrying its identity and
