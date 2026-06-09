@@ -190,7 +190,6 @@ graph LR
         cnvkit[CNVkit]
         msisensor2[MSIsensor2]
         msisensorpro[MSIsensor-pro]
-        collect[ ]
         out[ ]
 
         %% Germline route (top rail): deepvariant, haplotypecaller, haplotyper,
@@ -207,7 +206,7 @@ graph LR
         indexcov -->|germline| manta
         manta -->|germline| tiddit
         tiddit -->|germline| cnvkit
-        cnvkit -->|germline| collect
+        cnvkit -->|germline| out
 
         %% Tumour-only route (middle rail): tnscope, lofreq, mutect2, msisensor2
         %% join here; mpileup/indexcov run tumour but not the combined pair.
@@ -222,7 +221,7 @@ graph LR
         tiddit -->|tumor_only| controlfreec
         controlfreec -->|tumor_only| cnvkit
         cnvkit -->|tumor_only| msisensor2
-        msisensor2 -->|tumor_only| collect
+        msisensor2 -->|tumor_only| out
 
         %% Tumour-normal pair route (bottom rail): muse, ascat, msisensorpro are
         %% combined-only; strelka2 runs germline + combined (not tumour-only).
@@ -237,9 +236,7 @@ graph LR
         ascat -->|pair_n,pair_t| controlfreec
         controlfreec -->|pair_n,pair_t| cnvkit
         cnvkit -->|pair_n,pair_t| msisensorpro
-        msisensorpro -->|pair_n,pair_t| collect
-
-        collect -->|germline,tumor_only,pair_n,pair_t| out
+        msisensorpro -->|pair_n,pair_t| out
     end
 
     %% Inter-section: core workflow flows through the top three sections.

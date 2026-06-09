@@ -15,8 +15,9 @@ sections whose ``line_spread`` resolves to ``rails`` (``graph.is_rail_section``)
 so the normal layout path is untouched for every other section.
 
 Scope (MVP): LR sections.  Each section's lines get rails centred about the
-section trunk Y; stations are placed by longest-path layer (X) and anchored to
-span their lines' rail range (Y).  Sections are stacked vertically in grid-row
+section trunk Y; stations are placed one per column in declaration-priority
+topological order (X) and anchored to span their lines' rail range (Y).
+Sections are stacked vertically in grid-row
 order.  Ports/junctions are positioned at their connecting rail Y so that the
 dedicated rail-mode router (see ``routing/rail.py``) can draw straight rails.
 """
@@ -225,12 +226,15 @@ def _layout_section_rails(
     per_line_y = {lid: rails_top + slot_offset[lid] for lid in lines}
     rail_y[section.id] = per_line_y
 
-    # X by longest-path layer over this section's internal stations, so a
-    # station's column reflects its in-section depth.
-    from nf_metro.layout.layers import assign_layers
+    # Longest-path layer over this section's internal stations, used below for
+    # head/tail terminus depth checks (column X is assigned separately).
+    import networkx as nx
+
+    from nf_metro.layout.layers import assign_layers, build_station_digraph
     from nf_metro.layout.phases._common import _build_section_subgraph
 
-    layers = assign_layers(_build_section_subgraph(graph, section))
+    section_dag = _build_section_subgraph(graph, section)
+    layers = assign_layers(section_dag)
 
     # Place real stations.
     real_ids = [
@@ -274,6 +278,25 @@ def _layout_section_rails(
     if above_band:
         per_line_y = {lid: rails_top + slot_offset[lid] for lid in lines}
         rail_y[section.id] = per_line_y
+
+    # Rails place one distinct station per column.  Order the columns by a
+    # topological sort that breaks ties on declaration order, so the columns
+    # follow the order stations are authored in (the intended reading) while
+    # always respecting edge direction; each on-rail station gets its own column
+    # and no two distinct stations share an X.
+    decl_index = {sid: i for i, sid in enumerate(section.station_ids)}
+    real_set = set(real_ids)
+    dag = build_station_digraph(section_dag)
+    topo = nx.lexicographical_topological_sort(dag, key=lambda n: decl_index.get(n, 0))
+    on_rail_ids = [
+        sid for sid in topo if sid in real_set and not graph.stations[sid].off_track
+    ]
+    seen = set(on_rail_ids)
+    on_rail_ids += [
+        sid for sid in real_ids if sid not in seen and not graph.stations[sid].off_track
+    ]
+    cols: dict[str, int] = {sid: i for i, sid in enumerate(on_rail_ids)}
+    max_col = len(on_rail_ids) - 1 if on_rail_ids else 0
 
     # A blank terminus that fans across rails needs its own horizontal room so
     # the fan S-curves keep their shape regardless of the shared column pitch.
@@ -323,41 +346,40 @@ def _layout_section_rails(
         tail_icon_extra = max(tail_icon_extra, need - section_x_padding)
     tail_icon_extra = max(0.0, tail_icon_extra)
 
-    def _layer_x(layer: float) -> float:
-        x = x_offset + section_x_padding + layer * x_spacing
-        if layer >= 1:
+    def _col_x(col: float) -> float:
+        x = x_offset + section_x_padding + col * x_spacing
+        if col >= 1:
             x += head_extra
-        if layer == max_layer:
+        if col == max_col:
             x += tail_extra
         return x
 
     for sid in real_ids:
         st = graph.stations[sid]
-        layer = layers.get(sid, 0)
-        st.layer = layer
-        st.x = _layer_x(layer)
 
         if st.off_track:
             # Park above the rails just to the left of the consumer column, so
             # the router draws a short, clean S-curve down into the rail rather
-            # than a long diagonal traverse from layer 0.  The consumer's layer
-            # determines the X; the off-track input sits half a column before it.
-            consumer_layer = min(
-                (
-                    layers.get(e.target, layer)
-                    for e in graph.edges_from(sid)
-                    if e.target in layers
-                ),
-                default=layer + 1,
+            # than a long diagonal traverse from the section head.  The consumer's
+            # column determines the X; the off-track input sits half a column
+            # before it.
+            consumer_col = min(
+                (cols[e.target] for e in graph.edges_from(sid) if e.target in cols),
+                default=max_col + 1,
             )
-            feed_layer = max(0.0, consumer_layer - 0.5)
-            st.x = _layer_x(feed_layer)
+            feed_col = max(0.0, consumer_col - 0.5)
+            st.layer = consumer_col
+            st.x = _col_x(feed_col)
             st.y = off_track_y
             st.track = 0.0
             st.rail_used_ys = []
             st.rail_top_y = None
             st.rail_bottom_y = None
             continue
+
+        col = cols[sid]
+        st.layer = col
+        st.x = _col_x(col)
 
         st_lines = graph.station_lines_ordered(sid)
         ys = [per_line_y[lid] for lid in st_lines if lid in per_line_y]
@@ -411,7 +433,7 @@ def _layout_section_rails(
     bbox_x = x_offset
     bbox_w = (
         section_x_padding * 2
-        + max_layer * x_spacing
+        + max_col * x_spacing
         + head_extra
         + tail_extra
         + tail_icon_extra
