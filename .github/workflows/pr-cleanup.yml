@@ -1,8 +1,17 @@
 name: Clean up PR render preview
 
 on:
-  pull_request:
+  # pull_request_target runs in the base-repo context with a write token even
+  # for fork PRs (a fork PR's pull_request token is read-only and cannot push
+  # to gh-pages). Safe here: no PR-head code is checked out or run; the job only
+  # removes a directory keyed by the integer PR number.
+  pull_request_target:
     types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number whose preview directory to remove
+        required: true
 
 permissions:
   contents: write
@@ -21,13 +30,19 @@ jobs:
           fetch-depth: 1
 
       - name: Remove preview directory
+        env:
+          PR: ${{ github.event.inputs.pr_number || github.event.number }}
         run: |
-          if [ -d "_pr/${{ github.event.number }}" ]; then
+          if ! echo "$PR" | grep -qE '^[0-9]+$'; then
+            echo "Refusing to act on non-numeric PR number '$PR'." >&2
+            exit 1
+          fi
+          if [ -d "_pr/$PR" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git rm -rf "_pr/${{ github.event.number }}"
-            git commit -m "Clean up render preview for PR #${{ github.event.number }}"
+            git rm -rf "_pr/$PR"
+            git commit -m "Clean up render preview for PR #$PR"
             git push
           else
-            echo "No preview directory found for PR #${{ github.event.number }}, nothing to clean up."
+            echo "No preview directory found for PR #$PR, nothing to clean up."
           fi
