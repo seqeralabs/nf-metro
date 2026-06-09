@@ -79,8 +79,7 @@ class ProgressState:
             for st in model.stations
         }
         self.subscribers: set[queue.Queue[str]] = set()
-        # Set when the run reaches a terminal state (completed/error); cleared
-        # when a fresh run starts. Lets the CLI auto-stop after a run finishes.
+        # Lets the CLI auto-stop after a run reaches a terminal state.
         self.run_ended = threading.Event()
 
     def _station_state(self, t: dict[str, set[int]]) -> tuple[str, int, int]:
@@ -253,73 +252,88 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 </html>"""
 
 
+class _QuietHandler(BaseHTTPRequestHandler):
+    """BaseHTTPRequestHandler that doesn't log every request to stderr."""
+
+    def log_message(self, *args: object) -> None:
+        pass
+
+
+def _send_body(
+    handler: BaseHTTPRequestHandler, code: int, body: str, ctype: str = "text/plain"
+) -> None:
+    data = body.encode()
+    handler.send_response(code)
+    handler.send_header("Content-Type", ctype)
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
+
+
+def _token_ok(handler: BaseHTTPRequestHandler, token: str | None) -> bool:
+    if token is None:
+        return True
+    qs = urllib.parse.urlparse(handler.path).query
+    given = urllib.parse.parse_qs(qs).get("token", [None])[0]
+    return (given or handler.headers.get("X-Metro-Token")) == token
+
+
+def _read_body(handler: BaseHTTPRequestHandler) -> bytes:
+    try:
+        length = int(handler.headers.get("Content-Length", 0))
+    except (TypeError, ValueError):
+        length = 0
+    return handler.rfile.read(length) if length else b""
+
+
+def _sse_response(handler: BaseHTTPRequestHandler, state: ProgressState) -> None:
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("Connection", "keep-alive")
+    handler.end_headers()
+    q = state.subscribe()
+    try:
+        while True:
+            try:
+                msg = q.get(timeout=15)
+                handler.wfile.write(f"data: {msg}\n\n".encode())
+            except queue.Empty:
+                handler.wfile.write(b": ping\n\n")
+            handler.wfile.flush()
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+    finally:
+        state.unsubscribe(q)
+
+
 def make_handler(
     model: MapModel, state: ProgressState, token: str | None
 ) -> type[BaseHTTPRequestHandler]:
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args: object) -> None:
-            pass
-
-        def _send(self, code: int, body: str, ctype: str = "text/plain") -> None:
-            data = body.encode()
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        def _authorized(self) -> bool:
-            if token is None:
-                return True
-            qs = urllib.parse.urlparse(self.path).query
-            given = urllib.parse.parse_qs(qs).get("token", [None])[0]
-            return (given or self.headers.get("X-Metro-Token")) == token
-
+    class Handler(_QuietHandler):
         def do_GET(self) -> None:
             path = urllib.parse.urlparse(self.path).path
             if path == "/":
-                self._send(200, build_page(model), "text/html; charset=utf-8")
+                _send_body(self, 200, build_page(model), "text/html; charset=utf-8")
             elif path == "/state":
-                self._send(200, json.dumps(state.snapshot()), "application/json")
+                _send_body(self, 200, json.dumps(state.snapshot()), "application/json")
             elif path == "/stream":
-                self._stream()
+                _sse_response(self, state)
             else:
-                self._send(404, "not found")
+                _send_body(self, 404, "not found")
 
         def do_POST(self) -> None:
             if urllib.parse.urlparse(self.path).path != "/events":
-                self._send(404, "not found")
+                _send_body(self, 404, "not found")
                 return
-            if not self._authorized():
-                self._send(401, "unauthorized")
+            if not _token_ok(self, token):
+                _send_body(self, 401, "unauthorized")
                 return
-            length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length) if length else b"{}"
             try:
-                state.ingest(json.loads(raw or b"{}"))
+                state.ingest(json.loads(_read_body(self) or b"{}"))
             except (json.JSONDecodeError, ValueError):
                 pass
-            self._send(200, "ok")
-
-        def _stream(self) -> None:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
-            self.end_headers()
-            q = state.subscribe()
-            try:
-                while True:
-                    try:
-                        msg = q.get(timeout=15)
-                        self.wfile.write(f"data: {msg}\n\n".encode())
-                    except queue.Empty:
-                        self.wfile.write(b": ping\n\n")
-                    self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            finally:
-                state.unsubscribe(q)
+            _send_body(self, 200, "ok")
 
     return Handler
 
@@ -361,8 +375,9 @@ class RunRegistry:
     weblog events drive. Many pipelines can report into one server.
     """
 
-    def __init__(self, theme: Theme) -> None:
+    def __init__(self, theme: Theme, max_runs: int = 100) -> None:
         self.theme = theme
+        self.max_runs = max_runs
         self.lock = threading.Lock()
         self.runs: dict[str, dict[str, Any]] = {}
 
@@ -378,6 +393,9 @@ class RunRegistry:
                 "name": name or rid,
                 "created": time.time(),
             }
+            # Bound memory on a long-lived server: drop the oldest runs.
+            while len(self.runs) > self.max_runs:
+                del self.runs[min(self.runs, key=lambda k: self.runs[k]["created"])]
         return rid
 
     def get(self, rid: str) -> dict[str, Any] | None:
@@ -464,57 +482,38 @@ def make_multi_handler(
     """
     run_re = re.compile(r"^/r/([0-9a-f]+)/(state|stream|events)?$")
 
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args: object) -> None:
-            pass
-
-        def _send(self, code: int, body: str, ctype: str = "text/plain") -> None:
-            data = body.encode()
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        def _authorized(self) -> bool:
-            if token is None:
-                return True
-            qs = urllib.parse.urlparse(self.path).query
-            given = urllib.parse.parse_qs(qs).get("token", [None])[0]
-            return (given or self.headers.get("X-Metro-Token")) == token
-
+    class Handler(_QuietHandler):
         def do_GET(self) -> None:
             path = urllib.parse.urlparse(self.path).path
             if path == "/":
-                self._send(200, build_index(registry), "text/html; charset=utf-8")
+                _send_body(self, 200, build_index(registry), "text/html; charset=utf-8")
                 return
             m = run_re.match(path)
             if not m:
-                self._send(404, "not found")
+                _send_body(self, 404, "not found")
                 return
             run = registry.get(m.group(1))
             if run is None:
-                self._send(404, "unknown run")
+                _send_body(self, 404, "unknown run")
                 return
             kind = m.group(2)
             state: ProgressState = run["state"]
             if kind is None:
                 page = build_page(run["model"], stream_url=f"/r/{m.group(1)}/stream")
-                self._send(200, page, "text/html; charset=utf-8")
+                _send_body(self, 200, page, "text/html; charset=utf-8")
             elif kind == "state":
-                self._send(200, json.dumps(state.snapshot()), "application/json")
+                _send_body(self, 200, json.dumps(state.snapshot()), "application/json")
             elif kind == "stream":
-                self._stream(state)
+                _sse_response(self, state)
             else:
-                self._send(404, "not found")
+                _send_body(self, 404, "not found")
 
         def do_POST(self) -> None:
             path = urllib.parse.urlparse(self.path).path
-            if not self._authorized():
-                self._send(401, "unauthorized")
+            if not _token_ok(self, token):
+                _send_body(self, 401, "unauthorized")
                 return
-            length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length) if length else b""
+            raw = _read_body(self)
 
             if path == "/maps":
                 name = urllib.parse.parse_qs(
@@ -523,48 +522,28 @@ def make_multi_handler(
                 try:
                     rid = registry.register(raw.decode("utf-8"), name)
                 except Exception as exc:  # parse/layout failure -> 400, never 500
-                    self._send(400, f"bad map: {exc}")
+                    _send_body(self, 400, f"bad map: {exc}")
                     return
                 body = json.dumps(
                     {"id": rid, "view": f"/r/{rid}/", "events": f"/r/{rid}/events"}
                 )
-                self._send(200, body, "application/json")
+                _send_body(self, 200, body, "application/json")
                 return
 
             m = run_re.match(path)
             if m and m.group(2) == "events":
                 run = registry.get(m.group(1))
                 if run is None:
-                    self._send(404, "unknown run")
+                    _send_body(self, 404, "unknown run")
                     return
                 try:
                     run["state"].ingest(json.loads(raw or b"{}"))
                 except (json.JSONDecodeError, ValueError):
                     pass
-                self._send(200, "ok")
+                _send_body(self, 200, "ok")
                 return
 
-            self._send(404, "not found")
-
-        def _stream(self, state: ProgressState) -> None:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
-            self.end_headers()
-            q = state.subscribe()
-            try:
-                while True:
-                    try:
-                        msg = q.get(timeout=15)
-                        self.wfile.write(f"data: {msg}\n\n".encode())
-                    except queue.Empty:
-                        self.wfile.write(b": ping\n\n")
-                    self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            finally:
-                state.unsubscribe(q)
+            _send_body(self, 404, "not found")
 
     return Handler
 

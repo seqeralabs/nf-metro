@@ -399,7 +399,7 @@ def serve(
 
     httpd = serve_map(graph, theme_obj, host=host, port=port, token=token)
     # Local subprocesses post to a concrete loopback address, not 0.0.0.0.
-    run_host = "127.0.0.1" if host in ("127.0.0.1", "0.0.0.0") else host
+    run_host = "127.0.0.1" if host == "0.0.0.0" else host
     page_url = f"http://{run_host}:{port}/"
     events_url = f"{page_url}events"
     if token:
