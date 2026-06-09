@@ -225,18 +225,34 @@ watch every run light up on one page; the server stays up across runs.
 
 ## 2c. The Nextflow plugin (optional)
 
-!!! warning "Not yet released"
-    The nf-metro Nextflow plugin is not yet published to the Nextflow plugin
-    registry. The instructions below describe its intended interface; watch
-    the [plugin repository](https://github.com/pinin4fjords/nf-metro-plugin)
-    for release announcements.
-
 Everything in §2 and §2b works with **no plugin**: Nextflow's built-in
 `-with-weblog` posts events to a running server, and the persistent dashboard
 is driven by a `curl` to `/maps` plus a per-run `-with-weblog` URL. The
 [nf-metro Nextflow plugin](https://github.com/pinin4fjords/nf-metro-plugin) is a
 convenience layer on top - it emits the same events, but from config and with
 the plumbing handled for you. The Python tooling here never depends on it.
+
+### Installing the plugin
+
+!!! warning "Not yet on the Nextflow plugin registry"
+    The plugin is not yet published to the Nextflow plugin registry, so the
+    normal `plugins { id 'nf-metro@0.1.0' }` auto-download does not work yet.
+    Build and install it locally first:
+
+    ```bash
+    git clone https://github.com/pinin4fjords/nf-metro-plugin
+    cd nf-metro-plugin
+    make install        # installs to ~/.nextflow/plugins
+    ```
+
+    Requires Java 17+ and Nextflow 25.10.0+. Once installed, the `plugins {}`
+    block in the config examples below will find it.
+
+    Alternatively, run without installing by prefixing your `nextflow` command:
+
+    ```bash
+    NXF_PLUGINS_DEV=/path/to/nf-metro-plugin nextflow run my/pipeline
+    ```
 
 ### Plugin demo: shared dashboard
 
