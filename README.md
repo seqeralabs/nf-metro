@@ -125,7 +125,7 @@ Every rendered SVG carries a machine-readable manifest so the committed file is 
 - A JSON manifest in a `<metadata id="nf-metro-manifest">` element: schema `version`, map `title`, canvas `width`/`height`, `lines`, `sections`, and `stations` (each with `id`, `label`, absolute `x`/`y`/`r`, the `lines` and `section` it belongs to, and the `processes` regexes it represents).
 - `data-metro-*` attributes on each station's `<g>` element (`data-metro-station`, `data-metro-cx/cy/r`, `data-metro-lines`, `data-metro-section`), so individual stations stay addressable directly in the DOM.
 
-The station `id` is the join key between the two: it equals `data-metro-station="<id>"` on the matching element. Coordinates are absolute SVG user units inside the `viewBox="0 0 width height"`, so an overlay sharing that viewBox lines up exactly. The manifest is embedded by default and adds no external dependencies; pass `--no-manifest` (or `%%metro manifest: false`) to emit the drawn map only. See [Live progress](docs/live.md#the-embedded-data-manifest) for the full schema and matching semantics.
+The station `id` is the join key between the two: it equals `data-metro-station="<id>"` on the matching element. Coordinates are absolute SVG user units inside the `viewBox="0 0 width height"`, so an overlay sharing that viewBox lines up exactly. The manifest is embedded by default and adds no external dependencies; set `%%metro manifest: false` to emit the drawn map only. See [Live progress](docs/live.md#the-embedded-data-manifest) for the full schema and matching semantics.
 
 ### `nf-metro validate`
 

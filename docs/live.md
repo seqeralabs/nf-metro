@@ -72,9 +72,9 @@ and carried two redundant, sanitization-safe ways (no `<script>`):
 1. A JSON manifest inside a `<metadata id="nf-metro-manifest">` element.
 2. `data-metro-*` attributes on each station's `<g>` element.
 
-Pass `--no-manifest` (or `%%metro manifest: false`) to emit the drawn map only,
-with no manifest, no `data-metro-*` attributes, and no station-group wrapper -
-byte-for-byte the same SVG as a build that predates the manifest.
+Set `%%metro manifest: false` to emit the drawn map only, with no manifest, no
+`data-metro-*` attributes, and no station-group wrapper - byte-for-byte the same
+SVG as a build that predates the manifest.
 
 ### Schema
 
