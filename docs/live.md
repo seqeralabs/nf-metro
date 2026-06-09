@@ -133,6 +133,31 @@ Open `http://localhost:8080/` to watch every run light up on one page; the
 server stays up across runs. Without the plugin you can register and drive a
 run with `curl` exactly as shown above.
 
+## 2c. The Nextflow plugin (optional)
+
+Everything above works with **no plugin**: Nextflow's built-in `-with-weblog`
+posts events to a running server, and the persistent dashboard is driven by a
+`curl` to `/maps` plus a per-run `-with-weblog` URL. The
+[nf-metro Nextflow plugin](https://github.com/pinin4fjords/nf-metro-plugin) is a
+convenience layer on top - it emits the same events, but from config and with
+the plumbing handled for you. The Python tooling here never depends on it.
+
+What the plugin adds over `-with-weblog`:
+
+| Task | Without the plugin | With the plugin |
+|------|--------------------|-----------------|
+| Wiring | `-with-weblog <url>` on every run | One `plugins { id 'nf-metro' }` + a `metro {}` block in `nextflow.config` |
+| Run the server | Start `nf-metro serve` yourself in another shell | **Managed mode** spawns and stops it for the run (and can open the browser) |
+| Shared dashboard | `curl` the map to `/maps`, read the run id, then point `-with-weblog` at `/r/<id>/events` | **Central mode** registers the map and wires the per-run endpoint automatically |
+| Find the map | - | Prints the live URL in the run log |
+
+So the standalone path is fine for a quick look; the plugin is worth it when you
+want the integration to live in the pipeline's config, want the server started
+and stopped for you, or want runs to self-register on a shared dashboard (the
+register-then-emit step is awkward to do by hand). The plugin has three modes -
+attach, managed, central - documented in its
+[README](https://github.com/pinin4fjords/nf-metro-plugin#three-modes).
+
 ## 3. Keep the mapping honest
 
 The risk with any mapping is drift: a new process the map can't show (silently
