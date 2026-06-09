@@ -5,24 +5,12 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
-  pull-requests: write
-
-concurrency:
-  group: gh-pages
-  cancel-in-progress: false
+  contents: read
 
 jobs:
   render-diff:
     runs-on: ubuntu-latest
     steps:
-      - name: Mark previous preview as stale
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: render-preview
-          message: |
-            **Render preview**: :hourglass_flowing_sand: rendering in progress...
-
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -86,31 +74,20 @@ jobs:
             exit $EXIT_CODE
           fi
 
-      # --- Deploy preview ---
-      - name: Deploy to GitHub Pages
-        if: steps.diff.outputs.has_changes == 'true'
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: /tmp/diff_site
-          destination_dir: _pr/${{ github.event.number }}
-          keep_files: true
+      # A fork PR's GITHUB_TOKEN is read-only, so this job cannot deploy Pages or
+      # comment. Hand the site plus the publish decision to pr-render-publish.yml,
+      # which runs from the base repo with a write token via workflow_run.
+      - name: Stage preview metadata
+        run: |
+          mkdir -p /tmp/diff_site /tmp/preview_meta
+          echo "${{ github.event.number }}" > /tmp/preview_meta/pr_number.txt
+          echo "${{ steps.diff.outputs.has_changes }}" > /tmp/preview_meta/has_changes.txt
 
-      - name: Comment on PR (changes found)
-        if: steps.diff.outputs.has_changes == 'true'
-        uses: marocchino/sticky-pull-request-comment@v2
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v4
         with:
-          header: render-preview
-          message: |
-            **Render preview** is ready for review:
-            :framed_picture: https://pinin4fjords.github.io/nf-metro/_pr/${{ github.event.number }}/
-
-            This preview shows only the renders that changed compared to `main`.
-
-      - name: Comment on PR (no changes)
-        if: steps.diff.outputs.has_changes == 'false'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: render-preview
-          message: |
-            **Render preview**: no visual changes detected. All renders match `main`.
+          name: render-preview
+          path: |
+            /tmp/diff_site
+            /tmp/preview_meta
+          retention-days: 3
