@@ -1,0 +1,65 @@
+name: Publish render preview
+
+on:
+  workflow_run:
+    workflows: ["PR render preview"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Download preview artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: render-preview
+          path: artifact
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read preview metadata
+        id: meta
+        run: |
+          echo "pr=$(cat artifact/preview_meta/pr_number.txt)" >> "$GITHUB_OUTPUT"
+          echo "has_changes=$(cat artifact/preview_meta/has_changes.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to GitHub Pages
+        if: steps.meta.outputs.has_changes == 'true'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: artifact/diff_site
+          destination_dir: _pr/${{ steps.meta.outputs.pr }}
+          keep_files: true
+
+      - name: Comment on PR (changes found)
+        if: steps.meta.outputs.has_changes == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: render-preview
+          number: ${{ steps.meta.outputs.pr }}
+          message: |
+            **Render preview** is ready for review:
+            :framed_picture: https://pinin4fjords.github.io/nf-metro/_pr/${{ steps.meta.outputs.pr }}/
+
+            This preview shows only the renders that changed compared to `main`.
+
+      - name: Comment on PR (no changes)
+        if: steps.meta.outputs.has_changes == 'false'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: render-preview
+          number: ${{ steps.meta.outputs.pr }}
+          message: |
+            **Render preview**: no visual changes detected. All renders match `main`.
