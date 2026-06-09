@@ -39,7 +39,11 @@ def _layout_cli_option(opt: LayoutOption) -> Callable[..., Any]:
     if opt.kind == "bool":
         no_flag = "--no-" + opt.name.replace("_", "-")
         return click.option(
-            f"{opt.cli_flag}/{no_flag}", opt.name, default=None, help=opt.help
+            f"{opt.cli_flag}/{no_flag}",
+            opt.name,
+            default=None,
+            help=opt.help,
+            hidden=opt.hidden,
         )
     ctype: Any = (
         click.Choice(opt.choices)
@@ -50,7 +54,14 @@ def _layout_cli_option(opt: LayoutOption) -> Callable[..., Any]:
             "str": str,
         }[opt.kind]
     )
-    return click.option(opt.cli_flag, opt.name, type=ctype, default=None, help=opt.help)
+    return click.option(
+        opt.cli_flag,
+        opt.name,
+        type=ctype,
+        default=None,
+        help=opt.help,
+        hidden=opt.hidden,
+    )
 
 
 def layout_cli_options(f: _F) -> _F:

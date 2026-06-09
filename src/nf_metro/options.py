@@ -42,6 +42,7 @@ class LayoutOption:
     choices: tuple[str, ...] = ()
     sign: NumberSign = "any"
     parse_time: bool = False  # consumed during parsing, not after
+    hidden: bool = False  # omit the generated CLI flag from --help
 
     @property
     def target_attr(self) -> str:
@@ -205,6 +206,7 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         name="manifest",
         attr="embed_manifest",
         kind="bool",
+        hidden=True,
         help="Embed the machine-readable data manifest (the <metadata> block "
         "and per-station data-metro-* attributes) in the SVG. On by default; "
         "--no-manifest emits the drawn map only.",
