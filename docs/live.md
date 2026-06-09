@@ -248,10 +248,12 @@ the plumbing handled for you. The Python tooling here never depends on it.
     Requires Java 17+ and Nextflow 25.10.0+. Once installed, the `plugins {}`
     block in the config examples below will find it.
 
-    Alternatively, run without installing by prefixing your `nextflow` command:
+    Alternatively, run without installing by pointing Nextflow at the build tree
+    directly (still requires `-plugins` on the command line):
 
     ```bash
-    NXF_PLUGINS_DEV=/path/to/nf-metro-plugin nextflow run my/pipeline
+    NXF_PLUGINS_DEV=/path/to/nf-metro-plugin \
+      nextflow run my/pipeline -plugins nf-metro@0.1.0
     ```
 
 ### Plugin demo: shared dashboard
