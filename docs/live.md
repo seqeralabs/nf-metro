@@ -258,6 +258,9 @@ the plumbing handled for you. The Python tooling here never depends on it.
 
 ### Plugin demo: shared dashboard
 
+The plugin's `metro.server` mode does the register-and-emit automatically, so a
+plain `nextflow run` shows up on the dashboard:
+
 Start one persistent server:
 
 ```bash
