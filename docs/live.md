@@ -200,9 +200,45 @@ map. Endpoints mirror the single-map server under a `/r/<id>/` prefix
 
 ### Demo: a shared dashboard
 
-The [Nextflow plugin](https://github.com/pinin4fjords/nf-metro-plugin)'s
-`metro.server` mode does the register-and-emit automatically, so a plain
-`nextflow run` shows up on the dashboard:
+Start one persistent server:
+
+```bash
+nf-metro serve-multi --port 8080            # dashboard at http://localhost:8080/
+```
+
+Register each pipeline's map, capture the run id, then point Nextflow at the
+run's own events endpoint:
+
+```bash
+# register the map (prints JSON with "id" and "events" fields)
+RUN=$(curl -s --data-binary @assets/metro_map.mmd \
+      "http://localhost:8080/maps?name=myrun")
+RUN_ID=$(echo "$RUN" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+# start the pipeline pointing at that run's events endpoint
+nextflow run my/pipeline \
+  -with-weblog "http://localhost:8080/r/${RUN_ID}/events"
+```
+
+Repeat for as many pipelines as you like. Open `http://localhost:8080/` to
+watch every run light up on one page; the server stays up across runs.
+
+## 2c. The Nextflow plugin (optional)
+
+!!! warning "Not yet released"
+    The nf-metro Nextflow plugin is not yet published to the Nextflow plugin
+    registry. The instructions below describe its intended interface; watch
+    the [plugin repository](https://github.com/pinin4fjords/nf-metro-plugin)
+    for release announcements.
+
+Everything in §2 and §2b works with **no plugin**: Nextflow's built-in
+`-with-weblog` posts events to a running server, and the persistent dashboard
+is driven by a `curl` to `/maps` plus a per-run `-with-weblog` URL. The
+[nf-metro Nextflow plugin](https://github.com/pinin4fjords/nf-metro-plugin) is a
+convenience layer on top - it emits the same events, but from config and with
+the plumbing handled for you. The Python tooling here never depends on it.
+
+### Plugin demo: shared dashboard
 
 Start one persistent server:
 
@@ -227,19 +263,7 @@ nextflow run my/pipeline      # repeat for as many pipelines as you like
 
 Each run prints `registered on ...; live map: http://localhost:8080/r/<id>/`.
 Open `http://localhost:8080/` to watch every run light up on one page; the
-server stays up across runs. Without the plugin you can register and drive a
-run with `curl` exactly as shown above.
-
-## 2c. The Nextflow plugin (optional)
-
-Everything above works with **no plugin**: Nextflow's built-in `-with-weblog`
-posts events to a running server, and the persistent dashboard is driven by a
-`curl` to `/maps` plus a per-run `-with-weblog` URL. The
-[nf-metro Nextflow plugin](https://github.com/pinin4fjords/nf-metro-plugin) is a
-convenience layer on top - it emits the same events, but from config and with
-the plumbing handled for you. The Python tooling here never depends on it.
-
-What the plugin adds over `-with-weblog`:
+server stays up across runs.
 
 | Task | Without the plugin | With the plugin |
 |------|--------------------|-----------------|
