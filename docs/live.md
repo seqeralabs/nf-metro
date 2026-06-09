@@ -248,10 +248,14 @@ the plumbing handled for you. The Python tooling here never depends on it.
     Requires Java 17+ and Nextflow 25.10.0+. Once installed, the `plugins {}`
     block in the config examples below will find it.
 
-    Alternatively, run without installing by pointing Nextflow at the build tree
-    directly (still requires `-plugins` on the command line):
+    Alternatively, run against the build tree without installing (build first,
+    then set `NXF_PLUGINS_DEV`; still requires `-plugins` on the command line):
 
     ```bash
+    git clone https://github.com/pinin4fjords/nf-metro-plugin
+    cd nf-metro-plugin
+    make assemble       # build but do not install
+    # then, from anywhere:
     NXF_PLUGINS_DEV=/path/to/nf-metro-plugin \
       nextflow run my/pipeline -plugins nf-metro@0.1.0
     ```
@@ -299,6 +303,13 @@ and stopped for you, or want runs to self-register on a shared dashboard (the
 register-then-emit step is awkward to do by hand). The plugin has three modes -
 attach, managed, central - documented in its
 [README](https://github.com/pinin4fjords/nf-metro-plugin#three-modes).
+
+!!! note "Managed mode requires `nf-metro` on PATH"
+    Managed mode spawns `nf-metro serve` as a subprocess, so the `nf-metro`
+    command must be on the PATH when Nextflow runs. If it is not found the
+    plugin logs a warning and the pipeline continues without the live map.
+    Use `metro.binary = '/absolute/path/to/nf-metro'` in the config to point
+    to a specific installation.
 
 ## 3. Keep the mapping honest
 
