@@ -81,6 +81,28 @@ blank map.
 | `GET /state` | Current state as JSON (handy for scripting/debugging). |
 | `POST /events` | Nextflow weblog receiver. |
 
+## 2b. Persistent server (many runs)
+
+`serve` hosts one map. To run a long-lived server that many pipelines report
+into - a shared dashboard - use `serve-multi`, which starts with **no** map.
+A pipeline registers its map by POSTing the `.mmd` to `/maps`, then sends
+weblog events to the run's own endpoint:
+
+```bash
+nf-metro serve-multi --port 8080        # index at http://localhost:8080/
+
+# a pipeline registers its map (returns {"id","view","events"})
+curl -s --data-binary @map.mmd "http://localhost:8080/maps?name=myrun"
+# then POST weblog events to the returned /r/<id>/events
+```
+
+`GET /` lists every run with a live status; `GET /r/<id>/` is that run's live
+map. The [Nextflow plugin](https://github.com/pinin4fjords/nf-metro-plugin)'s
+`metro.server` mode does the register-and-emit automatically, so a plain
+`nextflow run` shows up on the dashboard. Endpoints mirror the single-map
+server under a `/r/<id>/` prefix (`/r/<id>/`, `/r/<id>/state`,
+`/r/<id>/stream`, `POST /r/<id>/events`); `POST /maps` registers a run.
+
 ## 3. Keep the mapping honest
 
 The risk with any mapping is drift: a new process the map can't show (silently

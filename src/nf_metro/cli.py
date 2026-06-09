@@ -425,6 +425,62 @@ def serve(
     )
 
 
+@cli.command(name="serve-multi")
+@click.option("--port", type=int, default=8080, help="Port to listen on.")
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    help="Interface to bind. Default 127.0.0.1 (local only); "
+    "use 0.0.0.0 to accept connections from other hosts.",
+)
+@click.option("--theme", type=str, default="nfcore", help="Theme name (nfcore, light).")
+@click.option(
+    "--token",
+    default=None,
+    help="If set, POSTs to /maps and /r/*/events must supply ?token=... "
+    "or an X-Metro-Token header.",
+)
+def serve_multi_cmd(port: int, host: str, theme: str, token: str | None) -> None:
+    """Run a persistent live server many pipelines can report into. [experimental]
+
+    Unlike `serve` (one map), this starts with no map. A pipeline registers its
+    map by POSTing the .mmd to /maps and then sends weblog events to the run's
+    /r/<id>/events endpoint:
+
+        curl -s --data-binary @map.mmd "http://HOST:PORT/maps?name=myrun"
+        # -> {"id": "...", "view": "/r/<id>/", "events": "/r/<id>/events"}
+
+    The index at http://HOST:PORT/ lists every run with a live status. The
+    nf-metro Nextflow plugin's `metro.server` mode does the register-and-emit
+    automatically.
+    """
+    from nf_metro.live.server import serve_multi
+
+    if theme not in THEMES:
+        raise click.ClickException(
+            f"unknown theme {theme!r}; choose from {list(THEMES)}"
+        )
+    if host == "0.0.0.0":  # noqa: S104 - explicit opt-in, warned
+        click.echo(
+            "Binding 0.0.0.0: reachable from other hosts; "
+            "use --token to restrict POSTs.",
+            err=True,
+        )
+    httpd = serve_multi(THEMES[theme], host=host, port=port, token=token)
+    display_host = "localhost" if host == "127.0.0.1" else host
+    click.echo("nf-metro live progress - persistent server (experimental)")
+    click.echo("")
+    click.echo(f"    ▶ Runs index: http://{display_host}:{port}/")
+    click.echo("")
+    click.echo(f"Pipelines register maps at http://{display_host}:{port}/maps")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("\nStopping.")
+    finally:
+        httpd.server_close()
+
+
 @cli.command(name="check-mapping")
 @click.argument("input_file", type=click.Path(exists=True, path_type=Path))
 @click.option(

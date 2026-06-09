@@ -16,12 +16,15 @@ import subprocess
 import threading
 import time
 import urllib.parse
+import uuid
 import webbrowser
 from collections.abc import Callable, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, TypedDict
 
+from nf_metro.layout import compute_layout
 from nf_metro.live.mapping import stations_for_process
+from nf_metro.parser import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render import render_svg
 from nf_metro.render.style import Theme
@@ -161,7 +164,7 @@ class ProgressState:
             q.put(msg)
 
 
-def build_page(model: MapModel) -> str:
+def build_page(model: MapModel, stream_url: str = "/stream") -> str:
     halos = "\n".join(
         f'<g class="halo pending" id="halo-{html.escape(st["id"])}">'
         f'<circle class="led" cx="{st["x"]}" cy="{st["y"]}" r="7"/>'
@@ -178,6 +181,7 @@ def build_page(model: MapModel) -> str:
         height=model.height,
         base_svg=model.svg_body,
         overlay=overlay,
+        stream_url=stream_url,
     )
 
 
@@ -233,7 +237,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   {overlay}
 </div></div>
 <script>
-  const es = new EventSource('/stream');
+  const es = new EventSource('{stream_url}');
   es.onmessage = (e) => {{
     const data = JSON.parse(e.data);
     document.getElementById('run-name').textContent =
@@ -347,6 +351,233 @@ def serve(
     httpd = MetroServer((host, port), make_handler(model, state, token))
     httpd.state = state
     return httpd
+
+
+class RunRegistry:
+    """A persistent server's set of live runs, keyed by a short id.
+
+    A run is registered by POSTing its .mmd to ``/maps``; the registry parses
+    and lays it out once, then holds a MapModel + ProgressState that the run's
+    weblog events drive. Many pipelines can report into one server.
+    """
+
+    def __init__(self, theme: Theme) -> None:
+        self.theme = theme
+        self.lock = threading.Lock()
+        self.runs: dict[str, dict[str, Any]] = {}
+
+    def register(self, mmd_text: str, name: str | None) -> str:
+        graph = parse_metro_mermaid(mmd_text)
+        compute_layout(graph)
+        model = MapModel(graph, self.theme)
+        rid = uuid.uuid4().hex[:8]
+        with self.lock:
+            self.runs[rid] = {
+                "model": model,
+                "state": ProgressState(model),
+                "name": name or rid,
+                "created": time.time(),
+            }
+        return rid
+
+    def get(self, rid: str) -> dict[str, Any] | None:
+        with self.lock:
+            return self.runs.get(rid)
+
+    def listing(self) -> list[dict[str, Any]]:
+        with self.lock:
+            runs = list(self.runs.items())
+        out = []
+        for rid, r in runs:
+            snap = r["state"].snapshot()
+            out.append(
+                {
+                    "id": rid,
+                    "name": r["name"],
+                    "created": r["created"],
+                    "run_state": snap["run"]["state"],
+                    "done": sum(
+                        1 for v in snap["stations"].values() if v["state"] == "done"
+                    ),
+                    "total": len(snap["stations"]),
+                }
+            )
+        out.sort(key=lambda r: r["created"], reverse=True)
+        return out
+
+
+def build_index(registry: RunRegistry) -> str:
+    rows = "\n".join(
+        f'<a class="run {html.escape(r["run_state"])}" href="/r/{r["id"]}/">'
+        f'<span class="name">{html.escape(r["name"])}</span>'
+        f'<span class="meta">{html.escape(r["run_state"])} &middot; '
+        f"{r['done']}/{r['total']} done</span></a>"
+        for r in registry.listing()
+    )
+    if not rows:
+        rows = '<p class="empty">No runs yet. Point a pipeline at this server.</p>'
+    return INDEX_TEMPLATE.format(rows=rows)
+
+
+INDEX_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta http-equiv="refresh" content="3"/>
+<title>nf-metro live</title>
+<style>
+  body {{ margin: 0; background: #0b1021; color: #e6e9f0;
+         font-family: -apple-system, Segoe UI, Roboto, sans-serif; }}
+  header {{ padding: 0.8rem 1rem; border-bottom: 1px solid #222a44; font-weight: 600; }}
+  .runs {{ display: flex; flex-direction: column; gap: 0.5rem; padding: 1rem;
+          max-width: 720px; }}
+  .run {{ display: flex; justify-content: space-between; align-items: center;
+         padding: 0.7rem 1rem; border: 1px solid #222a44; border-radius: 8px;
+         text-decoration: none; color: #e6e9f0; border-left-width: 4px; }}
+  .run:hover {{ background: #141a30; }}
+  .run.running {{ border-left-color: #ffc23a; }}
+  .run.complete {{ border-left-color: #2bee92; }}
+  .run.error {{ border-left-color: #ff4d4d; }}
+  .run.idle {{ border-left-color: #3a4a6b; }}
+  .name {{ font-weight: 600; }}
+  .meta {{ font-size: 0.8rem; color: #8ea0c8; }}
+  .empty {{ padding: 1rem; color: #8ea0c8; }}
+</style>
+</head>
+<body>
+<header>nf-metro live &middot; runs</header>
+<div class="runs">
+{rows}
+</div>
+</body>
+</html>"""
+
+
+def make_multi_handler(
+    registry: RunRegistry, token: str | None
+) -> type[BaseHTTPRequestHandler]:
+    """Handler for the persistent multi-run server.
+
+    Routes: ``GET /`` index, ``POST /maps`` register a run, and per-run
+    ``GET /r/<id>/`` page, ``GET /r/<id>/state``, ``GET /r/<id>/stream``,
+    ``POST /r/<id>/events``.
+    """
+    run_re = re.compile(r"^/r/([0-9a-f]+)/(state|stream|events)?$")
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args: object) -> None:
+            pass
+
+        def _send(self, code: int, body: str, ctype: str = "text/plain") -> None:
+            data = body.encode()
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _authorized(self) -> bool:
+            if token is None:
+                return True
+            qs = urllib.parse.urlparse(self.path).query
+            given = urllib.parse.parse_qs(qs).get("token", [None])[0]
+            return (given or self.headers.get("X-Metro-Token")) == token
+
+        def do_GET(self) -> None:
+            path = urllib.parse.urlparse(self.path).path
+            if path == "/":
+                self._send(200, build_index(registry), "text/html; charset=utf-8")
+                return
+            m = run_re.match(path)
+            if not m:
+                self._send(404, "not found")
+                return
+            run = registry.get(m.group(1))
+            if run is None:
+                self._send(404, "unknown run")
+                return
+            kind = m.group(2)
+            state: ProgressState = run["state"]
+            if kind is None:
+                page = build_page(run["model"], stream_url=f"/r/{m.group(1)}/stream")
+                self._send(200, page, "text/html; charset=utf-8")
+            elif kind == "state":
+                self._send(200, json.dumps(state.snapshot()), "application/json")
+            elif kind == "stream":
+                self._stream(state)
+            else:
+                self._send(404, "not found")
+
+        def do_POST(self) -> None:
+            path = urllib.parse.urlparse(self.path).path
+            if not self._authorized():
+                self._send(401, "unauthorized")
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b""
+
+            if path == "/maps":
+                name = urllib.parse.parse_qs(
+                    urllib.parse.urlparse(self.path).query
+                ).get("name", [None])[0]
+                try:
+                    rid = registry.register(raw.decode("utf-8"), name)
+                except Exception as exc:  # parse/layout failure -> 400, never 500
+                    self._send(400, f"bad map: {exc}")
+                    return
+                body = json.dumps(
+                    {"id": rid, "view": f"/r/{rid}/", "events": f"/r/{rid}/events"}
+                )
+                self._send(200, body, "application/json")
+                return
+
+            m = run_re.match(path)
+            if m and m.group(2) == "events":
+                run = registry.get(m.group(1))
+                if run is None:
+                    self._send(404, "unknown run")
+                    return
+                try:
+                    run["state"].ingest(json.loads(raw or b"{}"))
+                except (json.JSONDecodeError, ValueError):
+                    pass
+                self._send(200, "ok")
+                return
+
+            self._send(404, "not found")
+
+        def _stream(self, state: ProgressState) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            q = state.subscribe()
+            try:
+                while True:
+                    try:
+                        msg = q.get(timeout=15)
+                        self.wfile.write(f"data: {msg}\n\n".encode())
+                    except queue.Empty:
+                        self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                state.unsubscribe(q)
+
+    return Handler
+
+
+def serve_multi(
+    theme: Theme,
+    host: str = "127.0.0.1",
+    port: int = 8080,
+    token: str | None = None,
+) -> ThreadingHTTPServer:
+    """A persistent multi-run server: pipelines POST their .mmd to ``/maps``."""
+    registry = RunRegistry(theme)
+    return ThreadingHTTPServer((host, port), make_multi_handler(registry, token))
 
 
 def _weblog_command(launch_cmd: Sequence[str], events_url: str) -> list[str]:

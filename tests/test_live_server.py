@@ -268,3 +268,68 @@ def test_serve_cli_wires_launch_and_prints_url(monkeypatch, tmp_path):
     assert calls["page_url"] == "http://127.0.0.1:9999/"
     assert calls["events_url"] == "http://127.0.0.1:9999/events"
     assert "▶ Open: http://127.0.0.1:9999/" in result.output
+
+
+def test_registry_register_and_listing():
+    from nf_metro.live.server import RunRegistry
+
+    reg = RunRegistry(THEMES["nfcore"])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        rid = reg.register(MMD, name="run-a")
+    run = reg.get(rid)
+    assert run is not None
+    assert {st["id"] for st in run["model"].stations} == {"trim", "qc"}
+    listing = reg.listing()
+    assert listing[0]["id"] == rid and listing[0]["name"] == "run-a"
+    assert reg.get("nope") is None
+
+
+def test_multi_server_http_smoke():
+    from nf_metro.live.server import serve_multi
+
+    httpd = serve_multi(THEMES["nfcore"], host="127.0.0.1", port=0)
+    port = httpd.server_address[1]
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        # register a map
+        req = urllib.request.Request(
+            base + "/maps?name=smoke", data=MMD.encode(), method="POST"
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with urllib.request.urlopen(req) as r:
+                reg_resp = json.load(r)
+        rid = reg_resp["id"]
+        assert reg_resp["view"] == f"/r/{rid}/"
+
+        # index lists it; run page has halos
+        with urllib.request.urlopen(base + "/") as r:
+            assert b"smoke" in r.read()
+        with urllib.request.urlopen(base + f"/r/{rid}/") as r:
+            assert b'id="halo-trim"' in r.read()
+
+        # events for this run drive its state
+        body = json.dumps(_ev("process_started", 1, "TRIMGALORE", "RUNNING")).encode()
+        ereq = urllib.request.Request(
+            base + f"/r/{rid}/events", data=body, method="POST"
+        )
+        with urllib.request.urlopen(ereq) as r:
+            assert r.status == 200
+        with urllib.request.urlopen(base + f"/r/{rid}/state") as r:
+            snap = json.load(r)
+        assert snap["stations"]["trim"]["state"] == "running"
+
+        # unparseable input is handled leniently (empty run), never a 500
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            garbage = urllib.request.Request(
+                base + "/maps", data=b"not a map", method="POST"
+            )
+            with urllib.request.urlopen(garbage) as r:
+                assert r.status == 200
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
