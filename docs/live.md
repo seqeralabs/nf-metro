@@ -97,11 +97,41 @@ curl -s --data-binary @map.mmd "http://localhost:8080/maps?name=myrun"
 ```
 
 `GET /` lists every run with a live status; `GET /r/<id>/` is that run's live
-map. The [Nextflow plugin](https://github.com/pinin4fjords/nf-metro-plugin)'s
+map. Endpoints mirror the single-map server under a `/r/<id>/` prefix
+(`/r/<id>/`, `/r/<id>/state`, `/r/<id>/stream`, `POST /r/<id>/events`);
+`POST /maps` registers a run.
+
+### Demo: a shared dashboard
+
+The [Nextflow plugin](https://github.com/pinin4fjords/nf-metro-plugin)'s
 `metro.server` mode does the register-and-emit automatically, so a plain
-`nextflow run` shows up on the dashboard. Endpoints mirror the single-map
-server under a `/r/<id>/` prefix (`/r/<id>/`, `/r/<id>/state`,
-`/r/<id>/stream`, `POST /r/<id>/events`); `POST /maps` registers a run.
+`nextflow run` shows up on the dashboard:
+
+Start one persistent server:
+
+```bash
+nf-metro serve-multi --port 8080            # dashboard at http://localhost:8080/
+```
+
+Point any pipeline at it via the plugin's `metro` config (in `nextflow.config`
+or a `-c` overlay), then run it normally:
+
+```groovy
+plugins { id 'nf-metro@0.1.0' }
+metro {
+    server = 'http://localhost:8080'
+    map    = 'assets/metro_map.mmd'
+}
+```
+
+```bash
+nextflow run my/pipeline      # repeat for as many pipelines as you like
+```
+
+Each run prints `registered on ...; live map: http://localhost:8080/r/<id>/`.
+Open `http://localhost:8080/` to watch every run light up on one page; the
+server stays up across runs. Without the plugin you can register and drive a
+run with `curl` exactly as shown above.
 
 ## 3. Keep the mapping honest
 
