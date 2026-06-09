@@ -50,6 +50,11 @@ matched against the **fully-qualified** process name:
 
 ## 2. Serve the map
 
+`serve` hosts **one** map at a stable URL. Each run's `started` event resets it,
+so it's the mode for iterating on a single pipeline - re-run and watch the same
+page - and it's the server the plugin's managed mode spawns. For many pipelines
+or runs side by side, use the dashboard in §2b instead.
+
 ```bash
 nf-metro serve path/to/map.mmd --port 8080
 ```
@@ -83,10 +88,11 @@ blank map.
 
 ## 2b. Persistent server (many runs)
 
-`serve` hosts one map. To run a long-lived server that many pipelines report
-into - a shared dashboard - use `serve-multi`, which starts with **no** map.
-A pipeline registers its map by POSTing the `.mmd` to `/maps`, then sends
-weblog events to the run's own endpoint:
+Where `serve` is one map reused across re-runs (reset each time), `serve-multi`
+is a long-lived **dashboard**: each registered run is its own `/r/<id>/` entry,
+so many pipelines - or a history of runs - sit side by side. It starts with
+**no** map; a pipeline registers its map by POSTing the `.mmd` to `/maps`, then
+sends weblog events to the run's own endpoint:
 
 ```bash
 nf-metro serve-multi --port 8080        # index at http://localhost:8080/
