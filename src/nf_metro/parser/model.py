@@ -351,6 +351,14 @@ class MetroGraph:
     # Pending per-station marker styles: station_id -> MarkerStyle, applied
     # after parse so directives may precede or follow the node definition.
     _pending_markers: dict[str, MarkerStyle] = field(default_factory=dict)
+    # Pending %%metro process: marks buffered during parse as
+    # (station_id, regex) pairs, validated and folded into process_mapping
+    # after parse so directives may precede or follow the node definition.
+    _pending_process: list[tuple[str, str]] = field(default_factory=list)
+    # station_id -> list of regexes matching the Nextflow process names that
+    # station represents. Pure metadata: never read by layout or render, used
+    # only by the live-progress server and the check-mapping linter.
+    process_mapping: dict[str, list[str]] = field(default_factory=dict)
     # Lazy caches keyed off the edge list; invalidated on edge mutation.
     _station_lines_cache: dict[str, list[str]] | None = field(default=None, repr=False)
     _edges_from_cache: dict[str, list[Edge]] | None = field(default=None, repr=False)

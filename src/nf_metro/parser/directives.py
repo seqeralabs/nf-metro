@@ -8,6 +8,7 @@ extra context and are handled by :func:`_apply_directive`.
 
 from __future__ import annotations
 
+import re
 import warnings
 from collections.abc import Callable
 from typing import Literal
@@ -64,6 +65,29 @@ def _dir_logo(value: str, graph: MetroGraph) -> None:
 
 def _dir_off_track(value: str, graph: MetroGraph) -> None:
     graph._pending_off_track.extend(_split_csv(value))
+
+
+def _dir_process(value: str, graph: MetroGraph) -> None:
+    """Parse ``%%metro process: station_id | regex``.
+
+    Maps a station to the Nextflow process name(s) it represents, for the
+    live-progress server and the check-mapping linter. The whole field after
+    ``|`` is one regular expression (no comma splitting, so quantifiers like
+    ``{1,3}`` are safe); repeat the directive to attach several patterns to one
+    station. The regex is matched against the fully-qualified process name, so
+    ``FASTQC`` matches ``NFCORE_RNASEQ:RNASEQ:FASTQC``.
+    """
+    station_id, sep, pattern = value.partition("|")
+    station_id, pattern = station_id.strip(), pattern.strip()
+    if not sep or not station_id or not pattern:
+        _warn_malformed("process", value, "'station_id | regex'")
+        return
+    try:
+        re.compile(pattern)
+    except re.error as exc:
+        _warn_directive("process", f"invalid regex {pattern!r}: {exc}")
+        return
+    graph._pending_process.append((station_id, pattern))
 
 
 def _dir_line(value: str, graph: MetroGraph) -> None:
@@ -431,6 +455,7 @@ _GLOBAL_DIRECTIVE_HANDLERS.update(
         "logo": _dir_logo,
         "line": _dir_line,
         "off_track": _dir_off_track,
+        "process": _dir_process,
         "grid": _parse_grid_directive,
         "line_spread": _parse_line_spread_directive,
         "legend_combo": _parse_legend_combo_directive,

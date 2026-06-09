@@ -312,3 +312,264 @@ def info(input_file: Path) -> None:
         click.echo(
             f"  [{section.number}] {section.name}: {len(section.station_ids)} stations"
         )
+
+
+@cli.command(context_settings={"ignore_unknown_options": True})
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--port", type=int, default=8080, help="Port to listen on.")
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    help="Interface to bind. Default 127.0.0.1 (local only); "
+    "use 0.0.0.0 to accept connections from other hosts.",
+)
+@click.option("--theme", type=str, default=None, help="Theme name (nfcore, light).")
+@click.option(
+    "--token",
+    default=None,
+    help="If set, /events POSTs must supply ?token=... or an X-Metro-Token header.",
+)
+@click.option(
+    "--open", "open_browser", is_flag=True, help="Open the live page in a browser."
+)
+@click.option(
+    "--shutdown-after-complete",
+    is_flag=True,
+    help="Stop the server shortly after the run's completed/error event "
+    "(or after the launched command exits).",
+)
+@click.option(
+    "--shutdown-grace",
+    type=float,
+    default=10.0,
+    help="Seconds to keep the map up after the run finishes "
+    "(with --shutdown-after-complete).",
+)
+@click.argument("launch_cmd", nargs=-1, type=click.UNPROCESSED)
+def serve(
+    input_file: Path,
+    port: int,
+    host: str,
+    theme: str | None,
+    token: str | None,
+    open_browser: bool,
+    shutdown_after_complete: bool,
+    shutdown_grace: float,
+    launch_cmd: tuple[str, ...],
+) -> None:
+    """Serve a live-progress view of a metro map. [experimental]
+
+    Renders the map once and serves it at http://HOST:PORT/. Point a Nextflow
+    run's weblog at the events endpoint to light up stations as tasks run:
+
+        nextflow run ... -with-weblog http://HOST:PORT/events
+
+    Or launch the run in one step (the weblog is wired up automatically) and
+    have the server open a browser and stop itself when the run finishes:
+
+        nf-metro serve map.mmd --open --shutdown-after-complete -- \\
+            nextflow run my/pipeline -profile docker
+
+    Stations are tied to processes with `%%metro process:` directives in the
+    map; only mapped stations change state. Use `nf-metro check-mapping` to
+    verify the mapping covers the pipeline.
+    """
+    from nf_metro.live.server import run_lifecycle
+    from nf_metro.live.server import serve as serve_map
+
+    try:
+        graph = parse_metro_mermaid(input_file.read_text())
+        compute_layout(graph)
+    except (ValueError, PhaseInvariantError) as e:
+        raise click.ClickException(str(e))
+
+    theme_obj = _resolve_theme(theme, graph)
+    mapped = sorted(graph.process_mapping)
+    if not mapped:
+        click.echo(
+            "Warning: no %%metro process: directives; no station will update.",
+            err=True,
+        )
+    if host == "0.0.0.0":  # noqa: S104 - explicit opt-in, warned
+        click.echo(
+            "Binding 0.0.0.0: reachable from other hosts; "
+            "use --token to restrict /events.",
+            err=True,
+        )
+
+    httpd = serve_map(graph, theme_obj, host=host, port=port, token=token)
+    # Local subprocesses post to a concrete loopback address, not 0.0.0.0.
+    run_host = "127.0.0.1" if host == "0.0.0.0" else host
+    page_url = f"http://{run_host}:{port}/"
+    events_url = f"{page_url}events"
+    if token:
+        events_url += f"?token={token}"
+
+    click.echo("nf-metro live progress (experimental)")
+    click.echo(f"Mapped stations: {', '.join(mapped) or '(none)'}")
+    click.echo("")
+    click.echo(f"    ▶ Open: {page_url}")
+    click.echo("")
+    if not launch_cmd:
+        click.echo(f"Send Nextflow weblog events to {events_url}")
+
+    run_lifecycle(
+        httpd,
+        page_url,
+        events_url,
+        launch_cmd=launch_cmd,
+        shutdown_after_complete=shutdown_after_complete,
+        grace=shutdown_grace,
+        open_browser=open_browser,
+        echo=click.echo,
+    )
+
+
+@cli.command(name="serve-multi")
+@click.option("--port", type=int, default=8080, help="Port to listen on.")
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    help="Interface to bind. Default 127.0.0.1 (local only); "
+    "use 0.0.0.0 to accept connections from other hosts.",
+)
+@click.option("--theme", type=str, default="nfcore", help="Theme name (nfcore, light).")
+@click.option(
+    "--token",
+    default=None,
+    help="If set, POSTs to /maps and /r/*/events must supply ?token=... "
+    "or an X-Metro-Token header.",
+)
+def serve_multi_cmd(port: int, host: str, theme: str, token: str | None) -> None:
+    """Run a persistent live server many pipelines can report into. [experimental]
+
+    Unlike `serve` (one map), this starts with no map. A pipeline registers its
+    map by POSTing the .mmd to /maps and then sends weblog events to the run's
+    /r/<id>/events endpoint:
+
+        curl -s --data-binary @map.mmd "http://HOST:PORT/maps?name=myrun"
+        # -> {"id": "...", "view": "/r/<id>/", "events": "/r/<id>/events"}
+
+    The index at http://HOST:PORT/ lists every run with a live status. The
+    nf-metro Nextflow plugin's `metro.server` mode does the register-and-emit
+    automatically.
+    """
+    from nf_metro.live.server import serve_multi
+
+    if theme not in THEMES:
+        raise click.ClickException(
+            f"unknown theme {theme!r}; choose from {list(THEMES)}"
+        )
+    if host == "0.0.0.0":  # noqa: S104 - explicit opt-in, warned
+        click.echo(
+            "Binding 0.0.0.0: reachable from other hosts; "
+            "use --token to restrict POSTs.",
+            err=True,
+        )
+    httpd = serve_multi(THEMES[theme], host=host, port=port, token=token)
+    display_host = "localhost" if host == "127.0.0.1" else host
+    click.echo("nf-metro live progress - persistent server (experimental)")
+    click.echo("")
+    click.echo(f"    ▶ Runs index: http://{display_host}:{port}/")
+    click.echo("")
+    click.echo(f"Pipelines register maps at http://{display_host}:{port}/maps")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("\nStopping.")
+    finally:
+        httpd.server_close()
+
+
+@cli.command(name="check-mapping")
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--dag",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Nextflow `-with-dag` mermaid file; process names are read from its "
+    "stadium nodes.",
+)
+@click.option(
+    "--processes",
+    "processes_file",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Newline-delimited process names (e.g. captured from a run). "
+    "Authoritative alternative to --dag.",
+)
+@click.option(
+    "--ignore",
+    multiple=True,
+    help="Regex for processes deliberately left unmapped (plumbing). Repeatable.",
+)
+def check_mapping_cmd(
+    input_file: Path,
+    dag: Path | None,
+    processes_file: Path | None,
+    ignore: tuple[str, ...],
+) -> None:
+    """Check a map's `%%metro process:` mapping against the processes. [experimental]
+
+    Reports processes the map can't show (drift) and station patterns that
+    match nothing (stale), exiting non-zero if any are found so CI can gate on
+    map fidelity. Supply the pipeline's processes via --dag (a `nextflow
+    -with-dag` export) or --processes (a newline-delimited list).
+    """
+    from nf_metro.live.mapping import check_mapping, process_names_from_dag
+
+    if not dag and not processes_file:
+        raise click.ClickException("provide --dag or --processes")
+
+    graph = parse_metro_mermaid(input_file.read_text())
+    station_ids = [s.id for s in graph.stations.values() if not s.is_port]
+    if dag is not None:
+        process_names = process_names_from_dag(dag.read_text())
+    else:
+        assert processes_file is not None
+        process_names = [
+            line.strip()
+            for line in processes_file.read_text().splitlines()
+            if line.strip()
+        ]
+
+    report = check_mapping(
+        graph.process_mapping, station_ids, process_names, ignore=list(ignore)
+    )
+
+    if report.unmapped_processes:
+        click.echo(
+            f"Processes with no station (invisible): {len(report.unmapped_processes)}",
+            err=True,
+        )
+        for name in report.unmapped_processes:
+            click.echo(f"  - {name}", err=True)
+    if report.dead_patterns:
+        click.echo(
+            f"Station patterns matching no process (stale): "
+            f"{len(report.dead_patterns)}",
+            err=True,
+        )
+        for sid, pat in report.dead_patterns:
+            click.echo(f"  - {sid}: {pat}", err=True)
+    if report.ambiguous_processes:
+        click.echo(
+            f"Processes matching more than one station (duplicates progress): "
+            f"{len(report.ambiguous_processes)}",
+            err=True,
+        )
+        for name, sids in report.ambiguous_processes.items():
+            click.echo(f"  - {name}: {', '.join(sids)}", err=True)
+    if report.unmapped_stations:
+        click.echo(
+            f"Stations with no mapping (never light up): "
+            f"{', '.join(report.unmapped_stations)}"
+        )
+
+    if report.ok:
+        click.echo(
+            f"Mapping OK: {len(report.matched)}/{len(process_names)} "
+            "processes map to a station."
+        )
+    else:
+        raise SystemExit(1)
