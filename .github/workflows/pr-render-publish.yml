@@ -3,7 +3,7 @@ name: Publish render preview
 on:
   workflow_run:
     workflows: ["PR render preview"]
-    types: [completed]
+    types: [requested, completed]
 
 permissions:
   contents: write
@@ -14,10 +14,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  pending:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.action == 'requested'
+    steps:
+      - name: Resolve PR number from head SHA
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR=$(gh api \
+            "repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls" \
+            --jq '.[0].number')
+          echo "number=$PR" >> "$GITHUB_OUTPUT"
+
+      - name: Mark preview as rendering
+        if: steps.pr.outputs.number != ''
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: render-preview
+          number: ${{ steps.pr.outputs.number }}
+          message: |
+            **Render preview**: :hourglass_flowing_sand: rendering in progress...
+
   publish:
     runs-on: ubuntu-latest
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
+      github.event.action == 'completed' &&
       github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Download preview artifact
