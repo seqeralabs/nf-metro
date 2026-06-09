@@ -387,6 +387,14 @@ PIPELINE_ENTRIES: list[tuple[str, str, str, str]] = [
         "(STAR/RSEM, STAR/Salmon, HISAT2, Salmon pseudo-alignment, Kallisto).",
     ),
     (
+        "sarek_metro",
+        "nf-core/sarek",
+        "https://github.com/nf-core/sarek",
+        "Germline and somatic variant calling, covering germline, tumor-only, "
+        "and tumor-normal paired analysis through SNP/indel, SV/CNV, and MSI "
+        "callers with downstream variant annotation.",
+    ),
+    (
         "epitopeprediction",
         "nf-core/epitopeprediction",
         "https://github.com/nf-core/epitopeprediction",
