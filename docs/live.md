@@ -19,6 +19,15 @@ nextflow run --with-weblog ──HTTP──> nf-metro serve ──SSE──> bro
 The layout is computed once and the overlay is drawn on top, so the map never
 re-flows as state changes.
 
+<video controls autoplay loop muted playsinline
+       style="width: 100%; max-width: 760px; border-radius: 6px"
+       src="../assets/live_demo.mp4">
+  Your browser can't play the embedded video -
+  <a href="../assets/live_demo.mp4">download it here</a>.
+</video>
+
+*A pipeline run lighting up the map in real time.*
+
 ## 1. Map stations to processes
 
 A metro station is a curated abstraction that usually stands for several
