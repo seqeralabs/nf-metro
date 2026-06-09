@@ -535,13 +535,14 @@ def _render_svg_scaled(
 
     # Embed the machine-readable manifest first, so the file is a durable,
     # self-describing contract regardless of what is drawn below it.
-    manifest = build_manifest(
-        graph,
-        width=svg_width,
-        height=svg_height,
-        station_radius=theme.station_radius,
-    )
-    d.append(draw.Raw(manifest_metadata_svg(manifest)))
+    if graph.embed_manifest:
+        manifest = build_manifest(
+            graph,
+            width=svg_width,
+            height=svg_height,
+            station_radius=theme.station_radius,
+        )
+        d.append(draw.Raw(manifest_metadata_svg(manifest)))
 
     # Dark-mode CSS for transparent-background themes so that elements
     # rendered directly on the canvas (section labels, number badges,
@@ -1316,27 +1317,35 @@ def _render_stations(
     section get horizontal pills (wide, short) since the lines run
     vertically through them.
 
-    Each station's glyph (pill/marker/rail interchange plus any terminus
-    icons) is wrapped in its own ``<g>`` carrying ``data-metro-*`` identity
-    and geometry, so the station is a single addressable element. Skips port
-    stations (is_port=True).
+    When the manifest is embedded, each station's glyph (pill/marker/rail
+    interchange plus any terminus icons) is wrapped in its own ``<g>`` carrying
+    ``data-metro-*`` identity and geometry, so the station is a single
+    addressable element; with ``--no-manifest`` the glyphs are drawn directly
+    with no wrapper. Skips port stations (is_port=True).
     """
     for station in graph.stations.values():
         if station.is_port or station.is_hidden:
             continue
-        g = draw.Group(**_station_group_attrs(graph, theme, station))
-        _render_station_into(g, graph, theme, station, station_offsets)
-        d.append(g)
+        if graph.embed_manifest:
+            g = draw.Group(**_station_group_attrs(graph, theme, station))
+            _render_station_into(g, graph, theme, station, station_offsets)
+            d.append(g)
+        else:
+            _render_station_into(d, graph, theme, station, station_offsets)
 
 
 def _render_station_into(
-    d: draw.Group,
+    d: draw.Group | draw.Drawing,
     graph: MetroGraph,
     theme: Theme,
     station: Station,
     station_offsets: dict[tuple[str, str], float] | None,
 ) -> None:
-    """Draw one station's glyph and terminus icons into its wrapping group."""
+    """Draw one station's glyph and terminus icons into a container.
+
+    The container is the station's wrapping ``<g>`` when the manifest is
+    embedded, or the drawing itself under ``--no-manifest``.
+    """
     r = theme.station_radius
 
     # Rail mode: a blank terminus terminates its converged bundle exactly

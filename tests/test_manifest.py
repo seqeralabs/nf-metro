@@ -68,6 +68,42 @@ def test_svg_without_manifest_returns_none() -> None:
     assert read_manifest("<svg xmlns='http://www.w3.org/2000/svg'></svg>") is None
 
 
+def test_no_manifest_opt_out_emits_drawn_map_only() -> None:
+    """``embed_manifest=False`` drops every data decoration from the SVG.
+
+    The drawn map carries no ``<metadata>`` manifest, no ``data-metro-*``
+    attributes, and no station-group wrapper, so it is the lean output the
+    gallery's render diff compares against the base branch.
+    """
+    graph = parse_and_layout(MAPPED_TEXT)
+    graph.embed_manifest = False
+    svg = render_svg(graph, NFCORE_THEME)
+
+    ET.fromstring(svg)  # well-formed XML
+    assert read_manifest(svg) is None
+    assert "nf-metro-manifest" not in svg
+    assert "data-metro-" not in svg
+    assert "nf-metro-station-group" not in svg
+
+
+def test_no_manifest_drops_only_data_not_glyphs() -> None:
+    """The manifest-off SVG draws the same glyphs, minus the identity data.
+
+    Both outputs draw one ``<rect>`` per station; the manifest-off SVG is
+    shorter only because it omits the non-visual ``<metadata>`` block and
+    ``data-metro-*`` attributes.
+    """
+    graph = parse_and_layout(MAPPED_TEXT)
+    on = render_svg(graph, NFCORE_THEME)
+    graph.embed_manifest = False
+    off = render_svg(graph, NFCORE_THEME)
+
+    rects_on = on.count("<rect")
+    rects_off = off.count("<rect")
+    assert rects_off == rects_on
+    assert len(off) < len(on)
+
+
 def test_match_block_documents_semantics(mapped_svg: str) -> None:
     """The match block makes the (non-Python) matching contract explicit."""
     manifest = read_manifest(mapped_svg)

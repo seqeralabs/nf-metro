@@ -434,6 +434,17 @@ PIPELINE_ENTRIES: list[tuple[str, str, str, str]] = [
 _manifest: dict[str, str] = {}
 
 
+def render_drawn_svg(graph, theme, **kwargs) -> str:
+    """Render the drawn map only, with the embedded data manifest disabled.
+
+    The gallery is the visual-regression surface: the render diff compares
+    these SVGs byte-for-byte, and the data manifest carries no visual content.
+    Disabling it keeps the diff a true picture of what changed on screen.
+    """
+    graph.embed_manifest = False
+    return render_svg(graph, theme, **kwargs)
+
+
 def render_mmd(mmd_path: Path, svg_path: Path, *, debug: bool = DEBUG_RENDERS) -> None:
     """Parse, layout, and render a .mmd file to SVG."""
     text = mmd_path.read_text()
@@ -441,7 +452,7 @@ def render_mmd(mmd_path: Path, svg_path: Path, *, debug: bool = DEBUG_RENDERS) -
     compute_layout(graph)
     theme_name = graph.style if graph.style in THEMES else "nfcore"
     theme = THEMES[theme_name]
-    svg_str = render_svg(graph, theme, debug=debug)
+    svg_str = render_drawn_svg(graph, theme, debug=debug)
     svg_path.write_text(svg_str)
 
 
@@ -492,7 +503,7 @@ def render_guide_examples() -> None:
             compute_layout(graph)
             theme_name = graph.style if graph.style in THEMES else "nfcore"
             theme = THEMES[theme_name]
-            svg_str = render_svg(graph, theme, debug=True)
+            svg_str = render_drawn_svg(graph, theme, debug=True)
             debug_svg.write_text(svg_str)
             _manifest[debug_svg.name] = section
             print("  rnaseq_auto_debug: OK")
@@ -585,7 +596,7 @@ def render_nextflow_examples() -> None:
             graph = parse_metro_mermaid(converted)
             compute_layout(graph)
             theme = THEMES[graph.style if graph.style in THEMES else "nfcore"]
-            svg_str = render_svg(graph, theme, debug=DEBUG_RENDERS)
+            svg_str = render_drawn_svg(graph, theme, debug=DEBUG_RENDERS)
             svg_path.write_text(svg_str)
             _manifest[svg_path.name] = section
             print(f"  nf_{mmd_path.stem}: OK")

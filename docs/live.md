@@ -66,11 +66,15 @@ inside the file. Every rendered SVG therefore embeds a machine-readable manifest
 so it is a self-contained, durable contract: an overlay can be positioned,
 stations restyled, and process mappings looked up with no re-render.
 
-It is **always embedded** (it is small and adds no external dependencies), and
-carried two redundant, sanitization-safe ways (no `<script>`):
+It is **embedded by default** (it is small and adds no external dependencies),
+and carried two redundant, sanitization-safe ways (no `<script>`):
 
 1. A JSON manifest inside a `<metadata id="nf-metro-manifest">` element.
 2. `data-metro-*` attributes on each station's `<g>` element.
+
+Pass `--no-manifest` (or `%%metro manifest: false`) to emit the drawn map only,
+with no manifest, no `data-metro-*` attributes, and no station-group wrapper -
+byte-for-byte the same SVG as a build that predates the manifest.
 
 ### Schema
 

@@ -201,4 +201,12 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         kind="bool",
         help="Add animated balls traveling along the metro lines.",
     ),
+    LayoutOption(
+        name="manifest",
+        attr="embed_manifest",
+        kind="bool",
+        help="Embed the machine-readable data manifest (the <metadata> block "
+        "and per-station data-metro-* attributes) in the SVG. On by default; "
+        "--no-manifest emits the drawn map only.",
+    ),
 )
