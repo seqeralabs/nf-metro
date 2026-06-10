@@ -165,3 +165,35 @@ def test_render_center_ports_cli_overrides_directive(tmp_path, monkeypatch):
     # Sanity check: parser alone preserves the directive
     parsed = parse_metro_mermaid(mmd_text)
     assert parsed.center_ports is True
+
+
+def test_validate_svg_success(tmp_path):
+    """validate-svg passes on a freshly rendered (manifest-on) SVG."""
+    out = tmp_path / "map.svg"
+    runner = CliRunner()
+    rendered = runner.invoke(cli, ["render", str(RNASEQ_MMD), "-o", str(out)])
+    assert rendered.exit_code == 0, rendered.output
+    result = runner.invoke(cli, ["validate-svg", str(out)])
+    assert result.exit_code == 0, result.output
+    assert "Valid" in result.output
+
+
+def test_validate_svg_no_manifest(tmp_path):
+    """validate-svg fails when the SVG carries no manifest (--no-manifest)."""
+    out = tmp_path / "map.svg"
+    runner = CliRunner()
+    runner.invoke(cli, ["render", str(RNASEQ_MMD), "-o", str(out), "--no-manifest"])
+    result = runner.invoke(cli, ["validate-svg", str(out)])
+    assert result.exit_code == 1
+
+
+def test_validate_svg_rejects_nonconforming(tmp_path):
+    """validate-svg fails when the embedded manifest violates the schema."""
+    import re
+
+    out = tmp_path / "map.svg"
+    runner = CliRunner()
+    runner.invoke(cli, ["render", str(RNASEQ_MMD), "-o", str(out)])
+    out.write_text(re.sub(r'"r":[0-9.]+,', "", out.read_text(), count=1))
+    result = runner.invoke(cli, ["validate-svg", str(out)])
+    assert result.exit_code == 1

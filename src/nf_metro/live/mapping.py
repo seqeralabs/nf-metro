@@ -15,14 +15,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from nf_metro.manifest import matching_node_ids
+
 
 def stations_for_process(process: str, mapping: dict[str, list[str]]) -> list[str]:
     """Station ids whose patterns match ``process`` (case-insensitive)."""
-    return [
-        station_id
-        for station_id, patterns in mapping.items()
-        if any(re.search(p, process, re.IGNORECASE) for p in patterns)
-    ]
+    return matching_node_ids(process, mapping)
 
 
 def process_names_from_dag(text: str) -> list[str]:

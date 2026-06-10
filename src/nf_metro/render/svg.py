@@ -23,6 +23,7 @@ from nf_metro.layout.labels import (
 )
 from nf_metro.layout.routing import RoutedPath, compute_station_offsets, route_edges
 from nf_metro.layout.routing.corners import resolve_curve_radii
+from nf_metro.manifest import node_data_attrs
 from nf_metro.parser.model import (
     ICON_TYPE_DIR,
     ICON_TYPE_FILE,
@@ -101,7 +102,7 @@ from nf_metro.render.legend import (
     marker_stroke_color,
     render_legend,
 )
-from nf_metro.render.manifest import _round1, build_manifest, manifest_metadata_svg
+from nf_metro.render.manifest import build_manifest, manifest_metadata_svg
 from nf_metro.render.style import Theme
 
 
@@ -1288,23 +1289,27 @@ def _station_group_attrs(
 
     Makes each station one addressable DOM node carrying its identity and
     geometry, so a consumer can restyle or replace it without the manifest or
-    a re-render.  ``data-metro-station`` is the join key: it equals the
-    station's ``id`` in the embedded manifest.  The geometry attributes mirror
-    the manifest's ``x``/``y``/``r`` (absolute SVG user units, rounded to 1dp)
-    so an overlay can position against either half interchangeably.
+    a re-render.  ``data-node-id`` is the join key: it equals the station's
+    ``id`` in the embedded manifest.  The geometry attributes mirror the
+    manifest's ``x``/``y``/``r`` (absolute SVG user units, rounded to 1dp) so an
+    overlay can position against either half interchangeably.  A metro line is a
+    manifest group and a section is a manifest region.
     """
-    attrs = {
-        "class_": "nf-metro-station-group",
-        "data-metro-station": station.id,
-        "data-metro-cx": _round1(station.x),
-        "data-metro-cy": _round1(station.y),
-        "data-metro-r": _round1(theme.station_radius),
-        "data-metro-lines": ",".join(graph.station_lines(station.id)),
-    }
     section = graph.sections.get(station.section_id) if station.section_id else None
-    if section is not None and not section.is_implicit:
-        attrs["data-metro-section"] = station.section_id
-    return attrs
+    section_id = (
+        station.section_id if section is not None and not section.is_implicit else None
+    )
+    return {
+        "class_": "nf-metro-station-group",
+        **node_data_attrs(
+            id=station.id,
+            x=station.x,
+            y=station.y,
+            r=theme.station_radius,
+            groups=graph.station_lines(station.id),
+            region=section_id,
+        ),
+    }
 
 
 def _render_stations(
@@ -1321,7 +1326,7 @@ def _render_stations(
 
     When the manifest is embedded, each station's glyph (pill/marker/rail
     interchange plus any terminus icons) is wrapped in its own ``<g>`` carrying
-    ``data-metro-*`` identity and geometry, so the station is a single
+    ``data-node-*`` identity and geometry, so the station is a single
     addressable element; with ``--no-manifest`` the glyphs are drawn directly
     with no wrapper. Skips port stations (is_port=True).
     """

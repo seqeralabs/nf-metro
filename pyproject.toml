@@ -43,6 +43,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.8",
     "types-networkx",
+    "jsonschema>=4.0",
 ]
 docs = [
     "mkdocs-material>=9.0",
@@ -84,10 +85,11 @@ ignore_missing_imports = false
 strict_optional = true
 disallow_any_generics = true
 
-# drawsvg ships no type information; everything else (click, Pillow,
-# networkx via types-networkx) is typed once the package is installed.
+# drawsvg ships no type information; jsonschema is an optional, test-only
+# dependency imported lazily by `nf-metro validate-svg`. Everything else (click,
+# Pillow, networkx via types-networkx) is typed once the package is installed.
 [[tool.mypy.overrides]]
-module = ["drawsvg"]
+module = ["drawsvg", "jsonschema"]
 ignore_missing_imports = true
 
 # Fully-annotated core: the data model and the layout phases pass data

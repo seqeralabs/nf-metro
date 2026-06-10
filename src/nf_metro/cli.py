@@ -584,3 +584,35 @@ def check_mapping_cmd(
         )
     else:
         raise SystemExit(1)
+
+
+@cli.command(name="validate-svg")
+@click.argument("svg_file", type=click.Path(exists=True, path_type=Path))
+def validate_svg_cmd(svg_file: Path) -> None:
+    """Validate an SVG's embedded manifest against the manifest JSON Schema."""
+    from nf_metro.render import manifest_schema, read_manifest
+
+    try:
+        import jsonschema
+    except ImportError:
+        raise click.ClickException(
+            "validate-svg needs the jsonschema package: pip install jsonschema"
+        )
+
+    manifest = read_manifest(svg_file.read_text())
+    if manifest is None:
+        click.echo(f"{svg_file}: no diagram manifest embedded", err=True)
+        raise SystemExit(1)
+
+    try:
+        jsonschema.validate(manifest, manifest_schema())
+    except jsonschema.ValidationError as e:
+        where = "/".join(str(p) for p in e.absolute_path) or "<root>"
+        click.echo(f"{svg_file}: manifest does not conform to the schema", err=True)
+        click.echo(f"  at {where}: {e.message}", err=True)
+        raise SystemExit(1)
+
+    click.echo(
+        f"Valid: {len(manifest.get('nodes', []))} nodes, "
+        f"schema version {manifest.get('version')}"
+    )
