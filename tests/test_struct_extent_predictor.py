@@ -1,14 +1,12 @@
-"""Fidelity tests for the structural-extent predictor (#465 path 3-A).
+"""Fidelity tests for the structural-extent predictor.
 
-The inter-row cascade stacks lower rows from a *structural* content-bottom
-captured before the opportunistic Pass C content-compaction phases run
-(``graph._struct_height_below_top``), rather than from the post-compaction
-settled extent.  These tests pin two properties:
+The structural snapshot (``graph._struct_height_below_top``) records each
+section's content height below its bbox top after Stage 6.15a, when the
+layout is fully settled.  These tests pin two properties:
 
 * the predictor reproduces the bbox-shrink content-bottom rule exactly, and
-* the structural extent diverges from the settled extent by no more than a
-  small tolerance for the row-ending sections the cascade reads, with the
-  known-divergent fixtures pre-registered and bounded.
+* the structural extent in the snapshot coincides with the settled extent for
+  every row-ending section (within ``DEFAULT_TOLERANCE``).
 """
 
 from __future__ import annotations
@@ -26,23 +24,7 @@ from nf_metro.parser.model import MetroGraph, Section
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 
-# Default tolerance: a row-ending section's structural and settled extents
-# coincide to within rounding.  Compaction usually leaves the row-ending
-# content untouched, so most sections are exact.
 DEFAULT_TOLERANCE = 1.0
-
-# Fixtures whose structural extent legitimately exceeds the settled one
-# because a content-compaction phase lifts a row-ending section's content
-# after the snapshot.  Each value is the max allowed per-section divergence
-# (px); the structural extent is always >= settled, so stacking from it
-# loosens the inter-row gap, never overlaps.
-KNOWN_DIVERGENT: dict[str, float] = {
-    "differentialabundance.mmd": 150.0,
-    "variantbenchmarking.mmd": 20.0,
-    "variantbenchmarking_auto.mmd": 20.0,
-    "genomic_pipeline.mmd": 5.0,
-    "longread_variant_calling.mmd": 20.0,
-}
 
 
 def _example_files() -> list[Path]:
@@ -83,32 +65,16 @@ def _row_ending_divergences(graph: MetroGraph) -> dict[str, float]:
 
 @pytest.mark.parametrize("path", _example_files(), ids=lambda p: p.name)
 def test_structural_extent_matches_settled_within_tolerance(path: Path) -> None:
-    """The structural extent the cascade stacks from coincides with the
-    settled extent for every row-ending section, except the pre-registered
-    divergent fixtures (bounded above)."""
+    """The structural extent in the snapshot coincides with the settled extent
+    for every row-ending section across all gallery fixtures."""
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
 
-    bound = KNOWN_DIVERGENT.get(path.name, DEFAULT_TOLERANCE)
     divergences = _row_ending_divergences(graph)
     worst = max(divergences.values(), default=0.0)
-    assert worst <= bound, (
+    assert worst <= DEFAULT_TOLERANCE, (
         f"{path.name}: row-ending structural/settled divergence {worst:.2f}px "
-        f"exceeds allowed {bound:.2f}px (per-section {divergences})"
-    )
-
-
-@pytest.mark.parametrize("name", sorted(KNOWN_DIVERGENT), ids=lambda n: n)
-def test_known_divergent_fixtures_actually_diverge(name: str) -> None:
-    """Guard against the pre-registered allowances going stale: each
-    registered fixture must still exhibit a divergence above the default
-    tolerance, otherwise its entry should be removed."""
-    graph = parse_metro_mermaid((EXAMPLES_DIR / name).read_text())
-    compute_layout(graph)
-    worst = max(_row_ending_divergences(graph).values(), default=0.0)
-    assert worst > DEFAULT_TOLERANCE, (
-        f"{name}: divergence {worst:.2f}px no longer exceeds the default "
-        f"tolerance; remove it from KNOWN_DIVERGENT"
+        f"exceeds allowed {DEFAULT_TOLERANCE:.2f}px (per-section {divergences})"
     )
 
 
@@ -117,11 +83,10 @@ def test_off_track_lift_not_under_predicted() -> None:
     content height below the bbox top.
 
     The off-track lift (Stage 5.2) raises a section's bbox top to seat the
-    lifted input above the trunk.  The structural snapshot is taken after that
-    lift, so the stored height-below-top reflects the raised top.  Were it
-    captured before, the row-ending section here (``top``) would store a height
-    ~40px short of settled (the unsafe direction), and the inter-row cascade
-    would stack the row below it that much too high.
+    lifted input above the trunk.  The structural snapshot must reflect this
+    raised top so the stored height-below-top is not shorter than the settled
+    height.  A shortfall would make the cascade stack the row below too high
+    and risk overlap.
     """
     mmd = (
         "%%metro title: off-track two-row\n"
@@ -151,18 +116,16 @@ def test_off_track_lift_not_under_predicted() -> None:
     struct_h = graph._struct_height_below_top.get("top")
     settled_h = _settled_height_below_top(graph, top)
     assert struct_h is not None and settled_h is not None
-    # Safe direction only: structural must not fall short of settled (a shortfall
-    # makes the cascade stack the row below too high and risk overlap).
     assert struct_h >= settled_h - DEFAULT_TOLERANCE, (
         f"off-track section under-predicted: struct {struct_h:.1f} < settled "
-        f"{settled_h:.1f}; snapshot must run after the off-track lift"
+        f"{settled_h:.1f}"
     )
 
 
-def test_predictor_matches_shrink_rule_before_compaction() -> None:
+def test_predictor_matches_shrink_rule() -> None:
     """The snapshot equals the shrink rule's content-bottom at capture time.
 
-    Running the predictor over a freshly-snapshotted graph (heights stored
+    Running the predictor over the snapshotted graph (heights stored
     relative to the then-current bbox tops) must reproduce
     ``_predict_section_content_bottom`` exactly, confirming the snapshot is
     the shrink rule and not an approximation."""

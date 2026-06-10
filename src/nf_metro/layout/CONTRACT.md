@@ -811,14 +811,12 @@ in pipeline order.
   overestimate when a rowspan section collapses to less than its
   row claim.  Phase 2 must run as a second pass over the graph so
   every section's shrink is finalised before row-gap deficits are
-  measured.  Phase 2 stacks each lower row from a **structural
-  extent** captured before the opportunistic content-compaction
-  phases run (`graph._struct_height_below_top`, snapshotted at the
-  start of `_place_pass_c_content`), reconstructed on the section's
-  current bbox top, so the row offset resolves from an anchors-first
-  prediction rather than the settled extent (#465).  The structural
-  extent is >= the settled one, so the gap can only loosen, never
-  overlap.
+  measured.  Phase 2 reads `bbox_y + bbox_h` from Phase 1's content-hugging
+  bbox as the row-ending extent.  If `graph._struct_height_below_top`
+  is populated, its per-section height is used instead (reconstructed
+  on the current bbox top); that dict is populated after Stage 6.15a
+  so it records the fully settled extent for structural-extent fidelity
+  checks, not as a cascade input.
 - **Helper**: `_shrink_and_tighten_rows` (orchestrates
   `_shrink_bboxes_to_content_bottom` then
   `_tighten_lower_rows_after_shrink`).
