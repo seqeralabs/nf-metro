@@ -1437,6 +1437,7 @@ def place_labels(
     if routes:
         _avoid_diagonal_routes(placements, graph, routes, station_offsets)
         _avoid_horizontal_strikethrough(placements, graph, routes, station_offsets)
+        _avoid_diagonal_strikethrough(placements, graph, routes, station_offsets)
 
     _wrap_overlapping_labels(
         placements, graph, station_offsets, allow_hyphenation=allow_hyphenation
@@ -1757,22 +1758,21 @@ def _avoid_diagonal_routes(
         placement.x, placement.y, placement.above = trial.x, trial.y, trial.above
 
 
-def _avoid_horizontal_strikethrough(
-    placements: list[LabelPlacement],
-    graph: MetroGraph,
+def _foreign_route_segments(
     routes: list["RoutedPath"],
     station_offsets: dict[tuple[str, str], float] | None,
-) -> None:
-    """Flip a label off a foreign horizontal trunk that strikes its glyph ink.
+    *,
+    diagonal: bool,
+) -> list[tuple[str, str, str, float, float, float, float]]:
+    """Route segments usable as label-strike obstacles, offsets applied.
 
-    A label hanging on the side of its station where another line's horizontal
-    run passes reads as struck through.  ``_avoid_diagonal_routes`` ignores
-    horizontal segments because labels normally clear the trunk they sit on;
-    this catches the case a *foreign* trunk (a line the station does not carry,
-    not an edge endpoint) crosses the label's glyph ink, and flips the label to
-    the opposite side when that side is free of label and ink collisions.
+    ``diagonal=True`` keeps non-horizontal runs (trunk-to-fan transitions,
+    off-track entries, bypass Vs); ``diagonal=False`` keeps horizontal runs
+    (trunks).  Each entry is ``(line_id, source, target, x1, y1, x2, y2)`` so a
+    caller can exclude segments whose edge the label's station carries or is an
+    endpoint of.
     """
-    foreign: list[tuple[str, tuple[float, float, float, float]]] = []
+    segs: list[tuple[str, str, str, float, float, float, float]] = []
     for route in routes:
         pts = list(route.points)
         if station_offsets and not route.offsets_applied and pts:
@@ -1781,10 +1781,30 @@ def _avoid_horizontal_strikethrough(
             pts[0] = (pts[0][0], pts[0][1] + so)
             pts[-1] = (pts[-1][0], pts[-1][1] + to)
         for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
-            if abs(y2 - y1) >= max(abs(x2 - x1), 1.0) * 0.05:
+            is_diagonal = abs(y2 - y1) >= max(abs(x2 - x1), 1.0) * 0.05
+            if is_diagonal != diagonal:
                 continue
-            foreign.append((route.line_id, (min(x1, x2), y1, max(x1, x2), y2)))
-    if not foreign:
+            segs.append(
+                (route.line_id, route.edge.source, route.edge.target, x1, y1, x2, y2)
+            )
+    return segs
+
+
+def _flip_labels_off_foreign_strikes(
+    placements: list[LabelPlacement],
+    graph: MetroGraph,
+    station_offsets: dict[tuple[str, str], float] | None,
+    segments: list[tuple[str, str, str, float, float, float, float]],
+) -> None:
+    """Flip each label whose glyph ink a foreign ``segments`` entry strikes.
+
+    A segment strikes a label only when its line is one the label's station
+    does not carry and the station is not an endpoint of the segment's edge
+    (the strike definition shared with ``_guard_no_line_strikes_label``).  A
+    struck label flips to its other side when that side is free of sibling
+    collisions and foreign strikes; one struck on both sides stays put.
+    """
+    if not segments:
         return
 
     for placement in [p for p in placements if p.obstacle_bbox is None]:
@@ -1794,26 +1814,18 @@ def _avoid_horizontal_strikethrough(
         if station is None:
             continue
         carried = set(graph.station_lines(station.id))
-        ink = label_glyph_ink_bbox(placement)
 
         def strikes(box: tuple[float, float, float, float]) -> bool:
-            for line_id, (sx1, sy1, sx2, sy2) in foreign:
-                if line_id in carried:
+            for line_id, src, tgt, sx1, sy1, sx2, sy2 in segments:
+                if line_id in carried or src == station.id or tgt == station.id:
                     continue
                 if segment_intersects_bbox(sx1, sy1, sx2, sy2, box):
                     return True
             return False
 
-        if not strikes(ink):
+        if not strikes(label_glyph_ink_bbox(placement)):
             continue
-        if station_offsets:
-            offs = [
-                station_offsets.get((station.id, lid), 0.0)
-                for lid in graph.station_lines(station.id)
-            ]
-            min_off, max_off = (min(offs), max(offs)) if offs else (0.0, 0.0)
-        else:
-            min_off = max_off = 0.0
+        min_off, max_off = _pill_offsets(graph, station, station_offsets)
         if placement.above:
             gap = max((station.y + min_off) - placement.y, LABEL_OFFSET)
             trial = LabelPlacement(
@@ -1836,6 +1848,53 @@ def _avoid_horizontal_strikethrough(
         if _has_collision(trial, siblings) or strikes(label_glyph_ink_bbox(trial)):
             continue
         placement.x, placement.y, placement.above = trial.x, trial.y, trial.above
+
+
+def _avoid_horizontal_strikethrough(
+    placements: list[LabelPlacement],
+    graph: MetroGraph,
+    routes: list["RoutedPath"],
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> None:
+    """Flip a label off a foreign horizontal trunk that strikes its glyph ink.
+
+    A label hanging on the side of its station where another line's horizontal
+    run passes reads as struck through.  ``_avoid_diagonal_routes`` ignores
+    horizontal segments because labels normally clear the trunk they sit on;
+    this catches the case a *foreign* trunk (a line the station does not carry,
+    not an edge endpoint) crosses the label's glyph ink, and flips the label to
+    the opposite side when that side is free of label and ink collisions.
+    """
+    _flip_labels_off_foreign_strikes(
+        placements,
+        graph,
+        station_offsets,
+        _foreign_route_segments(routes, station_offsets, diagonal=False),
+    )
+
+
+def _avoid_diagonal_strikethrough(
+    placements: list[LabelPlacement],
+    graph: MetroGraph,
+    routes: list["RoutedPath"],
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> None:
+    """Flip a label off a foreign diagonal route that strikes its glyph ink.
+
+    The diagonal counterpart of ``_avoid_horizontal_strikethrough``.
+    ``_avoid_diagonal_routes`` already flips diagonally-overlapped labels but
+    judges the flip target by the full reserved box, so it declines when the
+    target's empty margin merely grazes a diagonal even though the glyph ink
+    clears.  Judging by glyph ink (the strike measure) and over foreign lines,
+    a label with a clean opposite side flips, while one a bypass V rakes on
+    both sides stays put.
+    """
+    _flip_labels_off_foreign_strikes(
+        placements,
+        graph,
+        station_offsets,
+        _foreign_route_segments(routes, station_offsets, diagonal=True),
+    )
 
 
 def _clamp_label_vertical(

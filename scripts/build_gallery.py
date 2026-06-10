@@ -250,6 +250,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "the metro line on the track above; the label is pulled back to its "
         "un-pushed anchor so the name clears the line.",
     ),
+    (
+        "funcprofiler_upstream",
+        TOPOLOGIES_DIR,
+        "A profiling section whose stacked tools share a fan-in/fan-out: a "
+        "line the 'FMH FunProfiler' station does not carry would rake its wide "
+        "below-station label, so the label flips to its clear side and the "
+        "diagonal no longer strikes the glyphs.",
+    ),
     # --- Branching and multipath ---
     (
         "asymmetric_tree",
