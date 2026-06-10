@@ -120,12 +120,12 @@ GitHub READMEs strip `<script>` tags, so embed there as a static SVG (or link ou
 
 #### Embedded data manifest
 
-Every rendered SVG carries a machine-readable manifest so the committed file is a self-contained, durable artifact - a downstream tool can drive it (position overlays, restyle stations, look up which processes a station represents) without re-running the layout engine. The data is carried two redundant ways, both sanitization-safe (no `<script>`):
+Every rendered SVG carries a machine-readable manifest so the committed file is a self-contained, durable artifact - a downstream tool can drive it (position overlays, restyle nodes, look up which processes a node represents) without re-running the layout engine. The format is tool-neutral, so it uses generic vocabulary - a metro station is a **node**, a line a **group**, a section a **region**. The data is carried two redundant ways, both sanitization-safe (no `<script>`):
 
-- A JSON manifest in a `<metadata id="nf-metro-manifest">` element: schema `version`, map `title`, canvas `width`/`height`, `lines`, `sections`, and `stations` (each with `id`, `label`, absolute `x`/`y`/`r`, the `lines` and `section` it belongs to, and the `processes` regexes it represents).
-- `data-metro-*` attributes on each station's `<g>` element (`data-metro-station`, `data-metro-cx/cy/r`, `data-metro-lines`, `data-metro-section`), so individual stations stay addressable directly in the DOM.
+- A JSON manifest in a `<metadata id="diagram-manifest">` element: schema `version`, `title`, canvas `width`/`height`, `groups`, `regions`, and `nodes` (each with `id`, `label`, absolute `x`/`y`/`r`, the `groups` and `region` it belongs to, and the `patterns` regexes it matches).
+- `data-node-*` attributes on each node's `<g>` element (`data-node-id`, `data-node-cx/cy/r`, `data-node-groups`, `data-node-region`), so individual nodes stay addressable directly in the DOM.
 
-The station `id` is the join key between the two: it equals `data-metro-station="<id>"` on the matching element. Coordinates are absolute SVG user units inside the `viewBox="0 0 width height"`, so an overlay sharing that viewBox lines up exactly. The manifest is embedded by default and adds no external dependencies; set `%%metro manifest: false` to emit the drawn map only. See [Live progress](docs/live.md#the-embedded-data-manifest) for the full schema and matching semantics.
+The node `id` is the join key between the two: it equals `data-node-id="<id>"` on the matching element. Coordinates are absolute SVG user units inside the `viewBox="0 0 width height"`, so an overlay sharing that viewBox lines up exactly. The manifest is embedded by default and adds no external dependencies; set `%%metro manifest: false` to emit the drawn map only. The format is a standalone contract any tool can emit - the `nf_metro.manifest` helpers build, embed, read, and match it without a metro map. See [Data manifest](docs/manifest.md) for the full schema, the terminology, the matching semantics, and how to produce a conforming SVG yourself.
 
 ### `nf-metro validate`
 

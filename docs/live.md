@@ -59,85 +59,21 @@ matched against the **fully-qualified** process name:
 
 ## The embedded data manifest
 
-`nf-metro serve` lights up a map because it holds the in-memory graph - it knows
-each station's coordinates and the `process:` mapping. A tool that has only the
-**committed SVG file** (no Python, no graph) needs that information carried
-inside the file. Every rendered SVG therefore embeds a machine-readable manifest
-so it is a self-contained, durable contract: an overlay can be positioned,
-stations restyled, and process mappings looked up with no re-render.
+`nf-metro serve` lights up a map because it holds the in-memory graph - it
+knows each station's coordinates and the `process:` mapping. A tool that has
+only the **committed SVG file** (no Python, no graph) needs that information
+carried inside the file, so every rendered SVG embeds a machine-readable
+manifest: a JSON block in a `<metadata id="diagram-manifest">` element plus
+`data-node-*` attributes on each station's `<g>`. An overlay can then be
+positioned, stations restyled, and process mappings looked up with no
+re-render.
 
-It is **embedded by default** (it is small and adds no external dependencies),
-and carried two redundant, sanitization-safe ways (no `<script>`):
-
-1. A JSON manifest inside a `<metadata id="nf-metro-manifest">` element.
-2. `data-metro-*` attributes on each station's `<g>` element.
-
-Set `%%metro manifest: false` to emit the drawn map only, with no manifest, no
-`data-metro-*` attributes, and no station-group wrapper - byte-for-byte the same
-SVG as a build that predates the manifest.
-
-### Schema
-
-```json
-{
-  "version": "1.0",
-  "match": { "target": "fqProcessName", "type": "regex", "flags": "i" },
-  "title": "nf-core/rnaseq",
-  "width": 1829,
-  "height": 724,
-  "lines":    [ { "id": "star_salmon", "label": "STAR + Salmon", "color": "#e64949" } ],
-  "sections": [ { "id": "preprocessing", "label": "Pre-processing" } ],
-  "stations": [
-    {
-      "id": "fastqc",
-      "label": "FastQC",
-      "x": 120.0, "y": 80.0, "r": 5.0,
-      "lines": ["star_salmon", "star_rsem"],
-      "section": "preprocessing",
-      "processes": ["FASTQC", "MULTIQC"]
-    }
-  ]
-}
-```
-
-- **`id` is the join key.** A station's `id` in the manifest equals
-  `data-metro-station="<id>"` on its `<g>` element, so a consumer can go
-  manifest→element and element→manifest without guessing.
-- **Coordinate space.** `x`/`y`/`r` are absolute SVG user units inside the
-  `viewBox="0 0 width height"` (the renderer emits no outer transform), so an
-  overlay sharing that viewBox lines up exactly. `r` is a single nominal marker
-  radius. Coordinates are rounded to one decimal place.
-- **Stations** are every non-port, non-hidden station - unmapped ones simply
-  carry an empty `processes` list, so the manifest is a complete inventory of
-  addressable stations, not only the subset that lights up.
-- **Forward compatibility.** Consumers must ignore unknown fields; additive
-  fields keep the same major `version`.
-
-### Process matching semantics
-
-`station.processes` are regular expressions matched **case-insensitively**
-against the **fully-qualified** Nextflow process name - exactly the rule the
-live server's `stations_for_process` uses (the `match` block states this
-explicitly so a non-Python consumer can reproduce it). To keep Python `re` and,
-say, JavaScript `RegExp` from diverging, keep patterns within a portable regex
-subset: character classes, anchors, `.`/`*`/`+`/`?`, bounded `{m,n}`,
-alternation, and groups. Avoid Python-only constructs (named groups `(?P<>)`,
-inline flags `(?i)`, possessive quantifiers, `\Z`).
-
-A process may legitimately match **more than one** station (the `check-mapping`
-"ambiguous" case below); how to resolve that is a consumer-side policy decision,
-not a schema error.
-
-### Reading it back
-
-`nf_metro.render` ships the canonical reader and matcher:
-
-```python
-from nf_metro.render import read_manifest, match_station_ids
-
-manifest = read_manifest(open("pipeline.svg").read())
-match_station_ids(manifest, "NFCORE_RNASEQ:RNASEQ:FASTQC")   # -> ["fastqc"]
-```
+The manifest format is tool-neutral (a station is a *node*, a line a *group*, a
+section a *region*); its schema, matching semantics, and reader/matcher tooling
+are a standalone contract documented on the [Data manifest](manifest.md) page -
+the same standard any non-metro tool can emit. Set `%%metro manifest: false`
+(or `--no-manifest`) to emit the drawn map only, with no manifest, no
+`data-node-*` attributes, and no station-group wrapper.
 
 ## 2. Serve the map
 
