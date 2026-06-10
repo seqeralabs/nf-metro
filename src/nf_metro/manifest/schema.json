@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pinin4fjords.github.io/nf-metro/manifest.schema.json",
+  "title": "Diagram manifest",
+  "description": "A self-describing, addressable SVG diagram manifest, embedded in a <metadata id=\"diagram-manifest\"> element. Tool-neutral and experimental (pre-1.0): the schema may change without a version bump until declared stable. Consumers MUST ignore unknown fields, so additional properties are permitted everywhere.",
+  "type": "object",
+  "required": ["version", "width", "height", "nodes"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Schema version (major.minor). Consumers tolerate additive fields within a major version."
+    },
+    "title": {
+      "type": ["string", "null"],
+      "description": "Human label for the diagram."
+    },
+    "width": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Canvas width; an overlay shares viewBox=\"0 0 width height\"."
+    },
+    "height": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Canvas height."
+    },
+    "match": {
+      "type": "object",
+      "description": "How node.patterns are matched against a runtime string. Required only for matching (e.g. lighting up nodes from a running job).",
+      "required": ["target", "type", "flags"],
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Names the runtime string the patterns match against (e.g. \"fqProcessName\" for a Nextflow run)."
+        },
+        "type": { "const": "regex" },
+        "flags": { "const": "i" }
+      }
+    },
+    "groups": {
+      "type": "array",
+      "description": "Optional multi-membership categories a node can belong to several of.",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "color"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "color": { "type": "string" }
+        }
+      }
+    },
+    "regions": {
+      "type": "array",
+      "description": "Optional single-membership containers a node sits inside.",
+      "items": {
+        "type": "object",
+        "required": ["id", "label"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" }
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "description": "The addressable points on the diagram.",
+      "items": {
+        "type": "object",
+        "required": ["id", "x", "y", "r"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Join key; equals data-node-id on the element."
+          },
+          "label": { "type": "string" },
+          "x": { "type": "number", "description": "Centre x, absolute SVG user units." },
+          "y": { "type": "number", "description": "Centre y, absolute SVG user units." },
+          "r": { "type": "number", "description": "Nominal marker radius." },
+          "groups": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Ids of groups this node belongs to."
+          },
+          "region": {
+            "type": "string",
+            "description": "Id of the region containing this node."
+          },
+          "patterns": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Regexes identifying this node against the match target."
+          }
+        }
+      }
+    }
+  }
+}

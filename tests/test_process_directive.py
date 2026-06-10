@@ -88,9 +88,7 @@ def test_process_directive_does_not_change_visual_render():
     # Identical once the manifest is stripped (nothing drawn changed)...
     assert _visual_svg(plain_svg) == _visual_svg(mapped_svg)
     # ...but the manifest carries the mapping difference.
-    plain_proc = {s["id"]: s["processes"] for s in read_manifest(plain_svg)["stations"]}
-    mapped_proc = {
-        s["id"]: s["processes"] for s in read_manifest(mapped_svg)["stations"]
-    }
+    plain_proc = {n["id"]: n["patterns"] for n in read_manifest(plain_svg)["nodes"]}
+    mapped_proc = {n["id"]: n["patterns"] for n in read_manifest(mapped_svg)["nodes"]}
     assert plain_proc["trim"] == []
     assert mapped_proc["trim"] == ["TRIMGALORE"]

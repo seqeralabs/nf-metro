@@ -208,7 +208,7 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         kind="bool",
         hidden=True,
         help="Embed the machine-readable data manifest (the <metadata> block "
-        "and per-station data-metro-* attributes) in the SVG. On by default; "
+        "and per-node data-node-* attributes) in the SVG. On by default; "
         "--no-manifest emits the drawn map only.",
     ),
 )

@@ -1,10 +1,12 @@
 """Tests for the embedded SVG manifest contract.
 
 The rendered SVG is a durable, machine-readable contract: a JSON manifest in a
-``<metadata>`` element plus ``data-metro-*`` attributes on each station ``<g>``.
-These tests assert the manifest round-trips, that its coordinates/processes
-match the graph it was built from, that the two halves agree on the station
-``id`` join key, and that the documented matching/coordinate semantics hold.
+``<metadata>`` element plus ``data-node-*`` attributes on each node ``<g>``.
+These tests assert the manifest round-trips, that its coordinates/patterns match
+the graph it was built from, that the two halves agree on the node ``id`` join
+key, and that the documented matching/coordinate semantics hold. nf-metro feeds
+the standalone builder via the adapter, so a metro station becomes a manifest
+node, a line a group, and a section a region.
 """
 
 from __future__ import annotations
@@ -12,13 +14,15 @@ from __future__ import annotations
 import re
 import xml.etree.ElementTree as ET
 
+import jsonschema
 import pytest
 from conftest import compute_corpus_layout, content_corpus, parse_and_layout
 
 from nf_metro.live.mapping import stations_for_process
 from nf_metro.render.manifest import (
     MANIFEST_SCHEMA_VERSION,
-    match_station_ids,
+    manifest_schema,
+    match_node_ids,
     read_manifest,
 )
 from nf_metro.render.svg import render_svg
@@ -60,8 +64,8 @@ def test_manifest_embedded_and_roundtrips(mapped_svg: str) -> None:
     assert manifest is not None
     assert manifest["version"] == MANIFEST_SCHEMA_VERSION
     assert manifest["title"] == "Demo Pipeline"
-    assert {ln["id"] for ln in manifest["lines"]} == {"qc", "align"}
-    assert {s["id"] for s in manifest["sections"]} == {"prep", "main"}
+    assert {g["id"] for g in manifest["groups"]} == {"qc", "align"}
+    assert {r["id"] for r in manifest["regions"]} == {"prep", "main"}
 
 
 def test_svg_without_manifest_returns_none() -> None:
@@ -71,7 +75,7 @@ def test_svg_without_manifest_returns_none() -> None:
 def test_no_manifest_opt_out_emits_drawn_map_only() -> None:
     """``embed_manifest=False`` drops every data decoration from the SVG.
 
-    The drawn map carries no ``<metadata>`` manifest, no ``data-metro-*``
+    The drawn map carries no ``<metadata>`` manifest, no ``data-node-*``
     attributes, and no station-group wrapper, so it is the lean output the
     gallery's render diff compares against the base branch.
     """
@@ -81,8 +85,8 @@ def test_no_manifest_opt_out_emits_drawn_map_only() -> None:
 
     ET.fromstring(svg)  # well-formed XML
     assert read_manifest(svg) is None
-    assert "nf-metro-manifest" not in svg
-    assert "data-metro-" not in svg
+    assert "diagram-manifest" not in svg
+    assert "data-node-" not in svg
     assert "nf-metro-station-group" not in svg
 
 
@@ -91,7 +95,7 @@ def test_no_manifest_drops_only_data_not_glyphs() -> None:
 
     Both outputs draw one ``<rect>`` per station; the manifest-off SVG is
     shorter only because it omits the non-visual ``<metadata>`` block and
-    ``data-metro-*`` attributes.
+    ``data-node-*`` attributes.
     """
     graph = parse_and_layout(MAPPED_TEXT)
     on = render_svg(graph, NFCORE_THEME)
@@ -114,12 +118,12 @@ def test_match_block_documents_semantics(mapped_svg: str) -> None:
     }
 
 
-def test_stations_coords_and_processes_match_graph() -> None:
+def test_nodes_coords_and_patterns_match_graph() -> None:
     graph = parse_and_layout(MAPPED_TEXT)
     svg = render_svg(graph, NFCORE_THEME)
     manifest = read_manifest(svg)
 
-    by_id = {s["id"]: s for s in manifest["stations"]}
+    by_id = {n["id"]: n for n in manifest["nodes"]}
     # Ports are excluded; every real (non-port, non-hidden) station is present.
     expected = {
         sid for sid, st in graph.stations.items() if not st.is_port and not st.is_hidden
@@ -131,49 +135,49 @@ def test_stations_coords_and_processes_match_graph() -> None:
         assert entry["x"] == round(st.x, 1)
         assert entry["y"] == round(st.y, 1)
         assert entry["r"] == round(NFCORE_THEME.station_radius, 1)
-        assert entry["lines"] == graph.station_lines(sid)
-        assert entry["processes"] == graph.process_mapping.get(sid, [])
+        assert entry["groups"] == graph.station_lines(sid)
+        assert entry["patterns"] == graph.process_mapping.get(sid, [])
 
 
-def test_unmapped_station_has_empty_processes(mapped_svg: str) -> None:
+def test_unmapped_node_has_empty_patterns(mapped_svg: str) -> None:
     manifest = read_manifest(mapped_svg)
-    fastqc = next(s for s in manifest["stations"] if s["id"] == "fastqc")
-    assert fastqc["processes"] == []
+    fastqc = next(n for n in manifest["nodes"] if n["id"] == "fastqc")
+    assert fastqc["patterns"] == []
 
 
 def test_id_is_join_key_to_dom(mapped_svg: str) -> None:
-    """Every manifest station id is emitted as data-metro-station on a <g>."""
+    """Every manifest node id is emitted as data-node-id on a <g>."""
     manifest = read_manifest(mapped_svg)
-    for station in manifest["stations"]:
-        assert f'data-metro-station="{station["id"]}"' in mapped_svg
+    for node in manifest["nodes"]:
+        assert f'data-node-id="{node["id"]}"' in mapped_svg
 
 
 def test_data_attrs_mirror_manifest_geometry(mapped_svg: str) -> None:
-    """The <g> data-metro-* values equal the manifest entry for each station.
+    """The <g> data-node-* values equal the manifest entry for each node.
 
-    The manifest and the per-station attributes derive the same geometry,
-    lines, and section independently, so this pins them together: a divergence
-    in either derivation fails here rather than shipping inconsistent halves.
+    The manifest and the per-node attributes derive the same geometry, groups,
+    and region independently, so this pins them together: a divergence in either
+    derivation fails here rather than shipping inconsistent halves.
     """
     manifest = read_manifest(mapped_svg)
     root = ET.fromstring(mapped_svg)
     groups = {
-        g.get("data-metro-station"): g
+        g.get("data-node-id"): g
         for g in root.iter("{http://www.w3.org/2000/svg}g")
-        if g.get("data-metro-station")
+        if g.get("data-node-id")
     }
-    assert groups  # sanity: the namespaced iter found the station groups
-    for station in manifest["stations"]:
-        g = groups[station["id"]]
-        assert float(g.get("data-metro-cx")) == station["x"]
-        assert float(g.get("data-metro-cy")) == station["y"]
-        assert float(g.get("data-metro-r")) == station["r"]
-        assert g.get("data-metro-lines") == ",".join(station["lines"])
-        assert g.get("data-metro-section") == station.get("section")
+    assert groups  # sanity: the namespaced iter found the node groups
+    for node in manifest["nodes"]:
+        g = groups[node["id"]]
+        assert float(g.get("data-node-cx")) == node["x"]
+        assert float(g.get("data-node-cy")) == node["y"]
+        assert float(g.get("data-node-r")) == node["r"]
+        assert g.get("data-node-groups") == ",".join(node["groups"])
+        assert g.get("data-node-region") == node.get("region")
 
 
 def test_manifest_arrays_follow_graph_declaration_order() -> None:
-    """stations, lines, and sections keep the graph's declaration order.
+    """nodes, groups, and regions keep the graph's declaration order.
 
     Manifest equality alone would catch a render-to-render reorder but not
     pin the order to anything meaningful; anchoring it to the graph makes an
@@ -182,15 +186,15 @@ def test_manifest_arrays_follow_graph_declaration_order() -> None:
     graph = parse_and_layout(MAPPED_TEXT)
     manifest = read_manifest(render_svg(graph, NFCORE_THEME))
 
-    expected_stations = [
+    expected_nodes = [
         sid for sid, st in graph.stations.items() if not st.is_port and not st.is_hidden
     ]
-    expected_sections = [
+    expected_regions = [
         sid for sid, sec in graph.sections.items() if not sec.is_implicit
     ]
-    assert [s["id"] for s in manifest["stations"]] == expected_stations
-    assert [ln["id"] for ln in manifest["lines"]] == list(graph.lines)
-    assert [s["id"] for s in manifest["sections"]] == expected_sections
+    assert [n["id"] for n in manifest["nodes"]] == expected_nodes
+    assert [g["id"] for g in manifest["groups"]] == list(graph.lines)
+    assert [r["id"] for r in manifest["regions"]] == expected_regions
 
 
 def test_coordinate_space_is_viewbox(mapped_svg: str) -> None:
@@ -206,7 +210,7 @@ def test_coordinate_space_is_viewbox(mapped_svg: str) -> None:
 
 
 def test_matcher_mirrors_live_server() -> None:
-    """match_station_ids reproduces stations_for_process exactly."""
+    """match_node_ids reproduces stations_for_process exactly."""
     graph = parse_and_layout(MAPPED_TEXT)
     manifest = read_manifest(render_svg(graph, NFCORE_THEME))
     process_names = [
@@ -217,7 +221,7 @@ def test_matcher_mirrors_live_server() -> None:
         "UNMAPPED_PROCESS",
     ]
     for name in process_names:
-        assert sorted(match_station_ids(manifest, name)) == sorted(
+        assert sorted(match_node_ids(manifest, name)) == sorted(
             stations_for_process(name, graph.process_mapping)
         )
 
@@ -242,18 +246,19 @@ def test_cdata_survives_bracket_sequence() -> None:
     svg = render_svg(graph, NFCORE_THEME)
     ET.fromstring(svg)  # must be well-formed XML
     parsed = read_manifest(svg)
-    a = next(s for s in parsed["stations"] if s["id"] == "a")
-    assert a["processes"] == ["FOO]]>BAR"]
+    a = next(n for n in parsed["nodes"] if n["id"] == "a")
+    assert a["patterns"] == ["FOO]]>BAR"]
 
 
 @pytest.mark.parametrize("fixture_id,path,is_nextflow", content_corpus())
 def test_corpus_manifest_roundtrips(fixture_id, path, is_nextflow) -> None:
     """Every gallery/topology fixture renders an SVG whose manifest reads back
-    and whose station ids all appear as data-metro-station handles."""
+    and whose node ids all appear as data-node-id handles."""
     graph = compute_corpus_layout(path, is_nextflow)
     svg = render_svg(graph, NFCORE_THEME)
     manifest = read_manifest(svg)
     assert manifest is not None
-    for station in manifest["stations"]:
-        assert f'data-metro-station="{station["id"]}"' in svg
-        assert station["processes"] == graph.process_mapping.get(station["id"], [])
+    jsonschema.validate(manifest, manifest_schema())
+    for node in manifest["nodes"]:
+        assert f'data-node-id="{node["id"]}"' in svg
+        assert node["patterns"] == graph.process_mapping.get(node["id"], [])
