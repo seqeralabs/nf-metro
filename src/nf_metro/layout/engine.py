@@ -580,6 +580,12 @@ def _compute_layout_scaled(
         targets = [t for sid in struck if (t := _growable_target(sid)) is not None]
         if not targets:
             break
+        # Both levers fire for every struck station rather than attributing the
+        # strike to one: a port-fan strike clears on the runway, an intra-section
+        # descent on the gap, and bumping both avoids classifying the striking
+        # segment.  Extra room never raises the struck count, so the rollback
+        # below only discards a step that regressed or overshot into a collinear
+        # overlay -- never a working lever.
         runway = {sec.id for sec, _ in targets}
         gaps = {(sec.id, layer) for sec, layer in targets}
         for sid in runway:
