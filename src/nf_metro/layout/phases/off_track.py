@@ -306,75 +306,61 @@ def _bubble_anchor_has_lifted_output(
     return False
 
 
-def _compute_fork_join_gaps(
+def _fork_join_adjacency(
     sub: MetroGraph,
-    layers: dict[str, int],
-    tracks: dict[str, float],
-    x_spacing: float,
-    full_graph: MetroGraph | None = None,
-    section_station_ids: set[str] | None = None,
-) -> dict[int, float]:
-    """Compute extra X offset per layer at fork/join points.
+    full_graph: MetroGraph | None,
+    section_station_ids: set[str] | None,
+) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """Successor/predecessor sets used for fork/join detection.
 
-    Adds a fractional gap after fork layers (where tracks diverge) and
-    before join layers (where tracks converge) so labels aren't obscured
-    by diagonal crossings.
-
-    When full_graph and section_station_ids are provided, fork/join
-    detection uses all edges within the section (including port-touching
-    edges). This catches divergences where a station connects to both
-    internal stations and exit ports.
-
-    In single-track sections (all stations on the same Y), port-bound
-    divergences are suppressed because there are no diagonal transitions
-    and the extra spacing is purely wasteful.
+    With ``full_graph`` and ``section_station_ids`` the adjacency is built
+    from every section-internal edge (including those touching exit/entry
+    ports), so a station feeding both an internal successor and a port counts
+    as a divergence.  Otherwise it falls back to ``sub``'s own edges.
     """
-    label_angle = (full_graph or sub).label_angle or 0.0
-
     out_targets: dict[str, set[str]] = defaultdict(set)
     in_sources: dict[str, set[str]] = defaultdict(set)
-
-    # Use full graph edges for fork/join detection when available,
-    # so that edges to/from port stations are counted as divergences.
     if full_graph is not None and section_station_ids is not None:
         for edge in full_graph.edges:
-            src_in = edge.source in section_station_ids
-            tgt_in = edge.target in section_station_ids
-            if src_in and tgt_in:
+            if (
+                edge.source in section_station_ids
+                and edge.target in section_station_ids
+            ):
                 out_targets[edge.source].add(edge.target)
                 in_sources[edge.target].add(edge.source)
     else:
         for edge in sub.edges:
             out_targets[edge.source].add(edge.target)
             in_sources[edge.target].add(edge.source)
+    return out_targets, in_sources
 
-    # Only count forks/joins that span multiple tracks (requiring a
-    # diagonal routing transition).  Same-track fan-outs (e.g. a station
-    # connecting to both an internal successor and an exit port on the
-    # same Y) don't need extra horizontal room.
-    #
-    # Port stations aren't in ``tracks`` (they're positioned later), so
-    # treat them conservatively: if any participant is missing from
-    # tracks, assume it may be on a different track and count the
-    # fork/join.
-    #
-    # Exception for **forks** in single-track sections: exit-side ports
-    # sit at the far section boundary, so the diagonal from the fork
-    # station has ample horizontal room without extra layer spacing.
-    # Join gaps are kept even in single-track sections because entry
-    # ports are close to the first internal station, and the diagonal
-    # from a different-Y entry needs the extra room.
-    # Bypass V helpers (id prefix ``__bypass_``) are routing-only.  A
-    # V on its own off-trunk track must not flip an otherwise
-    # single-track section into "multi-track", or it would turn
-    # port-bound divergences into fork gaps that shift visible stations
-    # rightward.  Specifically when a V is one of the fork/join peers:
-    # exclude its track AND fold the owner's own track into the visible
-    # set so that visible-vs-owner diagonals still trigger a gap, but a
-    # V-only off-trunk peer (e.g. ``trim -> {align, V}`` in the 05 guide
-    # family) does not.  When no V is involved, fall back to the original
-    # peer-set track count so non-bypass topologies stay byte-identical.
-    visible_tracks = {t for sid, t in tracks.items() if not sid.startswith("__bypass_")}
+
+def _detect_fork_join_layers(
+    out_targets: dict[str, set[str]],
+    in_sources: dict[str, set[str]],
+    layers: dict[str, int],
+    tracks: dict[str, float],
+) -> tuple[set[int], set[int]]:
+    """Layers where tracks diverge (forks) or converge (joins).
+
+    Only multi-track divergences/convergences count: a same-track fan-out
+    needs no diagonal transition and so no extra room.  Port stations are
+    absent from ``tracks`` and treated conservatively as possibly off-track.
+
+    Forks in a single visible-track section are an exception: an exit-side
+    port sits at the far boundary, so the diagonal already has ample room and
+    a missing-track fork is skipped.  Join gaps are kept even then, because an
+    entry port sits close to the first internal station.
+
+    Bypass-V helpers (``__bypass_`` ids) are routing-only.  A V on its own
+    off-trunk track must not flip an otherwise single-track section into
+    multi-track, so its track is excluded and the owner's own track folded in,
+    making a visible-vs-owner diagonal trigger a gap while a V-only off-trunk
+    peer does not.
+    """
+    visible_tracks = {
+        t for sid, t in tracks.items() if not sid.startswith("__bypass_")
+    }
     is_single_track = len(visible_tracks) <= 1
 
     def _has_bypass(ids: set[str]) -> bool:
@@ -421,169 +407,286 @@ def _compute_fork_join_gaps(
                 if len(source_tracks) > 1:
                     join_layers.add(layers[sid])
 
+    return fork_layers, join_layers
+
+
+def _fj_label_metrics(
+    layer: int,
+    layers: dict[str, int],
+    tracks: dict[str, float],
+    sub: MetroGraph,
+) -> tuple[float, set[float]]:
+    """Widest half-label and the set of occupied tracks on ``layer``."""
+    fj_label_half = 0.0
+    fj_tracks: set[float] = set()
+    for sid, lyr in layers.items():
+        if lyr == layer:
+            station = sub.stations.get(sid)
+            if station and station.label.strip():
+                fj_label_half = max(fj_label_half, label_text_width(station.label) / 2)
+            if sid in tracks:
+                fj_tracks.add(tracks[sid])
+    return fj_label_half, fj_tracks
+
+
+def _wide_fan_bubble_extra(
+    layer: int,
+    fork_layers: set[int],
+    join_layers: set[int],
+    out_targets: dict[str, set[str]],
+    in_sources: dict[str, set[str]],
+    layers: dict[str, int],
+    tracks: dict[str, float],
+    sub: MetroGraph,
+    x_spacing: float,
+    fj_tracks: set[float],
+) -> float:
+    """Extra bubble room for a wide (3+ branch) fan's off-track middle labels.
+
+    For a multi-target fork / multi-source join the router skips bubble-station
+    centring, so the flat run at the bubble end can be very short.  When a
+    bubble station on the adjacent layer sits on a different track and carries a
+    wide label, the flat run is widened to fit it.  The gap is added on both
+    sides (after fork, before join), so each side contributes half the total.
+    """
+    is_wide_fork = False
+    is_wide_join = False
+    if layer in fork_layers:
+        for sid, tgts in out_targets.items():
+            if layers.get(sid) == layer and sid in tracks:
+                off_track = sum(
+                    1 for t in tgts if t in tracks and tracks[t] != tracks[sid]
+                )
+                if off_track >= 3:
+                    is_wide_fork = True
+                    break
+    if layer in join_layers:
+        for sid, srcs in in_sources.items():
+            if layers.get(sid) == layer and sid in tracks:
+                off_track = sum(
+                    1 for s in srcs if s in tracks and tracks[s] != tracks[sid]
+                )
+                if off_track >= 3:
+                    is_wide_join = True
+                    break
+
+    bubble_label_half = 0.0
+    if is_wide_fork:
+        for sid, lyr in layers.items():
+            if lyr == layer + 1 and sid in tracks and tracks[sid] not in fj_tracks:
+                station = sub.stations.get(sid)
+                if station and station.label.strip():
+                    bubble_label_half = max(
+                        bubble_label_half, label_text_width(station.label) / 2
+                    )
+    if is_wide_join:
+        for sid, lyr in layers.items():
+            if lyr == layer - 1 and sid in tracks and tracks[sid] not in fj_tracks:
+                station = sub.stations.get(sid)
+                if station and station.label.strip():
+                    bubble_label_half = max(
+                        bubble_label_half, label_text_width(station.label) / 2
+                    )
+
+    return max(0.0, (bubble_label_half * 2 + DIAGONAL_RUN - x_spacing) / 1.5)
+
+
+def _has_interior_branch(
+    layer: int,
+    fork_layers: set[int],
+    join_layers: set[int],
+    out_targets: dict[str, set[str]],
+    in_sources: dict[str, set[str]],
+    layers: dict[str, int],
+    tracks: dict[str, float],
+) -> bool:
+    """Whether the fan puts a branch label inside the bubble.
+
+    This needs three or more branches (two or more off-trunk tracks): the
+    middle branch then has a diagonal on both sides.  A two-branch fork places
+    both labels outside the bubble, so the convergence diagonal never crosses
+    them.
+    """
+    if layer in fork_layers:
+        for fsid, ftgts in out_targets.items():
+            if layers.get(fsid) == layer and fsid in tracks:
+                off = sum(
+                    1 for t in ftgts if t in tracks and tracks[t] != tracks[fsid]
+                )
+                if off >= 2:
+                    return True
+    if layer in join_layers:
+        for jsid, jsrcs in in_sources.items():
+            if layers.get(jsid) == layer and jsid in tracks:
+                off = sum(
+                    1 for s in jsrcs if s in tracks and tracks[s] != tracks[jsid]
+                )
+                if off >= 2:
+                    return True
+    return False
+
+
+def _angled_interior_reach(
+    layer: int,
+    fork_layers: set[int],
+    layers: dict[str, int],
+    tracks: dict[str, float],
+    sub: MetroGraph,
+    fj_tracks: set[float],
+    label_angle: float,
+) -> float:
+    """Tilted-label horizontal reach on the adjacent bubble layer.
+
+    Angled labels hang to the lower-right of each fan caller; with a branch
+    label inside the bubble the convergence diagonal must start past the tilted
+    text or it rakes the label.
+    """
+    cos_a = abs(math.cos(math.radians(label_angle)))
+    adj_layer = layer + 1 if layer in fork_layers else layer - 1
+    angled_reach = 0.0
+    for sid, lyr in layers.items():
+        if lyr == adj_layer and sid in tracks and tracks[sid] not in fj_tracks:
+            station = sub.stations.get(sid)
+            if station and station.label.strip():
+                angled_reach = max(
+                    angled_reach, label_text_width(station.label) * cos_a
+                )
+    return angled_reach
+
+
+def _layer_gap_for(
+    layer: int,
+    fork_layers: set[int],
+    join_layers: set[int],
+    out_targets: dict[str, set[str]],
+    in_sources: dict[str, set[str]],
+    layers: dict[str, int],
+    tracks: dict[str, float],
+    sub: MetroGraph,
+    full_graph: MetroGraph | None,
+    x_spacing: float,
+    base_gap: float,
+    label_angle: float,
+) -> float:
+    """Column gap reserved at one fork/join layer.
+
+    The gap must be large enough that the diagonal transition starts past the
+    (possibly tilted) fork/join label and still has room for the transition.
+    The router reserves the fork/join label half-width as straight run but
+    abandons it when the column gap can't also fit the diagonal run plus the
+    branch-side minimum straight; the ``routing_clearance`` term reserves a gap
+    sized to preserve that clearance.  A whole pitch already sits between
+    columns, so it is subtracted; the 1px cushion absorbs float rounding in the
+    router's drop test.
+    """
+    fj_label_half, fj_tracks = _fj_label_metrics(layer, layers, tracks, sub)
+    bubble_extra = _wide_fan_bubble_extra(
+        layer,
+        fork_layers,
+        join_layers,
+        out_targets,
+        in_sources,
+        layers,
+        tracks,
+        sub,
+        x_spacing,
+        fj_tracks,
+    )
+    if label_angle:
+        if _has_interior_branch(
+            layer, fork_layers, join_layers, out_targets, in_sources, layers, tracks
+        ):
+            bubble_extra = max(
+                bubble_extra,
+                _angled_interior_reach(
+                    layer, fork_layers, layers, tracks, sub, fj_tracks, label_angle
+                ),
+            )
+        else:
+            # An off-track output above the top branch forces that branch's
+            # angled label down into the bubble, where it rakes the other
+            # branch's diagonal; widen by the forced label's horizontal reach.
+            bubble_extra = max(
+                bubble_extra,
+                _forced_branch_label_reach(
+                    layer,
+                    fork_layers,
+                    join_layers,
+                    out_targets,
+                    in_sources,
+                    layers,
+                    tracks,
+                    sub,
+                    full_graph,
+                    label_angle,
+                ),
+            )
+
+    routing_clearance = fj_label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE - x_spacing + 1.0
+    return max(base_gap, fj_label_half + bubble_extra, routing_clearance)
+
+
+def _compute_fork_join_gaps(
+    sub: MetroGraph,
+    layers: dict[str, int],
+    tracks: dict[str, float],
+    x_spacing: float,
+    full_graph: MetroGraph | None = None,
+    section_station_ids: set[str] | None = None,
+) -> dict[int, float]:
+    """Compute extra X offset per layer at fork/join points.
+
+    Adds a fractional gap after fork layers (where tracks diverge) and
+    before join layers (where tracks converge) so labels aren't obscured
+    by diagonal crossings.
+
+    When full_graph and section_station_ids are provided, fork/join
+    detection uses all edges within the section (including port-touching
+    edges). This catches divergences where a station connects to both
+    internal stations and exit ports.
+
+    In single-track sections (all stations on the same Y), port-bound
+    divergences are suppressed because there are no diagonal transitions
+    and the extra spacing is purely wasteful.
+    """
+    label_angle = (full_graph or sub).label_angle or 0.0
+    out_targets, in_sources = _fork_join_adjacency(
+        sub, full_graph, section_station_ids
+    )
+    fork_layers, join_layers = _detect_fork_join_layers(
+        out_targets, in_sources, layers, tracks
+    )
+
     if not fork_layers and not join_layers:
         return {}
 
     max_layer = max(layers.values()) if layers else 0
     base_gap = x_spacing * EXIT_GAP_MULTIPLIER
 
-    # Compute per-layer gap scaled by label width at fork/join stations.
-    # The gap must be large enough that the diagonal transition starts
-    # past the label text and still has room for the transition itself.
-    #
-    # For multi-target forks / multi-source joins, bubble station
-    # centering is skipped in routing, so the flat run at the bubble
-    # end can be very short.  When bubble stations sit on different
-    # tracks from the fork/join and have wide labels, add extra space
-    # so the flat run accommodates them.
-    layer_gap: dict[int, float] = {}
-    for layer in fork_layers | join_layers:
-        fj_label_half = 0.0
-        fj_tracks: set[float] = set()
-        for sid, lyr in layers.items():
-            if lyr == layer:
-                station = sub.stations.get(sid)
-                if station and station.label.strip():
-                    label_half = label_text_width(station.label) / 2
-                    fj_label_half = max(fj_label_half, label_half)
-                if sid in tracks:
-                    fj_tracks.add(tracks[sid])
-
-        # Check adjacent bubble layer for off-track stations with
-        # wide labels.  Only applies for wide fan-outs (3+ off-track
-        # targets/sources) where bubble station centering is skipped
-        # in routing and middle stations must have inside labels.
-        bubble_label_half = 0.0
-        is_wide_fork = False
-        is_wide_join = False
-        if layer in fork_layers:
-            for sid, tgts in out_targets.items():
-                if layers.get(sid) == layer and sid in tracks:
-                    off_track = sum(
-                        1 for t in tgts if t in tracks and tracks[t] != tracks[sid]
-                    )
-                    if off_track >= 3:
-                        is_wide_fork = True
-                        break
-        if layer in join_layers:
-            for sid, srcs in in_sources.items():
-                if layers.get(sid) == layer and sid in tracks:
-                    off_track = sum(
-                        1 for s in srcs if s in tracks and tracks[s] != tracks[sid]
-                    )
-                    if off_track >= 3:
-                        is_wide_join = True
-                        break
-        if is_wide_fork:
-            for sid, lyr in layers.items():
-                if lyr == layer + 1 and sid in tracks and tracks[sid] not in fj_tracks:
-                    station = sub.stations.get(sid)
-                    if station and station.label.strip():
-                        bubble_label_half = max(
-                            bubble_label_half, label_text_width(station.label) / 2
-                        )
-        if is_wide_join:
-            for sid, lyr in layers.items():
-                if lyr == layer - 1 and sid in tracks and tracks[sid] not in fj_tracks:
-                    station = sub.stations.get(sid)
-                    if station and station.label.strip():
-                        bubble_label_half = max(
-                            bubble_label_half, label_text_width(station.label) / 2
-                        )
-
-        # The bubble station is centered on its flat run.  The total
-        # space needed is 2 * label_half + DIAGONAL_RUN, but the gap
-        # is added on BOTH sides (after fork, before join), so each
-        # side contributes half the total requirement.
-        bubble_extra = max(
-            0.0, (bubble_label_half * 2 + DIAGONAL_RUN - x_spacing) / 1.5
+    layer_gap = {
+        layer: _layer_gap_for(
+            layer,
+            fork_layers,
+            join_layers,
+            out_targets,
+            in_sources,
+            layers,
+            tracks,
+            sub,
+            full_graph,
+            x_spacing,
+            base_gap,
+            label_angle,
         )
-
-        # Angled labels (label_angle) hang to the lower-right of each fan
-        # caller; the fan-out/fan-in diagonal must start past the tilted text
-        # or it rakes the label.  This only bites once a branch label sits
-        # *inside* the bubble, which needs three or more branches (two or more
-        # off-trunk tracks): the middle branch then has a diagonal on both
-        # sides.  A 2-branch fork places both labels outside the bubble (above
-        # the top branch, below the bottom one), so the convergence diagonal
-        # never crosses them and no extra room is needed.
-        has_interior_branch = False
-        if layer in fork_layers:
-            for fsid, ftgts in out_targets.items():
-                if layers.get(fsid) == layer and fsid in tracks:
-                    off = sum(
-                        1 for t in ftgts if t in tracks and tracks[t] != tracks[fsid]
-                    )
-                    if off >= 2:
-                        has_interior_branch = True
-                        break
-        if not has_interior_branch and layer in join_layers:
-            for jsid, jsrcs in in_sources.items():
-                if layers.get(jsid) == layer and jsid in tracks:
-                    off = sum(
-                        1 for s in jsrcs if s in tracks and tracks[s] != tracks[jsid]
-                    )
-                    if off >= 2:
-                        has_interior_branch = True
-                        break
-        if label_angle and has_interior_branch:
-            cos_a = abs(math.cos(math.radians(label_angle)))
-            adj_layer = layer + 1 if layer in fork_layers else layer - 1
-            angled_reach = 0.0
-            for sid, lyr in layers.items():
-                if lyr == adj_layer and sid in tracks and tracks[sid] not in fj_tracks:
-                    station = sub.stations.get(sid)
-                    if station and station.label.strip():
-                        angled_reach = max(
-                            angled_reach, label_text_width(station.label) * cos_a
-                        )
-            bubble_extra = max(bubble_extra, angled_reach)
-
-        # A two-branch bubble places both branch labels outside it (above the
-        # top branch, below the bottom), so the convergence/divergence diagonal
-        # clears them.  But when an off-track output hangs directly above the
-        # top (on-trunk) branch, that branch's angled label cannot flip up and
-        # is forced down into the bubble, where it rakes the other branch's
-        # diagonal.  Widen the bubble by the forced label's horizontal reach so
-        # the diagonal starts past the tilted text.
-        if label_angle and not has_interior_branch:
-            forced_reach = _forced_branch_label_reach(
-                layer,
-                fork_layers,
-                join_layers,
-                out_targets,
-                in_sources,
-                layers,
-                tracks,
-                sub,
-                full_graph,
-                label_angle,
-            )
-            bubble_extra = max(bubble_extra, forced_reach)
-
-        # The router (``_route_diagonal``) reserves the fork/join station's
-        # label half-width as straight run so the diagonal starts past the
-        # (possibly tilted) label, but it abandons that clearance when the
-        # column gap can't also fit the diagonal run plus the branch-side
-        # minimum straight.  Reserve a gap that keeps the clearance, so the
-        # fork/join label never overlaps the divergence/convergence diagonal.
-        # A whole pitch already sits between the columns, so subtract it; the
-        # 1px cushion absorbs float rounding in the router's drop test.
-        routing_clearance = (
-            fj_label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE - x_spacing + 1.0
-        )
-        layer_gap[layer] = max(
-            base_gap, fj_label_half + bubble_extra, routing_clearance
-        )
+        for layer in fork_layers | join_layers
+    }
 
     cumulative = 0.0
     layer_extra: dict[int, float] = {}
     for layer in range(max_layer + 1):
-        # Add gap before join layers
         if layer in join_layers:
             cumulative += layer_gap.get(layer, base_gap)
         layer_extra[layer] = cumulative
-        # Add gap after fork layers
         if layer in fork_layers:
             cumulative += layer_gap.get(layer, base_gap)
 
