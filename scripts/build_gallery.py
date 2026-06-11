@@ -325,6 +325,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Tall section bypass where the trunk is above the source (upward gap1).",
     ),
     (
+        "bypass_label_rake",
+        TOPOLOGIES_DIR,
+        "A foreign line dips below a station to bypass its marker, then climbs "
+        "back to the trunk past the wide 'Quantification' label. The router "
+        "lengthens the dip's flat run so the climb seats clear of the glyphs "
+        "(`_clear_bypass_v_label_strikes`).",
+    ),
+    (
         "off_track_convergence",
         TOPOLOGIES_DIR,
         "Multiple off-track file inputs converging on a single consumer. "

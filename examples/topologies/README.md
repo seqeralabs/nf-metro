@@ -34,6 +34,7 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `mixed_port_sides.mmd` | multi-side exit ports (RIGHT + BOTTOM) |
 | `off_track_convergence.mmd` | multiple off-track inputs converging on one consumer |
 | `upward_bypass.mmd` | tall section bypass (upward gap) |
+| `bypass_label_rake.mmd` | bypass V climbs clear of a wide bypassed-station label |
 | `rnaseq_lite.mmd` | realistic pipeline / TB+LR mix / diamond |
 | `variant_calling.mmd` | realistic pipeline / asymmetric fork-join / 4-way fan-in |
 | `funcprofiler_upstream.mmd` | dense fan-out + fan-in / known almost-horizontal defect |
