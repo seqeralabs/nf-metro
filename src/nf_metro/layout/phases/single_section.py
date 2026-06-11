@@ -295,6 +295,7 @@ def _layout_single_section(
     _adjust_tb_entry_shifts(section, sub, graph, y_spacing)
     _adjust_lr_entry_inset(sub, section, graph, x_spacing)
     _adjust_lr_exit_gap(sub, section, graph, layers, x_spacing)
+    _apply_label_strike_runway(sub, section, x_spacing)
     _adjust_lr_label_clearance(sub, section)
     _adjust_terminus_icon_clearance(sub, section, graph)
 
@@ -713,6 +714,29 @@ def _adjust_lr_exit_gap(
         for s in sub.stations.values():
             s.x += shift
         section.bbox_w += exit_gap
+
+
+def _apply_label_strike_runway(
+    sub: MetroGraph,
+    section: Section,
+    x_spacing: float,
+) -> None:
+    """LR/RL sections: lengthen both flat runs by ``label_strike_cols`` columns.
+
+    A label wider than its station's flat run lets a fan diagonal seat inside
+    the label's x-extent.  Adding a whole grid column of runway on each side
+    (stations shift right by the per-side amount; the bbox grows by twice it)
+    moves the diagonal transition clear of the label while keeping the column
+    pitch fixed and the stations centered.  The strike-clearance loop sets
+    ``label_strike_cols`` only for sections whose label is actually struck, so
+    this is a no-op (zero columns) for every other render.
+    """
+    if section.label_strike_cols <= 0 or section.direction not in ("LR", "RL"):
+        return
+    per_side = section.label_strike_cols * x_spacing
+    for s in sub.stations.values():
+        s.x += per_side
+    section.bbox_w += 2 * per_side
 
 
 def _adjust_lr_label_clearance(

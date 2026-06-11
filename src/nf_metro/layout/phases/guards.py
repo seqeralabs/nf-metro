@@ -1085,6 +1085,62 @@ def _guard_no_line_strikes_label(
                         )
 
 
+def _guard_no_diagonal_strikes_horizontal_label(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: no foreign fan diagonal rakes a stacked station's name.
+
+    Protects the strike-clearance loop's result: a fan-in/fan-out or
+    convergence diagonal that transitions through a horizontal label reads as a
+    strike-through, and the loop grows the offending section's runway by whole
+    grid columns until the transition seats clear.  This guard fails loudly if a
+    layout ships such a strike anyway.
+
+    Narrower than :func:`_guard_no_line_strikes_label`: it excludes bypass-V
+    crossings (a V sits a fixed offset from the station, so runway growth cannot
+    relocate it) and angled labels (handled by their rotated footprint, not
+    column runway), so it can be wired into the validate pass while those
+    remain.
+    """
+    from nf_metro.layout.labels import place_labels
+    from nf_metro.layout.phases.spacing import _struck_label_station_ids
+    from nf_metro.render.svg import _compute_icon_obstacles
+    from nf_metro.themes import THEMES
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    with _restoring_layout_geometry(graph):
+        if routes is None:
+            from nf_metro.layout.routing import route_edges
+
+            try:
+                routes = route_edges(graph, station_offsets=offsets)
+            except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+                return
+        placements = place_labels(
+            graph,
+            station_offsets=offsets,
+            icon_obstacles=_compute_icon_obstacles(graph, THEMES["nfcore"], offsets),
+            routes=routes,
+            label_angle=graph.label_angle or 0.0,
+        )
+        struck = _struck_label_station_ids(graph, offsets, routes, placements)
+        if struck:
+            names = ", ".join(
+                f"{sid!r} ({graph.stations[sid].label!r})" for sid in sorted(struck)
+            )
+            raise PhaseInvariantError(
+                f"{phase}: foreign fan diagonal strikes horizontal label(s): {names}"
+            )
+
+
 def _guard_no_wrapped_label_trunk_strike(
     graph: MetroGraph,
     phase: str,

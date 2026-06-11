@@ -1289,7 +1289,7 @@ _LABEL_STRIKE_DIAGONAL_XFAIL = {
 _LABEL_STRIKE_FIXTURES = _params_with_xfails(ALL_FIXTURES, _LABEL_STRIKE_DIAGONAL_XFAIL)
 
 
-def _label_glyph_strikes(fixture: str) -> list[tuple[str, str]]:
+def _label_glyph_strikes(fixture: str, **layout_kwargs) -> list[tuple[str, str]]:
     """Return ``(station_id, line_id)`` pairs where a foreign line strikes a label.
 
     Mirrors the renderer: ``route_edges`` mutates Station.x via diagonal
@@ -1297,8 +1297,11 @@ def _label_glyph_strikes(fixture: str) -> list[tuple[str, str]]:
     label glyph-ink boxes are built without restoring X.  A pair is reported
     when a segment of a line the station does not carry (and which is not an
     endpoint of the segment's edge) crosses the label's glyph-ink box.
+
+    ``layout_kwargs`` are forwarded to ``compute_layout`` (e.g. ``x_spacing``)
+    so callers can exercise the strike behaviour at a pinned column pitch.
     """
-    graph = _layout(fixture)
+    graph = _layout(fixture, **layout_kwargs)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
     theme = THEMES["nfcore"]
@@ -1347,6 +1350,35 @@ def test_no_line_strikes_through_label(fixture):
     )
 
 
+# A label wider than its station's flat run pushes the fan-in/fan-out diagonal
+# transition inside the label's x-extent, so a line the station does not carry
+# rakes its glyphs.  At a tight column pitch the proportional entry/exit runway
+# shrinks below the (fixed-width) label and the strike appears; the engine grows
+# the offending section's runway by whole grid columns until the transition
+# seats clear.  Each case strikes at the pinned pitch on a layout without that
+# growth.
+_TIGHT_PITCH_STRIKE_CASES = [
+    ("topologies/funcprofiler_upstream.mmd", 50),
+    ("topologies/funcprofiler_upstream.mmd", 45),
+    ("topologies/variant_calling.mmd", 45),
+]
+
+
+@pytest.mark.parametrize("fixture,x_spacing", _TIGHT_PITCH_STRIKE_CASES)
+def test_no_diagonal_strikes_label_at_tight_pitch(fixture, x_spacing):
+    """A port-side fan diagonal must not rake a stacked station's name label,
+    even when a tight pitch shrinks the proportional runway below the label.
+
+    The section's entry/exit runway is grown by whole grid columns (the pitch
+    stays fixed) so the fan transition completes outside the label's x-extent.
+    """
+    strikes = _label_glyph_strikes(fixture, x_spacing=x_spacing)
+    assert not strikes, (
+        f"{fixture} @ x_spacing={x_spacing}: foreign lines strike label glyph "
+        "ink: " + ", ".join(f"{lid!r} over {sid!r}" for sid, lid in strikes)
+    )
+
+
 def test_label_strike_guard_catches_a_strike():
     """The runtime guard fires on a genuine glyph strike and clears a graze.
 
@@ -1366,6 +1398,33 @@ def test_label_strike_guard_catches_a_strike():
 
     grazed = _layout("variantbenchmarking.mmd")
     _guard_no_line_strikes_label(grazed, "test")
+
+
+def test_diagonal_strike_guard_teeth_and_exemptions():
+    """The wired narrow guard fires on an unclearable fan-diagonal strike,
+    stays silent once the runway growth has cleared one, and exempts the
+    bypass-V crossing it cannot relocate.
+
+    A fan-into-stack section grown by the strike-clearance loop
+    (``funcprofiler_upstream`` at a tight pitch) must pass; an intra-section
+    fork whose strike the runway cannot move (``wide_label_fan`` at the same
+    pitch) must raise; and a bypass-V label rake (``guide/06a``) must pass,
+    since the guard excludes it.
+    """
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_no_diagonal_strikes_horizontal_label,
+    )
+
+    cleared = _layout("topologies/funcprofiler_upstream.mmd", x_spacing=45)
+    _guard_no_diagonal_strikes_horizontal_label(cleared, "test")
+
+    unclearable = _layout("topologies/wide_label_fan.mmd", x_spacing=45)
+    with pytest.raises(PhaseInvariantError, match="strikes horizontal label"):
+        _guard_no_diagonal_strikes_horizontal_label(unclearable, "test")
+
+    bypass = _layout("guide/06a_without_hidden.mmd")
+    _guard_no_diagonal_strikes_horizontal_label(bypass, "test")
 
 
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_DOWNWARD_OUTPUT)

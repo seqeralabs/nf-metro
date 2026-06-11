@@ -258,6 +258,11 @@ class Section:
     offset_y: float = 0.0
     # Implicit sections are auto-created for loose stations; no visible box
     is_implicit: bool = False
+    # Extra entry/exit runway, in whole grid columns, that the strike-clearance
+    # loop grows when a fan diagonal rakes a stacked station's name label.  The
+    # column pitch is left fixed; the section's flat runs lengthen so the
+    # transition seats outside the label's x-extent.
+    label_strike_cols: int = 0
 
 
 @dataclass

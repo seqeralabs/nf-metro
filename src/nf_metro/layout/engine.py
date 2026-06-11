@@ -128,6 +128,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_artefactual_counter_flow,
     _guard_no_coincident_station_coords,
     _guard_no_collinear_distinct_lines,
+    _guard_no_diagonal_strikes_horizontal_label,
     _guard_no_intra_section_collinear_distinct_lines,
     _guard_no_label_overlap,
     _guard_no_line_crosses_file_icon,
@@ -243,7 +244,9 @@ from nf_metro.layout.phases.snapshots import (
 from nf_metro.layout.phases.spacing import (  # noqa: F401
     _MAX_SPREAD_ITERS,
     _SPREAD_SLACK,
+    _layout_has_collinear,
     _residual_label_overlaps,
+    _residual_label_strike_sections,
     _spread_bump,
 )
 from nf_metro.parser.model import LineSpread, MetroGraph
@@ -534,6 +537,53 @@ def _compute_layout_scaled(
             break  # can't widen the binding axis (e.g. pinned) -- give up
         x_spacing, y_spacing = new_x, new_y
 
+    # Strike-clearance loop: a fan-in/fan-out diagonal that rakes a stacked
+    # station's wide name label is cleared by lengthening that section's flat
+    # runs by whole grid columns (the pitch stays fixed), seating the diagonal
+    # transition outside the label.  Need-driven: only sections the renderer
+    # would draw a strike through grow, so a clean layout -- every gallery
+    # render at its default pitch -- is left untouched.  A growth a collinear
+    # check rejects, or that fails to reduce the struck-section count, is rolled
+    # back, so the loop never ships a layout worse than it found.  Independent
+    # of pinned vs auto pitch: growing a section's runway is local room, not the
+    # global pitch, so it applies even when the caller fixed x_spacing.
+
+    def _relay() -> None:
+        _layout_once(
+            graph,
+            x_spacing=x_spacing,
+            y_spacing=y_spacing,
+            x_offset=x_offset,
+            y_offset=y_offset,
+            section_x_padding=section_x_padding,
+            section_y_padding=section_y_padding,
+            section_x_gap=section_x_gap,
+            section_y_gap=section_y_gap,
+            validate=validate,
+        )
+
+    for _ in range(_MAX_SPREAD_ITERS):
+        struck = _residual_label_strike_sections(graph)
+        grow = {
+            sid
+            for sid in struck
+            if (sec := graph.sections.get(sid)) is not None
+            and sec.direction in ("LR", "RL")
+            and not graph.is_rail_section(sid)
+        }
+        if not grow:
+            break
+        for sid in grow:
+            graph.sections[sid].label_strike_cols += 1
+        _relay()
+        if _layout_has_collinear(graph) or len(
+            _residual_label_strike_sections(graph)
+        ) >= len(struck):
+            for sid in grow:
+                graph.sections[sid].label_strike_cols -= 1
+            _relay()
+            break
+
     # Assure file-icon leaf sinks off the trunk by construction: a leaf icon
     # the laid-out routes rake a line across is taken off-track and the layout
     # re-run once, so the off-track machinery lifts it clear of the passing
@@ -599,6 +649,7 @@ def _compute_layout_scaled(
 
     if validate:
         _guard_no_label_overlap(graph, "final")
+        _guard_no_diagonal_strikes_horizontal_label(graph, "final")
         _guard_no_wrapped_label_trunk_strike(graph, "final")
         _guard_file_icon_no_name_label(graph, "final")
         _guard_no_line_crosses_file_icon(graph, "final")
