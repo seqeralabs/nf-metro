@@ -1295,10 +1295,10 @@ def _place_station_label(
     rail_panel = _rail_panel_label_offsets(station, ctx.panel_extents)
     if rail_panel is not None:
         min_off, max_off = rail_panel
-    rail_side = _rail_label_side(graph, station)
 
     if _is_tb_section(graph, station):
         return _place_tb_label(ctx, station, placements)
+    rail_side = _rail_label_side(graph, station)
     if ctx.label_angle:
         return _place_angled_label(ctx, station, min_off, max_off, rail_side)
     return _place_alternating_label(
