@@ -25,6 +25,246 @@ from nf_metro.layout.phases.single_section import _multiline_label_padding
 from nf_metro.parser.model import MetroGraph, PortSide, RowGridInfo, Section
 
 
+def _group_sections_by_row(
+    graph: MetroGraph,
+    section_subgraphs: dict[str, MetroGraph],
+    row_assign: dict[str, int],
+) -> dict[tuple[int, str], list[str]]:
+    """Group non-TB sections by their (grid row, direction)."""
+    groups: dict[tuple[int, str], list[str]] = defaultdict(list)
+    for sec_id in section_subgraphs:
+        section = graph.sections[sec_id]
+        row = row_assign.get(sec_id, -1)
+        if row < 0 or section.direction == "TB":
+            continue
+        groups[(row, section.direction)].append(sec_id)
+    return groups
+
+
+def _row_group_grid_spacing(
+    graph: MetroGraph,
+    section_subgraphs: dict[str, MetroGraph],
+    sec_ids: list[str],
+    section_class: dict[str, tuple[dict[int, list[float]], set[float]]],
+    section_y_padding: float,
+    y_spacing: float,
+) -> tuple[int, float, float] | None:
+    """Shared (grid_slots, max_y_pad, effective_y_spacing) for a row group.
+
+    Returns ``None`` when the group needs no shared grid (one slot or fewer).
+    The pitch is inflated past ``y_spacing`` when stations at multi-station
+    layers carry enough lines that their rendered bundle plus label height
+    would otherwise overlap an adjacent track.  Isolated hub stations (sole
+    layer occupant) are excluded so they don't inflate the whole row.
+    """
+    grid_slots = 0
+    for sec_id in sec_ids:
+        grid_slots = max(grid_slots, _max_stations_per_layer(section_subgraphs[sec_id]))
+    if grid_slots <= 1:
+        return None
+
+    max_y_pad = 0.0
+    for sec_id in sec_ids:
+        y_pad = section_y_padding + _multiline_label_padding(section_subgraphs[sec_id])
+        max_y_pad = max(max_y_pad, y_pad)
+
+    max_lines = 0
+    for sec_id in sec_ids:
+        sub = section_subgraphs[sec_id]
+        multi_ys = section_class[sec_id][1]
+        for st in sub.stations.values():
+            if not st.is_port and st.y in multi_ys:
+                max_lines = max(max_lines, len(graph.station_lines(st.id)))
+    min_track_gap = (
+        (max_lines - 1) * OFFSET_STEP
+        + 2 * STATION_RADIUS_APPROX
+        + LABEL_OFFSET
+        + FONT_HEIGHT * active_font_scale()
+    )
+    effective_y_spacing = max(y_spacing, min_track_gap)
+    return grid_slots, max_y_pad, effective_y_spacing
+
+
+def _assign_nonuniform_slots(
+    layer_stations: dict[int, list[float]],
+    multi_layer_ys: set[float],
+    remap_ys: list[float],
+    effective_y_spacing: float,
+    has_diamond: bool,
+) -> dict[float, float]:
+    """Map non-uniformly-spaced Y values to grid slots.
+
+    Y values that co-occur at the same layer are forced onto different slots
+    (checked against every value already in the candidate slot, so non-adjacent
+    same-layer pairs are caught).  A diamond hub keeps at least a 2-slot gap.
+    """
+    must_separate: set[tuple[float, float]] = set()
+    for ys_at_layer in layer_stations.values():
+        unique_ys = sorted(set(y for y in ys_at_layer if y in multi_layer_ys))
+        for a_idx in range(len(unique_ys)):
+            for b_idx in range(a_idx + 1, len(unique_ys)):
+                must_separate.add((unique_ys[a_idx], unique_ys[b_idx]))
+
+    y_map: dict[float, float] = {}
+    slot_for_y: dict[float, int] = {}
+    prev_slot = 0
+    for old_y in remap_ys:
+        raw_slot = int(math.floor(old_y / effective_y_spacing))
+        slot = max(raw_slot, prev_slot)
+        _changed = True
+        while _changed:
+            _changed = False
+            for other_y, other_slot in slot_for_y.items():
+                if other_slot != slot:
+                    continue
+                pair = (min(other_y, old_y), max(other_y, old_y))
+                if pair in must_separate:
+                    slot += 1
+                    _changed = True
+                    break
+        if has_diamond and prev_slot > 0 and slot - prev_slot < 2:
+            slot = prev_slot + 2
+        elif has_diamond and prev_slot == 0 and slot < 2 and old_y > 0:
+            slot = 2
+        y_map[old_y] = slot * effective_y_spacing
+        slot_for_y[old_y] = slot
+        prev_slot = slot
+    return y_map
+
+
+def _build_grid_y_map(
+    sub: MetroGraph,
+    section_class_entry: tuple[dict[int, list[float]], set[float]],
+    effective_y_spacing: float,
+) -> tuple[dict[float, float], list[float], list[float], int]:
+    """Map a section's station Ys to the shared grid.
+
+    Returns ``(y_map, remap_ys, all_ys, max_layer_size)``.  Uniform input gaps
+    map to equally-spaced slots (avoiding asymmetric compression that clashes
+    labels); otherwise per-layer separation drives the slot assignment.  A
+    diamond hub (an isolated Y between two tracks for a small fan-out) keeps a
+    2-slot gap so it has visual room.
+    """
+    layer_stations, multi_layer_ys = section_class_entry
+    if multi_layer_ys:
+        remap_ys = sorted(multi_layer_ys)
+    else:
+        remap_ys = sorted(set(s.y for s in sub.stations.values()))
+
+    max_layer_size = max((len(ys) for ys in layer_stations.values()), default=0)
+    all_ys = sorted(set(s.y for s in sub.stations.values()))
+    isolated_ys = set(all_ys) - set(remap_ys)
+    has_diamond = False
+    if max_layer_size <= 3 and len(remap_ys) >= 2 and isolated_ys:
+        for iso_y in isolated_ys:
+            if remap_ys[0] < iso_y < remap_ys[-1]:
+                has_diamond = True
+                break
+
+    gaps = [remap_ys[i + 1] - remap_ys[i] for i in range(len(remap_ys) - 1)]
+    uniform_gap = len(gaps) >= 1 and all(abs(g - gaps[0]) < 1.0 for g in gaps)
+
+    if uniform_gap and len(gaps) >= 1:
+        slot_gap = max(1, int(math.floor(gaps[0] / effective_y_spacing)))
+        if has_diamond and slot_gap < 2:
+            slot_gap = 2
+        y_map = {old_y: i * slot_gap * effective_y_spacing for i, old_y in enumerate(remap_ys)}
+    else:
+        y_map = _assign_nonuniform_slots(
+            layer_stations, multi_layer_ys, remap_ys, effective_y_spacing, has_diamond
+        )
+    return y_map, remap_ys, all_ys, max_layer_size
+
+
+def _enforce_multiline_label_gap(
+    sub: MetroGraph,
+    y_map: dict[float, float],
+    remap_ys: list[float],
+    effective_y_spacing: float,
+) -> None:
+    """Widen the slot gap to 2 for a multi-line label sandwiched both sides.
+
+    A multi-line label station hemmed in by same-layer neighbours above AND
+    below needs the gap to fit its text; one at the top or bottom of its column
+    can extend outward and is left alone.
+    """
+    layer_at_y: dict[tuple[int, float], bool] = {}
+    for st in sub.stations.values():
+        if not st.is_port:
+            layer_at_y[(st.layer, st.y)] = True
+    needs_gap_ys: set[float] = set()
+    for st in sub.stations.values():
+        if st.is_port or not st.label or "\n" not in st.label:
+            continue
+        if st.y not in y_map:
+            continue
+        has_above = any(
+            (st.layer, ry) in layer_at_y for ry in remap_ys if ry < st.y - 0.5
+        )
+        has_below = any(
+            (st.layer, ry) in layer_at_y for ry in remap_ys if ry > st.y + 0.5
+        )
+        if has_above and has_below:
+            needs_gap_ys.add(st.y)
+    if not needs_gap_ys:
+        return
+    sorted_mapped = sorted(y_map.items(), key=lambda kv: kv[1])
+    for idx in range(1, len(sorted_mapped)):
+        old_y, new_y = sorted_mapped[idx]
+        prev_y = sorted_mapped[idx - 1][1]
+        if old_y not in needs_gap_ys:
+            continue
+        gap_slots = round((new_y - prev_y) / effective_y_spacing)
+        if gap_slots < 2:
+            extra = (2 - gap_slots) * effective_y_spacing
+            for j in range(idx, len(sorted_mapped)):
+                k = sorted_mapped[j][0]
+                y_map[k] += extra
+            sorted_mapped = sorted(y_map.items(), key=lambda kv: kv[1])
+
+
+def _remap_section_to_grid(
+    graph: MetroGraph,
+    sub: MetroGraph,
+    section: Section,
+    section_class_entry: tuple[dict[int, list[float]], set[float]],
+    effective_y_spacing: float,
+    max_y_pad: float,
+    section_y_padding: float,
+) -> None:
+    """Remap one section's station Ys onto the shared row grid and resize bbox."""
+    y_map, remap_ys, all_ys, max_layer_size = _build_grid_y_map(
+        sub, section_class_entry, effective_y_spacing
+    )
+    _enforce_multiline_label_gap(sub, y_map, remap_ys, effective_y_spacing)
+
+    # Snap isolated Y values to the nearest grid slot, keeping diamond join
+    # points on-grid without collapsing them onto a track endpoint.  Skipped
+    # for large fan-outs where snapping disrupts routing geometry.
+    if max_layer_size <= 3:
+        for old_y in all_ys:
+            if old_y not in y_map:
+                slot = round(old_y / effective_y_spacing)
+                y_map[old_y] = slot * effective_y_spacing
+
+    for station in sub.stations.values():
+        if station.y in y_map:
+            station.y = y_map[station.y]
+
+    # y_pad compensation: shift so the gap from the top of the Y range to the
+    # first station equals max_y_pad, making first_station_y consistent across
+    # sections with different multiline label padding after top-alignment.
+    y_pad = section_y_padding + _multiline_label_padding(sub)
+    shift = max_y_pad - y_pad
+    if shift > 0:
+        for station in sub.stations.values():
+            station.y += shift
+
+    ys = [s.y for s in sub.stations.values()]
+    section.bbox_y = min(ys) - max_y_pad
+    section.bbox_h = (max(ys) - min(ys)) + max_y_pad * 2
+
+
 def _align_row_y_grids(
     graph: MetroGraph,
     section_subgraphs: dict[str, MetroGraph],
@@ -56,72 +296,27 @@ def _align_row_y_grids(
     """
     from nf_metro.layout.section_placement import _assign_grid_layout
 
-    # Pre-compute grid rows (not yet set on Section objects at this point)
+    # Grid rows are not yet set on Section objects at this point.
     section_edges = graph.section_dag.section_edges if graph.section_dag else set()
     _, row_assign = _assign_grid_layout(graph, section_edges)
 
-    # Group sections by (row, direction), skipping TB sections
-    groups: dict[tuple[int, str], list[str]] = defaultdict(list)
-    for sec_id in section_subgraphs:
-        section = graph.sections[sec_id]
-        row = row_assign.get(sec_id, -1)
-        if row < 0 or section.direction == "TB":
-            continue
-        groups[(row, section.direction)].append(sec_id)
+    groups = _group_sections_by_row(graph, section_subgraphs, row_assign)
 
-    # Store grid info for debug overlay
     grid_info: dict[int, RowGridInfo] = {}
-
     for (row, _direction), sec_ids in groups.items():
         if len(sec_ids) < 2:
             continue
 
-        # Grid size = max stations stacked at any single layer across
-        # all sections in the group.
-        grid_slots = 0
-        for sec_id in sec_ids:
-            sub = section_subgraphs[sec_id]
-            grid_slots = max(grid_slots, _max_stations_per_layer(sub))
-
-        if grid_slots <= 1:
-            continue
-
-        # Compute max y_pad across group for compensation
-        max_y_pad = 0.0
-        for sec_id in sec_ids:
-            sub = section_subgraphs[sec_id]
-            y_pad = section_y_padding + _multiline_label_padding(sub)
-            max_y_pad = max(max_y_pad, y_pad)
-
-        # Scale effective y_spacing when stations carry many lines.
-        # Per-line offsets spread the rendered line bundle vertically;
-        # when the spread + label height exceeds the base y_spacing,
-        # labels on adjacent tracks overlap.  We inflate the grid
-        # pitch just enough to guarantee clearance.
-        #
-        # Only count stations at multi-station layers (i.e. Y values
-        # in remap_ys).  Isolated hub stations (sole layer occupant,
-        # e.g. bench_hub with 6 lines) don't represent inter-track
-        # crowding and should not inflate spacing for the entire row.
-        #
-        max_lines = 0
         section_class: dict[str, tuple[dict[int, list[float]], set[float]]] = {
             sec_id: _classify_multi_station_ys(section_subgraphs[sec_id])
             for sec_id in sec_ids
         }
-        for sec_id in sec_ids:
-            sub = section_subgraphs[sec_id]
-            _multi_ys = section_class[sec_id][1]
-            for st in sub.stations.values():
-                if not st.is_port and st.y in _multi_ys:
-                    max_lines = max(max_lines, len(graph.station_lines(st.id)))
-        min_track_gap = (
-            (max_lines - 1) * OFFSET_STEP
-            + 2 * STATION_RADIUS_APPROX
-            + LABEL_OFFSET
-            + FONT_HEIGHT * active_font_scale()
+        spacing = _row_group_grid_spacing(
+            graph, section_subgraphs, sec_ids, section_class, section_y_padding, y_spacing
         )
-        effective_y_spacing = max(y_spacing, min_track_gap)
+        if spacing is None:
+            continue
+        grid_slots, max_y_pad, effective_y_spacing = spacing
 
         grid_info[row] = {
             "section_ids": list(sec_ids),
@@ -130,175 +325,16 @@ def _align_row_y_grids(
             "max_y_pad": max_y_pad,
         }
 
-        # Remap each section's stations to the shared grid
         for sec_id in sec_ids:
-            sub = section_subgraphs[sec_id]
-            section = graph.sections[sec_id]
-
-            layer_stations, multi_layer_ys = section_class[sec_id]
-
-            # Remap multi-station-layer Y values first.
-            if multi_layer_ys:
-                remap_ys = sorted(multi_layer_ys)
-            else:
-                remap_ys = sorted(set(s.y for s in sub.stations.values()))
-
-            # Check for diamond patterns: isolated Y values that sit
-            # between adjacent remap_ys indicate a join/fork hub.
-            # These need at least 2 grid slots between tracks so the
-            # hub has visual room.  Only for small fan-outs; large
-            # fan-outs (>3 per layer) keep their original spacing.
-            max_layer_size = max((len(ys) for ys in layer_stations.values()), default=0)
-            all_ys = sorted(set(s.y for s in sub.stations.values()))
-            isolated_ys = set(all_ys) - set(remap_ys)
-            has_diamond = False
-            if max_layer_size <= 3 and len(remap_ys) >= 2 and isolated_ys:
-                for iso_y in isolated_ys:
-                    if remap_ys[0] < iso_y < remap_ys[-1]:
-                        has_diamond = True
-                        break
-
-            # Map Y values to grid slots.
-            #
-            # Uniform spacing preservation: when all input gaps are
-            # equal (e.g. [0, 68.8, 137.6] with gap 68.8), map to
-            # equally-spaced slots so the output gaps stay uniform.
-            # This avoids asymmetric compression that causes label
-            # clashes (e.g. floor gives [0,40,120] = gaps 40,80).
-            #
-            # Diamond gap enforcement: when a fork/join hub sits
-            # between tracks, ensure at least 2-slot gap so the hub
-            # has visual room.
-            y_map: dict[float, float] = {}
-
-            # Detect uniform input spacing
-            gaps = [remap_ys[i + 1] - remap_ys[i] for i in range(len(remap_ys) - 1)]
-            uniform_gap = len(gaps) >= 1 and all(abs(g - gaps[0]) < 1.0 for g in gaps)
-
-            if uniform_gap and len(gaps) >= 1:
-                # Floor the uniform gap to a whole number of grid
-                # slots (minimum 1).  Using floor instead of round
-                # prevents inflation (e.g. a 68.8px gap with 40px
-                # spacing stays at 1 slot, not 2).
-                slot_gap = max(1, int(math.floor(gaps[0] / effective_y_spacing)))
-                if has_diamond and slot_gap < 2:
-                    slot_gap = 2
-                for i, old_y in enumerate(remap_ys):
-                    y_map[old_y] = i * slot_gap * effective_y_spacing
-            else:
-                # Build set of Y-value pairs that MUST occupy different
-                # grid slots because they co-occur at the same layer.
-                # Unlike the previous "check only previous remap_y"
-                # approach, we check against ALL values already
-                # assigned to the candidate slot, so non-adjacent
-                # pairs (e.g. sortmerna and ribodetector separated by
-                # trimgalore in remap_ys) are still caught.
-                must_separate: set[tuple[float, float]] = set()
-                for ys_at_layer in layer_stations.values():
-                    unique_ys = sorted(
-                        set(y for y in ys_at_layer if y in multi_layer_ys)
-                    )
-                    for a_idx in range(len(unique_ys)):
-                        for b_idx in range(a_idx + 1, len(unique_ys)):
-                            must_separate.add((unique_ys[a_idx], unique_ys[b_idx]))
-
-                slot_for_y: dict[float, int] = {}
-                prev_slot = 0
-                for i, old_y in enumerate(remap_ys):
-                    raw_slot = int(math.floor(old_y / effective_y_spacing))
-                    slot = max(raw_slot, prev_slot)
-                    # Check if this Y must be separated from any value
-                    # already assigned to the same slot.  Re-check after
-                    # each bump in case the new slot also conflicts.
-                    _changed = True
-                    while _changed:
-                        _changed = False
-                        for other_y, other_slot in slot_for_y.items():
-                            if other_slot != slot:
-                                continue
-                            pair = (min(other_y, old_y), max(other_y, old_y))
-                            if pair in must_separate:
-                                slot += 1
-                                _changed = True
-                                break
-                    # Diamond: ensure at least 2-slot gap from previous
-                    if has_diamond and prev_slot > 0 and slot - prev_slot < 2:
-                        slot = prev_slot + 2
-                    elif has_diamond and prev_slot == 0 and slot < 2 and old_y > 0:
-                        slot = 2
-                    y_map[old_y] = slot * effective_y_spacing
-                    slot_for_y[old_y] = slot
-                    prev_slot = slot
-
-            # Multi-line label clearance: when a multi-line label station
-            # is sandwiched between same-layer neighbors above AND below,
-            # the label must fit within the gap.  Enforce a 2-slot gap
-            # from the preceding Y so the label text doesn't overlap.
-            # Stations at the top or bottom of their column can extend
-            # outward and don't need the extra gap.
-            layer_at_y: dict[tuple[int, float], bool] = {}
-            for st in sub.stations.values():
-                if not st.is_port:
-                    layer_at_y[(st.layer, st.y)] = True
-            _needs_gap_ys: set[float] = set()
-            for st in sub.stations.values():
-                if st.is_port or not st.label or "\n" not in st.label:
-                    continue
-                if st.y not in y_map:
-                    continue
-                has_above = any(
-                    (st.layer, ry) in layer_at_y for ry in remap_ys if ry < st.y - 0.5
-                )
-                has_below = any(
-                    (st.layer, ry) in layer_at_y for ry in remap_ys if ry > st.y + 0.5
-                )
-                if has_above and has_below:
-                    _needs_gap_ys.add(st.y)
-            if _needs_gap_ys:
-                sorted_mapped = sorted(y_map.items(), key=lambda kv: kv[1])
-                for idx in range(1, len(sorted_mapped)):
-                    old_y, new_y = sorted_mapped[idx]
-                    prev_y = sorted_mapped[idx - 1][1]
-                    if old_y not in _needs_gap_ys:
-                        continue
-                    gap_slots = round((new_y - prev_y) / effective_y_spacing)
-                    if gap_slots < 2:
-                        extra = (2 - gap_slots) * effective_y_spacing
-                        for j in range(idx, len(sorted_mapped)):
-                            k = sorted_mapped[j][0]
-                            y_map[k] += extra
-                        sorted_mapped = sorted(y_map.items(), key=lambda kv: kv[1])
-
-            # Snap isolated Y values to the nearest grid slot (any
-            # multiple of effective_y_spacing, not just mapped slots).
-            # This keeps diamond join points between tracks on-grid
-            # without collapsing them onto a track endpoint.  Skip for
-            # large fan-outs where snapping disrupts routing geometry.
-            if max_layer_size <= 3:
-                for old_y in all_ys:
-                    if old_y not in y_map:
-                        slot = round(old_y / effective_y_spacing)
-                        y_map[old_y] = slot * effective_y_spacing
-
-            for station in sub.stations.values():
-                if station.y in y_map:
-                    station.y = y_map[station.y]
-
-            # y_pad compensation: shift all stations so that the
-            # distance from the top of the Y range to the first
-            # station equals max_y_pad.  After Stage 3.5 top-aligns
-            # bbox_y, this makes first_station_y consistent across
-            # sections with different multiline label padding.
-            y_pad = section_y_padding + _multiline_label_padding(sub)
-            shift = max_y_pad - y_pad
-            if shift > 0:
-                for station in sub.stations.values():
-                    station.y += shift
-
-            # Recompute bbox to match remapped + shifted positions.
-            ys = [s.y for s in sub.stations.values()]
-            section.bbox_y = min(ys) - max_y_pad
-            section.bbox_h = (max(ys) - min(ys)) + max_y_pad * 2
+            _remap_section_to_grid(
+                graph,
+                section_subgraphs[sec_id],
+                graph.sections[sec_id],
+                section_class[sec_id],
+                effective_y_spacing,
+                max_y_pad,
+                section_y_padding,
+            )
 
     graph._row_y_grid_info = grid_info
 
