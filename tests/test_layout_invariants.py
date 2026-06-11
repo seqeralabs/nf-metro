@@ -13,7 +13,9 @@ two-section grid with simpler topology (variant calling).
 
 from __future__ import annotations
 
+import copy
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -77,6 +79,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 _Y_TOL = 1.0
 
 
+@lru_cache(maxsize=None)
 def _resolve_fixture(name: str) -> Path:
     """Resolve a fixture name to a concrete .mmd path.
 
@@ -105,7 +108,17 @@ def _resolve_fixture(name: str) -> Path:
     )
 
 
-def _layout(fixture: str, **kwargs) -> MetroGraph:
+# Layout is deterministic, so the corpus-wide invariants share one computed
+# graph per (fixture, kwargs) rather than re-running the pipeline once per
+# invariant (~36 full-corpus invariants over 92 fixtures).  Each caller gets a
+# deep copy, so a test that mutates its graph (routing, label placement) cannot
+# leak into another.  A test that monkeypatches a layout phase must pass
+# ``_cache=False``: a cached graph would either return pre-patch geometry or, in
+# a probe-style test, skip the patched code entirely and pass vacuously.
+_LAYOUT_CACHE: dict[tuple[str, tuple], MetroGraph] = {}
+
+
+def _layout(fixture: str, *, _cache: bool = True, **kwargs) -> MetroGraph:
     """Parse a fixture file and run the full layout pipeline.
 
     ``fixture`` may be a name under ``tests/fixtures/`` (legacy) or a
@@ -116,6 +129,9 @@ def _layout(fixture: str, **kwargs) -> MetroGraph:
     directive directly.
     """
     path = _resolve_fixture(fixture)
+    key = (str(path), tuple(sorted(kwargs.items())))
+    if _cache and key in _LAYOUT_CACHE:
+        return copy.deepcopy(_LAYOUT_CACHE[key])
     text = path.read_text()
     graph = parse_metro_mermaid(text)
     # Legacy fixtures under tests/fixtures/ were authored before the
@@ -126,15 +142,24 @@ def _layout(fixture: str, **kwargs) -> MetroGraph:
     elif "center_ports" in kwargs:
         graph.center_ports = kwargs.pop("center_ports")
     compute_layout(graph, **kwargs)
-    return graph
+    if not _cache:
+        return graph
+    _LAYOUT_CACHE[key] = graph
+    return copy.deepcopy(graph)
 
 
-def _layout_example(name: str, **kwargs) -> MetroGraph:
+def _layout_example(name: str, *, _cache: bool = True, **kwargs) -> MetroGraph:
     """Parse an example file and run layout, honouring its own directives."""
-    text = (EXAMPLES / name).read_text()
-    graph = parse_metro_mermaid(text)
+    path = EXAMPLES / name
+    key = (str(path), tuple(sorted(kwargs.items())))
+    if _cache and key in _LAYOUT_CACHE:
+        return copy.deepcopy(_LAYOUT_CACHE[key])
+    graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph, **kwargs)
-    return graph
+    if not _cache:
+        return graph
+    _LAYOUT_CACHE[key] = graph
+    return copy.deepcopy(graph)
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +213,7 @@ def _discover_fixtures() -> list[str]:
 ALL_FIXTURES = _discover_fixtures()
 
 
+@lru_cache(maxsize=None)
 def _fixture_text(name: str) -> str:
     """Return raw text of a fixture for precondition filtering."""
     return _resolve_fixture(name).read_text()
@@ -1521,7 +1547,7 @@ def test_leaf_file_icon_crossing_fixture_crosses_without_auto_lift(monkeypatch):
     monkeypatch.setattr(
         engine_module, "_line_crossed_file_icon_sinks", lambda graph: set()
     )
-    graph = _layout("leaf_file_icon_on_trunk.mmd")
+    graph = _layout("leaf_file_icon_on_trunk.mmd", _cache=False)
     assert not graph.stations["bam_out"].off_track
     assert _segments_crossing_icons(graph), (
         "fixture no longer crosses its icon without auto-lift; it can't "
@@ -5980,7 +6006,7 @@ def test_content_placement_leaves_port_anchors_frozen(fixture, monkeypatch):
     for name in CONTENT_PLACEMENT_PHASES:
         monkeypatch.setattr(engine, name, _make_probe(name, getattr(engine, name)))
 
-    _layout(fixture)
+    _layout(fixture, _cache=False)
     assert not moved, f"{fixture}: content placement moved port anchor(s): {moved[:3]}"
 
 
@@ -6019,7 +6045,7 @@ def test_anchor_guard_catches_a_displaced_port(monkeypatch, example, sides, axis
 
     monkeypatch.setattr(engine, "_balance_section_content_around_trunk", _evil)
     with pytest.raises(PhaseInvariantError, match="port anchor"):
-        _layout_example(example, validate=True)
+        _layout_example(example, validate=True, _cache=False)
 
 
 # ---------------------------------------------------------------------------
