@@ -73,9 +73,7 @@ def build_manifest(
     a complete, future-proof inventory of addressable nodes rather than only the
     subset that lights up today.
     """
-    real_sections = {
-        sid: sec for sid, sec in graph.sections.items() if not sec.is_implicit
-    }
+    real_sections = graph.real_sections
 
     nodes: list[dict[str, Any]] = []
     for station in graph.stations.values():

@@ -123,7 +123,9 @@ def test_explicit_directives_reported_as_explicit() -> None:
     rnaseq_sections pins postprocessing to TB and qc_report to RL, and writes
     explicit entry/exit sides; the inferred sections around them stay inferred.
     """
-    sections = {s["id"]: s for s in build_info(_graph("rnaseq_sections.mmd"))["sections"]}
+    sections = {
+        s["id"]: s for s in build_info(_graph("rnaseq_sections.mmd"))["sections"]
+    }
 
     assert sections["postprocessing"]["direction"] == "TB"
     assert sections["postprocessing"]["direction_inferred"] is False
@@ -142,9 +144,7 @@ def test_port_side_inferred_tracks_section_directive() -> None:
     graph = _graph("rnaseq_sections.mmd")
     info = build_info(graph)
     for port in info["ports"]:
-        explicit = (
-            graph._explicit_entry if port["is_entry"] else graph._explicit_exit
-        )
+        explicit = graph._explicit_entry if port["is_entry"] else graph._explicit_exit
         assert port["side_inferred"] is (port["section_id"] not in explicit)
 
 

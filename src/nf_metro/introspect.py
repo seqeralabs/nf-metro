@@ -23,15 +23,17 @@ resolution internally; no full layout pass is required.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph
 
 __all__ = ["build_info", "format_info_json", "format_info_text", "station_kind"]
 
+StationKind = Literal["station", "junction", "port", "bypass", "hidden", "unknown"]
 
-def station_kind(graph: MetroGraph, station_id: str) -> str:
+
+def station_kind(graph: MetroGraph, station_id: str) -> StationKind:
     """Classify a station as authored or synthetic.
 
     Returns one of ``"station"`` (an authored node), ``"junction"`` (a fan-out
@@ -60,9 +62,7 @@ def build_info(graph: MetroGraph, warnings: list[str] | None = None) -> dict[str
     *warnings* are parse-time warning messages captured by the caller (the
     parser emits these via :mod:`warnings`); pass ``None`` for none.
     """
-    real_sections = {
-        sid: sec for sid, sec in graph.sections.items() if not sec.is_implicit
-    }
+    real_sections = graph.real_sections
 
     lines = []
     for lid, line in graph.lines.items():
@@ -73,9 +73,7 @@ def build_info(graph: MetroGraph, warnings: list[str] | None = None) -> dict[str
                 "display_name": line.display_name,
                 "color": line.color,
                 "style": line.style,
-                # Raw membership count (includes synthetic ports/junctions on the
-                # resolved chain) drives the human headline; ``route`` is the
-                # authored stations only.
+                # route_raw includes synthetic ports/junctions; route excludes them.
                 "n_stations": len(route_raw),
                 "route": [
                     sid for sid in route_raw if station_kind(graph, sid) == "station"
@@ -102,9 +100,7 @@ def build_info(graph: MetroGraph, warnings: list[str] | None = None) -> dict[str
                 "grid_inferred": sid not in graph._explicit_grid,
                 "is_implicit": sec.is_implicit,
                 "stations": [
-                    st
-                    for st in sec.station_ids
-                    if station_kind(graph, st) == "station"
+                    st for st in sec.station_ids if station_kind(graph, st) == "station"
                 ],
                 "entry_ports": list(sec.entry_ports),
                 "exit_ports": list(sec.exit_ports),
@@ -211,8 +207,7 @@ def format_info_text(info: dict[str, Any], *, verbose: bool = False) -> str:
     out.append(f"Lines: {counts['lines']}")
     for line in info["lines"]:
         out.append(
-            f"  {line['display_name']} ({line['color']}): "
-            f"{line['n_stations']} stations"
+            f"  {line['display_name']} ({line['color']}): {line['n_stations']} stations"
         )
     out.append(f"Sections: {counts['sections']}")
     for sec in info["sections"]:
@@ -233,9 +228,7 @@ def format_info_text(info: dict[str, Any], *, verbose: bool = False) -> str:
     out.append("Section dependency graph:")
     if info["section_dag"]["edges"]:
         for edge in info["section_dag"]["edges"]:
-            out.append(
-                f"  {edge['from']} -> {edge['to']} [{', '.join(edge['lines'])}]"
-            )
+            out.append(f"  {edge['from']} -> {edge['to']} [{', '.join(edge['lines'])}]")
     else:
         out.append("  (no inter-section edges)")
 

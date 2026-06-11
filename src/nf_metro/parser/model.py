@@ -585,3 +585,8 @@ class MetroGraph:
         if station:
             return station.section_id
         return None
+
+    @property
+    def real_sections(self) -> dict[str, Section]:
+        """Sections that draw a visible box (excludes implicit holders)."""
+        return {sid: sec for sid, sec in self.sections.items() if not sec.is_implicit}
