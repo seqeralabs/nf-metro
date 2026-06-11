@@ -12,9 +12,11 @@ __all__ = [
     "active_font_scale",
     "find_label_overlaps",
     "font_scale_context",
+    "label_glyph_advance_width",
     "label_glyph_ink_bbox",
     "label_text_width",
     "place_labels",
+    "segment_strikes_label",
 ]
 
 import math
@@ -28,7 +30,10 @@ from nf_metro.layout.constants import (
     DESCENDER_CLEARANCE,
     DIAGONAL_LABEL_OFFSET,
     FONT_HEIGHT,
+    GLYPH_ADVANCE_DEFAULT_EM,
+    GLYPH_ADVANCE_EM,
     LABEL_BBOX_MARGIN,
+    LABEL_FONT_SIZE,
     LABEL_GLYPH_INK_RATIO,
     LABEL_LINE_HEIGHT,
     LABEL_MARGIN,
@@ -42,7 +47,7 @@ from nf_metro.layout.constants import (
     TB_PILL_EDGE_OFFSET,
     X_SPACING,
 )
-from nf_metro.layout.geometry import segment_intersects_bbox
+from nf_metro.layout.geometry import segment_intersects_bbox, segment_intersects_quad
 from nf_metro.parser.model import MetroGraph
 
 if TYPE_CHECKING:
@@ -76,11 +81,31 @@ def font_scale_context(scale: float) -> Iterator[None]:
 
 
 def label_text_width(label: str) -> float:
-    """Pixel width of the widest line in a (possibly multi-line) label."""
+    """Reserved pixel width of the widest line in a (possibly multi-line) label.
+
+    A generous fixed-per-character budget for collision spacing; for the width
+    the text actually draws at, use :func:`label_glyph_advance_width`.
+    """
     char_width = CHAR_WIDTH * _ACTIVE_FONT_SCALE
     if "\n" not in label:
         return len(label) * char_width
     return max(len(line) for line in label.split("\n")) * char_width
+
+
+def label_glyph_advance_width(label: str) -> float:
+    """Rendered pixel width of the widest line in a (possibly multi-line) label.
+
+    Sums per-character advances (:data:`GLYPH_ADVANCE_EM`, Helvetica-Bold)
+    scaled by :data:`LABEL_FONT_SIZE` and the active font scale, so a wide
+    all-caps name measures as wide as it draws and a narrow one is not
+    over-claimed -- unlike the fixed-width :func:`label_text_width`.
+    """
+    size = LABEL_FONT_SIZE * _ACTIVE_FONT_SCALE
+    lines = label.split("\n") if "\n" in label else [label]
+    return size * max(
+        sum(GLYPH_ADVANCE_EM.get(c, GLYPH_ADVANCE_DEFAULT_EM) for c in line)
+        for line in lines
+    )
 
 
 def _label_text_height(label: str) -> float:
@@ -334,22 +359,84 @@ def label_glyph_ink_bbox(
 ) -> tuple[float, float, float, float]:
     """Return the label's drawn-glyph box, tightened to where text is inked.
 
-    The reserved box from :func:`_label_bbox` budgets ``CHAR_WIDTH`` per
-    character so labels claim ample collision room, but the rendered text is
-    narrower than that.  This shrinks the horizontal span to
-    ``LABEL_GLYPH_INK_RATIO`` of the reserved width about the box centre, and
-    (for a standard above/below label) replaces the vertical span with the
-    renderer's true ink band (:func:`_label_ink_y_band`), which stacks wrapped
-    lines downward rather than growing upward from the anchor.  A route grazing
-    only the empty reserved margin clears this box; a route striking through
-    the text intersects it.
+    For an axis-aligned label the horizontal span is the proportional glyph
+    advance (:func:`label_glyph_advance_width`) anchored to match the rendered
+    text, and the vertical span is the renderer's true ink band
+    (:func:`_label_ink_y_band`, which stacks wrapped lines downward rather than
+    growing upward from the anchor).  A route grazing only the empty reserved
+    margin clears this box; a route striking through the text intersects it.
+
+    Rotated or vertically-centred labels keep the reserved-box footprint
+    narrowed by ``LABEL_GLYPH_INK_RATIO``; the advance model is for horizontal
+    text.
     """
     x0, y0, x1, y1 = _label_bbox(placement)
-    center = (x0 + x1) / 2
-    ink_half = (x1 - x0) / 2 * LABEL_GLYPH_INK_RATIO
-    if not placement.angle and not placement.dominant_baseline:
-        y0, y1 = _label_ink_y_band(placement)
-    return (center - ink_half, y0, center + ink_half, y1)
+    if placement.angle or placement.dominant_baseline:
+        center = (x0 + x1) / 2
+        ink_half = (x1 - x0) / 2 * LABEL_GLYPH_INK_RATIO
+        return (center - ink_half, y0, center + ink_half, y1)
+
+    advance = label_glyph_advance_width(placement.text)
+    if placement.text_anchor == "end":
+        gx0, gx1 = placement.x - advance, placement.x
+    elif placement.text_anchor == "start":
+        gx0, gx1 = placement.x, placement.x + advance
+    else:
+        gx0, gx1 = placement.x - advance / 2, placement.x + advance / 2
+    iy0, iy1 = _label_ink_y_band(placement)
+    return (gx0, iy0, gx1, iy1)
+
+
+def _label_ink_quad(placement: LabelPlacement) -> list[tuple[float, float]]:
+    """Corners of the label's drawn-glyph footprint, rotated when angled.
+
+    For an angled label this is the proportional glyph strip
+    (:func:`label_glyph_advance_width` wide, one text-height tall) rotated about
+    the anchor like the renderer's ``rotate(angle, x, y)`` -- a thin diagonal
+    band, not the axis-aligned box that would overstate it.  For a horizontal
+    label it is the four corners of :func:`label_glyph_ink_bbox`.
+    """
+    if placement.angle and placement.obstacle_bbox is None:
+        w = label_glyph_advance_width(placement.text)
+        h = _label_text_height(placement.text)
+        if placement.text_anchor == "end":
+            left, right = placement.x - w, placement.x
+        elif placement.text_anchor == "start":
+            left, right = placement.x, placement.x + w
+        else:
+            left, right = placement.x - w / 2, placement.x + w / 2
+        upright = [
+            (left, placement.y - h),
+            (right, placement.y - h),
+            (right, placement.y),
+            (left, placement.y),
+        ]
+        rad = math.radians(placement.angle)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+        ax, ay = placement.x, placement.y
+        return [
+            (
+                ax + (cx - ax) * cos_a - (cy - ay) * sin_a,
+                ay + (cx - ax) * sin_a + (cy - ay) * cos_a,
+            )
+            for cx, cy in upright
+        ]
+    x0, y0, x1, y1 = label_glyph_ink_bbox(placement)
+    return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+
+
+def segment_strikes_label(
+    x1: float, y1: float, x2: float, y2: float, placement: LabelPlacement
+) -> bool:
+    """``True`` iff the segment crosses the label's drawn-glyph footprint.
+
+    Uses the rotated glyph strip for an angled label (so a route grazing only
+    the empty corner of its axis-aligned box is not a strike) and the
+    glyph-ink bbox otherwise.
+    """
+    if placement.angle and placement.obstacle_bbox is None:
+        return segment_intersects_quad(x1, y1, x2, y2, _label_ink_quad(placement))
+    return segment_intersects_bbox(x1, y1, x2, y2, label_glyph_ink_bbox(placement))
 
 
 def _rotated_label_bbox(

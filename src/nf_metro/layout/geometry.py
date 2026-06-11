@@ -6,6 +6,54 @@ import bisect
 from collections.abc import Iterator
 
 
+def segment_intersects_quad(
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    quad: list[tuple[float, float]],
+) -> bool:
+    """``True`` iff the segment touches or crosses the convex *quad*.
+
+    *quad* is four corners in order (winding either way).  Exact for a convex
+    polygon: the segment hits it when an endpoint lies inside or the segment
+    crosses any edge.  Used for rotated (angled) label footprints, where an
+    axis-aligned bbox would overstate the diagonal strip's extent.
+    """
+    n = len(quad)
+
+    def _inside(px: float, py: float) -> bool:
+        sign = 0
+        for i in range(n):
+            ax, ay = quad[i]
+            bx, by = quad[(i + 1) % n]
+            cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+            if cross > 1e-9:
+                if sign < 0:
+                    return False
+                sign = 1
+            elif cross < -1e-9:
+                if sign > 0:
+                    return False
+                sign = -1
+        return True
+
+    if _inside(x1, y1) or _inside(x2, y2):
+        return True
+
+    def _ccw(ax: float, ay: float, bx: float, by: float, cx: float, cy: float) -> bool:
+        return (cy - ay) * (bx - ax) > (by - ay) * (cx - ax)
+
+    for i in range(n):
+        cx, cy = quad[i]
+        dx, dy = quad[(i + 1) % n]
+        if _ccw(x1, y1, cx, cy, dx, dy) != _ccw(x2, y2, cx, cy, dx, dy) and _ccw(
+            x1, y1, x2, y2, cx, cy
+        ) != _ccw(x1, y1, x2, y2, dx, dy):
+            return True
+    return False
+
+
 def segment_intersects_bbox(
     x1: float,
     y1: float,

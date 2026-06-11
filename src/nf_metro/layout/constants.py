@@ -8,10 +8,132 @@ section_placement.py, and ordering.py.
 # Font / text metrics
 # ---------------------------------------------------------------------------
 CHAR_WIDTH: float = 9.0
-"""Approximate pixel width of a single character at default font size."""
+"""Approximate pixel width of a single character at default font size.
+
+A generous fixed per-character budget used to *reserve* collision room
+(:func:`~nf_metro.layout.labels.label_text_width`).  Where the *rendered*
+glyph extent matters -- strike detection, fan-run sizing -- use
+:data:`GLYPH_ADVANCE_EM` via
+:func:`~nf_metro.layout.labels.label_glyph_advance_width` instead, which
+tracks the proportional font and so neither over-reserves narrow strings nor
+under-measures wide all-caps ones."""
 
 FONT_HEIGHT: float = 14.0
 """Approximate pixel height of default font."""
+
+LABEL_FONT_SIZE: float = 13.0
+"""Pixel font size the proportional glyph-advance model measures against.
+
+Matches the theme ``label_font_size`` the renderer draws station names at;
+kept here as a theme-agnostic layout proxy (like :data:`CHAR_WIDTH`), with the
+``font_scale`` directive applied on top at measurement time."""
+
+GLYPH_ADVANCE_EM: dict[str, float] = {
+    " ": 0.278,
+    "!": 0.333,
+    '"': 0.474,
+    "#": 0.556,
+    "$": 0.556,
+    "%": 0.889,
+    "&": 0.722,
+    "'": 0.238,
+    "(": 0.333,
+    ")": 0.333,
+    "*": 0.389,
+    "+": 0.584,
+    ",": 0.278,
+    "-": 0.333,
+    ".": 0.278,
+    "/": 0.278,
+    "0": 0.556,
+    "1": 0.556,
+    "2": 0.556,
+    "3": 0.556,
+    "4": 0.556,
+    "5": 0.556,
+    "6": 0.556,
+    "7": 0.556,
+    "8": 0.556,
+    "9": 0.556,
+    ":": 0.333,
+    ";": 0.333,
+    "<": 0.584,
+    "=": 0.584,
+    ">": 0.584,
+    "?": 0.611,
+    "@": 0.975,
+    "A": 0.722,
+    "B": 0.722,
+    "C": 0.722,
+    "D": 0.722,
+    "E": 0.667,
+    "F": 0.611,
+    "G": 0.778,
+    "H": 0.722,
+    "I": 0.278,
+    "J": 0.556,
+    "K": 0.722,
+    "L": 0.611,
+    "M": 0.833,
+    "N": 0.722,
+    "O": 0.778,
+    "P": 0.667,
+    "Q": 0.778,
+    "R": 0.722,
+    "S": 0.667,
+    "T": 0.611,
+    "U": 0.722,
+    "V": 0.667,
+    "W": 0.944,
+    "X": 0.667,
+    "Y": 0.667,
+    "Z": 0.611,
+    "[": 0.333,
+    "\\": 0.278,
+    "]": 0.333,
+    "^": 0.584,
+    "_": 0.556,
+    "`": 0.333,
+    "a": 0.556,
+    "b": 0.611,
+    "c": 0.556,
+    "d": 0.611,
+    "e": 0.556,
+    "f": 0.333,
+    "g": 0.611,
+    "h": 0.611,
+    "i": 0.278,
+    "j": 0.278,
+    "k": 0.556,
+    "l": 0.278,
+    "m": 0.889,
+    "n": 0.611,
+    "o": 0.611,
+    "p": 0.611,
+    "q": 0.611,
+    "r": 0.389,
+    "s": 0.556,
+    "t": 0.333,
+    "u": 0.611,
+    "v": 0.556,
+    "w": 0.778,
+    "x": 0.556,
+    "y": 0.556,
+    "z": 0.500,
+    "{": 0.389,
+    "|": 0.280,
+    "}": 0.389,
+    "~": 0.584,
+}
+"""Per-character advance width in em units for Helvetica-Bold (Adobe AFM).
+
+The themes draw station names in bold Helvetica/Arial; these advances scaled
+by :data:`LABEL_FONT_SIZE` reproduce the rendered glyph extent to within ~1px,
+so a wide all-caps name (``MERGE_RUNS``) is measured as wide as it draws and a
+narrow one (``lll``) is not over-claimed."""
+
+GLYPH_ADVANCE_DEFAULT_EM: float = 0.6
+"""Advance for a character absent from :data:`GLYPH_ADVANCE_EM`."""
 
 LABEL_LINE_HEIGHT: float = 1.2
 """Line-height multiplier for multi-line labels (em units)."""
