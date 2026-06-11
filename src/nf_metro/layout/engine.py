@@ -593,6 +593,15 @@ def _compute_layout_scaled(
             if lg[layer] <= 0:
                 del lg[layer]
 
+    def _lever_value(lever: tuple[str, str, int]) -> int:
+        kind, sid, layer = lever
+        sec = graph.sections[sid]
+        if kind == "entry":
+            return sec.label_strike_entry_cols
+        if kind == "exit":
+            return sec.label_strike_exit_cols
+        return sec.label_strike_layer_gaps.get(layer, 0)
+
     struck, _ = _struck_stations_and_collinear(graph)
     for _ in range(_MAX_SPREAD_ITERS):
         levers: set[tuple[str, str, int]] = set()
@@ -619,10 +628,10 @@ def _compute_layout_scaled(
             break
         struck = after
 
-    # Minimization: drop each grown lever one at a time, keeping the drop only
-    # when the labels stay clear and no collinear overlay appears.  Skipped
-    # entirely when nothing grew, so a clean layout never pays a re-lay (and is
-    # never perturbed by one).
+    # Minimization: shrink each grown lever column by column, keeping a drop only
+    # while the labels stay clear and no collinear overlay appears, so every
+    # lever lands at its least load-bearing value.  Skipped entirely when nothing
+    # grew, so a clean layout never pays a re-lay (and is never perturbed by one).
     grown: list[tuple[str, str, int]] = (
         [
             ("entry", sid, 0)
@@ -642,11 +651,13 @@ def _compute_layout_scaled(
     )
     if grown:
         for lever in grown:
-            _adjust(lever, -1)
-            _relay()
-            still_struck, collinear = _struck_stations_and_collinear(graph)
-            if still_struck or collinear:
-                _adjust(lever, 1)
+            while _lever_value(lever) > 0:
+                _adjust(lever, -1)
+                _relay()
+                still_struck, collinear = _struck_stations_and_collinear(graph)
+                if still_struck or collinear:
+                    _adjust(lever, 1)
+                    break
         _relay()
 
     # Assure file-icon leaf sinks off the trunk by construction: a leaf icon
