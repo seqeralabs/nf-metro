@@ -1279,11 +1279,12 @@ def test_off_track_outputs_below_downward_branch_producer(fixture):
 # Fixtures where a foreign bypass V rakes a wide label's glyph ink on BOTH
 # sides of its station, so flipping the label to its other side does not clear
 # it (``_avoid_diagonal_strikethrough`` leaves a label whose flip target is also
-# struck).  Clearing these needs the V's flat run widened past the label or the
-# label moved, not a side flip -- tracked as a follow-up.
+# struck) and widening the column pitch does not relocate the V's corners.
+# Clearing these needs the V's flat-bottom run widened past the bypassed
+# station's label.
 _LABEL_STRIKE_DIAGONAL_XFAIL = {
-    "guide/06a_without_hidden.mmd": "bypass V rakes 'Quantification' both sides",
-    "guide/06b_with_hidden.mmd": "bypass V rakes 'Quantification' both sides",
+    "guide/06a_without_hidden.mmd": "#632: bypass V rakes 'Quantification' both sides",
+    "guide/06b_with_hidden.mmd": "#632: bypass V rakes 'Quantification' both sides",
 }
 
 _LABEL_STRIKE_FIXTURES = _params_with_xfails(ALL_FIXTURES, _LABEL_STRIKE_DIAGONAL_XFAIL)

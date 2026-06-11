@@ -1017,6 +1017,7 @@ def _guard_no_line_strikes_label(
     the segment's edge (that line legitimately touches the station).
     """
     from nf_metro.layout.labels import (
+        LabelPlacement,
         label_glyph_ink_bbox,
         place_labels,
         segment_strikes_label,
@@ -1045,7 +1046,7 @@ def _guard_no_line_strikes_label(
             label_angle=graph.label_angle or 0.0,
         )
         boxes: list[tuple[str, tuple[float, float, float, float]]] = []
-        placement_by_sid: dict[str, object] = {}
+        placement_by_sid: dict[str, LabelPlacement] = {}
         for p in placements:
             station = graph.stations.get(p.station_id)
             if station is None or not station.label.strip():

@@ -354,6 +354,46 @@ def _label_ink_y_band(placement: LabelPlacement) -> tuple[float, float]:
     return placement.y, placement.y + (n - 1) * line_spacing + font_height
 
 
+def _anchor_span(text_anchor: str, x: float, width: float) -> tuple[float, float]:
+    """``(left, right)`` x-extent of a ``width``-wide label at anchor ``x``.
+
+    ``end`` ends at ``x``, ``start`` begins at ``x``, anything else (the default
+    ``middle``) centres on ``x``.
+    """
+    if text_anchor == "end":
+        return x - width, x
+    if text_anchor == "start":
+        return x, x + width
+    return x - width / 2, x + width / 2
+
+
+def _rotated_text_corners(
+    placement: LabelPlacement, width: float
+) -> list[tuple[float, float]]:
+    """Corners of an upright ``width`` x text-height box rotated about the anchor.
+
+    Matches the renderer's ``rotate(angle, x, y)`` transform.
+    """
+    left, right = _anchor_span(placement.text_anchor, placement.x, width)
+    h = _label_text_height(placement.text)
+    upright = [
+        (left, placement.y - h),
+        (right, placement.y - h),
+        (right, placement.y),
+        (left, placement.y),
+    ]
+    rad = math.radians(placement.angle)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    ax, ay = placement.x, placement.y
+    return [
+        (
+            ax + (cx - ax) * cos_a - (cy - ay) * sin_a,
+            ay + (cx - ax) * sin_a + (cy - ay) * cos_a,
+        )
+        for cx, cy in upright
+    ]
+
+
 def label_glyph_ink_bbox(
     placement: LabelPlacement,
 ) -> tuple[float, float, float, float]:
@@ -376,13 +416,9 @@ def label_glyph_ink_bbox(
         ink_half = (x1 - x0) / 2 * LABEL_GLYPH_INK_RATIO
         return (center - ink_half, y0, center + ink_half, y1)
 
-    advance = label_glyph_advance_width(placement.text)
-    if placement.text_anchor == "end":
-        gx0, gx1 = placement.x - advance, placement.x
-    elif placement.text_anchor == "start":
-        gx0, gx1 = placement.x, placement.x + advance
-    else:
-        gx0, gx1 = placement.x - advance / 2, placement.x + advance / 2
+    gx0, gx1 = _anchor_span(
+        placement.text_anchor, placement.x, label_glyph_advance_width(placement.text)
+    )
     iy0, iy1 = _label_ink_y_band(placement)
     return (gx0, iy0, gx1, iy1)
 
@@ -397,30 +433,9 @@ def _label_ink_quad(placement: LabelPlacement) -> list[tuple[float, float]]:
     label it is the four corners of :func:`label_glyph_ink_bbox`.
     """
     if placement.angle and placement.obstacle_bbox is None:
-        w = label_glyph_advance_width(placement.text)
-        h = _label_text_height(placement.text)
-        if placement.text_anchor == "end":
-            left, right = placement.x - w, placement.x
-        elif placement.text_anchor == "start":
-            left, right = placement.x, placement.x + w
-        else:
-            left, right = placement.x - w / 2, placement.x + w / 2
-        upright = [
-            (left, placement.y - h),
-            (right, placement.y - h),
-            (right, placement.y),
-            (left, placement.y),
-        ]
-        rad = math.radians(placement.angle)
-        cos_a, sin_a = math.cos(rad), math.sin(rad)
-        ax, ay = placement.x, placement.y
-        return [
-            (
-                ax + (cx - ax) * cos_a - (cy - ay) * sin_a,
-                ay + (cx - ax) * sin_a + (cy - ay) * cos_a,
-            )
-            for cx, cy in upright
-        ]
+        return _rotated_text_corners(
+            placement, label_glyph_advance_width(placement.text)
+        )
     x0, y0, x1, y1 = label_glyph_ink_bbox(placement)
     return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
 

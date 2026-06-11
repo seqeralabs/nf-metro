@@ -526,13 +526,13 @@ def _compute_layout_scaled(
         )
 
     max_iters = _MAX_SPREAD_ITERS if (auto_x or auto_y) else 1
-    pre_strike_x = x_spacing  # last pitch before a strike-widening step
-    widening_strike = False
+    pre_strike_x = x_spacing
+    strike_widened = False
     for attempt in range(max_iters):
         _lay(x_spacing)
         # A strike-widening step that overshot into a collinear overlay is worse
         # than the strike it cleared; step back to the last good pitch and stop.
-        if widening_strike and _layout_has_collinear(graph):
+        if strike_widened and _layout_has_collinear(graph):
             x_spacing = pre_strike_x
             _lay(x_spacing)
             break
@@ -540,8 +540,8 @@ def _compute_layout_scaled(
             break
         residual = _residual_label_overlaps(graph, allow_hyphenation=False)
         # A horizontal label a diagonal route crosses needs a wider pitch so its
-        # station's flat run clears the transition.  Strikes a wider pitch can't
-        # fix (bypass-V, angled) are excluded from the count, so the step only
+        # station's flat run clears the transition; crossings a wider pitch can't
+        # fix (bypass-V, angled) are excluded by _strikes_from, so the step only
         # fires where it helps.
         strikes = _residual_label_strikes(graph) if auto_x else 0
         if not residual and strikes == 0:
@@ -549,9 +549,9 @@ def _compute_layout_scaled(
         new_x, new_y = _spread_bump(
             graph, residual, x_spacing, y_spacing, auto_x, auto_y
         )
-        if strikes > 0 and auto_x:
+        strike_widened = strikes > 0 and auto_x
+        if strike_widened:
             pre_strike_x = x_spacing
-            widening_strike = True
             new_x = max(new_x, x_spacing + _STRIKE_X_STEP)
         if new_x <= x_spacing + 1e-6 and new_y <= y_spacing + 1e-6:
             break  # can't widen the binding axis (e.g. pinned) -- give up
