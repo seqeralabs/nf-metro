@@ -676,6 +676,265 @@ def _compact_below_trunk_band(
         graph.stations[sid].y -= y_spacing
 
 
+def _fork_join_station_sets(graph: MetroGraph) -> tuple[set[str], set[str]]:
+    """Stations that fan out (>1 target) and that fan in (>1 source)."""
+    fork_targets: dict[str, set[str]] = defaultdict(set)
+    join_sources: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        fork_targets[e.source].add(e.target)
+        join_sources[e.target].add(e.source)
+    fork_stations = {sid for sid, t in fork_targets.items() if len(t) > 1}
+    join_stations = {sid for sid, s in join_sources.items() if len(s) > 1}
+    return fork_stations, join_stations
+
+
+def _loop_side_endpoints(
+    graph: MetroGraph,
+    sid: str,
+    st: Station,
+) -> tuple[Station, Station, float] | None:
+    """The on-trunk (source, target, trunk_y) of a clean horizontal loop side.
+
+    A loop side station has exactly one in-edge and one out-edge, both
+    endpoints on a shared trunk Y, with the station itself off that trunk and
+    strictly between the two endpoints (a real horizontal loop, not a U-turn).
+    Returns ``None`` for any station that doesn't fit that shape.
+    """
+    ins = graph.edges_to(sid)
+    outs = graph.edges_from(sid)
+    if len(ins) != 1 or len(outs) != 1:
+        return None
+    src = graph.stations.get(ins[0].source)
+    tgt = graph.stations.get(outs[0].target)
+    if src is None or tgt is None:
+        return None
+    if abs(src.y - tgt.y) > 0.5:
+        return None
+    trunk_y = src.y
+    if abs(st.y - trunk_y) < 0.5:
+        return None
+    if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
+        return None
+    return src, tgt, trunk_y
+
+
+def _has_off_trunk_sibling(
+    graph: MetroGraph,
+    section: Section,
+    sid: str,
+    src_id: str,
+    tgt_id: str,
+    trunk_y: float,
+) -> bool:
+    """Whether another off-trunk station shares this station's src and tgt.
+
+    A shared off-trunk sibling is what makes the column owned by a genuine
+    parallel fan-out rather than by an unrelated trunk station that merely
+    shares the layer-X.  A single side branch carries no fan, and recentering
+    it off the trunk station's column would visibly break the layout.
+    """
+    for other_sid in section.station_ids:
+        if other_sid == sid:
+            continue
+        other = graph.stations.get(other_sid)
+        if other is None or other.is_port or other.is_hidden:
+            continue
+        if abs(other.y - trunk_y) < 0.5:
+            continue
+        other_srcs = {e.source for e in graph.edges_to(other_sid)}
+        other_tgts = {e.target for e in graph.edges_from(other_sid)}
+        if other_srcs == {src_id} and other_tgts == {tgt_id}:
+            return True
+    return False
+
+
+def _recenter_section_loop_sides(
+    graph: MetroGraph,
+    section: Section,
+    fork_stations: set[str],
+    join_stations: set[str],
+) -> None:
+    """Re-centre off-trunk loop side stations on their diagonal midpoint.
+
+    Skips moves below a minimum visual-benefit threshold: an imperceptible
+    re-centre is not worth breaking incidental column alignment with stacked
+    on-trunk co-loopers.
+    """
+    min_recenter_delta = DIAGONAL_RUN / 3.0
+    port_ids = section.port_ids
+    for sid in section.station_ids:
+        if sid in port_ids:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or st.is_hidden:
+            continue
+        endpoints = _loop_side_endpoints(graph, sid, st)
+        if endpoints is None:
+            continue
+        src, tgt, trunk_y = endpoints
+        if not _has_off_trunk_sibling(graph, section, sid, src.id, tgt.id, trunk_y):
+            continue
+        corner_left = _loop_corner_x(src, st, fork_stations, join_stations, role="src")
+        corner_right = _loop_corner_x(st, tgt, fork_stations, join_stations, role="tgt")
+        if corner_left is None or corner_right is None:
+            continue
+        midpoint = (corner_left + corner_right) / 2.0
+        if not (
+            min(corner_left, corner_right)
+            <= midpoint
+            <= max(corner_left, corner_right)
+        ):
+            continue
+        if abs(midpoint - st.x) < min_recenter_delta:
+            continue
+        st.x = midpoint
+
+
+def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
+    """The section's trunk Y, taken from a horizontal (LEFT/RIGHT) port."""
+    for pid in section.entry_ports + section.exit_ports:
+        ps = graph.stations.get(pid)
+        port = graph.ports.get(pid)
+        if (
+            ps is not None
+            and port is not None
+            and port.side in (PortSide.LEFT, PortSide.RIGHT)
+        ):
+            return ps.y
+    return None
+
+
+def _loop_column_key(
+    graph: MetroGraph,
+    section: Section,
+    section_trunk_y: float,
+    sid: str,
+) -> tuple[float, float] | None:
+    """The (pred_x, succ_x) trunk-Y extent defining a station's loop column.
+
+    Returns ``None`` when the station has no trunk-Y neighbour on one side, or
+    when any visible neighbour sits off the trunk row (an off-track input
+    anchors the station elsewhere).
+    """
+    pred_x: float | None = None
+    succ_x: float | None = None
+    for e in graph.edges_to(sid):
+        p = graph.stations.get(e.source)
+        if p is None or p.is_hidden:
+            continue
+        if abs(p.y - section_trunk_y) > 0.5:
+            return None
+        if (
+            pred_x is None
+            or (section.direction == "LR" and p.x > pred_x)
+            or (section.direction == "RL" and p.x < pred_x)
+        ):
+            pred_x = p.x
+    for e in graph.edges_from(sid):
+        t = graph.stations.get(e.target)
+        if t is None or t.is_hidden:
+            continue
+        if abs(t.y - section_trunk_y) > 0.5:
+            return None
+        if (
+            succ_x is None
+            or (section.direction == "LR" and t.x < succ_x)
+            or (section.direction == "RL" and t.x > succ_x)
+        ):
+            succ_x = t.x
+    if pred_x is None or succ_x is None:
+        return None
+    return (round(pred_x, 3), round(succ_x, 3))
+
+
+def _build_loop_columns(
+    graph: MetroGraph,
+    section: Section,
+    section_trunk_y: float,
+) -> dict[tuple[float, float], list[str]]:
+    """Group section stations by loop column, keeping those strictly between
+    their trunk-Y neighbours (a meaningful horizontal extent)."""
+    columns: dict[tuple[float, float], list[str]] = defaultdict(list)
+    port_ids = section.port_ids
+    for sid in section.station_ids:
+        if sid in port_ids:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or st.is_hidden:
+            continue
+        key = _loop_column_key(graph, section, section_trunk_y, sid)
+        if key is None:
+            continue
+        pred_x, succ_x = key
+        lo, hi = min(pred_x, succ_x), max(pred_x, succ_x)
+        if not (lo < st.x < hi):
+            continue
+        columns[key].append(sid)
+    return columns
+
+
+def _snap_column_to_anchors(
+    graph: MetroGraph,
+    section_trunk_y: float,
+    members: list[str],
+    key: tuple[float, float],
+) -> None:
+    """Snap a loop column's movers to the mean X of its clean anchors.
+
+    Anchors are the off-trunk siblings pass 1 already placed at the loop
+    midpoint (restricted to the same single-in/single-out filter).  Movers are
+    the trunk-row station plus any off-trunk column-mate whose extra edge (e.g.
+    an exit-port feed alongside the trunk rejoin) disqualified it from pass 1
+    yet which belongs to the column.
+    """
+    movers: list[str] = []
+    anchor_xs: list[float] = []
+    for sid in members:
+        st = graph.stations[sid]
+        if abs(st.y - section_trunk_y) <= 0.5:
+            movers.append(sid)
+            continue
+        visible_ins = [
+            e
+            for e in graph.edges_to(sid)
+            if (
+                (gs := graph.stations.get(e.source)) is not None and not gs.is_hidden
+            )
+        ]
+        visible_outs = [
+            e
+            for e in graph.edges_from(sid)
+            if (
+                (gs := graph.stations.get(e.target)) is not None and not gs.is_hidden
+            )
+        ]
+        if len(visible_ins) == 1 and len(visible_outs) == 1:
+            anchor_xs.append(st.x)
+        else:
+            movers.append(sid)
+    if not movers or not anchor_xs:
+        return
+    target_x = sum(anchor_xs) / len(anchor_xs)
+    pred_x, succ_x = key
+    lo, hi = min(pred_x, succ_x), max(pred_x, succ_x)
+    if not (lo <= target_x <= hi):
+        return
+    for sid in movers:
+        graph.stations[sid].x = target_x
+
+
+def _snap_loop_column_mates(graph: MetroGraph, section: Section) -> None:
+    """Align loop-column-mate stations to the column X from pass-1 anchors."""
+    section_trunk_y = _section_trunk_y(graph, section)
+    if section_trunk_y is None:
+        return
+    columns = _build_loop_columns(graph, section, section_trunk_y)
+    for key, members in columns.items():
+        if len(members) < 2:
+            continue
+        _snap_column_to_anchors(graph, section_trunk_y, members, key)
+
+
 def _recenter_loop_side_stations(graph: MetroGraph) -> None:
     """Reposition fan-out side stations on the centre of their loop run.
 
@@ -711,235 +970,17 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
     skipped when shifting would leave fewer than ``DIAGONAL_RUN`` worth
     of horizontal room on either side.
     """
-    # Single pass over graph.edges to accumulate fork/join sets.
-    # (Adjacency itself is served by graph.edges_from / edges_to.)
-    fork_targets: dict[str, set[str]] = defaultdict(set)
-    join_sources: dict[str, set[str]] = defaultdict(set)
-    for e in graph.edges:
-        fork_targets[e.source].add(e.target)
-        join_sources[e.target].add(e.source)
-    fork_stations = {sid for sid, t in fork_targets.items() if len(t) > 1}
-    join_stations = {sid for sid, s in join_sources.items() if len(s) > 1}
+    fork_stations, join_stations = _fork_join_station_sets(graph)
 
-    # Minimum recenter delta below which we'd be moving the station
-    # without enough visual benefit to justify breaking any incidental
-    # column alignment with stacked siblings.  Anything smaller is in
-    # the noise where the layer-X placement already reads as centred.
-    min_recenter_delta = DIAGONAL_RUN / 3.0
-
-    # Pass 1: re-centre off-trunk loop side stations using the diagonal
-    # corner geometry.
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
-        port_ids = section.port_ids
-        # Each side station: not a port, not hidden, has exactly one
-        # incoming edge and one outgoing edge, both endpoints sit on
-        # the section trunk Y (single source / single target on-trunk).
-        for sid in section.station_ids:
-            if sid in port_ids:
-                continue
-            st = graph.stations.get(sid)
-            if st is None or st.is_port or st.is_hidden:
-                continue
-            ins = graph.edges_to(sid)
-            outs = graph.edges_from(sid)
-            if len(ins) != 1 or len(outs) != 1:
-                continue
-            src_id = ins[0].source
-            tgt_id = outs[0].target
-            src = graph.stations.get(src_id)
-            tgt = graph.stations.get(tgt_id)
-            if src is None or tgt is None:
-                continue
-            # Side station must sit OFF the trunk Y of its source and
-            # target (a vertical hop is needed at both endpoints).
-            if abs(src.y - tgt.y) > 0.5:
-                # Source and target aren't on the same trunk row, so
-                # this isn't a simple horizontal loop side station.
-                continue
-            trunk_y = src.y
-            if abs(st.y - trunk_y) < 0.5:
-                continue  # Already on trunk, no loop.
-            # Both endpoints must lie strictly to opposite sides of the
-            # side station (a real horizontal loop, not a U-turn).
-            if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
-                continue
-            # Require at least one OFF-TRUNK sibling sharing the same
-            # single src and tgt: this is what makes the station part
-            # of a genuine parallel fan-out where the column is owned
-            # by the loop, not by an unrelated trunk station that just
-            # happens to share the layer-X.  Single side branches (e.g.
-            # ``search`` paired with the trunk continuation ``align``)
-            # carry no fan, and recentering them off the column where
-            # the trunk station sits visibly breaks the layout.
-            has_off_trunk_sibling = False
-            for other_sid in section.station_ids:
-                if other_sid == sid:
-                    continue
-                other = graph.stations.get(other_sid)
-                if other is None or other.is_port or other.is_hidden:
-                    continue
-                if abs(other.y - trunk_y) < 0.5:
-                    continue  # on-trunk co-loopers don't establish a fan
-                other_ins = graph.edges_to(other_sid)
-                other_outs = graph.edges_from(other_sid)
-                other_srcs = {e.source for e in other_ins}
-                other_tgts = {e.target for e in other_outs}
-                if other_srcs == {src_id} and other_tgts == {tgt_id}:
-                    has_off_trunk_sibling = True
-                    break
-            if not has_off_trunk_sibling:
-                continue
-            # Compute the two diagonal corner Xs using routing's
-            # placement rule (see _compute_diagonal_placement).
-            corner_left = _loop_corner_x(
-                src, st, fork_stations, join_stations, role="src"
-            )
-            corner_right = _loop_corner_x(
-                st, tgt, fork_stations, join_stations, role="tgt"
-            )
-            if corner_left is None or corner_right is None:
-                continue
-            # Ensure room on both sides for the horizontal run after
-            # the new midpoint.  Skip if the move would push the
-            # station past either corner.
-            midpoint = (corner_left + corner_right) / 2.0
-            if not (
-                min(corner_left, corner_right)
-                <= midpoint
-                <= max(corner_left, corner_right)
-            ):
-                continue
-            # Skip moves smaller than the minimum visual-benefit
-            # threshold: they trade an imperceptible re-centre for a
-            # visible column break against on-trunk co-loopers (e.g.
-            # rnaseq_lite ``star_align`` ↔ ``hisat_align``).
-            if abs(midpoint - st.x) < min_recenter_delta:
-                continue
-            st.x = midpoint
+        _recenter_section_loop_sides(graph, section, fork_stations, join_stations)
 
-    # Pass 2: snap loop-column-mate stations (trunk-row station and any
-    # off-trunk siblings whose multi-edge topology disqualified them
-    # from pass 1) to the column X defined by pass-1's clean siblings.
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
-        port_ids = section.port_ids
-        # Determine the section's trunk Y from a horizontal port.
-        section_trunk_y: float | None = None
-        for pid in section.entry_ports + section.exit_ports:
-            ps = graph.stations.get(pid)
-            port = graph.ports.get(pid)
-            if (
-                ps is not None
-                and port is not None
-                and port.side in (PortSide.LEFT, PortSide.RIGHT)
-            ):
-                section_trunk_y = ps.y
-                break
-        if section_trunk_y is None:
-            continue
-
-        # Visible trunk-Y predecessor/successor X-extent for a station.
-        # Returns ``None`` when the station has no trunk-Y neighbour on
-        # one side, or when any visible neighbour sits off the trunk
-        # row (off-track inputs anchor the station elsewhere).
-        def _column_key(sid: str) -> tuple[float, float] | None:
-            pred_x: float | None = None
-            succ_x: float | None = None
-            for e in graph.edges_to(sid):
-                p = graph.stations.get(e.source)
-                if p is None or p.is_hidden:
-                    continue
-                if abs(p.y - section_trunk_y) > 0.5:
-                    return None
-                if (
-                    pred_x is None
-                    or (section.direction == "LR" and p.x > pred_x)
-                    or (section.direction == "RL" and p.x < pred_x)
-                ):
-                    pred_x = p.x
-            for e in graph.edges_from(sid):
-                t = graph.stations.get(e.target)
-                if t is None or t.is_hidden:
-                    continue
-                if abs(t.y - section_trunk_y) > 0.5:
-                    return None
-                if (
-                    succ_x is None
-                    or (section.direction == "LR" and t.x < succ_x)
-                    or (section.direction == "RL" and t.x > succ_x)
-                ):
-                    succ_x = t.x
-            if pred_x is None or succ_x is None:
-                return None
-            return (round(pred_x, 3), round(succ_x, 3))
-
-        columns: dict[tuple[float, float], list[str]] = defaultdict(list)
-        for sid in section.station_ids:
-            if sid in port_ids:
-                continue
-            st = graph.stations.get(sid)
-            if st is None or st.is_port or st.is_hidden:
-                continue
-            key = _column_key(sid)
-            if key is None:
-                continue
-            # Station must sit strictly between its trunk-Y neighbours
-            # for the column to be a meaningful horizontal extent.
-            pred_x, succ_x = key
-            lo, hi = min(pred_x, succ_x), max(pred_x, succ_x)
-            if not (lo < st.x < hi):
-                continue
-            columns[key].append(sid)
-
-        for key, members in columns.items():
-            if len(members) < 2:
-                continue
-            movers: list[str] = []
-            anchor_xs: list[float] = []
-            for sid in members:
-                st = graph.stations[sid]
-                if abs(st.y - section_trunk_y) <= 0.5:
-                    movers.append(sid)
-                    continue
-                # Anchor X must come from a station pass-1 already
-                # placed at the loop midpoint; restrict to the same
-                # single-in/single-out filter pass-1 uses.
-                visible_ins = [
-                    e
-                    for e in graph.edges_to(sid)
-                    if (
-                        (gs := graph.stations.get(e.source)) is not None
-                        and not gs.is_hidden
-                    )
-                ]
-                visible_outs = [
-                    e
-                    for e in graph.edges_from(sid)
-                    if (
-                        (gs := graph.stations.get(e.target)) is not None
-                        and not gs.is_hidden
-                    )
-                ]
-                if len(visible_ins) == 1 and len(visible_outs) == 1:
-                    anchor_xs.append(st.x)
-                else:
-                    # Off-trunk column-mate whose extra edge (e.g. an
-                    # exit-port feed alongside the trunk rejoin) failed
-                    # pass 1's single-in/single-out filter.  It still
-                    # belongs to the column and must follow the anchors.
-                    movers.append(sid)
-            if not movers or not anchor_xs:
-                continue
-            target_x = sum(anchor_xs) / len(anchor_xs)
-            pred_x, succ_x = key
-            lo, hi = min(pred_x, succ_x), max(pred_x, succ_x)
-            if not (lo <= target_x <= hi):
-                continue
-            for sid in movers:
-                graph.stations[sid].x = target_x
+        _snap_loop_column_mates(graph, section)
 
 
 def _shift_and_propagate_loop_stations(
