@@ -168,8 +168,10 @@ def _parse_port_hint(
     if section:
         if is_entry:
             section.entry_hints.append((side, line_ids))
+            graph._explicit_entry.add(section_id)
         else:
             section.exit_hints.append((side, line_ids))
+            graph._explicit_exit.add(section_id)
 
 
 def _parse_grid_directive(value: str, graph: MetroGraph) -> None:
