@@ -423,11 +423,11 @@ def _snapshot_struct_heights_below_top(
     """Record each section's structural height below its bbox top.
 
     Captures ``_predict_section_content_bottom(...) - section.bbox_y`` per
-    section into ``graph._struct_height_below_top`` before the opportunistic
-    Pass C content-compaction phases tighten content.  The inter-row cascade
-    later reconstructs the structural bottom on each section's current bbox
-    top (``bbox_y + stored_height``) so row offsets resolve from this
-    anchors-first prediction rather than the settled extent.
+    section into ``graph._struct_height_below_top``.  Called after Stage
+    6.15a so the stored heights reflect the fully settled bbox tops.  The
+    inter-row cascade (Stage 6.13 phase 2) reads Phase 1's content-hugging
+    bbox directly; this snapshot records the settled extents for
+    structural-extent fidelity checks.
     """
     graph._struct_height_below_top = {}
     for section in graph.sections.values():
@@ -696,9 +696,9 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
         ending_at_prev = sections_by_end_row.get(r - 1, [])
         if not lower or not ending_at_prev:
             continue
-        # Stack from the structural extent captured before content
-        # compaction when available, reconstructed on each section's current
-        # bbox top; fall back to the settled bbox bottom otherwise.
+        # Use the Phase 1 content-hugging bbox bottom (bbox_y + bbox_h) as the
+        # row-ending extent.  When a pre-populated structural snapshot exists,
+        # use it instead (per-section override, falls back to bbox_h).
         struct = graph._struct_height_below_top
         if struct:
             max_above_bot = max(

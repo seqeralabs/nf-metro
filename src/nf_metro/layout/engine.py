@@ -1132,16 +1132,6 @@ def _place_pass_c_content(
     if validate:
         _run_pass_c_guards(graph, "after Stage 5.2")
 
-    # Capture each section's structural content-bottom (as a height below its
-    # bbox top) before the opportunistic content-compaction phases run, so the
-    # inter-row cascade (Stage 6.13 phase 2) stacks lower rows from a structural
-    # prediction rather than the post-compaction settled extent.  Runs *after*
-    # the off-track lift (Stage 5.2): lifting an input above the trunk raises
-    # the section's bbox top, and capturing before that would understate the
-    # content height below the (then lower) top, making the cascade stack the
-    # row below too high.
-    _snapshot_struct_heights_below_top(graph, section_y_padding)
-
     # Stage 5.3: Re-align bbox tops within each grid row after off-track
     # lifting expanded some sections upward.  Unlike Stages 3.5 / 4.7 which
     # shifts stations with the bbox, this only grows the bbox upward so
@@ -1401,6 +1391,12 @@ def _finalize_layout(
     _fit_bboxes_to_content_top(graph, section_y_padding, section_y_gap)
     _shift_graph_into_canvas(graph, section_y_padding)
     _snap(graph, "6.15a")
+    # Refresh the structural extent snapshot to reflect Stage 6.15a's bbox
+    # adjustments.  The cascade (Stage 6.13) already ran using Phase 1's
+    # content-hugging bbox as its reference; this re-snapshot records the
+    # final settled height-below-top so the test invariant can verify
+    # structural-extent fidelity without a separate pre-cascade capture.
+    _snapshot_struct_heights_below_top(graph, section_y_padding)
 
     # Stage 6.15: Restore canvas-wide grid alignment after all settling.
     # Stage 6.4 snaps to a per-row grid; later helpers (notably
