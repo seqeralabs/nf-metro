@@ -613,10 +613,16 @@ def _compute_layout_scaled(
             if target is None:
                 continue
             sec, layer = target
+            # ``gap`` at the station's own layer lengthens its *incoming* flat
+            # run (clears a convergence/join diagonal raking the name); at the
+            # next layer it lengthens the *outgoing* run (clears a fan-out/fork
+            # diagonal).  Bumping both and letting minimization drop the
+            # non-load-bearing one clears a strike on either side.
             levers |= {
                 ("entry", sec.id, 0),
                 ("exit", sec.id, 0),
                 ("gap", sec.id, layer),
+                ("gap", sec.id, layer + 1),
             }
         if not levers:
             break

@@ -444,8 +444,9 @@ def _compute_fork_join_gaps(
             if lyr == layer:
                 station = sub.stations.get(sid)
                 if station and station.label.strip():
-                    label_half = label_text_width(station.label) / 2
-                    fj_label_half = max(fj_label_half, label_half)
+                    fj_label_half = max(
+                        fj_label_half, label_text_width(station.label) / 2
+                    )
                 if sid in tracks:
                     fj_tracks.add(tracks[sid])
 
@@ -561,20 +562,28 @@ def _compute_fork_join_gaps(
             )
             bubble_extra = max(bubble_extra, forced_reach)
 
-        # The router (``_route_diagonal``) reserves the fork/join station's
-        # label half-width as straight run so the diagonal starts past the
-        # (possibly tilted) label, but it abandons that clearance when the
-        # column gap can't also fit the diagonal run plus the branch-side
-        # minimum straight.  Reserve a gap that keeps the clearance, so the
-        # fork/join label never overlaps the divergence/convergence diagonal.
-        # A whole pitch already sits between the columns, so subtract it; the
-        # 1px cushion absorbs float rounding in the router's drop test.
-        routing_clearance = (
-            fj_label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE - x_spacing + 1.0
-        )
-        layer_gap[layer] = max(
-            base_gap, fj_label_half + bubble_extra, routing_clearance
-        )
+        if label_angle:
+            # Angled labels are invisible to the horizontal-label strike loop
+            # (it skips them) and to the strike guard, so they keep the eager
+            # width-based reservation that seats the fan diagonal past the
+            # tilted name.  A whole pitch already sits between columns, so the
+            # routing clearance subtracts it; the 1px cushion absorbs float
+            # rounding in the router's drop test.
+            routing_clearance = (
+                fj_label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE - x_spacing + 1.0
+            )
+            layer_gap[layer] = max(
+                base_gap, fj_label_half + bubble_extra, routing_clearance
+            )
+        else:
+            # Reserve only the diagonal-run minimum plus the interior-fan reach
+            # for a 3+ branch bubble.  Horizontal-label clearance for the
+            # fork/join station's own name is left to the strike-clearance
+            # loop, which lengthens the flat run by whole grid columns only
+            # where a diagonal would actually rake the name -- so a fork/join
+            # whose name already clears its transition does not pad its column
+            # on label width alone.
+            layer_gap[layer] = max(base_gap, bubble_extra)
 
     cumulative = 0.0
     layer_extra: dict[int, float] = {}

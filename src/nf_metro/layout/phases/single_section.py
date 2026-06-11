@@ -627,8 +627,13 @@ def _adjust_lr_entry_inset(
         section.bbox_w += entry_inset
         return
 
-    # Flow-side entry that fans out to multiple internal stations at
-    # different Y positions needs extra room for the diagonal transitions.
+    # Flow-side entry that fans out to multiple internal stations needs extra
+    # room for the diagonal transitions only when an angled label is in the
+    # fan: such labels are invisible to the strike-clearance loop.  With
+    # horizontal labels the loop's entry runway grows the room need-driven
+    # (only where a fan diagonal rakes a name), so no eager inset is reserved.
+    if not (graph.label_angle or 0.0):
+        return
     for pid in section.entry_ports:
         if pid not in graph.ports:
             continue
@@ -706,6 +711,13 @@ def _adjust_lr_exit_gap(
                 feeder_ys.add(sub.stations[src_id].y)
 
     if len(feeder_ys) <= 1:
+        return
+
+    # With horizontal labels the exit-fan clearance is handled need-driven by
+    # the strike-clearance loop's exit runway (grown only where a convergence
+    # diagonal rakes a name).  Reserve the eager gap only for angled labels,
+    # which the loop cannot see.
+    if not (graph.label_angle or 0.0):
         return
 
     exit_gap = x_spacing * EXIT_GAP_MULTIPLIER
