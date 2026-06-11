@@ -17,6 +17,13 @@ _MAX_SPREAD_ITERS = 6
 # spacing, so the re-laid-out labels land with a small gap, not flush.
 _SPREAD_SLACK = 4.0
 
+# Column-pitch increment (px) a spread pass applies while a diagonal crosses a
+# station's name.  A wider pitch lengthens the flat run at each station so the
+# fan transition seats clear of the label.  Small enough to settle near the
+# minimum clearing pitch rather than overshoot into a wider layout's defects;
+# the loop re-probes and stops once the strikes clear.
+_STRIKE_X_STEP = 10.0
+
 
 def _probe_label_placements(
     graph: MetroGraph, *, allow_hyphenation: bool
@@ -109,6 +116,125 @@ def _residual_label_overlaps(
         return bool(st and st.section_id and graph.is_rail_section(st.section_id))
 
     return [o for o in overlaps if not (_in_rail(o.a) or _in_rail(o.b))]
+
+
+def _residual_label_strikes(graph: MetroGraph) -> int:
+    """Count stations whose horizontal label a diagonal route crosses.
+
+    The visual goal driving the spread loop's X widening: a fan-in/fan-out or
+    convergence diagonal (a line the station carries or not) that transitions
+    through a station's drawn name reads as a strike-through.  Widening the
+    column pitch lengthens the flat run at each station so the transition seats
+    outside the label.
+
+    Excluded because widening cannot move them:
+
+    - angled labels (a rotated strip is handled by its own footprint, not
+      column pitch),
+    - bypass-V crossings (the V sits a fixed track offset from the station, so
+      a wider pitch does not relocate its corners -- those need a different
+      fix).
+
+    Snapshots and restores geometry like :func:`_probe_label_placements`.
+    """
+    from nf_metro.layout.labels import (
+        place_labels,
+        segment_strikes_label,
+    )
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+    from nf_metro.render.svg import apply_route_offsets
+
+    pos = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
+    bbox = {
+        sid: (s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h)
+        for sid, s in graph.sections.items()
+    }
+    try:
+        offsets = compute_station_offsets(graph)
+        routes = route_edges(graph, station_offsets=offsets)
+        placements = place_labels(
+            graph,
+            station_offsets=offsets,
+            routes=routes,
+            label_angle=graph.label_angle or 0.0,
+            lift_wrapped_off_trunks=False,
+        )
+        seg_lists = [
+            (
+                r,
+                apply_route_offsets(r, offsets),
+                r.edge.source.startswith("__bypass_")
+                or r.edge.target.startswith("__bypass_"),
+            )
+            for r in routes
+        ]
+        struck = 0
+        for p in placements:
+            station = graph.stations.get(p.station_id)
+            if station is None or not station.label.strip() or p.angle:
+                continue
+            for _r, pts, is_bypass in seg_lists:
+                if is_bypass:
+                    continue
+                if any(
+                    segment_strikes_label(x1, y1, x2, y2, p)
+                    and abs(y2 - y1) >= max(abs(x2 - x1), 1.0) * 0.05
+                    for (x1, y1), (x2, y2) in zip(pts, pts[1:])
+                ):
+                    struck += 1
+                    break
+        return struck
+    except Exception:  # noqa: BLE001 - a transient probe failure never blocks layout
+        return 0
+    finally:
+        for sid, (x, y) in pos.items():
+            st = graph.stations.get(sid)
+            if st is not None:
+                st.x, st.y = x, y
+        for sid, (bx, by, bw, bh) in bbox.items():
+            s = graph.sections.get(sid)
+            if s is not None:
+                s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h = bx, by, bw, bh
+
+
+def _layout_has_collinear(graph: MetroGraph) -> bool:
+    """Whether the current layout draws two distinct lines on top of each other.
+
+    Probes the offset-applied routes and runs the inter- and intra-section
+    collinear-overlay checks (the same the final-phase guards enforce), so the
+    spread loop can step back a strike-clearing widening that would overshoot
+    into a collinear defect rather than ship it.  Restores geometry like
+    :func:`_probe_label_placements`; returns ``False`` on a probe failure.
+    """
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+    from nf_metro.layout.routing.invariants import (
+        check_intra_section_collinear_distinct_lines,
+        check_no_collinear_distinct_lines,
+    )
+
+    pos = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
+    bbox = {
+        sid: (s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h)
+        for sid, s in graph.sections.items()
+    }
+    try:
+        offsets = compute_station_offsets(graph)
+        routes = route_edges(graph, station_offsets=offsets)
+        return bool(
+            check_no_collinear_distinct_lines(graph, routes, offsets)
+            or check_intra_section_collinear_distinct_lines(graph, routes, offsets)
+        )
+    except Exception:  # noqa: BLE001 - a transient probe failure never blocks layout
+        return False
+    finally:
+        for sid, (x, y) in pos.items():
+            st = graph.stations.get(sid)
+            if st is not None:
+                st.x, st.y = x, y
+        for sid, (bx, by, bw, bh) in bbox.items():
+            s = graph.sections.get(sid)
+            if s is not None:
+                s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h = bx, by, bw, bh
 
 
 def _placed_name_label_station_ids(graph: MetroGraph) -> set[str]:

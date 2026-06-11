@@ -243,7 +243,10 @@ from nf_metro.layout.phases.snapshots import (
 from nf_metro.layout.phases.spacing import (  # noqa: F401
     _MAX_SPREAD_ITERS,
     _SPREAD_SLACK,
+    _STRIKE_X_STEP,
+    _layout_has_collinear,
     _residual_label_overlaps,
+    _residual_label_strikes,
     _spread_bump,
 )
 from nf_metro.parser.model import LineSpread, MetroGraph
@@ -508,11 +511,10 @@ def _compute_layout_scaled(
     # so nothing is widened; only crowded wide-label graphs iterate.  When
     # the caller pins both spacings explicitly there is nothing to widen,
     # so a single pass runs.
-    max_iters = _MAX_SPREAD_ITERS if (auto_x or auto_y) else 1
-    for attempt in range(max_iters):
+    def _lay(xs: float) -> None:
         _layout_once(
             graph,
-            x_spacing=x_spacing,
+            x_spacing=xs,
             y_spacing=y_spacing,
             x_offset=x_offset,
             y_offset=y_offset,
@@ -522,14 +524,35 @@ def _compute_layout_scaled(
             section_y_gap=section_y_gap,
             validate=validate,
         )
+
+    max_iters = _MAX_SPREAD_ITERS if (auto_x or auto_y) else 1
+    pre_strike_x = x_spacing  # last pitch before a strike-widening step
+    widening_strike = False
+    for attempt in range(max_iters):
+        _lay(x_spacing)
+        # A strike-widening step that overshot into a collinear overlay is worse
+        # than the strike it cleared; step back to the last good pitch and stop.
+        if widening_strike and _layout_has_collinear(graph):
+            x_spacing = pre_strike_x
+            _lay(x_spacing)
+            break
         if attempt == max_iters - 1:
             break
         residual = _residual_label_overlaps(graph, allow_hyphenation=False)
-        if not residual:
+        # A horizontal label a diagonal route crosses needs a wider pitch so its
+        # station's flat run clears the transition.  Strikes a wider pitch can't
+        # fix (bypass-V, angled) are excluded from the count, so the step only
+        # fires where it helps.
+        strikes = _residual_label_strikes(graph) if auto_x else 0
+        if not residual and strikes == 0:
             break
         new_x, new_y = _spread_bump(
             graph, residual, x_spacing, y_spacing, auto_x, auto_y
         )
+        if strikes > 0 and auto_x:
+            pre_strike_x = x_spacing
+            widening_strike = True
+            new_x = max(new_x, x_spacing + _STRIKE_X_STEP)
         if new_x <= x_spacing + 1e-6 and new_y <= y_spacing + 1e-6:
             break  # can't widen the binding axis (e.g. pinned) -- give up
         x_spacing, y_spacing = new_x, new_y
