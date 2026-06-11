@@ -788,20 +788,6 @@ def _recenter_section_loop_sides(
         st.x = midpoint
 
 
-def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
-    """The section's trunk Y, taken from a horizontal (LEFT/RIGHT) port."""
-    for pid in section.entry_ports + section.exit_ports:
-        ps = graph.stations.get(pid)
-        port = graph.ports.get(pid)
-        if (
-            ps is not None
-            and port is not None
-            and port.side in (PortSide.LEFT, PortSide.RIGHT)
-        ):
-            return ps.y
-    return None
-
-
 def _loop_column_key(
     graph: MetroGraph,
     section: Section,
@@ -919,7 +905,7 @@ def _snap_column_to_anchors(
 
 def _snap_loop_column_mates(graph: MetroGraph, section: Section) -> None:
     """Align loop-column-mate stations to the column X from pass-1 anchors."""
-    section_trunk_y = _section_trunk_y(graph, section)
+    section_trunk_y = _section_lr_port_anchor_y(graph, section)
     if section_trunk_y is None:
         return
     columns = _build_loop_columns(graph, section, section_trunk_y)

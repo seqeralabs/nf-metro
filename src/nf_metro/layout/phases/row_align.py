@@ -45,13 +45,17 @@ def _row_group_grid_spacing(
     graph: MetroGraph,
     section_subgraphs: dict[str, MetroGraph],
     sec_ids: list[str],
-    section_class: dict[str, tuple[dict[int, list[float]], set[float]]],
     section_y_padding: float,
     y_spacing: float,
-) -> tuple[int, float, float] | None:
-    """Shared (grid_slots, max_y_pad, effective_y_spacing) for a row group.
+) -> (
+    tuple[int, float, float, dict[str, tuple[dict[int, list[float]], set[float]]]]
+    | None
+):
+    """Shared grid params for a row group, plus its per-section Y classification.
 
-    Returns ``None`` when the group needs no shared grid (one slot or fewer).
+    Returns ``(grid_slots, max_y_pad, effective_y_spacing, section_class)``, or
+    ``None`` when the group needs no shared grid (one slot or fewer) -- bailing
+    before the per-section classification so a skipped group does no extra work.
     The pitch is inflated past ``y_spacing`` when stations at multi-station
     layers carry enough lines that their rendered bundle plus label height
     would otherwise overlap an adjacent track.  Isolated hub stations (sole
@@ -62,6 +66,11 @@ def _row_group_grid_spacing(
         grid_slots = max(grid_slots, _max_stations_per_layer(section_subgraphs[sec_id]))
     if grid_slots <= 1:
         return None
+
+    section_class = {
+        sec_id: _classify_multi_station_ys(section_subgraphs[sec_id])
+        for sec_id in sec_ids
+    }
 
     max_y_pad = 0.0
     for sec_id in sec_ids:
@@ -82,7 +91,7 @@ def _row_group_grid_spacing(
         + FONT_HEIGHT * active_font_scale()
     )
     effective_y_spacing = max(y_spacing, min_track_gap)
-    return grid_slots, max_y_pad, effective_y_spacing
+    return grid_slots, max_y_pad, effective_y_spacing, section_class
 
 
 def _assign_nonuniform_slots(
@@ -310,21 +319,12 @@ def _align_row_y_grids(
         if len(sec_ids) < 2:
             continue
 
-        section_class: dict[str, tuple[dict[int, list[float]], set[float]]] = {
-            sec_id: _classify_multi_station_ys(section_subgraphs[sec_id])
-            for sec_id in sec_ids
-        }
         spacing = _row_group_grid_spacing(
-            graph,
-            section_subgraphs,
-            sec_ids,
-            section_class,
-            section_y_padding,
-            y_spacing,
+            graph, section_subgraphs, sec_ids, section_y_padding, y_spacing
         )
         if spacing is None:
             continue
-        grid_slots, max_y_pad, effective_y_spacing = spacing
+        grid_slots, max_y_pad, effective_y_spacing, section_class = spacing
 
         grid_info[row] = {
             "section_ids": list(sec_ids),
