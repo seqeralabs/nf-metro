@@ -60,6 +60,64 @@ def test_info_output():
     assert "Sections:" in result.output
 
 
+def test_info_default_matches_formatter():
+    """Default text output equals the non-verbose formatter, byte-for-byte."""
+    from nf_metro.introspect import build_info, format_info_text
+    from nf_metro.parser import parse_metro_mermaid
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["info", str(RNASEQ_MMD)])
+    assert result.exit_code == 0
+    graph = parse_metro_mermaid(RNASEQ_MMD.read_text())
+    expected = format_info_text(build_info(graph), verbose=False)
+    assert result.output == expected + "\n"
+    # The verbose-only sections must not leak into the default output.
+    assert "Section dependency graph:" not in result.output
+
+
+def test_info_json_is_valid_and_structured():
+    """--json emits parseable JSON carrying the full introspection structure."""
+    import json
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["info", str(RNASEQ_MMD), "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["title"] == "nf-core/rnaseq"
+    assert {"counts", "lines", "sections", "ports", "junctions", "section_dag"} <= set(
+        data
+    )
+    assert data["section_dag"]["edges"]
+
+
+def test_info_verbose_adds_introspection():
+    """--verbose appends the richer sections to the stable summary."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["info", str(RNASEQ_MMD), "--verbose"])
+    assert result.exit_code == 0
+    assert "Section dependency graph:" in result.output
+    assert "Per-line routes:" in result.output
+    assert "Ports (synthetic):" in result.output
+
+
+def test_info_captures_parse_warnings(tmp_path):
+    """A non-LR primary graph direction surfaces as a captured warning."""
+    import json
+
+    mmd = tmp_path / "tb.mmd"
+    mmd.write_text(
+        "%%metro title: TB warn\n"
+        "%%metro line: a | A | #ff0000\n"
+        "graph TB\n"
+        "    x[X] -->|a| y[Y]\n"
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli, ["info", str(mmd), "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert any("LR" in w for w in data["warnings"])
+
+
 def test_version():
     """--version flag prints version string."""
     runner = CliRunner()

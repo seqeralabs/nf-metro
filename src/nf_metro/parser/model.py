@@ -367,6 +367,12 @@ class MetroGraph:
     section_dag: SectionDAG | None = None
     # Section IDs that had explicit %%metro direction: directives
     _explicit_directions: set[str] = field(default_factory=set)
+    # Section IDs whose entry/exit port sides were author-specified via
+    # %%metro entry:/exit: directives (tracked separately because auto_layout
+    # fills entry_hints/exit_hints for sections that have none, so the hint
+    # list alone cannot tell an author side from an inferred one).
+    _explicit_entry: set[str] = field(default_factory=set)
+    _explicit_exit: set[str] = field(default_factory=set)
     # Pending terminus designations: station_id ->
     # list of (label, icon_type, name, banner)
     _pending_terminus: dict[str, list[tuple[str, str, str, bool]]] = field(

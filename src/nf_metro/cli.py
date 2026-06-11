@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -9,6 +10,7 @@ from typing import Any, TypeVar
 import click
 
 from nf_metro import __version__
+from nf_metro.introspect import build_info, format_info_json, format_info_text
 from nf_metro.layout import PhaseInvariantError, compute_layout
 from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
 from nf_metro.parser import ERROR, parse_metro_mermaid, validate_graph
@@ -302,27 +304,36 @@ def validate(input_file: Path) -> None:
 
 @cli.command()
 @click.argument("input_file", type=click.Path(exists=True, path_type=Path))
-def info(input_file: Path) -> None:
-    """Show information about a Mermaid metro map definition."""
-    text = input_file.read_text()
-    try:
-        graph = parse_metro_mermaid(text)
-    except ValueError as e:
-        raise click.ClickException(str(e))
+@click.option(
+    "--json", "as_json", is_flag=True, help="Emit the full introspection as JSON."
+)
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="Add the section dependency graph, per-line routes, inferred "
+    "auto-layout defaults, and synthetic ports/junctions to the text output.",
+)
+def info(input_file: Path, as_json: bool, verbose: bool) -> None:
+    """Show information about a Mermaid metro map definition.
 
-    click.echo(f"Title: {graph.title or '(none)'}")
-    click.echo(f"Style: {graph.style}")
-    click.echo(f"Stations: {len(graph.stations)}")
-    click.echo(f"Edges: {len(graph.edges)}")
-    click.echo(f"Lines: {len(graph.lines)}")
-    for lid, line in graph.lines.items():
-        stations = graph.line_stations(lid)
-        click.echo(f"  {line.display_name} ({line.color}): {len(stations)} stations")
-    click.echo(f"Sections: {len(graph.sections)}")
-    for section in graph.sections.values():
-        click.echo(
-            f"  [{section.number}] {section.name}: {len(section.station_ids)} stations"
-        )
+    The default output is a stable human summary. ``--verbose`` adds the
+    richer introspection (what nf-metro derived and inferred); ``--json``
+    emits the complete structure for scripting.
+    """
+    text = input_file.read_text()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            graph = parse_metro_mermaid(text)
+        except ValueError as e:
+            raise click.ClickException(str(e))
+    messages = [str(w.message) for w in caught]
+
+    report = build_info(graph, messages)
+    if as_json:
+        click.echo(format_info_json(report))
+    else:
+        click.echo(format_info_text(report, verbose=verbose))
 
 
 @cli.command(context_settings={"ignore_unknown_options": True})
