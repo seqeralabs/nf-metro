@@ -511,11 +511,11 @@ def _compute_layout_scaled(
     # so nothing is widened; only crowded wide-label graphs iterate.  When
     # the caller pins both spacings explicitly there is nothing to widen,
     # so a single pass runs.
-    def _lay(xs: float) -> None:
+    def _lay(xs: float, ys: float) -> None:
         _layout_once(
             graph,
             x_spacing=xs,
-            y_spacing=y_spacing,
+            y_spacing=ys,
             x_offset=x_offset,
             y_offset=y_offset,
             section_x_padding=section_x_padding,
@@ -529,12 +529,12 @@ def _compute_layout_scaled(
     pre_strike_x = x_spacing
     strike_widened = False
     for attempt in range(max_iters):
-        _lay(x_spacing)
+        _lay(x_spacing, y_spacing)
         # A strike-widening step that overshot into a collinear overlay is worse
         # than the strike it cleared; step back to the last good pitch and stop.
         if strike_widened and _layout_has_collinear(graph):
             x_spacing = pre_strike_x
-            _lay(x_spacing)
+            _lay(x_spacing, y_spacing)
             break
         if attempt == max_iters - 1:
             break
