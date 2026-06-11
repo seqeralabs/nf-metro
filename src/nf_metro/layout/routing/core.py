@@ -80,6 +80,7 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _clamp_inter_row_band_top,
     _clear_channel_x_in_band,
     _coincide_convergent_port_approaches,
+    _coincide_divergent_fanout_descents,
     _coincident_trunk_slots,
     _collect_htrunks,
     _collect_vchannels,
@@ -101,8 +102,8 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _restack_channel,
     _restack_htrunk,
     _restack_trunk_band,
-    _set_port_approach_x,
     _set_riser_x_and_radii,
+    _set_vchannel_x,
     _suboptimal_trunk_bands,
     _VChannel,
 )
@@ -215,6 +216,7 @@ def route_edges(
     _normalize_bypass_trunks(routes, ctx)
     _align_peeloff_riser_gaps(routes, ctx)
     _coincide_convergent_port_approaches(routes)
+    _coincide_divergent_fanout_descents(routes)
     _join_fanout_upstream_tails(routes, ctx)
     _clear_bypass_v_label_strikes(routes, ctx)
 

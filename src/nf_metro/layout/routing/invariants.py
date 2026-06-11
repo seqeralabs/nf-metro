@@ -28,6 +28,7 @@ from enum import Enum
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
+    EDGE_TO_BUNDLE_CLEARANCE,
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
 )
@@ -869,17 +870,107 @@ def check_partial_branch_offset_gaps(
     return violations
 
 
+@dataclass(frozen=True)
+class SameLineParallelRun:
+    """Two same-line segments running parallel a few pixels apart over a span.
+
+    The two segments share an endpoint - one source fans out to several
+    targets, or several feeds converge on one port - yet travel their common
+    stretch in adjacent channels instead of one merged trunk, so the single
+    line renders as two parallel same-colour tracks.
+    """
+
+    line_id: str
+    edge_a: tuple[str, str]
+    edge_b: tuple[str, str]
+    axis: str
+    sep: float
+    span: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"same-line parallel run: line {self.line_id!r} "
+            f"({self.edge_a[0]}->{self.edge_a[1]}) and "
+            f"({self.edge_b[0]}->{self.edge_b[1]}) run parallel on the "
+            f"{self.axis} axis {self.sep:.1f}px apart over {self.span:.1f}px"
+        )
+
+
+def check_no_same_line_parallel_descents(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[SameLineParallelRun]:
+    """Return same-line vertical descents that share an endpoint yet run parallel.
+
+    A line that fans out from one source to several targets (or converges
+    on one port from several feeds) must descend as a SINGLE trunk over the
+    span its branches travel together, splitting only where each branch
+    turns off.  When the branches instead occupy adjacent offset slots they
+    render as two parallel same-colour tracks that read as two routes.
+
+    Flags pairs of same-line vertical inter-section segments that share a
+    source or target endpoint, sit more than ``_COLLINEAR_LATERAL_TOL`` but
+    no more than ``EDGE_TO_BUNDLE_CLEARANCE`` apart (a merged trunk falls
+    below the floor; genuinely-distant corridors above the ceiling), and
+    overlap by more than ``_COLLINEAR_MIN_SPAN``.
+    """
+    segs: list[tuple[str, tuple[str, str], float, float, float]] = []
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        pts = _route_render_points(rp, offsets)
+        edge = (rp.edge.source, rp.edge.target)
+        for p1, p2 in zip(pts, pts[1:]):
+            axis, coord = _axis_aligned(p1, p2)
+            if axis != "V":
+                continue
+            lo, hi = sorted((p1[1], p2[1]))
+            segs.append((rp.line_id, edge, coord, lo, hi))
+
+    violations: list[SameLineParallelRun] = []
+    for i in range(len(segs)):
+        la, ea, xa, lo_a, hi_a = segs[i]
+        for j in range(i + 1, len(segs)):
+            lb, eb, xb, lo_b, hi_b = segs[j]
+            if la != lb:
+                continue
+            if ea[0] != eb[0] and ea[1] != eb[1]:
+                continue
+            sep = abs(xa - xb)
+            if sep <= _COLLINEAR_LATERAL_TOL or sep > EDGE_TO_BUNDLE_CLEARANCE:
+                continue
+            olo, ohi = max(lo_a, lo_b), min(hi_a, hi_b)
+            span = ohi - olo
+            if span <= _COLLINEAR_MIN_SPAN:
+                continue
+            violations.append(
+                SameLineParallelRun(
+                    line_id=la,
+                    edge_a=ea,
+                    edge_b=eb,
+                    axis="V",
+                    sep=sep,
+                    span=span,
+                )
+            )
+    return violations
+
+
 __all__ = [
     "BundleOrderViolation",
     "CollinearOverlapViolation",
     "FanoutTailGap",
     "MergePortApproachViolation",
     "PartialBranchGapViolation",
+    "SameLineParallelRun",
     "Side",
     "check_bundle_order_preserved",
     "check_fanout_tail_join",
     "check_merge_port_approach_side",
     "check_no_collinear_distinct_lines",
+    "check_no_same_line_parallel_descents",
     "check_partial_branch_offset_gaps",
     "classify_merge_port_feeders",
     "distinct_offset_levels",

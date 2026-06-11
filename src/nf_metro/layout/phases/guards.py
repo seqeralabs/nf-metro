@@ -47,10 +47,13 @@ from nf_metro.layout.phases.spacing import (
 from nf_metro.parser.model import LineSpread, MetroGraph, PortSide, Section, Station
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
+    from typing import Protocol
 
     from nf_metro.layout.routing.common import RoutedPath
-    from nf_metro.layout.routing.invariants import CollinearOverlapViolation
+
+    class _HasMessage(Protocol):
+        def message(self) -> str: ...
 
 
 class PhaseInvariantError(Exception):
@@ -2244,7 +2247,7 @@ def _guard_no_collinear_distinct_lines(
         check_no_collinear_distinct_lines,
     )
 
-    _raise_on_collinear_overlay(
+    _raise_on_first_violation(
         graph, phase, check_no_collinear_distinct_lines, offsets, routes
     )
 
@@ -2267,22 +2270,45 @@ def _guard_no_intra_section_collinear_distinct_lines(
         check_intra_section_collinear_distinct_lines,
     )
 
-    _raise_on_collinear_overlay(
+    _raise_on_first_violation(
         graph, phase, check_intra_section_collinear_distinct_lines, offsets, routes
     )
 
 
-def _raise_on_collinear_overlay(
+def _guard_no_same_line_parallel_descents(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: one line never descends as two parallel adjacent tracks.
+
+    Wraps :func:`check_no_same_line_parallel_descents`: where a line fans out
+    from one source (or converges on one port), the branches must share a
+    single trunk over the span they travel together rather than occupying
+    adjacent offset slots that render as two same-colour tracks.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_no_same_line_parallel_descents,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_no_same_line_parallel_descents, offsets, routes
+    )
+
+
+def _raise_on_first_violation(
     graph: MetroGraph,
     phase: str,
     check: Callable[
         [MetroGraph, list[RoutedPath], dict[tuple[str, str], float]],
-        list[CollinearOverlapViolation],
+        Sequence[_HasMessage],
     ],
     offsets: dict[tuple[str, str], float] | None,
     routes: list[RoutedPath] | None,
 ) -> None:
-    """Run a collinear-overlay *check* and raise on the first violation."""
+    """Run a route *check* and raise ``PhaseInvariantError`` on its first hit."""
     if offsets is None:
         from nf_metro.layout.routing import compute_station_offsets
 

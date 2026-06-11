@@ -675,33 +675,37 @@ def _coincide_convergent_port_approaches(routes: list[RoutedPath]) -> None:
     fused descents are a single track, so the concentric-bundle radii no
     longer apply.
     """
-    by_port: dict[tuple[float, float, str, bool], list[_VChannel]] = defaultdict(list)
+    by_port: dict[tuple[str, str, bool], list[_VChannel]] = defaultdict(list)
     for rp in routes:
         if not rp.is_inter_section:
             continue
         ch = _final_port_approach(rp)
         if ch is None:
             continue
-        ex, ey = rp.points[-1]
-        key = (round(ex, 1), round(ey, 1), rp.line_id, ch.down)
+        # Group by the destination port, not its exact terminal (x, y): two
+        # same-line descents into one port can land a per-line offset apart
+        # before render offsets are applied, and keying on the raw endpoint
+        # would split that single convergence into two.
+        key = (rp.edge.target, rp.line_id, ch.down)
         by_port[key].append(ch)
 
     band = EDGE_TO_BUNDLE_CLEARANCE
-    for (ex, _ey, _lid, _down), chans in by_port.items():
+    for chans in by_port.values():
         if len(chans) < 2:
             continue
+        ex = chans[0].route.points[-1][0]
         # Cluster by descent X proximity; widely-separated descents are
         # distinct corridors and must not be fused.
         chans.sort(key=lambda c: c.x)
         cluster: list[_VChannel] = []
 
-        def _flush(cluster: list[_VChannel]) -> None:
+        def _flush(cluster: list[_VChannel], ex: float = ex) -> None:
             if len(cluster) < 2:
                 return
             merge_x = min(cluster, key=lambda c: abs(c.x - ex)).x
             for c in cluster:
                 if abs(c.x - merge_x) > COORD_TOLERANCE:
-                    _set_port_approach_x(c, merge_x)
+                    _set_vchannel_x(c, merge_x)
 
         for ch in chans:
             if cluster and ch.x - cluster[-1].x > band:
@@ -711,11 +715,11 @@ def _coincide_convergent_port_approaches(routes: list[RoutedPath]) -> None:
         _flush(cluster)
 
 
-def _set_port_approach_x(ch: _VChannel, new_x: float) -> None:
-    """Move a final port-approach vertical to *new_x*, resetting its corners.
+def _set_vchannel_x(ch: _VChannel, new_x: float) -> None:
+    """Move a vertical channel to *new_x*, resetting its flanking corners.
 
-    The fused descents form one track, so both flanking corners take the base
-    ``CURVE_RADIUS`` (no concentric nesting remains to size them apart).
+    Fusing same-line descents into one track removes the concentric-bundle
+    nesting, so both flanking corners take the base ``CURVE_RADIUS``.
     """
     rp = ch.route
     pts = rp.points
@@ -727,6 +731,88 @@ def _set_port_approach_x(ch: _VChannel, new_x: float) -> None:
     for radius_idx in (k - 1, k):
         if 0 <= radius_idx < len(rp.curve_radii):
             rp.curve_radii[radius_idx] = reference_anchored_radius(0.0, CURVE_RADIUS)
+
+
+def _initial_fanout_descent(rp: RoutedPath) -> _VChannel | None:
+    """The first vertical descent leaving a route's source, when it leads H then V.
+
+    A fan-out branch starts ``(sx, sy) -> (vx, sy) -> (vx, dy) -> ...``: a
+    short horizontal lead off the shared source, then a vertical descent in
+    its own channel.  Returns the :class:`_VChannel` for that descent
+    (``idx`` points at ``points[1]``), or ``None`` when the route does not
+    open horizontal-then-vertical.
+    """
+    pts = rp.points
+    if len(pts) < 3:
+        return None
+    x0, y0 = pts[0]
+    x1, y1 = pts[1]
+    x2, y2 = pts[2]
+    if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
+        return None  # first segment is not a horizontal lead off the source
+    if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:
+        return None  # second segment is not a vertical descent
+    return _VChannel(
+        route=rp,
+        idx=1,
+        x=x1,
+        y_lo=min(y1, y2),
+        y_hi=max(y1, y2),
+        down=y2 > y1,
+    )
+
+
+def _coincide_divergent_fanout_descents(routes: list[RoutedPath]) -> None:
+    """Fuse same-line vertical descents leaving one source into one track.
+
+    The mirror of :func:`_coincide_convergent_port_approaches`: where the
+    convergent pass merges same-line descents *arriving* at one port, this
+    merges same-line descents *leaving* one source (a junction or exit port).
+    Several inter-section edges of the SAME line fanning out from one source
+    each open with their own horizontal lead and vertical channel a few pixels
+    apart; over the span they descend together they read as two parallel
+    same-colour tracks rather than one trunk that splits where the branches
+    actually turn off.
+
+    Channels are clustered by source endpoint + line + descent direction;
+    only clusters whose members fall within ``EDGE_TO_BUNDLE_CLEARANCE`` of
+    each other are fused (widely-separated descents head down genuinely
+    distinct corridors and must stay apart).  The merge X is the member
+    nearest the source, keeping the fused trunk hugging the side the branches
+    leave from; each branch still splits off downstream at its own turn Y.
+    """
+    by_source: dict[tuple[str, str, bool], list[_VChannel]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        ch = _initial_fanout_descent(rp)
+        if ch is None:
+            continue
+        key = (rp.edge.source, rp.line_id, ch.down)
+        by_source[key].append(ch)
+
+    band = EDGE_TO_BUNDLE_CLEARANCE
+    for chans in by_source.values():
+        if len(chans) < 2:
+            continue
+        sx = chans[0].route.points[0][0]
+        chans.sort(key=lambda c: c.x)
+
+        def _flush(cluster: list[_VChannel], sx: float = sx) -> None:
+            if len(cluster) < 2:
+                return
+            merge_x = min(cluster, key=lambda c: abs(c.x - sx)).x
+            for c in cluster:
+                if abs(c.x - merge_x) > COORD_TOLERANCE:
+                    _set_vchannel_x(c, merge_x)
+
+        cluster: list[_VChannel] = []
+        for ch in chans:
+            if cluster and ch.x - cluster[-1].x > band:
+                _flush(cluster)
+                cluster = []
+            cluster.append(ch)
+        _flush(cluster)
 
 
 def _normalize_bypass_trunks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
