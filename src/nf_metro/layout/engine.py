@@ -539,21 +539,21 @@ def _compute_layout_scaled(
     # Strike-clearance: a fan-in/fan-out, convergence, or descent diagonal that
     # rakes a station's name label is cleared by lengthening the flat run at that
     # station by whole grid columns (the pitch stays fixed), seating the
-    # transition outside the label.  Two complementary, grid-quantized levers:
-    # the section's entry/exit runway for a boundary-fan strike, and a per-column
-    # gap before the struck station's layer for an intra-section descent.
+    # transition outside the label.  Three grid-quantized levers, each a
+    # ``(kind, section, layer)`` triple: the section's entry-side runway, its
+    # exit-side runway, and a per-column gap before the struck station's layer.
     # Need-driven: only stations the renderer would draw a strike through grow,
     # so a clean layout -- every gallery render at its default pitch -- is left
     # untouched.  Independent of pinned vs auto pitch: the room is local, not the
     # global pitch, so it applies even when the caller fixed x_spacing.
     #
-    # A grow step bumps both levers at every struck station -- which lever
-    # actually relocates a given strike is hard to know in advance -- then a
-    # minimization pass strips every lever that turns out not to be load-bearing,
-    # so the settled layout carries the least extra width that keeps the labels
-    # clear.  A step a collinear check rejects, or that fails to reduce the
-    # struck count, is rolled back, so the loop never ships a layout worse than
-    # it found.
+    # A grow step bumps every lever at each struck station -- which one relocates
+    # a given strike is hard to know in advance -- then a minimization pass
+    # strips each lever that turns out not to be load-bearing, so the settled
+    # layout carries the least extra width that keeps the labels clear (a strike
+    # cleared by one side does not leave the other's room behind).  A step a
+    # collinear check rejects, or that fails to reduce the struck count, is
+    # rolled back, so the loop never ships a layout worse than it found.
 
     def _relay() -> None:
         _layout_once(
@@ -580,62 +580,73 @@ def _compute_layout_scaled(
             return None
         return sec, st.layer
 
-    def _add_runway(sid: str, delta: int) -> None:
-        graph.sections[sid].label_strike_cols += delta
-
-    def _add_gap(sid: str, layer: int, delta: int) -> None:
-        lg = graph.sections[sid].label_strike_layer_gaps
-        lg[layer] = lg.get(layer, 0) + delta
-        if lg[layer] <= 0:
-            del lg[layer]
+    def _adjust(lever: tuple[str, str, int], delta: int) -> None:
+        kind, sid, layer = lever
+        sec = graph.sections[sid]
+        if kind == "entry":
+            sec.label_strike_entry_cols += delta
+        elif kind == "exit":
+            sec.label_strike_exit_cols += delta
+        else:
+            lg = sec.label_strike_layer_gaps
+            lg[layer] = lg.get(layer, 0) + delta
+            if lg[layer] <= 0:
+                del lg[layer]
 
     struck, _ = _struck_stations_and_collinear(graph)
     for _ in range(_MAX_SPREAD_ITERS):
-        targets = [t for sid in struck if (t := _growable_target(sid)) is not None]
-        runway = {sec.id for sec, _ in targets}
-        gaps = {(sec.id, layer) for sec, layer in targets}
-        if not runway and not gaps:
+        levers: set[tuple[str, str, int]] = set()
+        for sid in struck:
+            target = _growable_target(sid)
+            if target is None:
+                continue
+            sec, layer = target
+            levers |= {
+                ("entry", sec.id, 0),
+                ("exit", sec.id, 0),
+                ("gap", sec.id, layer),
+            }
+        if not levers:
             break
-        for sid in runway:
-            _add_runway(sid, 1)
-        for sid, layer in gaps:
-            _add_gap(sid, layer, 1)
+        for lever in levers:
+            _adjust(lever, 1)
         _relay()
         after, collinear = _struck_stations_and_collinear(graph)
         if collinear or len(after) >= len(struck):
-            for sid in runway:
-                _add_runway(sid, -1)
-            for sid, layer in gaps:
-                _add_gap(sid, layer, -1)
+            for lever in levers:
+                _adjust(lever, -1)
             _relay()
             break
         struck = after
 
-    # Minimization: drop each grown lever one at a time; keep the drop only when
-    # the labels stay clear and no collinear overlay appears, so a strike cleared
-    # by one lever does not leave the other's width behind.  Skipped entirely
-    # when nothing grew, so a clean layout never pays a re-lay (and is never
-    # perturbed by one).
-    grown: list[tuple[str, int | None]] = [
-        (sid, None) for sid, sec in graph.sections.items() if sec.label_strike_cols
-    ] + [
-        (sid, gap_layer)
-        for sid, sec in graph.sections.items()
-        for gap_layer in list(sec.label_strike_layer_gaps)
-    ]
+    # Minimization: drop each grown lever one at a time, keeping the drop only
+    # when the labels stay clear and no collinear overlay appears.  Skipped
+    # entirely when nothing grew, so a clean layout never pays a re-lay (and is
+    # never perturbed by one).
+    grown: list[tuple[str, str, int]] = (
+        [
+            ("entry", sid, 0)
+            for sid, sec in graph.sections.items()
+            if sec.label_strike_entry_cols
+        ]
+        + [
+            ("exit", sid, 0)
+            for sid, sec in graph.sections.items()
+            if sec.label_strike_exit_cols
+        ]
+        + [
+            ("gap", sid, layer)
+            for sid, sec in graph.sections.items()
+            for layer in list(sec.label_strike_layer_gaps)
+        ]
+    )
     if grown:
-        for sid, gap_layer in grown:
-            if gap_layer is None:
-                _add_runway(sid, -1)
-            else:
-                _add_gap(sid, gap_layer, -1)
+        for lever in grown:
+            _adjust(lever, -1)
             _relay()
             still_struck, collinear = _struck_stations_and_collinear(graph)
             if still_struck or collinear:
-                if gap_layer is None:
-                    _add_runway(sid, 1)
-                else:
-                    _add_gap(sid, gap_layer, 1)
+                _adjust(lever, 1)
         _relay()
 
     # Assure file-icon leaf sinks off the trunk by construction: a leaf icon

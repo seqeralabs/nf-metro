@@ -258,11 +258,13 @@ class Section:
     offset_y: float = 0.0
     # Implicit sections are auto-created for loose stations; no visible box
     is_implicit: bool = False
-    # Extra entry/exit runway, in whole grid columns, that the strike-clearance
-    # loop grows when a fan diagonal rakes a stacked station's name label.  The
-    # column pitch is left fixed; the section's flat runs lengthen so the
+    # Extra runway, in whole grid columns, that the strike-clearance loop grows
+    # on the entry/exit side when a boundary-fan diagonal rakes a station's name
+    # label.  Sides are independent so the loop grows only the struck one.  The
+    # column pitch is left fixed; the section's flat run lengthens so the
     # transition seats outside the label's x-extent.
-    label_strike_cols: int = 0
+    label_strike_entry_cols: int = 0
+    label_strike_exit_cols: int = 0
     # Extra columns of intra-section gap the strike-clearance loop inserts
     # before a given layer (keyed by layer index; pushes that layer and every
     # downstream layer along the flow axis).  Lengthens the flat run into a

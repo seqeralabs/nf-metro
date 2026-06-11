@@ -734,22 +734,31 @@ def _apply_label_strike_runway(
     section: Section,
     x_spacing: float,
 ) -> None:
-    """LR/RL sections: lengthen both flat runs by ``label_strike_cols`` columns.
+    """LR/RL sections: lengthen the entry and/or exit runway by whole columns.
 
-    A label wider than its station's flat run lets a fan diagonal seat inside
-    the label's x-extent.  Adding a whole grid column of runway on each side
-    (stations shift right by the per-side amount; the bbox grows by twice it)
-    moves the diagonal transition clear of the label while keeping the column
-    pitch fixed and the stations centered.  The strike-clearance loop sets
-    ``label_strike_cols`` only for sections whose label is actually struck, so
-    this is a no-op (zero columns) for every other render.
+    A label wider than its station's flat run lets a boundary-fan diagonal seat
+    inside the label's x-extent.  Adding grid columns of runway on the struck
+    side (the entry side shifts stations along the flow so room opens before the
+    first column; the exit side grows the bbox past the last) moves the diagonal
+    transition clear of the label, keeping the column pitch fixed.  The
+    strike-clearance loop sets these only for the side of a section whose label
+    is actually struck, so this is a no-op (zero columns) for every other
+    render.
     """
-    if section.label_strike_cols <= 0 or section.direction not in ("LR", "RL"):
+    if section.direction not in ("LR", "RL"):
         return
-    per_side = section.label_strike_cols * x_spacing
-    for s in sub.stations.values():
-        s.x += per_side
-    section.bbox_w += 2 * per_side
+    entry = section.label_strike_entry_cols * x_spacing
+    exit_room = section.label_strike_exit_cols * x_spacing
+    # Entry is the flow-source boundary (left for LR, right for RL); shifting
+    # stations along the flow opens room between it and the first column.
+    if section.direction == "RL":
+        entry, exit_room = exit_room, entry
+    if entry > 0:
+        for s in sub.stations.values():
+            s.x += entry
+        section.bbox_w += entry
+    if exit_room > 0:
+        section.bbox_w += exit_room
 
 
 def _adjust_lr_label_clearance(
