@@ -36,6 +36,33 @@ def _scoped_sections(graph: MetroGraph, section_ids: list[str]) -> Iterator[None
         graph.sections = original
 
 
+@contextmanager
+def _restoring_layout_geometry(graph: MetroGraph) -> Iterator[None]:
+    """Restore station coords and section bboxes on exit.
+
+    route_edges' diagonal-centring nudges Station.x and place_labels expands
+    section bboxes to fit labels, so a probe or guard that re-routes and
+    re-places to inspect the drawn geometry must undo those mutations:
+    inspecting the settled layout must not perturb it.
+    """
+    pos = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
+    bbox = {
+        sid: (s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h)
+        for sid, s in graph.sections.items()
+    }
+    try:
+        yield
+    finally:
+        for sid, (x, y) in pos.items():
+            st = graph.stations.get(sid)
+            if st is not None:
+                st.x, st.y = x, y
+        for sid, (bx, by, bw, bh) in bbox.items():
+            s = graph.sections.get(sid)
+            if s is not None:
+                s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h = bx, by, bw, bh
+
+
 def _grid_rows_top_to_bottom(graph: MetroGraph) -> list[list[str]]:
     """Section ids grouped by grid row, rows ordered top-to-bottom.
 

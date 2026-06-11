@@ -244,10 +244,9 @@ from nf_metro.layout.phases.snapshots import (
 from nf_metro.layout.phases.spacing import (  # noqa: F401
     _MAX_SPREAD_ITERS,
     _SPREAD_SLACK,
-    _layout_has_collinear,
     _residual_label_overlaps,
-    _residual_label_strike_sections,
     _spread_bump,
+    _strike_sections_and_collinear,
 )
 from nf_metro.parser.model import LineSpread, MetroGraph
 
@@ -562,8 +561,8 @@ def _compute_layout_scaled(
             validate=validate,
         )
 
+    struck, _ = _strike_sections_and_collinear(graph)
     for _ in range(_MAX_SPREAD_ITERS):
-        struck = _residual_label_strike_sections(graph)
         grow = {
             sid
             for sid in struck
@@ -576,13 +575,13 @@ def _compute_layout_scaled(
         for sid in grow:
             graph.sections[sid].label_strike_cols += 1
         _relay()
-        if _layout_has_collinear(graph) or len(
-            _residual_label_strike_sections(graph)
-        ) >= len(struck):
+        after, collinear = _strike_sections_and_collinear(graph)
+        if collinear or len(after) >= len(struck):
             for sid in grow:
                 graph.sections[sid].label_strike_cols -= 1
             _relay()
             break
+        struck = after
 
     # Assure file-icon leaf sinks off the trunk by construction: a leaf icon
     # the laid-out routes rake a line across is taken off-track and the layout

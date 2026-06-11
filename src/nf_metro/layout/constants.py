@@ -270,6 +270,10 @@ COORD_TOLERANCE_FINE: float = 0.01
 SAME_Y_TOLERANCE: float = 0.1
 """Tolerance for treating two stations as sharing a base Y row."""
 
+DIAGONAL_SLOPE_RATIO: float = 0.05
+"""Slope above which a route segment counts as a diagonal (``|dy| >= |dx| *
+this``) rather than a flat trunk run.  A diagonal is what can rake a label."""
+
 CROSS_ROW_THRESHOLD: float = 80.0
 """Y gap threshold for detecting cross-row (fold) edges."""
 

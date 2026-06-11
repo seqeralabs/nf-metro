@@ -29,6 +29,7 @@ from nf_metro.layout.constants import (
     COLLISION_MULTIPLIER,
     DESCENDER_CLEARANCE,
     DIAGONAL_LABEL_OFFSET,
+    DIAGONAL_SLOPE_RATIO,
     FONT_HEIGHT,
     GLYPH_ADVANCE_DEFAULT_EM,
     GLYPH_ADVANCE_EM,
@@ -1793,7 +1794,7 @@ def _avoid_diagonal_routes(
         for i in range(len(pts) - 1):
             (x1, y1), (x2, y2) = pts[i], pts[i + 1]
             dx, dy = x2 - x1, y2 - y1
-            if abs(dy) < max(abs(dx), 1.0) * 0.05:
+            if abs(dy) < max(abs(dx), 1.0) * DIAGONAL_SLOPE_RATIO:
                 continue  # ~horizontal; not a label obstacle.
             diag.append((x1, y1, x2, y2))
     if not diag:
@@ -1868,7 +1869,7 @@ def _foreign_route_segments(
             pts[0] = (pts[0][0], pts[0][1] + so)
             pts[-1] = (pts[-1][0], pts[-1][1] + to)
         for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
-            is_diagonal = abs(y2 - y1) >= max(abs(x2 - x1), 1.0) * 0.05
+            is_diagonal = abs(y2 - y1) >= max(abs(x2 - x1), 1.0) * DIAGONAL_SLOPE_RATIO
             if is_diagonal != diagonal:
                 continue
             segs.append(

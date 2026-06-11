@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+from nf_metro.layout.constants import DIAGONAL_SLOPE_RATIO
+from nf_metro.layout.phases._common import _restoring_layout_geometry
 from nf_metro.parser.model import MetroGraph
 
 if TYPE_CHECKING:
@@ -20,41 +20,11 @@ _MAX_SPREAD_ITERS = 6
 # spacing, so the re-laid-out labels land with a small gap, not flush.
 _SPREAD_SLACK = 4.0
 
-# Slope above which a route segment counts as a diagonal (not a flat trunk
-# run): |dy| >= |dx| * this.  A diagonal is what can rake a station label.
-_DIAGONAL_SLOPE_RATIO = 0.05
-
 _Probe = tuple[
     dict[tuple[str, str], float],
     "list[RoutedPath]",
     "list[LabelPlacement]",
 ]
-
-
-@contextmanager
-def _restored_layout_geometry(graph: MetroGraph) -> Iterator[None]:
-    """Restore station coordinates and section bboxes on exit.
-
-    Routing and placement mutate the graph in place (route_edges nudges station
-    X for bundle separation; place_labels expands section bboxes to fit labels),
-    so a probe that runs them must undo the mutations before returning.
-    """
-    pos = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
-    bbox = {
-        sid: (s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h)
-        for sid, s in graph.sections.items()
-    }
-    try:
-        yield
-    finally:
-        for sid, (x, y) in pos.items():
-            st = graph.stations.get(sid)
-            if st is not None:
-                st.x, st.y = x, y
-        for sid, (bx, by, bw, bh) in bbox.items():
-            s = graph.sections.get(sid)
-            if s is not None:
-                s.bbox_x, s.bbox_y, s.bbox_w, s.bbox_h = bx, by, bw, bh
 
 
 def _probe_label_placements(
@@ -75,7 +45,7 @@ def _probe_label_placements(
     from nf_metro.layout.labels import place_labels
     from nf_metro.layout.routing import compute_station_offsets, route_edges
 
-    with _restored_layout_geometry(graph):
+    with _restoring_layout_geometry(graph):
         try:
             offsets = compute_station_offsets(graph)
             routes = route_edges(graph, station_offsets=offsets)
@@ -160,7 +130,7 @@ def _struck_label_station_ids(
                 continue
             if any(
                 segment_strikes_label(x1, y1, x2, y2, p)
-                and abs(y2 - y1) >= max(abs(x2 - x1), 1.0) * _DIAGONAL_SLOPE_RATIO
+                and abs(y2 - y1) >= max(abs(x2 - x1), 1.0) * DIAGONAL_SLOPE_RATIO
                 for (x1, y1), (x2, y2) in zip(pts, pts[1:])
             ):
                 struck.add(p.station_id)
@@ -208,18 +178,26 @@ def _residual_label_overlaps(
     return _overlaps_from(graph, offsets, placements)
 
 
-def _residual_label_strike_sections(graph: MetroGraph) -> set[str]:
-    """Section ids holding a station whose label a foreign diagonal crosses.
+def _strike_sections_and_collinear(graph: MetroGraph) -> tuple[set[str], bool]:
+    """One probe: sections needing runway growth, and a collinear-defect flag.
+
+    Returns ``(section_ids, has_collinear)`` where ``section_ids`` hold a
+    station whose horizontal label a foreign diagonal crosses, and
+    ``has_collinear`` is whether the routes draw two distinct lines on top of
+    each other.  Both read the same probed routes, so the strike-clearance loop
+    decides growth and step-back from a single route+place pass.
 
     Probes with ``allow_hyphenation=True`` -- the renderer-faithful wrapping --
-    so a strike is judged against the label the renderer actually draws.  A
+    so a strike is judged against the label the renderer draws; the collinear
+    check ignores placements, so the hyphenation flag does not affect it.  A
     struck station outside any section maps to nothing and is dropped (its
-    layout has no entry/exit runway to grow).  Returns an empty set on probe
-    failure.  See :func:`_struck_label_station_ids`.
+    layout has no entry/exit runway to grow).  Returns ``(set(), False)`` on
+    probe failure.  See :func:`_struck_label_station_ids` and
+    :func:`_collinear_from`.
     """
     probe = _probe_label_placements(graph, allow_hyphenation=True)
     if probe is None:
-        return set()
+        return set(), False
     offsets, routes, placements = probe
     struck = _struck_label_station_ids(graph, offsets, routes, placements)
     sections: set[str] = set()
@@ -227,17 +205,7 @@ def _residual_label_strike_sections(graph: MetroGraph) -> set[str]:
         section_id = graph.stations[sid].section_id
         if section_id:
             sections.add(section_id)
-    return sections
-
-
-def _layout_has_collinear(graph: MetroGraph) -> bool:
-    """Whether the current layout draws two distinct lines on top of each other
-    (or ``False`` on probe failure).  See :func:`_collinear_from`."""
-    probe = _probe_label_placements(graph, allow_hyphenation=False)
-    if probe is None:
-        return False
-    offsets, routes, _placements = probe
-    return _collinear_from(graph, offsets, routes)
+    return sections, _collinear_from(graph, offsets, routes)
 
 
 def _placed_name_label_station_ids(graph: MetroGraph) -> set[str]:
