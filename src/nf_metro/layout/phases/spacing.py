@@ -95,22 +95,17 @@ def _struck_label_station_ids(
 ) -> set[str]:
     """Stations whose horizontal name label a diagonal route crosses.
 
-    The visual goal: a fan-in/fan-out or convergence diagonal transitioning
-    through a station's drawn name reads as a strike-through -- whether or not
-    the station carries that line.  A wide label sits in the path of its own
-    line's sweep to the section's entry/exit ports just as it sits in a foreign
-    line's, so ownership is not an exemption; the runway must lengthen until the
-    transition clears the glyphs either way.
+    The visual goal: a fan-in/fan-out, convergence, or descent diagonal
+    transitioning through a station's drawn name reads as a strike-through --
+    whether or not the station carries that line.  A wide label sits in the path
+    of its own line's sweep just as it sits in a foreign line's, so ownership is
+    not an exemption; the flat run must lengthen until the transition clears the
+    glyphs either way.
 
-    Only segments that cannot be relocated by widening a section's runway are
-    excluded:
-
-    - flat (near-horizontal) trunk runs -- a line along a label's own row is not
-      a strike-through and a wider runway would not move it,
-    - bypass-V crossings (the V sits a fixed track offset from the station),
-    - off-track output sweeps (a producer-to-off-track-sink diagonal is placed
-      by the off-track machinery, not the in-grid runway),
-    - angled labels (a rotated strip is handled by its own footprint).
+    Segments a longer flat run cannot relocate are excluded: flat (near-
+    horizontal) trunk runs, bypass-V crossings, off-track output sweeps (placed
+    by the off-track machinery, not the in-grid runway), and angled labels
+    (handled by their rotated footprint).
     """
     from nf_metro.layout.labels import segment_strikes_label
     from nf_metro.render.svg import apply_route_offsets

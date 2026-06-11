@@ -536,19 +536,24 @@ def _compute_layout_scaled(
             break  # can't widen the binding axis (e.g. pinned) -- give up
         x_spacing, y_spacing = new_x, new_y
 
-    # Strike-clearance loop: a fan-in/fan-out, convergence, or descent diagonal
-    # that rakes a station's name label is cleared by lengthening the flat run
-    # at that station by whole grid columns (the pitch stays fixed), seating the
+    # Strike-clearance: a fan-in/fan-out, convergence, or descent diagonal that
+    # rakes a station's name label is cleared by lengthening the flat run at that
+    # station by whole grid columns (the pitch stays fixed), seating the
     # transition outside the label.  Two complementary, grid-quantized levers:
-    # the section's entry/exit runway (clears strikes from the section's own
-    # port fan) and a per-column gap before the struck station's layer (clears
-    # an intra-section station-to-station descent).  Need-driven: only stations
-    # the renderer would draw a strike through grow, so a clean layout -- every
-    # gallery render at its default pitch -- is left untouched.  A growth a
-    # collinear check rejects, or that fails to reduce the struck count, is
-    # rolled back, so the loop never ships a layout worse than it found.
-    # Independent of pinned vs auto pitch: the room is local, not the global
-    # pitch, so it applies even when the caller fixed x_spacing.
+    # the section's entry/exit runway for a boundary-fan strike, and a per-column
+    # gap before the struck station's layer for an intra-section descent.
+    # Need-driven: only stations the renderer would draw a strike through grow,
+    # so a clean layout -- every gallery render at its default pitch -- is left
+    # untouched.  Independent of pinned vs auto pitch: the room is local, not the
+    # global pitch, so it applies even when the caller fixed x_spacing.
+    #
+    # A grow step bumps both levers at every struck station -- which lever
+    # actually relocates a given strike is hard to know in advance -- then a
+    # minimization pass strips every lever that turns out not to be load-bearing,
+    # so the settled layout carries the least extra width that keeps the labels
+    # clear.  A step a collinear check rejects, or that fails to reduce the
+    # struck count, is rolled back, so the loop never ships a layout worse than
+    # it found.
 
     def _relay() -> None:
         _layout_once(
@@ -575,37 +580,63 @@ def _compute_layout_scaled(
             return None
         return sec, st.layer
 
+    def _add_runway(sid: str, delta: int) -> None:
+        graph.sections[sid].label_strike_cols += delta
+
+    def _add_gap(sid: str, layer: int, delta: int) -> None:
+        lg = graph.sections[sid].label_strike_layer_gaps
+        lg[layer] = lg.get(layer, 0) + delta
+        if lg[layer] <= 0:
+            del lg[layer]
+
     struck, _ = _struck_stations_and_collinear(graph)
     for _ in range(_MAX_SPREAD_ITERS):
         targets = [t for sid in struck if (t := _growable_target(sid)) is not None]
-        if not targets:
-            break
-        # Both levers fire for every struck station rather than attributing the
-        # strike to one: a port-fan strike clears on the runway, an intra-section
-        # descent on the gap, and bumping both avoids classifying the striking
-        # segment.  Extra room never raises the struck count, so the rollback
-        # below only discards a step that regressed or overshot into a collinear
-        # overlay -- never a working lever.
         runway = {sec.id for sec, _ in targets}
         gaps = {(sec.id, layer) for sec, layer in targets}
+        if not runway and not gaps:
+            break
         for sid in runway:
-            graph.sections[sid].label_strike_cols += 1
+            _add_runway(sid, 1)
         for sid, layer in gaps:
-            lg = graph.sections[sid].label_strike_layer_gaps
-            lg[layer] = lg.get(layer, 0) + 1
+            _add_gap(sid, layer, 1)
         _relay()
         after, collinear = _struck_stations_and_collinear(graph)
         if collinear or len(after) >= len(struck):
             for sid in runway:
-                graph.sections[sid].label_strike_cols -= 1
+                _add_runway(sid, -1)
             for sid, layer in gaps:
-                lg = graph.sections[sid].label_strike_layer_gaps
-                lg[layer] -= 1
-                if lg[layer] <= 0:
-                    del lg[layer]
+                _add_gap(sid, layer, -1)
             _relay()
             break
         struck = after
+
+    # Minimization: drop each grown lever one at a time; keep the drop only when
+    # the labels stay clear and no collinear overlay appears, so a strike cleared
+    # by one lever does not leave the other's width behind.  Skipped entirely
+    # when nothing grew, so a clean layout never pays a re-lay (and is never
+    # perturbed by one).
+    grown: list[tuple[str, int | None]] = [
+        (sid, None) for sid, sec in graph.sections.items() if sec.label_strike_cols
+    ] + [
+        (sid, gap_layer)
+        for sid, sec in graph.sections.items()
+        for gap_layer in list(sec.label_strike_layer_gaps)
+    ]
+    if grown:
+        for sid, gap_layer in grown:
+            if gap_layer is None:
+                _add_runway(sid, -1)
+            else:
+                _add_gap(sid, gap_layer, -1)
+            _relay()
+            still_struck, collinear = _struck_stations_and_collinear(graph)
+            if still_struck or collinear:
+                if gap_layer is None:
+                    _add_runway(sid, 1)
+                else:
+                    _add_gap(sid, gap_layer, 1)
+        _relay()
 
     # Assure file-icon leaf sinks off the trunk by construction: a leaf icon
     # the laid-out routes rake a line across is taken off-track and the layout
