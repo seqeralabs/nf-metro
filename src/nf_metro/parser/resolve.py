@@ -334,6 +334,7 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
                         label="",
                         section_id=section.id,
                         is_hidden=True,
+                        bypasses_station_id=sid,
                     )
                 )
 

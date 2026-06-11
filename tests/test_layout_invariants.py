@@ -1276,15 +1276,12 @@ def test_off_track_outputs_below_downward_branch_producer(fixture):
         )
 
 
-# Fixtures where a foreign bypass V rakes a wide label's glyph ink on BOTH
-# sides of its station, so flipping the label to its other side does not clear
-# it (``_avoid_diagonal_strikethrough`` leaves a label whose flip target is also
-# struck).  Clearing these needs the V's flat run widened past the label or the
-# label moved, not a side flip -- tracked as a follow-up.
-_LABEL_STRIKE_DIAGONAL_XFAIL = {
-    "guide/06a_without_hidden.mmd": "bypass V rakes 'Quantification' both sides",
-    "guide/06b_with_hidden.mmd": "bypass V rakes 'Quantification' both sides",
-}
+# No known fixture leaves a line striking through a station's name label: fan
+# and convergence diagonals are cleared by the column-runway loop and a foreign
+# bypass V's climb is seated clear of the bypassed station's label by the router
+# (``_clear_bypass_v_label_strikes``).  New strikes are caught both here and by
+# the wired ``_guard_no_line_strikes_label`` validate guard.
+_LABEL_STRIKE_DIAGONAL_XFAIL: dict[str, str] = {}
 
 _LABEL_STRIKE_FIXTURES = _params_with_xfails(ALL_FIXTURES, _LABEL_STRIKE_DIAGONAL_XFAIL)
 
@@ -1394,10 +1391,12 @@ def test_no_diagonal_strikes_label(fixture, x_spacing):
 def test_label_strike_guard_catches_a_strike():
     """The runtime guard fires on a genuine glyph strike and clears a graze.
 
-    Locks the guard's teeth and its glyph-ink discrimination: a fixture whose
-    bypass V rakes a wide label's glyphs on both sides (no flip clears it) must
-    raise, while one where a line only clips a label's empty reserved margin
-    must pass.
+    Locks the guard's teeth and its glyph-ink discrimination.  ``guide/06a``'s
+    bypass V rakes a wide label's glyphs on both sides until the router seats
+    the V clear (``_clear_bypass_v_label_strikes``); emptying the obstacle map
+    the router reads reinstates that strike, so the guard -- the backstop behind
+    the router -- must raise on it.  A fixture where a line only clips a label's
+    empty reserved margin must pass.
     """
     from nf_metro.layout.phases.guards import (
         PhaseInvariantError,
@@ -1405,6 +1404,7 @@ def test_label_strike_guard_catches_a_strike():
     )
 
     struck = _layout("guide/06a_without_hidden.mmd")
+    struck.bypass_label_obstacles = {}
     with pytest.raises(PhaseInvariantError, match="strikes through label"):
         _guard_no_line_strikes_label(struck, "test")
 

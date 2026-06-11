@@ -113,6 +113,7 @@ from nf_metro.layout.routing.postprocess import (  # noqa: F401
     _BubbleCtx,
     _build_bubble_ctx,
     _center_bubble_stations,
+    _clear_bypass_v_label_strikes,
     _collect_centering_candidates,
     _is_diagonal_route,
     _spread_diagonal_bundles,
@@ -215,5 +216,6 @@ def route_edges(
     _align_peeloff_riser_gaps(routes, ctx)
     _coincide_convergent_port_approaches(routes)
     _join_fanout_upstream_tails(routes, ctx)
+    _clear_bypass_v_label_strikes(routes, ctx)
 
     return routes

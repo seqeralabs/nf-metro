@@ -133,6 +133,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_label_overlap,
     _guard_no_line_crosses_file_icon,
     _guard_no_line_crosses_non_consumer,
+    _guard_no_line_strikes_label,
     _guard_no_negative_grid_columns,
     _guard_no_route_through_section,
     _guard_no_station_overlap,
@@ -244,6 +245,7 @@ from nf_metro.layout.phases.snapshots import (
 from nf_metro.layout.phases.spacing import (  # noqa: F401
     _MAX_SPREAD_ITERS,
     _SPREAD_SLACK,
+    _bypass_label_obstacles,
     _residual_label_overlaps,
     _spread_bump,
     _struck_stations_and_collinear,
@@ -716,6 +718,12 @@ def _compute_layout_scaled(
                 section_y_padding=section_y_padding,
             )
 
+    # Record the bypassed-station label box behind each bypass V so the router
+    # can seat the V's flat-run corners clear of the label.  Read on the render
+    # path, so it is populated independent of ``validate``; computed once the
+    # layout has fully settled so the box matches what the renderer draws.
+    graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
+
     # Always-on backstop (independent of ``validate``): the settled layout
     # must never leave a station outside its own section bbox.  Runs on the
     # render path so an unsupported directive combination fails loudly
@@ -726,6 +734,7 @@ def _compute_layout_scaled(
     if validate:
         _guard_no_label_overlap(graph, "final")
         _guard_no_diagonal_strikes_horizontal_label(graph, "final")
+        _guard_no_line_strikes_label(graph, "final")
         _guard_no_wrapped_label_trunk_strike(graph, "final")
         _guard_file_icon_no_name_label(graph, "final")
         _guard_no_line_crosses_file_icon(graph, "final")

@@ -9,9 +9,14 @@ from dataclasses import dataclass
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
+    CURVE_RADIUS,
+    DIAGONAL_RUN,
+    LABEL_BBOX_MARGIN,
     MIN_STRAIGHT_EDGE,
+    MIN_STRAIGHT_PORT,
     STATION_MOVE_TOLERANCE,
 )
+from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.routing.common import (
     RoutedPath,
 )
@@ -573,3 +578,80 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
     candidates = _collect_centering_candidates(graph, ctx)
     _apply_station_moves(graph, candidates, ctx.original_x)
     _align_uncentered_siblings(routes, graph, ctx.original_x)
+
+
+def _clear_bypass_v_label_strikes(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Lengthen a bypass V's flat run so its diagonal clears the bypassed label.
+
+    A bypass V dips its line below (or rises above) the station it routes around
+    and climbs back to the trunk on the far side.  When that station carries a
+    wide name label, the climbing diagonal can rake the label's glyph ink on the
+    overrun side -- a strike that neither a label side-flip nor a column-pitch
+    widening relocates, because the V sits a fixed track offset from the station
+    rather than a grid-column multiple.
+
+    For each V whose bypassed-station label box ``compute_layout`` recorded in
+    ``graph.bypass_label_obstacles``, this seats the V-side corner of any leg
+    whose diagonal crosses that box just outside the box on the overrun side, so
+    the diagonal climbs clear of the glyphs.  The far diagonal corner follows
+    within the room left before the leg's other endpoint, keeping a drawable
+    transition.  Legs whose diagonal already clears the box are untouched, so a
+    bypass V beside a narrow (or oppositely-placed) label is left as routed.
+
+    When the room before the leg's endpoint is too tight to fully seat the
+    corner clear, the corner is pulled back only as far as a drawable
+    ``CURVE_RADIUS`` transition allows, so clearance can be partial; the wired
+    ``_guard_no_line_strikes_label`` is the backstop for that residual.
+    """
+    obstacles = ctx.graph.bypass_label_obstacles
+    if not obstacles or ctx.station_offsets is None:
+        return
+
+    from nf_metro.render.svg import apply_route_offsets
+
+    legs_by_v: dict[str, list[RoutedPath]] = defaultdict(list)
+    for r in routes:
+        for nid in (r.edge.source, r.edge.target):
+            if nid in obstacles:
+                legs_by_v[nid].append(r)
+
+    for vid, legs in legs_by_v.items():
+        box = obstacles[vid]
+        bx0, _by0, bx1, _by1 = box
+        box_cx = (bx0 + bx1) / 2
+        for r in legs:
+            if not _is_diagonal_route(r):
+                continue
+            opts = apply_route_offsets(r, ctx.station_offsets)
+            (dx1, dy1), (dx2, dy2) = opts[1], opts[2]
+            if not segment_intersects_bbox(dx1, dy1, dx2, dy2, box):
+                continue
+            # On a 4-point bypass leg the V-adjacent corner is index 1 when the
+            # V is the source and index 2 when it is the target; the far corner
+            # climbs to the leg's other endpoint.
+            v_idx, far_idx = (1, 2) if r.edge.source == vid else (2, 1)
+            far_node = r.edge.target if v_idx == 1 else r.edge.source
+            far_st = ctx.graph.stations.get(far_node)
+            far_min = (
+                CURVE_RADIUS + MIN_STRAIGHT_PORT
+                if far_st is not None and far_st.is_port
+                else MIN_STRAIGHT_EDGE
+            )
+            # Push the corner toward whichever label edge it overruns: the V
+            # corner sits on the overrun side, so the half of the box it lies in
+            # picks the direction.
+            far_end_x = opts[3][0] if v_idx == 1 else opts[0][0]
+            if opts[v_idx][0] >= box_cx:
+                v_target = bx1 + LABEL_BBOX_MARGIN
+                far_target = min(v_target + DIAGONAL_RUN, far_end_x - far_min)
+                v_target = min(v_target, far_target - CURVE_RADIUS)
+            else:
+                v_target = bx0 - LABEL_BBOX_MARGIN
+                far_target = max(v_target - DIAGONAL_RUN, far_end_x + far_min)
+                v_target = max(v_target, far_target + CURVE_RADIUS)
+            # ``apply_route_offsets`` shifts only Y, so these X targets apply
+            # directly to the raw waypoints.
+            pts = list(r.points)
+            pts[v_idx] = (v_target, pts[v_idx][1])
+            pts[far_idx] = (far_target, pts[far_idx][1])
+            r.points = pts

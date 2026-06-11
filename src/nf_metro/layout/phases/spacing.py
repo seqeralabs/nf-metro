@@ -252,3 +252,42 @@ def _spread_bump(
     new_x = x_spacing + extra_x if auto_x else x_spacing
     new_y = y_spacing + extra_y if auto_y else y_spacing
     return new_x, new_y
+
+
+def _bypass_label_obstacles(
+    graph: MetroGraph,
+) -> dict[str, tuple[float, float, float, float]]:
+    """Glyph-ink bbox of each bypassed station's label, keyed by its bypass V.
+
+    Probes the renderer's settled labelling and, for every hidden bypass-V
+    helper station, records the drawn glyph-ink box of the station the V routes
+    around.  The router consumes this to seat the V's flat-run corners clear of
+    that label.  Boxes are in rendered (offset-applied) coordinates and only
+    cover Vs whose bypassed station carries a drawn name; the result is empty
+    when no bypass V exists or the probe fails.
+    """
+    from nf_metro.layout.labels import label_glyph_ink_bbox
+
+    vs = [
+        st
+        for st in graph.stations.values()
+        if st.is_hidden and st.bypasses_station_id is not None
+    ]
+    if not vs:
+        return {}
+    probe = _probe_label_placements(graph, allow_hyphenation=True)
+    if probe is None:
+        return {}
+    _offsets, _routes, placements = probe
+    ink_by_sid = {
+        p.station_id: label_glyph_ink_bbox(p)
+        for p in placements
+        if p.station_id and not p.angle
+    }
+    obstacles: dict[str, tuple[float, float, float, float]] = {}
+    for st in vs:
+        sid = st.bypasses_station_id
+        box = ink_by_sid.get(sid) if sid is not None else None
+        if box is not None:
+            obstacles[st.id] = box
+    return obstacles

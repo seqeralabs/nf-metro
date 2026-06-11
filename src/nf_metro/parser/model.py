@@ -126,6 +126,11 @@ class Station:
     section_id: str | None = None
     is_port: bool = False
     is_hidden: bool = False
+    # For a hidden bypass-V helper station, the id of the real station whose
+    # marker the routed line bypasses.  Lets the router seat the V's flat-run
+    # corners clear of that station's name label (the V carries no label of its
+    # own).  None for every non-bypass station.
+    bypasses_station_id: str | None = None
     # Per-station marker style from %%metro marker:; None = default pill.
     marker: MarkerStyle | None = None
     # When True, the station is lifted above the section's top track in a
@@ -333,6 +338,14 @@ class MetroGraph:
     # Opt-in diagonal station labels. None means "use the theme
     # default" (0 = horizontal); a directive value overrides the theme.
     label_angle: float | None = None
+    # Maps a hidden bypass-V station id to the glyph-ink bbox of the label of
+    # the station it bypasses, in rendered (offset-applied) coordinates.
+    # Populated by ``compute_layout`` once the layout settles; the router reads
+    # it to seat the V's flat-run corners clear of that label.  Empty until a
+    # bypass V's diagonal would otherwise rake the bypassed station's name.
+    bypass_label_obstacles: dict[str, tuple[float, float, float, float]] = field(
+        default_factory=dict
+    )
     # %%metro legend_combo entries: (line_ids, label) pairs.
     legend_combos: list[tuple[tuple[str, ...], str]] = field(default_factory=list)
     # Placement modifiers for the bundled legend+logo block. The corner/edge

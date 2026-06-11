@@ -1072,10 +1072,10 @@ def _guard_no_diagonal_strikes_horizontal_label(
     loop uses, so it validates exactly the geometry the loop reasoned about.
 
     Narrower than :func:`_guard_no_line_strikes_label`: it excludes bypass-V
-    crossings (a V sits a fixed offset from the station, so runway growth cannot
-    relocate it) and angled labels (handled by their rotated footprint, not
-    column runway), so it can be wired into the validate pass while those
-    remain.
+    crossings (cleared by the router seating the V's flat-run corners off the
+    label, not by runway growth) and angled labels (handled by their rotated
+    footprint).  It attributes a fan or convergence strike to the runway loop
+    that owns it.
     """
     from nf_metro.layout.phases.spacing import (
         _probe_label_placements,
@@ -1111,9 +1111,9 @@ def _guard_no_wrapped_label_trunk_strike(
     render-time lift in ``place_labels`` pulls such a label back to its
     un-pushed anchor; this asserts the settled render leaves none striking.
 
-    Narrower than :func:`_guard_no_line_strikes_label` (which is not wired into
-    the validate pass while diagonal-rake strikes remain): it covers only the
-    horizontal-trunk overrun the lift resolves, so it can run as an invariant.
+    Narrower than :func:`_guard_no_line_strikes_label`: it covers only the
+    horizontal-trunk overrun the lift resolves, reported against the unlifted
+    geometry the render-time lift then clears.
     """
     from nf_metro.layout.labels import (
         find_wrapped_label_trunk_strikes,

@@ -1427,6 +1427,11 @@ def check_intra_section_chain_alignment(
             continue
         if src.is_port or tgt.is_port:
             continue
+        if src.is_hidden or tgt.is_hidden:
+            # A hidden bypass V dips off the trunk to route a line around a
+            # station marker, so an edge into or out of it is diagonal by
+            # design, not a chain misalignment.
+            continue
         if src.is_terminus or tgt.is_terminus:
             continue
         if src.section_id is None or src.section_id != tgt.section_id:
