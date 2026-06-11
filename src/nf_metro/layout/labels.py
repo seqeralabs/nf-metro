@@ -1301,7 +1301,9 @@ def _place_station_label(
         return _place_tb_label(ctx, station, placements)
     if ctx.label_angle:
         return _place_angled_label(ctx, station, min_off, max_off, rail_side)
-    return _place_alternating_label(ctx, station, placements, min_off, max_off, rail_side)
+    return _place_alternating_label(
+        ctx, station, placements, min_off, max_off, rail_side
+    )
 
 
 def _place_tb_label(
@@ -1575,7 +1577,9 @@ def _place_alternating_label(
     candidate = _place_alternating_candidate(
         ctx, station, placements, min_off, max_off, start_above
     )
-    return _clamp_label_to_section(ctx, station, candidate, min_off, max_off, placements)
+    return _clamp_label_to_section(
+        ctx, station, candidate, min_off, max_off, placements
+    )
 
 
 def place_labels(

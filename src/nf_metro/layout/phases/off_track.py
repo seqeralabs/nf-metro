@@ -358,9 +358,7 @@ def _detect_fork_join_layers(
     making a visible-vs-owner diagonal trigger a gap while a V-only off-trunk
     peer does not.
     """
-    visible_tracks = {
-        t for sid, t in tracks.items() if not sid.startswith("__bypass_")
-    }
+    visible_tracks = {t for sid, t in tracks.items() if not sid.startswith("__bypass_")}
     is_single_track = len(visible_tracks) <= 1
 
     def _has_bypass(ids: set[str]) -> bool:
@@ -510,17 +508,13 @@ def _has_interior_branch(
     if layer in fork_layers:
         for fsid, ftgts in out_targets.items():
             if layers.get(fsid) == layer and fsid in tracks:
-                off = sum(
-                    1 for t in ftgts if t in tracks and tracks[t] != tracks[fsid]
-                )
+                off = sum(1 for t in ftgts if t in tracks and tracks[t] != tracks[fsid])
                 if off >= 2:
                     return True
     if layer in join_layers:
         for jsid, jsrcs in in_sources.items():
             if layers.get(jsid) == layer and jsid in tracks:
-                off = sum(
-                    1 for s in jsrcs if s in tracks and tracks[s] != tracks[jsid]
-                )
+                off = sum(1 for s in jsrcs if s in tracks and tracks[s] != tracks[jsid])
                 if off >= 2:
                     return True
     return False
@@ -622,7 +616,9 @@ def _layer_gap_for(
                 ),
             )
 
-    routing_clearance = fj_label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE - x_spacing + 1.0
+    routing_clearance = (
+        fj_label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE - x_spacing + 1.0
+    )
     return max(base_gap, fj_label_half + bubble_extra, routing_clearance)
 
 
@@ -650,9 +646,7 @@ def _compute_fork_join_gaps(
     and the extra spacing is purely wasteful.
     """
     label_angle = (full_graph or sub).label_angle or 0.0
-    out_targets, in_sources = _fork_join_adjacency(
-        sub, full_graph, section_station_ids
-    )
+    out_targets, in_sources = _fork_join_adjacency(sub, full_graph, section_station_ids)
     fork_layers, join_layers = _detect_fork_join_layers(
         out_targets, in_sources, layers, tracks
     )

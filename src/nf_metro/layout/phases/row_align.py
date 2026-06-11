@@ -168,7 +168,10 @@ def _build_grid_y_map(
         slot_gap = max(1, int(math.floor(gaps[0] / effective_y_spacing)))
         if has_diamond and slot_gap < 2:
             slot_gap = 2
-        y_map = {old_y: i * slot_gap * effective_y_spacing for i, old_y in enumerate(remap_ys)}
+        y_map = {
+            old_y: i * slot_gap * effective_y_spacing
+            for i, old_y in enumerate(remap_ys)
+        }
     else:
         y_map = _assign_nonuniform_slots(
             layer_stations, multi_layer_ys, remap_ys, effective_y_spacing, has_diamond
@@ -312,7 +315,12 @@ def _align_row_y_grids(
             for sec_id in sec_ids
         }
         spacing = _row_group_grid_spacing(
-            graph, section_subgraphs, sec_ids, section_class, section_y_padding, y_spacing
+            graph,
+            section_subgraphs,
+            sec_ids,
+            section_class,
+            section_y_padding,
+            y_spacing,
         )
         if spacing is None:
             continue

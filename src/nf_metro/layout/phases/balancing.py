@@ -780,9 +780,7 @@ def _recenter_section_loop_sides(
             continue
         midpoint = (corner_left + corner_right) / 2.0
         if not (
-            min(corner_left, corner_right)
-            <= midpoint
-            <= max(corner_left, corner_right)
+            min(corner_left, corner_right) <= midpoint <= max(corner_left, corner_right)
         ):
             continue
         if abs(midpoint - st.x) < min_recenter_delta:
@@ -897,16 +895,12 @@ def _snap_column_to_anchors(
         visible_ins = [
             e
             for e in graph.edges_to(sid)
-            if (
-                (gs := graph.stations.get(e.source)) is not None and not gs.is_hidden
-            )
+            if ((gs := graph.stations.get(e.source)) is not None and not gs.is_hidden)
         ]
         visible_outs = [
             e
             for e in graph.edges_from(sid)
-            if (
-                (gs := graph.stations.get(e.target)) is not None and not gs.is_hidden
-            )
+            if ((gs := graph.stations.get(e.target)) is not None and not gs.is_hidden)
         ]
         if len(visible_ins) == 1 and len(visible_outs) == 1:
             anchor_xs.append(st.x)
