@@ -40,8 +40,8 @@ from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.labels import (
     _label_bbox,
     find_wrapped_label_trunk_strikes,
-    label_glyph_ink_bbox,
     place_labels,
+    segment_strikes_label,
 )
 from nf_metro.layout.phases._common import _grow_section_bbox_upward
 from nf_metro.layout.phases.bbox import (
@@ -1315,7 +1315,6 @@ def _label_glyph_strikes(fixture: str) -> list[tuple[str, str]]:
         station = graph.stations.get(p.station_id)
         if station is None or not station.label.strip():
             continue
-        ink = label_glyph_ink_bbox(p)
         carried = set(graph.station_lines(p.station_id))
         for r in routes:
             if r.edge.source == p.station_id or r.edge.target == p.station_id:
@@ -1324,7 +1323,7 @@ def _label_glyph_strikes(fixture: str) -> list[tuple[str, str]]:
                 continue
             pts = apply_route_offsets(r, offsets)
             if any(
-                segment_intersects_bbox(x1, y1, x2, y2, ink)
+                segment_strikes_label(x1, y1, x2, y2, p)
                 for (x1, y1), (x2, y2) in zip(pts, pts[1:])
             ):
                 strikes.append((p.station_id, r.line_id))

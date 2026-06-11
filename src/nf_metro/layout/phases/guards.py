@@ -1019,6 +1019,7 @@ def _guard_no_line_strikes_label(
     from nf_metro.layout.labels import (
         label_glyph_ink_bbox,
         place_labels,
+        segment_strikes_label,
     )
     from nf_metro.render.svg import _compute_icon_obstacles, apply_route_offsets
     from nf_metro.themes import THEMES
@@ -1044,11 +1045,13 @@ def _guard_no_line_strikes_label(
             label_angle=graph.label_angle or 0.0,
         )
         boxes: list[tuple[str, tuple[float, float, float, float]]] = []
+        placement_by_sid: dict[str, object] = {}
         for p in placements:
             station = graph.stations.get(p.station_id)
             if station is None or not station.label.strip():
                 continue
             boxes.append((p.station_id, label_glyph_ink_bbox(p)))
+            placement_by_sid[p.station_id] = p
         if not boxes:
             return
         index = BBoxXIndex(boxes)
@@ -1069,7 +1072,9 @@ def _guard_no_line_strikes_label(
                         station_lines_cache[sid] = lines
                     if line_id in lines:
                         continue
-                    if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
+                    if segment_strikes_label(
+                        p1[0], p1[1], p2[0], p2[1], placement_by_sid[sid]
+                    ):
                         raise PhaseInvariantError(
                             f"{phase}: line {line_id!r} on edge {src!r} -> {tgt!r} "
                             f"strikes through label of {sid!r} "
