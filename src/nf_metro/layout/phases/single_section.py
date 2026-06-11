@@ -185,6 +185,19 @@ def _layout_single_section(
         sub, layers, tracks, x_spacing, graph, section_sids
     )
 
+    # Label-strike clearance: a gap declared before layer ``L`` pushes ``L`` and
+    # every downstream layer along the flow axis, lengthening the flat run into
+    # the struck station so its own descent/ascent diagonal seats clear of its
+    # name.  The strike-clearance loop populates this need-driven, so it is
+    # empty (a no-op) for every layout that draws no strike.
+    if section.label_strike_layer_gaps:
+        all_layers = set(layers.values())
+        for gap_layer, cols in section.label_strike_layer_gaps.items():
+            extra = cols * x_spacing
+            for layer in all_layers:
+                if layer >= gap_layer:
+                    layer_extra[layer] = layer_extra.get(layer, 0.0) + extra
+
     # Widen track spacing when multi-line labels need more vertical room
     effective_y_spacing = _multiline_track_spacing(sub, y_spacing)
 

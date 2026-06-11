@@ -1289,7 +1289,7 @@ _LABEL_STRIKE_DIAGONAL_XFAIL = {
 _LABEL_STRIKE_FIXTURES = _params_with_xfails(ALL_FIXTURES, _LABEL_STRIKE_DIAGONAL_XFAIL)
 
 
-def _label_glyph_strikes(fixture: str, **layout_kwargs) -> list[tuple[str, str]]:
+def _label_glyph_strikes(fixture: str) -> list[tuple[str, str]]:
     """Return ``(station_id, line_id)`` pairs where a foreign line strikes a label.
 
     Mirrors the renderer: ``route_edges`` mutates Station.x via diagonal
@@ -1297,11 +1297,8 @@ def _label_glyph_strikes(fixture: str, **layout_kwargs) -> list[tuple[str, str]]
     label glyph-ink boxes are built without restoring X.  A pair is reported
     when a segment of a line the station does not carry (and which is not an
     endpoint of the segment's edge) crosses the label's glyph-ink box.
-
-    ``layout_kwargs`` are forwarded to ``compute_layout`` (e.g. ``x_spacing``)
-    so callers can exercise the strike behaviour at a pinned column pitch.
     """
-    graph = _layout(fixture, **layout_kwargs)
+    graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
     theme = THEMES["nfcore"]
@@ -1350,33 +1347,48 @@ def test_no_line_strikes_through_label(fixture):
     )
 
 
-# A label wider than its station's flat run pushes the fan-in/fan-out diagonal
-# transition inside the label's x-extent, so a line the station does not carry
-# rakes its glyphs.  At a tight column pitch the proportional entry/exit runway
-# shrinks below the (fixed-width) label and the strike appears; the engine grows
-# the offending section's runway by whole grid columns until the transition
-# seats clear.  Each case strikes at the pinned pitch on a layout without that
-# growth.
+# A label wider than its station's flat run pushes a fan-in/fan-out,
+# convergence, or station-to-station descent diagonal inside the label's
+# x-extent, raking its glyphs.  At a tight column pitch the proportional flat
+# run shrinks below the (fixed-width) label and the strike appears; the engine
+# clears it by lengthening the run with whole grid columns (section runway for a
+# port fan, a per-column gap for an intra-section descent) at a fixed pitch.
+# Each case strikes at the pinned pitch on a layout without that growth.
+# ``None`` exercises the default (gallery) pitch, where these fixtures ship and
+# the strike-clearance loop must keep them clear; the pinned tighter pitches
+# stress the levers where the proportional flat run is shortest.
 _TIGHT_PITCH_STRIKE_CASES = [
+    ("topologies/funcprofiler_upstream.mmd", None),
     ("topologies/funcprofiler_upstream.mmd", 50),
     ("topologies/funcprofiler_upstream.mmd", 45),
+    ("topologies/variant_calling.mmd", None),
     ("topologies/variant_calling.mmd", 45),
+    ("rnaseq_sections.mmd", None),
+    ("topologies/wide_label_fan.mmd", 45),
 ]
 
 
 @pytest.mark.parametrize("fixture,x_spacing", _TIGHT_PITCH_STRIKE_CASES)
-def test_no_diagonal_strikes_label_at_tight_pitch(fixture, x_spacing):
-    """A port-side fan diagonal must not rake a stacked station's name label,
-    even when a tight pitch shrinks the proportional runway below the label.
+def test_no_diagonal_strikes_label(fixture, x_spacing):
+    """No diagonal may rake a station's name label.
 
-    The section's entry/exit runway is grown by whole grid columns (the pitch
-    stays fixed) so the fan transition completes outside the label's x-extent.
+    Uses the engine's own strike definition (the one the clearance loop and the
+    runtime guard share): a fan or descent diagonal -- of any line, the station's
+    own or foreign -- crossing the drawn glyphs, with flat runs, bypass-V
+    crossings, off-track sweeps, and angled labels excluded.  The loop lengthens
+    the flat run with whole grid columns until the transition clears.
     """
-    strikes = _label_glyph_strikes(fixture, x_spacing=x_spacing)
-    assert not strikes, (
-        f"{fixture} @ x_spacing={x_spacing}: foreign lines strike label glyph "
-        "ink: " + ", ".join(f"{lid!r} over {sid!r}" for sid, lid in strikes)
+    from nf_metro.layout.phases.spacing import _struck_stations_and_collinear
+
+    graph = (
+        _layout(fixture) if x_spacing is None else _layout(fixture, x_spacing=x_spacing)
     )
+    struck, collinear = _struck_stations_and_collinear(graph)
+    assert not struck, (
+        f"{fixture} @ x_spacing={x_spacing}: diagonals rake label glyph ink: "
+        + ", ".join(sorted(graph.stations[s].label for s in struck))
+    )
+    assert not collinear, f"{fixture} @ x_spacing={x_spacing}: collinear overlay"
 
 
 def test_label_strike_guard_catches_a_strike():
@@ -1401,15 +1413,14 @@ def test_label_strike_guard_catches_a_strike():
 
 
 def test_diagonal_strike_guard_teeth_and_exemptions():
-    """The wired narrow guard fires on an unclearable fan-diagonal strike,
-    stays silent once the runway growth has cleared one, and exempts the
-    bypass-V crossing it cannot relocate.
+    """The wired guard fires on a strike the clearance loop cannot relocate,
+    stays silent once the loop has cleared one, and exempts the bypass-V rake.
 
-    A fan-into-stack section grown by the strike-clearance loop
-    (``funcprofiler_upstream`` at a tight pitch) must pass; an intra-section
-    fork whose strike the runway cannot move (``wide_label_fan`` at the same
-    pitch) must raise; and a bypass-V label rake (``guide/06a``) must pass,
-    since the guard excludes it.
+    A section the strike-clearance loop grows (``funcprofiler_upstream`` at a
+    tight pitch) must pass; a sectionless flat graph (``centered_tracks`` at a
+    tight pitch), whose struck stations have no section runway or column gap to
+    grow, must raise; and a bypass-V label rake (``guide/06a``) must pass, since
+    the guard excludes it.
     """
     from nf_metro.layout.phases.guards import (
         PhaseInvariantError,
@@ -1419,7 +1430,7 @@ def test_diagonal_strike_guard_teeth_and_exemptions():
     cleared = _layout("topologies/funcprofiler_upstream.mmd", x_spacing=45)
     _guard_no_diagonal_strikes_horizontal_label(cleared, "test")
 
-    unclearable = _layout("topologies/wide_label_fan.mmd", x_spacing=45)
+    unclearable = _layout("centered_tracks.mmd", x_spacing=45)
     with pytest.raises(PhaseInvariantError, match="strikes horizontal label"):
         _guard_no_diagonal_strikes_horizontal_label(unclearable, "test")
 

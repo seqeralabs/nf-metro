@@ -93,27 +93,39 @@ def _struck_label_station_ids(
     routes: list[RoutedPath],
     placements: list[LabelPlacement],
 ) -> set[str]:
-    """Stations whose horizontal name label a foreign diagonal route crosses.
+    """Stations whose horizontal name label a diagonal route crosses.
 
     The visual goal: a fan-in/fan-out or convergence diagonal transitioning
-    through a station's drawn name reads as a strike-through.  A line the
-    station carries, or whose edge ends at the station, legitimately touches it
-    and is exempt.
+    through a station's drawn name reads as a strike-through -- whether or not
+    the station carries that line.  A wide label sits in the path of its own
+    line's sweep to the section's entry/exit ports just as it sits in a foreign
+    line's, so ownership is not an exemption; the runway must lengthen until the
+    transition clears the glyphs either way.
 
-    Excluded because growing a section's runway cannot relocate them:
+    Only segments that cannot be relocated by widening a section's runway are
+    excluded:
 
-    - angled labels (a rotated strip is handled by its own footprint),
-    - bypass-V crossings (the V sits a fixed track offset from the station).
+    - flat (near-horizontal) trunk runs -- a line along a label's own row is not
+      a strike-through and a wider runway would not move it,
+    - bypass-V crossings (the V sits a fixed track offset from the station),
+    - off-track output sweeps (a producer-to-off-track-sink diagonal is placed
+      by the off-track machinery, not the in-grid runway),
+    - angled labels (a rotated strip is handled by its own footprint).
     """
     from nf_metro.layout.labels import segment_strikes_label
     from nf_metro.render.svg import apply_route_offsets
 
+    def _off_track(node_id: str) -> bool:
+        st = graph.stations.get(node_id)
+        return bool(st and st.off_track)
+
     seg_lists = [
         (
-            r,
             apply_route_offsets(r, offsets),
             r.edge.source.startswith("__bypass_")
-            or r.edge.target.startswith("__bypass_"),
+            or r.edge.target.startswith("__bypass_")
+            or _off_track(r.edge.source)
+            or _off_track(r.edge.target),
         )
         for r in routes
     ]
@@ -122,11 +134,8 @@ def _struck_label_station_ids(
         station = graph.stations.get(p.station_id)
         if station is None or not station.label.strip() or p.angle:
             continue
-        carried = set(graph.station_lines(p.station_id))
-        for r, pts, is_bypass in seg_lists:
-            if is_bypass or r.line_id in carried:
-                continue
-            if r.edge.source == p.station_id or r.edge.target == p.station_id:
+        for pts, skip in seg_lists:
+            if skip:
                 continue
             if any(
                 segment_strikes_label(x1, y1, x2, y2, p)
@@ -178,34 +187,27 @@ def _residual_label_overlaps(
     return _overlaps_from(graph, offsets, placements)
 
 
-def _strike_sections_and_collinear(graph: MetroGraph) -> tuple[set[str], bool]:
-    """One probe: sections needing runway growth, and a collinear-defect flag.
+def _struck_stations_and_collinear(graph: MetroGraph) -> tuple[set[str], bool]:
+    """One probe: stations whose label a diagonal crosses, and a collinear flag.
 
-    Returns ``(section_ids, has_collinear)`` where ``section_ids`` hold a
-    station whose horizontal label a foreign diagonal crosses, and
-    ``has_collinear`` is whether the routes draw two distinct lines on top of
-    each other.  Both read the same probed routes, so the strike-clearance loop
-    decides growth and step-back from a single route+place pass.
+    Returns ``(station_ids, has_collinear)`` where ``station_ids`` are stations
+    whose horizontal label a diagonal route rakes, and ``has_collinear`` is
+    whether the routes draw two distinct lines on top of each other.  Both read
+    the same probed routes, so the strike-clearance loop decides growth and
+    step-back from a single route+place pass.
 
     Probes with ``allow_hyphenation=True`` -- the renderer-faithful wrapping --
     so a strike is judged against the label the renderer draws; the collinear
-    check ignores placements, so the hyphenation flag does not affect it.  A
-    struck station outside any section maps to nothing and is dropped (its
-    layout has no entry/exit runway to grow).  Returns ``(set(), False)`` on
-    probe failure.  See :func:`_struck_label_station_ids` and
-    :func:`_collinear_from`.
+    check ignores placements, so the hyphenation flag does not affect it.
+    Returns ``(set(), False)`` on probe failure.  See
+    :func:`_struck_label_station_ids` and :func:`_collinear_from`.
     """
     probe = _probe_label_placements(graph, allow_hyphenation=True)
     if probe is None:
         return set(), False
     offsets, routes, placements = probe
     struck = _struck_label_station_ids(graph, offsets, routes, placements)
-    sections: set[str] = set()
-    for sid in struck:
-        section_id = graph.stations[sid].section_id
-        if section_id:
-            sections.add(section_id)
-    return sections, _collinear_from(graph, offsets, routes)
+    return struck, _collinear_from(graph, offsets, routes)
 
 
 def _placed_name_label_station_ids(graph: MetroGraph) -> set[str]:

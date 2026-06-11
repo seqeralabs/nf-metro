@@ -263,6 +263,11 @@ class Section:
     # column pitch is left fixed; the section's flat runs lengthen so the
     # transition seats outside the label's x-extent.
     label_strike_cols: int = 0
+    # Extra columns of intra-section gap the strike-clearance loop inserts
+    # before a given layer (keyed by layer index; pushes that layer and every
+    # downstream layer along the flow axis).  Lengthens the flat run into a
+    # station whose own descent/ascent diagonal would otherwise rake its label.
+    label_strike_layer_gaps: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass

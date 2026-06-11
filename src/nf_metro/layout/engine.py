@@ -246,9 +246,9 @@ from nf_metro.layout.phases.spacing import (  # noqa: F401
     _SPREAD_SLACK,
     _residual_label_overlaps,
     _spread_bump,
-    _strike_sections_and_collinear,
+    _struck_stations_and_collinear,
 )
-from nf_metro.parser.model import LineSpread, MetroGraph
+from nf_metro.parser.model import LineSpread, MetroGraph, Section
 
 # ---------------------------------------------------------------------------
 # Stage-boundary guards
@@ -536,16 +536,19 @@ def _compute_layout_scaled(
             break  # can't widen the binding axis (e.g. pinned) -- give up
         x_spacing, y_spacing = new_x, new_y
 
-    # Strike-clearance loop: a fan-in/fan-out diagonal that rakes a stacked
-    # station's wide name label is cleared by lengthening that section's flat
-    # runs by whole grid columns (the pitch stays fixed), seating the diagonal
-    # transition outside the label.  Need-driven: only sections the renderer
-    # would draw a strike through grow, so a clean layout -- every gallery
-    # render at its default pitch -- is left untouched.  A growth a collinear
-    # check rejects, or that fails to reduce the struck-section count, is rolled
-    # back, so the loop never ships a layout worse than it found.  Independent
-    # of pinned vs auto pitch: growing a section's runway is local room, not the
-    # global pitch, so it applies even when the caller fixed x_spacing.
+    # Strike-clearance loop: a fan-in/fan-out, convergence, or descent diagonal
+    # that rakes a station's name label is cleared by lengthening the flat run
+    # at that station by whole grid columns (the pitch stays fixed), seating the
+    # transition outside the label.  Two complementary, grid-quantized levers:
+    # the section's entry/exit runway (clears strikes from the section's own
+    # port fan) and a per-column gap before the struck station's layer (clears
+    # an intra-section station-to-station descent).  Need-driven: only stations
+    # the renderer would draw a strike through grow, so a clean layout -- every
+    # gallery render at its default pitch -- is left untouched.  A growth a
+    # collinear check rejects, or that fails to reduce the struck count, is
+    # rolled back, so the loop never ships a layout worse than it found.
+    # Independent of pinned vs auto pitch: the room is local, not the global
+    # pitch, so it applies even when the caller fixed x_spacing.
 
     def _relay() -> None:
         _layout_once(
@@ -561,24 +564,39 @@ def _compute_layout_scaled(
             validate=validate,
         )
 
-    struck, _ = _strike_sections_and_collinear(graph)
+    def _growable_target(station_id: str) -> tuple[Section, int] | None:
+        st = graph.stations.get(station_id)
+        if st is None or not st.section_id:
+            return None
+        sec = graph.sections.get(st.section_id)
+        if sec is None or sec.direction not in ("LR", "RL"):
+            return None
+        if graph.is_rail_section(sec.id):
+            return None
+        return sec, st.layer
+
+    struck, _ = _struck_stations_and_collinear(graph)
     for _ in range(_MAX_SPREAD_ITERS):
-        grow = {
-            sid
-            for sid in struck
-            if (sec := graph.sections.get(sid)) is not None
-            and sec.direction in ("LR", "RL")
-            and not graph.is_rail_section(sid)
-        }
-        if not grow:
+        targets = [t for sid in struck if (t := _growable_target(sid)) is not None]
+        if not targets:
             break
-        for sid in grow:
+        runway = {sec.id for sec, _ in targets}
+        gaps = {(sec.id, layer) for sec, layer in targets}
+        for sid in runway:
             graph.sections[sid].label_strike_cols += 1
+        for sid, layer in gaps:
+            lg = graph.sections[sid].label_strike_layer_gaps
+            lg[layer] = lg.get(layer, 0) + 1
         _relay()
-        after, collinear = _strike_sections_and_collinear(graph)
+        after, collinear = _struck_stations_and_collinear(graph)
         if collinear or len(after) >= len(struck):
-            for sid in grow:
+            for sid in runway:
                 graph.sections[sid].label_strike_cols -= 1
+            for sid, layer in gaps:
+                lg = graph.sections[sid].label_strike_layer_gaps
+                lg[layer] -= 1
+                if lg[layer] <= 0:
+                    del lg[layer]
             _relay()
             break
         struck = after
