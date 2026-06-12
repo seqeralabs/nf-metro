@@ -16,7 +16,7 @@ from nf_metro.layout.routing.invariants import (
     distinct_offset_levels,
 )
 from nf_metro.layout.routing.reversal import detect_reversed_sections
-from nf_metro.parser.model import LineSpread, MetroGraph, PortSide
+from nf_metro.parser.model import LineSpread, MetroGraph, PortSide, Section
 
 # Tolerances used across offset phases
 _SAME_Y_TOLERANCE: float = SAME_Y_TOLERANCE
@@ -184,20 +184,9 @@ def _compute_base_offsets(ctx: _OffsetCtx) -> None:
                     ctx.offsets[(sid, lid)] = p * ctx.offset_step
 
 
-def _reindex_section_local(ctx: _OffsetCtx) -> None:
-    """Re-index offsets per-section to close priority gaps (non-compact only).
-
-    Lines absent from a section should not reserve offset slots within it.
-    Also applies reconvergence ordering: when multiple upstream sections
-    feed into one section, lines from the primary feeder keep their
-    relative offsets at the top.
-    """
-    if ctx.compact:
-        return
-
+def _reindex_local_priority_gaps(ctx: _OffsetCtx) -> dict[str, dict[str, int]]:
+    """Close priority gaps per-section, returning the section-local orderings."""
     graph = ctx.graph
-
-    # --- Section-local priority re-indexing ---
     section_local: dict[str, dict[str, int]] = {}
     for sec_id in graph.sections:
         present: set[str] = set()
@@ -225,29 +214,42 @@ def _reindex_section_local(ctx: _OffsetCtx) -> None:
                 ctx.offsets[(sid_s, lid)] = (local_max - p) * ctx.offset_step
             else:
                 ctx.offsets[(sid_s, lid)] = p * ctx.offset_step
+    return section_local
 
-    # --- Reconvergence ordering ---
+
+def _section_line_feeders(ctx: _OffsetCtx, section: Section) -> dict[str, str]:
+    """Map each entering line to the upstream section that feeds it."""
+    graph = ctx.graph
+    line_feeder: dict[str, str] = {}
+    for pid in section.entry_ports:
+        for edge in graph.edges_to(pid):
+            src = graph.stations.get(edge.source)
+            if not src:
+                continue
+            feeder_sec = None
+            if src.is_port:
+                feeder_sec = src.section_id
+            elif edge.source in graph.junctions:
+                for je in graph.edges_to(edge.source):
+                    if je.line_id == edge.line_id:
+                        js = graph.stations.get(je.source)
+                        if js and js.is_port:
+                            feeder_sec = js.section_id
+                            break
+            if feeder_sec is not None:
+                line_feeder[edge.line_id] = feeder_sec
+    return line_feeder
+
+
+def _reorder_reconvergence(
+    ctx: _OffsetCtx, section_local: dict[str, dict[str, int]]
+) -> None:
+    """Keep primary-feeder lines together at the top of each reconvergence section."""
+    graph = ctx.graph
     for sec_id, section in graph.sections.items():
         if not section.entry_ports:
             continue
-        line_feeder: dict[str, str] = {}
-        for pid in section.entry_ports:
-            for edge in graph.edges_to(pid):
-                src = graph.stations.get(edge.source)
-                if not src:
-                    continue
-                feeder_sec = None
-                if src.is_port:
-                    feeder_sec = src.section_id
-                elif edge.source in graph.junctions:
-                    for je in graph.edges_to(edge.source):
-                        if je.line_id == edge.line_id:
-                            js = graph.stations.get(je.source)
-                            if js and js.is_port:
-                                feeder_sec = js.section_id
-                                break
-                if feeder_sec is not None:
-                    line_feeder[edge.line_id] = feeder_sec
+        line_feeder = _section_line_feeders(ctx, section)
         if not line_feeder:
             continue
 
@@ -294,6 +296,20 @@ def _reindex_section_local(ctx: _OffsetCtx) -> None:
                     ctx.offsets[(sid_s, lid)] = (local_max - p) * ctx.offset_step
                 else:
                     ctx.offsets[(sid_s, lid)] = p * ctx.offset_step
+
+
+def _reindex_section_local(ctx: _OffsetCtx) -> None:
+    """Re-index offsets per-section to close priority gaps (non-compact only).
+
+    Lines absent from a section should not reserve offset slots within it.
+    Also applies reconvergence ordering: when multiple upstream sections
+    feed into one section, lines from the primary feeder keep their
+    relative offsets at the top.
+    """
+    if ctx.compact:
+        return
+    section_local = _reindex_local_priority_gaps(ctx)
+    _reorder_reconvergence(ctx, section_local)
 
 
 def _entry_fed_in_section(graph: MetroGraph, sid: str, lid: str, sec_id: str) -> bool:
@@ -360,127 +376,156 @@ def _reorder_exit_only_lines(ctx: _OffsetCtx) -> None:
         if len(lines) < 2:
             continue
 
-        sec_id = station.section_id
-
         # Find lines that originate at this station (no inbound edge)
         exit_only = [lid for lid in lines if lid not in ctx.inbound.get(sid, set())]
         if not exit_only:
             continue
 
         for lid in exit_only:
-            target_id = outbound_target.get((sid, lid))
-            if not target_id:
+            _reorder_one_exit_line(
+                ctx, same_y_adj, outbound_target, station, sid, lines, lid
+            )
+
+
+def _desired_exit_slot(
+    ctx: _OffsetCtx, station: Station, target_st: Station, lines: list[str], sid: str
+) -> float | None:
+    """Top slot when the exit port is above, bottom when below, else None."""
+    all_offs = [ctx.offsets.get((sid, ol), 0.0) for ol in lines]
+    if target_st.y < station.y - _SAME_Y_TOLERANCE:
+        return min(all_offs)
+    if target_st.y > station.y + _SAME_Y_TOLERANCE:
+        return max(all_offs)
+    return None
+
+
+def _reorder_one_exit_line(
+    ctx: _OffsetCtx,
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
+    outbound_target: dict[tuple[str, str], str],
+    station: Station,
+    sid: str,
+    lines: list[str],
+    lid: str,
+) -> None:
+    """Move one exit-only line to its crossing-free slot, propagating the swap."""
+    graph = ctx.graph
+    sec_id = station.section_id
+    target_id = outbound_target.get((sid, lid))
+    if not target_id:
+        return
+    target_st = graph.stations.get(target_id)
+    if not target_st:
+        return
+
+    # Only act when the target is an exit port
+    target_port = graph.ports.get(target_id)
+    if not target_port or target_port.is_entry:
+        return
+
+    cur_off = ctx.offsets.get((sid, lid), 0.0)
+    desired_off = _desired_exit_slot(ctx, station, target_st, lines, sid)
+    if desired_off is None:
+        return
+    if abs(cur_off - desired_off) < _OFFSET_EQ_TOLERANCE:
+        return  # already in the right slot
+
+    # Find which line currently occupies the desired slot
+    swap_lid = None
+    for other in lines:
+        if (
+            other != lid
+            and abs(ctx.offsets.get((sid, other), 0.0) - desired_off)
+            < _OFFSET_EQ_TOLERANCE
+        ):
+            swap_lid = other
+            break
+    if swap_lid is None:
+        return
+
+    # Don't displace the continuing through-trunk when the exit-only line
+    # co-travels with it to the *same* exit port: the reorder then prevents
+    # no crossing (both leave together) but steps the trunk's offset mid-run,
+    # slanting its junction-to-entry segment downstream (#420).  When the two
+    # diverge to different targets the swap is genuinely separating them and
+    # must stand (#125).
+    if outbound_target.get((sid, swap_lid)) == target_id and _entry_fed_in_section(
+        graph, sid, swap_lid, sec_id
+    ):
+        return
+
+    _propagate_offset_swap(
+        ctx, same_y_adj, sec_id, sid, lid, swap_lid, desired_off, cur_off
+    )
+
+
+def _propagate_offset_swap(
+    ctx: _OffsetCtx,
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
+    sec_id: str,
+    sid: str,
+    lid: str,
+    swap_lid: str,
+    desired_off: float,
+    cur_off: float,
+) -> None:
+    """Apply an offset swap and propagate it along same-Y edges in the section."""
+    graph = ctx.graph
+    pending: dict[str, dict[str, float]] = {sid: {lid: desired_off, swap_lid: cur_off}}
+
+    visited: set[tuple[str, str]] = set()
+    queue: deque[tuple[str, str, float]] = deque(
+        [
+            (sid, lid, desired_off),
+            (sid, swap_lid, cur_off),
+        ]
+    )
+    max_steps = len(graph.stations) * len(graph.lines)
+
+    while queue and max_steps > 0:
+        max_steps -= 1
+        cur_sid, cur_lid, new_off = queue.popleft()
+        if (cur_sid, cur_lid) in visited:
+            continue
+        visited.add((cur_sid, cur_lid))
+
+        adj = same_y_adj.get(sec_id, {}).get(cur_sid, [])
+        for nbr_sid, edge_lid in adj:
+            if edge_lid != cur_lid:
+                continue
+            if (nbr_sid, cur_lid) in visited:
                 continue
 
-            target_st = graph.stations.get(target_id)
-            if not target_st:
+            nbr_cur = ctx.offsets.get((nbr_sid, cur_lid), 0.0)
+            if abs(nbr_cur - new_off) < _OFFSET_EQ_TOLERANCE:
+                continue  # already matches
+
+            nbr_lines = graph.station_lines(nbr_sid)
+            pending.setdefault(nbr_sid, {})[cur_lid] = new_off
+            queue.append((nbr_sid, cur_lid, new_off))
+
+            if len(nbr_lines) < 2:
                 continue
 
-            # Only act when the target is an exit port
-            target_port = graph.ports.get(target_id)
-            if not target_port or target_port.is_entry:
-                continue
-
-            cur_off = ctx.offsets.get((sid, lid), 0.0)
-            all_offs = [ctx.offsets.get((sid, ol), 0.0) for ol in lines]
-            min_off = min(all_offs)
-            max_off = max(all_offs)
-
-            # Determine desired slot based on exit direction
-            if target_st.y < station.y - _SAME_Y_TOLERANCE:
-                desired_off = min_off  # above -> top slot
-            elif target_st.y > station.y + _SAME_Y_TOLERANCE:
-                desired_off = max_off  # below -> bottom slot
-            else:
-                continue
-
-            if abs(cur_off - desired_off) < _OFFSET_EQ_TOLERANCE:
-                continue  # already in the right slot
-
-            # Find which line currently occupies the desired slot
-            swap_lid = None
-            for other in lines:
+            # Multi-line station: check for collision and swap
+            for other_lid in nbr_lines:
+                if other_lid == cur_lid:
+                    continue
                 if (
-                    other != lid
-                    and abs(ctx.offsets.get((sid, other), 0.0) - desired_off)
+                    abs(ctx.offsets.get((nbr_sid, other_lid), 0.0) - new_off)
                     < _OFFSET_EQ_TOLERANCE
                 ):
-                    swap_lid = other
+                    pending[nbr_sid][other_lid] = nbr_cur
+                    queue.append((nbr_sid, other_lid, nbr_cur))
                     break
-            if swap_lid is None:
-                continue
 
-            # Don't displace the continuing through-trunk when the
-            # exit-only line co-travels with it to the *same* exit port:
-            # the reorder then prevents no crossing (both leave together)
-            # but steps the trunk's offset mid-run, slanting its
-            # junction-to-entry segment downstream (#420).  When the two
-            # diverge to different targets the swap is genuinely separating
-            # them and must stand (#125).
-            if outbound_target.get(
-                (sid, swap_lid)
-            ) == target_id and _entry_fed_in_section(graph, sid, swap_lid, sec_id):
-                continue
+    if max_steps <= 0:
+        return
 
-            # Prepare swap: lid -> desired_off, swap_lid -> cur_off
-            pending: dict[str, dict[str, float]] = {
-                sid: {lid: desired_off, swap_lid: cur_off}
-            }
-
-            # Propagate along same-Y edges within the section
-            visited: set[tuple[str, str]] = set()
-            queue: deque[tuple[str, str, float]] = deque(
-                [
-                    (sid, lid, desired_off),
-                    (sid, swap_lid, cur_off),
-                ]
-            )
-            max_steps = len(graph.stations) * len(graph.lines)
-
-            while queue and max_steps > 0:
-                max_steps -= 1
-                cur_sid, cur_lid, new_off = queue.popleft()
-                if (cur_sid, cur_lid) in visited:
-                    continue
-                visited.add((cur_sid, cur_lid))
-
-                adj = same_y_adj.get(sec_id, {}).get(cur_sid, [])
-                for nbr_sid, edge_lid in adj:
-                    if edge_lid != cur_lid:
-                        continue
-                    if (nbr_sid, cur_lid) in visited:
-                        continue
-
-                    nbr_cur = ctx.offsets.get((nbr_sid, cur_lid), 0.0)
-                    if abs(nbr_cur - new_off) < _OFFSET_EQ_TOLERANCE:
-                        continue  # already matches
-
-                    nbr_lines = graph.station_lines(nbr_sid)
-                    pending.setdefault(nbr_sid, {})[cur_lid] = new_off
-                    queue.append((nbr_sid, cur_lid, new_off))
-
-                    if len(nbr_lines) < 2:
-                        continue
-
-                    # Multi-line station: check for collision and swap
-                    for other_lid in nbr_lines:
-                        if other_lid == cur_lid:
-                            continue
-                        if (
-                            abs(ctx.offsets.get((nbr_sid, other_lid), 0.0) - new_off)
-                            < _OFFSET_EQ_TOLERANCE
-                        ):
-                            pending[nbr_sid][other_lid] = nbr_cur
-                            queue.append((nbr_sid, other_lid, nbr_cur))
-                            break
-
-            if max_steps <= 0:
-                continue
-
-            # Apply all pending changes
-            for s_id, line_offsets in pending.items():
-                for lid, off in line_offsets.items():
-                    ctx.offsets[(s_id, lid)] = off
+    # Apply all pending changes
+    for s_id, line_offsets in pending.items():
+        for lid_, off in line_offsets.items():
+            ctx.offsets[(s_id, lid_)] = off
 
 
 def _apply_compact_section_consistency(ctx: _OffsetCtx) -> None:
@@ -664,20 +709,9 @@ def _propagate_to_junctions(ctx: _OffsetCtx) -> None:
                 break
 
 
-def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
-    """Compute entry port offsets and propagate to downstream stations.
-
-    Handles three cases:
-    1. TOP entry ports fed by TB BOTTOM exits: match the reversed offset
-       scheme used by inter-section routing.
-    2. LEFT/RIGHT entry ports fed by a single LR/RL exit: propagate
-       spatial ordering to prevent bundle crossings.
-    3. Compact mode: ensure multi-line entry ports have separated offsets
-       and propagate to upstream exit ports.
-    """
+def _entry_top_from_tb_bottom_exits(ctx: _OffsetCtx) -> None:
+    """Match TOP entry ports to the reversed offsets of feeding TB BOTTOM exits."""
     graph = ctx.graph
-
-    # --- TOP entry ports fed by TB BOTTOM exits ---
     tb_right_entry: set[str] = set()
     for port_obj in graph.ports.values():
         if (
@@ -719,7 +753,10 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
                     ctx.offsets[(port_id, lid)] = max_exit_off - exit_off
             break
 
-    # --- LR/RL exit-to-entry port propagation ---
+
+def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
+    """Propagate single LR/RL exit-port offsets onto fed LEFT/RIGHT entry ports."""
+    graph = ctx.graph
     for port_id, port_obj in graph.ports.items():
         if not port_obj.is_entry:
             continue
@@ -759,39 +796,58 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
                         for lid in overlap:
                             ctx.offsets[(e2.target, lid)] = entry_offs[lid]
 
-    # --- Compact entry port offset separation ---
-    if ctx.compact:
-        for sec_id, section in graph.sections.items():
-            compact_entry_lines: list[str] = []
+
+def _separate_compact_entry_offsets(ctx: _OffsetCtx) -> None:
+    """Give multi-line entry ports separated offsets and feed them upstream."""
+    graph = ctx.graph
+    for sec_id, section in graph.sections.items():
+        compact_entry_lines: list[str] = []
+        for pid in section.entry_ports:
+            compact_entry_lines.extend(graph.station_lines(pid))
+        unique = sorted(
+            set(compact_entry_lines), key=lambda x: ctx.line_priority.get(x, 0)
+        )
+        if len(unique) < 2:
+            continue
+        existing = [
+            ctx.offsets.get((pid, lid), 0.0)
+            for pid in section.entry_ports
+            for lid in unique
+            if lid in graph.station_lines(pid)
+        ]
+        if len(set(existing)) >= 2:
+            continue
+        sec_reverse = sec_id in ctx.reversed_sections
+        for i, lid in enumerate(unique):
+            if sec_reverse:
+                off = (len(unique) - 1 - i) * ctx.offset_step
+            else:
+                off = i * ctx.offset_step
             for pid in section.entry_ports:
-                compact_entry_lines.extend(graph.station_lines(pid))
-            unique = sorted(
-                set(compact_entry_lines), key=lambda x: ctx.line_priority.get(x, 0)
-            )
-            if len(unique) < 2:
-                continue
-            existing = [
-                ctx.offsets.get((pid, lid), 0.0)
-                for pid in section.entry_ports
-                for lid in unique
-                if lid in graph.station_lines(pid)
-            ]
-            if len(set(existing)) >= 2:
-                continue
-            sec_reverse = sec_id in ctx.reversed_sections
-            for i, lid in enumerate(unique):
-                if sec_reverse:
-                    off = (len(unique) - 1 - i) * ctx.offset_step
-                else:
-                    off = i * ctx.offset_step
-                for pid in section.entry_ports:
-                    if lid in graph.station_lines(pid):
-                        ctx.offsets[(pid, lid)] = off
-                        for edge in graph.edges_to(pid):
-                            if edge.line_id == lid:
-                                src_port = graph.ports.get(edge.source)
-                                if src_port and not src_port.is_entry:
-                                    ctx.offsets[(edge.source, lid)] = off
+                if lid in graph.station_lines(pid):
+                    ctx.offsets[(pid, lid)] = off
+                    for edge in graph.edges_to(pid):
+                        if edge.line_id == lid:
+                            src_port = graph.ports.get(edge.source)
+                            if src_port and not src_port.is_entry:
+                                ctx.offsets[(edge.source, lid)] = off
+
+
+def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
+    """Compute entry port offsets and propagate to downstream stations.
+
+    Handles three cases:
+    1. TOP entry ports fed by TB BOTTOM exits: match the reversed offset
+       scheme used by inter-section routing.
+    2. LEFT/RIGHT entry ports fed by a single LR/RL exit: propagate
+       spatial ordering to prevent bundle crossings.
+    3. Compact mode: ensure multi-line entry ports have separated offsets
+       and propagate to upstream exit ports.
+    """
+    _entry_top_from_tb_bottom_exits(ctx)
+    _propagate_lr_rl_exit_to_entry(ctx)
+    if ctx.compact:
+        _separate_compact_entry_offsets(ctx)
 
 
 def _compact_station_gaps(ctx: _OffsetCtx) -> None:
@@ -839,119 +895,174 @@ def _compact_station_gaps(ctx: _OffsetCtx) -> None:
         for seed_sid in sec_stations:
             if seed_sid in already_compacted:
                 continue
-            seed_lines = graph.station_lines(seed_sid)
-            if len(seed_lines) < 2:
-                continue
-
-            current = {lid: ctx.offsets.get((seed_sid, lid), 0.0) for lid in seed_lines}
-            sorted_by_off = sorted(current.items(), key=lambda x: x[1])
-            base_off = sorted_by_off[0][1]
-            expected = [
-                base_off + i * ctx.offset_step for i in range(len(sorted_by_off))
-            ]
-            actual = [off for _, off in sorted_by_off]
-            if actual == expected:
-                continue
-
-            compacted: dict[str, float] = {}
-            for i, (lid, _) in enumerate(sorted_by_off):
-                compacted[lid] = base_off + i * ctx.offset_step
-
-            changed_lids = {
-                lid
-                for lid in seed_lines
-                if abs(compacted[lid] - current[lid]) > _OFFSET_EQ_TOLERANCE
-            }
-            if not changed_lids:
-                continue
-
-            # BFS to collect all stations needing consistent updates.
-            # Map: station_id -> {line_id: new_offset}
-            pending: dict[str, dict[str, float]] = {seed_sid: compacted}
-            visited: set[tuple[str, str]] = set()
-            queue: deque[tuple[str, str]] = deque(
-                (seed_sid, lid) for lid in changed_lids
+            already_compacted |= _compact_one_seed(
+                ctx, same_y_adj, sec_layer_stations, sec_id, seed_sid, len(sec_stations)
             )
-            safe = True
-            max_steps = len(sec_stations) * len(graph.lines)
 
-            while queue and safe and max_steps > 0:
-                max_steps -= 1
-                cur_sid, lid = queue.popleft()
-                if (cur_sid, lid) in visited:
-                    continue
-                visited.add((cur_sid, lid))
 
-                new_off = pending[cur_sid][lid]
+def _seed_compaction(ctx: _OffsetCtx, seed_sid: str) -> dict[str, float] | None:
+    """Target offsets that pack the seed's lines into consecutive slots, or None."""
+    seed_lines = ctx.graph.station_lines(seed_sid)
+    if len(seed_lines) < 2:
+        return None
 
-                adj = same_y_adj.get(sec_id, {}).get(cur_sid, [])
-                for nbr_sid, edge_lid in adj:
-                    if edge_lid != lid:
-                        continue
-                    if (nbr_sid, lid) in visited:
-                        continue
+    current = {lid: ctx.offsets.get((seed_sid, lid), 0.0) for lid in seed_lines}
+    sorted_by_off = sorted(current.items(), key=lambda x: x[1])
+    base_off = sorted_by_off[0][1]
+    expected = [base_off + i * ctx.offset_step for i in range(len(sorted_by_off))]
+    if [off for _, off in sorted_by_off] == expected:
+        return None
 
-                    # Read pending value if a prior BFS step already
-                    # scheduled a change, otherwise use current offset.
-                    nbr_cur = pending.get(nbr_sid, {}).get(
-                        lid, ctx.offsets.get((nbr_sid, lid), 0.0)
-                    )
-                    if abs(nbr_cur - new_off) < _OFFSET_EQ_TOLERANCE:
-                        continue
+    compacted = {
+        lid: base_off + i * ctx.offset_step for i, (lid, _) in enumerate(sorted_by_off)
+    }
+    if not any(
+        abs(compacted[lid] - current[lid]) > _OFFSET_EQ_TOLERANCE for lid in seed_lines
+    ):
+        return None
+    return compacted
 
-                    nbr_lines = graph.station_lines(nbr_sid)
 
-                    # Bail if a visible same-layer peer also carries
-                    # this line - compaction can't guarantee consistency
-                    # without cascading into unrelated stations.
-                    nbr_st = graph.stations[nbr_sid]
-                    layer_peers = sec_layer_stations.get(sec_id, {}).get(
-                        nbr_st.layer, []
-                    )
-                    for peer_sid in layer_peers:
-                        if peer_sid == nbr_sid:
-                            continue
-                        if graph.stations[peer_sid].is_hidden:
-                            continue
-                        if lid in graph.station_lines(peer_sid):
-                            safe = False
-                            break
-                    if not safe:
-                        break
+def _compact_one_seed(
+    ctx: _OffsetCtx,
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
+    sec_layer_stations: dict[str, dict[int, list[str]]],
+    sec_id: str,
+    seed_sid: str,
+    n_sec_stations: int,
+) -> set[str]:
+    """Compact one seed station's gaps, returning the stations it touched."""
+    graph = ctx.graph
+    compacted = _seed_compaction(ctx, seed_sid)
+    if compacted is None:
+        return set()
+    changed_lids = {
+        lid
+        for lid in graph.station_lines(seed_sid)
+        if abs(compacted[lid] - ctx.offsets.get((seed_sid, lid), 0.0))
+        > _OFFSET_EQ_TOLERANCE
+    }
 
-                    if len(nbr_lines) == 1:
-                        pending.setdefault(nbr_sid, {})[lid] = new_off
-                        queue.append((nbr_sid, lid))
-                        continue
+    pending = _propagate_compaction(
+        ctx,
+        same_y_adj,
+        sec_layer_stations,
+        sec_id,
+        seed_sid,
+        compacted,
+        changed_lids,
+        n_sec_stations,
+    )
+    if pending is None:
+        return set()
 
-                    # Check for collision with another line's offset
-                    collision_lid = None
-                    for other_lid in nbr_lines:
-                        if other_lid == lid:
-                            continue
-                        other_off = pending.get(nbr_sid, {}).get(
-                            other_lid,
-                            ctx.offsets.get((nbr_sid, other_lid), 0.0),
-                        )
-                        if abs(other_off - new_off) < _OFFSET_EQ_TOLERANCE:
-                            collision_lid = other_lid
-                            break
+    for sid, line_offsets in pending.items():
+        for lid, off in line_offsets.items():
+            ctx.offsets[(sid, lid)] = off
+    return set(pending)
 
-                    nbr_pending = pending.setdefault(nbr_sid, {})
-                    nbr_pending[lid] = new_off
-                    queue.append((nbr_sid, lid))
-                    if collision_lid is not None:
-                        # Swap: move collider to the slot we're vacating
-                        nbr_pending[collision_lid] = nbr_cur
-                        queue.append((nbr_sid, collision_lid))
 
-            if not safe or max_steps <= 0:
+def _compaction_peer_conflict(
+    graph: MetroGraph,
+    sec_layer_stations: dict[str, dict[int, list[str]]],
+    sec_id: str,
+    nbr_sid: str,
+    lid: str,
+) -> bool:
+    """True if a visible same-layer peer also carries this line.
+
+    Compaction can't guarantee consistency in that case without cascading
+    into unrelated stations, so propagation must abort.
+    """
+    nbr_st = graph.stations[nbr_sid]
+    layer_peers = sec_layer_stations.get(sec_id, {}).get(nbr_st.layer, [])
+    for peer_sid in layer_peers:
+        if peer_sid == nbr_sid:
+            continue
+        if graph.stations[peer_sid].is_hidden:
+            continue
+        if lid in graph.station_lines(peer_sid):
+            return True
+    return False
+
+
+def _propagate_compaction(
+    ctx: _OffsetCtx,
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
+    sec_layer_stations: dict[str, dict[int, list[str]]],
+    sec_id: str,
+    seed_sid: str,
+    compacted: dict[str, float],
+    changed_lids: set[str],
+    n_sec_stations: int,
+) -> dict[str, dict[str, float]] | None:
+    """BFS the compaction along same-Y edges; return updates, or None if unsafe."""
+    graph = ctx.graph
+    # Map: station_id -> {line_id: new_offset}
+    pending: dict[str, dict[str, float]] = {seed_sid: compacted}
+    visited: set[tuple[str, str]] = set()
+    queue: deque[tuple[str, str]] = deque((seed_sid, lid) for lid in changed_lids)
+    max_steps = n_sec_stations * len(graph.lines)
+
+    while queue and max_steps > 0:
+        max_steps -= 1
+        cur_sid, lid = queue.popleft()
+        if (cur_sid, lid) in visited:
+            continue
+        visited.add((cur_sid, lid))
+
+        new_off = pending[cur_sid][lid]
+
+        adj = same_y_adj.get(sec_id, {}).get(cur_sid, [])
+        for nbr_sid, edge_lid in adj:
+            if edge_lid != lid:
+                continue
+            if (nbr_sid, lid) in visited:
                 continue
 
-            for sid, line_offsets in pending.items():
-                for lid, off in line_offsets.items():
-                    ctx.offsets[(sid, lid)] = off
-                already_compacted.add(sid)
+            # Read pending value if a prior BFS step already scheduled a
+            # change, otherwise use current offset.
+            nbr_cur = pending.get(nbr_sid, {}).get(
+                lid, ctx.offsets.get((nbr_sid, lid), 0.0)
+            )
+            if abs(nbr_cur - new_off) < _OFFSET_EQ_TOLERANCE:
+                continue
+
+            if _compaction_peer_conflict(
+                graph, sec_layer_stations, sec_id, nbr_sid, lid
+            ):
+                return None
+
+            nbr_lines = graph.station_lines(nbr_sid)
+            if len(nbr_lines) == 1:
+                pending.setdefault(nbr_sid, {})[lid] = new_off
+                queue.append((nbr_sid, lid))
+                continue
+
+            # Check for collision with another line's offset
+            collision_lid = None
+            for other_lid in nbr_lines:
+                if other_lid == lid:
+                    continue
+                other_off = pending.get(nbr_sid, {}).get(
+                    other_lid,
+                    ctx.offsets.get((nbr_sid, other_lid), 0.0),
+                )
+                if abs(other_off - new_off) < _OFFSET_EQ_TOLERANCE:
+                    collision_lid = other_lid
+                    break
+
+            nbr_pending = pending.setdefault(nbr_sid, {})
+            nbr_pending[lid] = new_off
+            queue.append((nbr_sid, lid))
+            if collision_lid is not None:
+                # Swap: move collider to the slot we're vacating
+                nbr_pending[collision_lid] = nbr_cur
+                queue.append((nbr_sid, collision_lid))
+
+    if max_steps <= 0:
+        return None
+    return pending
 
 
 def _same_section(graph: MetroGraph, id_a: str, id_b: str) -> bool:
