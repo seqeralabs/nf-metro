@@ -2488,6 +2488,7 @@ def _guard_bypass_port_no_slot_gaps(
     from nf_metro.layout.routing.invariants import (
         bypass_horizontal_targets,
         classify_merge_port_feeders,
+        distinct_offset_levels,
     )
 
     if offsets is None:
@@ -2498,18 +2499,21 @@ def _guard_bypass_port_no_slot_gaps(
     for port_id in graph.ports:
         if classify_merge_port_feeders(graph, port_id) is None:
             continue
-        if not bypass_horizontal_targets(graph, port_id):
+        bypass = bypass_horizontal_targets(graph, port_id)
+        if not bypass:
             continue
         lines = list(graph.station_lines(port_id))
-        if not lines:
-            continue
         port_offsets = sorted(offsets.get((port_id, lid), 0.0) for lid in lines)
-        expected_max = (len(port_offsets) - 1) * OFFSET_STEP
-        actual_max = port_offsets[-1]
-        if actual_max > expected_max + COORD_TOLERANCE_FINE:
+        levels = distinct_offset_levels(port_offsets)
+        has_gap = any(
+            levels[i + 1] - levels[i] > OFFSET_STEP + COORD_TOLERANCE_FINE
+            for i in range(len(levels) - 1)
+        )
+        if has_gap:
             raise PhaseInvariantError(
                 f"{phase}: merge port {port_id!r} has empty bundle slot gaps: "
-                f"max offset {actual_max:.1f} > expected {expected_max:.1f} "
+                f"max offset {port_offsets[-1]:.1f} > expected "
+                f"{(len(port_offsets) - 1) * OFFSET_STEP:.1f} "
                 f"for {len(port_offsets)} lines "
                 f"(offsets: {[f'{o:.0f}' for o in port_offsets]})"
             )

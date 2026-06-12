@@ -1009,6 +1009,7 @@ __all__ = [
     "check_merge_port_approach_side",
     "check_no_collinear_distinct_lines",
     "check_no_same_line_parallel_descents",
+    "bypass_horizontal_targets",
     "check_partial_branch_offset_gaps",
     "classify_merge_port_feeders",
     "distinct_offset_levels",
