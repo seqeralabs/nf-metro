@@ -456,155 +456,179 @@ def _balance_section_content_around_trunk(
                 st.y = _ref_y(graph, sid)
 
     for section in graph.sections.values():
-        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
-            continue
-        bundle = _section_bundle_lines(graph, section)
-        if not bundle:
-            continue
-        port_set = section.port_ids
-        internal_ids = [
-            sid
-            for sid in section.station_ids
-            if sid not in port_set
-            and sid in graph.stations
-            and not graph.stations[sid].is_port
-            and not graph.stations[sid].is_hidden
-            and not graph.stations[sid].off_track
-        ]
-        if not internal_ids:
-            continue
+        _balance_one_section(graph, section, y_spacing)
 
-        trunk_y = _section_lr_port_anchor_y(graph, section)
-        if trunk_y is None:
-            full_ys = sorted(
-                graph.stations[s].y
-                for s in internal_ids
-                if set(graph.station_lines(s)) == bundle
-            )
-            if not full_ys:
+
+def _movable_partial_bundle_stations(
+    graph: MetroGraph, cols: dict[float, list[str]], bundle: set[str]
+) -> list[str]:
+    """Non-trunk stations sharing a column with a trunk, carrying a sub-bundle."""
+    movable: list[str] = []
+    for sids in cols.values():
+        trunks_in_col = [s for s in sids if set(graph.station_lines(s)) == bundle]
+        if not trunks_in_col:
+            continue
+        for s in sids:
+            if s in trunks_in_col:
                 continue
-            trunk_y = full_ys[len(full_ys) // 2]
+            lines = set(graph.station_lines(s))
+            if not lines or not (lines < bundle):
+                continue
+            movable.append(s)
+    return movable
 
-        cols: dict[float, list[str]] = defaultdict(list)
-        for sid in internal_ids:
-            cols[round(graph.stations[sid].x, 3)].append(sid)
 
+def _column_occupied_ys(
+    graph: MetroGraph, section: Section, col_x: float, skip_sid: str
+) -> list[float]:
+    """Ys of every other visible station (incl. off-track icons) at ``col_x``.
+
+    Lift candidates must avoid these slots or the lifted marker overlaps an
+    existing marker / icon at render time.
+    """
+    occ: list[float] = []
+    for sid2 in section.station_ids:
+        if sid2 == skip_sid:
+            continue
+        st2 = graph.stations.get(sid2)
+        if st2 is None or st2.is_port or st2.is_hidden:
+            continue
+        if abs(st2.x - col_x) > 0.5:
+            continue
+        occ.append(st2.y)
+    return occ
+
+
+def _balance_one_section(graph: MetroGraph, section: Section, y_spacing: float) -> None:
+    """Rebalance one section's fan-out siblings into the empty band above trunk."""
+    if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+        return
+    bundle = _section_bundle_lines(graph, section)
+    if not bundle:
+        return
+    port_set = section.port_ids
+    internal_ids = [
+        sid
+        for sid in section.station_ids
+        if sid not in port_set
+        and sid in graph.stations
+        and not graph.stations[sid].is_port
+        and not graph.stations[sid].is_hidden
+        and not graph.stations[sid].off_track
+    ]
+    if not internal_ids:
+        return
+
+    trunk_y = _section_lr_port_anchor_y(graph, section)
+    if trunk_y is None:
+        full_ys = sorted(
+            graph.stations[s].y
+            for s in internal_ids
+            if set(graph.station_lines(s)) == bundle
+        )
+        if not full_ys:
+            return
+        trunk_y = full_ys[len(full_ys) // 2]
+
+    cols: dict[float, list[str]] = defaultdict(list)
+    for sid in internal_ids:
+        cols[round(graph.stations[sid].x, 3)].append(sid)
+
+    section_top_y = min(graph.stations[s].y for s in internal_ids)
+    top_band = section_top_y - _ref_bbox_top(graph, section)
+    if top_band <= y_spacing + 0.5:
+        return
+
+    movable = _movable_partial_bundle_stations(graph, cols, bundle)
+    if not movable:
+        return
+
+    ys = [graph.stations[s].y for s in movable]
+    above_count = sum(1 for y in ys if y < trunk_y - 0.5)
+    below_count = sum(1 for y in ys if y > trunk_y + 0.5)
+    if below_count <= above_count:
+        return
+
+    _lift_below_trunk_siblings(
+        graph, section, movable, trunk_y, y_spacing, internal_ids
+    )
+
+    # Below-trunk compaction: when the first row below the trunk is empty but
+    # content sits two or more slots below, lift all below-trunk stations up by
+    # one ``y_spacing`` so they pack against the trunk row.  Honours the
+    # column-occupied guard so off-track icons and marker clearance hold.
+    _compact_below_trunk_band(graph, section, trunk_y, y_spacing)
+
+
+def _lift_below_trunk_siblings(
+    graph: MetroGraph,
+    section: Section,
+    movable: list[str],
+    trunk_y: float,
+    y_spacing: float,
+    internal_ids: list[str],
+) -> None:
+    """Iteratively lift (or swap) below-trunk siblings into the empty top band."""
+    section_internal_set = set(internal_ids)
+    for _ in range(len(movable)):
         section_top_y = min(graph.stations[s].y for s in internal_ids)
         top_band = section_top_y - _ref_bbox_top(graph, section)
         if top_band <= y_spacing + 0.5:
-            continue
-
-        movable: list[str] = []
-        for x, sids in cols.items():
-            trunks_in_col = [s for s in sids if set(graph.station_lines(s)) == bundle]
-            if not trunks_in_col:
+            break
+        ys_by_sid = {s: graph.stations[s].y for s in movable}
+        above = [s for s, y in ys_by_sid.items() if y < trunk_y - 0.5]
+        below = [s for s, y in ys_by_sid.items() if y > trunk_y + 0.5]
+        if len(below) <= len(above):
+            break
+        line_sets = {frozenset(graph.station_lines(s)) for s in movable}
+        if len(line_sets) == 1:
+            below.sort(key=lambda s: graph.stations[s].y, reverse=True)
+        else:
+            below.sort(key=lambda s: graph.stations[s].y)
+        # First below-trunk candidate whose lift Y doesn't collide with
+        # another station/icon already occupying the same column.
+        candidate = None
+        new_y = section_top_y - y_spacing
+        for cand in below:
+            col_x = graph.stations[cand].x
+            occ = _column_occupied_ys(graph, section, col_x, cand)
+            if any(abs(oy - new_y) < y_spacing - 0.5 for oy in occ):
                 continue
-            for s in sids:
-                if s in trunks_in_col:
-                    continue
-                lines = set(graph.station_lines(s))
-                if not lines or not (lines < bundle):
-                    continue
-                movable.append(s)
-
-        if not movable:
-            continue
-
-        ys = [graph.stations[s].y for s in movable]
-        above_count = sum(1 for y in ys if y < trunk_y - 0.5)
-        below_count = sum(1 for y in ys if y > trunk_y + 0.5)
-        if below_count <= above_count:
-            continue
-
-        section_internal_set = set(internal_ids)
-
-        # Ys of every other station (incl. off-track icons) at ``col_x``.
-        # Lift candidates must avoid these slots or the lifted marker
-        # overlaps an existing marker / icon at render time.
-        def _column_occupied_ys(col_x: float, skip_sid: str) -> list[float]:
-            occ: list[float] = []
-            for sid2 in section.station_ids:
-                if sid2 == skip_sid:
-                    continue
-                st2 = graph.stations.get(sid2)
-                if st2 is None or st2.is_port or st2.is_hidden:
-                    continue
-                if abs(st2.x - col_x) > 0.5:
-                    continue
-                occ.append(st2.y)
-            return occ
-
-        max_iters = len(movable)
-        for _ in range(max_iters):
-            section_top_y = min(graph.stations[s].y for s in internal_ids)
-            top_band = section_top_y - _ref_bbox_top(graph, section)
-            if top_band <= y_spacing + 0.5:
+            candidate = cand
+            break
+        if candidate is None:
+            break
+        st = graph.stations.get(candidate)
+        has_above_label = bool(st and st.label and st.label.strip())
+        label_clearance = y_spacing / 2 if has_above_label else 0.0
+        # Off-track file icons reach ~16 px above centre; on-track markers
+        # reach ~9.5 px.  Use the wider reach when relevant.
+        marker_clearance = 16.0 if (st and st.off_track) else 9.5
+        min_y = _ref_bbox_top(graph, section) + max(label_clearance, marker_clearance)
+        if new_y < min_y - 0.5:
+            if not above:
                 break
-            ys_by_sid = {s: graph.stations[s].y for s in movable}
-            above = [s for s, y in ys_by_sid.items() if y < trunk_y - 0.5]
-            below = [s for s, y in ys_by_sid.items() if y > trunk_y + 0.5]
-            if len(below) <= len(above):
+            above.sort(key=lambda s: graph.stations[s].y)
+            top_above = above[0]
+            ya = graph.stations[top_above].y
+            yc = graph.stations[candidate].y
+            if candidate != below[0]:
                 break
-            line_sets = {frozenset(graph.station_lines(s)) for s in movable}
-            if len(line_sets) == 1:
-                below.sort(key=lambda s: graph.stations[s].y, reverse=True)
-            else:
-                below.sort(key=lambda s: graph.stations[s].y)
-            # First below-trunk candidate whose lift Y doesn't collide
-            # with another station/icon already occupying the same column.
-            candidate = None
-            new_y = section_top_y - y_spacing
-            for cand in below:
-                col_x = graph.stations[cand].x
-                occ = _column_occupied_ys(col_x, cand)
-                if any(abs(oy - new_y) < y_spacing - 0.5 for oy in occ):
-                    continue
-                candidate = cand
-                break
-            if candidate is None:
-                break
-            st = graph.stations.get(candidate)
-            has_above_label = bool(st and st.label and st.label.strip())
-            label_clearance = y_spacing / 2 if has_above_label else 0.0
-            # Off-track file icons reach ~16 px above centre; on-track
-            # markers reach ~9.5 px.  Use the wider reach when relevant.
-            marker_clearance = 16.0 if (st and st.off_track) else 9.5
-            min_y = _ref_bbox_top(graph, section) + max(
-                label_clearance, marker_clearance
+            graph.stations[candidate].y = ya
+            graph.stations[top_above].y = yc
+            _shift_linear_consumer_chain(
+                graph, candidate, ya - yc, section_internal_set
             )
-            if new_y < min_y - 0.5:
-                if not above:
-                    break
-                above.sort(key=lambda s: graph.stations[s].y)
-                top_above = above[0]
-                ya = graph.stations[top_above].y
-                yc = graph.stations[candidate].y
-                if candidate != below[0]:
-                    break
-                graph.stations[candidate].y = ya
-                graph.stations[top_above].y = yc
-                _shift_linear_consumer_chain(
-                    graph, candidate, ya - yc, section_internal_set
-                )
-                _shift_linear_consumer_chain(
-                    graph, top_above, yc - ya, section_internal_set
-                )
-                break
-            ext_feeders = _balance_direct_external_feeder_ys(
-                graph, candidate, section.id
+            _shift_linear_consumer_chain(
+                graph, top_above, yc - ya, section_internal_set
             )
-            if len(ext_feeders) >= 2 and all(fy >= new_y - 0.5 for fy in ext_feeders):
-                break
-            delta = new_y - graph.stations[candidate].y
-            graph.stations[candidate].y = new_y
-            _shift_linear_consumer_chain(graph, candidate, delta, section_internal_set)
-
-        # Below-trunk compaction: when the first row below the trunk is
-        # empty but content sits two or more slots below, lift all
-        # below-trunk stations up by one ``y_spacing`` so they pack
-        # against the trunk row.  Honours the existing column-occupied
-        # guard so off-track icons and marker clearance aren't violated.
-        _compact_below_trunk_band(graph, section, trunk_y, y_spacing)
+            break
+        ext_feeders = _balance_direct_external_feeder_ys(graph, candidate, section.id)
+        if len(ext_feeders) >= 2 and all(fy >= new_y - 0.5 for fy in ext_feeders):
+            break
+        delta = new_y - graph.stations[candidate].y
+        graph.stations[candidate].y = new_y
+        _shift_linear_consumer_chain(graph, candidate, delta, section_internal_set)
 
 
 def _compact_below_trunk_band(
