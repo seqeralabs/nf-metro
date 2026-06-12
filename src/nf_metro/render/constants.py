@@ -177,6 +177,9 @@ WATERMARK_PADDING_RATIO: float = 0.5
 WATERMARK_Y_INSET: float = 8.0
 """Y distance from bottom edge for watermark text."""
 
+WATERMARK_FILL: str = "rgba(150, 150, 150, 0.6)"
+"""Fill color for the watermark and caption text."""
+
 # ---------------------------------------------------------------------------
 # Fallback colors
 # ---------------------------------------------------------------------------
