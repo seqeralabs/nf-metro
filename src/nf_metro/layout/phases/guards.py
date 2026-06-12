@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from nf_metro.layout.constants import (
     COMPONENT_BAND_OVERLAP_TOLERANCE,
     COORD_TOLERANCE,
+    COORD_TOLERANCE_FINE,
     EDGE_TO_BUNDLE_CLEARANCE,
     GUARD_TOLERANCE,
     ICON_HALF_HEIGHT,
@@ -2469,6 +2470,48 @@ def _guard_merge_port_approach_side(
     first = violations[0]
     extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
+def _guard_bypass_flat_entry_runway(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """Final-phase: a bypass horizontal line at a multi-feeder merge port must
+    arrive at the same rendered Y as its first downstream target so the
+    intra-section entry-runway leg renders flat.
+    """
+    from nf_metro.layout.routing.invariants import (
+        bypass_horizontal_targets,
+        classify_merge_port_feeders,
+    )
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    for port_id in graph.ports:
+        if classify_merge_port_feeders(graph, port_id) is None:
+            continue
+        bypass = bypass_horizontal_targets(graph, port_id)
+        if not bypass:
+            continue
+        port_st = graph.stations.get(port_id)
+        if port_st is None:
+            continue
+        for lid, tgt_st in bypass.items():
+            port_off = offsets.get((port_id, lid), 0.0)
+            tgt_off = offsets.get((tgt_st.id, lid), 0.0)
+            rendered_port = port_st.y + port_off
+            rendered_tgt = tgt_st.y + tgt_off
+            if abs(rendered_port - rendered_tgt) > COORD_TOLERANCE_FINE:
+                raise PhaseInvariantError(
+                    f"{phase}: bypass line {lid!r} entry runway not flat: "
+                    f"port {port_id!r} renders at y={rendered_port:.1f}, "
+                    f"target {tgt_st.id!r} renders at y={rendered_tgt:.1f}"
+                )
 
 
 def _guard_partial_branch_offset_gaps(

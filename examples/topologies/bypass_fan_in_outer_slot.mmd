@@ -1,0 +1,60 @@
+%%metro title: Bypass Fan-in Outer Slot
+%%metro style: dark
+%%metro line: dna | DNA | #e63946
+%%metro line: rna | RNA | #2db572
+%%metro line: meth | Methylation | #0570b0
+%%metro line: atac | ATAC | #f5c542
+%%metro line: qc | QC | #ff8c00
+
+graph LR
+    subgraph ingest [Ingest]
+        samplesheet[Samplesheet]
+        demux[Demultiplex]
+        samplesheet -->|dna,rna,meth,atac,qc| demux
+    end
+
+    subgraph trim [Trim & QC]
+        fastp[Fastp]
+        screen[Contam Screen]
+        fastp -->|dna,rna,meth,atac,qc| screen
+    end
+
+    subgraph hub [Branch Hub]
+        dispatch[Dispatch]
+    end
+
+    subgraph align_right [Alignment]
+        bwa[BWA-MEM]
+        markdup[MarkDup]
+        bwa -->|dna,meth| markdup
+    end
+
+    subgraph quant_bottom [Quantification]
+        salmon[Salmon]
+        tximport[Tximport]
+        salmon -->|rna| tximport
+    end
+
+    subgraph peaks_bottom [Peak Calling]
+        macs[MACS2]
+        macs -->|atac| macs2anno[Annotate Peaks]
+    end
+
+    subgraph integrate [Integration]
+        mofa[MOFA Factor Model]
+        report[MultiQC Report]
+        mofa -->|dna,rna,meth,atac| report
+    end
+
+    demux -->|dna,rna,meth,atac,qc| fastp
+    screen -->|dna,rna,meth,atac,qc| dispatch
+
+    dispatch -->|dna,meth| bwa
+    dispatch -->|rna| salmon
+    dispatch -->|atac| macs
+
+    markdup -->|dna,meth| mofa
+    tximport -->|rna| mofa
+    macs2anno -->|atac| mofa
+
+    screen -->|qc| report

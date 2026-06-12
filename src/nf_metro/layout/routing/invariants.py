@@ -38,7 +38,7 @@ from nf_metro.layout.routing.common import (
     horizontal_direction,
     vertical_direction,
 )
-from nf_metro.parser.model import Edge, MetroGraph, PortSide
+from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
 
 # Segments shorter than this are sub-pixel artefacts of per-line
 # offsets and carry no meaningful direction of travel.
@@ -422,6 +422,38 @@ def _immediate_feeder(graph, port_id: str, line_id: str):  # noqa: ANN001, ANN20
     return None, False
 
 
+def bypass_horizontal_targets(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    port_id: str,
+) -> dict[str, Station]:
+    """Return mapping from line_id to first internal target for bypass lines.
+
+    A bypass line co-travels horizontally to an entry port (its feeder is a
+    junction at the port's own Y) but its first downstream station inside the
+    section sits at a different Y.
+    """
+    port_st = graph.stations.get(port_id)
+    if port_st is None:
+        return {}
+    outgoing = {e.line_id: e for e in graph.edges_from(port_id)}
+    result: dict[str, Station] = {}
+    for lid in graph.station_lines(port_id):
+        src, is_junction = _immediate_feeder(graph, port_id, lid)
+        if src is None or not is_junction:
+            continue
+        if abs(src.y - port_st.y) > _MERGE_APPROACH_Y_TOL:
+            continue
+        edge = outgoing.get(lid)
+        if edge is None:
+            continue
+        tgt = graph.stations.get(edge.target)
+        if tgt is None or tgt.is_port:
+            continue
+        if abs(tgt.y - port_st.y) > COORD_TOLERANCE_FINE:
+            result[lid] = tgt
+    return result
+
+
 def classify_merge_port_feeders(
     graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
     port_id: str,
@@ -437,9 +469,12 @@ def classify_merge_port_feeders(
     inter-section edge that arrives perpendicular at the boundary.  A
     line dropped into the row by an upstream fan/merge junction
     co-travels horizontally and is not a perpendicular joiner, so it is
-    left unclassified.  Returns ``None`` when the port is not such a
-    reconvergence merge - i.e. when there is no approach-side decision
-    to make.
+    left unclassified.  Bypass horizontal lines (junction-derived,
+    same-Y feeder, but heading to a deeper station) are excluded from
+    the horizontal list so they do not inflate ``max_horiz`` and push
+    perpendicular lines into unnecessary outer slots.  Returns ``None``
+    when the port is not such a reconvergence merge - i.e. when there
+    is no approach-side decision to make.
     """
     port_obj = graph.ports.get(port_id)
     if port_obj is None or not port_obj.is_entry:
@@ -450,6 +485,7 @@ def classify_merge_port_feeders(
     if port_st is None:
         return None
 
+    bypass_lids = set(bypass_horizontal_targets(graph, port_id))
     distinct_sources: set[int] = set()
     horizontal: list[str] = []
     below: list[str] = []
@@ -459,6 +495,8 @@ def classify_merge_port_feeders(
         if src is None:
             continue
         distinct_sources.add(id(src))
+        if lid in bypass_lids:
+            continue
         dy = src.y - port_st.y
         if abs(dy) <= _MERGE_APPROACH_Y_TOL:
             horizontal.append(lid)

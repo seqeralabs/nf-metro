@@ -6189,6 +6189,57 @@ def test_merge_port_rejoining_line_takes_approach_slot(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Bypass line at fan-in entry port must hold the outer slot
+# ---------------------------------------------------------------------------
+
+
+_FIXTURES_WITH_BYPASS_FAN_IN = [
+    "topologies/bypass_fan_in_outer_slot.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_BYPASS_FAN_IN)
+def test_bypass_fan_in_outer_slot(fixture):
+    """A bypass line at a multi-feeder entry port must render flat to its target.
+
+    When a horizontal junction-derived line skips the section's trunk stations
+    to reach a deeper station at a different Y, the entry-port offset must be
+    set so the bypass line arrives already at the target's rendered Y-level.
+    The intra-section entry-runway leg then renders flat (no U-shaped dip).
+    """
+    from nf_metro.layout.constants import COORD_TOLERANCE_FINE
+    from nf_metro.layout.routing.invariants import (
+        bypass_horizontal_targets,
+        classify_merge_port_feeders,
+    )
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+
+    for port_id in graph.ports:
+        classified = classify_merge_port_feeders(graph, port_id)
+        if classified is None:
+            continue
+        bypass = bypass_horizontal_targets(graph, port_id)
+        if not bypass:
+            continue
+
+        port_st = graph.stations[port_id]
+        for lid, tgt_st in bypass.items():
+            actual_port_off = offsets.get((port_id, lid), 0.0)
+            actual_tgt_off = offsets.get((tgt_st.id, lid), 0.0)
+            rendered_port_y = port_st.y + actual_port_off
+            rendered_tgt_y = tgt_st.y + actual_tgt_off
+            assert abs(rendered_port_y - rendered_tgt_y) < COORD_TOLERANCE_FINE, (
+                f"{fixture}: bypass line {lid!r} entry runway is not flat: "
+                f"port {port_id!r} renders at y={rendered_port_y:.1f} "
+                f"(station {port_st.y:.0f} + offset {actual_port_off:.1f}), "
+                f"target {tgt_st.id!r} renders at y={rendered_tgt_y:.1f} "
+                f"(station {tgt_st.y:.0f} + offset {actual_tgt_off:.1f})"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Partial-line fan branches must not reserve absent-line offset slots
 # ---------------------------------------------------------------------------
 
