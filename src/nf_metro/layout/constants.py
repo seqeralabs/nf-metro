@@ -678,44 +678,58 @@ no single shift can align them all and the per-section snap from Stage
 # ---------------------------------------------------------------------------
 # Cross-constant relations
 # ---------------------------------------------------------------------------
+class ConstantRelationError(ValueError):
+    """A layout constant violates a required cross-constant ordering."""
+
+
 def _check_constant_relations() -> None:
-    """Assert the geometric orderings that independently-set constants depend on.
+    """Enforce the geometric orderings that independently-set constants depend on.
 
     Unlike the derived constants above (expressed as formulas of their
-    parents), each of these holds only *relative to another*, so encode the
-    relationships as import-time asserts.
+    parents), each of these holds only *relative to another*.  Explicit
+    raises (not ``assert``) keep the checks live under ``python -O``.
     """
+
+    def require(ok: bool, msg: str) -> None:
+        if not ok:
+            raise ConstantRelationError(msg)
+
     # Coordinate-tolerance tiers must stay strictly ordered so each answers
     # "same coordinate?" at its own precision without colliding with the next.
-    assert COORD_TOLERANCE_FINE < SAME_COORD_TOLERANCE < COORD_TOLERANCE, (
+    require(
+        COORD_TOLERANCE_FINE < SAME_COORD_TOLERANCE < COORD_TOLERANCE,
         "coordinate tolerances must be strictly ordered "
         f"fine ({COORD_TOLERANCE_FINE}) < same ({SAME_COORD_TOLERANCE}) "
-        f"< coarse ({COORD_TOLERANCE})"
+        f"< coarse ({COORD_TOLERANCE})",
     )
     # A same-coordinate test must never swallow an adjacent per-line offset
     # slot, or two parallel lines collapse onto one coordinate.
-    assert SAME_COORD_TOLERANCE < OFFSET_STEP, (
+    require(
+        SAME_COORD_TOLERANCE < OFFSET_STEP,
         f"SAME_COORD_TOLERANCE ({SAME_COORD_TOLERANCE}) must stay below "
-        f"OFFSET_STEP ({OFFSET_STEP}) so offset slots are not merged"
+        f"OFFSET_STEP ({OFFSET_STEP}) so offset slots are not merged",
     )
     # Bypass corners turn with CURVE_RADIUS each side; without 2*CURVE_RADIUS
     # of vertical clearance the two corners overlap the channel.
-    assert BYPASS_CLEARANCE >= 2 * CURVE_RADIUS, (
+    require(
+        BYPASS_CLEARANCE >= 2 * CURVE_RADIUS,
         f"BYPASS_CLEARANCE ({BYPASS_CLEARANCE}) must be >= 2*CURVE_RADIUS "
-        f"({2 * CURVE_RADIUS}) so bypass corners clear the channel"
+        f"({2 * CURVE_RADIUS}) so bypass corners clear the channel",
     )
     # Nesting multiple bypass routes must step them apart by more than the
     # per-line offset, else stacked bypasses read as one bundle.
-    assert OFFSET_STEP < BYPASS_NEST_STEP, (
+    require(
+        OFFSET_STEP < BYPASS_NEST_STEP,
         f"OFFSET_STEP ({OFFSET_STEP}) must stay below BYPASS_NEST_STEP "
-        f"({BYPASS_NEST_STEP}) so nested bypass routes separate visibly"
+        f"({BYPASS_NEST_STEP}) so nested bypass routes separate visibly",
     )
     # A port offset from a station by up to the bundle's offset span must not
     # be mistaken for an elbow at that station.  The current value is
     # 4 * OFFSET_STEP; only the floor (>= OFFSET_STEP) is required to hold.
-    assert STATION_ELBOW_TOLERANCE >= OFFSET_STEP, (
+    require(
+        STATION_ELBOW_TOLERANCE >= OFFSET_STEP,
         f"STATION_ELBOW_TOLERANCE ({STATION_ELBOW_TOLERANCE}) must be "
-        f">= OFFSET_STEP ({OFFSET_STEP})"
+        f">= OFFSET_STEP ({OFFSET_STEP})",
     )
 
 

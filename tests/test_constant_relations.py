@@ -45,5 +45,5 @@ def test_station_elbow_tolerance_at_least_offset_step():
 )
 def test_violation_raises(monkeypatch, attr, bad_value):
     monkeypatch.setattr(c, attr, bad_value)
-    with pytest.raises(AssertionError):
+    with pytest.raises(c.ConstantRelationError):
         c._check_constant_relations()
