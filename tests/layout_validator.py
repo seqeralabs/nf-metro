@@ -1120,11 +1120,10 @@ def check_route_segment_crossings(
     return violations
 
 
-def _pt_at_station(pt, station_xy, hub_tol) -> bool:
-    """True if *pt* lands within ``hub_tol`` of a real (non-port) station."""
-    x, y = pt
-    for sx, sy in station_xy:
-        if abs(sx - x) <= hub_tol and abs(sy - y) <= hub_tol:
+def _pt_near(pt, points, tol) -> bool:
+    """True if *pt* is within ``tol`` of any ``(x, y)`` in *points* on both axes."""
+    for px, py in points:
+        if abs(px - pt[0]) <= tol and abs(py - pt[1]) <= tol:
             return True
     return False
 
@@ -1164,14 +1163,6 @@ def _shared_port_endpoints(graph, ra_edge, rb_edge) -> list[tuple[float, float]]
     return result
 
 
-def _pt_near_shared_port(pt, ports, fan_tol) -> bool:
-    """True if *pt* sits within ``fan_tol`` of any shared port endpoint."""
-    for px, py in ports:
-        if abs(px - pt[0]) <= fan_tol and abs(py - pt[1]) <= fan_tol:
-            return True
-    return False
-
-
 def _seg_near_vertical(p0, p1, vertical_dx_tol) -> bool:
     """True if the segment is near-vertical (small dx, non-zero dy)."""
     return abs(p1[0] - p0[0]) <= vertical_dx_tol and abs(p1[1] - p0[1]) > 0
@@ -1203,9 +1194,9 @@ def _route_pair_crossing(graph, ra, pa, rb, pb, station_xy, hub_tol):
             pt = _segments_cross(pa[ai], pa[ai + 1], pb[bi], pb[bi + 1])
             if pt is None:
                 continue
-            if _pt_at_station(pt, station_xy, hub_tol):
+            if _pt_near(pt, station_xy, hub_tol):
                 continue
-            if shared_ports and _pt_near_shared_port(pt, shared_ports, fan_tol):
+            if shared_ports and _pt_near(pt, shared_ports, fan_tol):
                 seg_a = (pa[ai], pa[ai + 1])
                 seg_b = (pb[bi], pb[bi + 1])
                 if not (
