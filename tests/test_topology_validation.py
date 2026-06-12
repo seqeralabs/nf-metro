@@ -28,6 +28,7 @@ from layout_validator import (
 )
 
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.routing.common import row_bottom_edge
 from nf_metro.layout.routing.context import _resolve_section_row
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
@@ -1165,16 +1166,6 @@ def _station_row(graph, station_id):
     return _resolve_section_row(graph, st) if st else None
 
 
-def _row_band_bottom(graph, row):
-    """Bottom Y of the lowest-extending section in *row*, or ``None``."""
-    bottoms = [
-        s.bbox_y + s.bbox_h
-        for s in graph.sections.values()
-        if s.bbox_w > 0 and s.grid_row == row
-    ]
-    return max(bottoms) if bottoms else None
-
-
 def _bypass_fan_weaves(graph):
     """Junction crossings where a bypass weaves a descender AT THE FAN.
 
@@ -1201,7 +1192,7 @@ def _bypass_fan_weaves(graph):
             continue
         if (row_a > jrow) == (row_b > jrow):
             continue  # not a bypass-vs-descender pair
-        band_bottom = _row_band_bottom(graph, jrow)
+        band_bottom = row_bottom_edge(graph, jrow, default=None)
         cross_y = v.context["intersection"][1]
         if band_bottom is not None and cross_y <= band_bottom + 1.0:
             out.append(v.message)
