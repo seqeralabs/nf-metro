@@ -10,10 +10,39 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import networkx as nx
+
 from nf_metro.parser.model import MetroGraph
 
 ERROR = "error"
 WARNING = "warning"
+
+
+class CyclicGraphError(ValueError):
+    """Raised when a graph the layout engine requires to be a DAG has a cycle."""
+
+
+def find_cycle(graph: MetroGraph) -> list[str] | None:
+    """Return a node sequence witnessing a cycle, or ``None`` if acyclic.
+
+    The returned path closes back on its first node (``["a", "b", "a"]`` for a
+    two-node cycle, ``["a", "a"]`` for a self-loop) so it reads directly as
+    ``a -> b -> a`` when joined.
+    """
+    g: nx.DiGraph[str] = nx.DiGraph()
+    for edge in graph.edges:
+        g.add_edge(edge.source, edge.target)
+    if nx.is_directed_acyclic_graph(g):
+        return None
+    cycle_edges = nx.find_cycle(g)
+    nodes = [source for source, _ in cycle_edges]
+    nodes.append(cycle_edges[0][0])
+    return nodes
+
+
+def format_cycle_error(witness: list[str]) -> str:
+    """Render a cycle witness path as a fatal error message."""
+    return f"Graph contains a cycle: {' -> '.join(witness)}"
 
 
 @dataclass(frozen=True)
@@ -30,6 +59,10 @@ class ValidationIssue:
 def validate_graph(graph: MetroGraph) -> list[ValidationIssue]:
     """Return graph-semantic findings for ``graph`` as structured data."""
     issues: list[ValidationIssue] = []
+
+    witness = find_cycle(graph)
+    if witness is not None:
+        issues.append(ValidationIssue(ERROR, format_cycle_error(witness)))
 
     for edge in graph.edges:
         if edge.line_id != "default" and edge.line_id not in graph.lines:

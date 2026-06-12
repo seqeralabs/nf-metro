@@ -76,94 +76,113 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
             groups[("solo", sec.id)] = (y_spacing, [sec.id])
 
     for pitch, sec_ids in groups.values():
-        half = pitch / 2.0
-        # Collect non-port, on-track station Ys across the whole group
-        # to estimate the row's shared grid offset.  Off-track stations
-        # were lifted by Stage 5.2 relative to their consumers; they
-        # snap to the same grid (so the y_spacing gap above the
-        # consumer is preserved) but don't influence the origin.
-        residues: Counter[float] = Counter()
-        per_section_ports: dict[str, set[str]] = {}
-        half_grid_ids = graph.half_grid_station_ids
-        for sec_id in sec_ids:
-            section = graph.sections.get(sec_id)
-            if section is None or section.bbox_h <= 0:
-                continue
-            port_ids = section.port_ids
-            per_section_ports[sec_id] = port_ids
-            for sid in section.station_ids:
-                if sid in port_ids:
-                    continue
-                if sid in half_grid_ids:
-                    # Half-grid stations sit at origin + 0.5 * pitch by
-                    # design; don't let them shift the row's grid origin.
-                    continue
-                st = graph.stations.get(sid)
-                if st is None or st.off_track:
-                    continue
-                residues[round(st.y % pitch, 3)] += 1
-        if not residues:
+        _snap_group_to_grid(graph, pitch, sec_ids, convergence_sources)
+
+    _restore_convergence_midpoints(graph, convergence_sources)
+
+
+def _slot_snap(y: float, origin: float, pitch: float, half: float) -> float:
+    """Snap ``y`` to ``origin + n*pitch`` unless that shifts it over half a pitch."""
+    snapped = origin + round((y - origin) / pitch) * pitch
+    return snapped if abs(snapped - y) <= half + 1e-6 else y
+
+
+def _group_grid_origin(
+    graph: MetroGraph, sec_ids: list[str], pitch: float
+) -> tuple[float, dict[str, set[str]]] | None:
+    """Mode of ``y % pitch`` across the group's on-grid stations, with port map.
+
+    Returns ``(origin, per_section_ports)`` or None when the group has no
+    on-grid majority.  Off-track stations were lifted relative to their
+    consumers; they snap to the same grid but don't influence the origin.
+    """
+    residues: Counter[float] = Counter()
+    per_section_ports: dict[str, set[str]] = {}
+    half_grid_ids = graph.half_grid_station_ids
+    for sec_id in sec_ids:
+        section = graph.sections.get(sec_id)
+        if section is None or section.bbox_h <= 0:
             continue
-        origin_r, top = residues.most_common(1)[0]
-        if top < 2 and len(residues) > 1:
-            continue
-
-        def _snap(
-            y: float, origin: float = origin_r, p: float = pitch, h: float = half
-        ) -> float:
-            snapped = origin + round((y - origin) / p) * p
-            return snapped if abs(snapped - y) <= h + 1e-6 else y
-
-        # Independent snapping can round two same-column stations onto one
-        # slot; the later one keeps its pre-snap Y rather than collapsing.
-        column_slots: dict[float, set[float]] = {}
-
-        for sec_id, port_ids in per_section_ports.items():
-            section = graph.sections.get(sec_id)
-            if section is None:
+        port_ids = section.port_ids
+        per_section_ports[sec_id] = port_ids
+        for sid in section.station_ids:
+            if sid in port_ids:
                 continue
-            is_tb_section = section.direction == "TB"
-            for sid in section.station_ids:
-                if sid in port_ids:
-                    continue
-                if sid in half_grid_ids:
-                    continue
-                st = graph.stations.get(sid)
-                if st is None:
-                    continue
-                if sid in convergence_sources:
-                    continue
-                target = _snap(st.y)
-                slots = column_slots.setdefault(round(st.x, 3), set())
-                if round(target, 3) in slots:
-                    target = st.y
-                slots.add(round(target, 3))
-                st.y = target
-            for pid in port_ids:
-                port = graph.ports.get(pid)
-                port_st = graph.stations.get(pid)
-                if port is None or port_st is None:
-                    continue
-                if port.side not in (PortSide.LEFT, PortSide.RIGHT):
-                    continue
-                # TB exit ports are anchored to the downstream entry-port
-                # Y by _resolve_tb_exit_y; preserve that alignment.
-                if is_tb_section and not port.is_entry:
-                    continue
-                if pid in convergence_sources:
-                    continue
-                port_st.y = _snap(port_st.y)
+            # Half-grid stations sit at origin + 0.5 * pitch by design; don't
+            # let them shift the row's grid origin.
+            if sid in half_grid_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or st.off_track:
+                continue
+            residues[round(st.y % pitch, 3)] += 1
+    if not residues:
+        return None
+    origin_r, top = residues.most_common(1)[0]
+    if top < 2 and len(residues) > 1:
+        return None
+    return origin_r, per_section_ports
 
-    # Restore convergence midpoints after snap: if a convergence
-    # target's source Ys moved during snap, re-place the target at the
-    # new midpoint so a fan-in still visually converges symmetrically.
+
+def _snap_group_to_grid(
+    graph: MetroGraph,
+    pitch: float,
+    sec_ids: list[str],
+    convergence_sources: dict[str, list[str]],
+) -> None:
+    """Snap one row-group's stations and LEFT/RIGHT ports to its shared grid."""
+    half = pitch / 2.0
+    origin_info = _group_grid_origin(graph, sec_ids, pitch)
+    if origin_info is None:
+        return
+    origin_r, per_section_ports = origin_info
+    half_grid_ids = graph.half_grid_station_ids
+
+    # Independent snapping can round two same-column stations onto one slot;
+    # the later one keeps its pre-snap Y rather than collapsing.
+    column_slots: dict[float, set[float]] = {}
+
+    for sec_id, port_ids in per_section_ports.items():
+        section = graph.sections.get(sec_id)
+        if section is None:
+            continue
+        is_tb_section = section.direction == "TB"
+        for sid in section.station_ids:
+            if sid in port_ids or sid in half_grid_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is None or sid in convergence_sources:
+                continue
+            target = _slot_snap(st.y, origin_r, pitch, half)
+            slots = column_slots.setdefault(round(st.x, 3), set())
+            if round(target, 3) in slots:
+                target = st.y
+            slots.add(round(target, 3))
+            st.y = target
+        for pid in port_ids:
+            port = graph.ports.get(pid)
+            port_st = graph.stations.get(pid)
+            if port is None or port_st is None:
+                continue
+            if port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                continue
+            # TB exit ports are anchored to the downstream entry-port Y by
+            # _resolve_tb_exit_y; preserve that alignment.
+            if is_tb_section and not port.is_entry:
+                continue
+            if pid in convergence_sources:
+                continue
+            port_st.y = _slot_snap(port_st.y, origin_r, pitch, half)
+
+
+def _restore_convergence_midpoints(
+    graph: MetroGraph, convergence_sources: dict[str, list[str]]
+) -> None:
+    """Re-centre each fan-in target on its post-snap source midpoint."""
     for target_id, src_ids in convergence_sources.items():
         st = graph.stations.get(target_id)
         if st is None or st.off_track:
             continue
-        # Convergence sources whose snap displaced them away from their
-        # original Y may break the midpoint relationship; recompute
-        # from the post-snap source coordinates.
         new_src_ys = [graph.stations[sid].y for sid in src_ids if sid in graph.stations]
         if len(set(round(y, 3) for y in new_src_ys)) < 2:
             continue

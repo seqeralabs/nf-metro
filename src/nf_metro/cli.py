@@ -13,7 +13,12 @@ from nf_metro import __version__
 from nf_metro.introspect import build_info, format_info_json, format_info_text
 from nf_metro.layout import PhaseInvariantError, compute_layout
 from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
-from nf_metro.parser import ERROR, parse_metro_mermaid, validate_graph
+from nf_metro.parser import (
+    ERROR,
+    CyclicGraphError,
+    parse_metro_mermaid,
+    validate_graph,
+)
 from nf_metro.parser.directives import apply_legend_directive
 from nf_metro.parser.model import LineSpread, MetroGraph
 from nf_metro.render import render_svg
@@ -205,7 +210,7 @@ def render(
 
     try:
         compute_layout(graph)
-    except PhaseInvariantError as e:
+    except (CyclicGraphError, PhaseInvariantError) as e:
         raise click.ClickException(str(e))
 
     theme_obj = _resolve_theme(theme, graph)
