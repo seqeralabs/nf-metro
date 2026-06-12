@@ -10,6 +10,7 @@ from typing import Any, TypeVar
 import click
 
 from nf_metro import __version__
+from nf_metro.explain import build_explain, format_explain_json, format_explain_text
 from nf_metro.introspect import build_info, format_info_json, format_info_text
 from nf_metro.layout import PhaseInvariantError, compute_layout
 from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
@@ -334,6 +335,64 @@ def info(input_file: Path, as_json: bool, verbose: bool) -> None:
         click.echo(format_info_json(report))
     else:
         click.echo(format_info_text(report, verbose=verbose))
+
+
+@cli.command()
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--json", "as_json", is_flag=True, help="Emit the full explanation as JSON."
+)
+@click.option(
+    "--section",
+    "section_filter",
+    default=None,
+    metavar="SECTION_ID",
+    help="Restrict output to decisions involving this section.",
+)
+@click.option(
+    "--station",
+    "station_filter",
+    default=None,
+    metavar="STATION_ID",
+    help="Restrict output to decisions involving this station.",
+)
+def explain(
+    input_file: Path,
+    as_json: bool,
+    section_filter: str | None,
+    station_filter: str | None,
+) -> None:
+    """Explain WHY nf-metro made each layout decision.
+
+    Surfaces the rule that fired for each inferred decision (section direction,
+    port sides, fold/row layout) and each synthetic element the engine inserted
+    (fan-out junctions, bypass-V stations).
+
+    Pairs with ``nf-metro info``, which shows WHAT was built; this command
+    shows WHY each non-trivial choice was made.
+
+    Use ``--section SECTION_ID`` or ``--station STATION_ID`` to focus the
+    output on decisions involving a specific element.
+    """
+    text = input_file.read_text()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            graph = parse_metro_mermaid(text)
+        except ValueError as e:
+            raise click.ClickException(str(e))
+    messages = [str(w.message) for w in caught]
+
+    report = build_explain(
+        graph,
+        messages,
+        section_filter=section_filter,
+        station_filter=station_filter,
+    )
+    if as_json:
+        click.echo(format_explain_json(report))
+    else:
+        click.echo(format_explain_text(report))
 
 
 @cli.command(context_settings={"ignore_unknown_options": True})
