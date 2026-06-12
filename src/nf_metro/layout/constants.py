@@ -679,12 +679,11 @@ no single shift can align them all and the per-section snap from Stage
 # Cross-constant relations
 # ---------------------------------------------------------------------------
 def _check_constant_relations() -> None:
-    """Assert the geometric orderings several constants depend on.
+    """Assert the geometric orderings that independently-set constants depend on.
 
     Unlike the derived constants above (expressed as formulas of their
-    parents), these constants are set independently but are only correct
-    *relative to each other*.  Encoding the relationships as import-time
-    asserts turns a silent mis-tuning into an immediate, located failure.
+    parents), each of these holds only *relative to another*, so encode the
+    relationships as import-time asserts.
     """
     # Coordinate-tolerance tiers must stay strictly ordered so each answers
     # "same coordinate?" at its own precision without colliding with the next.

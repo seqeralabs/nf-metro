@@ -5,21 +5,13 @@ mis-tuned constant (one whose value is only correct relative to another)
 into an immediate, located failure rather than a silent layout regression.
 """
 
-import importlib
-
 import pytest
 
 from nf_metro.layout import constants as c
 
 
 def test_relations_hold_on_current_values():
-    # The live module already ran this at import; re-running must not raise.
     c._check_constant_relations()
-
-
-def test_module_imports_cleanly():
-    # A reload re-executes the import-time assert block.
-    importlib.reload(c)
 
 
 def test_coordinate_tolerance_tiers_strictly_ordered():
@@ -48,6 +40,7 @@ def test_station_elbow_tolerance_at_least_offset_step():
         ("SAME_COORD_TOLERANCE", 5.0),  # exceeds OFFSET_STEP and COORD_TOLERANCE
         ("BYPASS_CLEARANCE", 1.0),  # below 2*CURVE_RADIUS
         ("OFFSET_STEP", 99.0),  # exceeds BYPASS_NEST_STEP
+        ("STATION_ELBOW_TOLERANCE", 0.0),  # below OFFSET_STEP
     ],
 )
 def test_violation_raises(monkeypatch, attr, bad_value):
