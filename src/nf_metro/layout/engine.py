@@ -548,24 +548,109 @@ def _compute_layout_scaled(
             break  # can't widen the binding axis (e.g. pinned) -- give up
         x_spacing, y_spacing = new_x, new_y
 
-    # Strike-clearance: a fan-in/fan-out, convergence, or descent diagonal that
-    # rakes a station's name label is cleared by lengthening the flat run at that
-    # station by whole grid columns (the pitch stays fixed), seating the
-    # transition outside the label.  Three grid-quantized levers, each a
-    # ``(kind, section, layer)`` triple: the section's entry-side runway, its
-    # exit-side runway, and a per-column gap before the struck station's layer.
-    # Need-driven: only stations the renderer would draw a strike through grow,
-    # so a clean layout -- every gallery render at its default pitch -- is left
-    # untouched.  Independent of pinned vs auto pitch: the room is local, not the
-    # global pitch, so it applies even when the caller fixed x_spacing.
-    #
-    # A grow step bumps every lever at each struck station -- which one relocates
-    # a given strike is hard to know in advance -- then a minimization pass
-    # strips each lever that turns out not to be load-bearing, so the settled
-    # layout carries the least extra width that keeps the labels clear (a strike
-    # cleared by one side does not leave the other's room behind).  A step a
-    # collinear check rejects, or that fails to reduce the struck count, is
-    # rolled back, so the loop never ships a layout worse than it found.
+    _apply_label_strike_clearance(
+        graph,
+        x_spacing=x_spacing,
+        y_spacing=y_spacing,
+        x_offset=x_offset,
+        y_offset=y_offset,
+        section_x_padding=section_x_padding,
+        section_y_padding=section_y_padding,
+        section_x_gap=section_x_gap,
+        section_y_gap=section_y_gap,
+        validate=validate,
+    )
+
+    # Assure file-icon leaf sinks off the trunk by construction: a leaf icon
+    # the laid-out routes rake a line across is taken off-track and the layout
+    # re-run once, so the off-track machinery lifts it clear of the passing
+    # line.  Keyed on an observed crossing (not on icon presence), so an
+    # end-of-chain terminus that already sits clear is never disturbed.
+    crossed_sinks = _line_crossed_file_icon_sinks(graph)
+    if crossed_sinks:
+        for sid in crossed_sinks:
+            graph.stations[sid].off_track = True
+        _layout_once(
+            graph,
+            x_spacing=x_spacing,
+            y_spacing=y_spacing,
+            x_offset=x_offset,
+            y_offset=y_offset,
+            section_x_padding=section_x_padding,
+            section_y_padding=section_y_padding,
+            section_x_gap=section_x_gap,
+            section_y_gap=section_y_gap,
+            validate=validate,
+        )
+
+    _retrofit_section_rails_phase(
+        graph,
+        x_spacing=x_spacing,
+        y_spacing=y_spacing,
+        section_x_padding=section_x_padding,
+        section_y_padding=section_y_padding,
+    )
+
+    # Record the bypassed-station label box behind each bypass V so the router
+    # can seat the V's flat-run corners clear of the label.  Read on the render
+    # path, so it is populated independent of ``validate``; computed once the
+    # layout has fully settled so the box matches what the renderer draws.
+    graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
+
+    # Always-on backstop (independent of ``validate``): the settled layout
+    # must never leave a station outside its own section bbox.  Runs on the
+    # render path so an unsupported directive combination fails loudly
+    # instead of shipping a silently-broken diagram (issue #424).
+    _guard_stations_within_bbox(graph, "final")
+    _snap(graph, "final")
+
+    if validate:
+        _guard_no_label_overlap(graph, "final")
+        _guard_no_diagonal_strikes_horizontal_label(graph, "final")
+        _guard_no_line_strikes_label(graph, "final")
+        _guard_no_wrapped_label_trunk_strike(graph, "final")
+        _guard_file_icon_no_name_label(graph, "final")
+        _guard_no_line_crosses_file_icon(graph, "final")
+        _guard_centered_line_spread_balanced(graph, "final")
+        _guard_rail_above_label_band(graph, "final")
+        _guard_rail_stations_seat_on_rails(graph, "final")
+        _guard_rail_one_station_per_column(graph, "final")
+        _guard_single_trunk_off_track_step(graph, "final")
+
+
+def _apply_label_strike_clearance(
+    graph: MetroGraph,
+    *,
+    x_spacing: float,
+    y_spacing: float,
+    x_offset: float,
+    y_offset: float,
+    section_x_padding: float,
+    section_y_padding: float,
+    section_x_gap: float,
+    section_y_gap: float,
+    validate: bool,
+) -> None:
+    """Lengthen flat runs at struck stations so diagonals clear their labels.
+
+    A fan-in/fan-out, convergence, or descent diagonal that rakes a station's
+    name label is cleared by lengthening the flat run at that station by whole
+    grid columns (the pitch stays fixed), seating the transition outside the
+    label.  Three grid-quantized levers, each a ``(kind, section, layer)``
+    triple: the section's entry-side runway, its exit-side runway, and a
+    per-column gap before the struck station's layer.  Need-driven: only
+    stations the renderer would draw a strike through grow, so a clean layout
+    (every gallery render at its default pitch) is left untouched.  Independent
+    of pinned vs auto pitch: the room is local, not the global pitch, so it
+    applies even when the caller fixed x_spacing.
+
+    A grow step bumps every lever at each struck station (which one relocates a
+    given strike is hard to know in advance), then a minimization pass strips
+    each lever that turns out not to be load-bearing, so the settled layout
+    carries the least extra width that keeps the labels clear.  A step a
+    collinear check rejects, or that fails to reduce the struck count, is rolled
+    back, so the loop never ships a layout worse than it found.
+    """
 
     def _relay() -> None:
         _layout_once(
@@ -672,87 +757,52 @@ def _compute_layout_scaled(
                     break
         _relay()
 
-    # Assure file-icon leaf sinks off the trunk by construction: a leaf icon
-    # the laid-out routes rake a line across is taken off-track and the layout
-    # re-run once, so the off-track machinery lifts it clear of the passing
-    # line.  Keyed on an observed crossing (not on icon presence), so an
-    # end-of-chain terminus that already sits clear is never disturbed.
-    crossed_sinks = _line_crossed_file_icon_sinks(graph)
-    if crossed_sinks:
-        for sid in crossed_sinks:
-            graph.stations[sid].off_track = True
-        _layout_once(
-            graph,
-            x_spacing=x_spacing,
-            y_spacing=y_spacing,
-            x_offset=x_offset,
-            y_offset=y_offset,
-            section_x_padding=section_x_padding,
-            section_y_padding=section_y_padding,
-            section_x_gap=section_x_gap,
-            section_y_gap=section_y_gap,
-            validate=validate,
-        )
 
-    # Per-section rail mode: the normal pipeline has positioned every
-    # section's bbox and inter-section ports.  Now overwrite the *internal*
-    # geometry of each rail-flagged section with the rail-mode layout (rails
-    # + spanning pills), anchored at the bbox the placement chose.  Non-rail
-    # sections and all inter-section placement keep the normal machinery.
+def _retrofit_section_rails_phase(
+    graph: MetroGraph,
+    *,
+    x_spacing: float,
+    y_spacing: float,
+    section_x_padding: float,
+    section_y_padding: float,
+) -> None:
+    """Overwrite each rail-flagged section's internal geometry with rail layout.
+
+    The normal pipeline has positioned every section's bbox and inter-section
+    ports; this replaces only the *internal* geometry of rail-flagged sections
+    (rails + spanning pills), anchored at the bbox the placement chose.  Non-rail
+    sections and all inter-section placement keep the normal machinery.
+    """
     rail_section_ids = [
         sid
         for sid, mode in graph.line_spread_overrides.items()
         if mode is LineSpread.RAILS
     ]
-    if rail_section_ids and graph.line_spread is not LineSpread.RAILS:
-        from nf_metro.layout.labels import diagonal_label_pitch_by_section
-        from nf_metro.layout.rail_mode import retrofit_section_rails
+    if not rail_section_ids or graph.line_spread is LineSpread.RAILS:
+        return
 
-        section_pitch_map = diagonal_label_pitch_by_section(graph, x_spacing)
-        # Rails sit one base grid pitch apart and their labels hang above or
-        # below the bundle, so the diagonal-label widening of the global
-        # y_spacing (the spread loop, for between-station label clearance) must
-        # not also push the rails apart.  Column X still uses the label-aware
-        # pitch, where horizontal label room genuinely matters.
-        rail_pitch = getattr(graph, "_base_y_spacing", y_spacing)
-        for sid in rail_section_ids:
-            section = graph.sections.get(sid)
-            if section is None:
-                continue
-            retrofit_section_rails(
-                graph,
-                section,
-                x_spacing=section_pitch_map.get(sid, x_spacing),
-                y_spacing=rail_pitch,
-                section_x_padding=section_x_padding,
-                section_y_padding=section_y_padding,
-            )
+    from nf_metro.layout.labels import diagonal_label_pitch_by_section
+    from nf_metro.layout.rail_mode import retrofit_section_rails
 
-    # Record the bypassed-station label box behind each bypass V so the router
-    # can seat the V's flat-run corners clear of the label.  Read on the render
-    # path, so it is populated independent of ``validate``; computed once the
-    # layout has fully settled so the box matches what the renderer draws.
-    graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
-
-    # Always-on backstop (independent of ``validate``): the settled layout
-    # must never leave a station outside its own section bbox.  Runs on the
-    # render path so an unsupported directive combination fails loudly
-    # instead of shipping a silently-broken diagram (issue #424).
-    _guard_stations_within_bbox(graph, "final")
-    _snap(graph, "final")
-
-    if validate:
-        _guard_no_label_overlap(graph, "final")
-        _guard_no_diagonal_strikes_horizontal_label(graph, "final")
-        _guard_no_line_strikes_label(graph, "final")
-        _guard_no_wrapped_label_trunk_strike(graph, "final")
-        _guard_file_icon_no_name_label(graph, "final")
-        _guard_no_line_crosses_file_icon(graph, "final")
-        _guard_centered_line_spread_balanced(graph, "final")
-        _guard_rail_above_label_band(graph, "final")
-        _guard_rail_stations_seat_on_rails(graph, "final")
-        _guard_rail_one_station_per_column(graph, "final")
-        _guard_single_trunk_off_track_step(graph, "final")
+    section_pitch_map = diagonal_label_pitch_by_section(graph, x_spacing)
+    # Rails sit one base grid pitch apart and their labels hang above or below
+    # the bundle, so the diagonal-label widening of the global y_spacing (the
+    # spread loop, for between-station label clearance) must not also push the
+    # rails apart.  Column X still uses the label-aware pitch, where horizontal
+    # label room genuinely matters.
+    rail_pitch = getattr(graph, "_base_y_spacing", y_spacing)
+    for sid in rail_section_ids:
+        section = graph.sections.get(sid)
+        if section is None:
+            continue
+        retrofit_section_rails(
+            graph,
+            section,
+            x_spacing=section_pitch_map.get(sid, x_spacing),
+            y_spacing=rail_pitch,
+            section_x_padding=section_x_padding,
+            section_y_padding=section_y_padding,
+        )
 
 
 def _snap(graph: MetroGraph, phase_id: str) -> None:
