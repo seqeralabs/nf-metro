@@ -56,7 +56,52 @@ before writing any code:
 Only after the symptom is pinned down to specific numbers should you reason
 about which layout pass / function produced them.
 
+### Diagnostic tooling
+
+The repo bundles two scripts that do exactly this render-and-read-the-numbers
+work, usable for **any** layout issue regardless of how it was reported:
+
+```bash
+# Validator/crash/guard verdict: parse -> layout -> validate -> route, with
+# findings split into authoring mistakes vs engine bugs.
+python .claude/skills/nf-metro-stress-render/scripts/probe_layout.py <file.mmd> --json
+# Per-section station coordinates, flagging stations off their section trunk,
+# off-track in/outputs far from their consumer, and oversized inter-row gaps.
+python .claude/skills/nf-metro-stress-render/scripts/inspect_layout.py <file.mmd>
+```
+
+Plus `nf-metro explain <file.mmd>` (the rule behind each inferred layout
+decision) and `nf-metro info --json` (the structural model). These are
+conveniences, not requirements - any way you pin the bug to numbers is fine.
+
+If the issue happens to have been filed by the `nf-metro-stress-render` skill,
+it carries a correct-by-construction repro `.mmd` in a `<details>` fold in the
+issue body - start from that rather than re-deriving one. Most issues won't have
+this; in that case build the reproducer yourself as usual.
+
 ## Step 4: Write the Invariant Test FIRST
+
+### First, check for an existing regression lock
+
+Most issues arrive bare and you write the failing test yourself (skip to the
+numbered steps below). But some - notably those filed by the
+`nf-metro-stress-render` skill - arrive with their regression infra **already
+in place**: a fixture in `examples/topologies/`, a `GALLERY_ENTRIES` row in
+`scripts/build_gallery.py`, and a `strict=True` xfail test referencing the issue
+number. Grep before you write anything:
+
+```bash
+grep -rn "#<N>" tests/ scripts/build_gallery.py examples/topologies/
+```
+
+- **If a strict-xfail lock exists**, that *is* your failing test - don't write a
+  duplicate, and don't re-add the fixture or gallery entry. Confirm it xfails on
+  the current tree (it documents the live defect).
+- **Completing the fix flips that strict-xfail to XPASS, which reds CI** - that
+  is the signal the bug is actually fixed. Finish by **removing the `xfail`
+  marker** so the now-passing assertion becomes a permanent positive guard.
+  (Deleting the whole test loses the guard; leaving the marker keeps CI red.)
+- **If no lock exists** (the common case), proceed with the steps below.
 
 Before any production code change:
 
