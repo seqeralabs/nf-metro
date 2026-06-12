@@ -345,20 +345,37 @@ def _fixtures_with_above_output() -> list[str]:
 _FIXTURES_WITH_ABOVE_OUTPUT = _fixtures_with_above_output()
 
 
+def _off_track_input_consumer_map(
+    graph: MetroGraph, junction_ids: set[str]
+) -> dict[str, str]:
+    """Map each off-track input to its on-track consumer (first edge wins).
+
+    Re-derived from edges here rather than via production's
+    :func:`_off_track_anchor_of`, so an invariant built on this map stays an
+    independent oracle of the engine's own consumer resolution.
+    """
+    consumer_of: dict[str, str] = {}
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if (
+            src is None
+            or tgt is None
+            or not src.off_track
+            or src.is_port
+            or src.id in junction_ids
+            or tgt.is_port
+            or tgt.id in junction_ids
+            or tgt.off_track
+        ):
+            continue
+        consumer_of.setdefault(src.id, tgt.id)
+    return consumer_of
+
+
 def _off_track_consumer_ids(graph: MetroGraph, junction_ids: set[str]) -> set[str]:
     """On-track stations fed directly by an off-track input."""
-    return {
-        graph.stations[e.target].id
-        for e in graph.edges
-        if (src := graph.stations.get(e.source)) is not None
-        and src.off_track
-        and not src.is_port
-        and src.id not in junction_ids
-        and (tgt := graph.stations.get(e.target)) is not None
-        and not tgt.is_port
-        and tgt.id not in junction_ids
-        and not tgt.off_track
-    }
+    return set(_off_track_input_consumer_map(graph, junction_ids).values())
 
 
 def _in_section_on_track_successors(
@@ -397,8 +414,7 @@ def _fixtures_with_linear_off_track_consumer() -> list[str]:
         jids = set(g.junctions)
         consumers = _off_track_consumer_ids(g, jids)
         if any(
-            len(_in_section_on_track_successors(g, cid, jids)) == 1
-            for cid in consumers
+            len(_in_section_on_track_successors(g, cid, jids)) == 1 for cid in consumers
         ):
             out.append(name)
     return out
@@ -1137,23 +1153,7 @@ def test_off_track_inputs_above_consumer(fixture):
     """
     graph = _layout(fixture)
     junction_ids = set(graph.junctions)
-    # Build off_track -> consumer map from edges
-    consumer_of: dict[str, str] = {}
-    for edge in graph.edges:
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if (
-            src is None
-            or tgt is None
-            or not src.off_track
-            or src.is_port
-            or src.id in junction_ids
-            or tgt.is_port
-            or tgt.id in junction_ids
-            or tgt.off_track
-        ):
-            continue
-        consumer_of.setdefault(src.id, tgt.id)
+    consumer_of = _off_track_input_consumer_map(graph, junction_ids)
 
     assert consumer_of, f"{fixture}: no off-track edges found"
 
