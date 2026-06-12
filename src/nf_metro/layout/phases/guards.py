@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from nf_metro.layout.constants import (
     COMPONENT_BAND_OVERLAP_TOLERANCE,
     COORD_TOLERANCE,
+    COORD_TOLERANCE_FINE,
     EDGE_TO_BUNDLE_CLEARANCE,
     GUARD_TOLERANCE,
     ICON_HALF_HEIGHT,
@@ -2492,6 +2493,53 @@ def _guard_merge_port_approach_side(
     first = violations[0]
     extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
+def _guard_bypass_port_no_slot_gaps(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """Final-phase: at a multi-feeder merge port containing a bypass horizontal
+    line, all bundle slots must be consecutive with no empty interior gaps.
+
+    A bypass line that is incorrectly classified as a horizontal co-traveller
+    inflates ``max_horiz`` and pushes perpendicular feeders into outer slots,
+    leaving empty slots between the horizontal band and the feeders.
+    """
+    from nf_metro.layout.routing.invariants import (
+        bypass_horizontal_targets,
+        classify_merge_port_feeders,
+        distinct_offset_levels,
+    )
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    for port_id in graph.ports:
+        if classify_merge_port_feeders(graph, port_id) is None:
+            continue
+        bypass = bypass_horizontal_targets(graph, port_id)
+        if not bypass:
+            continue
+        lines = list(graph.station_lines(port_id))
+        port_offsets = sorted(offsets.get((port_id, lid), 0.0) for lid in lines)
+        levels = distinct_offset_levels(port_offsets)
+        has_gap = any(
+            levels[i + 1] - levels[i] > OFFSET_STEP + COORD_TOLERANCE_FINE
+            for i in range(len(levels) - 1)
+        )
+        if has_gap:
+            raise PhaseInvariantError(
+                f"{phase}: merge port {port_id!r} has empty bundle slot gaps: "
+                f"max offset {port_offsets[-1]:.1f} > expected "
+                f"{(len(port_offsets) - 1) * OFFSET_STEP:.1f} "
+                f"for {len(port_offsets)} lines "
+                f"(offsets: {[f'{o:.0f}' for o in port_offsets]})"
+            )
 
 
 def _guard_partial_branch_offset_gaps(

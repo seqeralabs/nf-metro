@@ -1233,13 +1233,11 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
         ):
             new_offs[lid] = min_horiz - rank * ctx.offset_step
 
-        if all(
-            abs(new_offs[lid] - cur[lid]) <= _OFFSET_EQ_TOLERANCE for lid in new_offs
+        if any(
+            abs(new_offs[lid] - cur[lid]) > _OFFSET_EQ_TOLERANCE for lid in new_offs
         ):
-            continue
-
-        sec_id = graph.ports[port_id].section_id
-        _apply_offsets_through_section(ctx, port_id, sec_id, new_offs)
+            sec_id = graph.ports[port_id].section_id
+            _apply_offsets_through_section(ctx, port_id, sec_id, new_offs)
 
 
 def _apply_offsets_through_section(

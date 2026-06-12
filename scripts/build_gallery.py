@@ -315,6 +315,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     ),
     # --- Offset and bypass ---
     (
+        "bypass_fan_in_outer_slot",
+        TOPOLOGIES_DIR,
+        "A bypass line (QC) skips hub and alignment to reach a deeper station "
+        "(MultiQC Report) in the Integration section, while dna/meth/rna/atac "
+        "converge at a fan-in entry port. The bypass line claims the outer slot "
+        "so no empty interior gaps appear (issue #655).",
+    ),
+    (
         "mismatched_tracks",
         TOPOLOGIES_DIR,
         "Lines with mismatched track counts at shared stations.",

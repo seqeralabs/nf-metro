@@ -6244,6 +6244,56 @@ def test_merge_port_rejoining_line_takes_approach_slot(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Bypass line at fan-in entry port must hold the outer slot
+# ---------------------------------------------------------------------------
+
+
+_FIXTURES_WITH_BYPASS_FAN_IN = [
+    "topologies/bypass_fan_in_outer_slot.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_BYPASS_FAN_IN)
+def test_bypass_fan_in_outer_slot(fixture):
+    """At a multi-feeder entry port containing a bypass horizontal line, all
+    bundle slots must be consecutive with no empty interior gaps.
+
+    A bypass line misclassified as a plain horizontal co-traveller inflates
+    ``max_horiz``, pushing perpendicular feeders into outer slots and leaving
+    empty interior slots.  After the fix, all N lines pack into slots 0..N-1.
+    """
+    from nf_metro.layout.constants import COORD_TOLERANCE_FINE, OFFSET_STEP
+    from nf_metro.layout.routing.invariants import (
+        bypass_horizontal_targets,
+        classify_merge_port_feeders,
+        distinct_offset_levels,
+    )
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+
+    for port_id in graph.ports:
+        if classify_merge_port_feeders(graph, port_id) is None:
+            continue
+        bypass = bypass_horizontal_targets(graph, port_id)
+        if not bypass:
+            continue
+        lines = list(graph.station_lines(port_id))
+        port_offsets = sorted(offsets.get((port_id, lid), 0.0) for lid in lines)
+        levels = distinct_offset_levels(port_offsets)
+        gaps = [
+            (levels[i], levels[i + 1])
+            for i in range(len(levels) - 1)
+            if levels[i + 1] - levels[i] > OFFSET_STEP + COORD_TOLERANCE_FINE
+        ]
+        assert not gaps, (
+            f"{fixture}: merge port {port_id!r} has empty bundle slot gaps: "
+            f"gaps at {gaps} "
+            f"(offsets: {[f'{o:.0f}' for o in port_offsets]})"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Partial-line fan branches must not reserve absent-line offset slots
 # ---------------------------------------------------------------------------
 
