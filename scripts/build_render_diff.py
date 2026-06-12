@@ -24,6 +24,15 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tests"))
+
+from layout_metrics import (  # noqa: E402
+    METRICS,
+    delta_direction,
+    format_delta,
+    format_value,
+)
+
 HTML_TEMPLATE = """\
 <!DOCTYPE html>
 <html lang="en">
@@ -218,6 +227,48 @@ HTML_TEMPLATE = """\
   .intro a {{
     color: var(--accent);
   }}
+  .metrics {{
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }}
+  .metrics h2 {{
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+    color: var(--accent);
+  }}
+  .metrics .caption {{
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 0.75rem;
+  }}
+  .metrics table {{
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.82rem;
+  }}
+  .metrics th, .metrics td {{
+    padding: 0.3rem 0.6rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }}
+  .metrics th:first-child, .metrics td:first-child {{
+    text-align: left;
+  }}
+  .metrics th {{
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+  }}
+  .metrics td a {{ color: var(--text); text-decoration: none; }}
+  .metrics td a:hover {{ color: var(--accent); }}
+  .m-flat {{ color: var(--muted); }}
+  .m-better {{ color: #4ec9b0; font-weight: 600; }}
+  .m-worse {{ color: #f38ba8; font-weight: 600; }}
 </style>
 </head>
 <body>
@@ -248,6 +299,7 @@ switch between side-by-side, base-only, and PR-only views.
     (red <em>removed</em> badge)</li>
 </ul>
 </details>
+{metrics}
 {toc}
 {entries}
 <script>
@@ -282,12 +334,69 @@ document.querySelectorAll('.toggle-bar button').forEach(btn => {{
 """
 
 
-def _load_manifest(render_dir: Path) -> dict[str, str]:
-    """Load manifest.json from a render directory, or return empty dict."""
-    manifest_path = render_dir / "manifest.json"
-    if manifest_path.exists():
-        return json.loads(manifest_path.read_text())
+def _load_json(render_dir: Path, filename: str) -> dict:
+    """Load a JSON sidecar from a render directory, or return an empty dict."""
+    path = render_dir / filename
+    if path.exists():
+        return json.loads(path.read_text())
     return {}
+
+
+def _build_metrics_html(
+    changed: list[tuple[str, str]],
+    base_metrics: dict[str, dict[str, float]],
+    pr_metrics: dict[str, dict[str, float]],
+) -> str:
+    """Build the advisory layout-quality delta table for the changed renders.
+
+    Returns an empty string when no scorecard is available on either side (the
+    base branch predates the metric, or computation failed everywhere).
+    """
+    if not base_metrics and not pr_metrics:
+        return ""
+
+    header_cells = "".join(f"<th>{spec.label}</th>" for spec in METRICS)
+    rows: list[str] = []
+    for name, _kind in changed:
+        stem = name.removesuffix(".svg")
+        base = base_metrics.get(name)
+        pr = pr_metrics.get(name)
+        if base is None and pr is None:
+            continue
+        cells = [f'<td><a href="#{stem}">{stem}</a></td>']
+        for spec in METRICS:
+            bv = base.get(spec.key) if base else None
+            pv = pr.get(spec.key) if pr else None
+            direction = delta_direction(bv, pv)
+            cls = {-1: "m-better", 1: "m-worse", 0: "m-flat"}[direction]
+            both_present = bv is not None and pv is not None
+            if both_present and direction != 0:
+                text = (
+                    f"{format_value(spec, bv)}&rarr;{format_value(spec, pv)} "
+                    f"({format_delta(spec, bv, pv)})"
+                )
+            elif both_present:
+                text = format_value(spec, pv)
+            elif bv is None:
+                text = f"&ndash;&rarr;{format_value(spec, pv)}"
+            else:
+                text = f"{format_value(spec, bv)}&rarr;&ndash;"
+            cells.append(f'<td class="{cls}">{text}</td>')
+        rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    if not rows:
+        return ""
+
+    return (
+        '<div class="metrics">\n<h2>Layout-quality metrics</h2>\n'
+        '<p class="caption">Advisory only &mdash; nothing gates on these. '
+        "Lower is better; "
+        '<span class="m-better">green</span> improved, '
+        '<span class="m-worse">red</span> regressed.</p>\n'
+        f"<table>\n<tr><th>Render</th>{header_cells}</tr>\n"
+        + "\n".join(rows)
+        + "\n</table>\n</div>"
+    )
 
 
 def build_diff(
@@ -314,11 +423,14 @@ def build_diff(
         return False
 
     # Load manifest from PR renders (preferred) with base as fallback
-    manifest = _load_manifest(pr_dir)
-    base_manifest = _load_manifest(base_dir)
+    manifest = _load_json(pr_dir, "manifest.json")
+    base_manifest = _load_json(base_dir, "manifest.json")
     for name, _ in changed:
         if name not in manifest and name in base_manifest:
             manifest[name] = base_manifest[name]
+
+    base_metrics = _load_json(base_dir, "metrics.json")
+    pr_metrics = _load_json(pr_dir, "metrics.json")
 
     # Group changed files by section
     section_order: list[str] = []
@@ -436,9 +548,15 @@ def build_diff(
                 )
             entries_html.append(entry)
 
+    ordered_changed = [
+        item for section in section_order for item in by_section[section]
+    ]
+    metrics_html = _build_metrics_html(ordered_changed, base_metrics, pr_metrics)
+
     html = HTML_TEMPLATE.format(
         title_suffix=title_suffix,
         summary=summary,
+        metrics=metrics_html,
         toc=toc,
         entries="\n\n".join(entries_html),
     )
