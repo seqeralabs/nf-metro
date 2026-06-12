@@ -23,6 +23,7 @@ from nf_metro.layout.constants import (
     LABEL_PAD,
     LINE_GAP,
     MIN_STATION_FLAT_LENGTH,
+    SAME_COORD_TOLERANCE,
     TB_LINE_Y_OFFSET,
     TERMINUS_ICON_CLEARANCE,
     TERMINUS_ICON_CLEARANCE_V,
@@ -81,7 +82,7 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
             if len(preds) != 1:
                 continue
             src = graph.stations[next(iter(preds))]
-            if abs(src.y - st.y) < 0.5:
+            if abs(src.y - st.y) < SAME_COORD_TOLERANCE:
                 continue
             collision = False
             for sib_sid in section.station_ids:
@@ -90,9 +91,9 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
                 sib = graph.stations.get(sib_sid)
                 if sib is None or sib.is_port or sib.is_hidden:
                     continue
-                if abs(sib.x - st.x) > 0.5:
+                if abs(sib.x - st.x) > SAME_COORD_TOLERANCE:
                     continue
-                if abs(sib.y - src.y) < 0.5:
+                if abs(sib.y - src.y) < SAME_COORD_TOLERANCE:
                     collision = True
                     break
             if collision:
@@ -335,7 +336,7 @@ def _resolve_station_collisions(
     else:
         primary, secondary, primary_step, step = "x", "y", x_spacing, y_spacing
 
-    EPS = 0.5
+    EPS = SAME_COORD_TOLERANCE
     # Off-track stations carry a placeholder Y here (the off-track lift in
     # Stage 5.2 overwrites it); letting that placeholder occupy a cell would
     # cascade on-track siblings off their true rows.

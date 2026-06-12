@@ -9,6 +9,7 @@ from nf_metro.layout.constants import (
     FONT_HEIGHT,
     LABEL_OFFSET,
     OFFSET_STEP,
+    SAME_COORD_TOLERANCE,
     STATION_RADIUS_APPROX,
 )
 from nf_metro.layout.labels import active_font_scale
@@ -211,10 +212,14 @@ def _enforce_multiline_label_gap(
         if st.y not in y_map:
             continue
         has_above = any(
-            (st.layer, ry) in layer_at_y for ry in remap_ys if ry < st.y - 0.5
+            (st.layer, ry) in layer_at_y
+            for ry in remap_ys
+            if ry < st.y - SAME_COORD_TOLERANCE
         )
         has_below = any(
-            (st.layer, ry) in layer_at_y for ry in remap_ys if ry > st.y + 0.5
+            (st.layer, ry) in layer_at_y
+            for ry in remap_ys
+            if ry > st.y + SAME_COORD_TOLERANCE
         )
         if has_above and has_below:
             needs_gap_ys.add(st.y)
@@ -509,7 +514,7 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                 if ty is None:
                     continue
                 delta = target_y - ty
-                if delta < 0.5:
+                if delta < SAME_COORD_TOLERANCE:
                     continue
                 for sid in section.station_ids:
                     st = graph.stations.get(sid)
@@ -536,7 +541,7 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                         p is None
                         or port_st is None
                         or p.side not in (PortSide.LEFT, PortSide.RIGHT)
-                        or abs(port_st.y - target_y) < 0.5
+                        or abs(port_st.y - target_y) < SAME_COORD_TOLERANCE
                     ):
                         continue
                     connected_ys: set[float] = set()
@@ -552,7 +557,7 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                         st = graph.stations.get(other_id)
                         if st and not st.is_port:
                             connected_ys.add(round(st.y, 1))
-                            if abs(st.y - target_y) < 0.5:
+                            if abs(st.y - target_y) < SAME_COORD_TOLERANCE:
                                 target_aligned = True
                     if len(connected_ys) < 2 and target_aligned:
                         _set_port_y(graph, pid, target_y)
@@ -594,7 +599,11 @@ def _compact_row_content_to_bbox_top(
             return True
         a_t = _section_trunk_y(graph, a)
         b_t = _section_trunk_y(graph, b)
-        return a_t is not None and b_t is not None and abs(a_t - b_t) < 0.5
+        return (
+            a_t is not None
+            and b_t is not None
+            and abs(a_t - b_t) < SAME_COORD_TOLERANCE
+        )
 
     for sections in row_sections.values():
         if not sections:
@@ -632,7 +641,7 @@ def _compact_row_content_to_bbox_top(
                 allowed_shifts.append(max(0.0, shift))
             delta = min(allowed_shifts) if allowed_shifts else 0.0
 
-            if delta >= 0.5:
+            if delta >= SAME_COORD_TOLERANCE:
                 for section in group:
                     # bbox_y is preserved; only bbox_h shrinks.  Clamp
                     # edge-pinned ports so the shift doesn't push them
@@ -665,5 +674,5 @@ def _compact_row_content_to_bbox_top(
                 if port_ys:
                     desired_bot = max(desired_bot, max(port_ys))
                 new_h = desired_bot - section.bbox_y
-                if new_h < section.bbox_h - 0.5:
+                if new_h < section.bbox_h - SAME_COORD_TOLERANCE:
                     section.bbox_h = max(0.0, new_h)
