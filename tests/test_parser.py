@@ -45,6 +45,18 @@ def test_parse_label_angle_default_none():
     assert graph.label_angle is None
 
 
+def test_parse_caption():
+    text = "%%metro caption: Example attribution text\ngraph LR\n"
+    graph = parse_metro_mermaid(text)
+    assert graph.caption == "Example attribution text"
+
+
+def test_parse_caption_default_empty():
+    text = "graph LR\n"
+    graph = parse_metro_mermaid(text)
+    assert graph.caption == ""
+
+
 def test_parse_label_angle_invalid_ignored():
     text = "%%metro label_angle: sideways\ngraph LR\n"
     graph = parse_metro_mermaid(text)

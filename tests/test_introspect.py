@@ -37,6 +37,7 @@ def test_info_has_all_top_level_keys(fixture: str) -> None:
     info = build_info(_graph(fixture))
     assert set(info) == {
         "title",
+        "caption",
         "style",
         "warnings",
         "counts",

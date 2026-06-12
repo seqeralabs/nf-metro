@@ -85,6 +85,7 @@ from nf_metro.render.constants import (
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
     TITLE_Y_OFFSET,
+    WATERMARK_FILL,
     WATERMARK_FONT_SIZE,
     WATERMARK_PADDING_RATIO,
     WATERMARK_Y_INSET,
@@ -620,11 +621,24 @@ def _render_svg_scaled(
             WATERMARK_FONT_SIZE,
             svg_width - padding * WATERMARK_PADDING_RATIO,
             svg_height - WATERMARK_Y_INSET,
-            fill="rgba(150, 150, 150, 0.6)",
+            fill=WATERMARK_FILL,
             font_family=theme.label_font_family,
             text_anchor="end",
         )
     )
+
+    if graph.caption:
+        d.append(
+            draw.Text(
+                graph.caption,
+                WATERMARK_FONT_SIZE,
+                padding * WATERMARK_PADDING_RATIO,
+                svg_height - WATERMARK_Y_INSET,
+                fill=WATERMARK_FILL,
+                font_family=theme.label_font_family,
+                text_anchor="start",
+            )
+        )
 
     return d.as_svg()
 

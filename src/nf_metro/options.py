@@ -211,4 +211,10 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         "and per-node data-node-* attributes) in the SVG. On by default; "
         "--no-manifest emits the drawn map only.",
     ),
+    LayoutOption(
+        name="caption",
+        kind="str",
+        help="Free-text caption or attribution line rendered bottom-left of the map "
+        "(e.g. 'Adapted from Author et al., Journal (Year)').",
+    ),
 )
