@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import itertools
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -852,6 +853,171 @@ def _coincide_divergent_fanout_descents(routes: list[RoutedPath]) -> None:
                 cluster = []
             cluster.append(ch)
         _flush(cluster)
+
+
+def _concentric_fanout_lead_ins(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Nest a fan-out down/up-turn bundle onto a single shared arc centre.
+
+    A multi-line fan leaving one junction opens ``(jx, jy) -> (vx, jy) ->
+    (vx, dy)``: a horizontal lead off the shared junction, then each line's
+    vertical channel a step apart, with concentric corner radii from
+    :func:`l_shape_radii` (inner line ``base_radius``, each outer line
+    ``+OFFSET_STEP``).  Because every line's lead-in sits at the same junction
+    Y, the per-line arcs are tangent to that Y at a common point and therefore
+    do NOT share a centre: an inner arc of radius ``r`` centres at ``jy + r``
+    while an outer arc of radius ``r + step`` centres at ``jy + r + step``.
+    The radial gap then pinches to zero at the bend entry and bows past
+    ``step`` through the turn instead of holding constant.
+
+    True concentricity needs every arc to share one centre, which requires the
+    outer lines' lead-in to sit a step OFF the inner line's (above for a DOWN
+    turn, below for UP) so ``centre = corner -/+ r`` lands at the same point
+    for all.  This pass anchors the innermost line (smallest radius) at its
+    current junction Y and shifts each outer line's *corner* waypoint by
+    ``radius - inner_radius`` along the turn's perpendicular.  Only the corner
+    moves; the lead START stays pinned at the junction, so the lead-in becomes
+    a short gentle ramp into the bend rather than a stepped offset that would
+    weave across the junction apex (the line keeps flowing out of the shared
+    source instead of peeling up and back).
+
+    Channels are grouped by source + turn direction and clustered within
+    ``EDGE_TO_BUNDLE_CLEARANCE`` (widely-separated descents head into distinct
+    corridors and never share a centre).  A cluster is nested only when it
+    carries at least two distinct corner radii - a genuine concentric bundle;
+    same-line descents already fused onto one track by
+    :func:`_coincide_divergent_fanout_descents` share a radius and are left
+    flat.  Shifting an outer corner off the junction Y tilts its lead into a
+    short ramp; a deep fan ramped into a busy trunk can rake a foreign line, so
+    each cluster's nesting is kept only when it adds no new inter-line crossing
+    on those leads (a fan whose ramp would tangle stays flat and keeps the
+    minor bend bow instead).
+    """
+    offsets = ctx.station_offsets or {}
+    for cluster, down in _iter_fanout_clusters(routes):
+        _nest_fanout_cluster(cluster, down, routes, offsets)
+
+
+def _iter_fanout_clusters(
+    routes: list[RoutedPath],
+) -> Iterator[tuple[list[_VChannel], bool]]:
+    """Yield ``(cluster, down)`` for each fan-out lead bundle in *routes*.
+
+    A bundle is the set of initial H-then-V descents leaving one source in one
+    turn direction, split into clusters whose vertical legs sit within
+    ``EDGE_TO_BUNDLE_CLEARANCE`` of one another (wider gaps are distinct
+    corridors).  Shared by the nesting pass and its guard so both see the same
+    bundles.
+    """
+    by_source: dict[tuple[str, bool], list[_VChannel]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section or rp.curve_radii is None:
+            continue
+        ch = _initial_fanout_descent(rp)
+        if ch is None or ch.idx - 1 >= len(rp.curve_radii):
+            continue
+        by_source[(rp.edge.source, ch.down)].append(ch)
+
+    band = EDGE_TO_BUNDLE_CLEARANCE
+    for (_source, down), chans in by_source.items():
+        if len(chans) < 2:
+            continue
+        chans.sort(key=lambda c: c.x)
+        cluster: list[_VChannel] = []
+        for ch in chans:
+            if cluster and ch.x - cluster[-1].x > band:
+                yield cluster, down
+                cluster = []
+            cluster.append(ch)
+        yield cluster, down
+
+
+def _lead_crossings(
+    cluster: list[_VChannel],
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> int:
+    """Count proper crossings of the cluster's bend legs by foreign lines.
+
+    Moving a member's corner tilts its lead (``points[idx-1] -> points[idx]``)
+    and lengthens its vertical leg (``points[idx] -> points[idx+1]``); both can
+    rake a foreign line, so both are tested.  A foreign segment is any segment
+    of a route carrying a different ``line_id`` - same-line segments merge,
+    never tangle.  Tested in rendered coordinates (per-line offsets applied):
+    a sibling that leaves the same junction sits on the trunk centre in raw
+    waypoints, so only the offset positions reveal whether a lifted leg truly
+    rakes it or merely diverges from it at the fork.
+    """
+    from nf_metro.layout.geometry import segments_cross
+    from nf_metro.render.svg import apply_route_offsets
+
+    cluster_ids = {id(ch.route) for ch in cluster}
+    foreign = [
+        (rp.line_id, apply_route_offsets(rp, offsets))
+        for rp in routes
+        if id(rp) not in cluster_ids
+    ]
+    n = 0
+    for ch in cluster:
+        lid = ch.route.line_id
+        rpts = apply_route_offsets(ch.route, offsets)
+        legs = [(rpts[ch.idx - 1], rpts[ch.idx]), (rpts[ch.idx], rpts[ch.idx + 1])]
+        for flid, fpts in foreign:
+            if flid == lid:
+                continue
+            for a, b in legs:
+                for k in range(len(fpts) - 1):
+                    if segments_cross(a, b, fpts[k], fpts[k + 1]):
+                        n += 1
+    return n
+
+
+def _fanout_lead_radius(ch: _VChannel) -> float:
+    """The lead-corner radius of a fan-out channel (``curve_radii[idx-1]``)."""
+    assert ch.route.curve_radii is not None
+    return ch.route.curve_radii[ch.idx - 1]
+
+
+def _apply_fanout_nest(
+    cluster: list[_VChannel], down: bool
+) -> list[tuple[float, float]]:
+    """Shift a cluster's corners onto a shared arc centre; return prior corners.
+
+    The innermost line (smallest lead-corner radius) anchors at its junction Y;
+    every other line's corner moves ``radius - inner_radius`` toward the inside
+    of the turn (up for DOWN, down for UP) so all arcs centre on one point.
+    The returned originals let a caller revert the move.
+    """
+    original = [ch.route.points[ch.idx] for ch in cluster]
+    r_inner = min(_fanout_lead_radius(ch) for ch in cluster)
+    anchor = min(cluster, key=_fanout_lead_radius)
+    anchor_y = anchor.route.points[anchor.idx][1]
+    sign = -1.0 if down else 1.0
+    for ch in cluster:
+        px, _ = ch.route.points[ch.idx]
+        shift = sign * (_fanout_lead_radius(ch) - r_inner)
+        ch.route.points[ch.idx] = (px, anchor_y + shift)
+    return original
+
+
+def _nest_fanout_cluster(
+    cluster: list[_VChannel],
+    down: bool,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> None:
+    """Nest one fan-out cluster onto a shared arc centre, gated on crossings.
+
+    Skipped unless the cluster carries at least two distinct lead radii;
+    reverted wholesale if the tilted leads introduce a foreign-line crossing the
+    flat leads did not have.
+    """
+    if len({round(_fanout_lead_radius(ch), 3) for ch in cluster}) < 2:
+        return
+    before = _lead_crossings(cluster, routes, offsets)
+    original = _apply_fanout_nest(cluster, down)
+    if _lead_crossings(cluster, routes, offsets) > before:
+        for ch, pt in zip(cluster, original):
+            ch.route.points[ch.idx] = pt
 
 
 def _normalize_bypass_trunks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:

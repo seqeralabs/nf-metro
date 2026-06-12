@@ -1006,6 +1006,75 @@ def _guard_no_line_crosses_non_consumer(
                     )
 
 
+def _guard_concentric_fanout_lead_ins(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: a multi-line fan-out down/up turn nests on one arc centre.
+
+    Each branch leaving a junction turns with a concentric corner radius (inner
+    line ``CURVE_RADIUS``, each outer line ``+OFFSET_STEP``).  If every branch's
+    lead-in stayed at the junction Y the arcs would be tangent to that Y at a
+    common point and centre at ``Y +/- radius`` - not a shared centre, so the
+    radial gap bows past ``OFFSET_STEP`` through the bend.
+    ``_concentric_fanout_lead_ins`` shifts each outer corner off the junction Y
+    by ``radius - inner_radius`` so all bend centres coincide; this guards that
+    invariant against silent regression.
+    """
+    from nf_metro.layout.routing import compute_station_offsets
+    from nf_metro.layout.routing.normalize import (
+        _apply_fanout_nest,
+        _fanout_lead_radius,
+        _iter_fanout_clusters,
+        _lead_crossings,
+    )
+
+    offsets = compute_station_offsets(graph)
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        # route_edges' diagonal-centring pass mutates Station.x in place; a
+        # guard must stay observational, so snapshot and restore X around it.
+        saved_x = {sid: s.x for sid, s in graph.stations.items()}
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+        finally:
+            for sid, x in saved_x.items():
+                graph.stations[sid].x = x
+
+    for cluster, down in _iter_fanout_clusters(routes):
+        if len({round(_fanout_lead_radius(ch), 3) for ch in cluster}) < 2:
+            continue
+        centres = []
+        for ch in cluster:
+            corner = ch.route.points[ch.idx]
+            r = _fanout_lead_radius(ch)
+            hs = 1.0 if corner[0] > ch.route.points[ch.idx - 1][0] else -1.0
+            vs = 1.0 if down else -1.0
+            centres.append((corner[0] - hs * r, corner[1] + vs * r))
+        cx0, cy0 = centres[0]
+        if all(abs(px - cx0) < 0.6 and abs(py - cy0) < 0.6 for px, py in centres):
+            continue  # already concentric
+
+        # Not concentric: legitimate only if nesting it would rake a foreign
+        # line (the pass reverts those).  Re-derive that decision; routes here
+        # are this guard's throwaway copy, so mutating them is safe.
+        before = _lead_crossings(cluster, routes, offsets)
+        _apply_fanout_nest(cluster, down)
+        if _lead_crossings(cluster, routes, offsets) > before:
+            continue
+        raise PhaseInvariantError(
+            f"{phase}: fan-out bundle at source "
+            f"{cluster[0].route.edge.source!r} left non-concentric "
+            f"(centres {[(round(x, 1), round(y, 1)) for x, y in centres]}) "
+            f"though nesting introduces no crossing"
+        )
+
+
 def _guard_no_line_crosses_file_icon(
     graph: MetroGraph,
     phase: str,

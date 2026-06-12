@@ -1142,6 +1142,59 @@ def test_top_entry_lead_corner_concentric(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Fan-out down/up-turn bundles nest on a shared arc centre
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_fanout_lead_corners_concentric(fixture):
+    """A multi-line fan-out down/up turn must nest on one shared arc centre.
+
+    Each branch leaving a junction gets a concentric corner radius (inner line
+    ``CURVE_RADIUS``, each outer line ``+OFFSET_STEP``).  If every branch's
+    lead-in stays at the junction Y, the arcs are tangent to that Y at a common
+    point and centre at ``Y +/- radius`` - so they do NOT share a centre and
+    the radial gap bows past ``OFFSET_STEP`` through the bend.  The lead-in must
+    shift each outer corner off the junction Y by ``radius - inner_radius`` so
+    ``centre = corner -/+ radius`` coincides for the whole bundle.
+
+    Exempts a bundle whose nesting would rake a foreign line (the pass keeps
+    those flat); encoded by tentatively nesting any non-concentric bundle and
+    accepting it only when that introduces a crossing.
+    """
+    from nf_metro.layout.routing.normalize import (
+        _apply_fanout_nest,
+        _fanout_lead_radius,
+        _iter_fanout_clusters,
+        _lead_crossings,
+    )
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    for cluster, down in _iter_fanout_clusters(routes):
+        if len({round(_fanout_lead_radius(ch), 3) for ch in cluster}) < 2:
+            continue
+        centres = []
+        for ch in cluster:
+            corner = ch.route.points[ch.idx]
+            r = _fanout_lead_radius(ch)
+            hs = 1.0 if corner[0] > ch.route.points[ch.idx - 1][0] else -1.0
+            centres.append((corner[0] - hs * r, corner[1] + (r if down else -r)))
+        cx0, cy0 = centres[0]
+        if all(abs(px - cx0) < 0.6 and abs(py - cy0) < 0.6 for px, py in centres):
+            continue
+        before = _lead_crossings(cluster, routes, offsets)
+        _apply_fanout_nest(cluster, down)
+        rounded = [(round(x, 1), round(y, 1)) for x, y in centres]
+        assert _lead_crossings(cluster, routes, offsets) > before, (
+            f"{fixture}: fan-out bundle at {cluster[0].route.edge.source!r} left "
+            f"non-concentric (centres {rounded}) though nesting adds no crossing"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Off-track inputs sit above their consumer
 # ---------------------------------------------------------------------------
 

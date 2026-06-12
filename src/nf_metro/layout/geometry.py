@@ -54,6 +54,34 @@ def segment_intersects_quad(
     return False
 
 
+def segments_cross(
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    p3: tuple[float, float],
+    p4: tuple[float, float],
+) -> bool:
+    """``True`` iff open segment ``p1-p2`` properly crosses ``p3-p4``.
+
+    Proper crossing only: shared endpoints and collinear overlaps return
+    ``False`` (the two segments must straddle each other).  Used to detect when
+    one routed leg passes through another rather than merely touching it.
+    """
+
+    eps = 1e-6
+
+    def _orient(
+        a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]
+    ) -> float:
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+    def _straddle(d1: float, d2: float) -> bool:
+        return (d1 > eps and d2 < -eps) or (d1 < -eps and d2 > eps)
+
+    return _straddle(_orient(p3, p4, p1), _orient(p3, p4, p2)) and _straddle(
+        _orient(p1, p2, p3), _orient(p1, p2, p4)
+    )
+
+
 def segment_intersects_bbox(
     x1: float,
     y1: float,

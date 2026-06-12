@@ -110,6 +110,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_anchors_frozen_during_placement,
     _guard_bundle_order_preserved,
     _guard_centered_line_spread_balanced,
+    _guard_concentric_fanout_lead_ins,
     _guard_coordinates_finite,
     _guard_entry_approach_from_port_side,
     _guard_explicit_grid_directions,
@@ -620,6 +621,7 @@ def _compute_layout_scaled(
         _guard_single_trunk_off_track_step(graph, "final")
         _guard_off_track_consumer_on_trunk(graph, "final")
         _guard_off_track_input_column_stack(graph, "final")
+        _guard_concentric_fanout_lead_ins(graph, "final")
 
 
 def _apply_label_strike_clearance(
