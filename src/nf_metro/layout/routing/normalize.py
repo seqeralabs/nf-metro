@@ -1436,6 +1436,17 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
         # UP: a's deeper vertical crosses b's shallower left-going lead-ins.
         return sum(1 for t in turns[b] if t < deepest[a] - COORD_TOLERANCE)
 
+    # The approach-weave term models a fan whose lead-ins enter from the LEFT
+    # and descend rightward (a bypass overtaking its down-turns on the right).
+    # A leftward-descending fan (source to the right of its channels) is the
+    # mirror image, where the deep-end ordering already nests the lines; the
+    # rightward-only term would mis-order it, so restrict it to fans whose
+    # source sits left of every descent channel.
+    fan_rightward = all(
+        ch.route.points and ch.route.points[0][0] <= ch.x + COORD_TOLERANCE
+        for ch in chans
+    )
+
     def approach_crossings_if_left(a: str, b: str) -> int:
         # Source-end (fan) crossings when a is placed LEFT of b: the RIGHT
         # line's lead-in, extending from the shared junction past the LEFT
@@ -1443,6 +1454,8 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
         # bypass makes when it descends on the far side of the fan but
         # approaches from the bundle's near side; ordering it out avoids the
         # tangle the deep-end-only test cannot see.
+        if not fan_rightward:
+            return 0
         right = b  # a is LEFT, so b sits to the RIGHT
         lo, hi = span_lo[a], span_hi[a]
         return sum(
