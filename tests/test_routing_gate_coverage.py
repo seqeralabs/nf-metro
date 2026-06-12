@@ -48,6 +48,13 @@ def current_gaps() -> set[str]:
     sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
     import routing_gate_coverage as rgc
 
+    if sys.version_info[:2] != rgc.BASELINE_PYTHON:
+        pytest.skip(
+            f"gate baseline is pinned to CPython {rgc.BASELINE_PYTHON[0]}."
+            f"{rgc.BASELINE_PYTHON[1]}; coverage's arc model differs on "
+            f"{sys.version_info[0]}.{sys.version_info[1]}"
+        )
+
     return set(rgc.gap_keys(rgc.compute_gate_coverage()))
 
 
