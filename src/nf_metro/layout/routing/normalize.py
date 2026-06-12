@@ -1520,16 +1520,11 @@ def _restack_channel(
     # same-line tail (re-joined by _join_fanout_upstream_tails), so it is free.
     if k == 1:
         lx, ly = pts[0]
-        cy = pts[1][1]
-        if abs(ly - cy) < COORD_TOLERANCE:
-            if lx < new_x - r_first:
-                pass  # already long enough
-            elif lx <= new_x:
-                pts[0] = (new_x - r_first, ly)
-            elif lx > new_x + r_first:
-                pass
-            else:
-                pts[0] = (new_x + r_first, ly)
+        if abs(ly - pts[1][1]) < COORD_TOLERANCE:
+            if lx <= new_x:  # lead approaches from the left (R-going fan)
+                pts[0] = (min(lx, new_x - r_first), ly)
+            else:  # lead approaches from the right (L-going fan)
+                pts[0] = (max(lx, new_x + r_first), ly)
 
 
 def _gap_channel_base(

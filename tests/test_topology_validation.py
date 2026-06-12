@@ -28,7 +28,7 @@ from layout_validator import (
 )
 
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing.common import resolve_section
+from nf_metro.layout.routing.context import _resolve_section_row
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
@@ -1159,22 +1159,10 @@ class TestAlmostHorizontalEdges:
 FAN_BYPASS_NESTING_FILE = TOPOLOGIES_DIR / "fan_bypass_nesting.mmd"
 
 
-def _edge_target_row(graph, edge_key):
-    """Grid row of an edge's target port/junction section, or ``None``."""
-    tgt = graph.stations.get(edge_key[1])
-    if tgt is None:
-        return None
-    sec = resolve_section(graph, tgt, prefer_upstream=False)
-    if sec is None or sec.grid_row < 0:
-        return None
-    return sec.grid_row
-
-
-def _junction_row(graph, jid):
-    """Grid row of a junction's resolved section, or ``None``."""
-    jst = graph.stations.get(jid)
-    sec = resolve_section(graph, jst, prefer_upstream=False) if jst else None
-    return sec.grid_row if sec and sec.grid_row >= 0 else None
+def _station_row(graph, station_id):
+    """Grid row of a station's resolved section, or ``None``."""
+    st = graph.stations.get(station_id)
+    return _resolve_section_row(graph, st) if st else None
 
 
 def _bypass_descender_crossings(graph):
@@ -1194,9 +1182,9 @@ def _bypass_descender_crossings(graph):
         jid = edge_a[0]
         if jid != edge_b[0] or not jid.startswith("__junction"):
             continue
-        jrow = _junction_row(graph, jid)
-        row_a = _edge_target_row(graph, edge_a)
-        row_b = _edge_target_row(graph, edge_b)
+        jrow = _station_row(graph, jid)
+        row_a = _station_row(graph, edge_a[1])
+        row_b = _station_row(graph, edge_b[1])
         if jrow is None or row_a is None or row_b is None:
             continue
         if (row_a > jrow) != (row_b > jrow):

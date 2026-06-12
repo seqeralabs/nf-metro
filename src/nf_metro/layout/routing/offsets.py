@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from nf_metro.layout.constants import (
@@ -10,7 +11,10 @@ from nf_metro.layout.constants import (
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
 )
-from nf_metro.layout.routing.common import resolve_section
+from nf_metro.layout.routing.context import (
+    _has_intervening_sections,
+    _resolve_section_colrow,
+)
 from nf_metro.layout.routing.invariants import (
     check_partial_branch_offset_gaps,
     classify_merge_port_feeders,
@@ -1385,37 +1389,14 @@ def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> 
             break
 
 
-def _section_colrow(
-    graph: MetroGraph, station: Station
-) -> tuple[int | None, int | None]:
-    """Grid ``(col, row)`` of the section a port/junction resolves to."""
-    sec = resolve_section(graph, station, prefer_upstream=False)
-    if sec is None or sec.grid_col < 0:
-        return None, None
-    return sec.grid_col, (sec.grid_row if sec.grid_row >= 0 else None)
+def _walk_line_run(
+    ctx: _OffsetCtx, start: str, lid: str, *, upstream: bool
+) -> Iterator[str]:
+    """Yield stations along *lid*'s horizontal run from *start*, junction-bounded.
 
-
-def _has_intervening_section(
-    graph: MetroGraph, col_a: int, col_b: int, row: int | None
-) -> bool:
-    """True when a same-row section sits strictly between two columns."""
-    lo, hi = (col_a, col_b) if col_a <= col_b else (col_b, col_a)
-    return any(
-        s.bbox_w > 0 and lo < s.grid_col < hi and (row is None or s.grid_row == row)
-        for s in graph.sections.values()
-    )
-
-
-def _raise_line_offset_run(
-    ctx: _OffsetCtx, start: str, lid: str, value: float, *, upstream: bool
-) -> None:
-    """Set *lid*'s offset to *value* along a horizontal run from *start*.
-
-    Walks the line's edges (inbound when *upstream*, else outbound), stopping
-    at any junction, so the bypass rides one continuous track on the side it
-    is lifted -- the source-side approach (so the upstream tail meets the
-    descent lead-in without a kink) and the target-side rejoin (so both
-    bundle endpoints share a mid-offset and the trunk marker stays level).
+    Follows the line's inbound edges when *upstream* (the source-side approach)
+    or outbound edges otherwise (the target-side rejoin), stopping at any
+    junction so the run covers exactly one bundle endpoint of the bypass.
     """
     graph = ctx.graph
     seen: set[str] = set()
@@ -1425,8 +1406,7 @@ def _raise_line_offset_run(
         if sid in seen:
             continue
         seen.add(sid)
-        if lid in graph.station_lines(sid):
-            ctx.offsets[(sid, lid)] = value
+        yield sid
         edges = graph.edges_to(sid) if upstream else graph.edges_from(sid)
         for edge in edges:
             nxt = edge.source if upstream else edge.target
@@ -1436,6 +1416,21 @@ def _raise_line_offset_run(
                 and nxt not in graph.junction_ids
             ):
                 stack.append(nxt)
+
+
+def _raise_line_offset_run(
+    ctx: _OffsetCtx, start: str, lid: str, value: float, *, upstream: bool
+) -> None:
+    """Set *lid*'s offset to *value* along its run from *start*.
+
+    Lifting the whole run keeps the bypass on one continuous track on the
+    side it rides: the source-side approach (so the upstream tail meets the
+    descent lead-in without a kink) and the target-side rejoin (so both bundle
+    endpoints share a mid-offset and the trunk marker stays level).
+    """
+    for sid in _walk_line_run(ctx, start, lid, upstream=upstream):
+        if lid in ctx.graph.station_lines(sid):
+            ctx.offsets[(sid, lid)] = value
 
 
 def _run_outer_slot_free(
@@ -1443,31 +1438,14 @@ def _run_outer_slot_free(
 ) -> bool:
     """True when no line other than *lid* sits at the *outer* slot on the run.
 
-    Mirrors the walk of :func:`_raise_line_offset_run` so the free check covers
-    exactly the stations the lift would touch; a collision there would render
-    two lines collinear.
+    Checks exactly the stations :func:`_raise_line_offset_run` would lift; a
+    collision there would render two lines collinear.
     """
-    graph = ctx.graph
     half = ctx.offset_step / 2
-    seen: set[str] = set()
-    stack = [start]
-    while stack:
-        sid = stack.pop()
-        if sid in seen:
-            continue
-        seen.add(sid)
-        for olid in graph.station_lines(sid):
+    for sid in _walk_line_run(ctx, start, lid, upstream=upstream):
+        for olid in ctx.graph.station_lines(sid):
             if olid != lid and abs(ctx.offsets.get((sid, olid), 0.0) - outer) < half:
                 return False
-        edges = graph.edges_to(sid) if upstream else graph.edges_from(sid)
-        for edge in edges:
-            nxt = edge.source if upstream else edge.target
-            if (
-                edge.line_id == lid
-                and nxt not in seen
-                and nxt not in graph.junction_ids
-            ):
-                stack.append(nxt)
     return True
 
 
@@ -1495,7 +1473,7 @@ def _raise_bypass_to_outer_track(ctx: _OffsetCtx) -> None:
         jst = graph.stations.get(jid)
         if jst is None:
             continue
-        scol, srow = _section_colrow(graph, jst)
+        scol, srow = _resolve_section_colrow(graph, jst)
         if scol is None:
             continue
         bypass_targets: dict[str, list[str]] = {}
@@ -1504,10 +1482,10 @@ def _raise_bypass_to_outer_track(ctx: _OffsetCtx) -> None:
             tgt = graph.stations.get(edge.target)
             if tgt is None:
                 continue
-            tcol, trow = _section_colrow(graph, tgt)
+            tcol, trow = _resolve_section_colrow(graph, tgt)
             if tcol is None:
                 continue
-            if abs(tcol - scol) > 1 and _has_intervening_section(
+            if abs(tcol - scol) > 1 and _has_intervening_sections(
                 graph, scol, tcol, srow
             ):
                 bypass_targets.setdefault(edge.line_id, []).append(edge.target)
