@@ -13,7 +13,11 @@ from typing import Any, NamedTuple
 
 import drawsvg as draw
 
-from nf_metro.layout.constants import LABEL_LINE_HEIGHT, Y_SPACING
+from nf_metro.layout.constants import (
+    LABEL_LINE_HEIGHT,
+    SAME_COORD_TOLERANCE,
+    Y_SPACING,
+)
 from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.labels import (
     LabelPlacement,
@@ -1201,7 +1205,7 @@ def _render_rail_pill(
     # metro interchange.  A non-bridging station (a single used rail, hence no
     # link bar) has nothing to bulge from, so its lone marker uses the standard
     # radius rather than the inflated interchange knob size.
-    is_spanning = (bot_y - top_y) > 0.5
+    is_spanning = (bot_y - top_y) > SAME_COORD_TOLERANCE
     knob_r = r * RAIL_KNOB_RADIUS_RATIO if is_spanning else r
     bar_half = r * RAIL_LINK_HALF_WIDTH_RATIO
     # rail_used_ys is recorded parallel to the line-definition order (see
@@ -1213,7 +1217,7 @@ def _render_rail_pill(
         # A round-capped line of the given width is a capsule; used here only
         # for its straight body between top and bottom used rails (the caps are
         # covered by the circles), so it joins the knobs with no seam.
-        if bot_y - top_y <= 0.5:
+        if bot_y - top_y <= SAME_COORD_TOLERANCE:
             return
         d.append(
             draw.Line(

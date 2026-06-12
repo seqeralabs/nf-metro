@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
+    SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
 )
@@ -363,9 +364,9 @@ def is_loop_side_branch_station(graph: MetroGraph, sid: str) -> bool:
     tgt = graph.stations.get(outs[0].target)
     if src is None or tgt is None:
         return False
-    if abs(src.y - tgt.y) > 0.5:
+    if abs(src.y - tgt.y) > SAME_COORD_TOLERANCE:
         return False
-    if abs(st.y - src.y) < 0.5:
+    if abs(st.y - src.y) < SAME_COORD_TOLERANCE:
         return False
     if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
         return False

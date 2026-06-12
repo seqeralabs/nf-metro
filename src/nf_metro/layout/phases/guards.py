@@ -17,6 +17,7 @@ from nf_metro.layout.constants import (
     INTER_ROW_EDGE_CLEARANCE,
     OFFSET_STEP,
     ROW_BAND_SLACK,
+    SAME_COORD_TOLERANCE,
     SECTION_Y_GAP,
     STATION_RADIUS_APPROX,
     X_SPACING,
@@ -564,7 +565,7 @@ def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> N
     Sections that don't share horizontal extent are unconstrained --
     their vertical proximity has no visual impact.
     """
-    tol = 0.5
+    tol = SAME_COORD_TOLERANCE
     sections_by_row_start: dict[int, list[tuple[str, Section]]] = defaultdict(list)
     for sid, sec in graph.sections.items():
         if sec.bbox_w <= 0 or sec.bbox_h <= 0:
@@ -917,7 +918,7 @@ def _guard_no_station_overlap(
         if b is not None:
             boxes.append((sid, b))
     boxes.sort(key=lambda item: item[1][0])
-    tol = 0.5
+    tol = SAME_COORD_TOLERANCE
     n = len(boxes)
     for i in range(n):
         s1, (x1, y1, X1, Y1) = boxes[i]
