@@ -1410,27 +1410,57 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
     down = chans[0].down if chans else True
 
     # Per line: the deep turn-off depths of each segment (always y_hi), the
-    # deepest reach, and a representative x for stable tie-breaking.
+    # deepest reach, a representative x for stable tie-breaking, and the
+    # source-side approach Y of each segment (y_lo for a DOWN bundle, y_hi for
+    # UP) plus the line's vertical-span extremes for the approach-side test.
     turns: dict[str, list[float]] = defaultdict(list)
     deepest: dict[str, float] = {}
     rep_x: dict[str, float] = {}
+    approach: dict[str, list[float]] = defaultdict(list)
+    span_lo: dict[str, float] = {}
+    span_hi: dict[str, float] = {}
     for ch in chans:
         lid = ch.route.line_id
         turns[lid].append(ch.y_hi)
         deepest[lid] = max(deepest.get(lid, ch.y_hi), ch.y_hi)
         rep_x[lid] = min(rep_x.get(lid, ch.x), ch.x)
+        approach[lid].append(ch.y_lo if down else ch.y_hi)
+        span_lo[lid] = min(span_lo.get(lid, ch.y_lo), ch.y_lo)
+        span_hi[lid] = max(span_hi.get(lid, ch.y_hi), ch.y_hi)
 
-    def crossings_if_left(a: str, b: str) -> int:
-        # Number of crossings when a is placed LEFT of b.
+    def peel_crossings_if_left(a: str, b: str) -> int:
+        # Deep-end (divergence) crossings when a is placed LEFT of b.
         if down:
             # b's deeper vertical crosses a's shallower right-going lead-outs.
             return sum(1 for t in turns[a] if t < deepest[b] - COORD_TOLERANCE)
         # UP: a's deeper vertical crosses b's shallower left-going lead-ins.
         return sum(1 for t in turns[b] if t < deepest[a] - COORD_TOLERANCE)
 
+    def approach_crossings_if_left(a: str, b: str) -> int:
+        # Source-end (fan) crossings when a is placed LEFT of b: the RIGHT
+        # line's lead-in, extending from the shared junction past the LEFT
+        # line's vertical, pierces that vertical's span.  This is the weave a
+        # bypass makes when it descends on the far side of the fan but
+        # approaches from the bundle's near side; ordering it out avoids the
+        # tangle the deep-end-only test cannot see.
+        right = b  # a is LEFT, so b sits to the RIGHT
+        lo, hi = span_lo[a], span_hi[a]
+        return sum(
+            1
+            for y in approach[right]
+            if lo + COORD_TOLERANCE < y < hi - COORD_TOLERANCE
+        )
+
     def cmp(a: str, b: str) -> int:
-        ca = crossings_if_left(a, b)  # a left of b
-        cb = crossings_if_left(b, a)  # b left of a
+        # Avoid fan-side weaves first, then deep-end divergence crossings: a
+        # crossover at the divergence reads as one clean fork, while a weave
+        # at the fan reads as a tangle.
+        aa = approach_crossings_if_left(a, b)
+        ab = approach_crossings_if_left(b, a)
+        if aa != ab:
+            return -1 if aa < ab else 1
+        ca = peel_crossings_if_left(a, b)
+        cb = peel_crossings_if_left(b, a)
         if ca != cb:
             return -1 if ca < cb else 1
         if rep_x[a] != rep_x[b]:
@@ -1480,6 +1510,26 @@ def _restack_channel(
         rp.curve_radii[k - 1] = r_first
     if k < len(rp.curve_radii) and k + 2 < len(pts):
         rp.curve_radii[k] = r_second
+
+    # Unclamp the source-side fan lead-in.  When this channel's lead-in is the
+    # route's first segment (a concentric fan corner hugging the junction), it
+    # is usually shorter than the outer members' r_first, so resolve_curve_radii
+    # clamps the radius down to the lead length and the bundle loses its
+    # concentric (shared-centre) spacing.  Extend the lead start back along its
+    # own axis so the full r_first fits; the extra length overlaps the upstream
+    # same-line tail (re-joined by _join_fanout_upstream_tails), so it is free.
+    if k == 1:
+        lx, ly = pts[0]
+        cy = pts[1][1]
+        if abs(ly - cy) < COORD_TOLERANCE:
+            if lx < new_x - r_first:
+                pass  # already long enough
+            elif lx <= new_x:
+                pts[0] = (new_x - r_first, ly)
+            elif lx > new_x + r_first:
+                pass
+            else:
+                pts[0] = (new_x + r_first, ly)
 
 
 def _gap_channel_base(

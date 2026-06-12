@@ -10,6 +10,7 @@ from nf_metro.layout.constants import (
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
 )
+from nf_metro.layout.routing.common import resolve_section
 from nf_metro.layout.routing.invariants import (
     check_partial_branch_offset_gaps,
     classify_merge_port_feeders,
@@ -1384,6 +1385,168 @@ def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> 
             break
 
 
+def _section_colrow(
+    graph: MetroGraph, station: Station
+) -> tuple[int | None, int | None]:
+    """Grid ``(col, row)`` of the section a port/junction resolves to."""
+    sec = resolve_section(graph, station, prefer_upstream=False)
+    if sec is None or sec.grid_col < 0:
+        return None, None
+    return sec.grid_col, (sec.grid_row if sec.grid_row >= 0 else None)
+
+
+def _has_intervening_section(
+    graph: MetroGraph, col_a: int, col_b: int, row: int | None
+) -> bool:
+    """True when a same-row section sits strictly between two columns."""
+    lo, hi = (col_a, col_b) if col_a <= col_b else (col_b, col_a)
+    return any(
+        s.bbox_w > 0 and lo < s.grid_col < hi and (row is None or s.grid_row == row)
+        for s in graph.sections.values()
+    )
+
+
+def _raise_line_offset_run(
+    ctx: _OffsetCtx, start: str, lid: str, value: float, *, upstream: bool
+) -> None:
+    """Set *lid*'s offset to *value* along a horizontal run from *start*.
+
+    Walks the line's edges (inbound when *upstream*, else outbound), stopping
+    at any junction, so the bypass rides one continuous track on the side it
+    is lifted -- the source-side approach (so the upstream tail meets the
+    descent lead-in without a kink) and the target-side rejoin (so both
+    bundle endpoints share a mid-offset and the trunk marker stays level).
+    """
+    graph = ctx.graph
+    seen: set[str] = set()
+    stack = [start]
+    while stack:
+        sid = stack.pop()
+        if sid in seen:
+            continue
+        seen.add(sid)
+        if lid in graph.station_lines(sid):
+            ctx.offsets[(sid, lid)] = value
+        edges = graph.edges_to(sid) if upstream else graph.edges_from(sid)
+        for edge in edges:
+            nxt = edge.source if upstream else edge.target
+            if (
+                edge.line_id == lid
+                and nxt not in seen
+                and nxt not in graph.junction_ids
+            ):
+                stack.append(nxt)
+
+
+def _run_outer_slot_free(
+    ctx: _OffsetCtx, start: str, lid: str, outer: float, *, upstream: bool
+) -> bool:
+    """True when no line other than *lid* sits at the *outer* slot on the run.
+
+    Mirrors the walk of :func:`_raise_line_offset_run` so the free check covers
+    exactly the stations the lift would touch; a collision there would render
+    two lines collinear.
+    """
+    graph = ctx.graph
+    half = ctx.offset_step / 2
+    seen: set[str] = set()
+    stack = [start]
+    while stack:
+        sid = stack.pop()
+        if sid in seen:
+            continue
+        seen.add(sid)
+        for olid in graph.station_lines(sid):
+            if olid != lid and abs(ctx.offsets.get((sid, olid), 0.0) - outer) < half:
+                return False
+        edges = graph.edges_to(sid) if upstream else graph.edges_from(sid)
+        for edge in edges:
+            nxt = edge.source if upstream else edge.target
+            if (
+                edge.line_id == lid
+                and nxt not in seen
+                and nxt not in graph.junction_ids
+            ):
+                stack.append(nxt)
+    return True
+
+
+def _raise_bypass_to_outer_track(ctx: _OffsetCtx) -> None:
+    """Lift a fan-out bypass onto the outer track of its bundle.
+
+    At a junction that fans out to stacked rows AND carries a far-column
+    bypass (the shallowest peeler), the bypass reads cleanest as the
+    OUTERMOST concentric arc: it rounds the shared corner with the
+    down-turns and peels into its run at the inter-row gap rather than
+    weaving across them.  ``_distinct_line_order`` orders the descent by
+    approach side, so placing the bypass on the bundle's outer edge here
+    (the TOP for a down-fan, the BOTTOM for an up-fan) is enough to make it
+    descend outermost.
+
+    The lift only happens when that outer slot is free, so an existing
+    bundle member is never displaced; where it is taken the bypass keeps its
+    slot and descends inner, crossing over once at the divergence point.
+    """
+    if ctx.compact:
+        return
+    graph = ctx.graph
+    step = ctx.offset_step
+    for jid in graph.junctions:
+        jst = graph.stations.get(jid)
+        if jst is None:
+            continue
+        scol, srow = _section_colrow(graph, jst)
+        if scol is None:
+            continue
+        bypass_targets: dict[str, list[str]] = {}
+        down_turn = up_turn = False
+        for edge in graph.edges_from(jid):
+            tgt = graph.stations.get(edge.target)
+            if tgt is None:
+                continue
+            tcol, trow = _section_colrow(graph, tgt)
+            if tcol is None:
+                continue
+            if abs(tcol - scol) > 1 and _has_intervening_section(
+                graph, scol, tcol, srow
+            ):
+                bypass_targets.setdefault(edge.line_id, []).append(edge.target)
+            if trow is not None and srow is not None:
+                down_turn = down_turn or trow > srow
+                up_turn = up_turn or trow < srow
+        # Only a fan with a single, unambiguous turn direction qualifies.
+        if not bypass_targets or down_turn == up_turn:
+            continue
+        bundle = {
+            lid: ctx.offsets.get((jid, lid), 0.0) for lid in graph.station_lines(jid)
+        }
+        if not bundle:
+            continue
+        outer = (
+            min(bundle.values()) - step if down_turn else max(bundle.values()) + step
+        )
+        for blid, targets in bypass_targets.items():
+            if blid not in bundle:
+                continue
+            # A (outer track) only where the slot is free at the junction AND
+            # every rejoin target; otherwise the lift would collide, so keep
+            # the bypass inner and let it cross over once at the divergence (B).
+            if not _run_outer_slot_free(ctx, jid, blid, outer, upstream=True):
+                continue
+            if not all(
+                _run_outer_slot_free(ctx, t, blid, outer, upstream=False)
+                for t in targets
+            ):
+                continue
+            # Source-side approach rides the outer track up to the junction...
+            _raise_line_offset_run(ctx, jid, blid, outer, upstream=True)
+            # ...and the target-side rejoin too, so both bundle endpoints share
+            # one mid-offset and the trunk marker stays level across the row.
+            for tgt_id in targets:
+                _raise_line_offset_run(ctx, tgt_id, blid, outer, upstream=False)
+            bundle[blid] = outer
+
+
 def compute_station_offsets(
     graph: MetroGraph,
     offset_step: float = OFFSET_STEP,
@@ -1443,4 +1606,5 @@ def compute_station_offsets(
     _allocate_merge_ports_by_approach(ctx)
     _reconcile_horizontal_offsets(ctx)
     _recenter_partial_fan_branches(ctx)
+    _raise_bypass_to_outer_track(ctx)
     return ctx.offsets
