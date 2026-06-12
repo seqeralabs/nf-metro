@@ -333,6 +333,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "(`_clear_bypass_v_label_strikes`).",
     ),
     (
+        "fan_bypass_nesting",
+        TOPOLOGIES_DIR,
+        "A junction fans to a straight continuation, three down-turns into "
+        "stacked rows, and one far-column bypass. The bypass joins the same "
+        "concentric corner as the down-turns and descends in the shared "
+        "channel, peeling into its lane at the inter-row gap rather than "
+        "grazing the down-turn corners near the junction (issue #652).",
+    ),
+    (
         "off_track_convergence",
         TOPOLOGIES_DIR,
         "Multiple off-track file inputs converging on a single consumer. "

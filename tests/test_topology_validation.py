@@ -1151,3 +1151,50 @@ class TestAlmostHorizontalEdges:
         compute_layout(graph)
         violations = check_almost_horizontal_edges(graph)
         assert not violations, "\n".join(v.message for v in violations)
+
+
+# --- #652: junction fan-out + bypass concentric nesting ---
+
+FAN_BYPASS_NESTING_FILE = TOPOLOGIES_DIR / "fan_bypass_nesting.mmd"
+
+
+def _junction_sibling_crossings(graph):
+    """route_segment_crossings between two edges fanning from one junction.
+
+    Two edges sharing a junction *source* endpoint diverge at that fan, so a
+    crossing between them is an avoidable tangle right at the fan-out. A
+    bypass crossing an unrelated feeder bundle (different sources) is not a
+    fan-sibling tangle and is excluded.
+    """
+    out = []
+    for v in check_route_segment_crossings(graph):
+        edge_a = v.context["edge_a"]
+        edge_b = v.context["edge_b"]
+        if edge_a[0] == edge_b[0] and edge_a[0].startswith("__junction"):
+            out.append(v.message)
+    return out
+
+
+def test_fan_bypass_nesting_fixture_fans_from_a_junction():
+    """The fixture's source must fan out through a synthetic junction."""
+    graph = _load_and_layout(FAN_BYPASS_NESTING_FILE)
+    junctions = [s for s in graph.stations.values() if s.id.startswith("__junction")]
+    assert junctions, "fixture lost its synthetic fan-out junction"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="known junction fan-out + bypass corner-graze; tracked in #652",
+)
+def test_fan_bypass_no_junction_sibling_crossings():
+    """Edges fanning from one junction must not cross each other (#652).
+
+    The bypass joins the down-turns' concentric corner and descends in the
+    shared channel, peeling into its lane at the inter-row gap, so it never
+    grazes the down-turn corners at the fan. Flips to XPASS once the engine
+    fix lands; the marker is then removed to leave a permanent positive
+    guard.
+    """
+    graph = _load_and_layout(FAN_BYPASS_NESTING_FILE)
+    crossings = _junction_sibling_crossings(graph)
+    assert not crossings, "\n".join(crossings)
