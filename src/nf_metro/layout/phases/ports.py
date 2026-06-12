@@ -8,6 +8,7 @@ from nf_metro.layout.constants import (
     CURVE_RADIUS,
     MAX_PORT_ALIGN_BBOX_EXPANSION_FRAC,
     MIN_PORT_STATION_GAP,
+    SAME_COORD_TOLERANCE,
     STATION_ELBOW_TOLERANCE,
 )
 from nf_metro.layout.phases._common import _expand_bbox_for_y, _grid_group_section_ids
@@ -933,7 +934,7 @@ def _align_tb_section_bbox_bottoms(graph: MetroGraph) -> None:
         if not target_bots:
             continue
         desired_bot = max(target_bots)
-        if desired_bot - current_bot <= 0.5:
+        if desired_bot - current_bot <= SAME_COORD_TOLERANCE:
             continue
         section.bbox_h = desired_bot - section.bbox_y
 

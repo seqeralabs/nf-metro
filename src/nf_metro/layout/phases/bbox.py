@@ -11,6 +11,7 @@ from nf_metro.layout.constants import (
     MIN_STATION_FLAT_LENGTH,
     MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
+    SAME_COORD_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
 )
 from nf_metro.layout.labels import font_scale_context, label_text_width
@@ -196,7 +197,7 @@ def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) ->
                 d = (bypass_bot + section_y_gap) - ls.bbox_y
                 if d > deficit:
                     deficit = d
-        if deficit <= 0.5:
+        if deficit <= SAME_COORD_TOLERANCE:
             continue
 
         shifted_section_ids = {
@@ -310,7 +311,7 @@ def _lift_would_cause_uturn(
     _collect(station_id)
     if len(feeder_ys) < 2:
         return False
-    return all(y >= anchor_y - 0.5 for y in feeder_ys)
+    return all(y >= anchor_y - SAME_COORD_TOLERANCE for y in feeder_ys)
 
 
 def _shrink_and_tighten_rows(
@@ -498,7 +499,7 @@ def _shrink_bboxes_to_content_bottom(
         if content_bot is None:
             continue
         current_bot = section.bbox_y + section.bbox_h
-        if content_bot > current_bot + 0.5:
+        if content_bot > current_bot + SAME_COORD_TOLERANCE:
             section.bbox_h = content_bot - section.bbox_y
             continue
         desired_bot = content_bot
@@ -506,7 +507,7 @@ def _shrink_bboxes_to_content_bottom(
         if mate_bots:
             desired_bot = max(desired_bot, max(mate_bots))
         new_h = desired_bot - section.bbox_y
-        if new_h < section.bbox_h - 0.5:
+        if new_h < section.bbox_h - SAME_COORD_TOLERANCE:
             section.bbox_h = max(0.0, new_h)
 
 
@@ -605,7 +606,9 @@ def _section_band_is_empty(graph: MetroGraph, section: Section) -> bool:
         st = graph.stations.get(sid)
         if st is None:
             continue
-        if (st.is_port or sid.startswith("__bypass_")) and st.y < topmost - 0.5:
+        if (
+            st.is_port or sid.startswith("__bypass_")
+        ) and st.y < topmost - SAME_COORD_TOLERANCE:
             return False
     return True
 
@@ -642,13 +645,13 @@ def _fit_bboxes_to_content_top(
         if section.bbox_h <= 0:
             continue
         target = _section_fit_top(graph, section, section_y_padding, section_y_gap)
-        if target is not None and target < section.bbox_y - 0.5:
+        if target is not None and target < section.bbox_y - SAME_COORD_TOLERANCE:
             _set_section_bbox_top(graph, section, target)
             continue
         hug = _section_content_hug_top(graph, section, section_y_padding)
         if (
             hug is not None
-            and hug > section.bbox_y + 0.5
+            and hug > section.bbox_y + SAME_COORD_TOLERANCE
             and _section_band_is_empty(graph, section)
         ):
             _set_section_bbox_top(graph, section, hug)
@@ -713,7 +716,7 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
         current_top = min(s.bbox_y for s in lower)
         target_gap = max(section_y_gap, wrap_min.get((r - 1, r), 0.0))
         slack = current_top - (effective_floor + target_gap)
-        if slack <= 0.5:
+        if slack <= SAME_COORD_TOLERANCE:
             continue
 
         for s in graph.sections.values():

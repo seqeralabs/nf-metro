@@ -14,6 +14,7 @@ from nf_metro.layout.constants import (
     LABEL_BBOX_MARGIN,
     MIN_STRAIGHT_EDGE,
     OFFSET_STEP,
+    SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
     TERMINUS_WIDTH,
     X_SPACING,
@@ -1139,9 +1140,9 @@ def _bump_off_track_clear_of_trunks(
             continue
         # Only stations on the OTHER side of the icon (i.e. the trunk
         # the entry port feeds) have tracks crossing the icon's column.
-        if section.direction == "LR" and st2.x <= off_st.x + 0.5:
+        if section.direction == "LR" and st2.x <= off_st.x + SAME_COORD_TOLERANCE:
             continue
-        if section.direction == "RL" and st2.x >= off_st.x - 0.5:
+        if section.direction == "RL" and st2.x >= off_st.x - SAME_COORD_TOLERANCE:
             continue
         # Collect the line-track band Y range at the icon's column.
         # Tracks run horizontally so each line's Y here equals
@@ -1325,7 +1326,7 @@ def _reanchor_off_track_to_consumer(
             desired_top = _off_track_fit_top(
                 graph, section, highest_y, section_y_padding
             )
-            if abs(desired_top - section.bbox_y) > 0.5:
+            if abs(desired_top - section.bbox_y) > SAME_COORD_TOLERANCE:
                 _set_section_bbox_top(graph, section, desired_top)
         if lowest_y is not None:
             _grow_section_bbox_downward(graph, section, lowest_y + section_y_padding)

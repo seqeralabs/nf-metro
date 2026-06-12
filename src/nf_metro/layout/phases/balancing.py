@@ -7,6 +7,7 @@ from collections import defaultdict
 from nf_metro.layout.constants import (
     DIAGONAL_RUN,
     ICON_HALF_HEIGHT,
+    SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
 )
@@ -89,7 +90,7 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
         if not targets:
             continue
         target_y = min(targets, key=lambda y: abs(y - port_st.y))
-        if abs(port_st.y - target_y) < 0.5:
+        if abs(port_st.y - target_y) < SAME_COORD_TOLERANCE:
             continue
 
         # Fan-in exits (multiple distinct internal source Ys) want to
@@ -121,7 +122,7 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
                     if ds_sec is None or ds_sec.grid_row != section.grid_row:
                         continue
                     ep_st = graph.stations.get(eid)
-                    if ep_st is None or abs(ep_st.y - port_st.y) < 0.5:
+                    if ep_st is None or abs(ep_st.y - port_st.y) < SAME_COORD_TOLERANCE:
                         continue
                     _set_port_y(graph, eid, port_st.y)
             continue
@@ -174,7 +175,7 @@ def _fan_free_content_upward(
             continue
         top_y = min(_ref_y(graph, sid) for sid in internal_ids)
         slack = top_y - _ref_bbox_top(graph, section) - section_y_padding
-        if slack < y_spacing - 0.5:
+        if slack < y_spacing - SAME_COORD_TOLERANCE:
             continue
         slots = int(slack // y_spacing)
         if slots <= 0:
@@ -357,7 +358,7 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         for i, src in enumerate(sources[:n_lift], 1):
             new_y = trunk_y - i * y_spacing
             delta = new_y - _ref_y(graph, src)
-            if abs(delta) < 0.5:
+            if abs(delta) < SAME_COORD_TOLERANCE:
                 continue
             graph.stations[src].y = new_y
             _shift_linear_consumer_chain(graph, src, delta, internal_set, from_ref=True)
@@ -371,7 +372,7 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         for i, src in enumerate(sources[n_lift:], 1):
             new_y = trunk_y + i * y_spacing
             delta = new_y - _ref_y(graph, src)
-            if abs(delta) < 0.5:
+            if abs(delta) < SAME_COORD_TOLERANCE:
                 continue
             graph.stations[src].y = new_y
             _shift_linear_consumer_chain(graph, src, delta, internal_set, from_ref=True)
@@ -493,7 +494,7 @@ def _column_occupied_ys(
         st2 = graph.stations.get(sid2)
         if st2 is None or st2.is_port or st2.is_hidden:
             continue
-        if abs(st2.x - col_x) > 0.5:
+        if abs(st2.x - col_x) > SAME_COORD_TOLERANCE:
             continue
         occ.append(st2.y)
     return occ
@@ -536,7 +537,7 @@ def _balance_one_section(graph: MetroGraph, section: Section, y_spacing: float) 
 
     section_top_y = min(graph.stations[s].y for s in internal_ids)
     top_band = section_top_y - _ref_bbox_top(graph, section)
-    if top_band <= y_spacing + 0.5:
+    if top_band <= y_spacing + SAME_COORD_TOLERANCE:
         return
 
     movable = _movable_partial_bundle_stations(graph, cols, bundle)
@@ -544,8 +545,8 @@ def _balance_one_section(graph: MetroGraph, section: Section, y_spacing: float) 
         return
 
     ys = [graph.stations[s].y for s in movable]
-    above_count = sum(1 for y in ys if y < trunk_y - 0.5)
-    below_count = sum(1 for y in ys if y > trunk_y + 0.5)
+    above_count = sum(1 for y in ys if y < trunk_y - SAME_COORD_TOLERANCE)
+    below_count = sum(1 for y in ys if y > trunk_y + SAME_COORD_TOLERANCE)
     if below_count <= above_count:
         return
 
@@ -573,11 +574,11 @@ def _lift_below_trunk_siblings(
     for _ in range(len(movable)):
         section_top_y = min(graph.stations[s].y for s in internal_ids)
         top_band = section_top_y - _ref_bbox_top(graph, section)
-        if top_band <= y_spacing + 0.5:
+        if top_band <= y_spacing + SAME_COORD_TOLERANCE:
             break
         ys_by_sid = {s: graph.stations[s].y for s in movable}
-        above = [s for s, y in ys_by_sid.items() if y < trunk_y - 0.5]
-        below = [s for s, y in ys_by_sid.items() if y > trunk_y + 0.5]
+        above = [s for s, y in ys_by_sid.items() if y < trunk_y - SAME_COORD_TOLERANCE]
+        below = [s for s, y in ys_by_sid.items() if y > trunk_y + SAME_COORD_TOLERANCE]
         if len(below) <= len(above):
             break
         line_sets = {frozenset(graph.station_lines(s)) for s in movable}
@@ -592,7 +593,7 @@ def _lift_below_trunk_siblings(
         for cand in below:
             col_x = graph.stations[cand].x
             occ = _column_occupied_ys(graph, section, col_x, cand)
-            if any(abs(oy - new_y) < y_spacing - 0.5 for oy in occ):
+            if any(abs(oy - new_y) < y_spacing - SAME_COORD_TOLERANCE for oy in occ):
                 continue
             candidate = cand
             break
@@ -605,7 +606,7 @@ def _lift_below_trunk_siblings(
         # reach ~9.5 px.  Use the wider reach when relevant.
         marker_clearance = 16.0 if (st and st.off_track) else 9.5
         min_y = _ref_bbox_top(graph, section) + max(label_clearance, marker_clearance)
-        if new_y < min_y - 0.5:
+        if new_y < min_y - SAME_COORD_TOLERANCE:
             if not above:
                 break
             above.sort(key=lambda s: graph.stations[s].y)
@@ -624,7 +625,9 @@ def _lift_below_trunk_siblings(
             )
             break
         ext_feeders = _balance_direct_external_feeder_ys(graph, candidate, section.id)
-        if len(ext_feeders) >= 2 and all(fy >= new_y - 0.5 for fy in ext_feeders):
+        if len(ext_feeders) >= 2 and all(
+            fy >= new_y - SAME_COORD_TOLERANCE for fy in ext_feeders
+        ):
             break
         delta = new_y - graph.stations[candidate].y
         graph.stations[candidate].y = new_y
@@ -658,7 +661,7 @@ def _compact_below_trunk_band(
         st = graph.stations.get(sid)
         if st is None or st.is_port or st.is_hidden:
             continue
-        if st.y > trunk_y + 0.5:
+        if st.y > trunk_y + SAME_COORD_TOLERANCE:
             movables.append(sid)
     if not movables:
         return
@@ -666,7 +669,8 @@ def _compact_below_trunk_band(
     # station at trunk_y + y_spacing within half a slot.
     first_row_y = trunk_y + y_spacing
     has_first_row = any(
-        abs(graph.stations[s].y - first_row_y) < y_spacing / 2 - 0.5 for s in movables
+        abs(graph.stations[s].y - first_row_y) < y_spacing / 2 - SAME_COORD_TOLERANCE
+        for s in movables
     )
     if has_first_row:
         return
@@ -691,7 +695,7 @@ def _compact_below_trunk_band(
         new_y = st.y - y_spacing
         col_x = round(st.x, 3)
         if any(
-            abs(oy - new_y) < y_spacing / 2 - 0.5
+            abs(oy - new_y) < y_spacing / 2 - SAME_COORD_TOLERANCE
             for oy in cols_nonmovable.get(col_x, set())
         ):
             return  # collision; abort
@@ -732,10 +736,10 @@ def _loop_side_endpoints(
     tgt = graph.stations.get(outs[0].target)
     if src is None or tgt is None:
         return None
-    if abs(src.y - tgt.y) > 0.5:
+    if abs(src.y - tgt.y) > SAME_COORD_TOLERANCE:
         return None
     trunk_y = src.y
-    if abs(st.y - trunk_y) < 0.5:
+    if abs(st.y - trunk_y) < SAME_COORD_TOLERANCE:
         return None
     if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
         return None
@@ -763,7 +767,7 @@ def _has_off_trunk_sibling(
         other = graph.stations.get(other_sid)
         if other is None or other.is_port or other.is_hidden:
             continue
-        if abs(other.y - trunk_y) < 0.5:
+        if abs(other.y - trunk_y) < SAME_COORD_TOLERANCE:
             continue
         other_srcs = {e.source for e in graph.edges_to(other_sid)}
         other_tgts = {e.target for e in graph.edges_from(other_sid)}
@@ -830,7 +834,7 @@ def _loop_column_key(
         p = graph.stations.get(e.source)
         if p is None or p.is_hidden:
             continue
-        if abs(p.y - section_trunk_y) > 0.5:
+        if abs(p.y - section_trunk_y) > SAME_COORD_TOLERANCE:
             return None
         if (
             pred_x is None
@@ -842,7 +846,7 @@ def _loop_column_key(
         t = graph.stations.get(e.target)
         if t is None or t.is_hidden:
             continue
-        if abs(t.y - section_trunk_y) > 0.5:
+        if abs(t.y - section_trunk_y) > SAME_COORD_TOLERANCE:
             return None
         if (
             succ_x is None
@@ -899,7 +903,7 @@ def _snap_column_to_anchors(
     anchor_xs: list[float] = []
     for sid in members:
         st = graph.stations[sid]
-        if abs(st.y - section_trunk_y) <= 0.5:
+        if abs(st.y - section_trunk_y) <= SAME_COORD_TOLERANCE:
             movers.append(sid)
             continue
         visible_ins = [
@@ -1075,13 +1079,16 @@ def _shift_sparse_loop_stations_to_clear_bundle(
             tgt = graph.stations.get(outs[0].target)
             if src is None or tgt is None:
                 continue
-            if abs(src.y - trunk_y) > 0.5 or abs(tgt.y - trunk_y) > 0.5:
+            if (
+                abs(src.y - trunk_y) > SAME_COORD_TOLERANCE
+                or abs(tgt.y - trunk_y) > SAME_COORD_TOLERANCE
+            ):
                 continue
             # S must sit clearly off the trunk and share its Y row
             # with a same-section sibling whose inbound bundle is
             # busier than S's.
             dy = st.y - trunk_y
-            if abs(dy) < 0.5:
+            if abs(dy) < SAME_COORD_TOLERANCE:
                 continue
             s_lines = _consumed_lines(sid)
             sibling: Station | None = None
@@ -1097,7 +1104,7 @@ def _shift_sparse_loop_stations_to_clear_bundle(
                     or sib.is_terminus
                 ):
                     continue
-                if abs(sib.y - st.y) > 0.5:
+                if abs(sib.y - st.y) > SAME_COORD_TOLERANCE:
                     continue
                 sib_lines = _consumed_lines(sib_id)
                 if len(sib_lines) > len(s_lines):

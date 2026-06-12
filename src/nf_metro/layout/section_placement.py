@@ -27,6 +27,7 @@ from nf_metro.layout.constants import (
     PLACEMENT_X_GAP,
     PLACEMENT_Y_GAP,
     PORT_MIN_GAP,
+    SAME_COORD_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
 )
@@ -345,7 +346,7 @@ def _finalize_spanning_sections(
             continue
         target_left = min(s.offset_x + s.bbox_x for s in peers)
         current_left = section.offset_x + section.bbox_x
-        if abs(current_left - target_left) > 0.5:
+        if abs(current_left - target_left) > SAME_COORD_TOLERANCE:
             section.offset_x -= current_left - target_left
 
         rspan = section.grid_row_span
