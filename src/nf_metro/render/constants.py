@@ -178,7 +178,13 @@ WATERMARK_Y_INSET: float = 8.0
 """Y distance from bottom edge for watermark text."""
 
 WATERMARK_FILL: str = "rgba(150, 150, 150, 0.6)"
-"""Fill color for the watermark and caption text."""
+"""Fill color for the muted attribution watermark."""
+
+CAPTION_FONT_SIZE: int = 11
+"""Font size for the figure caption (%%metro caption:) — readable, not a watermark."""
+
+CAPTION_FILL: str = "rgba(200, 200, 200, 0.85)"
+"""Fill color for the figure caption."""
 
 # ---------------------------------------------------------------------------
 # Fallback colors

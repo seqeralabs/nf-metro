@@ -40,6 +40,8 @@ from nf_metro.parser.model import (
 from nf_metro.render.bridges import BridgeBreak, compute_bridges
 from nf_metro.render.constants import (
     CANVAS_PADDING,
+    CAPTION_FILL,
+    CAPTION_FONT_SIZE,
     DEBUG_DIAMOND_RADIUS,
     DEBUG_ENTRY_PORT_COLOR,
     DEBUG_EXIT_PORT_COLOR,
@@ -631,10 +633,10 @@ def _render_svg_scaled(
         d.append(
             draw.Text(
                 graph.caption,
-                WATERMARK_FONT_SIZE,
+                CAPTION_FONT_SIZE,
                 padding * WATERMARK_PADDING_RATIO,
                 svg_height - WATERMARK_Y_INSET,
-                fill=WATERMARK_FILL,
+                fill=CAPTION_FILL,
                 font_family=theme.label_font_family,
                 text_anchor="start",
             )
