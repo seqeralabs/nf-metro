@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from nf_metro.layout.constants import (
     COMPONENT_BAND_OVERLAP_TOLERANCE,
@@ -1093,14 +1093,25 @@ def _guard_no_line_crosses_file_icon(
                     )
 
 
-def _guard_no_line_strikes_label(
+class LabelStrike(NamedTuple):
+    """One rendered line segment striking through a station's label glyph ink."""
+
+    line_id: str
+    src: str
+    tgt: str
+    station_id: str
+    bbox: tuple[float, float, float, float]
+    p1: tuple[float, float]
+    p2: tuple[float, float]
+
+
+def iter_line_label_strikes(
     graph: MetroGraph,
-    phase: str,
     *,
     offsets: dict[tuple[str, str], float] | None = None,
     routes: list[RoutedPath] | None = None,
-) -> None:
-    """Final-phase: no rendered line segment may strike through a station label.
+) -> Iterator[LabelStrike]:
+    """Yield every rendered line segment that strikes through a station label.
 
     A line dipping, fanning, or running across a station's name label reads as
     a strike-through.  The label glyph-ink box (the reserved label width
@@ -1110,6 +1121,10 @@ def _guard_no_line_strikes_label(
     crossing the glyphs does.  A segment is exempt when it belongs to a line
     the label's station carries, or when the label's station is an endpoint of
     the segment's edge (that line legitimately touches the station).
+
+    This is the single strike definition shared by
+    ``_guard_no_line_strikes_label`` (which raises on the first) and the passive
+    label-strike CI metric (which counts them all).
     """
     from nf_metro.layout.labels import (
         LabelPlacement,
@@ -1171,13 +1186,25 @@ def _guard_no_line_strikes_label(
                     if segment_strikes_label(
                         p1[0], p1[1], p2[0], p2[1], placement_by_sid[sid]
                     ):
-                        raise PhaseInvariantError(
-                            f"{phase}: line {line_id!r} on edge {src!r} -> {tgt!r} "
-                            f"strikes through label of {sid!r} "
-                            f"glyph-ink bbox ({bbox[0]:.1f},{bbox[1]:.1f})-"
-                            f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
-                            f"({p1[0]:.1f},{p1[1]:.1f})->({p2[0]:.1f},{p2[1]:.1f})"
-                        )
+                        yield LabelStrike(line_id, src, tgt, sid, bbox, p1, p2)
+
+
+def _guard_no_line_strikes_label(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: no rendered line segment may strike through a station label."""
+    for s in iter_line_label_strikes(graph, offsets=offsets, routes=routes):
+        raise PhaseInvariantError(
+            f"{phase}: line {s.line_id!r} on edge {s.src!r} -> {s.tgt!r} "
+            f"strikes through label of {s.station_id!r} "
+            f"glyph-ink bbox ({s.bbox[0]:.1f},{s.bbox[1]:.1f})-"
+            f"({s.bbox[2]:.1f},{s.bbox[3]:.1f}); segment "
+            f"({s.p1[0]:.1f},{s.p1[1]:.1f})->({s.p2[0]:.1f},{s.p2[1]:.1f})"
+        )
 
 
 def _guard_no_diagonal_strikes_horizontal_label(
