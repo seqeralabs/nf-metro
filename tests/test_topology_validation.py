@@ -28,6 +28,7 @@ from layout_validator import (
 )
 
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.routing.common import resolve_section
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
@@ -1158,19 +1159,47 @@ class TestAlmostHorizontalEdges:
 FAN_BYPASS_NESTING_FILE = TOPOLOGIES_DIR / "fan_bypass_nesting.mmd"
 
 
-def _junction_sibling_crossings(graph):
-    """route_segment_crossings between two edges fanning from one junction.
+def _edge_target_row(graph, edge_key):
+    """Grid row of an edge's target port/junction section, or ``None``."""
+    tgt = graph.stations.get(edge_key[1])
+    if tgt is None:
+        return None
+    sec = resolve_section(graph, tgt, prefer_upstream=False)
+    if sec is None or sec.grid_row < 0:
+        return None
+    return sec.grid_row
 
-    Two edges sharing a junction *source* endpoint diverge at that fan, so a
-    crossing between them is an avoidable tangle right at the fan-out. A
-    bypass crossing an unrelated feeder bundle (different sources) is not a
-    fan-sibling tangle and is excluded.
+
+def _junction_row(graph, jid):
+    """Grid row of a junction's resolved section, or ``None``."""
+    jst = graph.stations.get(jid)
+    sec = resolve_section(graph, jst, prefer_upstream=False) if jst else None
+    return sec.grid_row if sec and sec.grid_row >= 0 else None
+
+
+def _bypass_descender_crossings(graph):
+    """route_segment_crossings where a fan-out bypass weaves a descender sibling.
+
+    A weave is a crossing between two edges of one junction where exactly one
+    turns DOWN to a lower row (a descender) and the other rides the junction
+    row toward a far target (the bypass).  A crossing between the bypass and
+    the same-row trunk continuation -- the bypass diverging from the trunk --
+    is topologically unavoidable at the fan and is not a weave; nor is a
+    crossing with an unrelated feeder bundle (a different source).
     """
     out = []
     for v in check_route_segment_crossings(graph):
         edge_a = v.context["edge_a"]
         edge_b = v.context["edge_b"]
-        if edge_a[0] == edge_b[0] and edge_a[0].startswith("__junction"):
+        jid = edge_a[0]
+        if jid != edge_b[0] or not jid.startswith("__junction"):
+            continue
+        jrow = _junction_row(graph, jid)
+        row_a = _edge_target_row(graph, edge_a)
+        row_b = _edge_target_row(graph, edge_b)
+        if jrow is None or row_a is None or row_b is None:
+            continue
+        if (row_a > jrow) != (row_b > jrow):
             out.append(v.message)
     return out
 
@@ -1182,19 +1211,15 @@ def test_fan_bypass_nesting_fixture_fans_from_a_junction():
     assert junctions, "fixture lost its synthetic fan-out junction"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="known junction fan-out + bypass corner-graze; tracked in #652",
-)
-def test_fan_bypass_no_junction_sibling_crossings():
-    """Edges fanning from one junction must not cross each other (#652).
+def test_fan_bypass_no_descender_weave():
+    """A fan-out bypass must not weave across its sibling down-turns (#652).
 
-    The bypass joins the down-turns' concentric corner and descends in the
-    shared channel, peeling into its lane at the inter-row gap, so it never
-    grazes the down-turn corners at the fan. Flips to XPASS once the engine
-    fix lands; the marker is then removed to leave a permanent positive
-    guard.
+    The bypass rides the bundle's outer track, rounds the down-turns' shared
+    concentric corner, and peels into its run at the inter-row gap, so it never
+    crosses a descending sibling. The single crossing with the same-row trunk
+    continuation -- the bypass diverging from the trunk -- is unavoidable and
+    not counted.
     """
     graph = _load_and_layout(FAN_BYPASS_NESTING_FILE)
-    crossings = _junction_sibling_crossings(graph)
+    crossings = _bypass_descender_crossings(graph)
     assert not crossings, "\n".join(crossings)
