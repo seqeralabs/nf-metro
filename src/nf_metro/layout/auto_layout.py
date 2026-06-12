@@ -273,27 +273,10 @@ def _place_with_tall_anchor(
     return set(), set(), set()
 
 
-def _assign_grid_positions(
-    graph: MetroGraph,
-    successors: dict[str, set[str]],
-    predecessors: dict[str, set[str]],
-    max_station_columns: int,
-) -> tuple[set[str], set[str], set[str]]:
-    """Assign grid (col, row) positions to sections without explicit grid overrides.
-
-    When cumulative station columns in a row exceed the threshold, the
-    overflowing topo column becomes a "fold section" - it stays at the
-    right edge of the current row as a TB bridge. Subsequent topo columns
-    go into a new row below.
-
-    Returns (fold_sections, below_fold_sections). below_fold_sections are
-    sections placed directly below a fold instead of on the return row,
-    used when the fold has a single successor and the band has stacked
-    sections (making a return row visually awkward).
-    """
-    section_ids = list(graph.sections.keys())
-
-    # BFS topological sort for column assignment
+def _bfs_section_columns(
+    section_ids: list[str], successors: dict[str, set[str]]
+) -> dict[str, int]:
+    """Longest-path topo column per section (disconnected sections get 0)."""
     all_sections = set(section_ids)
     in_degree: dict[str, int] = {sid: 0 for sid in section_ids}
     adj: dict[str, list[str]] = {sid: [] for sid in section_ids}
@@ -321,10 +304,157 @@ def _assign_grid_positions(
             if in_degree[tgt] == 0:
                 queue.append(tgt)
 
-    # Handle disconnected sections
     for sid in section_ids:
         if sid not in col_assign:
             col_assign[sid] = 0
+    return col_assign
+
+
+def _pack_topo_columns(
+    col_groups: dict[int, list[str]],
+    topo_col_width: dict[int, int],
+    successors: dict[str, set[str]],
+    max_station_columns: int,
+) -> tuple[dict[str, tuple[int, int]], set[str], set[str]]:
+    """Greedily pack topo columns into serpentine row bands.
+
+    When a column would overflow the current row it becomes a fold section
+    (TB bridge) at the right edge, and subsequent columns start a new row band
+    below flowing in the opposite direction.  Returns ``(folded, fold_sections,
+    below_fold_sections)``.
+    """
+    sorted_cols = sorted(col_groups.keys())
+    fold_sections: set[str] = set()
+    below_fold_sections: set[str] = set()
+    folded: dict[str, tuple[int, int]] = {}
+    skip_topo_cols: set[int] = set()
+
+    current_grid_col = 0
+    col_step = 1  # +1 in first row (LR), -1 after a fold (RL)
+    band_start_row = 0
+    max_stack_in_band = 0  # tallest topo column (stacking) in this band
+    cumulative_width = 0
+
+    for topo_idx, topo_col in enumerate(sorted_cols):
+        if topo_col in skip_topo_cols:
+            continue
+
+        sids = col_groups[topo_col]
+        w = topo_col_width[topo_col]
+        stack_size = len(sids)
+        is_last_col = topo_idx == len(sorted_cols) - 1
+        # Don't fold the final topo column: there are no further columns to
+        # wrap into the next row, so a fold here only creates a spurious TB
+        # bridge (and a negative grid column) instead of bending the chain.
+        need_fold = (
+            not is_last_col
+            and cumulative_width > 0
+            and cumulative_width + w > max_station_columns
+        )
+
+        if need_fold:
+            fold_col = current_grid_col
+            # This column is the fold point: place at right edge as TB bridge
+            for i, sid in enumerate(sids):
+                folded[sid] = (fold_col, band_start_row + i)
+                fold_sections.add(sid)
+            band_height = max(max_stack_in_band, stack_size)
+            # Start new row band below all stacked rows in the current band
+            band_start_row += max(band_height, 1)
+            # Post-fold sections flow in the opposite direction, starting
+            # one column past the fold (i.e. to its left on a return row).
+            # Toggle: +1 -> -1 -> +1 (serpentine/zigzag layout).
+            col_step = -col_step
+            current_grid_col = fold_col + col_step
+            cumulative_width = 0
+            max_stack_in_band = 0
+
+            _maybe_place_below_fold(
+                col_groups,
+                successors,
+                sorted_cols,
+                topo_idx,
+                sids,
+                fold_col,
+                band_start_row,
+                band_height,
+                folded,
+                below_fold_sections,
+                skip_topo_cols,
+            )
+        else:
+            # Normal placement in current band
+            for i, sid in enumerate(sids):
+                folded[sid] = (current_grid_col, band_start_row + i)
+            max_stack_in_band = max(max_stack_in_band, stack_size)
+            current_grid_col += col_step
+            cumulative_width += w
+
+    return folded, fold_sections, below_fold_sections
+
+
+def _maybe_place_below_fold(
+    col_groups: dict[int, list[str]],
+    successors: dict[str, set[str]],
+    sorted_cols: list[int],
+    topo_idx: int,
+    sids: list[str],
+    fold_col: int,
+    band_start_row: int,
+    band_height: int,
+    folded: dict[str, tuple[int, int]],
+    below_fold_sections: set[str],
+    skip_topo_cols: set[int],
+) -> None:
+    """Place a fold's single successors directly below it instead of on a return row.
+
+    When the band has stacked sections (``band_height > 1``) a return row would
+    route backward over that content.  If every fold section has exactly one
+    successor and those successors are the only sections in the next topo
+    column, seat them in the fold column below the bridge.
+    """
+    if band_height <= 1 or topo_idx + 1 >= len(sorted_cols):
+        return
+    next_topo = sorted_cols[topo_idx + 1]
+    next_sids = col_groups[next_topo]
+    fold_succs: set[str] = set()
+    all_single = True
+    for fs in sids:
+        fs_succs = successors.get(fs, set())
+        if len(fs_succs) != 1:
+            all_single = False
+            break
+        fold_succs.update(fs_succs)
+    if all_single and fold_succs == set(next_sids):
+        for j, ns in enumerate(next_sids):
+            folded[ns] = (fold_col, band_start_row + j)
+            below_fold_sections.add(ns)
+        skip_topo_cols.add(next_topo)
+        # Don't increment band_start_row: below-fold sections are in the fold
+        # column, so return-row sections (in adjacent columns) share the rows.
+
+
+def _assign_grid_positions(
+    graph: MetroGraph,
+    successors: dict[str, set[str]],
+    predecessors: dict[str, set[str]],
+    max_station_columns: int,
+) -> tuple[set[str], set[str], set[str]]:
+    """Assign grid (col, row) positions to sections without explicit grid overrides.
+
+    When cumulative station columns in a row exceed the threshold, the
+    overflowing topo column becomes a "fold section" - it stays at the
+    right edge of the current row as a TB bridge. Subsequent topo columns
+    go into a new row below.
+
+    Returns (fold_sections, below_fold_sections). below_fold_sections are
+    sections placed directly below a fold instead of on the return row,
+    used when the fold has a single successor and the band has stacked
+    sections (making a return row visually awkward).
+    """
+    section_ids = list(graph.sections.keys())
+
+    col_assign = _bfs_section_columns(section_ids, successors)
 
     # Skip sections already in grid_overrides
     auto_sections = {sid for sid in section_ids if sid not in graph.grid_overrides}
@@ -384,87 +514,9 @@ def _assign_grid_positions(
                 convergence_result,
             )
 
-    # Greedily pack topo columns into row bands.
-    # When overflow is detected, the overflowing column becomes the fold
-    # section (TB bridge) at the right edge of the current row. Subsequent
-    # columns start a new row band below.
-    sorted_cols = sorted(col_groups.keys())
-    fold_sections: set[str] = set()
-    below_fold_sections: set[str] = set()
-    folded: dict[str, tuple[int, int]] = {}
-    skip_topo_cols: set[int] = set()
-
-    current_grid_col = 0
-    col_step = 1  # +1 in first row (LR), -1 after a fold (RL)
-    band_start_row = 0
-    max_stack_in_band = 0  # tallest topo column (stacking) in this band
-    cumulative_width = 0
-
-    for topo_idx, topo_col in enumerate(sorted_cols):
-        if topo_col in skip_topo_cols:
-            continue
-
-        sids = col_groups[topo_col]
-        w = topo_col_width[topo_col]
-        stack_size = len(sids)
-        is_last_col = topo_idx == len(sorted_cols) - 1
-        # Don't fold the final topo column: there are no further columns to
-        # wrap into the next row, so a fold here only creates a spurious TB
-        # bridge (and a negative grid column) instead of bending the chain.
-        need_fold = (
-            not is_last_col
-            and cumulative_width > 0
-            and cumulative_width + w > max_station_columns
-        )
-
-        if need_fold:
-            fold_col = current_grid_col
-            # This column is the fold point: place at right edge as TB bridge
-            for i, sid in enumerate(sids):
-                folded[sid] = (fold_col, band_start_row + i)
-                fold_sections.add(sid)
-            band_height = max(max_stack_in_band, stack_size)
-            # Start new row band below all stacked rows in the current band
-            band_start_row += max(band_height, 1)
-            # Post-fold sections flow in the opposite direction, starting
-            # one column past the fold (i.e. to its left on a return row).
-            # Toggle: +1 -> -1 -> +1 (serpentine/zigzag layout).
-            col_step = -col_step
-            current_grid_col = fold_col + col_step
-            cumulative_width = 0
-            max_stack_in_band = 0
-
-            # Below-fold placement: when the band has stacked sections
-            # (band_height > 1), a return row would route backward over
-            # that content. If every fold section has exactly one successor
-            # and those successors are the only sections in the next topo
-            # column, place them directly below the fold instead.
-            if band_height > 1 and topo_idx + 1 < len(sorted_cols):
-                next_topo = sorted_cols[topo_idx + 1]
-                next_sids = col_groups[next_topo]
-                fold_succs: set[str] = set()
-                all_single = True
-                for fs in sids:
-                    fs_succs = successors.get(fs, set())
-                    if len(fs_succs) != 1:
-                        all_single = False
-                        break
-                    fold_succs.update(fs_succs)
-                if all_single and fold_succs == set(next_sids):
-                    for j, ns in enumerate(next_sids):
-                        folded[ns] = (fold_col, band_start_row + j)
-                        below_fold_sections.add(ns)
-                    skip_topo_cols.add(next_topo)
-                    # Don't increment band_start_row: below-fold sections
-                    # are in the fold column, so return-row sections (in
-                    # adjacent columns) can share the same rows.
-        else:
-            # Normal placement in current band
-            for i, sid in enumerate(sids):
-                folded[sid] = (current_grid_col, band_start_row + i)
-            max_stack_in_band = max(max_stack_in_band, stack_size)
-            current_grid_col += col_step
-            cumulative_width += w
+    folded, fold_sections, below_fold_sections = _pack_topo_columns(
+        col_groups, topo_col_width, successors, max_station_columns
+    )
 
     # Boustrophedon normalization: a return row built by stepping left from
     # the fold bridge can run off the left edge into negative columns. Shift

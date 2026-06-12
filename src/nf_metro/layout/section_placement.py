@@ -160,35 +160,9 @@ def _compute_section_offsets(
         min_col = min(min_col, col)
         max_col = max(max_col, col + cspan - 1)
 
-    # Right reach re-anchored to the standard left edge so that bbox_x
-    # pushed further left (e.g. by terminus-icon clearance) doesn't
-    # inflate the column.  Stage 1.5 of compute_layout absorbs the
-    # leftward overhang via a global x_offset bump.
-    def _effective_width(section: Section) -> float:
-        return section.bbox_x + section.bbox_w + SECTION_X_PADDING
-
-    col_widths: dict[int, float] = defaultdict(float)
-    for sid, section in scoped.items():
-        if section.grid_col_span == 1:
-            col = col_assign.get(sid, 0)
-            col_widths[col] = max(col_widths[col], _effective_width(section))
-
-    for c in range(min_col, max_col + 1):
-        if c not in col_widths:
-            col_widths[c] = 0.0
-
-    # Expand columns if a spanning section exceeds spanned column widths
-    for sid, section in scoped.items():
-        cspan = section.grid_col_span
-        if cspan <= 1:
-            continue
-        start_col = col_assign.get(sid, 0)
-        spanned = sum(col_widths[c] for c in range(start_col, start_col + cspan))
-        spanned += (cspan - 1) * section_x_gap
-        eff_w = _effective_width(section)
-        if eff_w > spanned:
-            deficit = eff_w - spanned
-            col_widths[start_col + cspan - 1] += deficit
+    col_widths = _compute_col_widths(
+        scoped, col_assign, min_col, max_col, section_x_gap
+    )
 
     # Cumulative x offsets
     col_offsets: dict[int, float] = {}
@@ -197,13 +171,100 @@ def _compute_section_offsets(
         col_offsets[col] = cumulative_x
         cumulative_x += col_widths.get(col, 0) + section_x_gap
 
-    # Global row heights (only single-row non-TB sections)
     max_row = max(row_assign.values()) if row_assign else 0
     for sid in scoped:
         span = scoped[sid].grid_row_span
         row = row_assign.get(sid, 0)
         max_row = max(max_row, row + span - 1)
 
+    row_heights = _compute_row_heights(scoped, row_assign, max_row, section_y_gap)
+
+    # Cumulative y offsets per row
+    row_offsets: dict[int, float] = {}
+    cumulative_y = 0.0
+    for r in range(max_row + 1):
+        row_offsets[r] = cumulative_y
+        cumulative_y += row_heights[r] + section_y_gap
+
+    _apply_tb_fold_spans(
+        scoped, row_assign, row_offsets, row_heights, max_row, section_y_gap
+    )
+
+    # Right-align columns containing RL or TB sections
+    right_align_cols: set[int] = set()
+    for sid, section in scoped.items():
+        if section.direction in ("RL", "TB") and section.grid_col_span == 1:
+            right_align_cols.add(col_assign.get(sid, 0))
+
+    # Set section offsets and adjust for spanning
+    for sid, section in scoped.items():
+        section.grid_col = col_assign.get(sid, 0)
+        section.grid_row = row_assign.get(sid, 0)
+        section.offset_x = col_offsets.get(section.grid_col, 0)
+        section.offset_y = row_offsets.get(section.grid_row, 0)
+
+        if section.grid_col_span == 1 and (
+            section.direction in ("RL", "TB") or section.grid_col in right_align_cols
+        ):
+            col_w = col_widths.get(section.grid_col, 0)
+            if col_w > section.bbox_w:
+                section.offset_x += col_w - section.bbox_w
+
+    _finalize_spanning_sections(
+        scoped, col_widths, row_heights, section_x_gap, section_y_gap
+    )
+
+    return min_col, max_col
+
+
+def _effective_section_width(section: Section) -> float:
+    """Section right reach re-anchored to the standard left edge.
+
+    Keeps bbox_x pushed further left (e.g. by terminus-icon clearance) from
+    inflating the column; Stage 1.5 of compute_layout absorbs the leftward
+    overhang via a global x_offset bump.
+    """
+    return section.bbox_x + section.bbox_w + SECTION_X_PADDING
+
+
+def _compute_col_widths(
+    scoped: dict[str, Section],
+    col_assign: dict[str, int],
+    min_col: int,
+    max_col: int,
+    section_x_gap: float,
+) -> dict[int, float]:
+    """Per-column width: widest single-span section, expanded for spans."""
+    col_widths: dict[int, float] = defaultdict(float)
+    for sid, section in scoped.items():
+        if section.grid_col_span == 1:
+            col = col_assign.get(sid, 0)
+            col_widths[col] = max(col_widths[col], _effective_section_width(section))
+
+    for c in range(min_col, max_col + 1):
+        if c not in col_widths:
+            col_widths[c] = 0.0
+
+    for sid, section in scoped.items():
+        cspan = section.grid_col_span
+        if cspan <= 1:
+            continue
+        start_col = col_assign.get(sid, 0)
+        spanned = sum(col_widths[c] for c in range(start_col, start_col + cspan))
+        spanned += (cspan - 1) * section_x_gap
+        eff_w = _effective_section_width(section)
+        if eff_w > spanned:
+            col_widths[start_col + cspan - 1] += eff_w - spanned
+    return col_widths
+
+
+def _compute_row_heights(
+    scoped: dict[str, Section],
+    row_assign: dict[str, int],
+    max_row: int,
+    section_y_gap: float,
+) -> dict[int, float]:
+    """Per-row height: tallest single-row non-TB section, expanded for spans."""
     row_heights: dict[int, float] = defaultdict(float)
     for sid, section in scoped.items():
         if section.grid_row_span == 1 and section.direction != "TB":
@@ -214,7 +275,6 @@ def _compute_section_offsets(
         if r not in row_heights:
             row_heights[r] = 0.0
 
-    # Expand rows if a spanning section exceeds spanned row heights
     for sid, section in scoped.items():
         rspan = section.grid_row_span
         if rspan <= 1:
@@ -223,17 +283,19 @@ def _compute_section_offsets(
         spanned = sum(row_heights[r] for r in range(start_row, start_row + rspan))
         spanned += (rspan - 1) * section_y_gap
         if section.bbox_h > spanned:
-            deficit = section.bbox_h - spanned
-            row_heights[start_row + rspan - 1] += deficit
+            row_heights[start_row + rspan - 1] += section.bbox_h - spanned
+    return row_heights
 
-    # Cumulative y offsets per row
-    row_offsets: dict[int, float] = {}
-    cumulative_y = 0.0
-    for r in range(max_row + 1):
-        row_offsets[r] = cumulative_y
-        cumulative_y += row_heights[r] + section_y_gap
 
-    # TB fold sections visually span into the next row
+def _apply_tb_fold_spans(
+    scoped: dict[str, Section],
+    row_assign: dict[str, int],
+    row_offsets: dict[int, float],
+    row_heights: dict[int, float],
+    max_row: int,
+    section_y_gap: float,
+) -> None:
+    """Push lower rows down where a TB fold section spills into the next row."""
     tb_sections = sorted(
         [
             (sid, section)
@@ -258,36 +320,24 @@ def _compute_section_offsets(
         next_row_bottom = row_offsets[next_row] + row_heights[next_row]
         section.bbox_h = next_row_bottom - row_offsets[row]
 
-    # Right-align columns containing RL or TB sections
-    right_align_cols: set[int] = set()
-    for sid, section in scoped.items():
-        if section.direction in ("RL", "TB") and section.grid_col_span == 1:
-            right_align_cols.add(col_assign.get(sid, 0))
 
-    # Set section offsets and adjust for spanning
-    for sid, section in scoped.items():
-        section.grid_col = col_assign.get(sid, 0)
-        section.grid_row = row_assign.get(sid, 0)
-        section.offset_x = col_offsets.get(section.grid_col, 0)
-        section.offset_y = row_offsets.get(section.grid_row, 0)
+def _finalize_spanning_sections(
+    scoped: dict[str, Section],
+    col_widths: dict[int, float],
+    row_heights: dict[int, float],
+    section_x_gap: float,
+    section_y_gap: float,
+) -> None:
+    """Align spanning-section left edges to their column and size their bbox.
 
-        if section.grid_col_span == 1 and (
-            section.direction in ("RL", "TB") or section.grid_col in right_align_cols
-        ):
-            col_w = col_widths.get(section.grid_col, 0)
-            if col_w > section.bbox_w:
-                section.offset_x += col_w - section.bbox_w
-
-    # Align left edges of spanning sections with their starting column.
-    # A section that spans multiple columns may have a different local
-    # bbox_x from internal layout, causing its left edge to be offset
-    # from single-span sections in the same starting column.
+    A section that spans multiple columns may have a different local bbox_x
+    from internal layout, offsetting its left edge from single-span sections
+    in the same starting column.
+    """
     for section in scoped.values():
         if section.grid_col_span <= 1:
             continue
         col = section.grid_col
-        # Find the representative left edge from single-span sections
-        # in the same column.
         peers = [
             s for s in scoped.values() if s.grid_col == col and s.grid_col_span == 1
         ]
@@ -315,8 +365,6 @@ def _compute_section_offsets(
             )
             spanned_width += (cspan - 1) * section_x_gap
             section.bbox_w = spanned_width
-
-    return min_col, max_col
 
 
 def _weakly_connected_components(

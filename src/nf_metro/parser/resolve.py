@@ -9,6 +9,7 @@ junctions, and resolving inter-section edges into port-to-port chains.
 from __future__ import annotations
 
 import warnings
+from dataclasses import dataclass
 
 import networkx as nx
 
@@ -206,125 +207,18 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
     edges_to_remove: set[int] = set()
     bypass_count = 0
 
-    def _section_layers(section_ids: set[str]) -> dict[str, int]:
-        sub: nx.DiGraph[str] = nx.DiGraph()
-        for sid in section_ids:
-            sub.add_node(sid)
-        for edge in graph.edges:
-            if edge.source in section_ids and edge.target in section_ids:
-                sub.add_edge(edge.source, edge.target)
-        try:
-            topo = list(nx.topological_sort(sub))
-        except nx.NetworkXUnfeasible:
-            return {}
-        layers: dict[str, int] = {}
-        for node in topo:
-            preds = list(sub.predecessors(node))
-            layers[node] = (
-                max((layers[p] for p in preds), default=-1) + 1 if preds else 0
-            )
-        return layers
-
     for section in graph.sections.values():
         station_ids = set(section.station_ids)
         if not station_ids:
             continue
-
-        sec_layers = _section_layers(station_ids)
-        exit_port_ids = set(section.exit_ports)
-        # Pin exit ports past every internal station so longest-path layering
-        # doesn't tie an exit port with an internal station sharing its
-        # predecessor (which would suppress the bypass trigger).
-        if exit_port_ids and sec_layers:
-            internal_max = max(
-                v for k, v in sec_layers.items() if k not in exit_port_ids
-            )
-            for pid in exit_port_ids:
-                if sec_layers.get(pid, 0) <= internal_max:
-                    sec_layers[pid] = internal_max + 1
-
-        in_section_edges = [
-            e
-            for e in graph.edges
-            if e.source in station_ids and e.target in station_ids
-        ]
-        in_preds_by_target: dict[str, set[str]] = {}
-        consumed_lines_by_target: dict[str, set[str]] = {}
-        for e in in_section_edges:
-            in_preds_by_target.setdefault(e.target, set()).add(e.source)
-            consumed_lines_by_target.setdefault(e.target, set()).add(e.line_id)
-
-        entry_port_ids = set(section.entry_ports)
-        internal_ids = [
-            sid
-            for sid in station_ids
-            if sid not in exit_port_ids
-            and sid not in entry_port_ids
-            and sid in sec_layers
-        ]
-        if not internal_ids:
+        ctx = _build_bypass_section_ctx(graph, section, station_ids)
+        if ctx is None:
             continue
-        min_internal_layer = min(sec_layers[sid] for sid in internal_ids)
-        head_count = sum(
-            1 for sid in internal_ids if sec_layers[sid] == min_internal_layer
-        )
-        single_trunk_section = head_count <= 1
 
         for sid in section.station_ids:
-            station = graph.stations.get(sid)
-            if station is None or station.is_port or station.is_hidden:
-                continue
-            if station.is_terminus or sid in pending_terminus_ids:
-                continue
-
-            s_layer = sec_layers.get(sid)
-            if s_layer is None:
-                continue
-            s_lines = set(graph.station_lines(sid))
-
-            in_section_preds = in_preds_by_target.get(sid, set())
-            # In multi-trunk sections, only fan-in convergence points
-            # (S has >=2 in-section predecessors) need bypass help, and
-            # only from a direct predecessor of S - other lines already
-            # have their own parallel tracks.
-            if not single_trunk_section and len(in_section_preds) < 2:
-                continue
-
-            # Skip stations that only consume a spur line - the bypass
-            # would snap S's spur track to the section trunk Y, opening
-            # an unnecessary vertical gap to S.  A consumed line is
-            # "trunk" when it has at least one in-section edge that
-            # doesn't touch S.
-            consumed_lines = consumed_lines_by_target.get(sid, set())
-            trunk_lines = {
-                e.line_id
-                for e in in_section_edges
-                if e.source != sid and e.target != sid
-            }
-            if consumed_lines and not (consumed_lines & trunk_lines):
-                continue
-
-            candidate_preds = sorted(
-                station_ids if single_trunk_section else in_section_preds
+            bypass_by_pred = _station_bypass_groups(
+                graph, sid, ctx, edges_by_source, pending_terminus_ids
             )
-
-            bypass_by_pred: dict[str, list[tuple[int, Edge]]] = {}
-            for pred_id in candidate_preds:
-                if pred_id == sid:
-                    continue
-                pred_layer = sec_layers.get(pred_id)
-                if pred_layer is None or pred_layer >= s_layer:
-                    continue
-                for i, edge in edges_by_source.get(pred_id, []):
-                    if edge.target not in exit_port_ids:
-                        continue
-                    if edge.line_id in s_lines:
-                        continue
-                    t_layer = sec_layers.get(edge.target)
-                    if t_layer is None or t_layer <= s_layer:
-                        continue
-                    bypass_by_pred.setdefault(pred_id, []).append((i, edge))
-
             for pred_id, bypass_edges in bypass_by_pred.items():
                 bypass_count += 1
                 v_id = f"__bypass_{sid}_{pred_id}_{bypass_count}"
@@ -337,7 +231,6 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
                         bypasses_station_id=sid,
                     )
                 )
-
                 for idx, edge in bypass_edges:
                     edges_to_remove.add(idx)
                     new_edges.append(
@@ -359,6 +252,144 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
         )
     for edge in new_edges:
         graph.add_edge(edge)
+
+
+def _section_topo_layers(graph: MetroGraph, section_ids: set[str]) -> dict[str, int]:
+    """Longest-path layer index for the in-section subgraph (empty if cyclic)."""
+    sub: nx.DiGraph[str] = nx.DiGraph()
+    for sid in section_ids:
+        sub.add_node(sid)
+    for edge in graph.edges:
+        if edge.source in section_ids and edge.target in section_ids:
+            sub.add_edge(edge.source, edge.target)
+    try:
+        topo = list(nx.topological_sort(sub))
+    except nx.NetworkXUnfeasible:
+        return {}
+    layers: dict[str, int] = {}
+    for node in topo:
+        preds = list(sub.predecessors(node))
+        layers[node] = max((layers[p] for p in preds), default=-1) + 1 if preds else 0
+    return layers
+
+
+@dataclass
+class _BypassSectionCtx:
+    """Per-section state the bypass trigger reads for each candidate station."""
+
+    station_ids: set[str]
+    sec_layers: dict[str, int]
+    exit_port_ids: set[str]
+    in_preds_by_target: dict[str, set[str]]
+    consumed_lines_by_target: dict[str, set[str]]
+    in_section_edges: list[Edge]
+    single_trunk_section: bool
+
+
+def _build_bypass_section_ctx(
+    graph: MetroGraph, section: Section, station_ids: set[str]
+) -> _BypassSectionCtx | None:
+    """Compute bypass context for one section, or None when it has no internals."""
+    sec_layers = _section_topo_layers(graph, station_ids)
+    exit_port_ids = set(section.exit_ports)
+    # Pin exit ports past every internal station so longest-path layering
+    # doesn't tie an exit port with an internal station sharing its
+    # predecessor (which would suppress the bypass trigger).
+    if exit_port_ids and sec_layers:
+        internal_max = max(v for k, v in sec_layers.items() if k not in exit_port_ids)
+        for pid in exit_port_ids:
+            if sec_layers.get(pid, 0) <= internal_max:
+                sec_layers[pid] = internal_max + 1
+
+    in_section_edges = [
+        e for e in graph.edges if e.source in station_ids and e.target in station_ids
+    ]
+    in_preds_by_target: dict[str, set[str]] = {}
+    consumed_lines_by_target: dict[str, set[str]] = {}
+    for e in in_section_edges:
+        in_preds_by_target.setdefault(e.target, set()).add(e.source)
+        consumed_lines_by_target.setdefault(e.target, set()).add(e.line_id)
+
+    entry_port_ids = set(section.entry_ports)
+    internal_ids = [
+        sid
+        for sid in station_ids
+        if sid not in exit_port_ids and sid not in entry_port_ids and sid in sec_layers
+    ]
+    if not internal_ids:
+        return None
+    min_internal_layer = min(sec_layers[sid] for sid in internal_ids)
+    head_count = sum(1 for sid in internal_ids if sec_layers[sid] == min_internal_layer)
+
+    return _BypassSectionCtx(
+        station_ids=station_ids,
+        sec_layers=sec_layers,
+        exit_port_ids=exit_port_ids,
+        in_preds_by_target=in_preds_by_target,
+        consumed_lines_by_target=consumed_lines_by_target,
+        in_section_edges=in_section_edges,
+        single_trunk_section=head_count <= 1,
+    )
+
+
+def _station_bypass_groups(
+    graph: MetroGraph,
+    sid: str,
+    ctx: _BypassSectionCtx,
+    edges_by_source: dict[str, list[tuple[int, Edge]]],
+    pending_terminus_ids: set[str],
+) -> dict[str, list[tuple[int, Edge]]]:
+    """Bypassing exit edges grouped by predecessor for one station, or empty."""
+    station = graph.stations.get(sid)
+    if station is None or station.is_port or station.is_hidden:
+        return {}
+    if station.is_terminus or sid in pending_terminus_ids:
+        return {}
+
+    s_layer = ctx.sec_layers.get(sid)
+    if s_layer is None:
+        return {}
+    s_lines = set(graph.station_lines(sid))
+
+    in_section_preds = ctx.in_preds_by_target.get(sid, set())
+    # In multi-trunk sections, only fan-in convergence points (S has >=2
+    # in-section predecessors) need bypass help, and only from a direct
+    # predecessor of S - other lines already have their own parallel tracks.
+    if not ctx.single_trunk_section and len(in_section_preds) < 2:
+        return {}
+
+    # Skip stations that only consume a spur line - the bypass would snap S's
+    # spur track to the section trunk Y, opening an unnecessary vertical gap to
+    # S.  A consumed line is "trunk" when it has at least one in-section edge
+    # that doesn't touch S.
+    consumed_lines = ctx.consumed_lines_by_target.get(sid, set())
+    trunk_lines = {
+        e.line_id for e in ctx.in_section_edges if e.source != sid and e.target != sid
+    }
+    if consumed_lines and not (consumed_lines & trunk_lines):
+        return {}
+
+    candidate_preds = sorted(
+        ctx.station_ids if ctx.single_trunk_section else in_section_preds
+    )
+
+    bypass_by_pred: dict[str, list[tuple[int, Edge]]] = {}
+    for pred_id in candidate_preds:
+        if pred_id == sid:
+            continue
+        pred_layer = ctx.sec_layers.get(pred_id)
+        if pred_layer is None or pred_layer >= s_layer:
+            continue
+        for i, edge in edges_by_source.get(pred_id, []):
+            if edge.target not in ctx.exit_port_ids:
+                continue
+            if edge.line_id in s_lines:
+                continue
+            t_layer = ctx.sec_layers.get(edge.target)
+            if t_layer is None or t_layer <= s_layer:
+                continue
+            bypass_by_pred.setdefault(pred_id, []).append((i, edge))
+    return bypass_by_pred
 
 
 def _resolve_sections(graph: MetroGraph) -> None:

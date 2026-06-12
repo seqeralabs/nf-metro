@@ -1243,49 +1243,6 @@ def _guard_row_trunk_cy_consistent(
 
         offsets = compute_station_offsets(graph)
 
-    def _section_trunk_info(
-        sec: Section,
-    ) -> tuple[float, float, float, set[str]] | None:
-        bundle = _section_bundle_lines(graph, sec)
-        if not bundle:
-            return None
-        port_ys: list[float] = []
-        for pid in list(sec.entry_ports) + list(sec.exit_ports):
-            pst = graph.stations.get(pid)
-            pport = graph.ports.get(pid)
-            if (
-                pst is not None
-                and pport is not None
-                and pport.side in (PortSide.LEFT, PortSide.RIGHT)
-            ):
-                port_ys.append(pst.y)
-        if not port_ys:
-            return None
-        port_y = port_ys[0]
-        port_set = sec.port_ids
-        best: tuple[float, float, float, float] | None = None
-        for sid in sec.station_ids:
-            if sid in port_set:
-                continue
-            st = graph.stations.get(sid)
-            if st is None or st.is_port or st.is_hidden:
-                continue
-            lines = graph.station_lines(sid)
-            if set(lines) != bundle:
-                continue
-            line_offs = [offsets.get((sid, lid), 0.0) for lid in lines]
-            if not line_offs:
-                continue
-            y_min = st.y + min(line_offs)
-            y_max = st.y + max(line_offs)
-            cy = st.y + (min(line_offs) + max(line_offs)) / 2
-            dist = abs(cy - port_y)
-            if best is None or dist < best[0]:
-                best = (dist, cy, y_min, y_max)
-        if best is None:
-            return None
-        return (best[1], best[2], best[3], bundle)
-
     rows: dict[int, list[Section]] = {}
     for sec in graph.sections.values():
         if (
@@ -1298,49 +1255,108 @@ def _guard_row_trunk_cy_consistent(
         rows.setdefault(sec.grid_row, []).append(sec)
 
     for row, sections in rows.items():
-        info: dict[str, tuple[float, float, float, set[str]]] = {}
-        for sec in sections:
-            t = _section_trunk_info(sec)
-            if t is not None:
-                info[sec.id] = t
-        if len(info) < 2:
+        _check_row_trunk_cy(graph, phase, row, sections, offsets)
+
+
+def _section_trunk_cy_band(
+    graph: MetroGraph,
+    sec: Section,
+    offsets: dict[tuple[str, str], float],
+) -> tuple[float, float, float, set[str]] | None:
+    """Trunk ``(cy, y_min, y_max, bundle)`` of the bundle-carrying station
+    nearest the LR/RL port Y, or None when the section has no such trunk."""
+    bundle = _section_bundle_lines(graph, sec)
+    if not bundle:
+        return None
+    port_ys: list[float] = []
+    for pid in list(sec.entry_ports) + list(sec.exit_ports):
+        pst = graph.stations.get(pid)
+        pport = graph.ports.get(pid)
+        if (
+            pst is not None
+            and pport is not None
+            and pport.side in (PortSide.LEFT, PortSide.RIGHT)
+        ):
+            port_ys.append(pst.y)
+    if not port_ys:
+        return None
+    port_y = port_ys[0]
+    port_set = sec.port_ids
+    best: tuple[float, float, float, float] | None = None
+    for sid in sec.station_ids:
+        if sid in port_set:
             continue
-        parent = {sid: sid for sid in info}
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or st.is_hidden:
+            continue
+        lines = graph.station_lines(sid)
+        if set(lines) != bundle:
+            continue
+        line_offs = [offsets.get((sid, lid), 0.0) for lid in lines]
+        if not line_offs:
+            continue
+        y_min = st.y + min(line_offs)
+        y_max = st.y + max(line_offs)
+        cy = st.y + (min(line_offs) + max(line_offs)) / 2
+        dist = abs(cy - port_y)
+        if best is None or dist < best[0]:
+            best = (dist, cy, y_min, y_max)
+    if best is None:
+        return None
+    return (best[1], best[2], best[3], bundle)
 
-        def _find(x: str) -> str:
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
 
-        ids = list(info)
-        for i, a in enumerate(ids):
-            cy_a, lo_a, hi_a, bun_a = info[a]
-            for b in ids[i + 1 :]:
-                cy_b, lo_b, hi_b, bun_b = info[b]
-                bands_overlap = min(hi_a, hi_b) - max(lo_a, lo_b) >= -GUARD_TOLERANCE
-                if bands_overlap and bun_a == bun_b:
-                    ra, rb = _find(a), _find(b)
-                    if ra != rb:
-                        parent[ra] = rb
+def _check_row_trunk_cy(
+    graph: MetroGraph,
+    phase: str,
+    row: int,
+    sections: list[Section],
+    offsets: dict[tuple[str, str], float],
+) -> None:
+    """Raise if same-bundle, band-overlapping sections in one row drift in cy."""
+    info: dict[str, tuple[float, float, float, set[str]]] = {}
+    for sec in sections:
+        t = _section_trunk_cy_band(graph, sec, offsets)
+        if t is not None:
+            info[sec.id] = t
+    if len(info) < 2:
+        return
+    parent = {sid: sid for sid in info}
 
-        groups: dict[str, list[str]] = {}
-        for sid in ids:
-            groups.setdefault(_find(sid), []).append(sid)
+    def _find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
 
-        for members in groups.values():
-            if len(members) < 2:
-                continue
-            anchor = members[0]
-            anchor_cy = info[anchor][0]
-            for sid in members[1:]:
-                cy = info[sid][0]
-                if abs(cy - anchor_cy) > GUARD_TOLERANCE:
-                    raise PhaseInvariantError(
-                        f"{phase}: row {row} trunk cy drift: "
-                        f"section {sid!r} cy={cy:.1f} vs "
-                        f"section {anchor!r} cy={anchor_cy:.1f}"
-                    )
+    ids = list(info)
+    for i, a in enumerate(ids):
+        _cy_a, lo_a, hi_a, bun_a = info[a]
+        for b in ids[i + 1 :]:
+            _cy_b, lo_b, hi_b, bun_b = info[b]
+            bands_overlap = min(hi_a, hi_b) - max(lo_a, lo_b) >= -GUARD_TOLERANCE
+            if bands_overlap and bun_a == bun_b:
+                ra, rb = _find(a), _find(b)
+                if ra != rb:
+                    parent[ra] = rb
+
+    groups: dict[str, list[str]] = {}
+    for sid in ids:
+        groups.setdefault(_find(sid), []).append(sid)
+
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        anchor = members[0]
+        anchor_cy = info[anchor][0]
+        for sid in members[1:]:
+            cy = info[sid][0]
+            if abs(cy - anchor_cy) > GUARD_TOLERANCE:
+                raise PhaseInvariantError(
+                    f"{phase}: row {row} trunk cy drift: "
+                    f"section {sid!r} cy={cy:.1f} vs "
+                    f"section {anchor!r} cy={anchor_cy:.1f}"
+                )
 
 
 def _guard_inter_section_routes_in_row_band(
