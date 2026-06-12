@@ -1164,6 +1164,9 @@ def test_fanout_lead_corners_concentric(fixture):
     """
     from nf_metro.layout.routing.normalize import (
         _apply_fanout_nest,
+        _fanout_centres_coincide,
+        _fanout_foreign_segments,
+        _fanout_lead_centres,
         _fanout_lead_radius,
         _iter_fanout_clusters,
         _lead_crossings,
@@ -1176,19 +1179,14 @@ def test_fanout_lead_corners_concentric(fixture):
     for cluster, down in _iter_fanout_clusters(routes):
         if len({round(_fanout_lead_radius(ch), 3) for ch in cluster}) < 2:
             continue
-        centres = []
-        for ch in cluster:
-            corner = ch.route.points[ch.idx]
-            r = _fanout_lead_radius(ch)
-            hs = 1.0 if corner[0] > ch.route.points[ch.idx - 1][0] else -1.0
-            centres.append((corner[0] - hs * r, corner[1] + (r if down else -r)))
-        cx0, cy0 = centres[0]
-        if all(abs(px - cx0) < 0.6 and abs(py - cy0) < 0.6 for px, py in centres):
+        centres = _fanout_lead_centres(cluster, down)
+        if _fanout_centres_coincide(centres):
             continue
-        before = _lead_crossings(cluster, routes, offsets)
+        foreign = _fanout_foreign_segments(cluster, routes, offsets)
+        before = _lead_crossings(cluster, foreign, offsets)
         _apply_fanout_nest(cluster, down)
         rounded = [(round(x, 1), round(y, 1)) for x, y in centres]
-        assert _lead_crossings(cluster, routes, offsets) > before, (
+        assert _lead_crossings(cluster, foreign, offsets) > before, (
             f"{fixture}: fan-out bundle at {cluster[0].route.edge.source!r} left "
             f"non-concentric (centres {rounded}) though nesting adds no crossing"
         )

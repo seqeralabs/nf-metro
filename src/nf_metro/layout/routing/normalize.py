@@ -931,43 +931,59 @@ def _iter_fanout_clusters(
         yield cluster, down
 
 
-def _lead_crossings(
+def _fanout_foreign_segments(
     cluster: list[_VChannel],
     routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[tuple[str, list[tuple[float, float]]]]:
+    """Rendered ``(line_id, points)`` of every route outside *cluster*.
+
+    The foreign set is fixed across one cluster's flat-vs-nested crossing
+    comparison (only the cluster's own corners move), so building it once and
+    reusing it avoids re-applying offsets to the whole corpus per probe.
+    """
+    from nf_metro.render.svg import apply_route_offsets
+
+    cluster_ids = {id(ch.route) for ch in cluster}
+    return [
+        (rp.line_id, apply_route_offsets(rp, offsets))
+        for rp in routes
+        if id(rp) not in cluster_ids
+    ]
+
+
+def _lead_crossings(
+    cluster: list[_VChannel],
+    foreign: list[tuple[str, list[tuple[float, float]]]],
     offsets: dict[tuple[str, str], float],
 ) -> int:
     """Count proper crossings of the cluster's bend legs by foreign lines.
 
     Moving a member's corner tilts its lead (``points[idx-1] -> points[idx]``)
     and lengthens its vertical leg (``points[idx] -> points[idx+1]``); both can
-    rake a foreign line, so both are tested.  A foreign segment is any segment
-    of a route carrying a different ``line_id`` - same-line segments merge,
-    never tangle.  Tested in rendered coordinates (per-line offsets applied):
-    a sibling that leaves the same junction sits on the trunk centre in raw
-    waypoints, so only the offset positions reveal whether a lifted leg truly
-    rakes it or merely diverges from it at the fork.
+    rake a foreign line, so both are tested against the *foreign* segments (from
+    :func:`_fanout_foreign_segments`).  Same-``line_id`` segments merge rather
+    than tangle and are skipped.  Tested in rendered coordinates (per-line
+    offsets applied): a sibling that leaves the same junction sits on the trunk
+    centre in raw waypoints, so only the offset positions reveal whether a
+    lifted leg truly rakes it or merely diverges from it at the fork.
     """
     from nf_metro.layout.geometry import segments_cross
     from nf_metro.render.svg import apply_route_offsets
 
-    cluster_ids = {id(ch.route) for ch in cluster}
-    foreign = [
-        (rp.line_id, apply_route_offsets(rp, offsets))
-        for rp in routes
-        if id(rp) not in cluster_ids
-    ]
     n = 0
     for ch in cluster:
         lid = ch.route.line_id
         rpts = apply_route_offsets(ch.route, offsets)
-        legs = [(rpts[ch.idx - 1], rpts[ch.idx]), (rpts[ch.idx], rpts[ch.idx + 1])]
+        legs = ((rpts[ch.idx - 1], rpts[ch.idx]), (rpts[ch.idx], rpts[ch.idx + 1]))
         for flid, fpts in foreign:
             if flid == lid:
                 continue
             for a, b in legs:
-                for k in range(len(fpts) - 1):
-                    if segments_cross(a, b, fpts[k], fpts[k + 1]):
-                        n += 1
+                n += sum(
+                    segments_cross(a, b, fpts[k], fpts[k + 1])
+                    for k in range(len(fpts) - 1)
+                )
     return n
 
 
@@ -975,6 +991,32 @@ def _fanout_lead_radius(ch: _VChannel) -> float:
     """The lead-corner radius of a fan-out channel (``curve_radii[idx-1]``)."""
     assert ch.route.curve_radii is not None
     return ch.route.curve_radii[ch.idx - 1]
+
+
+def _fanout_lead_centres(
+    cluster: list[_VChannel], down: bool
+) -> list[tuple[float, float]]:
+    """Arc centre of each member's lead corner; shared iff the bundle nests.
+
+    A right-then-vertical bend of radius ``r`` whose corner is at ``corner``
+    centres at ``(corner_x - hsign * r, corner_y +/- r)`` (``+`` for a DOWN
+    turn, ``-`` for UP), where ``hsign`` is the lead's travel direction.
+    """
+    centres = []
+    for ch in cluster:
+        corner = ch.route.points[ch.idx]
+        r = _fanout_lead_radius(ch)
+        hsign = 1.0 if corner[0] > ch.route.points[ch.idx - 1][0] else -1.0
+        centres.append((corner[0] - hsign * r, corner[1] + (r if down else -r)))
+    return centres
+
+
+def _fanout_centres_coincide(
+    centres: list[tuple[float, float]], tol: float = 0.6
+) -> bool:
+    """``True`` iff every lead-corner arc centre falls within *tol* of the first."""
+    cx0, cy0 = centres[0]
+    return all(abs(px - cx0) < tol and abs(py - cy0) < tol for px, py in centres)
 
 
 def _apply_fanout_nest(
@@ -1013,9 +1055,10 @@ def _nest_fanout_cluster(
     """
     if len({round(_fanout_lead_radius(ch), 3) for ch in cluster}) < 2:
         return
-    before = _lead_crossings(cluster, routes, offsets)
+    foreign = _fanout_foreign_segments(cluster, routes, offsets)
+    before = _lead_crossings(cluster, foreign, offsets)
     original = _apply_fanout_nest(cluster, down)
-    if _lead_crossings(cluster, routes, offsets) > before:
+    if _lead_crossings(cluster, foreign, offsets) > before:
         for ch, pt in zip(cluster, original):
             ch.route.points[ch.idx] = pt
 
