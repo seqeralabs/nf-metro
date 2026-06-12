@@ -9,12 +9,16 @@ Usage:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
+sys.path.insert(0, str(project_root / "tests"))
+
+from layout_metrics import compute_metrics  # noqa: E402
 
 from nf_metro.convert import convert_nextflow_dag  # noqa: E402
 from nf_metro.layout.engine import compute_layout  # noqa: E402
@@ -482,6 +486,12 @@ PIPELINE_ENTRIES: list[tuple[str, str, str, str]] = [
 # Populated by each render function, written to RENDERS_DIR/manifest.json.
 _manifest: dict[str, str] = {}
 
+# Layout-quality scorecard per SVG filename, written to RENDERS_DIR/metrics.json
+# and reported as per-render deltas in the render-diff page. Advisory only.
+_metrics: dict[str, dict[str, float]] = {}
+
+_SVG_DIMS_RE = re.compile(r'<svg[^>]*\bwidth="([\d.]+)"[^>]*\bheight="([\d.]+)"')
+
 
 def render_drawn_svg(graph, theme, **kwargs) -> str:
     """Render the drawn map only, with the embedded data manifest disabled.
@@ -494,6 +504,20 @@ def render_drawn_svg(graph, theme, **kwargs) -> str:
     return render_svg(graph, theme, **kwargs)
 
 
+def _record_metrics(graph, svg_name: str, svg_str: str) -> None:
+    """Compute the layout-quality scorecard for a freshly rendered graph.
+
+    Computed alongside the render so the scores reflect the same engine version
+    that drew the SVG. A failure here never aborts a render.
+    """
+    match = _SVG_DIMS_RE.search(svg_str)
+    canvas = (float(match.group(1)), float(match.group(2))) if match else None
+    try:
+        _metrics[svg_name] = compute_metrics(graph, canvas=canvas)
+    except Exception as e:  # noqa: BLE001 - metrics are advisory, never fatal
+        print(f"    metrics FAIL for {svg_name}: {e}")
+
+
 def render_mmd(mmd_path: Path, svg_path: Path, *, debug: bool = DEBUG_RENDERS) -> None:
     """Parse, layout, and render a .mmd file to SVG."""
     text = mmd_path.read_text()
@@ -503,6 +527,7 @@ def render_mmd(mmd_path: Path, svg_path: Path, *, debug: bool = DEBUG_RENDERS) -
     theme = THEMES[theme_name]
     svg_str = render_drawn_svg(graph, theme, debug=debug)
     svg_path.write_text(svg_str)
+    _record_metrics(graph, svg_path.name, svg_str)
 
 
 def clean_name(stem: str) -> str:
@@ -554,6 +579,7 @@ def render_guide_examples() -> None:
             theme = THEMES[theme_name]
             svg_str = render_drawn_svg(graph, theme, debug=True)
             debug_svg.write_text(svg_str)
+            _record_metrics(graph, debug_svg.name, svg_str)
             _manifest[debug_svg.name] = section
             print("  rnaseq_auto_debug: OK")
         except Exception as e:
@@ -647,6 +673,7 @@ def render_nextflow_examples() -> None:
             theme = THEMES[graph.style if graph.style in THEMES else "nfcore"]
             svg_str = render_drawn_svg(graph, theme, debug=DEBUG_RENDERS)
             svg_path.write_text(svg_str)
+            _record_metrics(graph, svg_path.name, svg_str)
             _manifest[svg_path.name] = section
             print(f"  nf_{mmd_path.stem}: OK")
         except Exception as e:
@@ -771,6 +798,13 @@ def write_manifest() -> None:
     print(f"Manifest written to {manifest_path} ({len(_manifest)} entries)")
 
 
+def write_metrics() -> None:
+    """Write the per-render layout-quality scorecard for the render-diff page."""
+    metrics_path = RENDERS_DIR / "metrics.json"
+    metrics_path.write_text(json.dumps(_metrics, indent=2, sort_keys=True) + "\n")
+    print(f"Metrics written to {metrics_path} ({len(_metrics)} entries)")
+
+
 if __name__ == "__main__":
     # Clean stale renders so removed gallery entries don't persist
     if RENDERS_DIR.exists():
@@ -782,3 +816,4 @@ if __name__ == "__main__":
     render_test_fixtures()
     build_gallery()
     write_manifest()
+    write_metrics()
