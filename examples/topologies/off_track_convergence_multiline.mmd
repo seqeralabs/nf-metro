@@ -1,0 +1,35 @@
+%%metro title: Off-Track Convergence Multiline
+%%metro style: dark
+%%metro line: dna | DNA | #2db572
+%%metro line: rna | RNA | #e63946
+%%metro line: qc | QC | #f4a261
+%%metro file: ref_in | FASTA | Reference
+%%metro file: gtf_in | GTF | Annotation
+%%metro off_track: ref_in, gtf_in
+
+graph LR
+    subgraph input [Input]
+        reads[Reads]
+        prep[Prepare]
+        reads -->|dna,rna,qc| prep
+    end
+
+    subgraph process [Process]
+        ref_in[ ]
+        gtf_in[ ]
+        align[Align]
+        sort[Sort]
+        index[Index]
+
+        ref_in -->|dna,rna| align
+        gtf_in -->|rna| align
+        align -->|dna,rna,qc| sort
+        sort -->|dna,rna,qc| index
+    end
+
+    subgraph output [Output]
+        report[Report]
+    end
+
+    prep -->|dna,rna,qc| align
+    index -->|dna,rna,qc| report

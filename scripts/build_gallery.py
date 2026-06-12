@@ -339,6 +339,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "The trunk stays horizontal while the inputs stack above the consumer column.",
     ),
     (
+        "off_track_convergence_multiline",
+        TOPOLOGIES_DIR,
+        "A multi-line bundle enters a section and converges on a deep first "
+        "station that also consumes off-track file inputs. The consumer stays "
+        "on the section trunk, level with its continuation, rather than being "
+        "dragged to the section floor (issue #650).",
+    ),
+    (
         "around_section_below",
         TOPOLOGIES_DIR,
         "Cross-row route to a LEFT-entry target where the natural inter-row "

@@ -776,6 +776,50 @@ def _guard_single_trunk_off_track_step(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _guard_off_track_consumer_on_trunk(graph: MetroGraph, phase: str) -> None:
+    """An off-track input's consumer that continues straight into the
+    section trunk sits level with that successor.
+
+    When a multi-line bundle enters a section and converges on one deep
+    first station (the off-track-input consumer), that station heads the
+    section trunk.  Dragging it off the trunk (issue #650) leaves the
+    onward edge a near-vertical climb whose lines merge into one stroke.
+    Restricted to consumers with exactly one on-track in-section successor
+    so a genuine on-track fork's off-row branches don't trip it.
+    """
+    junction_ids = graph.junction_ids
+    tol = 1.0
+    consumers = {
+        anchor_id
+        for off_id, anchor_id in _off_track_anchor_of(graph).items()
+        if any(e.target == anchor_id for e in graph.edges_from(off_id))
+    }
+    for cons_id in consumers:
+        cons = graph.stations.get(cons_id)
+        if cons is None or cons.is_port or cons_id in junction_ids:
+            continue
+        succs = [
+            tgt
+            for e in graph.edges_from(cons_id)
+            if (tgt := graph.stations.get(e.target)) is not None
+            and not tgt.is_port
+            and tgt.id not in junction_ids
+            and not tgt.off_track
+            and tgt.section_id == cons.section_id
+        ]
+        distinct = {s.id for s in succs}
+        if len(distinct) != 1:
+            continue
+        succ = succs[0]
+        if abs(cons.y - succ.y) > tol:
+            raise PhaseInvariantError(
+                f"{phase}: off-track consumer {cons_id!r} y={cons.y:.1f} "
+                f"dragged off the section trunk; its continuation "
+                f"{succ.id!r} sits at y={succ.y:.1f} "
+                f"({abs(cons.y - succ.y):.0f}px climb)"
+            )
+
+
 def _guard_no_station_overlap(
     graph: MetroGraph,
     phase: str,

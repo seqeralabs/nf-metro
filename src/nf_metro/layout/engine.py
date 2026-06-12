@@ -140,6 +140,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_station_overlap,
     _guard_no_wrapped_label_trunk_strike,
     _guard_off_track_clear_of_anchor,
+    _guard_off_track_consumer_on_trunk,
     _guard_off_track_output_clears_non_producer,
     _guard_partial_branch_offset_gaps,
     _guard_ports_on_boundaries,
@@ -616,6 +617,7 @@ def _compute_layout_scaled(
         _guard_rail_stations_seat_on_rails(graph, "final")
         _guard_rail_one_station_per_column(graph, "final")
         _guard_single_trunk_off_track_step(graph, "final")
+        _guard_off_track_consumer_on_trunk(graph, "final")
 
 
 def _apply_label_strike_clearance(

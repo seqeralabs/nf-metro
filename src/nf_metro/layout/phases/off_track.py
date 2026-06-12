@@ -214,15 +214,25 @@ def _align_phantom_pass_throughs(
     Moving the convergence node (the phantom's sole successor) to that
     track keeps the trunk horizontal so the optional branch visually
     "bubbles" away from it.
+
+    A convergence node fed by *several* phantoms -- one per line when a
+    multi-line bundle enters a section and meets at one deep first
+    station -- is the head of the section trunk, not a bubble. Snapping
+    it to any single phantom's track would drag it off the trunk into a
+    near-vertical onward climb, so such a node is left on its assigned
+    trunk track.
     """
+    phantom_track_of: dict[str, list[float]] = defaultdict(list)
     for sid, station in sub.stations.items():
         if not station.is_hidden or sid not in tracks:
             continue
         succs = {e.target for e in sub.edges_from(sid)}
         if len(succs) == 1:
-            succ = next(iter(succs))
-            if succ in tracks:
-                tracks[succ] = tracks[sid]
+            phantom_track_of[next(iter(succs))].append(tracks[sid])
+
+    for succ, phantom_tracks in phantom_track_of.items():
+        if len(phantom_tracks) == 1 and succ in tracks:
+            tracks[succ] = phantom_tracks[0]
 
 
 def _forced_branch_label_reach(

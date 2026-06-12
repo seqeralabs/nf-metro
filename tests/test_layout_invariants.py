@@ -345,6 +345,68 @@ def _fixtures_with_above_output() -> list[str]:
 _FIXTURES_WITH_ABOVE_OUTPUT = _fixtures_with_above_output()
 
 
+def _off_track_consumer_ids(graph: MetroGraph, junction_ids: set[str]) -> set[str]:
+    """On-track stations fed directly by an off-track input."""
+    return {
+        graph.stations[e.target].id
+        for e in graph.edges
+        if (src := graph.stations.get(e.source)) is not None
+        and src.off_track
+        and not src.is_port
+        and src.id not in junction_ids
+        and (tgt := graph.stations.get(e.target)) is not None
+        and not tgt.is_port
+        and tgt.id not in junction_ids
+        and not tgt.off_track
+    }
+
+
+def _in_section_on_track_successors(
+    graph: MetroGraph, station_id: str, junction_ids: set[str]
+) -> list[str]:
+    """On-track, non-port, same-section successors of ``station_id``."""
+    sec = graph.stations[station_id].section_id
+    succs: list[str] = []
+    for edge in graph.edges_from(station_id):
+        tgt = graph.stations.get(edge.target)
+        if (
+            tgt is None
+            or tgt.is_port
+            or tgt.id in junction_ids
+            or tgt.off_track
+            or tgt.section_id != sec
+        ):
+            continue
+        if tgt.id not in succs:
+            succs.append(tgt.id)
+    return succs
+
+
+def _fixtures_with_linear_off_track_consumer() -> list[str]:
+    """Off-track-input fixtures with at least one consumer that continues
+    straight into the section trunk (exactly one on-track in-section
+    successor), the precondition of
+    :func:`test_off_track_consumer_on_section_trunk`.
+    """
+    out: list[str] = []
+    for name in _FIXTURES_WITH_OFF_TRACK_INPUT:
+        try:
+            g = _layout(name)
+        except Exception:
+            continue
+        jids = set(g.junctions)
+        consumers = _off_track_consumer_ids(g, jids)
+        if any(
+            len(_in_section_on_track_successors(g, cid, jids)) == 1
+            for cid in consumers
+        ):
+            out.append(name)
+    return out
+
+
+_FIXTURES_WITH_LINEAR_OFF_TRACK_CONSUMER = _fixtures_with_linear_off_track_consumer()
+
+
 # Pre-existing layout regressions surfaced by parametrizing single-fixture
 # invariants over the full corpus.  Each entry pins a fixture/invariant
 # pair as ``xfail(strict=False)`` so the bug is documented in code while
@@ -1102,6 +1164,41 @@ def test_off_track_inputs_above_consumer(fixture):
             f"Off-track {off_id} y={off_st.y} not above consumer "
             f"{consumer_id} y={cons_st.y}"
         )
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_LINEAR_OFF_TRACK_CONSUMER)
+def test_off_track_consumer_on_section_trunk(fixture):
+    """An off-track input's consumer that continues straight into the
+    section trunk must share that successor's Y.
+
+    When several lines enter a section through an entry port and converge
+    on one deep first station (the off-track-input consumer), that station
+    is the head of the section trunk. It must sit level with its on-track
+    continuation, not be dragged to the section floor -- otherwise the
+    onward edge climbs near-vertically and the multi-line bundle merges
+    into a single stroke (issue #650).
+
+    Restricted to consumers with exactly one on-track in-section successor
+    (a linear trunk continuation): a genuine on-track fork legitimately
+    places its branches off the entry station's row.
+    """
+    graph = _layout(fixture)
+    junction_ids = set(graph.junctions)
+    consumers = _off_track_consumer_ids(graph, junction_ids)
+    checked = 0
+    for cons_id in consumers:
+        succs = _in_section_on_track_successors(graph, cons_id, junction_ids)
+        if len(succs) != 1:
+            continue
+        checked += 1
+        cons_st = graph.stations[cons_id]
+        succ_st = graph.stations[succs[0]]
+        assert abs(cons_st.y - succ_st.y) <= _Y_TOL, (
+            f"{fixture}: off-track consumer {cons_id} y={cons_st.y} dragged "
+            f"off the section trunk; its continuation {succs[0]} sits at "
+            f"y={succ_st.y} ({abs(cons_st.y - succ_st.y):.0f}px climb)"
+        )
+    assert checked, f"{fixture}: no linear off-track consumer to check"
 
 
 # ---------------------------------------------------------------------------
