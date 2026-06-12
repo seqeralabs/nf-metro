@@ -113,6 +113,13 @@ class TestTopologyValidation:
         # humann3 junction routing is a known defect (see #241 family).
         if "funcprofiler_upstream" in request.node.name:
             pytest.xfail("funcprofiler_upstream has a known almost-horizontal edge")
+        # multiomics_integration: meth changes bundle slot at the Branch Hub
+        # fan-out, a known line-ordering defect (#654). Strict flip-detector
+        # lives in TestMultiomicsIntegrationDefects.
+        if "multiomics_integration" in request.node.name:
+            pytest.xfail(
+                "multiomics_integration has a known almost-horizontal edge (#654)"
+            )
         violations = check_almost_horizontal_edges(topology_graph)
         warnings = [v for v in violations if v.severity == Severity.WARNING]
         assert not warnings, "\n".join(v.message for v in warnings)
@@ -324,6 +331,66 @@ class TestVariantCallingDefects:
         v = check_excessive_column_gaps(graph)
         assert not v, "\n".join(vi.message for vi in v)
 
+    def test_no_route_segment_crossings(self, graph):
+        v = check_route_segment_crossings(graph)
+        assert not v, "\n".join(vi.message for vi in v)
+
+
+# Stress-render fixtures (#650-#655): each locks the validator-detectable
+# defects a confirmed bug exhibits via strict xfail, so an engine fix flips the
+# matching test to XPASS and reds CI, prompting the marker removal and issue
+# close. The section-boundary kink (#650) is locked in test_layout_invariants
+# via _XFAIL_NO_KINK. Defects with no validator check (#653 oversized inter-row
+# gap, #655 reserved-offset bypass dip) are guarded by the gallery render diff.
+
+LONGREAD_ATLAS_FILE = TOPOLOGIES_DIR / "longread_methylation_atlas.mmd"
+MULTIOMICS_FILE = TOPOLOGIES_DIR / "multiomics_integration.mmd"
+
+
+class TestLongreadMethylationAtlasDefects:
+    """Lock the longread_methylation_atlas defects via strict xfail.
+
+    Off-track input floating far above its consumer (#651) and the QC bypass
+    crossing the descending fan branches (#652).
+    """
+
+    @pytest.fixture
+    def graph(self):
+        return _load_and_layout(LONGREAD_ATLAS_FILE)
+
+    @pytest.mark.xfail(
+        strict=True, reason="off-track input floats above consumer; #651"
+    )
+    def test_no_excessive_column_gaps(self, graph):
+        v = check_excessive_column_gaps(graph)
+        assert not v, "\n".join(vi.message for vi in v)
+
+    @pytest.mark.xfail(strict=True, reason="QC bypass crosses fan branches; #652")
+    def test_no_route_segment_crossings(self, graph):
+        v = check_route_segment_crossings(graph)
+        assert not v, "\n".join(vi.message for vi in v)
+
+
+class TestMultiomicsIntegrationDefects:
+    """Lock the multiomics_integration defects via strict xfail.
+
+    Within-bundle line order forces meth to change slot at the Branch Hub
+    fan-out, surfacing as an almost-horizontal slot-shift edge and avoidable
+    hub-fan crossings (#654).
+    """
+
+    @pytest.fixture
+    def graph(self):
+        return _load_and_layout(MULTIOMICS_FILE)
+
+    @pytest.mark.xfail(
+        strict=True, reason="meth slot-shift almost-horizontal edge; #654"
+    )
+    def test_no_almost_horizontal_edges(self, graph):
+        v = check_almost_horizontal_edges(graph)
+        assert not v, "\n".join(vi.message for vi in v)
+
+    @pytest.mark.xfail(strict=True, reason="line-order hub-fan crossings; #654")
     def test_no_route_segment_crossings(self, graph):
         v = check_route_segment_crossings(graph)
         assert not v, "\n".join(vi.message for vi in v)

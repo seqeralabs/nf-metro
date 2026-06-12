@@ -381,7 +381,12 @@ _XFAIL_ROW_TRUNK_CY: dict[str, str] = {}
 # Inter-section exit-port cy drifts from the matching entry-port cy in
 # the next section.  See nf-metro audit item 1 (the "limma kink"
 # regression family).  Limited to multi-section fixtures.
-_XFAIL_NO_KINK: dict[str, str] = {}
+_XFAIL_NO_KINK: dict[str, str] = {
+    "topologies/longread_methylation_atlas.mmd": (
+        "off-track inputs drag minimap2 off the Alignment trunk, kinking the "
+        "section entry boundary; #650"
+    ),
+}
 
 
 # Symmetric-fan pairs (two full-bundle stations in the same column) end

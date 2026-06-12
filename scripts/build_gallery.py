@@ -378,6 +378,24 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "straight in, rather than diving under the return row counter to its "
         "flow.",
     ),
+    # --- Stress-render fixtures ---
+    (
+        "longread_methylation_atlas",
+        TOPOLOGIES_DIR,
+        "A long-read methylation and variant pipeline braiding off-track file "
+        "inputs and outputs, a five-way fan-out from alignment into stacked "
+        "analysis rows, and a QC bypass to the report. Holds known defects "
+        "around off-track placement, fan nesting, and the bypass corridor "
+        "(#650-#653).",
+    ),
+    (
+        "multiomics_integration",
+        TOPOLOGIES_DIR,
+        "A multi-omics pipeline with a dense five-line trunk that fans from a "
+        "branch hub into mixed-side sections and reconverges at integration, "
+        "with a QC line bypassing the factor model. Holds known line-ordering "
+        "and reserved-offset defects (#654-#655).",
+    ),
 ]
 
 # Category headers inserted before specific entries
@@ -389,6 +407,7 @@ CATEGORY_HEADERS: dict[str, str] = {
     "multi_line_bundle": "Multi-line Bundles",
     "rnaseq_lite": "Realistic Pipelines",
     "fold_fan_across": "Fold Topologies",
+    "longread_methylation_atlas": "Stress-render Fixtures",
 }
 
 

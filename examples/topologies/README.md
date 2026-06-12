@@ -48,6 +48,8 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `self_crossing_bridge.mmd` | same-colour self-crossing bridge glyph (issue #484) |
 | `convergence_stacked_sink.mmd` | convergence return-row stacked-sibling migration (issue #484) |
 | `cross_row_gap_wrap.mmd` | cross-row feed wrapping via the inter-row gap, no counter-flow (issue #484) |
+| `longread_methylation_atlas.mmd` | off-track in/outputs + 5-way fan-out into stacked rows + QC bypass; known defects (issues #650-#653) |
+| `multiomics_integration.mmd` | dense 5-line trunk, mixed-side fan-out, QC bypass at reconvergence; known line-order / reserved-offset defects (issues #654-#655) |
 
 ---
 
@@ -230,3 +232,15 @@ A main spine (Prep, Align, Dedup) converges at Merge, which is fed both by the s
 ### Cross-Row Gap Wrap
 
 A convergence layout (Ingest, Align, Dedup on row 0; Merge, Report on the return row) where the `feed` line runs from Ingest down to the rightmost return-row section. Tests that the feed wraps via the clear inter-row gap above the return row (then drops straight into the port) rather than diving under the whole return row counter to its flow. Backs `test_no_artefactual_counter_flow`, `test_entry_approach_arrives_from_port_side`, and their guards.
+
+## Stress-render Fixtures
+
+Realistic, deliberately-complex maps composed by the `nf-metro-stress-render` skill, kept as regression fixtures for the defects they surfaced. Each holds known defects locked via strict xfail in `tests/test_topology_validation.py` (so an engine fix flips the test to XPASS and reds CI); defects with no validator check are guarded by the gallery render diff.
+
+### Long-read Methylation & Variant Atlas
+
+A long-read pipeline braiding off-track file inputs and outputs, a five-way fan-out from alignment into stacked analysis rows (variants, expression, fusion), and a QC bypass to the report. Surfaced: off-track inputs dragging the consuming station off the section trunk (#650), an off-track input floating too far above its consumer (#651), the QC bypass crossing the descending fan branches instead of nesting (#652), and an oversized vertical gap below the spine row (#653).
+
+### Multi-Omics Integration
+
+A multi-omics pipeline with a dense five-line trunk that fans from a branch hub into mixed-side sections (alignment, quantification, peak calling) and reconverges at integration, with a QC line bypassing the factor model. Surfaced: within-bundle line order forcing an almost-horizontal slot-shift at the hub fan-out (#654) and reserved-offset gaps forcing an unnecessary bypass dip at reconvergence (#655).
