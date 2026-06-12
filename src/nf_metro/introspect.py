@@ -154,6 +154,7 @@ def build_info(graph: MetroGraph, warnings: list[str] | None = None) -> dict[str
 
     return {
         "title": graph.title or None,
+        "caption": graph.caption or None,
         "style": graph.style,
         "warnings": list(warnings or []),
         "counts": {
@@ -200,6 +201,8 @@ def format_info_text(info: dict[str, Any], *, verbose: bool = False) -> str:
     """
     out: list[str] = []
     out.append(f"Title: {info['title'] or '(none)'}")
+    if info.get("caption"):
+        out.append(f"Caption: {info['caption']}")
     out.append(f"Style: {info['style']}")
     counts = info["counts"]
     out.append(f"Stations: {counts['stations']}")

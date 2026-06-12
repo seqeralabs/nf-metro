@@ -49,6 +49,24 @@ def test_render_contains_line_color():
     assert "#ff0000" in svg
 
 
+def test_render_caption_appears_in_svg():
+    graph = parse_metro_mermaid(
+        "%%metro caption: Example attribution text\n"
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n"
+        "    a[Input] -->|main| b[Output]\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+    assert "Example attribution text" in svg
+
+
+def test_render_no_caption_by_default():
+    svg = _render_simple()
+    assert "created with nf-metro" in svg
+    assert svg.count("created with nf-metro") == 1
+
+
 def test_label_angle_emits_rotate_transform():
     graph = parse_metro_mermaid(
         "%%metro line: main | Main | #ff0000\n"

@@ -294,6 +294,7 @@ class MetroGraph:
     """Complete metro map graph definition."""
 
     title: str = ""
+    caption: str = ""
     style: str = "dark"
     lines: dict[str, MetroLine] = field(default_factory=dict)
     stations: dict[str, Station] = field(default_factory=dict)
