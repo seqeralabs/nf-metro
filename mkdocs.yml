@@ -47,5 +47,6 @@ nav:
     - Architecture: dev/architecture.md
     - Layout pipeline: dev/layout_pipeline.md
     - Routing: dev/routing.md
+    - Routing gate coverage: dev/routing_gate_coverage.md
     - Parser: dev/parser.md
     - Testing: dev/testing.md

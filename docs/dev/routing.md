@@ -115,3 +115,15 @@ dispatcher handles those degenerate cases directly.
 | `reversal.py` | fold/reversal (serpentine row) routing |
 | `invariants.py` | runtime routing guards |
 | `rail.py` | `route_rail_edges` straight-rail router for rail mode |
+
+## Gate coverage
+
+Each handler and post-pass is a chain of topology-conditional gates (direction
+checks, port-side checks, row/column relations, geometric thresholds). The
+[routing gate coverage matrix](routing_gate_coverage.md) enumerates every gate
+and records which corpus fixtures exercise each arm, so an un-exercised arm -
+an assumption no shipped topology probes - is a visible, enumerated entry
+rather than a latent surprise. Regenerate it with
+`python scripts/routing_gate_coverage.py --write`; `tests/test_routing_gate_coverage.py`
+ratchets the gap set so new conditionals must ship with a fixture hitting both
+arms.
