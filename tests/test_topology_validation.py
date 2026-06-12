@@ -1165,15 +1165,27 @@ def _station_row(graph, station_id):
     return _resolve_section_row(graph, st) if st else None
 
 
-def _bypass_descender_crossings(graph):
-    """route_segment_crossings where a fan-out bypass weaves a descender sibling.
+def _row_band_bottom(graph, row):
+    """Bottom Y of the lowest-extending section in *row*, or ``None``."""
+    bottoms = [
+        s.bbox_y + s.bbox_h
+        for s in graph.sections.values()
+        if s.bbox_w > 0 and s.grid_row == row
+    ]
+    return max(bottoms) if bottoms else None
 
-    A weave is a crossing between two edges of one junction where exactly one
-    turns DOWN to a lower row (a descender) and the other rides the junction
-    row toward a far target (the bypass).  A crossing between the bypass and
-    the same-row trunk continuation -- the bypass diverging from the trunk --
-    is topologically unavoidable at the fan and is not a weave; nor is a
-    crossing with an unrelated feeder bundle (a different source).
+
+def _bypass_fan_weaves(graph):
+    """Junction crossings where a bypass weaves a descender AT THE FAN.
+
+    The bug is a bypass whose lead-in tangles across its sibling down-turns up
+    at the fan corner.  A weave is a crossing of two edges from one junction
+    where exactly one turns DOWN to a lower row (a descender) and the crossing
+    point sits within the junction's own row band -- i.e. near the fan, before
+    the bypass has peeled off.  A crossing down in the inter-row gap is the
+    bypass diverging into its run (the clean fork), not a weave, and a crossing
+    with the same-row trunk continuation is the unavoidable divergence; neither
+    is counted.
     """
     out = []
     for v in check_route_segment_crossings(graph):
@@ -1187,7 +1199,11 @@ def _bypass_descender_crossings(graph):
         row_b = _station_row(graph, edge_b[1])
         if jrow is None or row_a is None or row_b is None:
             continue
-        if (row_a > jrow) != (row_b > jrow):
+        if (row_a > jrow) == (row_b > jrow):
+            continue  # not a bypass-vs-descender pair
+        band_bottom = _row_band_bottom(graph, jrow)
+        cross_y = v.context["intersection"][1]
+        if band_bottom is not None and cross_y <= band_bottom + 1.0:
             out.append(v.message)
     return out
 
@@ -1199,15 +1215,15 @@ def test_fan_bypass_nesting_fixture_fans_from_a_junction():
     assert junctions, "fixture lost its synthetic fan-out junction"
 
 
-def test_fan_bypass_no_descender_weave():
-    """A fan-out bypass must not weave across its sibling down-turns (#652).
+def test_fan_bypass_no_fan_weave():
+    """A fan-out bypass must not weave across its down-turns at the fan (#652).
 
-    The bypass rides the bundle's outer track, rounds the down-turns' shared
-    concentric corner, and peels into its run at the inter-row gap, so it never
-    crosses a descending sibling. The single crossing with the same-row trunk
-    continuation -- the bypass diverging from the trunk -- is unavoidable and
-    not counted.
+    The bypass stays bundled through the down-turns' shared concentric corner
+    and only crosses over once it has peeled into the inter-row gap, so no
+    crossing with a descending sibling lands in the junction's own row band.
+    A crossover down at the divergence, and the crossing with the same-row
+    trunk continuation, are both expected and not flagged.
     """
     graph = _load_and_layout(FAN_BYPASS_NESTING_FILE)
-    crossings = _bypass_descender_crossings(graph)
-    assert not crossings, "\n".join(crossings)
+    weaves = _bypass_fan_weaves(graph)
+    assert not weaves, "\n".join(weaves)
