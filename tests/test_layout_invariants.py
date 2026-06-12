@@ -847,6 +847,61 @@ def test_intra_section_collinear_check_detects_overlay():
     assert {violations[0].line_a, violations[0].line_b} == {"red", "blue"}
 
 
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_no_stacked_elbow_graze(fixture):
+    """Two stacked, non-parallel inter-section risers must not graze.
+
+    Two different lines descending one inter-section gap as risers that merely
+    meet at a shared elbow band - a deep descent landing on a port lane that a
+    shallow descent then leaves - are separate corridors, not a parallel
+    bundle.  Packed within ``BUNDLE_TO_BUNDLE_CLEARANCE`` of each other their
+    opposing elbows overlap and the lines graze.  The gap layout must
+    distribute them across the gap width instead.
+    """
+    from nf_metro.layout.routing.invariants import check_stacked_elbow_clearance
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    violations = check_stacked_elbow_clearance(graph, routes, offsets)
+    assert not violations, "; ".join(v.message() for v in violations)
+
+
+def test_stacked_elbow_check_detects_graze():
+    """Meaningfulness guard: the stacked-elbow check fires on a genuine graze.
+
+    Locks the detector so the corpus test above is not vacuously green: two
+    different-line vertical risers in one gap, stacked (their spans meet at one
+    elbow band rather than overlapping) and within
+    ``BUNDLE_TO_BUNDLE_CLEARANCE`` of each other in X, must be flagged.
+    """
+    from types import SimpleNamespace
+
+    from nf_metro.layout.routing.common import RoutedPath
+    from nf_metro.layout.routing.invariants import check_stacked_elbow_clearance
+    from nf_metro.parser.model import Edge
+
+    def _riser(src, tgt, line, x, y_lo, y_hi):
+        return RoutedPath(
+            edge=Edge(source=src, target=tgt, line_id=line),
+            line_id=line,
+            points=[(x, y_lo), (x, y_hi)],
+            is_inter_section=True,
+            offsets_applied=True,
+        )
+
+    # A deep descent landing at y=100 and a shallow descent leaving it, 6px
+    # apart in X (< BUNDLE_TO_BUNDLE_CLEARANCE), overlapping only 3px in Y.
+    graph = SimpleNamespace(stations={})
+    routes = [
+        _riser("up_src", "port", "red", 0.0, 0.0, 100.0),
+        _riser("hub", "down_dst", "blue", 6.0, 97.0, 200.0),
+    ]
+    violations = check_stacked_elbow_clearance(graph, routes, {})
+    assert violations, "expected a stacked-elbow graze to be detected"
+    assert {violations[0].line_a, violations[0].line_b} == {"red", "blue"}
+
+
 @pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
 def test_distinct_trunk_not_hidden_behind_exempt(fixture):
     """A distinct-line bypass trunk must not sit within a bundle gap of an

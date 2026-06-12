@@ -26,9 +26,11 @@ from dataclasses import dataclass
 from enum import Enum
 
 from nf_metro.layout.constants import (
+    BUNDLE_TO_BUNDLE_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
     EDGE_TO_BUNDLE_CLEARANCE,
+    MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
 )
@@ -958,6 +960,129 @@ def check_no_same_line_parallel_descents(
     return violations
 
 
+def _merge_spans(spans: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Merge overlapping / touching ``(lo, hi)`` intervals into maximal runs."""
+    out: list[tuple[float, float]] = []
+    for lo, hi in sorted(spans):
+        if out and lo <= out[-1][1] + COORD_TOLERANCE:
+            out[-1] = (out[-1][0], max(out[-1][1], hi))
+        else:
+            out.append((lo, hi))
+    return out
+
+
+@dataclass(frozen=True)
+class StackedElbowGraze:
+    """Two opposing elbows in one inter-section gap whose corners graze.
+
+    Two different lines descend the same gap in vertical risers that are
+    *stacked* (their spans meet at one elbow band rather than running
+    parallel), yet sit within ``BUNDLE_TO_BUNDLE_CLEARANCE`` of each other in
+    X.  Their turning corners then overlap, so the elbow of one line touches
+    the riser/elbow of the other instead of the two being distributed across
+    the gap width.
+    """
+
+    line_a: str
+    line_b: str
+    edge_a: tuple[str, str]
+    edge_b: tuple[str, str]
+    x_a: float
+    x_b: float
+    y_overlap: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"stacked-elbow graze: risers of {self.line_a!r} "
+            f"({self.edge_a[0]}->{self.edge_a[1]}) at x={self.x_a:.1f} and "
+            f"{self.line_b!r} ({self.edge_b[0]}->{self.edge_b[1]}) at "
+            f"x={self.x_b:.1f} overlap only {self.y_overlap:.1f}px in Y yet sit "
+            f"{abs(self.x_a - self.x_b):.1f}px apart (< {BUNDLE_TO_BUNDLE_CLEARANCE}); "
+            f"their opposing elbows graze instead of distributing across the gap"
+        )
+
+
+def check_stacked_elbow_clearance(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[StackedElbowGraze]:
+    """Return stacked, non-parallel inter-section risers packed too tightly.
+
+    Two vertical inter-section risers of different lines that merely *meet*
+    at one elbow band - their Y spans overlap by less than
+    ``MIN_CORRIDOR_Y_OVERLAP`` - are not a parallel bundle: one is a deep
+    descent landing on a lane the other then leaves.  When such a pair sits
+    within ``BUNDLE_TO_BUNDLE_CLEARANCE`` in X, the corners off the two risers
+    overlap and graze.  They must instead be distributed across the gap as
+    separate corridors, which puts at least ``BUNDLE_TO_BUNDLE_CLEARANCE``
+    between them.
+
+    Risers that genuinely overlap in Y (a real parallel bundle) are exempt:
+    their concentric corners are expected to nest at ``OFFSET_STEP``.  Risers
+    sharing a source or target endpoint are exempt too: those are one fan-out
+    or fan-in, whose branches legitimately stack at one elbow as they diverge
+    from / converge on the shared node.
+
+    Each line's vertical inter-section segments are first merged into maximal
+    runs per X column, so a bundle whose riser is split into segments by
+    intermediate corners is compared as one tall run (and so reads as a long
+    parallel overlap, exempt) rather than as short segment fragments that
+    could each show a spurious tiny overlap.
+    """
+    by_line_x: dict[tuple[str, float], list[tuple[float, float]]] = defaultdict(list)
+    edge_of: dict[tuple[str, float], tuple[str, str]] = {}
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        pts = _route_render_points(rp, offsets)
+        edge = (rp.edge.source, rp.edge.target)
+        for p1, p2 in zip(pts, pts[1:]):
+            axis, coord = _axis_aligned(p1, p2)
+            if axis != "V":
+                continue
+            xkey = round(coord / COORD_TOLERANCE) * COORD_TOLERANCE
+            lo, hi = sorted((p1[1], p2[1]))
+            by_line_x[(rp.line_id, xkey)].append((lo, hi))
+            edge_of[(rp.line_id, xkey)] = edge
+
+    risers: list[tuple[str, tuple[str, str], float, float, float]] = []
+    for (line_id, xkey), spans in by_line_x.items():
+        for lo, hi in _merge_spans(spans):
+            risers.append((line_id, edge_of[(line_id, xkey)], xkey, lo, hi))
+
+    violations: list[StackedElbowGraze] = []
+    for i in range(len(risers)):
+        la, ea, xa, lo_a, hi_a = risers[i]
+        for j in range(i + 1, len(risers)):
+            lb, eb, xb, lo_b, hi_b = risers[j]
+            if la == lb:
+                continue
+            if ea[0] == eb[0] or ea[1] == eb[1]:
+                continue
+            if abs(xa - xb) >= BUNDLE_TO_BUNDLE_CLEARANCE - COORD_TOLERANCE:
+                continue
+            overlap = min(hi_a, hi_b) - max(lo_a, lo_b)
+            # Lower bound: the two risers must genuinely meet (a non-meeting
+            # pair leaves a Y gap and so cannot graze); upper bound is the
+            # parallel-run floor.
+            if not (COORD_TOLERANCE < overlap < MIN_CORRIDOR_Y_OVERLAP):
+                continue
+            violations.append(
+                StackedElbowGraze(
+                    line_a=la,
+                    line_b=lb,
+                    edge_a=ea,
+                    edge_b=eb,
+                    x_a=xa,
+                    x_b=xb,
+                    y_overlap=overlap,
+                )
+            )
+    return violations
+
+
 __all__ = [
     "BundleOrderViolation",
     "CollinearOverlapViolation",
@@ -966,11 +1091,13 @@ __all__ = [
     "PartialBranchGapViolation",
     "SameLineParallelRun",
     "Side",
+    "StackedElbowGraze",
     "check_bundle_order_preserved",
     "check_fanout_tail_join",
     "check_merge_port_approach_side",
     "check_no_collinear_distinct_lines",
     "check_no_same_line_parallel_descents",
+    "check_stacked_elbow_clearance",
     "check_partial_branch_offset_gaps",
     "classify_merge_port_feeders",
     "distinct_offset_levels",
