@@ -1,8 +1,8 @@
 %%metro title: Bypass Fan-in Outer Slot
 %%metro style: dark
 %%metro line: dna | DNA | #e63946
-%%metro line: rna | RNA | #2db572
 %%metro line: meth | Methylation | #0570b0
+%%metro line: rna | RNA | #2db572
 %%metro line: atac | ATAC | #f5c542
 %%metro line: qc | QC | #ff8c00
 
@@ -10,13 +10,13 @@ graph LR
     subgraph ingest [Ingest]
         samplesheet[Samplesheet]
         demux[Demultiplex]
-        samplesheet -->|dna,rna,meth,atac,qc| demux
+        samplesheet -->|dna,meth,rna,atac,qc| demux
     end
 
     subgraph trim [Trim & QC]
         fastp[Fastp]
         screen[Contam Screen]
-        fastp -->|dna,rna,meth,atac,qc| screen
+        fastp -->|dna,meth,rna,atac,qc| screen
     end
 
     subgraph hub [Branch Hub]
@@ -43,11 +43,11 @@ graph LR
     subgraph integrate [Integration]
         mofa[MOFA Factor Model]
         report[MultiQC Report]
-        mofa -->|dna,rna,meth,atac| report
+        mofa -->|dna,meth,rna,atac| report
     end
 
-    demux -->|dna,rna,meth,atac,qc| fastp
-    screen -->|dna,rna,meth,atac,qc| dispatch
+    demux -->|dna,meth,rna,atac,qc| fastp
+    screen -->|dna,meth,rna,atac,qc| dispatch
 
     dispatch -->|dna,meth| bwa
     dispatch -->|rna| salmon
