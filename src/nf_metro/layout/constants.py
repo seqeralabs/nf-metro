@@ -239,6 +239,21 @@ DIAGONAL_RUN: float = 30.0
 CURVE_RADIUS: float = 10.0
 """Default corner radius for routed paths."""
 
+MIN_CORRIDOR_Y_OVERLAP: float = 2 * CURVE_RADIUS
+"""Minimum vertical overlap for two gap channels to share one corridor.
+
+Channels in the same inter-section gap and direction are grouped into a
+concentric corridor only when their vertical spans overlap by more than
+this much.  Two channels that overlap by less are not running parallel -
+they are stacked segments meeting at a single elbow (a deep descender
+landing on a port lane that another channel then leaves), and their
+turning corners sit within one corner-radius zone of each other.  Packing
+them into one ``OFFSET_STEP`` corridor makes those opposing elbows graze;
+treating them as separate corridors lets the gap layout distribute them
+across the gap width so the elbows stay clear.  Sized at twice the corner
+radius: an overlap that small is entirely inside the two corners' rounding
+zones, never a real parallel run."""
+
 MERGE_ROUTE_MARGIN: float = 2 * CURVE_RADIUS
 """Distance between a section bbox edge and any merge branch/trunk
 vertical line in the inter-section gap."""

@@ -872,6 +872,29 @@ def _guard_off_track_consumer_on_trunk(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _guard_no_stacked_elbow_graze(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Two stacked, non-parallel inter-section risers must not graze.
+
+    When two different lines descend the same inter-section gap as risers
+    that merely meet at one elbow band (their Y spans overlap by less than
+    ``MIN_CORRIDOR_Y_OVERLAP``, rather than running parallel), they are two
+    separate corridors and must be distributed across the gap width.  Packed
+    within ``BUNDLE_TO_BUNDLE_CLEARANCE`` of each other their opposing elbows
+    overlap and the lines graze instead of reading as distinct streams.
+    """
+    from nf_metro.layout.routing.invariants import check_stacked_elbow_clearance
+
+    _raise_on_first_violation(
+        graph, phase, check_stacked_elbow_clearance, offsets, routes
+    )
+
+
 def _guard_no_station_overlap(
     graph: MetroGraph,
     phase: str,

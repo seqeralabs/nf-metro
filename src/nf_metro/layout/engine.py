@@ -138,6 +138,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_negative_grid_columns,
     _guard_no_route_through_section,
     _guard_no_same_line_parallel_descents,
+    _guard_no_stacked_elbow_graze,
     _guard_no_station_overlap,
     _guard_no_wrapped_label_trunk_strike,
     _guard_off_track_clear_of_anchor,
@@ -1641,6 +1642,7 @@ def _finalize_layout(
             _guard_no_same_line_parallel_descents(
                 graph, phase, offsets=offsets, routes=routes
             )
+            _guard_no_stacked_elbow_graze(graph, phase, offsets=offsets, routes=routes)
             _guard_fanout_tail_join(graph, phase, offsets=offsets, routes=routes)
             _guard_inter_section_route_no_backtrack(graph, phase, routes=routes)
             _guard_inter_section_route_no_full_width_backtrack(

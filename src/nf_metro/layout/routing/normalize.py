@@ -15,6 +15,7 @@ from nf_metro.layout.constants import (
     CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
+    MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
     SECTION_HEADER_PROTRUSION,
 )
@@ -175,10 +176,14 @@ def _match_channel_gap(
 
 
 def _split_corridors(chans: list[_VChannel]) -> list[list[_VChannel]]:
-    """Split a bucket into corridors of y-overlapping channels.
+    """Split a bucket into corridors of substantially y-overlapping channels.
 
-    Only channels whose y-spans overlap share a true corridor; independent
-    vertical runs at different heights must NOT be merged.
+    Only channels whose y-spans overlap by more than
+    :data:`MIN_CORRIDOR_Y_OVERLAP` share a true corridor; independent
+    vertical runs at different heights - including two stacked descents that
+    merely touch at a shared elbow band - must NOT be merged, so the gap
+    layout can distribute them across the gap width instead of packing their
+    opposing elbows together.
     """
     chans = sorted(chans, key=lambda c: (c.y_lo, c.y_hi))
     groups: list[list[_VChannel]] = []
@@ -186,8 +191,7 @@ def _split_corridors(chans: list[_VChannel]) -> list[list[_VChannel]]:
         placed = False
         for g in groups:
             if any(
-                ch.y_lo < o.y_hi - COORD_TOLERANCE
-                and o.y_lo < ch.y_hi - COORD_TOLERANCE
+                min(ch.y_hi, o.y_hi) - max(ch.y_lo, o.y_lo) > MIN_CORRIDOR_Y_OVERLAP
                 for o in g
             ):
                 g.append(ch)
