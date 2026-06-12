@@ -9,7 +9,11 @@ Preserves any values explicitly set by %%metro directives.
 
 from __future__ import annotations
 
-__all__ = ["infer_section_layout", "detect_serpentine_runs"]
+__all__ = [
+    "infer_section_layout",
+    "detect_serpentine_runs",
+    "candidate_fold_thresholds",
+]
 
 from collections import defaultdict, deque
 from collections.abc import Set as AbstractSet
@@ -60,6 +64,49 @@ def infer_section_layout(graph: MetroGraph, max_station_columns: int = 15) -> No
         fold_sections,
         convergence_sections,
     )
+
+
+def candidate_fold_thresholds(graph: MetroGraph) -> list[int]:
+    """Fold-threshold values worth trying when searching for a target aspect.
+
+    The serpentine packer (:func:`_pack_topo_columns`) wraps a section row
+    onto the next band when its cumulative topo-column width would exceed the
+    threshold, so distinct shapes appear near the cumulative widths of the
+    topological columns. Sampling those running totals - plus 1 (maximum
+    folding, tallest) - brackets the range from the most-folded to the
+    unfolded single-row layout without enumerating every integer in between.
+
+    Returns a sorted ascending list, or an empty list when fold_threshold
+    cannot reshape the layout: a single section, a single topological column,
+    no inter-section edges, or an author-pinned grid (``%%metro grid:``),
+    which the packer never overrides.
+    """
+    if len(graph.sections) <= 1 or graph._explicit_grid:
+        return []
+
+    successors, predecessors, _ = _build_section_dag(graph)
+    if not successors and not predecessors:
+        return []
+
+    section_ids = list(graph.sections.keys())
+    col_assign = _bfs_section_columns(section_ids, successors)
+    col_groups: dict[int, list[str]] = defaultdict(list)
+    for sid in section_ids:
+        col_groups[col_assign[sid]].append(sid)
+
+    widths = [
+        max(_estimate_section_layers(graph, sid) for sid in sids)
+        for sids in (col_groups[col] for col in sorted(col_groups))
+    ]
+    if len(widths) <= 1:
+        return []
+
+    breakpoints = {1}
+    cumulative = 0
+    for w in widths:
+        cumulative += w
+        breakpoints.add(cumulative)
+    return sorted(breakpoints)
 
 
 def _build_section_dag(

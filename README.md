@@ -77,6 +77,7 @@ nf-metro render [OPTIONS] INPUT_FILE
 | `--theme [nfcore\|light]` | `nfcore` | Visual theme |
 | `--width INTEGER` | auto | SVG width in pixels |
 | `--height INTEGER` | auto | SVG height in pixels |
+| `--aspect FLOAT` | auto | Target output aspect ratio (width/height), e.g. `4` for thin-and-wide, `0.5` for tall-and-narrow. Picks the `fold_threshold` whose layout shape is closest |
 | `--x-spacing FLOAT` | auto | Horizontal spacing between layers (widened from 60 only when wide labels would otherwise collide) |
 | `--y-spacing FLOAT` | auto | Vertical spacing between tracks (derived from the map's content so captioned icons and dense labels don't collide) |
 | `--max-layers-per-row INTEGER` | auto | Max layers before folding to next row |

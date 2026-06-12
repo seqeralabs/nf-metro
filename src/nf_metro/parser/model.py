@@ -328,6 +328,11 @@ class MetroGraph:
     # horizontal trunk of sections on a single row. Overridden by the
     # --fold-threshold CLI flag.
     fold_threshold: int | None = None
+    # Target output aspect ratio (width / height). When set and the section
+    # grid is auto-inferred, the renderer picks the fold_threshold whose
+    # layout shape is closest to this ratio. Ignored when fold_threshold is
+    # set explicitly or the grid is author-pinned.
+    aspect: float | None = None
     # Vertical relationship between lines sharing a station (see LineSpread).
     # ``line_spread`` is the graph-wide default; ``line_spread_overrides`` maps
     # a section id to a mode that wins over the default for that section.

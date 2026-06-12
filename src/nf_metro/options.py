@@ -126,6 +126,15 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         "a long horizontal trunk of sections on a single row.",
     ),
     LayoutOption(
+        name="aspect",
+        kind="float",
+        sign="positive",
+        help="Target output aspect ratio (width / height), e.g. 4 for thin and "
+        "wide, 0.5 for tall and narrow. Picks the fold_threshold whose layout "
+        "shape is closest. Ignored when fold_threshold is set or the grid is "
+        "author-pinned.",
+    ),
+    LayoutOption(
         name="diamond_style",
         kind="choice",
         choices=("straight", "symmetric"),

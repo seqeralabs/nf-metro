@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import warnings
 from collections.abc import Callable
 from pathlib import Path
@@ -10,9 +11,11 @@ from typing import Any, TypeVar
 import click
 
 from nf_metro import __version__
+from nf_metro.aspect import solve_aspect
 from nf_metro.explain import build_explain, format_explain_json, format_explain_text
 from nf_metro.introspect import build_info, format_info_json, format_info_text
 from nf_metro.layout import PhaseInvariantError, compute_layout
+from nf_metro.layout.auto_layout import candidate_fold_thresholds
 from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
 from nf_metro.parser import (
     ERROR,
@@ -105,6 +108,54 @@ def _resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
     return THEMES.get(_STYLE_THEME_ALIASES.get(name, name), THEMES["nfcore"])
 
 
+_SVG_TAG_RE = re.compile(r"<svg\b[^>]*>")
+_SVG_DIM_RE = re.compile(r'\b(width|height)="(\d+(?:\.\d+)?)"')
+
+
+def _svg_dimensions(graph: MetroGraph, theme: Theme) -> tuple[float, float]:
+    """Rendered ``(width, height)`` of *graph*'s SVG, read from its root tag."""
+    tag = _SVG_TAG_RE.search(render_svg(graph, theme))
+    if tag is None:
+        return 0.0, 0.0
+    dims = {key: float(value) for key, value in _SVG_DIM_RE.findall(tag.group(0))}
+    return dims.get("width", 0.0), dims.get("height", 0.0)
+
+
+def _apply_aspect_target(
+    graph: MetroGraph,
+    build_graph: Callable[[int | None], MetroGraph],
+    theme: Theme,
+) -> MetroGraph:
+    """Re-fold *graph* toward its ``aspect`` target, reporting the choice.
+
+    Returns the graph rebuilt with the best-matching fold_threshold. When the
+    topology offers only one shape, returns the input graph and reports that
+    the target cannot be honoured.
+    """
+    target = graph.aspect
+    assert target is not None  # caller gates on graph.aspect being set
+    candidates = candidate_fold_thresholds(graph)
+    solution = solve_aspect(
+        target,
+        candidates,
+        lambda fold: _svg_dimensions(build_graph(fold), theme),
+    )
+    if not solution.adjustable or solution.fold_threshold is None:
+        click.echo(
+            f"Aspect {target:g} requested, but this layout's shape is "
+            "fixed by its topology (or an explicit grid); rendering as-is."
+        )
+        return graph
+
+    assert solution.achieved_dims is not None
+    width, height = solution.achieved_dims
+    click.echo(
+        f"Aspect {solution.target:g} requested, {solution.achieved_aspect:.2f} "
+        f"achieved ({width}x{height}, fold_threshold={solution.fold_threshold})."
+    )
+    return build_graph(solution.fold_threshold)
+
+
 @cli.command()
 @click.argument("input_file", type=click.Path(exists=True, path_type=Path))
 @click.option(
@@ -189,32 +240,34 @@ def render(
 
         text = convert_nextflow_dag(text, title=title or "")
 
-    fold = layout_opts.get("fold_threshold")
+    explicit_fold = layout_opts.get("fold_threshold")
+    explicit_fold = explicit_fold if isinstance(explicit_fold, int) else None
+
+    def build_graph(fold_override: int | None) -> MetroGraph:
+        graph = parse_metro_mermaid(text, max_station_columns=fold_override)
+        _apply_layout_overrides(graph, layout_opts)
+        if line_spread is not None:
+            graph.line_spread = LineSpread(line_spread)
+        if logo is not None:
+            graph.logo_path = str(logo)
+        if legend is not None:
+            apply_legend_directive(legend, graph)
+        if title is not None:
+            graph.title = title
+        compute_layout(graph)
+        return graph
+
     try:
-        graph = parse_metro_mermaid(
-            text,
-            max_station_columns=fold if isinstance(fold, int) else None,
-        )
+        graph = build_graph(explicit_fold)
     except ValueError as e:
         raise click.ClickException(str(e))
-
-    _apply_layout_overrides(graph, layout_opts)
-
-    if line_spread is not None:
-        graph.line_spread = LineSpread(line_spread)
-    if logo is not None:
-        graph.logo_path = str(logo)
-    if legend is not None:
-        apply_legend_directive(legend, graph)
-    if title is not None:
-        graph.title = title
-
-    try:
-        compute_layout(graph)
     except (CyclicGraphError, PhaseInvariantError) as e:
         raise click.ClickException(str(e))
 
     theme_obj = _resolve_theme(theme, graph)
+
+    if graph.aspect is not None and explicit_fold is None:
+        graph = _apply_aspect_target(graph, build_graph, theme_obj)
 
     if output is None:
         output = input_file.with_suffix(f".{format_}")

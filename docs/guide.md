@@ -519,6 +519,7 @@ These go at the top of the file, before `graph LR`.
 | `%%metro line_order: <strategy>` | Line ordering for track assignment: `definition` (default, preserves `.mmd` order) or `span` (longest-spanning lines get inner tracks) |
 | `%%metro diamond_style: <mode>` | Fork-join (diamond) layout: `straight` (default) keeps the top branch on the main track; `symmetric` fans the branches evenly |
 | `%%metro fold_threshold: <columns>` | Max station-columns a section row may reach before the auto-layout wraps it onto the next row (default 15). Raise it to keep a long horizontal trunk of sections on a single row. |
+| `%%metro aspect: <ratio>` | Target output aspect ratio (width / height), e.g. `4` for thin-and-wide, `0.5` for tall-and-narrow. Picks the `fold_threshold` whose layout shape is closest. Ignored when `fold_threshold` is set or the grid is author-pinned. |
 | `%%metro x_spacing: <pixels>` | Horizontal spacing between layers (default: auto - widened from 60 only when wide labels would collide) |
 | `%%metro y_spacing: <pixels>` | Vertical spacing between tracks (default: auto - derived from the map's content) |
 | `%%metro section_x_gap: <pixels>` | Horizontal gap between sections (default: 50) |
@@ -613,6 +614,7 @@ Set the directive in your committed `.mmd` so the map reproduces from the file a
 | `section_x_gap:` | `--section-x-gap` | 50 |
 | `section_y_gap:` | `--section-y-gap` | 50 |
 | `fold_threshold:` | `--fold-threshold` | auto (15) |
+| `aspect:` | `--aspect` | auto |
 | `diamond_style:` | `--diamond-style` | `straight` |
 | `line_order:` | `--line-order` | `definition` |
 | `center_ports:` | `--center-ports` / `--no-center-ports` | false |
