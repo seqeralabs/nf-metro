@@ -68,9 +68,9 @@ target-version = "py310"
 select = ["E", "F", "I", "W", "ANN", "C901"]
 
 [tool.ruff.lint.mccabe]
-# Ratchet against cyclomatic-complexity regressions; lower as functions
-# are decomposed.
-max-complexity = 43
+# Keep function branch complexity readable; functions above this are
+# decomposed into named helpers rather than allowed to grow.
+max-complexity = 30
 
 [tool.ruff.lint.per-file-ignores]
 # Type-annotation rules are enforced on the library only; tests favour

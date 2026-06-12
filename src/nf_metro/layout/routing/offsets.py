@@ -16,7 +16,7 @@ from nf_metro.layout.routing.invariants import (
     distinct_offset_levels,
 )
 from nf_metro.layout.routing.reversal import detect_reversed_sections
-from nf_metro.parser.model import LineSpread, MetroGraph, PortSide, Section
+from nf_metro.parser.model import LineSpread, MetroGraph, PortSide, Section, Station
 
 # Tolerances used across offset phases
 _SAME_Y_TOLERANCE: float = SAME_Y_TOLERANCE
@@ -383,7 +383,14 @@ def _reorder_exit_only_lines(ctx: _OffsetCtx) -> None:
 
         for lid in exit_only:
             _reorder_one_exit_line(
-                ctx, same_y_adj, outbound_target, station, sid, lines, lid
+                ctx,
+                same_y_adj,
+                outbound_target,
+                station,
+                station.section_id,
+                sid,
+                lines,
+                lid,
             )
 
 
@@ -404,13 +411,13 @@ def _reorder_one_exit_line(
     same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
     outbound_target: dict[tuple[str, str], str],
     station: Station,
+    sec_id: str,
     sid: str,
     lines: list[str],
     lid: str,
 ) -> None:
     """Move one exit-only line to its crossing-free slot, propagating the swap."""
     graph = ctx.graph
-    sec_id = station.section_id
     target_id = outbound_target.get((sid, lid))
     if not target_id:
         return

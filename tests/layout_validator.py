@@ -1073,137 +1073,148 @@ def check_route_segment_crossings(
     station_xy = [(st.x, st.y) for st in graph.stations.values() if not st.is_port]
     hub_tol = Y_SPACING / 4.0
 
-    def at_station(pt: tuple[float, float]) -> bool:
-        x, y = pt
-        for sx, sy in station_xy:
-            if abs(sx - x) <= hub_tol and abs(sy - y) <= hub_tol:
-                return True
-        return False
-
     # Precompute post-offset point lists once per route.
     paths = [(r, apply_route_offsets(r, offsets)) for r in routes]
-
-    # A shared endpoint at a multi-line real-station hub means the two
-    # edges are part of a fork or join at a station that genuinely
-    # carries multiple lines. Crossings near such hubs are part of the
-    # natural divergence and acceptable. Junction endpoints (synthetic
-    # routing artefacts, is_port=True) do NOT trigger this exclusion.
-    def shared_real_hub(ra_edge, rb_edge) -> bool:
-        shared = {ra_edge.source, ra_edge.target} & {
-            rb_edge.source,
-            rb_edge.target,
-        }
-        for sid in shared:
-            st = graph.stations.get(sid)
-            if st is not None and not st.is_port and len(graph.station_lines(sid)) > 1:
-                return True
-        return False
-
-    def involves_hidden(edge) -> bool:
-        for sid in (edge.source, edge.target):
-            st = graph.stations.get(sid)
-            if st is not None and st.is_hidden:
-                return True
-        return False
-
-    def shared_port_endpoints(ra_edge, rb_edge) -> list[tuple[float, float]]:
-        """Coordinates of port stations shared as endpoints by both edges."""
-        shared = {ra_edge.source, ra_edge.target} & {rb_edge.source, rb_edge.target}
-        result: list[tuple[float, float]] = []
-        for sid in shared:
-            st = graph.stations.get(sid)
-            if st is not None and st.is_port:
-                result.append((st.x, st.y))
-        return result
-
-    # A crossing near a shared port endpoint can be a benign fan-out
-    # (one port -> many destinations) or fan-in (many -> one port)
-    # divergence artefact: the lines have to split or merge at the port
-    # and may visually intersect within a few pixels of it. We exclude
-    # such crossings ONLY when both crossing segments transition to their
-    # next track via a diagonal - that's the natural way to enter a new
-    # row. If either segment is near-vertical at the crossing, one line is
-    # plunging up/down past its source y to detour around something, which
-    # is the awkward case we want to flag (e.g. variant_calling Main/QC
-    # leaving Section 1: qc immediately drops y=157 -> y=260 to bypass
-    # alignment, crossing main on the way).
-    fan_tol = Y_SPACING
-    vertical_dx_tol = 2.0
-
-    def near_shared_port(
-        pt: tuple[float, float], ports: list[tuple[float, float]]
-    ) -> bool:
-        for px, py in ports:
-            if abs(px - pt[0]) <= fan_tol and abs(py - pt[1]) <= fan_tol:
-                return True
-        return False
-
-    def segment_near_vertical(p0: tuple[float, float], p1: tuple[float, float]) -> bool:
-        return abs(p1[0] - p0[0]) <= vertical_dx_tol and abs(p1[1] - p0[1]) > 0
 
     seen: set[tuple] = set()
     for i in range(len(paths)):
         ra, pa = paths[i]
         for j in range(i + 1, len(paths)):
             rb, pb = paths[j]
-            if ra.line_id == rb.line_id:
+            pt = _route_pair_crossing(graph, ra, pa, rb, pb, station_xy, hub_tol)
+            if pt is None:
                 continue
-            if shared_real_hub(ra.edge, rb.edge):
+            key = tuple(
+                sorted(
+                    [
+                        (ra.edge.source, ra.edge.target, ra.line_id),
+                        (rb.edge.source, rb.edge.target, rb.line_id),
+                    ]
+                )
+            )
+            if key in seen:
                 continue
-            # Hidden helper stations are inserted by the layout to extend
-            # terminus or branch geometry; their crossings are intentional.
-            if involves_hidden(ra.edge) or involves_hidden(rb.edge):
-                continue
-            shared_ports = shared_port_endpoints(ra.edge, rb.edge)
-            for ai in range(len(pa) - 1):
-                for bi in range(len(pb) - 1):
-                    pt = _segments_cross(pa[ai], pa[ai + 1], pb[bi], pb[bi + 1])
-                    if pt is None:
-                        continue
-                    if at_station(pt):
-                        continue
-                    if shared_ports and near_shared_port(pt, shared_ports):
-                        seg_a = (pa[ai], pa[ai + 1])
-                        seg_b = (pb[bi], pb[bi + 1])
-                        if not (
-                            segment_near_vertical(*seg_a)
-                            or segment_near_vertical(*seg_b)
-                        ):
-                            continue
-                    key = tuple(
-                        sorted(
-                            [
-                                (ra.edge.source, ra.edge.target, ra.line_id),
-                                (rb.edge.source, rb.edge.target, rb.line_id),
-                            ]
-                        )
-                    )
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    violations.append(
-                        Violation(
-                            check="route_segment_crossing",
-                            severity=Severity.WARNING,
-                            message=(
-                                f"Lines '{ra.line_id}' "
-                                f"({ra.edge.source}->{ra.edge.target}) and "
-                                f"'{rb.line_id}' "
-                                f"({rb.edge.source}->{rb.edge.target}) "
-                                f"cross at ({pt[0]:.0f},{pt[1]:.0f}) - not "
-                                f"at a station, so the crossing is avoidable"
-                            ),
-                            context={
-                                "line_a": ra.line_id,
-                                "line_b": rb.line_id,
-                                "edge_a": (ra.edge.source, ra.edge.target),
-                                "edge_b": (rb.edge.source, rb.edge.target),
-                                "intersection": pt,
-                            },
-                        )
-                    )
+            seen.add(key)
+            violations.append(
+                Violation(
+                    check="route_segment_crossing",
+                    severity=Severity.WARNING,
+                    message=(
+                        f"Lines '{ra.line_id}' "
+                        f"({ra.edge.source}->{ra.edge.target}) and "
+                        f"'{rb.line_id}' "
+                        f"({rb.edge.source}->{rb.edge.target}) "
+                        f"cross at ({pt[0]:.0f},{pt[1]:.0f}) - not "
+                        f"at a station, so the crossing is avoidable"
+                    ),
+                    context={
+                        "line_a": ra.line_id,
+                        "line_b": rb.line_id,
+                        "edge_a": (ra.edge.source, ra.edge.target),
+                        "edge_b": (rb.edge.source, rb.edge.target),
+                        "intersection": pt,
+                    },
+                )
+            )
 
     return violations
+
+
+def _pt_at_station(pt, station_xy, hub_tol) -> bool:
+    """True if *pt* lands within ``hub_tol`` of a real (non-port) station."""
+    x, y = pt
+    for sx, sy in station_xy:
+        if abs(sx - x) <= hub_tol and abs(sy - y) <= hub_tol:
+            return True
+    return False
+
+
+def _edges_share_real_hub(graph, ra_edge, rb_edge) -> bool:
+    """True if the edges share an endpoint at a multi-line real-station hub.
+
+    Such a shared endpoint means the two edges fork or join at a station that
+    genuinely carries multiple lines, so crossings near it are natural
+    divergence.  Junction endpoints (synthetic, is_port=True) do NOT count.
+    """
+    shared = {ra_edge.source, ra_edge.target} & {rb_edge.source, rb_edge.target}
+    for sid in shared:
+        st = graph.stations.get(sid)
+        if st is not None and not st.is_port and len(graph.station_lines(sid)) > 1:
+            return True
+    return False
+
+
+def _edge_involves_hidden(graph, edge) -> bool:
+    """True if either endpoint of *edge* is a hidden helper station."""
+    for sid in (edge.source, edge.target):
+        st = graph.stations.get(sid)
+        if st is not None and st.is_hidden:
+            return True
+    return False
+
+
+def _shared_port_endpoints(graph, ra_edge, rb_edge) -> list[tuple[float, float]]:
+    """Coordinates of port stations shared as endpoints by both edges."""
+    shared = {ra_edge.source, ra_edge.target} & {rb_edge.source, rb_edge.target}
+    result: list[tuple[float, float]] = []
+    for sid in shared:
+        st = graph.stations.get(sid)
+        if st is not None and st.is_port:
+            result.append((st.x, st.y))
+    return result
+
+
+def _pt_near_shared_port(pt, ports, fan_tol) -> bool:
+    """True if *pt* sits within ``fan_tol`` of any shared port endpoint."""
+    for px, py in ports:
+        if abs(px - pt[0]) <= fan_tol and abs(py - pt[1]) <= fan_tol:
+            return True
+    return False
+
+
+def _seg_near_vertical(p0, p1, vertical_dx_tol) -> bool:
+    """True if the segment is near-vertical (small dx, non-zero dy)."""
+    return abs(p1[0] - p0[0]) <= vertical_dx_tol and abs(p1[1] - p0[1]) > 0
+
+
+def _route_pair_crossing(graph, ra, pa, rb, pb, station_xy, hub_tol):
+    """First avoidable crossing point between two routed paths, or None.
+
+    A crossing near a shared port endpoint can be a benign fan-out/fan-in
+    divergence artefact (lines split or merge at the port and may intersect
+    within a few pixels of it).  Such crossings are excluded ONLY when both
+    crossing segments transition via a diagonal; if either is near-vertical,
+    one line is plunging past its source Y to detour, which is the awkward
+    case worth flagging.
+    """
+    if ra.line_id == rb.line_id:
+        return None
+    if _edges_share_real_hub(graph, ra.edge, rb.edge):
+        return None
+    # Hidden helper stations are inserted by the layout to extend terminus or
+    # branch geometry; their crossings are intentional.
+    if _edge_involves_hidden(graph, ra.edge) or _edge_involves_hidden(graph, rb.edge):
+        return None
+    shared_ports = _shared_port_endpoints(graph, ra.edge, rb.edge)
+    fan_tol = Y_SPACING
+    vertical_dx_tol = 2.0
+    for ai in range(len(pa) - 1):
+        for bi in range(len(pb) - 1):
+            pt = _segments_cross(pa[ai], pa[ai + 1], pb[bi], pb[bi + 1])
+            if pt is None:
+                continue
+            if _pt_at_station(pt, station_xy, hub_tol):
+                continue
+            if shared_ports and _pt_near_shared_port(pt, shared_ports, fan_tol):
+                seg_a = (pa[ai], pa[ai + 1])
+                seg_b = (pb[bi], pb[bi + 1])
+                if not (
+                    _seg_near_vertical(*seg_a, vertical_dx_tol)
+                    or _seg_near_vertical(*seg_b, vertical_dx_tol)
+                ):
+                    continue
+            return pt
+    return None
 
 
 def check_inter_section_line_crossings(
