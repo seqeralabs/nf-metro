@@ -2472,15 +2472,18 @@ def _guard_merge_port_approach_side(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
-def _guard_bypass_flat_entry_runway(
+def _guard_bypass_port_no_slot_gaps(
     graph: MetroGraph,
     phase: str,
     *,
     offsets: dict[tuple[str, str], float] | None = None,
 ) -> None:
-    """Final-phase: a bypass horizontal line at a multi-feeder merge port must
-    arrive at the same rendered Y as its first downstream target so the
-    intra-section entry-runway leg renders flat.
+    """Final-phase: at a multi-feeder merge port containing a bypass horizontal
+    line, all bundle slots must be consecutive with no empty interior gaps.
+
+    A bypass line that is incorrectly classified as a horizontal co-traveller
+    inflates ``max_horiz`` and pushes perpendicular feeders into outer slots,
+    leaving empty slots between the horizontal band and the feeders.
     """
     from nf_metro.layout.routing.invariants import (
         bypass_horizontal_targets,
@@ -2495,23 +2498,21 @@ def _guard_bypass_flat_entry_runway(
     for port_id in graph.ports:
         if classify_merge_port_feeders(graph, port_id) is None:
             continue
-        bypass = bypass_horizontal_targets(graph, port_id)
-        if not bypass:
+        if not bypass_horizontal_targets(graph, port_id):
             continue
-        port_st = graph.stations.get(port_id)
-        if port_st is None:
+        lines = list(graph.station_lines(port_id))
+        if not lines:
             continue
-        for lid, tgt_st in bypass.items():
-            port_off = offsets.get((port_id, lid), 0.0)
-            tgt_off = offsets.get((tgt_st.id, lid), 0.0)
-            rendered_port = port_st.y + port_off
-            rendered_tgt = tgt_st.y + tgt_off
-            if abs(rendered_port - rendered_tgt) > COORD_TOLERANCE_FINE:
-                raise PhaseInvariantError(
-                    f"{phase}: bypass line {lid!r} entry runway not flat: "
-                    f"port {port_id!r} renders at y={rendered_port:.1f}, "
-                    f"target {tgt_st.id!r} renders at y={rendered_tgt:.1f}"
-                )
+        port_offsets = sorted(offsets.get((port_id, lid), 0.0) for lid in lines)
+        expected_max = (len(port_offsets) - 1) * OFFSET_STEP
+        actual_max = port_offsets[-1]
+        if actual_max > expected_max + COORD_TOLERANCE_FINE:
+            raise PhaseInvariantError(
+                f"{phase}: merge port {port_id!r} has empty bundle slot gaps: "
+                f"max offset {actual_max:.1f} > expected {expected_max:.1f} "
+                f"for {len(port_offsets)} lines "
+                f"(offsets: {[f'{o:.0f}' for o in port_offsets]})"
+            )
 
 
 def _guard_partial_branch_offset_gaps(

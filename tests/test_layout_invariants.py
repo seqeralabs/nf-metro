@@ -6200,14 +6200,14 @@ _FIXTURES_WITH_BYPASS_FAN_IN = [
 
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_BYPASS_FAN_IN)
 def test_bypass_fan_in_outer_slot(fixture):
-    """A bypass line at a multi-feeder entry port must render flat to its target.
+    """At a multi-feeder entry port containing a bypass horizontal line, all
+    bundle slots must be consecutive with no empty interior gaps.
 
-    When a horizontal junction-derived line skips the section's trunk stations
-    to reach a deeper station at a different Y, the entry-port offset must be
-    set so the bypass line arrives already at the target's rendered Y-level.
-    The intra-section entry-runway leg then renders flat (no U-shaped dip).
+    A bypass line misclassified as a plain horizontal co-traveller inflates
+    ``max_horiz``, pushing perpendicular feeders into outer slots and leaving
+    empty interior slots.  After the fix, all N lines pack into slots 0..N-1.
     """
-    from nf_metro.layout.constants import COORD_TOLERANCE_FINE
+    from nf_metro.layout.constants import COORD_TOLERANCE_FINE, OFFSET_STEP
     from nf_metro.layout.routing.invariants import (
         bypass_horizontal_targets,
         classify_merge_port_feeders,
@@ -6217,26 +6217,20 @@ def test_bypass_fan_in_outer_slot(fixture):
     offsets = compute_station_offsets(graph)
 
     for port_id in graph.ports:
-        classified = classify_merge_port_feeders(graph, port_id)
-        if classified is None:
+        if classify_merge_port_feeders(graph, port_id) is None:
             continue
-        bypass = bypass_horizontal_targets(graph, port_id)
-        if not bypass:
+        if not bypass_horizontal_targets(graph, port_id):
             continue
-
-        port_st = graph.stations[port_id]
-        for lid, tgt_st in bypass.items():
-            actual_port_off = offsets.get((port_id, lid), 0.0)
-            actual_tgt_off = offsets.get((tgt_st.id, lid), 0.0)
-            rendered_port_y = port_st.y + actual_port_off
-            rendered_tgt_y = tgt_st.y + actual_tgt_off
-            assert abs(rendered_port_y - rendered_tgt_y) < COORD_TOLERANCE_FINE, (
-                f"{fixture}: bypass line {lid!r} entry runway is not flat: "
-                f"port {port_id!r} renders at y={rendered_port_y:.1f} "
-                f"(station {port_st.y:.0f} + offset {actual_port_off:.1f}), "
-                f"target {tgt_st.id!r} renders at y={rendered_tgt_y:.1f} "
-                f"(station {tgt_st.y:.0f} + offset {actual_tgt_off:.1f})"
-            )
+        lines = list(graph.station_lines(port_id))
+        port_offsets = sorted(offsets.get((port_id, lid), 0.0) for lid in lines)
+        expected_max = (len(port_offsets) - 1) * OFFSET_STEP
+        actual_max = port_offsets[-1]
+        assert actual_max <= expected_max + COORD_TOLERANCE_FINE, (
+            f"{fixture}: merge port {port_id!r} has empty bundle slot gaps: "
+            f"max offset {actual_max:.1f} > expected {expected_max:.1f} "
+            f"for {len(port_offsets)} lines "
+            f"(offsets: {[f'{o:.0f}' for o in port_offsets]})"
+        )
 
 
 # ---------------------------------------------------------------------------

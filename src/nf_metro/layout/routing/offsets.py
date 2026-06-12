@@ -11,7 +11,6 @@ from nf_metro.layout.constants import (
     SAME_Y_TOLERANCE,
 )
 from nf_metro.layout.routing.invariants import (
-    bypass_horizontal_targets,
     check_partial_branch_offset_gaps,
     classify_merge_port_feeders,
     distinct_offset_levels,
@@ -1239,15 +1238,6 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
         ):
             sec_id = graph.ports[port_id].section_id
             _apply_offsets_through_section(ctx, port_id, sec_id, new_offs)
-
-        bypass_targets = bypass_horizontal_targets(graph, port_id)
-        if bypass_targets:
-            port_y = graph.stations[port_id].y
-            for lid, tgt_st in bypass_targets.items():
-                tgt_off = ctx.offsets.get((tgt_st.id, lid), 0.0)
-                bypass_off = tgt_st.y + tgt_off - port_y
-                if abs(bypass_off - cur.get(lid, 0.0)) > _OFFSET_EQ_TOLERANCE:
-                    ctx.offsets[(port_id, lid)] = bypass_off
 
 
 def _apply_offsets_through_section(
