@@ -25,6 +25,7 @@ from nf_metro.layout.routing.context import (
 )
 from nf_metro.parser.model import (
     MetroGraph,
+    Station,
 )
 
 
@@ -223,206 +224,246 @@ _StationMoveCandidate = tuple[
 ]
 
 
+def _is_internal_station(graph: MetroGraph, sid: str) -> bool:
+    """A visible, non-port internal station."""
+    st = graph.stations.get(sid)
+    return st is not None and not st.is_port and not st.is_hidden
+
+
+def _is_chain_predecessor(graph: MetroGraph, ctx: _BubbleCtx, sid: str) -> bool:
+    """Internal upstream station that acts as a flat-chain predecessor.
+
+    When a station being considered for centring has a flat-side connection
+    coming FROM ``sid``, this predicate decides whether ``sid`` should block
+    centring.  Normal internal stations do block it.  A true fan-out
+    divergence hub (matching ``engine._divergence_target_ys``: >= 2 outbound
+    real-station targets at distinct Ys, with at least one above and one below
+    the hub's own Y) is exempt: its flat-side connection to one branch is
+    incidental (induced by grid snapping the hub onto that branch's track), not
+    a topological chain.  Without this exemption the branch's column would fail
+    to centre.
+
+    Exemption applies only to the upstream/source side of a flat connection.
+    Downstream chain predecessors (an anchor sitting as the target of a flat
+    connection from the station being centred) reflect a natural same-Y chain,
+    not a snap artefact, and are still treated as chain-internal.
+    """
+    if not _is_internal_station(graph, sid):
+        return False
+    return sid not in ctx.divergence_anchors
+
+
+def _classify_centering_routes(
+    ctx: _BubbleCtx,
+    sid: str,
+    in_routes: list[RoutedPath],
+    out_routes: list[RoutedPath],
+    flat_in: list[RoutedPath],
+    flat_out: list[RoutedPath],
+) -> (
+    tuple[
+        RoutedPath | None, RoutedPath | None, RoutedPath | None, RoutedPath | None, bool
+    ]
+    | None
+):
+    """Pick the routes bounding the flat segment, or None if not centerable.
+
+    Returns ``(in_rp, out_rp, flat_in_rp, flat_out_rp, multi_diag)``.
+    """
+    is_fork_join = (
+        len(ctx.all_targets.get(sid, set())) > 1
+        or len(ctx.all_sources.get(sid, set())) > 1
+    )
+
+    in_rp = None
+    out_rp = None
+    flat_in_rp = None
+    flat_out_rp = None
+
+    # Count physically distinct edges (unique source-target pairs).
+    n_unique_in = len(set((rp.edge.source, rp.edge.target) for rp in in_routes))
+    n_unique_out = len(set((rp.edge.source, rp.edge.target) for rp in out_routes))
+    n_unique_flat_in = len(set((rp.edge.source, rp.edge.target) for rp in flat_in))
+    n_unique_flat_out = len(set((rp.edge.source, rp.edge.target) for rp in flat_out))
+
+    multi_diag = False
+    if not is_fork_join and (
+        (n_unique_in + n_unique_flat_in) >= 1
+        and n_unique_out >= 1
+        and (
+            n_unique_in > 1
+            or n_unique_out > 1
+            or (n_unique_in >= 1 and n_unique_flat_in >= 1)
+        )
+    ):
+        in_rp = in_routes[0] if in_routes else None
+        flat_in_rp = flat_in[0] if (not in_routes and flat_in) else None
+        out_rp = out_routes[0]
+        multi_diag = True
+    elif is_fork_join:
+        return None
+    elif n_unique_in == 1 and n_unique_out == 1:
+        in_rp = in_routes[0]
+        out_rp = out_routes[0]
+    elif n_unique_in == 0 and n_unique_flat_in == 1 and n_unique_out == 1:
+        flat_in_rp = flat_in[0]
+        out_rp = out_routes[0]
+    elif n_unique_in == 1 and n_unique_out == 0 and n_unique_flat_out == 1:
+        in_rp = in_routes[0]
+        flat_out_rp = flat_out[0]
+    else:
+        return None
+    return in_rp, out_rp, flat_in_rp, flat_out_rp, multi_diag
+
+
+def _flat_connects_to_internal_chain(
+    graph: MetroGraph,
+    ctx: _BubbleCtx,
+    multi_diag: bool,
+    flat_in_rp: RoutedPath | None,
+    flat_out_rp: RoutedPath | None,
+    flat_in: list[RoutedPath],
+    flat_out: list[RoutedPath],
+) -> bool:
+    """True when a flat connection ties the station into an internal chain.
+
+    Upstream sources may be fork-hub-exempted (a snap-induced flat from a true
+    divergence anchor does not represent a real chain).  Downstream targets are
+    checked strictly: a same-Y predecessor->successor pair on a downstream
+    internal station is a natural chain regardless of whether the successor
+    happens to be a divergence anchor.
+    """
+    if flat_in_rp and _is_chain_predecessor(graph, ctx, flat_in_rp.edge.source):
+        return True
+    if flat_out_rp and _is_internal_station(graph, flat_out_rp.edge.target):
+        return True
+    if multi_diag:
+        if any(_is_chain_predecessor(graph, ctx, r.edge.source) for r in flat_in):
+            return True
+        if any(_is_internal_station(graph, r.edge.target) for r in flat_out):
+            return True
+    return False
+
+
+def _centering_candidate(
+    graph: MetroGraph, ctx: _BubbleCtx, sid: str, station: Station
+) -> _StationMoveCandidate | None:
+    """Centre one station's diagonals in place, or return a move candidate.
+
+    Simple single-diagonal-per-side cases shift both diagonals to equalise the
+    flat runs and return None.  Complex cases (shared bundles, flat+diagonal
+    mixes) return a station-move candidate for the second pass.
+    """
+    in_routes = ctx.incoming.get(sid, [])
+    out_routes = ctx.outgoing.get(sid, [])
+    flat_in = ctx.flat_incoming.get(sid, [])
+    flat_out = ctx.flat_outgoing.get(sid, [])
+
+    classified = _classify_centering_routes(
+        ctx, sid, in_routes, out_routes, flat_in, flat_out
+    )
+    if classified is None:
+        return None
+    in_rp, out_rp, flat_in_rp, flat_out_rp, multi_diag = classified
+
+    # Check bundle convergence/divergence at neighbours.
+    shared_source = False
+    shared_target = False
+    if out_rp:
+        out_tgt = graph.stations.get(out_rp.edge.target)
+        if len(ctx.diag_in_sources.get(out_rp.edge.target, set())) > 1 and not (
+            out_tgt and out_tgt.is_port
+        ):
+            shared_target = True
+    if in_rp:
+        in_src = graph.stations.get(in_rp.edge.source)
+        if len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1 and not (
+            in_src and in_src.is_port
+        ):
+            shared_source = True
+
+    # Determine X extent of the flat segment at station Y.
+    if multi_diag:
+        in_xs = [r.points[2][0] for r in in_routes]
+        in_xs += [r.points[0][0] for r in flat_in]
+        out_xs = [r.points[1][0] for r in out_routes]
+        in_diag_end_x = max(in_xs) if in_xs else station.x
+        out_diag_start_x = min(out_xs) if out_xs else station.x
+    elif in_rp:
+        in_diag_end_x = in_rp.points[2][0]
+    else:
+        assert flat_in_rp is not None
+        in_diag_end_x = flat_in_rp.points[0][0]
+
+    if not multi_diag:
+        if out_rp:
+            out_diag_start_x = out_rp.points[1][0]
+        else:
+            assert flat_out_rp is not None
+            out_diag_start_x = flat_out_rp.points[-1][0]
+
+    in_flat = station.x - in_diag_end_x
+    out_flat = out_diag_start_x - station.x
+
+    if abs(in_flat) < 1 or abs(out_flat) < 1:
+        return None
+    if abs(in_flat - out_flat) < 1:
+        return None
+
+    has_flat_side = flat_in_rp is not None or flat_out_rp is not None
+
+    if (has_flat_side or multi_diag) and _flat_connects_to_internal_chain(
+        graph, ctx, multi_diag, flat_in_rp, flat_out_rp, flat_in, flat_out
+    ):
+        return None
+
+    if shared_source or shared_target or has_flat_side or multi_diag:
+        new_x = (in_diag_end_x + out_diag_start_x) / 2
+        return (new_x, in_routes, flat_in, out_routes, flat_out)
+
+    # Simple case: shift both diagonals to equalise the flats.
+    shift = (in_flat - out_flat) / 2
+
+    if abs(shift) > min(abs(in_flat), abs(out_flat)):
+        return None
+
+    # Guard: don't shift in convergence/divergence bundles.  Bypass V
+    # helpers have no marker so the convergence-guard doesn't apply.
+    is_bypass_v = sid.startswith("__bypass_")
+    if not is_bypass_v:
+        if out_rp and len(ctx.diag_in_sources.get(out_rp.edge.target, set())) > 1:
+            return None
+        if in_rp and len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1:
+            return None
+
+    for rp in in_routes:
+        rp.points[1] = (rp.points[1][0] + shift, rp.points[1][1])
+        rp.points[2] = (rp.points[2][0] + shift, rp.points[2][1])
+    for rp in out_routes:
+        rp.points[1] = (rp.points[1][0] + shift, rp.points[1][1])
+        rp.points[2] = (rp.points[2][0] + shift, rp.points[2][1])
+    return None
+
+
 def _collect_centering_candidates(
     graph: MetroGraph, ctx: _BubbleCtx
 ) -> dict[str, _StationMoveCandidate]:
     """First pass: shift simple diagonals and collect station-move candidates.
 
-    For stations with a single diagonal on each side and no bundle
-    conflicts, shifts both diagonals to equalise the flat runs.
-    For more complex cases (shared bundles, flat+diagonal mixes),
-    collects a station-move candidate for the second pass.
+    For stations with a single diagonal on each side and no bundle conflicts,
+    shifts both diagonals to equalise the flat runs.  For more complex cases
+    (shared bundles, flat+diagonal mixes), collects a station-move candidate
+    for the second pass.
     """
     station_move_candidates: dict[str, _StationMoveCandidate] = {}
-
-    def _is_internal(sid: str) -> bool:
-        st = graph.stations.get(sid)
-        return st is not None and not st.is_port and not st.is_hidden
-
-    def _is_chain_predecessor(sid: str) -> bool:
-        """Internal upstream station that acts as a flat-chain predecessor.
-
-        When a station being considered for centring has a flat-side
-        connection coming FROM ``sid``, this predicate decides whether
-        ``sid`` should block centring.  Normal internal stations do
-        block it.  A true fan-out divergence hub (matching
-        ``engine._divergence_target_ys``: >= 2 outbound real-station
-        targets at distinct Ys, with at least one above and one below
-        the hub's own Y) is exempt: its flat-side connection to one
-        branch is incidental (induced by grid snapping the hub onto
-        that branch's track), not a topological chain.  Without this
-        exemption the branch's column would fail to centre.
-
-        Exemption applies only to the upstream/source side of a flat
-        connection.  Downstream chain predecessors (an anchor sitting
-        as the target of a flat connection from the station being
-        centred) reflect a natural same-Y chain, not a snap artefact,
-        and are still treated as chain-internal.
-        """
-        if not _is_internal(sid):
-            return False
-        return sid not in ctx.divergence_anchors
-
     for sid, station in graph.stations.items():
         if station.is_port:
             continue
         if station.is_hidden and not sid.startswith("__bypass_"):
             continue
-
-        in_routes = ctx.incoming.get(sid, [])
-        out_routes = ctx.outgoing.get(sid, [])
-        flat_in = ctx.flat_incoming.get(sid, [])
-        flat_out = ctx.flat_outgoing.get(sid, [])
-
-        is_fork_join = (
-            len(ctx.all_targets.get(sid, set())) > 1
-            or len(ctx.all_sources.get(sid, set())) > 1
-        )
-
-        # Determine which routes bound the station's flat segment.
-        in_rp = None
-        out_rp = None
-        flat_in_rp = None
-        flat_out_rp = None
-
-        # Count physically distinct edges (unique source-target pairs).
-        n_unique_in = len(set((rp.edge.source, rp.edge.target) for rp in in_routes))
-        n_unique_out = len(set((rp.edge.source, rp.edge.target) for rp in out_routes))
-        n_unique_flat_in = len(set((rp.edge.source, rp.edge.target) for rp in flat_in))
-        n_unique_flat_out = len(
-            set((rp.edge.source, rp.edge.target) for rp in flat_out)
-        )
-
-        multi_diag = False
-        if not is_fork_join and (
-            (n_unique_in + n_unique_flat_in) >= 1
-            and n_unique_out >= 1
-            and (
-                n_unique_in > 1
-                or n_unique_out > 1
-                or (n_unique_in >= 1 and n_unique_flat_in >= 1)
-            )
-        ):
-            in_rp = in_routes[0] if in_routes else None
-            flat_in_rp = flat_in[0] if (not in_routes and flat_in) else None
-            out_rp = out_routes[0]
-            multi_diag = True
-        elif is_fork_join:
-            continue
-        elif n_unique_in == 1 and n_unique_out == 1:
-            in_rp = in_routes[0]
-            out_rp = out_routes[0]
-        elif n_unique_in == 0 and n_unique_flat_in == 1 and n_unique_out == 1:
-            flat_in_rp = flat_in[0]
-            out_rp = out_routes[0]
-        elif n_unique_in == 1 and n_unique_out == 0 and n_unique_flat_out == 1:
-            in_rp = in_routes[0]
-            flat_out_rp = flat_out[0]
-        else:
-            continue
-
-        # Check bundle convergence/divergence at neighbours.
-        shared_source = False
-        shared_target = False
-        if out_rp:
-            out_tgt = graph.stations.get(out_rp.edge.target)
-            if len(ctx.diag_in_sources.get(out_rp.edge.target, set())) > 1 and not (
-                out_tgt and out_tgt.is_port
-            ):
-                shared_target = True
-        if in_rp:
-            in_src = graph.stations.get(in_rp.edge.source)
-            if len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1 and not (
-                in_src and in_src.is_port
-            ):
-                shared_source = True
-
-        # Determine X extent of the flat segment at station Y.
-        if multi_diag:
-            in_xs = [r.points[2][0] for r in in_routes]
-            in_xs += [r.points[0][0] for r in flat_in]
-            out_xs = [r.points[1][0] for r in out_routes]
-            in_diag_end_x = max(in_xs) if in_xs else station.x
-            out_diag_start_x = min(out_xs) if out_xs else station.x
-        elif in_rp:
-            in_diag_end_x = in_rp.points[2][0]
-        else:
-            assert flat_in_rp is not None
-            in_diag_end_x = flat_in_rp.points[0][0]
-
-        if not multi_diag:
-            if out_rp:
-                out_diag_start_x = out_rp.points[1][0]
-            else:
-                assert flat_out_rp is not None
-                out_diag_start_x = flat_out_rp.points[-1][0]
-
-        in_flat = station.x - in_diag_end_x
-        out_flat = out_diag_start_x - station.x
-
-        if abs(in_flat) < 1 or abs(out_flat) < 1:
-            continue
-        if abs(in_flat - out_flat) < 1:
-            continue
-
-        has_flat_side = flat_in_rp is not None or flat_out_rp is not None
-
-        # Guard: skip when a flat connection goes to/from an internal
-        # chain station.  Upstream sources may be fork-hub-exempted (a
-        # snap-induced flat from a true divergence anchor does not
-        # represent a real chain).  Downstream targets are checked
-        # strictly: a same-Y predecessor->successor pair on a downstream
-        # internal station is a natural chain regardless of whether the
-        # successor happens to be a divergence anchor.
-        if has_flat_side or multi_diag:
-            flat_to_internal = False
-            if flat_in_rp and _is_chain_predecessor(flat_in_rp.edge.source):
-                flat_to_internal = True
-            if flat_out_rp and _is_internal(flat_out_rp.edge.target):
-                flat_to_internal = True
-            if multi_diag:
-                for r in flat_in:
-                    if _is_chain_predecessor(r.edge.source):
-                        flat_to_internal = True
-                for r in flat_out:
-                    if _is_internal(r.edge.target):
-                        flat_to_internal = True
-            if flat_to_internal:
-                continue
-
-        if shared_source or shared_target or has_flat_side or multi_diag:
-            new_x = (in_diag_end_x + out_diag_start_x) / 2
-            station_move_candidates[sid] = (
-                new_x,
-                in_routes,
-                flat_in,
-                out_routes,
-                flat_out,
-            )
-            continue
-
-        # Simple case: shift both diagonals to equalise the flats.
-        shift = (in_flat - out_flat) / 2
-
-        if abs(shift) > min(abs(in_flat), abs(out_flat)):
-            continue
-
-        # Guard: don't shift in convergence/divergence bundles.  Bypass
-        # V helpers have no marker so the convergence-guard doesn't apply.
-        is_bypass_v = sid.startswith("__bypass_")
-        if not is_bypass_v:
-            if out_rp and len(ctx.diag_in_sources.get(out_rp.edge.target, set())) > 1:
-                continue
-            if in_rp and len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1:
-                continue
-
-        for rp in in_routes:
-            rp.points[1] = (rp.points[1][0] + shift, rp.points[1][1])
-            rp.points[2] = (rp.points[2][0] + shift, rp.points[2][1])
-        for rp in out_routes:
-            rp.points[1] = (rp.points[1][0] + shift, rp.points[1][1])
-            rp.points[2] = (rp.points[2][0] + shift, rp.points[2][1])
-
+        candidate = _centering_candidate(graph, ctx, sid, station)
+        if candidate is not None:
+            station_move_candidates[sid] = candidate
     return station_move_candidates
 
 
