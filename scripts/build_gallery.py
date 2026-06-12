@@ -347,6 +347,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "dragged to the section floor (issue #650).",
     ),
     (
+        "off_track_input_above_consumer",
+        TOPOLOGIES_DIR,
+        "A section whose mid-trunk station consumes an off-track input while a "
+        "neighbouring station feeds an off-track output. The input hugs one row "
+        "above its consumer instead of towering an extra slot up because it "
+        "shares an anchor with the differently-columned output (issue #651).",
+    ),
+    (
         "around_section_below",
         TOPOLOGIES_DIR,
         "Cross-row route to a LEFT-entry target where the natural inter-row "

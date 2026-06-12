@@ -52,9 +52,11 @@ from nf_metro.layout.phases.bbox import (
     _section_fit_top,
 )
 from nf_metro.layout.phases.off_track import (
+    _is_single_trunk_lr_section,
     _off_track_anchor_of,
     _off_track_fit_top,
     _off_track_groups,
+    _off_track_lift_step,
     _off_track_output_below,
     _reanchor_off_track_to_consumer,
     _section_distinct_trunk_ys,
@@ -1199,6 +1201,92 @@ def test_off_track_consumer_on_section_trunk(fixture):
             f"y={succ_st.y} ({abs(cons_st.y - succ_st.y):.0f}px climb)"
         )
     assert checked, f"{fixture}: no linear off-track consumer to check"
+
+
+def _single_trunk_off_track_input_lifts(graph: MetroGraph):
+    """Yield ``(off_id, consumer_id, gap, n, step)`` for each off-track input
+    whose consumer lives in a single-trunk section.
+
+    ``n`` is the number of off-track stations sharing the input's column *and*
+    its anchor (its expected stack depth); ``gap`` is its lift above the
+    consumer; ``step`` is the section's off-track lift pitch.
+
+    Restricted to single-trunk LR/RL sections (one distinct on-track Y): those
+    carry no stacked horizontal line bands, so an off-track input cannot be
+    legitimately bumped past its natural slot to clear a foreign feed-line (the
+    multi-track ``differentialabundance`` ``functional`` bump).  On a single
+    trunk the lift must therefore equal the same-column stack rank exactly.
+    """
+    junction_ids = set(graph.junctions)
+    y_spacing = compute_min_y_spacing(graph)
+    anchor_of = _off_track_anchor_of(graph)
+    inputs = {
+        off_id: anc
+        for off_id, anc in anchor_of.items()
+        if any(e.target == anc for e in graph.edges_from(off_id))
+    }
+    col_group: dict[tuple[str | None, float, str], int] = defaultdict(int)
+    for off_id, anc in anchor_of.items():
+        st = graph.stations[off_id]
+        col_group[(st.section_id, round(st.x, 1), anc)] += 1
+
+    for off_id, anc in inputs.items():
+        off_st = graph.stations[off_id]
+        cons_st = graph.stations[anc]
+        section = graph.sections.get(off_st.section_id)
+        if section is None or not _is_single_trunk_lr_section(
+            graph, section, junction_ids
+        ):
+            continue
+        step = _off_track_lift_step(graph, section, junction_ids, y_spacing)
+        n = col_group[(off_st.section_id, round(off_st.x, 1), anc)]
+        yield off_id, anc, cons_st.y - off_st.y, n, step
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_INPUT)
+def test_off_track_input_lift_matches_column_stack_depth(fixture):
+    """On a single-trunk section, an off-track input hugs its consumer by
+    exactly its same-column stack depth, not the whole anchor group's size.
+
+    When one consumer is fed by off-track stations in *different* columns (e.g.
+    an input above it and a producer-fed output beside it), the lift step must
+    be counted per column.  Counting the whole anchor group instead pushes a
+    lone-in-its-column input an extra slot up, stranding it over an empty row
+    above an earlier trunk station (issue #651).
+    """
+    graph = _layout(fixture)
+    checked = 0
+    for off_id, cons_id, gap, n, step in _single_trunk_off_track_input_lifts(graph):
+        checked += 1
+        assert gap <= n * step + _Y_TOL, (
+            f"{fixture}: off-track input {off_id} lifted {gap:.0f}px above "
+            f"consumer {cons_id} ({gap / step:.1f} slots) but only {n} off-track "
+            f"station(s) share its column and anchor; expected at most "
+            f"{n * step:.0f}px - it is stranded above an empty row"
+        )
+    if not checked:
+        pytest.skip(f"{fixture}: no single-trunk off-track input to check")
+
+
+def test_off_track_input_column_stack_guard_catches_over_lift():
+    """The runtime guard fires when a lone-in-its-column input is over-lifted.
+
+    Locks the guard's teeth: dragging an off-track input one extra slot above
+    its consumer on a single-trunk section, where nothing shares its column,
+    must make ``_guard_off_track_input_column_stack`` raise rather than pass.
+    """
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_off_track_input_column_stack,
+    )
+
+    graph = _layout("topologies/off_track_input_above_consumer.mmd")
+    _guard_off_track_input_column_stack(graph, "test")
+    y_spacing = compute_min_y_spacing(graph)
+    graph.stations["cpg_bed"].y -= y_spacing
+
+    with pytest.raises(PhaseInvariantError, match="stranded above an empty row"):
+        _guard_off_track_input_column_stack(graph, "test")
 
 
 # ---------------------------------------------------------------------------

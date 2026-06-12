@@ -960,6 +960,23 @@ def _off_track_lift_step(
     return base
 
 
+def _per_column_stack_steps(innermost_first: list[Station]) -> dict[str, int]:
+    """Stack rank (1 = innermost, nearest the anchor) keyed per column.
+
+    ``innermost_first`` lists the off-track stations sharing one anchor in
+    order of increasing distance from it.  Each column counts its own stack
+    independently, so two stations sharing an anchor but sitting in different
+    columns each start at rank 1 rather than towering one above the other.
+    """
+    steps: dict[str, int] = {}
+    per_col: dict[float, int] = defaultdict(int)
+    for st in innermost_first:
+        col = round(st.x, 1)
+        per_col[col] += 1
+        steps[st.id] = per_col[col]
+    return steps
+
+
 def _place_off_track_relative_to_anchors(
     graph: MetroGraph,
     y_spacing: float,
@@ -1028,9 +1045,10 @@ def _place_off_track_relative_to_anchors(
         up_stations = [s for s in stations if s.id not in below]
         down_stations = [s for s in stations if s.id in below]
 
-        n_up = len(up_stations)
-        for i, st in enumerate(up_stations):
-            base_step = n_up - i
+        up_steps = _per_column_stack_steps(list(reversed(up_stations)))
+        down_steps = _per_column_stack_steps(down_stations)
+        for st in up_stations:
+            base_step = up_steps[st.id]
             candidate_y = consumer_y - base_step * step
             if section is not None and sec_dir in ("LR", "RL"):
                 candidate_y = _bump_off_track_clear_of_trunks(
@@ -1048,8 +1066,8 @@ def _place_off_track_relative_to_anchors(
             if highest_y is None or st.y < highest_y:
                 highest_y = st.y
 
-        for i, st in enumerate(down_stations):
-            base_step = i + 1
+        for st in down_stations:
+            base_step = down_steps[st.id]
             candidate_y = consumer_y + base_step * step
             if section is not None and sec_dir in ("LR", "RL"):
                 candidate_y = _bump_off_track_clear_of_trunks(

@@ -37,6 +37,7 @@ from nf_metro.layout.phases.bbox import _section_fit_top
 from nf_metro.layout.phases.off_track import (
     _is_single_trunk_lr_section,
     _off_track_anchor_of,
+    _off_track_lift_step,
     _off_track_output_below,
 )
 from nf_metro.layout.phases.single_section import _terminus_y_overhang
@@ -773,6 +774,56 @@ def _guard_single_trunk_off_track_step(graph: MetroGraph, phase: str) -> None:
                 f"{anchor_id!r} on single-trunk section {section.id!r}, not an "
                 f"integer multiple of the base step {base:.1f} -- the widened "
                 f"diagonal-label pitch leaked into the lift"
+            )
+
+
+def _guard_off_track_input_column_stack(graph: MetroGraph, phase: str) -> None:
+    """On a single-trunk section, an off-track input hugs its consumer by its
+    same-column stack depth, not the whole anchor group's size.
+
+    When a consumer is fed by off-track stations in different columns (an input
+    above it, a producer-fed output beside it), the lift step is counted per
+    column.  Counting the whole anchor group instead strands a lone-in-its-column
+    input an extra slot up over an empty row above an earlier trunk station
+    (issue #651).  Restricted to single-trunk sections, whose lift pitch carries
+    no stacked horizontal line bands that could legitimately bump an input past
+    its slot.
+    """
+    from nf_metro.layout.engine import compute_min_y_spacing
+
+    junction_ids = graph.junction_ids
+    y_spacing = compute_min_y_spacing(graph)
+    anchor_of = _off_track_anchor_of(graph)
+    tol = 1.0
+
+    col_group: dict[tuple[str | None, float, str], int] = defaultdict(int)
+    for off_id, anchor_id in anchor_of.items():
+        st = graph.stations.get(off_id)
+        if st is not None:
+            col_group[(st.section_id, round(st.x, 1), anchor_id)] += 1
+
+    for off_id, anchor_id in anchor_of.items():
+        off_st = graph.stations.get(off_id)
+        anchor = graph.stations.get(anchor_id)
+        if off_st is None or anchor is None:
+            continue
+        if not any(e.target == anchor_id for e in graph.edges_from(off_id)):
+            continue  # producer-fed sink, not an input
+        section = graph.sections.get(off_st.section_id or "")
+        if section is None or not _is_single_trunk_lr_section(
+            graph, section, junction_ids
+        ):
+            continue
+        step = _off_track_lift_step(graph, section, junction_ids, y_spacing)
+        n = col_group[(off_st.section_id, round(off_st.x, 1), anchor_id)]
+        gap = anchor.y - off_st.y
+        if gap > n * step + tol:
+            raise PhaseInvariantError(
+                f"{phase}: off-track input {off_id!r} sits {gap:.1f}px "
+                f"({gap / step:.1f} slots) above consumer {anchor_id!r} on "
+                f"single-trunk section {section.id!r}, but only {n} off-track "
+                f"station(s) share its column and anchor -- it is stranded above "
+                f"an empty row (expected at most {n * step:.1f}px)"
             )
 
 
