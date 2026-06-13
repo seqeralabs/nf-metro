@@ -8,51 +8,53 @@ Each row is a branch point (a *gate*) in a `layout/routing/` dispatch handler or
 
 Modules scoped to routing decision gates; `invariants.py` (the `validate=True` checker) and `__init__.py` are excluded.
 
+The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **7** gaps carry a triage verdict.
+
 ## `common.py`
 
 34/71 gates fully exercised.
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 79 | `if y_band is not None:` | `->L80` |
-| 120 | `if not secs:` | `->L121` |
-| 191 | `if n == 0:` | `->L192` |
-| 193 | `if bundle_index < 0 or bundle_index >= n:` | `->L194` |
-| 252 | `for edge in graph.edges:` | `->L268` |
-| 255 | `if not src or not tgt:` | `->L256` |
-| 308 | `elif tgt_sec:` | `->L316` |
-| 403 | `if dx > 0:` | `->L406` |
-| 414 | `if st is not None and st.is_port:` | `->L412` |
-| 449 | `if sec.bbox_w <= 0:` | `->L450` |
-| 455 | `if any(abs(adjusted - px) <= port_tol for px in port_xs):` | `->L456` |
-| 468 | `if clear_of_right >= edge_clearance or clear_of_left >= edge_clearance:` | `->L473` |
-| 473 | `if right - adjusted <= adjusted - left:` | `->L474`, `->L476` |
-| 492 | `if src and not src.is_port:` | `->L490` |
-| 508 | `for i in range(len(pts) - 1):` | `->L509`, `->L525` |
-| 513 | `if seg_len2 == 0:` | `->L514`, `->L517` |
-| 514 | `if abs(point[0] - ax) <= tol and abs(point[1] - ay) <= tol:` | `->L515`, `->L516` |
-| 518 | `if t < -0.01 or t > 1.01:` | `->L519`, `->L520` |
-| 523 | `if abs(point[0] - proj_x) <= tol and abs(point[1] - proj_y) <= tol:` | `->L508`, `->L524` |
-| 574 | `if all_in_range:` | `->L576` |
-| 599 | `if endpoints:` | `->L602` |
-| 612 | `if src_row is not None:` | `->L624` |
-| 649 | `if station is None:` | `->L650` |
-| 655 | `for e in graph.edges_to(station.id):` | `->L661` |
-| 657 | `if other and other.section_id:` | `->L655` |
-| 659 | `if sec:` | `->L655` |
-| 661 | `for e in graph.edges_from(station.id):` | `->L662`, `->L683` |
-| 663 | `if other and other.section_id:` | `->L661`, `->L664` |
-| 665 | `if sec:` | `->L661`, `->L666` |
-| 671 | `for e in graph.edges:` | `->L683` |
-| 673 | `if e.source == station.id:` | `->L674` |
-| 679 | `if other and other.section_id:` | `->L671` |
-| 681 | `if sec:` | `->L671` |
-| 704 | `if src_sec and tgt_sec and src_sec.grid_row != tgt_sec.grid_row:` | `->L735` |
-| 713 | `if dy > 0:` | `->L717` |
-| 725 | `if dy > 0:` | `->L730` |
-| 735 | `if dy > 0:` | `->L736`, `->L738` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 79 | `if y_band is not None:` | `->L80` |  |
+| 120 | `if not secs:` | `->L121` |  |
+| 191 | `if n == 0:` | `->L192` |  |
+| 193 | `if bundle_index < 0 or bundle_index >= n:` | `->L194` |  |
+| 252 | `for edge in graph.edges:` | `->L268` |  |
+| 255 | `if not src or not tgt:` | `->L256` |  |
+| 308 | `elif tgt_sec:` | `->L316` |  |
+| 403 | `if dx > 0:` | `->L406` |  |
+| 414 | `if st is not None and st.is_port:` | `->L412` |  |
+| 449 | `if sec.bbox_w <= 0:` | `->L450` |  |
+| 455 | `if any(abs(adjusted - px) <= port_tol for px in port_xs):` | `->L456` |  |
+| 468 | `if clear_of_right >= edge_clearance or clear_of_left >= edge_clearance:` | `->L473` |  |
+| 473 | `if right - adjusted <= adjusted - left:` | `->L474`, `->L476` |  |
+| 492 | `if src and not src.is_port:` | `->L490` |  |
+| 508 | `for i in range(len(pts) - 1):` | `->L509`, `->L525` |  |
+| 513 | `if seg_len2 == 0:` | `->L514`, `->L517` |  |
+| 514 | `if abs(point[0] - ax) <= tol and abs(point[1] - ay) <= tol:` | `->L515`, `->L516` |  |
+| 518 | `if t < -0.01 or t > 1.01:` | `->L519`, `->L520` |  |
+| 523 | `if abs(point[0] - proj_x) <= tol and abs(point[1] - proj_y) <= tol:` | `->L508`, `->L524` |  |
+| 574 | `if all_in_range:` | `->L576` |  |
+| 599 | `if endpoints:` | `->L602` |  |
+| 612 | `if src_row is not None:` | `->L624` |  |
+| 649 | `if station is None:` | `->L650` |  |
+| 655 | `for e in graph.edges_to(station.id):` | `->L661` |  |
+| 657 | `if other and other.section_id:` | `->L655` |  |
+| 659 | `if sec:` | `->L655` |  |
+| 661 | `for e in graph.edges_from(station.id):` | `->L662`, `->L683` |  |
+| 663 | `if other and other.section_id:` | `->L661`, `->L664` |  |
+| 665 | `if sec:` | `->L661`, `->L666` |  |
+| 671 | `for e in graph.edges:` | `->L683` |  |
+| 673 | `if e.source == station.id:` | `->L674` |  |
+| 679 | `if other and other.section_id:` | `->L671` |  |
+| 681 | `if sec:` | `->L671` |  |
+| 704 | `if src_sec and tgt_sec and src_sec.grid_row != tgt_sec.grid_row:` | `->L735` |  |
+| 713 | `if dy > 0:` | `->L717` |  |
+| 725 | `if dy > 0:` | `->L730` |  |
+| 735 | `if dy > 0:` | `->L736`, `->L738` |  |
 
 ## `context.py`
 
@@ -60,35 +62,35 @@ Gates with an un-exercised arm:
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 113 | `if succ_port and succ_port.is_entry:` | `->L107` |
-| 122 | `if st is None:` | `->L123` |
-| 128 | `if not mst:` | `->L129` |
-| 131 | `if tgt_col is None:` | `->L132` |
-| 135 | `for e in graph.edges_from(mjid):` | `->L147` |
-| 137 | `if ep and ep.is_entry:` | `->L135` |
-| 152 | `if not pred:` | `->L153` |
-| 155 | `if (` | `->L150`, `->L160` |
-| 189 | `if m_col is not None:` | `->L199` |
-| 202 | `if ep and ep.is_entry:` | `->L200` |
-| 206 | `if m_col is not None:` | `->L181` |
-| 259 | `for port in graph.ports.values():` | `->L260` |
-| 260 | `if (` | `->L265` |
-| 322 | `for e in graph.edges:` | `->L323`, `->L325` |
-| 350 | `if port_st is None:` | `->L351` |
-| 363 | `if ctx.station_offsets:` | `->L365` |
-| 370 | `if not ctx.station_offsets:` | `->L371` |
-| 395 | `if sec and sec.grid_col >= 0:` | `->L397` |
-| 403 | `if sec and sec.grid_row >= 0:` | `->L405` |
-| 417 | `if sec is None:` | `->L418` |
-| 472 | `if not src or not tgt:` | `->L473` |
-| 483 | `if (` | `->L489`, `->L491` |
-| 566 | `if not jst:` | `->L567` |
-| 569 | `if src_col is None:` | `->L570` |
-| 600 | `if not tgt or not (tgt.is_port or edge.target in junction_ids):` | `->L601` |
-| 603 | `if tgt_col is None:` | `->L604` |
-| 685 | `if edge.line_id in line_pos:` | `->L684`, `->L686` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 113 | `if succ_port and succ_port.is_entry:` | `->L107` |  |
+| 122 | `if st is None:` | `->L123` |  |
+| 128 | `if not mst:` | `->L129` |  |
+| 131 | `if tgt_col is None:` | `->L132` |  |
+| 135 | `for e in graph.edges_from(mjid):` | `->L147` |  |
+| 137 | `if ep and ep.is_entry:` | `->L135` |  |
+| 152 | `if not pred:` | `->L153` |  |
+| 155 | `if (` | `->L150`, `->L160` |  |
+| 189 | `if m_col is not None:` | `->L199` |  |
+| 202 | `if ep and ep.is_entry:` | `->L200` |  |
+| 206 | `if m_col is not None:` | `->L181` |  |
+| 259 | `for port in graph.ports.values():` | `->L260` |  |
+| 260 | `if (` | `->L265` |  |
+| 322 | `for e in graph.edges:` | `->L323`, `->L325` |  |
+| 350 | `if port_st is None:` | `->L351` |  |
+| 363 | `if ctx.station_offsets:` | `->L365` |  |
+| 370 | `if not ctx.station_offsets:` | `->L371` |  |
+| 395 | `if sec and sec.grid_col >= 0:` | `->L397` |  |
+| 403 | `if sec and sec.grid_row >= 0:` | `->L405` |  |
+| 417 | `if sec is None:` | `->L418` |  |
+| 472 | `if not src or not tgt:` | `->L473` |  |
+| 483 | `if (` | `->L489`, `->L491` |  |
+| 566 | `if not jst:` | `->L567` |  |
+| 569 | `if src_col is None:` | `->L570` |  |
+| 600 | `if not tgt or not (tgt.is_port or edge.target in junction_ids):` | `->L601` |  |
+| 603 | `if tgt_col is None:` | `->L604` |  |
+| 685 | `if edge.line_id in line_pos:` | `->L684`, `->L686` |  |
 
 ## `core.py`
 
@@ -96,12 +98,12 @@ Gates with an un-exercised arm:
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 169 | `if src is None or tgt is None or src.is_port or tgt.is_port:` | `->L171` |
-| 171 | `if (` | `->L166`, `->L176` |
-| 191 | `if not src or not tgt:` | `->L192` |
-| 210 | `if result is not None:` | `->L183` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 169 | `if src is None or tgt is None or src.is_port or tgt.is_port:` | `->L171` |  |
+| 171 | `if (` | `->L166`, `->L176` |  |
+| 191 | `if not src or not tgt:` | `->L192` |  |
+| 210 | `if result is not None:` | `->L183` |  |
 
 ## `corners.py`
 
@@ -109,10 +111,10 @@ Gates with an un-exercised arm:
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 84 | `if i > 1:` | `->L85` |
-| 95 | `if i < len(points) - 2:` | `->L96` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 84 | `if i > 1:` | `->L85` |  |
+| 95 | `if i < len(points) - 2:` | `->L96` |  |
 
 ## `inter_section.py`
 
@@ -120,12 +122,12 @@ Gates with an un-exercised arm:
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 98 | `if pair not in _CW_TURNS and pair not in _CCW_TURNS:` | `->L-96`, `->L99` |
-| 107 | `if (self.in_tangent, self.out_tangent) in _CW_TURNS:` | `->L108`, `->L109` |
-| 155 | `for prev, curr in zip(self.corners, self.corners[1:]):` | `->L156`, `->L158` |
-| 156 | `if prev.handedness != curr.handedness:` | `->L155`, `->L157` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 98 | `if pair not in _CW_TURNS and pair not in _CCW_TURNS:` | `->L-96`, `->L99` |  |
+| 107 | `if (self.in_tangent, self.out_tangent) in _CW_TURNS:` | `->L108`, `->L109` |  |
+| 155 | `for prev, curr in zip(self.corners, self.corners[1:]):` | `->L156`, `->L158` |  |
+| 156 | `if prev.handedness != curr.handedness:` | `->L155`, `->L157` |  |
 
 ## `inter_section_handlers.py`
 
@@ -133,88 +135,88 @@ Gates with an un-exercised arm:
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 139 | `if abs(dx) < COORD_TOLERANCE:` | `->L141` |
-| 151 | `if needs_bypass:` | `->L224` |
-| 155 | `if edge.target in ctx.merge.trunk_source:` | `->L167` |
-| 167 | `if (` | `->L175`, `->L186` |
-| 178 | `if not _h_segment_crosses_other_section(graph, sx, tx, ty, exclude):` | `->L186` |
-| 186 | `if (` | `->L200`, `->L210` |
-| 200 | `if (` | `->L206`, `->L209` |
-| 224 | `if (` | `->L232`, `->L256` |
-| 240 | `if horizontal is Direction.L:` | `->L243` |
-| 256 | `if (` | `->L262`, `->L271` |
-| 271 | `if (` | `->L287`, `->L301` |
-| 290 | `if _corridor_is_viable(ctx, src, tgt):` | `->L291` |
-| 301 | `if (` | `->L314`, `->L318` |
-| 319 | `if ep_id:` | `->L360` |
-| 321 | `if ep:` | `->L360` |
-| 322 | `if abs(ep.y - sy) < ctx.curve_radius:` | `->L323` |
-| 335 | `if ep_port and ep_port.side == PortSide.LEFT:` | `->L350` |
-| 341 | `if _corridor_is_viable(ctx, src, ep):` | `->L345` |
-| 350 | `if edge.source in ctx.junction_ids and _should_step_descent(` | `->L353` |
-| 360 | `if (` | `->L370`, `->L375` |
-| 371 | `if _h_segment_crosses_other_section(graph, sx, tx, ty, exclude):` | `->L375` |
-| 396 | `if abs(tx - sx) <= COORD_TOLERANCE:` | `->L410` |
-| 433 | `if ctx.station_offsets:` | `->L438` |
-| 477 | `if horizontal is Direction.R:` | `->L480` |
-| 483 | `if horizontal is Direction.R:` | `->L486` |
-| 531 | `if ep_port is None or ep_port.side != PortSide.LEFT:` | `->L532` |
-| 540 | `if other_src is None:` | `->L541` |
-| 545 | `if (` | `->L551`, `->L552` |
-| 553 | `if _h_segment_crosses_other_section(graph, other_src.x, ep.x, ep.y, exclude):` | `->L554` |
-| 751 | `if gap1_base - (g1_n - 1) * ctx.offset_step < gap1_limit:` | `->L752` |
-| 761 | `if gap2_base + (g2_n - 1) * ctx.offset_step > gap2_limit:` | `->L762` |
-| 765 | `if trunk_v_up_pull_away:` | `->L774` |
-| 803 | `if (` | `->L807`, `->L808` |
-| 833 | `if gap1_base + (g1_n - 1) * ctx.offset_step > gap1_limit:` | `->L834` |
-| 841 | `if gap2_base - (g2_n - 1) * ctx.offset_step < gap2_limit:` | `->L842` |
-| 874 | `if src_sec is not None and src_sec.bbox_w > 0:` | `->L890` |
-| 930 | `if ep_sec is None:` | `->L931`, `->L932` |
-| 933 | `if not secs:` | `->L934`, `->L935` |
-| 941 | `if abs(dx) >= abs(dy):` | `->L942`, `->L943` |
-| 980 | `if src_sec is None:` | `->L981`, `->L982` |
-| 994 | `if chan_x is None:` | `->L995`, `->L996` |
-| 1050 | `if ep_port is None or ep_port.side != PortSide.RIGHT:` | `->L1052` |
-| 1053 | `if src_sec is None:` | `->L1054`, `->L1055` |
-| 1056 | `if src_sec is None or ep_sec is None or src_sec.bbox_w <= 0:` | `->L1057`, `->L1059` |
-| 1059 | `if ep_sec.grid_col <= src_sec.grid_col:` | `->L1060`, `->L1061` |
-| 1066 | `if src_right <= ep.x + SECTION_ROUTE_CLEARANCE:` | `->L1067`, `->L1068` |
-| 1071 | `if chan_x is None:` | `->L1072`, `->L1075` |
-| 1171 | `if fan is not None:` | `->L1172` |
-| 1271 | `if abs(dx) > r_lead:` | `->L1274` |
-| 1275 | `if src.id in ctx.graph.junctions:` | `->L1276`, `->L1288` |
-| 1276 | `for je in ctx.graph.edges:` | `->L1277`, `->L1288` |
-| 1277 | `if je.target == src.id:` | `->L1276`, `->L1278` |
-| 1279 | `if js and js.is_port:` | `->L1276`, `->L1280` |
-| 1314 | `if n > 1 and (n - 1) * ctx.offset_step <= r_lead - ctx.offset_step:` | `->L1318` |
-| 1327 | `if abs(lx - tx) <= r_lead:` | `->L1328` |
-| 1340 | `if abs(drop_x - tx) < COORD_TOLERANCE:` | `->L1349` |
-| 1628 | `if tgt_col is not None:` | `->L1639` |
-| 1630 | `if shared_vx is not None:` | `->L1639` |
-| 1748 | `if entry_port is None:` | `->L1749` |
-| 1753 | `for mj_id, mapped_ep in ctx.merge.entry_port_for.items():` | `->L1754` |
-| 1754 | `if mapped_ep != ep_id:` | `->L1755`, `->L1758` |
-| 1759 | `if trunk_src is None or trunk_src == edge.source:` | `->L1760`, `->L1761` |
-| 1778 | `if gap_right <= gap_left:` | `->L1779` |
-| 1805 | `if col_left <= 0.0:` | `->L1806` |
-| 1821 | `if tgt is None:` | `->L1822` |
-| 1844 | `if entry_port is None:` | `->L1845` |
-| 1847 | `if ep_port is None or ep_port.side != PortSide.LEFT:` | `->L1848` |
-| 1851 | `if src_row is None or ep_row is None or src_col is None or ep_col is None:` | `->L1852` |
-| 1853 | `if ep_row <= src_row:` | `->L1854` |
-| 1935 | `if fan is not None:` | `->L1943` |
-| 1943 | `elif gap_bottom > gap_top:` | `->L1944`, `->L1946` |
-| 1955 | `if fan is None and gap_bottom > gap_top:` | `->L1956` |
-| 1966 | `if fan is not None and ep_col is not None:` | `->L1968` |
-| 1968 | `if vx is None:` | `->L1969` |
-| 2114 | `if ep_section and ep_section.bbox_w > 0:` | `->L2117` |
-| 2127 | `if ep_col is not None and ep_col > 0:` | `->L2128` |
-| 2225 | `if fan is not None:` | `->L2251` |
-| 2274 | `if cross_row:` | `->L2282` |
-| 2298 | `if fan_mid_x is not None:` | `->L2311` |
-| 2370 | `if gap_bottom <= gap_top:` | `->L2371` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 139 | `if abs(dx) < COORD_TOLERANCE:` | `->L141` |  |
+| 151 | `if needs_bypass:` | `->L224` |  |
+| 155 | `if edge.target in ctx.merge.trunk_source:` | `->L167` |  |
+| 167 | `if (` | `->L175`, `->L186` |  |
+| 178 | `if not _h_segment_crosses_other_section(graph, sx, tx, ty, exclude):` | `->L186` |  |
+| 186 | `if (` | `->L200`, `->L210` |  |
+| 200 | `if (` | `->L206`, `->L209` |  |
+| 224 | `if (` | `->L232`, `->L256` |  |
+| 240 | `if horizontal is Direction.L:` | `->L243` |  |
+| 256 | `if (` | `->L262`, `->L271` |  |
+| 271 | `if (` | `->L287`, `->L301` |  |
+| 290 | `if _corridor_is_viable(ctx, src, tgt):` | `->L291` |  |
+| 301 | `if (` | `->L314`, `->L318` |  |
+| 319 | `if ep_id:` | `->L360` |  |
+| 321 | `if ep:` | `->L360` |  |
+| 322 | `if abs(ep.y - sy) < ctx.curve_radius:` | `->L323` |  |
+| 335 | `if ep_port and ep_port.side == PortSide.LEFT:` | `->L350` |  |
+| 341 | `if _corridor_is_viable(ctx, src, ep):` | `->L345` |  |
+| 350 | `if edge.source in ctx.junction_ids and _should_step_descent(` | `->L353` |  |
+| 360 | `if (` | `->L370`, `->L375` |  |
+| 371 | `if _h_segment_crosses_other_section(graph, sx, tx, ty, exclude):` | `->L375` |  |
+| 396 | `if abs(tx - sx) <= COORD_TOLERANCE:` | `->L410` |  |
+| 433 | `if ctx.station_offsets:` | `->L438` |  |
+| 477 | `if horizontal is Direction.R:` | `->L480` |  |
+| 483 | `if horizontal is Direction.R:` | `->L486` |  |
+| 531 | `if ep_port is None or ep_port.side != PortSide.LEFT:` | `->L532` |  |
+| 540 | `if other_src is None:` | `->L541` |  |
+| 545 | `if (` | `->L551`, `->L552` |  |
+| 553 | `if _h_segment_crosses_other_section(graph, other_src.x, ep.x, ep.y, exclude):` | `->L554` |  |
+| 751 | `if gap1_base - (g1_n - 1) * ctx.offset_step < gap1_limit:` | `->L752` |  |
+| 761 | `if gap2_base + (g2_n - 1) * ctx.offset_step > gap2_limit:` | `->L762` |  |
+| 765 | `if trunk_v_up_pull_away:` | `->L774` |  |
+| 803 | `if (` | `->L807`, `->L808` |  |
+| 833 | `if gap1_base + (g1_n - 1) * ctx.offset_step > gap1_limit:` | `->L834` |  |
+| 841 | `if gap2_base - (g2_n - 1) * ctx.offset_step < gap2_limit:` | `->L842` |  |
+| 874 | `if src_sec is not None and src_sec.bbox_w > 0:` | `->L890` |  |
+| 930 | `if ep_sec is None:` | `->L931`, `->L932` |  |
+| 933 | `if not secs:` | `->L934`, `->L935` |  |
+| 941 | `if abs(dx) >= abs(dy):` | `->L942`, `->L943` |  |
+| 980 | `if src_sec is None:` | `->L981`, `->L982` |  |
+| 994 | `if chan_x is None:` | `->L995`, `->L996` |  |
+| 1050 | `if ep_port is None or ep_port.side != PortSide.RIGHT:` | `->L1052` |  |
+| 1053 | `if src_sec is None:` | `->L1054`, `->L1055` |  |
+| 1056 | `if src_sec is None or ep_sec is None or src_sec.bbox_w <= 0:` | `->L1057`, `->L1059` |  |
+| 1059 | `if ep_sec.grid_col <= src_sec.grid_col:` | `->L1060`, `->L1061` |  |
+| 1066 | `if src_right <= ep.x + SECTION_ROUTE_CLEARANCE:` | `->L1067`, `->L1068` |  |
+| 1071 | `if chan_x is None:` | `->L1072`, `->L1075` |  |
+| 1171 | `if fan is not None:` | `->L1172` |  |
+| 1271 | `if abs(dx) > r_lead:` | `->L1274` |  |
+| 1275 | `if src.id in ctx.graph.junctions:` | `->L1276`, `->L1288` |  |
+| 1276 | `for je in ctx.graph.edges:` | `->L1277`, `->L1288` |  |
+| 1277 | `if je.target == src.id:` | `->L1276`, `->L1278` |  |
+| 1279 | `if js and js.is_port:` | `->L1276`, `->L1280` |  |
+| 1314 | `if n > 1 and (n - 1) * ctx.offset_step <= r_lead - ctx.offset_step:` | `->L1318` |  |
+| 1327 | `if abs(lx - tx) <= r_lead:` | `->L1328` |  |
+| 1340 | `if abs(drop_x - tx) < COORD_TOLERANCE:` | `->L1349` |  |
+| 1628 | `if tgt_col is not None:` | `->L1639` |  |
+| 1630 | `if shared_vx is not None:` | `->L1639` |  |
+| 1748 | `if entry_port is None:` | `->L1749` |  |
+| 1753 | `for mj_id, mapped_ep in ctx.merge.entry_port_for.items():` | `->L1754` |  |
+| 1754 | `if mapped_ep != ep_id:` | `->L1755`, `->L1758` |  |
+| 1759 | `if trunk_src is None or trunk_src == edge.source:` | `->L1760`, `->L1761` |  |
+| 1778 | `if gap_right <= gap_left:` | `->L1779` |  |
+| 1805 | `if col_left <= 0.0:` | `->L1806` |  |
+| 1821 | `if tgt is None:` | `->L1822` |  |
+| 1844 | `if entry_port is None:` | `->L1845` |  |
+| 1847 | `if ep_port is None or ep_port.side != PortSide.LEFT:` | `->L1848` |  |
+| 1851 | `if src_row is None or ep_row is None or src_col is None or ep_col is None:` | `->L1852` |  |
+| 1853 | `if ep_row <= src_row:` | `->L1854` |  |
+| 1935 | `if fan is not None:` | `->L1943` |  |
+| 1943 | `elif gap_bottom > gap_top:` | `->L1944`, `->L1946` |  |
+| 1955 | `if fan is None and gap_bottom > gap_top:` | `->L1956` |  |
+| 1966 | `if fan is not None and ep_col is not None:` | `->L1968` |  |
+| 1968 | `if vx is None:` | `->L1969` |  |
+| 2114 | `if ep_section and ep_section.bbox_w > 0:` | `->L2117` |  |
+| 2127 | `if ep_col is not None and ep_col > 0:` | `->L2128` |  |
+| 2225 | `if fan is not None:` | `->L2251` |  |
+| 2274 | `if cross_row:` | `->L2282` |  |
+| 2298 | `if fan_mid_x is not None:` | `->L2311` |  |
+| 2370 | `if gap_bottom <= gap_top:` | `->L2371` |  |
 
 ## `intra_handlers.py`
 
@@ -222,22 +224,22 @@ Gates with an un-exercised arm:
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 53 | `if not section:` | `->L54` |
-| 58 | `if section.direction == "LR" and port.side != PortSide.LEFT:` | `->L59` |
-| 60 | `if section.direction == "RL" and port.side != PortSide.RIGHT:` | `->L61` |
-| 62 | `if section.direction not in ("LR", "RL"):` | `->L63` |
-| 79 | `if not st or st.is_port:` | `->L80` |
-| 84 | `elif section.direction == "RL" and tx < st.x < sx:` | `->L85` |
-| 85 | `if first_x is None or st.x > first_x:` | `->L75`, `->L86` |
-| 98 | `if room < src_min + ctx.diagonal_run:` | `->L99` |
-| 129 | `if dx <= 0 and abs(dy) > CROSS_ROW_THRESHOLD and not same_section:` | `->L130` |
-| 146 | `if abs(dx) < COORD_TOLERANCE:` | `->L147` |
-| 190 | `if not (same_sec or is_exit_port):` | `->L191` |
-| 230 | `if tgt.is_terminus and edge.target in ctx.join_stations:` | `->L231` |
-| 259 | `if src_min + tgt_min + ctx.diagonal_run > abs(dx):` | `->L260` |
-| 265 | `if src_min + tgt_min + ctx.diagonal_run > abs(dx):` | `->L266` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 53 | `if not section:` | `->L54` | **defensive** -- _route_entry_runway only runs on an entry-port -> internal-station edge; the target of such an edge always carries a section_id that resolves, so the guard's return-None arm protects against a malformed graph rather than a topology. |
+| 58 | `if section.direction == "LR" and port.side != PortSide.LEFT:` | `->L59` | **defensive** -- Auto-layout only ever assigns a LEFT (flow-side) entry to an LR section (0/225 LR entries are non-LEFT across the corpus); a RIGHT/back-side entry on an LR section is a misconfiguration, so the non-flow-side reject arm guards rather than encodes a valid topology. |
+| 60 | `if section.direction == "RL" and port.side != PortSide.RIGHT:` | `->L61` | **defensive** -- Mirror of the LR guard: RL sections only ever receive RIGHT (flow-side) entries (all 24 corpus RL entries are RIGHT); a LEFT-side entry on an RL section is a misconfiguration the reject arm guards against. |
+| 62 | `if section.direction not in ("LR", "RL"):` | `->L63` | **candidate-dead** -- No TB/BT entry reaches _route_entry_runway: TB LEFT/RIGHT entries are consumed by _route_tb_lr_entry and TB/BT TOP/BOTTOM entries by _route_perp_entry (both earlier in the dispatch chain), and a BT section is never produced (the direction directive accepts only LR/RL/TB; 0/391 corpus sections are BT). Left in place as a cheap backstop pending a deletion review. |
+| 79 | `if not st or st.is_port:` | `->L80` | **defensive** -- The loop already skips edge.target and every id in section.port_ids, so a surviving id resolves to a non-port internal station; the not-st / is_port re-check is belt-and-suspenders against a port absent from port_ids. |
+| 84 | `elif section.direction == "RL" and tx < st.x < sx:` | `->L85` |  |
+| 85 | `if first_x is None or st.x > first_x:` | `->L75`, `->L86` |  |
+| 98 | `if room < src_min + ctx.diagonal_run:` | `->L99` |  |
+| 129 | `if dx <= 0 and abs(dy) > CROSS_ROW_THRESHOLD and not same_section:` | `->L130` | **candidate-dead** -- The not-same_section precondition is never satisfied at _route_intra_section: cross-section edges are consumed by _route_inter_section upstream (0/391 corpus fixtures reach this branch with differing sections), and a sectionless flat graph's serpentine fold is routed before this handler too (verified: a flat fold over the threshold does not reach the arm). The cross-row fold branch is shadowed. Left in place pending a deletion review. |
+| 146 | `if abs(dx) < COORD_TOLERANCE:` | `->L147` |  |
+| 190 | `if not (same_sec or is_exit_port):` | `->L191` | **candidate-dead** -- _is_side_branch_ascent reaches this classification (44/391 corpus fixtures) but no fixture takes the reject arm: a target sitting within offset_step*2 of the source section's trunk Y is always a same-section internal station or that section's exit port. The arm needs a target at the source's trunk Y that belongs to a different section or is a non-exit port, which the trunk-alignment geometry does not produce. Left in place pending a deletion review. |
+| 230 | `if tgt.is_terminus and edge.target in ctx.join_stations:` | `->L231` |  |
+| 259 | `if src_min + tgt_min + ctx.diagonal_run > abs(dx):` | `->L260` |  |
+| 265 | `if src_min + tgt_min + ctx.diagonal_run > abs(dx):` | `->L266` |  |
 
 ## `normalize.py`
 
@@ -245,74 +247,74 @@ Gates with an un-exercised arm:
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 121 | `if s.bbox_h <= 0:` | `->L122` |
-| 173 | `if left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE:` | `->L174` |
-| 208 | `if s.bbox_w <= 0:` | `->L209` |
-| 243 | `if not (left + COORD_TOLERANCE < ch.x < right - COORD_TOLERANCE):` | `->L245` |
-| 245 | `if not (left <= ch.x <= right):` | `->L246`, `->L247` |
-| 392 | `if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:` | `->L393` |
-| 394 | `if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:` | `->L395` |
-| 449 | `if grp[0].dips_down != t.dips_down:` | `->L450` |
-| 500 | `if rc is not None:` | `->L498` |
-| 502 | `if len(risers) < 2:` | `->L503` |
-| 542 | `if vi < 0 or vi + 1 >= len(pts):` | `->L543` |
-| 546 | `if abs(x1 - x0) > COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:` | `->L547` |
-| 549 | `if not (0 <= lead_i < len(pts)):` | `->L550` |
-| 554 | `if abs(pts[lead_i][1] - pts[ly_idx][1]) > COORD_TOLERANCE:` | `->L555` |
-| 556 | `if abs(lx - pts[ly_idx][0]) <= COORD_TOLERANCE:` | `->L557` |
-| 593 | `if len(per_line) < 2:` | `->L594` |
-| 611 | `if all(abs(target_x[lid] - per_line[lid][1]) <= COORD_TOLERANCE for lid in lines):` | `->L613` |
-| 614 | `for _ty, rc in risers:` | `->L-568`, `->L615` |
-| 642 | `if rp.curve_radii is None or max_off <= COORD_TOLERANCE:` | `->L643`, `->L644` |
-| 648 | `for corner_idx, radius_idx, is_lead in ((k, k - 1, True), (k + 1, k, False)):` | `->L-620`, `->L649` |
-| 650 | `if not (0 <= nbr_idx < len(pts)):` | `->L651`, `->L653` |
-| 654 | `if is_lead:` | `->L655`, `->L658` |
-| 664 | `if not (0 <= radius_idx < len(rp.curve_radii)):` | `->L665`, `->L666` |
-| 666 | `if not is_lead and not (k + 2 < len(pts)):` | `->L667`, `->L668` |
-| 687 | `if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:` | `->L688` |
-| 772 | `if rp.curve_radii is None:` | `->L773` |
-| 775 | `if 0 <= radius_idx < len(rp.curve_radii):` | `->L774` |
-| 796 | `if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:` | `->L797` |
-| 845 | `if len(cluster) < 2:` | `->L846` |
-| 854 | `if cluster and ch.x - cluster[-1].x > band:` | `->L855` |
-| 969 | `elif far_y < t.y - COORD_TOLERANCE:` | `->L963` |
-| 999 | `if feats is None:` | `->L1000` |
-| 1072 | `if len(trunks) < 2:` | `->L1073`, `->L1074` |
-| 1076 | `for grp in groups:` | `->L1077`, `->L1095` |
-| 1077 | `if len({id(t.route) for t in grp}) < 2:` | `->L1078`, `->L1079` |
-| 1079 | `if not any(not t.route.normalize_exempt for t in grp):` | `->L1080`, `->L1081` |
-| 1081 | `for sign in (1, -1):` | `->L1076`, `->L1082` |
-| 1084 | `if len(slots) < 2 or len(slots) > _MAX_BAND_PERMUTE:` | `->L1085`, `->L1086` |
-| 1093 | `if best < cur:` | `->L1081`, `->L1094` |
-| 1111 | `if top + total > limit:` | `->L1113` |
-| 1157 | `if top is None or bottom is None:` | `->L1158` |
-| 1197 | `if id(t.route) in skip:` | `->L1199` |
-| 1210 | `if hit is None:` | `->L1211`, `->L1213` |
-| 1214 | `if band is not None:` | `->L1215`, `->L1219` |
-| 1224 | `if prefer_down and down >= min_sep:` | `->L1225`, `->L1226` |
-| 1226 | `elif up >= min_sep:` | `->L1227`, `->L1229` |
-| 1234 | `if id(t.route) in skip:` | `->L1236` |
-| 1247 | `if hit is None:` | `->L1248`, `->L1249` |
-| 1251 | `if band is not None:` | `->L1252`, `->L1256` |
-| 1257 | `if (t.y >= hit.y and below_ok) or (not above_ok and below_ok):` | `->L1258`, `->L1259` |
-| 1259 | `elif above_ok:` | `->L1260`, `->L1262` |
-| 1282 | `if sg[0].sign_x != t.sign_x:` | `->L1283` |
-| 1284 | `if any(t.x_lo < o.x_hi and o.x_lo < t.x_hi for o in sg):` | `->L1278` |
-| 1313 | `if rp.curve_radii is None:` | `->L1314` |
-| 1325 | `if 0 <= k - 1 < len(rp.curve_radii):` | `->L1327` |
-| 1327 | `if k < len(rp.curve_radii) and k + 2 < len(pts):` | `->L-1292` |
-| 1378 | `if down is None or len(up.points) < 2:` | `->L1379` |
-| 1483 | `if rep_x[a] != rep_x[b]:` | `->L1485` |
-| 1517 | `if rp.curve_radii is None:` | `->L1518` |
-| 1526 | `if 0 <= k - 1 < len(rp.curve_radii):` | `->L1528` |
-| 1528 | `if k < len(rp.curve_radii) and k + 2 < len(pts):` | `->L1538` |
-| 1540 | `if abs(ly - pts[1][1]) < COORD_TOLERANCE:` | `->L-1490` |
-| 1591 | `for _ in range(8):` | `->L1616` |
-| 1612 | `elif right_ok:` | `->L1615` |
-| 1639 | `if lo <= s.grid_col <= hi:` | `->L1636` |
-| 1665 | `if s.bbox_w <= 0:` | `->L1666` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 121 | `if s.bbox_h <= 0:` | `->L122` |  |
+| 173 | `if left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE:` | `->L174` |  |
+| 208 | `if s.bbox_w <= 0:` | `->L209` |  |
+| 243 | `if not (left + COORD_TOLERANCE < ch.x < right - COORD_TOLERANCE):` | `->L245` |  |
+| 245 | `if not (left <= ch.x <= right):` | `->L246`, `->L247` |  |
+| 392 | `if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:` | `->L393` |  |
+| 394 | `if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:` | `->L395` |  |
+| 449 | `if grp[0].dips_down != t.dips_down:` | `->L450` |  |
+| 500 | `if rc is not None:` | `->L498` |  |
+| 502 | `if len(risers) < 2:` | `->L503` |  |
+| 542 | `if vi < 0 or vi + 1 >= len(pts):` | `->L543` |  |
+| 546 | `if abs(x1 - x0) > COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:` | `->L547` |  |
+| 549 | `if not (0 <= lead_i < len(pts)):` | `->L550` |  |
+| 554 | `if abs(pts[lead_i][1] - pts[ly_idx][1]) > COORD_TOLERANCE:` | `->L555` |  |
+| 556 | `if abs(lx - pts[ly_idx][0]) <= COORD_TOLERANCE:` | `->L557` |  |
+| 593 | `if len(per_line) < 2:` | `->L594` |  |
+| 611 | `if all(abs(target_x[lid] - per_line[lid][1]) <= COORD_TOLERANCE for lid in lines):` | `->L613` |  |
+| 614 | `for _ty, rc in risers:` | `->L-568`, `->L615` |  |
+| 642 | `if rp.curve_radii is None or max_off <= COORD_TOLERANCE:` | `->L643`, `->L644` |  |
+| 648 | `for corner_idx, radius_idx, is_lead in ((k, k - 1, True), (k + 1, k, False)):` | `->L-620`, `->L649` |  |
+| 650 | `if not (0 <= nbr_idx < len(pts)):` | `->L651`, `->L653` |  |
+| 654 | `if is_lead:` | `->L655`, `->L658` |  |
+| 664 | `if not (0 <= radius_idx < len(rp.curve_radii)):` | `->L665`, `->L666` |  |
+| 666 | `if not is_lead and not (k + 2 < len(pts)):` | `->L667`, `->L668` |  |
+| 687 | `if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:` | `->L688` |  |
+| 772 | `if rp.curve_radii is None:` | `->L773` |  |
+| 775 | `if 0 <= radius_idx < len(rp.curve_radii):` | `->L774` |  |
+| 796 | `if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:` | `->L797` |  |
+| 845 | `if len(cluster) < 2:` | `->L846` |  |
+| 854 | `if cluster and ch.x - cluster[-1].x > band:` | `->L855` |  |
+| 969 | `elif far_y < t.y - COORD_TOLERANCE:` | `->L963` |  |
+| 999 | `if feats is None:` | `->L1000` |  |
+| 1072 | `if len(trunks) < 2:` | `->L1073`, `->L1074` |  |
+| 1076 | `for grp in groups:` | `->L1077`, `->L1095` |  |
+| 1077 | `if len({id(t.route) for t in grp}) < 2:` | `->L1078`, `->L1079` |  |
+| 1079 | `if not any(not t.route.normalize_exempt for t in grp):` | `->L1080`, `->L1081` |  |
+| 1081 | `for sign in (1, -1):` | `->L1076`, `->L1082` |  |
+| 1084 | `if len(slots) < 2 or len(slots) > _MAX_BAND_PERMUTE:` | `->L1085`, `->L1086` |  |
+| 1093 | `if best < cur:` | `->L1081`, `->L1094` |  |
+| 1111 | `if top + total > limit:` | `->L1113` |  |
+| 1157 | `if top is None or bottom is None:` | `->L1158` |  |
+| 1197 | `if id(t.route) in skip:` | `->L1199` |  |
+| 1210 | `if hit is None:` | `->L1211`, `->L1213` |  |
+| 1214 | `if band is not None:` | `->L1215`, `->L1219` |  |
+| 1224 | `if prefer_down and down >= min_sep:` | `->L1225`, `->L1226` |  |
+| 1226 | `elif up >= min_sep:` | `->L1227`, `->L1229` |  |
+| 1234 | `if id(t.route) in skip:` | `->L1236` |  |
+| 1247 | `if hit is None:` | `->L1248`, `->L1249` |  |
+| 1251 | `if band is not None:` | `->L1252`, `->L1256` |  |
+| 1257 | `if (t.y >= hit.y and below_ok) or (not above_ok and below_ok):` | `->L1258`, `->L1259` |  |
+| 1259 | `elif above_ok:` | `->L1260`, `->L1262` |  |
+| 1282 | `if sg[0].sign_x != t.sign_x:` | `->L1283` |  |
+| 1284 | `if any(t.x_lo < o.x_hi and o.x_lo < t.x_hi for o in sg):` | `->L1278` |  |
+| 1313 | `if rp.curve_radii is None:` | `->L1314` |  |
+| 1325 | `if 0 <= k - 1 < len(rp.curve_radii):` | `->L1327` |  |
+| 1327 | `if k < len(rp.curve_radii) and k + 2 < len(pts):` | `->L-1292` |  |
+| 1378 | `if down is None or len(up.points) < 2:` | `->L1379` |  |
+| 1483 | `if rep_x[a] != rep_x[b]:` | `->L1485` |  |
+| 1517 | `if rp.curve_radii is None:` | `->L1518` |  |
+| 1526 | `if 0 <= k - 1 < len(rp.curve_radii):` | `->L1528` |  |
+| 1528 | `if k < len(rp.curve_radii) and k + 2 < len(pts):` | `->L1538` |  |
+| 1540 | `if abs(ly - pts[1][1]) < COORD_TOLERANCE:` | `->L-1490` |  |
+| 1591 | `for _ in range(8):` | `->L1616` |  |
+| 1612 | `elif right_ok:` | `->L1615` |  |
+| 1639 | `if lo <= s.grid_col <= hi:` | `->L1636` |  |
+| 1665 | `if s.bbox_w <= 0:` | `->L1666` |  |
 
 ## `offsets.py`
 
@@ -320,86 +322,86 @@ Gates with an un-exercised arm:
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 54 | `if edge.target in inbound:` | `->L56` |
-| 56 | `if edge.source in outbound:` | `->L53` |
-| 93 | `if not src or not tgt:` | `->L94` |
-| 148 | `if not lines:` | `->L149` |
-| 227 | `if not src:` | `->L228` |
-| 230 | `if src.is_port:` | `->L232` |
-| 232 | `elif edge.source in graph.junctions:` | `->L233`, `->L239` |
-| 233 | `for je in graph.edges_to(edge.source):` | `->L234`, `->L239` |
-| 234 | `if je.line_id == edge.line_id:` | `->L233`, `->L235` |
-| 236 | `if js and js.is_port:` | `->L233`, `->L237` |
-| 295 | `if reverse:` | `->L296` |
-| 324 | `while stack:` | `->L338` |
-| 326 | `if cur in seen:` | `->L327` |
-| 330 | `if e.line_id != lid:` | `->L331` |
-| 336 | `if src and not src.is_port and src.section_id == sec_id:` | `->L329` |
-| 422 | `if not target_id:` | `->L423` |
-| 425 | `if not target_st:` | `->L426` |
-| 442 | `for other in lines:` | `->L443`, `->L450` |
-| 443 | `if (` | `->L442`, `->L448` |
-| 450 | `if swap_lid is None:` | `->L451` |
-| 495 | `if (cur_sid, cur_lid) in visited:` | `->L496` |
-| 507 | `if abs(nbr_cur - new_off) < _OFFSET_EQ_TOLERANCE:` | `->L508` |
-| 514 | `if len(nbr_lines) < 2:` | `->L518` |
-| 518 | `for other_lid in nbr_lines:` | `->L500`, `->L519` |
-| 519 | `if other_lid == cur_lid:` | `->L520`, `->L521` |
-| 521 | `if (` | `->L518`, `->L525` |
-| 529 | `if max_steps <= 0:` | `->L530` |
-| 557 | `if lid not in seen:` | `->L554` |
-| 577 | `elif station.is_hidden and len(slines) == 1 and slines[0] in sec_offs:` | `->L578` |
-| 602 | `if src_st and not src_st.is_port:` | `->L600` |
-| 606 | `if internal_offs:` | `->L594` |
-| 615 | `if port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):` | `->L616` |
-| 624 | `if src_st and not src_st.is_port:` | `->L622` |
-| 650 | `if trunk_feeder_id is not None:` | `->L659` |
-| 685 | `if src_st and not src_st.is_port:` | `->L683` |
-| 687 | `if len(feeder_ids) >= 2:` | `->L612` |
-| 714 | `if port_off is not None:` | `->L712` |
-| 723 | `for port_obj in graph.ports.values():` | `->L724` |
-| 724 | `if (` | `->L729` |
-| 736 | `if not src or not src.is_port:` | `->L737` |
-| 739 | `if not (` | `->L746` |
-| 752 | `if src.section_id in tb_right_entry:` | `->L753` |
-| 753 | `for lid in graph.station_lines(port_id):` | `->L754`, `->L761` |
-| 775 | `if not src or not src.is_port:` | `->L776` |
-| 793 | `if paired_off is not None:` | `->L791` |
-| 799 | `if tgt_st and not tgt_st.is_port:` | `->L797` |
-| 825 | `if len(set(existing)) >= 2:` | `->L827` |
-| 828 | `for i, lid in enumerate(unique):` | `->L810`, `->L829` |
-| 829 | `if sec_reverse:` | `->L830`, `->L832` |
-| 833 | `for pid in section.entry_ports:` | `->L828`, `->L834` |
-| 834 | `if lid in graph.station_lines(pid):` | `->L833`, `->L835` |
-| 836 | `for edge in graph.edges_to(pid):` | `->L833`, `->L837` |
-| 837 | `if edge.line_id == lid:` | `->L836`, `->L838` |
-| 839 | `if src_port and not src_port.is_entry:` | `->L836`, `->L840` |
-| 895 | `if not sec_stations:` | `->L896` |
-| 926 | `if not any(` | `->L929` |
-| 963 | `if pending is None:` | `->L964` |
-| 989 | `if graph.stations[peer_sid].is_hidden:` | `->L990` |
-| 991 | `if lid in graph.station_lines(peer_sid):` | `->L992` |
-| 1038 | `if _compaction_peer_conflict(` | `->L1041` |
-| 1070 | `if max_steps <= 0:` | `->L1071` |
-| 1084 | `if sec_a is None and id_a in graph.ports:` | `->L1085` |
-| 1086 | `if sec_b is None and id_b in graph.ports:` | `->L1087` |
-| 1149 | `if (tgt_id, lid) not in ctx.offsets:` | `->L1150` |
-| 1157 | `if len(set(desired.values())) != len(desired):` | `->L1158` |
-| 1160 | `if all(` | `->L1165` |
-| 1167 | `for edge in graph.edges_to(jid):` | `->L1168`, `->L1179` |
-| 1169 | `if src_port and not src_port.is_entry:` | `->L1170`, `->L1176` |
-| 1170 | `if feeding_exit is None:` | `->L1171`, `->L1172` |
-| 1172 | `elif feeding_exit != edge.source:` | `->L1167`, `->L1173` |
-| 1179 | `for lid, off in desired.items():` | `->L1180`, `->L1181` |
-| 1181 | `if single_exit and feeding_exit is not None:` | `->L1120`, `->L1182` |
-| 1183 | `if exit_lines == set(j_lines):` | `->L1120`, `->L1184` |
-| 1185 | `if abs(exit_st.y - j_st.y) <= _SAME_Y_TOLERANCE:` | `->L1120`, `->L1186` |
-| 1186 | `for lid, off in desired.items():` | `->L1120`, `->L1187` |
-| 1231 | `for rank, lid in enumerate(` | `->L1234` |
-| 1268 | `if tgt is None or tgt.is_port or tgt.section_id != sec_id:` | `->L1269` |
-| 1338 | `for _ in range(max_iterations):` | `->L-1310` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 54 | `if edge.target in inbound:` | `->L56` |  |
+| 56 | `if edge.source in outbound:` | `->L53` |  |
+| 93 | `if not src or not tgt:` | `->L94` |  |
+| 148 | `if not lines:` | `->L149` |  |
+| 227 | `if not src:` | `->L228` |  |
+| 230 | `if src.is_port:` | `->L232` |  |
+| 232 | `elif edge.source in graph.junctions:` | `->L233`, `->L239` |  |
+| 233 | `for je in graph.edges_to(edge.source):` | `->L234`, `->L239` |  |
+| 234 | `if je.line_id == edge.line_id:` | `->L233`, `->L235` |  |
+| 236 | `if js and js.is_port:` | `->L233`, `->L237` |  |
+| 295 | `if reverse:` | `->L296` |  |
+| 324 | `while stack:` | `->L338` |  |
+| 326 | `if cur in seen:` | `->L327` |  |
+| 330 | `if e.line_id != lid:` | `->L331` |  |
+| 336 | `if src and not src.is_port and src.section_id == sec_id:` | `->L329` |  |
+| 422 | `if not target_id:` | `->L423` |  |
+| 425 | `if not target_st:` | `->L426` |  |
+| 442 | `for other in lines:` | `->L443`, `->L450` |  |
+| 443 | `if (` | `->L442`, `->L448` |  |
+| 450 | `if swap_lid is None:` | `->L451` |  |
+| 495 | `if (cur_sid, cur_lid) in visited:` | `->L496` |  |
+| 507 | `if abs(nbr_cur - new_off) < _OFFSET_EQ_TOLERANCE:` | `->L508` |  |
+| 514 | `if len(nbr_lines) < 2:` | `->L518` |  |
+| 518 | `for other_lid in nbr_lines:` | `->L500`, `->L519` |  |
+| 519 | `if other_lid == cur_lid:` | `->L520`, `->L521` |  |
+| 521 | `if (` | `->L518`, `->L525` |  |
+| 529 | `if max_steps <= 0:` | `->L530` |  |
+| 557 | `if lid not in seen:` | `->L554` |  |
+| 577 | `elif station.is_hidden and len(slines) == 1 and slines[0] in sec_offs:` | `->L578` |  |
+| 602 | `if src_st and not src_st.is_port:` | `->L600` |  |
+| 606 | `if internal_offs:` | `->L594` |  |
+| 615 | `if port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):` | `->L616` |  |
+| 624 | `if src_st and not src_st.is_port:` | `->L622` |  |
+| 650 | `if trunk_feeder_id is not None:` | `->L659` |  |
+| 685 | `if src_st and not src_st.is_port:` | `->L683` |  |
+| 687 | `if len(feeder_ids) >= 2:` | `->L612` |  |
+| 714 | `if port_off is not None:` | `->L712` |  |
+| 723 | `for port_obj in graph.ports.values():` | `->L724` |  |
+| 724 | `if (` | `->L729` |  |
+| 736 | `if not src or not src.is_port:` | `->L737` |  |
+| 739 | `if not (` | `->L746` |  |
+| 752 | `if src.section_id in tb_right_entry:` | `->L753` |  |
+| 753 | `for lid in graph.station_lines(port_id):` | `->L754`, `->L761` |  |
+| 775 | `if not src or not src.is_port:` | `->L776` |  |
+| 793 | `if paired_off is not None:` | `->L791` |  |
+| 799 | `if tgt_st and not tgt_st.is_port:` | `->L797` |  |
+| 825 | `if len(set(existing)) >= 2:` | `->L827` |  |
+| 828 | `for i, lid in enumerate(unique):` | `->L810`, `->L829` |  |
+| 829 | `if sec_reverse:` | `->L830`, `->L832` |  |
+| 833 | `for pid in section.entry_ports:` | `->L828`, `->L834` |  |
+| 834 | `if lid in graph.station_lines(pid):` | `->L833`, `->L835` |  |
+| 836 | `for edge in graph.edges_to(pid):` | `->L833`, `->L837` |  |
+| 837 | `if edge.line_id == lid:` | `->L836`, `->L838` |  |
+| 839 | `if src_port and not src_port.is_entry:` | `->L836`, `->L840` |  |
+| 895 | `if not sec_stations:` | `->L896` |  |
+| 926 | `if not any(` | `->L929` |  |
+| 963 | `if pending is None:` | `->L964` |  |
+| 989 | `if graph.stations[peer_sid].is_hidden:` | `->L990` |  |
+| 991 | `if lid in graph.station_lines(peer_sid):` | `->L992` |  |
+| 1038 | `if _compaction_peer_conflict(` | `->L1041` |  |
+| 1070 | `if max_steps <= 0:` | `->L1071` |  |
+| 1084 | `if sec_a is None and id_a in graph.ports:` | `->L1085` |  |
+| 1086 | `if sec_b is None and id_b in graph.ports:` | `->L1087` |  |
+| 1149 | `if (tgt_id, lid) not in ctx.offsets:` | `->L1150` |  |
+| 1157 | `if len(set(desired.values())) != len(desired):` | `->L1158` |  |
+| 1160 | `if all(` | `->L1165` |  |
+| 1167 | `for edge in graph.edges_to(jid):` | `->L1168`, `->L1179` |  |
+| 1169 | `if src_port and not src_port.is_entry:` | `->L1170`, `->L1176` |  |
+| 1170 | `if feeding_exit is None:` | `->L1171`, `->L1172` |  |
+| 1172 | `elif feeding_exit != edge.source:` | `->L1167`, `->L1173` |  |
+| 1179 | `for lid, off in desired.items():` | `->L1180`, `->L1181` |  |
+| 1181 | `if single_exit and feeding_exit is not None:` | `->L1120`, `->L1182` |  |
+| 1183 | `if exit_lines == set(j_lines):` | `->L1120`, `->L1184` |  |
+| 1185 | `if abs(exit_st.y - j_st.y) <= _SAME_Y_TOLERANCE:` | `->L1120`, `->L1186` |  |
+| 1186 | `for lid, off in desired.items():` | `->L1120`, `->L1187` |  |
+| 1231 | `for rank, lid in enumerate(` | `->L1234` |  |
+| 1268 | `if tgt is None or tgt.is_port or tgt.section_id != sec_id:` | `->L1269` |  |
+| 1338 | `for _ in range(max_iterations):` | `->L-1310` |  |
 
 ## `postprocess.py`
 
@@ -407,27 +409,27 @@ Gates with an un-exercised arm:
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 57 | `if ctx.station_offsets is None:` | `->L58` |
-| 290 | `if not is_fork_join and (` | `->L299` |
-| 340 | `if multi_diag:` | `->L341` |
-| 341 | `if any(_is_chain_predecessor(graph, ctx, r.edge.source) for r in flat_in):` | `->L342`, `->L343` |
-| 343 | `if any(_is_internal_station(graph, r.edge.target) for r in flat_out):` | `->L344`, `->L345` |
-| 386 | `if multi_diag:` | `->L387` |
-| 398 | `if not multi_diag:` | `->L405` |
-| 481 | `for sid, (` | `->L488` |
-| 502 | `if not other or other.is_port or other.is_hidden:` | `->L503` |
-| 506 | `if abs(other.y - station.y) > 1:` | `->L496` |
-| 538 | `if ox is None:` | `->L539` |
-| 565 | `if max(moved_xs) - min(moved_xs) > 1.0:` | `->L582` |
-| 570 | `if majority_count <= len(moved) / 2:` | `->L571` |
-| 577 | `if not outliers:` | `->L578` |
-| 582 | `if not unmoved:` | `->L583`, `->L584` |
-| 584 | `if len(moved) <= len(unmoved):` | `->L585`, `->L586` |
-| 592 | `if abs(rp.points[0][0] - old_x) < STATION_MOVE_TOLERANCE:` | `->L591` |
-| 595 | `if abs(rp.points[-1][0] - old_x) < STATION_MOVE_TOLERANCE:` | `->L594` |
-| 685 | `if opts[v_idx][0] >= box_cx:` | `->L690` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 57 | `if ctx.station_offsets is None:` | `->L58` |  |
+| 290 | `if not is_fork_join and (` | `->L299` |  |
+| 340 | `if multi_diag:` | `->L341` |  |
+| 341 | `if any(_is_chain_predecessor(graph, ctx, r.edge.source) for r in flat_in):` | `->L342`, `->L343` |  |
+| 343 | `if any(_is_internal_station(graph, r.edge.target) for r in flat_out):` | `->L344`, `->L345` |  |
+| 386 | `if multi_diag:` | `->L387` |  |
+| 398 | `if not multi_diag:` | `->L405` |  |
+| 481 | `for sid, (` | `->L488` |  |
+| 502 | `if not other or other.is_port or other.is_hidden:` | `->L503` |  |
+| 506 | `if abs(other.y - station.y) > 1:` | `->L496` |  |
+| 538 | `if ox is None:` | `->L539` |  |
+| 565 | `if max(moved_xs) - min(moved_xs) > 1.0:` | `->L582` |  |
+| 570 | `if majority_count <= len(moved) / 2:` | `->L571` |  |
+| 577 | `if not outliers:` | `->L578` |  |
+| 582 | `if not unmoved:` | `->L583`, `->L584` |  |
+| 584 | `if len(moved) <= len(unmoved):` | `->L585`, `->L586` |  |
+| 592 | `if abs(rp.points[0][0] - old_x) < STATION_MOVE_TOLERANCE:` | `->L591` |  |
+| 595 | `if abs(rp.points[-1][0] - old_x) < STATION_MOVE_TOLERANCE:` | `->L594` |  |
+| 685 | `if opts[v_idx][0] >= box_cx:` | `->L690` |  |
 
 ## `rail.py`
 
@@ -435,15 +437,15 @@ Gates with an un-exercised arm:
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 38 | `if st is None:` | `->L39` |
-| 44 | `if port is not None:` | `->L45` |
-| 46 | `if line_id in section_rails:` | `->L47`, `->L49` |
-| 57 | `if line_id in served and len(st.rail_used_ys) == len(served):` | `->L59` |
-| 94 | `if edge.line_id not in order or len(order) <= 1:` | `->L95` |
-| 154 | `if src is None or tgt is None:` | `->L155` |
-| 176 | `if off_tgt:` | `->L177` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 38 | `if st is None:` | `->L39` |  |
+| 44 | `if port is not None:` | `->L45` |  |
+| 46 | `if line_id in section_rails:` | `->L47`, `->L49` |  |
+| 57 | `if line_id in served and len(st.rail_used_ys) == len(served):` | `->L59` |  |
+| 94 | `if edge.line_id not in order or len(order) <= 1:` | `->L95` |  |
+| 154 | `if src is None or tgt is None:` | `->L155` |  |
+| 176 | `if off_tgt:` | `->L177` |  |
 
 ## `reversal.py`
 
@@ -451,18 +453,18 @@ Gates with an un-exercised arm:
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 95 | `if not src or not src.is_port:` | `->L96` |
-| 98 | `if (` | `->L104` |
-| 136 | `if not src or not tgt:` | `->L137` |
-| 142 | `if (` | `->L133`, `->L150` |
-| 175 | `if not section:` | `->L176` |
-| 186 | `if not succ:` | `->L187`, `->L188` |
-| 188 | `if (` | `->L182`, `->L192` |
-| 225 | `if not src:` | `->L226` |
-| 231 | `if not s2 or not s2.is_port:` | `->L232` |
-| 236 | `elif src.is_port:` | `->L223` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 95 | `if not src or not src.is_port:` | `->L96` |  |
+| 98 | `if (` | `->L104` |  |
+| 136 | `if not src or not tgt:` | `->L137` |  |
+| 142 | `if (` | `->L133`, `->L150` |  |
+| 175 | `if not section:` | `->L176` |  |
+| 186 | `if not succ:` | `->L187`, `->L188` |  |
+| 188 | `if (` | `->L182`, `->L192` |  |
+| 225 | `if not src:` | `->L226` |  |
+| 231 | `if not s2 or not s2.is_port:` | `->L232` |  |
+| 236 | `elif src.is_port:` | `->L223` |  |
 
 ## `tb_handlers.py`
 
@@ -470,19 +472,19 @@ Gates with an un-exercised arm:
 
 Gates with an un-exercised arm:
 
-| Line | Gate | Un-exercised arm(s) |
-| ---: | --- | --- |
-| 49 | `if not (` | `->L58` |
-| 116 | `if diag_end < diag_start:` | `->L117` |
-| 122 | `if diag_end > diag_start:` | `->L123` |
-| 167 | `if not (` | `->L174` |
-| 213 | `if not (` | `->L222` |
-| 251 | `if not (` | `->L258` |
-| 268 | `if upstream_st is not None:` | `->L269` |
-| 291 | `if abs(drop_delta) < COORD_TOLERANCE:` | `->L292`, `->L299` |
-| 365 | `if not ctx.station_offsets:` | `->L366` |
-| 373 | `if not u:` | `->L374` |
-| 377 | `if (` | `->L383` |
-| 385 | `if abs(u.y - src.y) > COORD_TOLERANCE:` | `->L387` |
-| 407 | `if abs(upstream_st.x - src.x) < COORD_TOLERANCE:` | `->L409`, `->L436` |
+| Line | Gate | Un-exercised arm(s) | Triage |
+| ---: | --- | --- | --- |
+| 49 | `if not (` | `->L58` |  |
+| 116 | `if diag_end < diag_start:` | `->L117` |  |
+| 122 | `if diag_end > diag_start:` | `->L123` |  |
+| 167 | `if not (` | `->L174` |  |
+| 213 | `if not (` | `->L222` |  |
+| 251 | `if not (` | `->L258` |  |
+| 268 | `if upstream_st is not None:` | `->L269` |  |
+| 291 | `if abs(drop_delta) < COORD_TOLERANCE:` | `->L292`, `->L299` |  |
+| 365 | `if not ctx.station_offsets:` | `->L366` |  |
+| 373 | `if not u:` | `->L374` |  |
+| 377 | `if (` | `->L383` |  |
+| 385 | `if abs(u.y - src.y) > COORD_TOLERANCE:` | `->L387` |  |
+| 407 | `if abs(upstream_st.x - src.x) < COORD_TOLERANCE:` | `->L409`, `->L436` |  |
 

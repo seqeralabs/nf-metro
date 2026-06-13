@@ -36,6 +36,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ROUTING_DIR = PROJECT_ROOT / "src" / "nf_metro" / "layout" / "routing"
 DOC_PATH = PROJECT_ROOT / "docs" / "dev" / "routing_gate_coverage.md"
 BASELINE_PATH = PROJECT_ROOT / "tests" / "data" / "routing_gate_coverage_baseline.json"
+# Curated per-gate triage verdicts, keyed by ``Gate.key``: a gap that no fixture
+# can ever close because the arm is a defensive guard or unreachable. Rendered as
+# the matrix's Triage column so a triaged arm is not re-investigated.
+TRIAGE_PATH = PROJECT_ROOT / "tests" / "data" / "routing_gate_triage.json"
+
+# Accepted triage verdicts. ``reachable`` arms are not recorded here -- they are
+# closed by authoring a fixture, which drops them from the gap set entirely.
+TRIAGE_STATUSES = {"defensive", "candidate-dead", "needs-review"}
 
 # ``coverage`` derives a module's branch arcs from CPython bytecode, whose arc
 # model shifts between interpreter versions (e.g. 3.12 splits short-circuit
@@ -224,7 +232,39 @@ def gap_keys(gates: list[Gate]) -> list[str]:
     return sorted(g.key for g in gates if not g.fully_covered)
 
 
-def _render_markdown(gates: list[Gate]) -> str:
+def triage_stale_keys(
+    gates: list[Gate], triage: dict[str, dict[str, str]]
+) -> list[str]:
+    """Triage keys that do not name a current gate with an un-exercised arm.
+
+    A verdict is valid only while its gate stays a gap; one whose gate the
+    corpus fully exercises (or whose key text has diverged from the source) is
+    stale and must be removed so the sidecar cannot mis-describe a closed gate.
+    """
+    return sorted(set(triage) - set(gap_keys(gates)))
+
+
+def load_triage() -> dict[str, dict[str, str]]:
+    """Curated ``{gate key -> {status, note}}`` verdicts for un-closable gaps.
+
+    Returns an empty mapping when the sidecar is absent (the matrix renders
+    without a Triage column).  Each value's ``status`` must be one of
+    :data:`TRIAGE_STATUSES`.
+    """
+    if not TRIAGE_PATH.exists():
+        return {}
+    raw = json.loads(TRIAGE_PATH.read_text())
+    for key, entry in raw.items():
+        status = entry.get("status")
+        if status not in TRIAGE_STATUSES:
+            raise ValueError(
+                f"Triage entry {key!r} has status {status!r}; "
+                f"expected one of {sorted(TRIAGE_STATUSES)}."
+            )
+    return raw
+
+
+def _render_markdown(gates: list[Gate], triage: dict[str, dict[str, str]]) -> str:
     by_module: dict[str, list[Gate]] = {}
     for g in gates:
         by_module.setdefault(g.module, []).append(g)
@@ -261,6 +301,18 @@ def _render_markdown(gates: list[Gate]) -> str:
         "`validate=True` checker) and `__init__.py` are excluded."
     )
     out.append("")
+    triaged = sum(1 for g in gates if not g.fully_covered and g.key in triage)
+    if triage:
+        out.append(
+            "The Triage column carries a curated verdict for gaps no fixture "
+            "can close: **defensive** (a guard arm a valid topology never "
+            "violates), **candidate-dead** (no constructible topology reaches "
+            "it; left in place pending a separate deletion review), or "
+            "**needs-review** (not yet classified). A blank cell means the gap "
+            "is still open for a fixture. "
+            f"**{triaged}** gaps carry a triage verdict."
+        )
+        out.append("")
 
     for module in sorted(by_module):
         mod_gates = by_module[module]
@@ -277,14 +329,20 @@ def _render_markdown(gates: list[Gate]) -> str:
             continue
         out.append("Gates with an un-exercised arm:")
         out.append("")
-        out.append("| Line | Gate | Un-exercised arm(s) |")
-        out.append("| ---: | --- | --- |")
+        out.append("| Line | Gate | Un-exercised arm(s) | Triage |")
+        out.append("| ---: | --- | --- | --- |")
         for g in sorted(mod_gaps, key=lambda g: g.src_line):
             dead = ", ".join(f"`->L{a.dst_line}`" for a in g.arms if not a.covered)
             code = g.code.replace("|", "\\|")
             if len(code) > 90:
                 code = code[:87] + "..."
-            out.append(f"| {g.src_line} | `{code}` | {dead} |")
+            entry = triage.get(g.key)
+            if entry:
+                note = entry["note"].replace("|", "\\|")
+                verdict = f"**{entry['status']}** -- {note}"
+            else:
+                verdict = ""
+            out.append(f"| {g.src_line} | `{code}` | {dead} | {verdict} |")
         out.append("")
 
     return "\n".join(out) + "\n"
@@ -310,6 +368,14 @@ def main() -> int:
         )
 
     gates = compute_gate_coverage()
+    triage = load_triage()
+    stale = triage_stale_keys(gates, triage)
+    if stale:
+        sys.exit(
+            "Triage sidecar references gate(s) the corpus now fully exercises "
+            "(or whose key has shifted). Remove the stale entr(y/ies) from "
+            f"{TRIAGE_PATH.relative_to(PROJECT_ROOT)}:\n  " + "\n  ".join(stale)
+        )
 
     if args.json:
         payload = [
@@ -319,6 +385,7 @@ def main() -> int:
                 "code": g.code,
                 "occurrence": g.occurrence,
                 "fully_covered": g.fully_covered,
+                "triage": triage.get(g.key),
                 "arms": [{"dst": a.dst_line, "fixtures": a.fixtures} for a in g.arms],
             }
             for g in gates
@@ -327,7 +394,7 @@ def main() -> int:
         sys.stdout.write("\n")
         return 0
 
-    markdown = _render_markdown(gates)
+    markdown = _render_markdown(gates, triage)
 
     if args.write:
         DOC_PATH.parent.mkdir(parents=True, exist_ok=True)

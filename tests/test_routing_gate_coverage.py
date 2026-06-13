@@ -88,3 +88,20 @@ def test_gate_coverage_baseline_in_sync(current_gaps, baseline_gaps):
         "`python scripts/routing_gate_coverage.py --write` to tighten the "
         "ratchet.\nNewly covered:\n  " + "\n  ".join(now_covered)
     )
+
+
+def test_triage_sidecar_references_open_gaps(current_gaps):
+    """Every triage verdict must name a gate that is an open gap.
+
+    A verdict whose gate the corpus exercises (or whose key text has diverged)
+    would silently mis-describe a closed gate, so it must be pruned.
+    """
+    sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+    import routing_gate_coverage as rgc
+
+    triage = rgc.load_triage()
+    stale = sorted(set(triage) - current_gaps)
+    assert not stale, (
+        "Triage sidecar entr(y/ies) name gates that are not open gaps; remove "
+        "them from tests/data/routing_gate_triage.json:\n  " + "\n  ".join(stale)
+    )

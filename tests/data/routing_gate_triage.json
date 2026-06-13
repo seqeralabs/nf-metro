@@ -1,0 +1,30 @@
+{
+  "intra_handlers.py::if not section:::#1": {
+    "status": "defensive",
+    "note": "_route_entry_runway only runs on an entry-port -> internal-station edge; the target of such an edge always carries a section_id that resolves, so the guard's return-None arm protects against a malformed graph rather than a topology."
+  },
+  "intra_handlers.py::if section.direction == \"LR\" and port.side != PortSide.LEFT:::#1": {
+    "status": "defensive",
+    "note": "Auto-layout only ever assigns a LEFT (flow-side) entry to an LR section (0/225 LR entries are non-LEFT across the corpus); a RIGHT/back-side entry on an LR section is a misconfiguration, so the non-flow-side reject arm guards rather than encodes a valid topology."
+  },
+  "intra_handlers.py::if section.direction == \"RL\" and port.side != PortSide.RIGHT:::#1": {
+    "status": "defensive",
+    "note": "Mirror of the LR guard: RL sections only ever receive RIGHT (flow-side) entries (all 24 corpus RL entries are RIGHT); a LEFT-side entry on an RL section is a misconfiguration the reject arm guards against."
+  },
+  "intra_handlers.py::if section.direction not in (\"LR\", \"RL\"):::#1": {
+    "status": "candidate-dead",
+    "note": "No TB/BT entry reaches _route_entry_runway: TB LEFT/RIGHT entries are consumed by _route_tb_lr_entry and TB/BT TOP/BOTTOM entries by _route_perp_entry (both earlier in the dispatch chain), and a BT section is never produced (the direction directive accepts only LR/RL/TB; 0/391 corpus sections are BT). Left in place as a cheap backstop pending a deletion review."
+  },
+  "intra_handlers.py::if not st or st.is_port:::#1": {
+    "status": "defensive",
+    "note": "The loop already skips edge.target and every id in section.port_ids, so a surviving id resolves to a non-port internal station; the not-st / is_port re-check is belt-and-suspenders against a port absent from port_ids."
+  },
+  "intra_handlers.py::if dx <= 0 and abs(dy) > CROSS_ROW_THRESHOLD and not same_section:::#1": {
+    "status": "candidate-dead",
+    "note": "The not-same_section precondition is never satisfied at _route_intra_section: cross-section edges are consumed by _route_inter_section upstream (0/391 corpus fixtures reach this branch with differing sections), and a sectionless flat graph's serpentine fold is routed before this handler too (verified: a flat fold over the threshold does not reach the arm). The cross-row fold branch is shadowed. Left in place pending a deletion review."
+  },
+  "intra_handlers.py::if not (same_sec or is_exit_port):::#1": {
+    "status": "candidate-dead",
+    "note": "_is_side_branch_ascent reaches this classification (44/391 corpus fixtures) but no fixture takes the reject arm: a target sitting within offset_step*2 of the source section's trunk Y is always a same-section internal station or that section's exit port. The arm needs a target at the source's trunk Y that belongs to a different section or is a non-exit port, which the trunk-alignment geometry does not produce. Left in place pending a deletion review."
+  }
+}
