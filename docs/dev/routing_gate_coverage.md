@@ -8,7 +8,7 @@ Each row is a branch point (a *gate*) in a `layout/routing/` dispatch handler or
 
 Modules scoped to routing decision gates; `invariants.py` (the `validate=True` checker) and `__init__.py` are excluded.
 
-The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **9** gaps carry a triage verdict.
+The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **75** gaps carry a triage verdict.
 
 ## `common.py`
 
@@ -244,72 +244,72 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 121 | `if s.bbox_h <= 0:` | `->L122` |  |
-| 173 | `if left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE:` | `->L174` |  |
-| 208 | `if s.bbox_w <= 0:` | `->L209` |  |
-| 243 | `if not (left + COORD_TOLERANCE < ch.x < right - COORD_TOLERANCE):` | `->L245` |  |
-| 245 | `if not (left <= ch.x <= right):` | `->L246`, `->L247` |  |
-| 392 | `if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:` | `->L393` |  |
-| 394 | `if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:` | `->L395` |  |
-| 449 | `if grp[0].dips_down != t.dips_down:` | `->L450` |  |
-| 500 | `if rc is not None:` | `->L498` |  |
-| 502 | `if len(risers) < 2:` | `->L503` |  |
-| 542 | `if vi < 0 or vi + 1 >= len(pts):` | `->L543` |  |
-| 546 | `if abs(x1 - x0) > COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:` | `->L547` |  |
-| 549 | `if not (0 <= lead_i < len(pts)):` | `->L550` |  |
-| 554 | `if abs(pts[lead_i][1] - pts[ly_idx][1]) > COORD_TOLERANCE:` | `->L555` |  |
-| 556 | `if abs(lx - pts[ly_idx][0]) <= COORD_TOLERANCE:` | `->L557` |  |
-| 593 | `if len(per_line) < 2:` | `->L594` |  |
-| 611 | `if all(abs(target_x[lid] - per_line[lid][1]) <= COORD_TOLERANCE for lid in lines):` | `->L613` |  |
-| 614 | `for _ty, rc in risers:` | `->L-568`, `->L615` |  |
-| 642 | `if rp.curve_radii is None or max_off <= COORD_TOLERANCE:` | `->L643`, `->L644` |  |
-| 648 | `for corner_idx, radius_idx, is_lead in ((k, k - 1, True), (k + 1, k, False)):` | `->L-620`, `->L649` |  |
-| 650 | `if not (0 <= nbr_idx < len(pts)):` | `->L651`, `->L653` |  |
-| 654 | `if is_lead:` | `->L655`, `->L658` |  |
-| 664 | `if not (0 <= radius_idx < len(rp.curve_radii)):` | `->L665`, `->L666` |  |
-| 666 | `if not is_lead and not (k + 2 < len(pts)):` | `->L667`, `->L668` |  |
-| 687 | `if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:` | `->L688` |  |
-| 772 | `if rp.curve_radii is None:` | `->L773` |  |
-| 775 | `if 0 <= radius_idx < len(rp.curve_radii):` | `->L774` |  |
-| 796 | `if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:` | `->L797` |  |
-| 845 | `if len(cluster) < 2:` | `->L846` |  |
-| 854 | `if cluster and ch.x - cluster[-1].x > band:` | `->L855` |  |
-| 969 | `elif far_y < t.y - COORD_TOLERANCE:` | `->L963` |  |
-| 999 | `if feats is None:` | `->L1000` |  |
-| 1072 | `if len(trunks) < 2:` | `->L1073`, `->L1074` |  |
-| 1076 | `for grp in groups:` | `->L1077`, `->L1095` |  |
-| 1077 | `if len({id(t.route) for t in grp}) < 2:` | `->L1078`, `->L1079` |  |
-| 1079 | `if not any(not t.route.normalize_exempt for t in grp):` | `->L1080`, `->L1081` |  |
-| 1081 | `for sign in (1, -1):` | `->L1076`, `->L1082` |  |
-| 1084 | `if len(slots) < 2 or len(slots) > _MAX_BAND_PERMUTE:` | `->L1085`, `->L1086` |  |
-| 1093 | `if best < cur:` | `->L1081`, `->L1094` |  |
-| 1111 | `if top + total > limit:` | `->L1113` |  |
-| 1157 | `if top is None or bottom is None:` | `->L1158` |  |
-| 1197 | `if id(t.route) in skip:` | `->L1199` |  |
-| 1210 | `if hit is None:` | `->L1211`, `->L1213` |  |
-| 1214 | `if band is not None:` | `->L1215`, `->L1219` |  |
-| 1224 | `if prefer_down and down >= min_sep:` | `->L1225`, `->L1226` |  |
-| 1226 | `elif up >= min_sep:` | `->L1227`, `->L1229` |  |
-| 1234 | `if id(t.route) in skip:` | `->L1236` |  |
-| 1247 | `if hit is None:` | `->L1248`, `->L1249` |  |
-| 1251 | `if band is not None:` | `->L1252`, `->L1256` |  |
-| 1257 | `if (t.y >= hit.y and below_ok) or (not above_ok and below_ok):` | `->L1258`, `->L1259` |  |
-| 1259 | `elif above_ok:` | `->L1260`, `->L1262` |  |
-| 1282 | `if sg[0].sign_x != t.sign_x:` | `->L1283` |  |
-| 1284 | `if any(t.x_lo < o.x_hi and o.x_lo < t.x_hi for o in sg):` | `->L1278` |  |
-| 1313 | `if rp.curve_radii is None:` | `->L1314` |  |
-| 1325 | `if 0 <= k - 1 < len(rp.curve_radii):` | `->L1327` |  |
-| 1327 | `if k < len(rp.curve_radii) and k + 2 < len(pts):` | `->L-1292` |  |
-| 1378 | `if down is None or len(up.points) < 2:` | `->L1379` |  |
-| 1483 | `if rep_x[a] != rep_x[b]:` | `->L1485` |  |
-| 1517 | `if rp.curve_radii is None:` | `->L1518` |  |
-| 1526 | `if 0 <= k - 1 < len(rp.curve_radii):` | `->L1528` |  |
-| 1528 | `if k < len(rp.curve_radii) and k + 2 < len(pts):` | `->L1538` |  |
-| 1540 | `if abs(ly - pts[1][1]) < COORD_TOLERANCE:` | `->L-1490` |  |
-| 1591 | `for _ in range(8):` | `->L1616` |  |
-| 1612 | `elif right_ok:` | `->L1615` |  |
-| 1639 | `if lo <= s.grid_col <= hi:` | `->L1636` |  |
-| 1665 | `if s.bbox_w <= 0:` | `->L1666` |  |
+| 121 | `if s.bbox_h <= 0:` | `->L122` | **defensive** -- Degenerate-bbox guard in _build_row_bands: a laid-out section always has bbox_h > 0, so the skip arm only protects against a zero/negative-height section that the layout never produces. |
+| 173 | `if left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE:` | `->L174` | **candidate-dead** -- Row-agnostic union-gap fallback in _match_channel_gap is provably unreachable: the union gap [max(col_lo right edges), min(col_hi left edges)] is a subset of every per-row gap that brackets a channel, so overlap_match/bracket_match always resolve first and the union fallback is never reached. Left in place pending the deletion review in #689. |
+| 208 | `if s.bbox_w <= 0:` | `->L209` | **defensive** -- Degenerate-bbox guard in _section_intrudes: a laid-out section always has bbox_w > 0; the skip arm guards a zero/negative-width section the layout never produces. |
+| 243 | `if not (left + COORD_TOLERANCE < ch.x < right - COORD_TOLERANCE):` | `->L245` | **defensive** -- Float-precision guard in _bucket_gap_channels: routing centres channels in inter-column gaps with >= 16px clearance from section edges (min observed across the corpus), far outside the 1px COORD_TOLERANCE edge band, so the on/outside-edge arm is never entered. |
+| 245 | `if not (left <= ch.x <= right):` | `->L246`, `->L247` | **defensive** -- Downstream of the gap-edge band guard (L243); only reached when a channel x sits within 1px of a gap boundary, which the >=16px clearance never produces, so both arms are unreachable. |
+| 392 | `if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:` | `->L393` | **candidate-dead** -- Interior horizontal segments only occur in 6-point bypass U-shapes whose flanking legs are always vertical (same x on each side); routes with non-vertical flanks are normalize_exempt and filtered out. The prev-flank-non-vertical reject in _collect_htrunks is unreachable. Pending deletion review in #689. |
+| 394 | `if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:` | `->L395` | **candidate-dead** -- Mirror of the prev-flank guard: a bypass trunk's trailing flank is always vertical, so the next-flank-non-vertical reject in _collect_htrunks is unreachable. Pending deletion review in #689. |
+| 449 | `if grp[0].dips_down != t.dips_down:` | `->L450` | **needs-review** -- Opposite-dip grouping arm (->450): a channel group holding both an up-dipping and a down-dipping bypass trunk. Reached this slice only incidentally via the now-withdrawn dogleg fixtures (#702); not itself an eager-bundling violation. Exercise with a dedicated clean opposite-dip fixture. |
+| 500 | `if rc is not None:` | `->L498` | **needs-review** -- Reachable riser-collection arm in _align_peeloff_riser_gaps (a trunk in the group that does not peel off on the tested side). It lives in the peel-off riser respace pass whose body inverts bundle order (#695); a clean fixture exercising it awaits that fix. |
+| 502 | `if len(risers) < 2:` | `->L503` | **needs-review** -- Reachable riser-collection arm (a peel-off side that collects fewer than two risers). In the peel-off riser respace pass under review in #695; exercise once the bundle-order inversion is fixed and a clean peel-off fixture renders. |
+| 542 | `if vi < 0 or vi + 1 >= len(pts):` | `->L543` | **defensive** -- Bounds guard in _peeloff_riser: the trunk index comes from range(1, len(pts)-2), keeping vi and vi+1 in range; the out-of-bounds return arm is unreachable for a valid trunk. |
+| 546 | `if abs(x1 - x0) > COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:` | `->L547` | **defensive** -- Re-validation guard in _peeloff_riser: the leg flanking a trunk is already proven vertical by _collect_htrunks (L392/L394), so the not-vertical return arm cannot fire. |
+| 549 | `if not (0 <= lead_i < len(pts)):` | `->L550` | **needs-review** -- Reachable peel-off edge arm in _peeloff_riser (a trunk at the route start/end with no lead segment). In the peel-off pass under review in #695; deferred with that fix. |
+| 554 | `if abs(pts[lead_i][1] - pts[ly_idx][1]) > COORD_TOLERANCE:` | `->L555` | **needs-review** -- Reachable peel-off edge arm in _peeloff_riser (a riser whose lead segment is not horizontal). In the peel-off pass under review in #695; deferred with that fix. |
+| 556 | `if abs(lx - pts[ly_idx][0]) <= COORD_TOLERANCE:` | `->L557` | **needs-review** -- Reachable peel-off edge arm in _peeloff_riser (a riser whose lead has zero horizontal extent). In the peel-off pass under review in #695; deferred with that fix. |
+| 593 | `if len(per_line) < 2:` | `->L594` | **defensive** -- Caller-guarded in _respace_risers_to_trunk: the caller only invokes it when the cluster holds >=2 distinct line_ids (L515), so per_line always has >=2 entries; the early-return arm is unreachable. |
+| 611 | `if all(abs(target_x[lid] - per_line[lid][1]) <= COORD_TOLERANCE for lid in lines):` | `->L613` | **needs-review** -- Body of _respace_risers_to_trunk (the spacing-disagrees path that performs the respace). Reachable only via the peel-off topology that exposes the bundle-order inversion in #695; a fixture awaits that fix. |
+| 614 | `for _ty, rc in risers:` | `->L-568`, `->L615` | **needs-review** -- Respace loop in _respace_risers_to_trunk, reached only when the riser spacing disagrees with the trunk spacing -- the case that triggers the bundle-order inversion in #695. Deferred with that fix. |
+| 642 | `if rp.curve_radii is None or max_off <= COORD_TOLERANCE:` | `->L643`, `->L644` | **needs-review** -- Radii-sizing guard in _set_riser_x_and_radii, reached only when the defective respace pass runs (#695). The curve_radii-is-None sub-arm is additionally defensive (always set for inter-section routes). Deferred with the #695 fix. |
+| 648 | `for corner_idx, radius_idx, is_lead in ((k, k - 1, True), (k + 1, k, False)):` | `->L-620`, `->L649` | **needs-review** -- Corner loop in _set_riser_x_and_radii, reached only when the defective respace pass runs (#695). Deferred with that fix. |
+| 650 | `if not (0 <= nbr_idx < len(pts)):` | `->L651`, `->L653` | **needs-review** -- Neighbour-index guard in _set_riser_x_and_radii, reached only when the defective respace pass runs (#695). The out-of-bounds sub-arm is additionally defensive. Deferred with the #695 fix. |
+| 654 | `if is_lead:` | `->L655`, `->L658` | **needs-review** -- Lead/trail corner branch in _set_riser_x_and_radii, reached only when the defective respace pass runs (#695). Deferred with that fix. |
+| 664 | `if not (0 <= radius_idx < len(rp.curve_radii)):` | `->L665`, `->L666` | **needs-review** -- Radius-index guard in _set_riser_x_and_radii, reached only when the defective respace pass runs (#695). The out-of-bounds sub-arm is additionally defensive. Deferred with the #695 fix. |
+| 666 | `if not is_lead and not (k + 2 < len(pts)):` | `->L667`, `->L668` | **needs-review** -- Trail-corner end-of-route guard in _set_riser_x_and_radii, reached only when the defective respace pass runs (#695). The out-of-bounds sub-arm is additionally defensive. Deferred with the #695 fix. |
+| 687 | `if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:` | `->L688` | **candidate-dead** -- Every non-exempt inter-section route ends with a vertical descent into the target Y then a short horizontal port lead (V->H tail); routes with non-V tails are normalize_exempt. The second-to-last-not-vertical reject in _final_port_approach is unreachable. Pending deletion review in #689. |
+| 772 | `if rp.curve_radii is None:` | `->L773` | **defensive** -- curve_radii is always a concrete list for inter-section routes (every inter-section handler sets it); the None arm in _set_vchannel_x is a belt-and-suspenders guard. |
+| 775 | `if 0 <= radius_idx < len(rp.curve_radii):` | `->L774` | **defensive** -- Bounds guard in _set_vchannel_x: radius_idx in (k-1, k) for a real channel stays in range; the out-of-range skip arm is defensive. |
+| 796 | `if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:` | `->L797` | **defensive** -- Reject arm in _initial_fanout_descent: a route whose first segment is horizontal (passes the prior check) always has a vertical second segment in the orthogonal inter-section route model; the non-vertical reject mirrors the proven-unreachable _final_port_approach reject (L687) and never fires. |
+| 845 | `if len(cluster) < 2:` | `->L846` | **needs-review** -- Divergent fan-out flush of a singleton cluster (->846), reachable only via a same-line fan-out whose descents split too early - the eager-bundling violation in #702. Exercise with a clean fixture once #702 defers the split. |
+| 854 | `if cluster and ch.x - cluster[-1].x > band:` | `->L855` | **needs-review** -- Divergent fan-out descent cluster-split (->855): the pass gives up fusing same-line descents >16px apart, which produces the early-split crossover in #702. Exercise with a clean fixture once #702 defers the split. |
+| 969 | `elif far_y < t.y - COORD_TOLERANCE:` | `->L963` | **defensive** -- Degenerate-leg guard in _trunk_slot_features: a trunk's flanking legs are genuine vertical legs (far_y differs from the trunk y), so neither the below nor the above classification is skipped; the fall-through arm needs a zero-height leg the layout never produces. |
+| 999 | `if feats is None:` | `->L1000` | **defensive** -- Unused default-arg branch: all three callers of _band_order_crossings pass feats explicitly, so the feats-is-None compute-it arm is never taken. |
+| 1072 | `if len(trunks) < 2:` | `->L1073`, `->L1074` | **defensive** -- _suboptimal_trunk_bands is a validate=True diagnostic (raised by guards.py:_guard_*), not a production render-path gate, so the rendering coverage sweep never reaches it -- analogous to the excluded invariants.py. Exercised by the validator suite, not by fixtures. |
+| 1076 | `for grp in groups:` | `->L1077`, `->L1095` | **defensive** -- _suboptimal_trunk_bands diagnostic loop: validate-only, not reached by the render-path coverage sweep (see the len(trunks)<2 note). |
+| 1077 | `if len({id(t.route) for t in grp}) < 2:` | `->L1078`, `->L1079` | **defensive** -- _suboptimal_trunk_bands diagnostic guard: validate-only, not on the render path. |
+| 1079 | `if not any(not t.route.normalize_exempt for t in grp):` | `->L1080`, `->L1081` | **defensive** -- _suboptimal_trunk_bands diagnostic guard: validate-only, not on the render path. |
+| 1081 | `for sign in (1, -1):` | `->L1076`, `->L1082` | **defensive** -- _suboptimal_trunk_bands direction loop: validate-only, not on the render path. |
+| 1084 | `if len(slots) < 2 or len(slots) > _MAX_BAND_PERMUTE:` | `->L1085`, `->L1086` | **defensive** -- _suboptimal_trunk_bands slot-count guard: validate-only, not on the render path. |
+| 1093 | `if best < cur:` | `->L1081`, `->L1094` | **defensive** -- _suboptimal_trunk_bands crossing-comparison: validate-only, not on the render path. |
+| 1111 | `if top + total > limit:` | `->L1113` | **defensive** -- No-clamp return arm in _clamp_inter_row_band_top: the inter-row gap is auto-widened to fit its routing bundle, so a fanned trunk band sits at or over the header-clearance limit and the clamp arm is taken; the load-bearing no-clamp return is structurally avoided by the gap sizing. |
+| 1157 | `if top is None or bottom is None:` | `->L1158` | **defensive** -- Defensive in _inter_row_gap_band: adjacent rows in the sorted section-row set both contain sections, so row_bottom_edge / row_top_edge resolve; the None skip arm guards a row with no sections that the iteration never yields. |
+| 1197 | `if id(t.route) in skip:` | `->L1199` | **needs-review** -- _dogleg_off_exempt_trunks first-loop skip of an already-bundled route (->1199), reached only when the dogleg pass runs; the topologies that exercised it are the same-line (#698) and distinct-line eager-bundling (#702) doglegs. Exercise with a clean fixture once those render cleanly. |
+| 1210 | `if hit is None:` | `->L1211`, `->L1213` | **needs-review** -- Same-line dogleg obstacle test: the obstacle-found arm (->1213) is reachable only via the same-line regime whose down-move crowds the next-row header (#698); the no-obstacle arm (->1211) only fires when the dogleg pass runs on a topology with exempt obstacles. Both await a clean dogleg fixture (#698 / #702). |
+| 1214 | `if band is not None:` | `->L1215`, `->L1219` | **needs-review** -- Same-line dogleg: the band-found arm (->1215) is reachable only via the same-line regime whose down-move crowds the next-row header (#698); the band-is-None arm (->1219) is defensive (both colliding trunks route through _center_inter_row_channel, so the trunk Y always resolves to a gap band). Exercise ->1215 with a clean fixture once #698 is fixed. |
+| 1224 | `if prefer_down and down >= min_sep:` | `->L1225`, `->L1226` | **needs-review** -- Same-line dogleg: the down-move arm (->1225) is reachable only via the same-line regime whose down-move crowds the next-row header (#698); the elif/else arm (->1226) is defensive (the two fused flows start at an identical Y so prefer_down is always True and down >= min_sep holds). Exercise ->1225 with a clean fixture once #698 is fixed. |
+| 1226 | `elif up >= min_sep:` | `->L1227`, `->L1229` | **defensive** -- Same-line dogleg move-up branch: unreachable because prefer_down is always True (the two flows start at the same Y), so the down branch is always taken before this elif. |
+| 1234 | `if id(t.route) in skip:` | `->L1236` | **needs-review** -- Distinct-line dogleg second-loop skip of an already-bundled route (->1236), reached only when the distinct dogleg runs - the eager-bundling case in #702. Exercise with a clean fixture once #702 renders cleanly. |
+| 1247 | `if hit is None:` | `->L1248`, `->L1249` | **needs-review** -- Distinct-line dogleg obstacle test (->1248 no-obstacle, ->1249 obstacle), reached only when the distinct dogleg runs - the eager-bundling case in #702. Exercise with a clean fixture once #702 renders cleanly. |
+| 1251 | `if band is not None:` | `->L1252`, `->L1256` | **needs-review** -- Distinct-line dogleg: the band-found arm (->1252) is reachable only via the distinct dogleg whose routing crosses the exempt trunk twice (#702); the band-is-None arm (->1256) is defensive (the trunk Y always resolves to an inter-row gap band). Exercise ->1252 with a clean fixture once #702 renders cleanly. |
+| 1257 | `if (t.y >= hit.y and below_ok) or (not above_ok and below_ok):` | `->L1258`, `->L1259` | **needs-review** -- Distinct-line dogleg: the below-move arm (->1258) is reachable only via the distinct dogleg that crosses the exempt trunk twice (#702); the move-up arm (->1259) is defensive (the trunk starts at the obstacle Y inside a valid band, so the below branch is always taken). Exercise ->1258 with a clean fixture once #702 renders cleanly. |
+| 1259 | `elif above_ok:` | `->L1260`, `->L1262` | **defensive** -- Distinct-line dogleg move-up/skip branch: unreachable because the below branch is always taken (t.y == hit.y, below_ok true); covers both the move-up and the gap-too-tight continue. |
+| 1282 | `if sg[0].sign_x != t.sign_x:` | `->L1283` | **candidate-dead** -- Both callers of _coincident_trunk_slots pre-filter input to a single traversal direction (band = [t for t in grp if t.sign_x == sign]), so within the function sg[0].sign_x != t.sign_x is always False; the opposing-direction continue is unreachable. Pending deletion review in #689. |
+| 1284 | `if any(t.x_lo < o.x_hi and o.x_lo < t.x_hi for o in sg):` | `->L1278` | **needs-review** -- Disjoint same-line trunk slotting (->1278): two disjoint trunks of one line keep separate slots instead of riding one shared trunk and peeling off at the turn column - the early-unbundling violation in #702. Exercise with a clean fixture once #702 defers the split. |
+| 1313 | `if rp.curve_radii is None:` | `->L1314` | **defensive** -- curve_radii is always set for inter-section routes; the None arm in _restack_htrunk is a defensive guard. |
+| 1325 | `if 0 <= k - 1 < len(rp.curve_radii):` | `->L1327` | **defensive** -- Bounds guard in _restack_htrunk: trunk index k >= 1 so k-1 >= 0 is always in range; the skip arm is defensive. |
+| 1327 | `if k < len(rp.curve_radii) and k + 2 < len(pts):` | `->L-1292` | **defensive** -- Bounds guard in _restack_htrunk: for a real interior trunk k and k+2 are in range; the skip arm is defensive. |
+| 1378 | `if down is None or len(up.points) < 2:` | `->L1379` | **candidate-dead** -- Every line entering a fan-out junction also exits it to an entry port, so _fanout_route_maps always pairs a downstream route for each (jid, line_id) upstream; all handlers emit >=2-point routes. The skip arm in _join_fanout_upstream_tails is unreachable. Pending deletion review in #689. |
+| 1483 | `if rep_x[a] != rep_x[b]:` | `->L1485` | **candidate-dead** -- The routing system assigns distinct x offsets to every line sharing a column gap, so two distinct lines in one gap-bundle corridor never share a representative x; the equal-rep_x tiebreak fall-through in _distinct_line_order is unreachable (exhaustive corpus scan confirms). Pending deletion review in #689. |
+| 1517 | `if rp.curve_radii is None:` | `->L1518` | **defensive** -- curve_radii is always set for inter-section routes; the None arm in _restack_channel is a defensive guard. |
+| 1526 | `if 0 <= k - 1 < len(rp.curve_radii):` | `->L1528` | **defensive** -- Bounds guard in _restack_channel: the skip arm fires only for k==0 (channel at the route start), which the restacked gap channels (interior verticals after a horizontal lead-in) never are. |
+| 1528 | `if k < len(rp.curve_radii) and k + 2 < len(pts):` | `->L1538` | **defensive** -- Bounds guard in _restack_channel: the skip arm guards k or k+2 out of range for a real interior channel; defensive. |
+| 1540 | `if abs(ly - pts[1][1]) < COORD_TOLERANCE:` | `->L-1490` | **candidate-dead** -- A re-stacked gap channel at points-index 1 always has a horizontal lead-in (L-shape and bypass routes open with a horizontal segment); routes opening non-horizontally are normalize_exempt and excluded from _collect_vchannels. The non-horizontal-lead return in _restack_channel is unreachable. Pending deletion review in #689. |
+| 1591 | `for _ in range(8):` | `->L1616` | **candidate-dead** -- The 8-iteration exhaustion arm of _clear_channel_x_in_band requires 9+ sections chained across a single column band to shift the channel x eight times without resolving, which no constructible topology produces. Pending deletion review in #689. |
+| 1612 | `elif right_ok:` | `->L1615` | **candidate-dead** -- The both-bounds-fail return of _clear_channel_x_in_band requires a blocking section spanning the entire inter-column gap (so neither cleared edge fits within bound_left/bound_right); a cross-row section cannot span a gap defined as the space between same-row sections. Unreachable. Pending deletion review in #689. |
+| 1639 | `if lo <= s.grid_col <= hi:` | `->L1636` | **needs-review** -- The out-of-range-section skip arm of _has_other_row_section_in_col_range is reachable, but the only minimal merge topology found that reaches it triggers the merge-trunk route-through-section defect in #696 (a merge source sitting right of the target). Minimal forward-edge merge fixtures either miss the predicate or trip _guard_routes_enter_sections_at_ports. Exercise via a clean fixture once #696 is resolved. |
+| 1665 | `if s.bbox_w <= 0:` | `->L1666` | **defensive** -- Degenerate-bbox guard in _h_segment_crosses_other_section: mirror of the bbox_w<=0 guard; sections always have positive width. |
 
 ## `offsets.py`
 
