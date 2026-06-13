@@ -396,6 +396,17 @@ Section headers (numbered circle + label) are rendered above bbox_y by
 approximately SECTION_HEADER_PROTRUSION (~26px).  This constant adds a
 small margin so routing channels don't overlap the header zone."""
 
+NEXT_ROW_HEADER_BADGE_CLEARANCE: float = 12.0
+"""Minimum vertical gap a near-horizontal inter-section routed segment must
+keep above a next-row section header badge.
+
+A segment doglegged down into the inter-row gap sits above the lower row's
+header badge (which protrudes ``SECTION_HEADER_PROTRUSION`` above its
+``bbox_y``).  This margin exceeds the stacked-bundle half-width yet stays
+below the band where TOP-entry channel routes legitimately approach the
+badge, so the segment reads as clearly separate from the header rather than
+grazing it.  Enforced by ``test_routed_paths_clear_next_row_headers``."""
+
 INTER_ROW_EDGE_CLEARANCE: float = 26.0
 """Minimum distance between an inter-row wrap channel and the *box edge*
 it runs beneath (the upper section's bbox bottom).

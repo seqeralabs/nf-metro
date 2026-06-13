@@ -108,16 +108,16 @@
     "note": "No-clamp return arm in _clamp_inter_row_band_top: the inter-row gap is auto-widened to fit its routing bundle, so a fanned trunk band sits at or over the header-clearance limit and the clamp arm is taken; the load-bearing no-clamp return is structurally avoided by the gap sizing."
   },
   "normalize.py::if band is not None:::#1": {
-    "status": "needs-review",
-    "note": "Same-line dogleg: the band-found arm (->1215) is reachable only via the same-line regime whose down-move crowds the next-row header (#698); the band-is-None arm (->1219) is defensive (both colliding trunks route through _center_inter_row_channel, so the trunk Y always resolves to a gap band). Exercise ->1215 with a clean fixture once #698 is fixed."
+    "status": "defensive",
+    "note": "Same-line dogleg: the band-found arm is exercised by dogleg_exempt_sameline; the band-is-None arm is defensive (both colliding trunks route through _center_inter_row_channel, so the trunk Y always resolves to a gap band)."
   },
   "normalize.py::if prefer_down and down >= min_sep:::#1": {
     "status": "needs-review",
-    "note": "Same-line dogleg: the down-move arm (->1225) is reachable only via the same-line regime whose down-move crowds the next-row header (#698); the elif/else arm (->1226) is defensive (the two fused flows start at an identical Y so prefer_down is always True and down >= min_sep holds). Exercise ->1225 with a clean fixture once #698 is fixed."
+    "note": "Same-line dogleg: the down-move arm is exercised by dogleg_exempt_sameline; the elif/else (up-fallback) arm fires only when the lower gap is too tight to clear the next-row header badge by the required margin (down room below one bundle clearance), which no corpus fixture currently produces. Exercise with a same-line dogleg over a narrowed inter-row gap."
   },
   "normalize.py::elif up >= min_sep:::#1": {
-    "status": "defensive",
-    "note": "Same-line dogleg move-up branch: unreachable because prefer_down is always True (the two flows start at the same Y), so the down branch is always taken before this elif."
+    "status": "needs-review",
+    "note": "Same-line dogleg move-up branch: reached when the down-move is suppressed because the lower gap is too tight to clear the next-row header badge (down room below one bundle clearance), so the trunk falls back to moving up. No corpus fixture currently narrows the inter-row gap enough to take it; exercise with a same-line dogleg over a narrowed inter-row gap."
   },
   "normalize.py::if band is not None:::#2": {
     "status": "needs-review",
@@ -178,10 +178,6 @@
   "normalize.py::if lo <= s.grid_col <= hi:::#1": {
     "status": "needs-review",
     "note": "The out-of-range-section skip arm of _has_other_row_section_in_col_range is reachable. The minimal merge topology that reaches it (a merge source sitting right of the target in the same row) is now rejected at layout time as a backward feed (#696, BackwardFlowError), so it can no longer exercise the arm. A clean forward-edge merge fixture (source left of target, same row, intervening sections, no other-row section in the column range) is still needed to hit the False branch; minimal attempts either miss the predicate or trip _guard_routes_enter_sections_at_ports."
-  },
-  "normalize.py::if hit is None:::#1": {
-    "status": "needs-review",
-    "note": "Same-line dogleg obstacle test: the obstacle-found arm (->1213) is reachable only via the same-line regime whose down-move crowds the next-row header (#698); the no-obstacle arm (->1211) only fires when the dogleg pass runs on a topology with exempt obstacles. Both await a clean dogleg fixture (#698 / #702)."
   },
   "normalize.py::if below_ok and above_ok and (cross_below is None) != (cross_above is None):::#1": {
     "status": "needs-review",

@@ -387,6 +387,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "wrap run twice (issue #702).",
     ),
     (
+        "dogleg_exempt_sameline",
+        TOPOLOGIES_DIR,
+        "Two opposing flows of one line fused in the inter-row gap are pulled "
+        "apart into a dogleg; the down-moved trunk stops short of the next "
+        "row's section header badge, keeping the required clearance rather "
+        "than crowding it (issue #698).",
+    ),
+    (
         "off_track_convergence",
         TOPOLOGIES_DIR,
         "Multiple off-track file inputs converging on a single consumer. "

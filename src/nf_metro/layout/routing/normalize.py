@@ -16,6 +16,7 @@ from nf_metro.layout.constants import (
     EDGE_TO_BUNDLE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MIN_CORRIDOR_Y_OVERLAP,
+    NEXT_ROW_HEADER_BADGE_CLEARANCE,
     OFFSET_STEP,
     SECTION_HEADER_PROTRUSION,
 )
@@ -1266,11 +1267,15 @@ def _dogleg_off_exempt_trunks(
         )
         if hit is None:
             continue
-        # Lower edge reserves the next row's header protrusion.
+        # Lower edge reserves the next row's header badge plus the clearance
+        # margin the header-clearance invariant requires; up_room only the
+        # upper box edge.  When down_room is too tight to clear the badge the
+        # side-choice below falls back to the up-move.
         band = _inter_row_gap_band(ctx, t.y)
         if band is not None:
             top, bottom = band
-            down_room = (bottom - SECTION_HEADER_PROTRUSION) - hit.y
+            header_top = bottom - SECTION_HEADER_PROTRUSION
+            down_room = (header_top - NEXT_ROW_HEADER_BADGE_CLEARANCE) - hit.y
             up_room = hit.y - top
         else:
             down_room = up_room = clearance

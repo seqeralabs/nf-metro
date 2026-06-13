@@ -186,7 +186,6 @@
   "normalize.py::if ctx.station_offsets is None:::#2",
   "normalize.py::if down is None or len(up.points) < 2:::#1",
   "normalize.py::if feats is None:::#1",
-  "normalize.py::if hit is None:::#1",
   "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#1",
   "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#2",
   "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#3",
