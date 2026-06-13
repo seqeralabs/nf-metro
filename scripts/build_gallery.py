@@ -371,6 +371,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "the nearer one and crosses it (issue #702).",
     ),
     (
+        "disjoint_sameline_trunks",
+        TOPOLOGIES_DIR,
+        "Two lines diving into one below-row channel to bypass a section ride a "
+        "tight concentric bundle until a member peels up at its turn column, "
+        "rather than being split apart by a track reserved for a trunk that only "
+        "appears further along the channel (issue #702).",
+    ),
+    (
         "off_track_convergence",
         TOPOLOGIES_DIR,
         "Multiple off-track file inputs converging on a single consumer. "

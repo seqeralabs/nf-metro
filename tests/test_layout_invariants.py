@@ -1149,6 +1149,78 @@ def test_inter_row_trunk_bands_crossing_optimal(fixture):
     )
 
 
+@pytest.mark.parametrize(
+    "spans, expected",
+    [
+        # Two distinct trunks fully sharing a corridor -> one concentric stack.
+        ([(0, 100), (0, 100)], [0, 1]),
+        # Disjoint left/right pair bridged by a long trunk: the bridge packs
+        # adjacent to the left trunk so they bundle tight under the left
+        # corridor; the right pair reuses the freed shallow track.
+        ([(0, 100), (0, 300), (250, 400), (240, 410)], [0, 1, 2, 3]),
+        # A pair that never shares any X reuses track 0 -- no reserved gap.
+        ([(0, 100), (200, 300)], [0, 0]),
+    ],
+)
+def test_pack_band_tracks_no_reserved_gaps(spans, expected):
+    """Greedy track packing never wedges an empty track between two trunks
+    that share a sub-corridor.
+
+    Each trunk takes the shallowest track one deeper than every shallower
+    trunk it overlaps in X, so co-travelling trunks land on adjacent tracks
+    and a trunk absent from a sub-corridor frees its track for reuse there.
+    """
+    from nf_metro.layout.routing.common import RoutedPath
+    from nf_metro.layout.routing.normalize import _HTrunk, _pack_band_tracks
+
+    order = [
+        [
+            _HTrunk(
+                route=RoutedPath(edge=None, line_id=f"l{i}", points=[]),
+                idx=1,
+                y=0.0,
+                x_lo=float(lo),
+                x_hi=float(hi),
+                dips_down=True,
+                sign_x=1,
+            )
+        ]
+        for i, (lo, hi) in enumerate(spans)
+    ]
+    assert _pack_band_tracks(order) == expected
+
+
+def test_disjoint_sameline_trunks_bundle_tight():
+    """Two distinct lines that dive into one below-row channel together ride a
+    tight bundle until a member peels off at its turn column (issue #702).
+
+    In ``disjoint_sameline_trunks`` lines ``a`` and ``c`` both bypass the QC
+    section in the channel below the single section row; ``a`` peels up into
+    the Align section while ``c`` continues to Call.  Their shared left-hand
+    trunk must sit one ``OFFSET_STEP`` apart (one concentric bundle), not be
+    split by tracks reserved for trunks that only appear further right.
+    """
+    from nf_metro.layout.constants import OFFSET_STEP
+    from nf_metro.layout.routing.normalize import _collect_htrunks
+
+    graph = _layout("topologies/disjoint_sameline_trunks.mmd")
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    trunks = _collect_htrunks(routes, include_exempt=True)
+
+    a_left = min((t for t in trunks if t.route.line_id == "a"), key=lambda t: t.x_lo)
+    c_trunk = next(t for t in trunks if t.route.line_id == "c")
+
+    assert a_left.x_lo < c_trunk.x_hi and c_trunk.x_lo < a_left.x_hi, (
+        "fixture precondition: a's left trunk and c's trunk share a corridor"
+    )
+    assert abs(a_left.y - c_trunk.y) <= OFFSET_STEP + 0.1, (
+        f"a's left trunk (y={a_left.y:.1f}) and c's trunk (y={c_trunk.y:.1f}) "
+        f"should bundle one OFFSET_STEP apart, not "
+        f"{abs(a_left.y - c_trunk.y):.1f}px"
+    )
+
+
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_top_entry_lead_corner_concentric(fixture):
     """A multi-line TOP-entry L-shape must turn its lead-in corner
