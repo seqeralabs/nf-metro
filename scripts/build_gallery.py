@@ -345,6 +345,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "(`_clear_bypass_v_label_strikes`).",
     ),
     (
+        "bypass_v_tight",
+        TOPOLOGIES_DIR,
+        "An intra-section bypass V at a tight column pitch: without room for a "
+        "lead-in the descent would diverge on the 'Process A' marker and rake "
+        "its label. The engine pushes the bypassed node to a further grid "
+        "column so the V diverges past the label and keeps a visible flat run "
+        "through its X (issue #688).",
+    ),
+    (
         "fan_bypass_nesting",
         TOPOLOGIES_DIR,
         "A junction fans to a straight continuation, three down-turns into "

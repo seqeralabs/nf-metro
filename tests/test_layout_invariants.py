@@ -23,6 +23,7 @@ from conftest import CONTENT_PLACEMENT_PHASES
 
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
+    DIAGONAL_SLOPE_RATIO,
     EDGE_TO_BUNDLE_CLEARANCE,
     INTER_ROW_EDGE_CLEARANCE,
     MIN_STATION_FLAT_LENGTH,
@@ -1608,6 +1609,84 @@ def test_no_line_strikes_through_label(fixture):
         f"{fixture}: foreign lines strike label glyph ink: "
         + ", ".join(f"{lid!r} over {sid!r}" for sid, lid in strikes)
     )
+
+
+def _bypass_v_own_label_strikes(fixture: str) -> list[str]:
+    """Return ids of stations whose own bypass-V diagonal rakes their label.
+
+    A bypass V diverges from the trunk at the station before the bypassed one
+    and re-merges at the station after it.  When the section is too tight for a
+    horizontal lead-in, the divergence (or merge) pins to the marker and the
+    descending diagonal cuts through that station's name label, which sits
+    directly under the marker.  This is the divergence station's *own* line over
+    its *own* label, so it is exempt from the foreign-strike checks; it is only
+    cured by placing the label on the side clear of the V.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    placements = place_labels(
+        graph,
+        station_offsets=offsets,
+        routes=routes,
+        label_angle=graph.label_angle or 0.0,
+    )
+    by_station = {p.station_id: p for p in placements if p.station_id}
+    struck: list[str] = []
+    for r in routes:
+        src_bypass = r.edge.source.startswith("__bypass_")
+        tgt_bypass = r.edge.target.startswith("__bypass_")
+        if src_bypass == tgt_bypass:
+            continue
+        endpoint = r.edge.target if src_bypass else r.edge.source
+        p = by_station.get(endpoint)
+        station = graph.stations.get(endpoint)
+        if p is None or p.angle or station is None or not station.label.strip():
+            continue
+        pts = apply_route_offsets(r, offsets)
+        if any(
+            segment_strikes_label(x1, y1, x2, y2, p)
+            and abs(y2 - y1) >= max(abs(x2 - x1), 1.0) * DIAGONAL_SLOPE_RATIO
+            for (x1, y1), (x2, y2) in zip(pts, pts[1:])
+        ):
+            struck.append(endpoint)
+    return struck
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_bypass_v_does_not_strike_diverging_station_label(fixture):
+    """A bypass V must not rake the label of the station it diverges from.
+
+    The divergence point may sit on a station's marker only when the label is
+    clear of the V's side; otherwise the descending diagonal strikes the name.
+    """
+    struck = _bypass_v_own_label_strikes(fixture)
+    assert not struck, (
+        f"{fixture}: bypass-V diagonal rakes its own diverging/merging station "
+        "label: " + ", ".join(sorted(struck))
+    )
+
+
+def test_bypass_v_flat_guard_catches_a_collapse():
+    """The runtime guard fires when a bypass V's flat run is left collapsed.
+
+    The strike-clearance loop seats ``bypass_v_tight``'s V on a full flat by
+    pushing the bypassed node and the merge target each a grid column out, so
+    the settled layout passes the guard.  Pulling the exit port back toward the
+    bypassed node reinstates the tight merge run, and the guard -- the backstop
+    behind the loop -- must raise on the collapsed flat.
+    """
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_bypass_v_flat_visible,
+    )
+
+    graph = _layout("topologies/bypass_v_tight.mmd", _cache=False)
+    _guard_bypass_v_flat_visible(graph, "test")
+
+    graph.stations["mid__exit_right_1"].x -= X_SPACING
+    with pytest.raises(PhaseInvariantError, match="bypass-V flat"):
+        _guard_bypass_v_flat_visible(graph, "test")
 
 
 # A label wider than its station's flat run pushes a fan-in/fan-out,

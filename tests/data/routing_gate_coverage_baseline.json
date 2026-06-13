@@ -162,8 +162,6 @@
   "intra_handlers.py::if section.direction == \"LR\" and port.side != PortSide.LEFT:::#1",
   "intra_handlers.py::if section.direction == \"RL\" and port.side != PortSide.RIGHT:::#1",
   "intra_handlers.py::if section.direction not in (\"LR\", \"RL\"):::#1",
-  "intra_handlers.py::if src_min + tgt_min + ctx.diagonal_run > abs(dx):::#2",
-  "intra_handlers.py::if src_min + tgt_min + ctx.diagonal_run > abs(dx):::#3",
   "normalize.py::elif above_ok:::#1",
   "normalize.py::elif far_y < t.y - COORD_TOLERANCE:::#1",
   "normalize.py::elif right_ok:::#1",

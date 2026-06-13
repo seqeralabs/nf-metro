@@ -110,6 +110,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_anchors_frozen_during_placement,
     _guard_bundle_order_preserved,
     _guard_bypass_port_no_slot_gaps,
+    _guard_bypass_v_flat_visible,
     _guard_centered_line_spread_balanced,
     _guard_coordinates_finite,
     _guard_entry_approach_from_port_side,
@@ -251,6 +252,7 @@ from nf_metro.layout.phases.spacing import (  # noqa: F401
     _MAX_SPREAD_ITERS,
     _SPREAD_SLACK,
     _bypass_label_obstacles,
+    _label_clearance_issues,
     _residual_label_overlaps,
     _spread_bump,
     _struck_stations_and_collinear,
@@ -612,6 +614,7 @@ def _compute_layout_scaled(
         _guard_no_label_overlap(graph, "final")
         _guard_no_diagonal_strikes_horizontal_label(graph, "final")
         _guard_no_line_strikes_label(graph, "final")
+        _guard_bypass_v_flat_visible(graph, "final")
         _guard_no_wrapped_label_trunk_strike(graph, "final")
         _guard_file_icon_no_name_label(graph, "final")
         _guard_no_line_crosses_file_icon(graph, "final")
@@ -705,9 +708,27 @@ def _apply_label_strike_clearance(
             return sec.label_strike_exit_cols
         return sec.label_strike_layer_gaps.get(layer, 0)
 
-    struck, _ = _struck_stations_and_collinear(graph)
+    # A station a bypass V diverges from is the diagonal's source, so its strike
+    # is relocated by lengthening the run *after* it: a gap before the next
+    # layer pushes the bypassed node a grid column further out.  Fan-in and
+    # convergence strikes land on the diagonal's target, cleared by the gap
+    # before the struck station's own layer.
+    bypass_divergence_sources = {
+        edge.source
+        for edge in graph.edges
+        if edge.target.startswith("__bypass_")
+        and not edge.source.startswith("__bypass_")
+    }
+
+    def _issues() -> tuple[set[str], bool, set[tuple[str, str, int]]]:
+        struck_, collinear_, flat_gaps_ = _label_clearance_issues(graph)
+        flat_levers_ = {("gap", sid, layer) for sid, layer in flat_gaps_}
+        return struck_, collinear_, flat_levers_
+
+    struck, _, flat_levers = _issues()
+    count = len(struck) + len(flat_levers)
     for _ in range(_MAX_SPREAD_ITERS):
-        levers: set[tuple[str, str, int]] = set()
+        levers: set[tuple[str, str, int]] = set(flat_levers)
         for sid in struck:
             target = _growable_target(sid)
             if target is None:
@@ -718,23 +739,27 @@ def _apply_label_strike_clearance(
                 ("exit", sec.id, 0),
                 ("gap", sec.id, layer),
             }
+            if sid in bypass_divergence_sources:
+                levers.add(("gap", sec.id, layer + 1))
         if not levers:
             break
         for lever in levers:
             _adjust(lever, 1)
         _relay()
-        after, collinear = _struck_stations_and_collinear(graph)
-        if collinear or len(after) >= len(struck):
+        after, collinear, after_flats = _issues()
+        after_count = len(after) + len(after_flats)
+        if collinear or after_count >= count:
             for lever in levers:
                 _adjust(lever, -1)
             _relay()
             break
-        struck = after
+        struck, flat_levers, count = after, after_flats, after_count
 
     # Minimization: shrink each grown lever column by column, keeping a drop only
-    # while the labels stay clear and no collinear overlay appears, so every
-    # lever lands at its least load-bearing value.  Skipped entirely when nothing
-    # grew, so a clean layout never pays a re-lay (and is never perturbed by one).
+    # while the labels stay clear, no collinear overlay appears, and no bypass-V
+    # flat re-collapses, so every lever lands at its least load-bearing value.
+    # Skipped entirely when nothing grew, so a clean layout never pays a re-lay
+    # (and is never perturbed by one).
     grown: list[tuple[str, str, int]] = (
         [
             ("entry", sid, 0)
@@ -757,8 +782,8 @@ def _apply_label_strike_clearance(
             while _lever_value(lever) > 0:
                 _adjust(lever, -1)
                 _relay()
-                still_struck, collinear = _struck_stations_and_collinear(graph)
-                if still_struck or collinear:
+                still_struck, collinear, still_flat = _label_clearance_issues(graph)
+                if still_struck or collinear or still_flat:
                     _adjust(lever, 1)
                     break
         _relay()

@@ -34,13 +34,5 @@
   "intra_handlers.py::if abs(dx) < COORD_TOLERANCE:::#1": {
     "status": "candidate-dead",
     "note": "A same-section, non-TB intra edge with |dx| < COORD_TOLERANCE (1px) and non-zero dy is not constructible: layering assigns increasing X along edges so the minimum |dx| at _route_intra_section across the corpus is 50px (port spacing / off-track output lead). TB same-track edges that could reach |dx|=0 are intercepted by _route_tb_internal before this handler. Left in place pending the deletion review in #689."
-  },
-  "intra_handlers.py::if src_min + tgt_min + ctx.diagonal_run > abs(dx):::#2": {
-    "status": "needs-review",
-    "note": "Reachable: a tight intra-section bypass-V (the V's |dx| below src_min + v_flat_half + diagonal_run = 60px) takes this target-side clamp. But the only minimal fixture that hits it diverges the bypass at a labelled station with no horizontal lead-in, colliding the descending V with the station label (the layout bug tracked in #688; shrinking the label to dodge it is not an acceptable fixture). Deferred until #688 is fixed and the divergence reads cleanly."
-  },
-  "intra_handlers.py::if src_min + tgt_min + ctx.diagonal_run > abs(dx):::#3": {
-    "status": "needs-review",
-    "note": "Source-side mirror of the target-side bypass-V clamp (occurrence #2): same tight intra-section bypass, same divergence-at-a-labelled-station collision tracked in #688. Deferred until #688 is fixed."
   }
 }

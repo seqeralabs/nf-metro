@@ -1,0 +1,23 @@
+%%metro title: Bypass V Tight
+%%metro style: dark
+%%metro x_spacing: 50
+%%metro line: a | Line A | #FF9800
+%%metro line: b | Line B | #4CAF50
+
+graph LR
+    subgraph src [Source]
+        s1[Start]
+    end
+    subgraph mid [Mid]
+        %%metro exit: right | a,b
+        m1[Process A]
+        m2[Transform]
+        m1 -->|a| m2
+    end
+    subgraph dest [Dest]
+        d1[End]
+    end
+
+    s1 -->|a,b| m1
+    m2 -->|a| d1
+    m1 -->|b| d1
