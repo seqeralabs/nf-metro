@@ -183,7 +183,6 @@
   "normalize.py::if abs(x1 - x0) > COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:::#1",
   "normalize.py::if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:::#1",
   "normalize.py::if all(abs(target_x[lid] - per_line[lid][1]) <= COORD_TOLERANCE for lid in lines):::#1",
-  "normalize.py::if any(t.x_lo < o.x_hi and o.x_lo < t.x_hi for o in sg):::#1",
   "normalize.py::if band is not None:::#1",
   "normalize.py::if band is not None:::#2",
   "normalize.py::if best < cur:::#1",

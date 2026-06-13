@@ -286,9 +286,5 @@
   "normalize.py::if hit is None:::#2": {
     "status": "needs-review",
     "note": "Distinct-line dogleg obstacle test (->1248 no-obstacle, ->1249 obstacle), reached only when the distinct dogleg runs - the eager-bundling case in #702. Exercise with a clean fixture once #702 renders cleanly."
-  },
-  "normalize.py::if any(t.x_lo < o.x_hi and o.x_lo < t.x_hi for o in sg):::#1": {
-    "status": "needs-review",
-    "note": "Disjoint same-line trunk slotting (->1278): two disjoint trunks of one line keep separate slots instead of riding one shared trunk and peeling off at the turn column - the early-unbundling violation in #702. Exercise with a clean fixture once #702 defers the split."
   }
 }
