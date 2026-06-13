@@ -37,25 +37,40 @@ def _coverage_already_running() -> bool:
 
 
 @pytest.fixture(scope="module")
-def current_gaps() -> set[str]:
-    """Gates with an un-exercised arm, computed once per module.
+def rgc():
+    """The coverage script as an importable module, behind the skip guards.
 
-    Rendering the corpus under coverage is the dominant cost, so the two
-    ratchet assertions share a single run.
+    Skips the whole module when a coverage tracer is already active (it cannot
+    be nested) or the interpreter differs from the pinned baseline (the arc
+    model is version-specific).
     """
     if _coverage_already_running():
         pytest.skip("cannot nest a Coverage tracer inside an active coverage run")
     sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
-    import routing_gate_coverage as rgc
+    import routing_gate_coverage as module
 
-    if sys.version_info[:2] != rgc.BASELINE_PYTHON:
+    if sys.version_info[:2] != module.BASELINE_PYTHON:
         pytest.skip(
-            f"gate baseline is pinned to CPython {rgc.BASELINE_PYTHON[0]}."
-            f"{rgc.BASELINE_PYTHON[1]}; coverage's arc model differs on "
+            f"gate baseline is pinned to CPython {module.BASELINE_PYTHON[0]}."
+            f"{module.BASELINE_PYTHON[1]}; coverage's arc model differs on "
             f"{sys.version_info[0]}.{sys.version_info[1]}"
         )
+    return module
 
-    return set(rgc.gap_keys(rgc.compute_gate_coverage()))
+
+@pytest.fixture(scope="module")
+def gates(rgc):
+    """Every routing gate with per-arm coverage, computed once per module.
+
+    Rendering the corpus under coverage is the dominant cost, so all assertions
+    share a single run.
+    """
+    return rgc.compute_gate_coverage()
+
+
+@pytest.fixture(scope="module")
+def current_gaps(rgc, gates) -> set[str]:
+    return set(rgc.gap_keys(gates))
 
 
 @pytest.fixture(scope="module")
@@ -90,17 +105,13 @@ def test_gate_coverage_baseline_in_sync(current_gaps, baseline_gaps):
     )
 
 
-def test_triage_sidecar_references_open_gaps(current_gaps):
+def test_triage_sidecar_references_open_gaps(rgc, gates):
     """Every triage verdict must name a gate that is an open gap.
 
     A verdict whose gate the corpus exercises (or whose key text has diverged)
     would silently mis-describe a closed gate, so it must be pruned.
     """
-    sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
-    import routing_gate_coverage as rgc
-
-    triage = rgc.load_triage()
-    stale = sorted(set(triage) - current_gaps)
+    stale = rgc.triage_stale_keys(gates, rgc.load_triage())
     assert not stale, (
         "Triage sidecar entr(y/ies) name gates that are not open gaps; remove "
         "them from tests/data/routing_gate_triage.json:\n  " + "\n  ".join(stale)

@@ -41,9 +41,9 @@ BASELINE_PATH = PROJECT_ROOT / "tests" / "data" / "routing_gate_coverage_baselin
 # the matrix's Triage column so a triaged arm is not re-investigated.
 TRIAGE_PATH = PROJECT_ROOT / "tests" / "data" / "routing_gate_triage.json"
 
-# Accepted triage verdicts. ``reachable`` arms are not recorded here -- they are
-# closed by authoring a fixture, which drops them from the gap set entirely.
-TRIAGE_STATUSES = {"defensive", "candidate-dead", "needs-review"}
+# Accepted triage verdicts. ``reachable`` is absent by design: a fixture closes
+# such an arm, dropping it from the gap set rather than recording a verdict.
+TRIAGE_STATUSES = frozenset({"defensive", "candidate-dead", "needs-review"})
 
 # ``coverage`` derives a module's branch arcs from CPython bytecode, whose arc
 # model shifts between interpreter versions (e.g. 3.12 splits short-circuit
@@ -100,18 +100,19 @@ def _collect_corpus() -> list[tuple[Path, bool]]:
     the loose ``tests/fixtures/`` fixtures, and the Nextflow-DAG fixtures under
     ``tests/fixtures/nextflow/`` (which need ``convert_nextflow_dag`` before
     parsing). Widening past the original ``examples/``-only scope lets the test
-    fixtures retire gate arms the gallery never reaches.
+    fixtures retire gate arms the gallery never reaches. Unlike
+    ``content_corpus`` this keeps the ``rails`` fixtures -- their rail router is
+    a routing path the matrix should measure, not skip.
     """
     examples = PROJECT_ROOT / "examples"
     fixtures = PROJECT_ROOT / "tests" / "fixtures"
     nextflow = fixtures / "nextflow"
-    candidates: list[tuple[Path, bool]] = []
-    for p in sorted(examples.rglob("*.mmd")):
-        candidates.append((p, False))
-    for p in sorted(fixtures.glob("*.mmd")):
-        candidates.append((p, False))
-    for p in sorted(nextflow.glob("*.mmd")):
-        candidates.append((p, True))
+    sources: list[tuple[list[Path], bool]] = [
+        (sorted(examples.rglob("*.mmd")), False),
+        (sorted(fixtures.glob("*.mmd")), False),
+        (sorted(nextflow.glob("*.mmd")), True),
+    ]
+    candidates = [(p, is_nextflow) for paths, is_nextflow in sources for p in paths]
 
     seen: set[str] = set()
     out: list[tuple[Path, bool]] = []
