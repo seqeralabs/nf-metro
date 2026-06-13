@@ -171,14 +171,6 @@
     "status": "candidate-dead",
     "note": "Row-agnostic union-gap fallback in _match_channel_gap is provably unreachable: the union gap [max(col_lo right edges), min(col_hi left edges)] is a subset of every per-row gap that brackets a channel, so overlap_match/bracket_match always resolve first and the union fallback is never reached. Left in place pending the deletion review in #689."
   },
-  "normalize.py::if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:::#1": {
-    "status": "candidate-dead",
-    "note": "Interior horizontal segments only occur in 6-point bypass U-shapes whose flanking legs are always vertical (same x on each side); routes with non-vertical flanks are normalize_exempt and filtered out. The prev-flank-non-vertical reject in _collect_htrunks is unreachable. Pending deletion review in #689."
-  },
-  "normalize.py::if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:::#1": {
-    "status": "candidate-dead",
-    "note": "Mirror of the prev-flank guard: a bypass trunk's trailing flank is always vertical, so the next-flank-non-vertical reject in _collect_htrunks is unreachable. Pending deletion review in #689."
-  },
   "normalize.py::if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:::#1": {
     "status": "candidate-dead",
     "note": "Every non-exempt inter-section route ends with a vertical descent into the target Y then a short horizontal port lead (V->H tail); routes with non-V tails are normalize_exempt. The second-to-last-not-vertical reject in _final_port_approach is unreachable. Pending deletion review in #689."
@@ -274,5 +266,13 @@
   "normalize.py::elif below_ok and (not above_ok or prefer_below):::#1": {
     "status": "needs-review",
     "note": "Distinct-line dogleg crossing-tie fallback (preserves the pre-fix lean-toward side): reached only when the crossing test does not disambiguate the two sides, so both arms (->1343 below, ->1344 try-up) await a distinct dogleg fixture whose sides tie on crossings."
+  },
+  "common.py::if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:::#1": {
+    "status": "candidate-dead",
+    "note": "Mirror of the prev-flank guard: a bypass trunk's trailing flank is always vertical, so the next-flank-non-vertical reject in iter_horizontal_trunks is unreachable. Pending deletion review in #689."
+  },
+  "common.py::if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:::#1": {
+    "status": "candidate-dead",
+    "note": "Interior horizontal segments only occur in 6-point bypass U-shapes whose flanking legs are always vertical (same x on each side); routes with non-vertical flanks are normalize_exempt and filtered out. The prev-flank-non-vertical reject in iter_horizontal_trunks is unreachable. Pending deletion review in #689."
   }
 }

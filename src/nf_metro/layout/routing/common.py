@@ -278,11 +278,12 @@ class HTrunkSeg:
         return max(self.xa, self.xb)
 
 
-def iter_horizontal_trunks(rp: RoutedPath) -> Iterator[HTrunkSeg]:
-    """Yield each interior horizontal trunk segment of *rp* as an ``HTrunkSeg``.
+def iter_horizontal_trunks(rp: RoutedPath) -> Iterator[tuple[int, HTrunkSeg]]:
+    """Yield ``(waypoint_index, segment)`` for each interior horizontal trunk.
 
     A trunk is an interior horizontal leg whose two flanking neighbours are
-    both vertical, i.e. the bottom (or top) leg of a U-shaped bypass.
+    both vertical, i.e. the bottom (or top) leg of a U-shaped bypass.  The
+    index is the trunk leg's first waypoint, ``points[index] -> [index+1]``.
     """
     pts = rp.points
     for k in range(1, len(pts) - 2):
@@ -294,7 +295,7 @@ def iter_horizontal_trunks(rp: RoutedPath) -> Iterator[HTrunkSeg]:
             continue
         if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:
             continue
-        yield HTrunkSeg(y0, x0, x1, pts[k - 1][1], pts[k + 2][1])
+        yield k, HTrunkSeg(y0, x0, x1, pts[k - 1][1], pts[k + 2][1])
 
 
 def _vert_horiz_cross(

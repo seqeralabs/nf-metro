@@ -25,6 +25,7 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
     column_gap_edges,
     initial_fanout_descent_span,
+    iter_horizontal_trunks,
     row_bottom_edge,
     row_top_edge,
     symmetric_bundle_midpoint,
@@ -385,27 +386,16 @@ def _collect_htrunks(
             continue
         if rp.normalize_exempt and not include_exempt:
             continue
-        pts = rp.points
-        for k in range(1, len(pts) - 2):
-            x0, y0 = pts[k]
-            x1, y1 = pts[k + 1]
-            if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
-                continue
-            # Both flanking neighbours must be vertical legs.
-            if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:
-                continue
-            if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:
-                continue
-            dips_down = pts[k - 1][1] < y0 - COORD_TOLERANCE
+        for k, seg in iter_horizontal_trunks(rp):
             out.append(
                 _HTrunk(
                     route=rp,
                     idx=k,
-                    y=y0,
-                    x_lo=min(x0, x1),
-                    x_hi=max(x0, x1),
-                    dips_down=dips_down,
-                    sign_x=1 if x1 > x0 else -1,
+                    y=seg.y,
+                    x_lo=seg.x_lo,
+                    x_hi=seg.x_hi,
+                    dips_down=seg.before_y < seg.y - COORD_TOLERANCE,
+                    sign_x=1 if seg.xb > seg.xa else -1,
                 )
             )
     return out

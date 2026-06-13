@@ -1131,7 +1131,7 @@ def check_no_dogleg_crosses_exempt_trunk(
         (rp, seg)
         for rp in routes
         if rp.is_inter_section and rp.normalize_exempt
-        for seg in iter_horizontal_trunks(rp)
+        for _k, seg in iter_horizontal_trunks(rp)
     ]
     if not exempt:
         return []
@@ -1139,7 +1139,7 @@ def check_no_dogleg_crosses_exempt_trunk(
     for rp in routes:
         if not rp.is_inter_section or rp.normalize_exempt:
             continue
-        for seg in iter_horizontal_trunks(rp):
+        for _k, seg in iter_horizontal_trunks(rp):
             for erp, eseg in exempt:
                 if erp.line_id == rp.line_id:
                     continue
