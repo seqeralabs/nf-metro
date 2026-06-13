@@ -13,7 +13,7 @@
   },
   "intra_handlers.py::if section.direction not in (\"LR\", \"RL\"):::#1": {
     "status": "candidate-dead",
-    "note": "No TB/BT entry reaches _route_entry_runway: TB LEFT/RIGHT entries are consumed by _route_tb_lr_entry and TB/BT TOP/BOTTOM entries by _route_perp_entry (both earlier in the dispatch chain), and a BT section is never produced (the direction directive accepts only LR/RL/TB; 0/391 corpus sections are BT). Left in place as a cheap backstop pending a deletion review."
+    "note": "No TB/BT entry reaches _route_entry_runway: TB LEFT/RIGHT entries are consumed by _route_tb_lr_entry and TB/BT TOP/BOTTOM entries by _route_perp_entry (both earlier in the dispatch chain), and a BT section is never produced (the direction directive accepts only LR/RL/TB; 0/391 corpus sections are BT). Left in place as a cheap backstop pending the deletion review in #689."
   },
   "intra_handlers.py::if not st or st.is_port:::#1": {
     "status": "defensive",
@@ -21,10 +21,26 @@
   },
   "intra_handlers.py::if dx <= 0 and abs(dy) > CROSS_ROW_THRESHOLD and not same_section:::#1": {
     "status": "candidate-dead",
-    "note": "The not-same_section precondition is never satisfied at _route_intra_section: cross-section edges are consumed by _route_inter_section upstream (0/391 corpus fixtures reach this branch with differing sections), and a sectionless flat graph's serpentine fold is routed before this handler too (verified: a flat fold over the threshold does not reach the arm). The cross-row fold branch is shadowed. Left in place pending a deletion review."
+    "note": "The not-same_section precondition is never satisfied at _route_intra_section: cross-section edges are consumed by _route_inter_section upstream (0/391 corpus fixtures reach this branch with differing sections), and a sectionless flat graph's serpentine fold is routed before this handler too (verified: a flat fold over the threshold does not reach the arm). The cross-row fold branch is shadowed. Left in place pending the deletion review in #689."
   },
   "intra_handlers.py::if not (same_sec or is_exit_port):::#1": {
     "status": "candidate-dead",
-    "note": "_is_side_branch_ascent reaches this classification (44/391 corpus fixtures) but no fixture takes the reject arm: a target sitting within offset_step*2 of the source section's trunk Y is always a same-section internal station or that section's exit port. The arm needs a target at the source's trunk Y that belongs to a different section or is a non-exit port, which the trunk-alignment geometry does not produce. Left in place pending a deletion review."
+    "note": "_is_side_branch_ascent reaches this classification (44/391 corpus fixtures) but no fixture takes the reject arm: a target sitting within offset_step*2 of the source section's trunk Y is always a same-section internal station or that section's exit port. The arm needs a target at the source's trunk Y that belongs to a different section or is a non-exit port, which the trunk-alignment geometry does not produce. Left in place pending the deletion review in #689."
+  },
+  "intra_handlers.py::if room < src_min + ctx.diagonal_run:::#1": {
+    "status": "candidate-dead",
+    "note": "The entry-runway 'too tight' return cannot fire: room = |first_x - entry_port_x| is floored at SECTION_X_PADDING (50px, the entry port sits at section.bbox_x = min(internal_station_x) - SECTION_X_PADDING), while the threshold src_min + diagonal_run = CURVE_RADIUS(10) + MIN_STRAIGHT_PORT(5) + DIAGONAL_RUN(30) = 45px. Since 50 >= 45 the guard is always False; SECTION_X_PADDING is not exposed as a directive. Left in place pending the deletion review in #689."
+  },
+  "intra_handlers.py::if abs(dx) < COORD_TOLERANCE:::#1": {
+    "status": "candidate-dead",
+    "note": "A same-section, non-TB intra edge with |dx| < COORD_TOLERANCE (1px) and non-zero dy is not constructible: layering assigns increasing X along edges so the minimum |dx| at _route_intra_section across the corpus is 50px (port spacing / off-track output lead). TB same-track edges that could reach |dx|=0 are intercepted by _route_tb_internal before this handler. Left in place pending the deletion review in #689."
+  },
+  "intra_handlers.py::if src_min + tgt_min + ctx.diagonal_run > abs(dx):::#2": {
+    "status": "needs-review",
+    "note": "Reachable: a tight intra-section bypass-V (the V's |dx| below src_min + v_flat_half + diagonal_run = 60px) takes this target-side clamp. But the only minimal fixture that hits it diverges the bypass at a labelled station with no horizontal lead-in, colliding the descending V with the station label (the layout bug tracked in #688; shrinking the label to dodge it is not an acceptable fixture). Deferred until #688 is fixed and the divergence reads cleanly."
+  },
+  "intra_handlers.py::if src_min + tgt_min + ctx.diagonal_run > abs(dx):::#3": {
+    "status": "needs-review",
+    "note": "Source-side mirror of the target-side bypass-V clamp (occurrence #2): same tight intra-section bypass, same divergence-at-a-labelled-station collision tracked in #688. Deferred until #688 is fixed."
   }
 }

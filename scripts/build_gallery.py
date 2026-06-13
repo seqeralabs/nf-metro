@@ -415,6 +415,20 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "straight in, rather than diving under the return row counter to its "
         "flow.",
     ),
+    (
+        "rl_entry_runway",
+        TOPOLOGIES_DIR,
+        "A right-to-left section whose flow-side entry skips ahead to a deep "
+        "off-track target, compressing the diagonal into the entry region and "
+        "running a horizontal runway past the bypassed stations.",
+    ),
+    (
+        "terminus_join",
+        TOPOLOGIES_DIR,
+        "Two lines converge on a single file-icon terminus in a sectionless "
+        "flat graph, so the join lands directly on the terminus rather than a "
+        "synthesised convergence junction.",
+    ),
 ]
 
 # Category headers inserted before specific entries
