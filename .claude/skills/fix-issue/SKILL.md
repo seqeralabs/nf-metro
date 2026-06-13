@@ -36,7 +36,7 @@ git worktree add /tmp/nf-metro-fix-<N> -b fix/<N>-<slug> origin/main
 # Fix environment
 ulimit -n 1000000 && export CONDA_OVERRIDE_OSX=15.0 && /opt/homebrew/bin/micromamba create -n nf-metro-fix-<N> python=3.11 cairo -y
 source ~/.local/bin/mm-activate nf-metro-fix-<N>
-pip install -e "/tmp/nf-metro-fix-<N>[docs]"
+pip install -e "/tmp/nf-metro-fix-<N>[dev,docs]"
 ```
 
 All subsequent work happens inside `/tmp/nf-metro-fix-<N>`.
