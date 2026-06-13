@@ -1305,32 +1305,50 @@ def test_disjoint_sameline_trunks_bundle_tight():
 
 
 def test_peeloff_riser_keeps_bundle_order():
-    """A bypass-trunk bundle peeling a non-contiguous subset up into a shared
-    entry port keeps each source bundle's declaration order at the bend
-    (issue #695).
+    """A bypass-trunk bundle peeling up into a shared entry port enters it
+    concentrically and keeps that order through the consumer section (#695).
 
-    In ``peeloff_riser_respace`` four lines ride one shared bypass trunk and
-    rise into the destination's left entry port.  The trunk-Y order and the
-    riser-X order are normalized by independent passes and disagree on the
-    interior lines, so a respace that mirrors each line's trunk-Y offset onto X
-    inverted the ``l1``/``l2`` and ``l3``/``l4`` pairs, crossing each
-    same-source bundle at the peel-off corner.  ``validate=True`` runs
-    ``_guard_bundle_order_preserved`` at the final boundary; the settled route
-    must leave no same-bundle crossing.
+    In ``peeloff_riser_respace`` four lines from two sources ride one shared
+    bypass trunk below the destination row and rise into its left entry port.
+    The trunk stacking puts the nearer source's lines on top, but the riser
+    peel order, the port-slot offsets, and the consumer section's internal
+    order are assigned in line-declaration order by independent passes, so the
+    lines on the bottom of the trunk rose on the near side and cut across the
+    others.  The settled route must order the riser peel-x, the port slots, and
+    the section's internal bundle by trunk depth, so:
+
+    1. no two lines make an avoidable crossing, and
+    2. the bundle's top-to-bottom order at the port entry matches its order on
+       the internal ``d1 -> d2`` run - a reorder between them would be a
+       crossing the validator's hub-exclusion hides just inside the boundary.
     """
     from layout_validator import check_route_segment_crossings
 
     fixture = "topologies/peeloff_riser_respace.mmd"
     graph = _layout(fixture, validate=True)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
 
-    same_bundle = [
-        v
-        for v in check_route_segment_crossings(graph)
-        if v.context["edge_a"] == v.context["edge_b"]
-    ]
-    assert not same_bundle, (
-        "peel-off respace inverted a same-source bundle at the bend: "
-        + "; ".join(v.message for v in same_bundle)
+    crossings = check_route_segment_crossings(graph, (offsets, routes))
+    assert not crossings, "; ".join(v.message for v in crossings)
+
+    def order_by_y(selected, at_target):
+        rows = [
+            (rp.line_id, apply_route_offsets(rp, offsets)[-1 if at_target else 0][1])
+            for rp in selected
+        ]
+        return [lid for lid, _ in sorted(rows, key=lambda r: r[1])]
+
+    port_order = order_by_y(
+        [rp for rp in routes if rp.edge.target == "dst__entry_left_2"], at_target=True
+    )
+    internal_order = order_by_y(
+        [rp for rp in routes if rp.edge.source == "d1" and rp.edge.target == "d2"],
+        at_target=False,
+    )
+    assert port_order == internal_order, (
+        f"bundle reorders entering the section: port {port_order} "
+        f"vs internal {internal_order}"
     )
 
 

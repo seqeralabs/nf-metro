@@ -151,10 +151,6 @@
     "status": "candidate-dead",
     "note": "Row-agnostic union-gap fallback in _match_channel_gap is provably unreachable: the union gap [max(col_lo right edges), min(col_hi left edges)] is a subset of every per-row gap that brackets a channel, so overlap_match/bracket_match always resolve first and the union fallback is never reached. Left in place pending the deletion review in #689."
   },
-  "normalize.py::if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:::#1": {
-    "status": "candidate-dead",
-    "note": "Every non-exempt inter-section route ends with a vertical descent into the target Y then a short horizontal port lead (V->H tail); routes with non-V tails are normalize_exempt. The second-to-last-not-vertical reject in _final_port_approach is unreachable. Pending deletion review in #689."
-  },
   "normalize.py::if sg[0].sign_x != t.sign_x:::#1": {
     "status": "candidate-dead",
     "note": "Both callers of _coincident_trunk_slots pre-filter input to a single traversal direction (band = [t for t in grp if t.sign_x == sign]), so within the function sg[0].sign_x != t.sign_x is always False; the opposing-direction continue is unreachable. Pending deletion review in #689."
@@ -478,5 +474,9 @@
   "offsets.py::if not in_section and not on_row:::#1": {
     "status": "needs-review",
     "note": "The skip arm of _apply_offsets_along_bundle's row-continuation gate fires only when a line re-slotted at a merge port turns off the merge row before reaching its consumer; the corpus merge-port fixtures keep the re-joined line on the merge row to its output, so the off-row stop is not exercised."
+  },
+  "normalize.py::if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:::#2": {
+    "status": "candidate-dead",
+    "note": "Every non-exempt inter-section route ends with a vertical descent into the target Y then a short horizontal port lead (V->H tail); routes with non-V tails are normalize_exempt. The second-to-last-not-vertical reject in _final_port_approach is unreachable. Pending deletion review in #689."
   }
 }
