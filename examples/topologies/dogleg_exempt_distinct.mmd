@@ -1,0 +1,40 @@
+%%metro title: Dogleg Off Exempt Trunks - Distinct Line Regime
+%%metro style: dark
+%%metro line: wrap | Wrap | #0570b0
+%%metro line: byp | Bypass | #e63946
+%%metro line: skip | Skip | #2ca02c
+
+%%metro grid: left_tgt | 0,0
+%%metro grid: right_src | 1,1
+%%metro grid: bot_sink | 2,1
+%%metro grid: skip_src | 0,1
+
+graph LR
+    subgraph left_tgt [Left Target]
+        %%metro entry: left | wrap
+        lt1[Collect]
+        lt2[Output]
+        lt1 -->|wrap| lt2
+    end
+
+    subgraph right_src [Right Source]
+        rs1[Input R]
+        rs2[Hub R]
+        rs1 -->|wrap| rs2
+    end
+
+    subgraph bot_sink [Bottom Sink]
+        bs1[Collect B]
+        bs2[Output B]
+        bs1 -->|byp| bs2
+    end
+
+    subgraph skip_src [Skip Source]
+        ss1[Step S]
+        ss2[Out S]
+        ss1 -->|skip| ss2
+    end
+
+    rs2 -->|wrap| lt1
+    lt2 -->|byp| bs1
+    ss2 -->|skip| bs1

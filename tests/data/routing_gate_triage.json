@@ -135,10 +135,6 @@
     "status": "needs-review",
     "note": "Distinct-line dogleg: the band-found arm (->1252) is reachable only via the distinct dogleg whose routing crosses the exempt trunk twice (#702); the band-is-None arm (->1256) is defensive (the trunk Y always resolves to an inter-row gap band). Exercise ->1252 with a clean fixture once #702 renders cleanly."
   },
-  "normalize.py::if (t.y >= hit.y and below_ok) or (not above_ok and below_ok):::#1": {
-    "status": "needs-review",
-    "note": "Distinct-line dogleg: the below-move arm (->1258) is reachable only via the distinct dogleg that crosses the exempt trunk twice (#702); the move-up arm (->1259) is defensive (the trunk starts at the obstacle Y inside a valid band, so the below branch is always taken). Exercise ->1258 with a clean fixture once #702 renders cleanly."
-  },
   "normalize.py::elif above_ok:::#1": {
     "status": "defensive",
     "note": "Distinct-line dogleg move-up/skip branch: unreachable because the below branch is always taken (t.y == hit.y, below_ok true); covers both the move-up and the gap-too-tight continue."
@@ -174,14 +170,6 @@
   "normalize.py::if left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE:::#1": {
     "status": "candidate-dead",
     "note": "Row-agnostic union-gap fallback in _match_channel_gap is provably unreachable: the union gap [max(col_lo right edges), min(col_hi left edges)] is a subset of every per-row gap that brackets a channel, so overlap_match/bracket_match always resolve first and the union fallback is never reached. Left in place pending the deletion review in #689."
-  },
-  "normalize.py::if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:::#1": {
-    "status": "candidate-dead",
-    "note": "Interior horizontal segments only occur in 6-point bypass U-shapes whose flanking legs are always vertical (same x on each side); routes with non-vertical flanks are normalize_exempt and filtered out. The prev-flank-non-vertical reject in _collect_htrunks is unreachable. Pending deletion review in #689."
-  },
-  "normalize.py::if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:::#1": {
-    "status": "candidate-dead",
-    "note": "Mirror of the prev-flank guard: a bypass trunk's trailing flank is always vertical, so the next-flank-non-vertical reject in _collect_htrunks is unreachable. Pending deletion review in #689."
   },
   "normalize.py::if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:::#1": {
     "status": "candidate-dead",
@@ -271,20 +259,20 @@
     "status": "needs-review",
     "note": "Same-line dogleg obstacle test: the obstacle-found arm (->1213) is reachable only via the same-line regime whose down-move crowds the next-row header (#698); the no-obstacle arm (->1211) only fires when the dogleg pass runs on a topology with exempt obstacles. Both await a clean dogleg fixture (#698 / #702)."
   },
-  "normalize.py::if grp[0].dips_down != t.dips_down:::#1": {
+  "normalize.py::if below_ok and above_ok and (cross_below is None) != (cross_above is None):::#1": {
     "status": "needs-review",
-    "note": "Opposite-dip grouping arm (->450): a channel group holding both an up-dipping and a down-dipping bypass trunk. Reached this slice only incidentally via the now-withdrawn dogleg fixtures (#702); not itself an eager-bundling violation. Exercise with a dedicated clean opposite-dip fixture."
+    "note": "Distinct-line dogleg side selection: the crossing-decided arm (->1341, pick the side whose riser does not pierce the exempt run) is exercised by dogleg_exempt_distinct (#702); the fall-through arm (->1342) fires only when the two candidate sides are crossing-equal (both clear or both pierced) or one side is out of band, which the single clean fixture never produces. Exercise with a distinct dogleg whose two sides tie on crossings."
   },
-  "normalize.py::if id(t.route) in skip:::#1": {
+  "normalize.py::elif below_ok and (not above_ok or prefer_below):::#1": {
     "status": "needs-review",
-    "note": "_dogleg_off_exempt_trunks first-loop skip of an already-bundled route (->1199), reached only when the dogleg pass runs; the topologies that exercised it are the same-line (#698) and distinct-line eager-bundling (#702) doglegs. Exercise with a clean fixture once those render cleanly."
+    "note": "Distinct-line dogleg crossing-tie fallback (preserves the pre-fix lean-toward side): reached only when the crossing test does not disambiguate the two sides, so both arms (->1343 below, ->1344 try-up) await a distinct dogleg fixture whose sides tie on crossings."
   },
-  "normalize.py::if id(t.route) in skip:::#2": {
-    "status": "needs-review",
-    "note": "Distinct-line dogleg second-loop skip of an already-bundled route (->1236), reached only when the distinct dogleg runs - the eager-bundling case in #702. Exercise with a clean fixture once #702 renders cleanly."
+  "common.py::if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:::#1": {
+    "status": "candidate-dead",
+    "note": "Mirror of the prev-flank guard: a bypass trunk's trailing flank is always vertical, so the next-flank-non-vertical reject in iter_horizontal_trunks is unreachable. Pending deletion review in #689."
   },
-  "normalize.py::if hit is None:::#2": {
-    "status": "needs-review",
-    "note": "Distinct-line dogleg obstacle test (->1248 no-obstacle, ->1249 obstacle), reached only when the distinct dogleg runs - the eager-bundling case in #702. Exercise with a clean fixture once #702 renders cleanly."
+  "common.py::if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:::#1": {
+    "status": "candidate-dead",
+    "note": "Interior horizontal segments only occur in 6-point bypass U-shapes whose flanking legs are always vertical (same x on each side); routes with non-vertical flanks are normalize_exempt and filtered out. The prev-flank-non-vertical reject in iter_horizontal_trunks is unreachable. Pending deletion review in #689."
   }
 }

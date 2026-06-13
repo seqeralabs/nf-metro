@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
 
@@ -250,6 +251,81 @@ def initial_fanout_descent_span(
     if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:
         return None
     return x1, min(y1, y2), max(y1, y2), y2 > y1
+
+
+@dataclass(frozen=True)
+class HTrunkSeg:
+    """One interior horizontal leg of a route, flanked by two vertical legs.
+
+    The trunk runs at ``y`` from ``xa`` to ``xb`` (traversal order, not
+    sorted); its two flanking risers stand at those Xs and climb/drop to
+    ``before_y`` (at ``xa``) and ``after_y`` (at ``xb``) -- the bottom or top
+    of a U-shaped bypass.
+    """
+
+    y: float
+    xa: float
+    xb: float
+    before_y: float
+    after_y: float
+
+    @property
+    def x_lo(self) -> float:
+        return min(self.xa, self.xb)
+
+    @property
+    def x_hi(self) -> float:
+        return max(self.xa, self.xb)
+
+
+def iter_horizontal_trunks(rp: RoutedPath) -> Iterator[tuple[int, HTrunkSeg]]:
+    """Yield ``(waypoint_index, segment)`` for each interior horizontal trunk.
+
+    A trunk is an interior horizontal leg whose two flanking neighbours are
+    both vertical, i.e. the bottom (or top) leg of a U-shaped bypass.  The
+    index is the trunk leg's first waypoint, ``points[index] -> [index+1]``.
+    """
+    pts = rp.points
+    for k in range(1, len(pts) - 2):
+        x0, y0 = pts[k]
+        x1, y1 = pts[k + 1]
+        if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
+            continue
+        if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:
+            continue
+        if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:
+            continue
+        yield k, HTrunkSeg(y0, x0, x1, pts[k - 1][1], pts[k + 2][1])
+
+
+def _vert_horiz_cross(
+    vx: float, vy0: float, vy1: float, hy: float, hx0: float, hx1: float
+) -> bool:
+    """True when a vertical segment crosses a horizontal one in their interior.
+
+    Shared-endpoint touches (T-junctions, corners) are excluded: the crossing
+    point must lie strictly inside both segments.
+    """
+    lo, hi = min(vy0, vy1), max(vy0, vy1)
+    xlo, xhi = min(hx0, hx1), max(hx0, hx1)
+    return (
+        xlo + COORD_TOLERANCE < vx < xhi - COORD_TOLERANCE
+        and lo + COORD_TOLERANCE < hy < hi - COORD_TOLERANCE
+    )
+
+
+def trunk_segments_cross(a: HTrunkSeg, b: HTrunkSeg) -> tuple[float, float] | None:
+    """Return where trunks *a* and *b* cross, or ``None`` if they don't.
+
+    A crossing is a riser of one trunk piercing the horizontal run of the
+    other (the two parallel runs themselves never cross).  Returns the first
+    crossing point found.
+    """
+    for seg, other in ((a, b), (b, a)):
+        for vx, vy in ((seg.xa, seg.before_y), (seg.xb, seg.after_y)):
+            if _vert_horiz_cross(vx, seg.y, vy, other.y, other.x_lo, other.x_hi):
+                return vx, other.y
+    return None
 
 
 def compute_bundle_info(

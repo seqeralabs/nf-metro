@@ -21,12 +21,15 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.routing.common import (
     Direction,
+    HTrunkSeg,
     RoutedPath,
     column_gap_edges,
     initial_fanout_descent_span,
+    iter_horizontal_trunks,
     row_bottom_edge,
     row_top_edge,
     symmetric_bundle_midpoint,
+    trunk_segments_cross,
 )
 from nf_metro.layout.routing.context import (
     _RoutingCtx,
@@ -383,27 +386,16 @@ def _collect_htrunks(
             continue
         if rp.normalize_exempt and not include_exempt:
             continue
-        pts = rp.points
-        for k in range(1, len(pts) - 2):
-            x0, y0 = pts[k]
-            x1, y1 = pts[k + 1]
-            if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
-                continue
-            # Both flanking neighbours must be vertical legs.
-            if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:
-                continue
-            if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:
-                continue
-            dips_down = pts[k - 1][1] < y0 - COORD_TOLERANCE
+        for k, seg in iter_horizontal_trunks(rp):
             out.append(
                 _HTrunk(
                     route=rp,
                     idx=k,
-                    y=y0,
-                    x_lo=min(x0, x1),
-                    x_hi=max(x0, x1),
-                    dips_down=dips_down,
-                    sign_x=1 if x1 > x0 else -1,
+                    y=seg.y,
+                    x_lo=seg.x_lo,
+                    x_hi=seg.x_hi,
+                    dips_down=seg.before_y < seg.y - COORD_TOLERANCE,
+                    sign_x=1 if seg.xb > seg.xa else -1,
                 )
             )
     return out
@@ -1221,6 +1213,18 @@ def _inter_row_gap_band(ctx: _RoutingCtx, y: float) -> tuple[float, float] | Non
     return None
 
 
+def _htrunk_seg(t: _HTrunk, y: float) -> HTrunkSeg:
+    """Build the geometric trunk segment for *t* with its run placed at *y*.
+
+    The flanking risers stay anchored at their outer endpoints and stretch to
+    meet the run at *y*, mirroring :func:`_restack_htrunk`, so crossing tests
+    can probe a candidate placement before committing to it.
+    """
+    pts = t.route.points
+    k = t.idx
+    return HTrunkSeg(y, pts[k][0], pts[k + 1][0], pts[k - 1][1], pts[k + 2][1])
+
+
 def _dogleg_off_exempt_trunks(
     routes: list[RoutedPath], ctx: _RoutingCtx, skip: set[int] | None = None
 ) -> None:
@@ -1314,13 +1318,24 @@ def _dogleg_off_exempt_trunks(
             above_ok = above >= top
         else:
             below_ok = above_ok = True
-        if (t.y >= hit.y and below_ok) or (not above_ok and below_ok):
-            new_y = below
+        # Pick the side that keeps the trunk a crossing-free parallel bundle:
+        # nudging it onto the side whose riser would pierce the exempt run (or
+        # whose run the exempt riser would pierce) trades one fused stroke for
+        # two crossings.  Among crossing-equal sides, fall back to the side the
+        # trunk already leans toward.
+        obstacle = _htrunk_seg(hit, hit.y)
+        cross_below = trunk_segments_cross(_htrunk_seg(t, below), obstacle)
+        cross_above = trunk_segments_cross(_htrunk_seg(t, above), obstacle)
+        prefer_below = t.y >= hit.y
+        if below_ok and above_ok and (cross_below is None) != (cross_above is None):
+            use_below = cross_below is None
+        elif below_ok and (not above_ok or prefer_below):
+            use_below = True
         elif above_ok:
-            new_y = above
+            use_below = False
         else:
             continue
-        _restack_htrunk(t, new_y, 0, 1, step, ctx.curve_radius)
+        _restack_htrunk(t, below if use_below else above, 0, 1, step, ctx.curve_radius)
 
 
 def _coincident_trunk_slots(grp: list[_HTrunk]) -> list[list[_HTrunk]]:
