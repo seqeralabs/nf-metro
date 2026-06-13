@@ -379,6 +379,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "appears further along the channel (issue #702).",
     ),
     (
+        "dogleg_exempt_distinct",
+        TOPOLOGIES_DIR,
+        "A bypass line cleared off a different line's exempt wrap trunk in the "
+        "inter-row gap runs parallel above it as a tight bundle, rather than "
+        "doglegging onto the crossing side where its riser would pierce the "
+        "wrap run twice (issue #702).",
+    ),
+    (
         "off_track_convergence",
         TOPOLOGIES_DIR,
         "Multiple off-track file inputs converging on a single consumer. "

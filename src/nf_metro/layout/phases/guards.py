@@ -2507,6 +2507,29 @@ def _guard_no_split_same_line_fanout_descents(
     )
 
 
+def _guard_no_dogleg_crosses_exempt_trunk(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: a doglegged trunk runs parallel to its exempt mate.
+
+    Wraps :func:`check_no_dogleg_crosses_exempt_trunk`: a non-exempt bypass
+    trunk cleared off an ``normalize_exempt`` run of a different line must land
+    on the side that keeps the two parallel, never the side whose riser pierces
+    the exempt run and crosses it twice.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_no_dogleg_crosses_exempt_trunk,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_no_dogleg_crosses_exempt_trunk, offsets, routes
+    )
+
+
 def _raise_on_first_violation(
     graph: MetroGraph,
     phase: str,
