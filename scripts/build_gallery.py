@@ -438,27 +438,6 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "flat graph, so the join lands directly on the terminus rather than a "
         "synthesised convergence junction.",
     ),
-    (
-        "dogleg_exempt_distinct",
-        TOPOLOGIES_DIR,
-        "A non-exempt bypass trunk drawn inside a wrap run's sub-bundle gap is "
-        "nudged to a full bundle-step gap so both colours show as a tight "
-        "concentric bundle instead of one painted over the other.",
-    ),
-    (
-        "divergent_fanout_split",
-        TOPOLOGIES_DIR,
-        "One source fans the same line to two targets whose initial descents sit "
-        "in widely-separated column gaps, so the descents stay distinct "
-        "corridors rather than being fused into one trunk.",
-    ),
-    (
-        "disjoint_sameline_trunks",
-        TOPOLOGIES_DIR,
-        "A wide bypass trunk overlaps two disjoint trunks of another line in one "
-        "channel group; the disjoint same-line trunks keep separate concentric "
-        "slots since their X-spans never overlap.",
-    ),
 ]
 
 # Category headers inserted before specific entries

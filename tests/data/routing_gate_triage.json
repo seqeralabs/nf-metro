@@ -132,12 +132,12 @@
     "note": "Same-line dogleg move-up branch: unreachable because prefer_down is always True (the two flows start at the same Y), so the down branch is always taken before this elif."
   },
   "normalize.py::if band is not None:::#2": {
-    "status": "defensive",
-    "note": "Distinct-line dogleg: mirror of the same-line band guard; the trunk Y always resolves to an inter-row gap band, so the band-is-None fallback is never taken."
+    "status": "needs-review",
+    "note": "Distinct-line dogleg: the band-found arm (->1252) is reachable only via the distinct dogleg whose routing crosses the exempt trunk twice (#702); the band-is-None arm (->1256) is defensive (the trunk Y always resolves to an inter-row gap band). Exercise ->1252 with a clean fixture once #702 renders cleanly."
   },
   "normalize.py::if (t.y >= hit.y and below_ok) or (not above_ok and below_ok):::#1": {
-    "status": "defensive",
-    "note": "Distinct-line dogleg: the movable trunk starts at the obstacle's Y (t.y == hit.y) inside a valid band, so the below branch is always taken; the elif move-up arm is never reached."
+    "status": "needs-review",
+    "note": "Distinct-line dogleg: the below-move arm (->1258) is reachable only via the distinct dogleg that crosses the exempt trunk twice (#702); the move-up arm (->1259) is defensive (the trunk starts at the obstacle Y inside a valid band, so the below branch is always taken). Exercise ->1258 with a clean fixture once #702 renders cleanly."
   },
   "normalize.py::elif above_ok:::#1": {
     "status": "defensive",
@@ -269,6 +269,34 @@
   },
   "normalize.py::if hit is None:::#1": {
     "status": "needs-review",
-    "note": "The same-line dogleg 'obstacle found' arm (->1213) is reachable only via the same-line regime of _dogleg_off_exempt_trunks, whose forced down-move crowds the next-row section header (#698). The other arm (->1211, no obstacle) is exercised by dogleg_exempt_distinct. Exercise ->1213 with a clean fixture once #698 is fixed."
+    "note": "Same-line dogleg obstacle test: the obstacle-found arm (->1213) is reachable only via the same-line regime whose down-move crowds the next-row header (#698); the no-obstacle arm (->1211) only fires when the dogleg pass runs on a topology with exempt obstacles. Both await a clean dogleg fixture (#698 / #702)."
+  },
+  "normalize.py::if grp[0].dips_down != t.dips_down:::#1": {
+    "status": "needs-review",
+    "note": "Opposite-dip grouping arm (->450): a channel group holding both an up-dipping and a down-dipping bypass trunk. Reached this slice only incidentally via the now-withdrawn dogleg fixtures (#702); not itself an eager-bundling violation. Exercise with a dedicated clean opposite-dip fixture."
+  },
+  "normalize.py::if len(cluster) < 2:::#2": {
+    "status": "needs-review",
+    "note": "Divergent fan-out flush of a singleton cluster (->846), reachable only via a same-line fan-out whose descents split too early - the eager-bundling violation in #702. Exercise with a clean fixture once #702 defers the split."
+  },
+  "normalize.py::if cluster and ch.x - cluster[-1].x > band:::#2": {
+    "status": "needs-review",
+    "note": "Divergent fan-out descent cluster-split (->855): the pass gives up fusing same-line descents >16px apart, which produces the early-split crossover in #702. Exercise with a clean fixture once #702 defers the split."
+  },
+  "normalize.py::if id(t.route) in skip:::#1": {
+    "status": "needs-review",
+    "note": "_dogleg_off_exempt_trunks first-loop skip of an already-bundled route (->1199), reached only when the dogleg pass runs; the topologies that exercised it are the same-line (#698) and distinct-line eager-bundling (#702) doglegs. Exercise with a clean fixture once those render cleanly."
+  },
+  "normalize.py::if id(t.route) in skip:::#2": {
+    "status": "needs-review",
+    "note": "Distinct-line dogleg second-loop skip of an already-bundled route (->1236), reached only when the distinct dogleg runs - the eager-bundling case in #702. Exercise with a clean fixture once #702 renders cleanly."
+  },
+  "normalize.py::if hit is None:::#2": {
+    "status": "needs-review",
+    "note": "Distinct-line dogleg obstacle test (->1248 no-obstacle, ->1249 obstacle), reached only when the distinct dogleg runs - the eager-bundling case in #702. Exercise with a clean fixture once #702 renders cleanly."
+  },
+  "normalize.py::if any(t.x_lo < o.x_hi and o.x_lo < t.x_hi for o in sg):::#1": {
+    "status": "needs-review",
+    "note": "Disjoint same-line trunk slotting (->1278): two disjoint trunks of one line keep separate slots instead of riding one shared trunk and peeling off at the turn column - the early-unbundling violation in #702. Exercise with a clean fixture once #702 defers the split."
   }
 }
