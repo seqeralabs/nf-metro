@@ -67,9 +67,9 @@
     "status": "defensive",
     "note": "Bounds guard in _set_vchannel_x: radius_idx in (k-1, k) for a real channel stays in range; the out-of-range skip arm is defensive."
   },
-  "normalize.py::if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:::#1": {
+  "common.py::if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:::#1": {
     "status": "defensive",
-    "note": "Reject arm in _initial_fanout_descent: a route whose first segment is horizontal (passes the prior check) always has a vertical second segment in the orthogonal inter-section route model; the non-vertical reject mirrors the proven-unreachable _final_port_approach reject (L687) and never fires."
+    "note": "Reject arm in initial_fanout_descent_span: a route whose first segment is horizontal (passes the prior check) always has a vertical second segment in the orthogonal inter-section route model; the non-vertical reject mirrors the proven-unreachable _final_port_approach reject (L687) and never fires."
   },
   "normalize.py::elif far_y < t.y - COORD_TOLERANCE:::#1": {
     "status": "defensive",

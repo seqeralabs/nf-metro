@@ -23,6 +23,7 @@ from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
     column_gap_edges,
+    initial_fanout_descent_span,
     row_bottom_edge,
     row_top_edge,
     symmetric_bundle_midpoint,
@@ -779,30 +780,15 @@ def _set_vchannel_x(ch: _VChannel, new_x: float) -> None:
 def _initial_fanout_descent(rp: RoutedPath) -> _VChannel | None:
     """The first vertical descent leaving a route's source, when it leads H then V.
 
-    A fan-out branch starts ``(sx, sy) -> (vx, sy) -> (vx, dy) -> ...``: a
-    short horizontal lead off the shared source, then a vertical descent in
-    its own channel.  Returns the :class:`_VChannel` for that descent
-    (``idx`` points at ``points[1]``), or ``None`` when the route does not
-    open horizontal-then-vertical.
+    Wraps :func:`initial_fanout_descent_span` in a :class:`_VChannel` whose
+    ``idx`` points at ``points[1]``, or ``None`` when the route does not open
+    horizontal-then-vertical.
     """
-    pts = rp.points
-    if len(pts) < 3:
+    span = initial_fanout_descent_span(rp)
+    if span is None:
         return None
-    x0, y0 = pts[0]
-    x1, y1 = pts[1]
-    x2, y2 = pts[2]
-    if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
-        return None  # first segment is not a horizontal lead off the source
-    if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:
-        return None  # second segment is not a vertical descent
-    return _VChannel(
-        route=rp,
-        idx=1,
-        x=x1,
-        y_lo=min(y1, y2),
-        y_hi=max(y1, y2),
-        down=y2 > y1,
-    )
+    x, y_lo, y_hi, down = span
+    return _VChannel(route=rp, idx=1, x=x, y_lo=y_lo, y_hi=y_hi, down=down)
 
 
 def _coincide_divergent_fanout_descents(routes: list[RoutedPath]) -> None:

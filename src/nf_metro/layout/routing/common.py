@@ -231,6 +231,27 @@ class RoutedPath:
     radius) that the standard L-shape re-stacking would break."""
 
 
+def initial_fanout_descent_span(
+    rp: RoutedPath,
+) -> tuple[float, float, float, bool] | None:
+    """``(x, y_lo, y_hi, down)`` of the descent leaving a route's source.
+
+    A fan-out branch opens ``(sx, sy) -> (vx, sy) -> (vx, dy) -> ...``: a
+    short horizontal lead off the shared source, then a vertical descent in
+    its own channel.  Returns ``None`` when the route does not open
+    horizontal-then-vertical.
+    """
+    pts = rp.points
+    if len(pts) < 3:
+        return None
+    (x0, y0), (x1, y1), (x2, y2) = pts[0], pts[1], pts[2]
+    if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
+        return None
+    if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:
+        return None
+    return x1, min(y1, y2), max(y1, y2), y2 > y1
+
+
 def compute_bundle_info(
     graph: MetroGraph,
     junction_ids: set[str],

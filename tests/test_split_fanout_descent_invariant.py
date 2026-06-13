@@ -9,10 +9,9 @@ its descent (issue #702).
 
 Covers:
 
-* Happy-path: every gallery example and topology fixture routes without a
-  split same-line fan-out descent.
-* Targeted: ``divergent_fanout_split`` (the reported defect) routes its near
-  and far branches as one fused trunk.
+* Happy-path: every gallery example and topology fixture (including
+  ``divergent_fanout_split``, the reported defect) routes without a split
+  same-line fan-out descent.
 * Meaningfulness: with the fan-out fuse pass disabled the checker fires on the
   reported fixture, so the invariant genuinely encodes the bug.
 """
@@ -60,13 +59,6 @@ def test_no_split_same_line_fanout_descents_in_gallery(path: Path) -> None:
     """Every shipped example and topology routes same-line fan-outs as one
     fused trunk, never as two Y-overlapping descents at distinct Xs."""
     graph, routes, offsets = _route(path)
-    violations = check_no_split_same_line_fanout_descents(graph, routes, offsets)
-    assert not violations, "\n".join(v.message() for v in violations)
-
-
-def test_divergent_fanout_split_fuses_descents() -> None:
-    """The near and far branches of the reported fan-out share one descent."""
-    graph, routes, offsets = _route(EXAMPLE_TOPOLOGIES / "divergent_fanout_split.mmd")
     violations = check_no_split_same_line_fanout_descents(graph, routes, offsets)
     assert not violations, "\n".join(v.message() for v in violations)
 
