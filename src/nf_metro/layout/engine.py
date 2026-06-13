@@ -5,7 +5,12 @@ Section-first layout: sections are laid out independently, then placed on a meta
 
 from __future__ import annotations
 
-__all__ = ["PhaseInvariantError", "compute_layout", "compute_min_y_spacing"]
+__all__ = [
+    "BackwardFlowError",
+    "PhaseInvariantError",
+    "compute_layout",
+    "compute_min_y_spacing",
+]
 
 import warnings
 from collections.abc import Callable
@@ -103,6 +108,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _BISECTION_FIRST_VALID,
     _FLOW_ALIGNED_SIDES,
     _PASS_C_BISECTION_ORDER,
+    BackwardFlowError,
     PhaseInvariantError,
     _bbox_guarded_stations,
     _bisection_should_run,
@@ -142,6 +148,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_negative_grid_columns,
     _guard_no_route_through_section,
     _guard_no_same_line_parallel_descents,
+    _guard_no_same_row_backward_feed,
     _guard_no_split_same_line_fanout_descents,
     _guard_no_stacked_elbow_graze,
     _guard_no_station_overlap,
@@ -1055,6 +1062,7 @@ def _compute_section_layout(
             section_subgraphs[sec_id] = sub
 
     _snap(graph, "1.1")
+    _guard_no_same_row_backward_feed(graph)
     if validate:
         _guard_section_bboxes_positive(graph, "after Stage 1.1")
         _guard_no_negative_grid_columns(graph, "after Stage 1.1")

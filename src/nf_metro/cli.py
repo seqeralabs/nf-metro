@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, NoReturn, TypeVar
 
 import click
 
 from nf_metro import __version__
 from nf_metro.explain import build_explain, format_explain_json, format_explain_text
 from nf_metro.introspect import build_info, format_info_json, format_info_text
-from nf_metro.layout import PhaseInvariantError, compute_layout
+from nf_metro.layout import BackwardFlowError, PhaseInvariantError, compute_layout
 from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
 from nf_metro.parser import (
     ERROR,
@@ -95,6 +95,14 @@ def _apply_layout_overrides(graph: MetroGraph, opts: dict[str, object]) -> None:
 
 # Maps legacy `style:` values onto theme keys (the nfcore theme is the dark one).
 _STYLE_THEME_ALIASES = {"dark": "nfcore"}
+
+
+def _fail_validation(messages: Iterable[str]) -> NoReturn:
+    """Print validation errors to stderr and exit non-zero."""
+    click.echo("Validation errors:", err=True)
+    for message in messages:
+        click.echo(f"  - {message}", err=True)
+    raise SystemExit(1)
 
 
 def _resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
@@ -211,7 +219,7 @@ def render(
 
     try:
         compute_layout(graph)
-    except (CyclicGraphError, PhaseInvariantError) as e:
+    except (CyclicGraphError, BackwardFlowError, PhaseInvariantError) as e:
         raise click.ClickException(str(e))
 
     theme_obj = _resolve_theme(theme, graph)
@@ -293,12 +301,13 @@ def validate(input_file: Path) -> None:
         raise SystemExit(1)
 
     errors = [issue for issue in validate_graph(graph) if issue.severity == ERROR]
-
     if errors:
-        click.echo("Validation errors:", err=True)
-        for issue in errors:
-            click.echo(f"  - {issue.message}", err=True)
-        raise SystemExit(1)
+        _fail_validation(issue.message for issue in errors)
+
+    try:
+        compute_layout(graph)
+    except (BackwardFlowError, PhaseInvariantError) as e:
+        _fail_validation([str(e)])
 
     click.echo(
         f"Valid: {len(graph.stations)} stations, "

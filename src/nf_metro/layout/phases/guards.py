@@ -63,6 +63,17 @@ class PhaseInvariantError(Exception):
     """Raised when a layout phase produces invalid intermediate state."""
 
 
+class BackwardFlowError(ValueError):
+    """Raised when a layout places a section so an inter-section edge must
+    flow backward against its own row's flow direction.
+
+    Unlike :class:`PhaseInvariantError` (an engine self-check), this is an
+    authoring error: the section grid the user supplied cannot be rendered
+    honestly.  It is a ``ValueError`` so the CLI surfaces it the same way as
+    other invalid-input errors (cf. :class:`CyclicGraphError`).
+    """
+
+
 def _port_anchor_snapshot(graph: MetroGraph) -> dict[str, tuple[float, float]]:
     """``(x, y)`` of every port station -- the inter-section anchors that
     content placement positions content around.
@@ -499,6 +510,64 @@ def _guard_explicit_grid_directions(graph: MetroGraph, phase: str) -> None:
         raise PhaseInvariantError(
             f"{phase}: explicit-grid sections with no %%metro direction were "
             f"inferred to a non-LR direction: {offenders}"
+        )
+
+
+def _section_has_exit_on_side(
+    graph: MetroGraph, section: Section, side: PortSide
+) -> bool:
+    """Whether *section* has an exit port on *side*.
+
+    An exit on the side facing the target marks an author who deliberately
+    redirected the flow there (e.g. an explicit ``%%metro exit: left``).
+    """
+    return any(
+        (port := graph.ports.get(pid)) is not None and port.side == side
+        for pid in section.exit_ports
+    )
+
+
+def _guard_no_same_row_backward_feed(graph: MetroGraph) -> None:
+    """Reject a same-row inter-section edge that runs against the source
+    section's flow direction with no exit facing the target.
+
+    Within a single row, flow direction is read purely from horizontal
+    position -- routed lines are undirected polylines with no arrowheads.  A
+    producer placed at a column past a consumer it feeds therefore reads as
+    flowing the wrong way, and the only route to that consumer ploughs back
+    across the producer's own box.  Cross-row backward feeds are exempt: they
+    descend into a separate row, which the inter-section router carries around
+    cleanly and which the reader sees as a distinct branch.  Sections whose
+    author redirected the exit toward the target (an explicit ``exit`` on the
+    facing side) are exempt too.
+    """
+    dag = graph.section_dag
+    if dag is None:
+        return
+    for src_id, tgt_id in sorted(dag.section_edges):
+        src = graph.sections.get(src_id)
+        if src is None or tgt_id not in graph.sections:
+            continue
+        src_pos = graph.grid_overrides.get(src_id)
+        tgt_pos = graph.grid_overrides.get(tgt_id)
+        if src_pos is None or tgt_pos is None or src_pos[1] != tgt_pos[1]:
+            continue
+        src_col, tgt_col = src_pos[0], tgt_pos[0]
+        if src.direction == "LR" and tgt_col < src_col:
+            facing = PortSide.LEFT
+        elif src.direction == "RL" and tgt_col > src_col:
+            facing = PortSide.RIGHT
+        else:
+            continue
+        if _section_has_exit_on_side(graph, src, facing):
+            continue
+        raise BackwardFlowError(
+            f"section '{src_id}' (grid column {src_col}) feeds '{tgt_id}' "
+            f"(column {tgt_col}) backward against its {src.direction} flow in "
+            f"the same row: a routed line cannot show this reversal and would "
+            f"cross '{src_id}'s own box.  Place '{src_id}' ahead of '{tgt_id}' "
+            f"in the row's flow direction, move it to a separate row, or add "
+            f"'%%metro exit: {facing.value}' so the exit faces the target."
         )
 
 

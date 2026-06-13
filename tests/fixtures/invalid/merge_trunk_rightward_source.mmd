@@ -1,0 +1,41 @@
+%%metro title: Merge Trunk Col Outside Range
+%%metro style: dark
+%%metro line: main | Main | #0570b0
+%%metro grid: sec_a | 0,0
+%%metro grid: sec_mid | 1,0
+%%metro grid: sec_c | 2,0
+%%metro grid: sec_b | 3,0
+%%metro grid: sec_extra | 4,1
+
+graph LR
+    subgraph sec_a [Source A]
+        a1[Input A]
+        a2[Process A]
+        a1 -->|main| a2
+    end
+    subgraph sec_mid [Middle]
+        m1[Transform]
+        m2[Validate]
+        m1 -->|main| m2
+    end
+    subgraph sec_c [Collector]
+        c1[Collect]
+        c2[Report]
+        c1 -->|main| c2
+    end
+    subgraph sec_b [Source B]
+        b1[Input B]
+        b2[Process B]
+        b1 -->|main| b2
+    end
+    subgraph sec_extra [Extra]
+        e1[Side]
+        e2[Store]
+        e1 -->|main| e2
+    end
+
+    a2 -->|main| m1
+    b2 -->|main| m1
+    a2 -->|main| c1
+    b2 -->|main| c1
+    m2 -->|main| c1
