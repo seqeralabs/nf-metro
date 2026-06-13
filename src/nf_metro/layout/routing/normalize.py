@@ -1231,8 +1231,9 @@ def _dogleg_off_exempt_trunks(
     occupants and clears the movable trunk off them in two regimes:
 
     - SAME line: two opposing flows of one metro line fused into a single
-      drawn track.  Shifted clear by up to one bundle clearance, picking the
-      side with room, so the two flows read as a dogleg/crossroads.
+      drawn track.  Shifted clear by up to one bundle clearance onto the
+      crossing-free side with room, so the two flows read as a dogleg without
+      the moved flow crossing the exempt run.
     - DISTINCT line: a different-colour trunk drawn within a sub-bundle gap of
       the exempt run reads as one stroke (the exempt line painted over it).
       Nudged to a full ``OFFSET_STEP`` gap so both colours show as a tight
@@ -1281,13 +1282,26 @@ def _dogleg_off_exempt_trunks(
         down = min(clearance, down_room)
         up = min(clearance, up_room)
         min_sep = 2 * OFFSET_STEP  # below this the two strokes still fuse
-        prefer_down = up < min_sep or (down >= min_sep and t.y >= hit.y)
-        if prefer_down and down >= min_sep:
-            new_y = hit.y + down
-        elif up >= min_sep:
-            new_y = hit.y - up
+        down_ok = down >= min_sep
+        up_ok = up >= min_sep
+        down_y, up_y = hit.y + down, hit.y - up
+        # Pick the side that keeps the two flows a crossing-free dogleg: moving
+        # onto the side whose riser pierces the exempt run (or whose run the
+        # exempt riser pierces) trades one fused stroke for a crossing.  Among
+        # crossing-equal sides, lean to the side the trunk already sits toward.
+        obstacle = _htrunk_seg(hit, hit.y)
+        cross_down = trunk_segments_cross(_htrunk_seg(t, down_y), obstacle)
+        cross_up = trunk_segments_cross(_htrunk_seg(t, up_y), obstacle)
+        prefer_down = t.y >= hit.y
+        if down_ok and up_ok and (cross_down is None) != (cross_up is None):
+            use_down = cross_down is None
+        elif down_ok and (not up_ok or prefer_down):
+            use_down = True
+        elif up_ok:
+            use_down = False
         else:
             continue
+        new_y = down_y if use_down else up_y
         _restack_htrunk(t, new_y, 0, 1, ctx.offset_step, ctx.curve_radius)
 
     step = ctx.offset_step

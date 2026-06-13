@@ -111,13 +111,17 @@
     "status": "defensive",
     "note": "Same-line dogleg: the band-found arm is exercised by dogleg_exempt_sameline; the band-is-None arm is defensive (both colliding trunks route through _center_inter_row_channel, so the trunk Y always resolves to a gap band)."
   },
-  "normalize.py::if prefer_down and down >= min_sep:::#1": {
+  "normalize.py::if down_ok and up_ok and (cross_down is None) != (cross_up is None):::#1": {
     "status": "needs-review",
-    "note": "Same-line dogleg: the down-move arm is exercised by dogleg_exempt_sameline; the elif/else (up-fallback) arm fires only when the lower gap is too tight to clear the next-row header badge by the required margin (down room below one bundle clearance), which no corpus fixture currently produces. Exercise with a same-line dogleg over a narrowed inter-row gap."
+    "note": "Same-line dogleg side selection: the crossing-decided arm (pick the side whose riser does not pierce the exempt run) is exercised by dogleg_exempt_sameline; the fall-through arm fires only when the two candidate sides are crossing-equal (both clear or both pierced) or one side is out of band, which the single clean fixture never produces. Exercise with a same-line dogleg whose two sides tie on crossings."
   },
-  "normalize.py::elif up >= min_sep:::#1": {
+  "normalize.py::elif down_ok and (not up_ok or prefer_down):::#1": {
     "status": "needs-review",
-    "note": "Same-line dogleg move-up branch: reached when the down-move is suppressed because the lower gap is too tight to clear the next-row header badge (down room below one bundle clearance), so the trunk falls back to moving up. No corpus fixture currently narrows the inter-row gap enough to take it; exercise with a same-line dogleg over a narrowed inter-row gap."
+    "note": "Same-line dogleg crossing-tie fallback (leans to the side the trunk already sits toward): reached only when the crossing test does not disambiguate the two sides, so both arms await a same-line dogleg fixture whose sides tie on crossings."
+  },
+  "normalize.py::elif up_ok:::#1": {
+    "status": "needs-review",
+    "note": "Same-line dogleg move-up fallback: reached when the down-move has no room (lower gap too tight to clear the next-row header badge) and the crossing test does not pick the up side outright. No corpus fixture currently narrows the inter-row gap enough to take it; exercise with a same-line dogleg over a narrowed inter-row gap."
   },
   "normalize.py::if band is not None:::#2": {
     "status": "needs-review",
