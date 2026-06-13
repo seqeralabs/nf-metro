@@ -83,39 +83,66 @@ class Gate:
         return all(a.covered for a in self.arms)
 
 
-def _collect_corpus() -> list[Path]:
-    """All ``examples/`` ``.mmd`` fixtures, deduped by content (sorted order)."""
-    paths = sorted(p for p in (PROJECT_ROOT / "examples").rglob("*.mmd"))
+def _collect_corpus() -> list[tuple[Path, bool]]:
+    """Every ``.mmd`` in the render corpus as ``(path, is_nextflow)``, deduped by
+    content (sorted order).
+
+    Mirrors ``tests/conftest.py``'s ``content_corpus``: the ``examples/`` tree
+    (``rglob`` already subsumes ``examples/topologies`` and ``examples/guide``),
+    the loose ``tests/fixtures/`` fixtures, and the Nextflow-DAG fixtures under
+    ``tests/fixtures/nextflow/`` (which need ``convert_nextflow_dag`` before
+    parsing). Widening past the original ``examples/``-only scope lets the test
+    fixtures retire gate arms the gallery never reaches.
+    """
+    examples = PROJECT_ROOT / "examples"
+    fixtures = PROJECT_ROOT / "tests" / "fixtures"
+    nextflow = fixtures / "nextflow"
+    candidates: list[tuple[Path, bool]] = []
+    for p in sorted(examples.rglob("*.mmd")):
+        candidates.append((p, False))
+    for p in sorted(fixtures.glob("*.mmd")):
+        candidates.append((p, False))
+    for p in sorted(nextflow.glob("*.mmd")):
+        candidates.append((p, True))
+
     seen: set[str] = set()
-    out: list[Path] = []
-    for p in paths:
-        h = hashlib.sha256(p.read_bytes()).hexdigest()
+    out: list[tuple[Path, bool]] = []
+    for path, is_nextflow in candidates:
+        h = hashlib.sha256(path.read_bytes()).hexdigest()
         if h in seen:
             continue
         seen.add(h)
-        out.append(p)
+        out.append((path, is_nextflow))
     return out
 
 
-def _render_under_coverage(corpus: list[Path]):
+def _render_under_coverage(corpus: list[tuple[Path, bool]]):
     """Render every fixture under its own coverage context; return the data."""
     import coverage
 
-    cov = coverage.Coverage(branch=True, source=[str(ROUTING_DIR)])
+    # ``data_file=None`` keeps the arc data in memory: the script writes no
+    # ``.coverage`` file, and concurrent ratchet-test workers under ``pytest -n
+    # auto`` each get a private in-memory store rather than racing one on-disk
+    # sqlite file.
+    cov = coverage.Coverage(branch=True, source=[str(ROUTING_DIR)], data_file=None)
     cov.start()
 
     # Import inside the measured region so module-level branches are attributed,
     # then render each fixture on the production path (validate=False).
+    from nf_metro.convert import convert_nextflow_dag
     from nf_metro.layout.engine import compute_layout
     from nf_metro.parser.mermaid import parse_metro_mermaid
     from nf_metro.render.svg import render_svg
     from nf_metro.themes import THEMES
 
-    for path in corpus:
+    for path, is_nextflow in corpus:
         ctx = str(path.relative_to(PROJECT_ROOT))
         cov.switch_context(ctx)
         try:
-            graph = parse_metro_mermaid(path.read_text())
+            text = path.read_text()
+            if is_nextflow:
+                text = convert_nextflow_dag(text)
+            graph = parse_metro_mermaid(text)
             compute_layout(graph)
             theme = THEMES[graph.style if graph.style in THEMES else "nfcore"]
             render_svg(graph, theme)
@@ -133,7 +160,7 @@ def compute_gate_coverage() -> list[Gate]:
     exercise it.  An arm with no fixtures is an un-exercised gate arm.
     """
     corpus = _collect_corpus()
-    fixtures = [str(p.relative_to(PROJECT_ROOT)) for p in corpus]
+    fixtures = [str(p.relative_to(PROJECT_ROOT)) for p, _ in corpus]
     cov = _render_under_coverage(corpus)
     data = cov.get_data()
     measured = sorted(data.measured_files())
