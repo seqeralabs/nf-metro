@@ -128,6 +128,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_inter_section_route_no_full_width_backtrack,
     _guard_inter_section_routes_in_row_band,
     _guard_merge_port_approach_side,
+    _guard_merge_port_outgoing_side_preserved,
     _guard_no_artefactual_counter_flow,
     _guard_no_coincident_station_coords,
     _guard_no_collinear_distinct_lines,
@@ -1643,6 +1644,7 @@ def _finalize_layout(
         _guard_off_track_clear_of_anchor(graph, phase)
         _guard_fanout_junction_shares_exit_port_y(graph, phase)
         _guard_merge_port_approach_side(graph, phase, offsets=offsets)
+        _guard_merge_port_outgoing_side_preserved(graph, phase, offsets=offsets)
         _guard_exit_inherits_entry_bundle_order(graph, phase, offsets=offsets)
         _guard_bypass_port_no_slot_gaps(graph, phase, offsets=offsets)
         _guard_partial_branch_offset_gaps(graph, phase, offsets=offsets)

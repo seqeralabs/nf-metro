@@ -20,7 +20,7 @@ gallery example and topology fixture.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -562,6 +562,84 @@ def check_merge_port_approach_side(
                         bound=min_horiz,
                     )
                 )
+    return violations
+
+
+@dataclass(frozen=True)
+class MergePortOutgoingFlip:
+    """A perpendicular line re-joined at a merge port that flips its slot on
+    the outgoing run, crossing the trunk between the merge and its consumer.
+
+    ``port_offset`` is the slot the line takes at the merge port; it flips to
+    ``flipped_offset`` at ``at_station`` further along the merge row.
+    """
+
+    port_id: str
+    line_id: str
+    port_offset: float
+    flipped_offset: float
+    at_station: str
+
+    def message(self) -> str:
+        return (
+            f"merge port {self.port_id!r} line {self.line_id!r}: takes slot "
+            f"{self.port_offset:.1f} at the merge but flips to "
+            f"{self.flipped_offset:.1f} at {self.at_station!r} on the same "
+            "row, crossing the trunk on the outgoing run; a re-joined line "
+            "must keep its slot to its consumer"
+        )
+
+
+def check_merge_port_outgoing_side_preserved(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    offsets: dict[tuple[str, str], float],
+) -> list[MergePortOutgoingFlip]:
+    """Return merge ports whose re-joined line flips slot on the outgoing run.
+
+    A line re-slotted at a merge port (see
+    :func:`classify_merge_port_feeders`) keeps that slot along the merge
+    row down to its consumer; any same-row downstream station carrying it at
+    a different offset is a crossover of the trunk.
+    """
+    violations: list[MergePortOutgoingFlip] = []
+    for port_id in graph.ports:
+        classified = classify_merge_port_feeders(graph, port_id)
+        if classified is None:
+            continue
+        _horizontal, below, above = classified
+        perp = list(below) + list(above)
+        if not perp:
+            continue
+        row_y = graph.stations[port_id].y
+        port_offs = {lid: offsets.get((port_id, lid), 0.0) for lid in perp}
+        visited = {port_id}
+        queue = deque([port_id])
+        while queue:
+            cur = queue.popleft()
+            for edge in graph.edges_from(cur):
+                tgt_id = edge.target
+                if tgt_id in visited:
+                    continue
+                tgt = graph.stations[tgt_id]
+                if abs(tgt.y - row_y) > SAME_Y_TOLERANCE:
+                    continue
+                visited.add(tgt_id)
+                tgt_lines = graph.station_lines(tgt_id)
+                for lid in perp:
+                    if lid not in tgt_lines:
+                        continue
+                    off = offsets.get((tgt_id, lid), 0.0)
+                    if abs(off - port_offs[lid]) > COORD_TOLERANCE_FINE:
+                        violations.append(
+                            MergePortOutgoingFlip(
+                                port_id=port_id,
+                                line_id=lid,
+                                port_offset=port_offs[lid],
+                                flipped_offset=off,
+                                at_station=tgt_id,
+                            )
+                        )
+                queue.append(tgt_id)
     return violations
 
 

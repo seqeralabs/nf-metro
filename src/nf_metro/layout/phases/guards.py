@@ -2592,6 +2592,37 @@ def _guard_merge_port_approach_side(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
+def _guard_merge_port_outgoing_side_preserved(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """Final-phase: a line re-slotted at a merge port must keep that slot
+    along the merge row down to its consumer, so it does not cross the trunk
+    on the outgoing run.
+
+    See
+    :func:`nf_metro.layout.routing.invariants.check_merge_port_outgoing_side_preserved`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_merge_port_outgoing_side_preserved,
+    )
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    violations = check_merge_port_outgoing_side_preserved(graph, offsets)
+    if not violations:
+        return
+    first = violations[0]
+    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
 def _guard_exit_inherits_entry_bundle_order(
     graph: MetroGraph,
     phase: str,

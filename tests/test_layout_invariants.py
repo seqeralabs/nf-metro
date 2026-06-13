@@ -693,6 +693,45 @@ def test_straight_through_line_keeps_constant_offset(fixture, line_id):
 
 
 # ---------------------------------------------------------------------------
+# Merge-port re-joined line keeps its side on the outgoing run
+# ---------------------------------------------------------------------------
+
+# (fixture, line_id, row_y) where the line re-joins a bundle perpendicular at a
+# multi-feeder merge port and then continues horizontally along the merge row.
+# Once re-slotted to one side of the trunk it must keep that side across the
+# whole row, so its offset is constant on every station at row_y; flipping
+# sides on the outgoing run paints an avoidable crossover.
+_MERGE_PORT_OUTGOING_LINES = [
+    ("topologies/merge_port_above_approach.mmd", "bypass", 270.0),
+]
+
+
+@pytest.mark.parametrize("fixture,line_id,row_y", _MERGE_PORT_OUTGOING_LINES)
+def test_merge_port_line_keeps_side_on_outgoing_run(fixture, line_id, row_y):
+    """A line re-joined at a merge port keeps one offset along the merge row.
+
+    The merge-port pass picks the bundle slot nearest the line's approach
+    side; if the downstream consumer keeps the line's old slot it crosses the
+    trunk on the outgoing run.  Every station the line touches at ``row_y``
+    must therefore share one offset.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    on_row = [
+        sid
+        for sid in graph.stations
+        if line_id in graph.station_lines(sid)
+        and abs(graph.stations[sid].y - row_y) <= _Y_TOL
+    ]
+    offs = {sid: round(offsets.get((sid, line_id), 0.0), 1) for sid in on_row}
+    distinct = sorted(set(offs.values()))
+    assert len(distinct) == 1, (
+        f"{fixture}: line {line_id} flips offset {distinct} along the merge "
+        f"row y={row_y}, crossing the trunk; per-station offsets {offs}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Symmetric fan column-mate Y equality
 # ---------------------------------------------------------------------------
 

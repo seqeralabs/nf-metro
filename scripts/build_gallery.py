@@ -476,6 +476,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "intervening line, rather than cascading the reorder.",
     ),
     (
+        "merge_port_above_approach",
+        TOPOLOGIES_DIR,
+        "A line descending into a multi-feeder merge port from a section above "
+        "keeps the above-trunk slot all the way to the output, so its riser "
+        "joins the bundle without crossing the trunk on the outgoing run "
+        "(issue #704).",
+    ),
+    (
         "junction_entry_collision",
         TOPOLOGIES_DIR,
         "A three-line fan-out where one line continues straight to its own "

@@ -1264,22 +1264,27 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
             abs(new_offs[lid] - cur[lid]) > _OFFSET_EQ_TOLERANCE for lid in new_offs
         ):
             sec_id = graph.ports[port_id].section_id
-            _apply_offsets_through_section(ctx, port_id, sec_id, new_offs)
+            _apply_offsets_along_bundle(ctx, port_id, sec_id, new_offs)
 
 
-def _apply_offsets_through_section(
+def _apply_offsets_along_bundle(
     ctx: _OffsetCtx,
     port_id: str,
     sec_id: str | None,
     new_offs: dict[str, float],
 ) -> None:
-    """Set ``new_offs`` at ``port_id`` and propagate downstream in-section.
+    """Set ``new_offs`` at ``port_id`` and carry it along the bundle.
 
-    Walks ``edges_from`` from the port through non-port stations of the
-    same section, copying each line's new offset so the whole bundle
-    moves together.  Stops at section boundaries and ports.
+    Walks ``edges_from`` from the port, copying each moved line's new offset
+    onto downstream stations.  In-section non-port stations always continue
+    the bundle; ports and downstream sections continue only while the run
+    stays on the merge port's row, so a line re-slotted at the merge port
+    keeps that slot all the way to its consumer rather than crossing back on
+    the outgoing run.  A line that turns off the row stops the walk there and
+    transitions its slot at the turn.
     """
     graph = ctx.graph
+    row_y = graph.stations[port_id].y
     for lid, off in new_offs.items():
         ctx.offsets[(port_id, lid)] = off
 
@@ -1291,8 +1296,10 @@ def _apply_offsets_through_section(
             tgt_id = edge.target
             if tgt_id in visited:
                 continue
-            tgt = graph.stations.get(tgt_id)
-            if tgt is None or tgt.is_port or tgt.section_id != sec_id:
+            tgt = graph.stations[tgt_id]
+            in_section = not tgt.is_port and tgt.section_id == sec_id
+            on_row = abs(tgt.y - row_y) <= _SAME_Y_TOLERANCE
+            if not in_section and not on_row:
                 continue
             visited.add(tgt_id)
             for lid in graph.station_lines(tgt_id):
