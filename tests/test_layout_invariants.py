@@ -1171,7 +1171,11 @@ def test_pack_band_tracks_no_reserved_gaps(spans, expected):
     and a trunk absent from a sub-corridor frees its track for reuse there.
     """
     from nf_metro.layout.routing.common import RoutedPath
-    from nf_metro.layout.routing.normalize import _HTrunk, _pack_band_tracks
+    from nf_metro.layout.routing.normalize import (
+        _HTrunk,
+        _pack_band_tracks,
+        _slot_span,
+    )
 
     order = [
         [
@@ -1187,7 +1191,8 @@ def test_pack_band_tracks_no_reserved_gaps(spans, expected):
         ]
         for i, (lo, hi) in enumerate(spans)
     ]
-    assert _pack_band_tracks(order) == expected
+    span_of = {id(sg): _slot_span(sg) for sg in order}
+    assert _pack_band_tracks(order, span_of) == expected
 
 
 def test_disjoint_sameline_trunks_bundle_tight():
