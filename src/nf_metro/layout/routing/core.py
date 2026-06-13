@@ -74,7 +74,6 @@ from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
     _route_intra_section,
 )
 from nf_metro.layout.routing.normalize import (  # noqa: F401
-    _align_peeloff_riser_gaps,
     _band_order_crossings,
     _build_gap_intervals,
     _clamp_inter_row_band_top,
@@ -96,13 +95,10 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _join_fanout_upstream_tails,
     _normalize_bypass_trunks,
     _normalize_gap_channels,
-    _peeloff_riser,
     _plan_trunk_band,
-    _respace_risers_to_trunk,
     _restack_channel,
     _restack_htrunk,
     _restack_trunk_band,
-    _set_riser_x_and_radii,
     _set_vchannel_x,
     _suboptimal_trunk_bands,
     _VChannel,
@@ -214,7 +210,6 @@ def route_edges(
     _spread_diagonal_bundles(routes, ctx)
     _normalize_gap_channels(routes, ctx)
     _normalize_bypass_trunks(routes, ctx)
-    _align_peeloff_riser_gaps(routes, ctx)
     _coincide_convergent_port_approaches(routes)
     _coincide_divergent_fanout_descents(routes)
     _join_fanout_upstream_tails(routes, ctx)

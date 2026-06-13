@@ -47,18 +47,6 @@
     "status": "defensive",
     "note": "Degenerate-bbox guard in _h_segment_crosses_other_section: mirror of the bbox_w<=0 guard; sections always have positive width."
   },
-  "normalize.py::if vi < 0 or vi + 1 >= len(pts):::#1": {
-    "status": "defensive",
-    "note": "Bounds guard in _peeloff_riser: the trunk index comes from range(1, len(pts)-2), keeping vi and vi+1 in range; the out-of-bounds return arm is unreachable for a valid trunk."
-  },
-  "normalize.py::if abs(x1 - x0) > COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:::#1": {
-    "status": "defensive",
-    "note": "Re-validation guard in _peeloff_riser: the leg flanking a trunk is already proven vertical by _collect_htrunks (L392/L394), so the not-vertical return arm cannot fire."
-  },
-  "normalize.py::if len(per_line) < 2:::#1": {
-    "status": "defensive",
-    "note": "Caller-guarded in _respace_risers_to_trunk: the caller only invokes it when the cluster holds >=2 distinct line_ids (L515), so per_line always has >=2 entries; the early-return arm is unreachable."
-  },
   "normalize.py::if rp.curve_radii is None:::#1": {
     "status": "defensive",
     "note": "curve_radii is always a concrete list for inter-section routes (every inter-section handler sets it); the None arm in _set_vchannel_x is a belt-and-suspenders guard."
@@ -139,17 +127,9 @@
     "status": "defensive",
     "note": "Distinct-line dogleg move-up/skip branch: unreachable because the below branch is always taken (t.y == hit.y, below_ok true); covers both the move-up and the gap-too-tight continue."
   },
-  "normalize.py::if len(trunks) < 2:::#2": {
-    "status": "defensive",
-    "note": "_suboptimal_trunk_bands is a validate=True diagnostic (raised by guards.py:_guard_*), not a production render-path gate, so the rendering coverage sweep never reaches it -- analogous to the excluded invariants.py. Exercised by the validator suite, not by fixtures."
-  },
   "normalize.py::for grp in groups:::#3": {
     "status": "defensive",
     "note": "_suboptimal_trunk_bands diagnostic loop: validate-only, not reached by the render-path coverage sweep (see the len(trunks)<2 note)."
-  },
-  "normalize.py::if len({id(t.route) for t in grp}) < 2:::#3": {
-    "status": "defensive",
-    "note": "_suboptimal_trunk_bands diagnostic guard: validate-only, not on the render path."
   },
   "normalize.py::if not any(not t.route.normalize_exempt for t in grp):::#2": {
     "status": "defensive",
@@ -199,58 +179,6 @@
     "status": "candidate-dead",
     "note": "The both-bounds-fail return of _clear_channel_x_in_band requires a blocking section spanning the entire inter-column gap (so neither cleared edge fits within bound_left/bound_right); a cross-row section cannot span a gap defined as the space between same-row sections. Unreachable. Pending deletion review in #689."
   },
-  "normalize.py::if rc is not None:::#1": {
-    "status": "needs-review",
-    "note": "Reachable riser-collection arm in _align_peeloff_riser_gaps (a trunk in the group that does not peel off on the tested side). It lives in the peel-off riser respace pass whose body inverts bundle order (#695); a clean fixture exercising it awaits that fix."
-  },
-  "normalize.py::if len(risers) < 2:::#1": {
-    "status": "needs-review",
-    "note": "Reachable riser-collection arm (a peel-off side that collects fewer than two risers). In the peel-off riser respace pass under review in #695; exercise once the bundle-order inversion is fixed and a clean peel-off fixture renders."
-  },
-  "normalize.py::if not (0 <= lead_i < len(pts)):::#1": {
-    "status": "needs-review",
-    "note": "Reachable peel-off edge arm in _peeloff_riser (a trunk at the route start/end with no lead segment). In the peel-off pass under review in #695; deferred with that fix."
-  },
-  "normalize.py::if abs(pts[lead_i][1] - pts[ly_idx][1]) > COORD_TOLERANCE:::#1": {
-    "status": "needs-review",
-    "note": "Reachable peel-off edge arm in _peeloff_riser (a riser whose lead segment is not horizontal). In the peel-off pass under review in #695; deferred with that fix."
-  },
-  "normalize.py::if abs(lx - pts[ly_idx][0]) <= COORD_TOLERANCE:::#1": {
-    "status": "needs-review",
-    "note": "Reachable peel-off edge arm in _peeloff_riser (a riser whose lead has zero horizontal extent). In the peel-off pass under review in #695; deferred with that fix."
-  },
-  "normalize.py::if all(abs(target_x[lid] - per_line[lid][1]) <= COORD_TOLERANCE for lid in lines):::#1": {
-    "status": "needs-review",
-    "note": "Body of _respace_risers_to_trunk (the spacing-disagrees path that performs the respace). Reachable only via the peel-off topology that exposes the bundle-order inversion in #695; a fixture awaits that fix."
-  },
-  "normalize.py::for _ty, rc in risers:::#1": {
-    "status": "needs-review",
-    "note": "Respace loop in _respace_risers_to_trunk, reached only when the riser spacing disagrees with the trunk spacing -- the case that triggers the bundle-order inversion in #695. Deferred with that fix."
-  },
-  "normalize.py::if rp.curve_radii is None or max_off <= COORD_TOLERANCE:::#1": {
-    "status": "needs-review",
-    "note": "Radii-sizing guard in _set_riser_x_and_radii, reached only when the defective respace pass runs (#695). The curve_radii-is-None sub-arm is additionally defensive (always set for inter-section routes). Deferred with the #695 fix."
-  },
-  "normalize.py::for corner_idx, radius_idx, is_lead in ((k, k - 1, True), (k + 1, k, False)):::#1": {
-    "status": "needs-review",
-    "note": "Corner loop in _set_riser_x_and_radii, reached only when the defective respace pass runs (#695). Deferred with that fix."
-  },
-  "normalize.py::if not (0 <= nbr_idx < len(pts)):::#1": {
-    "status": "needs-review",
-    "note": "Neighbour-index guard in _set_riser_x_and_radii, reached only when the defective respace pass runs (#695). The out-of-bounds sub-arm is additionally defensive. Deferred with the #695 fix."
-  },
-  "normalize.py::if is_lead:::#1": {
-    "status": "needs-review",
-    "note": "Lead/trail corner branch in _set_riser_x_and_radii, reached only when the defective respace pass runs (#695). Deferred with that fix."
-  },
-  "normalize.py::if not (0 <= radius_idx < len(rp.curve_radii)):::#1": {
-    "status": "needs-review",
-    "note": "Radius-index guard in _set_riser_x_and_radii, reached only when the defective respace pass runs (#695). The out-of-bounds sub-arm is additionally defensive. Deferred with the #695 fix."
-  },
-  "normalize.py::if not is_lead and not (k + 2 < len(pts)):::#1": {
-    "status": "needs-review",
-    "note": "Trail-corner end-of-route guard in _set_riser_x_and_radii, reached only when the defective respace pass runs (#695). The out-of-bounds sub-arm is additionally defensive. Deferred with the #695 fix."
-  },
   "normalize.py::if lo <= s.grid_col <= hi:::#1": {
     "status": "needs-review",
     "note": "The out-of-range-section skip arm of _has_other_row_section_in_col_range is reachable, but the only minimal merge topology found that reaches it triggers the merge-trunk route-through-section defect in #696 (a merge source sitting right of the target). Minimal forward-edge merge fixtures either miss the predicate or trip _guard_routes_enter_sections_at_ports. Exercise via a clean fixture once #696 is resolved."
@@ -286,10 +214,6 @@
   "offsets.py::if not src or not tgt:::#1": {
     "status": "defensive",
     "note": "_build_same_y_adj calls graph.stations.get(edge.source/target). All edge endpoints are registered stations after _resolve_sections (regular nodes, ports, junctions all go through add_station), so both .get() calls always return non-None Station objects and the `if not src or not tgt` branch is never taken."
-  },
-  "offsets.py::if not lines:::#1": {
-    "status": "defensive",
-    "note": "graph.station_lines returns empty only for a node with no incident edges - an isolated, unconnected declaration. That is an authoring artifact rather than a routing topology, so the skip arm backstops a degenerate node; no shipped pipeline diagram contains a line-less station."
   },
   "offsets.py::if not src:::#1": {
     "status": "defensive",

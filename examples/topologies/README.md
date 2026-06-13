@@ -209,6 +209,10 @@ One stacked column contains three siblings of different line counts: a 3-line br
 
 Reduced upstream slice of nf-core/funcprofiler with one input section fanning out to seven profiler tools and back into a MultiQC section. Pinned via xfail in `test_no_almost_horizontal_edges` - documents a known almost-horizontal-edge defect in dense fan-out + fan-in topologies.
 
+### Peel-off Riser Respace
+
+Four lines from two source sections ride one shared bypass trunk and rise into a common destination entry port. The trunk-Y order (set by `_normalize_bypass_trunks`) and the entry-port slot order disagree on the interior lines, so each source bundle must keep its declaration order at the peel-off corner rather than inverting. Backs `test_peeloff_riser_keeps_bundle_order` and the `_guard_bundle_order_preserved` guard (issue #695).
+
 ---
 
 ## #484 Regression Isolation

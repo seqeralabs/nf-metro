@@ -498,6 +498,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "junction-to-entry-port boundary, so the straight-through line stays "
         "horizontal instead of slanting to swap slots (issue #704).",
     ),
+    (
+        "peeloff_riser_respace",
+        TOPOLOGIES_DIR,
+        "Four lines from two sources ride one shared bypass trunk and rise "
+        "into a common destination entry port, where the trunk-Y order and "
+        "the entry-port slot order disagree. Each source bundle keeps its "
+        "declaration order at the peel-off corner instead of inverting "
+        "(issue #695).",
+    ),
 ]
 
 # Category headers inserted before specific entries
