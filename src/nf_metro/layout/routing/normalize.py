@@ -529,7 +529,7 @@ def _reorder_convergence_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> 
         if n < 2:
             continue
         trunk_ys = sorted(t.trunk_y for t in per_line.values())
-        if len({round(ty, 1) for ty in trunk_ys}) < 2:
+        if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:
             continue  # no distinct trunk depths to order by
         if trunk_ys[-1] - trunk_ys[0] > (n - 1) * step + COORD_TOLERANCE:
             continue  # not one contiguous concentric bundle
@@ -541,28 +541,27 @@ def _reorder_convergence_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> 
         x_slots = sorted(t.peel_x for t in per_line.values())
         y_slots = sorted(t.port_y for t in per_line.values())
         ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
-        # Shallowest trunk takes the slot nearest the trunk's near end: the
-        # innermost (lowest) slot for a left-to-right trunk, the outermost for
-        # a right-to-left one.  X and Y use the same slot index so they stay in
-        # lockstep.
         slot = list(range(n - 1, -1, -1)) if reverse else list(range(n))
         target_x = {lid: x_slots[slot[i]] for i, lid in enumerate(ranked)}
         target_y = {lid: y_slots[slot[i]] for i, lid in enumerate(ranked)}
+        peel_rank = {lid: slot[i] for i, lid in enumerate(ranked)}
         if all(
             abs(target_x[lid] - per_line[lid].peel_x) <= COORD_TOLERANCE
             and abs(target_y[lid] - per_line[lid].port_y) <= COORD_TOLERANCE
             for lid in ranked
         ):
             continue  # already in trunk-depth order
+        if not _section_reorderable(ctx, port_id, set(per_line)):
+            continue
 
-        for rp, t in entries:
-            nx, ny = target_x[rp.edge.line_id], target_y[rp.edge.line_id]
+        for rp, _t in entries:
+            lid = rp.edge.line_id
+            nx, ny = target_x[lid], target_y[lid]
             pts = rp.points
             pts[-3] = (nx, pts[-3][1])
             pts[-2] = (nx, ny)
             pts[-1] = (pts[-1][0], ny)
-            peel_rank = x_slots.index(nx)
-            _set_peeloff_radii(rp, peel_rank, n, step, ctx.curve_radius, reverse)
+            _set_peeloff_radii(rp, peel_rank[lid], n, step, ctx.curve_radius, reverse)
 
         # Propagate the slot order into the consumer section so its internal
         # bundle matches the port; otherwise the crossing the riser reorder
@@ -609,6 +608,33 @@ def _set_peeloff_radii(
         rp.curve_radii[k] = port_r
 
 
+def _section_reorderable(
+    ctx: _RoutingCtx, port_id: str, bundle_lines: set[str]
+) -> bool:
+    """Whether *port_id*'s section can take the bundle's slot order safely.
+
+    The propagation writes one dense ``rank * step`` offset per bundle line to
+    every section station, so it is only safe when the consumer section is a
+    plain single-row LR section carrying nothing but the bundle's lines.  A
+    section with extra lines, more than one row, or a reversed flow needs the
+    richer offsets-phase machinery and is left untouched.
+    """
+    if ctx.station_offsets is None:
+        return False
+    sec = ctx.graph.sections.get(ctx.graph.ports[port_id].section_id)
+    if sec is None or sec.direction != "LR":
+        return False
+    ys: list[float] = []
+    for sid in sec.station_ids:
+        st = ctx.graph.stations[sid]
+        if st.is_port:
+            continue
+        ys.append(st.y)
+        if any(lid not in bundle_lines for lid in ctx.graph.station_lines(sid)):
+            return False  # carries a line outside the bundle
+    return not ys or max(ys) - min(ys) <= COORD_TOLERANCE
+
+
 def _apply_section_bundle_order(
     ctx: _RoutingCtx, port_id: str, port_rank: dict[str, int], step: float
 ) -> None:
@@ -621,10 +647,8 @@ def _apply_section_bundle_order(
     """
     if ctx.station_offsets is None:
         return
-    sec_id = ctx.graph.ports[port_id].section_id
-    for sid, st in ctx.graph.stations.items():
-        if st.section_id != sec_id and sid != port_id:
-            continue
+    # Section ``station_ids`` already includes the port station.
+    for sid in ctx.graph.sections[ctx.graph.ports[port_id].section_id].station_ids:
         for lid in ctx.graph.station_lines(sid):
             if lid in port_rank:
                 ctx.station_offsets[(sid, lid)] = port_rank[lid] * step
