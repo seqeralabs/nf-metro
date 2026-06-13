@@ -578,6 +578,31 @@ def _apply_compact_section_consistency(ctx: _OffsetCtx) -> None:
                 ctx.offsets[(sid_s, slines[0])] = sec_offs[slines[0]]
 
 
+def _propagate_exit_offsets_to_hubs(
+    ctx: _OffsetCtx, port_id: str, offs: dict[str, float]
+) -> None:
+    """Copy a port's per-line offsets onto its upstream hub stations.
+
+    A hub is a station feeding two or more of the port's feeders; giving it
+    the port's bundle ordering keeps the in-section run consistent up to the
+    fan-out point.
+    """
+    graph = ctx.graph
+    feeder_ids = {
+        edge.source
+        for edge in graph.edges_to(port_id)
+        if (st := graph.stations.get(edge.source)) is not None and not st.is_port
+    }
+    if len(feeder_ids) < 2:
+        return
+    hub_candidates = {edge.source for fid in feeder_ids for edge in graph.edges_to(fid)}
+    for hub_id in hub_candidates:
+        overlap = [lid for lid in graph.station_lines(hub_id) if lid in offs]
+        if len(overlap) >= 2:
+            for lid in overlap:
+                ctx.offsets[(hub_id, lid)] = offs[lid]
+
+
 def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
     """Compute exit port offsets for TB and LR/RL sections.
 
@@ -628,6 +653,24 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         if len(line_feeders) < 2:
             continue
         port_lines = set(line_feeders.keys())
+
+        # A section fed by a single incoming bundle that already carries every
+        # exit-port line has an established order: preserve it at the exit so a
+        # straight-through line keeps its slot instead of being re-sorted by
+        # feeder Y.
+        section = graph.sections.get(port_obj.section_id)
+        entry_ports = list(section.entry_ports) if section else []
+        if len(entry_ports) == 1 and port_lines.issubset(
+            graph.station_lines(entry_ports[0])
+        ):
+            inherited = {
+                lid: ctx.offsets.get((entry_ports[0], lid), 0.0) for lid in port_lines
+            }
+            for lid, off in inherited.items():
+                ctx.offsets[(port_id, lid)] = off
+            _propagate_exit_offsets_to_hubs(ctx, port_id, inherited)
+            continue
+
         all_feeders = {fid for entries in line_feeders.values() for fid, _ in entries}
         trunk_feeder_id = next(
             (
@@ -678,23 +721,7 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         for lid, off in spatial_offs.items():
             ctx.offsets[(port_id, lid)] = off
 
-        # Propagate to upstream hub stations
-        feeder_ids: set[str] = set()
-        for edge in graph.edges_to(port_id):
-            src_st = graph.stations.get(edge.source)
-            if src_st and not src_st.is_port:
-                feeder_ids.add(edge.source)
-        if len(feeder_ids) >= 2:
-            hub_candidates: set[str] = set()
-            for feeder_id in feeder_ids:
-                for edge in graph.edges_to(feeder_id):
-                    hub_candidates.add(edge.source)
-            for hub_id in hub_candidates:
-                hub_lines = graph.station_lines(hub_id)
-                overlap = [lid for lid in hub_lines if lid in spatial_offs]
-                if len(overlap) >= 2:
-                    for lid in overlap:
-                        ctx.offsets[(hub_id, lid)] = spatial_offs[lid]
+        _propagate_exit_offsets_to_hubs(ctx, port_id, spatial_offs)
 
 
 def _propagate_to_junctions(ctx: _OffsetCtx) -> None:

@@ -1,0 +1,44 @@
+%%metro title: Junction Entry Collision Skip
+%%metro style: dark
+%%metro line_order: span
+%%metro line: beta | Beta | #2db572
+%%metro line: alpha | Alpha | #e63946
+%%metro line: gamma | Gamma | #0570b0
+
+%%metro grid: pre | 0,0
+%%metro grid: src | 1,0
+%%metro grid: dst_a | 2,0
+%%metro grid: dst_bg | 3,0
+
+graph LR
+    subgraph pre [Pre]
+        pre1[Start]
+        pre2[Prep]
+        pre1 -->|alpha,beta,gamma| pre2
+    end
+
+    subgraph src [Source]
+        %%metro exit: right | alpha,beta,gamma
+        s_a[Alpha Tool]
+        s_b[Beta Tool]
+        s_g[Gamma Tool]
+    end
+
+    subgraph dst_a [Dest Alpha]
+        %%metro entry: left | alpha
+        da1[Output A]
+    end
+
+    subgraph dst_bg [Dest Beta+Gamma]
+        %%metro entry: left | beta,gamma
+        dbg1[Output B+G]
+        dbg2[Report]
+        dbg1 -->|beta,gamma| dbg2
+    end
+
+    pre2 -->|alpha| s_a
+    pre2 -->|beta| s_b
+    pre2 -->|gamma| s_g
+    s_a -->|alpha| da1
+    s_b -->|beta| dbg1
+    s_g -->|gamma| dbg1

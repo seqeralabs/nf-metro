@@ -566,6 +566,84 @@ def check_merge_port_approach_side(
 
 
 # ---------------------------------------------------------------------------
+# Exit port preserves the single entry bundle's order
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ExitBundleOrderViolation:
+    """An LR/RL exit port that re-orders a bundle relative to the single
+    entry bundle feeding the section, kinking a straight-through line.
+
+    ``entry_order`` / ``exit_order`` are the shared lines sorted by their
+    per-line offset at each port.
+    """
+
+    section_id: str
+    entry_port: str
+    exit_port: str
+    entry_order: tuple[str, ...]
+    exit_order: tuple[str, ...]
+
+    def message(self) -> str:
+        return (
+            f"section {self.section_id!r}: exit port {self.exit_port!r} "
+            f"re-orders the bundle from its single entry {self.entry_port!r} "
+            f"(entry order {self.entry_order} != exit order {self.exit_order}); "
+            "a straight-through line is pushed off its incoming slot"
+        )
+
+
+def check_exit_inherits_entry_bundle_order(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    offsets: dict[tuple[str, str], float],
+) -> list[ExitBundleOrderViolation]:
+    """Return LR/RL exit ports that re-order a single incoming bundle.
+
+    When a left/right section has exactly one entry port whose lines are a
+    superset of an exit port's lines, that entry bundle establishes the
+    order; the exit port must keep the shared lines in the same relative
+    vertical order, so a line travelling straight through keeps its slot.
+    TB sections are exempt: their exit reverses offsets for concentric arcs.
+    """
+
+    def _order(port_id: str, lines: set[str]) -> tuple[str, ...]:
+        return tuple(
+            sorted(lines, key=lambda lid: (offsets.get((port_id, lid), 0.0), lid))
+        )
+
+    violations: list[ExitBundleOrderViolation] = []
+    for port_id, port in graph.ports.items():
+        if port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is None or section.direction not in ("LR", "RL"):
+            continue
+        entry_ports = list(section.entry_ports)
+        if len(entry_ports) != 1:
+            continue
+        entry_id = entry_ports[0]
+        exit_lines = set(graph.station_lines(port_id))
+        if len(exit_lines) < 2 or not exit_lines.issubset(
+            graph.station_lines(entry_id)
+        ):
+            continue
+        entry_order = _order(entry_id, exit_lines)
+        exit_order = _order(port_id, exit_lines)
+        if entry_order != exit_order:
+            violations.append(
+                ExitBundleOrderViolation(
+                    section_id=section.id,
+                    entry_port=entry_id,
+                    exit_port=port_id,
+                    entry_order=entry_order,
+                    exit_order=exit_order,
+                )
+            )
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # Partial-line fan-branch offset gaps
 # ---------------------------------------------------------------------------
 

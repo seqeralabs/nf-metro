@@ -654,6 +654,45 @@ def test_row_trunk_marker_cy_consistent(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Straight-through bundle line keeps a constant offset
+# ---------------------------------------------------------------------------
+
+# (fixture, line_id) where the named line's whole route lies on a single
+# base-Y trunk, so every station it touches must carry one per-line offset --
+# any variation paints the line as a kink or slant.  These fixtures exercise
+# the section-exit / junction-to-entry-port bundle-order paths in offsets.py
+# where a straight-through line is reordered off its incoming slot.
+_STRAIGHT_THROUGH_LINES = [
+    ("topologies/junction_entry_collision.mmd", "alpha"),
+    ("topologies/junction_entry_align.mmd", "alpha"),
+]
+
+
+@pytest.mark.parametrize("fixture,line_id", _STRAIGHT_THROUGH_LINES)
+def test_straight_through_line_keeps_constant_offset(fixture, line_id):
+    """A line confined to one base-Y trunk must carry a single offset.
+
+    The line is purely horizontal, so any per-station offset variation is
+    painted as a kink or slant.  Reordering the bundle at a section exit or
+    across a junction-to-entry-port boundary breaks this.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    stations = [sid for sid in graph.stations if line_id in graph.station_lines(sid)]
+    ys = [graph.stations[sid].y for sid in stations]
+    assert max(ys) - min(ys) <= _Y_TOL, (
+        f"{fixture}: {line_id} spans rows {min(ys)}..{max(ys)}; "
+        "test precondition (single trunk) does not hold"
+    )
+    offs = {sid: round(offsets.get((sid, line_id), 0.0), 1) for sid in stations}
+    distinct = sorted(set(offs.values()))
+    assert len(distinct) == 1, (
+        f"{fixture}: line {line_id} runs flat on one trunk but its offset "
+        f"varies {distinct}; per-station offsets {offs}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Symmetric fan column-mate Y equality
 # ---------------------------------------------------------------------------
 

@@ -475,6 +475,21 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "abandons gap-compaction when a visible same-layer peer carries the "
         "intervening line, rather than cascading the reorder.",
     ),
+    (
+        "junction_entry_collision",
+        TOPOLOGIES_DIR,
+        "A three-line fan-out where one line continues straight to its own "
+        "destination while the other two branch away: the straight line keeps "
+        "a constant bundle slot across the source exit so its trunk stays "
+        "horizontal (issue #704).",
+    ),
+    (
+        "junction_entry_align",
+        TOPOLOGIES_DIR,
+        "A two-line bundle whose order is preserved across the "
+        "junction-to-entry-port boundary, so the straight-through line stays "
+        "horizontal instead of slanting to swap slots (issue #704).",
+    ),
 ]
 
 # Category headers inserted before specific entries

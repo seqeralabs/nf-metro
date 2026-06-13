@@ -2592,6 +2592,37 @@ def _guard_merge_port_approach_side(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
+def _guard_exit_inherits_entry_bundle_order(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """Final-phase: an LR/RL section fed by a single incoming bundle must
+    keep that bundle's order at its exit port, so a line running straight
+    through the section is not re-sorted off its incoming slot.
+
+    See
+    :func:`nf_metro.layout.routing.invariants.check_exit_inherits_entry_bundle_order`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_exit_inherits_entry_bundle_order,
+    )
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    violations = check_exit_inherits_entry_bundle_order(graph, offsets)
+    if not violations:
+        return
+    first = violations[0]
+    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
 def _guard_bypass_port_no_slot_gaps(
     graph: MetroGraph,
     phase: str,

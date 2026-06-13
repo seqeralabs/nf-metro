@@ -407,14 +407,6 @@
     "status": "defensive",
     "note": "len(unique_ys) < 2 means every port line's feeder stations average to a single Y. Under track-per-line layout, distinct lines occupy distinct tracks, so a shared Y across >=2 lines implies one trunk feeder carrying all of them (trunk_feeder_id set); the no-trunk arm is therefore not reached by a track-separated topology."
   },
-  "offsets.py::if src_st and not src_st.is_port:::#3": {
-    "status": "defensive",
-    "note": "Same invariant as L602 and L624: edges to LR/RL exit ports originate from internal (non-port) stations only. The false arm where `src_st is None or src_st.is_port` cannot be triggered by any valid parsed graph, making this a defensive guard."
-  },
-  "offsets.py::if len(feeder_ids) >= 2:::#1": {
-    "status": "candidate-dead",
-    "note": "Logically unsatisfiable: code reaches L687 only when unique_ys >= 2 (the continue at L659 was not taken). unique_ys >= 2 requires trunk_feeder_id=None (a single trunk feeder would collapse all lines to one trunk_y). If trunk_feeder_id is None, then no single station carries all port lines, which means feeder_ids must have >=2 stations. Therefore len(feeder_ids) < 2 at L687 is impossible \u2014 it would require a single station carrying multiple lines to all map to different avg_y values, but a single-feeder situation is caught by trunk_feeder_id detection above."
-  },
   "offsets.py::if port_off is not None:::#1": {
     "status": "defensive",
     "note": "_compute_base_offsets runs before _propagate_to_junctions and sets ctx.offsets[(sid, lid)] for every station-line pair in the graph; exit ports are stations, so ctx.offsets.get((exit_port_id, lid)) is never None for any lid in graph.station_lines(jid). The loop-back arm (714->712) requires a junction line with no exit-port offset, which base-offset initialization makes structurally impossible."
@@ -514,10 +506,6 @@
   "offsets.py::if (tgt_id, lid) not in ctx.offsets:::#1": {
     "status": "candidate-dead",
     "note": "The True branch (missing entry-port offset -> ok=False) is unreachable because phase 7 (_compute_entry_port_offsets) runs before this function (phase 8a) and assigns an offset for every (entry_port_id, line_id) pair in the graph. By the time _align_junction_to_entry_port runs, ctx.offsets is populated for all entry ports, so the guard never fires."
-  },
-  "offsets.py::if len(set(desired.values())) != len(desired):::#1": {
-    "status": "needs-review",
-    "note": "Reachable only via a fan-out where a bypassing line reserves an offset slot it does not need at the upstream exit, distorting the trunk (#704). Exercise with a clean fixture once #704 is fixed."
   },
   "offsets.py::for edge in graph.edges_to(jid):::#2": {
     "status": "needs-review",
