@@ -1268,9 +1268,8 @@ def _dogleg_off_exempt_trunks(
         if hit is None:
             continue
         # Lower edge reserves the next row's header badge plus the clearance
-        # margin the header-clearance invariant requires; up_room only the
-        # upper box edge.  When down_room is too tight to clear the badge the
-        # side-choice below falls back to the up-move.
+        # margin the header-clearance invariant requires; up_room only reserves
+        # the upper box edge.
         band = _inter_row_gap_band(ctx, t.y)
         if band is not None:
             top, bottom = band
