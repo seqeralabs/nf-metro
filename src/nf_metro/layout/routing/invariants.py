@@ -38,6 +38,9 @@ from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
     horizontal_direction,
+    initial_fanout_descent_span,
+    iter_horizontal_trunks,
+    trunk_segments_cross,
     vertical_direction,
 )
 from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
@@ -995,6 +998,168 @@ def check_no_same_line_parallel_descents(
                     span=span,
                 )
             )
+    return violations
+
+
+@dataclass
+class SplitFanoutDescent:
+    """Two same-line fan-out descents that overlap in Y at distinct Xs.
+
+    Both branches leave one source horizontal-then-vertical and descend
+    through a common Y band, yet open in separate channels instead of one
+    fused trunk.  A split that begins before either branch turns off puts the
+    farther-reaching branch on the inside of the nearer one, so its onward
+    horizontal run crosses the nearer branch's descent.
+    """
+
+    line_id: str
+    source: str
+    x_a: float
+    x_b: float
+    sep: float
+    overlap: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"split same-line fan-out: line {self.line_id!r} leaves "
+            f"{self.source} as two descents {self.sep:.1f}px apart "
+            f"(x={self.x_a:.1f}, {self.x_b:.1f}) overlapping {self.overlap:.1f}px "
+            f"in Y instead of one fused trunk"
+        )
+
+
+def check_no_split_same_line_fanout_descents(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[SplitFanoutDescent]:
+    """Return same-line fan-out descents that overlap in Y at distinct Xs.
+
+    Several inter-section edges of one line fanning out from a single source
+    must descend as ONE trunk over the span their branches travel together,
+    splitting only where each branch turns off.  When two such descents
+    overlap in their Y span yet sit at distinct Xs, the split has begun before
+    either branch diverges; the farther branch then crosses the nearer one's
+    descent (issue #702).  Coincident descents (a fused trunk) are the wanted
+    state and never flag.
+    """
+    by_source: dict[tuple[str, str, bool], list[tuple[float, float, float]]] = (
+        defaultdict(list)
+    )
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        span = initial_fanout_descent_span(rp)
+        if span is None:
+            continue
+        x, y_lo, y_hi, down = span
+        by_source[(rp.edge.source, rp.line_id, down)].append((x, y_lo, y_hi))
+
+    violations: list[SplitFanoutDescent] = []
+    for (source, line_id, _down), descents in by_source.items():
+        if len(descents) < 2:
+            continue
+        for i in range(len(descents)):
+            xa, lo_a, hi_a = descents[i]
+            for j in range(i + 1, len(descents)):
+                xb, lo_b, hi_b = descents[j]
+                overlap = min(hi_a, hi_b) - max(lo_a, lo_b)
+                if overlap <= COORD_TOLERANCE:
+                    continue
+                sep = abs(xa - xb)
+                if sep <= COORD_TOLERANCE:
+                    continue
+                violations.append(
+                    SplitFanoutDescent(
+                        line_id=line_id,
+                        source=source,
+                        x_a=xa,
+                        x_b=xb,
+                        sep=sep,
+                        overlap=overlap,
+                    )
+                )
+    return violations
+
+
+@dataclass(frozen=True)
+class DoglegCrossesExemptTrunk:
+    """A non-exempt trunk doglegged off an exempt run that crosses it.
+
+    An ``normalize_exempt`` horizontal run (wrap / around-section loop) and a
+    different line's bypass trunk share an inter-row channel within a bundle
+    gap.  Cleared to one side they read as a tight parallel bundle; cleared to
+    the wrong side the movable trunk's riser pierces the exempt run (and the
+    exempt riser pierces the movable run), so the two colours cross twice
+    instead of running parallel (issue #702).
+    """
+
+    line_id: str
+    exempt_line: str
+    edge: tuple[str, str]
+    exempt_edge: tuple[str, str]
+    x: float
+    y: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"dogleg crossing: line {self.line_id!r} "
+            f"({self.edge[0]}->{self.edge[1]}) crosses exempt trunk "
+            f"{self.exempt_line!r} ({self.exempt_edge[0]}->"
+            f"{self.exempt_edge[1]}) at ({self.x:.1f},{self.y:.1f}) instead of "
+            f"running parallel above or below it"
+        )
+
+
+def check_no_dogleg_crosses_exempt_trunk(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[DoglegCrossesExemptTrunk]:
+    """Return non-exempt trunks that cross an exempt trunk they bundle with.
+
+    A movable bypass trunk nudged off an ``normalize_exempt`` run of a
+    different line must clear to the side that keeps the two parallel; landing
+    on the side whose riser pierces the exempt run trades one fused stroke for
+    a double crossing (issue #702).  Only pairs sharing an inter-row channel
+    (within ``2 * OFFSET_STEP`` in Y and overlapping in X) are considered, so a
+    legitimate bundle a full gap apart never flags.
+    """
+    exempt = [
+        (rp, seg)
+        for rp in routes
+        if rp.is_inter_section and rp.normalize_exempt
+        for _k, seg in iter_horizontal_trunks(rp)
+    ]
+    if not exempt:
+        return []
+    violations: list[DoglegCrossesExemptTrunk] = []
+    for rp in routes:
+        if not rp.is_inter_section or rp.normalize_exempt:
+            continue
+        for _k, seg in iter_horizontal_trunks(rp):
+            for erp, eseg in exempt:
+                if erp.line_id == rp.line_id:
+                    continue
+                if abs(seg.y - eseg.y) >= 2 * OFFSET_STEP:
+                    continue
+                if seg.x_lo >= eseg.x_hi or eseg.x_lo >= seg.x_hi:
+                    continue
+                pt = trunk_segments_cross(seg, eseg)
+                if pt is None:
+                    continue
+                violations.append(
+                    DoglegCrossesExemptTrunk(
+                        line_id=rp.line_id,
+                        exempt_line=erp.line_id,
+                        edge=(rp.edge.source, rp.edge.target),
+                        exempt_edge=(erp.edge.source, erp.edge.target),
+                        x=pt[0],
+                        y=pt[1],
+                    )
+                )
     return violations
 
 

@@ -2484,6 +2484,52 @@ def _guard_no_same_line_parallel_descents(
     )
 
 
+def _guard_no_split_same_line_fanout_descents(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: same-line fan-out descents fuse before either branch turns.
+
+    Wraps :func:`check_no_split_same_line_fanout_descents`: where one line fans
+    out from a single source, two descents that overlap in their Y span must
+    ride one fused trunk rather than open at distinct Xs, which would peel the
+    farther-reaching branch onto the inside of the nearer one and cross it.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_no_split_same_line_fanout_descents,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_no_split_same_line_fanout_descents, offsets, routes
+    )
+
+
+def _guard_no_dogleg_crosses_exempt_trunk(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: a doglegged trunk runs parallel to its exempt mate.
+
+    Wraps :func:`check_no_dogleg_crosses_exempt_trunk`: a non-exempt bypass
+    trunk cleared off an ``normalize_exempt`` run of a different line must land
+    on the side that keeps the two parallel, never the side whose riser pierces
+    the exempt run and crosses it twice.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_no_dogleg_crosses_exempt_trunk,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_no_dogleg_crosses_exempt_trunk, offsets, routes
+    )
+
+
 def _raise_on_first_violation(
     graph: MetroGraph,
     phase: str,

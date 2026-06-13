@@ -363,6 +363,30 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "grazing the down-turn corners near the junction (issue #652).",
     ),
     (
+        "divergent_fanout_split",
+        TOPOLOGIES_DIR,
+        "One line fans out from a single source to a near and a far target in "
+        "the row below. The two descents stay fused as one trunk until the near "
+        "branch turns off, so the farther branch never peels onto the inside of "
+        "the nearer one and crosses it (issue #702).",
+    ),
+    (
+        "disjoint_sameline_trunks",
+        TOPOLOGIES_DIR,
+        "Two lines diving into one below-row channel to bypass a section ride a "
+        "tight concentric bundle until a member peels up at its turn column, "
+        "rather than being split apart by a track reserved for a trunk that only "
+        "appears further along the channel (issue #702).",
+    ),
+    (
+        "dogleg_exempt_distinct",
+        TOPOLOGIES_DIR,
+        "A bypass line cleared off a different line's exempt wrap trunk in the "
+        "inter-row gap runs parallel above it as a tight bundle, rather than "
+        "doglegging onto the crossing side where its riser would pierce the "
+        "wrap run twice (issue #702).",
+    ),
+    (
         "off_track_convergence",
         TOPOLOGIES_DIR,
         "Multiple off-track file inputs converging on a single consumer. "
