@@ -1,0 +1,27 @@
+%%metro title: Hidden Pass-through Compact
+%%metro style: dark
+%%metro compact_offsets: true
+%%metro line: a | Line A | #e63946
+%%metro line: b | Line B | #0570b0
+
+graph LR
+    subgraph src [Source]
+        s1[Input A]
+        s2[Input B]
+    end
+
+    subgraph process [Process]
+        _pass[hidden]
+        p1[Step A]
+        p2[Step B]
+        _pass -->|a| p1
+        p1 -->|a,b| p2
+    end
+
+    subgraph report [Report]
+        r1[Report]
+    end
+
+    s1 -->|a| _pass
+    s2 -->|b| p1
+    p2 -->|a,b| r1

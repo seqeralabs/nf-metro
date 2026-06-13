@@ -1,0 +1,32 @@
+%%metro title: Compaction Gap Peer Conflict
+%%metro style: dark
+%%metro line: alpha | Alpha | #e63946
+%%metro line: beta | Beta | #2db572
+%%metro line: gamma | Gamma | #0570b0
+
+graph LR
+    subgraph src [Source]
+        s1[Input]
+        s1 -->|alpha,beta,gamma| s2
+        s2[Prepare]
+    end
+
+    subgraph proc [Process]
+        %%metro entry: left | alpha, beta, gamma
+        %%metro exit: right | alpha, beta, gamma
+        p1[Fork]
+        p2[Alpha Gamma]
+        p3[Beta Node]
+        p4[Merge]
+        p1 -->|alpha,gamma| p2
+        p1 -->|beta| p3
+        p2 -->|alpha,gamma| p4
+        p3 -->|beta| p4
+    end
+
+    subgraph sink [Sink]
+        t1[End]
+    end
+
+    s2 -->|alpha,beta,gamma| p1
+    p4 -->|alpha,beta,gamma| t1

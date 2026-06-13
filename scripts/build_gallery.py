@@ -438,6 +438,19 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "flat graph, so the join lands directly on the terminus rather than a "
         "synthesised convergence junction.",
     ),
+    (
+        "compact_hidden_passthrough",
+        TOPOLOGIES_DIR,
+        "Compact mode keeps a hidden single-line pass-through station on its "
+        "bundle slot so the two lines weave consistently through the section.",
+    ),
+    (
+        "compact_gap_peer_conflict",
+        TOPOLOGIES_DIR,
+        "A fork-join whose hub carries non-consecutive offset slots safely "
+        "abandons gap-compaction when a visible same-layer peer carries the "
+        "intervening line, rather than cascading the reorder.",
+    ),
 ]
 
 # Category headers inserted before specific entries
