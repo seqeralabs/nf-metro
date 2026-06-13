@@ -998,6 +998,109 @@ def check_no_same_line_parallel_descents(
     return violations
 
 
+@dataclass
+class SplitFanoutDescent:
+    """Two same-line fan-out descents that overlap in Y at distinct Xs.
+
+    Both branches leave one source horizontal-then-vertical and descend
+    through a common Y band, yet open in separate channels instead of one
+    fused trunk.  A split that begins before either branch turns off puts the
+    farther-reaching branch on the inside of the nearer one, so its onward
+    horizontal run crosses the nearer branch's descent.
+    """
+
+    line_id: str
+    source: str
+    x_a: float
+    x_b: float
+    sep: float
+    overlap: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"split same-line fan-out: line {self.line_id!r} leaves "
+            f"{self.source} as two descents {self.sep:.1f}px apart "
+            f"(x={self.x_a:.1f}, {self.x_b:.1f}) overlapping {self.overlap:.1f}px "
+            f"in Y instead of one fused trunk"
+        )
+
+
+def _initial_fanout_descent_span(
+    rp: RoutedPath,
+) -> tuple[float, float, float, bool] | None:
+    """``(x, y_lo, y_hi, down)`` of the descent leaving a route's source.
+
+    A fan-out branch opens ``(sx, sy) -> (vx, sy) -> (vx, dy) -> ...``: a
+    short horizontal lead off the shared source, then a vertical descent in
+    its own channel.  Returns ``None`` when the route does not open
+    horizontal-then-vertical.
+    """
+    pts = rp.points
+    if len(pts) < 3:
+        return None
+    (x0, y0), (x1, y1), (x2, y2) = pts[0], pts[1], pts[2]
+    if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
+        return None
+    if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:
+        return None
+    return x1, min(y1, y2), max(y1, y2), y2 > y1
+
+
+def check_no_split_same_line_fanout_descents(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[SplitFanoutDescent]:
+    """Return same-line fan-out descents that overlap in Y at distinct Xs.
+
+    Several inter-section edges of one line fanning out from a single source
+    must descend as ONE trunk over the span their branches travel together,
+    splitting only where each branch turns off.  When two such descents
+    overlap in their Y span yet sit at distinct Xs, the split has begun before
+    either branch diverges; the farther branch then crosses the nearer one's
+    descent (issue #702).  Coincident descents (a fused trunk) are the wanted
+    state and never flag.
+    """
+    by_source: dict[tuple[str, str, bool], list[tuple[float, float, float]]] = (
+        defaultdict(list)
+    )
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        span = _initial_fanout_descent_span(rp)
+        if span is None:
+            continue
+        x, y_lo, y_hi, down = span
+        by_source[(rp.edge.source, rp.line_id, down)].append((x, y_lo, y_hi))
+
+    violations: list[SplitFanoutDescent] = []
+    for (source, line_id, _down), descents in by_source.items():
+        if len(descents) < 2:
+            continue
+        for i in range(len(descents)):
+            xa, lo_a, hi_a = descents[i]
+            for j in range(i + 1, len(descents)):
+                xb, lo_b, hi_b = descents[j]
+                overlap = min(hi_a, hi_b) - max(lo_a, lo_b)
+                if overlap <= COORD_TOLERANCE:
+                    continue
+                sep = abs(xa - xb)
+                if sep <= COORD_TOLERANCE:
+                    continue
+                violations.append(
+                    SplitFanoutDescent(
+                        line_id=line_id,
+                        source=source,
+                        x_a=xa,
+                        x_b=xb,
+                        sep=sep,
+                        overlap=overlap,
+                    )
+                )
+    return violations
+
+
 def _merge_spans(spans: list[tuple[float, float]]) -> list[tuple[float, float]]:
     """Merge overlapping / touching ``(lo, hi)`` intervals into maximal runs."""
     out: list[tuple[float, float]] = []

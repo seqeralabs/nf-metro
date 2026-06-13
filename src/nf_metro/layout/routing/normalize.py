@@ -813,16 +813,16 @@ def _coincide_divergent_fanout_descents(routes: list[RoutedPath]) -> None:
     merges same-line descents *leaving* one source (a junction or exit port).
     Several inter-section edges of the SAME line fanning out from one source
     each open with their own horizontal lead and vertical channel a few pixels
-    apart; over the span they descend together they read as two parallel
-    same-colour tracks rather than one trunk that splits where the branches
-    actually turn off.
+    apart.  Every such branch leaves on the same source-Y horizontal lead, so
+    they share the descent until each turns off: they are one trunk that split
+    too early.  Left apart they read as parallel same-colour tracks, and an
+    inverted split (the farther-reaching branch opening inside the nearer one)
+    crosses its sibling's descent.
 
-    Channels are clustered by source endpoint + line + descent direction;
-    only clusters whose members fall within ``EDGE_TO_BUNDLE_CLEARANCE`` of
-    each other are fused (widely-separated descents head down genuinely
-    distinct corridors and must stay apart).  The merge X is the member
-    nearest the source, keeping the fused trunk hugging the side the branches
-    leave from; each branch still splits off downstream at its own turn Y.
+    Descents are grouped by source endpoint + line + descent direction; every
+    group of two or more is fused onto the channel nearest the source, hugging
+    the side the branches leave from.  Each branch splits off downstream at its
+    own turn Y.
     """
     by_source: dict[tuple[str, str, bool], list[_VChannel]] = defaultdict(list)
     for rp in routes:
@@ -834,28 +834,14 @@ def _coincide_divergent_fanout_descents(routes: list[RoutedPath]) -> None:
         key = (rp.edge.source, rp.line_id, ch.down)
         by_source[key].append(ch)
 
-    band = EDGE_TO_BUNDLE_CLEARANCE
     for chans in by_source.values():
         if len(chans) < 2:
             continue
         sx = chans[0].route.points[0][0]
-        chans.sort(key=lambda c: c.x)
-
-        def _flush(cluster: list[_VChannel], sx: float = sx) -> None:
-            if len(cluster) < 2:
-                return
-            merge_x = min(cluster, key=lambda c: abs(c.x - sx)).x
-            for c in cluster:
-                if abs(c.x - merge_x) > COORD_TOLERANCE:
-                    _set_vchannel_x(c, merge_x)
-
-        cluster: list[_VChannel] = []
-        for ch in chans:
-            if cluster and ch.x - cluster[-1].x > band:
-                _flush(cluster)
-                cluster = []
-            cluster.append(ch)
-        _flush(cluster)
+        merge_x = min(chans, key=lambda c: abs(c.x - sx)).x
+        for c in chans:
+            if abs(c.x - merge_x) > COORD_TOLERANCE:
+                _set_vchannel_x(c, merge_x)
 
 
 def _normalize_bypass_trunks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:

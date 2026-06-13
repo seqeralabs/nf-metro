@@ -363,6 +363,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "grazing the down-turn corners near the junction (issue #652).",
     ),
     (
+        "divergent_fanout_split",
+        TOPOLOGIES_DIR,
+        "One line fans out from a single source to a near and a far target in "
+        "the row below. The two descents stay fused as one trunk until the near "
+        "branch turns off, so the farther branch never peels onto the inside of "
+        "the nearer one and crosses it (issue #702).",
+    ),
+    (
         "off_track_convergence",
         TOPOLOGIES_DIR,
         "Multiple off-track file inputs converging on a single consumer. "

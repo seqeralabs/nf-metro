@@ -275,14 +275,6 @@
     "status": "needs-review",
     "note": "Opposite-dip grouping arm (->450): a channel group holding both an up-dipping and a down-dipping bypass trunk. Reached this slice only incidentally via the now-withdrawn dogleg fixtures (#702); not itself an eager-bundling violation. Exercise with a dedicated clean opposite-dip fixture."
   },
-  "normalize.py::if len(cluster) < 2:::#2": {
-    "status": "needs-review",
-    "note": "Divergent fan-out flush of a singleton cluster (->846), reachable only via a same-line fan-out whose descents split too early - the eager-bundling violation in #702. Exercise with a clean fixture once #702 defers the split."
-  },
-  "normalize.py::if cluster and ch.x - cluster[-1].x > band:::#2": {
-    "status": "needs-review",
-    "note": "Divergent fan-out descent cluster-split (->855): the pass gives up fusing same-line descents >16px apart, which produces the early-split crossover in #702. Exercise with a clean fixture once #702 defers the split."
-  },
   "normalize.py::if id(t.route) in skip:::#1": {
     "status": "needs-review",
     "note": "_dogleg_off_exempt_trunks first-loop skip of an already-bundled route (->1199), reached only when the dogleg pass runs; the topologies that exercised it are the same-line (#698) and distinct-line eager-bundling (#702) doglegs. Exercise with a clean fixture once those render cleanly."
