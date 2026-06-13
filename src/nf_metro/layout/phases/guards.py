@@ -1208,6 +1208,29 @@ def _guard_no_line_strikes_label(
         )
 
 
+def _guard_bypass_v_flat_visible(graph: MetroGraph, phase: str) -> None:
+    """Final-phase: every bypass V keeps a visible horizontal run through its X.
+
+    A bypass V whose diverging run pins to the station marker rakes that
+    station's label; one whose run collapses sits at the curve apex instead of
+    on a flat like a regular station.  The strike-clearance loop pushes the
+    bypassed node (or the merge target) a grid column out until both runs reach
+    ``MIN_STATION_FLAT_LENGTH``; this is the backstop for a residual the loop
+    could not relocate.
+    """
+    from nf_metro.layout.phases.spacing import _bypass_v_collapsed_flat_gaps
+
+    collapsed = _bypass_v_collapsed_flat_gaps(graph)
+    if collapsed:
+        detail = ", ".join(
+            f"section {sid!r} layer {layer}" for sid, layer in sorted(collapsed)
+        )
+        raise PhaseInvariantError(
+            f"{phase}: bypass-V flat run collapsed below the minimum visible "
+            f"length; a grid-column gap is unplaced at {detail}"
+        )
+
+
 def _guard_no_diagonal_strikes_horizontal_label(
     graph: MetroGraph,
     phase: str,
