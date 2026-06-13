@@ -35,7 +35,6 @@ from nf_metro.layout.routing.context import (
     _RoutingCtx,
 )
 from nf_metro.layout.routing.corners import (
-    corner_outside_sign,
     corner_radius,
     l_shape_radii,
     reference_anchored_radius,
@@ -556,15 +555,14 @@ def _reorder_convergence_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> 
         ):
             continue  # already in trunk-depth order
 
-        centre_x = sum(x_slots) / n
-        max_off = (x_slots[-1] - x_slots[0]) / 2
         for rp, t in entries:
             nx, ny = target_x[rp.edge.line_id], target_y[rp.edge.line_id]
             pts = rp.points
             pts[-3] = (nx, pts[-3][1])
             pts[-2] = (nx, ny)
             pts[-1] = (pts[-1][0], ny)
-            _set_peeloff_radii(rp, centre_x, max_off, ctx.curve_radius)
+            peel_rank = x_slots.index(nx)
+            _set_peeloff_radii(rp, peel_rank, n, step, ctx.curve_radius, reverse)
 
         # Propagate the slot order into the consumer section so its internal
         # bundle matches the port; otherwise the crossing the riser reorder
@@ -577,36 +575,38 @@ def _reorder_convergence_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> 
 
 
 def _set_peeloff_radii(
-    rp: RoutedPath, centre_x: float, max_off: float, base_radius: float
+    rp: RoutedPath,
+    peel_rank: int,
+    n: int,
+    step: float,
+    base_radius: float,
+    reverse: bool,
 ) -> None:
     """Size a moved peel-off riser's two flanking corners concentrically.
 
-    The riser is ``points[-3] -> points[-2]``.  Each flanking corner radius is
-    taken from the riser's signed offset from the bundle centre
-    (``peel_x - centre_x``) so the merged bundle's nested arcs stay an equal
-    perpendicular gap apart.  The Z-step riser's two corners turn opposite
-    ways, so each corner's inner/outer sense is read from its local segment
-    directions.
+    The riser ``points[-3] -> points[-2]`` is a Z-step: its trunk-side and
+    port-side corners turn opposite ways, so the line outermost at one is
+    innermost at the other.  Each corner's radii therefore step with peel-x
+    rank in opposite directions, ``base_radius`` (innermost) up by one
+    ``step`` per rank so the nested arcs stay an equal gap apart.  The
+    rank-to-radius direction flips with the trunk's traversal sense
+    (``reverse``), matching which trunk end the bundle peels at.
     """
     pts = rp.points
-    if rp.curve_radii is None or max_off <= COORD_TOLERANCE:
+    if rp.curve_radii is None:
         return
     k = len(pts) - 3  # riser is pts[k] -> pts[k+1]
-    off_signed = pts[k][0] - centre_x
-    v_dir = (0.0, 1.0) if pts[k + 1][1] > pts[k][1] else (0.0, -1.0)
-    for corner_idx, radius_idx, is_lead in ((k, k - 1, True), (k + 1, k, False)):
-        nbr_idx = corner_idx - 1 if is_lead else corner_idx + 1
-        if not (0 <= nbr_idx < len(pts)):
-            continue
-        hx = 1.0 if pts[nbr_idx][0] > pts[corner_idx][0] else -1.0
-        if is_lead:
-            turn_in, turn_out = (-hx, 0.0), v_dir
-        else:
-            turn_in, turn_out = v_dir, (hx, 0.0)
-        side = corner_outside_sign(turn_in, turn_out)
-        r = reference_anchored_radius(off_signed * side, base_radius + max_off)
-        if 0 <= radius_idx < len(rp.curve_radii) and (is_lead or k + 2 < len(pts)):
-            rp.curve_radii[radius_idx] = r
+    inner_first = peel_rank if not reverse else (n - 1 - peel_rank)
+    offset = inner_first * step
+    max_offset = (n - 1) * step
+    # Trunk-side corner: outermost peel slot is on the outside of its turn;
+    # the port-side corner turns the other way, so the same line is inside.
+    trunk_r = corner_radius(offset, max_offset, outside=True, base_radius=base_radius)
+    port_r = corner_radius(offset, max_offset, outside=False, base_radius=base_radius)
+    if 0 <= k - 1 < len(rp.curve_radii):
+        rp.curve_radii[k - 1] = trunk_r
+    if k < len(rp.curve_radii) and k + 2 < len(pts):
+        rp.curve_radii[k] = port_r
 
 
 def _apply_section_bundle_order(
