@@ -267,10 +267,6 @@
     "note": "Multiline `if (` gate in _route_bypass: the SECTION_ROUTE_CLEARANCE enter-body arm (L797, pull gap2 toward its candidate) is never taken in the corpus (the clearance condition is never satisfied, 0/128), and the skip arc (793->798) is a translate_arcs residue the matrix cannot attribute back to the if-keyword line. Defensive clearance guard. Reclassified defensive (#762).",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if (::#3": {
-    "note": "Multiline `if (` gate in _route_inter_section: translate_arcs recovers the taken gap-above arm, but the fall-back arm to _route_right_entry_around_below (L207) is never taken because the gap-above corridor is clear whenever src_row<tgt_row across the corpus. Instrumentation: arm target L207 never executes (0/128). Defensive fallback for a blocked gap-above; the earlier 'phantom' note was inaccurate (the arm is never taken, not merely unrecordable). Reclassified defensive (#762).",
-    "status": "defensive"
-  },
   "inter_section_handlers.py::if (::#7": {
     "note": "Multiline `if (` gate in _route_inter_section guarding _route_left_exit_left_entry_drop: the left-exit + left-entry + same-column topology is absent from the corpus, so the body (L312) never executes (0/128). Defensive guard for that channel-overlap case; the earlier 'phantom' note was inaccurate (the body is never entered, not merely unrecordable). Reclassified defensive (#762).",
     "status": "defensive"
@@ -379,10 +375,6 @@
     "note": "Reachable only via a defective render (bypass overflow clamp inverts bundle order); see #723.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if gap_bottom <= gap_top:::#1": {
-    "note": "Reachable and renders cleanly, but only via opposite-direction entries to one section, a pattern under review for disallowal; held pending that decision.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if gap_right <= gap_left:::#1": {
     "note": "The column-gap enforcer keeps inter-column gaps positive, so gap_right>gap_left always holds at the target row.",
     "status": "defensive"
@@ -479,10 +471,6 @@
     "note": "The entry-runway 'too tight' return cannot fire: room = |first_x - entry_port_x| is floored at SECTION_X_PADDING (50px, the entry port sits at section.bbox_x = min(internal_station_x) - SECTION_X_PADDING), while the threshold src_min + diagonal_run = CURVE_RADIUS(10) + MIN_STRAIGHT_PORT(5) + DIAGONAL_RUN(30) = 45px. Since 50 >= 45 the guard is always False; SECTION_X_PADDING is not exposed as a directive. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
-  "intra_handlers.py::if section.direction == \"LR\" and port.side != PortSide.LEFT:::#1": {
-    "note": "Auto-layout only ever assigns a LEFT (flow-side) entry to an LR section (0/225 LR entries are non-LEFT across the corpus); a RIGHT/back-side entry on an LR section is a misconfiguration, so the non-flow-side reject arm guards rather than encodes a valid topology.",
-    "status": "defensive"
-  },
   "intra_handlers.py::if section.direction == \"RL\" and port.side != PortSide.RIGHT:::#1": {
     "note": "Mirror of the LR guard: RL sections only ever receive RIGHT (flow-side) entries (all 24 corpus RL entries are RIGHT); a LEFT-side entry on an RL section is a misconfiguration the reject arm guards against.",
     "status": "defensive"
@@ -496,12 +484,12 @@
     "status": "defensive"
   },
   "normalize.py::elif below_ok and (not above_ok or prefer_below):::#1": {
-    "note": "Distinct-line dogleg crossing-tie fallback (preserves the pre-fix lean-toward side): reached only when the crossing test does not disambiguate the two sides, so both arms (->1343 below, ->1344 try-up) await a distinct dogleg fixture whose sides tie on crossings.",
-    "status": "needs-review"
+    "note": "Distinct-line dogleg tie fallback, reached only after L1341 is false (a tie), which a clean topology never produces (see that gate). The true arm (->1344, lean below) would fire on such a tie; the false arm (->1345) is unreachable because below_ok always holds and prefer_below is always true (t.y == hit.y in this regime).",
+    "status": "defensive"
   },
   "normalize.py::elif down_ok and (not up_ok or prefer_down):::#1": {
-    "note": "Same-line dogleg crossing-tie fallback (leans to the side the trunk already sits toward): reached only when the crossing test does not disambiguate the two sides, so both arms await a same-line dogleg fixture whose sides tie on crossings.",
-    "status": "needs-review"
+    "note": "Same-line dogleg tie / out-of-band fallback, reached only after the L1296 if is false, which a clean topology never produces (see that gate): the true arm (->1299, lean down on a tie) needs a crossing-free tie that requires degenerate risers, and the false arm (->1300) needs down_ok False, which the regime's fixed inter-row band (down_room >= min_sep) never yields.",
+    "status": "defensive"
   },
   "normalize.py::elif far_y < t.y - COORD_TOLERANCE:::#1": {
     "note": "Degenerate-leg guard in _trunk_slot_features: a trunk's flanking legs are genuine vertical legs (far_y differs from the trunk y), so neither the below nor the above classification is skipped; the fall-through arm needs a zero-height leg the layout never produces.",
@@ -512,8 +500,8 @@
     "status": "defensive"
   },
   "normalize.py::elif up_ok:::#1": {
-    "note": "Same-line dogleg move-up fallback: reached when the down-move has no room (lower gap too tight to clear the next-row header badge) and the crossing test does not pick the up side outright. No corpus fixture currently narrows the inter-row gap enough to take it; exercise with a same-line dogleg over a narrowed inter-row gap.",
-    "status": "needs-review"
+    "note": "Same-line dogleg move-up / give-up fallback, reached only when both L1296 and L1298 are false. The true arm (->1301, move up because the lower gap is too tight) needs down_ok False and the else arm (->1303, leave fused) needs both rooms below min_sep; the reachable regime's inter-row band is auto-widened so both rooms stay >= min_sep=6 (observed 14/26), so neither is reached by a valid topology.",
+    "status": "defensive"
   },
   "normalize.py::for _ in range(8):::#1": {
     "note": "The 8-iteration exhaustion arm of _clear_channel_x_in_band requires 9+ sections chained across a single column band to shift the channel x eight times without resolving, which no constructible topology produces. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
@@ -568,8 +556,8 @@
     "status": "defensive"
   },
   "normalize.py::if below_ok and above_ok and (cross_below is None) != (cross_above is None):::#1": {
-    "note": "Distinct-line dogleg side selection: the crossing-decided arm (->1342) is exercised by dogleg_exempt_distinct. The fall-through arm (->1343) fires only on a crossing tie. above_ok/below_ok are structurally always True (the inter-row gap is >= ~78px), so a clean both-clear tie is not constructible, and the only realizable tie (a multi-line left-entry wrap pierced on both sides) trips _guard_bundle_order_preserved - the bundle-order inversion filed as #758. Reachable-but-defective; revisit when #758 lands.",
-    "status": "needs-review"
+    "note": "Distinct-line dogleg side selection. The crossing-decided true arm (->1342) is exercised by dogleg_exempt_distinct. The false fall-through (->1343) needs a crossing-equal tie; a crossing-free tie requires degenerate zero-length exempt risers and the only realizable tie is both-cross, which trips _guard_no_dogleg_crosses_exempt_trunk plus the section-crossing guards and is never a shippable render.",
+    "status": "defensive"
   },
   "normalize.py::if best < cur:::#1": {
     "note": "_suboptimal_trunk_bands crossing-comparison: validate-only, not on the render path.",
@@ -588,8 +576,8 @@
     "status": "defensive"
   },
   "normalize.py::if down_ok and up_ok and (cross_down is None) != (cross_up is None):::#1": {
-    "note": "Same-line dogleg side selection: the crossing-decided arm (pick the side whose riser does not pierce the exempt run) is exercised by dogleg_exempt_sameline; the fall-through arm fires only when the two candidate sides are crossing-equal (both clear or both pierced) or one side is out of band, which the single clean fixture never produces. Exercise with a same-line dogleg whose two sides tie on crossings.",
-    "status": "needs-review"
+    "note": "Same-line dogleg side selection. The crossing-decided true arm (->1297, pick the side whose riser does not pierce the exempt run) is exercised by dogleg_exempt_sameline. The false fall-through (->1298) needs either an out-of-band side or a crossing-equal tie, neither reachable by a clean topology: the reachable dogleg regime rigidly fixes the inter-row band so down_room/up_room stay >= min_sep=6 (observed 14/26 across the corpus and every constructed variant; perturbing the grid loses the regime), and the only realizable tie is both-cross (a crossing-free tie needs degenerate zero-length exempt risers) which co-occurs with section-crossing / dogleg-crosses-exempt guard failures and is never a shippable render.",
+    "status": "defensive"
   },
   "normalize.py::if feats is None:::#1": {
     "note": "Unused default-arg branch: all three callers of _band_order_crossings pass feats explicitly, so the feats-is-None compute-it arm is never taken.",
@@ -798,10 +786,6 @@
   "offsets.py::if not any(::#1": {
     "note": "The L920 check returns None when offsets are EXACTLY equal to expected (exact float ==). The L926 check returns None when differences are less than _OFFSET_EQ_TOLERANCE (0.001). Since all offsets are integer multiples of OFFSET_STEP (3.0px), any non-zero difference is exactly 3.0 or more, which is >> 0.001. So L920 catches exact matches and L926 can never catch a case L920 missed; the near-equal window (0,0.001) is unreachable with 3.0px discrete steps.",
     "status": "defensive"
-  },
-  "offsets.py::if not in_section and not on_row:::#1": {
-    "note": "The skip arm of _apply_offsets_along_bundle's row-continuation gate fires only when a line re-slotted at a merge port turns off the merge row before reaching its consumer; the corpus merge-port fixtures keep the re-joined line on the merge row to its output, so the off-row stop is not exercised.",
-    "status": "needs-review"
   },
   "offsets.py::if not sec_stations:::#1": {
     "note": "The parser calls _remove_empty_sections() (resolve.py:26) which deletes any section whose station_ids list is empty before port creation. Ports are only added to station_ids during _create_port_stations() (resolve.py:527), which runs AFTER _remove_empty_sections(). Therefore every section in graph.sections at layout time has at least one non-port station; sec_stations is never empty.",

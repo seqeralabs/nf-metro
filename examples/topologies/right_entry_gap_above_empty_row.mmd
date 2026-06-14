@@ -1,0 +1,29 @@
+%%metro title: Right Entry Gap Above Empty Row
+%%metro style: dark
+%%metro line: a | A | #e63946
+
+%%metro grid: source | 0,0
+%%metro grid: blocker | 1,0
+%%metro grid: target | 2,2
+
+graph LR
+    subgraph source [Source]
+        s1[Input]
+        s2[Output]
+        s1 -->|a| s2
+    end
+
+    subgraph blocker [Blocker]
+        b1[Process]
+        b2[Output]
+        b1 -->|a| b2
+    end
+
+    subgraph target [Target]
+        %%metro entry: right | a
+        t1[Process]
+        t2[Output]
+        t1 -->|a| t2
+    end
+
+    s2 -->|a| t1

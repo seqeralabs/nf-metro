@@ -403,6 +403,22 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "than crowding it (issue #698).",
     ),
     (
+        "merge_offrow_continuation",
+        TOPOLOGIES_DIR,
+        "A perpendicular feeder re-slots at a multi-feeder merge port, and the "
+        "single re-joined line leaves the merge row before reaching its "
+        "consumer one row up, so the bundle-offset walk stops at the off-row "
+        "exit rather than carrying the slot off the row.",
+    ),
+    (
+        "right_entry_gap_above_empty_row",
+        TOPOLOGIES_DIR,
+        "A right-entry feed from a source two rows above its target finds the "
+        "immediate next row empty, collapsing the inter-row band so the "
+        "gap-above route is unavailable and the feed falls back to the "
+        "around-below loop.",
+    ),
+    (
         "off_track_convergence",
         TOPOLOGIES_DIR,
         "Multiple off-track file inputs converging on a single consumer. "
