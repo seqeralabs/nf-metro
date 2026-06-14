@@ -1,23 +1,25 @@
-%%metro title: Top Entry Two Lines Same Column
+%%metro title: LR to TB Top Drop
 %%metro style: dark
 %%metro line: a | A | #e63946
-%%metro line: b | B | #0570b0
+
 %%metro grid: src_sec | 0,0
 %%metro grid: tgt_sec | 0,1
+
 graph LR
     subgraph src_sec [Source]
         %%metro direction: LR
-        %%metro exit: right | a,b
         s1[Start]
         s2[End]
-        s1 -->|a,b| s2
+        s1 -->|a| s2
     end
+
     subgraph tgt_sec [Target]
         %%metro direction: TB
-        %%metro entry: top | a,b
-        %%metro exit: right | a,b
+        %%metro entry: top | a
+        %%metro exit: right | a
         t1[Process]
         t2[Result]
-        t1 -->|a,b| t2
+        t1 -->|a| t2
     end
-    s2 -->|a,b| t1
+
+    s2 -->|a| t1

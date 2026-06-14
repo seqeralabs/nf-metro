@@ -7013,3 +7013,80 @@ def test_wrapped_label_trunk_lift_has_teeth():
     # The lift runs in the render path place_labels uses; validate=True asserts
     # the settled render leaves no strike (the guard does not raise).
     _layout(fixture, validate=True)
+
+
+# Bottom-drop: an LR/RL section feeding a TB section's perpendicular TOP entry
+# (issue #720) leaves through a BOTTOM exit and drops straight onto the target
+# trunk, which is aligned under the exit.
+_BOTTOM_DROP_FIXTURES = [
+    "lr_to_tb_top_drop.mmd",
+    "lr_to_tb_top_drop_two_lines.mmd",
+]
+
+
+def _lr_bottom_drop_exits(graph: MetroGraph) -> set[str]:
+    """Port IDs of BOTTOM exits on horizontal-flow sections."""
+    return {
+        pid
+        for pid, port in graph.ports.items()
+        if not port.is_entry
+        and port.side == PortSide.BOTTOM
+        and (sec := graph.sections.get(port.section_id)) is not None
+        and sec.direction in ("LR", "RL")
+    }
+
+
+@pytest.mark.parametrize("fixture", _BOTTOM_DROP_FIXTURES)
+def test_lr_to_tb_bottom_drop_routes_straight(fixture):
+    """The inter-section leg from a BOTTOM exit into a TOP entry is vertical.
+
+    A single curve lives in the internal trunk->exit segment; the leg between
+    the two sections is then a straight drop (one X per line), and the target
+    trunk sits directly under the exit so no jog is needed inside the target.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    drop_exits = _lr_bottom_drop_exits(graph)
+    assert drop_exits, f"{fixture}: expected a BOTTOM drop exit on an LR section"
+
+    drop_legs = [r for r in routes if r.edge.source in drop_exits]
+    assert drop_legs, f"{fixture}: no route leaves the BOTTOM drop exit"
+    for leg in drop_legs:
+        xs = {round(x, 3) for x, _y in leg.points}
+        assert len(xs) == 1, (
+            f"{fixture}: bottom-drop leg {leg.edge.source}->{leg.edge.target} "
+            f"is not a straight vertical drop: {leg.points}"
+        )
+        target_port = graph.ports.get(leg.edge.target)
+        if target_port is not None and target_port.is_entry:
+            exit_x = graph.stations[leg.edge.source].x
+            entry_x = graph.stations[leg.edge.target].x
+            assert abs(exit_x - entry_x) < 1.0, (
+                f"{fixture}: target trunk not aligned under the exit "
+                f"(exit x={exit_x}, entry x={entry_x})"
+            )
+
+
+@pytest.mark.parametrize("fixture", _BOTTOM_DROP_FIXTURES)
+def test_lr_to_tb_bottom_drop_clears_last_station(fixture):
+    """The BOTTOM exit sits clear of every internal station along the flow.
+
+    The trunk curves out after the trailing station rather than turning the
+    line through a marker (a station-as-elbow on the perpendicular port).
+    """
+    graph = _layout(fixture)
+    for pid in _lr_bottom_drop_exits(graph):
+        section = graph.sections[graph.ports[pid].section_id]
+        exit_x = graph.stations[pid].x
+        internal_xs = [
+            graph.stations[sid].x
+            for sid in section.station_ids
+            if sid in graph.stations and not graph.stations[sid].is_port
+        ]
+        assert internal_xs, f"{fixture}: section {section.id} has no stations"
+        assert all(abs(exit_x - sx) > 10.0 for sx in internal_xs), (
+            f"{fixture}: BOTTOM exit x={exit_x} coincides with a station "
+            f"(would route through the marker)"
+        )

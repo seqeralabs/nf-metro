@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterator
 
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
@@ -764,11 +765,116 @@ def _align_exit_ports(graph: MetroGraph) -> None:
         exit_section = graph.sections.get(port.section_id)
         if not exit_section:
             continue
+
+        # A TOP/BOTTOM exit on a horizontal-flow section that drops into a TB
+        # section's perpendicular entry is positioned past the last station so
+        # the trunk curves out after the marker.  A fold's BOTTOM exit (which
+        # feeds a sideways entry, not a drop) has no such target and keeps its
+        # own placement.
+        if (
+            exit_section.direction in ("LR", "RL")
+            and port.side in (PortSide.TOP, PortSide.BOTTOM)
+            and next(_drop_targets(graph, port_id), None) is not None
+        ):
+            _align_perpendicular_exit_port(graph, port_id, port, exit_section)
+            continue
+
         if exit_section.grid_row_span <= 1 and exit_section.direction != "TB":
             continue
 
         if port.side in (PortSide.LEFT, PortSide.RIGHT):
             _align_lr_exit_port(graph, port_id, port, exit_section, junction_ids)
+
+
+def _align_perpendicular_exit_port(
+    graph: MetroGraph,
+    port_id: str,
+    port: Port,
+    exit_section: Section,
+) -> None:
+    """Place a TOP/BOTTOM exit on an LR/RL section past its last station.
+
+    The trunk runs horizontally; to leave through the top or bottom edge the
+    line continues past the trailing station and curves perpendicular.  The
+    port sits on the boundary edge, offset along the flow beyond the last
+    station by more than the station-elbow tolerance so the curve falls after
+    the marker rather than turning the line through it.
+    """
+    internal_xs = [
+        graph.stations[sid].x
+        for sid in exit_section.station_ids
+        if sid in graph.stations and not graph.stations[sid].is_port
+    ]
+    if not internal_xs:
+        return
+
+    clearance = STATION_ELBOW_TOLERANCE + CURVE_RADIUS
+    if exit_section.direction == "RL":
+        # Flow runs right-to-left, so the trailing station is the leftmost.
+        exit_x = min(internal_xs) - clearance
+        exit_x = max(exit_x, exit_section.bbox_x + CURVE_RADIUS)
+    else:
+        exit_x = max(internal_xs) + clearance
+        exit_x = min(exit_x, exit_section.bbox_x + exit_section.bbox_w - CURVE_RADIUS)
+
+    if port.side == PortSide.TOP:
+        exit_y = exit_section.bbox_y
+    else:
+        exit_y = exit_section.bbox_y + exit_section.bbox_h
+    _set_port_x(graph, port_id, exit_x)
+    _set_port_y(graph, port_id, exit_y)
+
+    _align_drop_target_trunk(graph, port_id, exit_x)
+
+
+def _align_drop_target_trunk(graph: MetroGraph, port_id: str, exit_x: float) -> None:
+    """Shift a perpendicular-drop target so its trunk sits under the exit X.
+
+    The line leaves the exit port vertically and drops straight into the
+    target's TOP/BOTTOM entry, so the target's vertical trunk must align with
+    the exit port's X -- the 90-degree rotation of a fold's TB exit aligning to
+    its target's Y.  Shifts the whole target section (stations, ports, bbox) by
+    the gap so the drop is straight, leaving the source's curve after its last
+    station intact.
+    """
+    for tgt_section in _drop_targets(graph, port_id):
+        trunk_x = _tb_trunk_x(graph, tgt_section)
+        if trunk_x is None:
+            continue
+        delta = exit_x - trunk_x
+        if abs(delta) < SAME_COORD_TOLERANCE:
+            continue
+        for sid in tgt_section.station_ids:
+            st = graph.stations.get(sid)
+            if st:
+                st.x += delta
+            p = graph.ports.get(sid)
+            if p:
+                p.x += delta
+        tgt_section.bbox_x += delta
+
+
+def _drop_targets(graph: MetroGraph, port_id: str) -> Iterator[Section]:
+    """Yield TB/BT sections reached from an exit port via a vertical drop.
+
+    Follows the exit port's edges (directly or through a fan-out junction) to
+    any TOP/BOTTOM entry port on a TB/BT section.
+    """
+    for edge in graph.edges_from(port_id):
+        targets = [edge.target]
+        if edge.target in graph.junction_ids:
+            targets = [e.target for e in graph.edges_from(edge.target)]
+        for tid in targets:
+            tp = graph.ports.get(tid)
+            if (
+                not tp
+                or not tp.is_entry
+                or tp.side not in (PortSide.TOP, PortSide.BOTTOM)
+            ):
+                continue
+            sec = graph.sections.get(tp.section_id)
+            if sec and sec.direction in ("TB", "BT"):
+                yield sec
 
 
 def _align_lr_exit_port(

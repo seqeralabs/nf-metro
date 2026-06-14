@@ -259,14 +259,6 @@
     "note": "Reachable only via a defective render (merge-junction tangle); see #721.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if (::#10": {
-    "note": "Multiline `if (` gate in _route_bypass: the SECTION_ROUTE_CLEARANCE enter-body arm (L797, pull gap2 toward its candidate) is never taken in the corpus (the clearance condition is never satisfied, 0/128), and the skip arc (793->798) is a translate_arcs residue the matrix cannot attribute back to the if-keyword line. Defensive clearance guard. Reclassified defensive (#762).",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if (::#7": {
-    "note": "Multiline `if (` gate in _route_inter_section guarding _route_left_exit_left_entry_drop: the left-exit + left-entry + same-column topology is absent from the corpus, so the body (L312) never executes (0/128). Defensive guard for that channel-overlap case; the earlier 'phantom' note was inaccurate (the body is never entered, not merely unrecordable). Reclassified defensive (#762).",
-    "status": "defensive"
-  },
   "inter_section_handlers.py::if _corridor_is_viable(ctx, src, ep):::#1": {
     "note": "Reachable only via a defective render (route skirts/crosses section boundary); see #724.",
     "status": "needs-review"
@@ -289,10 +281,6 @@
   },
   "inter_section_handlers.py::if abs(dx) < COORD_TOLERANCE:::#1": {
     "note": "Reachable only via a defective render (route skirts/crosses section boundary); see #724.",
-    "status": "needs-review"
-  },
-  "inter_section_handlers.py::if abs(dx) > r_lead:::#1": {
-    "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
     "status": "needs-review"
   },
   "inter_section_handlers.py::if abs(ep.y - sy) < ctx.curve_radius:::#1": {
@@ -818,10 +806,6 @@
   "offsets.py::if paired_off is not None:::#1": {
     "note": "_compute_base_offsets sets ctx.offsets[(sid, lid)] for every station-line pair before _propagate_lr_rl_exit_to_entry runs. Exit ports are stations. The for-loop at L791 iterates graph.station_lines(port_id) which equals graph.station_lines(exit_port_id) (enforced by the exit_lines != entry_lines guard at L788). For each lid, ctx.offsets.get((exit_port_id, lid)) is therefore never None. The loop-back arc (793,791) for the paired_off-is-None case is structurally unreachable.",
     "status": "defensive"
-  },
-  "offsets.py::if port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):::#2": {
-    "note": "The LR/RL TOP/BOTTOM-exit branch of _compute_exit_port_offsets; reachable only via a multi-line perpendicular exit on an LR/RL section, which raises a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
-    "status": "needs-review"
   },
   "offsets.py::if port_off is not None:::#1": {
     "note": "_compute_base_offsets runs before _propagate_to_junctions and sets ctx.offsets[(sid, lid)] for every station-line pair in the graph; exit ports are stations, so ctx.offsets.get((exit_port_id, lid)) is never None for any lid in graph.station_lines(jid). The loop-back arm (714->712) requires a junction line with no exit-port offset, which base-offset initialization makes structurally impossible.",

@@ -128,10 +128,29 @@ def _route_inter_section(
     if src_is_tb_bottom and ctx.station_offsets:
         return _route_tb_bottom_exit(edge, src, tgt, ctx)
 
+    tgt_port = graph.ports.get(edge.target)
+
+    # A perpendicular (TOP/BOTTOM) exit on a horizontal-flow section leaves the
+    # section vertically and drops straight into the aligned TOP/BOTTOM entry
+    # below/above.  The after-station curve lives in the internal
+    # station->exit segment, so this inter-section leg is a plain drop.
+    src_is_perp_exit = (
+        src_port is not None
+        and not src_port.is_entry
+        and src_port.side in (PortSide.TOP, PortSide.BOTTOM)
+        and src.section_id not in ctx.tb_sections
+    )
+    if (
+        src_is_perp_exit
+        and tgt_port
+        and tgt_port.is_entry
+        and tgt_port.side in (PortSide.TOP, PortSide.BOTTOM)
+    ):
+        return _route_perp_exit_drop(edge, src, tgt, i, n, ctx)
+
     # TOP entry port: L-shape so the line gets a proper curve into the
     # section.  Must be checked before the same-X shortcut, which would
     # produce a straight vertical drop with no horizontal lead-in.
-    tgt_port = graph.ports.get(edge.target)
     if tgt_port and tgt_port.is_entry and tgt_port.side == PortSide.TOP:
         return _route_top_entry_l_shape(edge, src, tgt, i, n, ctx)
 
@@ -1075,6 +1094,31 @@ def _source_exit_side(graph: MetroGraph, src: Station) -> Direction | None:
             continue
         return None
     return None
+
+
+def _route_perp_exit_drop(
+    edge: Edge, src: Station, tgt: Station, i: int, n: int, ctx: _RoutingCtx
+) -> RoutedPath:
+    """Straight vertical drop from a perpendicular exit into an aligned entry.
+
+    A TOP/BOTTOM exit on a horizontal-flow section and the TOP/BOTTOM entry it
+    feeds share an X (the target trunk is aligned to the exit), so the
+    inter-section leg is a single straight segment.  Co-travelling lines hold a
+    constant X offset baked here so they stay parallel down to the port without
+    a converging jog; they merge at the first real station inside the target.
+    """
+    sx, sy = src.x, src.y
+    ty = tgt.y
+    offset = ((n - 1) / 2 - i) * ctx.offset_step if n > 1 else 0.0
+    x = sx + offset
+    return RoutedPath(
+        edge=edge,
+        line_id=edge.line_id,
+        points=[(x, sy), (x, ty)],
+        is_inter_section=True,
+        normalize_exempt=True,
+        offsets_applied=True,
+    )
 
 
 def _route_top_entry_l_shape(

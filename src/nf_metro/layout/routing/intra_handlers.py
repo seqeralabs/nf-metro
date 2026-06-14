@@ -21,6 +21,7 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
 )
 from nf_metro.layout.routing.context import (
+    _get_offset,
     _RoutingCtx,
 )
 from nf_metro.layout.routing.tb_handlers import (
@@ -132,6 +133,49 @@ def _route_intra_section(
             edge=edge,
             line_id=edge.line_id,
             points=[(sx, sy), (fold_right, sy), (fold_right, ty), (tx, ty)],
+        )
+
+    # Internal station -> perpendicular (TOP/BOTTOM) exit port on a
+    # horizontal-flow section: run along the trunk to the exit X, then curve
+    # once and leave vertically.  The corner sits past the trailing station so
+    # the line bends after the marker rather than turning through it.
+    tgt_port = ctx.graph.ports.get(tgt.id)
+    src_section = ctx.graph.sections.get(src.section_id) if src.section_id else None
+    if (
+        not src.is_port
+        and tgt_port is not None
+        and not tgt_port.is_entry
+        and tgt_port.side in (PortSide.TOP, PortSide.BOTTOM)
+        and src_section is not None
+        and src_section.direction in ("LR", "RL")
+    ):
+        sibling_lines = sorted(
+            {
+                e.line_id
+                for e in ctx.graph.edges_from(edge.source)
+                if e.target == edge.target
+            }
+        )
+        n = len(sibling_lines)
+        i = sibling_lines.index(edge.line_id)
+        if n <= 1:
+            return RoutedPath(
+                edge=edge,
+                line_id=edge.line_id,
+                points=[(sx, sy), (tx, sy), (tx, ty)],
+            )
+        # Co-travelling lines turn the corner concentrically: the horizontal
+        # run keeps the trunk's render Y offset (so it joins the bundle
+        # arriving along the trunk) and the vertical leg takes a centred X
+        # offset that matches the drop and the target trunk below, so the
+        # bundle stays parallel through the bend and down into the port.
+        hy = sy + _get_offset(ctx, edge.source, edge.line_id)
+        vx = tx + ((n - 1) / 2 - i) * ctx.offset_step
+        return RoutedPath(
+            edge=edge,
+            line_id=edge.line_id,
+            points=[(sx, hy), (vx, hy), (vx, ty)],
+            offsets_applied=True,
         )
 
     # Same track: straight line

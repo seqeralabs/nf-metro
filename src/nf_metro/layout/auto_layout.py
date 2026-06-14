@@ -1154,7 +1154,9 @@ def _infer_port_sides(
                     )
                     section.exit_hints.append((exit_side, sorted(all_exit_lines)))
                 elif flow_aligned_exit:
-                    section.exit_hints.append((exit_aligned, sorted(all_exit_lines)))
+                    _infer_flow_exit_hints_with_drops(
+                        graph, sec_id, successors, edge_lines, exit_aligned
+                    )
                 else:
                     _compute_exit_hints_by_side(graph, sec_id, successors, edge_lines)
 
@@ -1248,6 +1250,51 @@ def _compute_fold_exit_side(
             dominant = PortSide.BOTTOM
 
     return dominant
+
+
+def _infer_flow_exit_hints_with_drops(
+    graph: MetroGraph,
+    sec_id: str,
+    successors: dict[str, set[str]],
+    edge_lines: dict[tuple[str, str], set[str]],
+    exit_aligned: PortSide,
+) -> None:
+    """Infer exit hints for a horizontal-flow section, dropping where natural.
+
+    A line whose target is a TB/BT section stacked directly in an adjacent row
+    of an overlapping column exits perpendicular (BOTTOM if below, TOP if
+    above) so it drops straight into that section's TOP/BOTTOM entry instead of
+    carriage-returning around.  Every other line keeps the flow-aligned exit.
+    """
+    my_col, my_row, my_row_span, my_col_span = _effective_grid_pos(graph, sec_id)
+    my_bottom_row = my_row + my_row_span - 1
+
+    drop_side_lines: dict[PortSide, set[str]] = defaultdict(set)
+    flow_lines: set[str] = set()
+    for tgt in successors.get(sec_id, set()):
+        tgt_sec = graph.sections.get(tgt)
+        lines = edge_lines.get((sec_id, tgt), set())
+        side = None
+        if tgt_sec is not None and tgt_sec.direction in ("TB", "BT"):
+            tgt_col, tgt_row, _trs, tgt_col_span = _effective_grid_pos(graph, tgt)
+            rel = _relative_side(
+                my_col, my_row, tgt_col, tgt_row, my_col_span, tgt_col_span
+            )
+            if rel is PortSide.BOTTOM and tgt_row == my_bottom_row + 1:
+                side = PortSide.BOTTOM
+            elif rel is PortSide.TOP and tgt_row + 1 == my_row:
+                side = PortSide.TOP
+        if side is not None:
+            drop_side_lines[side].update(lines)
+        else:
+            flow_lines.update(lines)
+
+    section = graph.sections[sec_id]
+    if flow_lines:
+        section.exit_hints.append((exit_aligned, sorted(flow_lines)))
+    for side, lines in sorted(drop_side_lines.items(), key=lambda x: x[0].value):
+        if lines:
+            section.exit_hints.append((side, sorted(lines)))
 
 
 def _compute_exit_hints_by_side(
