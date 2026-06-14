@@ -74,6 +74,19 @@ class BackwardFlowError(ValueError):
     """
 
 
+class MixedEntryDirectionError(ValueError):
+    """Raised when one section receives incoming lines from more than one
+    approach direction (entry ports on more than one cardinal side).
+
+    Routed lines are undirected polylines with no arrowheads, so a reader
+    infers flow direction from how a line enters a section.  When one line
+    enters heading one way and another enters a different side heading
+    another, the approaches conflict and the diagram cannot show which way
+    flow runs.  Like :class:`BackwardFlowError`, this is an authoring error
+    (a ``ValueError``) the CLI surfaces as invalid input.
+    """
+
+
 def _port_anchor_snapshot(graph: MetroGraph) -> dict[str, tuple[float, float]]:
     """``(x, y)`` of every port station -- the inter-section anchors that
     content placement positions content around.
@@ -568,6 +581,47 @@ def _guard_no_same_row_backward_feed(graph: MetroGraph) -> None:
             f"cross '{src_id}'s own box.  Place '{src_id}' ahead of '{tgt_id}' "
             f"in the row's flow direction, move it to a separate row, or add "
             f"'%%metro exit: {facing.value}' so the exit faces the target."
+        )
+
+
+def _guard_no_mixed_entry_directions(graph: MetroGraph) -> None:
+    """Reject a section whose incoming lines approach from more than one
+    cardinal direction (entry ports on more than one side).
+
+    Routed metro lines are undirected polylines with no arrowheads, so the
+    reader infers flow from how a line enters a section.  When one line enters
+    a section heading one way (say, rightward into a LEFT port) and another
+    enters a different side heading another (downward into a TOP port, or
+    leftward into a RIGHT port), the approaches conflict and the rendered flow
+    direction is unreadable.  Reject the topology rather than emit an ambiguous
+    diagram.
+
+    A section fed from a single side reads cleanly: parser-inferred multi-side
+    entry hints that collapse to one natural side therefore pass, and an entry
+    port carrying no line is not an approach.
+    """
+    for sec_id, section in sorted(graph.sections.items()):
+        sides: dict[PortSide, set[str]] = defaultdict(set)
+        for pid in section.entry_ports:
+            port = graph.ports.get(pid)
+            if port is None:
+                continue
+            lines = {edge.line_id for edge in graph.edges_to(pid)}
+            if lines:
+                sides[port.side].update(lines)
+        if len(sides) <= 1:
+            continue
+        detail = ", ".join(
+            f"{side.value} ({'+'.join(sorted(lines))})"
+            for side, lines in sorted(sides.items(), key=lambda kv: kv[0].value)
+        )
+        raise MixedEntryDirectionError(
+            f"section '{sec_id}' receives lines from more than one approach "
+            f"direction: {detail}.  Routed lines have no arrowheads, so entries "
+            f"from different sides leave the flow direction ambiguous.  Feed "
+            f"'{sec_id}' from a single side (align the producers' grid columns "
+            f"so every line enters the same edge), or split it into separate "
+            f"sections."
         )
 
 

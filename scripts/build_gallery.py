@@ -537,6 +537,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "horizontal instead of slanting to swap slots (issue #704).",
     ),
     (
+        "merge_trunk_out_of_range_section",
+        TOPOLOGIES_DIR,
+        "Two same-row sources merge into one sink past an intervening section "
+        "while another row's section sits outside the merge column range, so "
+        "the merge trunk keeps its same-row bypass channel rather than crossing "
+        "below the out-of-range section.",
+    ),
+    (
         "peeloff_riser_respace",
         TOPOLOGIES_DIR,
         "Four lines from two sources ride one shared bypass trunk and rise "
