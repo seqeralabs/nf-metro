@@ -8,7 +8,7 @@ Each row is a branch point (a *gate*) in a `layout/routing/` dispatch handler or
 
 Modules scoped to routing decision gates; `invariants.py` (the `validate=True` checker) and `__init__.py` are excluded.
 
-The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **308** gaps carry a triage verdict.
+The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **315** gaps carry a triage verdict.
 
 ## `common.py`
 
@@ -406,13 +406,13 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 38 | `if st is None:` | `->L39` |  |
-| 44 | `if port is not None:` | `->L45` |  |
-| 46 | `if line_id in section_rails:` | `->L47`, `->L49` |  |
-| 57 | `if line_id in served and len(st.rail_used_ys) == len(served):` | `->L59` |  |
-| 94 | `if edge.line_id not in order or len(order) <= 1:` | `->L95` |  |
-| 154 | `if src is None or tgt is None:` | `->L155` |  |
-| 176 | `if off_tgt:` | `->L177` |  |
+| 38 | `if st is None:` | `->L39` | **defensive** -- _line_rail_y is only ever called with a real station id (on_rail.id, edge.source/target, or a sibling edge endpoint), all of which exist in graph.stations - the route loop pre-filters None endpoints at the src/tgt guard. The None arm is a contract guard no render-path call reaches. |
+| 44 | `if port is not None:` | `->L45` | **needs-review** -- The port branch is reachable only via whole-graph line_spread:rails with an inter-section edge (per-section rail mode excludes port edges from the rail router), and that topology renders defectively (dangling port stubs + avoidable crossings). Parked pending #743 rather than fixtured (reachable-but-defective, the #688 pattern). |
+| 46 | `if line_id in section_rails:` | `->L47`, `->L49` | **needs-review** -- Gated behind the port branch, so reachable only via the same connected-whole-graph-rails topology (#743). A port always carries a line present in its own section's rail map, so the in-rails arm is the live one and the fall-through is a structural fallback. Parked pending #743 (reachable-but-defective). |
+| 57 | `if line_id in served and len(st.rail_used_ys) == len(served):` | `->L59` | **defensive** -- Reached only for a non-port spanning station, whose rail_used_ys is station_lines_ordered filtered to the section's per_line_y - itself built from the same _section_lines_in_order. So a served line is always in per_line_y (lengths match) and _line_rail_y is only called with a line the touching edge carries (always served). The fall-through return st.y is a defensive fallback no render-path call reaches. |
+| 94 | `if edge.line_id not in order or len(order) <= 1:` | `->L95` | **needs-review** -- The single-feeder early-return (len(order)<=1) is reachable only via a single-line off-track input or output, and off-track I/O renders defectively in rail mode (bare rail-ends, label overlap). Parked pending #744 (reachable-but-defective). The 'not in order' disjunct is dead: the edge itself is always in the feeder<->consumer set that builds order. |
+| 154 | `if src is None or tgt is None:` | `->L155` | **defensive** -- Null guard over an edge's endpoints; every graph.edges endpoint exists in graph.stations, so the continue arm is a contract guard no render-path call reaches. |
+| 176 | `if off_tgt:` | `->L177` | **needs-review** -- The off-track-output arm (reverse the L-route when the target is off-track) is reachable only via an off-track output, which renders defectively in rail mode (bare line-end, detached label). Parked pending #744 (reachable-but-defective). |
 
 ## `reversal.py`
 

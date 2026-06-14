@@ -1139,6 +1139,34 @@
     "note": "Null guard in _align_uncentered_siblings. The loop iterates visible non-port stations and original_x is built from every non-port station, so ox is always present; the guard never fires.",
     "status": "defensive"
   },
+  "rail.py::if edge.line_id not in order or len(order) <= 1:::#1": {
+    "note": "The single-feeder early-return (len(order)<=1) is reachable only via a single-line off-track input or output, and off-track I/O renders defectively in rail mode (bare rail-ends, label overlap). Parked pending #744 (reachable-but-defective). The 'not in order' disjunct is dead: the edge itself is always in the feeder<->consumer set that builds order.",
+    "status": "needs-review"
+  },
+  "rail.py::if line_id in section_rails:::#1": {
+    "note": "Gated behind the port branch, so reachable only via the same connected-whole-graph-rails topology (#743). A port always carries a line present in its own section's rail map, so the in-rails arm is the live one and the fall-through is a structural fallback. Parked pending #743 (reachable-but-defective).",
+    "status": "needs-review"
+  },
+  "rail.py::if line_id in served and len(st.rail_used_ys) == len(served):::#1": {
+    "note": "Reached only for a non-port spanning station, whose rail_used_ys is station_lines_ordered filtered to the section's per_line_y - itself built from the same _section_lines_in_order. So a served line is always in per_line_y (lengths match) and _line_rail_y is only called with a line the touching edge carries (always served). The fall-through return st.y is a defensive fallback no render-path call reaches.",
+    "status": "defensive"
+  },
+  "rail.py::if off_tgt:::#1": {
+    "note": "The off-track-output arm (reverse the L-route when the target is off-track) is reachable only via an off-track output, which renders defectively in rail mode (bare line-end, detached label). Parked pending #744 (reachable-but-defective).",
+    "status": "needs-review"
+  },
+  "rail.py::if port is not None:::#1": {
+    "note": "The port branch is reachable only via whole-graph line_spread:rails with an inter-section edge (per-section rail mode excludes port edges from the rail router), and that topology renders defectively (dangling port stubs + avoidable crossings). Parked pending #743 rather than fixtured (reachable-but-defective, the #688 pattern).",
+    "status": "needs-review"
+  },
+  "rail.py::if src is None or tgt is None:::#1": {
+    "note": "Null guard over an edge's endpoints; every graph.edges endpoint exists in graph.stations, so the continue arm is a contract guard no render-path call reaches.",
+    "status": "defensive"
+  },
+  "rail.py::if st is None:::#1": {
+    "note": "_line_rail_y is only ever called with a real station id (on_rail.id, edge.source/target, or a sibling edge endpoint), all of which exist in graph.stations - the route loop pre-filters None endpoints at the src/tgt guard. The None arm is a contract guard no render-path call reaches.",
+    "status": "defensive"
+  },
   "reversal.py::elif src.is_port:::#1": {
     "note": "Edge feeding a LEFT/RIGHT entry port whose source is not a junction; src is then always an exit port (is_port=True), because resolved chains feed entry ports only from exit ports or junctions. The elif is always true, so the implicit fall-through to the loop (->223) is a structural-contract guard no valid topology reaches.",
     "status": "defensive"
