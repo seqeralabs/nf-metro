@@ -737,9 +737,10 @@ def resolve_section(
     For junctions (``section_id is None``), traces edges to find a
     connected port's section.
 
-    When *prefer_upstream* is True (default), incoming edges are checked
-    first so the junction resolves to the upstream section.  When False,
-    both directions are scanned in a single pass with no preference.
+    When *prefer_upstream* is True (default), the junction is resolved
+    through its incoming edges, yielding the upstream section.  When False,
+    both directions are scanned in a single ``graph.edges`` pass with no
+    preference.
 
     A ``None`` station (e.g. an unresolved lookup) yields ``None``.
     """
@@ -751,12 +752,6 @@ def resolve_section(
     if prefer_upstream:
         for e in graph.edges_to(station.id):
             other = graph.stations.get(e.source)
-            if other and other.section_id:
-                sec = graph.sections.get(other.section_id)
-                if sec:
-                    return sec
-        for e in graph.edges_from(station.id):
-            other = graph.stations.get(e.target)
             if other and other.section_id:
                 sec = graph.sections.get(other.section_id)
                 if sec:

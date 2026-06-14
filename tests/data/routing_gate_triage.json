@@ -4,16 +4,12 @@
     "status": "candidate-dead"
   },
   "common.py::for e in graph.edges:::#1": {
-    "note": "prefer_upstream=False scan loop-exit: a junction always has an incident edge to a sectioned port, so the loop always returns a section and never exhausts graph.edges; the not-found exit is vestigial. Pending deletion review in #689.",
-    "status": "candidate-dead"
-  },
-  "common.py::for e in graph.edges_from(station.id):::#1": {
-    "note": "edges_from fallback (prefer_upstream): reached only if the edges_to loop found nothing, which never happens (junctions always have a sectioned upstream). Both the loop body and its exit are vestigial. Pending deletion review in #689.",
-    "status": "candidate-dead"
+    "note": "No-preference graph.edges scan loop-exit: a fan-out junction always has a sectioned incident port (its exit/entry ports carry a section_id), so the loop always returns and never exhausts graph.edges; the fall-through to the type-contract return None is the never-taken no-neighbour fallback.",
+    "status": "defensive"
   },
   "common.py::for e in graph.edges_to(station.id):::#1": {
-    "note": "Loop-exit into the edges_from fallback: a junction always has a sectioned upstream (exit_port->junction edge whose source has section_id), so the edges_to loop always returns early and never falls through. The fallback it guards is vestigial. Pending deletion review in #689.",
-    "status": "candidate-dead"
+    "note": "Upstream edges_to loop-exit: every fan-out junction is emitted with an exit_port->junction edge whose source carries the source section id, so the upstream loop always returns; the fall-through to the type-contract return None is the never-taken no-upstream fallback.",
+    "status": "defensive"
   },
   "common.py::for i in range(len(pts) - 1):::#1": {
     "note": "point_on_polyline is used only by the --animate renderer (render/animate.py); the matrix's render-path coverage sweep calls render_svg without animation, so none of its branches are reached. Exercised instead by test_animation.py / test_routing.py.",
@@ -68,8 +64,8 @@
     "status": "defensive"
   },
   "common.py::if e.source == station.id:::#1": {
-    "note": "prefer_upstream=False junction-as-source arm: edges are inserted exit_port->junction before junction->entry_port, so iterating graph.edges always hits the junction as a target first (elif arm) and returns before any junction-as-source edge; the source arm is vestigial. Pending deletion review in #689.",
-    "status": "candidate-dead"
+    "note": "Junction-as-source arm of the no-preference scan: fan-out junctions are emitted exit_port->junction before junction->entry_port, so graph.edges encounters the junction as a target (elif arm) first and returns; the source arm is a cheap structural guard whose deadness rests on emit order, not a hard type invariant.",
+    "status": "defensive"
   },
   "common.py::if endpoints:::#1": {
     "note": "Non-cross_row bypass guard: the endpoints list always includes the source and target sections (both in src_row), so it is never empty; the default-clearance arm only guards a degenerate empty endpoint set.",
@@ -92,10 +88,6 @@
     "status": "defensive"
   },
   "common.py::if other and other.section_id:::#2": {
-    "note": "Inside the vestigial edges_from fallback (see the edges_from loop): unreachable because the edges_to loop always returns first. Pending deletion review in #689.",
-    "status": "candidate-dead"
-  },
-  "common.py::if other and other.section_id:::#3": {
     "note": "prefer_upstream=False neighbour guard: a junction's neighbours are always sectioned ports, so the False (continue) arm only guards a junction-to-junction edge valid construction never produces.",
     "status": "defensive"
   },
@@ -112,10 +104,6 @@
     "status": "defensive"
   },
   "common.py::if sec:::#2": {
-    "note": "Inside the vestigial edges_from fallback (see the edges_from loop): unreachable because the edges_to loop always returns first. Pending deletion review in #689.",
-    "status": "candidate-dead"
-  },
-  "common.py::if sec:::#3": {
     "note": "prefer_upstream=False section-lookup guard: graph.sections.get(section_id) returning None requires a missing section_id (corrupted state); null-guard.",
     "status": "defensive"
   },
