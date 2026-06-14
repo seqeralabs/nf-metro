@@ -1,0 +1,28 @@
+%%metro title: Opposing Entry (LEFT + RIGHT)
+%%metro style: dark
+%%metro line: a | Line A | #0570b0
+%%metro line: b | Line B | #d7301f
+%%metro grid: up | 0,0
+%%metro grid: srcL | 0,1
+%%metro grid: dest | 1,1
+
+graph LR
+    subgraph up [Source Above]
+        u1[In U]
+        u2[Out U]
+        u1 -->|b| u2
+    end
+    subgraph srcL [Source Left]
+        s1[In L]
+        s2[Out L]
+        s1 -->|a| s2
+    end
+    subgraph dest [Destination]
+        %%metro entry: right | b
+        d1[Collect]
+        d2[Report]
+        d1 -->|a| d2
+        d1 -->|b| d2
+    end
+    s2 -->|a| d1
+    u2 -->|b| d1
