@@ -10,7 +10,7 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Station
 from nf_metro.render.svg import _terminus_icon_centers, render_svg
-from nf_metro.themes import LIGHT_THEME, NFCORE_THEME
+from nf_metro.themes import LIGHT_THEME, NFCORE_THEME, SEQERA_THEME
 
 
 def _render_simple():
@@ -103,6 +103,19 @@ def test_render_light_theme():
     # Light theme uses transparent background (no background rectangle)
     assert LIGHT_THEME.background_color == "none"
     assert "#333333" in svg  # label/stroke color present
+
+
+def test_render_seqera_theme():
+    graph = parse_metro_mermaid(
+        "%%metro title: Seqera Test\n"
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n"
+        "    a -->|main| b\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, SEQERA_THEME)
+    assert SEQERA_THEME.background_color in svg  # #f8f9fa present
+    assert SEQERA_THEME.title_color in svg  # #160F26 brand dark present
 
 
 def test_render_dashed_line_has_dasharray():
