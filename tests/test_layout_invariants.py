@@ -2964,6 +2964,38 @@ def test_fanout_junction_shares_exit_port_y(fixture):
         )
 
 
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_fanout_junction_resolves_via_upstream(fixture):
+    """Every fan-out junction resolves to a section through an incoming edge.
+
+    A fan-out junction (``section_id is None``) is emitted with an
+    ``exit_port -> junction`` edge whose source carries the source section's
+    id, so ``resolve_section``'s upstream (incoming-edge) scan always resolves
+    it; the downstream ``edges_from`` scan and the no-section ``return None``
+    are never needed.  Asserting this across every multi-section fixture pins
+    the reachability that lets ``resolve_section`` carry only the upstream scan.
+    """
+    graph = _layout(fixture)
+    for jid in graph.junctions:
+        junction = graph.stations.get(jid)
+        if junction is None or junction.section_id:
+            continue
+        upstream_sectioned = any(
+            (src := graph.stations.get(e.source)) is not None
+            and src.section_id
+            and graph.sections.get(src.section_id) is not None
+            for e in graph.edges_to(jid)
+        )
+        assert upstream_sectioned, (
+            f"{fixture}: fan-out junction {jid} has no sectioned upstream; "
+            f"resolve_section would need its downstream fallback"
+        )
+        for prefer in (True, False):
+            assert (
+                resolve_section(graph, junction, prefer_upstream=prefer) is not None
+            ), f"{fixture}: resolve_section({jid}, prefer_upstream={prefer}) is None"
+
+
 # ---------------------------------------------------------------------------
 # Inter-section routes don't backtrack in X against their net flow direction
 # ---------------------------------------------------------------------------
