@@ -430,6 +430,28 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "The horizontal run sits centred in the inter-row gap, clear of both "
         "the section above and the next row's header.",
     ),
+    # --- Routing-gate coverage fixtures ---
+    (
+        "bypass_gap2_rightward_overflow",
+        TOPOLOGIES_DIR,
+        "A seven-line rightward bypass whose gap-2 bundle right edge overflows "
+        "the inter-column gap limit and is clamped, keeping the bundle inside "
+        "the gap.",
+    ),
+    (
+        "right_entry_wrap_no_fan",
+        TOPOLOGIES_DIR,
+        "A single line wrapping from an LR exit into a cross-row RL section's "
+        "RIGHT entry, with no junction siblings (the solo `_route_right_entry_"
+        "wrap` lead-in).",
+    ),
+    (
+        "around_below_ep_col_gt0",
+        TOPOLOGIES_DIR,
+        "A two-line bundle looping around below the canvas into a non-zero-"
+        "column LEFT-entry target, past an intervening middle-row section that "
+        "blocks the direct wrap.",
+    ),
     # --- Complex auto-layout regression isolation ---
     (
         "route_around_intervening",

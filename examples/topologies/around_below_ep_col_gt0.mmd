@@ -1,0 +1,31 @@
+%%metro title: Around Section Below Ep Col
+%%metro style: dark
+%%metro line: a | A | #e63946
+%%metro line: b | B | #0570b0
+
+%%metro grid: source | 3,0
+%%metro grid: middle | 2,1
+%%metro grid: target | 1,2
+
+graph LR
+    subgraph source [Source]
+        s1[Input]
+        s2[Output]
+        s1 -->|a,b| s2
+    end
+
+    subgraph middle [Middle Row]
+        m1[Process]
+        m2[Output]
+        m1 -->|a| m2
+    end
+
+    subgraph target [Target]
+        %%metro entry: left | a, b
+        t1[Process]
+        t2[Output]
+        t1 -->|a,b| t2
+    end
+
+    s2 -->|a,b| t1
+    s2 -->|a| m1
