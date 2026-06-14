@@ -8,7 +8,7 @@ Each row is a branch point (a *gate*) in a `layout/routing/` dispatch handler or
 
 Modules scoped to routing decision gates; `invariants.py` (the `validate=True` checker) and `__init__.py` are excluded.
 
-The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **257** gaps carry a triage verdict.
+The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **270** gaps carry a triage verdict.
 
 ## `common.py`
 
@@ -442,17 +442,17 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 49 | `if not (` | `->L58` |  |
-| 116 | `if diag_end < diag_start:` | `->L117` |  |
-| 122 | `if diag_end > diag_start:` | `->L123` |  |
-| 167 | `if not (` | `->L174` |  |
-| 213 | `if not (` | `->L222` |  |
-| 251 | `if not (` | `->L258` |  |
-| 268 | `if upstream_st is not None:` | `->L269` |  |
-| 291 | `if abs(drop_delta) < COORD_TOLERANCE:` | `->L292`, `->L299` |  |
-| 365 | `if not ctx.station_offsets:` | `->L366` |  |
-| 373 | `if not u:` | `->L374` |  |
-| 377 | `if (` | `->L383` |  |
-| 385 | `if abs(u.y - src.y) > COORD_TOLERANCE:` | `->L387` |  |
-| 407 | `if abs(upstream_st.x - src.x) < COORD_TOLERANCE:` | `->L409`, `->L436` |  |
+| 49 | `if not (` | `->L58` | **defensive** -- Phantom multi-line arc. The 49->58 fall-through (route a TB internal edge) is recorded by CPython from the last operand line (52->58), not the opening `if not (`. _route_tb_internal returns a routed path 487x across the corpus; the route arm IS exercised, the static 49->58 arc is a coverage-attribution artifact. |
+| 116 | `if diag_end < diag_start:` | `->L117` | **defensive** -- Degenerate-collapse clamp for an ascending diagonal: fires only when the run is shorter than 2*MIN_STRAIGHT_EDGE (20px). Every caller feeds grid-placed station coordinates whose run-axis separation is at least one grid pitch (Y_SPACING=40 / X_SPACING=60); _route_entry_runway additionally pre-guards with `room < src_min + diagonal_run`. The 20px collapse threshold is never reached. |
+| 122 | `if diag_end > diag_start:` | `->L123` | **defensive** -- Descending-run mirror of the ascending collapse clamp (#1 of `if diag_end < diag_start:`): fires only when \|run\| < 2*MIN_STRAIGHT_EDGE (20px), but connected diagonal endpoints are always >= one grid pitch (40/60px) apart on the run axis. Unreachable degenerate-geometry guard. |
+| 167 | `if not (` | `->L174` | **defensive** -- Phantom multi-line arc. The 167->174 fall-through (route internal station -> LR exit port in a TB section) is recorded from operand line 171 (171->174). _route_tb_lr_exit routes 31x across the corpus; the route arm IS exercised, the static 167->174 arc is an attribution artifact. |
+| 213 | `if not (` | `->L222` | **defensive** -- Phantom multi-line arc. The 213->222 fall-through (route LR entry port -> internal station in a TB section) is recorded from operand line 218 (218->222). _route_tb_lr_entry routes 120x across the corpus; the route arm IS exercised, the static 213->222 arc is an attribution artifact. |
+| 251 | `if not (` | `->L258` | **defensive** -- Phantom multi-line arc. The 251->258 fall-through (route TOP/BOTTOM port -> internal station) is recorded from operand line 253 (253->258). _route_perp_entry routes 76x across the corpus; the route arm IS exercised, the static 251->258 arc is an attribution artifact. |
+| 268 | `if upstream_st is not None:` | `->L269` | **needs-review** -- Reachable-but-defective (#688 pattern, filed as #740). The perp-entry merge (_route_perp_entry_merged) fires only when a cross-column producer feeds an LR section's TOP/BOTTOM entry port, which makes _align_tb_entry_port drag the port off the section boundary (a _guard_ports_on_boundaries failure). No robust clean topology reaches it; not fixtured until #740 is fixed. |
+| 291 | `if abs(drop_delta) < COORD_TOLERANCE:` | `->L292`, `->L299` | **defensive** -- Phantom list-literal arcs. The flagged dsts 292 and 299 are `pts = [` assignment lines; CPython records the branch landings from the first list-element lines instead (291->293 true arm, 291->300 false arm). Both real arms of the gate ARE exercised; 291->292 / 291->299 are attribution artifacts. |
+| 365 | `if not ctx.station_offsets:` | `->L366` | **defensive** -- compute_station_offsets returns a 0.0 entry for every (station,line) of any graph with edges, so ctx.station_offsets is never empty on the render path (76/76 _find_upstream_for_merge calls pass this guard). The falsy arm guards only a test-only route_edges(station_offsets=None) call. Same precedent as context.py L363/370 (#728). |
+| 373 | `if not u:` | `->L374` | **defensive** -- Null/contract guard: u = graph.stations.get(e2.source) where e2 is an edge in graph.edges, so e2.source is always a resolvable station id. The None arm never fires on the render path (u found in all corpus iterations); a defensive dict-lookup guard. |
+| 377 | `if (` | `->L383` | **defensive** -- Phantom multi-line arc. The 377->383 `continue` (skip a TB BOTTOM-exit upstream when merging) is recorded from operand line 381 (381->383). The continue IS taken in the corpus; the static 377->383 arc attributed to the opening `if (` is an artifact. |
+| 385 | `if abs(u.y - src.y) > COORD_TOLERANCE:` | `->L387` | **needs-review** -- Reachable-but-defective (#740). The 385->387 merge-enabling arm (upstream at the same Y as the entry port) fires only when a cross-column producer drags an LR section's TOP/BOTTOM port off its boundary; in the corpus the upstream is always at a different Y (385->386 continue). Parked until #740 is fixed; see `if upstream_st is not None:`. |
+| 407 | `if abs(upstream_st.x - src.x) < COORD_TOLERANCE:` | `->L409`, `->L436` | **needs-review** -- Reachable-but-defective (#740): both arms are behind the defective merge (_route_perp_entry_merged is never called cleanly). The different-X arm (->L436) is reached only by the off-boundary repro; the same-X arm (->L409) is additionally unreachable because the upstream exit port / junction and the entry port are always in different columns (section X-separation >= SECTION_X_PADDING). Parked until #740 is fixed. |
 
