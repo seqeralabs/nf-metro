@@ -8,7 +8,7 @@ Each row is a branch point (a *gate*) in a `layout/routing/` dispatch handler or
 
 Modules scoped to routing decision gates; `invariants.py` (the `validate=True` checker) and `__init__.py` are excluded.
 
-The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **264** gaps carry a triage verdict.
+The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **297** gaps carry a triage verdict.
 
 ## `common.py`
 
@@ -102,10 +102,10 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 167 | `if src is None or tgt is None or src.is_port or tgt.is_port:` | `->L169` |  |
-| 169 | `if (` | `->L164`, `->L174` |  |
-| 189 | `if not src or not tgt:` | `->L190` |  |
-| 208 | `if result is not None:` | `->L181` |  |
+| 167 | `if src is None or tgt is None or src.is_port or tgt.is_port:` | `->L169` | **defensive** -- Per-section rail-mode edge filter. The True/continue arm (skip port or missing-station edges) IS exercised: rail fixtures carry inter-section port chains past this loop. When the guard is False, execution falls through to the inner rail-section if and is recorded as the arc to that if's first operand line, so the static fall-through arc to the bare opening-paren line is a phantom no execution takes. Both real branches are covered. |
+| 169 | `if (` | `->L164`, `->L174` | **defensive** -- Multiline if(...) opening-paren line for the rail-section internal-edge test (src.section_id == tgt.section_id and ... is not None and is_rail_section(...)). Python attributes the branch decisions to the operand lines, all of which have executed arcs including the is-not-None short-circuit exit and the rail_edges.append body. The static arcs from the opening-paren line are phantoms no execution traverses. |
+| 189 | `if not src or not tgt:` | `->L190` | **defensive** -- Main edge-loop guard against a missing endpoint station. After section resolution every edge endpoint exists in graph.stations (parse _ensure_station's all referenced nodes; resolved chains insert their own ports/junctions), so the guard never fires and only the proceed-to-routing arm is reachable. |
+| 208 | `if result is not None:` | `->L181` | **defensive** -- Append-guard after the priority-ordered handler chain. The final handler _route_intra_section is total: its three early returns and its _route_diagonal fallback (annotated -> RoutedPath, single return statement) always yield a RoutedPath, so result is never None and every edge appends. The None arm is unreachable. |
 
 ## `corners.py`
 
@@ -115,8 +115,8 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 84 | `if i > 1:` | `->L85` |  |
-| 95 | `if i < len(points) - 2:` | `->L96` |  |
+| 84 | `if i > 1:` | `->L85` | **defensive** -- Proportional segment-budget allocation for a corner sharing its incoming segment with a previous corner. The True branch IS taken on multi-corner paths (>=2 corners are common in the corpus): the executed true arc lands on the prev_r conditional-expression condition line, not the static arc to the assignment-target line, because the ternary evaluates its condition first. The static true arc is a phantom of the multiline ternary. |
+| 95 | `if i < len(points) - 2:` | `->L96` | **defensive** -- Mirror of the i>1 split for a corner sharing its outgoing segment with a following corner. The True branch is exercised on multi-corner paths via the next_r conditional-expression condition line; the static true arc to the assignment-target line is a phantom of the multiline ternary (condition evaluates before the assignment target). |
 
 ## `inter_section.py`
 
@@ -126,10 +126,10 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 98 | `if pair not in _CW_TURNS and pair not in _CCW_TURNS:` | `->L-96`, `->L99` |  |
-| 107 | `if (self.in_tangent, self.out_tangent) in _CW_TURNS:` | `->L108`, `->L109` |  |
-| 155 | `for prev, curr in zip(self.corners, self.corners[1:]):` | `->L156`, `->L158` |  |
-| 156 | `if prev.handedness != curr.handedness:` | `->L155`, `->L157` |  |
+| 98 | `if pair not in _CW_TURNS and pair not in _CCW_TURNS:` | `->L-96`, `->L99` | **defensive** -- Corner.__post_init__ turn-validity check. inter_section.py is the descriptor/documentation module (distinct from inter_section_handlers.py); no src module imports it, so it never loads during the render-corpus sweep (confirmed absent from sys.modules after rendering the whole corpus) and both arms show 0 hits. Corner instances are module-level constants built from valid right-angle turns, so the raise can only fire on a source edit. Exercised by test_inter_section_descriptor.py. |
+| 107 | `if (self.in_tangent, self.out_tangent) in _CW_TURNS:` | `->L108`, `->L109` | **defensive** -- Corner.handedness property. Same module-load story: inter_section.py is never imported on the render path, so neither the CW nor the CCW arm is reachable by any render topology. Both branches are exercised by test_inter_section_descriptor.py. |
+| 155 | `for prev, curr in zip(self.corners, self.corners[1:]):` | `->L156`, `->L158` | **defensive** -- TurnSequence.parity loop over consecutive corners. parity is descriptor-level documentation (runtime wrap handlers preserve bundle ordering via per-corner offset propagation regardless of this value); nothing on the render path reads it, and the module is never imported during the sweep. Exercised by test_inter_section_descriptor.py. |
+| 156 | `if prev.handedness != curr.handedness:` | `->L155`, `->L157` | **defensive** -- Handedness-change counter inside TurnSequence.parity. Off the render path for the same reason (inter_section.py never loaded during rendering); both arms are exercised by test_inter_section_descriptor.py's parity-contract tests. |
 
 ## `inter_section_handlers.py`
 
@@ -423,16 +423,16 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 95 | `if not src or not src.is_port:` | `->L96` |  |
-| 98 | `if (` | `->L104` |  |
-| 136 | `if not src or not tgt:` | `->L137` |  |
-| 142 | `if (` | `->L133`, `->L150` |  |
-| 175 | `if not section:` | `->L176` |  |
-| 186 | `if not succ:` | `->L187`, `->L188` |  |
-| 188 | `if (` | `->L182`, `->L192` |  |
-| 225 | `if not src:` | `->L226` |  |
-| 231 | `if not s2 or not s2.is_port:` | `->L232` |  |
-| 236 | `elif src.is_port:` | `->L223` |  |
+| 95 | `if not src or not src.is_port:` | `->L96` | **defensive** -- Phase 1a (_detect_tb_bottom_top_entries) iterates edges feeding a TOP entry port. Entry ports are synthetic nodes created by section resolution; the only edges targeting them are the resolved chain's exit_port->entry_port and junction->entry_port links, so edge.source is always a registered port or junction station (both is_port=True). The continue (missing or non-port source) is a structural-contract guard no valid topology reaches. |
+| 98 | `if (` | `->L104` | **defensive** -- PHANTOM multi-line short-circuit arc. CPython emits no branch bytecode at the opening `if (` line, so the static arc into the body L104 never executes; the Phase 1a reversal mark is exercised via the last-operand arc L102->104 (a TOP entry fed by a TB BOTTOM exit). Not an un-taken branch. |
+| 136 | `if not src or not tgt:` | `->L137` | **defensive** -- _build_section_adjacency iterates graph.edges; every edge endpoint is a registered station, so graph.stations.get never returns None for edge.source or edge.target. The continue is a defensive null guard no valid graph reaches. |
+| 142 | `if (` | `->L133`, `->L150` | **defensive** -- PHANTOM multi-line short-circuit arc. No branch bytecode at the opening `if (` line, so both static arms (->150 body, ->133 loop-back) are phantom; the horizontal_succ_pairs body is exercised via the last-operand arc L148->150 and the negative case via operand short-circuit. Not un-taken branches. |
+| 175 | `if not section:` | `->L176` | **defensive** -- _propagate_reversal_along_rows iterates sec_id values drawn from reversed_secs, which only ever holds real section ids added from graph.sections. graph.sections.get(sec_id) is never None; the continue is a defensive null guard. |
+| 186 | `if not succ:` | `->L187`, `->L188` | **defensive** -- succ_id comes from sec_successors, built only from real tgt.section_id values, so graph.sections.get(succ_id) is never None and the continue (->187) is a defensive null guard. The fall-through static arm (->188) is phantom: control falls into the following multi-line `if (`, whose first operand line carries the real arc L186->189. |
+| 188 | `if (` | `->L182`, `->L192` | **defensive** -- PHANTOM multi-line short-circuit arc. No branch bytecode at the opening `if (` line, so both static arms (->192 body, ->182 loop-back) are phantom; the reversal-propagation body is exercised via the operand arcs L189->192 and L190->192. Not un-taken branches. |
+| 225 | `if not src:` | `->L226` | **defensive** -- _section_fed_by_tb_lr_exit iterates edges feeding a LEFT/RIGHT entry port; edge.source is always a registered station, so graph.stations.get is never None. Defensive null guard. |
+| 231 | `if not s2 or not s2.is_port:` | `->L232` | **defensive** -- Junction look-through: s2 is the source of an edge feeding a fold junction. Junctions are synthetic resolution nodes fed only by exit ports or upstream junctions (both is_port=True), so s2 is always present and port-like. The continue is a structural-contract guard no valid topology reaches. |
+| 236 | `elif src.is_port:` | `->L223` | **defensive** -- Edge feeding a LEFT/RIGHT entry port whose source is not a junction; src is then always an exit port (is_port=True), because resolved chains feed entry ports only from exit ports or junctions. The elif is always true, so the implicit fall-through to the loop (->223) is a structural-contract guard no valid topology reaches. |
 
 ## `tb_handlers.py`
 
@@ -442,17 +442,17 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 49 | `if not (` | `->L58` |  |
-| 116 | `if diag_end < diag_start:` | `->L117` |  |
-| 122 | `if diag_end > diag_start:` | `->L123` |  |
-| 167 | `if not (` | `->L174` |  |
-| 213 | `if not (` | `->L222` |  |
-| 251 | `if not (` | `->L258` |  |
-| 268 | `if upstream_st is not None:` | `->L269` |  |
-| 291 | `if abs(drop_delta) < COORD_TOLERANCE:` | `->L292`, `->L299` |  |
-| 365 | `if not ctx.station_offsets:` | `->L366` |  |
-| 373 | `if not u:` | `->L374` |  |
-| 377 | `if (` | `->L383` |  |
-| 385 | `if abs(u.y - src.y) > COORD_TOLERANCE:` | `->L387` |  |
-| 407 | `if abs(upstream_st.x - src.x) < COORD_TOLERANCE:` | `->L409`, `->L436` |  |
+| 49 | `if not (` | `->L58` | **defensive** -- Phantom multi-line arc. The 49->58 fall-through (route a TB internal edge) is recorded by CPython from the last operand line (52->58), not the opening `if not (`. _route_tb_internal returns a routed path 487x across the corpus; the route arm IS exercised, the static 49->58 arc is a coverage-attribution artifact. |
+| 116 | `if diag_end < diag_start:` | `->L117` | **defensive** -- Degenerate-collapse clamp for an ascending diagonal: fires only when the run is shorter than 2*MIN_STRAIGHT_EDGE (20px). Every caller feeds grid-placed station coordinates whose run-axis separation is at least one grid pitch (Y_SPACING=40 / X_SPACING=60); _route_entry_runway additionally pre-guards with `room < src_min + diagonal_run`. The 20px collapse threshold is never reached. |
+| 122 | `if diag_end > diag_start:` | `->L123` | **defensive** -- Descending-run mirror of the ascending collapse clamp (#1 of `if diag_end < diag_start:`): fires only when \|run\| < 2*MIN_STRAIGHT_EDGE (20px), but connected diagonal endpoints are always >= one grid pitch (40/60px) apart on the run axis. Unreachable degenerate-geometry guard. |
+| 167 | `if not (` | `->L174` | **defensive** -- Phantom multi-line arc. The 167->174 fall-through (route internal station -> LR exit port in a TB section) is recorded from operand line 171 (171->174). _route_tb_lr_exit routes 31x across the corpus; the route arm IS exercised, the static 167->174 arc is an attribution artifact. |
+| 213 | `if not (` | `->L222` | **defensive** -- Phantom multi-line arc. The 213->222 fall-through (route LR entry port -> internal station in a TB section) is recorded from operand line 218 (218->222). _route_tb_lr_entry routes 120x across the corpus; the route arm IS exercised, the static 213->222 arc is an attribution artifact. |
+| 251 | `if not (` | `->L258` | **defensive** -- Phantom multi-line arc. The 251->258 fall-through (route TOP/BOTTOM port -> internal station) is recorded from operand line 253 (253->258). _route_perp_entry routes 76x across the corpus; the route arm IS exercised, the static 251->258 arc is an attribution artifact. |
+| 268 | `if upstream_st is not None:` | `->L269` | **needs-review** -- Reachable-but-defective (#688 pattern, filed as #740). The perp-entry merge (_route_perp_entry_merged) fires only when a cross-column producer feeds an LR section's TOP/BOTTOM entry port, which makes _align_tb_entry_port drag the port off the section boundary (a _guard_ports_on_boundaries failure). No robust clean topology reaches it; not fixtured until #740 is fixed. |
+| 291 | `if abs(drop_delta) < COORD_TOLERANCE:` | `->L292`, `->L299` | **defensive** -- Phantom list-literal arcs. The flagged dsts 292 and 299 are `pts = [` assignment lines; CPython records the branch landings from the first list-element lines instead (291->293 true arm, 291->300 false arm). Both real arms of the gate ARE exercised; 291->292 / 291->299 are attribution artifacts. |
+| 365 | `if not ctx.station_offsets:` | `->L366` | **defensive** -- compute_station_offsets returns a 0.0 entry for every (station,line) of any graph with edges, so ctx.station_offsets is never empty on the render path (76/76 _find_upstream_for_merge calls pass this guard). The falsy arm guards only a test-only route_edges(station_offsets=None) call. Same precedent as context.py L363/370 (#728). |
+| 373 | `if not u:` | `->L374` | **defensive** -- Null/contract guard: u = graph.stations.get(e2.source) where e2 is an edge in graph.edges, so e2.source is always a resolvable station id. The None arm never fires on the render path (u found in all corpus iterations); a defensive dict-lookup guard. |
+| 377 | `if (` | `->L383` | **defensive** -- Phantom multi-line arc. The 377->383 `continue` (skip a TB BOTTOM-exit upstream when merging) is recorded from operand line 381 (381->383). The continue IS taken in the corpus; the static 377->383 arc attributed to the opening `if (` is an artifact. |
+| 385 | `if abs(u.y - src.y) > COORD_TOLERANCE:` | `->L387` | **needs-review** -- Reachable-but-defective (#740). The 385->387 merge-enabling arm (upstream at the same Y as the entry port) fires only when a cross-column producer drags an LR section's TOP/BOTTOM port off its boundary; in the corpus the upstream is always at a different Y (385->386 continue). Parked until #740 is fixed; see `if upstream_st is not None:`. |
+| 407 | `if abs(upstream_st.x - src.x) < COORD_TOLERANCE:` | `->L409`, `->L436` | **needs-review** -- Reachable-but-defective (#740): both arms are behind the defective merge (_route_perp_entry_merged is never called cleanly). The different-X arm (->L436) is reached only by the off-boundary repro; the same-X arm (->L409) is additionally unreachable because the upstream exit port / junction and the entry port are always in different columns (section X-separation >= SECTION_X_PADDING). Parked until #740 is fixed. |
 
