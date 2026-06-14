@@ -8,7 +8,7 @@ Each row is a branch point (a *gate*) in a `layout/routing/` dispatch handler or
 
 Modules scoped to routing decision gates; `invariants.py` (the `validate=True` checker) and `__init__.py` are excluded.
 
-The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **267** gaps carry a triage verdict.
+The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **277** gaps carry a triage verdict.
 
 ## `common.py`
 
