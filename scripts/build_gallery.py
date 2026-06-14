@@ -456,6 +456,13 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     ),
     # --- Routing-gate coverage fixtures ---
     (
+        "cross_col_top_entry",
+        TOPOLOGIES_DIR,
+        "A cross-column feed from a RIGHT-exit producer into a TOP-entry "
+        "consumer: the entry port is placed on the section boundary rather "
+        "than floating above the canvas (issue #740).",
+    ),
+    (
         "bypass_gap2_rightward_overflow",
         TOPOLOGIES_DIR,
         "A seven-line rightward bypass whose gap-2 bundle right edge overflows "

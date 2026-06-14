@@ -11,6 +11,7 @@ from nf_metro.layout.constants import (
     COMPONENT_BAND_OVERLAP_TOLERANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
+    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     GUARD_TOLERANCE,
     ICON_HALF_HEIGHT,
@@ -1713,6 +1714,62 @@ def _guard_inter_section_routes_in_row_band(
                     f"line {r.line_id!r} waypoint y={y:.1f} outside "
                     f"row-{sec_a.grid_row} band [{lo:.1f}..{hi:.1f}]"
                 )
+
+
+def _guard_topmost_row_top_entry_hugs_section(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """After routing: a same-row inter-section route into a section in the
+    topmost grid row must hug that section's top edge, not climb into the
+    canvas-top band.
+
+    A TOP port fed by a same-row producer routes up-and-over into the port.
+    The topmost row has no inter-row gap above it -- only the title, drawn
+    in the canvas-top padding -- so the over-the-top channel must sit a
+    route's-width above the section edge. A deeper climb drives the line
+    through the title text.
+    """
+    from nf_metro.layout.routing.common import (
+        row_top_edge,
+        section_exists_above_row,
+    )
+
+    routes = _ensure_routes(graph, routes)
+
+    for r in routes:
+        src = graph.stations.get(r.edge.source)
+        tgt = graph.stations.get(r.edge.target)
+        if src is None or tgt is None:
+            continue
+        if src.section_id is None or tgt.section_id is None:
+            continue
+        if src.section_id == tgt.section_id:
+            continue
+        sec_a = graph.sections.get(src.section_id)
+        sec_b = graph.sections.get(tgt.section_id)
+        if sec_a is None or sec_b is None:
+            continue
+        if sec_a.grid_row != sec_b.grid_row:
+            continue
+        if sec_a.grid_row_span != 1 or sec_b.grid_row_span != 1:
+            continue
+        if section_exists_above_row(graph, sec_b.grid_row):
+            continue
+        band_top = row_top_edge(graph, sec_b.grid_row, default=sec_b.bbox_y)
+        limit = band_top - (INTER_ROW_EDGE_CLEARANCE + CURVE_RADIUS) - GUARD_TOLERANCE
+        min_y = min(y for _x, y in r.points)
+        if min_y < limit:
+            raise PhaseInvariantError(
+                f"{phase}: topmost-row route {r.edge.source!r}->{r.edge.target!r} "
+                f"line {r.line_id!r} climbs to y={min_y:.1f}, above the "
+                f"section-edge clearance limit {limit:.1f} (band top "
+                f"{band_top:.1f}); the over-the-top channel would cross the "
+                f"canvas-top title band"
+            )
 
 
 def _ensure_routes(

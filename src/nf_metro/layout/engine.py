@@ -179,6 +179,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_stations_within_bbox,
     _guard_tall_anchor_stack_well_formed,
     _guard_terminus_icons_within_bbox,
+    _guard_topmost_row_top_entry_hugs_section,
     _guard_trunk_bands_crossing_optimal,
     _inter_section_backtrack_legs,
     _port_anchor_snapshot,
@@ -1674,6 +1675,9 @@ def _finalize_layout(
         _guard_terminus_icons_within_bbox(graph, phase)
         if routes is not None:
             _guard_inter_section_routes_in_row_band(
+                graph, phase, offsets=offsets, routes=routes
+            )
+            _guard_topmost_row_top_entry_hugs_section(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_off_track_output_clears_non_producer(

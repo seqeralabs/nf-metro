@@ -32,6 +32,7 @@ from nf_metro.layout.routing.common import (
     resolve_section,
     row_bottom_edge,
     row_top_edge,
+    section_exists_above_row,
     symmetric_bundle_midpoint,
     vertical_direction,
 )
@@ -1082,6 +1083,35 @@ def _route_top_entry_l_shape(
     # the rightmost line (positive delta) turns inside, so it sits at
     # the smaller (northern) horizontal Y, hence -delta here.
     mid_y = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius)
+
+    # For a same-row cross-column producer the generic fallback in
+    # inter_row_channel_y places the channel at ty + clearance (inside the
+    # section bbox).  The route must approach the TOP entry from ABOVE the
+    # boundary, so override mid_y to sit above the row's top edge.
+    src_sec = resolve_section(ctx.graph, src)
+    tgt_sec = resolve_section(ctx.graph, tgt)
+    if (
+        src_sec is not None
+        and tgt_sec is not None
+        and src_sec.grid_row == tgt_sec.grid_row
+        and mid_y > ty
+    ):
+        # A row above the target contributes a section-header badge that
+        # protrudes down into the gap, so clear the full inter-row header
+        # band.  The topmost row has only the title above it (a fixed band
+        # in the canvas-top padding), so the full clearance overshoots into
+        # the title; keep the channel a route's-width above the section edge.
+        clearance = (
+            INTER_ROW_HEADER_CLEARANCE
+            if section_exists_above_row(ctx.graph, tgt_sec.grid_row)
+            else SECTION_ROUTE_CLEARANCE
+        )
+        mid_y = (
+            row_top_edge(ctx.graph, tgt_sec.grid_row, default=ty)
+            - clearance
+            - ctx.curve_radius
+        )
+
     hy = mid_y - delta
 
     # Horizontal lead-in: a short run so the corner from horizontal to

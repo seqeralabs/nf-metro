@@ -29,7 +29,6 @@
   "common.py::if seg_len2 == 0:::#1",
   "common.py::if src and not src.is_port:::#1",
   "common.py::if src_row is not None:::#1",
-  "common.py::if src_sec and tgt_sec and src_sec.grid_row != tgt_sec.grid_row:::#1",
   "common.py::if st is not None and st.is_port:::#1",
   "common.py::if station is None:::#1",
   "common.py::if t < -0.01 or t > 1.01:::#1",
