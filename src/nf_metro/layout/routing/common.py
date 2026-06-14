@@ -58,7 +58,6 @@ def _sections_in_col(
     graph: MetroGraph,
     col: int | None,
     row: int | None = None,
-    y_band: tuple[float, float] | None = None,
 ) -> list[Section]:
     """Sections in a specific grid column with non-zero width.
 
@@ -67,19 +66,12 @@ def _sections_in_col(
     in one row must measure the gap against that row's sections only,
     otherwise a section stacked in another row of the same column (e.g. a
     wide output section below) corrupts the gap edges.
-
-    When *y_band* ``(lo, hi)`` is given, restrict to sections whose bbox
-    overlaps that vertical span - used when a descent's vertical run must
-    clear only the sections it would actually cross, not the whole column.
     """
     secs = [s for s in graph.sections.values() if s.grid_col == col and s.bbox_w > 0]
     if row is not None:
         secs = [
             s for s in secs if s.grid_row <= row <= s.grid_row + s.grid_row_span - 1
         ]
-    if y_band is not None:
-        lo, hi = y_band
-        secs = [s for s in secs if not (hi < s.bbox_y or lo > s.bbox_y + s.bbox_h)]
     return secs
 
 

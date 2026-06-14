@@ -135,10 +135,6 @@
     "note": "point_on_polyline parameter-range branch, reached only via the --animate renderer; the render-path coverage sweep doesn't animate. Exercised by test_animation.py / test_routing.py.",
     "status": "defensive"
   },
-  "common.py::if y_band is not None:::#1": {
-    "note": "y_band filter body. The sole y_band caller, _nested_target_clear_channel_x, belongs to the stepped-descent subsystem (_route_stepped_descent / _should_step_descent) that #692 flagged candidate-dead; the filter is reached only through that dead path. Pending deletion review in #689.",
-    "status": "candidate-dead"
-  },
   "context.py::for e in graph.edges:::#3": {
     "note": "In the public compute_junction_fan_info, called only from _guard_fan_bundles_coincide_or_separate (a validate=True guard). The coverage sweep renders with validate=False, so this function never runs on the render path; it is exercised by the layout-invariant test surface instead.",
     "status": "defensive"
@@ -307,10 +303,6 @@
     "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if abs(dx) >= abs(dy):::#1": {
-    "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
-    "status": "candidate-dead"
-  },
   "inter_section_handlers.py::if abs(ep.y - sy) < ctx.curve_radius:::#1": {
     "note": "The merge entry-port Y tracks the source/junction Y, so a sub-curve_radius gap between exit and entry never arises (the same-Y shortcut at L120 already handles dy<curve_radius); real topologies give a larger gap.",
     "status": "candidate-dead"
@@ -323,14 +315,6 @@
     "note": "Reachable only via a defective render (TB BOTTOM-exit jog collinear overlay); see #706.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if chan_x is None:::#1": {
-    "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if chan_x is None:::#2": {
-    "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
-    "status": "candidate-dead"
-  },
   "inter_section_handlers.py::if col_left <= 0.0:::#1": {
     "note": "col_left_edge's 0.0 default only fires for a column with no sections; the target's own column always holds its section.",
     "status": "defensive"
@@ -341,10 +325,6 @@
   },
   "inter_section_handlers.py::if ctx.station_offsets:::#1": {
     "note": "_run_pass_c_guards always populates ctx.station_offsets before route_edges, and RAILS mode returns earlier; the empty-offsets arm never fires.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if edge.source in ctx.junction_ids and _should_step_descent(::#1": {
-    "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
     "status": "candidate-dead"
   },
   "inter_section_handlers.py::if entry_port is None:::#1": {
@@ -371,18 +351,6 @@
     "note": "Reachable only via a defective render (route skirts/crosses section boundary); see #724.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if ep_port is None or ep_port.side != PortSide.RIGHT:::#1": {
-    "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if ep_sec is None:::#1": {
-    "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if ep_sec.grid_col <= src_sec.grid_col:::#1": {
-    "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
-    "status": "candidate-dead"
-  },
   "inter_section_handlers.py::if ep_section and ep_section.bbox_w > 0:::#1": {
     "note": "entry_port.section_id is always set and the section has bbox_w>0 after layout; the else arm never fires.",
     "status": "defensive"
@@ -396,8 +364,8 @@
     "status": "needs-review"
   },
   "inter_section_handlers.py::if fan is not None:::#5": {
-    "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
-    "status": "candidate-dead"
+    "note": "_route_l_shape radius-shrink branch (r_first + r_second > seg): the fan-active arm rebuilds both corner radii from the shrunk base. Un-exercised because no corpus fan route's vertical segment is short enough to trip the shrink; reachability of the shrink+fan combination not yet established.",
+    "status": "needs-review"
   },
   "inter_section_handlers.py::if fan is not None:::#9": {
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
@@ -447,10 +415,6 @@
     "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if not secs:::#1": {
-    "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
-    "status": "candidate-dead"
-  },
   "inter_section_handlers.py::if other_src is None:::#1": {
     "note": "Every edge endpoint is a registered station after parse+resolve, so graph.stations.get(other.source) is never None here.",
     "status": "defensive"
@@ -463,25 +427,9 @@
     "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if src_right <= ep.x + SECTION_ROUTE_CLEARANCE:::#1": {
-    "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
-    "status": "candidate-dead"
-  },
   "inter_section_handlers.py::if src_row is None or ep_row is None or src_col is None or ep_col is None:::#1": {
     "note": "_resolve_section_colrow returns (None,None) only for a station with no section; valid entry ports always have a section with non-negative grid coords.",
     "status": "defensive"
-  },
-  "inter_section_handlers.py::if src_sec is None or ep_sec is None or src_sec.bbox_w <= 0:::#1": {
-    "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if src_sec is None:::#1": {
-    "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if src_sec is None:::#2": {
-    "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
-    "status": "candidate-dead"
   },
   "inter_section_handlers.py::if src_sec is not None and src_sec.bbox_w > 0:::#1": {
     "note": "A bypass source section always resolves and has bbox_w>0 (the parser never emits an empty section); the None/zero-width arm never fires.",
