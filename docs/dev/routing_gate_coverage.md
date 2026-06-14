@@ -8,7 +8,7 @@ Each row is a branch point (a *gate*) in a `layout/routing/` dispatch handler or
 
 Modules scoped to routing decision gates; `invariants.py` (the `validate=True` checker) and `__init__.py` are excluded.
 
-The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **273** gaps carry a triage verdict.
+The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **283** gaps carry a triage verdict.
 
 ## `common.py`
 
@@ -420,16 +420,16 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 95 | `if not src or not src.is_port:` | `->L96` |  |
-| 98 | `if (` | `->L104` |  |
-| 136 | `if not src or not tgt:` | `->L137` |  |
-| 142 | `if (` | `->L133`, `->L150` |  |
-| 175 | `if not section:` | `->L176` |  |
-| 186 | `if not succ:` | `->L187`, `->L188` |  |
-| 188 | `if (` | `->L182`, `->L192` |  |
-| 225 | `if not src:` | `->L226` |  |
-| 231 | `if not s2 or not s2.is_port:` | `->L232` |  |
-| 236 | `elif src.is_port:` | `->L223` |  |
+| 95 | `if not src or not src.is_port:` | `->L96` | **defensive** -- Phase 1a (_detect_tb_bottom_top_entries) iterates edges feeding a TOP entry port. Entry ports are synthetic nodes created by section resolution; the only edges targeting them are the resolved chain's exit_port->entry_port and junction->entry_port links, so edge.source is always a registered port or junction station (both is_port=True). The continue (missing or non-port source) is a structural-contract guard no valid topology reaches. |
+| 98 | `if (` | `->L104` | **defensive** -- PHANTOM multi-line short-circuit arc. CPython emits no branch bytecode at the opening `if (` line, so the static arc into the body L104 never executes; the Phase 1a reversal mark is exercised via the last-operand arc L102->104 (a TOP entry fed by a TB BOTTOM exit). Not an un-taken branch. |
+| 136 | `if not src or not tgt:` | `->L137` | **defensive** -- _build_section_adjacency iterates graph.edges; every edge endpoint is a registered station, so graph.stations.get never returns None for edge.source or edge.target. The continue is a defensive null guard no valid graph reaches. |
+| 142 | `if (` | `->L133`, `->L150` | **defensive** -- PHANTOM multi-line short-circuit arc. No branch bytecode at the opening `if (` line, so both static arms (->150 body, ->133 loop-back) are phantom; the horizontal_succ_pairs body is exercised via the last-operand arc L148->150 and the negative case via operand short-circuit. Not un-taken branches. |
+| 175 | `if not section:` | `->L176` | **defensive** -- _propagate_reversal_along_rows iterates sec_id values drawn from reversed_secs, which only ever holds real section ids added from graph.sections. graph.sections.get(sec_id) is never None; the continue is a defensive null guard. |
+| 186 | `if not succ:` | `->L187`, `->L188` | **defensive** -- succ_id comes from sec_successors, built only from real tgt.section_id values, so graph.sections.get(succ_id) is never None and the continue (->187) is a defensive null guard. The fall-through static arm (->188) is phantom: control falls into the following multi-line `if (`, whose first operand line carries the real arc L186->189. |
+| 188 | `if (` | `->L182`, `->L192` | **defensive** -- PHANTOM multi-line short-circuit arc. No branch bytecode at the opening `if (` line, so both static arms (->192 body, ->182 loop-back) are phantom; the reversal-propagation body is exercised via the operand arcs L189->192 and L190->192. Not un-taken branches. |
+| 225 | `if not src:` | `->L226` | **defensive** -- _section_fed_by_tb_lr_exit iterates edges feeding a LEFT/RIGHT entry port; edge.source is always a registered station, so graph.stations.get is never None. Defensive null guard. |
+| 231 | `if not s2 or not s2.is_port:` | `->L232` | **defensive** -- Junction look-through: s2 is the source of an edge feeding a fold junction. Junctions are synthetic resolution nodes fed only by exit ports or upstream junctions (both is_port=True), so s2 is always present and port-like. The continue is a structural-contract guard no valid topology reaches. |
+| 236 | `elif src.is_port:` | `->L223` | **defensive** -- Edge feeding a LEFT/RIGHT entry port whose source is not a junction; src is then always an exit port (is_port=True), because resolved chains feed entry ports only from exit ports or junctions. The elif is always true, so the implicit fall-through to the loop (->223) is a structural-contract guard no valid topology reaches. |
 
 ## `tb_handlers.py`
 
