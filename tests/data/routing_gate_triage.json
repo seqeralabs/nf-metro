@@ -263,6 +263,46 @@
     "status": "defensive",
     "note": "A junction's port/junction target always resolves to a grid column; the unresolved-column continue never fires."
   },
+  "core.py::if (::#1": {
+    "note": "Multiline if(...) opening-paren line for the rail-section internal-edge test (src.section_id == tgt.section_id and ... is not None and is_rail_section(...)). Python attributes the branch decisions to the operand lines, all of which have executed arcs including the is-not-None short-circuit exit and the rail_edges.append body. The static arcs from the opening-paren line are phantoms no execution traverses.",
+    "status": "defensive"
+  },
+  "core.py::if not src or not tgt:::#1": {
+    "note": "Main edge-loop guard against a missing endpoint station. After section resolution every edge endpoint exists in graph.stations (parse _ensure_station's all referenced nodes; resolved chains insert their own ports/junctions), so the guard never fires and only the proceed-to-routing arm is reachable.",
+    "status": "defensive"
+  },
+  "core.py::if result is not None:::#1": {
+    "note": "Append-guard after the priority-ordered handler chain. The final handler _route_intra_section is total: its three early returns and its _route_diagonal fallback (annotated -> RoutedPath, single return statement) always yield a RoutedPath, so result is never None and every edge appends. The None arm is unreachable.",
+    "status": "defensive"
+  },
+  "core.py::if src is None or tgt is None or src.is_port or tgt.is_port:::#1": {
+    "note": "Per-section rail-mode edge filter. The True/continue arm (skip port or missing-station edges) IS exercised: rail fixtures carry inter-section port chains past this loop. When the guard is False, execution falls through to the inner rail-section if and is recorded as the arc to that if's first operand line, so the static fall-through arc to the bare opening-paren line is a phantom no execution takes. Both real branches are covered.",
+    "status": "defensive"
+  },
+  "corners.py::if i < len(points) - 2:::#1": {
+    "note": "Mirror of the i>1 split for a corner sharing its outgoing segment with a following corner. The True branch is exercised on multi-corner paths via the next_r conditional-expression condition line; the static true arc to the assignment-target line is a phantom of the multiline ternary (condition evaluates before the assignment target).",
+    "status": "defensive"
+  },
+  "corners.py::if i > 1:::#1": {
+    "note": "Proportional segment-budget allocation for a corner sharing its incoming segment with a previous corner. The True branch IS taken on multi-corner paths (>=2 corners are common in the corpus): the executed true arc lands on the prev_r conditional-expression condition line, not the static arc to the assignment-target line, because the ternary evaluates its condition first. The static true arc is a phantom of the multiline ternary.",
+    "status": "defensive"
+  },
+  "inter_section.py::for prev, curr in zip(self.corners, self.corners[1:]):::#1": {
+    "note": "TurnSequence.parity loop over consecutive corners. parity is descriptor-level documentation (runtime wrap handlers preserve bundle ordering via per-corner offset propagation regardless of this value); nothing on the render path reads it, and the module is never imported during the sweep. Exercised by test_inter_section_descriptor.py.",
+    "status": "defensive"
+  },
+  "inter_section.py::if (self.in_tangent, self.out_tangent) in _CW_TURNS:::#1": {
+    "note": "Corner.handedness property. Same module-load story: inter_section.py is never imported on the render path, so neither the CW nor the CCW arm is reachable by any render topology. Both branches are exercised by test_inter_section_descriptor.py.",
+    "status": "defensive"
+  },
+  "inter_section.py::if pair not in _CW_TURNS and pair not in _CCW_TURNS:::#1": {
+    "note": "Corner.__post_init__ turn-validity check. inter_section.py is the descriptor/documentation module (distinct from inter_section_handlers.py); no src module imports it, so it never loads during the render-corpus sweep (confirmed absent from sys.modules after rendering the whole corpus) and both arms show 0 hits. Corner instances are module-level constants built from valid right-angle turns, so the raise can only fire on a source edit. Exercised by test_inter_section_descriptor.py.",
+    "status": "defensive"
+  },
+  "inter_section.py::if prev.handedness != curr.handedness:::#1": {
+    "note": "Handedness-change counter inside TurnSequence.parity. Off the render path for the same reason (inter_section.py never loaded during rendering); both arms are exercised by test_inter_section_descriptor.py's parity-contract tests.",
+    "status": "defensive"
+  },
   "inter_section_handlers.py::elif gap_bottom > gap_top:::#1": {
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
