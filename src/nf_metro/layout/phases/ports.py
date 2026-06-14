@@ -828,14 +828,16 @@ def _align_perpendicular_exit_port(
 
 
 def _align_drop_target_trunk(graph: MetroGraph, port_id: str, exit_x: float) -> None:
-    """Shift a perpendicular-drop target so its trunk sits under the exit X.
+    """Shift a perpendicular-drop target's trunk under the exit X.
 
     The line leaves the exit port vertically and drops straight into the
     target's TOP/BOTTOM entry, so the target's vertical trunk must align with
     the exit port's X -- the 90-degree rotation of a fold's TB exit aligning to
-    its target's Y.  Shifts the whole target section (stations, ports, bbox) by
-    the gap so the drop is straight, leaving the source's curve after its last
-    station intact.
+    its target's Y.  Only the trunk (internal stations and the perpendicular
+    drop entry/exit ports) moves; the section box and its flow-side LEFT/RIGHT
+    ports stay on the grid column edge, so a source and target stacked in one
+    column keep their shared right edge rather than the target jutting out by
+    the drop offset.
     """
     for tgt_section in _drop_targets(graph, port_id):
         trunk_x = _tb_trunk_x(graph, tgt_section)
@@ -844,14 +846,20 @@ def _align_drop_target_trunk(graph: MetroGraph, port_id: str, exit_x: float) -> 
         delta = exit_x - trunk_x
         if abs(delta) < SAME_COORD_TOLERANCE:
             continue
+        bbox_right = tgt_section.bbox_x + tgt_section.bbox_w
         for sid in tgt_section.station_ids:
+            port = graph.ports.get(sid)
+            if port is not None and port.side in (PortSide.LEFT, PortSide.RIGHT):
+                continue
             st = graph.stations.get(sid)
             if st:
                 st.x += delta
-            p = graph.ports.get(sid)
-            if p:
-                p.x += delta
-        tgt_section.bbox_x += delta
+            if port:
+                port.x += delta
+        # Grow the box only if the shifted trunk would otherwise overrun it.
+        overrun = (exit_x + CURVE_RADIUS) - bbox_right
+        if overrun > 0:
+            tgt_section.bbox_w += overrun
 
 
 def _drop_targets(graph: MetroGraph, port_id: str) -> Iterator[Section]:
