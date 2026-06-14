@@ -125,6 +125,17 @@ def row_top_edge(
     return min((s.bbox_y for s in secs), default=default) if secs else default
 
 
+def section_exists_above_row(graph: MetroGraph, row: int) -> bool:
+    """True if any section lies entirely above grid *row* (its bottom row is
+    a higher row than *row*).
+
+    Distinguishes a row with a genuine inter-row gap above it (a section
+    contributes a header badge there) from the topmost row, which has only
+    the canvas-top padding above.
+    """
+    return any(s.grid_row + s.grid_row_span - 1 < row for s in graph.sections.values())
+
+
 def column_gap_midpoint(
     graph: MetroGraph, col_a: int, col_b: int, row: int | None = None
 ) -> float:

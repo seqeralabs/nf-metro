@@ -32,6 +32,7 @@ from nf_metro.layout.routing.common import (
     resolve_section,
     row_bottom_edge,
     row_top_edge,
+    section_exists_above_row,
     symmetric_bundle_midpoint,
     vertical_direction,
 )
@@ -1100,12 +1101,10 @@ def _route_top_entry_l_shape(
         # band.  The topmost row has only the title above it (a fixed band
         # in the canvas-top padding), so the full clearance overshoots into
         # the title; keep the channel a route's-width above the section edge.
-        has_row_above = any(
-            s.grid_row + s.grid_row_span - 1 < tgt_sec.grid_row
-            for s in ctx.graph.sections.values()
-        )
         clearance = (
-            INTER_ROW_HEADER_CLEARANCE if has_row_above else SECTION_ROUTE_CLEARANCE
+            INTER_ROW_HEADER_CLEARANCE
+            if section_exists_above_row(ctx.graph, tgt_sec.grid_row)
+            else SECTION_ROUTE_CLEARANCE
         )
         mid_y = (
             row_top_edge(ctx.graph, tgt_sec.grid_row, default=ty)

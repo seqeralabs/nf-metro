@@ -1733,22 +1733,12 @@ def _guard_topmost_row_top_entry_hugs_section(
     route's-width above the section edge. A deeper climb drives the line
     through the title text.
     """
-    routes = _ensure_routes(graph, routes)
-
-    flat_rows = [
-        s.grid_row
-        for s in graph.sections.values()
-        if s.bbox_h > 0 and s.grid_row_span == 1
-    ]
-    if not flat_rows:
-        return
-    top_row = min(flat_rows)
-    band_top = min(
-        s.bbox_y
-        for s in graph.sections.values()
-        if s.grid_row == top_row and s.bbox_h > 0 and s.grid_row_span == 1
+    from nf_metro.layout.routing.common import (
+        row_top_edge,
+        section_exists_above_row,
     )
-    limit = band_top - (INTER_ROW_EDGE_CLEARANCE + CURVE_RADIUS) - GUARD_TOLERANCE
+
+    routes = _ensure_routes(graph, routes)
 
     for r in routes:
         src = graph.stations.get(r.edge.source)
@@ -1763,10 +1753,14 @@ def _guard_topmost_row_top_entry_hugs_section(
         sec_b = graph.sections.get(tgt.section_id)
         if sec_a is None or sec_b is None:
             continue
-        if sec_a.grid_row != top_row or sec_b.grid_row != top_row:
+        if sec_a.grid_row != sec_b.grid_row:
             continue
         if sec_a.grid_row_span != 1 or sec_b.grid_row_span != 1:
             continue
+        if section_exists_above_row(graph, sec_b.grid_row):
+            continue
+        band_top = row_top_edge(graph, sec_b.grid_row, default=sec_b.bbox_y)
+        limit = band_top - (INTER_ROW_EDGE_CLEARANCE + CURVE_RADIUS) - GUARD_TOLERANCE
         min_y = min(y for _x, y in r.points)
         if min_y < limit:
             raise PhaseInvariantError(
