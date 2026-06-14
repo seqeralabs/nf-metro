@@ -226,16 +226,7 @@ def _section_line_feeders(ctx: _OffsetCtx, section: Section) -> dict[str, str]:
             src = graph.stations.get(edge.source)
             if not src:
                 continue
-            feeder_sec = None
-            if src.is_port:
-                feeder_sec = src.section_id
-            elif edge.source in graph.junctions:
-                for je in graph.edges_to(edge.source):
-                    if je.line_id == edge.line_id:
-                        js = graph.stations.get(je.source)
-                        if js and js.is_port:
-                            feeder_sec = js.section_id
-                            break
+            feeder_sec = src.section_id
             if feeder_sec is not None:
                 line_feeder[edge.line_id] = feeder_sec
     return line_feeder
@@ -831,57 +822,17 @@ def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
                             ctx.offsets[(e2.target, lid)] = entry_offs[lid]
 
 
-def _separate_compact_entry_offsets(ctx: _OffsetCtx) -> None:
-    """Give multi-line entry ports separated offsets and feed them upstream."""
-    graph = ctx.graph
-    for sec_id, section in graph.sections.items():
-        compact_entry_lines: list[str] = []
-        for pid in section.entry_ports:
-            compact_entry_lines.extend(graph.station_lines(pid))
-        unique = sorted(
-            set(compact_entry_lines), key=lambda x: ctx.line_priority.get(x, 0)
-        )
-        if len(unique) < 2:
-            continue
-        existing = [
-            ctx.offsets.get((pid, lid), 0.0)
-            for pid in section.entry_ports
-            for lid in unique
-            if lid in graph.station_lines(pid)
-        ]
-        if len(set(existing)) >= 2:
-            continue
-        sec_reverse = sec_id in ctx.reversed_sections
-        for i, lid in enumerate(unique):
-            if sec_reverse:
-                off = (len(unique) - 1 - i) * ctx.offset_step
-            else:
-                off = i * ctx.offset_step
-            for pid in section.entry_ports:
-                if lid in graph.station_lines(pid):
-                    ctx.offsets[(pid, lid)] = off
-                    for edge in graph.edges_to(pid):
-                        if edge.line_id == lid:
-                            src_port = graph.ports.get(edge.source)
-                            if src_port and not src_port.is_entry:
-                                ctx.offsets[(edge.source, lid)] = off
-
-
 def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
     """Compute entry port offsets and propagate to downstream stations.
 
-    Handles three cases:
+    Handles two cases:
     1. TOP entry ports fed by TB BOTTOM exits: match the reversed offset
        scheme used by inter-section routing.
     2. LEFT/RIGHT entry ports fed by a single LR/RL exit: propagate
        spatial ordering to prevent bundle crossings.
-    3. Compact mode: ensure multi-line entry ports have separated offsets
-       and propagate to upstream exit ports.
     """
     _entry_top_from_tb_bottom_exits(ctx)
     _propagate_lr_rl_exit_to_entry(ctx)
-    if ctx.compact:
-        _separate_compact_entry_offsets(ctx)
 
 
 def _compact_station_gaps(ctx: _OffsetCtx) -> None:

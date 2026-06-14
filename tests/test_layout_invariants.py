@@ -2996,6 +2996,58 @@ def test_fanout_junction_resolves_via_upstream(fixture):
             ), f"{fixture}: resolve_section({jid}, prefer_upstream={prefer}) is None"
 
 
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_entry_port_fed_only_by_ports(fixture):
+    """Every edge into a section entry port originates at a port station.
+
+    ``_resolve_sections`` rewrites inter-section edges into
+    ``source -> exit_port -> entry_port -> target`` chains, so an entry
+    port's incoming edges come from exit ports or fan-out junctions, all
+    ``is_port=True``.  ``_section_line_feeders`` reads the feeder section
+    directly off the source's ``section_id``, relying on this; a non-port
+    source would mean an internal station feeds an entry port directly.
+    """
+    graph = _layout(fixture)
+    for section in graph.sections.values():
+        for pid in section.entry_ports:
+            for edge in graph.edges_to(pid):
+                src = graph.stations.get(edge.source)
+                assert src is None or src.is_port, (
+                    f"{fixture}: entry port {pid} fed by non-port station {edge.source}"
+                )
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_COMPACT)
+def test_compact_multiline_entry_ports_pre_separated(fixture):
+    """Multi-line entry ports already carry separated offsets before the
+    entry-port pass runs.
+
+    ``_apply_compact_section_consistency`` assigns each section's entry lines
+    distinct ``i * offset_step`` offsets early in ``compute_station_offsets``,
+    so by the time the entry-port pass runs the offsets on a multi-line entry
+    port are never all-equal.  This pins the precondition that made the
+    compact entry-port separation pass a no-op.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    for section in graph.sections.values():
+        entry_lines = {
+            lid for pid in section.entry_ports for lid in graph.station_lines(pid)
+        }
+        if len(entry_lines) < 2:
+            continue
+        existing = [
+            offsets.get((pid, lid), 0.0)
+            for pid in section.entry_ports
+            for lid in entry_lines
+            if lid in graph.station_lines(pid)
+        ]
+        assert len(set(existing)) >= 2, (
+            f"{fixture}: section {section.id} multi-line entry ports share one "
+            f"offset {set(existing)}; the separation pass was not redundant"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Inter-section routes don't backtrack in X against their net flow direction
 # ---------------------------------------------------------------------------

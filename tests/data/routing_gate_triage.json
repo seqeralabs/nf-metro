@@ -699,10 +699,6 @@
     "note": "Defensive in _inter_row_gap_band: adjacent rows in the sorted section-row set both contain sections, so row_bottom_edge / row_top_edge resolve; the None skip arm guards a row with no sections that the iteration never yields.",
     "status": "defensive"
   },
-  "offsets.py::elif edge.source in graph.junctions:::#1": {
-    "note": "This elif is unreachable because L230 `if src.is_port:` always matches junction sources first: all junctions (both fan-out junctions and merge junctions) are created with is_port=True in resolve.py. The elif body at L232 and both its outgoing arcs (body-entry 232->233 and fallthrough 232->239) are therefore dead.",
-    "status": "candidate-dead"
-  },
   "offsets.py::elif feeding_exit != edge.source:::#1": {
     "note": "This arm (single_exit=False due to multiple distinct exit ports feeding one junction) requires one junction to receive edges from two different exit ports. But _rewrite_edges_with_junctions in resolve.py creates exactly one junction per exit port fan-out, wired exclusively from that exit port's edges. A junction always has a single upstream exit port; the elif is structurally unreachable.",
     "status": "candidate-dead"
@@ -714,18 +710,6 @@
   "offsets.py::for edge in graph.edges_to(jid):::#2": {
     "note": "Reachable only via a junction->entry-port alignment whose bundle order switches across the section boundary, breaking an otherwise-horizontal trunk (#704). Exercise with a clean fixture once #704 is fixed.",
     "status": "needs-review"
-  },
-  "offsets.py::for edge in graph.edges_to(pid):::#2": {
-    "note": "Inside the L834 true-arm block nested within L828 and L825 false-arm. Unreachable for the same reason as all other L828-L839 arms.",
-    "status": "candidate-dead"
-  },
-  "offsets.py::for i, lid in enumerate(unique):::#1": {
-    "note": "The for-loop at L828 is inside the L825 false-arm block (L826: continue is taken when offsets already separated). _apply_compact_section_consistency always separates entry port offsets before this function runs, so L825 always takes the skip path. Both arcs (loop-entered and loop-done) are unreachable for the same reason as L825->L827.",
-    "status": "candidate-dead"
-  },
-  "offsets.py::for je in graph.edges_to(edge.source):::#1": {
-    "note": "Inside the dead elif body at L232. The for-loop and its inner logic (L234-L238) are never executed because L232 is never entered (all junction stations have is_port=True, caught by L230 before reaching L232).",
-    "status": "candidate-dead"
   },
   "offsets.py::for lid in graph.station_lines(port_id):::#1": {
     "note": "The tb_right_entry branch of _entry_top_from_tb_bottom_exits; reachable only via a TB section with a RIGHT entry stacked above another section, which backtracks against flow and crosses the section boundary (#707). Exercise with a clean fixture once #707 is fixed.",
@@ -746,10 +730,6 @@
   "offsets.py::for other_lid in nbr_lines:::#1": {
     "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
     "status": "needs-review"
-  },
-  "offsets.py::for pid in section.entry_ports:::#4": {
-    "note": "Inner loop inside the L828 for-loop body, which is inside the L825 false-arm block. Unreachable for the same reason: _apply_compact_section_consistency always separates entry port offsets before _separate_compact_entry_offsets runs.",
-    "status": "candidate-dead"
   },
   "offsets.py::if (::#2": {
     "note": "Both arcs are CPython 3.11 phantoms. The `if ( abs(ctx.offsets.get(...) - new_off) < tol ):` condition at L521-L524 generates bytecode starting at L522; the false-branch arc is (522, FOR_ITER_line) and the true-branch arc is (522,525). Static analysis incorrectly attributes both to L521 as (521,518) and (521,525). Runtime data.arcs() never produces (521,518) or (521,525); internal_origin_main.mmd confirms the real arcs are (519,522) and (522,525).",
@@ -783,10 +763,6 @@
     "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
     "status": "needs-review"
   },
-  "offsets.py::if edge.line_id == lid:::#1": {
-    "note": "Inside the L836 loop, nested within L828 and L825 false-arm. Unreachable because _apply_compact_section_consistency always separates entry port offsets before _separate_compact_entry_offsets is called.",
-    "status": "candidate-dead"
-  },
   "offsets.py::if edge.source in outbound:::#1": {
     "note": "outbound is pre-built from graph.stations keys identically to inbound. All edge sources are registered stations by construction (regular nodes, ports, junctions), so edge.source is always found in outbound and the False branch (56->53) is never taken.",
     "status": "defensive"
@@ -811,25 +787,9 @@
     "note": "Exit ports are only created when inter-section edges exist (resolve.py `_create_port_stations` iterates `exit_group_edges` which is populated only from actual edges). Every TB LEFT/RIGHT exit port therefore has at least one edge from an internal station, so `internal_offs` is never empty when the loop is entered. The false arm is a defensive guard against an impossible empty-feeder state.",
     "status": "defensive"
   },
-  "offsets.py::if je.line_id == edge.line_id:::#1": {
-    "note": "Inside the dead elif body at L232. This condition is part of the inner loop at L233, which is itself in dead code because all junction sources have is_port=True and are caught at L230, never reaching the elif at L232.",
-    "status": "candidate-dead"
-  },
-  "offsets.py::if js and js.is_port:::#1": {
-    "note": "Inside the dead elif body at L232. This condition checks the upstream feeder of the junction source, but the entire elif block is unreachable since junction stations have is_port=True (resolve.py L617, L729) and are therefore dispatched to the `if src.is_port:` branch at L230 before ever reaching L232.",
-    "status": "candidate-dead"
-  },
   "offsets.py::if len(nbr_lines) < 2:::#1": {
     "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
     "status": "needs-review"
-  },
-  "offsets.py::if len(set(existing)) >= 2:::#1": {
-    "note": "_apply_compact_section_consistency runs at step 4 before _separate_compact_entry_offsets at step 8. That function explicitly sets per-line offsets (i * offset_step) for every multi-line station including entry ports, guaranteeing len(set(existing)) >= 2 for any section with >=2 entry lines. No topology can reach L825 with all-equal existing offsets because the consistency phase always separates them first. Confirmed: funcprofiler_upstream (compact fixture with multi-line entries) hits only L825->L826.",
-    "status": "candidate-dead"
-  },
-  "offsets.py::if lid in graph.station_lines(pid):::#1": {
-    "note": "Inside the L833 inner loop which is itself inside the L828 loop inside the L825 false-arm block. Unreachable because _apply_compact_section_consistency always pre-separates entry port offsets.",
-    "status": "candidate-dead"
   },
   "offsets.py::if lid not in seen:::#1": {
     "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable \u2014 the dedup happens at set construction, making the `seen` guard dead code.",
@@ -907,10 +867,6 @@
     "note": "Same argument as L1084: id_b in graph.ports requires the station to have been registered via graph.add_port(), which always supplies a non-None section_id for the created station. A station with section_id=None (sec_b is None) is a junction created by add_junction(), which never calls add_port(). The precondition sec_b is None AND id_b in graph.ports is therefore unsatisfiable.",
     "status": "candidate-dead"
   },
-  "offsets.py::if sec_reverse:::#2": {
-    "note": "Inside the L828 for-loop body which itself is inside the L825 false-arm block. _apply_compact_section_consistency always separates offsets first, so L825->826 (skip) is always taken. Both arms of sec_reverse are unreachable.",
-    "status": "candidate-dead"
-  },
   "offsets.py::if single_exit and feeding_exit is not None:::#1": {
     "note": "Reachable only via a junction->entry-port alignment whose bundle order switches across the section boundary, breaking an otherwise-horizontal trunk (#704). Exercise with a clean fixture once #704 is fixed.",
     "status": "needs-review"
@@ -919,19 +875,11 @@
     "note": "The false arm fires when an edge source is an internal station (not a port) whose section_id differs from sec_id. After _resolve_sections(), all inter-section edges run through port stations; no direct edge from an internal station of section A to an internal station of section B exists. DFS back-walk via edges_to() from within a section can only reach: (a) entry ports (return True), (b) same-section internal stations (pushed), or (c) other-section ports (is_port=True, skipped by `port and port.is_entry` check). Cross-section internal stations are structurally unreachable via direct edges after resolution.",
     "status": "defensive"
   },
-  "offsets.py::if src.is_port:::#1": {
-    "note": "The elif at L232 (`edge.source in graph.junctions`) can never be reached because every junction station is created with is_port=True (resolve.py L617 and L729), so the `if src.is_port:` branch at L230 always catches junction sources before the elif. The arc 230->232 requires src.is_port to be False, which cannot occur for any valid edge feeding an entry port after _resolve_sections.",
-    "status": "candidate-dead"
-  },
   "offsets.py::if src.section_id in tb_right_entry:::#1": {
     "note": "The tb_right_entry branch of _entry_top_from_tb_bottom_exits; reachable only via a TB section with a RIGHT entry stacked above another section, which backtracks against flow and crosses the section boundary (#707). Exercise with a clean fixture once #707 is fixed.",
     "status": "needs-review"
   },
   "offsets.py::if src_port and not src_port.is_entry:::#2": {
-    "note": "Inside the L837 true-arm, nested within L836, L828, and L825 false-arm. Unreachable because _apply_compact_section_consistency always separates entry port offsets before _separate_compact_entry_offsets is called.",
-    "status": "candidate-dead"
-  },
-  "offsets.py::if src_port and not src_port.is_entry:::#3": {
     "note": "Reachable only via a junction->entry-port alignment whose bundle order switches across the section boundary, breaking an otherwise-horizontal trunk (#704). Exercise with a clean fixture once #704 is fixed.",
     "status": "needs-review"
   },

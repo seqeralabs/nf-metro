@@ -2927,6 +2927,28 @@ def _guard_fanout_junction_resolves_upstream(graph: MetroGraph, phase: str) -> N
             )
 
 
+def _guard_entry_port_fed_only_by_ports(graph: MetroGraph, phase: str) -> None:
+    """Every edge into a section entry port originates at a port station.
+
+    ``_resolve_sections`` rewrites each inter-section edge into a chain
+    ``source -> exit_port -> entry_port -> target``, so an entry port's
+    incoming edges come from exit ports or fan-out junctions, all carrying
+    ``is_port=True``.  ``_section_line_feeders`` relies on this to read the
+    feeder section straight off the source's ``section_id``; a non-port
+    source would mean an internal station feeds an entry port directly,
+    which would mis-attribute the reconvergence feeder ordering.
+    """
+    for section in graph.sections.values():
+        for pid in section.entry_ports:
+            for edge in graph.edges_to(pid):
+                src = graph.stations.get(edge.source)
+                if src is not None and not src.is_port:
+                    raise PhaseInvariantError(
+                        f"{phase}: entry port {pid!r} is fed by non-port station "
+                        f"{edge.source!r}; entry ports must be fed only by ports"
+                    )
+
+
 def _guard_station_x_column_drift(graph: MetroGraph, phase: str) -> None:
     """Final-phase: within each LR/RL section, stations sharing a layer
     must agree on X within one ``X_SPACING`` of the layer's median X.
