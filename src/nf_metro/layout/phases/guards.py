@@ -2904,6 +2904,29 @@ def _guard_fanout_junction_shares_exit_port_y(graph: MetroGraph, phase: str) -> 
             )
 
 
+def _guard_fanout_junction_resolves_upstream(graph: MetroGraph, phase: str) -> None:
+    """Every ``section_id``-less junction resolves to a section upstream.
+
+    ``resolve_section`` traces such a junction to a connected port's section
+    through its incoming edges; a fan-out junction is emitted with an
+    ``exit_port -> junction`` edge whose source carries the source section's
+    id, so the upstream scan always resolves.  A junction that resolves to no
+    section would leave routing without a grid column/row for it and silently
+    misplace the fanned bundle.
+    """
+    from nf_metro.layout.routing.common import resolve_section
+
+    for jid in graph.junction_ids:
+        junction = graph.stations.get(jid)
+        if junction is None or junction.section_id:
+            continue
+        if resolve_section(graph, junction) is None:
+            raise PhaseInvariantError(
+                f"{phase}: fan-out junction {jid!r} resolves to no section; "
+                f"its upstream neighbours carry no section_id"
+            )
+
+
 def _guard_station_x_column_drift(graph: MetroGraph, phase: str) -> None:
     """Final-phase: within each LR/RL section, stations sharing a layer
     must agree on X within one ``X_SPACING`` of the layer's median X.

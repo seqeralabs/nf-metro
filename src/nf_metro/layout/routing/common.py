@@ -58,7 +58,6 @@ def _sections_in_col(
     graph: MetroGraph,
     col: int | None,
     row: int | None = None,
-    y_band: tuple[float, float] | None = None,
 ) -> list[Section]:
     """Sections in a specific grid column with non-zero width.
 
@@ -67,19 +66,12 @@ def _sections_in_col(
     in one row must measure the gap against that row's sections only,
     otherwise a section stacked in another row of the same column (e.g. a
     wide output section below) corrupts the gap edges.
-
-    When *y_band* ``(lo, hi)`` is given, restrict to sections whose bbox
-    overlaps that vertical span - used when a descent's vertical run must
-    clear only the sections it would actually cross, not the whole column.
     """
     secs = [s for s in graph.sections.values() if s.grid_col == col and s.bbox_w > 0]
     if row is not None:
         secs = [
             s for s in secs if s.grid_row <= row <= s.grid_row + s.grid_row_span - 1
         ]
-    if y_band is not None:
-        lo, hi = y_band
-        secs = [s for s in secs if not (hi < s.bbox_y or lo > s.bbox_y + s.bbox_h)]
     return secs
 
 
@@ -737,9 +729,10 @@ def resolve_section(
     For junctions (``section_id is None``), traces edges to find a
     connected port's section.
 
-    When *prefer_upstream* is True (default), incoming edges are checked
-    first so the junction resolves to the upstream section.  When False,
-    both directions are scanned in a single pass with no preference.
+    When *prefer_upstream* is True (default), the junction is resolved
+    through its incoming edges, yielding the upstream section.  When False,
+    both directions are scanned in a single ``graph.edges`` pass with no
+    preference.
 
     A ``None`` station (e.g. an unresolved lookup) yields ``None``.
     """
@@ -751,12 +744,6 @@ def resolve_section(
     if prefer_upstream:
         for e in graph.edges_to(station.id):
             other = graph.stations.get(e.source)
-            if other and other.section_id:
-                sec = graph.sections.get(other.section_id)
-                if sec:
-                    return sec
-        for e in graph.edges_from(station.id):
-            other = graph.stations.get(e.target)
             if other and other.section_id:
                 sec = graph.sections.get(other.section_id)
                 if sec:

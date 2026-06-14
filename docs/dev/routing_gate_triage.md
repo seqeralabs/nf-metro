@@ -205,6 +205,40 @@ So: run `--write` and reconcile the triage JSON as a normal part of any routing 
 that adds, removes, or rewrites a gate. No separate maintenance pass is needed
 between campaigns.
 
+## Finalising: reconciling `needs-review` when a parked bug closes
+
+A `needs-review` arm filed via the **reachable-but-defective** lane is parked on a
+bug issue: the arm is only reached by a topology that renders defectively, so no
+fixture was shippable yet. When that bug is fixed and merged, the arm does **not**
+resolve itself - it stays a `needs-review` gap until someone reconciles it against
+*how* the bug was fixed. Three outcomes, by fix shape:
+
+- **Fixed by rendering the topology cleanly** -> the blocker is gone; author the
+  clean fixture now (the standard `reachable` lane), verify the arm flips via the
+  coverage script, and remove its `needs-review` entry. This is the common case
+  and the bulk of finalising a campaign.
+- **Fixed by rejecting or reshaping the topology** (e.g. the fix adds a new
+  `BackwardFlowError` or forces a different port side) -> the route that reached
+  the arm may no longer be constructible. Check whether *another* valid topology
+  still reaches it: if not, reclassify **defensive**/**candidate-dead** with the
+  rejection as evidence; if so, it stays `reachable` and still wants a fixture by
+  the surviving route.
+- **Fixed, but the defect was re-filed as a follow-up** (the original bug closed,
+  a sibling opened) -> the arm is still reachable-but-defective; re-point its note
+  to the open follow-up issue. It stays parked, now correctly attributed.
+
+Watch the distinction between *parked on* a closed bug and *citing* a closed bug
+**as the pattern** while parked on an open follow-up - only the former is
+actionable when the bug closes. A note that reads "the #688 pattern, filed as
+\#740" is parked on #740 (open), not #688 (closed).
+
+**Where this reconciliation should happen:** ideally inside the bug-fix PR itself.
+If a fix ships the fixture that flips its parked arm, the stale-key ratchet
+*forces* that PR to remove the `needs-review` entry in the same change (the arm
+leaves the gap set, so its triage key goes stale). So the cleanest path is for
+each engine fix to retire its own parked arm; a later finalisation sweep then only
+mops up the arms whose fix PRs did not, plus the reject/reshape reclassifications.
+
 ## Re-running a campaign in future
 
 Run a fresh campaign when the open-gap backlog has grown enough to be worth a
