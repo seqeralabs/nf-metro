@@ -1095,9 +1095,21 @@ def _route_top_entry_l_shape(
         and src_sec.grid_row == tgt_sec.grid_row
         and mid_y > ty
     ):
+        # A row above the target contributes a section-header badge that
+        # protrudes down into the gap, so clear the full inter-row header
+        # band.  The topmost row has only the title above it (a fixed band
+        # in the canvas-top padding), so the full clearance overshoots into
+        # the title; keep the channel a route's-width above the section edge.
+        has_row_above = any(
+            s.grid_row + s.grid_row_span - 1 < tgt_sec.grid_row
+            for s in ctx.graph.sections.values()
+        )
+        clearance = (
+            INTER_ROW_HEADER_CLEARANCE if has_row_above else SECTION_ROUTE_CLEARANCE
+        )
         mid_y = (
             row_top_edge(ctx.graph, tgt_sec.grid_row, default=ty)
-            - INTER_ROW_HEADER_CLEARANCE
+            - clearance
             - ctx.curve_radius
         )
 

@@ -2519,3 +2519,62 @@ graph LR
                 f"BOTTOM port {pid!r} at y={st.y:.1f} not on bottom boundary "
                 f"bbox_y+bbox_h={sec.bbox_y + sec.bbox_h:.1f}"
             )
+
+
+def test_cross_col_top_entry_channel_clears_title_band():
+    """A topmost-row over-the-top entry channel sits between title and section.
+
+    A same-row producer feeding a TOP entry routes up-and-over into the
+    port.  In the topmost grid row the only thing above the section is the
+    title, so the channel must sit below the title baseline yet above the
+    section's top edge: clear of the title text, while entering the section
+    from above as ``entry: top`` requests.
+    """
+    from nf_metro.layout.routing import route_edges
+    from nf_metro.parser.model import PortSide
+    from nf_metro.render.constants import TITLE_Y_OFFSET
+
+    mmd = """\
+%%metro title: Cross-Column Top Entry
+%%metro style: dark
+%%metro line: l1 | Line 1 | #0570b0
+
+graph LR
+    subgraph producer [Producer]
+        %%metro exit: right | l1
+        p1[Step P1]
+        p2[Step P2]
+        p1 -->|l1| p2
+    end
+
+    subgraph consumer [Consumer]
+        %%metro entry: top | l1
+        c1[Step C1]
+        c2[Step C2]
+        c1 -->|l1| c2
+    end
+
+    p2 -->|l1| c1
+"""
+    graph = parse_metro_mermaid(mmd)
+    # validate=True exercises _guard_topmost_row_top_entry_hugs_section.
+    compute_layout(graph, validate=True)
+
+    top_port_id = next(
+        pid
+        for pid, port in graph.ports.items()
+        if port.is_entry and port.side == PortSide.TOP
+    )
+    consumer_top = graph.sections["consumer"].bbox_y
+
+    over_top = next(r for r in route_edges(graph) if r.edge.target == top_port_id)
+    channel_y = min(y for _x, y in over_top.points)
+
+    assert channel_y > TITLE_Y_OFFSET, (
+        f"over-the-top channel y={channel_y:.1f} is above the title baseline "
+        f"{TITLE_Y_OFFSET:.1f}; the route loops through the title text"
+    )
+    assert channel_y < consumer_top, (
+        f"over-the-top channel y={channel_y:.1f} does not rise above the "
+        f"consumer top edge {consumer_top:.1f}; the TOP entry is not honoured"
+    )
