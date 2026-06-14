@@ -119,10 +119,6 @@
     "note": "Header-clamp guard: the False arm (src_row is None) needs an unresolvable source section, but inter-section bypass sources always resolve to a grid row after layout; a guard against an unresolved source that doesn't occur.",
     "status": "defensive"
   },
-  "common.py::if src_sec and tgt_sec and src_sec.grid_row != tgt_sec.grid_row:::#1": {
-    "note": "inter_row_channel_y resolve guard: every call resolves both endpoints to sections in different grid rows (the handlers calling it route only genuine inter-row wraps), so the False arm (unresolvable or same-row) -> near-target fallback is a guard never taken.",
-    "status": "defensive"
-  },
   "common.py::if st is not None and st.is_port:::#1": {
     "note": "Null/non-port guard: after _resolve_sections both endpoints of an inter-section edge are ports/junctions and graph.stations.get() resolves them, so the False (None or non-port) arm only guards a malformed pre-resolve graph.",
     "status": "defensive"
