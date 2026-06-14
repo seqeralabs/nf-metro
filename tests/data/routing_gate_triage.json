@@ -56,8 +56,8 @@
     "status": "defensive"
   },
   "common.py::if clear_of_right >= edge_clearance or clear_of_left >= edge_clearance:::#1": {
-    "note": "Incidental-graze guard: the False arm (channel grazes a section edge within edge_clearance) never fires across 411 corpus calls because inter-column placement (gap-centring + _enforce_min_column_gaps gap-widening) keeps the channel clear; the outward-push correction is a guard valid layouts never trigger.",
-    "status": "defensive"
+    "note": "Incidental-graze detection in clear_channel_of_section_edge. Reachable: a fan-out descent placed per source-row (inter_section_handlers.py:1119) lands inside a wider section stacked in a lower row of the source column, so the graze fires. The only topologies reaching it expose a defective render (the downstream push direction misfires); see #736. Not defensive.",
+    "status": "needs-review"
   },
   "common.py::if dx > 0:::#1": {
     "note": "Leftward (dx<=0) near-source fallback: the symmetric mirror of the rightward fallback. Reached only when section info is unavailable AND no adjacent column resolves; valid layouts take the rightward fallback, but the leftward mirror is kept for robustness.",
@@ -104,8 +104,8 @@
     "status": "defensive"
   },
   "common.py::if right - adjusted <= adjusted - left:::#1": {
-    "note": "Push-direction arms of the incidental-graze correction. The enclosing graze branch (L565) never fires across 411 corpus calls (placement keeps channels clear of section edges), so neither outward-push direction is reached; a guard body valid layouts never enter.",
-    "status": "defensive"
+    "note": "Push-direction arms of the graze correction. Reachable (a fan descent grazing a wide lower-row section), but the heuristic pushes toward the nearer section edge regardless of the route's target side: push-left routes the line away from a right-side target into a far-left detour. Reachable-but-defective; see #736. Not defensive.",
+    "status": "needs-review"
   },
   "common.py::if sec.bbox_w <= 0:::#1": {
     "note": "Zero-width-section guard: the loop scans all graph.sections, but after compute_layout every placed section has bbox_w>0, so the skip arm only guards an empty/unplaced section that valid layouts don't produce.",
