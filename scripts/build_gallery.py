@@ -353,14 +353,6 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "left edge (`_clear_bypass_v_label_strikes`).",
     ),
     (
-        "sibling_align_agree",
-        TOPOLOGIES_DIR,
-        "A hub fans to six tools that all reconverge at a results collector. "
-        "The bubble-centering pass moves the stacked tools to one shared X, so "
-        "the uncentered-sibling pass sees its movers agree within a pixel "
-        "(`_align_uncentered_siblings`).",
-    ),
-    (
         "bypass_v_tight",
         TOPOLOGIES_DIR,
         "An intra-section bypass V at a tight column pitch: without room for a "
