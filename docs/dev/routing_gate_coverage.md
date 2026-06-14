@@ -8,7 +8,7 @@ Each row is a branch point (a *gate*) in a `layout/routing/` dispatch handler or
 
 Modules scoped to routing decision gates; `invariants.py` (the `validate=True` checker) and `__init__.py` are excluded.
 
-The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **194** gaps carry a triage verdict.
+The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **230** gaps carry a triage verdict.
 
 ## `common.py`
 
@@ -18,45 +18,45 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 80 | `if y_band is not None:` | `->L81` |  |
-| 121 | `if not secs:` | `->L122` |  |
-| 192 | `if n == 0:` | `->L193` |  |
-| 194 | `if bundle_index < 0 or bundle_index >= n:` | `->L195` |  |
+| 80 | `if y_band is not None:` | `->L81` | **candidate-dead** -- y_band filter body. The sole y_band caller, _nested_target_clear_channel_x, belongs to the stepped-descent subsystem (_route_stepped_descent / _should_step_descent) that #692 flagged candidate-dead; the filter is reached only through that dead path. Pending deletion review in #689. |
+| 121 | `if not secs:` | `->L122` | **defensive** -- row_bottom_edge empty-result guard: every caller passes a grid row (optionally col-filtered) that contains the routed source/target section after layout, so the section list is never empty; the default-return arm is a guard valid layouts never take. |
+| 192 | `if n == 0:` | `->L193` | **defensive** -- Empty-bundle guard: all callers (normalize.py 291/1648, inter_section_handlers.py 783/796/2132) derive bundle_widths from a non-empty bundle line count, so n is always >=1; the empty-list arm is never taken. |
+| 194 | `if bundle_index < 0 or bundle_index >= n:` | `->L195` | **defensive** -- Contract guard raising IndexError on an out-of-range bundle_index. Callers always pass an in-range index (0<=i<n); the raise arm fires only on a caller-contract violation no valid call produces. |
 | 251 | `if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:` | `->L252` | **defensive** -- Reject arm in initial_fanout_descent_span: a route whose first segment is horizontal (passes the prior check) always has a vertical second segment in the orthogonal inter-section route model; the non-vertical reject mirrors the proven-unreachable _final_port_approach reject (L687) and never fires. |
 | 294 | `if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:` | `->L295` | **candidate-dead** -- Interior horizontal segments only occur in 6-point bypass U-shapes whose flanking legs are always vertical (same x on each side); routes with non-vertical flanks are normalize_exempt and filtered out. The prev-flank-non-vertical reject in iter_horizontal_trunks is unreachable. Pending deletion review in #689. |
 | 296 | `if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:` | `->L297` | **candidate-dead** -- Mirror of the prev-flank guard: a bypass trunk's trailing flank is always vertical, so the next-flank-non-vertical reject in iter_horizontal_trunks is unreachable. Pending deletion review in #689. |
-| 349 | `for edge in graph.edges:` | `->L365` |  |
-| 352 | `if not src or not tgt:` | `->L353` |  |
-| 405 | `elif tgt_sec:` | `->L413` |  |
-| 500 | `if dx > 0:` | `->L503` |  |
-| 511 | `if st is not None and st.is_port:` | `->L509` |  |
-| 546 | `if sec.bbox_w <= 0:` | `->L547` |  |
-| 552 | `if any(abs(adjusted - px) <= port_tol for px in port_xs):` | `->L553` |  |
-| 565 | `if clear_of_right >= edge_clearance or clear_of_left >= edge_clearance:` | `->L570` |  |
-| 570 | `if right - adjusted <= adjusted - left:` | `->L571`, `->L573` |  |
-| 589 | `if src and not src.is_port:` | `->L587` |  |
-| 605 | `for i in range(len(pts) - 1):` | `->L606`, `->L622` |  |
-| 610 | `if seg_len2 == 0:` | `->L611`, `->L614` |  |
-| 611 | `if abs(point[0] - ax) <= tol and abs(point[1] - ay) <= tol:` | `->L612`, `->L613` |  |
-| 615 | `if t < -0.01 or t > 1.01:` | `->L616`, `->L617` |  |
-| 620 | `if abs(point[0] - proj_x) <= tol and abs(point[1] - proj_y) <= tol:` | `->L605`, `->L621` |  |
-| 671 | `if all_in_range:` | `->L673` |  |
-| 696 | `if endpoints:` | `->L699` |  |
-| 709 | `if src_row is not None:` | `->L721` |  |
-| 746 | `if station is None:` | `->L747` |  |
-| 752 | `for e in graph.edges_to(station.id):` | `->L758` |  |
-| 754 | `if other and other.section_id:` | `->L752` |  |
-| 756 | `if sec:` | `->L752` |  |
-| 758 | `for e in graph.edges_from(station.id):` | `->L759`, `->L780` |  |
-| 760 | `if other and other.section_id:` | `->L758`, `->L761` |  |
-| 762 | `if sec:` | `->L758`, `->L763` |  |
-| 768 | `for e in graph.edges:` | `->L780` |  |
-| 770 | `if e.source == station.id:` | `->L771` |  |
-| 776 | `if other and other.section_id:` | `->L768` |  |
-| 778 | `if sec:` | `->L768` |  |
-| 801 | `if src_sec and tgt_sec and src_sec.grid_row != tgt_sec.grid_row:` | `->L832` |  |
-| 822 | `if dy > 0:` | `->L827` |  |
-| 832 | `if dy > 0:` | `->L833`, `->L835` |  |
+| 349 | `for edge in graph.edges:` | `->L365` | **defensive** -- Phantom loop-exit arc. The loop's real recorded exit is L367 (the `corridor_groups: dict[...] = defaultdict(list)` store; the annotation is unevaluated under `from __future__ import annotations`), so the static arc 349->365 is a coverage line-attribution artifact no execution takes. |
+| 352 | `if not src or not tgt:` | `->L353` | **defensive** -- Null-endpoint guard: the parser creates a Station for every edge endpoint, so graph.stations.get() never returns None for a real edge; the continue arm only guards a malformed graph. |
+| 405 | `elif tgt_sec:` | `->L413` | **candidate-dead** -- The else (col_key=round(sx)) needs an L-shaped (dx!=0,dy!=0) inter edge whose target resolves to no section. Only exit_port->junction edges lack a target section, and junction positioning makes those axis-aligned (same-X RIGHT exit or same-Y BOTTOM exit), never L-shaped, so the else is unreachable. Pending deletion review in #689. |
+| 500 | `if dx > 0:` | `->L503` | **defensive** -- Leftward (dx<=0) near-source fallback: the symmetric mirror of the rightward fallback. Reached only when section info is unavailable AND no adjacent column resolves; valid layouts take the rightward fallback, but the leftward mirror is kept for robustness. |
+| 511 | `if st is not None and st.is_port:` | `->L509` | **defensive** -- Null/non-port guard: after _resolve_sections both endpoints of an inter-section edge are ports/junctions and graph.stations.get() resolves them, so the False (None or non-port) arm only guards a malformed pre-resolve graph. |
+| 546 | `if sec.bbox_w <= 0:` | `->L547` | **defensive** -- Zero-width-section guard: the loop scans all graph.sections, but after compute_layout every placed section has bbox_w>0, so the skip arm only guards an empty/unplaced section that valid layouts don't produce. |
+| 552 | `if any(abs(adjusted - px) <= port_tol for px in port_xs):` | `->L553` | **defensive** -- Port-coincidence guard: skips the graze check when the channel midline sits on an endpoint port x (legitimate port-to-port drop). Channels are gap-centred or source-offset, never within COORD_TOLERANCE of a port x in the corpus; guard against the coincident case. |
+| 565 | `if clear_of_right >= edge_clearance or clear_of_left >= edge_clearance:` | `->L570` | **defensive** -- Incidental-graze guard: the False arm (channel grazes a section edge within edge_clearance) never fires across 411 corpus calls because inter-column placement (gap-centring + _enforce_min_column_gaps gap-widening) keeps the channel clear; the outward-push correction is a guard valid layouts never trigger. |
+| 570 | `if right - adjusted <= adjusted - left:` | `->L571`, `->L573` | **defensive** -- Push-direction arms of the incidental-graze correction. The enclosing graze branch (L565) never fires across 411 corpus calls (placement keeps channels clear of section edges), so neither outward-push direction is reached; a guard body valid layouts never enter. |
+| 589 | `if src and not src.is_port:` | `->L587` | **defensive** -- Null/port-source guard: edges to an exit port always originate at an internal (non-port) station after _resolve_sections, so the continue arm (None or port source) only guards a malformed pre-resolve graph. |
+| 605 | `for i in range(len(pts) - 1):` | `->L606`, `->L622` | **defensive** -- point_on_polyline is used only by the --animate renderer (render/animate.py); the matrix's render-path coverage sweep calls render_svg without animation, so none of its branches are reached. Exercised instead by test_animation.py / test_routing.py. |
+| 610 | `if seg_len2 == 0:` | `->L611`, `->L614` | **defensive** -- point_on_polyline degenerate-segment branch, reached only via the --animate renderer (render/animate.py); the render-path coverage sweep doesn't animate. Exercised by test_animation.py / test_routing.py, not the corpus. |
+| 611 | `if abs(point[0] - ax) <= tol and abs(point[1] - ay) <= tol:` | `->L612`, `->L613` | **defensive** -- point_on_polyline zero-length-segment hit test, reached only via the --animate renderer; the render-path coverage sweep doesn't animate. Exercised by test_animation.py / test_routing.py. |
+| 615 | `if t < -0.01 or t > 1.01:` | `->L616`, `->L617` | **defensive** -- point_on_polyline parameter-range branch, reached only via the --animate renderer; the render-path coverage sweep doesn't animate. Exercised by test_animation.py / test_routing.py. |
+| 620 | `if abs(point[0] - proj_x) <= tol and abs(point[1] - proj_y) <= tol:` | `->L605`, `->L621` | **defensive** -- point_on_polyline projection hit test, reached only via the --animate renderer; the render-path coverage sweep doesn't animate. Exercised by test_animation.py / test_routing.py. |
+| 671 | `if all_in_range:` | `->L673` | **defensive** -- cross_row bypass guard: the False arm (no sections in the column range -> return clearance) needs an empty [lo,hi] column span, which a valid multi-section pipeline routing cross_row never has; a degenerate-range guard. |
+| 696 | `if endpoints:` | `->L699` | **defensive** -- Non-cross_row bypass guard: the endpoints list always includes the source and target sections (both in src_row), so it is never empty; the default-clearance arm only guards a degenerate empty endpoint set. |
+| 709 | `if src_row is not None:` | `->L721` | **defensive** -- Header-clamp guard: the False arm (src_row is None) needs an unresolvable source section, but inter-section bypass sources always resolve to a grid row after layout; a guard against an unresolved source that doesn't occur. |
+| 746 | `if station is None:` | `->L747` | **defensive** -- None-station guard: every production caller passes a concrete Station (grep-verified); the None arm only guards the typed Station\|None parameter. |
+| 752 | `for e in graph.edges_to(station.id):` | `->L758` | **candidate-dead** -- Loop-exit into the edges_from fallback: a junction always has a sectioned upstream (exit_port->junction edge whose source has section_id), so the edges_to loop always returns early and never falls through. The fallback it guards is vestigial. Pending deletion review in #689. |
+| 754 | `if other and other.section_id:` | `->L752` | **defensive** -- edges_to upstream guard: a junction's incoming neighbour is always an exit_port with section_id set, so the False (continue) arm only guards a junction-to-junction edge that valid construction never produces. |
+| 756 | `if sec:` | `->L752` | **defensive** -- edges_to section-lookup guard: graph.sections.get(section_id) returning None requires a section_id absent from graph.sections, a corrupted state no valid parse produces; null-guard. |
+| 758 | `for e in graph.edges_from(station.id):` | `->L759`, `->L780` | **candidate-dead** -- edges_from fallback (prefer_upstream): reached only if the edges_to loop found nothing, which never happens (junctions always have a sectioned upstream). Both the loop body and its exit are vestigial. Pending deletion review in #689. |
+| 760 | `if other and other.section_id:` | `->L758`, `->L761` | **candidate-dead** -- Inside the vestigial edges_from fallback (see the edges_from loop): unreachable because the edges_to loop always returns first. Pending deletion review in #689. |
+| 762 | `if sec:` | `->L758`, `->L763` | **candidate-dead** -- Inside the vestigial edges_from fallback (see the edges_from loop): unreachable because the edges_to loop always returns first. Pending deletion review in #689. |
+| 768 | `for e in graph.edges:` | `->L780` | **candidate-dead** -- prefer_upstream=False scan loop-exit: a junction always has an incident edge to a sectioned port, so the loop always returns a section and never exhausts graph.edges; the not-found exit is vestigial. Pending deletion review in #689. |
+| 770 | `if e.source == station.id:` | `->L771` | **candidate-dead** -- prefer_upstream=False junction-as-source arm: edges are inserted exit_port->junction before junction->entry_port, so iterating graph.edges always hits the junction as a target first (elif arm) and returns before any junction-as-source edge; the source arm is vestigial. Pending deletion review in #689. |
+| 776 | `if other and other.section_id:` | `->L768` | **defensive** -- prefer_upstream=False neighbour guard: a junction's neighbours are always sectioned ports, so the False (continue) arm only guards a junction-to-junction edge valid construction never produces. |
+| 778 | `if sec:` | `->L768` | **defensive** -- prefer_upstream=False section-lookup guard: graph.sections.get(section_id) returning None requires a missing section_id (corrupted state); null-guard. |
+| 801 | `if src_sec and tgt_sec and src_sec.grid_row != tgt_sec.grid_row:` | `->L832` | **defensive** -- inter_row_channel_y resolve guard: every call resolves both endpoints to sections in different grid rows (the handlers calling it route only genuine inter-row wraps), so the False arm (unresolvable or same-row) -> near-target fallback is a guard never taken. |
+| 822 | `if dy > 0:` | `->L827` | **defensive** -- Multi-row upward-crossing arm: grid rows are assigned topologically and upward inter-section routes take other handlers (a same-row/around-section path), never reaching inter_row_channel_y's multi-row branch with dy<=0; verified by an upward multi-row fixture that bypasses this code. |
+| 832 | `if dy > 0:` | `->L833`, `->L835` | **defensive** -- Near-target fallback block, gated behind the L801 resolve guard: since every call resolves to different-row sections (see that entry), the fallback is never reached, so neither dy arm fires. |
 
 ## `context.py`
 
