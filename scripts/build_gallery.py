@@ -345,6 +345,22 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "(`_clear_bypass_v_label_strikes`).",
     ),
     (
+        "bypass_label_rake_left",
+        TOPOLOGIES_DIR,
+        "Mirror of the bypass-label rake: the dip's descending leg, not its "
+        "climb, crosses the wide 'Quantification Step' label, so its V corner "
+        "lands in the label's left half and the router seats it clear of the "
+        "left edge (`_clear_bypass_v_label_strikes`).",
+    ),
+    (
+        "sibling_align_agree",
+        TOPOLOGIES_DIR,
+        "A hub fans to six tools that all reconverge at a results collector. "
+        "The bubble-centering pass moves the stacked tools to one shared X, so "
+        "the uncentered-sibling pass sees its movers agree within a pixel "
+        "(`_align_uncentered_siblings`).",
+    ),
+    (
         "bypass_v_tight",
         TOPOLOGIES_DIR,
         "An intra-section bypass V at a tight column pitch: without room for a "
