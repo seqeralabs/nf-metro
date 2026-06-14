@@ -59,6 +59,7 @@ using the `drawsvg` library.  Visual properties come from a `Theme`
 | Per-phase contract (preconditions/postconditions/invariants) | [`CONTRACT.md`](https://github.com/pinin4fjords/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md) |
 | Edge routing families | [routing.md](routing.md) |
 | Parser and `%%metro` model | [parser.md](parser.md) |
+| SVG, HTML, bridges, manifest, animation | [render.md](render.md) |
 | Adding fixtures, tests, invariants | [testing.md](testing.md) |
 | Topology stress fixtures (inventory + known issues) | [`examples/topologies/README.md`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/topologies/README.md) |
 

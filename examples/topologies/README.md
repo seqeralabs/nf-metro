@@ -28,11 +28,14 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `shared_sink_parallel.mmd` | parallel multi-line branches with shared source and sink |
 | `asymmetric_tree.mmd` | unbalanced branching / variable branch depth |
 | `complex_multipath.mmd` | per-line route variation / bundle slot reservation |
+| `trunk_through_fan.mmd` | trunk bundle entering and exiting a section that has an internal fork-join diamond |
+| `terminal_symmetric_fan.mmd` | two-line bundle fanning out to three terminal nodes in a reporting section (no inter-terminal edges) |
 | `multi_line_bundle.mmd` | dense bundle / tall station pills |
 | `mismatched_tracks.mmd` | per-line track mismatch between sections |
 | `mixed_bundle_column.mmd` | mixed-cardinality fan-out into stacked column |
 | `mixed_port_sides.mmd` | multi-side exit ports (RIGHT + BOTTOM) |
 | `off_track_convergence.mmd` | multiple off-track inputs converging on one consumer |
+| `off_track_convergence_multiline.mmd` | multiple off-track inputs converging on one consumer, carrying multiple lines |
 | `upward_bypass.mmd` | tall section bypass (upward gap) |
 | `bypass_label_rake.mmd` | bypass V climbs clear of a wide bypassed-station label |
 | `rnaseq_lite.mmd` | realistic pipeline / TB+LR mix / diamond |
@@ -48,6 +51,9 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `self_crossing_bridge.mmd` | same-colour self-crossing bridge glyph (issue #484) |
 | `convergence_stacked_sink.mmd` | convergence return-row stacked-sibling migration (issue #484) |
 | `cross_row_gap_wrap.mmd` | cross-row feed wrapping via the inter-row gap, no counter-flow (issue #484) |
+| `stacked_lr_serpentine.mmd` | tall rowspan section alongside stacked single-row sections in the same column |
+| `around_section_below.mmd` | inter-section edge routing around a section that sits below and between source and target |
+| `inter_row_wrap_clearance.mmd` | three-line bundle exiting a top section right and entering a bottom section left via the inter-row gap |
 
 ---
 
@@ -96,6 +102,14 @@ Same-line convergence: one line fans out from the source to all downstream secti
 ### Section Diamond
 
 A section-level fork-join: one source fans out to two parallel sections, which then reconverge into a single sink. Tests both fan-out junction creation and fan-in routing in the same topology.
+
+### Terminal Symmetric Fan
+
+A two-line bundle from a source section fans out to three independent terminal nodes (Shiny, MultiQC, Quarto) inside a reporting section. The terminals share no edges with each other. Tests fan-out routing where all targets are leaf nodes within a single entry-port section.
+
+### Trunk Through Fan
+
+Source and sink sections are connected through a middle section that contains an internal fork-join diamond (Split → Path Up/Down → Join). The two-line bundle enters the middle section, passes through the diamond, and exits as the same bundle into the sink. Tests that a trunk bundle is preserved end-to-end through a section whose interior contains parallel branches.
 
 ![Section Diamond](section_diamond.png)
 
@@ -209,9 +223,9 @@ One stacked column contains three siblings of different line counts: a 3-line br
 
 Reduced upstream slice of nf-core/funcprofiler with one input section fanning out to seven profiler tools and back into a MultiQC section. Pinned via xfail in `test_no_almost_horizontal_edges` - documents a known almost-horizontal-edge defect in dense fan-out + fan-in topologies.
 
-### Peel-off Riser Respace
+### Off-Track Convergence Multiline
 
-Four lines from two source sections ride one shared bypass trunk and rise into a common destination entry port. The trunk-Y order (set by `_normalize_bypass_trunks`) and the entry-port slot order disagree on the interior lines, so each source bundle must keep its declaration order at the peel-off corner rather than inverting. Backs `test_peeloff_riser_keeps_bundle_order` and the `_guard_bundle_order_preserved` guard (issue #695).
+Extends `off_track_convergence.mmd` with multiple off-track file inputs (FASTA reference, GTF annotation) converging on a processing section, this time carrying multiple lines (DNA, RNA, QC). The reference is used by the DNA and RNA lines; the annotation only by RNA. Tests off-track routing when different subsets of lines use each off-track input.
 
 ---
 
@@ -234,3 +248,15 @@ A main spine (Prep, Align, Dedup) converges at Merge, which is fed both by the s
 ### Cross-Row Gap Wrap
 
 A convergence layout (Ingest, Align, Dedup on row 0; Merge, Report on the return row) where the `feed` line runs from Ingest down to the rightmost return-row section. Tests that the feed wraps via the clear inter-row gap above the return row (then drops straight into the port) rather than diving under the whole return row counter to its flow. Backs `test_no_artefactual_counter_flow`, `test_entry_approach_arrives_from_port_side`, and their guards.
+
+### Stacked LR Serpentine
+
+A tall section (Ingest, spanning 3 rows) sits in column 0 alongside three single-row sections (Alignment, Dedup, Variant Calling) stacked vertically in column 1. Tests rowspan layout where one section's height forces adjacent sections into a column stack rather than a horizontal chain.
+
+### Around Section Below
+
+Source (col 2, row 0) sends a two-line bundle both directly to Target (col 0, row 2) and sideways to Middle (col 1, row 1). The direct Source→Target inter-section edge must route around Middle, which sits between them diagonally. Tests that inter-section routing finds a path around a section occupying the space below and to the left of the source.
+
+### Inter-Row Wrap Clearance
+
+A three-line bundle exits the top section's right port, wraps via the inter-row gap, and enters the bottom section's left port. The two sections are stacked directly (same column, adjacent rows). Tests that the wrap uses the clear gap between rows rather than clipping the section boxes, and that port alignment is maintained across the wrap.

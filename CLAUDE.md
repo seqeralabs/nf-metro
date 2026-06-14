@@ -37,15 +37,20 @@ Dependencies: click, drawsvg, networkx, pillow. Dev: pytest, ruff.
 The pipeline is: **Parse** -> **Layout** -> **Render**
 
 ### Parser (`src/nf_metro/parser/`)
-- `mermaid.py` - Line-by-line regex parser. Parses Mermaid `graph LR` syntax plus custom `%%metro` directives.
+- `mermaid.py` - Driver: applies a sequence of typed statements (produced by `grammar.py`) to build the `MetroGraph`, then calls the post-parse rewrites in `resolve.py`.
+- `grammar.py` - Lark front-end for the Mermaid subset nf-metro accepts. A small grammar covers graph headers, subgraphs, node declarations, edges, `%%metro` directives, and comments; a transformer turns the parse tree into typed statement objects.
+- `directives.py` - Parsing and dispatch of `%%metro` directives. Graph-wide directives are routed through a registry; section-scoped (entry/exit/direction) and icon directives are handled by `_apply_directive`.
 - `model.py` - Core data model: `MetroGraph`, `Station`, `Edge`, `MetroLine`, `Section`, `Port`. The `MetroGraph` dataclass is the central data structure passed through all stages.
+- `resolve.py` - Post-parse graph rewrites: drops empty sections, wraps loose stations in an implicit section, inserts junctions, and rewrites inter-section edges into 3-part chains (source -> exit_port -> entry_port -> target). Internally split into `_build_entry_side_mapping()`, `_classify_edges()`, and `_create_ports_and_junctions()`.
+- `validate.py` - Graph-semantic validation (every edge references a defined line, every section refers to existing stations). Independent of layout geometry.
 - Sections are defined as Mermaid `subgraph` blocks with `%%metro entry:/exit:` port directives.
-- Post-parse `_resolve_sections()` rewrites inter-section edges into 3-part chains: source -> exit_port -> entry_port -> target, inserting junction stations for fan-outs. Internally split into `_build_entry_side_mapping()`, `_classify_edges()`, and `_create_ports_and_junctions()`.
 
 ### Layout (`src/nf_metro/layout/`)
 - `auto_layout.py` - Runs before `_resolve_sections()`. Infers missing grid positions, section directions, and port sides from the section DAG. Preserves any values explicitly set by `%%metro` directives. Handles fold thresholds (wrapping long chains into serpentine rows).
-- `engine.py` - Orchestrator. Holds `compute_layout`, the per-stage drivers (`_layout_once`, `_compute_flat_layout`, `_compute_section_layout`), and `compute_min_y_spacing`; the section-first pipeline runs 9 phases: (2) internal section layout, (3) section placement, (4) global coordinate mapping, (5) port positioning, (6) junction positioning, (7) entry port alignment, (8) exit port alignment on fold sections, (9) junction re-positioning after exit alignment. The phase implementations live in the `phases/` subpackage (below) and are re-exported from `engine` for backward-compatible imports. Per-phase preconditions, postconditions, and invariants are documented in `src/nf_metro/layout/CONTRACT.md`.
-- `phases/` - Phase implementations extracted from `engine.py` (#451). Modules form an import DAG (no cycles): `_common.py` (shared leaf helpers) <- `guards.py` (stage-boundary invariant checks + `PhaseInvariantError`), `spacing.py` (label-spread search helpers), `single_section.py` (single-section layout + label/terminus adjustments), `row_align.py`, `balancing.py`, `bbox.py` (bbox shrink/grow/tighten), `fan_bundles.py` (fan-out/bundle redistribution), `grid_snap.py`, `junctions.py` (junction positioning), `ports.py` (entry/exit port alignment, incl. `_align_lr_entry_port`, `_align_tb_entry_port`, etc.), `off_track.py`, `canvas.py`.
+- `engine.py` - Orchestrator. Holds `compute_layout`, the per-stage drivers (`_layout_once`, `_compute_flat_layout`, `_compute_section_layout`), and `compute_min_y_spacing`. The section-first pipeline runs 40+ numbered stages grouped into 6 phase groups; the full per-stage preconditions, postconditions, and invariants are documented in `src/nf_metro/layout/CONTRACT.md`. Phase implementations live in the `phases/` subpackage (below) and are re-exported from `engine` for backward-compatible imports.
+- `phases/` - Phase implementations extracted from `engine.py`. Modules form an import DAG (no cycles): `_common.py` (shared leaf helpers) <- `guards.py` (stage-boundary invariant checks + `PhaseInvariantError`), `spacing.py` (label-spread search helpers), `single_section.py` (single-section layout + label/terminus adjustments), `row_align.py`, `balancing.py`, `bbox.py` (bbox shrink/grow/tighten), `fan_bundles.py` (fan-out/bundle redistribution), `grid_snap.py`, `junctions.py` (junction positioning), `ports.py` (entry/exit port alignment, incl. `_align_lr_entry_port`, `_align_tb_entry_port`, etc.), `off_track.py`, `canvas.py`, `snapshots.py` (opt-in per-phase coordinate snapshots for regression localisation, gated on `NF_METRO_PHASE_SNAPSHOTS`).
+- `geometry.py` - Low-level geometric primitives shared by layout passes and validation guards: segment/bbox intersection tests, spatial indexing, convex-polygon hit detection for rotated label footprints.
+- `rail_mode.py` - Opt-in rail-mode layout (the nf-core/sarek interchange idiom). Lays each metro line along a fixed horizontal rail; stations shared by multiple lines render as interchange pills. Run by `compute_layout` only for sections whose `line_spread` resolves to `rails`; the normal layout path is untouched.
 - `layers.py` - Longest-path layering via networkx topological sort (X-axis assignment).
 - `ordering.py` - Track-per-line vertical ordering (Y-axis). Each metro line gets a dedicated base track. Handles diamond (fork-join) detection for compact layout of alternative paths (e.g., FastP/TrimGalore).
 - `section_placement.py` - Meta-graph layout: places sections on a grid via topological layering of section dependencies. Supports `%%metro grid:` overrides. Also handles port positioning on section boundaries.
@@ -65,12 +70,17 @@ Edge routing with horizontal runs and 45-degree diagonal transitions. Inter-sect
 - `common.py` - Shared types (`RoutedPath`) and helper functions (`compute_bundle_info`, `inter_column_channel_x`, etc.).
 - `corners.py` - Corner radius computation and curve smoothing.
 - `inter_section.py` - Simplified inter-section routing (used by tests; distinct from `inter_section_handlers.py`).
+- `invariants.py` - Runtime invariant checks on `route_edges` output. `check_bundle_order_preserved` asserts that co-travelling routes maintain consistent left/right ordering across all waypoints (a flip is a visible crossing).
 - `offsets.py` - Per-station Y offset computation for parallel lines.
+- `rail.py` - Edge router for opt-in rail mode: connects source and target along each line's fixed horizontal rail Y with a straight run, matching the interchange layout produced by `rail_mode.py`.
 - `reversal.py` - Fold/reversal edge routing (serpentine row transitions).
 
 ### Render (`src/nf_metro/render/`)
-- `svg.py` - SVG generation using the `drawsvg` library. Renders section boxes, edges (with quadratic Bezier curves at corners), pill-shaped station markers, labels, and legend.
+- `svg.py` - SVG generation using the `drawsvg` library. Renders section boxes, edges (with quadratic Bezier curves at corners), pill-shaped station markers, labels, legend, and bridge gaps.
 - `animate.py` - Animated SVG balls traveling along routed metro line paths (enabled via `--animate` CLI flag).
+- `bridges.py` - Detection of non-merging line crossings. Identifies genuine crossings on rendered polylines (offsets applied) and reports, per under-route, the gap span to break, creating a bridge effect. Drawing is handled in `svg.py`.
+- `html.py` - Interactive HTML wrapper around the SVG renderer for interactive metro maps (pan/zoom, hover tooltips).
+- `manifest.py` - nf-metro adapter for the embedded-manifest standard. Maps a laid-out `MetroGraph` onto a tool-neutral vocabulary (nodes, groups, regions) and injects it into the SVG. The manifest package itself lives in `nf_metro.manifest`.
 - `style.py` - `Theme` dataclass defining all visual properties.
 - `legend.py` - Legend rendering.
 - `icons.py` - Icon support.
@@ -156,7 +166,7 @@ The `nf-metro` micromamba environment has the project installed in editable mode
 
 - Test fixtures: `tests/fixtures/`
 - Example pipelines: `examples/` (including `rnaseq_sections.mmd` with manual grid and `rnaseq_auto.mmd` with fully inferred layout)
-- Topology stress tests: `examples/topologies/*.mmd` - 30 fixtures covering fan-out, fan-in, diamonds, folds, mixed port sides, etc. See `examples/topologies/README.md` for full inventory and known issues.
+- Topology stress tests: `examples/topologies/*.mmd` - 38 fixtures covering fan-out, fan-in, diamonds, folds, mixed port sides, etc. See `examples/topologies/README.md` for the documented inventory and known issues (note: the README covers ~33 fixtures; a handful of newer regression fixtures are present but not yet catalogued there).
 - `tests/layout_validator.py` - Programmatic layout checks (section overlap, station containment, port positioning, edge waypoints).
 - `tests/test_topology_validation.py` - Parametrized tests running all validator checks against every topology fixture.
 - `scripts/render_topologies.py` - Batch render all fixtures to `/tmp/nf_metro_topology_renders/`.
