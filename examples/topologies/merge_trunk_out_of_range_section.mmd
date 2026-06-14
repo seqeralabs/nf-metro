@@ -1,0 +1,51 @@
+%%metro title: Merge Trunk Out-of-Range Section
+%%metro style: dark
+%%metro line: main | Main | #2db572
+%%metro grid: src_far | 0, 0
+%%metro grid: mid | 1, 0
+%%metro grid: src_near | 2, 0
+%%metro grid: sink | 3, 0
+%%metro grid: extra | 4, 0
+%%metro grid: other | 5, 1
+
+graph LR
+    subgraph src_far [Source Far]
+        %%metro exit: right | main
+        far1[Far]
+    end
+
+    subgraph mid [Mid]
+        %%metro entry: left | main
+        %%metro exit: right | main
+        m1[Mid Step]
+    end
+
+    subgraph src_near [Source Near]
+        %%metro entry: left | main
+        %%metro exit: right | main
+        near1[Near]
+    end
+
+    subgraph sink [Sink]
+        %%metro entry: left | main
+        merge[Merge]
+        report[Report]
+        merge -->|main| report
+    end
+
+    subgraph extra [Extra]
+        %%metro entry: left | main
+        e1[Extra Step]
+    end
+
+    subgraph other [Other Row]
+        %%metro entry: top | main
+        o1[Other]
+    end
+
+    m1 -->|main| near1
+    far1 -->|main| merge
+    near1 -->|main| merge
+    far1 -->|main| e1
+    near1 -->|main| e1
+    e1 -->|main| o1

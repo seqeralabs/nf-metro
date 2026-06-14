@@ -7,6 +7,7 @@ from __future__ import annotations
 
 __all__ = [
     "BackwardFlowError",
+    "MixedEntryDirectionError",
     "PhaseInvariantError",
     "compute_layout",
     "compute_min_y_spacing",
@@ -109,6 +110,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _FLOW_ALIGNED_SIDES,
     _PASS_C_BISECTION_ORDER,
     BackwardFlowError,
+    MixedEntryDirectionError,
     PhaseInvariantError,
     _bbox_guarded_stations,
     _bisection_should_run,
@@ -147,6 +149,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_line_crosses_file_icon,
     _guard_no_line_crosses_non_consumer,
     _guard_no_line_strikes_label,
+    _guard_no_mixed_entry_directions,
     _guard_no_negative_grid_columns,
     _guard_no_route_through_section,
     _guard_no_same_line_parallel_descents,
@@ -1065,6 +1068,7 @@ def _compute_section_layout(
 
     _snap(graph, "1.1")
     _guard_no_same_row_backward_feed(graph)
+    _guard_no_mixed_entry_directions(graph)
     if validate:
         _guard_section_bboxes_positive(graph, "after Stage 1.1")
         _guard_no_negative_grid_columns(graph, "after Stage 1.1")
