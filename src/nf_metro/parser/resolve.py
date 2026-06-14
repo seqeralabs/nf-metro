@@ -538,6 +538,7 @@ def _exit_side_for_edge(
 
     entry_side = entry_side_for_line.get((tgt_sec, edge.line_id), PortSide.LEFT)
 
+    preferred: PortSide | None
     if len(sides) == 1:
         preferred = next(iter(sides))
     else:
