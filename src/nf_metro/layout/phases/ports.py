@@ -174,16 +174,16 @@ def _align_tb_entry_port(
                 break
 
     if is_cross_column:
-        # Cross-column: set Y to the closest source level
-        src_ys = [y for _, y, _ in sources]
+        # Cross-column: snap the port Y to its boundary edge.
+        # The source Y must NOT drag the port off its designated boundary —
+        # a same-row producer sits at the section's vertical centre, which is
+        # strictly inside the bbox, so clamping-within-bbox alone leaves the
+        # port off-boundary and trips _guard_ports_on_boundaries.
         if port.side == PortSide.TOP:
-            target_y = min(src_ys)
+            boundary_y = entry_section.bbox_y
         else:
-            target_y = max(src_ys)
-        # Clamp within bbox
-        target_y = max(target_y, entry_section.bbox_y)
-        target_y = min(target_y, entry_section.bbox_y + entry_section.bbox_h)
-        _set_port_y(graph, port_id, target_y)
+            boundary_y = entry_section.bbox_y + entry_section.bbox_h
+        _set_port_y(graph, port_id, boundary_y)
         # A same-column source stacked directly above/below drops in
         # vertically; align X to it (clear of internal stations) so the
         # mixed-source case still gets a straight drop, not a jog.

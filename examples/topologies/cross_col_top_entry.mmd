@@ -1,0 +1,20 @@
+%%metro title: Cross-Column Top Entry
+%%metro style: dark
+%%metro line: l1 | Line 1 | #0570b0
+
+graph LR
+    subgraph producer [Producer]
+        %%metro exit: right | l1
+        p1[Step P1]
+        p2[Step P2]
+        p1 -->|l1| p2
+    end
+
+    subgraph consumer [Consumer]
+        %%metro entry: top | l1
+        c1[Step C1]
+        c2[Step C2]
+        c1 -->|l1| c2
+    end
+
+    p2 -->|l1| c1

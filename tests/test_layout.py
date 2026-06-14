@@ -2460,3 +2460,62 @@ def test_multi_path_gap_separates_by_b_and_centers():
     assert abs(pair_mid - center) <= 3.0, (
         f"path pair midpoint {pair_mid:.1f} not centred on gap {center:.1f}"
     )
+
+
+def test_cross_col_top_entry_port_on_boundary():
+    """A same-row cross-column producer into a TOP entry keeps the port on boundary.
+
+    Regression for issue #740: ``_align_tb_entry_port`` was dragging the TOP
+    port's Y to the source level (the section's vertical centre) instead of
+    snapping it to the section's top boundary.  The guard
+    ``_guard_ports_on_boundaries`` then fired under ``validate=True``.
+    """
+    mmd = """\
+%%metro title: Cross-Column Top Entry
+%%metro style: dark
+%%metro line: l1 | Line 1 | #0570b0
+
+graph LR
+    subgraph producer [Producer]
+        %%metro exit: right | l1
+        p1[Step P1]
+        p2[Step P2]
+        p1 -->|l1| p2
+    end
+
+    subgraph consumer [Consumer]
+        %%metro entry: top | l1
+        c1[Step C1]
+        c2[Step C2]
+        c1 -->|l1| c2
+    end
+
+    p2 -->|l1| c1
+"""
+    from nf_metro.layout.constants import GUARD_TOLERANCE
+
+    graph = parse_metro_mermaid(mmd)
+    # validate=True re-runs _guard_ports_on_boundaries after every stage;
+    # this must not raise PhaseInvariantError.
+    compute_layout(graph, validate=True)
+
+    # Additionally assert the TOP entry port sits exactly on the top boundary.
+    for pid, port in graph.ports.items():
+        if not port.is_entry:
+            continue
+        st = graph.stations.get(pid)
+        sec = graph.sections.get(st.section_id or "") if st else None
+        if sec is None:
+            continue
+        from nf_metro.parser.model import PortSide
+
+        if port.side == PortSide.TOP:
+            assert abs(st.y - sec.bbox_y) <= GUARD_TOLERANCE, (
+                f"TOP port {pid!r} at y={st.y:.1f} not on top boundary "
+                f"bbox_y={sec.bbox_y:.1f}"
+            )
+        elif port.side == PortSide.BOTTOM:
+            assert abs(st.y - (sec.bbox_y + sec.bbox_h)) <= GUARD_TOLERANCE, (
+                f"BOTTOM port {pid!r} at y={st.y:.1f} not on bottom boundary "
+                f"bbox_y+bbox_h={sec.bbox_y + sec.bbox_h:.1f}"
+            )
