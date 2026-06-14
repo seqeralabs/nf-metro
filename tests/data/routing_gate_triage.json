@@ -15,10 +15,6 @@
     "note": "Loop-exit into the edges_from fallback: a junction always has a sectioned upstream (exit_port->junction edge whose source has section_id), so the edges_to loop always returns early and never falls through. The fallback it guards is vestigial. Pending deletion review in #689.",
     "status": "candidate-dead"
   },
-  "common.py::for edge in graph.edges:::#1": {
-    "note": "Phantom loop-exit arc. The loop's real recorded exit is L367 (the `corridor_groups: dict[...] = defaultdict(list)` store; the annotation is unevaluated under `from __future__ import annotations`), so the static arc 349->365 is a coverage line-attribution artifact no execution takes.",
-    "status": "defensive"
-  },
   "common.py::for i in range(len(pts) - 1):::#1": {
     "note": "point_on_polyline is used only by the --animate renderer (render/animate.py); the matrix's render-path coverage sweep calls render_svg without animation, so none of its branches are reached. Exercised instead by test_animation.py / test_routing.py.",
     "status": "defensive"
@@ -163,22 +159,6 @@
     "note": "The entry-port search finds the merge junction's sole entry-port successor on the first edge and breaks (real exit arc 139->147), so the loop never runs to exhaustion and the for-completion arm never fires.",
     "status": "defensive"
   },
-  "context.py::for port in graph.ports.values():::#1": {
-    "note": "The loop body is entered via the multi-line `if (` whose first operand line records the real arc (259->261), so the static body-enter arc to L260 is a phantom; the loop body is exercised.",
-    "status": "defensive"
-  },
-  "context.py::if (::#1": {
-    "note": "Multi-line `and` condition: CPython records both real arms from the operand lines (157->150 reject, 157->160 enter), so the static arcs attributed to the opening `if (` at L155 are never taken though both arms are exercised. Coverage attribution artifact.",
-    "status": "defensive"
-  },
-  "context.py::if (::#2": {
-    "note": "Multi-line `and` condition: the real enter-body arc fires from the last operand line (263->265) and tb_right_entry is populated, so the static arc from the opening `if (` at L260 is never taken. Coverage attribution artifact.",
-    "status": "defensive"
-  },
-  "context.py::if (::#3": {
-    "note": "Multi-line `or` condition: both real arms fire from the operand line (486->489 reject, 486->491 continue), so the static arcs attributed to the opening `if (` at L483 are never taken though both arms are exercised. Coverage attribution artifact.",
-    "status": "defensive"
-  },
   "context.py::if ctx.station_offsets:::#1": {
     "note": "compute_station_offsets returns a 0.0 entry for every (station, line) of any graph with edges, so the render path always passes a non-empty dict; the falsy-return arm guards only the route_edges(station_offsets=None) call path used by tests, which the sweep never exercises.",
     "status": "defensive"
@@ -263,28 +243,12 @@
     "note": "A junction's port/junction target always resolves to a grid column; the unresolved-column continue never fires.",
     "status": "defensive"
   },
-  "core.py::if (::#1": {
-    "note": "Multiline if(...) opening-paren line for the rail-section internal-edge test (src.section_id == tgt.section_id and ... is not None and is_rail_section(...)). Python attributes the branch decisions to the operand lines, all of which have executed arcs including the is-not-None short-circuit exit and the rail_edges.append body. The static arcs from the opening-paren line are phantoms no execution traverses.",
-    "status": "defensive"
-  },
   "core.py::if not src or not tgt:::#1": {
     "note": "Main edge-loop guard against a missing endpoint station. After section resolution every edge endpoint exists in graph.stations (parse _ensure_station's all referenced nodes; resolved chains insert their own ports/junctions), so the guard never fires and only the proceed-to-routing arm is reachable.",
     "status": "defensive"
   },
   "core.py::if result is not None:::#1": {
     "note": "Append-guard after the priority-ordered handler chain. The final handler _route_intra_section is total: its three early returns and its _route_diagonal fallback (annotated -> RoutedPath, single return statement) always yield a RoutedPath, so result is never None and every edge appends. The None arm is unreachable.",
-    "status": "defensive"
-  },
-  "core.py::if src is None or tgt is None or src.is_port or tgt.is_port:::#1": {
-    "note": "Per-section rail-mode edge filter. The True/continue arm (skip port or missing-station edges) IS exercised: rail fixtures carry inter-section port chains past this loop. When the guard is False, execution falls through to the inner rail-section if and is recorded as the arc to that if's first operand line, so the static fall-through arc to the bare opening-paren line is a phantom no execution takes. Both real branches are covered.",
-    "status": "defensive"
-  },
-  "corners.py::if i < len(points) - 2:::#1": {
-    "note": "Mirror of the i>1 split for a corner sharing its outgoing segment with a following corner. The True branch is exercised on multi-corner paths via the next_r conditional-expression condition line; the static true arc to the assignment-target line is a phantom of the multiline ternary (condition evaluates before the assignment target).",
-    "status": "defensive"
-  },
-  "corners.py::if i > 1:::#1": {
-    "note": "Proportional segment-budget allocation for a corner sharing its incoming segment with a previous corner. The True branch IS taken on multi-corner paths (>=2 corners are common in the corpus): the executed true arc lands on the prev_r conditional-expression condition line, not the static arc to the assignment-target line, because the ternary evaluates its condition first. The static true arc is a phantom of the multiline ternary.",
     "status": "defensive"
   },
   "inter_section.py::for prev, curr in zip(self.corners, self.corners[1:]):::#1": {
@@ -315,15 +279,7 @@
     "note": "Reachable only via a defective render (merge-junction tangle); see #721.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if (::#1": {
-    "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
-    "status": "candidate-dead"
-  },
   "inter_section_handlers.py::if (::#10": {
-    "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if (::#2": {
     "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
     "status": "candidate-dead"
   },
@@ -331,27 +287,7 @@
     "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
     "status": "candidate-dead"
   },
-  "inter_section_handlers.py::if (::#4": {
-    "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if (::#5": {
-    "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if (::#6": {
-    "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
-    "status": "candidate-dead"
-  },
   "inter_section_handlers.py::if (::#7": {
-    "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if (::#8": {
-    "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if (::#9": {
     "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
     "status": "candidate-dead"
   },
@@ -423,10 +359,6 @@
     "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
     "status": "candidate-dead"
   },
-  "inter_section_handlers.py::if edge.target in ctx.merge.trunk_source:::#1": {
-    "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
-    "status": "candidate-dead"
-  },
   "inter_section_handlers.py::if entry_port is None:::#1": {
     "note": "_route_around_section_below is always called with a non-None entry_port (both dispatch sites pass a checked station).",
     "status": "defensive"
@@ -436,10 +368,6 @@
     "status": "defensive"
   },
   "inter_section_handlers.py::if ep:::#1": {
-    "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if ep_id:::#1": {
     "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
     "status": "candidate-dead"
   },
@@ -530,14 +458,6 @@
   "inter_section_handlers.py::if n > 1 and (n - 1) * ctx.offset_step <= r_lead - ctx.offset_step:::#1": {
     "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
     "status": "needs-review"
-  },
-  "inter_section_handlers.py::if needs_bypass:::#1": {
-    "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
-    "status": "candidate-dead"
-  },
-  "inter_section_handlers.py::if not _h_segment_crosses_other_section(graph, sx, tx, ty, exclude):::#1": {
-    "note": "CPython 3.11 coverage multiline-`if` artifact: FileReporter sources the branch arc at the if-keyword line but the runtime tracer records it from the last condition line, so this arc is never recordable. The handler is exercised; static-vs-runtime arc-model mismatch, not dead code. Matches the #691 offsets.py phantom precedent.",
-    "status": "candidate-dead"
   },
   "inter_section_handlers.py::if not secs:::#1": {
     "note": "Dead with the rest of the stepped-descent subsystem: _route_stepped_descent / _nested_target_clear_channel_x / _should_step_descent are only reached at L350 for a RIGHT-entry merge junction, which is always intercepted earlier (dy=0 straight-horizontal, needs_bypass merge dispatch, or near-vertical junction handler), and the column-gap enforcer keeps src_right<ep.x. Candidate for the #689 deletion review.",
@@ -843,20 +763,8 @@
     "note": "Inner loop inside the L828 for-loop body, which is inside the L825 false-arm block. Unreachable for the same reason: _apply_compact_section_consistency always separates entry port offsets before _separate_compact_entry_offsets runs.",
     "status": "candidate-dead"
   },
-  "offsets.py::for port_obj in graph.ports.values():::#1": {
-    "note": "Python 3.11 coverage.py does not emit arc (723,724) for the for-loop-body-entered transition; it records (723,725) instead (jumping to the first statement inside the `if (` body). The logical branch is exercised by any fixture that has a TB section with a RIGHT entry port (e.g. variantbenchmarking hits 723->725 and 723->731), but the specific possible arc (723,724) from FileReporter.arcs() is never emitted at runtime in Python 3.11.",
-    "status": "candidate-dead"
-  },
-  "offsets.py::if (::#1": {
-    "note": "Both arcs are CPython 3.11 phantoms. The multi-line `if (other != lid and abs(...) < tol):` condition at L443-L447 generates bytecode where the false-branch arc is (444,442) and the true-branch arc is (445,448). The static analysis model incorrectly attributes these as (443,442) and (443,448) since it assigns the entire multi-line condition to the opening `if (` line. Runtime data.arcs() never produces (443,442) or (443,448); the longread corpus confirms (444->442) and (445->448) are the real arcs.",
-    "status": "candidate-dead"
-  },
   "offsets.py::if (::#2": {
     "note": "Both arcs are CPython 3.11 phantoms. The `if ( abs(ctx.offsets.get(...) - new_off) < tol ):` condition at L521-L524 generates bytecode starting at L522; the false-branch arc is (522, FOR_ITER_line) and the true-branch arc is (522,525). Static analysis incorrectly attributes both to L521 as (521,518) and (521,525). Runtime data.arcs() never produces (521,518) or (521,525); internal_origin_main.mmd confirms the real arcs are (519,522) and (522,525).",
-    "status": "candidate-dead"
-  },
-  "offsets.py::if (::#3": {
-    "note": "Python 3.11 coverage.py records the compound `if (port_obj.is_entry and ... and port_obj.section_id in ctx.tb_sections)` true-arm as arc (727,729), not (724,729). The possible arc (724,729) from FileReporter.arcs() is never emitted at runtime even when all conditions are satisfied. The logical branch fires whenever a TB section has a RIGHT entry port (verified via simulation on tb_right_entry_stack.mmd).",
     "status": "candidate-dead"
   },
   "offsets.py::if (cur_sid, cur_lid) in visited:::#1": {
@@ -946,10 +854,6 @@
   "offsets.py::if max_steps <= 0:::#2": {
     "note": "max_steps = n_sec_stations * len(graph.lines). The BFS visits each (station_id, line_id) pair at most once (the visited set at L1017 prevents revisits). The total distinct pairs is bounded by n_sec_stations * len(graph.lines) = max_steps. Since max_steps decrements by 1 per loop iteration and the loop exits when the queue is empty (naturally after at most max_steps unique visits), the condition max_steps <= 0 is never True; the while-loop guard already prevents the body from executing when the queue is empty.",
     "status": "defensive"
-  },
-  "offsets.py::if not (::#1": {
-    "note": "Python 3.11 coverage.py records the compound `if not (src_port and not src_port.is_entry and src_port.side == PortSide.BOTTOM and src.section_id in ctx.tb_sections)` false-arm (condition met, fall through to 746) as arc (743,746), not (739,746). The possible arc (739,746) is never emitted at runtime in Python 3.11. The logical branch fires in tb_right_entry_stack.mmd (oracle: L743->L746 HIT) but (739,746) remains MISS.",
-    "status": "candidate-dead"
   },
   "offsets.py::if not any(::#1": {
     "note": "The L920 check returns None when offsets are EXACTLY equal to expected (exact float ==). The L926 check returns None when differences are less than _OFFSET_EQ_TOLERANCE (0.001). Since all offsets are integer multiples of OFFSET_STEP (3.0px), any non-zero difference is exactly 3.0 or more, which is >> 0.001. So L920 catches exact matches and L926 can never catch a case L920 missed; the near-equal window (0,0.001) is unreachable with 3.0px discrete steps.",
@@ -1067,10 +971,6 @@
     "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
     "status": "needs-review"
   },
-  "postprocess.py::for sid, (::#1": {
-    "note": "Phantom branch arc. The multi-line `for sid, (...) in candidates.items()` unpacking target spans several lines; coverage attributes the real loop-body entry to L481->L482 (executed by 122 fixtures) and the loop exit to the function start, leaving the static L481->L488 arc as an attribution artifact no execution takes.",
-    "status": "defensive"
-  },
   "postprocess.py::if abs(other.y - station.y) > 1:::#1": {
     "note": "The loop-back arm (skip appending a column companion) fires only when another non-port station in the same section shares the moving station's x (within 1px) and its y (within 1px) - two near-coincident distinct stations, forbidden by the no-overlap invariant.",
     "status": "defensive"
@@ -1171,14 +1071,6 @@
     "note": "Edge feeding a LEFT/RIGHT entry port whose source is not a junction; src is then always an exit port (is_port=True), because resolved chains feed entry ports only from exit ports or junctions. The elif is always true, so the implicit fall-through to the loop (->223) is a structural-contract guard no valid topology reaches.",
     "status": "defensive"
   },
-  "reversal.py::if (::#1": {
-    "note": "PHANTOM multi-line short-circuit arc. CPython emits no branch bytecode at the opening `if (` line, so the static arc into the body L104 never executes; the Phase 1a reversal mark is exercised via the last-operand arc L102->104 (a TOP entry fed by a TB BOTTOM exit). Not an un-taken branch.",
-    "status": "defensive"
-  },
-  "reversal.py::if (::#2": {
-    "note": "PHANTOM multi-line short-circuit arc. No branch bytecode at the opening `if (` line, so both static arms (->150 body, ->133 loop-back) are phantom; the horizontal_succ_pairs body is exercised via the last-operand arc L148->150 and the negative case via operand short-circuit. Not un-taken branches.",
-    "status": "defensive"
-  },
   "reversal.py::if (::#3": {
     "note": "PHANTOM multi-line short-circuit arc. No branch bytecode at the opening `if (` line, so both static arms (->192 body, ->182 loop-back) are phantom; the reversal-propagation body is exercised via the operand arcs L189->192 and L190->192. Not un-taken branches.",
     "status": "defensive"
@@ -1207,14 +1099,6 @@
     "note": "succ_id comes from sec_successors, built only from real tgt.section_id values, so graph.sections.get(succ_id) is never None and the continue (->187) is a defensive null guard. The fall-through static arm (->188) is phantom: control falls into the following multi-line `if (`, whose first operand line carries the real arc L186->189.",
     "status": "defensive"
   },
-  "tb_handlers.py::if (::#1": {
-    "note": "Phantom multi-line arc. The 377->383 `continue` (skip a TB BOTTOM-exit upstream when merging) is recorded from operand line 381 (381->383). The continue IS taken in the corpus; the static 377->383 arc attributed to the opening `if (` is an artifact.",
-    "status": "defensive"
-  },
-  "tb_handlers.py::if abs(drop_delta) < COORD_TOLERANCE:::#1": {
-    "note": "Phantom list-literal arcs. The flagged dsts 292 and 299 are `pts = [` assignment lines; CPython records the branch landings from the first list-element lines instead (291->293 true arm, 291->300 false arm). Both real arms of the gate ARE exercised; 291->292 / 291->299 are attribution artifacts.",
-    "status": "defensive"
-  },
   "tb_handlers.py::if abs(u.y - src.y) > COORD_TOLERANCE:::#1": {
     "note": "Reachable-but-defective (#740). The 385->387 merge-enabling arm (upstream at the same Y as the entry port) fires only when a cross-column producer drags an LR section's TOP/BOTTOM port off its boundary; in the corpus the upstream is always at a different Y (385->386 continue). Parked until #740 is fixed; see `if upstream_st is not None:`.",
     "status": "needs-review"
@@ -1229,22 +1113,6 @@
   },
   "tb_handlers.py::if diag_end > diag_start:::#1": {
     "note": "Descending-run mirror of the ascending collapse clamp (#1 of `if diag_end < diag_start:`): fires only when |run| < 2*MIN_STRAIGHT_EDGE (20px), but connected diagonal endpoints are always >= one grid pitch (40/60px) apart on the run axis. Unreachable degenerate-geometry guard.",
-    "status": "defensive"
-  },
-  "tb_handlers.py::if not (::#1": {
-    "note": "Phantom multi-line arc. The 49->58 fall-through (route a TB internal edge) is recorded by CPython from the last operand line (52->58), not the opening `if not (`. _route_tb_internal returns a routed path 487x across the corpus; the route arm IS exercised, the static 49->58 arc is a coverage-attribution artifact.",
-    "status": "defensive"
-  },
-  "tb_handlers.py::if not (::#2": {
-    "note": "Phantom multi-line arc. The 167->174 fall-through (route internal station -> LR exit port in a TB section) is recorded from operand line 171 (171->174). _route_tb_lr_exit routes 31x across the corpus; the route arm IS exercised, the static 167->174 arc is an attribution artifact.",
-    "status": "defensive"
-  },
-  "tb_handlers.py::if not (::#3": {
-    "note": "Phantom multi-line arc. The 213->222 fall-through (route LR entry port -> internal station in a TB section) is recorded from operand line 218 (218->222). _route_tb_lr_entry routes 120x across the corpus; the route arm IS exercised, the static 213->222 arc is an attribution artifact.",
-    "status": "defensive"
-  },
-  "tb_handlers.py::if not (::#4": {
-    "note": "Phantom multi-line arc. The 251->258 fall-through (route TOP/BOTTOM port -> internal station) is recorded from operand line 253 (253->258). _route_perp_entry routes 76x across the corpus; the route arm IS exercised, the static 251->258 arc is an attribution artifact.",
     "status": "defensive"
   },
   "tb_handlers.py::if not ctx.station_offsets:::#1": {

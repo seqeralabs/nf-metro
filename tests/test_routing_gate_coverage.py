@@ -116,3 +116,66 @@ def test_triage_sidecar_references_open_gaps(rgc, gates):
         "Triage sidecar entr(y/ies) name gates that are not open gaps; remove "
         "them from tests/data/routing_gate_triage.json:\n  " + "\n  ".join(stale)
     )
+
+
+def _gate(gates, key):
+    """The gate with the given line-stable ``Gate.key`` (or ``None``)."""
+    return next((g for g in gates if g.key == key), None)
+
+
+# Gates whose every static arm CPython 3.11 attributes to the *opening* line of
+# a multi-line construct (a wrapped ``if (``/``if not (`` condition, a multi-line
+# body/list literal, or a ``for`` whose exit jumps through an unevaluated
+# annotation), while the tracer records the executed transition from an operand
+# or body-element line.  Both logical arms are exercised by the corpus, so once
+# the executed arcs are normalized to logical lines the gate is fully covered,
+# not a gap.
+PHANTOM_MULTILINE_GATES = [
+    "tb_handlers.py::if not (::#1",  # wrapped condition fall-through
+    "tb_handlers.py::if not (::#2",
+    "tb_handlers.py::if not (::#3",
+    "tb_handlers.py::if not (::#4",
+    "tb_handlers.py::if (::#1",
+    "tb_handlers.py::if abs(drop_delta) < COORD_TOLERANCE:::#1",  # list-literal body
+    "corners.py::if i > 1:::#1",  # single-line ``if`` with multi-line ternary body
+    "corners.py::if i < len(points) - 2:::#1",
+    "common.py::for edge in graph.edges:::#1",  # exit through unevaluated annotation
+    "context.py::if (::#1",  # multi-line ``and``/``or`` conditions
+    "context.py::if (::#2",
+    "context.py::if (::#3",
+]
+
+
+@pytest.mark.parametrize("key", PHANTOM_MULTILINE_GATES)
+def test_multiline_displaced_gate_is_fully_covered(gates, key):
+    """A gate whose arcs are displaced to a multi-line opening line is covered.
+
+    CPython records the executed transition from an operand/body line; coverage's
+    ``translate_arcs`` maps it back to the logical first line, so pairing it with
+    the static arc shows both arms exercised, not an un-exercised gap.
+    """
+    gate = _gate(gates, key)
+    assert gate is not None, f"no gate keyed {key!r}"
+    uncovered = [a.dst_line for a in gate.arms if not a.covered]
+    assert gate.fully_covered, (
+        f"{key} is a phantom multi-line gate but the matrix reports arm(s) "
+        f"->{uncovered} un-exercised"
+    )
+
+
+def test_genuine_dead_arm_not_masked_as_covered(gates):
+    """A tautologically-dead branch stays a gap, not silenced as phantom.
+
+    ``context.py`` ``if edge.line_id in line_pos:`` skips back to its enclosing
+    ``for`` header when false, but ``line_pos`` is built from the same edges so
+    the false arm never fires.  Its dst (the loop header) is reached every
+    iteration by the loop back-edge, so a dst-reachability heuristic would wrongly
+    call it phantom.  Normalizing arcs to logical lines keeps the distinction: the
+    false transition has no physical arc to translate, so the gate stays a gap.
+    """
+    gate = _gate(gates, "context.py::if edge.line_id in line_pos:::#1")
+    assert gate is not None, "tautological-membership gate not found"
+    assert not gate.fully_covered, (
+        "the tautologically-dead false arm is now reported covered; arc "
+        "normalization must not merge a never-taken branch onto a live one"
+    )

@@ -173,15 +173,24 @@ def compute_gate_coverage() -> list[Gate]:
     cov = _render_under_coverage(corpus)
     data = cov.get_data()
     measured = sorted(data.measured_files())
+    reporters = {f: cov._get_file_reporter(f) for f in measured}
 
     # Invert the per-fixture arc sets into an ``arc -> fixtures`` index per file
     # in one pass.  Iterating fixtures in sorted order yields sorted fixture
     # lists for free.
+    #
+    # The tracer records the executed transition from the *physical* line that
+    # holds the branch bytecode -- an operand line of a wrapped ``if (`` or the
+    # first element of a multi-line body -- whereas ``FileReporter.arcs()``
+    # attributes the static arc to the multi-line statement's *opening* line.
+    # ``translate_arcs`` collapses each physical endpoint onto that logical
+    # first line, so a genuinely-taken branch lands on the same arc the static
+    # view names instead of looking un-exercised.
     arc_hitters: dict[str, dict[tuple[int, int], list[str]]] = {f: {} for f in measured}
     for fx in fixtures:
         data.set_query_context(fx)
         for f in measured:
-            for arc in data.arcs(f) or []:
+            for arc in reporters[f].translate_arcs(data.arcs(f) or []):
                 arc_hitters[f].setdefault(arc, []).append(fx)
 
     gates: list[Gate] = []
@@ -192,7 +201,7 @@ def compute_gate_coverage() -> list[Gate]:
         # ``FileReporter.arcs()`` is coverage's plugin-API view of every
         # possible branch arc; pairing it with the executed-arc index above
         # reveals which arms no fixture takes.
-        possible = cov._get_file_reporter(f).arcs()
+        possible = reporters[f].arcs()
         if not possible:
             continue
         source_lines = Path(f).read_text().splitlines()
