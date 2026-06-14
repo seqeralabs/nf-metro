@@ -11,6 +11,114 @@
     "status": "defensive",
     "note": "Reject arm in initial_fanout_descent_span: a route whose first segment is horizontal (passes the prior check) always has a vertical second segment in the orthogonal inter-section route model; the non-vertical reject mirrors the proven-unreachable _final_port_approach reject (L687) and never fires."
   },
+  "context.py::for e in graph.edges:::#3": {
+    "status": "defensive",
+    "note": "In the public compute_junction_fan_info, called only from _guard_fan_bundles_coincide_or_separate (a validate=True guard). The coverage sweep renders with validate=False, so this function never runs on the render path; it is exercised by the layout-invariant test surface instead."
+  },
+  "context.py::for e in graph.edges_from(mjid):::#1": {
+    "status": "defensive",
+    "note": "The entry-port search finds the merge junction's sole entry-port successor on the first edge and breaks (real exit arc 139->147), so the loop never runs to exhaustion and the for-completion arm never fires."
+  },
+  "context.py::for port in graph.ports.values():::#1": {
+    "status": "defensive",
+    "note": "The loop body is entered via the multi-line `if (` whose first operand line records the real arc (259->261), so the static body-enter arc to L260 is a phantom; the loop body is exercised."
+  },
+  "context.py::if (::#1": {
+    "status": "defensive",
+    "note": "Multi-line `and` condition: CPython records both real arms from the operand lines (157->150 reject, 157->160 enter), so the static arcs attributed to the opening `if (` at L155 are never taken though both arms are exercised. Coverage attribution artifact."
+  },
+  "context.py::if (::#2": {
+    "status": "defensive",
+    "note": "Multi-line `and` condition: the real enter-body arc fires from the last operand line (263->265) and tb_right_entry is populated, so the static arc from the opening `if (` at L260 is never taken. Coverage attribution artifact."
+  },
+  "context.py::if (::#3": {
+    "status": "defensive",
+    "note": "Multi-line `or` condition: both real arms fire from the operand line (486->489 reject, 486->491 continue), so the static arcs attributed to the opening `if (` at L483 are never taken though both arms are exercised. Coverage attribution artifact."
+  },
+  "context.py::if ctx.station_offsets:::#1": {
+    "status": "defensive",
+    "note": "compute_station_offsets returns a 0.0 entry for every (station, line) of any graph with edges, so the render path always passes a non-empty dict; the falsy-return arm guards only the route_edges(station_offsets=None) call path used by tests, which the sweep never exercises."
+  },
+  "context.py::if edge.line_id in line_pos:::#1": {
+    "status": "candidate-dead",
+    "note": "line_pos is built from the line IDs of the very all_outgoing list this loop iterates, so the membership test is always true: the reject/loop-back arm (684) is an unreachable tautology and the enter-body static arc (686) is a phantom of the real 685->687. Vestigial guard; pending deletion review in #689."
+  },
+  "context.py::if ep and ep.is_entry:::#1": {
+    "status": "defensive",
+    "note": "The merge junction's only outgoing edge targets its entry port, so the first iteration matches and breaks; the loop-back arm (a non-entry edge before the entry port) never fires."
+  },
+  "context.py::if ep and ep.is_entry:::#2": {
+    "status": "defensive",
+    "note": "Same merge-junction invariant in the skip-edge pass: the junction's lone successor is its entry port, so the loop-back over a non-entry edge never fires."
+  },
+  "context.py::if m_col is not None:::#1": {
+    "status": "defensive",
+    "note": "Reached only for junctions in trunk_source, which by construction resolved a column, so m_col is never None and the no-column skip arm never fires."
+  },
+  "context.py::if m_col is not None:::#2": {
+    "status": "defensive",
+    "note": "As the first occurrence, in the index-exclude pass: a trunk-source junction always has a resolved column, so the no-column skip arm never fires."
+  },
+  "context.py::if not ctx.station_offsets:::#1": {
+    "status": "defensive",
+    "note": "Pairs with _get_offset's guard: compute_station_offsets is never empty on the render path, so _max_offset_at's early-return arm guards only the route_edges(station_offsets=None) call path used by tests."
+  },
+  "context.py::if not jst:::#1": {
+    "status": "defensive",
+    "note": "jid ranges over junction_ids, all present in graph.stations; the missing-station continue never fires."
+  },
+  "context.py::if not mst:::#1": {
+    "status": "defensive",
+    "note": "mjid ranges over junctions, a subset of junction_ids all present in graph.stations; the missing-station continue never fires."
+  },
+  "context.py::if not pred:::#1": {
+    "status": "defensive",
+    "note": "edge.source for an edge into the junction is always a present station; the missing-predecessor continue never fires."
+  },
+  "context.py::if not src or not tgt:::#1": {
+    "status": "defensive",
+    "note": "Edge endpoints are always present stations; the missing-endpoint continue never fires."
+  },
+  "context.py::if not tgt or not (tgt.is_port or edge.target in junction_ids):::#1": {
+    "status": "defensive",
+    "note": "A junction's outgoing inter-section edges always target a port or another junction (junctions are synthesised only on exit-port -> entry-port chains); the skip arm for a plain-station target never fires."
+  },
+  "context.py::if port_st is None:::#1": {
+    "status": "defensive",
+    "note": "Ports listed in a section's entry_ports/exit_ports always have a backing station; the missing-station continue never fires."
+  },
+  "context.py::if sec and sec.grid_col >= 0:::#1": {
+    "status": "defensive",
+    "note": "After section placement every resolved section carries a non-negative grid_col, so the None-return for an unplaced/missing column never fires."
+  },
+  "context.py::if sec and sec.grid_row >= 0:::#1": {
+    "status": "defensive",
+    "note": "After section placement every resolved section carries a non-negative grid_row, so the None-return for an unplaced/missing row never fires."
+  },
+  "context.py::if sec is None:::#1": {
+    "status": "defensive",
+    "note": "_resolve_section_colrow is called for ports/junctions that always resolve to a section; the None-section early-return never fires (mirrors the grid-sentinel guards at L395/L403)."
+  },
+  "context.py::if src_col is None:::#1": {
+    "status": "defensive",
+    "note": "A fan-out junction always resolves to a grid column; the unresolved-column continue never fires."
+  },
+  "context.py::if st is None:::#1": {
+    "status": "defensive",
+    "note": "_col_for_id looks up junction and predecessor IDs that are always present in graph.stations; the missing-station early-return never fires."
+  },
+  "context.py::if succ_port and succ_port.is_entry:::#1": {
+    "status": "defensive",
+    "note": "A merge junction is defined as one whose single successor is the section entry port it was inserted before, so succ_port is always a present entry port; the reject arm (successor absent or non-entry) never fires."
+  },
+  "context.py::if tgt_col is None:::#1": {
+    "status": "defensive",
+    "note": "A merge junction always resolves to a grid column (it sits adjacent to its entry-port section); the unresolved-column continue never fires."
+  },
+  "context.py::if tgt_col is None:::#2": {
+    "status": "defensive",
+    "note": "A junction's port/junction target always resolves to a grid column; the unresolved-column continue never fires."
+  },
   "inter_section_handlers.py::elif gap_bottom > gap_top:::#1": {
     "status": "needs-review",
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722."

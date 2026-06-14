@@ -8,7 +8,7 @@ Each row is a branch point (a *gate*) in a `layout/routing/` dispatch handler or
 
 Modules scoped to routing decision gates; `invariants.py` (the `validate=True` checker) and `__init__.py` are excluded.
 
-The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **194** gaps carry a triage verdict.
+The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **221** gaps carry a triage verdict.
 
 ## `common.py`
 
@@ -66,33 +66,33 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 113 | `if succ_port and succ_port.is_entry:` | `->L107` |  |
-| 122 | `if st is None:` | `->L123` |  |
-| 128 | `if not mst:` | `->L129` |  |
-| 131 | `if tgt_col is None:` | `->L132` |  |
-| 135 | `for e in graph.edges_from(mjid):` | `->L147` |  |
-| 137 | `if ep and ep.is_entry:` | `->L135` |  |
-| 152 | `if not pred:` | `->L153` |  |
-| 155 | `if (` | `->L150`, `->L160` |  |
-| 189 | `if m_col is not None:` | `->L199` |  |
-| 202 | `if ep and ep.is_entry:` | `->L200` |  |
-| 206 | `if m_col is not None:` | `->L181` |  |
-| 259 | `for port in graph.ports.values():` | `->L260` |  |
-| 260 | `if (` | `->L265` |  |
-| 322 | `for e in graph.edges:` | `->L323`, `->L325` |  |
-| 350 | `if port_st is None:` | `->L351` |  |
-| 363 | `if ctx.station_offsets:` | `->L365` |  |
-| 370 | `if not ctx.station_offsets:` | `->L371` |  |
-| 395 | `if sec and sec.grid_col >= 0:` | `->L397` |  |
-| 403 | `if sec and sec.grid_row >= 0:` | `->L405` |  |
-| 417 | `if sec is None:` | `->L418` |  |
-| 472 | `if not src or not tgt:` | `->L473` |  |
-| 483 | `if (` | `->L489`, `->L491` |  |
-| 566 | `if not jst:` | `->L567` |  |
-| 569 | `if src_col is None:` | `->L570` |  |
-| 600 | `if not tgt or not (tgt.is_port or edge.target in junction_ids):` | `->L601` |  |
-| 603 | `if tgt_col is None:` | `->L604` |  |
-| 685 | `if edge.line_id in line_pos:` | `->L684`, `->L686` |  |
+| 113 | `if succ_port and succ_port.is_entry:` | `->L107` | **defensive** -- A merge junction is defined as one whose single successor is the section entry port it was inserted before, so succ_port is always a present entry port; the reject arm (successor absent or non-entry) never fires. |
+| 122 | `if st is None:` | `->L123` | **defensive** -- _col_for_id looks up junction and predecessor IDs that are always present in graph.stations; the missing-station early-return never fires. |
+| 128 | `if not mst:` | `->L129` | **defensive** -- mjid ranges over junctions, a subset of junction_ids all present in graph.stations; the missing-station continue never fires. |
+| 131 | `if tgt_col is None:` | `->L132` | **defensive** -- A merge junction always resolves to a grid column (it sits adjacent to its entry-port section); the unresolved-column continue never fires. |
+| 135 | `for e in graph.edges_from(mjid):` | `->L147` | **defensive** -- The entry-port search finds the merge junction's sole entry-port successor on the first edge and breaks (real exit arc 139->147), so the loop never runs to exhaustion and the for-completion arm never fires. |
+| 137 | `if ep and ep.is_entry:` | `->L135` | **defensive** -- The merge junction's only outgoing edge targets its entry port, so the first iteration matches and breaks; the loop-back arm (a non-entry edge before the entry port) never fires. |
+| 152 | `if not pred:` | `->L153` | **defensive** -- edge.source for an edge into the junction is always a present station; the missing-predecessor continue never fires. |
+| 155 | `if (` | `->L150`, `->L160` | **defensive** -- Multi-line `and` condition: CPython records both real arms from the operand lines (157->150 reject, 157->160 enter), so the static arcs attributed to the opening `if (` at L155 are never taken though both arms are exercised. Coverage attribution artifact. |
+| 189 | `if m_col is not None:` | `->L199` | **defensive** -- Reached only for junctions in trunk_source, which by construction resolved a column, so m_col is never None and the no-column skip arm never fires. |
+| 202 | `if ep and ep.is_entry:` | `->L200` | **defensive** -- Same merge-junction invariant in the skip-edge pass: the junction's lone successor is its entry port, so the loop-back over a non-entry edge never fires. |
+| 206 | `if m_col is not None:` | `->L181` | **defensive** -- As the first occurrence, in the index-exclude pass: a trunk-source junction always has a resolved column, so the no-column skip arm never fires. |
+| 259 | `for port in graph.ports.values():` | `->L260` | **defensive** -- The loop body is entered via the multi-line `if (` whose first operand line records the real arc (259->261), so the static body-enter arc to L260 is a phantom; the loop body is exercised. |
+| 260 | `if (` | `->L265` | **defensive** -- Multi-line `and` condition: the real enter-body arc fires from the last operand line (263->265) and tb_right_entry is populated, so the static arc from the opening `if (` at L260 is never taken. Coverage attribution artifact. |
+| 322 | `for e in graph.edges:` | `->L323`, `->L325` | **defensive** -- In the public compute_junction_fan_info, called only from _guard_fan_bundles_coincide_or_separate (a validate=True guard). The coverage sweep renders with validate=False, so this function never runs on the render path; it is exercised by the layout-invariant test surface instead. |
+| 350 | `if port_st is None:` | `->L351` | **defensive** -- Ports listed in a section's entry_ports/exit_ports always have a backing station; the missing-station continue never fires. |
+| 363 | `if ctx.station_offsets:` | `->L365` | **defensive** -- compute_station_offsets returns a 0.0 entry for every (station, line) of any graph with edges, so the render path always passes a non-empty dict; the falsy-return arm guards only the route_edges(station_offsets=None) call path used by tests, which the sweep never exercises. |
+| 370 | `if not ctx.station_offsets:` | `->L371` | **defensive** -- Pairs with _get_offset's guard: compute_station_offsets is never empty on the render path, so _max_offset_at's early-return arm guards only the route_edges(station_offsets=None) call path used by tests. |
+| 395 | `if sec and sec.grid_col >= 0:` | `->L397` | **defensive** -- After section placement every resolved section carries a non-negative grid_col, so the None-return for an unplaced/missing column never fires. |
+| 403 | `if sec and sec.grid_row >= 0:` | `->L405` | **defensive** -- After section placement every resolved section carries a non-negative grid_row, so the None-return for an unplaced/missing row never fires. |
+| 417 | `if sec is None:` | `->L418` | **defensive** -- _resolve_section_colrow is called for ports/junctions that always resolve to a section; the None-section early-return never fires (mirrors the grid-sentinel guards at L395/L403). |
+| 472 | `if not src or not tgt:` | `->L473` | **defensive** -- Edge endpoints are always present stations; the missing-endpoint continue never fires. |
+| 483 | `if (` | `->L489`, `->L491` | **defensive** -- Multi-line `or` condition: both real arms fire from the operand line (486->489 reject, 486->491 continue), so the static arcs attributed to the opening `if (` at L483 are never taken though both arms are exercised. Coverage attribution artifact. |
+| 566 | `if not jst:` | `->L567` | **defensive** -- jid ranges over junction_ids, all present in graph.stations; the missing-station continue never fires. |
+| 569 | `if src_col is None:` | `->L570` | **defensive** -- A fan-out junction always resolves to a grid column; the unresolved-column continue never fires. |
+| 600 | `if not tgt or not (tgt.is_port or edge.target in junction_ids):` | `->L601` | **defensive** -- A junction's outgoing inter-section edges always target a port or another junction (junctions are synthesised only on exit-port -> entry-port chains); the skip arm for a plain-station target never fires. |
+| 603 | `if tgt_col is None:` | `->L604` | **defensive** -- A junction's port/junction target always resolves to a grid column; the unresolved-column continue never fires. |
+| 685 | `if edge.line_id in line_pos:` | `->L684`, `->L686` | **candidate-dead** -- line_pos is built from the line IDs of the very all_outgoing list this loop iterates, so the membership test is always true: the reject/loop-back arm (684) is an unreachable tautology and the enter-body static arc (686) is a phantom of the real 685->687. Vestigial guard; pending deletion review in #689. |
 
 ## `core.py`
 
