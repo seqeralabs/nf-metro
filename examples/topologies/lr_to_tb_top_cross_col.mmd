@@ -1,0 +1,32 @@
+%%metro title: Top Entry Horizontal Source
+%%metro style: dark
+%%metro line: a | A | #e63946
+%%metro grid: src_sec | 0,0
+%%metro grid: mid_sec | 1,0
+%%metro grid: tgt_sec | 0,2
+graph LR
+    subgraph src_sec [Source]
+        %%metro direction: LR
+        %%metro exit: right | a
+        s1[Start]
+        s2[End]
+        s1 -->|a| s2
+    end
+    subgraph mid_sec [Middle]
+        %%metro direction: LR
+        %%metro entry: left | a
+        %%metro exit: right | a
+        m1[Middle]
+        m2[Middle Out]
+        m1 -->|a| m2
+    end
+    subgraph tgt_sec [Target]
+        %%metro direction: TB
+        %%metro entry: top | a
+        %%metro exit: right | a
+        t1[Process]
+        t2[Result]
+        t1 -->|a| t2
+    end
+    s2 -->|a| m1
+    s2 -->|a| t1

@@ -155,6 +155,24 @@ def _align_tb_entry_port(
     if not sources:
         return
 
+    # A TOP/BOTTOM entry into a TB/BT section feeds the head of the vertical
+    # trunk.  Place the port on its boundary edge with X on the trunk so the
+    # port -> first-station segment is a clean vertical continuation; routing
+    # bridges the source across to the trunk X (a right-down-left-down lead-in
+    # when the source sits off to the side).  Inheriting the source X instead
+    # leaves the port off the trunk, forcing an elbow inside the section and,
+    # for cross-column sources, a route that crosses the boundary off-port.
+    if entry_section.direction in ("TB", "BT"):
+        if port.side == PortSide.TOP:
+            boundary_y = entry_section.bbox_y
+        else:
+            boundary_y = entry_section.bbox_y + entry_section.bbox_h
+        _set_port_y(graph, port_id, boundary_y)
+        trunk_x = _tb_trunk_x(graph, entry_section)
+        if trunk_x is not None:
+            _set_port_x(graph, port_id, trunk_x)
+        return
+
     # Check if any source is cross-column
     my_cols = set(
         range(
@@ -197,6 +215,26 @@ def _align_tb_entry_port(
         # Same-column: align X with source for vertical drop
         src_x, _, _ = sources[0]
         _set_port_x(graph, port_id, src_x)
+
+
+def _tb_trunk_x(graph: MetroGraph, section: Section) -> float | None:
+    """X of a TB/BT section's vertical trunk (its internal stations' column).
+
+    Returns the median internal-station X, or ``None`` when the section has no
+    internal stations.  Internal stations in a TB/BT section stack on a single
+    column, so the median ignores any port outliers and yields the trunk X.
+    """
+    internal_ids = (
+        set(section.station_ids) - set(section.entry_ports) - set(section.exit_ports)
+    )
+    xs = sorted(
+        graph.stations[sid].x
+        for sid in internal_ids
+        if sid in graph.stations and not graph.stations[sid].is_port
+    )
+    if not xs:
+        return None
+    return xs[len(xs) // 2]
 
 
 def _vertical_drop_source_x(
