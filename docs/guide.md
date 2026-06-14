@@ -630,6 +630,20 @@ Set the directive in your committed `.mmd` so the map reproduces from the file a
 
 `--output`, `--format`, `--from-nextflow`, and `--debug` have no directive: they select the output target or a diagnostic overlay rather than describing the diagram.
 
+## Bridge glyphs
+
+When two distinct lines cross at a point that is neither a shared station nor a
+merge/junction, nf-metro automatically draws a **bridge glyph**: a short gap in
+the under-route where it passes beneath the over-route.  This disambiguates a
+crossing from an interchange (where a gap would mean the lines genuinely share a
+node).
+
+Bridge glyphs are computed automatically — there is no directive to enable them.
+If your diagram has a visual crossing that you do not expect, check whether the
+two lines genuinely share an endpoint.  If they should converge, connect them
+with a shared station; if the crossing is unavoidable layout-wise, the bridge
+glyph is the correct rendering.
+
 ## Tips
 
 - **Start without sections.** Get your stations and line routing right first, then wrap groups in `subgraph` blocks.
