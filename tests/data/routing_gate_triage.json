@@ -923,17 +923,13 @@
     "note": "Null guard in _spread_diagonal_bundles. compute_station_offsets returns a non-Optional dict and every render-path route_edges call passes it; the only caller leaving station_offsets at its None default is the validate-only _ensure_routes (guards.py), which the render sweep does not run. The early return never fires on a rendered topology, mirroring the matching assert in _apply_diagonal_spread.",
     "status": "defensive"
   },
-  "postprocess.py::if len(moved) <= len(unmoved):::#1": {
-    "note": "Reached only from the has-unmoved arm of the agree branch, which is unreachable because a column never mixes moved and unmoved visible stations (all-or-nothing companion consensus). Both arms unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
-    "status": "defensive"
-  },
   "postprocess.py::if majority_count <= len(moved) / 2:::#1": {
     "note": "The no-clear-majority arm. Movers in a column either converge to one consensus x or sit off it only via hub/exit-port collinearity at a fixed >=20px quantum; the consensus cluster is always the strict majority, so majority_count is never <= half (0 of corpus, no probe topology reproduces a split). Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
-  "postprocess.py::if max(moved_xs) - min(moved_xs) > 1.0:::#1": {
-    "note": "Movers-agree branch (else). Reachable only by a contrived topology that lifts the trunk-collinear fan branch out of the tools' column (e.g. a hidden hop) so the remaining branches centre to one shared X; the engine seats one fan branch on the hub's trunk row in every natural fan, forcing the disagree branch (L568). Left un-fixtured: the only reaching topology is a coverage-only contrivance, not a natural pipeline.",
-    "status": "needs-review"
+  "postprocess.py::if max(moved_xs) - min(moved_xs) <= 1.0:::#1": {
+    "note": "Early-exit for the agree case: all movers land within 1px of each other. Unreachable for natural pipelines because the engine always seats one fan branch on the hub's trunk row, vetoing companion consensus for the whole column, so moved is empty and the outer guard fires first.",
+    "status": "defensive"
   },
   "postprocess.py::if multi_diag:::#1": {
     "note": "multi_diag branch of _flat_connects_to_internal_chain; multi_diag is structurally unsatisfiable (see the _classify_centering_routes gate at the same line text), so the function is only ever called with multi_diag False. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
@@ -958,10 +954,6 @@
   "postprocess.py::if not outliers:::#1": {
     "note": "The no-outliers arm in the movers-disagree branch. Disagreement only arises from hub/exit-port collinearity at a >=20px quantum, never sub-pixel, so whenever spread exceeds 1px at least one mover rounds >1px from the majority x. outliers is never empty here. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
-  },
-  "postprocess.py::if not unmoved:::#1": {
-    "note": "Agree-branch tail. `->L583` (unmoved empty, continue) is reachable only via the same contrived agree-case as the L565 gate; `->L584` (unmoved non-empty) is unreachable because the all-or-nothing companion consensus never leaves a moved and an unmoved visible station in one column. Left un-fixtured.",
-    "status": "needs-review"
   },
   "postprocess.py::if ox is None:::#1": {
     "note": "Null guard in _align_uncentered_siblings. The loop iterates visible non-port stations and original_x is built from every non-port station, so ox is always present; the guard never fires.",
