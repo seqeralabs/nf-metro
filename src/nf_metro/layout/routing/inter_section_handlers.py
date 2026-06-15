@@ -1103,14 +1103,14 @@ def _route_perp_exit_drop(
 
     A TOP/BOTTOM exit on a horizontal-flow section and the TOP/BOTTOM entry it
     feeds share an X (the target trunk is aligned to the exit), so the
-    inter-section leg is a single straight segment.  Co-travelling lines hold a
-    constant X offset baked here so they stay parallel down to the port without
-    a converging jog; they merge at the first real station inside the target.
+    inter-section leg is a single straight segment.  Each line drops at the
+    target trunk's per-line X offset so a co-travelling bundle stays parallel
+    down to the port and on into the trunk, merging only at the first real
+    station inside the target.
     """
-    sx, sy = src.x, src.y
+    sy = src.y
     ty = tgt.y
-    offset = ((n - 1) / 2 - i) * ctx.offset_step if n > 1 else 0.0
-    x = sx + offset
+    x = tgt.x + _tb_x_offset(ctx, edge.target, edge.line_id, tgt.section_id)
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,

@@ -7090,3 +7090,42 @@ def test_lr_to_tb_bottom_drop_clears_last_station(fixture):
             f"{fixture}: BOTTOM exit x={exit_x} coincides with a station "
             f"(would route through the marker)"
         )
+
+
+@pytest.mark.parametrize("fixture", _BOTTOM_DROP_FIXTURES)
+def test_lr_to_tb_bottom_drop_no_boundary_crossover(fixture):
+    """Co-travelling drop lines keep their X order across the section boundary.
+
+    Each line's inter-section drop leg must land at the same X its in-section
+    trunk segment runs on, so a multi-line bundle flows straight through the
+    shared entry port instead of two lines swapping sides (a crossover) at the
+    boundary.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    drop_exits = _lr_bottom_drop_exits(graph)
+    drop_leg_x = {
+        r.line_id: r.points[-1][0] for r in routes if r.edge.source in drop_exits
+    }
+    if len(drop_leg_x) < 2:
+        pytest.skip(f"{fixture}: single-line drop has no bundle order to cross")
+
+    # First in-section trunk segment each line runs after the entry port.
+    entry_ports = {
+        pid
+        for pid, port in graph.ports.items()
+        if port.is_entry and port.side in (PortSide.TOP, PortSide.BOTTOM)
+    }
+    trunk_x = {
+        r.line_id: r.points[0][0]
+        for r in routes
+        if r.edge.source in entry_ports and r.line_id in drop_leg_x
+    }
+    for line_id, x in drop_leg_x.items():
+        assert line_id in trunk_x, f"{fixture}: line {line_id} has no trunk segment"
+        assert abs(x - trunk_x[line_id]) < 1.0, (
+            f"{fixture}: line {line_id} drops at x={x} but its trunk runs at "
+            f"x={trunk_x[line_id]} -- the bundle swaps sides at the boundary"
+        )

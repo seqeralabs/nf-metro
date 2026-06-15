@@ -23,6 +23,7 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import (
     _get_offset,
     _RoutingCtx,
+    _tb_x_offset,
 )
 from nf_metro.layout.routing.tb_handlers import (
     _compute_diagonal_placement,
@@ -149,28 +150,22 @@ def _route_intra_section(
         and src_section is not None
         and src_section.direction in ("LR", "RL")
     ):
-        sibling_lines = sorted(
-            {
-                e.line_id
-                for e in ctx.graph.edges_from(edge.source)
-                if e.target == edge.target
-            }
+        sibling_count = sum(
+            1 for e in ctx.graph.edges_from(edge.source) if e.target == edge.target
         )
-        n = len(sibling_lines)
-        i = sibling_lines.index(edge.line_id)
-        if n <= 1:
+        if sibling_count <= 1:
             return RoutedPath(
                 edge=edge,
                 line_id=edge.line_id,
                 points=[(sx, sy), (tx, sy), (tx, ty)],
             )
         # Co-travelling lines turn the corner concentrically: the horizontal
-        # run keeps the trunk's render Y offset (so it joins the bundle
-        # arriving along the trunk) and the vertical leg takes a centred X
-        # offset that matches the drop and the target trunk below, so the
-        # bundle stays parallel through the bend and down into the port.
+        # run keeps the trunk's render Y offset (so it joins the bundle arriving
+        # along the trunk) and the vertical leg takes the destination trunk's
+        # per-line X offset, so the bundle stays parallel through the bend and
+        # down into the port matching the drop and the trunk below it.
         hy = sy + _get_offset(ctx, edge.source, edge.line_id)
-        vx = tx + ((n - 1) / 2 - i) * ctx.offset_step
+        vx = tx + _tb_x_offset(ctx, edge.target, edge.line_id, src.section_id)
         return RoutedPath(
             edge=edge,
             line_id=edge.line_id,
