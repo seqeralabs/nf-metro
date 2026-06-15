@@ -608,6 +608,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "TB section's TOP entry two rows below. The downward branch drops onto "
         "the target trunk without crossing the section boundary off-port.",
     ),
+    (
+        "lr_to_tb_top_two_lines",
+        TOPOLOGIES_DIR,
+        "Two co-travelling lines from a RIGHT-exit LR section double back into "
+        "a TB section's shared TOP entry below, landing on their trunk X "
+        "offsets so the bundle stays parallel through the boundary without "
+        "pinching or crossing.",
+    ),
 ]
 
 # Category headers inserted before specific entries
