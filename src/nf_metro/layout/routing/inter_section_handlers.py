@@ -146,7 +146,7 @@ def _route_inter_section(
         and tgt_port.is_entry
         and tgt_port.side in (PortSide.TOP, PortSide.BOTTOM)
     ):
-        return _route_perp_exit_drop(edge, src, tgt, i, n, ctx)
+        return _route_perp_exit_drop(edge, src, tgt, ctx)
 
     # TOP entry port: L-shape so the line gets a proper curve into the
     # section.  Must be checked before the same-X shortcut, which would
@@ -1097,7 +1097,7 @@ def _source_exit_side(graph: MetroGraph, src: Station) -> Direction | None:
 
 
 def _route_perp_exit_drop(
-    edge: Edge, src: Station, tgt: Station, i: int, n: int, ctx: _RoutingCtx
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> RoutedPath:
     """Straight vertical drop from a perpendicular exit into an aligned entry.
 
@@ -1352,11 +1352,17 @@ def _route_top_entry_offset_bundle(
     trunk_y = hy0 + bsign * offset
     drop2_x = tx - offset
 
+    # The reference line drops straight into the port; offset lines step down,
+    # across and down, sitting inside the lead-in bend (radius base-offset for
+    # an East lead, base+offset for a West lead), and on opposite sides of the
+    # two trunk bends.  Each radius is the reference-anchored concentric form
+    # base + signed_offset; the trunk-bend signs flip for the double-back.
+    r1 = reference_anchored_radius(-lead_sign * offset, base_radius)
+    r2 = reference_anchored_radius(bsign * offset, base_radius)
+    r3 = reference_anchored_radius(-bsign * offset, base_radius)
+
     if land_x is not None:
         # Straight drop onto the trunk X; no converging port jog.
-        r1 = reference_anchored_radius(-lead_sign * offset, base_radius)
-        r2 = reference_anchored_radius(bsign * offset, base_radius)
-        r3 = reference_anchored_radius(-bsign * offset, base_radius)
         return RoutedPath(
             edge=edge,
             line_id=edge.line_id,
@@ -1372,15 +1378,6 @@ def _route_top_entry_offset_bundle(
             offsets_applied=True,
             curve_radii=[r1, r2, r3],
         )
-
-    # The reference line drops straight into the port; offset lines step down,
-    # across and down, sitting inside the lead-in bend (radius base-offset for
-    # an East lead, base+offset for a West lead), and on opposite sides of the
-    # two trunk bends.  Each radius is the reference-anchored concentric form
-    # base + signed_offset; the trunk-bend signs flip for the double-back.
-    r1 = reference_anchored_radius(-lead_sign * offset, base_radius)
-    r2 = reference_anchored_radius(bsign * offset, base_radius)
-    r3 = reference_anchored_radius(-bsign * offset, base_radius)
 
     if abs(drop2_x - tx) < COORD_TOLERANCE:
         # Reference line: no port jog, drop straight in.
