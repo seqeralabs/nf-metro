@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 from conftest import CONTENT_PLACEMENT_PHASES
+from layout_validator import check_station_as_elbow
 
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
@@ -64,6 +65,10 @@ from nf_metro.layout.phases.off_track import (
 )
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import resolve_section
+from nf_metro.layout.routing.invariants import (
+    check_bundle_order_preserved,
+    check_no_collinear_distinct_lines,
+)
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 from nf_metro.render.svg import (
@@ -3734,6 +3739,34 @@ def test_lr_section_all_perpendicular_ports_rejected():
     msg = str(excinfo.value).lower()
     assert "annotation" in msg
     assert "perpendicular" in msg or "flow-aligned" in msg
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "topologies/lr_perp_top_exit_side_entry.mmd",
+        "topologies/lr_perp_bottom_exit_side_entry.mmd",
+    ],
+)
+def test_lr_perp_multiline_exit_routes_cleanly(fixture):
+    """A multi-line perpendicular (TOP/BOTTOM) exit on a flow-anchored LR/RL
+    section places its exit port off every internal station's X (no
+    station-as-elbow) and separates the exiting lines into distinct channels.
+
+    ``validate=True`` succeeds, the station-as-elbow constraint holds, and no
+    pair of distinct lines coincides on a vertical run or flips bundle order
+    through the up-and-over corners (#706).
+    """
+    graph = _layout(fixture, validate=True)
+
+    elbow = check_station_as_elbow(graph)
+    assert not elbow, "; ".join(v.message for v in elbow)
+
+    # The exiting lines must not collapse onto one channel anywhere.
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    assert not check_no_collinear_distinct_lines(graph, routes, offsets)
+    assert not check_bundle_order_preserved(routes)
 
 
 # ---------------------------------------------------------------------------

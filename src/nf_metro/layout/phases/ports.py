@@ -13,6 +13,7 @@ from nf_metro.layout.constants import (
     STATION_ELBOW_TOLERANCE,
 )
 from nf_metro.layout.phases._common import _expand_bbox_for_y, _grid_group_section_ids
+from nf_metro.layout.phases.guards import _section_lacks_flow_aligned_port
 from nf_metro.layout.phases.junctions import (
     _resolve_source_section_id,
     _resolve_source_xy,
@@ -70,6 +71,23 @@ def _align_entry_ports(graph: MetroGraph, tb_only: bool = False) -> None:
             _align_tb_entry_port(graph, port_id, port, entry_section, junction_ids)
 
 
+def _entry_consumer_y(
+    graph: MetroGraph, port_id: str, entry_section: Section
+) -> float | None:
+    """Y of the first internal station this entry port feeds, nearest the port."""
+    ys = [
+        st.y
+        for edge in graph.edges_from(port_id)
+        if (st := graph.stations.get(edge.target)) is not None
+        and not st.is_port
+        and st.section_id == entry_section.id
+    ]
+    port_st = graph.stations.get(port_id)
+    if not ys or port_st is None:
+        return None
+    return min(ys, key=lambda y: abs(y - port_st.y))
+
+
 def _align_lr_entry_port(
     graph: MetroGraph,
     port_id: str,
@@ -96,6 +114,23 @@ def _align_lr_entry_port(
             continue
 
         if entry_section.grid_row != src_section.grid_row:
+            break
+
+        # A perpendicular (TOP/BOTTOM) exit feeding this LEFT/RIGHT entry sits on
+        # the source section's boundary edge, not on a trunk -- aligning to it
+        # would pin the entry near the section top/bottom and force the up-and-
+        # over route to step down into the first station.  Anchor the entry on
+        # its own consumer station's Y so the route descends straight in.
+        src_port = graph.ports.get(edge.source)
+        if (
+            src_port is not None
+            and not src_port.is_entry
+            and src_port.side in (PortSide.TOP, PortSide.BOTTOM)
+            and src_section.direction in ("LR", "RL")
+        ):
+            consumer_y = _entry_consumer_y(graph, port_id, entry_section)
+            if consumer_y is not None:
+                _set_port_y(graph, port_id, consumer_y)
             break
 
         # Skip alignment if source Y is too far outside entry section bbox.
@@ -770,11 +805,20 @@ def _align_exit_ports(graph: MetroGraph) -> None:
         # section's perpendicular entry is positioned past the last station so
         # the trunk curves out after the marker.  A fold's BOTTOM exit (which
         # feeds a sideways entry, not a drop) has no such target and keeps its
-        # own placement.
+        # own placement.  A single-row section places its perpendicular exit
+        # past the last station only when it also has a flow-aligned port to
+        # anchor the horizontal run; a section with ONLY perpendicular ports is
+        # an unsupported shape rejected downstream, so it keeps its placement.
         if (
             exit_section.direction in ("LR", "RL")
             and port.side in (PortSide.TOP, PortSide.BOTTOM)
-            and next(_drop_targets(graph, port_id), None) is not None
+            and (
+                next(_drop_targets(graph, port_id), None) is not None
+                or (
+                    exit_section.grid_row_span == 1
+                    and not _section_lacks_flow_aligned_port(graph, exit_section)
+                )
+            )
         ):
             _align_perpendicular_exit_port(graph, port_id, port, exit_section)
             continue

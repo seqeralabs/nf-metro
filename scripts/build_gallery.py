@@ -616,6 +616,23 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "offsets so the bundle stays parallel through the boundary without "
         "pinching or crossing.",
     ),
+    # --- Multi-line perpendicular exit that does not drop straight down ---
+    (
+        "lr_perp_top_exit_side_entry",
+        TOPOLOGIES_DIR,
+        "Two co-travelling lines leave an LR section through an explicit TOP "
+        "exit and feed the LEFT entry of a same-row neighbour. The exit port "
+        "sits past the last station, and the bundle rises into the header "
+        "band, runs across, and descends to the consumer's row to enter "
+        "straight, staying parallel through every concentric corner.",
+    ),
+    (
+        "lr_perp_bottom_exit_side_entry",
+        TOPOLOGIES_DIR,
+        "The BOTTOM-exit mirror of lr_perp_top_exit_side_entry: the bundle "
+        "drops below the source section, runs across the under-row band, and "
+        "rises back to the consumer's row to enter straight.",
+    ),
 ]
 
 # Category headers inserted before specific entries

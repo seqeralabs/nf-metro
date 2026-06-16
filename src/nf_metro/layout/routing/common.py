@@ -19,6 +19,7 @@ from nf_metro.layout.constants import (
     INTER_ROW_HEADER_CLEARANCE,
     OFFSET_STEP,
     SECTION_HEADER_PROTRUSION,
+    SECTION_ROUTE_CLEARANCE,
 )
 from nf_metro.parser.model import Edge, MetroGraph, Section, Station
 
@@ -123,6 +124,37 @@ def row_top_edge(
     if col is not None:
         secs = [s for s in secs if s.grid_col == col]
     return min((s.bbox_y for s in secs), default=default) if secs else default
+
+
+def header_corridor_y(
+    graph: MetroGraph,
+    row: int,
+    *,
+    below: bool,
+    base_radius: float,
+    default: float = 0.0,
+) -> float:
+    """Y of an inter-row routing channel that clears a row's header band.
+
+    Above the row (``below=False``) the channel sits a header band above the
+    top edge; below it sits a route's clearance under the bottom edge.  The
+    full :data:`INTER_ROW_HEADER_CLEARANCE` applies only when a section
+    occupies the gap above the row (contributing a header badge); the topmost
+    row has only the canvas-top title band, so the smaller
+    :data:`SECTION_ROUTE_CLEARANCE` keeps the channel from overshooting it.
+    """
+    if below:
+        return (
+            row_bottom_edge(graph, row, default=default)
+            + SECTION_ROUTE_CLEARANCE
+            + base_radius
+        )
+    clearance = (
+        INTER_ROW_HEADER_CLEARANCE
+        if section_exists_above_row(graph, row)
+        else SECTION_ROUTE_CLEARANCE
+    )
+    return row_top_edge(graph, row, default=default) - clearance - base_radius
 
 
 def section_exists_above_row(graph: MetroGraph, row: int) -> bool:

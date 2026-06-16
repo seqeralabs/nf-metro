@@ -25,14 +25,15 @@ from nf_metro.layout.routing.common import (
     col_left_edge,
     col_right_edge,
     column_gap_edges,
+    column_gap_midpoint,
     endpoint_port_xs,
+    header_corridor_y,
     horizontal_direction,
     inter_column_channel_x,
     inter_row_channel_y,
     resolve_section,
     row_bottom_edge,
     row_top_edge,
-    section_exists_above_row,
     symmetric_bundle_midpoint,
     vertical_direction,
 )
@@ -116,6 +117,15 @@ def _route_inter_section(
         )
     )
 
+    tgt_port = graph.ports.get(edge.target)
+
+    # A perpendicular exit leaves its section vertically; route it before the
+    # same-Y shortcut, since an exit and entry both on their sections' top (or
+    # bottom) edge share a Y but a straight run between them would graze both.
+    perp = _route_perp_exit(edge, src, tgt, src_col, tgt_col, ctx)
+    if perp is not None:
+        return perp
+
     if abs(dy) < COORD_TOLERANCE_FINE and not needs_bypass:
         # Same Y: straight horizontal
         return RoutedPath(
@@ -127,26 +137,6 @@ def _route_inter_section(
 
     if src_is_tb_bottom and ctx.station_offsets:
         return _route_tb_bottom_exit(edge, src, tgt, ctx)
-
-    tgt_port = graph.ports.get(edge.target)
-
-    # A perpendicular (TOP/BOTTOM) exit on a horizontal-flow section leaves the
-    # section vertically and drops straight into the aligned TOP/BOTTOM entry
-    # below/above.  The after-station curve lives in the internal
-    # station->exit segment, so this inter-section leg is a plain drop.
-    src_is_perp_exit = (
-        src_port is not None
-        and not src_port.is_entry
-        and src_port.side in (PortSide.TOP, PortSide.BOTTOM)
-        and src.section_id not in ctx.tb_sections
-    )
-    if (
-        src_is_perp_exit
-        and tgt_port
-        and tgt_port.is_entry
-        and tgt_port.side in (PortSide.TOP, PortSide.BOTTOM)
-    ):
-        return _route_perp_exit_drop(edge, src, tgt, ctx)
 
     # TOP entry port: L-shape so the line gets a proper curve into the
     # section.  Must be checked before the same-X shortcut, which would
@@ -1121,6 +1111,138 @@ def _route_perp_exit_drop(
     )
 
 
+def _route_perp_exit(
+    edge: Edge,
+    src: Station,
+    tgt: Station,
+    src_col: int | None,
+    tgt_col: int | None,
+    ctx: _RoutingCtx,
+) -> RoutedPath | None:
+    """Route a perpendicular (TOP/BOTTOM) exit on a horizontal-flow section.
+
+    A column-aligned drop into a TB/BT trunk is a straight vertical (the trunk
+    is aligned under the exit X by ``_align_drop_target_trunk``); a side entry
+    or a cross-column perpendicular entry goes up and over the source section.
+    Returns ``None`` when *src* is not such an exit.
+    """
+    graph = ctx.graph
+    src_port = graph.ports.get(edge.source)
+    if (
+        src_port is None
+        or src_port.is_entry
+        or src_port.side not in (PortSide.TOP, PortSide.BOTTOM)
+        or src.section_id in ctx.tb_sections
+    ):
+        return None
+    tgt_port = graph.ports.get(edge.target)
+    is_aligned_drop = (
+        tgt_port is not None
+        and tgt_port.is_entry
+        and tgt_port.side in (PortSide.TOP, PortSide.BOTTOM)
+        and tgt.section_id in ctx.tb_sections
+        and src_col == tgt_col
+    )
+    if is_aligned_drop:
+        return _route_perp_exit_drop(edge, src, tgt, ctx)
+    return _route_perp_exit_over(edge, src, tgt, ctx)
+
+
+def _route_perp_exit_over(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> RoutedPath:
+    """Up-and-over route from a perpendicular exit that does not drop straight.
+
+    A TOP/BOTTOM exit on a horizontal-flow section whose target is not a
+    column-aligned vertical drop (a side entry, or a perpendicular entry in
+    another column) leaves the section vertically, rises (TOP) or descends
+    (BOTTOM) into the inter-row header band that clears the source section,
+    runs across, then descends to the target's own row and turns straight in::
+
+        (lift)     (corridor)      (descent)      (into target)
+        port -> up -> over -> down to station Y -> straight into entry
+
+    The bundle is a constant perpendicular offset of its reference line: the
+    vertical legs continue the in-section riser's per-line X and the corridor
+    stacks the same offset in Y, so the per-line gap is constant.  Each corner
+    radius is the reference-anchored concentric form ``base +/- offset`` so the
+    arcs share a centre and the gap never pinches through the bends.
+    """
+    graph = ctx.graph
+    sx, sy = src.x, src.y
+    tx, ty = tgt.x, tgt.y
+    src_port = graph.ports[edge.source]
+    tgt_port = graph.ports.get(edge.target)
+    src_sec = resolve_section(graph, src)
+    tgt_sec = resolve_section(graph, tgt)
+    base = ctx.curve_radius
+    is_top = src_port.side == PortSide.TOP
+    row = src_sec.grid_row if src_sec is not None else None
+
+    # Per-line lateral offset, continuing the in-section riser's convention so
+    # the lift out of the port stays parallel (TOP: raw offset; BOTTOM: the
+    # reversed offset the BOTTOM riser bakes).
+    if is_top:
+        d = _get_offset(ctx, edge.source, edge.line_id)
+    else:
+        d = _tb_x_offset(ctx, edge.source, edge.line_id, src.section_id)
+
+    # Corridor Y: the header band clearing the source section's near edge.
+    cy_base = (
+        header_corridor_y(graph, row, below=not is_top, base_radius=base, default=sy)
+        if row is not None
+        else sy - base
+        if is_top
+        else sy + base
+    )
+
+    # The larger-offset line sits toward the source section on the corridor
+    # (south of a TOP run, north of a BOTTOM run) and west on the descent, which
+    # preserves bundle order through the rise/over/descend/turn-in sequence.
+    corridor_y = cy_base + (d if is_top else -d)
+    radii = [
+        reference_anchored_radius(-d, base),  # rise -> over (and over -> descend)
+        reference_anchored_radius(-d, base),
+        reference_anchored_radius(d, base),  # descend -> turn into target
+    ]
+
+    perp_entry = (
+        tgt_port is not None
+        and tgt_port.is_entry
+        and tgt_port.side in (PortSide.TOP, PortSide.BOTTOM)
+    )
+    if perp_entry:
+        # Perpendicular entry: descend straight into the entry on the target
+        # trunk's X; the lines converge at the shared port.
+        descent_x = tx - d
+        final_y = ty
+    else:
+        # Side entry: descend in the inter-column gap to the consumer's row and
+        # turn straight in, holding each line on the target section's per-line Y
+        # so the bundle stays stacked into the station marker rather than
+        # collapsing onto the entry-port Y (which would hide all but one line).
+        src_col = src_sec.grid_col if src_sec is not None else 0
+        tgt_col = tgt_sec.grid_col if tgt_sec is not None else src_col
+        descent_x = column_gap_midpoint(graph, src_col, tgt_col, row) - d
+        final_y = ty + _get_offset(ctx, edge.target, edge.line_id)
+
+    return RoutedPath(
+        edge=edge,
+        line_id=edge.line_id,
+        points=[
+            (sx + d, sy),
+            (sx + d, corridor_y),
+            (descent_x, corridor_y),
+            (descent_x, final_y),
+            (tx, final_y),
+        ],
+        is_inter_section=True,
+        normalize_exempt=True,
+        offsets_applied=True,
+        curve_radii=radii,
+    )
+
+
 def _route_top_entry_l_shape(
     edge: Edge, src: Station, tgt: Station, i: int, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -1168,20 +1290,13 @@ def _route_top_entry_l_shape(
         and src_sec.grid_row == tgt_sec.grid_row
         and mid_y > ty
     ):
-        # A row above the target contributes a section-header badge that
-        # protrudes down into the gap, so clear the full inter-row header
-        # band.  The topmost row has only the title above it (a fixed band
-        # in the canvas-top padding), so the full clearance overshoots into
-        # the title; keep the channel a route's-width above the section edge.
-        clearance = (
-            INTER_ROW_HEADER_CLEARANCE
-            if section_exists_above_row(ctx.graph, tgt_sec.grid_row)
-            else SECTION_ROUTE_CLEARANCE
-        )
-        mid_y = (
-            row_top_edge(ctx.graph, tgt_sec.grid_row, default=ty)
-            - clearance
-            - ctx.curve_radius
+        # The route must approach the TOP entry from above the row's top edge.
+        mid_y = header_corridor_y(
+            ctx.graph,
+            tgt_sec.grid_row,
+            below=False,
+            base_radius=ctx.curve_radius,
+            default=ty,
         )
 
     # A multi-line bundle fans the channel toward the source box (the line
