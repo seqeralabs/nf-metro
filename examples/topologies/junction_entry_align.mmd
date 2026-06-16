@@ -1,0 +1,58 @@
+%%metro title: Junction Entry Port Align
+%%metro style: dark
+%%metro line_order: span
+%%metro line: alpha | Alpha | #e63946
+%%metro line: beta | Beta | #2db572
+
+%%metro grid: pre | 0,0
+%%metro grid: src | 1,0
+%%metro grid: dst_a | 2,0
+%%metro grid: dst_b | 3,0
+%%metro grid: beta_extra_1 | 0,1
+%%metro grid: beta_extra_2 | 1,1
+
+graph LR
+    subgraph pre [Pre]
+        pre1[Start]
+        pre2[Prep]
+        pre1 -->|alpha,beta| pre2
+    end
+
+    subgraph beta_extra_1 [Beta Extra 1]
+        be1_1[Step]
+        be1_2[Step 2]
+        be1_1 -->|beta| be1_2
+    end
+
+    subgraph beta_extra_2 [Beta Extra 2]
+        be2_1[Step]
+        be2_2[Step 2]
+        be2_1 -->|beta| be2_2
+    end
+
+    subgraph src [Source]
+        %%metro exit: right | alpha,beta
+        s_a[Tool Alpha]
+        s_b[Tool Beta]
+    end
+
+    subgraph dst_a [Dest Alpha]
+        %%metro entry: left | alpha
+        da1[Process A]
+        da2[Output A]
+        da1 -->|alpha| da2
+    end
+
+    subgraph dst_b [Dest Beta]
+        %%metro entry: left | beta
+        db1[Process B]
+        db2[Output B]
+        db1 -->|beta| db2
+    end
+
+    pre2 -->|alpha| s_a
+    pre2 -->|beta| s_b
+    pre2 -->|beta| be1_1
+    be1_2 -->|beta| be2_1
+    s_a -->|alpha| da1
+    s_b -->|beta| db1

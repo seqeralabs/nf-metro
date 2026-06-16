@@ -1,0 +1,40 @@
+%%metro title: Off-Row Merge Continuation
+%%metro style: dark
+%%metro line: trunk | Trunk | #2db572
+%%metro line: bypass | Bypass | #e63946
+
+%%metro grid: above_src | 0,0
+%%metro grid: horiz_src | 0,1
+%%metro grid: sink | 1,1
+%%metro grid: out | 2,0
+
+graph LR
+    subgraph above_src [Above Source]
+        %%metro exit: right | bypass
+        a1[Start A]
+        a2[Prep A]
+        a1 -->|bypass| a2
+    end
+
+    subgraph horiz_src [Horizontal Source]
+        %%metro exit: right | trunk
+        h1[Start B]
+        h2[Prep B]
+        h1 -->|trunk| h2
+    end
+
+    subgraph sink [Sink]
+        %%metro entry: left | trunk,bypass
+        %%metro exit: right | trunk
+        s1[Merge]
+        s2[Combine]
+        s1 -->|trunk,bypass| s2
+    end
+
+    subgraph out [Output]
+        o1[Report]
+    end
+
+    a2 -->|bypass| s1
+    h2 -->|trunk| s1
+    s2 -->|trunk| o1

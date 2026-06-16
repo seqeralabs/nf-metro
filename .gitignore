@@ -19,3 +19,4 @@ docs/gallery/index.md
 .claude/prompts/
 .claude/scheduled_tasks.lock
 .claude/worktrees/
+.coverage

@@ -239,6 +239,21 @@ DIAGONAL_RUN: float = 30.0
 CURVE_RADIUS: float = 10.0
 """Default corner radius for routed paths."""
 
+MIN_CORRIDOR_Y_OVERLAP: float = 2 * CURVE_RADIUS
+"""Minimum vertical overlap for two gap channels to share one corridor.
+
+Channels in the same inter-section gap and direction are grouped into a
+concentric corridor only when their vertical spans overlap by more than
+this much.  Two channels that overlap by less are not running parallel -
+they are stacked segments meeting at a single elbow (a deep descender
+landing on a port lane that another channel then leaves), and their
+turning corners sit within one corner-radius zone of each other.  Packing
+them into one ``OFFSET_STEP`` corridor makes those opposing elbows graze;
+treating them as separate corridors lets the gap layout distribute them
+across the gap width so the elbows stay clear.  Sized at twice the corner
+radius: an overlap that small is entirely inside the two corners' rounding
+zones, never a real parallel run."""
+
 MERGE_ROUTE_MARGIN: float = 2 * CURVE_RADIUS
 """Distance between a section bbox edge and any merge branch/trunk
 vertical line in the inter-section gap."""
@@ -266,6 +281,17 @@ COORD_TOLERANCE: float = 1.0
 
 COORD_TOLERANCE_FINE: float = 0.01
 """Fine tolerance for detecting nearly identical Y coordinates."""
+
+SAME_COORD_TOLERANCE: float = 0.5
+"""Sub-pixel tolerance for treating two coordinates as the same assigned
+row / track / value.
+
+Layout phases assign coordinates onto integer-ish grids; this half-pixel
+band absorbs float drift so "is this station on that trunk / row / column?"
+and threshold-residual checks (``slack <= SAME_COORD_TOLERANCE``) answer
+consistently across call sites.  It must stay well below
+:data:`OFFSET_STEP` (3.0) so adjacent per-line offset slots are never merged
+into one coordinate."""
 
 SAME_Y_TOLERANCE: float = 0.1
 """Tolerance for treating two stations as sharing a base Y row."""
@@ -369,6 +395,17 @@ HEADER_CLEARANCE: float = 30.0
 Section headers (numbered circle + label) are rendered above bbox_y by
 approximately SECTION_HEADER_PROTRUSION (~26px).  This constant adds a
 small margin so routing channels don't overlap the header zone."""
+
+NEXT_ROW_HEADER_BADGE_CLEARANCE: float = 12.0
+"""Minimum vertical gap a near-horizontal inter-section routed segment must
+keep above a next-row section header badge.
+
+A segment doglegged down into the inter-row gap sits above the lower row's
+header badge (which protrudes ``SECTION_HEADER_PROTRUSION`` above its
+``bbox_y``).  This margin exceeds the stacked-bundle half-width yet stays
+below the band where TOP-entry channel routes legitimately approach the
+badge, so the segment reads as clearly separate from the header rather than
+grazing it.  Enforced by ``test_routed_paths_clear_next_row_headers``."""
 
 INTER_ROW_EDGE_CLEARANCE: float = 26.0
 """Minimum distance between an inter-row wrap channel and the *box edge*
@@ -647,3 +684,64 @@ multiples of ``y_spacing``.  Below the threshold, sections sit at
 multiple distinct residues by construction, so
 no single shift can align them all and the per-section snap from Stage
 6.4 is honoured as the best-effort alignment."""
+
+
+# ---------------------------------------------------------------------------
+# Cross-constant relations
+# ---------------------------------------------------------------------------
+class ConstantRelationError(ValueError):
+    """A layout constant violates a required cross-constant ordering."""
+
+
+def _check_constant_relations() -> None:
+    """Enforce the geometric orderings that independently-set constants depend on.
+
+    Unlike the derived constants above (expressed as formulas of their
+    parents), each of these holds only *relative to another*.  Explicit
+    raises (not ``assert``) keep the checks live under ``python -O``.
+    """
+
+    def require(ok: bool, msg: str) -> None:
+        if not ok:
+            raise ConstantRelationError(msg)
+
+    # Coordinate-tolerance tiers must stay strictly ordered so each answers
+    # "same coordinate?" at its own precision without colliding with the next.
+    require(
+        COORD_TOLERANCE_FINE < SAME_COORD_TOLERANCE < COORD_TOLERANCE,
+        "coordinate tolerances must be strictly ordered "
+        f"fine ({COORD_TOLERANCE_FINE}) < same ({SAME_COORD_TOLERANCE}) "
+        f"< coarse ({COORD_TOLERANCE})",
+    )
+    # A same-coordinate test must never swallow an adjacent per-line offset
+    # slot, or two parallel lines collapse onto one coordinate.
+    require(
+        SAME_COORD_TOLERANCE < OFFSET_STEP,
+        f"SAME_COORD_TOLERANCE ({SAME_COORD_TOLERANCE}) must stay below "
+        f"OFFSET_STEP ({OFFSET_STEP}) so offset slots are not merged",
+    )
+    # Bypass corners turn with CURVE_RADIUS each side; without 2*CURVE_RADIUS
+    # of vertical clearance the two corners overlap the channel.
+    require(
+        BYPASS_CLEARANCE >= 2 * CURVE_RADIUS,
+        f"BYPASS_CLEARANCE ({BYPASS_CLEARANCE}) must be >= 2*CURVE_RADIUS "
+        f"({2 * CURVE_RADIUS}) so bypass corners clear the channel",
+    )
+    # Nesting multiple bypass routes must step them apart by more than the
+    # per-line offset, else stacked bypasses read as one bundle.
+    require(
+        OFFSET_STEP < BYPASS_NEST_STEP,
+        f"OFFSET_STEP ({OFFSET_STEP}) must stay below BYPASS_NEST_STEP "
+        f"({BYPASS_NEST_STEP}) so nested bypass routes separate visibly",
+    )
+    # A port offset from a station by up to the bundle's offset span must not
+    # be mistaken for an elbow at that station.  The current value is
+    # 4 * OFFSET_STEP; only the floor (>= OFFSET_STEP) is required to hold.
+    require(
+        STATION_ELBOW_TOLERANCE >= OFFSET_STEP,
+        f"STATION_ELBOW_TOLERANCE ({STATION_ELBOW_TOLERANCE}) must be "
+        f">= OFFSET_STEP ({OFFSET_STEP})",
+    )
+
+
+_check_constant_relations()

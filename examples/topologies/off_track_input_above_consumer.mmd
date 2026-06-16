@@ -1,0 +1,109 @@
+%%metro title: Long-read Methylation & Variant Atlas
+%%metro style: dark
+%%metro line: dna | DNA variants | #2db572
+%%metro line: rna | RNA expression | #e63946
+%%metro line: qc | QC stream | #f4a261
+
+%%metro file: ref_fa | FASTA | Reference
+%%metro file: gtf_in | GTF | Annotation
+%%metro file: cpg_bed | BED | CpG islands
+%%metro off_track: ref_fa, gtf_in, cpg_bed
+
+%%metro file: raw_bam | BAM | Aligned
+%%metro file: meth_bw | bigWig | Methylation
+%%metro off_track: raw_bam, meth_bw
+
+graph LR
+    subgraph intake [Intake & Basecall]
+        in_pod5[POD5]
+        in_basecall[Basecall]
+        in_demux[Demux]
+        in_qc[ReadQC]
+
+        in_pod5 -->|dna,rna,qc| in_basecall
+        in_basecall -->|dna,rna,qc| in_demux
+        in_demux -->|dna,rna,qc| in_qc
+    end
+
+    subgraph align [Alignment]
+        ref_fa[ ]
+        gtf_in[ ]
+        al_minimap[minimap2]
+        al_sort[Sort]
+        al_index[Index]
+        raw_bam[ ]
+
+        ref_fa -->|dna,rna| al_minimap
+        gtf_in -->|rna| al_minimap
+        al_minimap -->|dna,rna,qc| al_sort
+        al_sort -->|dna,rna,qc| al_index
+        al_sort -->|dna| raw_bam
+    end
+
+    subgraph methcall [Methylation Calling]
+        mc_modkit[modkit]
+        mc_pileup[Pileup]
+        mc_dmr[DMR]
+        cpg_bed[ ]
+        meth_bw[ ]
+
+        cpg_bed -->|dna| mc_pileup
+        mc_modkit -->|dna| mc_pileup
+        mc_pileup -->|dna| mc_dmr
+        mc_pileup -->|dna| meth_bw
+    end
+
+    subgraph variants [Variant Calling]
+        vc_clair[Clair3]
+        vc_phase[Phase]
+        vc_filter[Filter]
+
+        vc_clair -->|dna| vc_phase
+        vc_phase -->|dna| vc_filter
+    end
+
+    subgraph expr [Expression]
+        ex_isoquant[IsoQuant]
+        ex_count[Count]
+        ex_norm[Normalize]
+
+        ex_isoquant -->|rna| ex_count
+        ex_count -->|rna| ex_norm
+    end
+
+    subgraph fusion [Fusion Detection]
+        fu_jaffal[JAFFAL]
+        fu_annotate[Annotate]
+
+        fu_jaffal -->|rna| fu_annotate
+    end
+
+    subgraph merge [Merge & Annotate]
+        mg_collect[Collect]
+        mg_vep[VEP]
+        mg_classify[Classify]
+
+        mg_collect -->|dna,rna| mg_vep
+        mg_vep -->|dna,rna| mg_classify
+    end
+
+    subgraph report [Report]
+        rp_aggregate[Aggregate]
+        rp_multiqc[MultiQC]
+        rp_final[Report]
+
+        rp_aggregate -->|dna,rna,qc| rp_multiqc
+        rp_multiqc -->|dna,rna,qc| rp_final
+    end
+
+    in_qc -->|dna,rna,qc| al_minimap
+    al_index -->|dna| mc_modkit
+    al_index -->|dna| vc_clair
+    al_index -->|rna| ex_isoquant
+    al_index -->|rna| fu_jaffal
+    al_index -->|qc| rp_aggregate
+    mc_dmr -->|dna| mg_collect
+    vc_filter -->|dna| mg_collect
+    ex_norm -->|rna| mg_collect
+    fu_annotate -->|rna| mg_collect
+    mg_classify -->|dna,rna| rp_aggregate

@@ -21,7 +21,12 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
 )
 from nf_metro.layout.routing.context import (
+    _get_offset,
     _RoutingCtx,
+    _tb_x_offset,
+)
+from nf_metro.layout.routing.corners import (
+    concentric_corner_radius,
 )
 from nf_metro.layout.routing.tb_handlers import (
     _compute_diagonal_placement,
@@ -132,6 +137,56 @@ def _route_intra_section(
             edge=edge,
             line_id=edge.line_id,
             points=[(sx, sy), (fold_right, sy), (fold_right, ty), (tx, ty)],
+        )
+
+    # Internal station -> perpendicular (TOP/BOTTOM) exit port on a
+    # horizontal-flow section: run along the trunk to the exit X, then curve
+    # once and leave vertically.  The corner sits past the trailing station so
+    # the line bends after the marker rather than turning through it.
+    tgt_port = ctx.graph.ports.get(tgt.id)
+    src_section = ctx.graph.sections.get(src.section_id) if src.section_id else None
+    if (
+        not src.is_port
+        and tgt_port is not None
+        and not tgt_port.is_entry
+        and tgt_port.side in (PortSide.TOP, PortSide.BOTTOM)
+        and src_section is not None
+        and src_section.direction in ("LR", "RL")
+    ):
+        sibling_count = sum(
+            1 for e in ctx.graph.edges_from(edge.source) if e.target == edge.target
+        )
+        if sibling_count <= 1:
+            return RoutedPath(
+                edge=edge,
+                line_id=edge.line_id,
+                points=[(sx, sy), (tx, sy), (tx, ty)],
+            )
+        # Co-travelling lines turn the corner concentrically: the horizontal
+        # run keeps the trunk's render Y offset (so it joins the bundle arriving
+        # along the trunk) and the vertical leg takes a per-line X offset so the
+        # bundle stays parallel through the bend.  A BOTTOM exit turns the same
+        # rotation as a vertical drop, so it inherits the destination-trunk X
+        # offset; a TOP exit turns the opposite rotation, which reverses the
+        # lateral order, so it takes the raw (non-reversed) bundle offset to
+        # keep the lines from crossing through the corner.
+        hy = sy + _get_offset(ctx, edge.source, edge.line_id)
+        if tgt_port.side == PortSide.TOP:
+            vx = tx + _get_offset(ctx, edge.target, edge.line_id)
+        else:
+            vx = tx + _tb_x_offset(ctx, edge.target, edge.line_id, src.section_id)
+        # The vertical leg sits ``vx - tx`` from the reference line; size the
+        # bend with the concentric radius so the per-line gap stays constant
+        # through the turn instead of pinching to a shared default radius.
+        turn_in = (1.0 if vx >= sx else -1.0, 0.0)
+        turn_out = (0.0, 1.0 if ty >= hy else -1.0)
+        r_turn = concentric_corner_radius(turn_in, turn_out, vx - tx, ctx.curve_radius)
+        return RoutedPath(
+            edge=edge,
+            line_id=edge.line_id,
+            points=[(sx, hy), (vx, hy), (vx, ty)],
+            offsets_applied=True,
+            curve_radii=[r_turn],
         )
 
     # Same track: straight line

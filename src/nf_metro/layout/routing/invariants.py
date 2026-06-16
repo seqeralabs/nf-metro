@@ -20,15 +20,17 @@ gallery example and topology fixture.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 
 from nf_metro.layout.constants import (
+    BUNDLE_TO_BUNDLE_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
     EDGE_TO_BUNDLE_CLEARANCE,
+    MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
 )
@@ -36,9 +38,12 @@ from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
     horizontal_direction,
+    initial_fanout_descent_span,
+    iter_horizontal_trunks,
+    trunk_segments_cross,
     vertical_direction,
 )
-from nf_metro.parser.model import Edge, MetroGraph, PortSide
+from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
 
 # Segments shorter than this are sub-pixel artefacts of per-line
 # offsets and carry no meaningful direction of travel.
@@ -422,6 +427,38 @@ def _immediate_feeder(graph, port_id: str, line_id: str):  # noqa: ANN001, ANN20
     return None, False
 
 
+def bypass_horizontal_targets(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    port_id: str,
+) -> dict[str, Station]:
+    """Return mapping from line_id to first internal target for bypass lines.
+
+    A bypass line co-travels horizontally to an entry port (its feeder is a
+    junction at the port's own Y) but its first downstream station inside the
+    section sits at a different Y.
+    """
+    port_st = graph.stations.get(port_id)
+    if port_st is None:
+        return {}
+    outgoing = {e.line_id: e for e in graph.edges_from(port_id)}
+    result: dict[str, Station] = {}
+    for lid in graph.station_lines(port_id):
+        src, is_junction = _immediate_feeder(graph, port_id, lid)
+        if src is None or not is_junction:
+            continue
+        if abs(src.y - port_st.y) > _MERGE_APPROACH_Y_TOL:
+            continue
+        edge = outgoing.get(lid)
+        if edge is None:
+            continue
+        tgt = graph.stations.get(edge.target)
+        if tgt is None or tgt.is_port:
+            continue
+        if abs(tgt.y - port_st.y) > COORD_TOLERANCE_FINE:
+            result[lid] = tgt
+    return result
+
+
 def classify_merge_port_feeders(
     graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
     port_id: str,
@@ -437,9 +474,12 @@ def classify_merge_port_feeders(
     inter-section edge that arrives perpendicular at the boundary.  A
     line dropped into the row by an upstream fan/merge junction
     co-travels horizontally and is not a perpendicular joiner, so it is
-    left unclassified.  Returns ``None`` when the port is not such a
-    reconvergence merge - i.e. when there is no approach-side decision
-    to make.
+    left unclassified.  Bypass horizontal lines (junction-derived,
+    same-Y feeder, but heading to a deeper station) are excluded from
+    the horizontal list so they do not inflate ``max_horiz`` and push
+    perpendicular lines into unnecessary outer slots.  Returns ``None``
+    when the port is not such a reconvergence merge - i.e. when there
+    is no approach-side decision to make.
     """
     port_obj = graph.ports.get(port_id)
     if port_obj is None or not port_obj.is_entry:
@@ -450,6 +490,7 @@ def classify_merge_port_feeders(
     if port_st is None:
         return None
 
+    bypass_lids = set(bypass_horizontal_targets(graph, port_id))
     distinct_sources: set[int] = set()
     horizontal: list[str] = []
     below: list[str] = []
@@ -459,6 +500,8 @@ def classify_merge_port_feeders(
         if src is None:
             continue
         distinct_sources.add(id(src))
+        if lid in bypass_lids:
+            continue
         dy = src.y - port_st.y
         if abs(dy) <= _MERGE_APPROACH_Y_TOL:
             horizontal.append(lid)
@@ -519,6 +562,162 @@ def check_merge_port_approach_side(
                         bound=min_horiz,
                     )
                 )
+    return violations
+
+
+@dataclass(frozen=True)
+class MergePortOutgoingFlip:
+    """A perpendicular line re-joined at a merge port that flips its slot on
+    the outgoing run, crossing the trunk between the merge and its consumer.
+
+    ``port_offset`` is the slot the line takes at the merge port; it flips to
+    ``flipped_offset`` at ``at_station`` further along the merge row.
+    """
+
+    port_id: str
+    line_id: str
+    port_offset: float
+    flipped_offset: float
+    at_station: str
+
+    def message(self) -> str:
+        return (
+            f"merge port {self.port_id!r} line {self.line_id!r}: takes slot "
+            f"{self.port_offset:.1f} at the merge but flips to "
+            f"{self.flipped_offset:.1f} at {self.at_station!r} on the same "
+            "row, crossing the trunk on the outgoing run; a re-joined line "
+            "must keep its slot to its consumer"
+        )
+
+
+def check_merge_port_outgoing_side_preserved(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    offsets: dict[tuple[str, str], float],
+) -> list[MergePortOutgoingFlip]:
+    """Return merge ports whose re-joined line flips slot on the outgoing run.
+
+    A line re-slotted at a merge port (see
+    :func:`classify_merge_port_feeders`) keeps that slot along the merge
+    row down to its consumer; any same-row downstream station carrying it at
+    a different offset is a crossover of the trunk.
+    """
+    violations: list[MergePortOutgoingFlip] = []
+    for port_id in graph.ports:
+        classified = classify_merge_port_feeders(graph, port_id)
+        if classified is None:
+            continue
+        _horizontal, below, above = classified
+        perp = list(below) + list(above)
+        if not perp:
+            continue
+        row_y = graph.stations[port_id].y
+        port_offs = {lid: offsets.get((port_id, lid), 0.0) for lid in perp}
+        visited = {port_id}
+        queue = deque([port_id])
+        while queue:
+            cur = queue.popleft()
+            for edge in graph.edges_from(cur):
+                tgt_id = edge.target
+                if tgt_id in visited:
+                    continue
+                tgt = graph.stations[tgt_id]
+                if abs(tgt.y - row_y) > SAME_Y_TOLERANCE:
+                    continue
+                visited.add(tgt_id)
+                tgt_lines = graph.station_lines(tgt_id)
+                for lid in perp:
+                    if lid not in tgt_lines:
+                        continue
+                    off = offsets.get((tgt_id, lid), 0.0)
+                    if abs(off - port_offs[lid]) > COORD_TOLERANCE_FINE:
+                        violations.append(
+                            MergePortOutgoingFlip(
+                                port_id=port_id,
+                                line_id=lid,
+                                port_offset=port_offs[lid],
+                                flipped_offset=off,
+                                at_station=tgt_id,
+                            )
+                        )
+                queue.append(tgt_id)
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# Exit port preserves the single entry bundle's order
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ExitBundleOrderViolation:
+    """An LR/RL exit port that re-orders a bundle relative to the single
+    entry bundle feeding the section, kinking a straight-through line.
+
+    ``entry_order`` / ``exit_order`` are the shared lines sorted by their
+    per-line offset at each port.
+    """
+
+    section_id: str
+    entry_port: str
+    exit_port: str
+    entry_order: tuple[str, ...]
+    exit_order: tuple[str, ...]
+
+    def message(self) -> str:
+        return (
+            f"section {self.section_id!r}: exit port {self.exit_port!r} "
+            f"re-orders the bundle from its single entry {self.entry_port!r} "
+            f"(entry order {self.entry_order} != exit order {self.exit_order}); "
+            "a straight-through line is pushed off its incoming slot"
+        )
+
+
+def check_exit_inherits_entry_bundle_order(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    offsets: dict[tuple[str, str], float],
+) -> list[ExitBundleOrderViolation]:
+    """Return LR/RL exit ports that re-order a single incoming bundle.
+
+    When a left/right section has exactly one entry port whose lines are a
+    superset of an exit port's lines, that entry bundle establishes the
+    order; the exit port must keep the shared lines in the same relative
+    vertical order, so a line travelling straight through keeps its slot.
+    TB sections are exempt: their exit reverses offsets for concentric arcs.
+    """
+
+    def _order(port_id: str, lines: set[str]) -> tuple[str, ...]:
+        return tuple(
+            sorted(lines, key=lambda lid: (offsets.get((port_id, lid), 0.0), lid))
+        )
+
+    violations: list[ExitBundleOrderViolation] = []
+    for port_id, port in graph.ports.items():
+        if port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is None or section.direction not in ("LR", "RL"):
+            continue
+        entry_ports = list(section.entry_ports)
+        if len(entry_ports) != 1:
+            continue
+        entry_id = entry_ports[0]
+        exit_lines = set(graph.station_lines(port_id))
+        if len(exit_lines) < 2 or not exit_lines.issubset(
+            graph.station_lines(entry_id)
+        ):
+            continue
+        entry_order = _order(entry_id, exit_lines)
+        exit_order = _order(port_id, exit_lines)
+        if entry_order != exit_order:
+            violations.append(
+                ExitBundleOrderViolation(
+                    section_id=section.id,
+                    entry_port=entry_id,
+                    exit_port=port_id,
+                    entry_order=entry_order,
+                    exit_order=exit_order,
+                )
+            )
     return violations
 
 
@@ -958,6 +1157,291 @@ def check_no_same_line_parallel_descents(
     return violations
 
 
+@dataclass
+class SplitFanoutDescent:
+    """Two same-line fan-out descents that overlap in Y at distinct Xs.
+
+    Both branches leave one source horizontal-then-vertical and descend
+    through a common Y band, yet open in separate channels instead of one
+    fused trunk.  A split that begins before either branch turns off puts the
+    farther-reaching branch on the inside of the nearer one, so its onward
+    horizontal run crosses the nearer branch's descent.
+    """
+
+    line_id: str
+    source: str
+    x_a: float
+    x_b: float
+    sep: float
+    overlap: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"split same-line fan-out: line {self.line_id!r} leaves "
+            f"{self.source} as two descents {self.sep:.1f}px apart "
+            f"(x={self.x_a:.1f}, {self.x_b:.1f}) overlapping {self.overlap:.1f}px "
+            f"in Y instead of one fused trunk"
+        )
+
+
+def check_no_split_same_line_fanout_descents(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[SplitFanoutDescent]:
+    """Return same-line fan-out descents that overlap in Y at distinct Xs.
+
+    Several inter-section edges of one line fanning out from a single source
+    must descend as ONE trunk over the span their branches travel together,
+    splitting only where each branch turns off.  When two such descents
+    overlap in their Y span yet sit at distinct Xs, the split has begun before
+    either branch diverges; the farther branch then crosses the nearer one's
+    descent (issue #702).  Coincident descents (a fused trunk) are the wanted
+    state and never flag.
+    """
+    by_source: dict[tuple[str, str, bool], list[tuple[float, float, float]]] = (
+        defaultdict(list)
+    )
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        span = initial_fanout_descent_span(rp)
+        if span is None:
+            continue
+        x, y_lo, y_hi, down = span
+        by_source[(rp.edge.source, rp.line_id, down)].append((x, y_lo, y_hi))
+
+    violations: list[SplitFanoutDescent] = []
+    for (source, line_id, _down), descents in by_source.items():
+        if len(descents) < 2:
+            continue
+        for i in range(len(descents)):
+            xa, lo_a, hi_a = descents[i]
+            for j in range(i + 1, len(descents)):
+                xb, lo_b, hi_b = descents[j]
+                overlap = min(hi_a, hi_b) - max(lo_a, lo_b)
+                if overlap <= COORD_TOLERANCE:
+                    continue
+                sep = abs(xa - xb)
+                if sep <= COORD_TOLERANCE:
+                    continue
+                violations.append(
+                    SplitFanoutDescent(
+                        line_id=line_id,
+                        source=source,
+                        x_a=xa,
+                        x_b=xb,
+                        sep=sep,
+                        overlap=overlap,
+                    )
+                )
+    return violations
+
+
+@dataclass(frozen=True)
+class DoglegCrossesExemptTrunk:
+    """A non-exempt trunk doglegged off an exempt run that crosses it.
+
+    An ``normalize_exempt`` horizontal run (wrap / around-section loop) and a
+    different line's bypass trunk share an inter-row channel within a bundle
+    gap.  Cleared to one side they read as a tight parallel bundle; cleared to
+    the wrong side the movable trunk's riser pierces the exempt run (and the
+    exempt riser pierces the movable run), so the two colours cross twice
+    instead of running parallel (issue #702).
+    """
+
+    line_id: str
+    exempt_line: str
+    edge: tuple[str, str]
+    exempt_edge: tuple[str, str]
+    x: float
+    y: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"dogleg crossing: line {self.line_id!r} "
+            f"({self.edge[0]}->{self.edge[1]}) crosses exempt trunk "
+            f"{self.exempt_line!r} ({self.exempt_edge[0]}->"
+            f"{self.exempt_edge[1]}) at ({self.x:.1f},{self.y:.1f}) instead of "
+            f"running parallel above or below it"
+        )
+
+
+def check_no_dogleg_crosses_exempt_trunk(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[DoglegCrossesExemptTrunk]:
+    """Return non-exempt trunks that cross an exempt trunk they bundle with.
+
+    A movable bypass trunk nudged off an ``normalize_exempt`` run of a
+    different line must clear to the side that keeps the two parallel; landing
+    on the side whose riser pierces the exempt run trades one fused stroke for
+    a double crossing (issue #702).  Only pairs sharing an inter-row channel
+    (within ``2 * OFFSET_STEP`` in Y and overlapping in X) are considered, so a
+    legitimate bundle a full gap apart never flags.
+    """
+    exempt = [
+        (rp, seg)
+        for rp in routes
+        if rp.is_inter_section and rp.normalize_exempt
+        for _k, seg in iter_horizontal_trunks(rp)
+    ]
+    if not exempt:
+        return []
+    violations: list[DoglegCrossesExemptTrunk] = []
+    for rp in routes:
+        if not rp.is_inter_section or rp.normalize_exempt:
+            continue
+        for _k, seg in iter_horizontal_trunks(rp):
+            for erp, eseg in exempt:
+                if erp.line_id == rp.line_id:
+                    continue
+                if abs(seg.y - eseg.y) >= 2 * OFFSET_STEP:
+                    continue
+                if seg.x_lo >= eseg.x_hi or eseg.x_lo >= seg.x_hi:
+                    continue
+                pt = trunk_segments_cross(seg, eseg)
+                if pt is None:
+                    continue
+                violations.append(
+                    DoglegCrossesExemptTrunk(
+                        line_id=rp.line_id,
+                        exempt_line=erp.line_id,
+                        edge=(rp.edge.source, rp.edge.target),
+                        exempt_edge=(erp.edge.source, erp.edge.target),
+                        x=pt[0],
+                        y=pt[1],
+                    )
+                )
+    return violations
+
+
+def _merge_spans(spans: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Merge overlapping / touching ``(lo, hi)`` intervals into maximal runs."""
+    out: list[tuple[float, float]] = []
+    for lo, hi in sorted(spans):
+        if out and lo <= out[-1][1] + COORD_TOLERANCE:
+            out[-1] = (out[-1][0], max(out[-1][1], hi))
+        else:
+            out.append((lo, hi))
+    return out
+
+
+@dataclass(frozen=True)
+class StackedElbowGraze:
+    """Two opposing elbows in one inter-section gap whose corners graze.
+
+    Two different lines descend the same gap in vertical risers that are
+    *stacked* (their spans meet at one elbow band rather than running
+    parallel), yet sit within ``BUNDLE_TO_BUNDLE_CLEARANCE`` of each other in
+    X.  Their turning corners then overlap, so the elbow of one line touches
+    the riser/elbow of the other instead of the two being distributed across
+    the gap width.
+    """
+
+    line_a: str
+    line_b: str
+    edge_a: tuple[str, str]
+    edge_b: tuple[str, str]
+    x_a: float
+    x_b: float
+    y_overlap: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"stacked-elbow graze: risers of {self.line_a!r} "
+            f"({self.edge_a[0]}->{self.edge_a[1]}) at x={self.x_a:.1f} and "
+            f"{self.line_b!r} ({self.edge_b[0]}->{self.edge_b[1]}) at "
+            f"x={self.x_b:.1f} overlap only {self.y_overlap:.1f}px in Y yet sit "
+            f"{abs(self.x_a - self.x_b):.1f}px apart (< {BUNDLE_TO_BUNDLE_CLEARANCE}); "
+            f"their opposing elbows graze instead of distributing across the gap"
+        )
+
+
+def check_stacked_elbow_clearance(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[StackedElbowGraze]:
+    """Return stacked, non-parallel inter-section risers packed too tightly.
+
+    Two vertical inter-section risers of different lines that merely *meet*
+    at one elbow band - their Y spans overlap by less than
+    ``MIN_CORRIDOR_Y_OVERLAP`` - are not a parallel bundle: one is a deep
+    descent landing on a lane the other then leaves.  When such a pair sits
+    within ``BUNDLE_TO_BUNDLE_CLEARANCE`` in X, the corners off the two risers
+    overlap and graze.  They must instead be distributed across the gap as
+    separate corridors, which puts at least ``BUNDLE_TO_BUNDLE_CLEARANCE``
+    between them.
+
+    Risers that genuinely overlap in Y (a real parallel bundle) are exempt:
+    their concentric corners are expected to nest at ``OFFSET_STEP``.  Risers
+    sharing a source or target endpoint are exempt too: those are one fan-out
+    or fan-in, whose branches legitimately stack at one elbow as they diverge
+    from / converge on the shared node.
+
+    Each line's vertical inter-section segments are first merged into maximal
+    runs per X column, so a bundle whose riser is split into segments by
+    intermediate corners is compared as one tall run (and so reads as a long
+    parallel overlap, exempt) rather than as short segment fragments that
+    could each show a spurious tiny overlap.
+    """
+    by_line_x: dict[tuple[str, float], list[tuple[float, float]]] = defaultdict(list)
+    edge_of: dict[tuple[str, float], tuple[str, str]] = {}
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        pts = _route_render_points(rp, offsets)
+        edge = (rp.edge.source, rp.edge.target)
+        for p1, p2 in zip(pts, pts[1:]):
+            axis, coord = _axis_aligned(p1, p2)
+            if axis != "V":
+                continue
+            xkey = round(coord / COORD_TOLERANCE) * COORD_TOLERANCE
+            lo, hi = sorted((p1[1], p2[1]))
+            by_line_x[(rp.line_id, xkey)].append((lo, hi))
+            edge_of[(rp.line_id, xkey)] = edge
+
+    risers: list[tuple[str, tuple[str, str], float, float, float]] = []
+    for (line_id, xkey), spans in by_line_x.items():
+        for lo, hi in _merge_spans(spans):
+            risers.append((line_id, edge_of[(line_id, xkey)], xkey, lo, hi))
+
+    violations: list[StackedElbowGraze] = []
+    for i in range(len(risers)):
+        la, ea, xa, lo_a, hi_a = risers[i]
+        for j in range(i + 1, len(risers)):
+            lb, eb, xb, lo_b, hi_b = risers[j]
+            if la == lb:
+                continue
+            if ea[0] == eb[0] or ea[1] == eb[1]:
+                continue
+            if abs(xa - xb) >= BUNDLE_TO_BUNDLE_CLEARANCE - COORD_TOLERANCE:
+                continue
+            overlap = min(hi_a, hi_b) - max(lo_a, lo_b)
+            # Lower bound: the two risers must genuinely meet (a non-meeting
+            # pair leaves a Y gap and so cannot graze); upper bound is the
+            # parallel-run floor.
+            if not (COORD_TOLERANCE < overlap < MIN_CORRIDOR_Y_OVERLAP):
+                continue
+            violations.append(
+                StackedElbowGraze(
+                    line_a=la,
+                    line_b=lb,
+                    edge_a=ea,
+                    edge_b=eb,
+                    x_a=xa,
+                    x_b=xb,
+                    y_overlap=overlap,
+                )
+            )
+    return violations
+
+
 __all__ = [
     "BundleOrderViolation",
     "CollinearOverlapViolation",
@@ -966,11 +1450,14 @@ __all__ = [
     "PartialBranchGapViolation",
     "SameLineParallelRun",
     "Side",
+    "StackedElbowGraze",
     "check_bundle_order_preserved",
     "check_fanout_tail_join",
     "check_merge_port_approach_side",
     "check_no_collinear_distinct_lines",
     "check_no_same_line_parallel_descents",
+    "bypass_horizontal_targets",
+    "check_stacked_elbow_clearance",
     "check_partial_branch_offset_gaps",
     "classify_merge_port_feeders",
     "distinct_offset_levels",

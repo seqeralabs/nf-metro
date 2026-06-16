@@ -226,16 +226,7 @@ def _section_line_feeders(ctx: _OffsetCtx, section: Section) -> dict[str, str]:
             src = graph.stations.get(edge.source)
             if not src:
                 continue
-            feeder_sec = None
-            if src.is_port:
-                feeder_sec = src.section_id
-            elif edge.source in graph.junctions:
-                for je in graph.edges_to(edge.source):
-                    if je.line_id == edge.line_id:
-                        js = graph.stations.get(je.source)
-                        if js and js.is_port:
-                            feeder_sec = js.section_id
-                            break
+            feeder_sec = src.section_id
             if feeder_sec is not None:
                 line_feeder[edge.line_id] = feeder_sec
     return line_feeder
@@ -578,6 +569,31 @@ def _apply_compact_section_consistency(ctx: _OffsetCtx) -> None:
                 ctx.offsets[(sid_s, slines[0])] = sec_offs[slines[0]]
 
 
+def _propagate_exit_offsets_to_hubs(
+    ctx: _OffsetCtx, port_id: str, offs: dict[str, float]
+) -> None:
+    """Copy a port's per-line offsets onto its upstream hub stations.
+
+    A hub is a station feeding two or more of the port's feeders; giving it
+    the port's bundle ordering keeps the in-section run consistent up to the
+    fan-out point.
+    """
+    graph = ctx.graph
+    feeder_ids = {
+        edge.source
+        for edge in graph.edges_to(port_id)
+        if (st := graph.stations.get(edge.source)) is not None and not st.is_port
+    }
+    if len(feeder_ids) < 2:
+        return
+    hub_candidates = {edge.source for fid in feeder_ids for edge in graph.edges_to(fid)}
+    for hub_id in hub_candidates:
+        overlap = [lid for lid in graph.station_lines(hub_id) if lid in offs]
+        if len(overlap) >= 2:
+            for lid in overlap:
+                ctx.offsets[(hub_id, lid)] = offs[lid]
+
+
 def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
     """Compute exit port offsets for TB and LR/RL sections.
 
@@ -628,6 +644,24 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         if len(line_feeders) < 2:
             continue
         port_lines = set(line_feeders.keys())
+
+        # A section fed by a single incoming bundle that already carries every
+        # exit-port line has an established order: preserve it at the exit so a
+        # straight-through line keeps its slot instead of being re-sorted by
+        # feeder Y.
+        section = graph.sections.get(port_obj.section_id)
+        entry_ports = list(section.entry_ports) if section else []
+        if len(entry_ports) == 1 and port_lines.issubset(
+            graph.station_lines(entry_ports[0])
+        ):
+            inherited = {
+                lid: ctx.offsets.get((entry_ports[0], lid), 0.0) for lid in port_lines
+            }
+            for lid, off in inherited.items():
+                ctx.offsets[(port_id, lid)] = off
+            _propagate_exit_offsets_to_hubs(ctx, port_id, inherited)
+            continue
+
         all_feeders = {fid for entries in line_feeders.values() for fid, _ in entries}
         trunk_feeder_id = next(
             (
@@ -678,23 +712,7 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         for lid, off in spatial_offs.items():
             ctx.offsets[(port_id, lid)] = off
 
-        # Propagate to upstream hub stations
-        feeder_ids: set[str] = set()
-        for edge in graph.edges_to(port_id):
-            src_st = graph.stations.get(edge.source)
-            if src_st and not src_st.is_port:
-                feeder_ids.add(edge.source)
-        if len(feeder_ids) >= 2:
-            hub_candidates: set[str] = set()
-            for feeder_id in feeder_ids:
-                for edge in graph.edges_to(feeder_id):
-                    hub_candidates.add(edge.source)
-            for hub_id in hub_candidates:
-                hub_lines = graph.station_lines(hub_id)
-                overlap = [lid for lid in hub_lines if lid in spatial_offs]
-                if len(overlap) >= 2:
-                    for lid in overlap:
-                        ctx.offsets[(hub_id, lid)] = spatial_offs[lid]
+        _propagate_exit_offsets_to_hubs(ctx, port_id, spatial_offs)
 
 
 def _propagate_to_junctions(ctx: _OffsetCtx) -> None:
@@ -804,57 +822,17 @@ def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
                             ctx.offsets[(e2.target, lid)] = entry_offs[lid]
 
 
-def _separate_compact_entry_offsets(ctx: _OffsetCtx) -> None:
-    """Give multi-line entry ports separated offsets and feed them upstream."""
-    graph = ctx.graph
-    for sec_id, section in graph.sections.items():
-        compact_entry_lines: list[str] = []
-        for pid in section.entry_ports:
-            compact_entry_lines.extend(graph.station_lines(pid))
-        unique = sorted(
-            set(compact_entry_lines), key=lambda x: ctx.line_priority.get(x, 0)
-        )
-        if len(unique) < 2:
-            continue
-        existing = [
-            ctx.offsets.get((pid, lid), 0.0)
-            for pid in section.entry_ports
-            for lid in unique
-            if lid in graph.station_lines(pid)
-        ]
-        if len(set(existing)) >= 2:
-            continue
-        sec_reverse = sec_id in ctx.reversed_sections
-        for i, lid in enumerate(unique):
-            if sec_reverse:
-                off = (len(unique) - 1 - i) * ctx.offset_step
-            else:
-                off = i * ctx.offset_step
-            for pid in section.entry_ports:
-                if lid in graph.station_lines(pid):
-                    ctx.offsets[(pid, lid)] = off
-                    for edge in graph.edges_to(pid):
-                        if edge.line_id == lid:
-                            src_port = graph.ports.get(edge.source)
-                            if src_port and not src_port.is_entry:
-                                ctx.offsets[(edge.source, lid)] = off
-
-
 def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
     """Compute entry port offsets and propagate to downstream stations.
 
-    Handles three cases:
+    Handles two cases:
     1. TOP entry ports fed by TB BOTTOM exits: match the reversed offset
        scheme used by inter-section routing.
     2. LEFT/RIGHT entry ports fed by a single LR/RL exit: propagate
        spatial ordering to prevent bundle crossings.
-    3. Compact mode: ensure multi-line entry ports have separated offsets
-       and propagate to upstream exit ports.
     """
     _entry_top_from_tb_bottom_exits(ctx)
     _propagate_lr_rl_exit_to_entry(ctx)
-    if ctx.compact:
-        _separate_compact_entry_offsets(ctx)
 
 
 def _compact_station_gaps(ctx: _OffsetCtx) -> None:
@@ -1233,28 +1211,31 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
         ):
             new_offs[lid] = min_horiz - rank * ctx.offset_step
 
-        if all(
-            abs(new_offs[lid] - cur[lid]) <= _OFFSET_EQ_TOLERANCE for lid in new_offs
+        if any(
+            abs(new_offs[lid] - cur[lid]) > _OFFSET_EQ_TOLERANCE for lid in new_offs
         ):
-            continue
-
-        sec_id = graph.ports[port_id].section_id
-        _apply_offsets_through_section(ctx, port_id, sec_id, new_offs)
+            sec_id = graph.ports[port_id].section_id
+            _apply_offsets_along_bundle(ctx, port_id, sec_id, new_offs)
 
 
-def _apply_offsets_through_section(
+def _apply_offsets_along_bundle(
     ctx: _OffsetCtx,
     port_id: str,
     sec_id: str | None,
     new_offs: dict[str, float],
 ) -> None:
-    """Set ``new_offs`` at ``port_id`` and propagate downstream in-section.
+    """Set ``new_offs`` at ``port_id`` and carry it along the bundle.
 
-    Walks ``edges_from`` from the port through non-port stations of the
-    same section, copying each line's new offset so the whole bundle
-    moves together.  Stops at section boundaries and ports.
+    Walks ``edges_from`` from the port, copying each moved line's new offset
+    onto downstream stations.  In-section non-port stations always continue
+    the bundle; ports and downstream sections continue only while the run
+    stays on the merge port's row, so a line re-slotted at the merge port
+    keeps that slot all the way to its consumer rather than crossing back on
+    the outgoing run.  A line that turns off the row stops the walk there and
+    transitions its slot at the turn.
     """
     graph = ctx.graph
+    row_y = graph.stations[port_id].y
     for lid, off in new_offs.items():
         ctx.offsets[(port_id, lid)] = off
 
@@ -1266,8 +1247,10 @@ def _apply_offsets_through_section(
             tgt_id = edge.target
             if tgt_id in visited:
                 continue
-            tgt = graph.stations.get(tgt_id)
-            if tgt is None or tgt.is_port or tgt.section_id != sec_id:
+            tgt = graph.stations[tgt_id]
+            in_section = not tgt.is_port and tgt.section_id == sec_id
+            on_row = abs(tgt.y - row_y) <= _SAME_Y_TOLERANCE
+            if not in_section and not on_row:
                 continue
             visited.add(tgt_id)
             for lid in graph.station_lines(tgt_id):

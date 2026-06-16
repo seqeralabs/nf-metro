@@ -278,11 +278,15 @@ def _route_perp_entry(
     drop_x = sx + src_off + drop_delta
 
     if abs(dx) < COORD_TOLERANCE and abs(drop_delta) < COORD_TOLERANCE:
-        # Nearly same X: straight vertical drop
+        # Aligned perpendicular entry into the trunk: each line drops straight
+        # at its in-section trunk X offset and continues down, so a multi-line
+        # bundle stays parallel into the trunk instead of one line slanting
+        # across to a Y-staggered marker.
+        x = tx + _tb_x_offset(ctx, edge.target, edge.line_id, tgt.section_id)
         return RoutedPath(
             edge=edge,
             line_id=edge.line_id,
-            points=[(sx + src_off, sy), (tx, ty + tgt_off)],
+            points=[(x, sy), (x, ty)],
             offsets_applied=True,
         )
 
@@ -379,6 +383,17 @@ def _find_upstream_for_merge(
             and not u_port.is_entry
             and u_port.side == PortSide.BOTTOM
             and u.section_id in ctx.tb_sections
+        ):
+            continue
+        # Don't merge with a perpendicular exit on a horizontal-flow section:
+        # its Y sits on the source section's boundary edge, so a merged
+        # horizontal run at that Y would graze the section.  Such an exit
+        # routes up and over the section on its own inter-section leg.
+        if (
+            u_port
+            and not u_port.is_entry
+            and u_port.side in (PortSide.TOP, PortSide.BOTTOM)
+            and u.section_id not in ctx.tb_sections
         ):
             continue
         # Only merge when upstream is at the same Y as the entry port

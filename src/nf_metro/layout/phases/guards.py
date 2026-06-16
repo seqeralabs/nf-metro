@@ -5,17 +5,20 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from nf_metro.layout.constants import (
     COMPONENT_BAND_OVERLAP_TOLERANCE,
     COORD_TOLERANCE,
+    COORD_TOLERANCE_FINE,
+    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     GUARD_TOLERANCE,
     ICON_HALF_HEIGHT,
     INTER_ROW_EDGE_CLEARANCE,
     OFFSET_STEP,
     ROW_BAND_SLACK,
+    SAME_COORD_TOLERANCE,
     SECTION_Y_GAP,
     STATION_RADIUS_APPROX,
     X_SPACING,
@@ -37,6 +40,7 @@ from nf_metro.layout.phases.bbox import _section_fit_top
 from nf_metro.layout.phases.off_track import (
     _is_single_trunk_lr_section,
     _off_track_anchor_of,
+    _off_track_lift_step,
     _off_track_output_below,
 )
 from nf_metro.layout.phases.single_section import _terminus_y_overhang
@@ -58,6 +62,30 @@ if TYPE_CHECKING:
 
 class PhaseInvariantError(Exception):
     """Raised when a layout phase produces invalid intermediate state."""
+
+
+class BackwardFlowError(ValueError):
+    """Raised when a layout places a section so an inter-section edge must
+    flow backward against its own row's flow direction.
+
+    Unlike :class:`PhaseInvariantError` (an engine self-check), this is an
+    authoring error: the section grid the user supplied cannot be rendered
+    honestly.  It is a ``ValueError`` so the CLI surfaces it the same way as
+    other invalid-input errors (cf. :class:`CyclicGraphError`).
+    """
+
+
+class MixedEntryDirectionError(ValueError):
+    """Raised when one section receives incoming lines from more than one
+    approach direction (entry ports on more than one cardinal side).
+
+    Routed lines are undirected polylines with no arrowheads, so a reader
+    infers flow direction from how a line enters a section.  When one line
+    enters heading one way and another enters a different side heading
+    another, the approaches conflict and the diagram cannot show which way
+    flow runs.  Like :class:`BackwardFlowError`, this is an authoring error
+    (a ``ValueError``) the CLI surfaces as invalid input.
+    """
 
 
 def _port_anchor_snapshot(graph: MetroGraph) -> dict[str, tuple[float, float]]:
@@ -499,6 +527,105 @@ def _guard_explicit_grid_directions(graph: MetroGraph, phase: str) -> None:
         )
 
 
+def _section_has_exit_on_side(
+    graph: MetroGraph, section: Section, side: PortSide
+) -> bool:
+    """Whether *section* has an exit port on *side*.
+
+    An exit on the side facing the target marks an author who deliberately
+    redirected the flow there (e.g. an explicit ``%%metro exit: left``).
+    """
+    return any(
+        (port := graph.ports.get(pid)) is not None and port.side == side
+        for pid in section.exit_ports
+    )
+
+
+def _guard_no_same_row_backward_feed(graph: MetroGraph) -> None:
+    """Reject a same-row inter-section edge that runs against the source
+    section's flow direction with no exit facing the target.
+
+    Within a single row, flow direction is read purely from horizontal
+    position -- routed lines are undirected polylines with no arrowheads.  A
+    producer placed at a column past a consumer it feeds therefore reads as
+    flowing the wrong way, and the only route to that consumer ploughs back
+    across the producer's own box.  Cross-row backward feeds are exempt: they
+    descend into a separate row, which the inter-section router carries around
+    cleanly and which the reader sees as a distinct branch.  Sections whose
+    author redirected the exit toward the target (an explicit ``exit`` on the
+    facing side) are exempt too.
+    """
+    dag = graph.section_dag
+    if dag is None:
+        return
+    for src_id, tgt_id in sorted(dag.section_edges):
+        src = graph.sections.get(src_id)
+        if src is None or tgt_id not in graph.sections:
+            continue
+        src_pos = graph.grid_overrides.get(src_id)
+        tgt_pos = graph.grid_overrides.get(tgt_id)
+        if src_pos is None or tgt_pos is None or src_pos[1] != tgt_pos[1]:
+            continue
+        src_col, tgt_col = src_pos[0], tgt_pos[0]
+        if src.direction == "LR" and tgt_col < src_col:
+            facing = PortSide.LEFT
+        elif src.direction == "RL" and tgt_col > src_col:
+            facing = PortSide.RIGHT
+        else:
+            continue
+        if _section_has_exit_on_side(graph, src, facing):
+            continue
+        raise BackwardFlowError(
+            f"section '{src_id}' (grid column {src_col}) feeds '{tgt_id}' "
+            f"(column {tgt_col}) backward against its {src.direction} flow in "
+            f"the same row: a routed line cannot show this reversal and would "
+            f"cross '{src_id}'s own box.  Place '{src_id}' ahead of '{tgt_id}' "
+            f"in the row's flow direction, move it to a separate row, or add "
+            f"'%%metro exit: {facing.value}' so the exit faces the target."
+        )
+
+
+def _guard_no_mixed_entry_directions(graph: MetroGraph) -> None:
+    """Reject a section whose incoming lines approach from more than one
+    cardinal direction (entry ports on more than one side).
+
+    Routed metro lines are undirected polylines with no arrowheads, so the
+    reader infers flow from how a line enters a section.  When one line enters
+    a section heading one way (say, rightward into a LEFT port) and another
+    enters a different side heading another (downward into a TOP port, or
+    leftward into a RIGHT port), the approaches conflict and the rendered flow
+    direction is unreadable.  Reject the topology rather than emit an ambiguous
+    diagram.
+
+    A section fed from a single side reads cleanly: parser-inferred multi-side
+    entry hints that collapse to one natural side therefore pass, and an entry
+    port carrying no line is not an approach.
+    """
+    for sec_id, section in sorted(graph.sections.items()):
+        sides: dict[PortSide, set[str]] = defaultdict(set)
+        for pid in section.entry_ports:
+            port = graph.ports.get(pid)
+            if port is None:
+                continue
+            lines = {edge.line_id for edge in graph.edges_to(pid)}
+            if lines:
+                sides[port.side].update(lines)
+        if len(sides) <= 1:
+            continue
+        detail = ", ".join(
+            f"{side.value} ({'+'.join(sorted(lines))})"
+            for side, lines in sorted(sides.items(), key=lambda kv: kv[0].value)
+        )
+        raise MixedEntryDirectionError(
+            f"section '{sec_id}' receives lines from more than one approach "
+            f"direction: {detail}.  Routed lines have no arrowheads, so entries "
+            f"from different sides leave the flow direction ambiguous.  Feed "
+            f"'{sec_id}' from a single side (align the producers' grid columns "
+            f"so every line enters the same edge), or split it into separate "
+            f"sections."
+        )
+
+
 def _guard_tall_anchor_stack_well_formed(graph: MetroGraph, phase: str) -> None:
     """A tall-anchor vertical stack keeps its anchor's downstream chain
     stacked in one column within the anchor's row span, all horizontal.
@@ -562,7 +689,7 @@ def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> N
     Sections that don't share horizontal extent are unconstrained --
     their vertical proximity has no visual impact.
     """
-    tol = 0.5
+    tol = SAME_COORD_TOLERANCE
     sections_by_row_start: dict[int, list[tuple[str, Section]]] = defaultdict(list)
     for sid, sec in graph.sections.items():
         if sec.bbox_w <= 0 or sec.bbox_h <= 0:
@@ -776,6 +903,56 @@ def _guard_single_trunk_off_track_step(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _guard_off_track_input_column_stack(graph: MetroGraph, phase: str) -> None:
+    """On a single-trunk section, an off-track input hugs its consumer by its
+    same-column stack depth, not the whole anchor group's size.
+
+    When a consumer is fed by off-track stations in different columns (an input
+    above it, a producer-fed output beside it), the lift step is counted per
+    column.  Counting the whole anchor group instead strands a lone-in-its-column
+    input an extra slot up over an empty row above an earlier trunk station
+    (issue #651).  Restricted to single-trunk sections, whose lift pitch carries
+    no stacked horizontal line bands that could legitimately bump an input past
+    its slot.
+    """
+    from nf_metro.layout.engine import compute_min_y_spacing
+
+    junction_ids = graph.junction_ids
+    y_spacing = compute_min_y_spacing(graph)
+    anchor_of = _off_track_anchor_of(graph)
+    tol = 1.0
+
+    col_group: dict[tuple[str | None, float, str], int] = defaultdict(int)
+    for off_id, anchor_id in anchor_of.items():
+        st = graph.stations.get(off_id)
+        if st is not None:
+            col_group[(st.section_id, round(st.x, 1), anchor_id)] += 1
+
+    for off_id, anchor_id in anchor_of.items():
+        off_st = graph.stations.get(off_id)
+        anchor = graph.stations.get(anchor_id)
+        if off_st is None or anchor is None:
+            continue
+        if not any(e.target == anchor_id for e in graph.edges_from(off_id)):
+            continue  # producer-fed sink, not an input
+        section = graph.sections.get(off_st.section_id or "")
+        if section is None or not _is_single_trunk_lr_section(
+            graph, section, junction_ids
+        ):
+            continue
+        step = _off_track_lift_step(graph, section, junction_ids, y_spacing)
+        n = col_group[(off_st.section_id, round(off_st.x, 1), anchor_id)]
+        gap = anchor.y - off_st.y
+        if gap > n * step + tol:
+            raise PhaseInvariantError(
+                f"{phase}: off-track input {off_id!r} sits {gap:.1f}px "
+                f"({gap / step:.1f} slots) above consumer {anchor_id!r} on "
+                f"single-trunk section {section.id!r}, but only {n} off-track "
+                f"station(s) share its column and anchor -- it is stranded above "
+                f"an empty row (expected at most {n * step:.1f}px)"
+            )
+
+
 def _guard_off_track_consumer_on_trunk(graph: MetroGraph, phase: str) -> None:
     """An off-track input's consumer that continues straight into the
     section trunk sits level with that successor.
@@ -820,6 +997,29 @@ def _guard_off_track_consumer_on_trunk(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _guard_no_stacked_elbow_graze(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Two stacked, non-parallel inter-section risers must not graze.
+
+    When two different lines descend the same inter-section gap as risers
+    that merely meet at one elbow band (their Y spans overlap by less than
+    ``MIN_CORRIDOR_Y_OVERLAP``, rather than running parallel), they are two
+    separate corridors and must be distributed across the gap width.  Packed
+    within ``BUNDLE_TO_BUNDLE_CLEARANCE`` of each other their opposing elbows
+    overlap and the lines graze instead of reading as distinct streams.
+    """
+    from nf_metro.layout.routing.invariants import check_stacked_elbow_clearance
+
+    _raise_on_first_violation(
+        graph, phase, check_stacked_elbow_clearance, offsets, routes
+    )
+
+
 def _guard_no_station_overlap(
     graph: MetroGraph,
     phase: str,
@@ -842,7 +1042,7 @@ def _guard_no_station_overlap(
         if b is not None:
             boxes.append((sid, b))
     boxes.sort(key=lambda item: item[1][0])
-    tol = 0.5
+    tol = SAME_COORD_TOLERANCE
     n = len(boxes)
     for i in range(n):
         s1, (x1, y1, X1, Y1) = boxes[i]
@@ -1018,14 +1218,25 @@ def _guard_no_line_crosses_file_icon(
                     )
 
 
-def _guard_no_line_strikes_label(
+class LabelStrike(NamedTuple):
+    """One rendered line segment striking through a station's label glyph ink."""
+
+    line_id: str
+    src: str
+    tgt: str
+    station_id: str
+    bbox: tuple[float, float, float, float]
+    p1: tuple[float, float]
+    p2: tuple[float, float]
+
+
+def iter_line_label_strikes(
     graph: MetroGraph,
-    phase: str,
     *,
     offsets: dict[tuple[str, str], float] | None = None,
     routes: list[RoutedPath] | None = None,
-) -> None:
-    """Final-phase: no rendered line segment may strike through a station label.
+) -> Iterator[LabelStrike]:
+    """Yield every rendered line segment that strikes through a station label.
 
     A line dipping, fanning, or running across a station's name label reads as
     a strike-through.  The label glyph-ink box (the reserved label width
@@ -1035,6 +1246,10 @@ def _guard_no_line_strikes_label(
     crossing the glyphs does.  A segment is exempt when it belongs to a line
     the label's station carries, or when the label's station is an endpoint of
     the segment's edge (that line legitimately touches the station).
+
+    This is the single strike definition shared by
+    ``_guard_no_line_strikes_label`` (which raises on the first) and the passive
+    label-strike CI metric (which counts them all).
     """
     from nf_metro.layout.labels import (
         LabelPlacement,
@@ -1096,13 +1311,48 @@ def _guard_no_line_strikes_label(
                     if segment_strikes_label(
                         p1[0], p1[1], p2[0], p2[1], placement_by_sid[sid]
                     ):
-                        raise PhaseInvariantError(
-                            f"{phase}: line {line_id!r} on edge {src!r} -> {tgt!r} "
-                            f"strikes through label of {sid!r} "
-                            f"glyph-ink bbox ({bbox[0]:.1f},{bbox[1]:.1f})-"
-                            f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
-                            f"({p1[0]:.1f},{p1[1]:.1f})->({p2[0]:.1f},{p2[1]:.1f})"
-                        )
+                        yield LabelStrike(line_id, src, tgt, sid, bbox, p1, p2)
+
+
+def _guard_no_line_strikes_label(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: no rendered line segment may strike through a station label."""
+    for s in iter_line_label_strikes(graph, offsets=offsets, routes=routes):
+        raise PhaseInvariantError(
+            f"{phase}: line {s.line_id!r} on edge {s.src!r} -> {s.tgt!r} "
+            f"strikes through label of {s.station_id!r} "
+            f"glyph-ink bbox ({s.bbox[0]:.1f},{s.bbox[1]:.1f})-"
+            f"({s.bbox[2]:.1f},{s.bbox[3]:.1f}); segment "
+            f"({s.p1[0]:.1f},{s.p1[1]:.1f})->({s.p2[0]:.1f},{s.p2[1]:.1f})"
+        )
+
+
+def _guard_bypass_v_flat_visible(graph: MetroGraph, phase: str) -> None:
+    """Final-phase: every bypass V keeps a visible horizontal run through its X.
+
+    A bypass V whose diverging run pins to the station marker rakes that
+    station's label; one whose run collapses sits at the curve apex instead of
+    on a flat like a regular station.  The strike-clearance loop pushes the
+    bypassed node (or the merge target) a grid column out until both runs reach
+    ``MIN_STATION_FLAT_LENGTH``; this is the backstop for a residual the loop
+    could not relocate.
+    """
+    from nf_metro.layout.phases.spacing import _bypass_v_collapsed_flat_gaps
+
+    collapsed = _bypass_v_collapsed_flat_gaps(graph)
+    if collapsed:
+        detail = ", ".join(
+            f"section {sid!r} layer {layer}" for sid, layer in sorted(collapsed)
+        )
+        raise PhaseInvariantError(
+            f"{phase}: bypass-V flat run collapsed below the minimum visible "
+            f"length; a grid-column gap is unplaced at {detail}"
+        )
 
 
 def _guard_no_diagonal_strikes_horizontal_label(
@@ -1464,6 +1714,62 @@ def _guard_inter_section_routes_in_row_band(
                     f"line {r.line_id!r} waypoint y={y:.1f} outside "
                     f"row-{sec_a.grid_row} band [{lo:.1f}..{hi:.1f}]"
                 )
+
+
+def _guard_topmost_row_top_entry_hugs_section(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """After routing: a same-row inter-section route into a section in the
+    topmost grid row must hug that section's top edge, not climb into the
+    canvas-top band.
+
+    A TOP port fed by a same-row producer routes up-and-over into the port.
+    The topmost row has no inter-row gap above it -- only the title, drawn
+    in the canvas-top padding -- so the over-the-top channel must sit a
+    route's-width above the section edge. A deeper climb drives the line
+    through the title text.
+    """
+    from nf_metro.layout.routing.common import (
+        row_top_edge,
+        section_exists_above_row,
+    )
+
+    routes = _ensure_routes(graph, routes)
+
+    for r in routes:
+        src = graph.stations.get(r.edge.source)
+        tgt = graph.stations.get(r.edge.target)
+        if src is None or tgt is None:
+            continue
+        if src.section_id is None or tgt.section_id is None:
+            continue
+        if src.section_id == tgt.section_id:
+            continue
+        sec_a = graph.sections.get(src.section_id)
+        sec_b = graph.sections.get(tgt.section_id)
+        if sec_a is None or sec_b is None:
+            continue
+        if sec_a.grid_row != sec_b.grid_row:
+            continue
+        if sec_a.grid_row_span != 1 or sec_b.grid_row_span != 1:
+            continue
+        if section_exists_above_row(graph, sec_b.grid_row):
+            continue
+        band_top = row_top_edge(graph, sec_b.grid_row, default=sec_b.bbox_y)
+        limit = band_top - (INTER_ROW_EDGE_CLEARANCE + CURVE_RADIUS) - GUARD_TOLERANCE
+        min_y = min(y for _x, y in r.points)
+        if min_y < limit:
+            raise PhaseInvariantError(
+                f"{phase}: topmost-row route {r.edge.source!r}->{r.edge.target!r} "
+                f"line {r.line_id!r} climbs to y={min_y:.1f}, above the "
+                f"section-edge clearance limit {limit:.1f} (band top "
+                f"{band_top:.1f}); the over-the-top channel would cross the "
+                f"canvas-top title band"
+            )
 
 
 def _ensure_routes(
@@ -2358,6 +2664,52 @@ def _guard_no_same_line_parallel_descents(
     )
 
 
+def _guard_no_split_same_line_fanout_descents(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: same-line fan-out descents fuse before either branch turns.
+
+    Wraps :func:`check_no_split_same_line_fanout_descents`: where one line fans
+    out from a single source, two descents that overlap in their Y span must
+    ride one fused trunk rather than open at distinct Xs, which would peel the
+    farther-reaching branch onto the inside of the nearer one and cross it.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_no_split_same_line_fanout_descents,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_no_split_same_line_fanout_descents, offsets, routes
+    )
+
+
+def _guard_no_dogleg_crosses_exempt_trunk(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: a doglegged trunk runs parallel to its exempt mate.
+
+    Wraps :func:`check_no_dogleg_crosses_exempt_trunk`: a non-exempt bypass
+    trunk cleared off an ``normalize_exempt`` run of a different line must land
+    on the side that keeps the two parallel, never the side whose riser pierces
+    the exempt run and crosses it twice.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_no_dogleg_crosses_exempt_trunk,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_no_dogleg_crosses_exempt_trunk, offsets, routes
+    )
+
+
 def _raise_on_first_violation(
     graph: MetroGraph,
     phase: str,
@@ -2418,6 +2770,115 @@ def _guard_merge_port_approach_side(
     first = violations[0]
     extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
+def _guard_merge_port_outgoing_side_preserved(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """Final-phase: a line re-slotted at a merge port must keep that slot
+    along the merge row down to its consumer, so it does not cross the trunk
+    on the outgoing run.
+
+    See
+    :func:`nf_metro.layout.routing.invariants.check_merge_port_outgoing_side_preserved`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_merge_port_outgoing_side_preserved,
+    )
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    violations = check_merge_port_outgoing_side_preserved(graph, offsets)
+    if not violations:
+        return
+    first = violations[0]
+    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
+def _guard_exit_inherits_entry_bundle_order(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """Final-phase: an LR/RL section fed by a single incoming bundle must
+    keep that bundle's order at its exit port, so a line running straight
+    through the section is not re-sorted off its incoming slot.
+
+    See
+    :func:`nf_metro.layout.routing.invariants.check_exit_inherits_entry_bundle_order`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_exit_inherits_entry_bundle_order,
+    )
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    violations = check_exit_inherits_entry_bundle_order(graph, offsets)
+    if not violations:
+        return
+    first = violations[0]
+    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
+def _guard_bypass_port_no_slot_gaps(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """Final-phase: at a multi-feeder merge port containing a bypass horizontal
+    line, all bundle slots must be consecutive with no empty interior gaps.
+
+    A bypass line that is incorrectly classified as a horizontal co-traveller
+    inflates ``max_horiz`` and pushes perpendicular feeders into outer slots,
+    leaving empty slots between the horizontal band and the feeders.
+    """
+    from nf_metro.layout.routing.invariants import (
+        bypass_horizontal_targets,
+        classify_merge_port_feeders,
+        distinct_offset_levels,
+    )
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    for port_id in graph.ports:
+        if classify_merge_port_feeders(graph, port_id) is None:
+            continue
+        bypass = bypass_horizontal_targets(graph, port_id)
+        if not bypass:
+            continue
+        lines = list(graph.station_lines(port_id))
+        port_offsets = sorted(offsets.get((port_id, lid), 0.0) for lid in lines)
+        levels = distinct_offset_levels(port_offsets)
+        has_gap = any(
+            levels[i + 1] - levels[i] > OFFSET_STEP + COORD_TOLERANCE_FINE
+            for i in range(len(levels) - 1)
+        )
+        if has_gap:
+            raise PhaseInvariantError(
+                f"{phase}: merge port {port_id!r} has empty bundle slot gaps: "
+                f"max offset {port_offsets[-1]:.1f} > expected "
+                f"{(len(port_offsets) - 1) * OFFSET_STEP:.1f} "
+                f"for {len(port_offsets)} lines "
+                f"(offsets: {[f'{o:.0f}' for o in port_offsets]})"
+            )
 
 
 def _guard_partial_branch_offset_gaps(
@@ -2552,6 +3013,51 @@ def _guard_fanout_junction_shares_exit_port_y(graph: MetroGraph, phase: str) -> 
                 f"{phase}: fan-out junction {jid!r} y={junction.y:.1f} "
                 f"stranded from exit port {exit_port.id!r} y={exit_port.y:.1f}"
             )
+
+
+def _guard_fanout_junction_resolves_upstream(graph: MetroGraph, phase: str) -> None:
+    """Every ``section_id``-less junction resolves to a section upstream.
+
+    ``resolve_section`` traces such a junction to a connected port's section
+    through its incoming edges; a fan-out junction is emitted with an
+    ``exit_port -> junction`` edge whose source carries the source section's
+    id, so the upstream scan always resolves.  A junction that resolves to no
+    section would leave routing without a grid column/row for it and silently
+    misplace the fanned bundle.
+    """
+    from nf_metro.layout.routing.common import resolve_section
+
+    for jid in graph.junction_ids:
+        junction = graph.stations.get(jid)
+        if junction is None or junction.section_id:
+            continue
+        if resolve_section(graph, junction) is None:
+            raise PhaseInvariantError(
+                f"{phase}: fan-out junction {jid!r} resolves to no section; "
+                f"its upstream neighbours carry no section_id"
+            )
+
+
+def _guard_entry_port_fed_only_by_ports(graph: MetroGraph, phase: str) -> None:
+    """Every edge into a section entry port originates at a port station.
+
+    ``_resolve_sections`` rewrites each inter-section edge into a chain
+    ``source -> exit_port -> entry_port -> target``, so an entry port's
+    incoming edges come from exit ports or fan-out junctions, all carrying
+    ``is_port=True``.  ``_section_line_feeders`` relies on this to read the
+    feeder section straight off the source's ``section_id``; a non-port
+    source would mean an internal station feeds an entry port directly,
+    which would mis-attribute the reconvergence feeder ordering.
+    """
+    for section in graph.sections.values():
+        for pid in section.entry_ports:
+            for edge in graph.edges_to(pid):
+                src = graph.stations.get(edge.source)
+                if src is not None and not src.is_port:
+                    raise PhaseInvariantError(
+                        f"{phase}: entry port {pid!r} is fed by non-port station "
+                        f"{edge.source!r}; entry ports must be fed only by ports"
+                    )
 
 
 def _guard_station_x_column_drift(graph: MetroGraph, phase: str) -> None:

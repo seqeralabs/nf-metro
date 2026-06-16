@@ -550,27 +550,91 @@ def _classify_edges(
     return internal_edges, inter_section_edges
 
 
-def _determine_exit_sides(
+def _build_exit_side_mapping(
     graph: MetroGraph,
-) -> dict[str, PortSide]:
-    """Map each section to its exit side based on exit hints."""
-    section_exit_side: dict[str, PortSide] = {}
+) -> dict[tuple[str, str], set[PortSide]]:
+    """Build per-line exit side options from exit hints.
+
+    Maps (section_id, line_id) -> the set of sides that line may exit by.
+    A line declared on more than one side (e.g. ``exit: right`` plus
+    ``exit: bottom``) leaves by whichever side faces a given target; a line
+    on a single side always uses it, routing around when that side does not
+    face the target.
+    """
+    exit_sides: dict[tuple[str, str], set[PortSide]] = {}
     for sec_id, section in graph.sections.items():
-        unique_sides = {side for side, _line_ids in section.exit_hints}
-        if len(unique_sides) == 1:
-            section_exit_side[sec_id] = unique_sides.pop()
-        else:
-            section_exit_side[sec_id] = PortSide.RIGHT
-    return section_exit_side
+        for side, line_ids in section.exit_hints:
+            for lid in line_ids:
+                exit_sides.setdefault((sec_id, lid), set()).add(side)
+    return exit_sides
+
+
+_PERP_DROP_PAIR = {
+    PortSide.BOTTOM: PortSide.TOP,
+    PortSide.TOP: PortSide.BOTTOM,
+}
+
+
+def _exit_side_for_edge(
+    graph: MetroGraph,
+    edge: Edge,
+    src_sec: str,
+    tgt_sec: str,
+    exit_sides: dict[tuple[str, str], set[PortSide]],
+    entry_side_for_line: dict[tuple[str, str], PortSide],
+) -> PortSide:
+    """Choose the exit side an inter-section edge leaves its source by.
+
+    A perpendicular (TOP/BOTTOM) exit forms a clean vertical drop only when it
+    pairs with the target's perpendicular entry (BOTTOM exit into a TOP entry,
+    or TOP exit into a BOTTOM entry).  Such an edge gets its own perpendicular
+    port and drops straight in.  Every other edge collapses to the section's
+    single exit side -- the dominant side when one is declared, RIGHT when
+    several are -- so folds (a BOTTOM exit into a sideways LEFT entry) and
+    flow-aligned exits keep one shared port and route around.
+    """
+    from nf_metro.layout.auto_layout import _relative_side
+
+    sides = exit_sides.get((src_sec, edge.line_id))
+    if not sides:
+        return PortSide.RIGHT
+
+    entry_side = entry_side_for_line.get((tgt_sec, edge.line_id), PortSide.LEFT)
+
+    preferred: PortSide | None
+    if len(sides) == 1:
+        preferred = next(iter(sides))
+    else:
+        src = graph.sections[src_sec]
+        tgt = graph.sections[tgt_sec]
+        geo = _relative_side(
+            src.grid_col,
+            src.grid_row,
+            tgt.grid_col,
+            tgt.grid_row,
+            src.grid_col_span,
+            tgt.grid_col_span,
+        )
+        preferred = geo if geo in sides else None
+
+    if preferred in _PERP_DROP_PAIR and _PERP_DROP_PAIR[preferred] == entry_side:
+        return preferred
+
+    section_sides = {s for s, _ in graph.sections[src_sec].exit_hints}
+    return next(iter(section_sides)) if len(section_sides) == 1 else PortSide.RIGHT
 
 
 def _group_inter_section_edges(
     graph: MetroGraph,
     inter_section_edges: list[Edge],
     entry_side_for_line: dict[tuple[str, str], PortSide],
-) -> tuple[dict[str, list[Edge]], dict[tuple[str, PortSide], list[Edge]]]:
-    """Group inter-section edges by exit section and (entry section, side)."""
-    exit_group_edges: dict[str, list[Edge]] = {}
+    exit_sides: dict[tuple[str, str], set[PortSide]],
+) -> tuple[
+    dict[tuple[str, PortSide], list[Edge]],
+    dict[tuple[str, PortSide], list[Edge]],
+]:
+    """Group inter-section edges by (exit section, side) and (entry section, side)."""
+    exit_group_edges: dict[tuple[str, PortSide], list[Edge]] = {}
     entry_group_edges: dict[tuple[str, PortSide], list[Edge]] = {}
 
     for edge in inter_section_edges:
@@ -580,8 +644,11 @@ def _group_inter_section_edges(
         # endpoints resolve to a section, so neither lookup is None here.
         assert src_sec is not None and tgt_sec is not None
         entry_side = entry_side_for_line.get((tgt_sec, edge.line_id), PortSide.LEFT)
+        exit_side = _exit_side_for_edge(
+            graph, edge, src_sec, tgt_sec, exit_sides, entry_side_for_line
+        )
 
-        exit_group_edges.setdefault(src_sec, []).append(edge)
+        exit_group_edges.setdefault((src_sec, exit_side), []).append(edge)
         entry_group_edges.setdefault((tgt_sec, entry_side), []).append(edge)
 
     return exit_group_edges, entry_group_edges
@@ -589,19 +656,19 @@ def _group_inter_section_edges(
 
 def _create_port_stations(
     graph: MetroGraph,
-    exit_group_edges: dict[str, list[Edge]],
+    exit_group_edges: dict[tuple[str, PortSide], list[Edge]],
     entry_group_edges: dict[tuple[str, PortSide], list[Edge]],
-    section_exit_side: dict[str, PortSide],
-) -> tuple[dict[str, str], dict[tuple[str, PortSide], str], int]:
+) -> tuple[dict[tuple[str, PortSide], str], dict[tuple[str, PortSide], str], int]:
     """Create exit and entry port stations on the graph.
 
-    Returns (exit_port_map, entry_port_map, next_port_counter).
+    A section gets one exit port per side it leaves by, so a line declared on
+    more than one side (e.g. ``exit: right`` plus ``exit: bottom``) emits from
+    each.  Returns (exit_port_map, entry_port_map, next_port_counter).
     """
     port_counter = 0
-    exit_port_map: dict[str, str] = {}
+    exit_port_map: dict[tuple[str, PortSide], str] = {}
 
-    for sec_id in exit_group_edges:
-        side = section_exit_side.get(sec_id, PortSide.RIGHT)
+    for sec_id, side in exit_group_edges:
         port_id = f"{sec_id}__exit_{side.value}_{port_counter}"
         port = Port(
             id=port_id,
@@ -610,7 +677,7 @@ def _create_port_stations(
             is_entry=False,
         )
         graph.add_port(port)
-        exit_port_map[sec_id] = port_id
+        exit_port_map[(sec_id, side)] = port_id
         port_counter += 1
 
     entry_port_map: dict[tuple[str, PortSide], str] = {}
@@ -635,7 +702,8 @@ def _rewrite_edges_with_junctions(
     internal_edges: list[Edge],
     inter_section_edges: list[Edge],
     entry_side_for_line: dict[tuple[str, str], PortSide],
-    exit_port_map: dict[str, str],
+    exit_sides: dict[tuple[str, str], set[PortSide]],
+    exit_port_map: dict[tuple[str, PortSide], str],
     entry_port_map: dict[tuple[str, PortSide], str],
     port_counter: int,
 ) -> None:
@@ -650,8 +718,11 @@ def _rewrite_edges_with_junctions(
         tgt_sec = graph.section_for_station(edge.target)
         assert src_sec is not None and tgt_sec is not None
         entry_side = entry_side_for_line.get((tgt_sec, edge.line_id), PortSide.LEFT)
+        exit_side = _exit_side_for_edge(
+            graph, edge, src_sec, tgt_sec, exit_sides, entry_side_for_line
+        )
 
-        exit_port_id = exit_port_map[src_sec]
+        exit_port_id = exit_port_map[(src_sec, exit_side)]
         entry_port_id = entry_port_map[(tgt_sec, entry_side)]
 
         new_edges.append(
@@ -721,22 +792,23 @@ def _create_ports_and_junctions(
 ) -> None:
     """Create exit/entry ports and junctions, rewrite inter-section edges.
 
-    Creates one exit port per source section, one entry port per
-    (target_section, entry_side), and inserts junction stations where
-    an exit port fans out to multiple entry ports.
+    Creates one exit port per (source_section, exit_side), one entry port per
+    (target_section, entry_side), and inserts junction stations where an exit
+    port fans out to multiple entry ports.
     """
-    section_exit_side = _determine_exit_sides(graph)
+    exit_sides = _build_exit_side_mapping(graph)
     exit_groups, entry_groups = _group_inter_section_edges(
-        graph, inter_section_edges, entry_side_for_line
+        graph, inter_section_edges, entry_side_for_line, exit_sides
     )
     exit_port_map, entry_port_map, port_counter = _create_port_stations(
-        graph, exit_groups, entry_groups, section_exit_side
+        graph, exit_groups, entry_groups
     )
     _rewrite_edges_with_junctions(
         graph,
         internal_edges,
         inter_section_edges,
         entry_side_for_line,
+        exit_sides,
         exit_port_map,
         entry_port_map,
         port_counter,

@@ -107,11 +107,17 @@ dispatcher handles those degenerate cases directly.
 
 | Module | Responsibility |
 | --- | --- |
-| `core.py` | `route_edges` dispatcher and all handler functions |
+| `core.py` | `route_edges` dispatcher; re-exports handlers from sibling modules for backward-compatible imports |
+| `context.py` | `_RoutingCtx` dataclass and `_build_routing_context`; per-station offset helpers; shared section-geometry helpers (`_resolve_section_col`, `_has_intervening_sections`, `compute_junction_fan_info`, …) |
+| `inter_section_handlers.py` | handler 1 family: bypass, left/right entry wraps, around-section, inter-row corridors, stepped descent, L-shape |
+| `tb_handlers.py` | TB section handlers (`_route_tb_internal`, `_route_tb_lr_exit`, `_route_tb_lr_entry`, `_route_perp_entry`) and `_compute_diagonal_placement` |
+| `intra_handlers.py` | `_route_entry_runway` and `_route_intra_section` (the general intra-section fallback) |
+| `postprocess.py` | post-routing passes: diagonal bundle spread and bubble-station centring |
+| `normalize.py` | channel and trunk normalization passes (`_normalize_gap_channels`, htrunk restacking, riser/port-approach alignment, …) |
 | `common.py` | `RoutedPath`, `Direction`, bundle/channel helpers |
 | `corners.py` | corner radii and curve smoothing |
-| `inter_section.py` | `WRAP_TABLE` descriptor catalogue |
+| `inter_section.py` | `WRAP_TABLE` descriptor catalogue (documentation reference; not used at runtime) |
 | `offsets.py` | per-station Y offsets for parallel lines |
 | `reversal.py` | fold/reversal (serpentine row) routing |
-| `invariants.py` | runtime routing guards |
+| `invariants.py` | runtime routing guards (`check_bundle_order_preserved`) |
 | `rail.py` | `route_rail_edges` straight-rail router for rail mode |

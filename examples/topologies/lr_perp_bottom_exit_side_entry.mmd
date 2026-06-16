@@ -1,0 +1,23 @@
+%%metro title: LR Perp Bottom Exit into Side Entry
+%%metro style: dark
+%%metro line: a | Line A | #e63946
+%%metro line: b | Line B | #0570b0
+
+graph LR
+    subgraph src [Source]
+        s1[Start]
+    end
+
+    subgraph mid [Middle]
+        %%metro exit: bottom | a, b
+        m1[Step 1]
+        m2[Step 2]
+        m1 -->|a,b| m2
+    end
+
+    subgraph dst [Destination]
+        d1[Finish]
+    end
+
+    s1 -->|a,b| m1
+    m2 -->|a,b| d1

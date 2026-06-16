@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
 
@@ -18,6 +19,7 @@ from nf_metro.layout.constants import (
     INTER_ROW_HEADER_CLEARANCE,
     OFFSET_STEP,
     SECTION_HEADER_PROTRUSION,
+    SECTION_ROUTE_CLEARANCE,
 )
 from nf_metro.parser.model import Edge, MetroGraph, Section, Station
 
@@ -57,7 +59,6 @@ def _sections_in_col(
     graph: MetroGraph,
     col: int | None,
     row: int | None = None,
-    y_band: tuple[float, float] | None = None,
 ) -> list[Section]:
     """Sections in a specific grid column with non-zero width.
 
@@ -66,19 +67,12 @@ def _sections_in_col(
     in one row must measure the gap against that row's sections only,
     otherwise a section stacked in another row of the same column (e.g. a
     wide output section below) corrupts the gap edges.
-
-    When *y_band* ``(lo, hi)`` is given, restrict to sections whose bbox
-    overlaps that vertical span - used when a descent's vertical run must
-    clear only the sections it would actually cross, not the whole column.
     """
     secs = [s for s in graph.sections.values() if s.grid_col == col and s.bbox_w > 0]
     if row is not None:
         secs = [
             s for s in secs if s.grid_row <= row <= s.grid_row + s.grid_row_span - 1
         ]
-    if y_band is not None:
-        lo, hi = y_band
-        secs = [s for s in secs if not (hi < s.bbox_y or lo > s.bbox_y + s.bbox_h)]
     return secs
 
 
@@ -130,6 +124,48 @@ def row_top_edge(
     if col is not None:
         secs = [s for s in secs if s.grid_col == col]
     return min((s.bbox_y for s in secs), default=default) if secs else default
+
+
+def header_corridor_y(
+    graph: MetroGraph,
+    row: int,
+    *,
+    below: bool,
+    base_radius: float,
+    default: float = 0.0,
+) -> float:
+    """Y of an inter-row routing channel that clears a row's header band.
+
+    Above the row (``below=False``) the channel sits a header band above the
+    top edge; below it sits a route's clearance under the bottom edge.  The
+    full :data:`INTER_ROW_HEADER_CLEARANCE` applies only when a section
+    occupies the gap above the row (contributing a header badge); the topmost
+    row has only the canvas-top title band, so the smaller
+    :data:`SECTION_ROUTE_CLEARANCE` keeps the channel from overshooting it.
+    """
+    if below:
+        return (
+            row_bottom_edge(graph, row, default=default)
+            + SECTION_ROUTE_CLEARANCE
+            + base_radius
+        )
+    clearance = (
+        INTER_ROW_HEADER_CLEARANCE
+        if section_exists_above_row(graph, row)
+        else SECTION_ROUTE_CLEARANCE
+    )
+    return row_top_edge(graph, row, default=default) - clearance - base_radius
+
+
+def section_exists_above_row(graph: MetroGraph, row: int) -> bool:
+    """True if any section lies entirely above grid *row* (its bottom row is
+    a higher row than *row*).
+
+    Distinguishes a row with a genuine inter-row gap above it (a section
+    contributes a header badge there) from the topmost row, which has only
+    the canvas-top padding above.
+    """
+    return any(s.grid_row + s.grid_row_span - 1 < row for s in graph.sections.values())
 
 
 def column_gap_midpoint(
@@ -229,6 +265,102 @@ class RoutedPath:
     Set by wrap / around-section / TOP-entry handlers whose vertical
     channels follow a special concentric loop (all corners share one
     radius) that the standard L-shape re-stacking would break."""
+
+
+def initial_fanout_descent_span(
+    rp: RoutedPath,
+) -> tuple[float, float, float, bool] | None:
+    """``(x, y_lo, y_hi, down)`` of the descent leaving a route's source.
+
+    A fan-out branch opens ``(sx, sy) -> (vx, sy) -> (vx, dy) -> ...``: a
+    short horizontal lead off the shared source, then a vertical descent in
+    its own channel.  Returns ``None`` when the route does not open
+    horizontal-then-vertical.
+    """
+    pts = rp.points
+    if len(pts) < 3:
+        return None
+    (x0, y0), (x1, y1), (x2, y2) = pts[0], pts[1], pts[2]
+    if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
+        return None
+    if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:
+        return None
+    return x1, min(y1, y2), max(y1, y2), y2 > y1
+
+
+@dataclass(frozen=True)
+class HTrunkSeg:
+    """One interior horizontal leg of a route, flanked by two vertical legs.
+
+    The trunk runs at ``y`` from ``xa`` to ``xb`` (traversal order, not
+    sorted); its two flanking risers stand at those Xs and climb/drop to
+    ``before_y`` (at ``xa``) and ``after_y`` (at ``xb``) -- the bottom or top
+    of a U-shaped bypass.
+    """
+
+    y: float
+    xa: float
+    xb: float
+    before_y: float
+    after_y: float
+
+    @property
+    def x_lo(self) -> float:
+        return min(self.xa, self.xb)
+
+    @property
+    def x_hi(self) -> float:
+        return max(self.xa, self.xb)
+
+
+def iter_horizontal_trunks(rp: RoutedPath) -> Iterator[tuple[int, HTrunkSeg]]:
+    """Yield ``(waypoint_index, segment)`` for each interior horizontal trunk.
+
+    A trunk is an interior horizontal leg whose two flanking neighbours are
+    both vertical, i.e. the bottom (or top) leg of a U-shaped bypass.  The
+    index is the trunk leg's first waypoint, ``points[index] -> [index+1]``.
+    """
+    pts = rp.points
+    for k in range(1, len(pts) - 2):
+        x0, y0 = pts[k]
+        x1, y1 = pts[k + 1]
+        if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
+            continue
+        if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:
+            continue
+        if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:
+            continue
+        yield k, HTrunkSeg(y0, x0, x1, pts[k - 1][1], pts[k + 2][1])
+
+
+def _vert_horiz_cross(
+    vx: float, vy0: float, vy1: float, hy: float, hx0: float, hx1: float
+) -> bool:
+    """True when a vertical segment crosses a horizontal one in their interior.
+
+    Shared-endpoint touches (T-junctions, corners) are excluded: the crossing
+    point must lie strictly inside both segments.
+    """
+    lo, hi = min(vy0, vy1), max(vy0, vy1)
+    xlo, xhi = min(hx0, hx1), max(hx0, hx1)
+    return (
+        xlo + COORD_TOLERANCE < vx < xhi - COORD_TOLERANCE
+        and lo + COORD_TOLERANCE < hy < hi - COORD_TOLERANCE
+    )
+
+
+def trunk_segments_cross(a: HTrunkSeg, b: HTrunkSeg) -> tuple[float, float] | None:
+    """Return where trunks *a* and *b* cross, or ``None`` if they don't.
+
+    A crossing is a riser of one trunk piercing the horizontal run of the
+    other (the two parallel runs themselves never cross).  Returns the first
+    crossing point found.
+    """
+    for seg, other in ((a, b), (b, a)):
+        for vx, vy in ((seg.xa, seg.before_y), (seg.xb, seg.after_y)):
+            if _vert_horiz_cross(vx, seg.y, vy, other.y, other.x_lo, other.x_hi):
+                return vx, other.y
+    return None
 
 
 def compute_bundle_info(
@@ -640,9 +772,10 @@ def resolve_section(
     For junctions (``section_id is None``), traces edges to find a
     connected port's section.
 
-    When *prefer_upstream* is True (default), incoming edges are checked
-    first so the junction resolves to the upstream section.  When False,
-    both directions are scanned in a single pass with no preference.
+    When *prefer_upstream* is True (default), the junction is resolved
+    through its incoming edges, yielding the upstream section.  When False,
+    both directions are scanned in a single ``graph.edges`` pass with no
+    preference.
 
     A ``None`` station (e.g. an unresolved lookup) yields ``None``.
     """
@@ -654,12 +787,6 @@ def resolve_section(
     if prefer_upstream:
         for e in graph.edges_to(station.id):
             other = graph.stations.get(e.source)
-            if other and other.section_id:
-                sec = graph.sections.get(other.section_id)
-                if sec:
-                    return sec
-        for e in graph.edges_from(station.id):
-            other = graph.stations.get(e.target)
             if other and other.section_id:
                 sec = graph.sections.get(other.section_id)
                 if sec:

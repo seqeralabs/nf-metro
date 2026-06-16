@@ -170,7 +170,7 @@ The [`examples/`](examples/) directory contains ready-to-render `.mmd` files:
 
 ### Topology gallery
 
-The [`examples/topologies/`](examples/topologies/) directory has 30 examples covering a range of layout patterns. See the [topology README](examples/topologies/README.md) for descriptions and rendered previews.
+The [`examples/topologies/`](examples/topologies/) directory has 38 examples covering a range of layout patterns. See the [topology README](examples/topologies/README.md) for descriptions and rendered previews.
 
 A few highlights:
 
