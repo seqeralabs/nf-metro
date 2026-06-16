@@ -107,6 +107,7 @@
   "inter_section_handlers.py::if port.side == PortSide.RIGHT:::#1",
   "inter_section_handlers.py::if shared_vx is not None:::#1",
   "inter_section_handlers.py::if src.id in ctx.graph.junctions:::#1",
+  "inter_section_handlers.py::if src_col is None or src_row is None or ep_row is None:::#1",
   "inter_section_handlers.py::if src_row is None or ep_row is None or src_col is None or ep_col is None:::#1",
   "inter_section_handlers.py::if src_sec is not None and src_sec.bbox_w > 0:::#1",
   "inter_section_handlers.py::if tgt is None:::#1",
