@@ -13,7 +13,6 @@ from nf_metro.layout.constants import (
     INTER_ROW_HEADER_CLEARANCE,
     JUNCTION_MARGIN,
     MERGE_ROUTE_MARGIN,
-    OFFSET_STEP,
     SECTION_ROUTE_CLEARANCE,
 )
 from nf_metro.layout.routing.common import (
@@ -30,6 +29,7 @@ from nf_metro.layout.routing.common import (
     horizontal_direction,
     inter_column_channel_x,
     inter_row_channel_y,
+    inter_row_wrap_band,
     resolve_section,
     row_bottom_edge,
     row_top_edge,
@@ -1860,11 +1860,10 @@ def _corridor_is_viable(ctx: _RoutingCtx, src: Station, entry_port: Station) -> 
         if e.target == entry_port.id
         or ctx.merge.entry_port_for.get(e.target) == entry_port.id
     }
-    span = max(len(bundle_lines) - 1, 0) * OFFSET_STEP
-    # Section placement reserves exactly this band for a wrap bundle
-    # (_wrap_bundle_row_minimums), so a corridor sized for it sits right at
-    # the boundary; absorb float dust so an exactly-reserved gap stays viable.
-    required = INTER_ROW_EDGE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE
+    # Section placement reserves exactly this band for the wrap bundle, so a
+    # corridor sized for it sits right at the boundary; absorb float dust so
+    # an exactly-reserved gap stays viable.
+    required = inter_row_wrap_band(len(bundle_lines))
     return gap_bottom - gap_top >= required - COORD_TOLERANCE
 
 

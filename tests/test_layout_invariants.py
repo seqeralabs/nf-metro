@@ -3236,13 +3236,11 @@ def test_corridor_viability_requires_full_clearance_band():
     g2 = _layout("genomic_pipeline.mmd")
     off2 = compute_station_offsets(g2)
     ctx2 = _build_routing_context(g2, DIAGONAL_RUN, CURVE_RADIUS, off2)
-    viable_pairs = [
-        (s, ep2)
+    assert any(
+        _corridor_is_viable(ctx2, s, ep2)
         for s in g2.stations.values()
         for ep2 in g2.stations.values()
-        if _corridor_is_viable(ctx2, s, ep2)
-    ]
-    assert viable_pairs, (
+    ), (
         "genomic_pipeline should still route at least one feeder through the "
         "corridor; the viability tightening over-constrained it"
     )
