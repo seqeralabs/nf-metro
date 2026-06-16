@@ -17,8 +17,6 @@ from typing import TypeGuard
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     EDGE_TO_BUNDLE_CLEARANCE,
-    INTER_ROW_EDGE_CLEARANCE,
-    INTER_ROW_HEADER_CLEARANCE,
     MERGE_GAP_MIN,
     MIN_INTER_SECTION_GAP,
     MIN_INTER_SECTION_ROW_GAP,
@@ -31,7 +29,7 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
 )
-from nf_metro.layout.routing.common import resolve_section
+from nf_metro.layout.routing.common import inter_row_wrap_band, resolve_section
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
 
@@ -610,8 +608,7 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     minimums: dict[tuple[int, int], float] = {}
     for gap, ports in per_gap.items():
         widest = max(len(lines) for lines in ports.values())
-        span = (widest - 1) * OFFSET_STEP
-        minimums[gap] = INTER_ROW_EDGE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE
+        minimums[gap] = inter_row_wrap_band(widest)
     return minimums
 
 

@@ -3191,6 +3191,66 @@ def test_merge_feeder_does_not_loop_below_target(fixture):
         )
 
 
+def test_corridor_viability_requires_full_clearance_band():
+    """The inter-row-gap corridor is chosen only when the gap fits its band.
+
+    The corridor's leftward traverse runs in a clamp band
+    ``[gap_top + INTER_ROW_EDGE_CLEARANCE, gap_bottom - INTER_ROW_HEADER_CLEARANCE]``;
+    a bundle of ``n`` lines needs ``(n - 1) * OFFSET_STEP`` of room inside
+    it.  When the gap is narrower than
+    ``INTER_ROW_EDGE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE`` the band
+    inverts and every line collapses onto one Y, producing a collinear
+    overlay and a route through the source section's bottom edge (#722).
+    Below that threshold the feeder must fall back to the around-below
+    route, so ``_corridor_is_viable`` must return ``False``.
+    """
+    from nf_metro.layout.constants import (
+        CURVE_RADIUS,
+        DIAGONAL_RUN,
+        INTER_ROW_EDGE_CLEARANCE,
+        INTER_ROW_HEADER_CLEARANCE,
+    )
+    from nf_metro.layout.routing.common import row_bottom_edge, row_top_edge
+    from nf_metro.layout.routing.context import _resolve_section_colrow
+    from nf_metro.layout.routing.core import _build_routing_context
+    from nf_metro.layout.routing.inter_section_handlers import _corridor_is_viable
+
+    # Narrow gap: a two-line bundle crossing into a left-entry target two
+    # rows below, with only the default 50px gap below its source row.
+    graph = _layout("topologies/corridor_narrow_gap_fallback.mmd")
+    offsets = compute_station_offsets(graph)
+    ctx = _build_routing_context(graph, DIAGONAL_RUN, CURVE_RADIUS, offsets)
+    src = graph.stations["source__exit_right_0"]
+    ep = graph.stations["target__entry_left_2"]
+    src_col, src_row = _resolve_section_colrow(graph, src)
+    gap_top = row_bottom_edge(graph, src_row, col=src_col)
+    gap_bottom = row_top_edge(graph, src_row + 1, col=src_col, default=gap_top)
+    gap = gap_bottom - gap_top
+    floor = INTER_ROW_EDGE_CLEARANCE + INTER_ROW_HEADER_CLEARANCE
+    assert gap < floor, (
+        f"fixture precondition: gap below source row is {gap:.1f}px, "
+        f"expected narrower than the {floor:.0f}px floor"
+    )
+    assert not _corridor_is_viable(ctx, src, ep), (
+        f"corridor chosen for a {gap:.1f}px gap that cannot hold its "
+        f"{floor:.0f}px+ clearance band"
+    )
+
+    # Positive control: genomic_pipeline's 84px corridor gap exactly fits a
+    # three-line bundle's band, so viability holds there.
+    g2 = _layout("genomic_pipeline.mmd")
+    off2 = compute_station_offsets(g2)
+    ctx2 = _build_routing_context(g2, DIAGONAL_RUN, CURVE_RADIUS, off2)
+    assert any(
+        _corridor_is_viable(ctx2, s, ep2)
+        for s in g2.stations.values()
+        for ep2 in g2.stations.values()
+    ), (
+        "genomic_pipeline should still route at least one feeder through the "
+        "corridor; the viability tightening over-constrained it"
+    )
+
+
 @pytest.mark.parametrize(
     "fixture",
     sorted({*_FIXTURES_MULTI_SECTION, "genomic_pipeline.mmd"}),

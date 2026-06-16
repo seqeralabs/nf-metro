@@ -810,6 +810,21 @@ def resolve_section(
     return None
 
 
+def inter_row_wrap_band(n_lines: int) -> float:
+    """Bbox-to-bbox row gap a wrap bundle of *n_lines* needs.
+
+    A horizontal inter-row run keeps :data:`INTER_ROW_EDGE_CLEARANCE` below
+    the upper box edge and :data:`INTER_ROW_HEADER_CLEARANCE` above the next
+    row's header badge, with the bundle's ``(n_lines - 1) * OFFSET_STEP``
+    stagger between.  Section placement reserves this band
+    (:func:`~nf_metro.layout.section_placement._wrap_bundle_row_minimums`)
+    and the corridor checks against it (``_corridor_is_viable``); the single
+    definition keeps the two in lockstep.
+    """
+    span = max(n_lines - 1, 0) * OFFSET_STEP
+    return INTER_ROW_EDGE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE
+
+
 def inter_row_channel_y(
     graph: MetroGraph,
     src: Station,
@@ -818,12 +833,18 @@ def inter_row_channel_y(
     ty: float,
     dy: float,
     max_r: float,
+    offset: float = 0.0,
 ) -> float:
     """Compute Y for a horizontal channel in an inter-row gap.
 
     Vertical equivalent of ``inter_column_channel_x``: places the
     channel in the inter-row gap, clear of section headers (numbered
     circle + label rendered above/below bbox_y).
+
+    ``offset`` shifts the run by a caller's per-line bundle stagger.  In
+    the adjacent-row case it is clamped inside the clearance band (see
+    :func:`_center_inter_row_channel`) so an over-sized stagger can't lift
+    the run past the box edge.
     """
     src_sec = resolve_section(graph, src)
     tgt_sec = resolve_section(graph, tgt)
@@ -843,7 +864,7 @@ def inter_row_channel_y(
             else:
                 upper_bottom = row_bottom_edge(graph, tgt_row, default=ty)
                 lower_top = row_top_edge(graph, src_row, default=sy)
-            return _center_inter_row_channel(upper_bottom, lower_top)
+            return _center_inter_row_channel(upper_bottom, lower_top, offset)
 
         # Multi-row crossing: an intervening row sits between source and
         # target.  Keep the legacy midpoint so ``_route_around_section_below``
@@ -852,20 +873,22 @@ def inter_row_channel_y(
         if dy > 0:
             bottom = row_bottom_edge(graph, src_row, default=sy)
             top = row_top_edge(graph, tgt_row, default=ty)
-            return (bottom + (top - HEADER_CLEARANCE)) / 2
+            return (bottom + (top - HEADER_CLEARANCE)) / 2 + offset
         else:
             top = row_top_edge(graph, src_row, default=sy)
             bottom = row_bottom_edge(graph, tgt_row, default=ty)
-            return (top + (bottom + HEADER_CLEARANCE)) / 2
+            return (top + (bottom + HEADER_CLEARANCE)) / 2 + offset
 
     # Fallback: place near target, clearing the header zone
     if dy > 0:
-        return ty - HEADER_CLEARANCE - max_r
+        return ty - HEADER_CLEARANCE - max_r + offset
     else:
-        return ty + HEADER_CLEARANCE + max_r
+        return ty + HEADER_CLEARANCE + max_r + offset
 
 
-def _center_inter_row_channel(upper_bottom: float, lower_top: float) -> float:
+def _center_inter_row_channel(
+    upper_bottom: float, lower_top: float, offset: float = 0.0
+) -> float:
     """Y for a horizontal channel in the gap between two stacked rows.
 
     The channel is centred in the band that keeps
@@ -875,14 +898,21 @@ def _center_inter_row_channel(upper_bottom: float, lower_top: float) -> float:
     than just the bbox edge, so the run doesn't graze the next-row label.
     When the gap is too narrow to satisfy both margins the channel biases
     to ``hi`` so it still clears the badge.
+
+    A non-zero ``offset`` (a per-line bundle stagger) shifts the run off
+    centre.  When the band has room it is clamped to stay inside, so a
+    stagger sized from a larger bundle than the gap was reserved for can't
+    push the run past the box edge or header badge; in the degenerate
+    too-narrow band the stagger is applied unclamped so co-travelling lines
+    stay distinct rather than collapsing onto one Y.
     """
     lo = upper_bottom + INTER_ROW_EDGE_CLEARANCE
     hi = lower_top - INTER_ROW_HEADER_CLEARANCE
     if lo <= hi:
-        return (lo + hi) / 2
+        return min(max((lo + hi) / 2 + offset, lo), hi)
     # Gap too narrow for both margins (typically a heterogeneous-row case
     # where the global row edges over-state the obstruction at this x).
     # Bias to ``hi`` so the run still clears the next-row header badge --
     # the visually intrusive side -- and the source side keeps whatever
     # the gap allows, rather than the geometric midpoint that grazes both.
-    return hi
+    return hi + offset

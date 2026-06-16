@@ -1,0 +1,37 @@
+%%metro title: Corridor Narrow Gap Fallback
+%%metro style: dark
+%%metro line: a | A | #e63946
+%%metro line: b | B | #0570b0
+
+%%metro grid: source | 2,0
+%%metro grid: tall | 2,1
+%%metro grid: target | 1,2
+
+graph LR
+    subgraph source [Source]
+        s1[Input]
+        s2[Process]
+        s1 -->|a,b| s2
+    end
+
+    subgraph tall [Tall Section]
+        %%metro entry: left | a
+        k1[Step A]
+        k2[Step B]
+        k3[Step C]
+        k4[Step D]
+        k1 -->|a| k2
+        k2 -->|a| k3
+        k3 -->|a| k4
+    end
+
+    subgraph target [Target]
+        %%metro entry: left | a, b
+        t1[Process]
+        t2[Output]
+        t1 -->|a,b| t2
+    end
+
+    s2 -->|b| t1
+    s2 -->|a| t1
+    k4 -->|a| t1
