@@ -2125,6 +2125,24 @@ def _route_inter_row_gap_corridor(
     )
 
 
+def _descent_rightward_clearable_pierce(
+    ctx: _RoutingCtx, x: float, y_lo: float, y_hi: float, exclude: set[str]
+) -> bool:
+    """True if a vertical channel at *x* over ``[y_lo, y_hi]`` cuts through a
+    section interior and can be cleared to its right.
+
+    A zero-margin clear pinned to ``bound_left=x`` only moves the channel when
+    it sits strictly inside a box (so a non-trivial rightward shift is exactly
+    a pierce); a channel that merely runs near a box edge is not flagged.  This
+    mirrors the band the actual divert below uses, so detection and clearing
+    agree.
+    """
+    return (
+        _clear_channel_x_in_band(ctx.graph, x, y_lo, y_hi, 0.0, exclude, bound_left=x)
+        > x + COORD_TOLERANCE
+    )
+
+
 def _route_around_section_below(
     edge: Edge,
     src: Station,
@@ -2283,19 +2301,7 @@ def _route_around_section_below(
     # near-parallel tracks.
     base_corner_x = corner_x - delta
     exclude = {src.section_id} if src.section_id else set[str]()
-    pierces_section = (
-        _clear_channel_x_in_band(
-            ctx.graph,
-            base_corner_x,
-            sy,
-            by_base,
-            0.0,
-            exclude,
-            bound_left=base_corner_x,
-        )
-        > base_corner_x + COORD_TOLERANCE
-    )
-    if pierces_section:
+    if _descent_rightward_clearable_pierce(ctx, base_corner_x, sy, by_base, exclude):
         clearance = (
             SECTION_ROUTE_CLEARANCE + ctx.curve_radius + EDGE_TO_BUNDLE_CLEARANCE
         )
