@@ -34,6 +34,7 @@ from nf_metro.parser.grammar import (
 from nf_metro.parser.model import Edge, MetroGraph, Section, Station
 from nf_metro.parser.resolve import (
     _create_implicit_section,
+    _expand_interchanges,
     _insert_bypass_stations,
     _insert_terminus_convergence_stations,
     _remove_empty_sections,
@@ -192,7 +193,15 @@ def _finalize_graph(graph: MetroGraph, max_station_columns: int | None) -> None:
     if graph.sections:
         _create_implicit_section(graph)
 
-        from nf_metro.layout.auto_layout import infer_section_layout
+        from nf_metro.layout.auto_layout import (
+            infer_interchanges,
+            infer_section_layout,
+        )
+
+        # Inference must populate graph.interchanges before expansion so
+        # auto-detected and author-written interchanges share the expansion path.
+        infer_interchanges(graph)
+        _expand_interchanges(graph)
 
         # Row-wrap width precedence: an explicit caller value (the
         # --max-layers-per-row CLI flag) wins over a %%metro fold_threshold

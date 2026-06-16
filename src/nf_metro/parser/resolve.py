@@ -60,6 +60,69 @@ def _create_implicit_section(graph: MetroGraph) -> None:
     graph.add_section(implicit)
 
 
+def _expand_interchanges(graph: MetroGraph) -> None:
+    """Expand each ``%%metro interchange:`` node into one sub-station per rail.
+
+    The named node becomes a column of co-located ordinary stations (one per
+    rail, top to bottom in declaration order); every edge touching the node is
+    repointed to the sub-station whose rail owns the edge's line.  From here on
+    the layout engine treats them as plain stations, so each line keeps its own
+    track through the step and only the renderer joins them into one connector
+    glyph.  An unknown node, a single rail, or a rail referencing no live line
+    is warned about and skipped.
+    """
+    # (node_id, line_id) -> the member sub-station that line's edges retarget to.
+    moved: dict[tuple[str, str], str] = {}
+    for ic in graph.interchanges:
+        orig = graph.stations.get(ic.node_id)
+        if orig is None:
+            warnings.warn(
+                f"interchange: node {ic.node_id!r} is not a defined station; ignoring",
+                stacklevel=2,
+            )
+            continue
+        node_lines = set(graph.station_lines(ic.node_id))
+        line_rail: dict[str, int] = {}
+        for i, rail in enumerate(ic.rails):
+            for lid in rail:
+                if lid in node_lines:
+                    line_rail[lid] = i
+        # A line through the node not named in any rail stays on the first rail
+        # so no edge is left dangling at the now-split node.
+        for lid in node_lines - set(line_rail):
+            line_rail[lid] = 0
+
+        member_ids: list[str] = [ic.node_id]
+        orig.interchange_id = ic.node_id
+        for i in range(1, len(ic.rails)):
+            sub = Station(
+                id=f"{ic.node_id}__rail{i}",
+                label="",
+                section_id=orig.section_id,
+                interchange_id=ic.node_id,
+            )
+            graph.register_station(sub)
+            member_ids.append(sub.id)
+
+        for lid, rail_i in line_rail.items():
+            moved[(ic.node_id, lid)] = member_ids[rail_i]
+        ic.label = orig.label
+        ic.member_ids = member_ids
+
+    if not moved:
+        return
+    graph.replace_edges(
+        [
+            Edge(
+                source=moved.get((e.source, e.line_id), e.source),
+                target=moved.get((e.target, e.line_id), e.target),
+                line_id=e.line_id,
+            )
+            for e in graph.edges
+        ]
+    )
+
+
 def _insert_terminus_convergence_stations(graph: MetroGraph) -> None:
     """Insert virtual convergence stations before multi-source termini.
 

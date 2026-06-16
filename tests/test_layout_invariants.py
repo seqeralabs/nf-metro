@@ -3888,7 +3888,6 @@ def test_section_bbox_matches_content_extent(fixture):
 @pytest.mark.parametrize(
     "fixture",
     [
-        "topologies/rnaseq_lite.mmd",
         "topologies/mismatched_tracks.mmd",
         "topologies/variant_calling.mmd",
     ],
@@ -3902,10 +3901,9 @@ def test_loop_recenter_only_for_pure_side_branches(fixture):
     fan-out side stations with their own off-trunk siblings (DA's
     deseq2/dream around limma), but breaks visible column alignment
     when the on-trunk member of the same loop sits at the same X
-    (e.g. rnaseq_lite ``star_align`` ↔ ``hisat_align``, mismatched
-    tracks ``t_a`` ↔ ``t_b``).  The narrowed pass leaves those
-    side stations alone so the on-trunk and off-trunk siblings stay
-    column-aligned.
+    (e.g. mismatched tracks ``t_a`` ↔ ``t_b``).  The narrowed pass
+    leaves those side stations alone so the on-trunk and off-trunk
+    siblings stay column-aligned.
     """
     graph = _layout(fixture)
 

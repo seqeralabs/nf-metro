@@ -22,6 +22,7 @@ from nf_metro.parser.model import (
     VALID_ICON_TYPES,
     VALID_LINE_STYLES,
     VALID_MARKER_SHAPES,
+    Interchange,
     LineSpread,
     MarkerLegendEntry,
     MarkerStyle,
@@ -304,6 +305,34 @@ def _parse_group_directive(value: str, graph: MetroGraph) -> None:
     )
 
 
+def _parse_interchange_directive(value: str, graph: MetroGraph) -> None:
+    """Parse %%metro interchange: node_id | rail-1 lines | rail-2 lines [| ...].
+
+    Declares ``node_id`` a cross-track interchange: each pipe-separated group is
+    one rail of the interchange, carrying the comma-separated lines listed in
+    it.  The node is expanded into one sub-station per rail in
+    :func:`resolve._expand_interchanges`, so the lines pass through on their own
+    tracks and the step renders as a single connector glyph.  Needs at least two
+    rails; a malformed directive is warned about and ignored.
+    """
+    parts = _split_fields(value)
+    if len(parts) < 3:
+        _warn_directive(
+            "interchange",
+            f"{value!r} needs 'node_id | rail-1 lines | rail-2 lines'. Ignoring",
+        )
+        return
+    node_id = parts[0].strip()
+    rails = [_split_csv(p) for p in parts[1:]]
+    if not node_id or any(not rail for rail in rails):
+        _warn_directive(
+            "interchange",
+            f"{value!r} needs a node id and at least one line per rail. Ignoring",
+        )
+        return
+    graph.interchanges.append(Interchange(node_id=node_id, rails=rails))
+
+
 def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:
     """Parse %%metro legend_combo: lineA, lineB[, ...] | Display Label.
 
@@ -463,6 +492,7 @@ _GLOBAL_DIRECTIVE_HANDLERS.update(
         "legend_combo": _parse_legend_combo_directive,
         "legend": apply_legend_directive,
         "group": _parse_group_directive,
+        "interchange": _parse_interchange_directive,
         "marker_legend": _parse_marker_legend_directive,
         "marker": _parse_marker_directive,
     }

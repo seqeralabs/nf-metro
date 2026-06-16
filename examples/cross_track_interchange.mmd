@@ -1,0 +1,34 @@
+%%metro title: Cross-track interchange
+%%metro style: dark
+%%metro legend: br
+%%metro line: tumor | Tumor | #d62728
+%%metro line: normal | Normal | #0570b0
+
+%% MarkDuplicates is one tool both lanes run, but tumor and normal never merge.
+%% Declaring it an interchange keeps each lane on its own track and renders the
+%% shared step as a single cross-track connector instead of pinching the lines
+%% together to a point.  (Auto-layout infers this same interchange even without
+%% the directive, since the lanes are fully parallel; the directive pins it.)
+%%metro interchange: markduplicates | tumor | normal
+
+graph LR
+    subgraph calling [Somatic variant calling]
+        t_in[ ]
+        n_in[ ]
+        t_align[BWA-MEM tumor]
+        n_align[BWA-MEM normal]
+        markduplicates[MarkDuplicates]
+        t_call[Mutect2]
+        n_call[GATK HC]
+        t_out[ ]
+        n_out[ ]
+
+        t_in -->|tumor| t_align
+        n_in -->|normal| n_align
+        t_align -->|tumor| markduplicates
+        n_align -->|normal| markduplicates
+        markduplicates -->|tumor| t_call
+        markduplicates -->|normal| n_call
+        t_call -->|tumor| t_out
+        n_call -->|normal| n_out
+    end

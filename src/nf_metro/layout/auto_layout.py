@@ -9,12 +9,80 @@ Preserves any values explicitly set by %%metro directives.
 
 from __future__ import annotations
 
-__all__ = ["infer_section_layout", "detect_serpentine_runs"]
+__all__ = ["infer_section_layout", "infer_interchanges", "detect_serpentine_runs"]
 
 from collections import defaultdict, deque
 from collections.abc import Set as AbstractSet
 
-from nf_metro.parser.model import MetroGraph, PortSide, SectionDAG
+from nf_metro.parser.model import Interchange, MetroGraph, PortSide, SectionDAG
+
+
+def infer_interchanges(graph: MetroGraph) -> None:
+    """Auto-detect cross-track interchanges, appending to ``graph.interchanges``.
+
+    A station qualifies only when its lines are fully *parallel lanes*: every
+    line through it has exactly one predecessor and one successor, and the
+    predecessors are all distinct and the successors are all distinct.  Then the
+    lines never share a track around the station, so converging them onto its
+    single point is pure visual cost the interchange removes -- each line keeps
+    its own rail straight through.
+
+    The distinctness test deliberately abstains when any two lines share a
+    neighbour (e.g. two callers that both feed one merge): there the convergence
+    is doing real work and an interchange would only defer it, so those want the
+    explicit ``%%metro interchange:`` directive (or nothing).  Author-written
+    interchanges are left untouched.
+    """
+    explicit = {ic.node_id for ic in graph.interchanges}
+    for sid, st in list(graph.stations.items()):
+        if st.is_port or st.interchange_id is not None or st.is_terminus:
+            continue
+        if sid in explicit:
+            continue
+        # Rail sections already lay every line on its own rail and draw shared
+        # stops as interchanges, so one here is redundant and would clash with
+        # rail rendering/layout.
+        if graph.is_rail_section(st.section_id):
+            continue
+        if not _is_parallel_lane_hub(graph, sid):
+            continue
+        lines = graph.station_lines(sid)
+        ordered = [lid for lid in graph.lines if lid in lines]
+        graph.interchanges.append(
+            Interchange(node_id=sid, rails=[[lid] for lid in ordered], inferred=True)
+        )
+
+
+def _is_parallel_lane_hub(graph: MetroGraph, sid: str) -> bool:
+    """True when every line through *sid* is its own parallel lane.
+
+    Each line must enter from one predecessor and leave to one successor, all
+    in *sid*'s section (no port = no boundary crossing), with the predecessors
+    mutually distinct and the successors mutually distinct.  Two lines sharing a
+    neighbour means they genuinely converge here, so this returns False.
+    """
+    lines = graph.station_lines(sid)
+    if len(lines) < 2:
+        return False
+    section_id = graph.stations[sid].section_id
+    ins = graph.edges_to(sid)
+    outs = graph.edges_from(sid)
+    preds: set[str] = set()
+    succs: set[str] = set()
+    for lid in lines:
+        li = [e for e in ins if e.line_id == lid]
+        lo = [e for e in outs if e.line_id == lid]
+        if len(li) != 1 or len(lo) != 1:
+            return False
+        pst = graph.stations.get(li[0].source)
+        sst = graph.stations.get(lo[0].target)
+        if pst is None or sst is None or pst.is_port or sst.is_port:
+            return False
+        if pst.section_id != section_id or sst.section_id != section_id:
+            return False
+        preds.add(pst.id)
+        succs.add(sst.id)
+    return len(preds) == len(lines) and len(succs) == len(lines)
 
 
 def infer_section_layout(graph: MetroGraph, max_station_columns: int = 15) -> None:
