@@ -2010,31 +2010,6 @@ def _route_inter_row_gap_corridor(
     )
 
 
-def _intervening_cofeeder(
-    ctx: _RoutingCtx,
-    entry_port: Station,
-    src_col: int | None,
-    src_row: int | None,
-    ep_row: int | None,
-) -> bool:
-    """True if a section in the source's column, in a row between the source
-    and the entry port, also feeds *entry_port*.
-
-    Such a co-feeder reaches the shared LEFT entry port by wrapping down its
-    own right edge (the same channel an around-below descent is cleared into),
-    so the descent must step clear of it to avoid a same-line parallel run.
-    """
-    if src_col is None or src_row is None or ep_row is None:
-        return False
-    for fed in ctx.graph.edges_to(entry_port.id):
-        f_col, f_row = _resolve_section_colrow(
-            ctx.graph, ctx.graph.stations[fed.source]
-        )
-        if f_col == src_col and f_row is not None and src_row < f_row < ep_row:
-            return True
-    return False
-
-
 def _route_around_section_below(
     edge: Edge,
     src: Station,
@@ -2114,7 +2089,7 @@ def _route_around_section_below(
     # Bypass Y below all sections in the column range so the route
     # clears every intervening section (cross_row=True).
     src_col, src_row = _resolve_section_colrow(ctx.graph, src)
-    ep_col, ep_row = _resolve_section_colrow(ctx.graph, entry_port)
+    ep_col = _resolve_section_col(ctx.graph, entry_port)
     # Fallbacks if a column can't be resolved (degenerate cases).
     bc_src_col = src_col if src_col is not None else 0
     bc_tgt_col = ep_col if ep_col is not None else bc_src_col
@@ -2182,33 +2157,43 @@ def _route_around_section_below(
     # V1 clearance from the source section's right edge, mirroring
     # _route_left_entry_wrap.  See comments there for the derivation.
     corner_x = _v1_corner_x(ctx, src, sx, corner_x)
-    # The V1 channel descends from the source row to the bypass bottom; a
-    # section stacked below the source in its column and wider than the
-    # source (its right edge past the V1 channel) would otherwise be
-    # pierced.  Nudge the bundle's base channel right, clear of every
-    # section the descent crosses, then re-apply the per-line stagger so
-    # the bundle stays separated rather than collapsing onto one descent.
+    # The V1 channel descends from the source row to the bypass bottom.  When
+    # it would cut THROUGH a section stacked below the source (one wider than
+    # the source, so its box spans the channel), divert the bundle's base
+    # channel clear of it, then re-apply the per-line stagger.  A channel that
+    # merely runs near a box edge is left untouched.  The clearance steps past
+    # the box far enough to also miss any LEFT-entry wrap hugging that
+    # section's right edge (box_right + curve_radius), so a line the descent
+    # shares with such a wrap reads as a distinct corridor, not two
+    # near-parallel tracks.
     base_corner_x = corner_x - delta
-    cleared_base = _clear_channel_x_in_band(
-        ctx.graph,
-        base_corner_x,
-        sy,
-        by_base,
-        SECTION_ROUTE_CLEARANCE,
-        {src.section_id} if src.section_id else set[str](),
-        bound_left=base_corner_x,
+    exclude = {src.section_id} if src.section_id else set[str]()
+    pierces_section = (
+        _clear_channel_x_in_band(
+            ctx.graph,
+            base_corner_x,
+            sy,
+            by_base,
+            0.0,
+            exclude,
+            bound_left=base_corner_x,
+        )
+        > base_corner_x + COORD_TOLERANCE
     )
-    if cleared_base > base_corner_x + COORD_TOLERANCE and _intervening_cofeeder(
-        ctx, entry_port, src_col, src_row, ep_row
-    ):
-        # The descent was pushed past an intervening section that also feeds
-        # this entry port - it fields its own LEFT-entry wrap hugging the
-        # same right edge (at box_right + curve_radius).  Step the descent a
-        # further EDGE_TO_BUNDLE_CLEARANCE clear so a line shared with that
-        # wrap reads as a distinct corridor rather than two near-parallel
-        # tracks.  When no such co-feeder exists the box clearance suffices.
-        cleared_base += ctx.curve_radius + EDGE_TO_BUNDLE_CLEARANCE
-    corner_x = cleared_base + delta
+    if pierces_section:
+        clearance = (
+            SECTION_ROUTE_CLEARANCE + ctx.curve_radius + EDGE_TO_BUNDLE_CLEARANCE
+        )
+        cleared_base = _clear_channel_x_in_band(
+            ctx.graph,
+            base_corner_x,
+            sy,
+            by_base,
+            clearance,
+            exclude,
+            bound_left=base_corner_x,
+        )
+        corner_x = cleared_base + delta
     # Pin lx at sx so the route starts at the source station; the source
     # clearance bump manifests as a longer H lead-in before C1.  See the
     # analogous comment in _route_left_entry_wrap.
