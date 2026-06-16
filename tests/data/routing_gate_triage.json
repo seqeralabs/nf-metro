@@ -723,10 +723,6 @@
     "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
     "status": "needs-review"
   },
-  "offsets.py::if e.line_id != lid:::#1": {
-    "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
-    "status": "needs-review"
-  },
   "offsets.py::if edge.source in outbound:::#1": {
     "note": "outbound is pre-built from graph.stations keys identically to inbound. All edge sources are registered stations by construction (regular nodes, ports, junctions), so edge.source is always found in outbound and the False branch (56->53) is never taken.",
     "status": "defensive"
@@ -1009,6 +1005,10 @@
   },
   "tb_handlers.py::if upstream_st is not None:::#1": {
     "note": "Reachable-but-defective (#688 pattern, filed as #740). The perp-entry merge (_route_perp_entry_merged) fires only when a cross-column producer feeds an LR section's TOP/BOTTOM entry port, which makes _align_tb_entry_port drag the port off the section boundary (a _guard_ports_on_boundaries failure). No robust clean topology reaches it; not fixtured until #740 is fixed.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if perp_entry:::#1": {
+    "note": "The perpendicular-entry branch of the up-and-over handler (cross-column perp exit -> perp entry). No corpus fixture exercises it: that case is deferred to #775 (bundle-order flip at the entry drop, trunk left-space, diverging-exit reorder). The branch prevents a crash for the topology but its render is not yet fixtured; the side-entry branch is exercised by lr_perp_top/bottom_exit_side_entry.",
     "status": "needs-review"
   }
 }

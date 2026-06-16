@@ -385,6 +385,17 @@ def _find_upstream_for_merge(
             and u.section_id in ctx.tb_sections
         ):
             continue
+        # Don't merge with a perpendicular exit on a horizontal-flow section:
+        # its Y sits on the source section's boundary edge, so a merged
+        # horizontal run at that Y would graze the section.  Such an exit
+        # routes up and over the section on its own inter-section leg.
+        if (
+            u_port
+            and not u_port.is_entry
+            and u_port.side in (PortSide.TOP, PortSide.BOTTOM)
+            and u.section_id not in ctx.tb_sections
+        ):
+            continue
         # Only merge when upstream is at the same Y as the entry port
         if abs(u.y - src.y) > COORD_TOLERANCE:
             continue
