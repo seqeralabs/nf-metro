@@ -1442,16 +1442,203 @@ def check_stacked_elbow_clearance(
     return violations
 
 
+# ---------------------------------------------------------------------------
+# Bundle-corner concentricity
+# ---------------------------------------------------------------------------
+
+# Arc-centre spread above this reads as a visible pinch/gap through the bend.
+_CONCENTRIC_CENTRE_TOLERANCE = 1.0
+# A corner counts as wholesale-translated only when both flanking legs are
+# offset from the bundle-mate by the same amount; a difference above this means
+# one leg is pinned (a transition corner), where non-concentric is intended.
+_WHOLESALE_LEG_TOLERANCE = 1.0
+
+
+@dataclass(frozen=True)
+class NonConcentricCornerViolation:
+    """A wholesale-translated bundle corner whose arcs don't share a centre.
+
+    At a corner where the whole bend translates per line (both flanking legs
+    offset by the same perpendicular distance), the bundle-mates' arcs must
+    share a common centre so the inter-line gap stays constant through the
+    bend.  ``centre_spread`` is the distance between the two arc centres;
+    anything above tolerance pinches or gaps the bundle mid-curve.
+    """
+
+    edge_source: str
+    edge_target: str
+    line_a: str
+    line_b: str
+    corner_index: int
+    corner_xy: tuple[float, float]
+    centre_spread: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        cx, cy = self.corner_xy
+        return (
+            f"non-concentric bundle corner {self.edge_source!r}->"
+            f"{self.edge_target!r} at ({cx:.1f},{cy:.1f}) "
+            f"(corner #{self.corner_index}): lines {self.line_a!r} and "
+            f"{self.line_b!r} translate the whole corner together yet their "
+            f"arc centres are {self.centre_spread:.1f}px apart "
+            f"(> {_CONCENTRIC_CENTRE_TOLERANCE:.1f}px) - the bundle pinches "
+            f"through the bend.  Size the corner via "
+            f"concentric_corner_radius(_at), not a hand-signed radius"
+        )
+
+
+def _arc_centre(
+    corner: tuple[float, float],
+    radius: float,
+    turn_in: tuple[float, float],
+    turn_out: tuple[float, float],
+) -> tuple[float, float]:
+    """Centre of the rounded-corner arc: ``corner + radius * (turn_out - turn_in)``."""
+    ux = turn_out[0] - turn_in[0]
+    uy = turn_out[1] - turn_in[1]
+    return (corner[0] + radius * ux, corner[1] + radius * uy)
+
+
+def _resolved_corner_radii(
+    rp: RoutedPath, pts: list[tuple[float, float]]
+) -> list[float]:
+    """Effective (segment-clamped) radius at each corner of *pts*."""
+    from nf_metro.layout.routing.corners import resolve_curve_radii
+
+    return resolve_curve_radii(pts, rp.curve_radii)
+
+
+def check_concentric_bundle_corners(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[NonConcentricCornerViolation]:
+    """Return wholesale-translated bundle corners whose arcs aren't concentric.
+
+    The correctness check the corner-radius *source* ratchet
+    (``tests/test_corner_radius_ratchet.py``) explicitly cannot perform: a
+    radius traceable to an approved helper can nest non-concentrically when the
+    caller hand-picks the wrong sign.
+
+    Routes are grouped by ``(edge.source, edge.target)``.  For each bundled
+    pair sharing a waypoint count, every interior corner is classified from the
+    *final* offset-applied geometry: a corner is **wholesale-translated** (must
+    be concentric) when the two flanking legs are each offset from the mate by
+    the same perpendicular distance, and a **transition** corner (skipped) when
+    one leg is pinned.  At a wholesale corner the two arc centres
+    (``corner + radius * (turn_out - turn_in)``, using the segment-clamped
+    radius) must coincide within tolerance; a larger spread is a visible pinch.
+    """
+    bundles: dict[tuple[str, str], list[RoutedPath]] = defaultdict(list)
+    for r in routes:
+        bundles[(r.edge.source, r.edge.target)].append(r)
+
+    violations: list[NonConcentricCornerViolation] = []
+    for (src_id, tgt_id), bundle in bundles.items():
+        if len(bundle) < 2:
+            continue
+        rendered = [(r, _route_render_points(r, offsets)) for r in bundle]
+        radii = {id(r): _resolved_corner_radii(r, pts) for r, pts in rendered}
+        for ai in range(len(rendered)):
+            ra, pa = rendered[ai]
+            for bi in range(ai + 1, len(rendered)):
+                rb, pb = rendered[bi]
+                if len(pa) != len(pb) or len(pa) < 3:
+                    continue
+                v = _pair_corner_violation(
+                    src_id, tgt_id, ra, pa, radii[id(ra)], rb, pb, radii[id(rb)]
+                )
+                if v is not None:
+                    violations.append(v)
+    return violations
+
+
+def _pair_corner_violation(
+    src_id: str,
+    tgt_id: str,
+    ra: RoutedPath,
+    pa: list[tuple[float, float]],
+    radii_a: list[float],
+    rb: RoutedPath,
+    pb: list[tuple[float, float]],
+    radii_b: list[float],
+) -> NonConcentricCornerViolation | None:
+    """First non-concentric wholesale corner between two bundled routes."""
+    for k in range(1, len(pa) - 1):
+        turn_in = _segment_unit(pa[k - 1], pa[k])
+        turn_out = _segment_unit(pa[k], pa[k + 1])
+        if turn_in is None or turn_out is None:
+            continue
+        # Real 90-degree turn only: a straight pass-through has turn_out == turn_in
+        # so (turn_out - turn_in) is zero and the centre test is degenerate.
+        if (
+            abs(turn_in[0] * turn_out[0] + turn_in[1] * turn_out[1])
+            > COORD_TOLERANCE_FINE
+        ):
+            continue
+        # Corner displacement of B from A, split into the offset of the
+        # incoming leg (component along turn_out) and the outgoing leg
+        # (component along turn_in).
+        vx = pb[k][0] - pa[k][0]
+        vy = pb[k][1] - pa[k][1]
+        d_in_leg = abs(vx * turn_out[0] + vy * turn_out[1])
+        d_out_leg = abs(vx * turn_in[0] + vy * turn_in[1])
+        if max(d_in_leg, d_out_leg) <= _WHOLESALE_LEG_TOLERANCE:
+            continue  # coincident corner: no bundle offset to nest
+        if abs(d_in_leg - d_out_leg) > _WHOLESALE_LEG_TOLERANCE:
+            continue  # transition corner: one leg pinned, non-concentric by design
+        if k - 1 >= len(radii_a) or k - 1 >= len(radii_b):
+            continue
+        ca = _arc_centre(pa[k], radii_a[k - 1], turn_in, turn_out)
+        cb = _arc_centre(pb[k], radii_b[k - 1], turn_in, turn_out)
+        spread = ((ca[0] - cb[0]) ** 2 + (ca[1] - cb[1]) ** 2) ** 0.5
+        if spread > _CONCENTRIC_CENTRE_TOLERANCE:
+            return NonConcentricCornerViolation(
+                edge_source=src_id,
+                edge_target=tgt_id,
+                line_a=ra.line_id,
+                line_b=rb.line_id,
+                corner_index=k,
+                corner_xy=pa[k],
+                centre_spread=spread,
+            )
+    return None
+
+
+def _segment_unit(
+    p1: tuple[float, float], p2: tuple[float, float]
+) -> tuple[float, float] | None:
+    """Unit travel vector for an axis-aligned segment.
+
+    Returns ``None`` for a sub-pixel segment or a diagonal one (both axes
+    significant): concentric nesting is defined only for the orthogonal
+    horizontal/vertical legs of a 90-degree bend, so a diagonal leg carries no
+    corner to test.
+    """
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    if abs(dx) < _MIN_SEGMENT_LENGTH and abs(dy) < _MIN_SEGMENT_LENGTH:
+        return None
+    if min(abs(dx), abs(dy)) > COORD_TOLERANCE:
+        return None  # diagonal: not an orthogonal corner leg
+    if abs(dx) >= abs(dy):
+        return (1.0 if dx > 0 else -1.0, 0.0)
+    return (0.0, 1.0 if dy > 0 else -1.0)
+
+
 __all__ = [
     "BundleOrderViolation",
     "CollinearOverlapViolation",
     "FanoutTailGap",
     "MergePortApproachViolation",
+    "NonConcentricCornerViolation",
     "PartialBranchGapViolation",
     "SameLineParallelRun",
     "Side",
     "StackedElbowGraze",
     "check_bundle_order_preserved",
+    "check_concentric_bundle_corners",
     "check_fanout_tail_join",
     "check_merge_port_approach_side",
     "check_no_collinear_distinct_lines",

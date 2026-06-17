@@ -50,6 +50,8 @@ from nf_metro.layout.routing.context import (
 )
 from nf_metro.layout.routing.corners import (
     bypass_radii,
+    concentric_corner_radius,
+    concentric_corner_radius_at,
     corner_radius,
     l_shape_radii,
     reference_anchored_radius,
@@ -440,15 +442,18 @@ def _route_bottom_exit_junction(
         x_off = ((n - 1) / 2 - i) * ctx.offset_step
 
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-    r = reference_anchored_radius(x_off, ctx.curve_radius)
+    points = [
+        (src.x + x_off, src.y),
+        (src.x + x_off, tgt.y + tgt_off),
+        (tgt.x, tgt.y + tgt_off),
+    ]
+    r = concentric_corner_radius_at(
+        points[0], points[1], points[2], x_off, ctx.curve_radius
+    )
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
-        points=[
-            (src.x + x_off, src.y),
-            (src.x + x_off, tgt.y + tgt_off),
-            (tgt.x, tgt.y + tgt_off),
-        ],
+        points=points,
         is_inter_section=True,
         curve_radii=[r],
         offsets_applied=True,
@@ -1028,26 +1033,28 @@ def _route_l_shape(
 
     # When fan is active, vx == sx (corner at junction).  The first
     # segment (sx, sy) -> (vx, sy) is zero-length, which prevents the
-    # renderer from drawing the corner curve.  Extend pts[0] back by
-    # curve_radius LEFT of the junction so the first corner gets a
-    # standard CURVE_RADIUS arc with horizontal lead-in (overlapping
-    # the upstream exit_port->junction segment's last curve_radius
-    # pixels, fine since they share the same line colour).
+    # renderer from drawing the corner curve.  Extend pts[0] back by the
+    # lead-in corner's own radius LEFT of the junction so the first corner
+    # gets its full arc with a horizontal lead-in (overlapping the upstream
+    # exit_port->junction segment, fine since they share the line colour).
+    # The lead-in corner sits at the fanned vertical X (vx == mid_x + delta),
+    # so it must take the concentric ``r_first`` for this fan position; a flat
+    # base radius would pinch the bundle through the bend.
     if fan is not None:
         src_off = _get_offset(ctx, edge.source, edge.line_id)
         tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-        r_lead = reference_anchored_radius(0.0, ctx.curve_radius)
+        lead_len = max(r_first, ctx.curve_radius)
         return RoutedPath(
             edge=edge,
             line_id=edge.line_id,
             points=[
-                (vx - r_lead, sy + src_off),
+                (vx - lead_len, sy + src_off),
                 (vx, sy + src_off),
                 (vx, ty + tgt_off),
                 (tx, ty + tgt_off),
             ],
             is_inter_section=True,
-            curve_radii=[r_lead, r_second],
+            curve_radii=[r_first, r_second],
             offsets_applied=True,
         )
 
@@ -1217,8 +1224,8 @@ def _route_perp_exit_over(
             (descent_x, ty),
         ]
         radii = [
-            reference_anchored_radius(-d, base),  # rise -> over
-            reference_anchored_radius(-d, base),  # over -> descend
+            concentric_corner_radius_at(points[0], points[1], points[2], d, base),
+            concentric_corner_radius_at(points[1], points[2], points[3], -d, base),
         ]
     else:
         # Side entry: descend in the inter-column gap to the consumer's row and
@@ -1237,9 +1244,9 @@ def _route_perp_exit_over(
             (tx, final_y),
         ]
         radii = [
-            reference_anchored_radius(-d, base),  # rise -> over
-            reference_anchored_radius(-d, base),  # over -> descend
-            reference_anchored_radius(d, base),  # descend -> turn into target
+            concentric_corner_radius_at(points[0], points[1], points[2], d, base),
+            concentric_corner_radius_at(points[1], points[2], points[3], -d, base),
+            concentric_corner_radius_at(points[2], points[3], points[4], -d, base),
         ]
 
     return RoutedPath(
@@ -1478,13 +1485,14 @@ def _route_top_entry_offset_bundle(
     drop2_x = tx - offset
 
     # The reference line drops straight into the port; offset lines step down,
-    # across and down, sitting inside the lead-in bend (radius base-offset for
-    # an East lead, base+offset for a West lead), and on opposite sides of the
-    # two trunk bends.  Each radius is the reference-anchored concentric form
-    # base + signed_offset; the trunk-bend signs flip for the double-back.
-    r1 = reference_anchored_radius(-lead_sign * offset, base_radius)
-    r2 = reference_anchored_radius(bsign * offset, base_radius)
-    r3 = reference_anchored_radius(-bsign * offset, base_radius)
+    # across and down, sitting inside the lead-in bend and on opposite sides of
+    # the two trunk bends.  Each line's legs are a constant ``offset`` from the
+    # reference, so each bend takes the concentric radius for that displacement;
+    # the turn vectors (lead-in ``lead_sign``, trunk ``bsign``, drops downward)
+    # carry the sign, so the double-back's flipped trunk is handled by geometry.
+    r1 = concentric_corner_radius((lead_sign, 0.0), (0.0, 1.0), -offset, base_radius)
+    r2 = concentric_corner_radius((0.0, 1.0), (bsign, 0.0), -offset, base_radius)
+    r3 = concentric_corner_radius((bsign, 0.0), (0.0, 1.0), -offset, base_radius)
 
     if land_x is not None:
         # Straight drop onto the trunk X; no converging port jog.

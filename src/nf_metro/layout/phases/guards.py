@@ -2664,6 +2664,30 @@ def _guard_no_same_line_parallel_descents(
     )
 
 
+def _guard_concentric_bundle_corners(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: wholesale-translated bundle corners share an arc centre.
+
+    Wraps :func:`check_concentric_bundle_corners`, the correctness check the
+    corner-radius source ratchet (``test_corner_radius_ratchet``) cannot do:
+    a radius can trace to an approved helper yet nest non-concentrically when
+    the caller hand-picks the wrong sign.  A bundle turning a 90-degree corner
+    as a unit must keep its arcs concentric or it pinches through the bend.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_concentric_bundle_corners,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_concentric_bundle_corners, offsets, routes
+    )
+
+
 def _guard_no_split_same_line_fanout_descents(
     graph: MetroGraph,
     phase: str,
