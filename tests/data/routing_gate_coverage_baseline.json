@@ -103,7 +103,6 @@
   "inter_section_handlers.py::if js and js.is_port:::#1",
   "inter_section_handlers.py::if mapped_ep != ep_id:::#1",
   "inter_section_handlers.py::if n > 1 and (n - 1) * ctx.offset_step <= r_lead - ctx.offset_step:::#1",
-  "inter_section_handlers.py::if not line_ids:::#1",
   "inter_section_handlers.py::if other_src is None:::#1",
   "inter_section_handlers.py::if port.side == PortSide.LEFT:::#1",
   "inter_section_handlers.py::if port.side == PortSide.RIGHT:::#1",

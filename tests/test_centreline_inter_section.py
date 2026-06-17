@@ -51,9 +51,7 @@ def _route(path: Path):
     return graph, offsets, routes
 
 
-@pytest.mark.parametrize(
-    "path", MIGRATED_SHAPE_FIXTURES, ids=lambda p: p.stem
-)
+@pytest.mark.parametrize("path", MIGRATED_SHAPE_FIXTURES, ids=lambda p: p.stem)
 def test_inter_section_bundles_are_concentric_and_unflipped(path: Path) -> None:
     graph, offsets, routes = _route(path)
     assert check_concentric_bundle_corners(graph, routes, offsets) == []
@@ -62,9 +60,7 @@ def test_inter_section_bundles_are_concentric_and_unflipped(path: Path) -> None:
     assert_render_curve_invariants(graph, routes, offsets)
 
 
-@pytest.mark.parametrize(
-    "path", MIGRATED_SHAPE_FIXTURES, ids=lambda p: p.stem
-)
+@pytest.mark.parametrize("path", MIGRATED_SHAPE_FIXTURES, ids=lambda p: p.stem)
 def test_multi_line_inter_section_bundles_are_offset_baked(path: Path) -> None:
     """A multi-line inter-section bundle routed via a centreline bakes offsets.
 

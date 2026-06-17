@@ -25,9 +25,7 @@ _Vec = tuple[float, float]
 _Member = tuple[Edge, str, float]
 
 
-def gather_bundle(
-    ctx: _RoutingCtx, edge: Edge
-) -> tuple[list[_Member], float, float]:
+def gather_bundle(ctx: _RoutingCtx, edge: Edge) -> tuple[list[_Member], float, float]:
     """Collect the bundle of lines co-travelling ``edge.source -> edge.target``.
 
     Returns ``(members, src_center, tgt_center)``.  ``members`` is one
@@ -48,9 +46,7 @@ def gather_bundle(
     tgt_offs = {lid: _get_offset(ctx, edge.target, lid) for lid in line_ids}
     src_center = sum(src_offs.values()) / len(src_offs)
     tgt_center = sum(tgt_offs.values()) / len(tgt_offs)
-    members = [
-        (edge_by_line[lid], lid, src_offs[lid] - src_center) for lid in line_ids
-    ]
+    members = [(edge_by_line[lid], lid, src_offs[lid] - src_center) for lid in line_ids]
     return members, src_center, tgt_center
 
 

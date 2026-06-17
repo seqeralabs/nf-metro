@@ -15,7 +15,6 @@ from nf_metro.layout.constants import (
     MERGE_ROUTE_MARGIN,
     SECTION_ROUTE_CLEARANCE,
 )
-from nf_metro.layout.routing.bundle import build_concentric_bundle
 from nf_metro.layout.routing.centrelines import (
     gather_bundle,
     route_along,
@@ -457,9 +456,7 @@ def _route_bottom_exit_junction(
         return ((bn - 1) / 2 - bi) * ctx.offset_step
 
     members, _, tgt_center = gather_bundle(ctx, edge)
-    exit_offs = [
-        exit_x_offset(line_id) for _edge, line_id, _offset in members
-    ]
+    exit_offs = [exit_x_offset(line_id) for _edge, line_id, _offset in members]
     mean_exit_x = sum(exit_offs) / len(exit_offs)
     vx = src.x + mean_exit_x
     hy = tgt.y + tgt_center
@@ -996,8 +993,8 @@ def _route_l_shape_fan(
     The combined fan-out at the first corner (``fan``) differs from the
     sub-bundle that turns the second corner (``i, n``): bypass siblings join the
     first corner but continue past instead of turning.  A bundle with two
-    groupings is not a single rigid offset, so it stays hand-built until the
-    bypass family migrates (#795).
+    distinct fan groupings is not a single rigid offset of one centreline, so it
+    is built per-line rather than through ``build_concentric_bundle``.
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
@@ -2359,14 +2356,9 @@ def _route_right_entry_over_top(
     the loop cannot flip and every corner is concentric by construction.
     """
     graph = ctx.graph
-    members_edges = [e for e in graph.edges_to(edge.target) if e.source == edge.source]
-    line_ids = list(dict.fromkeys(e.line_id for e in members_edges))
-    if not line_ids:
-        return None
-    edge_by_line = {e.line_id: e for e in members_edges}
-
-    src_offs = {lid: _get_offset(ctx, edge.source, lid) for lid in line_ids}
-    mean = sum(src_offs.values()) / len(src_offs)
+    # A U-turn keeps the bundle centred on its source mean end-to-end (the
+    # descent's reversal is matched by the section's reversed internal order).
+    members, src_center, _ = gather_bundle(ctx, edge)
 
     sx, sy = src.x, src.y
     ex, ey = tgt.x, tgt.y
@@ -2385,8 +2377,8 @@ def _route_right_entry_over_top(
     descent_x = (
         section_right + ctx.curve_radius + ctx.offset_step + SECTION_ROUTE_CLEARANCE
     )
-    mid_sy = sy + mean
-    mid_ey = ey + mean
+    mid_sy = sy + src_center
+    mid_ey = ey + src_center
     centerline = [
         (sx, mid_sy),
         (lead_x, mid_sy),
@@ -2395,9 +2387,7 @@ def _route_right_entry_over_top(
         (descent_x, mid_ey),
         (ex, mid_ey),
     ]
-    members = [(edge_by_line[lid], lid, src_offs[lid] - mean) for lid in line_ids]
-    routes = build_concentric_bundle(members, centerline, base_radius=ctx.curve_radius)
-    return next((r for r in routes if r.line_id == edge.line_id), None)
+    return route_along(edge, members, centerline, base_radius=ctx.curve_radius)
 
 
 def _route_right_entry_wrap(
