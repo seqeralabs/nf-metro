@@ -39,6 +39,24 @@ _PARALLEL = (
 )
 
 
+# Three independent lanes through one node, for multi-line-per-rail tests.
+_THREE = (
+    "%%metro line: a | A | #d62728\n"
+    "%%metro line: b | B | #2db572\n"
+    "%%metro line: c | C | #0570b0\n"
+    "{directive}"
+    "graph LR\n"
+    "    subgraph s [S]\n"
+    "        a_in[ ]\n        b_in[ ]\n        c_in[ ]\n"
+    "        dedup[Dedup]\n"
+    "        a_out[ ]\n        b_out[ ]\n        c_out[ ]\n"
+    "        a_in -->|a| dedup\n        b_in -->|b| dedup\n        c_in -->|c| dedup\n"
+    "        dedup -->|a| a_out\n        dedup -->|b| b_out\n"
+    "        dedup -->|c| c_out\n"
+    "    end\n"
+)
+
+
 def _layout(src):
     g = parse_metro_mermaid(src)
     compute_layout(g)
@@ -137,6 +155,45 @@ def test_auto_detection_abstains_when_bar_would_span_a_third_lane():
     clearance rule must keep auto-detection from inferring it."""
     g = parse_metro_mermaid((EXAMPLES / "longread_variant_calling.mmd").read_text())
     assert "samtools_merge" not in {c.node_id for c in g.interchanges}
+
+
+def test_directive_bundles_multiple_lines_on_one_rail():
+    """A rail naming several lines becomes one sub-station carrying that bundle;
+    the other rail is its own member."""
+    g = _layout(_THREE.format(directive="%%metro interchange: dedup | a,b | c\n"))
+    ic = next(c for c in g.interchanges if c.node_id == "dedup")
+    assert len(ic.member_ids) == 2
+    members = {m: set(g.station_lines(m)) for m in ic.member_ids}
+    assert members["dedup"] == {"a", "b"}
+    assert set().union(*members.values()) == {"a", "b", "c"}
+    # One knob per (member, line) pair, so all three lines are knobbed.
+    svg = render_svg(g, THEMES["nfcore"])
+    assert svg.count('class="nf-metro-rail-knob"') >= 3
+
+
+def test_directive_skipped_when_under_two_live_rails():
+    """A directive whose rails resolve to fewer than two lines the node carries
+    is warned about and left unexpanded (the node renders normally)."""
+    src = _THREE.format(directive="%%metro interchange: dedup | a,b,c | missing\n")
+    with pytest.warns(UserWarning, match="fewer than two rails"):
+        g = parse_metro_mermaid(src)
+    assert g.stations["dedup"].interchange_id is None
+    assert all(not c.member_ids for c in g.interchanges)
+
+
+def test_marked_interchange_renders_as_a_tinted_interchange():
+    """A %%metro marker on the interchange node tints the glyph rather than
+    suppressing it; the connector renders and carries the marker fill."""
+    src = _PARALLEL.format(
+        directive=(
+            "%%metro interchange: dedup | tumor | normal\n"
+            "%%metro marker: dedup | square, #4CAF50\n"
+        )
+    )
+    g = _layout(src)
+    svg = render_svg(g, THEMES["nfcore"])
+    assert "nf-metro-rail-connector" in svg
+    assert "#4CAF50" in svg
 
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES, ids=lambda p: p.name)

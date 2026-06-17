@@ -1307,14 +1307,23 @@ def _render_interchange(
         for m in members
         for lid in graph.station_lines_ordered(m.id)
     ]
+    # A marker on the anchor tints the glyph and takes the light marker outline,
+    # mirroring a marked rail-mode interchange.
+    fill_override = _rail_marker_fill(members[0].marker, theme)
     _draw_interchange_glyph(
         d,
         members[0].x,
         knobs,
         theme,
         r,
-        interior_fill=theme.station_fill,
-        outline=theme.station_stroke,
+        interior_fill=fill_override
+        if fill_override is not None
+        else theme.station_fill,
+        outline=(
+            marker_stroke_color(theme)
+            if fill_override is not None
+            else theme.station_stroke
+        ),
         station_data=_station_data_attrs(graph, members[0]),
         data_station_id=ic.node_id,
     )
@@ -1421,9 +1430,10 @@ def _render_station_into(
 
     # Cross-track interchange: the whole glyph is drawn once, anchored on the
     # node the interchange kept (its id equals interchange_id); the other member
-    # sub-stations contribute knobs but draw nothing of their own.  A marked
-    # interchange node keeps falling through to its normal glyph.
-    if station.interchange_id is not None and station.marker is None:
+    # sub-stations contribute knobs but draw nothing of their own.  A marker on
+    # the anchor tints the glyph (like a rail-mode interchange) rather than
+    # suppressing it.
+    if station.interchange_id is not None:
         if station.id == station.interchange_id:
             ic = next(
                 (c for c in graph.interchanges if c.node_id == station.interchange_id),

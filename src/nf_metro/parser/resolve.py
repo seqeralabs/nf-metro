@@ -64,12 +64,13 @@ def _expand_interchanges(graph: MetroGraph) -> None:
     """Expand each ``%%metro interchange:`` node into one sub-station per rail.
 
     The named node becomes a column of co-located ordinary stations (one per
-    rail, top to bottom in declaration order); every edge touching the node is
-    repointed to the sub-station whose rail owns the edge's line.  From here on
-    the layout engine treats them as plain stations, so each line keeps its own
-    track through the step and only the renderer joins them into one connector
-    glyph.  An unknown node, a single rail, or a rail referencing no live line
-    is warned about and skipped.
+    rail that carries a live line, top to bottom in declaration order); every
+    edge touching the node is repointed to the sub-station whose rail owns the
+    edge's line.  From here on the layout engine treats them as plain stations,
+    so each line keeps its own track through the step and only the renderer
+    joins them into one connector glyph.  An unknown node, or a directive that
+    resolves to fewer than two rails actually carrying the node's lines, is
+    warned about and skipped.
     """
     # (node_id, line_id) -> the member sub-station that line's edges retarget to.
     moved: dict[tuple[str, str], str] = {}
@@ -81,31 +82,45 @@ def _expand_interchanges(graph: MetroGraph) -> None:
                 stacklevel=2,
             )
             continue
+        # Assign each of the node's lines to the first rail that names it; lines
+        # named in no rail (or only in rails that name lines the node lacks) fall
+        # onto the first surviving rail.  Rails that name no live line drop out.
         node_lines = set(graph.station_lines(ic.node_id))
         line_rail: dict[str, int] = {}
         for i, rail in enumerate(ic.rails):
             for lid in rail:
-                if lid in node_lines:
+                if lid in node_lines and lid not in line_rail:
                     line_rail[lid] = i
-        # A line through the node not named in any rail stays on the first rail
-        # so no edge is left dangling at the now-split node.
-        for lid in node_lines - set(line_rail):
-            line_rail[lid] = 0
-
-        member_ids: list[str] = [ic.node_id]
-        orig.interchange_id = ic.node_id
-        for i in range(1, len(ic.rails)):
-            sub = Station(
-                id=f"{ic.node_id}__rail{i}",
-                label="",
-                section_id=orig.section_id,
-                interchange_id=ic.node_id,
+        surviving = sorted(set(line_rail.values()))
+        if len(surviving) < 2:
+            warnings.warn(
+                f"interchange: node {ic.node_id!r} resolves to fewer than two "
+                "rails carrying its lines; ignoring",
+                stacklevel=2,
             )
-            graph.register_station(sub)
-            member_ids.append(sub.id)
+            continue
+        for lid in node_lines - set(line_rail):
+            line_rail[lid] = surviving[0]
+
+        rail_member: dict[int, str] = {}
+        member_ids: list[str] = []
+        for pos, rail_i in enumerate(surviving):
+            if pos == 0:
+                orig.interchange_id = ic.node_id
+                rail_member[rail_i] = ic.node_id
+            else:
+                sub = Station(
+                    id=f"{ic.node_id}__rail{rail_i}",
+                    label="",
+                    section_id=orig.section_id,
+                    interchange_id=ic.node_id,
+                )
+                graph.register_station(sub)
+                rail_member[rail_i] = sub.id
+            member_ids.append(rail_member[rail_i])
 
         for lid, rail_i in line_rail.items():
-            moved[(ic.node_id, lid)] = member_ids[rail_i]
+            moved[(ic.node_id, lid)] = rail_member[rail_i]
         ic.label = orig.label
         ic.member_ids = member_ids
 
