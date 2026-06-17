@@ -19,6 +19,7 @@ from nf_metro.layout.routing.centrelines import (
     gather_bundle,
     gather_tapered_bundle,
     route_along,
+    route_hvh_tapered,
     route_straight,
     route_tapered,
 )
@@ -261,15 +262,8 @@ def _route_inter_section(
             channel_x = sx + ctx.curve_radius + ctx.offset_step
         else:
             channel_x = sx - ctx.curve_radius - ctx.offset_step
-        members, src_center, tgt_center = gather_tapered_bundle(ctx, edge)
-        sy_c = sy + src_center
-        ty_c = ty + tgt_center
-        return route_tapered(
-            edge,
-            members,
-            [(sx, sy_c), (channel_x, sy_c), (channel_x, ty_c), (tx, ty_c)],
-            transition_leg=1,
-            base_radius=ctx.curve_radius,
+        return route_hvh_tapered(
+            ctx, edge, src, tgt, channel_x, base_radius=ctx.curve_radius
         )
 
     # RIGHT entry port with source to the LEFT: wrap the vertical
@@ -946,11 +940,9 @@ def _route_l_shape_plain(
     """L-shape for a self-contained bundle: centreline + tapering fan.
 
     One H -> V -> H centreline.  The source fan (an exit port / merge junction)
-    and the target entry trunk can have different spreads, so the bundle tapers:
-    ``route_tapered`` carries each line's source offset on the source-side leg
-    and its target offset on the channel and target-side legs, switching at the
-    first corner.  The two corner radii of any line sum to ``2 * base``, so a
-    vertical leg shorter than that shrinks the base to fit.
+    and the target entry trunk can have different spreads, so the bundle tapers
+    (each line lands on its own offset at both ends).  A vertical leg shorter
+    than its two corners shrinks the base radius to fit.
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
@@ -970,22 +962,15 @@ def _route_l_shape_plain(
         endpoint_port_xs(ctx.graph, edge),
     )
 
-    members, src_center, tgt_center = gather_tapered_bundle(ctx, edge)
-    sy_c = sy + src_center
-    ty_c = ty + tgt_center
-    centerline = [(sx, sy_c), (mid_x, sy_c), (mid_x, ty_c), (tx, ty_c)]
-
-    seg = abs(ty_c - sy_c)
-    base = ctx.curve_radius
-    if seg > 0 and 2 * base > seg:
-        base = seg / 2
-    return route_tapered(
+    return route_hvh_tapered(
+        ctx,
         edge,
-        members,
-        centerline,
-        transition_leg=1,
-        base_radius=base,
+        src,
+        tgt,
+        mid_x,
+        base_radius=ctx.curve_radius,
         min_radius=COORD_TOLERANCE,
+        fit_segment=True,
     )
 
 
@@ -1558,22 +1543,12 @@ def _route_left_exit_left_entry_drop(
     The channel ``vx`` is placed just left of the column's leftmost edge so
     the connector never re-enters either section's bbox.
     """
-    sx, sy = src.x, src.y
-    tx, ty = tgt.x, tgt.y
-
     src_col = _resolve_section_col(ctx.graph, src)
-    left_edge = col_left_edge(ctx.graph, src_col, default=min(sx, tx))
-    channel_x = min(left_edge, sx, tx) - ctx.curve_radius - ctx.offset_step
+    left_edge = col_left_edge(ctx.graph, src_col, default=min(src.x, tgt.x))
+    channel_x = min(left_edge, src.x, tgt.x) - ctx.curve_radius - ctx.offset_step
 
-    members, src_center, tgt_center = gather_tapered_bundle(ctx, edge)
-    sy_c = sy + src_center
-    ty_c = ty + tgt_center
-    return route_tapered(
-        edge,
-        members,
-        [(sx, sy_c), (channel_x, sy_c), (channel_x, ty_c), (tx, ty_c)],
-        transition_leg=1,
-        base_radius=ctx.curve_radius,
+    return route_hvh_tapered(
+        ctx, edge, src, tgt, channel_x, base_radius=ctx.curve_radius
     )
 
 

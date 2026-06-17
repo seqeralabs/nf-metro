@@ -173,10 +173,9 @@ def test_complex_multipath_taper_present() -> None:
 def test_tapering_lshape_preserves_both_spreads(fixture: str) -> None:
     """Each tapering L-shape enters/leaves at its true per-line spread.
 
-    A rigid bundle bakes the source spread onto the target endpoints, so the
-    rendered target endpoints span the source width rather than the trunk's.
-    After the taper migration the source endpoints span ``src_spread`` and the
-    target endpoints span ``tgt_spread``.
+    A rigid bundle would bake the source spread onto the target endpoints,
+    spanning the source width rather than the trunk's; a tapering bundle spans
+    ``src_spread`` at the source endpoints and ``tgt_spread`` at the target.
     """
     graph = parse_metro_mermaid((TOPO / f"{fixture}.mmd").read_text())
     compute_layout(graph)

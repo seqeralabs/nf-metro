@@ -22,7 +22,7 @@ from nf_metro.layout.routing.bundle import (
 )
 from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.layout.routing.context import _get_offset, _RoutingCtx
-from nf_metro.parser.model import Edge
+from nf_metro.parser.model import Edge, Station
 
 _Vec = tuple[float, float]
 _Member = tuple[Edge, str, float]
@@ -145,6 +145,42 @@ def route_tapered(
         normalize_exempt=True,
     )
     return next((r for r in routes if r.line_id == edge.line_id), None)
+
+
+def route_hvh_tapered(
+    ctx: _RoutingCtx,
+    edge: Edge,
+    src: Station,
+    tgt: Station,
+    channel_x: float,
+    *,
+    base_radius: float,
+    min_radius: float | None = None,
+    fit_segment: bool = False,
+) -> RoutedPath | None:
+    """Route a horizontal -> vertical -> horizontal bundle through *channel_x*.
+
+    The shared template for an inter-section L-shape: gather the co-travelling
+    bundle, lay its centreline out of the source port, down the channel at
+    *channel_x*, and into the target port, and taper each line to its own offset
+    at both ends (the vertical leg is the transition).  With *fit_segment* the
+    base radius shrinks to fit a vertical leg shorter than its two corners.
+    """
+    members, src_center, tgt_center = gather_tapered_bundle(ctx, edge)
+    sy_c = src.y + src_center
+    ty_c = tgt.y + tgt_center
+    if fit_segment:
+        seg = abs(ty_c - sy_c)
+        if seg > 0 and 2 * base_radius > seg:
+            base_radius = seg / 2
+    return route_tapered(
+        edge,
+        members,
+        [(src.x, sy_c), (channel_x, sy_c), (channel_x, ty_c), (tgt.x, ty_c)],
+        transition_leg=1,
+        base_radius=base_radius,
+        min_radius=min_radius,
+    )
 
 
 def route_straight(
