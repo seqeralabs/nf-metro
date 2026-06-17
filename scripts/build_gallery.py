@@ -56,6 +56,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "shared stations as interchanges.",
     ),
     (
+        "cross_track_interchange",
+        EXAMPLES_DIR,
+        "Demonstrates `%%metro interchange:`: parallel tumour/normal lanes share "
+        "one MarkDuplicates step without merging, drawn as a cross-track "
+        "interchange so each lane stays straight on its own track instead of "
+        "pinching together to a point. Auto-layout infers the same interchange "
+        "for fully-parallel lanes even without the directive.",
+    ),
+    (
         "rnaseq_auto",
         EXAMPLES_DIR,
         "Demonstrates fully auto-inferred layout: no `%%metro grid:` directives "
