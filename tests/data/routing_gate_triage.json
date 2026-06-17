@@ -343,14 +343,6 @@
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if fan is not None:::#5": {
-    "note": "_route_l_shape radius-shrink branch (r_first + r_second > seg): the fan-active arm rebuilds both corner radii from the shrunk base. Un-exercised because no corpus fan route's vertical segment is short enough to trip the shrink; reachability of the shrink+fan combination not yet established.",
-    "status": "needs-review"
-  },
-  "inter_section_handlers.py::if fan is not None:::#9": {
-    "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if gap1_base + (g1_n - 1) * ctx.offset_step > gap1_limit:::#1": {
     "note": "Reachable only via a defective render (bypass overflow clamp inverts bundle order); see #723.",
     "status": "needs-review"
@@ -986,5 +978,21 @@
   "tb_handlers.py::if diag_end > diag_start:::#1": {
     "note": "Descending-run mirror of the ascending collapse clamp (#1 of `if diag_end < diag_start:`): fires only when |run| < 2*MIN_STRAIGHT_EDGE (20px), but connected diagonal endpoints are always >= one grid pitch (40/60px) apart on the run axis. Unreachable degenerate-geometry guard.",
     "status": "defensive"
+  },
+  "inter_section_handlers.py::if r_first + r_second > seg and seg > 0:::#1": {
+    "note": "Fan L-shape radius-shrink arm: rebuilds both corner radii from a base shrunk to fit a short vertical leg. Un-exercised because no corpus fan route's vertical segment is short enough to trip it.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if fan is not None:::#6": {
+    "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
+    "status": "needs-review"
+  },
+  "normalize.py::if ca != cb:::#1": {
+    "note": "Trunk-restack channel-merge arm reached only when two co-column trunks carry distinct channel keys. Migrating the simple inter-section shapes onto baked-offset centrelines (build_concentric_bundle) shifted which routes this pass sees, leaving this arm un-exercised; render-diff confirms no visual change.",
+    "status": "needs-review"
+  },
+  "normalize.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
+    "note": "Degenerate single-Y trunk band in the riser-alignment pass. Left un-exercised after the simple inter-section shapes moved to baked-offset centrelines; render-diff confirms no visual change.",
+    "status": "needs-review"
   }
 }
