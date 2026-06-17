@@ -594,7 +594,7 @@ Auto-layout infers an interchange automatically wherever the lanes are *fully pa
 %%metro interchange: markduplicates | tumor | normal
 ```
 
-The lanes are listed one rail per pipe-group; commas bundle several lines onto the same rail. Auto-detection deliberately abstains when two lines share a predecessor or successor (e.g. two callers feeding one merge): there the convergence is doing real work, so it is left alone. Interchanges are skipped inside `rails` sections, which already lay every line on its own rail. The [cross_track_interchange](https://github.com/pinin4fjords/nf-metro/blob/main/examples/cross_track_interchange.mmd) example shows a shared MarkDuplicates step across parallel tumour/normal lanes.
+The lanes are listed one rail per pipe-group; commas bundle several lines onto the same rail. Auto-detection deliberately abstains when two lines share a predecessor or successor (e.g. two callers feeding one merge): there the convergence is doing real work, so it is left alone. It also abstains when another lane's rail would fall between the interchange's rails, since the connector bar would then cut across that lane's stations. Interchanges are skipped inside `rails` sections, which already lay every line on its own rail. The [cross_track_interchange](https://github.com/pinin4fjords/nf-metro/blob/main/examples/cross_track_interchange.mmd) example shows a shared MarkDuplicates step across parallel tumour/normal lanes.
 
 ### Section directives
 

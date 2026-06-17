@@ -8,12 +8,18 @@ a single connector glyph instead of pinching the lines to a point.
 
 from pathlib import Path
 
+import pytest
+
+from nf_metro.layout.constants import SAME_COORD_TOLERANCE
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import render_svg
 from nf_metro.themes import THEMES
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
+ALL_FIXTURES = sorted(EXAMPLES.glob("*.mmd")) + sorted(
+    (EXAMPLES / "topologies").glob("*.mmd")
+)
 
 # Two fully-parallel lanes (tumor/normal) sharing one step.
 _PARALLEL = (
@@ -123,3 +129,39 @@ def test_example_fixture_renders_with_inferred_and_explicit_agreeing():
     # Author-pinned and auto-inferred land the same interchange node.
     assert {c.node_id for c in g_explicit.interchanges} == {"markduplicates"}
     assert {c.node_id for c in g_auto.interchanges if c.inferred} == {"markduplicates"}
+
+
+def test_auto_detection_abstains_when_bar_would_span_a_third_lane():
+    """longread's samtools_merge carries ubam+bam, but the fastq lane's track
+    sits between them; a bridge there would draw its bar over cat_fastq.  The
+    clearance rule must keep auto-detection from inferring it."""
+    g = parse_metro_mermaid((EXAMPLES / "longread_variant_calling.mmd").read_text())
+    assert "samtools_merge" not in {c.node_id for c in g.interchanges}
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES, ids=lambda p: p.name)
+def test_interchange_bar_never_spans_a_non_member_station(fixture):
+    """An interchange connector bar runs between its top and bottom member
+    rails; no other station may sit within that span at the bar's column, or
+    the bar would visibly cut through that station's marker."""
+    g = parse_metro_mermaid(fixture.read_text())
+    compute_layout(g)
+    for ic in g.interchanges:
+        members = [g.stations[m] for m in ic.member_ids if m in g.stations]
+        if len(members) < 2:
+            continue
+        x = members[0].x
+        ys = [m.y for m in members]
+        lo, hi = min(ys), max(ys)
+        for s in g.stations.values():
+            if s.is_port or s.id in ic.member_ids:
+                continue
+            spans = (
+                abs(s.x - x) < SAME_COORD_TOLERANCE
+                and lo - SAME_COORD_TOLERANCE < s.y < hi + SAME_COORD_TOLERANCE
+            )
+            assert not spans, (
+                f"{fixture.name}: interchange {ic.node_id!r} bar (x={x:.0f}, "
+                f"y {lo:.0f}..{hi:.0f}) spans station {s.id!r} at "
+                f"({s.x:.0f}, {s.y:.0f})"
+            )

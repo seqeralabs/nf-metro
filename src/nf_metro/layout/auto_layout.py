@@ -46,6 +46,8 @@ def infer_interchanges(graph: MetroGraph) -> None:
             continue
         if not _is_parallel_lane_hub(graph, sid):
             continue
+        if not _rails_span_is_clear(graph, sid):
+            continue
         lines = graph.station_lines(sid)
         ordered = [lid for lid in graph.lines if lid in lines]
         graph.interchanges.append(
@@ -83,6 +85,30 @@ def _is_parallel_lane_hub(graph: MetroGraph, sid: str) -> bool:
         preds.add(pst.id)
         succs.add(sst.id)
     return len(preds) == len(lines) and len(succs) == len(lines)
+
+
+def _rails_span_is_clear(graph: MetroGraph, sid: str) -> bool:
+    """True when the interchange's rails would form a contiguous track block.
+
+    The connector bar spans from the topmost member rail to the bottommost, so
+    if a non-member line's rail falls between them its stations sit under the
+    bar (a station-as-elbow violation).  Track order follows line-definition
+    order within a section, so require the member lines to be a contiguous run
+    among the section's lines -- no other line interleaved.
+    """
+    section_id = graph.stations[sid].section_id
+    section = graph.sections.get(section_id) if section_id is not None else None
+    if section is None:
+        return True
+    present = {
+        lid
+        for mid in section.station_ids
+        if (m := graph.stations.get(mid)) is not None and not m.is_port
+        for lid in graph.station_lines(mid)
+    }
+    section_order = [lid for lid in graph.lines if lid in present]
+    member_idx = sorted(section_order.index(lid) for lid in graph.station_lines(sid))
+    return member_idx == list(range(member_idx[0], member_idx[-1] + 1))
 
 
 def infer_section_layout(graph: MetroGraph, max_station_columns: int = 15) -> None:
