@@ -60,7 +60,6 @@ from nf_metro.layout.routing.inter_section_handlers import (  # noqa: F401
     _route_right_entry_wrap,
     _route_tb_bottom_exit,
     _route_top_entry_l_shape,
-    _route_top_entry_offset_bundle,
     _v1_corner_x,
 )
 from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
