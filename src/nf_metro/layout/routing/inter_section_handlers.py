@@ -1198,11 +1198,6 @@ def _route_perp_exit_over(
     # (south of a TOP run, north of a BOTTOM run) and west on the descent, which
     # preserves bundle order through the rise/over/descend/turn-in sequence.
     corridor_y = cy_base + (d if is_top else -d)
-    radii = [
-        reference_anchored_radius(-d, base),  # rise -> over (and over -> descend)
-        reference_anchored_radius(-d, base),
-        reference_anchored_radius(d, base),  # descend -> turn into target
-    ]
 
     perp_entry = (
         tgt_port is not None
@@ -1210,10 +1205,21 @@ def _route_perp_exit_over(
         and tgt_port.side in (PortSide.TOP, PortSide.BOTTOM)
     )
     if perp_entry:
-        # Perpendicular entry: descend straight into the entry on the target
-        # trunk's X; the lines converge at the shared port.
+        # Perpendicular entry: descend straight on the target trunk's per-line
+        # X and stop there.  The matching entry drop continues from that same
+        # X, so ending the corridor short of the port centre keeps the two
+        # legs one continuous line instead of jogging onto the port marker.
         descent_x = tx - d
-        final_y = ty
+        points = [
+            (sx + d, sy),
+            (sx + d, corridor_y),
+            (descent_x, corridor_y),
+            (descent_x, ty),
+        ]
+        radii = [
+            reference_anchored_radius(-d, base),  # rise -> over
+            reference_anchored_radius(-d, base),  # over -> descend
+        ]
     else:
         # Side entry: descend in the inter-column gap to the consumer's row and
         # turn straight in, holding each line on the target section's per-line Y
@@ -1223,17 +1229,23 @@ def _route_perp_exit_over(
         tgt_col = tgt_sec.grid_col if tgt_sec is not None else src_col
         descent_x = column_gap_midpoint(graph, src_col, tgt_col, row) - d
         final_y = ty + _get_offset(ctx, edge.target, edge.line_id)
-
-    return RoutedPath(
-        edge=edge,
-        line_id=edge.line_id,
-        points=[
+        points = [
             (sx + d, sy),
             (sx + d, corridor_y),
             (descent_x, corridor_y),
             (descent_x, final_y),
             (tx, final_y),
-        ],
+        ]
+        radii = [
+            reference_anchored_radius(-d, base),  # rise -> over
+            reference_anchored_radius(-d, base),  # over -> descend
+            reference_anchored_radius(d, base),  # descend -> turn into target
+        ]
+
+    return RoutedPath(
+        edge=edge,
+        line_id=edge.line_id,
+        points=points,
         is_inter_section=True,
         normalize_exempt=True,
         offsets_applied=True,
