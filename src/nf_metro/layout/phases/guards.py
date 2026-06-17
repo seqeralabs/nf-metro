@@ -3061,15 +3061,20 @@ def _guard_entry_port_fed_only_by_ports(graph: MetroGraph, phase: str) -> None:
 
 
 def _guard_perp_entry_feed_not_collinear(graph: MetroGraph, phase: str) -> None:
-    """A TOP/BOTTOM entry port never sits at its feeding station's Y.
+    """A TOP/BOTTOM entry port never sits at a flow-aligned feeder's Y.
 
     A perpendicular (TOP/BOTTOM) entry port is held off the consumer's
     internal station rows by the station-as-elbow constraint, and snaps to
-    the section's top/bottom boundary edge.  The only stations that feed an
-    entry port are exit ports, which seat at producer station rows in a
-    vertically-distinct section.  So the entry port's Y can never coincide
-    with the Y of the station feeding it; a collinear feed means a producer
-    has dragged the port off its boundary edge.
+    the section's top/bottom boundary edge.  A LEFT/RIGHT exit port seats at
+    a producer station row in a vertically-distinct section, so a feed from
+    one can never be collinear with the entry port; a collinear feed there
+    means a producer has dragged the port off its boundary edge.
+
+    A perpendicular (TOP/BOTTOM) exit port is exempt: it rises into the
+    inter-row corridor band that also hosts the entry port (the up-and-over
+    and drop-pair shapes), so feeder and entry legitimately share that Y.
+    ``_perp_corridor_feeder`` keys the matching entry-drop route off the same
+    collinear perp-exit feed this guard exempts.
     """
     for section in graph.sections.values():
         for pid in section.entry_ports:
@@ -3084,17 +3089,10 @@ def _guard_perp_entry_feed_not_collinear(graph: MetroGraph, phase: str) -> None:
                 if feeder is None:
                     continue
                 feeder_port = graph.ports.get(edge.source)
-                feeder_sec = (
-                    graph.sections.get(feeder.section_id)
-                    if feeder.section_id is not None
-                    else None
-                )
                 if (
                     feeder_port is not None
                     and not feeder_port.is_entry
-                    and feeder_port.side == PortSide.BOTTOM
-                    and feeder_sec is not None
-                    and feeder_sec.direction == "TB"
+                    and feeder_port.side in (PortSide.TOP, PortSide.BOTTOM)
                 ):
                     continue
                 if abs(feeder.y - entry_st.y) <= COORD_TOLERANCE:

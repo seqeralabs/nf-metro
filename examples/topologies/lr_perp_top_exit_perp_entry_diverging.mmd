@@ -1,0 +1,26 @@
+%%metro title: Cross-Column Perp Entry Diverging
+%%metro style: dark
+%%metro line: main | Main | #e63946
+%%metro line: branch | Branch | #2db572
+
+graph LR
+    subgraph src [Source]
+        %%metro exit: right | main,branch
+        s1[Start]
+    end
+    subgraph sec1 [Section One]
+        %%metro entry: left | main,branch
+        %%metro exit: top | main,branch
+        a[Input]
+        b[Output]
+        a -->|main,branch| b
+    end
+    subgraph sec2 [Section Two]
+        %%metro entry: top | main,branch
+        d[Step D]
+        e[Step E]
+        d -->|main| e
+    end
+    s1 -->|main,branch| a
+    b -->|main| d
+    b -->|branch| e

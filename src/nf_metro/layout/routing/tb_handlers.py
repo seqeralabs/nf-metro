@@ -14,6 +14,7 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import (
     _get_offset,
     _max_offset_at,
+    _perp_riser_lateral,
     _RoutingCtx,
     _tb_x_offset,
 )
@@ -24,6 +25,7 @@ from nf_metro.layout.routing.corners import (
 )
 from nf_metro.parser.model import (
     Edge,
+    Port,
     PortSide,
     Station,
 )
@@ -256,6 +258,12 @@ def _route_perp_entry(
     tx, ty = tgt.x, tgt.y
     dx = tx - sx
 
+    corridor_feeder = _perp_corridor_feeder(edge, src, ctx)
+    if corridor_feeder is not None:
+        return _route_perp_entry_from_corridor(
+            edge, src, tgt, ctx, corridor_feeder.side
+        )
+
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
 
@@ -305,6 +313,69 @@ def _route_perp_entry(
         points=pts,
         offsets_applied=True,
         curve_radii=radii,
+    )
+
+
+def _perp_corridor_feeder(
+    edge: Edge, entry_st: Station, ctx: _RoutingCtx
+) -> Port | None:
+    """Return the perpendicular exit port feeding this entry over the corridor.
+
+    A TOP/BOTTOM exit port on a same-row section rises into the inter-row
+    corridor band and runs across to feed a perpendicular entry (the
+    up-and-over shape); the exit and entry ports then share the corridor Y.
+    The drop out of that entry must continue the corridor's per-line descent
+    order, so it needs the feeding exit port's side.
+
+    A perpendicular exit that drops across rows into the entry below (the
+    LR -> TB top-drop) is *not* collinear with the entry and keeps its own
+    drop convention, so it is excluded by the shared-Y test.
+
+    This mirrors the exemption in ``_guard_perp_entry_feed_not_collinear``:
+    that guard permits exactly the collinear perp-exit feed this routes.
+    """
+    for feed in ctx.graph.edges_to(edge.source):
+        port = ctx.graph.ports.get(feed.source)
+        feeder_st = ctx.graph.stations.get(feed.source)
+        if (
+            port is not None
+            and not port.is_entry
+            and port.side in (PortSide.TOP, PortSide.BOTTOM)
+            and feeder_st is not None
+            and abs(feeder_st.y - entry_st.y) <= COORD_TOLERANCE
+        ):
+            return port
+    return None
+
+
+def _route_perp_entry_from_corridor(
+    edge: Edge,
+    src: Station,
+    tgt: Station,
+    ctx: _RoutingCtx,
+    feeder_side: PortSide,
+) -> RoutedPath:
+    """Drop a corridor-fed perpendicular entry into its target station.
+
+    The up-and-over corridor lands each line at ``port_x - lateral`` (the
+    reversed per-line convention shared with the aligned-entry branch).
+    The drop leaves at that same per-line X so the bundle stays ordered
+    across the entry port, then turns into the station at the target row's
+    per-line Y, mirroring how the corridor stacks the bundle on the way in.
+    """
+    sx, sy = src.x, src.y
+    tx, ty = tgt.x, tgt.y
+    lateral = _perp_riser_lateral(
+        ctx, edge.source, edge.line_id, feeder_side, tgt.section_id
+    )
+    drop_x = sx - lateral
+    tgt_off = _get_offset(ctx, edge.target, edge.line_id)
+    return RoutedPath(
+        edge=edge,
+        line_id=edge.line_id,
+        points=[(drop_x, sy), (drop_x, ty + tgt_off), (tx, ty + tgt_off)],
+        offsets_applied=True,
+        curve_radii=[reference_anchored_radius(-lateral, ctx.curve_radius)],
     )
 
 
