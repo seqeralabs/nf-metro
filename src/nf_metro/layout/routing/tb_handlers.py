@@ -286,15 +286,16 @@ def _route_perp_entry(
     # is flow-aligned on its trunk X offset (which the approach already
     # matches), and a fanned port has no stagger to reverse, so neither applies.
     tgt_sec = ctx.graph.sections.get(tgt.section_id) if tgt.section_id else None
-    if abs(drop_delta) > COORD_TOLERANCE and (
-        tgt_sec is not None and tgt_sec.direction not in ("TB", "BT")
+    crossing_x = None
+    if (
+        abs(drop_delta) > COORD_TOLERANCE
+        and tgt_sec is not None
+        and tgt_sec.direction not in ("TB", "BT")
     ):
         crossing_x = _perp_entry_crossing_x(ctx, edge.source, edge.line_id, sx)
         if crossing_x is not None:
             drop_x = crossing_x
             drop_delta = drop_x - (sx + src_off)
-    else:
-        crossing_x = None
 
     if abs(dx) < COORD_TOLERANCE and abs(drop_delta) < COORD_TOLERANCE:
         # Aligned perpendicular entry into the trunk: each line drops straight

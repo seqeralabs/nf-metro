@@ -1648,7 +1648,12 @@ def _boundary_crossing_x(
     if approach:
         segments = list(reversed(segments))
     for (x1, y1), (x2, y2) in segments:
-        if abs(x2 - x1) <= COORD_TOLERANCE and abs(y2 - y1) > COORD_TOLERANCE:
+        touches_boundary = min(abs(y1 - port_y), abs(y2 - port_y)) <= COORD_TOLERANCE
+        if (
+            touches_boundary
+            and abs(x2 - x1) <= COORD_TOLERANCE
+            and abs(y2 - y1) > COORD_TOLERANCE
+        ):
             return x1
     return None
 

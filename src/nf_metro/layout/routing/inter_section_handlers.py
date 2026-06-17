@@ -1364,9 +1364,9 @@ def _route_top_entry_l_shape(
     if n > 1 and abs(dx) > r_lead:
         # Into a TB/BT trunk, land each line at its trunk X offset so the bundle
         # flows straight on into the trunk rather than converging at the shared
-        # port and re-fanning (a boundary pinch).  An LR/RL perpendicular drop
-        # lands on its own staircase channel (``drop2_x``), which the in-section
-        # drop departs from, so ``land_x`` is left unset there.
+        # port and re-fanning (a boundary pinch).  An LR/RL drop lands on its own
+        # staircase channel ``drop2_x`` (paired with the in-section drop), so
+        # ``land_x`` stays unset.
         land_x = None
         if tgt_sec is not None and tgt_sec.direction in ("TB", "BT"):
             land_x = tgt.x + _tb_x_offset(ctx, edge.target, edge.line_id, tgt_sec.id)
