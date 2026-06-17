@@ -1273,17 +1273,19 @@ def _route_perp_exit_over(
 def _route_top_entry_l_shape(
     edge: Edge, src: Station, tgt: Station, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
-    """Vertical-first L-shape for TOP entry ports.
+    """Staircase route into a TOP entry port, fanned along one centreline.
 
-    Routes via a short horizontal lead-in so the transition from any
-    preceding horizontal edge (e.g. exit -> junction) curves smoothly
-    into the vertical drop::
+    A short horizontal lead-in lets the transition from any preceding
+    horizontal edge (e.g. exit -> junction) curve smoothly into a vertical
+    drop, then a trunk run in the inter-row gap above the target section drops
+    cleanly into the port::
 
         (sx,sy) -> (lx, sy) -> (lx, hy) -> (tx, hy) -> (tx, ty)
 
-    The horizontal run sits in the inter-row gap just above the target
-    section so the line drops cleanly into the TOP port, mirroring how
-    LEFT entry ports receive a vertical run in the inter-column gap.
+    This is the bundle's reference centreline; every co-travelling line is fanned
+    as a per-leg offset of it (rigid for an LR/RL drop, tapering into a TB/BT
+    trunk), mirroring how LEFT entry ports receive a vertical run in the
+    inter-column gap.
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
@@ -1354,13 +1356,11 @@ def _route_top_entry_l_shape(
 
     lx0 = sx + lead.sign * r_lead
 
-    # Express the staircase as a single centreline -- the bundle's reference
-    # line (source offset 0) -- and fan every co-travelling line as a per-leg
-    # offset of it, so each corner radius is derived from the turn geometry
-    # rather than hand-signed.  The reference runs lead-in -> drop -> trunk ->
-    # drop straight into the port; source-side legs (lead-in, drop, trunk) carry
-    # each line's source fan offset and the final drop carries its target
-    # offset, so the bundle tapers when the two spreads differ.
+    # Anchor the centreline on the bundle's reference line (source offset 0) and
+    # fan every co-travelling line as a per-leg offset of it, so each corner
+    # radius is derived from the turn geometry rather than hand-signed.  The
+    # source-side legs carry the source fan offset and the final drop the target
+    # offset (transition_leg below), so the bundle tapers when they differ.
     member_edges = [
         e for e in ctx.graph.edges_to(edge.target) if e.source == edge.source
     ]
