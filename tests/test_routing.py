@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -359,3 +361,53 @@ def test_around_section_below_dispatched_for_cross_row_left_entry():
             f"around-section corners must share one radius (CW loop); "
             f"got {r.curve_radii}"
         )
+
+
+@pytest.mark.parametrize(
+    ("fixture", "handler"),
+    [
+        ("around_section_below.mmd", "_route_around_section_below"),
+        ("around_below_ep_col_gt0.mmd", "_route_around_section_below"),
+        ("corridor_narrow_gap_fallback.mmd", "_route_around_section_below"),
+        ("self_crossing_bridge.mmd", "_route_around_section_below"),
+        ("genomic_pipeline.mmd", "_route_inter_row_gap_corridor"),
+    ],
+)
+def test_around_and_corridor_routes_built_from_centreline(fixture, handler):
+    """The around-below and inter-row-corridor handlers route via the
+    centreline builder, so each is a 6-point loop with concentric, derived
+    corner radii (never hand-rolled) and route_edges' always-on curve
+    invariants stay green.
+    """
+    import nf_metro.layout.routing.inter_section_handlers as ish
+
+    root = Path(__file__).parent.parent / "examples"
+    candidate = root / "topologies" / fixture
+    path = candidate if candidate.exists() else root / fixture
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+
+    real = getattr(ish, handler)
+    captured: list = []
+
+    def hook(*args):
+        result = real(*args)
+        captured.append(result)
+        return result
+
+    setattr(ish, handler, hook)
+    try:
+        # route_edges runs assert_render_curve_invariants on its output; a flip
+        # or non-concentric corner from these handlers would raise here.
+        route_edges(graph)
+    finally:
+        setattr(ish, handler, real)
+
+    assert captured, f"{handler} was not dispatched for {fixture}"
+    for r in captured:
+        assert len(r.points) == 6, f"expected a 6-point loop, got {r.points}"
+        assert r.curve_radii is not None and len(r.curve_radii) == 4, (
+            f"expected 4 derived corner radii, got {r.curve_radii}"
+        )
+        assert all(c > 0 for c in r.curve_radii)
+        assert r.offsets_applied
