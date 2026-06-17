@@ -195,6 +195,17 @@ def _fan_bundle(
     ]
     normals = [_right_normal(t) for t in legs]
 
+    # One reference radius per interior corner; a scalar broadcasts to all.
+    n_corners = len(centerline) - 2
+    if isinstance(base_radius, (int, float)):
+        corner_bases = [float(base_radius)] * n_corners
+    else:
+        corner_bases = list(base_radius)
+        assert len(corner_bases) == n_corners, (
+            f"base_radius sequence has {len(corner_bases)} entries, "
+            f"expected one per interior corner ({n_corners})"
+        )
+
     routes: list[RoutedPath] = []
     for edge, line_id, offs in members:
         points: list[_Vec] = []
@@ -218,18 +229,13 @@ def _fan_bundle(
                 vertical_dx = o_in * n_in[0] + o_out * n_out[0]
                 px = cx + vertical_dx
                 py = cy + o_in * n_in[1] + o_out * n_out[1]
-                corner_base = (
-                    base_radius
-                    if isinstance(base_radius, (int, float))
-                    else base_radius[vi - 1]
-                )
                 radii.append(
                     concentric_corner_radius_at(
                         centerline[vi - 1],
                         centerline[vi],
                         centerline[vi + 1],
                         vertical_dx,
-                        corner_base,
+                        corner_bases[vi - 1],
                         min_radius=min_radius,
                     )
                 )

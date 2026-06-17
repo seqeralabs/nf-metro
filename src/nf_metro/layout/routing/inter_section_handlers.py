@@ -712,9 +712,8 @@ def _route_bypass(
     gap1_vertical = vertical_direction(base_y - sy)
     gap2_vertical = vertical_direction(ty - base_y)
 
-    # Per-line lateral deltas at each gap's vertical channel.  The radii are
-    # not taken from here: the centreline + build_tapered_bundle below derive
-    # every corner concentrically from the turn geometry.
+    # Per-line lateral deltas at each gap's vertical channel; the centreline +
+    # build_tapered_bundle below derive every corner radius from the geometry.
     delta1, delta2 = bypass_radii(
         g1_j,
         g1_n,
