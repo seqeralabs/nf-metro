@@ -41,6 +41,7 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import (
     _get_offset,
     _has_intervening_sections,
+    _perp_riser_lateral,
     _resolve_section_col,
     _resolve_section_colrow,
     _resolve_section_row,
@@ -1180,13 +1181,9 @@ def _route_perp_exit_over(
     is_top = src_port.side == PortSide.TOP
     row = src_sec.grid_row if src_sec is not None else None
 
-    # Per-line lateral offset, continuing the in-section riser's convention so
-    # the lift out of the port stays parallel (TOP: raw offset; BOTTOM: the
-    # reversed offset the BOTTOM riser bakes).
-    if is_top:
-        d = _get_offset(ctx, edge.source, edge.line_id)
-    else:
-        d = _tb_x_offset(ctx, edge.source, edge.line_id, src.section_id)
+    d = _perp_riser_lateral(
+        ctx, edge.source, edge.line_id, src_port.side, src.section_id
+    )
 
     # Corridor Y: the header band clearing the source section's near edge.
     cy_base = (
