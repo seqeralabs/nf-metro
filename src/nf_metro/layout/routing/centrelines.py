@@ -39,19 +39,12 @@ def gather_bundle(ctx: _RoutingCtx, edge: Edge) -> tuple[list[_Member], float, f
     reproduces each line's fan position on every leg.  ``src_center`` /
     ``tgt_center`` are the mean source / target offsets: the centreline's own
     displacement from the raw port coordinate on each side.
-    """
-    member_edges = [
-        e for e in ctx.graph.edges_to(edge.target) if e.source == edge.source
-    ]
-    line_ids = list(dict.fromkeys(e.line_id for e in member_edges))
-    edge_by_line = {e.line_id: e for e in member_edges}
 
-    src_offs = {lid: _get_offset(ctx, edge.source, lid) for lid in line_ids}
-    tgt_offs = {lid: _get_offset(ctx, edge.target, lid) for lid in line_ids}
-    src_center = sum(src_offs.values()) / len(src_offs)
-    tgt_center = sum(tgt_offs.values()) / len(tgt_offs)
-    members = [(edge_by_line[lid], lid, src_offs[lid] - src_center) for lid in line_ids]
-    return members, src_center, tgt_center
+    The source-only view of :func:`gather_tapered_bundle`, for callers that fan
+    one rigid offset on every leg.
+    """
+    members, src_center, tgt_center = gather_tapered_bundle(ctx, edge)
+    return [(e, lid, src) for e, lid, src, _tgt in members], src_center, tgt_center
 
 
 def gather_tapered_bundle(

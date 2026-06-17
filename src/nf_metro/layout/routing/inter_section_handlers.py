@@ -442,11 +442,12 @@ def _route_bottom_exit_junction(
 ) -> RoutedPath | None:
     """Vertical-first L-shape from bottom exit junction.
 
-    The bundle drops in X at the bundle's mean exit X, turns the corner, and
-    runs to the entry at the mean entry Y.  Its descent channel is positioned
-    from the exit port's fan, not from the per-line endpoint offsets, so it is
-    fanned rigidly by one offset on every leg; ``route_tapered`` routes the
-    rigid bundle through the shared seam.
+    The descent channel sits at the bundle's mean exit X (the fan above the
+    junction), turns the corner, and runs to the entry at the mean entry Y.
+    Because the channel is anchored on the exit fan rather than the per-line
+    endpoint offsets, this corner is fanned rigidly -- one offset on every leg
+    -- so the bundle is built with each line's source offset on both ends and
+    ``route_tapered`` sends it down its rigid (``route_along``) path.
     """
     exit_pid = ctx.bottom_exit_junction_ports[edge.source]
     exit_src = ctx.graph.stations.get(exit_pid)
@@ -463,6 +464,9 @@ def _route_bottom_exit_junction(
     mean_exit_x = sum(exit_offs) / len(exit_offs)
     vx = src.x + mean_exit_x
     hy = tgt.y + tgt_center
+    # Each line keeps its source offset on both legs: the channel is anchored
+    # on the exit fan, so a per-end taper would detach the descent from the
+    # entry offsets it never carried.
     rigid = [(e, line_id, src_off, src_off) for e, line_id, src_off, _tgt in members]
     return route_tapered(
         edge,
