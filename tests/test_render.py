@@ -3,13 +3,18 @@
 import pathlib
 import re
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 
 import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Station
-from nf_metro.render.svg import _terminus_icon_centers, render_svg
+from nf_metro.render.svg import (
+    _label_halo_color,
+    _terminus_icon_centers,
+    render_svg,
+)
 from nf_metro.themes import LIGHT_THEME, NFCORE_THEME
 
 
@@ -993,3 +998,65 @@ def test_standalone_nodes_render_as_unlinked_labels():
     svg = render_svg(graph, NFCORE_THEME)
     for t in standalone:
         assert t in svg
+
+
+def test_label_halo_color_resolves_to_opaque_background():
+    color = _label_halo_color(replace(NFCORE_THEME, label_halo_color=""))
+    assert color == NFCORE_THEME.background_color
+
+
+def test_label_halo_color_resolves_to_white_on_transparent_theme():
+    color = _label_halo_color(replace(LIGHT_THEME, label_halo_color=""))
+    assert color == "#ffffff"
+
+
+def test_label_halo_color_honours_explicit_colour():
+    color = _label_halo_color(replace(NFCORE_THEME, label_halo_color="#123456"))
+    assert color == "#123456"
+
+
+def test_label_halo_disabled_by_zero_width():
+    assert _label_halo_color(replace(NFCORE_THEME, label_halo_width=0.0)) is None
+
+
+def test_label_halo_disabled_by_none_colour():
+    assert _label_halo_color(replace(NFCORE_THEME, label_halo_color="none")) is None
+
+
+def test_label_halo_emits_aria_hidden_backing_copy():
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n"
+        "    a[Input]\n"
+        "    b[Output]\n"
+        "    a -->|main| b\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_THEME)
+
+    root = ET.fromstring(svg)
+    ns = "{http://www.w3.org/2000/svg}"
+    texts = [t for t in root.iter(f"{ns}text") if (t.text or "") == "Input"]
+    halo = [t for t in texts if t.get("aria-hidden") == "true"]
+    fill = [t for t in texts if t.get("aria-hidden") != "true"]
+    assert len(halo) == 1, "expected one aria-hidden halo copy of the label"
+    assert len(fill) == 1, "expected one painted label that carries station metadata"
+    assert halo[0].get("data-station-id") is None
+    assert fill[0].get("data-station-id") == "a"
+
+
+def test_label_halo_suppressed_when_disabled():
+    graph = parse_metro_mermaid(
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n"
+        "    a[Input]\n"
+        "    b[Output]\n"
+        "    a -->|main| b\n"
+    )
+    compute_layout(graph)
+    svg = render_svg(graph, replace(NFCORE_THEME, label_halo_width=0.0))
+
+    root = ET.fromstring(svg)
+    ns = "{http://www.w3.org/2000/svg}"
+    texts = [t for t in root.iter(f"{ns}text") if (t.text or "") == "Input"]
+    assert len(texts) == 1, "halo copy should be absent when haloing is disabled"

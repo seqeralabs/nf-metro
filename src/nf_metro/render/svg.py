@@ -1712,14 +1712,16 @@ def _render_terminus_icons(
 def _label_halo_color(theme: Theme) -> str | None:
     """Resolve the halo colour, or ``None`` when haloing is disabled.
 
-    An empty theme colour resolves to the background (so the name punches a
-    knockout through any route it crosses), or white on transparent themes.
+    Haloing is disabled by a non-positive ``label_halo_width`` or an explicit
+    ``label_halo_color`` of ``"none"`` (matching the SVG ``fill="none"``
+    convention). An empty colour resolves to the background, so the name
+    punches a knockout through any route it crosses, or white on transparent
+    themes.
     """
-    if theme.label_halo_width <= 0:
+    if theme.label_halo_width <= 0 or theme.label_halo_color == "none":
         return None
-    color = theme.label_halo_color
-    if color and color != "none":
-        return color
+    if theme.label_halo_color:
+        return theme.label_halo_color
     bg = theme.background_color
     return bg if bg and bg != "none" else "#ffffff"
 
