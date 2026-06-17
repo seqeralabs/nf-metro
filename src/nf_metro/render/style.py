@@ -28,6 +28,11 @@ class Theme:
     label_font_family: str
     label_font_size: float
     label_font_weight: str
+    # Knockout halo painted behind station labels so names stay legible where
+    # they fall over routes. Width 0 disables. Empty colour resolves to the
+    # background (a knockout), or white on transparent themes.
+    label_halo_width: float = 3.0
+    label_halo_color: str = ""
     title_color: str
     title_font_size: float
     section_fill: str

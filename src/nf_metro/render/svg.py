@@ -424,6 +424,7 @@ def _scale_theme_fonts(theme: Theme, scale: float) -> Theme:
         return theme
     return replace(
         theme,
+        label_halo_width=theme.label_halo_width * scale,
         label_font_size=theme.label_font_size * scale,
         title_font_size=theme.title_font_size * scale,
         section_label_font_size=theme.section_label_font_size * scale,
@@ -1708,12 +1709,66 @@ def _render_terminus_icons(
             )
 
 
+def _label_halo_color(theme: Theme) -> str | None:
+    """Resolve the halo colour, or ``None`` when haloing is disabled.
+
+    An empty theme colour resolves to the background (so the name punches a
+    knockout through any route it crosses), or white on transparent themes.
+    """
+    if theme.label_halo_width <= 0:
+        return None
+    color = theme.label_halo_color
+    if color and color != "none":
+        return color
+    bg = theme.background_color
+    return bg if bg and bg != "none" else "#ffffff"
+
+
 def _render_labels(
     d: draw.Drawing,
     labels: list[LabelPlacement],
     theme: Theme,
 ) -> None:
     """Render station name labels."""
+    halo_color = _label_halo_color(theme)
+
+    def emit(text: str, x: float, y: float, **style: object) -> None:
+        # The halo is a stroked copy drawn underneath the glyph fill. A second
+        # paint pass (rather than paint-order on a single element) keeps the
+        # knockout correct in renderers that ignore the paint-order property.
+        if halo_color is not None:
+            d.append(
+                draw.Text(
+                    text,
+                    theme.label_font_size,
+                    x,
+                    y,
+                    fill=halo_color,
+                    stroke=halo_color,
+                    stroke_width=theme.label_halo_width,
+                    stroke_linejoin="round",
+                    font_family=theme.label_font_family,
+                    font_weight=theme.label_font_weight,
+                    line_height=LABEL_LINE_HEIGHT,
+                    aria_hidden="true",
+                    **style,
+                )
+            )
+        d.append(
+            draw.Text(
+                text,
+                theme.label_font_size,
+                x,
+                y,
+                fill=theme.label_color,
+                font_family=theme.label_font_family,
+                font_weight=theme.label_font_weight,
+                line_height=LABEL_LINE_HEIGHT,
+                **style,
+                **label_data,
+            )
+        )
+
     for label in labels:
         text = label.text
         n_lines = text.count("\n") + 1
@@ -1740,55 +1795,31 @@ def _render_labels(
             # Diagonal labels: anchor at the pill and rotate about
             # the anchor.  text-anchor=start so the tilted text trails
             # away from the station.
-            d.append(
-                draw.Text(
-                    text,
-                    theme.label_font_size,
-                    label.x,
-                    label.y,
-                    fill=theme.label_color,
-                    font_family=theme.label_font_family,
-                    font_weight=theme.label_font_weight,
-                    text_anchor=label.text_anchor or "start",
-                    dominant_baseline="auto",
-                    line_height=LABEL_LINE_HEIGHT,
-                    transform=f"rotate({label.angle},{label.x},{label.y})",
-                    **label_data,
-                )
+            emit(
+                text,
+                label.x,
+                label.y,
+                text_anchor=label.text_anchor or "start",
+                dominant_baseline="auto",
+                transform=f"rotate({label.angle},{label.x},{label.y})",
             )
         elif label.dominant_baseline:
             # Custom placement (e.g. TB vertical stations: right-side labels)
-            d.append(
-                draw.Text(
-                    text,
-                    theme.label_font_size,
-                    label.x,
-                    y,
-                    fill=theme.label_color,
-                    font_family=theme.label_font_family,
-                    font_weight=theme.label_font_weight,
-                    text_anchor=label.text_anchor,
-                    dominant_baseline=label.dominant_baseline,
-                    line_height=LABEL_LINE_HEIGHT,
-                    **label_data,
-                )
+            emit(
+                text,
+                label.x,
+                y,
+                text_anchor=label.text_anchor,
+                dominant_baseline=label.dominant_baseline,
             )
         else:
             baseline = "auto" if label.above else "hanging"
-            d.append(
-                draw.Text(
-                    text,
-                    theme.label_font_size,
-                    label.x,
-                    y,
-                    fill=theme.label_color,
-                    font_family=theme.label_font_family,
-                    font_weight=theme.label_font_weight,
-                    text_anchor="middle",
-                    dominant_baseline=baseline,
-                    line_height=LABEL_LINE_HEIGHT,
-                    **label_data,
-                )
+            emit(
+                text,
+                label.x,
+                y,
+                text_anchor="middle",
+                dominant_baseline=baseline,
             )
 
 
