@@ -24,6 +24,8 @@ that keeps these correct.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.layout.routing.corners import concentric_corner_radius_at
@@ -104,7 +106,7 @@ def build_tapered_bundle(
     members: list[tuple[Edge, str, float, float]],
     centerline: list[_Vec],
     transition_leg: int,
-    base_radius: float,
+    base_radius: float | Sequence[float],
     *,
     min_radius: float | None = None,
     is_inter_section: bool = True,
@@ -139,7 +141,11 @@ def build_tapered_bundle(
         inter-section L-shape: the source-side leg fans by ``src_offset``, the
         channel and target-side legs by ``tgt_offset``).
     base_radius
-        Reference-line corner radius.
+        Reference-line corner radius.  A per-corner sequence (one entry per
+        interior vertex, ``len(centerline) - 2``) anchors each corner on its own
+        reference radius -- used when the legs flanking different corners fan by
+        different depths (a U whose two gaps carry different line counts), so
+        each gap's innermost line lands at its own base rather than a shared one.
     min_radius
         Optional floor for inside-of-turn arcs.
     """
@@ -168,7 +174,7 @@ def build_tapered_bundle(
 def _fan_bundle(
     members: list[tuple[Edge, str, list[float]]],
     centerline: list[_Vec],
-    base_radius: float,
+    base_radius: float | Sequence[float],
     *,
     min_radius: float | None,
     is_inter_section: bool,
@@ -212,13 +218,18 @@ def _fan_bundle(
                 vertical_dx = o_in * n_in[0] + o_out * n_out[0]
                 px = cx + vertical_dx
                 py = cy + o_in * n_in[1] + o_out * n_out[1]
+                corner_base = (
+                    base_radius
+                    if isinstance(base_radius, (int, float))
+                    else base_radius[vi - 1]
+                )
                 radii.append(
                     concentric_corner_radius_at(
                         centerline[vi - 1],
                         centerline[vi],
                         centerline[vi + 1],
                         vertical_dx,
-                        base_radius,
+                        corner_base,
                         min_radius=min_radius,
                     )
                 )

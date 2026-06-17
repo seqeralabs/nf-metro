@@ -1732,14 +1732,67 @@ def _segment_unit(
     return (0.0, 1.0 if dy > 0 else -1.0)
 
 
+@dataclass(frozen=True)
+class PinchedCornerViolation:
+    """A route carries a non-positive corner radius.
+
+    A corner radius is ``base_radius`` plus this line's signed displacement from
+    the bundle reference.  When a deep fan is anchored on the wrong reference the
+    inside-of-turn arc can fall to zero or below -- an inverted, unrenderable
+    arc.  ``radius`` is the offending value at ``corner_index``.
+    """
+
+    line_id: str
+    edge_source: str
+    edge_target: str
+    corner_index: int
+    radius: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"pinched corner {self.edge_source!r}->{self.edge_target!r} line "
+            f"{self.line_id!r} (corner #{self.corner_index}): radius "
+            f"{self.radius:.1f} <= 0.  A deep fan's inside arc collapsed; anchor "
+            f"each turn's innermost line at the base radius"
+        )
+
+
+def check_no_pinched_corner_radii(
+    routes: list[RoutedPath],
+) -> list[PinchedCornerViolation]:
+    """Return any route whose handler emitted a non-positive corner radius.
+
+    A negative (or zero) corner radius is always a defect -- it inverts the arc
+    rather than rounding the bend.  It surfaces when a multi-leg bundle anchors
+    the wrong line at the base radius, driving the inside-of-turn arc of a deep
+    fan below zero.  Checks the handler's own ``curve_radii`` (the value the
+    handler computed), independent of the renderer's later segment clamping.
+    """
+    violations: list[PinchedCornerViolation] = []
+    for r in routes:
+        for i, radius in enumerate(r.curve_radii or []):
+            if radius is not None and radius <= 0:
+                violations.append(
+                    PinchedCornerViolation(
+                        line_id=r.line_id,
+                        edge_source=r.edge.source,
+                        edge_target=r.edge.target,
+                        corner_index=i,
+                        radius=radius,
+                    )
+                )
+    return violations
+
+
 class CurveInvariantError(RuntimeError):
     """A rendered route contains a bundle-curve defect.
 
     Covers a bundle flip (a line crosses its bundle-mate), a non-concentric
-    wholesale corner (pinched arcs), or two distinct lines collapsed onto one
-    channel.  Raised on the render path itself so a routing handler can never
-    silently draw a defective curve, independent of ``compute_layout``'s
-    ``validate`` flag.
+    wholesale corner (pinched arcs), a non-positive corner radius, or two
+    distinct lines collapsed onto one channel.  Raised on the render path itself
+    so a routing handler can never silently draw a defective curve, independent
+    of ``compute_layout``'s ``validate`` flag.
     """
 
 
@@ -1771,6 +1824,10 @@ def assert_render_curve_invariants(
         (
             "non-concentric bundle corner",
             check_concentric_bundle_corners(graph, routes, offsets),
+        ),
+        (
+            "pinched corner (non-positive radius)",
+            check_no_pinched_corner_radii(routes),
         ),
         (
             "collinear distinct lines",
@@ -1818,6 +1875,7 @@ __all__ = [
     "NonConcentricCornerViolation",
     "PartialBranchGapViolation",
     "PerpEntryBoundaryViolation",
+    "PinchedCornerViolation",
     "SameLineParallelRun",
     "Side",
     "StackedElbowGraze",
@@ -1826,6 +1884,7 @@ __all__ = [
     "check_fanout_tail_join",
     "check_merge_port_approach_side",
     "check_no_collinear_distinct_lines",
+    "check_no_pinched_corner_radii",
     "check_no_same_line_parallel_descents",
     "check_perp_entry_boundary_consistent",
     "bypass_horizontal_targets",
