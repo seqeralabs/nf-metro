@@ -14,6 +14,7 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import (
     _get_offset,
     _max_offset_at,
+    _perp_entry_crossing_x,
     _perp_riser_lateral,
     _RoutingCtx,
     _tb_x_offset,
@@ -269,12 +270,31 @@ def _route_perp_entry(
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
 
-    # When distinct lines share this port and target, hold them on parallel
-    # drop channels so they don't overlay; the port offset alone is per-line
-    # zero for a bundle through one TOP/BOTTOM port.  The stagger order tracks
-    # the target-side tgt_off so the drop->turn corner preserves bundle order.
+    # When distinct lines share this port and target with per-line offset zero,
+    # hold them on parallel drop channels so they don't overlay; the stagger
+    # order tracks the target-side tgt_off so the drop->turn corner preserves
+    # bundle order.  A fanned port already carries the separation in src_off, so
+    # the stagger is zero.
     drop_delta = _perp_entry_drop_delta(edge, dx, ctx)
     drop_x = sx + src_off + drop_delta
+
+    # That centred stagger re-fans the lines off the port marker, but the
+    # inter-section approach into an LR/RL section lands each line on a
+    # reference-on-marker channel; converging at the marker between the two
+    # leaves a lateral reversal on the boundary.  When such a bundled feeder
+    # pins the channel, drop straight through it instead.  A TB/BT continuation
+    # is flow-aligned on its trunk X offset (which the approach already
+    # matches), and a fanned port has no stagger to reverse, so neither applies.
+    tgt_sec = ctx.graph.sections.get(tgt.section_id) if tgt.section_id else None
+    if abs(drop_delta) > COORD_TOLERANCE and (
+        tgt_sec is not None and tgt_sec.direction not in ("TB", "BT")
+    ):
+        crossing_x = _perp_entry_crossing_x(ctx, edge.source, edge.line_id, sx)
+        if crossing_x is not None:
+            drop_x = crossing_x
+            drop_delta = drop_x - (sx + src_off)
+    else:
+        crossing_x = None
 
     if abs(dx) < COORD_TOLERANCE and abs(drop_delta) < COORD_TOLERANCE:
         # Aligned perpendicular entry into the trunk: each line drops straight
@@ -289,9 +309,10 @@ def _route_perp_entry(
             offsets_applied=True,
         )
 
-    # L-shape: vertical drop then horizontal to station.  With a stagger,
-    # fan out from the shared port marker so the lines converge only there.
-    if abs(drop_delta) < COORD_TOLERANCE:
+    # L-shape: vertical drop then horizontal to station.  A pinned crossing X
+    # drops straight through the boundary; otherwise a per-line stagger fans out
+    # from the shared port marker so the lines converge only there.
+    if crossing_x is not None or abs(drop_delta) < COORD_TOLERANCE:
         pts = [
             (drop_x, sy),
             (drop_x, ty + tgt_off),

@@ -41,6 +41,7 @@
   "context.py::if m_col is not None:::#1",
   "context.py::if m_col is not None:::#2",
   "context.py::if not ctx.station_offsets:::#1",
+  "context.py::if not indices:::#1",
   "context.py::if not jst:::#1",
   "context.py::if not mst:::#1",
   "context.py::if not pred:::#1",
@@ -253,6 +254,8 @@
   "reversal.py::if not src or not tgt:::#1",
   "reversal.py::if not src:::#1",
   "reversal.py::if not succ:::#1",
+  "tb_handlers.py::if crossing_x is not None or abs(drop_delta) < COORD_TOLERANCE:::#1",
+  "tb_handlers.py::if crossing_x is not None:::#1",
   "tb_handlers.py::if diag_end < diag_start:::#1",
   "tb_handlers.py::if diag_end > diag_start:::#1"
 ]

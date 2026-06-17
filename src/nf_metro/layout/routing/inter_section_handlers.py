@@ -1364,7 +1364,9 @@ def _route_top_entry_l_shape(
     if n > 1 and abs(dx) > r_lead:
         # Into a TB/BT trunk, land each line at its trunk X offset so the bundle
         # flows straight on into the trunk rather than converging at the shared
-        # port and re-fanning (a boundary pinch).
+        # port and re-fanning (a boundary pinch).  An LR/RL perpendicular drop
+        # lands on its own staircase channel (``drop2_x``), which the in-section
+        # drop departs from, so ``land_x`` is left unset there.
         land_x = None
         if tgt_sec is not None and tgt_sec.direction in ("TB", "BT"):
             land_x = tgt.x + _tb_x_offset(ctx, edge.target, edge.line_id, tgt_sec.id)
@@ -1494,47 +1496,12 @@ def _route_top_entry_offset_bundle(
     r2 = concentric_corner_radius((0.0, 1.0), (bsign, 0.0), -offset, base_radius)
     r3 = concentric_corner_radius((bsign, 0.0), (0.0, 1.0), -offset, base_radius)
 
-    if land_x is not None:
-        # Straight drop onto the trunk X; no converging port jog.
-        return RoutedPath(
-            edge=edge,
-            line_id=edge.line_id,
-            points=[
-                (sx, lead_in_y),
-                (drop1_x, lead_in_y),
-                (drop1_x, trunk_y),
-                (land_x, trunk_y),
-                (land_x, ty),
-            ],
-            is_inter_section=True,
-            normalize_exempt=True,
-            offsets_applied=True,
-            curve_radii=[r1, r2, r3],
-        )
-
-    if abs(drop2_x - tx) < COORD_TOLERANCE:
-        # Reference line: no port jog, drop straight in.
-        return RoutedPath(
-            edge=edge,
-            line_id=edge.line_id,
-            points=[
-                (sx, lead_in_y),
-                (drop1_x, lead_in_y),
-                (drop1_x, trunk_y),
-                (tx, trunk_y),
-                (tx, ty),
-            ],
-            is_inter_section=True,
-            normalize_exempt=True,
-            offsets_applied=True,
-            curve_radii=[r1, r2, r3],
-        )
-
-    # Offset line: tight converging jog onto the shared port point.  The jog
-    # can drive base - offset to zero, so floor it at the coordinate tolerance.
-    r4 = reference_anchored_radius(
-        -bsign * offset, base_radius, min_radius=COORD_TOLERANCE
-    )
+    # Drop straight onto the per-line landing X and continue through the port:
+    # ``land_x`` for a TB/BT trunk continuation, else the line's own staircase
+    # channel ``drop2_x`` (the reference line's is the marker X).  The matching
+    # in-section drop departs from the same channel, so the line crosses the
+    # boundary without converging on the marker and re-fanning (a boundary cusp).
+    final_x = land_x if land_x is not None else drop2_x
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
@@ -1542,14 +1509,13 @@ def _route_top_entry_offset_bundle(
             (sx, lead_in_y),
             (drop1_x, lead_in_y),
             (drop1_x, trunk_y),
-            (drop2_x, trunk_y),
-            (drop2_x, ty),
-            (tx, ty),
+            (final_x, trunk_y),
+            (final_x, ty),
         ],
         is_inter_section=True,
         normalize_exempt=True,
         offsets_applied=True,
-        curve_radii=[r1, r2, r3, r4],
+        curve_radii=[r1, r2, r3],
     )
 
 

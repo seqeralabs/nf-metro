@@ -1606,6 +1606,99 @@ def _pair_corner_violation(
     return None
 
 
+@dataclass(frozen=True)
+class PerpEntryBoundaryViolation:
+    """A line that reverses lateral direction crossing a perpendicular port.
+
+    At a shared TOP/BOTTOM entry port, the inter-section approach lands at
+    ``approach_x`` while the same line's intra-section drop departs at
+    ``departure_x``.  When these disagree the line jogs onto the port marker
+    and back off it - an S-cusp on the section boundary.  ``port_y`` is the
+    boundary the two crossings straddle.
+    """
+
+    port_id: str
+    line_id: str
+    approach_x: float
+    departure_x: float
+    port_y: float
+
+    def message(self) -> str:
+        return (
+            f"perp entry port {self.port_id} line {self.line_id}: approach "
+            f"crosses boundary y={self.port_y:.1f} at x={self.approach_x:.1f} "
+            f"but departure leaves at x={self.departure_x:.1f} "
+            f"(lateral reversal at boundary)"
+        )
+
+
+def _boundary_crossing_x(
+    points: list[tuple[float, float]], port_y: float, *, approach: bool
+) -> float | None:
+    """X of the vertical leg by which a route touches a perpendicular port.
+
+    A route into the port (``approach``) reaches ``port_y`` with its last
+    vertical segment; a route out of it (departure) leaves ``port_y`` with its
+    first vertical segment.  Either way the line crosses the boundary at that
+    segment's X.  A horizontal jog onto the port marker is the segment *after*
+    (approach) or *before* (departure) this leg, so it does not mask the true
+    crossing X.  Returns ``None`` when no vertical leg touches the boundary.
+    """
+    segments = list(zip(points, points[1:]))
+    if approach:
+        segments = list(reversed(segments))
+    for (x1, y1), (x2, y2) in segments:
+        if abs(x2 - x1) <= COORD_TOLERANCE and abs(y2 - y1) > COORD_TOLERANCE:
+            return x1
+    return None
+
+
+def check_perp_entry_boundary_consistent(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+) -> list[PerpEntryBoundaryViolation]:
+    """Return lines that reverse lateral direction crossing a perp entry port.
+
+    For each TOP/BOTTOM entry port, a line that *approaches* via an
+    inter-section route and *continues* via an intra-section drop must cross the
+    section boundary at one consistent per-line X: the approach's vertical leg
+    into the boundary and the departure's vertical leg out of it must share that
+    X.  A mismatch is the boundary jitter where the line lands on the port
+    marker, then re-fans off it.  Merge ports with more than one approach for a
+    line are exempt: those feeders genuinely converge, so a single crossing X is
+    not defined.
+    """
+    approaches: dict[tuple[str, str], list[RoutedPath]] = defaultdict(list)
+    departures: dict[tuple[str, str], RoutedPath] = {}
+    for r in routes:
+        if len(r.points) < 2:
+            continue
+        approaches[(r.edge.target, r.line_id)].append(r)
+        departures.setdefault((r.edge.source, r.line_id), r)
+
+    violations: list[PerpEntryBoundaryViolation] = []
+    for pid, port in graph.ports.items():
+        if not port.is_entry or port.side not in (PortSide.TOP, PortSide.BOTTOM):
+            continue
+        pst = graph.stations.get(pid)
+        if pst is None:
+            continue
+        for line_id in graph.station_lines(pid):
+            feeders = approaches.get((pid, line_id), [])
+            departure = departures.get((pid, line_id))
+            if len(feeders) != 1 or departure is None:
+                continue
+            ax = _boundary_crossing_x(feeders[0].points, pst.y, approach=True)
+            dx = _boundary_crossing_x(departure.points, pst.y, approach=False)
+            if ax is None or dx is None:
+                continue
+            if abs(ax - dx) > COORD_TOLERANCE:
+                violations.append(
+                    PerpEntryBoundaryViolation(pid, line_id, ax, dx, pst.y)
+                )
+    return violations
+
+
 def _segment_unit(
     p1: tuple[float, float], p2: tuple[float, float]
 ) -> tuple[float, float] | None:
@@ -1634,6 +1727,7 @@ __all__ = [
     "MergePortApproachViolation",
     "NonConcentricCornerViolation",
     "PartialBranchGapViolation",
+    "PerpEntryBoundaryViolation",
     "SameLineParallelRun",
     "Side",
     "StackedElbowGraze",
@@ -1643,6 +1737,7 @@ __all__ = [
     "check_merge_port_approach_side",
     "check_no_collinear_distinct_lines",
     "check_no_same_line_parallel_descents",
+    "check_perp_entry_boundary_consistent",
     "bypass_horizontal_targets",
     "check_stacked_elbow_clearance",
     "check_partial_branch_offset_gaps",

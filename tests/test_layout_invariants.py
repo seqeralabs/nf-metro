@@ -2952,6 +2952,81 @@ def test_no_kink_at_section_boundary(fixture):
 
 
 # ---------------------------------------------------------------------------
+# A line must cross a perpendicular entry port at one consistent X
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_perp_entry_boundary_no_lateral_reversal(fixture):
+    """A line through a shared TOP/BOTTOM entry port must not reverse its
+    lateral direction at the boundary.
+
+    The inter-section approach and the intra-section drop for the same line
+    must cross the section boundary at one consistent per-line X.  When they
+    disagree the line lands on the port marker, then re-fans off it - a visible
+    S-cusp on the boundary (the ``cross_row_gap_wrap`` feed line entering Merge
+    through ``merge_pt__entry_top_6``).
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_perp_entry_boundary_consistent,
+    )
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    violations = check_perp_entry_boundary_consistent(graph, routes)
+    assert not violations, "; ".join(v.message() for v in violations)
+
+
+def test_perp_entry_boundary_check_detects_cusp():
+    """Meaningfulness guard: the boundary-consistency check fires when a line's
+    approach and drop cross a perp entry port at different X.
+
+    Locks the detector so the corpus test above is not vacuously green: a TOP
+    entry port whose single inter-section approach lands at one X while the
+    intra drop departs at another (each via a marker jog) must be flagged.
+    """
+    from types import SimpleNamespace
+
+    from nf_metro.layout.routing.common import RoutedPath
+    from nf_metro.layout.routing.invariants import (
+        check_perp_entry_boundary_consistent,
+    )
+    from nf_metro.parser.model import Edge, Port, Station
+
+    port = Station("p", "P", x=100.0, y=50.0, is_port=True)
+    g1 = Station("g1", "G1", x=70.0, y=80.0)
+    junction = Station("j", "", x=10.0, y=20.0, is_port=True)
+    graph = SimpleNamespace(
+        ports={"p": Port("p", "sec", PortSide.TOP, is_entry=True)},
+        stations={"p": port, "g1": g1, "j": junction},
+        station_lines=lambda _pid: ["a"],
+    )
+
+    approach = RoutedPath(
+        edge=Edge("j", "p", "a"),
+        line_id="a",
+        points=[(10.0, 20.0), (97.0, 20.0), (97.0, 50.0), (100.0, 50.0)],
+    )
+    departure = RoutedPath(
+        edge=Edge("p", "g1", "a"),
+        line_id="a",
+        points=[(100.0, 50.0), (98.5, 50.0), (98.5, 80.0), (70.0, 80.0)],
+    )
+    violations = check_perp_entry_boundary_consistent(graph, [approach, departure])
+    assert len(violations) == 1
+    assert violations[0].approach_x == 97.0
+    assert violations[0].departure_x == 98.5
+
+    straight_dep = RoutedPath(
+        edge=Edge("p", "g1", "a"),
+        line_id="a",
+        points=[(97.0, 50.0), (97.0, 80.0), (70.0, 80.0)],
+    )
+    assert not check_perp_entry_boundary_consistent(graph, [approach, straight_dep])
+
+
+# ---------------------------------------------------------------------------
 # Fan-out junctions share Y with their feeding LR/RL exit port
 # ---------------------------------------------------------------------------
 

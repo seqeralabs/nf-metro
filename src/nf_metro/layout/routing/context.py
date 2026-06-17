@@ -389,6 +389,32 @@ def _tb_x_offset(
     return reversed_offset(off, _max_offset_at(ctx, station_id))
 
 
+def _perp_entry_crossing_x(
+    ctx: _RoutingCtx, entry_port_id: str, line_id: str, port_x: float
+) -> float | None:
+    """Per-line X at which *line_id* crosses a TOP/BOTTOM entry port.
+
+    The inter-section approach lands, and the intra-section drop departs, at
+    this one X so the line passes straight through the boundary rather than
+    converging on the port marker and re-fanning.  It is the marker X minus the
+    line's inter-section feeder bundle index times the offset step, matching the
+    approach's reference-on-marker fan: the reference feeder (index 0, e.g. a
+    column-aligned vertical drop) sits on the marker, later-index lines fan one
+    consistent side.  Returns ``None`` when no bundled inter-section feeder
+    reaches the port for this line (nothing to align a crossing X to).
+    """
+    indices = [
+        info[0]
+        for edge in ctx.graph.edges_to(entry_port_id)
+        if edge.line_id == line_id
+        and (info := ctx.bundle_info.get((edge.source, entry_port_id, line_id)))
+        is not None
+    ]
+    if not indices:
+        return None
+    return port_x - max(indices) * ctx.offset_step
+
+
 def _perp_riser_lateral(
     ctx: _RoutingCtx,
     station_id: str,

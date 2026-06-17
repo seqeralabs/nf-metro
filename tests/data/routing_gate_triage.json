@@ -167,6 +167,10 @@
     "note": "Pairs with _get_offset's guard: compute_station_offsets is never empty on the render path, so _max_offset_at's early-return arm guards only the route_edges(station_offsets=None) call path used by tests.",
     "status": "defensive"
   },
+  "context.py::if not indices:::#1": {
+    "note": "No-feeder guard in _perp_entry_crossing_x: the helper is called only from _route_perp_entry when a multi-line bundle shares the port with a per-line stagger, and a TOP/BOTTOM entry port in that case is always reached by a bundled inter-section feeder (dy!=0, so compute_bundle_info indexes it).  The empty-indices return-None arm is a contract guard, never taken across the corpus.",
+    "status": "defensive"
+  },
   "context.py::if not jst:::#1": {
     "note": "jid ranges over junction_ids, all present in graph.stations; the missing-station continue never fires.",
     "status": "defensive"
@@ -977,6 +981,14 @@
   },
   "reversal.py::if not succ:::#1": {
     "note": "succ_id comes from sec_successors, built only from real tgt.section_id values, so graph.sections.get(succ_id) is never None and the continue (->187) is a defensive null guard. The fall-through static arm (->188) is phantom: control falls into the following multi-line `if (`, whose first operand line carries the real arc L186->189.",
+    "status": "defensive"
+  },
+  "tb_handlers.py::if crossing_x is not None or abs(drop_delta) < COORD_TOLERANCE:::#1": {
+    "note": "The else (per-line marker-converging jog) is reached only by a multi-line perpendicular entry whose drop carries a non-zero stagger AND has no pinned crossing channel - i.e. a TB/BT continuation with a uniform per-line port offset and a horizontal lead-in.  Corpus TB/BT perp entries all carry the separation in src_off (drop_delta==0, straight arm), so the jog fallback is never taken across the corpus.",
+    "status": "defensive"
+  },
+  "tb_handlers.py::if crossing_x is not None:::#1": {
+    "note": "Pair of context.py::if not indices: - the helper returns None only when no bundled feeder reaches the port, which never co-occurs with the gate that calls it (drop_delta!=0 multi-line bundle into an LR/RL section is always fed by a bundled inter-section edge).  The crossing_x-is-None fall-through is a defensive guard, never taken across the corpus.",
     "status": "defensive"
   },
   "tb_handlers.py::if diag_end < diag_start:::#1": {
