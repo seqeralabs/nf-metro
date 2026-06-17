@@ -120,6 +120,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_bypass_port_no_slot_gaps,
     _guard_bypass_v_flat_visible,
     _guard_centered_line_spread_balanced,
+    _guard_concentric_bundle_corners,
     _guard_coordinates_finite,
     _guard_entry_approach_from_port_side,
     _guard_entry_port_fed_only_by_ports,
@@ -1686,6 +1687,9 @@ def _finalize_layout(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
+            _guard_concentric_bundle_corners(
+                graph, phase, offsets=offsets, routes=routes
+            )
             _guard_no_collinear_distinct_lines(
                 graph, phase, offsets=offsets, routes=routes
             )

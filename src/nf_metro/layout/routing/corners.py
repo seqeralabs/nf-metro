@@ -238,6 +238,52 @@ def concentric_corner_radius(
     return reference_anchored_radius(-dx * ux, base_radius, min_radius=min_radius)
 
 
+def _corner_travel_units(
+    prev: tuple[float, float],
+    corner: tuple[float, float],
+    nxt: tuple[float, float],
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Axis-aligned unit travel vectors into and out of an axis-aligned corner.
+
+    Each leg snaps to its dominant axis, so a segment carrying sub-pixel
+    off-axis drift resolves to a clean cardinal unit.
+    """
+
+    def unit(a: tuple[float, float], b: tuple[float, float]) -> tuple[float, float]:
+        sx, sy = b[0] - a[0], b[1] - a[1]
+        if abs(sx) >= abs(sy):
+            return (math.copysign(1.0, sx) if sx else 0.0, 0.0)
+        return (0.0, math.copysign(1.0, sy) if sy else 0.0)
+
+    return unit(prev, corner), unit(corner, nxt)
+
+
+def concentric_corner_radius_at(
+    prev: tuple[float, float],
+    corner: tuple[float, float],
+    nxt: tuple[float, float],
+    dx: float,
+    base_radius: float = CURVE_RADIUS,
+    *,
+    min_radius: float | None = None,
+) -> float:
+    """Concentric radius for one bundle line, deriving the turn from the points.
+
+    Geometry-keyed entry point for a wholesale-translated 90° corner: it reads
+    the two travel vectors from the corner's own three waypoints (*prev* ->
+    *corner* -> *nxt*) and forwards them to :func:`concentric_corner_radius`, so
+    a caller supplies only the corner geometry and this line's signed
+    displacement *dx* from the bundle reference - never a hand-picked sign.  Use
+    this at every wholesale-translated bundle corner; reserve raw
+    :func:`reference_anchored_radius` for transition corners (one leg pinned,
+    e.g. a converging port jog) where non-concentric is intended.
+    """
+    turn_in, turn_out = _corner_travel_units(prev, corner, nxt)
+    return concentric_corner_radius(
+        turn_in, turn_out, dx, base_radius, min_radius=min_radius
+    )
+
+
 def reference_anchored_radius(
     signed_offset: float,
     base_radius: float = CURVE_RADIUS,

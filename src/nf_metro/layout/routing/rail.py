@@ -17,11 +17,13 @@ from __future__ import annotations
 __all__ = ["route_rail_edges"]
 
 from nf_metro.layout.constants import (
+    CURVE_RADIUS,
     DIAGONAL_RUN,
     MIN_STRAIGHT_EDGE,
     RAIL_TERMINUS_FAN_LEAD,
 )
 from nf_metro.layout.routing.common import RoutedPath
+from nf_metro.layout.routing.corners import concentric_corner_radius_at
 from nf_metro.parser.model import Edge, MetroGraph, Station
 
 
@@ -175,11 +177,19 @@ def route_rail_edges(
             ]
             if off_tgt:
                 l_points.reverse()
+            # Staggered sibling drops fan the elbow's vertical leg by
+            # ``drop_x - feeder.x``; the turn onto the rail takes the
+            # concentric radius for that offset so the bundle keeps a
+            # constant gap through the bend instead of a base-radius pinch.
+            elbow_r = concentric_corner_radius_at(
+                l_points[0], l_points[1], l_points[2], drop_x - feeder.x, CURVE_RADIUS
+            )
             routes.append(
                 RoutedPath(
                     edge=edge,
                     line_id=edge.line_id,
                     points=l_points,
+                    curve_radii=[elbow_r],
                     offsets_applied=True,
                 )
             )

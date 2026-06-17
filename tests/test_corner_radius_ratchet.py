@@ -52,6 +52,7 @@ APPROVED_RADIUS_HELPERS = frozenset(
         "tb_exit_corner",
         "tb_entry_corner",
         "concentric_corner_radius",
+        "concentric_corner_radius_at",
         "reference_anchored_radius",
         "resolve_curve_radii",
     }

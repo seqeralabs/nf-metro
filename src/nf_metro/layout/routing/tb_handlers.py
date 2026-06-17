@@ -20,6 +20,7 @@ from nf_metro.layout.routing.context import (
 )
 from nf_metro.layout.routing.corners import (
     concentric_corner_radius,
+    concentric_corner_radius_at,
     reference_anchored_radius,
     tb_entry_corner,
     tb_exit_corner,
@@ -296,7 +297,11 @@ def _route_perp_entry(
             (drop_x, ty + tgt_off),
             (tx, ty + tgt_off),
         ]
-        radii = [reference_anchored_radius(src_off, ctx.curve_radius)]
+        radii = [
+            concentric_corner_radius_at(
+                pts[0], pts[1], pts[2], drop_x - sx, ctx.curve_radius
+            )
+        ]
     else:
         pts = [
             (sx + src_off, sy),
@@ -306,7 +311,9 @@ def _route_perp_entry(
         ]
         radii = [
             reference_anchored_radius(0.0, ctx.curve_radius),
-            reference_anchored_radius(src_off, ctx.curve_radius),
+            concentric_corner_radius_at(
+                pts[1], pts[2], pts[3], drop_x - sx, ctx.curve_radius
+            ),
         ]
     return RoutedPath(
         edge=edge,
