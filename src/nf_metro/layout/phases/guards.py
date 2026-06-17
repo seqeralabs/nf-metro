@@ -1759,6 +1759,13 @@ def _guard_topmost_row_top_entry_hugs_section(
             continue
         if section_exists_above_row(graph, sec_b.grid_row):
             continue
+        tgt_port = graph.ports.get(r.edge.target)
+        if tgt_port is not None and tgt_port.side == PortSide.RIGHT:
+            # An over-the-top loop into a RIGHT entry port must climb above the
+            # section's header badge to approach from the right; the row was
+            # pushed down (_reserve_over_top_headroom) to keep that climb below
+            # the title, so the hug limit does not apply.
+            continue
         band_top = row_top_edge(graph, sec_b.grid_row, default=sec_b.bbox_y)
         limit = band_top - (INTER_ROW_EDGE_CLEARANCE + CURVE_RADIUS) - GUARD_TOLERANCE
         min_y = min(y for _x, y in r.points)
@@ -2354,6 +2361,17 @@ def _guard_no_artefactual_counter_flow(
             )
 
 
+def _is_side_entry_turn_in(graph: MetroGraph, rp: RoutedPath) -> bool:
+    """Whether *rp* is the turn-in from a LEFT/RIGHT entry port into the trunk.
+
+    Such a route runs one leg perpendicular to a TB section's flow to reach the
+    trunk from the side port; that traverse is the entry, not a fold-back, so
+    serpentine-backtrack accounting excludes it.
+    """
+    port = graph.ports.get(rp.edge.source)
+    return bool(port and port.is_entry and port.side in (PortSide.LEFT, PortSide.RIGHT))
+
+
 def _guard_serpentine_no_backtrack(
     graph: MetroGraph,
     phase: str,
@@ -2388,6 +2406,11 @@ def _guard_serpentine_no_backtrack(
         if src_sec != graph.section_for_station(rp.edge.target):
             continue
         if src_sec not in serpentine_sections:
+            continue
+        if _is_side_entry_turn_in(graph, rp):
+            # A LEFT/RIGHT entry port feeds the trunk via one turn-in leg
+            # perpendicular to the section's flow -- the entry itself, bounded
+            # by the section width, not a serpentine fold-back.
             continue
         forward = 1.0 if graph.sections[src_sec].direction != "RL" else -1.0
         xs = [p[0] for p in rp.points]

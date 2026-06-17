@@ -6,17 +6,26 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from nf_metro.layout.constants import (
+    COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
 )
+from nf_metro.layout.routing.corners import reversed_offset
 from nf_metro.layout.routing.invariants import (
     check_partial_branch_offset_gaps,
     classify_merge_port_feeders,
     distinct_offset_levels,
 )
 from nf_metro.layout.routing.reversal import detect_reversed_sections
-from nf_metro.parser.model import LineSpread, MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import (
+    LineSpread,
+    MetroGraph,
+    Port,
+    PortSide,
+    Section,
+    Station,
+)
 
 # Tolerances used across offset phases
 _SAME_Y_TOLERANCE: float = SAME_Y_TOLERANCE
@@ -1426,4 +1435,90 @@ def compute_station_offsets(
     _allocate_merge_ports_by_approach(ctx)
     _reconcile_horizontal_offsets(ctx)
     _recenter_partial_fan_branches(ctx)
+    _reverse_tb_right_entry_offsets(ctx)
     return ctx.offsets
+
+
+def _is_over_top_right_entry(
+    graph: MetroGraph, port: Port, tb_sections: set[str]
+) -> bool:
+    """Whether *port* is a RIGHT entry reached by an over-the-top loop.
+
+    Matches the dispatch of ``_route_right_entry_over_top``: a RIGHT entry on a
+    TB section fed by an exit port in the SAME grid row, an ADJACENT column, and
+    to the port's LEFT.  That feed loops over the section's top and approaches
+    from the right -- a U-turn that transposes the bundle.  A right entry fed
+    from the right (a fold) or across columns (a bypass) keeps its order and is
+    excluded.
+    """
+    if not (port.is_entry and port.side == PortSide.RIGHT):
+        return False
+    if port.section_id not in tb_sections:
+        return False
+    psec = graph.sections.get(port.section_id)
+    pst = graph.stations.get(port.id)
+    if psec is None or pst is None:
+        return False
+    for edge in graph.edges_to(port.id):
+        src = graph.stations.get(edge.source)
+        src_port = graph.ports.get(edge.source)
+        if not (src and src_port and not src_port.is_entry):
+            continue
+        ssec = graph.sections.get(src.section_id) if src.section_id else None
+        if ssec is None:
+            continue
+        if (
+            ssec.grid_row == psec.grid_row
+            and abs(ssec.grid_col - psec.grid_col) <= 1
+            and src.x < pst.x - COORD_TOLERANCE
+        ):
+            return True
+    return False
+
+
+def _reverse_tb_right_entry_offsets(ctx: _OffsetCtx) -> None:
+    """Reverse the line order of TB sections entered through a RIGHT port.
+
+    A left source reaches a RIGHT-side entry by looping over the section's top
+    and approaching from the right -- a U-turn, which transposes the bundle
+    end-to-end (see ``_route_right_entry_over_top``).  The section therefore
+    receives its lines in the opposite order to the source, so its entry port,
+    internal trunk, and bottom exit must all carry the reversed order for the
+    descent into the port and the drop out of it to stay straight.  Sections
+    downstream of that exit inherit the reversal so their feed stays aligned.
+
+    Reversal is :func:`reversed_offset` applied per station, an involution, so
+    two stations with equal offsets map to equal offsets -- the propagated
+    exit/entry equalities are preserved.
+    """
+    graph = ctx.graph
+    roots = {
+        port.section_id
+        for port in graph.ports.values()
+        if _is_over_top_right_entry(graph, port, ctx.tb_sections)
+    }
+    if not roots:
+        return
+
+    affected = set(roots)
+    dag = graph.section_dag
+    if dag is not None:
+        stack = list(roots)
+        while stack:
+            for succ in dag.successors.get(stack.pop(), ()):
+                if succ not in affected:
+                    affected.add(succ)
+                    stack.append(succ)
+
+    for sid, station in graph.stations.items():
+        if station.section_id not in affected:
+            continue
+        lines = graph.station_lines(sid)
+        offs = [ctx.offsets.get((sid, lid), 0.0) for lid in lines]
+        if not offs:
+            continue
+        max_off = max(offs)
+        for lid in lines:
+            ctx.offsets[(sid, lid)] = reversed_offset(
+                ctx.offsets.get((sid, lid), 0.0), max_off
+            )

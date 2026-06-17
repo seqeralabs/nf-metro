@@ -16,7 +16,9 @@ from typing import TypeGuard
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
+    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
+    INTER_ROW_HEADER_CLEARANCE,
     MERGE_GAP_MIN,
     MIN_INTER_SECTION_GAP,
     MIN_INTER_SECTION_ROW_GAP,
@@ -29,7 +31,11 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
 )
-from nf_metro.layout.routing.common import inter_row_wrap_band, resolve_section
+from nf_metro.layout.routing.common import (
+    inter_row_wrap_band,
+    resolve_section,
+    section_exists_above_row,
+)
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
 
@@ -473,6 +479,7 @@ def place_sections(
     components = _weakly_connected_components(graph, section_edges)
     if len(components) <= 1 or graph._explicit_grid:
         _place_section_group(graph, section_edges, section_x_gap, section_y_gap, None)
+        _reserve_over_top_headroom(graph)
         return
 
     # Deterministic stacking order: top-most original row first, then the
@@ -506,6 +513,42 @@ def place_sections(
             s.offset_y += dy
             s.offset_x += dx
         stack_y += (bottom - top) + section_y_gap
+    _reserve_over_top_headroom(graph)
+
+
+def _reserve_over_top_headroom(graph: MetroGraph) -> None:
+    """Shift rows down to clear the canvas title for an over-the-top loop.
+
+    A RIGHT-entry TB section fed by a same-row, lower-column source is reached
+    by a loop over the section's top (see ``_route_right_entry_over_top``).
+    When no section sits above that section's row, the loop's horizontal would
+    climb into the canvas-top title band.  Reserve a header-clearance band above
+    the topmost such row -- pushing it and every lower row down -- so the loop
+    runs between the title and the section's header badge.
+    """
+    headroom = INTER_ROW_HEADER_CLEARANCE + CURVE_RADIUS
+    target_rows: set[int] = set()
+    for port in graph.ports.values():
+        if not (port.is_entry and port.side == PortSide.RIGHT):
+            continue
+        psec = graph.sections.get(port.section_id)
+        if psec is None or psec.direction != "TB":
+            continue
+        for edge in graph.edges_to(port.id):
+            src_port = graph.ports.get(edge.source)
+            ssec = graph.sections.get(src_port.section_id) if src_port else None
+            if ssec is None:
+                continue
+            if ssec.grid_row == psec.grid_row and ssec.grid_col < psec.grid_col:
+                if not section_exists_above_row(graph, psec.grid_row):
+                    target_rows.add(psec.grid_row)
+                break
+    if not target_rows:
+        return
+    min_target = min(target_rows)
+    for section in graph.sections.values():
+        if section.grid_row >= min_target:
+            section.offset_y += headroom
 
 
 def _rows_overlap(a: Section, b: Section) -> bool:

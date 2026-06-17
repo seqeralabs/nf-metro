@@ -20,10 +20,13 @@ gallery example and topology fixture.
 
 from __future__ import annotations
 
+import os
+import warnings
 from collections import defaultdict, deque
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
+from typing import Protocol
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -48,6 +51,10 @@ from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
 # Segments shorter than this are sub-pixel artefacts of per-line
 # offsets and carry no meaningful direction of travel.
 _MIN_SEGMENT_LENGTH = 1.0
+
+
+class _HasMessage(Protocol):
+    def message(self) -> str: ...
 
 
 class Side(Enum):
@@ -1725,9 +1732,87 @@ def _segment_unit(
     return (0.0, 1.0 if dy > 0 else -1.0)
 
 
+class CurveInvariantError(RuntimeError):
+    """A rendered route contains a bundle-curve defect.
+
+    Covers a bundle flip (a line crosses its bundle-mate), a non-concentric
+    wholesale corner (pinched arcs), or two distinct lines collapsed onto one
+    channel.  Raised on the render path itself so a routing handler can never
+    silently draw a defective curve, independent of ``compute_layout``'s
+    ``validate`` flag.
+    """
+
+
+def assert_render_curve_invariants(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> None:
+    """Raise :class:`CurveInvariantError` if the final render routes are defective.
+
+    Runs the bundle-curve correctness checks on the *final* ``route_edges``
+    output -- the exact geometry the renderer is about to draw.  The
+    stage-boundary guards in :func:`compute_layout` only run under
+    ``validate=True`` (off for ``nf-metro render``), so a handler that builds a
+    bundle with an inconsistent fan (flip), a hand-picked corner radius
+    (non-concentric), or a collapsed channel could reach the canvas unchecked.
+    This closes that gap: every render path routes through here, so such a
+    curve aborts the render with a message naming the offending edge instead of
+    being drawn.
+
+    Set ``NF_METRO_ALLOW_BAD_CURVES=1`` to downgrade to a warning (debugging a
+    work-in-progress handler only; not a supported render mode).
+    """
+    named_checks: list[tuple[str, list[_HasMessage]]] = [
+        (
+            "bundle order (line crosses its bundle-mate)",
+            check_bundle_order_preserved(routes),
+        ),
+        (
+            "non-concentric bundle corner",
+            check_concentric_bundle_corners(graph, routes, offsets),
+        ),
+        (
+            "collinear distinct lines",
+            check_no_collinear_distinct_lines(graph, routes, offsets),
+        ),
+        (
+            "intra-section collinear distinct lines",
+            check_intra_section_collinear_distinct_lines(graph, routes, offsets),
+        ),
+        (
+            "same-line parallel descents",
+            check_no_same_line_parallel_descents(graph, routes, offsets),
+        ),
+    ]
+    messages: list[str] = []
+    for label, violations in named_checks:
+        if violations:
+            first = violations[0]
+            extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+            messages.append(f"[{label}] {first.message()}{extra}")
+    if not messages:
+        return
+
+    detail = "\n  ".join(messages)
+    msg = (
+        "render aborted: a routing handler produced defective bundle curves. "
+        "The handler for the named edge built the bundle with an inconsistent "
+        "fan (flip), a hand-picked corner radius (non-concentric), or a "
+        "collapsed channel. Size wholesale corners via "
+        "concentric_corner_radius_at and fan every leg consistently.\n  "
+        f"{detail}"
+    )
+    if os.environ.get("NF_METRO_ALLOW_BAD_CURVES"):
+        warnings.warn(msg, stacklevel=2)
+        return
+    raise CurveInvariantError(msg)
+
+
 __all__ = [
     "BundleOrderViolation",
     "CollinearOverlapViolation",
+    "CurveInvariantError",
     "FanoutTailGap",
     "MergePortApproachViolation",
     "NonConcentricCornerViolation",

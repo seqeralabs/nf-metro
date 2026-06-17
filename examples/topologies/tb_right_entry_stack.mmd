@@ -1,0 +1,33 @@
+%%metro title: TB Right-Entry Stack
+%%metro style: dark
+%%metro line: alpha | Alpha | #e63946
+%%metro line: beta | Beta | #0570b0
+%%metro grid: source | 0,0
+%%metro grid: upper | 1,0
+%%metro grid: lower | 1,1
+
+graph LR
+    subgraph source [Source]
+        s1[Prepare A]
+        s2[Prepare B]
+        s1 -->|alpha| s2
+    end
+
+    subgraph upper [Upper]
+        %%metro direction: TB
+        %%metro entry: right | alpha, beta
+        u1[Align]
+        u2[Sort]
+        u1 -->|alpha,beta| u2
+    end
+
+    subgraph lower [Lower]
+        %%metro direction: TB
+        %%metro entry: top | alpha, beta
+        l1[Merge]
+        l2[Report]
+        l1 -->|alpha,beta| l2
+    end
+
+    s2 -->|alpha,beta| u1
+    u2 -->|alpha,beta| l1

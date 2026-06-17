@@ -27,6 +27,7 @@ from nf_metro.layout.labels import (
 )
 from nf_metro.layout.routing import RoutedPath, compute_station_offsets, route_edges
 from nf_metro.layout.routing.corners import resolve_curve_radii
+from nf_metro.layout.routing.invariants import assert_render_curve_invariants
 from nf_metro.manifest import node_data_attrs
 from nf_metro.parser.model import (
     ICON_TYPE_DIR,
@@ -455,6 +456,7 @@ def _render_svg_scaled(
 
     station_offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=station_offsets)
+    assert_render_curve_invariants(graph, routes, station_offsets)
 
     # Compute labels early so section bbox expansions are applied
     # before section boxes are drawn and canvas bounds are computed.

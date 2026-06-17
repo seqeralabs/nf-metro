@@ -303,10 +303,6 @@
     "note": "col_left_edge's 0.0 default only fires for a column with no sections; the target's own column always holds its section.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if cross_row:::#2": {
-    "note": "_route_right_entry_wrap is dispatched only for cross-row pairs (same-Y returns at L120), so cross_row is always True; the same-row else arm never fires. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
-    "status": "defensive"
-  },
   "inter_section_handlers.py::if ctx.station_offsets:::#1": {
     "note": "_run_pass_c_guards always populates ctx.station_offsets before route_edges, and RAILS mode returns earlier; the empty-offsets arm never fires. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
@@ -679,10 +675,6 @@
     "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). That topology renders with a bundle-order flip inside the reversal curves - filed as #760 - so no clean fixture can be shipped yet. Reachable-but-defective; revisit when #760 lands.",
     "status": "needs-review"
   },
-  "offsets.py::for lid in graph.station_lines(port_id):::#1": {
-    "note": "The tb_right_entry branch of _entry_top_from_tb_bottom_exits; reachable only via a TB section with a RIGHT entry stacked above another section, which backtracks against flow and crosses the section boundary (#707). Exercise with a clean fixture once #707 is fixed.",
-    "status": "needs-review"
-  },
   "offsets.py::for lid, off in desired.items():::#1": {
     "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). That topology renders with a bundle-order flip inside the reversal curves - filed as #760 - so no clean fixture can be shipped yet. Reachable-but-defective; revisit when #760 lands.",
     "status": "needs-review"
@@ -830,10 +822,6 @@
   "offsets.py::if src and not src.is_port and src.section_id == sec_id:::#1": {
     "note": "The false arm fires when an edge source is an internal station (not a port) whose section_id differs from sec_id. After _resolve_sections(), all inter-section edges run through port stations; no direct edge from an internal station of section A to an internal station of section B exists. DFS back-walk via edges_to() from within a section can only reach: (a) entry ports (return True), (b) same-section internal stations (pushed), or (c) other-section ports (is_port=True, skipped by `port and port.is_entry` check). Cross-section internal stations are structurally unreachable via direct edges after resolution.",
     "status": "defensive"
-  },
-  "offsets.py::if src.section_id in tb_right_entry:::#1": {
-    "note": "The tb_right_entry branch of _entry_top_from_tb_bottom_exits; reachable only via a TB section with a RIGHT entry stacked above another section, which backtracks against flow and crosses the section boundary (#707). Exercise with a clean fixture once #707 is fixed.",
-    "status": "needs-review"
   },
   "offsets.py::if src_port and not src_port.is_entry:::#2": {
     "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). That topology renders with a bundle-order flip inside the reversal curves - filed as #760 - so no clean fixture can be shipped yet. Reachable-but-defective; revisit when #760 lands. Its else arm (->1203) is additionally defensive: the sole feeder of a >=2-line fan-out junction is its exit port, a non-entry port.",

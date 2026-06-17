@@ -494,6 +494,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "wrap` lead-in).",
     ),
     (
+        "tb_right_entry_stack",
+        TOPOLOGIES_DIR,
+        "A two-line bundle into a stacked TB section's RIGHT entry from a "
+        "same-row left source: it loops over the section top and descends into "
+        "the port, the U-turn transposing the bundle, with concentric corners "
+        "built via `build_concentric_bundle` (#707).",
+    ),
+    (
         "around_below_ep_col_gt0",
         TOPOLOGIES_DIR,
         "A two-line bundle looping around below the canvas into a non-zero-"

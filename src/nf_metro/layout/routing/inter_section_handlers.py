@@ -15,6 +15,7 @@ from nf_metro.layout.constants import (
     MERGE_ROUTE_MARGIN,
     SECTION_ROUTE_CLEARANCE,
 )
+from nf_metro.layout.routing.bundle import build_concentric_bundle
 from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
@@ -130,7 +131,22 @@ def _route_inter_section(
     if perp is not None:
         return perp
 
-    if abs(dy) < COORD_TOLERANCE_FINE and not needs_bypass:
+    # A RIGHT entry port whose source is to the LEFT sits on the target's
+    # far edge; a same-Y straight run reaches it only by ploughing through
+    # the whole box interior and the intra-section drop then doubles back
+    # left over that same run.  Fall through to the wrap handler, which
+    # approaches the port from its own outward (right) side instead.
+    straight_ploughs_right_entry = (
+        tgt_port is not None
+        and tgt_port.is_entry
+        and tgt_port.side == PortSide.RIGHT
+        and sx < tx - COORD_TOLERANCE
+    )
+    if (
+        abs(dy) < COORD_TOLERANCE_FINE
+        and not needs_bypass
+        and not straight_ploughs_right_entry
+    ):
         # Same Y: straight horizontal
         return RoutedPath(
             edge=edge,
@@ -2331,6 +2347,64 @@ def _route_around_section_below(
     )
 
 
+def _route_right_entry_over_top(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> RoutedPath | None:
+    """Loop a same-row left source over the top of a TB section's RIGHT port.
+
+    The source sits at (nearly) the port's own Y, so a straight or under-the-box
+    channel would cut the interior.  The bundle instead rises over the section's
+    top edge, runs right past its right edge, and descends into the RIGHT port
+    from the port's own outward side.  Approaching a right-side port from the
+    left is a U-turn, which transposes the bundle end-to-end; the descent into
+    the section therefore reverses the lines, matched by the section's reversed
+    internal order (see ``_reverse_tb_right_entry_offsets``).
+
+    Built via :func:`build_concentric_bundle` from the bundle's centreline, so
+    the loop cannot flip and every corner is concentric by construction.
+    """
+    graph = ctx.graph
+    members_edges = [e for e in graph.edges_to(edge.target) if e.source == edge.source]
+    line_ids = list(dict.fromkeys(e.line_id for e in members_edges))
+    if not line_ids:
+        return None
+    edge_by_line = {e.line_id: e for e in members_edges}
+
+    src_offs = {lid: _get_offset(ctx, edge.source, lid) for lid in line_ids}
+    mean = sum(src_offs.values()) / len(src_offs)
+
+    sx, sy = src.x, src.y
+    ex, ey = tgt.x, tgt.y
+    ep_section = graph.sections.get(tgt.section_id) if tgt.section_id else None
+    section_right = (
+        ep_section.bbox_x + ep_section.bbox_w
+        if ep_section and ep_section.bbox_w > 0
+        else ex
+    )
+    # The horizontal runs over the target section's own top, so the channel
+    # clears the section's header badge (it protrudes SECTION_HEADER_PROTRUSION
+    # above bbox_y), not merely the box edge.
+    section_top = ep_section.bbox_y if ep_section else min(sy, ey)
+    channel_y = section_top - INTER_ROW_HEADER_CLEARANCE - ctx.curve_radius
+    lead_x = sx + ctx.curve_radius + ctx.offset_step
+    descent_x = (
+        section_right + ctx.curve_radius + ctx.offset_step + SECTION_ROUTE_CLEARANCE
+    )
+    mid_sy = sy + mean
+    mid_ey = ey + mean
+    centerline = [
+        (sx, mid_sy),
+        (lead_x, mid_sy),
+        (lead_x, channel_y),
+        (descent_x, channel_y),
+        (descent_x, mid_ey),
+        (ex, mid_ey),
+    ]
+    members = [(edge_by_line[lid], lid, src_offs[lid] - mean) for lid in line_ids]
+    routes = build_concentric_bundle(members, centerline, base_radius=ctx.curve_radius)
+    return next((r for r in routes if r.line_id == edge.line_id), None)
+
+
 def _route_right_entry_wrap(
     edge: Edge, src: Station, tgt: Station, i: int, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -2419,16 +2493,16 @@ def _route_right_entry_wrap(
         and tgt_col is not None
     )
 
-    if cross_row:
-        assert src_col is not None and tgt_col is not None
-        hy = bypass_bottom_y(
-            ctx.graph, src_col, tgt_col, BYPASS_CLEARANCE, src_row=src_row
-        )
-        hy += delta
-    else:
-        # Same-row: use inter-row gap above the target section.
-        hy = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius)
-        hy += delta
+    if not cross_row:
+        # Same-row source: loop over the top into the right port (the channel
+        # below would cut the interior).  Built as a concentric bundle.
+        over_top = _route_right_entry_over_top(edge, src, tgt, ctx)
+        assert over_top is not None  # edge is always among its own bundle members
+        return over_top
+
+    assert src_col is not None and tgt_col is not None
+    hy = bypass_bottom_y(ctx.graph, src_col, tgt_col, BYPASS_CLEARANCE, src_row=src_row)
+    hy += delta
 
     # Vertical channel X: just past the entry port in the inter-section
     # gap.  Mirror of the left-entry wrap's V2 sign convention: OUTER
