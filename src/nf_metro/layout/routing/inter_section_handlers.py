@@ -17,8 +17,10 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.routing.centrelines import (
     gather_bundle,
+    gather_tapered_bundle,
     route_along,
     route_straight,
+    route_tapered,
 )
 from nf_metro.layout.routing.common import (
     Direction,
@@ -259,15 +261,15 @@ def _route_inter_section(
             channel_x = sx + ctx.curve_radius + ctx.offset_step
         else:
             channel_x = sx - ctx.curve_radius - ctx.offset_step
-        members, src_center, tgt_center = gather_bundle(ctx, edge)
+        members, src_center, tgt_center = gather_tapered_bundle(ctx, edge)
         sy_c = sy + src_center
         ty_c = ty + tgt_center
-        return route_along(
+        return route_tapered(
             edge,
             members,
             [(sx, sy_c), (channel_x, sy_c), (channel_x, ty_c), (tx, ty_c)],
+            transition_leg=1,
             base_radius=ctx.curve_radius,
-            normalize_exempt=False,
         )
 
     # RIGHT entry port with source to the LEFT: wrap the vertical
@@ -440,10 +442,11 @@ def _route_bottom_exit_junction(
 ) -> RoutedPath | None:
     """Vertical-first L-shape from bottom exit junction.
 
-    The bundle leaves the exit fanned in X, turns the corner, and arrives at the
-    entry fanned in Y -- a single rigid corner whose stacking axis rotates.  The
-    centreline drops at the bundle's mean exit X and turns at the mean entry Y;
-    ``build_concentric_bundle`` derives each line's X fan from its entry offset.
+    The bundle drops in X at the bundle's mean exit X, turns the corner, and
+    runs to the entry at the mean entry Y.  Its descent channel is positioned
+    from the exit port's fan, not from the per-line endpoint offsets, so it is
+    fanned rigidly by one offset on every leg; ``route_tapered`` routes the
+    rigid bundle through the shared seam.
     """
     exit_pid = ctx.bottom_exit_junction_ports[edge.source]
     exit_src = ctx.graph.stations.get(exit_pid)
@@ -455,17 +458,18 @@ def _route_bottom_exit_junction(
         bi, bn = ctx.bundle_info.get((edge.source, edge.target, line_id), (i, n))
         return ((bn - 1) / 2 - bi) * ctx.offset_step
 
-    members, _, tgt_center = gather_bundle(ctx, edge)
-    exit_offs = [exit_x_offset(line_id) for _edge, line_id, _offset in members]
+    members, _, tgt_center = gather_tapered_bundle(ctx, edge)
+    exit_offs = [exit_x_offset(line_id) for _e, line_id, _s, _t in members]
     mean_exit_x = sum(exit_offs) / len(exit_offs)
     vx = src.x + mean_exit_x
     hy = tgt.y + tgt_center
-    return route_along(
+    rigid = [(e, line_id, src_off, src_off) for e, line_id, src_off, _tgt in members]
+    return route_tapered(
         edge,
-        members,
+        rigid,
         [(vx, src.y), (vx, hy), (tgt.x, hy)],
+        transition_leg=1,
         base_radius=ctx.curve_radius,
-        normalize_exempt=False,
     )
 
 
@@ -935,12 +939,14 @@ def _route_l_shape(
 def _route_l_shape_plain(
     edge: Edge, src: Station, tgt: Station, n: int, ctx: _RoutingCtx
 ) -> RoutedPath | None:
-    """L-shape for a self-contained bundle: centreline + concentric fan.
+    """L-shape for a self-contained bundle: centreline + tapering fan.
 
-    The whole bundle turns both corners together, so it is a single rigid
-    offset of one H -> V -> H centreline.  ``build_concentric_bundle`` fans the
-    lines and sizes every corner; the two corner radii of any line sum to
-    ``2 * base``, so a vertical leg shorter than that shrinks the base to fit.
+    One H -> V -> H centreline.  The source fan (an exit port / merge junction)
+    and the target entry trunk can have different spreads, so the bundle tapers:
+    ``route_tapered`` carries each line's source offset on the source-side leg
+    and its target offset on the channel and target-side legs, switching at the
+    first corner.  The two corner radii of any line sum to ``2 * base``, so a
+    vertical leg shorter than that shrinks the base to fit.
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
@@ -960,7 +966,7 @@ def _route_l_shape_plain(
         endpoint_port_xs(ctx.graph, edge),
     )
 
-    members, src_center, tgt_center = gather_bundle(ctx, edge)
+    members, src_center, tgt_center = gather_tapered_bundle(ctx, edge)
     sy_c = sy + src_center
     ty_c = ty + tgt_center
     centerline = [(sx, sy_c), (mid_x, sy_c), (mid_x, ty_c), (tx, ty_c)]
@@ -969,13 +975,13 @@ def _route_l_shape_plain(
     base = ctx.curve_radius
     if seg > 0 and 2 * base > seg:
         base = seg / 2
-    return route_along(
+    return route_tapered(
         edge,
         members,
         centerline,
+        transition_leg=1,
         base_radius=base,
         min_radius=COORD_TOLERANCE,
-        normalize_exempt=False,
     )
 
 
@@ -1555,15 +1561,15 @@ def _route_left_exit_left_entry_drop(
     left_edge = col_left_edge(ctx.graph, src_col, default=min(sx, tx))
     channel_x = min(left_edge, sx, tx) - ctx.curve_radius - ctx.offset_step
 
-    members, src_center, tgt_center = gather_bundle(ctx, edge)
+    members, src_center, tgt_center = gather_tapered_bundle(ctx, edge)
     sy_c = sy + src_center
     ty_c = ty + tgt_center
-    return route_along(
+    return route_tapered(
         edge,
         members,
         [(sx, sy_c), (channel_x, sy_c), (channel_x, ty_c), (tx, ty_c)],
+        transition_leg=1,
         base_radius=ctx.curve_radius,
-        normalize_exempt=False,
     )
 
 

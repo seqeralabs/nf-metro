@@ -994,5 +994,17 @@
   "normalize.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
     "note": "Degenerate single-Y trunk band in the riser-alignment pass. Left un-exercised after the simple inter-section shapes moved to baked-offset centrelines; render-diff confirms no visual change.",
     "status": "needs-review"
+  },
+  "bundle.py::if n_legs < 1:::#1": {
+    "note": "Defensive guard: build_concentric_bundle rejects a centreline of fewer than two vertices. Every caller (route_along / route_straight and the handler centrelines) builds a >=2-vertex polyline, so the raise arm is never taken.",
+    "status": "defensive"
+  },
+  "bundle.py::if n_legs < 1:::#2": {
+    "note": "Defensive guard: build_tapered_bundle rejects a centreline of fewer than two vertices, mirroring build_concentric_bundle. Every caller passes a >=2-vertex centreline, so the raise arm is never taken.",
+    "status": "defensive"
+  },
+  "bundle.py::if not 0 <= transition_leg <= n_legs:::#1": {
+    "note": "Defensive guard: build_tapered_bundle rejects a transition_leg outside [0, n_legs]. Handlers pass a literal 1 against a 3- or 4-vertex centreline, so the raise arm is never taken.",
+    "status": "defensive"
   }
 }

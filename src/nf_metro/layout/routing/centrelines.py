@@ -16,13 +16,17 @@ out the centreline from the handler's named geometry, and returns the single
 from __future__ import annotations
 
 from nf_metro.layout.constants import COORD_TOLERANCE
-from nf_metro.layout.routing.bundle import build_concentric_bundle
+from nf_metro.layout.routing.bundle import (
+    build_concentric_bundle,
+    build_tapered_bundle,
+)
 from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.layout.routing.context import _get_offset, _RoutingCtx
 from nf_metro.parser.model import Edge
 
 _Vec = tuple[float, float]
 _Member = tuple[Edge, str, float]
+_TaperedMember = tuple[Edge, str, float, float]
 
 
 def gather_bundle(ctx: _RoutingCtx, edge: Edge) -> tuple[list[_Member], float, float]:
@@ -50,6 +54,38 @@ def gather_bundle(ctx: _RoutingCtx, edge: Edge) -> tuple[list[_Member], float, f
     return members, src_center, tgt_center
 
 
+def gather_tapered_bundle(
+    ctx: _RoutingCtx, edge: Edge
+) -> tuple[list[_TaperedMember], float, float]:
+    """Collect a co-travelling bundle as a *tapering* one.
+
+    Like :func:`gather_bundle`, but each member is ``(edge, line_id,
+    src_offset, tgt_offset)``: the line's displacement from the bundle's
+    source-side mean *and* from its target-side mean.  When the two spreads
+    differ the bundle tapers, and feeding these members to
+    :func:`build_tapered_bundle` lands each line on its own offset at both ends
+    rather than baking the source spread onto the target endpoints.  When the
+    spreads match it is rigid and the result equals :func:`gather_bundle`'s.
+    ``src_center`` / ``tgt_center`` are the mean source / target offsets to
+    centre the centreline on each side.
+    """
+    member_edges = [
+        e for e in ctx.graph.edges_to(edge.target) if e.source == edge.source
+    ]
+    line_ids = list(dict.fromkeys(e.line_id for e in member_edges))
+    edge_by_line = {e.line_id: e for e in member_edges}
+
+    src_offs = {lid: _get_offset(ctx, edge.source, lid) for lid in line_ids}
+    tgt_offs = {lid: _get_offset(ctx, edge.target, lid) for lid in line_ids}
+    src_center = sum(src_offs.values()) / len(src_offs)
+    tgt_center = sum(tgt_offs.values()) / len(tgt_offs)
+    members = [
+        (edge_by_line[lid], lid, src_offs[lid] - src_center, tgt_offs[lid] - tgt_center)
+        for lid in line_ids
+    ]
+    return members, src_center, tgt_center
+
+
 def route_along(
     edge: Edge,
     members: list[_Member],
@@ -71,6 +107,49 @@ def route_along(
         base_radius=base_radius,
         min_radius=min_radius,
         normalize_exempt=normalize_exempt,
+    )
+    return next((r for r in routes if r.line_id == edge.line_id), None)
+
+
+def route_tapered(
+    edge: Edge,
+    members: list[_TaperedMember],
+    centerline: list[_Vec],
+    *,
+    transition_leg: int,
+    base_radius: float,
+    min_radius: float | None = None,
+) -> RoutedPath | None:
+    """Fan a bundle and return the route for *edge*, tapering when it must.
+
+    Each member carries a source and target offset.  When every line's two
+    offsets match the bundle is rigid: it is routed through :func:`route_along`
+    and left ``normalize_exempt=False``, so the post-routing passes can bundle
+    it with any gap-mates (channels into different targets that share one
+    inter-column gap collapse into one concentric bundle there, not here).
+
+    When the spreads differ the bundle tapers, and a single rigid offset cannot
+    land each line on its true offset at both ends.  Then it is built with
+    :func:`build_tapered_bundle` -- the offset switches at *transition_leg* --
+    and marked ``normalize_exempt``, since a normalize restack would re-size its
+    transition corner as if it were wholesale and pinch the bundle.
+    """
+    if all(abs(src - tgt) <= COORD_TOLERANCE for _e, _lid, src, tgt in members):
+        return route_along(
+            edge,
+            [(e, lid, src) for e, lid, src, _tgt in members],
+            centerline,
+            base_radius=base_radius,
+            min_radius=min_radius,
+            normalize_exempt=False,
+        )
+    routes = build_tapered_bundle(
+        members,
+        centerline,
+        transition_leg,
+        base_radius=base_radius,
+        min_radius=min_radius,
+        normalize_exempt=True,
     )
     return next((r for r in routes if r.line_id == edge.line_id), None)
 

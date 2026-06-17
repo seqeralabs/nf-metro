@@ -1,6 +1,8 @@
 [
   "bundle.py::if abs(dx) > COORD_TOLERANCE and abs(dy) > COORD_TOLERANCE:::#1",
-  "bundle.py::if len(centerline) < 2:::#1",
+  "bundle.py::if n_legs < 1:::#1",
+  "bundle.py::if n_legs < 1:::#2",
+  "bundle.py::if not 0 <= transition_leg <= n_legs:::#1",
   "common.py::elif tgt_sec:::#1",
   "common.py::for e in graph.edges:::#1",
   "common.py::for e in graph.edges_to(station.id):::#1",

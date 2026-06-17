@@ -87,44 +87,142 @@ def build_concentric_bundle(
     with concentric corner radii.  ``offsets_applied`` is set: the per-line
     offset is baked into the points, not left to the renderer's heuristic.
     """
-    if len(centerline) < 2:
+    n_legs = len(centerline) - 1
+    if n_legs < 1:
         raise ValueError("centerline needs at least two vertices")
+    return _fan_bundle(
+        [(edge, line_id, [s] * n_legs) for edge, line_id, s in members],
+        centerline,
+        base_radius,
+        min_radius=min_radius,
+        is_inter_section=is_inter_section,
+        normalize_exempt=normalize_exempt,
+    )
 
+
+def build_tapered_bundle(
+    members: list[tuple[Edge, str, float, float]],
+    centerline: list[_Vec],
+    transition_leg: int,
+    base_radius: float,
+    *,
+    min_radius: float | None = None,
+    is_inter_section: bool = True,
+    normalize_exempt: bool = True,
+) -> list[RoutedPath]:
+    """Fan a *tapering* bundle: a per-line source offset and target offset.
+
+    A rigid bundle keeps one perpendicular offset on every leg; a tapering one
+    carries a wider spread on its source side than its target side (or vice
+    versa), so it cannot.  Each line holds two offsets -- ``src_offset`` on the
+    legs before *transition_leg*, ``tgt_offset`` on the legs at and after it --
+    and the offset switches at the single vertex where ``transition_leg``
+    begins.  That vertex becomes a *transition corner*: one flanking leg is
+    fanned by the source offset, the other by the target offset.  Its arcs do
+    not share a centre (the two legs are fanned by different amounts), so it is
+    sized to the fanned turning leg via
+    :func:`~nf_metro.layout.routing.corners.concentric_corner_radius_at`.  A
+    *wholesale* corner -- both flanking legs carrying one offset -- is genuinely
+    concentric, as in :func:`build_concentric_bundle`.
+
+    Parameters
+    ----------
+    members
+        ``(edge, line_id, src_offset, tgt_offset)`` per line.  ``src_offset ==
+        tgt_offset`` for every line reduces to the rigid bundle, byte-identical
+        to :func:`build_concentric_bundle`.
+    centerline
+        ``>= 2`` axis-aligned vertices; each consecutive pair differs in exactly
+        one axis.
+    transition_leg
+        Index of the first leg that carries ``tgt_offset`` (``1`` for the common
+        inter-section L-shape: the source-side leg fans by ``src_offset``, the
+        channel and target-side legs by ``tgt_offset``).
+    base_radius
+        Reference-line corner radius.
+    min_radius
+        Optional floor for inside-of-turn arcs.
+    """
+    n_legs = len(centerline) - 1
+    if n_legs < 1:
+        raise ValueError("centerline needs at least two vertices")
+    if not 0 <= transition_leg <= n_legs:
+        raise ValueError(f"transition_leg {transition_leg} out of range [0, {n_legs}]")
+    return _fan_bundle(
+        [
+            (
+                edge,
+                line_id,
+                [src if leg < transition_leg else tgt for leg in range(n_legs)],
+            )
+            for edge, line_id, src, tgt in members
+        ],
+        centerline,
+        base_radius,
+        min_radius=min_radius,
+        is_inter_section=is_inter_section,
+        normalize_exempt=normalize_exempt,
+    )
+
+
+def _fan_bundle(
+    members: list[tuple[Edge, str, list[float]]],
+    centerline: list[_Vec],
+    base_radius: float,
+    *,
+    min_radius: float | None,
+    is_inter_section: bool,
+    normalize_exempt: bool,
+) -> list[RoutedPath]:
+    """Emit one route per member from explicit per-leg offsets.
+
+    ``members`` is ``(edge, line_id, leg_offsets)`` with one signed
+    perpendicular offset per centreline leg.  A constant offset across all legs
+    is a rigid bundle; an offset that switches between legs tapers.  At every
+    interior vertex only the *vertical* leg displaces X, so its signed X
+    displacement is the input the concentric-radius helper derives the turn
+    from -- a wholesale corner (both legs equal) lands genuinely concentric, a
+    transition corner (legs differ) is sized to the turning leg.
+    """
     legs = [
         _axis_unit(centerline[i], centerline[i + 1]) for i in range(len(centerline) - 1)
     ]
     normals = [_right_normal(t) for t in legs]
 
     routes: list[RoutedPath] = []
-    for edge, line_id, s in members:
+    for edge, line_id, offs in members:
         points: list[_Vec] = []
         radii: list[float] = []
         for vi, (cx, cy) in enumerate(centerline):
             if vi == 0:
-                nx, ny = normals[0]
+                o, (nx, ny) = offs[0], normals[0]
+                px, py = cx + o * nx, cy + o * ny
             elif vi == len(centerline) - 1:
-                nx, ny = normals[-1]
+                o, (nx, ny) = offs[-1], normals[-1]
+                px, py = cx + o * nx, cy + o * ny
             else:
-                # Interior corner: the parallel offset of the incoming leg and
-                # of the outgoing leg meet here.  One leg is horizontal (its
-                # normal shifts Y) and one vertical (its normal shifts X), so
-                # summing the two normals selects the right shift per axis.
-                rn_in, rn_out = normals[vi - 1], normals[vi]
-                nx, ny = rn_in[0] + rn_out[0], rn_in[1] + rn_out[1]
-                # ``s * nx`` is this line's signed X displacement from the
-                # centreline at this corner -- the input the concentric-radius
-                # helper derives the turn from.
+                # Interior corner: the incoming and outgoing legs meet here.
+                # One leg is horizontal (its normal shifts Y) and one vertical
+                # (its normal shifts X), so each axis takes the shift from the
+                # leg that bends it.  ``vertical_dx`` is this line's signed X
+                # displacement from the centreline at this corner -- the input
+                # the concentric-radius helper derives the turn from.
+                o_in, o_out = offs[vi - 1], offs[vi]
+                n_in, n_out = normals[vi - 1], normals[vi]
+                vertical_dx = o_in * n_in[0] + o_out * n_out[0]
+                px = cx + vertical_dx
+                py = cy + o_in * n_in[1] + o_out * n_out[1]
                 radii.append(
                     concentric_corner_radius_at(
                         centerline[vi - 1],
                         centerline[vi],
                         centerline[vi + 1],
-                        s * nx,
+                        vertical_dx,
                         base_radius,
                         min_radius=min_radius,
                     )
                 )
-            points.append((cx + s * nx, cy + s * ny))
+            points.append((px, py))
 
         routes.append(
             RoutedPath(
