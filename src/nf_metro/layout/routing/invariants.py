@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
@@ -1763,7 +1763,7 @@ def assert_render_curve_invariants(
     Set ``NF_METRO_ALLOW_BAD_CURVES=1`` to downgrade to a warning (debugging a
     work-in-progress handler only; not a supported render mode).
     """
-    named_checks: list[tuple[str, list[_HasMessage]]] = [
+    named_checks: list[tuple[str, Sequence[_HasMessage]]] = [
         (
             "bundle order (line crosses its bundle-mate)",
             check_bundle_order_preserved(routes),
