@@ -395,10 +395,6 @@
     "note": "Every edge endpoint is a registered station after parse+resolve, so graph.stations.get(other.source) is never None here.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if perp_entry:::#1": {
-    "note": "The perpendicular-entry branch of the up-and-over handler (cross-column perp exit -> perp entry). No corpus fixture exercises it: that case is deferred to #775 (bundle-order flip at the entry drop, trunk left-space, diverging-exit reorder). The branch prevents a crash for the topology but its render is not yet fixtured; the side-entry branch is exercised by lr_perp_top/bottom_exit_side_entry.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if shared_vx is not None:::#1": {
     "note": "_fan_left_entry_descent_x returns None only when col_left<=0; col_left_edge for the target's own column is always >0.",
     "status": "defensive"

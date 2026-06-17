@@ -650,6 +650,30 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "drops below the source section, runs across the under-row band, and "
         "rises back to the consumer's row to enter straight.",
     ),
+    (
+        "lr_perp_top_exit_perp_entry",
+        TOPOLOGIES_DIR,
+        "Two co-travelling lines leave an LR section through a TOP exit and "
+        "feed the TOP entry of a same-row neighbour in another column. The "
+        "bundle rises over the header band and drops into the consumer trunk, "
+        "keeping a single left/right order across the shared entry port so it "
+        "stays parallel without crossing at the drop.",
+    ),
+    (
+        "lr_perp_bottom_exit_perp_entry",
+        TOPOLOGIES_DIR,
+        "The BOTTOM-exit mirror of lr_perp_top_exit_perp_entry: the bundle "
+        "drops under the row, runs across, and rises into the consumer's "
+        "BOTTOM entry, staying parallel through the corridor.",
+    ),
+    (
+        "lr_perp_top_exit_perp_entry_diverging",
+        TOPOLOGIES_DIR,
+        "A TOP-exit bundle taken over the corridor into a TOP entry where the "
+        "two lines split to different downstream stations. Consistent corridor "
+        "ordering routes each line to its target without a convergence jog at "
+        "the entry.",
+    ),
 ]
 
 # Category headers inserted before specific entries
