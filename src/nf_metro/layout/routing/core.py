@@ -116,10 +116,8 @@ from nf_metro.layout.routing.postprocess import (  # noqa: F401
 )
 from nf_metro.layout.routing.tb_handlers import (  # noqa: F401
     _compute_diagonal_placement,
-    _find_upstream_for_merge,
     _perp_entry_drop_delta,
     _route_perp_entry,
-    _route_perp_entry_merged,
     _route_tb_diagonal,
     _route_tb_internal,
     _route_tb_lr_entry,

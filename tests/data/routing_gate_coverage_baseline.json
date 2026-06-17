@@ -254,11 +254,6 @@
   "reversal.py::if not src or not tgt:::#1",
   "reversal.py::if not src:::#1",
   "reversal.py::if not succ:::#1",
-  "tb_handlers.py::if abs(u.y - src.y) > COORD_TOLERANCE:::#1",
-  "tb_handlers.py::if abs(upstream_st.x - src.x) < COORD_TOLERANCE:::#1",
   "tb_handlers.py::if diag_end < diag_start:::#1",
-  "tb_handlers.py::if diag_end > diag_start:::#1",
-  "tb_handlers.py::if not ctx.station_offsets:::#1",
-  "tb_handlers.py::if not u:::#1",
-  "tb_handlers.py::if upstream_st is not None:::#1"
+  "tb_handlers.py::if diag_end > diag_start:::#1"
 ]

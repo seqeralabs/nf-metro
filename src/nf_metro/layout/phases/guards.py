@@ -3060,6 +3060,52 @@ def _guard_entry_port_fed_only_by_ports(graph: MetroGraph, phase: str) -> None:
                     )
 
 
+def _guard_perp_entry_feed_not_collinear(graph: MetroGraph, phase: str) -> None:
+    """A TOP/BOTTOM entry port never sits at its feeding station's Y.
+
+    A perpendicular (TOP/BOTTOM) entry port is held off the consumer's
+    internal station rows by the station-as-elbow constraint, and snaps to
+    the section's top/bottom boundary edge.  The only stations that feed an
+    entry port are exit ports, which seat at producer station rows in a
+    vertically-distinct section.  So the entry port's Y can never coincide
+    with the Y of the station feeding it; a collinear feed means a producer
+    has dragged the port off its boundary edge.
+    """
+    for section in graph.sections.values():
+        for pid in section.entry_ports:
+            port = graph.ports.get(pid)
+            if port is None or port.side not in (PortSide.TOP, PortSide.BOTTOM):
+                continue
+            entry_st = graph.stations.get(pid)
+            if entry_st is None:
+                continue
+            for edge in graph.edges_to(pid):
+                feeder = graph.stations.get(edge.source)
+                if feeder is None:
+                    continue
+                feeder_port = graph.ports.get(edge.source)
+                feeder_sec = (
+                    graph.sections.get(feeder.section_id)
+                    if feeder.section_id is not None
+                    else None
+                )
+                if (
+                    feeder_port is not None
+                    and not feeder_port.is_entry
+                    and feeder_port.side == PortSide.BOTTOM
+                    and feeder_sec is not None
+                    and feeder_sec.direction == "TB"
+                ):
+                    continue
+                if abs(feeder.y - entry_st.y) <= COORD_TOLERANCE:
+                    raise PhaseInvariantError(
+                        f"{phase}: {port.side.name} entry port {pid!r} "
+                        f"(y={entry_st.y:.1f}) is collinear with its feeder "
+                        f"{edge.source!r} (y={feeder.y:.1f}); a perpendicular "
+                        f"entry port must stay off its feeder's Y"
+                    )
+
+
 def _guard_station_x_column_drift(graph: MetroGraph, phase: str) -> None:
     """Final-phase: within each LR/RL section, stations sharing a layer
     must agree on X within one ``X_SPACING`` of the layer's median X.

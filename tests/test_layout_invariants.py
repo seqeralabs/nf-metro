@@ -987,6 +987,48 @@ def test_stacked_elbow_check_detects_graze():
 
 
 @pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_perp_entry_feed_not_collinear(fixture):
+    """A TOP/BOTTOM entry port never sits at the Y of the station feeding it.
+
+    The station-as-elbow constraint and the boundary snap hold a perpendicular
+    entry port off the consumer's internal rows, while its feeders are exit
+    ports seated in a vertically-distinct section, so a feed can never be
+    collinear with the port; ``_guard_perp_entry_feed_not_collinear`` locks
+    that out.
+    """
+    from nf_metro.layout.phases.guards import _guard_perp_entry_feed_not_collinear
+
+    graph = _layout(fixture)
+    _guard_perp_entry_feed_not_collinear(graph, "test")
+
+
+def test_perp_entry_feed_collinear_guard_detects():
+    """Meaningfulness guard: dragging a TOP entry port onto its feeder's Y
+    makes ``_guard_perp_entry_feed_not_collinear`` raise.
+    """
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_perp_entry_feed_not_collinear,
+    )
+
+    graph = _layout("topologies/cross_col_top_entry.mmd")
+    _guard_perp_entry_feed_not_collinear(graph, "test")
+
+    port_id, feeder_id = next(
+        (pid, edge.source)
+        for section in graph.sections.values()
+        for pid in section.entry_ports
+        if (port := graph.ports.get(pid)) is not None
+        and port.side in (PortSide.TOP, PortSide.BOTTOM)
+        for edge in graph.edges_to(pid)
+    )
+    graph.stations[port_id].y = graph.stations[feeder_id].y
+
+    with pytest.raises(PhaseInvariantError, match="collinear with its feeder"):
+        _guard_perp_entry_feed_not_collinear(graph, "test")
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
 def test_distinct_trunk_not_hidden_behind_exempt(fixture):
     """A distinct-line bypass trunk must not sit within a bundle gap of an
     exempt trunk it overlaps in X.

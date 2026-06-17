@@ -10,7 +10,6 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.routing.common import (
     RoutedPath,
-    inter_column_channel_x,
 )
 from nf_metro.layout.routing.context import (
     _get_offset,
@@ -19,9 +18,7 @@ from nf_metro.layout.routing.context import (
     _tb_x_offset,
 )
 from nf_metro.layout.routing.corners import (
-    corner_radius,
     reference_anchored_radius,
-    reversed_offset,
     tb_entry_corner,
     tb_exit_corner,
 )
@@ -245,7 +242,7 @@ def _route_tb_lr_entry(
 def _route_perp_entry(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> RoutedPath | None:
-    """Route TOP/BOTTOM port -> internal station with upstream merging."""
+    """Route a TOP/BOTTOM entry port down to its internal target station."""
     graph = ctx.graph
     src_port = graph.ports.get(edge.source)
     if not (
@@ -261,14 +258,6 @@ def _route_perp_entry(
 
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-
-    # Try to merge with upstream inter-section edge
-    upstream_st = _find_upstream_for_merge(edge, src, ctx)
-
-    if upstream_st is not None:
-        return _route_perp_entry_merged(
-            edge, src, tgt, upstream_st, src_off, tgt_off, ctx
-        )
 
     # When distinct lines share this port and target, hold them on parallel
     # drop channels so they don't overlay; the port offset alone is per-line
@@ -356,115 +345,3 @@ def _perp_entry_drop_delta(edge: Edge, dx: float, ctx: _RoutingCtx) -> float:
     centred = i - (n - 1) / 2
     sign = 1.0 if dx < 0 else -1.0
     return sign * centred * ctx.offset_step
-
-
-def _find_upstream_for_merge(
-    edge: Edge, src: Station, ctx: _RoutingCtx
-) -> Station | None:
-    """Find an upstream station to merge with for combined L-shape routing.
-
-    Returns the upstream station if merging is appropriate, or None.
-    Adds the upstream edge to skip_edges when merging.
-    """
-    if not ctx.station_offsets:
-        return None
-
-    graph = ctx.graph
-    for e2 in graph.edges:
-        if e2.target != edge.source or e2.line_id != edge.line_id:
-            continue
-        u = graph.stations.get(e2.source)
-        if not u:
-            continue
-        # Don't merge with TB BOTTOM exits
-        u_port = graph.ports.get(e2.source)
-        if (
-            u_port
-            and not u_port.is_entry
-            and u_port.side == PortSide.BOTTOM
-            and u.section_id in ctx.tb_sections
-        ):
-            continue
-        # Don't merge with a perpendicular exit on a horizontal-flow section:
-        # its Y sits on the source section's boundary edge, so a merged
-        # horizontal run at that Y would graze the section.  Such an exit
-        # routes up and over the section on its own inter-section leg.
-        if (
-            u_port
-            and not u_port.is_entry
-            and u_port.side in (PortSide.TOP, PortSide.BOTTOM)
-            and u.section_id not in ctx.tb_sections
-        ):
-            continue
-        # Only merge when upstream is at the same Y as the entry port
-        if abs(u.y - src.y) > COORD_TOLERANCE:
-            continue
-        ctx.skip_edges.add((e2.source, e2.target, e2.line_id))
-        return u
-
-    return None
-
-
-def _route_perp_entry_merged(
-    edge: Edge,
-    src: Station,
-    tgt: Station,
-    upstream_st: Station,
-    src_off: float,
-    tgt_off: float,
-    ctx: _RoutingCtx,
-) -> RoutedPath:
-    """Route a combined inter-section + perpendicular entry as one L-shape."""
-    graph = ctx.graph
-    tx, ty = tgt.x, tgt.y
-    up_y_off = _get_offset(ctx, upstream_st.id, edge.line_id)
-
-    if abs(upstream_st.x - src.x) < COORD_TOLERANCE:
-        # Same X: 4-point combined route through inter-column channel
-        mid_x = inter_column_channel_x(
-            graph,
-            upstream_st,
-            tgt,
-            upstream_st.x,
-            tgt.x,
-            tgt.x - upstream_st.x,
-            ctx.curve_radius,
-            ctx.offset_step,
-        )
-        return RoutedPath(
-            edge=edge,
-            line_id=edge.line_id,
-            points=[
-                (upstream_st.x, upstream_st.y + up_y_off),
-                (mid_x + src_off, upstream_st.y + up_y_off),
-                (mid_x + src_off, ty + tgt_off),
-                (tx, ty + tgt_off),
-            ],
-            offsets_applied=True,
-            curve_radii=[
-                reference_anchored_radius(0.0, ctx.curve_radius),
-                reference_anchored_radius(src_off, ctx.curve_radius),
-            ],
-        )
-
-    # Different X (cross-column entry): 3-point L-shape
-    max_tgt_off = _max_offset_at(ctx, edge.target)
-    rev_tgt_off = reversed_offset(tgt_off, max_tgt_off)
-    return RoutedPath(
-        edge=edge,
-        line_id=edge.line_id,
-        points=[
-            (upstream_st.x, upstream_st.y + up_y_off),
-            (tx + rev_tgt_off, upstream_st.y + up_y_off),
-            (tx + rev_tgt_off, ty + tgt_off),
-        ],
-        offsets_applied=True,
-        curve_radii=[
-            corner_radius(
-                tgt_off,
-                max_tgt_off,
-                outside=False,
-                base_radius=ctx.curve_radius,
-            )
-        ],
-    )

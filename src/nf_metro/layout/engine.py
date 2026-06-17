@@ -163,6 +163,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_off_track_input_column_stack,
     _guard_off_track_output_clears_non_producer,
     _guard_partial_branch_offset_gaps,
+    _guard_perp_entry_feed_not_collinear,
     _guard_ports_on_boundaries,
     _guard_rail_above_label_band,
     _guard_rail_one_station_per_column,
@@ -1660,6 +1661,7 @@ def _finalize_layout(
         _guard_fanout_junction_shares_exit_port_y(graph, phase)
         _guard_fanout_junction_resolves_upstream(graph, phase)
         _guard_entry_port_fed_only_by_ports(graph, phase)
+        _guard_perp_entry_feed_not_collinear(graph, phase)
         _guard_merge_port_approach_side(graph, phase, offsets=offsets)
         _guard_merge_port_outgoing_side_preserved(graph, phase, offsets=offsets)
         _guard_exit_inherits_entry_bundle_order(graph, phase, offsets=offsets)

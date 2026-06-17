@@ -135,7 +135,6 @@ PHANTOM_MULTILINE_GATES = [
     "tb_handlers.py::if not (::#2",
     "tb_handlers.py::if not (::#3",
     "tb_handlers.py::if not (::#4",
-    "tb_handlers.py::if (::#1",
     "tb_handlers.py::if abs(drop_delta) < COORD_TOLERANCE:::#1",  # list-literal body
     "corners.py::if i > 1:::#1",  # single-line ``if`` with multi-line ternary body
     "corners.py::if i < len(points) - 2:::#1",
