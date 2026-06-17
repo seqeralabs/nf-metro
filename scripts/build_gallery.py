@@ -428,6 +428,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "around-below loop.",
     ),
     (
+        "corridor_narrow_gap_fallback",
+        TOPOLOGIES_DIR,
+        "A left-entry feed crosses two rows past a wider intervening section "
+        "whose inter-row gap is too narrow for the corridor's clearance band, "
+        "so it falls back to the around-below loop clear of that section while "
+        "the adjacent feeder takes the corridor (issue #722).",
+    ),
+    (
         "off_track_convergence",
         TOPOLOGIES_DIR,
         "Multiple off-track file inputs converging on a single consumer. "

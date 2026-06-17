@@ -31,6 +31,7 @@ from nf_metro.layout.routing.common import (
     horizontal_direction,
     inter_column_channel_x,
     inter_row_channel_y,
+    inter_row_wrap_band,
     resolve_section,
     row_bottom_edge,
     row_top_edge,
@@ -1707,8 +1708,12 @@ def _route_left_entry_wrap(
     # This is the rule illustrated by the user's A/B example: A starts on
     # top going right, lands on top after C4 with no crossings at any
     # corner.
-    hy_base = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius)
-    hy = hy_base + delta
+    # The per-line stagger is sized from the full port bundle (bundle_info
+    # counts feeders that take other routes, e.g. an around-below sibling),
+    # so on its own it can lift this run past INTER_ROW_EDGE_CLEARANCE of the
+    # upper box edge in a gap reserved only for the lines that actually wrap.
+    # Passing it as the channel offset clamps it inside the clearance band.
+    hy = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius, delta)
 
     # Ensure the V2 channel (the per-line vertical run on the target's
     # OUTER side, before C4) sits at least SECTION_ROUTE_CLEARANCE past
@@ -1953,10 +1958,28 @@ def _corridor_is_viable(ctx: _RoutingCtx, src: Station, entry_port: Station) -> 
         return False
     if _corridor_descent_x(ctx, ep_col, ep_row, 0.0) is None:
         return False
-    # An inter-row gap must open below the source row within its column.
+    # The leftward traverse runs in a band INTER_ROW_EDGE_CLEARANCE below the
+    # source-row bottom and INTER_ROW_HEADER_CLEARANCE above the lower row's
+    # header badge, with the bundle's per-line stagger inside it.  A gap too
+    # narrow for that band collapses the stagger onto one Y (a collinear
+    # overlay) and forces the leftward run through the source box's bottom
+    # edge; below it the feeder routes around the section instead.
     gap_top = row_bottom_edge(ctx.graph, src_row, col=src_col)
-    gap_bottom = row_top_edge(ctx.graph, src_row + 1, col=src_col)
-    return gap_bottom - gap_top > EDGE_TO_BUNDLE_CLEARANCE
+    gap_bottom = row_top_edge(ctx.graph, src_row + 1, col=src_col, default=gap_top)
+    # The traverse carries only the bundle this source feeds into the entry
+    # port (its co-travelling lines), so size the band by that bundle's
+    # stagger - not by every line the port receives from other sources.
+    bundle_lines = {
+        e.line_id
+        for e in ctx.graph.edges_from(src.id)
+        if e.target == entry_port.id
+        or ctx.merge.entry_port_for.get(e.target) == entry_port.id
+    }
+    # Section placement reserves exactly this band for the wrap bundle, so a
+    # corridor sized for it sits right at the boundary; absorb float dust so
+    # an exactly-reserved gap stays viable.
+    required = inter_row_wrap_band(len(bundle_lines))
+    return gap_bottom - gap_top >= required - COORD_TOLERANCE
 
 
 def _route_inter_row_gap_corridor(
@@ -2099,6 +2122,24 @@ def _route_inter_row_gap_corridor(
         # D->R turns.  Mirrors :func:`_route_left_entry_wrap`.
         curve_radii=[r_outer, r_outer, r_inner, r_inner],
         offsets_applied=True,
+    )
+
+
+def _descent_rightward_clearable_pierce(
+    ctx: _RoutingCtx, x: float, y_lo: float, y_hi: float, exclude: set[str]
+) -> bool:
+    """True if a vertical channel at *x* over ``[y_lo, y_hi]`` cuts through a
+    section interior and can be cleared to its right.
+
+    A zero-margin clear pinned to ``bound_left=x`` only moves the channel when
+    it sits strictly inside a box (so a non-trivial rightward shift is exactly
+    a pierce); a channel that merely runs near a box edge is not flagged.  This
+    mirrors the band the actual divert below uses, so detection and clearing
+    agree.
+    """
+    return (
+        _clear_channel_x_in_band(ctx.graph, x, y_lo, y_hi, 0.0, exclude, bound_left=x)
+        > x + COORD_TOLERANCE
     )
 
 
@@ -2249,6 +2290,31 @@ def _route_around_section_below(
     # V1 clearance from the source section's right edge, mirroring
     # _route_left_entry_wrap.  See comments there for the derivation.
     corner_x = _v1_corner_x(ctx, src, sx, corner_x)
+    # The V1 channel descends from the source row to the bypass bottom.  When
+    # it would cut THROUGH a section stacked below the source (one wider than
+    # the source, so its box spans the channel), divert the bundle's base
+    # channel clear of it, then re-apply the per-line stagger.  A channel that
+    # merely runs near a box edge is left untouched.  The clearance steps past
+    # the box far enough to also miss any LEFT-entry wrap hugging that
+    # section's right edge (box_right + curve_radius), so a line the descent
+    # shares with such a wrap reads as a distinct corridor, not two
+    # near-parallel tracks.
+    base_corner_x = corner_x - delta
+    exclude = {src.section_id} if src.section_id else set[str]()
+    if _descent_rightward_clearable_pierce(ctx, base_corner_x, sy, by_base, exclude):
+        clearance = (
+            SECTION_ROUTE_CLEARANCE + ctx.curve_radius + EDGE_TO_BUNDLE_CLEARANCE
+        )
+        cleared_base = _clear_channel_x_in_band(
+            ctx.graph,
+            base_corner_x,
+            sy,
+            by_base,
+            clearance,
+            exclude,
+            bound_left=base_corner_x,
+        )
+        corner_x = cleared_base + delta
     # Pin lx at sx so the route starts at the source station; the source
     # clearance bump manifests as a longer H lead-in before C1.  See the
     # analogous comment in _route_left_entry_wrap.
