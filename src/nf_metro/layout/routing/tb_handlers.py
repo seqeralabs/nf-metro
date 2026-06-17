@@ -19,6 +19,7 @@ from nf_metro.layout.routing.context import (
     _tb_x_offset,
 )
 from nf_metro.layout.routing.corners import (
+    concentric_corner_radius,
     reference_anchored_radius,
     tb_entry_corner,
     tb_exit_corner,
@@ -362,6 +363,10 @@ def _route_perp_entry_from_corridor(
     The drop leaves at that same per-line X so the bundle stays ordered
     across the entry port, then turns into the station at the target row's
     per-line Y, mirroring how the corridor stacks the bundle on the way in.
+
+    The turn into the station is sized by :func:`concentric_corner_radius`
+    from the two travel vectors, so the bundle's arcs share a centre (a
+    constant gap through the bend) for either drop direction.
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
@@ -370,12 +375,18 @@ def _route_perp_entry_from_corridor(
     )
     drop_x = sx - lateral
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
+    corner_y = ty + tgt_off
+    turn_in = (0.0, 1.0 if corner_y >= sy else -1.0)
+    turn_out = (1.0 if tx >= drop_x else -1.0, 0.0)
+    radius = concentric_corner_radius(
+        turn_in, turn_out, -lateral, ctx.curve_radius, min_radius=COORD_TOLERANCE
+    )
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
-        points=[(drop_x, sy), (drop_x, ty + tgt_off), (tx, ty + tgt_off)],
+        points=[(drop_x, sy), (drop_x, corner_y), (tx, corner_y)],
         offsets_applied=True,
-        curve_radii=[reference_anchored_radius(-lateral, ctx.curve_radius)],
+        curve_radii=[radius],
     )
 
 
