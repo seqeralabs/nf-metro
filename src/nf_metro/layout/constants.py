@@ -258,7 +258,7 @@ Ensures the gap midpoint is at least 2*CURVE_RADIUS from each section
 edge, giving enough horizontal run for smooth curves at bypass route
 corners.  Derived as 4 * CURVE_RADIUS."""
 
-OFFSET_STEP: float = 4.0
+OFFSET_STEP: float = 3.0
 """Per-line offset increment for parallel lines in bundles."""
 
 COORD_TOLERANCE: float = 1.0
