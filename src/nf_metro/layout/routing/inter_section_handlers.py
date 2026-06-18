@@ -63,7 +63,6 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import (
     _get_offset,
     _has_intervening_sections,
-    _perp_riser_lateral,
     _resolve_section_col,
     _resolve_section_colrow,
     _resolve_section_row,
@@ -79,6 +78,9 @@ from nf_metro.layout.routing.normalize import (
     _gap_channel_base,
     _h_segment_crosses_other_section,
     _has_other_row_section_in_col_range,
+)
+from nf_metro.layout.routing.perp import (
+    _perp_riser_lateral,
 )
 from nf_metro.parser.model import (
     Edge,
@@ -1345,6 +1347,12 @@ def _route_perp_exit_over(
     the floor radius.  The vertical legs carry the source-side riser lateral and
     the final turn-in carries the target's per-line Y, so a side entry tapers
     between the two while a perp-entry trunk drop stays rigid.
+
+    This is the exit end of the up-and-over shape whose entry end is
+    ``tb_handlers._route_perp_entry_from_corridor``; both seat their bundle on
+    the per-line lateral from ``perp._perp_riser_lateral`` (see that module for
+    the TOP vs BOTTOM sign convention) so the two legs stay parallel across the
+    shared port.
     """
     graph = ctx.graph
     sx, sy = src.x, src.y

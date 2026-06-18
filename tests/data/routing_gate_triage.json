@@ -179,10 +179,6 @@
     "note": "Pairs with _get_offset's guard: compute_station_offsets is never empty on the render path, so _max_offset_at's early-return arm guards only the route_edges(station_offsets=None) call path used by tests.",
     "status": "defensive"
   },
-  "context.py::if not indices:::#1": {
-    "note": "No-feeder guard in _perp_entry_crossing_x: the helper is called only from _route_perp_entry when a multi-line bundle shares the port with a per-line stagger, and a TOP/BOTTOM entry port in that case is always reached by a bundled inter-section feeder (dy!=0, so compute_bundle_info indexes it).  The empty-indices return-None arm is a contract guard, never taken across the corpus.",
-    "status": "defensive"
-  },
   "context.py::if not jst:::#1": {
     "note": "jid ranges over junction_ids, all present in graph.stations; the missing-station continue never fires.",
     "status": "defensive"
@@ -838,6 +834,10 @@
   "offsets.py::while stack:::#1": {
     "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
     "status": "needs-review"
+  },
+  "perp.py::if not indices:::#1": {
+    "note": "No-feeder guard in _perp_entry_crossing_x: the helper is called only from _route_perp_entry when a multi-line bundle shares the port with a per-line stagger, and a TOP/BOTTOM entry port in that case is always reached by a bundled inter-section feeder (dy!=0, so compute_bundle_info indexes it).  The empty-indices return-None arm is a contract guard, never taken across the corpus.",
+    "status": "defensive"
   },
   "postprocess.py::if abs(other.y - station.y) > 1:::#1": {
     "note": "The loop-back arm (skip appending a column companion) fires only when another non-port station in the same section shares the moving station's x (within 1px) and its y (within 1px) - two near-coincident distinct stations, forbidden by the no-overlap invariant.",

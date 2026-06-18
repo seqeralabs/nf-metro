@@ -14,8 +14,6 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import (
     _get_offset,
     _max_offset_at,
-    _perp_entry_crossing_x,
-    _perp_riser_lateral,
     _RoutingCtx,
     _tb_x_offset,
 )
@@ -25,6 +23,10 @@ from nf_metro.layout.routing.corners import (
     reference_anchored_radius,
     tb_entry_corner,
     tb_exit_corner,
+)
+from nf_metro.layout.routing.perp import (
+    _perp_entry_crossing_x,
+    _perp_riser_lateral,
 )
 from nf_metro.parser.model import (
     Edge,
@@ -386,6 +388,12 @@ def _route_perp_entry_from_corridor(
     feeder_side: PortSide,
 ) -> RoutedPath:
     """Drop a corridor-fed perpendicular entry into its target station.
+
+    This is the entry end of the up-and-over shape whose exit end is
+    ``inter_section_handlers._route_perp_exit_over``; both seat their bundle on
+    the per-line lateral from ``perp._perp_riser_lateral`` (see that module for
+    the TOP vs BOTTOM sign convention) so the two legs stay parallel across the
+    shared port.
 
     The up-and-over corridor lands each line at ``port_x - lateral`` (the
     reversed per-line convention shared with the aligned-entry branch).
