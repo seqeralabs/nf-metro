@@ -151,11 +151,21 @@ Pre-existing mis-formats in scripts, docs config, etc. will trip CI on
 your PR even though they predate your change.
 
 ```bash
-source ~/.local/bin/mm-activate nf-metro-fix-<N> && cd /tmp/nf-metro-fix-<N> && ruff format . && ruff check .
+source ~/.local/bin/mm-activate nf-metro-fix-<N> && cd /tmp/nf-metro-fix-<N> && ruff format . && ruff check . && mypy
 ```
 
 Run from the repo root, no path restriction. Fix or commit any deltas
 that appear (a separate `style: ruff format whole repo` commit is fine).
+
+Alternatively, the repo ships a `.pre-commit-config.yaml` that runs the
+same checks. If you installed the hooks (`pip install pre-commit &&
+pre-commit install`), they fire automatically on commit. To run them
+manually:
+
+```bash
+pre-commit run --all-files
+```
+
 Then run the test suite:
 
 ```bash

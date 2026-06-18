@@ -1,0 +1,27 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+        exclude: \.svg$
+      - id: check-yaml
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Keep rev in sync with ruff>=0.4 in pyproject.toml [project.optional-dependencies.dev]
+    rev: v0.15.17
+    hooks:
+      - id: ruff
+        files: ^(src|tests)/
+        args: ["--fix"]
+      - id: ruff-format
+        files: ^(src|tests)/
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        pass_filenames: false
+        types: [python]
