@@ -184,8 +184,13 @@ class _InterFacts:
         )
 
     @property
-    def straight_ploughs_right_entry(self) -> bool:
-        """A same-Y run to a RIGHT entry would plough through the box interior."""
+    def right_entry_from_left(self) -> bool:
+        """Target is a RIGHT entry port whose source sits to its left.
+
+        A straight or interior-cutting approach would plough through the box to
+        reach the far-edge port, so such an edge wraps in from the port's own
+        outward side instead.
+        """
         return self.entry_side is PortSide.RIGHT and self.sx < self.tx - COORD_TOLERANCE
 
     @property
@@ -236,6 +241,7 @@ def _build_inter_facts(
         )
     )
     ep_id = ctx.merge.entry_port_for.get(edge.target)
+    i, n = ctx.bundle_info.get((edge.source, edge.target, edge.line_id), (0, 1))
     return _InterFacts(
         edge=edge,
         src=src,
@@ -245,8 +251,8 @@ def _build_inter_facts(
         sy=src.y,
         tx=tgt.x,
         ty=tgt.y,
-        i=ctx.bundle_info.get((edge.source, edge.target, edge.line_id), (0, 1))[0],
-        n=ctx.bundle_info.get((edge.source, edge.target, edge.line_id), (0, 1))[1],
+        i=i,
+        n=n,
         src_port=graph.ports.get(edge.source),
         tgt_port=graph.ports.get(edge.target),
         src_col=src_col,
@@ -258,7 +264,8 @@ def _build_inter_facts(
     )
 
 
-def _route_straight_h(f: _InterFacts) -> RoutedPath | None:
+def _route_straight_connector(f: _InterFacts) -> RoutedPath | None:
+    """Straight horizontal (same Y) or vertical (same X) connector."""
     ctx = f.ctx
     return route_straight(
         f.edge, ctx, (f.sx, f.sy), (f.tx, f.ty), base_radius=ctx.curve_radius
@@ -309,7 +316,7 @@ def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
         exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
         if not _h_segment_crosses_other_section(graph, f.sx, f.tx, f.ty, exclude):
             return _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
-    if f.straight_ploughs_right_entry:
+    if f.right_entry_from_left:
         if (
             f.src_row is not None
             and f.tgt_row is not None
@@ -384,6 +391,14 @@ def _right_entry_plough_needs_bypass(f: _InterFacts) -> bool:
     return _h_segment_crosses_other_section(f.graph, f.sx, f.tx, f.ty, exclude)
 
 
+def _route_right_entry_plough_bypass(f: _InterFacts) -> RoutedPath | None:
+    # Columns are guaranteed non-None by _right_entry_plough_needs_bypass.
+    assert f.src_col is not None and f.tgt_col is not None
+    return _route_bypass(
+        f.edge, f.src, f.tgt, f.i, f.src_col, f.tgt_col, f.ctx, f.src_row
+    )
+
+
 @dataclass(frozen=True)
 class _Rule:
     """One row of the dispatch table: a named predicate and its route builder."""
@@ -410,10 +425,8 @@ _INTER_SECTION_RULES: list[_Rule] = [
     # Same Y, no obstacle, not a right-entry plough: a straight horizontal run.
     _Rule(
         "same-Y straight",
-        lambda f: f.same_y
-        and not f.needs_bypass
-        and not f.straight_ploughs_right_entry,
-        _route_straight_h,
+        lambda f: f.same_y and not f.needs_bypass and not f.right_entry_from_left,
+        _route_straight_connector,
     ),
     _Rule(
         "TB bottom exit",
@@ -427,7 +440,7 @@ _INTER_SECTION_RULES: list[_Rule] = [
         lambda f: f.entry_side is PortSide.TOP,
         lambda f: _route_top_entry_l_shape(f.edge, f.src, f.tgt, f.n, f.ctx),
     ),
-    _Rule("same-X vertical drop", lambda f: f.same_x, _route_straight_h),
+    _Rule("same-X vertical drop", lambda f: f.same_x, _route_straight_connector),
     _Rule(
         "bottom-exit junction",
         lambda f: f.edge.source in f.ctx.bottom_exit_junctions,
@@ -466,9 +479,7 @@ _INTER_SECTION_RULES: list[_Rule] = [
     _Rule(
         "RIGHT entry plough -> bypass",
         _right_entry_plough_needs_bypass,
-        lambda f: _route_bypass(
-            f.edge, f.src, f.tgt, f.i, f.src_col, f.tgt_col, f.ctx, f.src_row
-        ),
+        _route_right_entry_plough_bypass,
     ),
 ]
 
@@ -564,7 +575,7 @@ def _route_bottom_exit_junction(
         if ctx.station_offsets:
             return _tb_x_offset(ctx, exit_pid, line_id, exit_sec or "")
         bi, bn = ctx.bundle_info.get((edge.source, edge.target, line_id), (i, n))
-        return ((bn - 1) / 2 - bi) * ctx.offset_step
+        return l_shape_stagger(bi, bn, Direction.D, ctx.offset_step)
 
     members, _, tgt_center = gather_tapered_bundle(ctx, edge)
     exit_offs = [exit_x_offset(line_id) for _e, line_id, _s, _t in members]
@@ -1928,23 +1939,12 @@ def _route_inter_row_gap_corridor(
     derives the concentric R->D->L->D->R corner radii, so each feeder nests
     against its siblings in the shared channel without a hand-picked radius.
     """
-    sx, sy = src.x, src.y
-    ex, ey = entry_port.x, entry_port.y
-
-    # When this corridor feeder shares a junction fan with a sibling wrap,
-    # consume the unified fan position so the source-side first corner and the
-    # inter-row gap stagger match the wrap exactly.  Without this the corridor
-    # picks its own per-bundle (i, n) and the two same-line bundles smear a few
-    # px apart instead of overlaying.
-    ekey = (edge.source, edge.target, edge.line_id)
-    fan = ctx.junction_fan_info.get(ekey)
-    pos_i, pos_n = fan if fan is not None else (i, n)
-
-    # This feeder's signed offset within the shared channel (the L-shape
-    # stagger going down).  The centreline is the channel centre; the feeder
-    # sits ``delta`` off it, and its sibling feeders sit at their own ranks
-    # against the same centreline, so the bundle holds even spacing.
-    delta = ((pos_n - 1) / 2 - pos_i) * ctx.offset_step
+    # The source-side first corner and the per-line stagger come from the same
+    # fan geometry as the sibling wrap (_route_left_entry_wrap), so a corridor
+    # feeder and a wrap sharing a junction fan overlay rather than smear apart.
+    fan, pos_n, delta, corner_x = _wrap_fan_geometry(
+        ctx, edge, src, i, n, vertical_direction(entry_port.y - src.y)
+    )
 
     src_col, src_row = _resolve_section_colrow(ctx.graph, src)
     ep_col, ep_row = _resolve_section_colrow(ctx.graph, entry_port)
@@ -1995,31 +1995,17 @@ def _route_inter_row_gap_corridor(
         vx = _corridor_descent_x(ctx, ep_col, ep_row, 0.0)
     assert vx is not None
 
-    # H lead-in right of the source, clear of the source section's edge.
-    # When the source is a sectionless junction, fall back to its own X as
-    # the reference edge (mirrors :func:`_route_left_entry_wrap`) so a fan
-    # feeder gets the SAME source-side clearance as its sibling wrap.
-    corner_x = sx + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
-    corner_x = _v1_corner_x(ctx, src, sx, corner_x)
-
-    # Centre the feeder's centreline so it lands on its station offset at both
-    # ports while sitting ``delta`` off the channel through the loop.
-    src_off = _get_offset(ctx, edge.source, edge.line_id)
-    tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-    centerline = [
-        (sx, sy + src_off + delta),
-        (corner_x, sy + src_off + delta),
-        (corner_x, gy_base),
-        (vx, gy_base),
-        (vx, ey + tgt_off + delta),
-        (ex, ey + tgt_off + delta),
-    ]
-    return route_along(
+    return _route_entry_wrap(
         edge,
-        [(edge, edge.line_id, -delta)],
-        centerline,
-        base_radius=ctx.curve_radius,
-        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+        src,
+        entry_port,
+        ctx,
+        pos_n=pos_n,
+        delta=delta,
+        corner_x=corner_x,
+        channel_y=gy_base,
+        descent_x=vx,
+        entry_side=PortSide.LEFT,
     )
 
 
