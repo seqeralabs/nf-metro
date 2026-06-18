@@ -120,6 +120,7 @@ from nf_metro.layout.routing.tb_handlers import (  # noqa: F401
     _route_tb_internal,
     _route_tb_lr_entry,
     _route_tb_lr_exit,
+    _route_tb_section,
 )
 from nf_metro.parser.model import (
     LineSpread,
@@ -185,13 +186,7 @@ def route_edges(
         # The first handler that returns a RoutedPath wins.
         result = _route_inter_section(edge, src, tgt, ctx)
         if result is None:
-            result = _route_tb_internal(edge, src, tgt, ctx)
-        if result is None:
-            result = _route_tb_lr_exit(edge, src, tgt, ctx)
-        if result is None:
-            result = _route_tb_lr_entry(edge, src, tgt, ctx)
-        if result is None:
-            result = _route_perp_entry(edge, src, tgt, ctx)
+            result = _route_tb_section(edge, src, tgt, ctx)
         if result is None:
             result = _route_entry_runway(edge, src, tgt, ctx)
         if result is None:

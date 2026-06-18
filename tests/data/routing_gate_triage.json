@@ -7,6 +7,10 @@
     "note": "Defensive guard: build_tapered_bundle rejects a centreline of fewer than two vertices, mirroring build_concentric_bundle. Every caller passes a >=2-vertex centreline, so the raise arm is never taken.",
     "status": "defensive"
   },
+  "bundle.py::if n_legs < 1:::#3": {
+    "note": "Defensive guard: build_offset_bundle rejects a centreline of fewer than two vertices, mirroring build_concentric_bundle and build_tapered_bundle. Every caller passes a >=2-vertex centreline, so the raise arm is never taken.",
+    "status": "defensive"
+  },
   "bundle.py::if not 0 <= transition_leg <= n_legs:::#1": {
     "note": "Defensive guard: build_tapered_bundle rejects a transition_leg outside [0, n_legs]. Handlers pass a literal 1 against a 3- or 4-vertex centreline, so the raise arm is never taken.",
     "status": "defensive"
@@ -959,8 +963,8 @@
     "note": "succ_id comes from sec_successors, built only from real tgt.section_id values, so graph.sections.get(succ_id) is never None and the continue (->187) is a defensive null guard. The fall-through static arm (->188) is phantom: control falls into the following multi-line `if (`, whose first operand line carries the real arc L186->189.",
     "status": "defensive"
   },
-  "tb_handlers.py::if crossing_x is not None or abs(drop_delta) < COORD_TOLERANCE:::#1": {
-    "note": "The else (per-line marker-converging jog) is reached only by a multi-line perpendicular entry whose drop carries a non-zero stagger AND has no pinned crossing channel - i.e. a TB/BT continuation with a uniform per-line port offset and a horizontal lead-in.  Corpus TB/BT perp entries all carry the separation in src_off (drop_delta==0, straight arm), so the jog fallback is never taken across the corpus.",
+  "tb_handlers.py::if pinned_crossing or abs(drop_delta) < COORD_TOLERANCE:::#1": {
+    "note": "The else (the H-V-H staircase in _route_perp_entry_staircase) is reached only by a multi-line perpendicular entry whose drop carries a non-zero stagger AND has no pinned crossing channel - i.e. a TB/BT continuation with a uniform per-line port offset and a horizontal lead-in.  Corpus TB/BT perp entries all carry the separation in src_off (drop_delta==0, L-shape arm), so the staircase fallback is never taken across the corpus.",
     "status": "defensive"
   },
   "tb_handlers.py::if crossing_x is not None:::#1": {

@@ -48,8 +48,6 @@ APPROVED_RADIUS_HELPERS = frozenset(
     {
         "corner_radius",
         "l_shape_radii",
-        "tb_exit_corner",
-        "tb_entry_corner",
         "concentric_corner_radius",
         "concentric_corner_radius_at",
         "reference_anchored_radius",
@@ -255,7 +253,7 @@ def test_every_curve_radius_traces_to_a_corners_helper() -> None:
     total = sum(len(slots) for slots in per_file.values())
 
     # Guard against the finder silently matching nothing (e.g. modules moved).
-    assert total >= 11, (
+    assert total >= 7, (
         f"expected to find many curve_radii sites, found {total} - "
         "the finder may be broken or the routing modules restructured"
     )

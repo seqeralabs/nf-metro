@@ -202,6 +202,61 @@ def build_tapered_bundle(
     )
 
 
+def build_offset_bundle(
+    members: list[tuple[Edge, str, list[float]]],
+    centerline: list[_Vec],
+    base_radius: float,
+    *,
+    min_radius: float | None = None,
+    bundle_offsets: Sequence[Sequence[float]] | None = None,
+    is_inter_section: bool = True,
+    normalize_exempt: bool = True,
+) -> list[RoutedPath]:
+    """Fan a bundle whose per-leg offsets are given explicitly, leg by leg.
+
+    The most general builder.  :func:`build_concentric_bundle` holds one offset
+    on every leg and :func:`build_tapered_bundle` switches between two at a
+    single transition; a shape that fans by a *different* amount on more than two
+    legs -- an H-V-H staircase that departs a shared port at offset zero, fans
+    out only in its vertical channel, then lands at a third offset -- needs all
+    of its per-leg offsets stated directly.  Each member carries one signed
+    perpendicular offset per centreline leg, and every corner anchors on the
+    bundle's innermost-of-turn line, so no arc falls below the floor.
+
+    Parameters
+    ----------
+    members
+        ``(edge, line_id, leg_offsets)`` per line, ``leg_offsets`` one signed
+        perpendicular offset per centreline leg (``len(centerline) - 1`` of
+        them).
+    centerline
+        ``>= 2`` axis-aligned vertices; each consecutive pair differs in exactly
+        one axis.
+    base_radius
+        Floor corner radius for the innermost-of-turn line.
+    min_radius
+        Optional floor for inside-of-turn arcs.
+    bundle_offsets
+        The per-leg offsets of every line in the co-travelling bundle, anchoring
+        each corner on the innermost line.  A handler routing its siblings one at
+        a time passes the full fan here; ``None`` anchors on *members*.
+    """
+    n_legs = len(centerline) - 1
+    if n_legs < 1:
+        raise ValueError("centerline needs at least two vertices")
+    return _fan_bundle(
+        [(edge, line_id, list(offs)) for edge, line_id, offs in members],
+        centerline,
+        base_radius,
+        min_radius=min_radius,
+        anchor_offsets=[list(o) for o in bundle_offsets]
+        if bundle_offsets is not None
+        else None,
+        is_inter_section=is_inter_section,
+        normalize_exempt=normalize_exempt,
+    )
+
+
 def _fan_bundle(
     members: list[tuple[Edge, str, list[float]]],
     centerline: list[_Vec],
