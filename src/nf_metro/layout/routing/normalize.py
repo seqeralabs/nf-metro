@@ -563,7 +563,7 @@ def _reorder_convergence_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> 
 
         # Propagate slot order to the consumer section: without it the crossing
         # removed from the riser re-forms between the port and the first station.
-        if _section_reorderable(ctx, port_id):
+        if _section_reorderable(ctx, port_id, set(per_line)):
             port_rank = {
                 lid: r
                 for r, lid in enumerate(sorted(ranked, key=lambda lid: target_y[lid]))
@@ -606,14 +606,17 @@ def _set_peeloff_radii(
         rp.curve_radii[k] = port_r
 
 
-def _section_reorderable(ctx: _RoutingCtx, port_id: str) -> bool:
+def _section_reorderable(
+    ctx: _RoutingCtx, port_id: str, bundle_lines: set[str]
+) -> bool:
     """Whether *port_id*'s section can absorb the bundle's slot order.
 
     The propagation writes one dense ``rank * step`` offset per bundle line to
-    every section station.  This is safe for a single-row LR section: all
-    stations share one trunk Y so the dense offsets are valid replacements.
-    Multi-row sections and non-LR sections use different offset semantics and
-    cannot absorb a dense uniform rewrite.
+    every section station.  This is safe when all stations that carry at least
+    one bundle line share the same trunk Y (single-row for the bundle).
+    Stations that carry no bundle lines are ignored: the propagation never
+    touches them, so their Y does not constrain this check.
+    Non-LR sections use different offset semantics and are always excluded.
     """
     if ctx.station_offsets is None:
         return False
@@ -621,7 +624,10 @@ def _section_reorderable(ctx: _RoutingCtx, port_id: str) -> bool:
     if sec is None or sec.direction != "LR":
         return False
     ys = [
-        st.y for sid in sec.station_ids if not (st := ctx.graph.stations[sid]).is_port
+        st.y
+        for sid in sec.station_ids
+        if not (st := ctx.graph.stations[sid]).is_port
+        and any(lid in bundle_lines for lid in ctx.graph.station_lines(sid))
     ]
     return not ys or max(ys) - min(ys) <= COORD_TOLERANCE
 

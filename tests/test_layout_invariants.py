@@ -1405,8 +1405,9 @@ def test_peeloff_riser_crossing_free_extra_line_consumer():
     Several lines from two sources ride one shared bypass trunk and rise into
     a common destination entry port.  The trunk-Y stack order and the
     declaration order disagree, so the riser must be reordered to avoid
-    braiding.  This must hold when the consumer also has its own internal
-    branches that are not part of the converging bundle.
+    braiding.  The bundle's top-to-bottom order at the port entry must also
+    carry through into the consumer section's internal run, so the crossing
+    does not re-form just inside the boundary.
     """
     graph = _layout("topologies/peeloff_extra_line_consumer.mmd", validate=True)
     offsets = compute_station_offsets(graph)
@@ -1414,6 +1415,25 @@ def test_peeloff_riser_crossing_free_extra_line_consumer():
 
     crossings = check_route_segment_crossings(graph, (offsets, routes))
     assert not crossings, "; ".join(v.message for v in crossings)
+
+    def order_by_y(selected, at_target):
+        rows = [
+            (rp.line_id, apply_route_offsets(rp, offsets)[-1 if at_target else 0][1])
+            for rp in selected
+        ]
+        return [lid for lid, _ in sorted(rows, key=lambda r: r[1])]
+
+    port_order = order_by_y(
+        [rp for rp in routes if rp.edge.target == "dst__entry_left_2"], at_target=True
+    )
+    internal_order = order_by_y(
+        [rp for rp in routes if rp.edge.source == "d1" and rp.edge.target == "d2"],
+        at_target=False,
+    )
+    assert port_order == internal_order, (
+        f"bundle reorders entering the section: port {port_order} "
+        f"vs internal {internal_order}"
+    )
 
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)

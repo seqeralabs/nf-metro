@@ -559,10 +559,6 @@
     "note": "Single-route-group skip in _suboptimal_trunk_bands, validate-only: called from the _guard_* validator and a unit test, not the production render path the validate=False sweep exercises. Defensive.",
     "status": "defensive"
   },
-  "normalize.py::if lid in port_rank:::#1": {
-    "note": "Membership guard in _apply_section_bundle_order: port_rank is keyed by the bundle's lines, and the function runs only when _section_reorderable returned True, which guarantees every non-port station line is in bundle_lines = port_rank. Instrumented across the corpus, all 36 calls take the in-rank arm and the skip arm never fires. Defensive, guaranteed by the L555/L634 precondition.",
-    "status": "defensive"
-  },
   "normalize.py::if not (left + COORD_TOLERANCE < ch.x < right - COORD_TOLERANCE):::#1": {
     "note": "Float-precision guard in _bucket_gap_channels: routing centres channels in inter-column gaps with >= 16px clearance from section edges (min observed across the corpus), far outside the 1px COORD_TOLERANCE edge band, so the on/outside-edge arm is never entered.",
     "status": "defensive"
