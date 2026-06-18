@@ -501,11 +501,25 @@ def _route_inter_section(
         return None
 
     f = _build_inter_facts(edge, src, tgt, ctx)
-    for rule in _INTER_SECTION_RULES:
-        if rule.when(f):
-            return rule.route(f)
+    rule = _match_inter_section_rule(f)
+    if rule is not None:
+        return rule.route(f)
     # Standard L-shape: the default when no rule above claims the edge.
     return _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
+
+
+def _match_inter_section_rule(f: _InterFacts) -> _Rule | None:
+    """The first dispatch rule whose predicate claims *f*, or ``None``.
+
+    The selection seam: ``_route_inter_section`` routes through the matched
+    rule, and the dispatch-table tests assert which rule claims each edge so a
+    predicate edit that silently steals an edge class from a neighbouring rule
+    is caught.
+    """
+    for rule in _INTER_SECTION_RULES:
+        if rule.when(f):
+            return rule
+    return None
 
 
 def _route_tb_bottom_exit(
