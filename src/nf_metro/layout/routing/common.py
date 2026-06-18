@@ -780,6 +780,28 @@ def has_other_row_section_in_col_range(
     return False
 
 
+def merge_trunk_force_cross_row(
+    graph: MetroGraph,
+    src_col: int,
+    tgt_col: int,
+    src_row: int | None,
+    tgt_row: int | None,
+) -> bool:
+    """Whether a merge trunk must route its bypass below ALL sections.
+
+    The trunk's same-row bypass channel would collide with another row's
+    section titles when the trunk shares the merge's row but its column span
+    straddles a section in a different row.  The branch drop level computed in
+    the routing context and the trunk route itself must agree on this, or
+    branches land at a different Y from where the trunk runs.
+    """
+    return (
+        src_row is not None
+        and tgt_row == src_row
+        and has_other_row_section_in_col_range(graph, src_col, tgt_col, src_row)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Section resolution + inter-row channel placement
 # ---------------------------------------------------------------------------

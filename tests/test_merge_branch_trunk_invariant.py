@@ -78,7 +78,7 @@ def test_checker_fires_when_context_ignores_cross_row(
     is meant to catch.  Proves the check is not vacuous."""
     monkeypatch.setattr(
         routing_context,
-        "has_other_row_section_in_col_range",
+        "merge_trunk_force_cross_row",
         lambda *args, **kwargs: False,
     )
     graph, routes, offsets = _route(FIXTURES / "genomeassembly_organellar.mmd")

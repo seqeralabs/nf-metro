@@ -1698,8 +1698,6 @@ def _clear_channel_x_in_band(
     return x
 
 
-
-
 def _h_segment_crosses_other_section(
     graph: MetroGraph,
     x1: float,

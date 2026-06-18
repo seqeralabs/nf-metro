@@ -14,7 +14,7 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.routing.common import (
     bypass_bottom_y,
     compute_bundle_info,
-    has_other_row_section_in_col_range,
+    merge_trunk_force_cross_row,
     resolve_section,
 )
 from nf_metro.layout.routing.corners import (
@@ -132,7 +132,7 @@ def _classify_merge_edges(
         mst = graph.stations.get(mjid)
         if not mst:
             continue
-        tgt_col = _resolve_section_col(graph, mst)
+        tgt_col, tgt_row = _resolve_section_colrow(graph, mst)
         if tgt_col is None:
             continue
 
@@ -148,13 +148,9 @@ def _classify_merge_edges(
         # trunk's route actually uses -- not the deepest across all
         # preds (which can disagree when the cap-at-midpoint guard in
         # bypass_bottom_y fires for the trunk's span but not a closer
-        # branch's).  The trunk route (``_route_merge_trunk``) forces
-        # ``cross_row`` whenever its span shares the merge's row but
-        # straddles another row's section, so its channel runs below
-        # everything rather than in the same-row inter-section gap; the
-        # branch drop level must use the same decision or it lands at a
-        # different Y from where the trunk actually runs.
-        tgt_row = _resolve_section_row(graph, mst)
+        # branch's).  The branch drop level must use the trunk route's own
+        # ``cross_row`` decision (see ``merge_trunk_force_cross_row``) or it
+        # lands at a different Y from where the trunk actually runs.
         farthest_source: str | None = None
         farthest_span = 0
         trunk_pred_by = 0.0
@@ -169,17 +165,10 @@ def _classify_merge_edges(
                 and _has_intervening_sections(graph, pred_col, tgt_col, pred_row)
             ):
                 span = abs(tgt_col - pred_col)
-                force_cross_row = (
-                    pred_row is not None
-                    and tgt_row == pred_row
-                    and has_other_row_section_in_col_range(
-                        graph, pred_col, tgt_col, pred_row
-                    )
-                )
-                cross_row = force_cross_row or (
-                    pred_row is not None
-                    and tgt_row is not None
-                    and pred_row != tgt_row
+                cross_row = merge_trunk_force_cross_row(
+                    graph, pred_col, tgt_col, pred_row, tgt_row
+                ) or (
+                    pred_row is not None and tgt_row is not None and pred_row != tgt_row
                 )
                 by = bypass_bottom_y(
                     graph,

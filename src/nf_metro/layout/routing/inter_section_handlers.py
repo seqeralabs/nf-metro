@@ -49,12 +49,12 @@ from nf_metro.layout.routing.common import (
     column_gap_edges,
     column_gap_midpoint,
     endpoint_port_xs,
-    has_other_row_section_in_col_range,
     header_corridor_y,
     horizontal_direction,
     inter_column_channel_x,
     inter_row_channel_y,
     inter_row_wrap_band,
+    merge_trunk_force_cross_row,
     resolve_section,
     row_bottom_edge,
     row_top_edge,
@@ -783,10 +783,8 @@ def _route_merge_trunk(
     effective_tx = ep.x if ep else tgt.x
     effective_ty = ep.y if ep else tgt.y
     tgt_row = _resolve_section_row(ctx.graph, tgt)
-    force_cross_row = (
-        src_row is not None
-        and tgt_row == src_row
-        and has_other_row_section_in_col_range(ctx.graph, src_col, tgt_col, src_row)
+    force_cross_row = merge_trunk_force_cross_row(
+        ctx.graph, src_col, tgt_col, src_row, tgt_row
     )
     trunk_v_up_pull_away = ep is not None and _has_around_section_sibling(
         edge, ep, ep_port, ctx
