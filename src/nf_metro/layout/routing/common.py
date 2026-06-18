@@ -657,6 +657,17 @@ def point_on_polyline(
     return None
 
 
+def section_header_top(section: Section) -> float:
+    """Y of a section's header badge top, which protrudes above the bbox."""
+    return section.bbox_y - SECTION_HEADER_PROTRUSION
+
+
+def section_header_safe_cap(section: Section) -> float:
+    """Lowest Y a routing channel may occupy that clears the section's header
+    badge by ``HEADER_CLEARANCE``."""
+    return section_header_top(section) - HEADER_CLEARANCE
+
+
 def bypass_bottom_y(
     graph: MetroGraph,
     src_col: int,
@@ -744,9 +755,9 @@ def bypass_bottom_y(
     if src_row is not None:
         for s in graph.sections.values():
             if s.bbox_w > 0 and lo <= s.grid_col <= hi and s.grid_row > src_row:
-                header_top = s.bbox_y - SECTION_HEADER_PROTRUSION
+                header_top = section_header_top(s)
                 row_bottom = candidate - clearance
-                safe_cap = header_top - HEADER_CLEARANCE
+                safe_cap = section_header_safe_cap(s)
                 if candidate > safe_cap:
                     if safe_cap >= row_bottom:
                         candidate = safe_cap
@@ -787,13 +798,15 @@ def merge_trunk_force_cross_row(
         cross_row=False,
         tgt_row=tgt_row,
     )
+    # A lower section grazes the shallow channel only where bypass_bottom_y's
+    # own clamp could not pull the channel down to section_header_safe_cap; the
+    # tolerance keeps a sub-pixel near-miss from forcing a needless deep dive.
     lo, hi = min(src_col, tgt_col), max(src_col, tgt_col)
     return any(
         s.bbox_w > 0
         and s.grid_row > src_row
         and lo <= s.grid_col <= hi
-        and shallow
-        > s.bbox_y - SECTION_HEADER_PROTRUSION - HEADER_CLEARANCE + COORD_TOLERANCE
+        and shallow > section_header_safe_cap(s) + COORD_TOLERANCE
         for s in graph.sections.values()
     )
 
