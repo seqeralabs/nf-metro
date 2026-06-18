@@ -72,6 +72,9 @@ pytest tests/
 ruff check src/ tests/
 ruff format --check src/ tests/
 
+# Type-check
+mypy
+
 # Render a single fixture
 nf-metro render examples/rnaseq_sections.mmd -o /tmp/rnaseq.svg
 
@@ -81,6 +84,25 @@ nf-metro render examples/rnaseq_sections.mmd --debug -o /tmp/rnaseq.svg
 # Build the full gallery (writes docs/assets/renders/)
 python scripts/build_gallery.py --debug
 ```
+
+### Pre-commit hooks
+
+A `.pre-commit-config.yaml` is provided that runs the same `ruff check`, `ruff format`, and `mypy` checks as CI. Install once after creating your dev environment:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Hooks run automatically on `git commit`. To run them manually against all files:
+
+```bash
+pre-commit run --all-files
+```
+
+The `mypy` hook uses `language: system`, so it relies on the mypy installed in your active environment (`pip install -e ".[dev]"`). Activate that environment before committing.
+
+### Parallel branches
 
 When working on multiple branches concurrently, use `git worktree add` for each branch rather than swapping with `git checkout` - the editable install means `src/` changes are live, and a checkout swap can briefly leave the env pointing at the wrong code.
 
