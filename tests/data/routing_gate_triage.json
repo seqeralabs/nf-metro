@@ -975,7 +975,7 @@
     "note": "Fan L-shape radius-shrink arm: rebuilds both corner radii from a base shrunk to fit a short vertical leg. Un-exercised because no corpus fan route's vertical segment is short enough to trip it.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if fan is not None:::#6": {
+  "inter_section_handlers.py::if fan is not None:::#4": {
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },

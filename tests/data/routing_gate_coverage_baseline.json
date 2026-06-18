@@ -93,7 +93,7 @@
   "inter_section_handlers.py::if exit_side is not None:::#1",
   "inter_section_handlers.py::if fan is None and gap_bottom > gap_top:::#1",
   "inter_section_handlers.py::if fan is not None and ep_col is not None:::#1",
-  "inter_section_handlers.py::if fan is not None:::#6",
+  "inter_section_handlers.py::if fan is not None:::#4",
   "inter_section_handlers.py::if gap1_base + (g1_n - 1) * ctx.offset_step > gap1_limit:::#1",
   "inter_section_handlers.py::if gap2_base - (g2_n - 1) * ctx.offset_step < gap2_limit:::#1",
   "inter_section_handlers.py::if gap_right <= gap_left:::#1",

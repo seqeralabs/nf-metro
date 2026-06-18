@@ -60,9 +60,7 @@ from nf_metro.layout.routing.context import (
 )
 from nf_metro.layout.routing.corners import (
     bypass_radii,
-    corner_radius,
     l_shape_radii,
-    reference_anchored_radius,
 )
 from nf_metro.layout.routing.normalize import (
     _clear_channel_x_in_band,
@@ -1509,20 +1507,6 @@ def _left_entry_descent_x(
     return anchor_x - base_gap - extra_clearance + signed_delta
 
 
-def _radius_inputs(
-    fan: tuple[int, int] | None, i: int, n: int, offset_step: float
-) -> tuple[float, float]:
-    """Concentric-radius inputs ``(off, max_off)`` for a wrap/around corner.
-
-    Uses the unified fan position ``(ui, un)`` when the edge pivots through a
-    shared junction fan, else the edge's own ``(i, n)`` sub-bundle index.
-    """
-    if fan is not None:
-        ui, un = fan
-        return (un - 1 - ui) * offset_step, (un - 1) * offset_step
-    return (n - 1 - i) * offset_step, (n - 1) * offset_step
-
-
 def _v1_corner_x(ctx: _RoutingCtx, src: Station, sx: float, corner_x: float) -> float:
     """Push *corner_x* right so the source-side V1 channel keeps
     ``SECTION_ROUTE_CLEARANCE`` from the source section's right edge.
@@ -1557,197 +1541,78 @@ def _route_left_entry_wrap(
 
     This mirrors :func:`_route_right_entry_wrap` and avoids the
     "cut through intervening section" anti-pattern.
+
+    Built via :func:`route_along` from the bundle's centreline: the loop is
+    described once at the bundle centre, this line sits ``delta`` off it, and
+    its siblings sit at their own ranks against the same centreline, so
+    :func:`build_concentric_bundle` nests every corner concentrically and the
+    R-D-L-D-R loop cannot flip.
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
     dy = ty - sy
     vertical = vertical_direction(dy)
 
-    # When the junction has mixed-direction siblings, share the first-
-    # corner geometry with the other handlers (bypass / L-shape) by
-    # consuming junction_fan_info exactly the way _route_l_shape and
-    # _route_bypass do.  This makes ALL outgoing routes from the
-    # junction pivot through the same first corner; they only diverge
-    # at the second corner (where this wrap turns into the inter-row
-    # channel and the bypass continues downward).
-    ekey = (edge.source, edge.target, edge.line_id)
-    fan = ctx.junction_fan_info.get(ekey)
-    if fan is not None:
-        ui, un = fan
-        fan_delta, r_first, _ = l_shape_radii(
-            ui,
-            un,
-            vertical=vertical,
-            offset_step=ctx.offset_step,
-            base_radius=ctx.curve_radius,
-        )
-        # For the wrap, the source-side first corner sits on the
-        # OUTSIDE of section 1 (the right of section 1's right edge,
-        # since we're wrapping right then down then left).  Use the
-        # going_right convention (+curve_radius + (un-1)*offset_step/2)
-        # for fan_mid_x so the curve_start_x = corner_x - r_wrap lands
-        # EXACTLY at the junction's x, which means the upstream
-        # exit_port -> junction segment terminates at the curve start
-        # with no overlap / no "nubbin" past the curve start.
-        fan_mid_x = sx + ctx.curve_radius + (un - 1) * ctx.offset_step / 2
-        # Second corner is per-line within this edge's sub-bundle.
-        _, _, r_second = l_shape_radii(
-            i,
-            n,
-            vertical=vertical,
-            offset_step=ctx.offset_step,
-            base_radius=ctx.curve_radius,
-        )
-        delta = fan_delta
-    else:
-        delta, r_first, r_second = l_shape_radii(
-            i,
-            n,
-            vertical=vertical,
-            offset_step=ctx.offset_step,
-            base_radius=ctx.curve_radius,
-        )
-        fan_mid_x = None
+    # Unify the junction fan and the edge's own sub-bundle into one stagger.
+    # The shared first corner pivots all of the junction's outgoing edges
+    # through one fan, so a fanned wrap takes its position from (ui, un); an
+    # un-fanned one from its own (i, n).
+    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
+    pos_i, pos_n = fan if fan is not None else (i, n)
+    delta = l_shape_radii(
+        pos_i,
+        pos_n,
+        vertical=vertical,
+        offset_step=ctx.offset_step,
+        base_radius=ctx.curve_radius,
+    )[0]
+    # First-corner X centre: lead-in right of the source, clear of its edge.
+    mid_x = sx + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
+    corner_x = _v1_corner_x(ctx, src, sx, mid_x)
 
-    # Per-corner offset propagation rule:
-    # The bundle enters going RIGHT with the outer line (i=0, delta > 0
-    # going_down) at LARGER x in V1.  Through the four-corner wrap
-    # (R -> D -> L -> D -> R; handedness CW, CW, CCW, CCW), the outer
-    # line stays "on top" of the bundle when delivered at C4.  Each
-    # corner propagates the stagger as:
-    #   - V1 (vertical, post-C1): OUTER at LARGER x (sign +delta on corner_x).
-    #   - H  (horizontal, post-C2): OUTER at LARGER y (sign +delta on hy).
-    #   - V2 (vertical, post-C3): OUTER at LARGER x (sign +delta on vx).
-    #   - Entry endpoint (post-C4): OUTER at SMALLER y (natural priority
-    #     ordering via station_offsets, no per-corner flip).
-    # This is the rule illustrated by the user's A/B example: A starts on
-    # top going right, lands on top after C4 with no crossings at any
-    # corner.
-    # The per-line stagger is sized from the full port bundle (bundle_info
-    # counts feeders that take other routes, e.g. an around-below sibling),
-    # so on its own it can lift this run past INTER_ROW_EDGE_CLEARANCE of the
-    # upper box edge in a gap reserved only for the lines that actually wrap.
-    # Passing it as the channel offset clamps it inside the clearance band.
+    # Horizontal channel Y in the inter-row gap.  ``inter_row_channel_y`` clamps
+    # the per-line stagger inside the clearance band (a narrow gap must not let
+    # the run graze the source box); the builder re-adds ``delta`` on the
+    # leftward traverse, so pre-subtract it here to land on the clamped Y.
     hy = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius, delta)
+    hy -= delta
 
-    # Ensure the V2 channel (the per-line vertical run on the target's
-    # OUTER side, before C4) sits at least SECTION_ROUTE_CLEARANCE past
-    # the target section's left edge.  The default vx places the line
-    # CLOSEST to the edge (delta=+max_delta in this sign convention) at
-    # ~curve_radius from the edge, which reads as flush in renders.
-    # A uniform extra shift preserves the per-line delta stagger so the
-    # offset propagation rule is unchanged.
-    n_for_outer = fan[1] if fan is not None else n
-    vx = _left_entry_descent_x(ctx, tx, n_for_outer, delta)
+    # V2 descent channel centre, left of the target section.
+    vx = _left_entry_descent_x(ctx, tx, pos_n)
     # When this wrap shares a junction fan with a corridor feeder descending
     # the same target column, anchor the descent channel to the column's LEFT
     # edge so the spine and the corridor overlay as one bundle instead of smearing.
     if fan is not None and _fan_has_corridor_sibling(edge.source, ctx):
         tgt_col = _resolve_section_col(ctx.graph, tgt)
         if tgt_col is not None:
-            shared_vx = _fan_left_entry_descent_x(ctx, tgt_col, n_for_outer, delta)
+            shared_vx = _fan_left_entry_descent_x(ctx, tgt_col, pos_n, 0.0)
             if shared_vx is not None:
                 vx = shared_vx
 
-    # Apply src/tgt station offsets explicitly so the renderer's later
-    # _apply_line_offsets pass doesn't double-apply.  Without this, the
-    # intermediate hy points fall in the source-vs-target heuristic's
-    # target side (closer to ty than sy), get the target offset, and
-    # cancel the per-line `delta` here - making the bundle collapse to
-    # a single y in the horizontal gap segment.
+    # Centreline: R-D-L-D-R loop pinned to the source station, right out of the
+    # source, down into the inter-row gap, left past the target column, down to
+    # the entry Y, and into the LEFT port.  Each port endpoint is offset by
+    # ``delta`` so the line lands on its station offset there while sitting off
+    # the channel through the loop.
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-
-    # Per-corner concentric radii.  The wrap turns R -> D -> L -> D -> R,
-    # giving corner handedness CW, CCW, CCW, CW.  Tracing the outer line
-    # (i=0, largest off_for_radius):
-    #   * C1 (H_lead -> V1, CW):   outer is OUTSIDE the turn -> LARGE r.
-    #   * C2 (V1   -> H,  CCW):    outer is OUTSIDE the turn -> LARGE r.
-    #   * C3 (H    -> V2, CCW):    outer is OUTSIDE the turn -> LARGE r.
-    #   * C4 (V2   -> H_entry, CW):outer is INSIDE  the turn -> SMALL r.
-    # C4's handedness is the mirror of C1: the OUTER line of the bundle
-    # is now on the INSIDE of the turn, so it gets base_radius (the
-    # smallest radius) while the INNER bundle line gets the largest.
-    # This matches the per-line vx stagger (vx = tx - curve_radius -
-    # offset_step + delta), which places exactly r_outer_at_C4
-    # =base_radius of post-segment for the outer line and
-    # r_inner_at_C4 = base_radius + max_off for the inner line.  Using
-    # outside=True for C4 (as previously) clamps the outer line's curve
-    # radius down to base_radius because the post-C4 segment is too
-    # short, producing the visible "outer line collapses at C4"
-    # asymmetry against C1/C2/C3.  Mirrors the [r_lead, r_first,
-    # r_first, r_second] pattern in _route_right_entry_wrap.
-    off_for_radius, max_off_for_radius = _radius_inputs(fan, i, n, ctx.offset_step)
-    r_wrap = corner_radius(
-        off_for_radius,
-        max_off_for_radius,
-        outside=True,
+    centerline = [
+        (sx, sy + src_off + delta),
+        (corner_x, sy + src_off + delta),
+        (corner_x, hy),
+        (vx, hy),
+        (vx, ty + tgt_off + delta),
+        (tx, ty + tgt_off + delta),
+    ]
+    route = route_along(
+        edge,
+        [(edge, edge.line_id, -delta)],
+        centerline,
         base_radius=ctx.curve_radius,
+        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
     )
-    r_inside = corner_radius(
-        off_for_radius,
-        max_off_for_radius,
-        outside=False,
-        base_radius=ctx.curve_radius,
-    )
-    if fan_mid_x is not None:
-        corner_x = fan_mid_x + fan_delta
-    else:
-        # No junction: still place the C1 corner OUTSIDE the source
-        # section's right edge with per-line stagger, using the same
-        # formula as the fan case (treating the bundle as a virtual
-        # fan of size n).  Without this lead-in, corner_x == sx puts
-        # V1 right at the section boundary and collapses all lines
-        # onto a single column, producing the "compressed bundle at
-        # the section edge" visual reported on a tall stacked section.
-        non_fan_mid_x = sx + ctx.curve_radius + (n - 1) * ctx.offset_step / 2
-        corner_x = non_fan_mid_x + delta
-    # Ensure the V1 channel (the per-line vertical run on the SOURCE's
-    # OUTER side, between C1 and C2) sits at least SECTION_ROUTE_CLEARANCE
-    # past the source section's right edge.  Without this, when the source
-    # station is AT the section's right edge (e.g. an exit port on the
-    # right side), corner_x's closest line lands ~curve_radius past the
-    # edge, which reads as flush in renders.  When the source is already
-    # offset from the section (e.g. a junction at sx = bbox_right +
-    # JUNCTION_MARGIN), this shift is zero.  Uniform across lines, so the
-    # per-line delta stagger and the corner_x - r_wrap == sx cancellation
-    # below are preserved by also shifting lx.
-    corner_x = _v1_corner_x(ctx, src, sx, corner_x)
-    # Lead-in extends r_wrap LEFT of the corner so the first corner
-    # gets the SAME concentric radius as the other three corners.  With
-    # the virtual-fan corner_x above, every line lands lx == sx
-    # exactly (corner_x - r_wrap = sx + curve_radius + (n-1)*step/2 +
-    # delta - r_wrap, and r_wrap = curve_radius + (n-1-i)*step, delta
-    # = ((n-1)/2 - i)*step => they cancel to sx for every i).  When the
-    # source clearance bump is non-zero, that cancellation places lx at
-    # sx + bump; pin lx back to sx so the route starts at the source
-    # station/port and the extra clearance manifests as a longer
-    # horizontal lead-in
-    # before C1 rather than a gap at the start of the path.
-    lx = sx
-    return RoutedPath(
-        edge=edge,
-        line_id=edge.line_id,
-        points=[
-            (lx, sy + src_off),
-            (corner_x, sy + src_off),
-            (corner_x, hy),
-            (vx, hy),
-            (vx, ty + tgt_off),
-            (tx, ty + tgt_off),
-        ],
-        is_inter_section=True,
-        normalize_exempt=True,
-        # Handedness-aware radii: C1 and C2 are right turns (the bundle's
-        # outer line is OUTSIDE the turn) so use the larger outside-of-turn
-        # radius r_wrap.  C3 and C4 are left turns (outer line is INSIDE
-        # the turn) so use the smaller inside-of-turn radius r_inside.
-        # Without this, C3's outer-line radius (r_wrap) clamps mid-curve
-        # because the post-C3 segment is too short, producing the visible
-        # "outer line wider than inner" asymmetry the user reported.
-        curve_radii=[r_wrap, r_wrap, r_inside, r_inside],
-        offsets_applied=True,
-    )
+    assert route is not None  # the lone member is always in its own bundle
+    return route
 
 
 def _has_bypass_sibling_to_same_entry(
@@ -2257,61 +2122,15 @@ def _route_right_entry_wrap(
 
     This avoids crossing through intervening sections.
 
-    Per-corner offset propagation is the mirror of
-    :func:`_route_left_entry_wrap`: bundle going RIGHT with outer line
-    (i=0, delta>0 going_down) at SMALLER y in V0 (sy+src_off) wraps
-    through R-D-R-D-L (handedness CW, CCW, CW, CW), landing at the
-    entry port with outer at SMALLER y again - matching the natural
-    priority-based station-offset ordering.
+    Cross-row sources route via :func:`route_along` from the bundle's
+    centreline: the R-D-R-D-L loop is described once at the bundle centre, this
+    line sits ``delta`` off it, and :func:`build_concentric_bundle` nests every
+    corner concentrically so the loop cannot flip.  Same-row sources delegate to
+    :func:`_route_right_entry_over_top` (also a centreline build).
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
-    dy = ty - sy
-    vertical = vertical_direction(dy)
-
-    # When this wrap shares a junction with mixed-direction siblings
-    # (e.g. another RIGHT-entry feed routed via the inter-row gap above),
-    # share the source-side first-corner X by consuming junction_fan_info
-    # exactly the way _route_left_entry_wrap / _route_right_entry_via_gap_above
-    # do.  Without this the wrap picks lx = sx + curve_radius on its own and
-    # its V1 downturn leg splays apart from the sibling's bundled channel
-    # (issue #484).
-    ekey = (edge.source, edge.target, edge.line_id)
-    fan = ctx.junction_fan_info.get(ekey)
-    if fan is not None:
-        ui, un = fan
-        fan_delta, _r_first, _ = l_shape_radii(
-            ui,
-            un,
-            vertical=vertical,
-            offset_step=ctx.offset_step,
-            base_radius=ctx.curve_radius,
-        )
-        fan_mid_x = sx + ctx.curve_radius + (un - 1) * ctx.offset_step / 2
-        delta = fan_delta
-        off_for_radius, max_off_for_radius = _radius_inputs(fan, i, n, ctx.offset_step)
-        r_first = corner_radius(
-            off_for_radius,
-            max_off_for_radius,
-            outside=True,
-            base_radius=ctx.curve_radius,
-        )
-        _, _, r_second = l_shape_radii(
-            i,
-            n,
-            vertical=vertical,
-            offset_step=ctx.offset_step,
-            base_radius=ctx.curve_radius,
-        )
-    else:
-        delta, r_first, r_second = l_shape_radii(
-            i,
-            n,
-            vertical=vertical,
-            offset_step=ctx.offset_step,
-            base_radius=ctx.curve_radius,
-        )
-        fan_mid_x = None
+    vertical = vertical_direction(ty - sy)
 
     # Detect cross-row case: use bypass-style Y just below the source
     # row's sections so the line runs horizontally under the adjacent
@@ -2335,61 +2154,57 @@ def _route_right_entry_wrap(
         return over_top
 
     assert src_col is not None and tgt_col is not None
+
+    # Unify the junction fan and the edge's own sub-bundle into one stagger.
+    # Sharing the source-side first corner keeps a fanned wrap's V1 downturn
+    # bundled with the junction's other downturning siblings.
+    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
+    pos_i, pos_n = fan if fan is not None else (i, n)
+    delta = l_shape_radii(
+        pos_i,
+        pos_n,
+        vertical=vertical,
+        offset_step=ctx.offset_step,
+        base_radius=ctx.curve_radius,
+    )[0]
+
+    # First-corner X centre: lead-in right of the source, clear of its edge.
+    mid_x = sx + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
+    v1_x = _v1_corner_x(ctx, src, sx, mid_x)
+
+    # Horizontal channel Y centre, below the source row's sections.
     hy = bypass_bottom_y(ctx.graph, src_col, tgt_col, BYPASS_CLEARANCE, src_row=src_row)
-    hy += delta
 
-    # Vertical channel X: just past the entry port in the inter-section
-    # gap.  Mirror of the left-entry wrap's V2 sign convention: OUTER
-    # (delta > 0 going_down) lands at SMALLER x in V2 here (west of
-    # bundle midline) because the C3 (R->D, CW) corner preserves the
-    # right-of-travel position established on H by C2 (D->R, CCW).
-    # Apply SECTION_ROUTE_CLEARANCE so the line CLOSEST to the section's
-    # right edge (delta=-max_delta in this sign convention) keeps a
-    # visible gap.  Uniform shift preserves the offset stagger.
-    max_delta = (n - 1) * ctx.offset_step / 2
+    # V2 descent channel centre, just past the entry port in the gap to the
+    # right of the target column.
     base_gap = ctx.curve_radius + ctx.offset_step
+    max_delta = (pos_n - 1) * ctx.offset_step / 2
     extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
-    vx = tx + base_gap + extra_clearance - delta
+    vx = tx + base_gap + extra_clearance
 
-    if fan_mid_x is not None:
-        # Share the source-side first-corner (V1) channel with the junction's
-        # other downturning siblings: place V1 on the fan midline staggered by
-        # this line's per-line delta, then apply the same right-edge clearance
-        # bump the sibling handlers use so all the downturn legs land in one
-        # concentric bundle rather than splaying (#484).  The route still
-        # starts at the junction (sx); the clearance manifests as a longer
-        # horizontal lead-in before C1.
-        v1_x = _v1_corner_x(ctx, src, sx, fan_mid_x + fan_delta)
-        r_lead = r_first
-    else:
-        # Short horizontal lead-in so the first corner (horizontal-to-vertical)
-        # gets a smooth curve instead of a sharp right angle at the junction.
-        r_lead = reference_anchored_radius(0.0, ctx.curve_radius)
-        v1_x = sx + r_lead
-
-    # Bake the per-line station offset into the endpoints (mirroring
-    # _route_left_entry_wrap).  The horizontal channel ``hy`` already carries
-    # the per-line ``delta`` and the deconflicted band Y; if the offset were
-    # left for the renderer's source/target heuristic it would shift the
-    # whole horizontal leg onto a neighbouring line's channel.
+    # Centreline: R-D-R-D-L loop pinned to the source.  Each port endpoint
+    # pre-subtracts the member's normal-projected offset so the line lands
+    # exactly on its station offset there: the lead-in runs rightward (+delta
+    # cancels), the entry runs leftward into the right port (-delta).
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-    return RoutedPath(
-        edge=edge,
-        line_id=edge.line_id,
-        points=[
-            (sx, sy + src_off),
-            (v1_x, sy + src_off),
-            (v1_x, hy),
-            (vx, hy),
-            (vx, ty + tgt_off),
-            (tx, ty + tgt_off),
-        ],
-        is_inter_section=True,
-        normalize_exempt=True,
-        curve_radii=[r_lead, r_first, r_first, r_second],
-        offsets_applied=True,
+    centerline = [
+        (sx, sy + src_off + delta),
+        (v1_x, sy + src_off + delta),
+        (v1_x, hy),
+        (vx, hy),
+        (vx, ty + tgt_off - delta),
+        (tx, ty + tgt_off - delta),
+    ]
+    route = route_along(
+        edge,
+        [(edge, edge.line_id, -delta)],
+        centerline,
+        base_radius=ctx.curve_radius,
+        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
     )
+    assert route is not None  # the lone member is always in its own bundle
+    return route
 
 
 def _right_entry_gap_above_target_y(
@@ -2459,50 +2274,36 @@ def _build_right_entry_wrap_route(
     Shared body of :func:`_route_right_entry_via_gap_above` and
     :func:`_route_right_entry_around_below`, which differ only in the
     horizontal channel they pass.  Leads right out of the source, drops to
-    ``channel_y_base`` (offset by the per-line fan ``delta``), runs right
-    past the target's right edge, then turns to the entry Y and in to the
-    RIGHT port from ``vx >= ex`` (its outward side), never crossing the
-    section interior.
+    ``channel_y_base``, runs right past the target's right edge, then turns to
+    the entry Y and in to the RIGHT port from ``vx >= ex`` (its outward side),
+    never crossing the section interior.
+
+    Built via :func:`route_along` from the bundle's centreline: the loop is
+    described once at the bundle centre, this line sits ``delta`` off it, and
+    :func:`build_concentric_bundle` nests every corner concentrically so the
+    R-D-R-D-L loop cannot flip.
     """
     sx, sy = src.x, src.y
     ex, ey = entry_port.x, entry_port.y
     vertical = vertical_direction(ey - sy)
 
-    ekey = (edge.source, edge.target, edge.line_id)
-    fan = ctx.junction_fan_info.get(ekey)
-    if fan is not None:
-        ui, un = fan
-        fan_delta, _r_first, _ = l_shape_radii(
-            ui,
-            un,
-            vertical=vertical,
-            offset_step=ctx.offset_step,
-            base_radius=ctx.curve_radius,
-        )
-        fan_mid_x = sx + ctx.curve_radius + (un - 1) * ctx.offset_step / 2
-        delta = fan_delta
-    else:
-        delta, _r_first, _r_second = l_shape_radii(
-            i,
-            n,
-            vertical=vertical,
-            offset_step=ctx.offset_step,
-            base_radius=ctx.curve_radius,
-        )
-        fan_mid_x = None
-    off_for_radius, max_off_for_radius = _radius_inputs(fan, i, n, ctx.offset_step)
-    r_outer = corner_radius(
-        off_for_radius,
-        max_off_for_radius,
-        outside=True,
+    # Unify the junction fan and the edge's own sub-bundle into one stagger.
+    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
+    pos_i, pos_n = fan if fan is not None else (i, n)
+    delta = l_shape_radii(
+        pos_i,
+        pos_n,
+        vertical=vertical,
+        offset_step=ctx.offset_step,
         base_radius=ctx.curve_radius,
-    )
+    )[0]
 
-    hy = channel_y_base + delta
+    # First-corner X centre: lead-in right of the source, clear of its edge.
+    mid_x = sx + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
+    corner_x = _v1_corner_x(ctx, src, sx, mid_x)
 
-    # V_down/up channel sits just RIGHT of the target section's bbox, in the
-    # gap to the right of the target column; +delta keeps the outer line
-    # (larger radius) on the outside of both turns into the right-side port.
+    # V_down/up channel centre, just RIGHT of the target section's bbox in the
+    # gap to the right of the target column.
     ep_section = (
         ctx.graph.sections.get(entry_port.section_id) if entry_port.section_id else None
     )
@@ -2511,39 +2312,36 @@ def _build_right_entry_wrap_route(
         if ep_section and ep_section.bbox_w > 0
         else ex
     )
-    n_for_outer = fan[1] if fan is not None else n
     base_gap = ctx.curve_radius + ctx.offset_step
-    max_delta = (n_for_outer - 1) * ctx.offset_step / 2
+    max_delta = (pos_n - 1) * ctx.offset_step / 2
     extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
-    vx = section_right + base_gap + extra_clearance + delta
+    vx = section_right + base_gap + extra_clearance
 
-    if fan_mid_x is not None:
-        corner_x = fan_mid_x + delta
-    else:
-        non_fan_mid_x = sx + ctx.curve_radius + (n - 1) * ctx.offset_step / 2
-        corner_x = non_fan_mid_x + delta
-    corner_x = _v1_corner_x(ctx, src, sx, corner_x)
-    lx = sx
-
+    # Centreline: R-D-R-D-L loop pinned to the source, right out of the source,
+    # down to the traverse channel, right past the target's right edge, to the
+    # entry Y, and in to the RIGHT port from its outward side.  Each port
+    # endpoint pre-subtracts the member's normal-projected offset so the line
+    # lands exactly on its station offset there: the lead-in runs rightward
+    # (+delta cancels), the entry runs leftward into the right port (-delta).
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-
-    return RoutedPath(
-        edge=edge,
-        line_id=edge.line_id,
-        points=[
-            (lx, sy + src_off),
-            (corner_x, sy + src_off),
-            (corner_x, hy),
-            (vx, hy),
-            (vx, ey + tgt_off),
-            (ex, ey + tgt_off),
-        ],
-        is_inter_section=True,
-        normalize_exempt=True,
-        curve_radii=[r_outer, r_outer, r_outer, r_outer],
-        offsets_applied=True,
+    centerline = [
+        (sx, sy + src_off + delta),
+        (corner_x, sy + src_off + delta),
+        (corner_x, channel_y_base),
+        (vx, channel_y_base),
+        (vx, ey + tgt_off - delta),
+        (ex, ey + tgt_off - delta),
+    ]
+    route = route_along(
+        edge,
+        [(edge, edge.line_id, -delta)],
+        centerline,
+        base_radius=ctx.curve_radius,
+        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
     )
+    assert route is not None  # the lone member is always in its own bundle
+    return route
 
 
 def _route_right_entry_via_gap_above(

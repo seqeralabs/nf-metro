@@ -42,7 +42,6 @@ from nf_metro.layout.routing.inter_section_handlers import (  # noqa: F401
     _has_around_section_sibling,
     _has_bypass_sibling_to_same_entry,
     _left_entry_descent_x,
-    _radius_inputs,
     _right_entry_gap_above_is_clear,
     _right_entry_gap_above_target_y,
     _route_around_section_below,
