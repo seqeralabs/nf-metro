@@ -60,7 +60,6 @@ from nf_metro.layout.routing.context import (
 )
 from nf_metro.layout.routing.corners import (
     bypass_radii,
-    concentric_corner_radius_at,
     corner_radius,
     l_shape_radii,
     reference_anchored_radius,
@@ -1223,11 +1222,12 @@ def _route_perp_exit_over(
         (lift)     (corridor)      (descent)      (into target)
         port -> up -> over -> down to station Y -> straight into entry
 
-    The bundle is a constant perpendicular offset of its reference line: the
-    vertical legs continue the in-section riser's per-line X and the corridor
-    stacks the same offset in Y, so the per-line gap is constant.  Each corner
-    radius is the reference-anchored concentric form ``base +/- offset`` so the
-    arcs share a centre and the gap never pinches through the bends.
+    The polyline above is the bundle's centreline; every co-travelling line is
+    fanned as a perpendicular offset of it by the bundle builder, which anchors
+    each corner on the bundle's innermost-of-turn line so no arc pinches below
+    the floor radius.  The vertical legs carry the source-side riser lateral and
+    the final turn-in carries the target's per-line Y, so a side entry tapers
+    between the two while a perp-entry trunk drop stays rigid.
     """
     graph = ctx.graph
     sx, sy = src.x, src.y
@@ -1240,9 +1240,22 @@ def _route_perp_exit_over(
     is_top = src_port.side == PortSide.TOP
     row = src_sec.grid_row if src_sec is not None else None
 
-    d = _perp_riser_lateral(
-        ctx, edge.source, edge.line_id, src_port.side, src.section_id
-    )
+    # The co-travelling bundle: every line leaving this perpendicular exit for
+    # the same target rises into the corridor together.  Each contributes its
+    # source-side lateral so the builder anchors every corner on the bundle's
+    # innermost-of-turn line.
+    member_edges = [e for e in graph.edges_to(edge.target) if e.source == edge.source]
+    line_ids = list(dict.fromkeys(e.line_id for e in member_edges))
+
+    def source_lateral(line_id: str) -> float:
+        """The centreline's source-side perpendicular offset for *line_id*.
+
+        ``_perp_riser_lateral`` keeps the raw per-line X on a TOP riser and
+        reverses it on a BOTTOM one; the right-hand normal on the centreline's
+        vertical legs reverses the BOTTOM sign back, so it is negated here.
+        """
+        d = _perp_riser_lateral(ctx, edge.source, line_id, src_port.side, src.section_id)
+        return d if is_top else -d
 
     # Corridor Y: the header band clearing the source section's near edge.
     cy_base = (
@@ -1252,11 +1265,6 @@ def _route_perp_exit_over(
         if is_top
         else sy + base
     )
-
-    # The larger-offset line sits toward the source section on the corridor
-    # (south of a TOP run, north of a BOTTOM run) and west on the descent, which
-    # preserves bundle order through the rise/over/descend/turn-in sequence.
-    corridor_y = cy_base + (d if is_top else -d)
 
     perp_entry = (
         tgt_port is not None
@@ -1268,17 +1276,15 @@ def _route_perp_exit_over(
         # X and stop there.  The matching entry drop continues from that same
         # X, so ending the corridor short of the port centre keeps the two
         # legs one continuous line instead of jogging onto the port marker.
-        descent_x = tx - d
-        points = [
-            (sx + d, sy),
-            (sx + d, corridor_y),
-            (descent_x, corridor_y),
-            (descent_x, ty),
-        ]
-        radii = [
-            concentric_corner_radius_at(points[0], points[1], points[2], d, base),
-            concentric_corner_radius_at(points[1], points[2], points[3], -d, base),
-        ]
+        centerline = [(sx, sy), (sx, cy_base), (tx, cy_base), (tx, ty)]
+        src_offs = {lid: source_lateral(lid) for lid in line_ids}
+        route = route_along(
+            edge,
+            [(edge, edge.line_id, src_offs[edge.line_id])],
+            centerline,
+            base_radius=ctx.curve_radius,
+            bundle_offsets=[src_offs[lid] for lid in line_ids],
+        )
     else:
         # Side entry: descend in the inter-column gap to the consumer's row and
         # turn straight in, holding each line on the target section's per-line Y
@@ -1286,30 +1292,27 @@ def _route_perp_exit_over(
         # collapsing onto the entry-port Y (which would hide all but one line).
         src_col = src_sec.grid_col if src_sec is not None else 0
         tgt_col = tgt_sec.grid_col if tgt_sec is not None else src_col
-        descent_x = column_gap_midpoint(graph, src_col, tgt_col, row) - d
-        final_y = ty + _get_offset(ctx, edge.target, edge.line_id)
-        points = [
-            (sx + d, sy),
-            (sx + d, corridor_y),
-            (descent_x, corridor_y),
-            (descent_x, final_y),
-            (tx, final_y),
+        gap_x = column_gap_midpoint(graph, src_col, tgt_col, row)
+        centerline = [
+            (sx, sy),
+            (sx, cy_base),
+            (gap_x, cy_base),
+            (gap_x, ty),
+            (tx, ty),
         ]
-        radii = [
-            concentric_corner_radius_at(points[0], points[1], points[2], d, base),
-            concentric_corner_radius_at(points[1], points[2], points[3], -d, base),
-            concentric_corner_radius_at(points[2], points[3], points[4], -d, base),
-        ]
+        src_offs = {lid: source_lateral(lid) for lid in line_ids}
+        tgt_offs = {lid: _get_offset(ctx, edge.target, lid) for lid in line_ids}
+        routes = build_tapered_bundle(
+            [(edge, edge.line_id, src_offs[edge.line_id], tgt_offs[edge.line_id])],
+            centerline,
+            transition_leg=3,
+            base_radius=ctx.curve_radius,
+            bundle_offsets=[(src_offs[lid], tgt_offs[lid]) for lid in line_ids],
+        )
+        route = next((r for r in routes if r.line_id == edge.line_id), None)
 
-    return RoutedPath(
-        edge=edge,
-        line_id=edge.line_id,
-        points=points,
-        is_inter_section=True,
-        normalize_exempt=True,
-        offsets_applied=True,
-        curve_radii=radii,
-    )
+    assert route is not None
+    return route
 
 
 def _route_top_entry_l_shape(
