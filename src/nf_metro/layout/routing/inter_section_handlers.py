@@ -17,6 +17,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import (
+    fan_offsets,
     gather_bundle,
     gather_tapered_bundle,
     route_along,
@@ -414,9 +415,9 @@ def _route_tb_bottom_exit(
 
     # Misaligned: jog in the inter-row gap so the line leaves the BOTTOM
     # port travelling downward, transitions across with bounded curves,
-    # then drops into the target.  Corner radii are clamped to half the
-    # horizontal jog so short jogs stay orthogonal rather than collapsing
-    # into a diagonal.
+    # then drops into the target.  A short horizontal jog is shared by both
+    # corners, so the render-time segment budget shrinks each arc to half the
+    # jog and the bend stays orthogonal rather than collapsing into a diagonal.
     dy = ty - sy
     hy = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius)
     # Keep the jog Y strictly between the two ports so both vertical legs
@@ -427,7 +428,7 @@ def _route_tb_bottom_exit(
         edge,
         member,
         [(sx, sy), (sx, hy), (tx, hy), (tx, ty)],
-        base_radius=min(ctx.curve_radius, abs(tx - sx) / 2),
+        base_radius=ctx.curve_radius,
     )
 
 
@@ -1338,11 +1339,10 @@ def _route_top_entry_l_shape(
     # across the source box.  Falls back to dx for sources with no horizontal
     # exit side, and to the upstream-feeder direction for near-vertical
     # junction sources.
-    r_lead = reference_anchored_radius(0.0, ctx.curve_radius)
     exit_side = _source_exit_side(ctx.graph, src)
     if exit_side is not None:
         lead = exit_side
-    elif abs(dx) > r_lead:
+    elif abs(dx) > ctx.curve_radius:
         lead = horizontal_direction(dx)
     else:
         lead = Direction.R
@@ -1354,7 +1354,7 @@ def _route_top_entry_l_shape(
                         lead = Direction.R if js.x < src.x else Direction.L
                         break
 
-    lx0 = sx + lead.sign * r_lead
+    lx0 = sx + lead.sign * ctx.curve_radius
 
     # Anchor the centreline on the bundle's reference line (source offset 0) and
     # fan every co-travelling line as a per-leg offset of it, so each corner
@@ -1399,7 +1399,7 @@ def _route_top_entry_l_shape(
 
     # When the lead-in already sits at the landing X the trunk leg collapses;
     # drop straight from the lead-in and jog into the port instead.
-    if abs(lx0 - final_x) <= r_lead:
+    if abs(lx0 - final_x) <= ctx.curve_radius:
         centerline = [(sx, sy), (lx0, sy), (lx0, ty), (final_x, ty)]
         transition_leg = 2
     else:
@@ -1416,7 +1416,7 @@ def _route_top_entry_l_shape(
         members,
         centerline,
         transition_leg,
-        base_radius=r_lead,
+        base_radius=ctx.curve_radius,
         normalize_exempt=True,
     )
     return next(r for r in routes if r.line_id == edge.line_id)
@@ -1976,6 +1976,7 @@ def _route_inter_row_gap_corridor(
         [(edge, edge.line_id, -delta)],
         centerline,
         base_radius=ctx.curve_radius,
+        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
     )
 
 
@@ -2137,6 +2138,7 @@ def _route_around_section_below(
         [(edge, edge.line_id, -delta)],
         centerline,
         base_radius=ctx.curve_radius,
+        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
     )
 
 

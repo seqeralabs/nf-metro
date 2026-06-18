@@ -1407,13 +1407,13 @@ def test_top_entry_lead_corner_concentric(fixture):
     The lines are already separated in Y by the render offset, so an equal
     lead-in radius leaves the arcs non-concentric and the perpendicular gap
     pinches through the bend (issue #484, cross_row turn-down after section 1).
-    The fix keeps the outermost line at the base radius and shrinks each inner
-    line's lead-in radius by one ``OFFSET_STEP`` so all arcs nest about a
-    common centre.  Encoded as: within a shared (source TOP-entry, target)
-    bundle, the first-corner radii sorted descending must step down by exactly
-    ``OFFSET_STEP``.  Only checks narrow bundles where the fix applies.
+    Concentric arcs nest about a common centre: within a shared (source
+    TOP-entry, target) bundle the first-corner radii sorted descending step by
+    exactly ``OFFSET_STEP``.  The absolute anchor (which line sits at the base
+    radius) is asserted separately in
+    ``test_inter_section_bundle_corners_anchored_at_floor``.
     """
-    from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
+    from nf_metro.layout.constants import OFFSET_STEP
 
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
@@ -1431,20 +1431,87 @@ def test_top_entry_lead_corner_concentric(fixture):
         )
 
     for (src, tgt), radii in by_key.items():
-        n = len(radii)
-        # Gate matches the handler: only narrow bundles get concentric radii.
-        if n < 2 or (n - 1) * OFFSET_STEP > CURVE_RADIUS - OFFSET_STEP:
+        if len(radii) < 2:
             continue
         radii = sorted(radii, reverse=True)
-        assert abs(radii[0] - CURVE_RADIUS) < 0.1, (
-            f"{fixture}: {src}->{tgt} outermost lead radius {radii[0]} "
-            f"!= base {CURVE_RADIUS}"
-        )
         steps = [round(a - b, 1) for a, b in zip(radii, radii[1:])]
         assert all(abs(s - OFFSET_STEP) < 0.1 for s in steps), (
             f"{fixture}: {src}->{tgt} lead-corner radii {radii} not concentric "
             f"(steps {steps})"
         )
+
+
+# ---------------------------------------------------------------------------
+# Bundle corners anchored on the innermost-of-turn line
+# ---------------------------------------------------------------------------
+
+
+def test_build_concentric_bundle_anchors_innermost_at_base():
+    """The bundle builder anchors every corner on the innermost-of-turn line.
+
+    A fan turning an L-shape must keep the line deepest inside each bend at the
+    base radius and grow the rest outward, so no arc falls below the floor.  The
+    mean-anchored predecessor pinned the bundle *mean* at the base, letting an
+    inside-of-turn line drop to ``base - half_width`` (a sub-floor pinch on a
+    deep fan).  Pinned directly on :func:`build_concentric_bundle`: with three
+    lines one ``OFFSET_STEP`` apart, every corner radius is ``>= base`` and the
+    smallest at each corner equals ``base``.
+    """
+    from nf_metro.layout.constants import OFFSET_STEP
+    from nf_metro.layout.routing.bundle import build_concentric_bundle
+    from nf_metro.parser.model import Edge
+
+    members = [
+        (Edge("s", "t", f"l{k}"), f"l{k}", (k - 1) * OFFSET_STEP) for k in range(3)
+    ]
+    centerline = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (200.0, 100.0)]
+    routes = build_concentric_bundle(members, centerline, base_radius=CURVE_RADIUS)
+
+    for ci in range(len(centerline) - 2):
+        col = sorted(r.curve_radii[ci] for r in routes)
+        assert col[0] >= CURVE_RADIUS - 0.1, (
+            f"corner {ci}: smallest radius {col[0]} below floor {CURVE_RADIUS}"
+        )
+        assert abs(col[0] - CURVE_RADIUS) < 0.1, (
+            f"corner {ci}: innermost radius {col[0]} != base {CURVE_RADIUS}"
+        )
+        steps = [round(b - a, 1) for a, b in zip(col, col[1:])]
+        assert all(abs(s - OFFSET_STEP) < 0.1 for s in steps), (
+            f"corner {ci} not concentric: {col}"
+        )
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "topologies/around_section_below.mmd",
+        "topologies/around_below_ep_col_gt0.mmd",
+    ],
+)
+def test_inter_section_bundle_corners_anchored_at_floor(fixture):
+    """A co-travelling inter-section bundle keeps every corner at/above the floor.
+
+    The around-below loop fans a two-line bundle through four corners.  The
+    mean-anchored builder dropped the inside-of-turn line to 8.5px (below the
+    10px floor); anchored on the innermost line, every inter-section corner
+    radius is ``>= CURVE_RADIUS``.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    worst = min(
+        (
+            rad
+            for rp in routes
+            if rp.is_inter_section and rp.curve_radii
+            for rad in rp.curve_radii
+        ),
+        default=CURVE_RADIUS,
+    )
+    assert worst >= CURVE_RADIUS - 0.1, (
+        f"{fixture}: inter-section corner radius {worst} below floor {CURVE_RADIUS}"
+    )
 
 
 # ---------------------------------------------------------------------------

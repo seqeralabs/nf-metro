@@ -29,6 +29,17 @@ _Member = tuple[Edge, str, float]
 _TaperedMember = tuple[Edge, str, float, float]
 
 
+def fan_offsets(n: int, step: float) -> list[float]:
+    """The signed offsets of an *n*-line bundle centred on its own mean.
+
+    Line ``j`` sits at ``(j - (n-1)/2) * step``, so the set is symmetric about
+    zero with half-width ``(n-1)/2 * step``.  A handler that routes a bundle's
+    lines one at a time passes this as ``bundle_offsets`` so the builder can
+    anchor each corner on the innermost line without seeing the siblings.
+    """
+    return [(j - (n - 1) / 2) * step for j in range(n)]
+
+
 def gather_bundle(ctx: _RoutingCtx, edge: Edge) -> tuple[list[_Member], float, float]:
     """Collect the bundle of lines co-travelling ``edge.source -> edge.target``.
 
@@ -86,19 +97,23 @@ def route_along(
     *,
     base_radius: float,
     min_radius: float | None = None,
+    bundle_offsets: list[float] | None = None,
     normalize_exempt: bool = True,
 ) -> RoutedPath | None:
     """Fan *members* along *centerline* and return the route for *edge*.
 
     The single seam between a handler's named geometry and
     :func:`build_concentric_bundle`: the handler builds the centreline, this
-    fans the bundle and picks out the calling edge's line.
+    fans the bundle and picks out the calling edge's line.  A handler that
+    routes its siblings one at a time passes the full bundle's offsets as
+    *bundle_offsets* so the lone member anchors against the whole spread.
     """
     routes = build_concentric_bundle(
         members,
         centerline,
         base_radius=base_radius,
         min_radius=min_radius,
+        bundle_offsets=bundle_offsets,
         normalize_exempt=normalize_exempt,
     )
     return next((r for r in routes if r.line_id == edge.line_id), None)
