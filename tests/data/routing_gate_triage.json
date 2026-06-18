@@ -415,12 +415,12 @@
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },
-  "intra_handlers.py::if abs(dx) < COORD_TOLERANCE:::#1": {
-    "note": "A same-section, non-TB intra edge with |dx| < COORD_TOLERANCE (1px) and non-zero dy is not constructible: layering assigns increasing X along edges so the minimum |dx| at _route_intra_section across the corpus is 50px (port spacing / off-track output lead). TB same-track edges that could reach |dx|=0 are intercepted by _route_tb_internal before this handler. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+  "intra_handlers.py::if abs(tgt.x - src.x) >= COORD_TOLERANCE:::#1": {
+    "note": "_route_near_zero_gap_straight: a same-section, non-TB intra edge with |tgt.x - src.x| < COORD_TOLERANCE (1px) and non-zero dy is not constructible, so the straight-return (False) arm is never taken: layering assigns increasing X along edges so the minimum |dx| at _route_intra_section across the corpus is 50px (port spacing / off-track output lead). TB same-track edges that could reach |dx|=0 are intercepted by _route_tb_internal before this handler. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
-  "intra_handlers.py::if dx <= 0 and abs(dy) > CROSS_ROW_THRESHOLD and not same_section:::#1": {
-    "note": "The not-same_section precondition is never satisfied at _route_intra_section: cross-section edges are consumed by _route_inter_section upstream (0/391 corpus fixtures reach this branch with differing sections), and a sectionless flat graph's serpentine fold is routed before this handler too (verified: a flat fold over the threshold does not reach the arm). The cross-row fold branch is shadowed. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+  "intra_handlers.py::if not (tgt.x - src.x <= 0 and abs(dy) > CROSS_ROW_THRESHOLD and not same_section):::#1": {
+    "note": "_route_fold_edge: the not-same_section precondition is never satisfied at the intra-section handlers, so the fold (False) arm is never taken: cross-section edges are consumed by _route_inter_section upstream (0/391 corpus fixtures reach this branch with differing sections), and a sectionless flat graph's serpentine fold is routed before this handler too (verified: a flat fold over the threshold does not reach the arm). The cross-row fold branch is shadowed. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
   "intra_handlers.py::if not (same_sec or is_exit_port):::#1": {
