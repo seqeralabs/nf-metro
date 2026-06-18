@@ -601,6 +601,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "declaration order at the peel-off corner instead of inverting "
         "(issue #695).",
     ),
+    (
+        "peeloff_extra_line_consumer",
+        TOPOLOGIES_DIR,
+        "Same peel-off topology as peeloff_riser_respace but the destination "
+        "section also carries an extra internal branch (l5). The riser reorder "
+        "must still fire and keep the bundle crossing-free at the shared entry "
+        "port regardless of extra lines in the consumer section (issue #751).",
+    ),
     # --- LR section feeding a TB section's TOP entry ---
     (
         "lr_to_tb_top_drop",

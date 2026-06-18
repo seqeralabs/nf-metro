@@ -491,10 +491,6 @@
     "note": "Trunk-not-horizontal guard in _port_peeloff_tail, reached only after the port lead is horizontal and the riser vertical (L478/L480 returned early otherwise). In an orthogonal route segments alternate H/V, so the segment preceding a vertical riser is always horizontal; instrumenting the corpus the guard is reached 866 times and the non-horizontal-trunk arm never fires. Defensive against a degenerate collinear tail the router does not produce.",
     "status": "defensive"
   },
-  "normalize.py::if any(lid not in bundle_lines for lid in ctx.graph.station_lines(sid)):::#1": {
-    "note": "Extra-line arm of _section_reorderable, taken when the consumer section carries any line outside the peel-off bundle (e.g. its own internal branch). Reachable by valid topology but re-exposes the #695 crossing because the reorder declines: same root cause as the L555/L626 decline. Reachable-but-defective; see #751.",
-    "status": "needs-review"
-  },
   "normalize.py::if band is not None:::#1": {
     "note": "Same-line dogleg: the band-found arm is exercised by dogleg_exempt_sameline; the band-is-None arm is defensive (both colliding trunks route through _center_inter_row_channel, so the trunk Y always resolves to a gap band).",
     "status": "defensive"
@@ -575,10 +571,6 @@
     "note": "Downstream of the gap-edge band guard (L243); only reached when a channel x sits within 1px of a gap boundary, which the >=16px clearance never produces, so both arms are unreachable.",
     "status": "defensive"
   },
-  "normalize.py::if not _section_reorderable(ctx, port_id, set(per_line)):::#1": {
-    "note": "Reorder-decline arm of _reorder_convergence_peeloff, taken when the consumer section is not a plain single-row LR-only section. Reachable by valid topology (consumer with an internal branch, extra line, multiple rows, or non-LR flow), but every reaching topology re-exposes the #695 crossing the pass exists to fix: it declines and leaves declaration order. Reachable-but-defective; see #751. Not defensive.",
-    "status": "needs-review"
-  },
   "normalize.py::if not any(not t.route.normalize_exempt for t in grp):::#2": {
     "note": "_suboptimal_trunk_bands diagnostic guard: validate-only, not on the render path.",
     "status": "defensive"
@@ -616,8 +608,8 @@
     "status": "defensive"
   },
   "normalize.py::if sec is None or sec.direction != \"LR\":::#1": {
-    "note": "Non-LR-consumer arm of _section_reorderable, taken when the converging bundle's consumer section flows non-LR (or resolves to no section). Reachable (a TB destination with a LEFT entry port) but the reaching topology re-exposes the #695 crossing at the same coordinates as the L555/L634 decline. Reachable-but-defective; see #751.",
-    "status": "needs-review"
+    "note": "Non-LR consumer arm of _section_reorderable. The dense rank*step offset propagation is only valid for single-row LR sections; TB and other directions use different offset semantics. The riser reorder fires unconditionally; only the section-internal propagation is skipped. No clean single-purpose fixture exercises this arm in isolation.",
+    "status": "defensive"
   },
   "normalize.py::if sg[0].sign_x != t.sign_x:::#1": {
     "note": "Both callers of _coincident_trunk_slots pre-filter input to a single traversal direction (band = [t for t in grp if t.sign_x == sign]), so within the function sg[0].sign_x != t.sign_x is always False; the opposing-direction continue is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",

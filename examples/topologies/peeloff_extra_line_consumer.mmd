@@ -1,0 +1,43 @@
+%%metro title: Peel-off Extra Line Consumer
+%%metro style: dark
+%%metro line: l1 | Line 1 | #e63946
+%%metro line: l2 | Line 2 | #2db572
+%%metro line: l3 | Line 3 | #0570b0
+%%metro line: l4 | Line 4 | #f5c542
+%%metro line: l5 | Line 5 | #9b59b6
+%%metro grid: src_a | 0,0
+%%metro grid: src_b | 1,0
+%%metro grid: mid | 2,0
+%%metro grid: dst | 3,0
+
+graph LR
+    subgraph src_a [Source A]
+        %%metro exit: right | l1,l2
+        sa_in[Input A]
+        sa_out[Output A]
+        sa_in -->|l1,l2| sa_out
+    end
+
+    subgraph src_b [Source B]
+        %%metro entry: left | l3,l4
+        %%metro exit: right | l3,l4
+        sb_in[Input B]
+        sb_out[Output B]
+        sb_in -->|l3,l4| sb_out
+    end
+
+    subgraph mid [Mid]
+        m1[Mid Process]
+    end
+
+    subgraph dst [Destination]
+        %%metro entry: left | l1,l2,l3,l4
+        d1[Process D1]
+        d2[Process D2]
+        d3[Process D3]
+        d1 -->|l1,l2,l3,l4| d2
+        d2 -->|l5| d3
+    end
+
+    sa_out -->|l1,l2| d1
+    sb_out -->|l3,l4| d1

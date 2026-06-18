@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 from conftest import CONTENT_PLACEMENT_PHASES
-from layout_validator import check_station_as_elbow
+from layout_validator import check_route_segment_crossings, check_station_as_elbow
 
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
@@ -1369,8 +1369,6 @@ def test_peeloff_riser_keeps_bundle_order():
        the internal ``d1 -> d2`` run - a reorder between them would be a
        crossing the validator's hub-exclusion hides just inside the boundary.
     """
-    from layout_validator import check_route_segment_crossings
-
     fixture = "topologies/peeloff_riser_respace.mmd"
     graph = _layout(fixture, validate=True)
     offsets = compute_station_offsets(graph)
@@ -1397,6 +1395,25 @@ def test_peeloff_riser_keeps_bundle_order():
         f"bundle reorders entering the section: port {port_order} "
         f"vs internal {internal_order}"
     )
+
+
+def test_peeloff_riser_crossing_free_extra_line_consumer():
+    """A bypass-trunk peel-off into a shared LEFT entry port must be
+    crossing-free when the consumer section also carries an extra internal
+    branch not present in the converging bundle.
+
+    Several lines from two sources ride one shared bypass trunk and rise into
+    a common destination entry port.  The trunk-Y stack order and the
+    declaration order disagree, so the riser must be reordered to avoid
+    braiding.  This must hold when the consumer also has its own internal
+    branches that are not part of the converging bundle.
+    """
+    graph = _layout("topologies/peeloff_extra_line_consumer.mmd", validate=True)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    crossings = check_route_segment_crossings(graph, (offsets, routes))
+    assert not crossings, "; ".join(v.message for v in crossings)
 
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)

@@ -552,9 +552,6 @@ def _reorder_convergence_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> 
             for lid in ranked
         ):
             continue  # already in trunk-depth order
-        if not _section_reorderable(ctx, port_id, set(per_line)):
-            continue
-
         for rp, _t in entries:
             lid = rp.edge.line_id
             nx, ny = target_x[lid], target_y[lid]
@@ -564,14 +561,14 @@ def _reorder_convergence_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> 
             pts[-1] = (pts[-1][0], ny)
             _set_peeloff_radii(rp, peel_rank[lid], n, step, ctx.curve_radius, reverse)
 
-        # Propagate the slot order into the consumer section so its internal
-        # bundle matches the port; otherwise the crossing the riser reorder
-        # removes simply re-forms between the port and the first station.
-        port_rank = {
-            lid: r
-            for r, lid in enumerate(sorted(ranked, key=lambda lid: target_y[lid]))
-        }
-        _apply_section_bundle_order(ctx, port_id, port_rank, step)
+        # Propagate slot order to the consumer section: without it the crossing
+        # removed from the riser re-forms between the port and the first station.
+        if _section_reorderable(ctx, port_id):
+            port_rank = {
+                lid: r
+                for r, lid in enumerate(sorted(ranked, key=lambda lid: target_y[lid]))
+            }
+            _apply_section_bundle_order(ctx, port_id, port_rank, step)
 
 
 def _set_peeloff_radii(
@@ -609,30 +606,23 @@ def _set_peeloff_radii(
         rp.curve_radii[k] = port_r
 
 
-def _section_reorderable(
-    ctx: _RoutingCtx, port_id: str, bundle_lines: set[str]
-) -> bool:
-    """Whether *port_id*'s section can take the bundle's slot order safely.
+def _section_reorderable(ctx: _RoutingCtx, port_id: str) -> bool:
+    """Whether *port_id*'s section can absorb the bundle's slot order.
 
     The propagation writes one dense ``rank * step`` offset per bundle line to
-    every section station, so it is only safe when the consumer section is a
-    plain single-row LR section carrying nothing but the bundle's lines.  A
-    section with extra lines, more than one row, or a reversed flow needs the
-    richer offsets-phase machinery and is left untouched.
+    every section station.  This is safe for a single-row LR section: all
+    stations share one trunk Y so the dense offsets are valid replacements.
+    Multi-row sections and non-LR sections use different offset semantics and
+    cannot absorb a dense uniform rewrite.
     """
     if ctx.station_offsets is None:
         return False
     sec = ctx.graph.sections.get(ctx.graph.ports[port_id].section_id)
     if sec is None or sec.direction != "LR":
         return False
-    ys: list[float] = []
-    for sid in sec.station_ids:
-        st = ctx.graph.stations[sid]
-        if st.is_port:
-            continue
-        ys.append(st.y)
-        if any(lid not in bundle_lines for lid in ctx.graph.station_lines(sid)):
-            return False  # carries a line outside the bundle
+    ys = [
+        st.y for sid in sec.station_ids if not (st := ctx.graph.stations[sid]).is_port
+    ]
     return not ys or max(ys) - min(ys) <= COORD_TOLERANCE
 
 
