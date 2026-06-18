@@ -1398,6 +1398,19 @@ def test_disjoint_sameline_trunks_bundle_tight():
     )
 
 
+def _routes_ordered_by_y(
+    selected: list,
+    offsets: dict,
+    *,
+    at_target: bool,
+) -> list:
+    rows = [
+        (rp.line_id, apply_route_offsets(rp, offsets)[-1 if at_target else 0][1])
+        for rp in selected
+    ]
+    return [lid for lid, _ in sorted(rows, key=lambda r: r[1])]
+
+
 def test_peeloff_riser_keeps_bundle_order():
     """A bypass-trunk bundle peeling up into a shared entry port enters it
     concentrically and keeps that order through the consumer section (#695).
@@ -1424,18 +1437,14 @@ def test_peeloff_riser_keeps_bundle_order():
     crossings = check_route_segment_crossings(graph, (offsets, routes))
     assert not crossings, "; ".join(v.message for v in crossings)
 
-    def order_by_y(selected, at_target):
-        rows = [
-            (rp.line_id, apply_route_offsets(rp, offsets)[-1 if at_target else 0][1])
-            for rp in selected
-        ]
-        return [lid for lid, _ in sorted(rows, key=lambda r: r[1])]
-
-    port_order = order_by_y(
-        [rp for rp in routes if rp.edge.target == "dst__entry_left_2"], at_target=True
+    port_order = _routes_ordered_by_y(
+        [rp for rp in routes if rp.edge.target == "dst__entry_left_2"],
+        offsets,
+        at_target=True,
     )
-    internal_order = order_by_y(
+    internal_order = _routes_ordered_by_y(
         [rp for rp in routes if rp.edge.source == "d1" and rp.edge.target == "d2"],
+        offsets,
         at_target=False,
     )
     assert port_order == internal_order, (
@@ -1465,18 +1474,14 @@ def test_peeloff_riser_crossing_free_extra_line_consumer():
     crossings = check_route_segment_crossings(graph, (offsets, routes))
     assert not crossings, "; ".join(v.message for v in crossings)
 
-    def order_by_y(selected, at_target):
-        rows = [
-            (rp.line_id, apply_route_offsets(rp, offsets)[-1 if at_target else 0][1])
-            for rp in selected
-        ]
-        return [lid for lid, _ in sorted(rows, key=lambda r: r[1])]
-
-    port_order = order_by_y(
-        [rp for rp in routes if rp.edge.target == "dst__entry_left_2"], at_target=True
+    port_order = _routes_ordered_by_y(
+        [rp for rp in routes if rp.edge.target == "dst__entry_left_2"],
+        offsets,
+        at_target=True,
     )
-    internal_order = order_by_y(
+    internal_order = _routes_ordered_by_y(
         [rp for rp in routes if rp.edge.source == "d1" and rp.edge.target == "d2"],
+        offsets,
         at_target=False,
     )
     assert port_order == internal_order, (
