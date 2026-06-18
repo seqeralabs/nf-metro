@@ -1510,6 +1510,67 @@ def _wrap_fan_geometry(
     return fan, pos_n, delta, corner_x
 
 
+def _route_entry_wrap(
+    edge: Edge,
+    src: Station,
+    entry_port: Station,
+    ctx: _RoutingCtx,
+    *,
+    pos_n: int,
+    delta: float,
+    corner_x: float,
+    channel_y: float,
+    descent_x: float,
+    entry_side: PortSide,
+) -> RoutedPath:
+    """Fan a single-member entry-wrap loop along its centreline.
+
+    Every entry-wrap shape -- LEFT or RIGHT entry, reached through the inter-row
+    gap, the bypass band below the source row, or the around-below loop -- is the
+    same 6-point R-D-?-D-? loop and differs only in three inputs the caller
+    resolves from its own geometry: the horizontal channel Y (*channel_y*), the
+    descent channel X (*descent_x*), and which edge the port sits on
+    (*entry_side*)::
+
+        (sx, sy)        -> H lead-in right of the source
+        (corner_x, sy)  ; turn down
+        (corner_x, cy)  -> V into the channel
+        (vx, cy)        -> H along the channel to the descent X
+        (vx, ey)        -> V to the entry Y
+        (ex, ey)        -> H into the port from its own outward side
+
+    This is the bundle's centreline; the lone member sits ``delta`` off it and
+    its fan-mates sit at their own ranks against the same centreline, so
+    :func:`build_concentric_bundle` derives every corner radius from the turn
+    geometry and the loop can neither flip nor pinch.  Each port endpoint bakes
+    the member's normal-projected stagger so the line lands on its station
+    offset there: ``+delta`` at the source lead-in (runs rightward) and at a LEFT
+    entry (runs rightward in), ``-delta`` at a RIGHT entry (runs leftward in).
+    """
+    sx, sy = src.x, src.y
+    ex, ey = entry_port.x, entry_port.y
+    entry_delta = delta if entry_side is PortSide.LEFT else -delta
+    src_off = _get_offset(ctx, edge.source, edge.line_id)
+    tgt_off = _get_offset(ctx, edge.target, edge.line_id)
+    centerline = [
+        (sx, sy + src_off + delta),
+        (corner_x, sy + src_off + delta),
+        (corner_x, channel_y),
+        (descent_x, channel_y),
+        (descent_x, ey + tgt_off + entry_delta),
+        (ex, ey + tgt_off + entry_delta),
+    ]
+    route = route_along(
+        edge,
+        [(edge, edge.line_id, -delta)],
+        centerline,
+        base_radius=ctx.curve_radius,
+        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+    )
+    assert route is not None  # the lone member is always in its own bundle
+    return route
+
+
 def _route_left_entry_wrap(
     edge: Edge, src: Station, tgt: Station, i: int, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -1533,12 +1594,11 @@ def _route_left_entry_wrap(
     :func:`build_concentric_bundle` nests every corner concentrically and the
     R-D-L-D-R loop cannot flip.
     """
-    sx, sy = src.x, src.y
-    tx, ty = tgt.x, tgt.y
+    sy, ty = src.y, tgt.y
     dy = ty - sy
-    vertical = vertical_direction(dy)
-
-    fan, pos_n, delta, corner_x = _wrap_fan_geometry(ctx, edge, src, i, n, vertical)
+    fan, pos_n, delta, corner_x = _wrap_fan_geometry(
+        ctx, edge, src, i, n, vertical_direction(dy)
+    )
 
     # Horizontal channel Y in the inter-row gap.  ``inter_row_channel_y`` clamps
     # the per-line stagger inside the clearance band (a narrow gap must not let
@@ -1548,7 +1608,7 @@ def _route_left_entry_wrap(
     hy -= delta
 
     # V2 descent channel centre, left of the target section.
-    vx = _left_entry_descent_x(ctx, tx, pos_n)
+    vx = _left_entry_descent_x(ctx, tgt.x, pos_n)
     # When this wrap shares a junction fan with a corridor feeder descending
     # the same target column, anchor the descent channel to the column's LEFT
     # edge so the spine and the corridor overlay as one bundle instead of smearing.
@@ -1559,30 +1619,18 @@ def _route_left_entry_wrap(
             if shared_vx is not None:
                 vx = shared_vx
 
-    # Centreline: R-D-L-D-R loop pinned to the source station, right out of the
-    # source, down into the inter-row gap, left past the target column, down to
-    # the entry Y, and into the LEFT port.  Each port endpoint is offset by
-    # ``delta`` so the line lands on its station offset there while sitting off
-    # the channel through the loop.
-    src_off = _get_offset(ctx, edge.source, edge.line_id)
-    tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-    centerline = [
-        (sx, sy + src_off + delta),
-        (corner_x, sy + src_off + delta),
-        (corner_x, hy),
-        (vx, hy),
-        (vx, ty + tgt_off + delta),
-        (tx, ty + tgt_off + delta),
-    ]
-    route = route_along(
+    return _route_entry_wrap(
         edge,
-        [(edge, edge.line_id, -delta)],
-        centerline,
-        base_radius=ctx.curve_radius,
-        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+        src,
+        tgt,
+        ctx,
+        pos_n=pos_n,
+        delta=delta,
+        corner_x=corner_x,
+        channel_y=hy,
+        descent_x=vx,
+        entry_side=PortSide.LEFT,
     )
-    assert route is not None  # the lone member is always in its own bundle
-    return route
 
 
 def _has_bypass_sibling_to_same_entry(
@@ -1912,25 +1960,16 @@ def _route_around_section_below(
     (the LEFT entry port station resolved from the merge junction or
     equal to *tgt* when the edge targets a port directly).
     """
-    sx, sy = src.x, src.y
+    sy = src.y
     ex, ey = entry_port.x, entry_port.y
 
     # The route shares its first corner with any sibling routes from the same
     # junction (junction_fan_info pivots all outgoing edges through one shared
     # corner; merge-branch edges are excluded, so for the merge case the fan is
     # typically absent and the edge's own bundle position is used).
-    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
-    pos_i, pos_n = fan if fan is not None else (i, n)
-    # This line's signed offset within the loop bundle (the L-shape stagger,
-    # whose sign follows the net source->entry direction).  The centreline is
-    # the channel centre; the line sits ``delta`` off it and its siblings sit
-    # at their own ranks against the same centreline, so build_concentric_bundle
-    # nests every corner without a hand-signed radius and the R-D-L-U-R loop
-    # cannot flip.
-    delta = l_shape_stagger(
-        pos_i, pos_n, vertical_direction(ey - sy), ctx.offset_step
+    _fan, pos_n, delta, corner_x = _wrap_fan_geometry(
+        ctx, edge, src, i, n, vertical_direction(ey - sy)
     )
-    fan_mid_x = sx + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
 
     # Bypass Y below all sections in the column range so the route
     # clears every intervening section (cross_row=True).
@@ -1976,8 +2015,6 @@ def _route_around_section_below(
         # target section's left edge.
         vx = _left_entry_descent_x(ctx, section_left, pos_n)
 
-    # First-corner X: lead-in right of source, mirroring _route_left_entry_wrap.
-    corner_x = _v1_corner_x(ctx, src, sx, fan_mid_x)
     # The V1 channel descends from the source row to the bypass bottom.  When
     # it would cut THROUGH a section stacked below the source (one wider than
     # the source, so its box spans the channel), divert the bundle's channel
@@ -1995,27 +2032,19 @@ def _route_around_section_below(
             ctx.graph, corner_x, sy, by, clearance, exclude, bound_left=corner_x
         )
 
-    # Centreline: R-D-L-U-R loop pinned to the source station, down past the
-    # target row's bottom, left of the target column, up to the entry Y, and
-    # into the LEFT port.  Each port endpoint is offset by ``delta`` so the
-    # line lands on its station offset there while sitting off the channel
-    # through the loop.
-    src_off = _get_offset(ctx, edge.source, edge.line_id)
-    tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-    centerline = [
-        (sx, sy + src_off + delta),
-        (corner_x, sy + src_off + delta),
-        (corner_x, by),
-        (vx, by),
-        (vx, ey + tgt_off + delta),
-        (ex, ey + tgt_off + delta),
-    ]
-    return route_along(
+    # R-D-L-U-R loop: down past the target row's bottom (by), left of the target
+    # column (vx), up to the entry Y, and into the LEFT port from below.
+    return _route_entry_wrap(
         edge,
-        [(edge, edge.line_id, -delta)],
-        centerline,
-        base_radius=ctx.curve_radius,
-        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+        src,
+        entry_port,
+        ctx,
+        pos_n=pos_n,
+        delta=delta,
+        corner_x=corner_x,
+        channel_y=by,
+        descent_x=vx,
+        entry_side=PortSide.LEFT,
     )
 
 
@@ -2094,8 +2123,7 @@ def _route_right_entry_wrap(
     corner concentrically so the loop cannot flip.  Same-row sources delegate to
     :func:`_route_right_entry_over_top` (also a centreline build).
     """
-    sx, sy = src.x, src.y
-    tx, ty = tgt.x, tgt.y
+    sy, tx, ty = src.y, tgt.x, tgt.y
     vertical = vertical_direction(ty - sy)
 
     # Detect cross-row case: use bypass-style Y just below the source
@@ -2130,29 +2158,18 @@ def _route_right_entry_wrap(
     # right of the target column.
     vx = _right_entry_descent_x(ctx, tx, pos_n)
 
-    # Centreline: R-D-R-D-L loop pinned to the source.  Each port endpoint
-    # pre-subtracts the member's normal-projected offset so the line lands
-    # exactly on its station offset there: the lead-in runs rightward (+delta
-    # cancels), the entry runs leftward into the right port (-delta).
-    src_off = _get_offset(ctx, edge.source, edge.line_id)
-    tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-    centerline = [
-        (sx, sy + src_off + delta),
-        (corner_x, sy + src_off + delta),
-        (corner_x, hy),
-        (vx, hy),
-        (vx, ty + tgt_off - delta),
-        (tx, ty + tgt_off - delta),
-    ]
-    route = route_along(
+    return _route_entry_wrap(
         edge,
-        [(edge, edge.line_id, -delta)],
-        centerline,
-        base_radius=ctx.curve_radius,
-        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+        src,
+        tgt,
+        ctx,
+        pos_n=pos_n,
+        delta=delta,
+        corner_x=corner_x,
+        channel_y=hy,
+        descent_x=vx,
+        entry_side=PortSide.RIGHT,
     )
-    assert route is not None  # the lone member is always in its own bundle
-    return route
 
 
 def _right_entry_gap_above_target_y(
@@ -2231,11 +2248,11 @@ def _build_right_entry_wrap_route(
     :func:`build_concentric_bundle` nests every corner concentrically so the
     R-D-R-D-L loop cannot flip.
     """
-    sx, sy = src.x, src.y
-    ex, ey = entry_port.x, entry_port.y
-    vertical = vertical_direction(ey - sy)
+    ex = entry_port.x
 
-    _fan, pos_n, delta, corner_x = _wrap_fan_geometry(ctx, edge, src, i, n, vertical)
+    _fan, pos_n, delta, corner_x = _wrap_fan_geometry(
+        ctx, edge, src, i, n, vertical_direction(entry_port.y - src.y)
+    )
 
     # V_down/up channel centre, just RIGHT of the target section's bbox in the
     # gap to the right of the target column.
@@ -2249,31 +2266,20 @@ def _build_right_entry_wrap_route(
     )
     vx = _right_entry_descent_x(ctx, section_right, pos_n)
 
-    # Centreline: R-D-R-D-L loop pinned to the source, right out of the source,
-    # down to the traverse channel, right past the target's right edge, to the
-    # entry Y, and in to the RIGHT port from its outward side.  Each port
-    # endpoint pre-subtracts the member's normal-projected offset so the line
-    # lands exactly on its station offset there: the lead-in runs rightward
-    # (+delta cancels), the entry runs leftward into the right port (-delta).
-    src_off = _get_offset(ctx, edge.source, edge.line_id)
-    tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-    centerline = [
-        (sx, sy + src_off + delta),
-        (corner_x, sy + src_off + delta),
-        (corner_x, channel_y_base),
-        (vx, channel_y_base),
-        (vx, ey + tgt_off - delta),
-        (ex, ey + tgt_off - delta),
-    ]
-    route = route_along(
+    # R-D-R-D-L loop: down to the traverse channel, right past the target's
+    # right edge, then in to the RIGHT port from its own outward side.
+    return _route_entry_wrap(
         edge,
-        [(edge, edge.line_id, -delta)],
-        centerline,
-        base_radius=ctx.curve_radius,
-        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+        src,
+        entry_port,
+        ctx,
+        pos_n=pos_n,
+        delta=delta,
+        corner_x=corner_x,
+        channel_y=channel_y_base,
+        descent_x=vx,
+        entry_side=PortSide.RIGHT,
     )
-    assert route is not None  # the lone member is always in its own bundle
-    return route
 
 
 def _route_right_entry_via_gap_above(
