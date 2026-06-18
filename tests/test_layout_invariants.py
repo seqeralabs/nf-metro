@@ -1407,7 +1407,9 @@ def test_peeloff_riser_crossing_free_extra_line_consumer():
     declaration order disagree, so the riser must be reordered to avoid
     braiding.  The bundle's top-to-bottom order at the port entry must also
     carry through into the consumer section's internal run, so the crossing
-    does not re-form just inside the boundary.
+    does not re-form just inside the boundary.  The consumer section carries
+    an extra l5 branch that is not part of the converging bundle and must not
+    cause the internal propagation to be skipped.
     """
     graph = _layout("topologies/peeloff_extra_line_consumer.mmd", validate=True)
     offsets = compute_station_offsets(graph)
