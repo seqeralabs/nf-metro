@@ -224,7 +224,10 @@ def _fan_bundle(
 
         The line's signed X displacement from the centreline at the corner,
         projected onto the turn (``turn_out_x - turn_in_x``) so an outside-of-turn
-        line is positive and an inside one negative.
+        line is positive and an inside one negative.  This is the ``-dx * ux``
+        projection :func:`~nf_metro.layout.routing.corners.concentric_corner_radius`
+        feeds to ``reference_anchored_radius``; here it is taken raw so the
+        per-corner anchor can be subtracted before sizing.
         """
         vertical_dx = offs[vi - 1] * normals[vi - 1][0] + offs[vi] * normals[vi][0]
         return -vertical_dx * (legs[vi][0] - legs[vi - 1][0])

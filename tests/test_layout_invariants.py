@@ -1450,12 +1450,12 @@ def test_build_concentric_bundle_anchors_innermost_at_base():
     """The bundle builder anchors every corner on the innermost-of-turn line.
 
     A fan turning an L-shape must keep the line deepest inside each bend at the
-    base radius and grow the rest outward, so no arc falls below the floor.  The
-    mean-anchored predecessor pinned the bundle *mean* at the base, letting an
-    inside-of-turn line drop to ``base - half_width`` (a sub-floor pinch on a
-    deep fan).  Pinned directly on :func:`build_concentric_bundle`: with three
-    lines one ``OFFSET_STEP`` apart, every corner radius is ``>= base`` and the
-    smallest at each corner equals ``base``.
+    base radius and grow the rest outward, so no arc falls below the floor.
+    Anchoring on the bundle *mean* instead would drop an inside-of-turn line to
+    ``base - half_width`` (a sub-floor pinch on a deep fan).  Pinned directly on
+    :func:`build_concentric_bundle`: with three lines one ``OFFSET_STEP`` apart,
+    every corner radius is ``>= base`` and the smallest at each corner equals
+    ``base``.
     """
     from nf_metro.layout.constants import OFFSET_STEP
     from nf_metro.layout.routing.bundle import build_concentric_bundle
@@ -1491,10 +1491,10 @@ def test_build_concentric_bundle_anchors_innermost_at_base():
 def test_inter_section_bundle_corners_anchored_at_floor(fixture):
     """A co-travelling inter-section bundle keeps every corner at/above the floor.
 
-    The around-below loop fans a two-line bundle through four corners.  The
-    mean-anchored builder dropped the inside-of-turn line to 8.5px (below the
-    10px floor); anchored on the innermost line, every inter-section corner
-    radius is ``>= CURVE_RADIUS``.
+    The around-below loop fans a two-line bundle through four corners.  Anchored
+    on the innermost line, every inter-section corner radius is
+    ``>= CURVE_RADIUS``; anchoring on the bundle mean would instead drop the
+    inside-of-turn line to 8.5px, below the 10px floor.
     """
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)

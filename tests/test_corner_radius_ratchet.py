@@ -414,9 +414,7 @@ def _base_radius_arg(call: ast.Call) -> ast.expr | None:
     for kw in call.keywords:
         if kw.arg == "base_radius":
             return kw.value
-    func = call.func
-    name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-    pos = _BASE_RADIUS_POS.get(name)
+    pos = _BASE_RADIUS_POS.get(_called_name(call) or "")
     if pos is not None and len(call.args) > pos:
         return call.args[pos]
     return None
@@ -437,12 +435,7 @@ def test_handler_bundle_base_radius_is_curve_radius_only() -> None:
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            func = node.func
-            name = (
-                func.attr
-                if isinstance(func, ast.Attribute)
-                else getattr(func, "id", "")
-            )
+            name = _called_name(node)
             if name not in _BUILDER_ENTRYPOINTS:
                 continue
             base = _base_radius_arg(node)

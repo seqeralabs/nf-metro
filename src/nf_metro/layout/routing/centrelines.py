@@ -15,6 +15,8 @@ out the centreline from the handler's named geometry, and returns the single
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.routing.bundle import (
     build_concentric_bundle,
@@ -97,7 +99,7 @@ def route_along(
     *,
     base_radius: float,
     min_radius: float | None = None,
-    bundle_offsets: list[float] | None = None,
+    bundle_offsets: Sequence[float] | None = None,
     normalize_exempt: bool = True,
 ) -> RoutedPath | None:
     """Fan *members* along *centerline* and return the route for *edge*.
