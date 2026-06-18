@@ -275,20 +275,8 @@
     "note": "The L545 filter only skips bypass siblings; a non-bypass sibling is in an adjacent column or a gap with no same-row intervening section, so its horizontal at ep.y never crosses another section. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if _h_segment_crosses_other_section(graph, sx, tx, ty, exclude):::#1": {
-    "note": "Reachable only via a defective render (route skirts/crosses section boundary); see #724.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if abs(lx0 - final_x) <= ctx.curve_radius:::#1": {
     "note": "Trunk-collapse guard for the TOP-entry staircase: when the lead-in channel coincides with the landing X the trunk leg would be zero-length, so the route drops straight and jogs into the port. The render path (offsets applied) routes a directly-below source via the perpendicular-exit / drop-pair handlers before reaching the staircase, so the corpus never drives it into this collapse.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if abs(dx) < COORD_TOLERANCE:::#1": {
-    "note": "Reachable only via a defective render (route skirts/crosses section boundary); see #724.",
-    "status": "needs-review"
-  },
-  "inter_section_handlers.py::if abs(ep.y - sy) < ctx.curve_radius:::#1": {
-    "note": "The merge entry-port Y tracks the source/junction Y, so a sub-curve_radius gap between exit and entry never arises (the same-Y shortcut at L120 already handles dy<curve_radius); real topologies give a larger gap. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
   "inter_section_handlers.py::if abs(tx - sx) <= COORD_TOLERANCE:::#1": {
@@ -309,10 +297,6 @@
   },
   "inter_section_handlers.py::if entry_port is None:::#2": {
     "note": "Every caller of _corridor_is_viable passes a non-None entry_port.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if ep:::#1": {
-    "note": "Single-line null guard in _route_inter_section: ep_id comes from ctx.merge.entry_port_for so the entry-port station always exists; ep is always truthy and the skip arm (L350) never fires (0/128). The earlier 'multiline phantom' note was inaccurate -- this is a recorded single-line gate whose false arm is simply never taken. Defensive null guard. Reclassified defensive (#762).",
     "status": "defensive"
   },
   "inter_section_handlers.py::if ep_port and ep_port.side == PortSide.LEFT:::#1": {
@@ -349,10 +333,6 @@
   },
   "inter_section_handlers.py::if gap_right <= gap_left:::#1": {
     "note": "The column-gap enforcer keeps inter-column gaps positive, so gap_right>gap_left always holds at the target row.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if horizontal is Direction.L:::#1": {
-    "note": "Near-vertical junction channel push: the junction always sits right of a same-column LEFT entry, so horizontal is always Direction.L; the Direction.R arm never fires. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
   "inter_section_handlers.py::if horizontal is Direction.R:::#1": {
@@ -993,6 +973,14 @@
   },
   "bundle.py::if not 0 <= transition_leg <= n_legs:::#1": {
     "note": "Defensive guard: build_tapered_bundle rejects a transition_leg outside [0, n_legs]. Handlers pass a literal 1 against a 3- or 4-vertex centreline, so the raise arm is never taken.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::if abs(ep.y - f.sy) < ctx.curve_radius:::#1": {
+    "note": "Merge entry-port Y tracks the source/junction Y, so a sub-curve_radius exit->entry gap never arises (the same-Y rule already handles dy<tol); corpus instrumentation across the fixtures (#762) confirms the arm is never taken. Defensive.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::if f.horizontal is Direction.L:::#1": {
+    "note": "Near-vertical same-column junction channel push: the junction always sits right of its same-column LEFT entry, so horizontal is always Direction.L; the Direction.R arm never fires (#762). Defensive.",
     "status": "defensive"
   }
 }

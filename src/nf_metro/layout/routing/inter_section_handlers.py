@@ -1,8 +1,17 @@
 """Inter-section edge routing: bypass, entry wraps, around-section,
 inter-row corridors, stepped descent, and L-shape handlers.
+
+``_route_inter_section`` selects the shape via a declarative table
+(``_INTER_SECTION_RULES``): one :class:`_InterFacts` snapshot of the edge's
+geometry and topology is matched against an ordered list of named rules, and
+the first whose predicate holds owns the route.  The rule order is the
+combinatorial space documented in ``docs/dev/inter_section_dispatch.md``.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from nf_metro.layout.constants import (
     BYPASS_CLEARANCE,
@@ -78,46 +87,146 @@ from nf_metro.parser.model import (
 )
 
 
-def _route_inter_section(
-    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
-) -> RoutedPath | None:
-    """Route edges between ports/junctions using L-shapes (no diagonals)."""
-    graph = ctx.graph
-    is_inter = (src.is_port or edge.source in ctx.junction_ids) and (
-        tgt.is_port or edge.target in ctx.junction_ids
-    )
-    if not is_inter:
+@dataclass(frozen=True)
+class _InterFacts:
+    """Geometry and topology of one inter-section edge, computed once.
+
+    The shared snapshot every dispatch rule reads.  Coordinates and grid
+    columns/rows are resolved up front; the booleans the rules key on are
+    derived properties so each rule predicate stays a one-line read.
+    """
+
+    edge: Edge
+    src: Station
+    tgt: Station
+    ctx: _RoutingCtx
+    sx: float
+    sy: float
+    tx: float
+    ty: float
+    i: int
+    n: int
+    src_port: Port | None
+    tgt_port: Port | None
+    src_col: int | None
+    src_row: int | None
+    tgt_col: int | None
+    tgt_row: int | None
+    needs_bypass: bool
+    merge_ep: Station | None
+
+    @property
+    def graph(self) -> MetroGraph:
+        return self.ctx.graph
+
+    @property
+    def dx(self) -> float:
+        return self.tx - self.sx
+
+    @property
+    def dy(self) -> float:
+        return self.ty - self.sy
+
+    @property
+    def horizontal(self) -> Direction:
+        return horizontal_direction(self.dx)
+
+    @property
+    def same_y(self) -> bool:
+        return abs(self.dy) < COORD_TOLERANCE_FINE
+
+    @property
+    def same_x(self) -> bool:
+        return abs(self.dx) < COORD_TOLERANCE
+
+    @property
+    def cross_row(self) -> bool:
+        return (
+            self.src_row is not None
+            and self.tgt_row is not None
+            and self.src_row != self.tgt_row
+        )
+
+    @property
+    def same_col(self) -> bool:
+        return (
+            self.src_col is not None
+            and self.tgt_col is not None
+            and self.src_col == self.tgt_col
+        )
+
+    @property
+    def entry_side(self) -> PortSide | None:
+        """The target entry port's side, or ``None`` when the target is not one."""
+        if self.tgt_port is not None and self.tgt_port.is_entry:
+            return self.tgt_port.side
         return None
 
-    sx, sy = src.x, src.y
-    tx, ty = tgt.x, tgt.y
-    dx = tx - sx
-    dy = ty - sy
-    horizontal = horizontal_direction(dx)
+    @property
+    def is_perp_exit(self) -> bool:
+        """Source is a TOP/BOTTOM exit on a horizontal-flow section."""
+        return (
+            self.src_port is not None
+            and not self.src_port.is_entry
+            and self.src_port.side in (PortSide.TOP, PortSide.BOTTOM)
+            and self.src.section_id not in self.ctx.tb_sections
+        )
 
-    i, n = ctx.bundle_info.get((edge.source, edge.target, edge.line_id), (0, 1))
+    @property
+    def is_tb_bottom_exit(self) -> bool:
+        """Source is a BOTTOM exit on a TB/BT section (with station offsets)."""
+        return (
+            self.src_port is not None
+            and not self.src_port.is_entry
+            and self.src_port.side == PortSide.BOTTOM
+            and self.src.section_id in self.ctx.tb_sections
+            and bool(self.ctx.station_offsets)
+        )
 
-    # Check for TB BOTTOM exit
-    src_port = graph.ports.get(edge.source)
-    src_is_tb_bottom = (
-        src_port is not None
-        and not src_port.is_entry
-        and src_port.side == PortSide.BOTTOM
-        and src.section_id in ctx.tb_sections
-    )
+    @property
+    def straight_ploughs_right_entry(self) -> bool:
+        """A same-Y run to a RIGHT entry would plough through the box interior."""
+        return self.entry_side is PortSide.RIGHT and self.sx < self.tx - COORD_TOLERANCE
 
-    # Resolve section columns and rows for bypass detection
+    @property
+    def is_near_vertical_same_col_junction(self) -> bool:
+        """Junction dropping almost straight into a same-column entry."""
+        return (
+            self.edge.source in self.ctx.junction_ids
+            and abs(self.dx) <= JUNCTION_MARGIN + COORD_TOLERANCE
+            and abs(self.dy) > abs(self.dx) * 3
+            and self.same_col
+        )
+
+    @property
+    def is_serpentine_left_exit_left_entry(self) -> bool:
+        """LEFT exit dropping into a LEFT entry stacked in the same column."""
+        return (
+            self.src_port is not None
+            and not self.src_port.is_entry
+            and self.src_port.side == PortSide.LEFT
+            and self.entry_side is PortSide.LEFT
+            and self.same_col
+            and self.cross_row
+        )
+
+
+def _build_inter_facts(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> _InterFacts:
+    graph = ctx.graph
     src_col, src_row = _resolve_section_colrow(graph, src)
     tgt_col, tgt_row = _resolve_section_colrow(graph, tgt)
+    # A multi-column hop needs a bypass when an intervening section blocks the
+    # source row, or - for a cross-row L-shape, whose horizontal leg runs at the
+    # target entry Y - the TARGET row, plowed through even when the source row
+    # is clear.
     needs_bypass = (
         src_col is not None
         and tgt_col is not None
         and abs(tgt_col - src_col) > 1
         and (
             _has_intervening_sections(graph, src_col, tgt_col, src_row)
-            # A cross-row L-shape runs its horizontal leg at the target
-            # entry Y, which lands in the TARGET row; intervening sections
-            # there are plowed through even when the source row is clear.
             or (
                 src_row is not None
                 and tgt_row is not None
@@ -126,261 +235,266 @@ def _route_inter_section(
             )
         )
     )
-
-    tgt_port = graph.ports.get(edge.target)
-
-    # A perpendicular exit leaves its section vertically; route it before the
-    # same-Y shortcut, since an exit and entry both on their sections' top (or
-    # bottom) edge share a Y but a straight run between them would graze both.
-    perp = _route_perp_exit(edge, src, tgt, src_col, tgt_col, ctx)
-    if perp is not None:
-        return perp
-
-    # A RIGHT entry port whose source is to the LEFT sits on the target's
-    # far edge; a same-Y straight run reaches it only by ploughing through
-    # the whole box interior and the intra-section drop then doubles back
-    # left over that same run.  Fall through to the wrap handler, which
-    # approaches the port from its own outward (right) side instead.
-    straight_ploughs_right_entry = (
-        tgt_port is not None
-        and tgt_port.is_entry
-        and tgt_port.side == PortSide.RIGHT
-        and sx < tx - COORD_TOLERANCE
-    )
-    if (
-        abs(dy) < COORD_TOLERANCE_FINE
-        and not needs_bypass
-        and not straight_ploughs_right_entry
-    ):
-        # Same Y: straight horizontal
-        return route_straight(
-            edge, ctx, (sx, sy), (tx, ty), base_radius=ctx.curve_radius
-        )
-
-    if src_is_tb_bottom and ctx.station_offsets:
-        return _route_tb_bottom_exit(edge, src, tgt, ctx)
-
-    # TOP entry port: L-shape so the line gets a proper curve into the
-    # section.  Must be checked before the same-X shortcut, which would
-    # produce a straight vertical drop with no horizontal lead-in.
-    if tgt_port and tgt_port.is_entry and tgt_port.side == PortSide.TOP:
-        return _route_top_entry_l_shape(edge, src, tgt, n, ctx)
-
-    if abs(dx) < COORD_TOLERANCE:
-        # Same X: straight vertical drop
-        return route_straight(
-            edge, ctx, (sx, sy), (tx, ty), base_radius=ctx.curve_radius
-        )
-
-    if edge.source in ctx.bottom_exit_junctions:
-        return _route_bottom_exit_junction(edge, src, tgt, i, n, ctx)
-
-    if needs_bypass:
-        assert src_col is not None and tgt_col is not None
-        # Merge dispatch: trunk gets full bypass to entry port,
-        # branches get truncated descent to trunk level.
-        if edge.target in ctx.merge.trunk_source:
-            if ctx.merge.trunk_source[edge.target] == edge.source:
-                return _route_merge_trunk(
-                    edge, src, tgt, i, src_col, tgt_col, ctx, src_row
-                )
-            return _route_merge_branch(edge, src, ctx, src_col)
-        # A feeder into a LEFT entry one row directly below descends into that
-        # row before its horizontal run, so intervening sections in the SOURCE
-        # row are not obstacles. When the L-shape's horizontal at the entry Y
-        # is clear of other sections, drop straight in instead of looping to
-        # the canvas bottom (_route_bypass). Restricted to adjacent rows: a
-        # multi-row descent's vertical leg could pierce an intervening row.
-        if (
-            tgt_port is not None
-            and tgt_port.is_entry
-            and tgt_port.side == PortSide.LEFT
-            and src_row is not None
-            and tgt_row is not None
-            and tgt_row == src_row + 1
-        ):
-            exclude = {
-                sid for sid in (src.section_id, tgt.section_id) if sid is not None
-            }
-            if not _h_segment_crosses_other_section(graph, sx, tx, ty, exclude):
-                return _route_l_shape(edge, src, tgt, i, n, ctx)
-        # A bypass into a RIGHT entry port whose source is to the LEFT
-        # would rise in the inter-column gap LEFT of the target, then run
-        # its final horizontal RIGHTWARD across the section interior to
-        # reach the right-edge port - entering the far side and doubling
-        # back.  Wrap around BELOW the target and rise on its RIGHT side
-        # so the approach arrives from the port's own outward side.
-        if (
-            tgt_port is not None
-            and tgt_port.is_entry
-            and tgt_port.side == PortSide.RIGHT
-            and sx < tx - COORD_TOLERANCE
-        ):
-            # When the source sits in a row ABOVE the target, going UNDER the
-            # whole target row would run the long horizontal counter to the
-            # target row's flow (an artefactual counter-flow run).  The clear
-            # inter-row gap between the source row and the target row is the
-            # natural, with-the-downward-transition channel: run the rightward
-            # H there, then drop straight down the RIGHT side into the port.
-            # Falls back to the around-below loop when that gap horizontal is
-            # not clear of intervening section interiors.
-            if (
-                src_row is not None
-                and tgt_row is not None
-                and src_row < tgt_row
-                and _right_entry_gap_above_is_clear(graph, src, tgt, tgt, src_row)
-            ):
-                return _route_right_entry_via_gap_above(
-                    edge, src, tgt, tgt, i, n, ctx, src_row
-                )
-            return _route_right_entry_around_below(edge, src, tgt, tgt, i, n, ctx)
-        return _route_bypass(edge, src, tgt, i, src_col, tgt_col, ctx, src_row)
-
-    # Near-vertical: junction to same-column entry with tiny horizontal
-    # offset (just the junction margin).  The standard L-shape would
-    # place the vertical channel on the wrong side (toward the target,
-    # which is back inside the section).  Instead, route the channel
-    # further into the inter-column gap (away from the target) so the
-    # line continues in the junction's natural direction before dropping.
-    # Only fires for true same-column cases: both source and target
-    # belong to the same grid column (so the "wrong side" intrudes into
-    # their shared column).  When source and target sit in different
-    # columns the standard L-shape naturally drops in the inter-column
-    # gap and going "away from target" would route backward through a
-    # neighbouring section.
-    if (
-        edge.source in ctx.junction_ids
-        and abs(dx) <= JUNCTION_MARGIN + COORD_TOLERANCE
-        and abs(dy) > abs(dx) * 3
-        and src_col is not None
-        and tgt_col is not None
-        and src_col == tgt_col
-    ):
-        # Push channel away from target into the inter-column gap.
-        if horizontal is Direction.L:
-            channel_x = sx + ctx.curve_radius + ctx.offset_step
-        else:
-            channel_x = sx - ctx.curve_radius - ctx.offset_step
-        return route_hvh_tapered(
-            ctx, edge, src, tgt, channel_x, base_radius=ctx.curve_radius
-        )
-
-    # RIGHT entry port with source to the LEFT: wrap the vertical
-    # channel around the right side of the target section so the route
-    # goes over the top and in from the right, rather than cutting
-    # horizontally through the section interior.
-    if (
-        tgt_port
-        and tgt_port.is_entry
-        and tgt_port.side == PortSide.RIGHT
-        and horizontal is Direction.R
-    ):
-        return _route_right_entry_wrap(edge, src, tgt, i, n, ctx)
-
-    # LEFT entry port with source to the RIGHT: mirror of the above.  The
-    # standard L-shape would cut through the target section's interior
-    # at ty to reach a left-side entry port (the long horizontal lands
-    # inside the bbox).  Wrap leftward through the inter-row gap then
-    # drop into the entry from the left.  Restricted to cross-row cases
-    # where the standard L-shape would actually intrude (same-row
-    # neighbours route fine with a normal L).
-    if (
-        tgt_port
-        and tgt_port.is_entry
-        and tgt_port.side == PortSide.LEFT
-        and dx < 0
-        and src_row is not None
-        and tgt_row is not None
-        and src_row != tgt_row
-    ):
-        # When the inter-row channel _route_left_entry_wrap would use
-        # lands inside an intervening section (e.g. a multi-row jump
-        # past a tall middle row), route AROUND BELOW the target
-        # section instead.  Otherwise use the standard wrap.  The
-        # source section is excluded - the H lead-in just outside the
-        # source's right edge is fine even if its Y falls within the
-        # source's row.
-        wrap_hy = inter_row_channel_y(graph, src, tgt, sy, ty, dy, ctx.curve_radius)
-        exclude = {src.section_id} if src.section_id else set[str]()
-        if _h_segment_crosses_other_section(graph, sx, tx, wrap_hy, exclude):
-            if _corridor_is_viable(ctx, src, tgt):
-                return _route_inter_row_gap_corridor(edge, src, tgt, tgt, i, n, ctx)
-            return _route_around_section_below(edge, src, tgt, tgt, i, n, ctx)
-        return _route_left_entry_wrap(edge, src, tgt, i, n, ctx)
-
-    # Serpentine LEFT exit -> LEFT entry stacked in the same column:
-    # an RL section's left exit dropping to the LR section directly below
-    # whose left entry sits a few px inward.  The standard L-shape places
-    # its vertical channel at sx + radius, which lands inside the source
-    # bbox.  Drop the channel on the LEFT of the column instead so the
-    # connector stays outside both section boxes.
-    if (
-        src_port is not None
-        and not src_port.is_entry
-        and src_port.side == PortSide.LEFT
-        and tgt_port is not None
-        and tgt_port.is_entry
-        and tgt_port.side == PortSide.LEFT
-        and src_col is not None
-        and tgt_col is not None
-        and src_col == tgt_col
-        and src_row is not None
-        and tgt_row != src_row
-    ):
-        return _route_left_exit_left_entry_drop(edge, src, tgt, ctx)
-
-    # Non-bypass edges to merge junctions: route to entry port.
-    # When dy is tiny, use a straight line to avoid cramped curves.
     ep_id = ctx.merge.entry_port_for.get(edge.target)
-    if ep_id:
-        ep = graph.stations.get(ep_id)
-        if ep:
-            if abs(ep.y - sy) < ctx.curve_radius:
-                return RoutedPath(
-                    edge=edge,
-                    line_id=edge.line_id,
-                    points=[(sx, sy), (ep.x, ep.y)],
-                    is_inter_section=True,
-                )
-            # If the standard L-shape's horizontal segment at the entry
-            # port's Y would cross a section bbox the route doesn't
-            # enter, route AROUND BELOW the target section instead.
-            # The source section is excluded - its right-edge lead-in
-            # is safe even when its bbox spans the route's Y range.
-            ep_port = graph.ports.get(ep_id)
-            if ep_port and ep_port.side == PortSide.LEFT:
-                exclude = {src.section_id} if src.section_id else set[str]()
-                if _h_segment_crosses_other_section(graph, sx, ep.x, ep.y, exclude):
-                    # When a clear inter-row / inter-column corridor exists for
-                    # this downward cross-row feeder, descend it instead of
-                    # looping below the canvas.
-                    if _corridor_is_viable(ctx, src, ep):
-                        return _route_inter_row_gap_corridor(
-                            edge, src, tgt, ep, i, n, ctx
-                        )
-                    return _route_around_section_below(edge, src, tgt, ep, i, n, ctx)
-            return _route_l_shape(edge, src, ep, i, n, ctx)
+    return _InterFacts(
+        edge=edge,
+        src=src,
+        tgt=tgt,
+        ctx=ctx,
+        sx=src.x,
+        sy=src.y,
+        tx=tgt.x,
+        ty=tgt.y,
+        i=ctx.bundle_info.get((edge.source, edge.target, edge.line_id), (0, 1))[0],
+        n=ctx.bundle_info.get((edge.source, edge.target, edge.line_id), (0, 1))[1],
+        src_port=graph.ports.get(edge.source),
+        tgt_port=graph.ports.get(edge.target),
+        src_col=src_col,
+        src_row=src_row,
+        tgt_col=tgt_col,
+        tgt_row=tgt_row,
+        needs_bypass=needs_bypass,
+        merge_ep=graph.stations.get(ep_id) if ep_id else None,
+    )
 
-    # Standard L-shape: when its horizontal segment at the target Y would
-    # plough through an intervening same-row section to reach a RIGHT entry
-    # port from a higher row, deflect the whole route through the bypass
-    # (descend right of the obstacle, run below the row, rise into the port).
+
+def _route_straight_h(f: _InterFacts) -> RoutedPath | None:
+    ctx = f.ctx
+    return route_straight(
+        f.edge, ctx, (f.sx, f.sy), (f.tx, f.ty), base_radius=ctx.curve_radius
+    )
+
+
+def _route_near_vertical_junction(f: _InterFacts) -> RoutedPath | None:
+    """Drop a same-column junction into its entry via the inter-column gap.
+
+    A standard L-shape would place the vertical channel toward the target (back
+    inside the shared column); push it the other way so the line keeps the
+    junction's natural direction before dropping.
+    """
+    ctx = f.ctx
+    if f.horizontal is Direction.L:
+        channel_x = f.sx + ctx.curve_radius + ctx.offset_step
+    else:
+        channel_x = f.sx - ctx.curve_radius - ctx.offset_step
+    return route_hvh_tapered(
+        ctx, f.edge, f.src, f.tgt, channel_x, base_radius=ctx.curve_radius
+    )
+
+
+def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
+    """Multi-column hop past intervening sections (``needs_bypass``).
+
+    A merge target splits into trunk (full bypass to the entry port) and branch
+    (truncated descent to trunk level).  Otherwise: a LEFT entry one row
+    directly below drops straight in when the entry-Y horizontal is clear (no
+    canvas-bottom loop); a RIGHT entry fed from the left wraps around its
+    outward side (via the inter-row gap above when clear, else the around-below
+    loop); everything else takes the U-shaped bypass.
+    """
+    edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
+    assert f.src_col is not None and f.tgt_col is not None
+    if edge.target in ctx.merge.trunk_source:
+        if ctx.merge.trunk_source[edge.target] == edge.source:
+            return _route_merge_trunk(
+                edge, src, tgt, f.i, f.src_col, f.tgt_col, ctx, f.src_row
+            )
+        return _route_merge_branch(edge, src, ctx, f.src_col)
     if (
-        tgt_port is not None
-        and tgt_port.is_entry
-        and tgt_port.side == PortSide.RIGHT
-        and src_row is not None
-        and tgt_row is not None
-        and tgt_row > src_row
-        and src_col is not None
-        and tgt_col is not None
+        f.entry_side is PortSide.LEFT
+        and f.src_row is not None
+        and f.tgt_row is not None
+        and f.tgt_row == f.src_row + 1
     ):
         exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
-        if _h_segment_crosses_other_section(graph, sx, tx, ty, exclude):
-            return _route_bypass(edge, src, tgt, i, src_col, tgt_col, ctx, src_row)
+        if not _h_segment_crosses_other_section(graph, f.sx, f.tx, f.ty, exclude):
+            return _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
+    if f.straight_ploughs_right_entry:
+        if (
+            f.src_row is not None
+            and f.tgt_row is not None
+            and f.src_row < f.tgt_row
+            and _right_entry_gap_above_is_clear(graph, src, tgt, tgt, f.src_row)
+        ):
+            return _route_right_entry_via_gap_above(
+                edge, src, tgt, tgt, f.i, f.n, ctx, f.src_row
+            )
+        return _route_right_entry_around_below(edge, src, tgt, tgt, f.i, f.n, ctx)
+    return _route_bypass(edge, src, tgt, f.i, f.src_col, f.tgt_col, ctx, f.src_row)
 
-    # Standard L-shape
-    return _route_l_shape(edge, src, tgt, i, n, ctx)
+
+def _route_left_entry_family(f: _InterFacts) -> RoutedPath | None:
+    """Cross-row feed into a LEFT entry from a source on its right.
+
+    A standard L-shape would cut through the target interior to reach the
+    left-side port.  Wrap leftward through the inter-row gap; when that gap
+    horizontal lands inside an intervening section, descend the clear corridor
+    if one exists, else loop around below the target.
+    """
+    edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
+    wrap_hy = inter_row_channel_y(graph, src, tgt, f.sy, f.ty, f.dy, ctx.curve_radius)
+    exclude = {src.section_id} if src.section_id else set[str]()
+    if _h_segment_crosses_other_section(graph, f.sx, f.tx, wrap_hy, exclude):
+        if _corridor_is_viable(ctx, src, tgt):
+            return _route_inter_row_gap_corridor(edge, src, tgt, tgt, f.i, f.n, ctx)
+        return _route_around_section_below(edge, src, tgt, tgt, f.i, f.n, ctx)
+    return _route_left_entry_wrap(edge, src, tgt, f.i, f.n, ctx)
+
+
+def _route_merge_entry_family(f: _InterFacts) -> RoutedPath | None:
+    """Non-bypass feed into a merge junction, routed to its entry port.
+
+    A near-collinear feed connects straight to avoid a cramped curve.  A LEFT
+    entry whose L-shape horizontal would cross a foreign section descends the
+    clear corridor if one exists, else loops around below; otherwise a standard
+    L-shape into the entry port.
+    """
+    edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
+    ep = f.merge_ep
+    assert ep is not None
+    if abs(ep.y - f.sy) < ctx.curve_radius:
+        return RoutedPath(
+            edge=edge,
+            line_id=edge.line_id,
+            points=[(f.sx, f.sy), (ep.x, ep.y)],
+            is_inter_section=True,
+        )
+    ep_port = graph.ports.get(ep.id)
+    if ep_port and ep_port.side == PortSide.LEFT:
+        exclude = {src.section_id} if src.section_id else set[str]()
+        if _h_segment_crosses_other_section(graph, f.sx, ep.x, ep.y, exclude):
+            if _corridor_is_viable(ctx, src, ep):
+                return _route_inter_row_gap_corridor(edge, src, tgt, ep, f.i, f.n, ctx)
+            return _route_around_section_below(edge, src, tgt, ep, f.i, f.n, ctx)
+    return _route_l_shape(edge, src, ep, f.i, f.n, ctx)
+
+
+def _right_entry_plough_needs_bypass(f: _InterFacts) -> bool:
+    """A same-row-section L-shape to a RIGHT entry from above would plough through."""
+    if not (
+        f.entry_side is PortSide.RIGHT
+        and f.src_row is not None
+        and f.tgt_row is not None
+        and f.tgt_row > f.src_row
+        and f.src_col is not None
+        and f.tgt_col is not None
+    ):
+        return False
+    exclude = {sid for sid in (f.src.section_id, f.tgt.section_id) if sid is not None}
+    return _h_segment_crosses_other_section(f.graph, f.sx, f.tx, f.ty, exclude)
+
+
+@dataclass(frozen=True)
+class _Rule:
+    """One row of the dispatch table: a named predicate and its route builder."""
+
+    name: str
+    when: Callable[[_InterFacts], bool]
+    route: Callable[[_InterFacts], RoutedPath | None]
+
+
+# Inter-section dispatch table.  The first rule whose predicate holds owns the
+# route; order is significant (earlier rules shadow later ones).  The
+# combinatorial space (relative position x exit side x entry side) and why each
+# rule sits where it does are documented in
+# docs/dev/inter_section_dispatch.md.
+_INTER_SECTION_RULES: list[_Rule] = [
+    # A perpendicular (TOP/BOTTOM) exit leaves vertically: route it before the
+    # same-Y shortcut, which would graze both boxes when exit and entry share an
+    # edge Y.
+    _Rule(
+        "perp-exit",
+        lambda f: f.is_perp_exit,
+        lambda f: _route_perp_exit(f.edge, f.src, f.tgt, f.src_col, f.tgt_col, f.ctx),
+    ),
+    # Same Y, no obstacle, not a right-entry plough: a straight horizontal run.
+    _Rule(
+        "same-Y straight",
+        lambda f: f.same_y
+        and not f.needs_bypass
+        and not f.straight_ploughs_right_entry,
+        _route_straight_h,
+    ),
+    _Rule(
+        "TB bottom exit",
+        lambda f: f.is_tb_bottom_exit,
+        lambda f: _route_tb_bottom_exit(f.edge, f.src, f.tgt, f.ctx),
+    ),
+    # TOP entry needs an L-shape lead-in; checked before the same-X shortcut,
+    # which would drop straight in with no horizontal approach.
+    _Rule(
+        "TOP entry L-shape",
+        lambda f: f.entry_side is PortSide.TOP,
+        lambda f: _route_top_entry_l_shape(f.edge, f.src, f.tgt, f.n, f.ctx),
+    ),
+    _Rule("same-X vertical drop", lambda f: f.same_x, _route_straight_h),
+    _Rule(
+        "bottom-exit junction",
+        lambda f: f.edge.source in f.ctx.bottom_exit_junctions,
+        lambda f: _route_bottom_exit_junction(f.edge, f.src, f.tgt, f.i, f.n, f.ctx),
+    ),
+    _Rule("bypass family", lambda f: f.needs_bypass, _route_bypass_family),
+    _Rule(
+        "near-vertical same-col junction",
+        lambda f: f.is_near_vertical_same_col_junction,
+        _route_near_vertical_junction,
+    ),
+    # RIGHT entry fed from the left: wrap around the right side rather than cut
+    # through the interior.
+    _Rule(
+        "RIGHT entry wrap",
+        lambda f: f.entry_side is PortSide.RIGHT and f.horizontal is Direction.R,
+        lambda f: _route_right_entry_wrap(f.edge, f.src, f.tgt, f.i, f.n, f.ctx),
+    ),
+    _Rule(
+        "LEFT entry wrap family",
+        lambda f: f.entry_side is PortSide.LEFT and f.dx < 0 and f.cross_row,
+        _route_left_entry_family,
+    ),
+    _Rule(
+        "serpentine LEFT exit -> LEFT entry",
+        lambda f: f.is_serpentine_left_exit_left_entry,
+        lambda f: _route_left_exit_left_entry_drop(f.edge, f.src, f.tgt, f.ctx),
+    ),
+    _Rule(
+        "merge entry family",
+        lambda f: f.merge_ep is not None,
+        _route_merge_entry_family,
+    ),
+    # A higher-row L-shape to a RIGHT entry that would plough an intervening
+    # same-row section deflects through the bypass instead.
+    _Rule(
+        "RIGHT entry plough -> bypass",
+        _right_entry_plough_needs_bypass,
+        lambda f: _route_bypass(
+            f.edge, f.src, f.tgt, f.i, f.src_col, f.tgt_col, f.ctx, f.src_row
+        ),
+    ),
+]
+
+
+def _route_inter_section(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> RoutedPath | None:
+    """Route an edge between ports/junctions via the dispatch table.
+
+    Returns ``None`` when the edge is not inter-section (both endpoints must be
+    a port or junction).  Otherwise the first rule in ``_INTER_SECTION_RULES``
+    whose predicate holds builds the route; the standard L-shape is the
+    fall-through when no rule matches.
+    """
+    is_inter = (src.is_port or edge.source in ctx.junction_ids) and (
+        tgt.is_port or edge.target in ctx.junction_ids
+    )
+    if not is_inter:
+        return None
+
+    f = _build_inter_facts(edge, src, tgt, ctx)
+    for rule in _INTER_SECTION_RULES:
+        if rule.when(f):
+            return rule.route(f)
+    # Standard L-shape: the default when no rule above claims the edge.
+    return _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
 
 
 def _route_tb_bottom_exit(
