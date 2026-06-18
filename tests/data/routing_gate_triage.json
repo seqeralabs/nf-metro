@@ -1,4 +1,16 @@
 {
+  "bundle.py::if n_legs < 1:::#1": {
+    "note": "Defensive guard: build_concentric_bundle rejects a centreline of fewer than two vertices. Every caller (route_along / route_straight and the handler centrelines) builds a >=2-vertex polyline, so the raise arm is never taken.",
+    "status": "defensive"
+  },
+  "bundle.py::if n_legs < 1:::#2": {
+    "note": "Defensive guard: build_tapered_bundle rejects a centreline of fewer than two vertices, mirroring build_concentric_bundle. Every caller passes a >=2-vertex centreline, so the raise arm is never taken.",
+    "status": "defensive"
+  },
+  "bundle.py::if not 0 <= transition_leg <= n_legs:::#1": {
+    "note": "Defensive guard: build_tapered_bundle rejects a transition_leg outside [0, n_legs]. Handlers pass a literal 1 against a 3- or 4-vertex centreline, so the raise arm is never taken.",
+    "status": "defensive"
+  },
   "common.py::elif tgt_sec:::#1": {
     "note": "The else (col_key=round(sx)) needs an L-shaped (dx!=0,dy!=0) inter edge whose target resolves to no section. Only exit_port->junction edges lack a target section, and junction positioning makes those axis-aligned (same-X RIGHT exit or same-Y BOTTOM exit), never L-shaped, so the else is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
@@ -275,6 +287,10 @@
     "note": "The L545 filter only skips bypass siblings; a non-bypass sibling is in an adjacent column or a gap with no same-row intervening section, so its horizontal at ep.y never crosses another section. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
+  "inter_section_handlers.py::if abs(ep.y - f.sy) < ctx.curve_radius:::#1": {
+    "note": "Merge entry-port Y tracks the source/junction Y, so a sub-curve_radius exit->entry gap never arises (the same-Y rule already handles dy<tol); corpus instrumentation across the fixtures (#762) confirms the arm is never taken. Defensive.",
+    "status": "defensive"
+  },
   "inter_section_handlers.py::if abs(lx0 - final_x) <= ctx.curve_radius:::#1": {
     "note": "Trunk-collapse guard for the TOP-entry staircase: when the lead-in channel coincides with the landing X the trunk leg would be zero-length, so the route drops straight and jogs into the port. The render path (offsets applied) routes a directly-below source via the perpendicular-exit / drop-pair handlers before reaching the staircase, so the corpus never drives it into this collapse.",
     "status": "defensive"
@@ -315,11 +331,19 @@
     "note": "entry_port.section_id is always set and the section has bbox_w>0 after layout; the else arm never fires.",
     "status": "defensive"
   },
+  "inter_section_handlers.py::if f.horizontal is Direction.L:::#1": {
+    "note": "Near-vertical same-column junction channel push: the junction always sits right of its same-column LEFT entry, so horizontal is always Direction.L; the Direction.R arm never fires (#762). Defensive.",
+    "status": "defensive"
+  },
   "inter_section_handlers.py::if fan is None and gap_bottom > gap_top:::#1": {
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },
   "inter_section_handlers.py::if fan is not None and ep_col is not None:::#1": {
+    "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if fan is not None:::#4": {
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },
@@ -511,6 +535,10 @@
     "note": "_suboptimal_trunk_bands crossing-comparison: validate-only, not on the render path.",
     "status": "defensive"
   },
+  "normalize.py::if ca != cb:::#1": {
+    "note": "Trunk-restack channel-merge arm reached only when two co-column trunks carry distinct channel keys. Migrating the simple inter-section shapes onto baked-offset centrelines (build_concentric_bundle) shifted which routes this pass sees, leaving this arm un-exercised; render-diff confirms no visual change.",
+    "status": "needs-review"
+  },
   "normalize.py::if ctx.station_offsets is None:::#1": {
     "note": "Null-offsets guard in _section_reorderable: station_offsets is built for every graph carrying edges, and the peel-off pass runs only when routes exist; instrumented across the corpus the guard never sees None. Defensive null guard (cf. #728 context.py precedent).",
     "status": "defensive"
@@ -627,6 +655,10 @@
     "note": "Defensive in _inter_row_gap_band: adjacent rows in the sorted section-row set both contain sections, so row_bottom_edge / row_top_edge resolve; the None skip arm guards a row with no sections that the iteration never yields.",
     "status": "defensive"
   },
+  "normalize.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
+    "note": "Degenerate single-Y trunk band in the riser-alignment pass. Left un-exercised after the simple inter-section shapes moved to baked-offset centrelines; render-diff confirms no visual change.",
+    "status": "needs-review"
+  },
   "offsets.py::elif feeding_exit != edge.source:::#1": {
     "note": "This arm (single_exit=False due to multiple distinct exit ports feeding one junction) requires one junction to receive edges from two different exit ports. But _rewrite_edges_with_junctions in resolve.py creates exactly one junction per exit port fan-out, wired exclusively from that exit port's edges. A junction always has a single upstream exit port; the elif is structurally unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
@@ -655,7 +687,7 @@
     "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
     "status": "needs-review"
   },
-  "offsets.py::if (::#2": {
+  "offsets.py::if (::#3": {
     "note": "Inside _propagate_offset_swap's same-Y collision-swap block: across the corpus no same-Y adjacent multi-line neighbour needs an offset swap, so the inner collision check never executes (0/128). Defensive guard for a same-Y multi-line offset collision absent from current topologies. Reclassified defensive (#762).",
     "status": "defensive"
   },
@@ -753,6 +785,10 @@
   },
   "offsets.py::if not target_st:::#1": {
     "note": "After parse and layout, every edge target ID in a MetroGraph maps to a station in graph.stations. The guard protects against a structurally malformed graph where an edge references a nonexistent station ID, which cannot occur with valid .mmd input processed through the parser and _resolve_sections().",
+    "status": "defensive"
+  },
+  "offsets.py::if ordered != expected:::#1": {
+    "note": "The raise arm of _assert_sections_anchored_on_trunk, a backstop on the postcondition of _reindex_section_local: an independent section (no flat-frame neighbour) always lands on the contiguous top-anchored levels 0,step,...,(m-1)*step by construction, so the mismatch arm never fires across the corpus. It guards against a future change that stops re-anchoring such a section.",
     "status": "defensive"
   },
   "offsets.py::if other_lid == cur_lid:::#1": {
@@ -949,38 +985,6 @@
   },
   "tb_handlers.py::if diag_end > diag_start:::#1": {
     "note": "Descending-run mirror of the ascending collapse clamp (#1 of `if diag_end < diag_start:`): fires only when |run| < 2*MIN_STRAIGHT_EDGE (20px), but connected diagonal endpoints are always >= one grid pitch (40/60px) apart on the run axis. Unreachable degenerate-geometry guard.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if fan is not None:::#4": {
-    "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
-    "status": "needs-review"
-  },
-  "normalize.py::if ca != cb:::#1": {
-    "note": "Trunk-restack channel-merge arm reached only when two co-column trunks carry distinct channel keys. Migrating the simple inter-section shapes onto baked-offset centrelines (build_concentric_bundle) shifted which routes this pass sees, leaving this arm un-exercised; render-diff confirms no visual change.",
-    "status": "needs-review"
-  },
-  "normalize.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
-    "note": "Degenerate single-Y trunk band in the riser-alignment pass. Left un-exercised after the simple inter-section shapes moved to baked-offset centrelines; render-diff confirms no visual change.",
-    "status": "needs-review"
-  },
-  "bundle.py::if n_legs < 1:::#1": {
-    "note": "Defensive guard: build_concentric_bundle rejects a centreline of fewer than two vertices. Every caller (route_along / route_straight and the handler centrelines) builds a >=2-vertex polyline, so the raise arm is never taken.",
-    "status": "defensive"
-  },
-  "bundle.py::if n_legs < 1:::#2": {
-    "note": "Defensive guard: build_tapered_bundle rejects a centreline of fewer than two vertices, mirroring build_concentric_bundle. Every caller passes a >=2-vertex centreline, so the raise arm is never taken.",
-    "status": "defensive"
-  },
-  "bundle.py::if not 0 <= transition_leg <= n_legs:::#1": {
-    "note": "Defensive guard: build_tapered_bundle rejects a transition_leg outside [0, n_legs]. Handlers pass a literal 1 against a 3- or 4-vertex centreline, so the raise arm is never taken.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if abs(ep.y - f.sy) < ctx.curve_radius:::#1": {
-    "note": "Merge entry-port Y tracks the source/junction Y, so a sub-curve_radius exit->entry gap never arises (the same-Y rule already handles dy<tol); corpus instrumentation across the fixtures (#762) confirms the arm is never taken. Defensive.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if f.horizontal is Direction.L:::#1": {
-    "note": "Near-vertical same-column junction channel push: the junction always sits right of its same-column LEFT entry, so horizontal is always Direction.L; the Direction.R arm never fires (#762). Defensive.",
     "status": "defensive"
   }
 }

@@ -698,6 +698,53 @@ def test_straight_through_line_keeps_constant_offset(fixture, line_id):
 
 
 # ---------------------------------------------------------------------------
+# Subset-carrying section anchors its bundle on its own trunk
+# ---------------------------------------------------------------------------
+
+# (fixture, section_id) for independent sections (no flat-frame neighbour) that
+# carry a contiguous subset of the global lines starting below the top
+# priority -- the case base offsets push off the trunk.  qc_report is reversed
+# (RL): its base offsets count down from the global, not local, maximum, so it
+# exercises the reversed branch of the re-anchoring.
+_SUBSET_ANCHORED_SECTIONS = [
+    ("topologies/dogleg_exempt_distinct.mmd", "bot_sink"),
+    ("rnaseq_auto.mmd", "pseudo_align"),
+    ("sarek_metro.mmd", "calling"),
+    ("rnaseq_auto.mmd", "qc_report"),
+]
+
+
+@pytest.mark.parametrize("fixture,section_id", _SUBSET_ANCHORED_SECTIONS)
+def test_subset_section_bundle_anchored_on_trunk(fixture, section_id):
+    """An independent section carrying a line subset anchors its bundle on its
+    own trunk.
+
+    The section's distinct per-line offset levels must be the contiguous
+    top-anchored run ``0, step, 2*step, ...``.  Leaving a subset on its
+    global-priority slots (e.g. lines 3,4 of a four-line bundle at offsets
+    6,9) centres the marker pill below the trunk, so the section sits lower
+    than a same-row sibling carrying a different subset.
+    """
+    from nf_metro.layout.constants import OFFSET_STEP
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    levels = sorted(
+        {
+            round(offsets.get((sid, lid), 0.0), 1)
+            for sid, st in graph.stations.items()
+            if st.section_id == section_id and not st.is_port
+            for lid in graph.station_lines(sid)
+        }
+    )
+    expected = [round(i * OFFSET_STEP, 1) for i in range(len(levels))]
+    assert levels == expected, (
+        f"{fixture}: section {section_id} offset levels {levels} are not "
+        f"top-anchored {expected}; markers pushed off the trunk"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Merge-port re-joined line keeps its side on the outgoing run
 # ---------------------------------------------------------------------------
 
