@@ -1052,7 +1052,7 @@ def render_test_fixtures() -> None:
     RENDERS_DIR.mkdir(parents=True, exist_ok=True)
     section = "Test Fixtures"
     print("Test fixtures:")
-    for stem in ("multiline_labels", "rnaseq_simple"):
+    for stem in ("multiline_labels", "rnaseq_simple", "genomeassembly_organellar"):
         mmd_path = TEST_FIXTURES_DIR / f"{stem}.mmd"
         if not mmd_path.exists():
             continue

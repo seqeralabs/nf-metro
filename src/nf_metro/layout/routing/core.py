@@ -83,7 +83,6 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _gap_channel_base,
     _group_channel_trunks,
     _h_segment_crosses_other_section,
-    _has_other_row_section_in_col_range,
     _HTrunk,
     _inter_row_gap_band,
     _join_fanout_upstream_tails,

@@ -756,6 +756,30 @@ def bypass_bottom_y(
     return candidate
 
 
+def has_other_row_section_in_col_range(
+    graph: MetroGraph,
+    src_col: int,
+    tgt_col: int,
+    src_row: int,
+) -> bool:
+    """Check if a section in a row OTHER than *src_row* sits anywhere in the
+    column range ``[min(src_col, tgt_col), max(src_col, tgt_col)]``.
+
+    Used to decide whether a same-row bypass channel would visually collide
+    with another row's section title text.  When no such other-row section
+    exists in the column range, the standard channel sits in empty inter-row
+    space and there is nothing to push the trunk further down for - so the
+    ``cross_row=False`` placement is preferred.
+    """
+    lo, hi = min(src_col, tgt_col), max(src_col, tgt_col)
+    for s in graph.sections.values():
+        if s.bbox_w <= 0 or s.grid_row == src_row:
+            continue
+        if lo <= s.grid_col <= hi:
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Section resolution + inter-row channel placement
 # ---------------------------------------------------------------------------

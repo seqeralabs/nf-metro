@@ -32,6 +32,7 @@ from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
+    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
@@ -1732,6 +1733,132 @@ def _segment_unit(
     return (0.0, 1.0 if dy > 0 else -1.0)
 
 
+# A merge branch endpoint farther than this from the converging structure
+# (its trunk, the merge junction, or the entry port) reads as a stub hanging
+# in open space rather than a route that joins the trunk.  Two corner radii
+# of slack covers the branch's turn-in arc and per-line bundle offsets; a real
+# desync between the branch drop level and the trunk channel is an order of
+# magnitude larger.
+_MERGE_BRANCH_HANG_TOL = 2 * CURVE_RADIUS
+
+
+@dataclass
+class MergeBranchHang:
+    """A merge feeder route that terminates disconnected from the trunk.
+
+    At a reconvergence merge, the non-trunk feeders ("branches") descend to
+    the trunk's bypass channel and turn into it.  When the branch's drop
+    level disagrees with the channel the trunk route actually runs, the
+    branch ends in open space, hundreds of pixels from the trunk it should
+    join.  ``gap`` is the distance from the branch endpoint to the nearest
+    converging structure (a sibling feeder's path, the merge junction, or
+    the entry port).
+    """
+
+    merge_id: str
+    line_id: str
+    source: str
+    endpoint: tuple[float, float]
+    gap: float
+
+    def message(self) -> str:
+        return (
+            f"merge {self.merge_id!r}: feeder {self.line_id!r} from "
+            f"{self.source!r} ends at "
+            f"({self.endpoint[0]:.1f},{self.endpoint[1]:.1f}), {self.gap:.1f}px "
+            f"from the trunk it should join -- a route hanging in open space"
+        )
+
+
+def _point_to_polyline_distance(
+    p: tuple[float, float], pts: Sequence[tuple[float, float]]
+) -> float:
+    """Shortest distance from point *p* to a polyline through *pts*."""
+    px, py = p
+    best = float("inf")
+    for k in range(len(pts) - 1):
+        ax, ay = pts[k]
+        bx, by = pts[k + 1]
+        dx, dy = bx - ax, by - ay
+        seg_sq = dx * dx + dy * dy
+        if seg_sq == 0.0:
+            t = 0.0
+        else:
+            t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / seg_sq))
+        cx, cy = ax + t * dx, ay + t * dy
+        best = min(best, ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5)
+    return best
+
+
+def _merge_entry_port(graph: MetroGraph, merge_id: str) -> Station | None:
+    """The entry-port successor of a merge junction, if any."""
+    for e in graph.edges_from(merge_id):
+        port = graph.ports.get(e.target)
+        if port and port.is_entry:
+            return graph.stations.get(e.target)
+    return None
+
+
+def check_merge_branches_meet_trunk(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[MergeBranchHang]:
+    """Return merge feeders whose route ends disconnected from the trunk.
+
+    A reconvergence merge junction has at least two predecessors and a single
+    entry-port successor.  Each feeder route must terminate where it joins the
+    converging structure: a branch lands on the trunk's channel, the trunk
+    reaches the entry port.  A feeder whose endpoint is farther than
+    :data:`_MERGE_BRANCH_HANG_TOL` from every sibling feeder's path, the merge
+    junction, and the entry port is a stub hanging in open space -- the
+    symptom of the branch drop level disagreeing with the trunk's real channel.
+    """
+    by_key = {(r.edge.source, r.edge.target, r.line_id): r for r in routes}
+    violations: list[MergeBranchHang] = []
+    for merge_id in graph.junctions:
+        feeders = list(graph.edges_to(merge_id))
+        if len(feeders) < 2:
+            continue
+        entry_port = _merge_entry_port(graph, merge_id)
+        if entry_port is None:
+            continue
+        merge_st = graph.stations.get(merge_id)
+        if merge_st is None:
+            continue
+        polylines: list[tuple[Edge, list[tuple[float, float]]]] = []
+        for e in feeders:
+            r = by_key.get((e.source, e.target, e.line_id))
+            if r is not None and len(r.points) >= 2:
+                polylines.append((e, _route_render_points(r, offsets)))
+        for edge, pts in polylines:
+            end = pts[-1]
+            d_merge = ((end[0] - merge_st.x) ** 2 + (end[1] - merge_st.y) ** 2) ** 0.5
+            d_entry = (
+                (end[0] - entry_port.x) ** 2 + (end[1] - entry_port.y) ** 2
+            ) ** 0.5
+            d_sibling = min(
+                (
+                    _point_to_polyline_distance(end, other)
+                    for other_edge, other in polylines
+                    if other_edge is not edge
+                ),
+                default=float("inf"),
+            )
+            gap = min(d_merge, d_entry, d_sibling)
+            if gap > _MERGE_BRANCH_HANG_TOL:
+                violations.append(
+                    MergeBranchHang(
+                        merge_id=merge_id,
+                        line_id=edge.line_id,
+                        source=edge.source,
+                        endpoint=end,
+                        gap=gap,
+                    )
+                )
+    return violations
+
+
 class CurveInvariantError(RuntimeError):
     """A rendered route contains a bundle-curve defect.
 
@@ -1792,6 +1919,10 @@ def assert_render_curve_invariants(
             "same-line parallel descents",
             check_no_same_line_parallel_descents(graph, routes, offsets),
         ),
+        (
+            "merge branch hanging in open space",
+            check_merge_branches_meet_trunk(graph, routes, offsets),
+        ),
     ]
     messages: list[str] = []
     for label, violations in named_checks:
@@ -1822,6 +1953,7 @@ __all__ = [
     "CollinearOverlapViolation",
     "CurveInvariantError",
     "FanoutTailGap",
+    "MergeBranchHang",
     "MergePortApproachViolation",
     "NonConcentricCornerViolation",
     "PartialBranchGapViolation",
@@ -1832,6 +1964,7 @@ __all__ = [
     "check_bundle_order_preserved",
     "check_concentric_bundle_corners",
     "check_fanout_tail_join",
+    "check_merge_branches_meet_trunk",
     "check_merge_port_approach_side",
     "check_no_collinear_distinct_lines",
     "check_no_same_line_parallel_descents",
