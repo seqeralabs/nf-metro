@@ -26,7 +26,7 @@ from nf_metro.layout.labels import (
     place_labels,
 )
 from nf_metro.layout.routing import RoutedPath, compute_station_offsets, route_edges
-from nf_metro.layout.routing.corners import resolve_curve_radii
+from nf_metro.layout.routing.corners import curve_tangents, resolve_curve_radii
 from nf_metro.layout.routing.invariants import assert_render_curve_invariants
 from nf_metro.manifest import node_data_attrs
 from nf_metro.parser.model import (
@@ -979,20 +979,10 @@ def _curve_tangents(
     before: dict[int, tuple[float, float]] = {}
     after: dict[int, tuple[float, float]] = {}
     curved: dict[int, bool] = {}
-    for i in range(1, len(pts) - 1):
-        prev, curr, nxt = pts[i - 1], pts[i], pts[i + 1]
-        dx1, dy1 = curr[0] - prev[0], curr[1] - prev[1]
-        len1 = (dx1**2 + dy1**2) ** 0.5
-        dx2, dy2 = nxt[0] - curr[0], nxt[1] - curr[1]
-        len2 = (dx2**2 + dy2**2) ** 0.5
-        r = resolved[i - 1]
-        if len1 > 0 and len2 > 0:
-            before[i] = (curr[0] - dx1 / len1 * r, curr[1] - dy1 / len1 * r)
-            after[i] = (curr[0] + dx2 / len2 * r, curr[1] + dy2 / len2 * r)
-            curved[i] = True
-        else:
-            before[i] = after[i] = curr
-            curved[i] = False
+    for i, tan in enumerate(curve_tangents(pts, resolved), start=1):
+        before[i] = tan.before
+        after[i] = tan.after
+        curved[i] = tan.curved
     return before, after, curved
 
 

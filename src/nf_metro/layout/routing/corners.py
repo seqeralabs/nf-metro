@@ -23,6 +23,7 @@ is NEVER variable beyond the line's position within the bundle.
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
 from nf_metro.layout.routing.common import Direction
@@ -106,6 +107,55 @@ def resolve_curve_radii(
         effective.append(min(desired_r, max_len1, max_len2))
 
     return effective
+
+
+class CornerTangent(NamedTuple):
+    """Rounded-corner tangent points for one interior vertex.
+
+    ``before``/``after`` are where the smoothing curve leaves the incoming
+    leg and rejoins the outgoing leg; ``corner`` is the vertex the curve
+    bends around.  ``curved`` is False for a degenerate vertex (a
+    zero-length neighbouring leg), where all three points collapse to the
+    vertex itself and no curve is drawn.
+    """
+
+    curved: bool
+    before: tuple[float, float]
+    corner: tuple[float, float]
+    after: tuple[float, float]
+
+
+def curve_tangents(
+    points: list[tuple[float, float]],
+    resolved: list[float],
+) -> list[CornerTangent]:
+    """Per-interior-vertex rounded-corner tangent points.
+
+    For each interior vertex ``i`` (``1..len(points)-2``) the smoothing
+    curve leaves the incoming leg at ``before`` and rejoins the outgoing leg
+    at ``after``, each a distance ``resolved[i-1]`` from the corner along the
+    respective unit leg vector.
+
+    This is the single source of tangent geometry shared by the static SVG
+    renderer and the animation renderer, so a corner is rounded identically
+    in both.  ``resolved`` is the clamped radius list from
+    :func:`resolve_curve_radii` (length ``len(points) - 2``).
+    """
+    tangents: list[CornerTangent] = []
+    for i in range(1, len(points) - 1):
+        prev, curr, nxt = points[i - 1], points[i], points[i + 1]
+        dx1, dy1 = curr[0] - prev[0], curr[1] - prev[1]
+        len1 = (dx1**2 + dy1**2) ** 0.5
+        dx2, dy2 = nxt[0] - curr[0], nxt[1] - curr[1]
+        len2 = (dx2**2 + dy2**2) ** 0.5
+        r = resolved[i - 1]
+        if len1 > 0 and len2 > 0:
+            before = (curr[0] - dx1 / len1 * r, curr[1] - dy1 / len1 * r)
+            after = (curr[0] + dx2 / len2 * r, curr[1] + dy2 / len2 * r)
+            tangents.append(CornerTangent(True, before, curr, after))
+        else:
+            tangents.append(CornerTangent(False, curr, curr, curr))
+    return tangents
 
 
 def reversed_offset(offset: float, max_offset: float) -> float:
