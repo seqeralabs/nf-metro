@@ -374,3 +374,76 @@ def test_helper_derived_radii_accepted(source: str) -> None:
 @pytest.mark.parametrize("source", _REJECTED.values(), ids=_REJECTED.keys())
 def test_raw_radii_rejected(source: str) -> None:
     assert not _slot_resolves(source), "raw radius should be rejected"
+
+
+# ---------------------------------------------------------------------------
+# Ratchet: handlers pass only ``ctx.curve_radius`` as a bundle base radius
+# ---------------------------------------------------------------------------
+
+# The bundle builder / centreline-template entry points.  Each owns its corner
+# anchoring and leg-fit, so the only ``base_radius`` a handler may hand it is the
+# global floor ``ctx.curve_radius`` -- never a value pre-bumped by the bundle's
+# half-width or shrunk to fit a leg.
+_BUILDER_ENTRYPOINTS = frozenset(
+    {
+        "build_concentric_bundle",
+        "build_tapered_bundle",
+        "route_along",
+        "route_tapered",
+        "route_hvh_tapered",
+        "route_straight",
+    }
+)
+# Positional index of ``base_radius`` for builders that accept it positionally
+# (the ``route_*`` templates take it keyword-only).
+_BASE_RADIUS_POS = {"build_concentric_bundle": 2, "build_tapered_bundle": 3}
+
+
+def _is_curve_radius(node: ast.expr) -> bool:
+    """True for the ``ctx.curve_radius`` attribute access."""
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "curve_radius"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "ctx"
+    )
+
+
+def _base_radius_arg(call: ast.Call) -> ast.expr | None:
+    """The ``base_radius`` value passed to a builder *call*, keyword or positional."""
+    for kw in call.keywords:
+        if kw.arg == "base_radius":
+            return kw.value
+    pos = _BASE_RADIUS_POS.get(_called_name(call) or "")
+    if pos is not None and len(call.args) > pos:
+        return call.args[pos]
+    return None
+
+
+def test_handler_bundle_base_radius_is_curve_radius_only() -> None:
+    """Every builder call in the routing handlers passes ``ctx.curve_radius``.
+
+    The builder anchors each corner on the bundle's innermost-of-turn line, so a
+    handler need only supply the floor; a hand-computed base (half-width bump,
+    leg-fit shrink, or a recomputed lead-in) is exactly the fragility this
+    ratchet keeps out of the handlers.  Any ``base_radius`` argument to a builder
+    entry point that is not literally ``ctx.curve_radius`` fails.
+    """
+    offenders: list[str] = []
+    for path in ROUTING_PATHS:
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _called_name(node)
+            if name not in _BUILDER_ENTRYPOINTS:
+                continue
+            base = _base_radius_arg(node)
+            if base is not None and not _is_curve_radius(base):
+                offenders.append(
+                    f"{path.name}:{node.lineno} {name}(base_radius={ast.unparse(base)})"
+                )
+    assert not offenders, (
+        "Builder base_radius must be ctx.curve_radius (the builder owns "
+        "anchoring and leg-fit):\n  " + "\n  ".join(offenders)
+    )

@@ -2,10 +2,10 @@
 
 ``_route_bypass`` describes the down -> across -> up loop as a centreline through
 the two gap channels and fans it with ``build_tapered_bundle`` rather than
-assembling per-line ``points`` / ``curve_radii`` by hand.  Each gap anchors its
-own innermost-of-turn line at the base radius, so a deep fan never pinches to a
-sub-base (or negative) arc on the inside of a turn -- the failure mode a single
-shared base radius would reintroduce on the deepest bundles.
+assembling per-line ``points`` / ``curve_radii`` by hand.  It declares each gap's
+full fan via ``bundle_offsets``, so the builder anchors every corner on that
+gap's innermost-of-turn line and no arc on the inside of a deep fan falls below
+the floor radius.
 
 These tests pin that on the fixtures whose bypasses run the deepest fans
 (``funcprofiler_upstream`` fans eight lines, ``bypass_gap2_rightward_overflow``
@@ -19,17 +19,15 @@ from pathlib import Path
 
 import pytest
 
+from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
-from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
     check_bundle_order_preserved,
     check_concentric_bundle_corners,
-    check_no_pinched_corner_radii,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import Edge
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = REPO_ROOT / "examples"
@@ -71,13 +69,13 @@ def test_bypass_corners_are_concentric_and_unflipped(path: Path) -> None:
 
 
 @pytest.mark.parametrize("path", BYPASS_FIXTURES, ids=lambda p: p.stem)
-def test_bypass_corner_radii_never_pinch(path: Path) -> None:
-    """Every U-shaped bypass corner keeps a positive radius.
+def test_bypass_corner_radii_anchored_at_floor(path: Path) -> None:
+    """Every U-shaped bypass corner sits at or above the floor radius.
 
-    Anchoring each gap on its own innermost line keeps the inside-of-turn arc of
-    a deep fan at or above the base radius.  Collapsing both gaps onto one shared
-    base radius would drive the inside arc of the deepest fan negative -- an
-    unrenderable pinch this assertion catches.
+    The builder anchors each gap's innermost-of-turn line at ``CURVE_RADIUS``
+    from the declared fan, so no inside-of-turn arc of a deep fan falls below it.
+    A single-member call that failed to declare its fan would re-introduce a
+    sub-floor (eventually negative) arc, which this catches.
     """
     _graph, _offsets, routes = _route(path)
     bypasses = _bypass_routes(routes)
@@ -85,9 +83,9 @@ def test_bypass_corner_radii_never_pinch(path: Path) -> None:
     offenders = [
         (r.edge.source, r.edge.target, r.line_id, r.curve_radii)
         for r in bypasses
-        if any(radius <= 0 for radius in r.curve_radii)
+        if any(radius < CURVE_RADIUS - 0.01 for radius in r.curve_radii)
     ]
-    assert not offenders, f"{path.stem}: bypass corners pinched to <= 0: {offenders}"
+    assert not offenders, f"{path.stem}: bypass corners below the floor: {offenders}"
 
 
 @pytest.mark.parametrize("path", BYPASS_FIXTURES, ids=lambda p: p.stem)
@@ -96,21 +94,3 @@ def test_bypass_routes_are_offset_baked(path: Path) -> None:
     bypasses = _bypass_routes(routes)
     assert bypasses, f"{path.stem}: expected at least one U-shaped bypass route"
     assert all(r.offsets_applied for r in bypasses)
-
-
-def _route_with_radii(radii: list[float]) -> RoutedPath:
-    edge = Edge(source="a", target="b", line_id="l")
-    return RoutedPath(
-        edge=edge,
-        line_id="l",
-        points=[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)],
-        is_inter_section=True,
-        curve_radii=radii,
-    )
-
-
-def test_pinch_guard_flags_non_positive_radius() -> None:
-    assert check_no_pinched_corner_radii([_route_with_radii([10.0])]) == []
-    flagged = check_no_pinched_corner_radii([_route_with_radii([-2.0])])
-    assert len(flagged) == 1 and flagged[0].radius == -2.0
-    assert check_no_pinched_corner_radii([_route_with_radii([0.0])])
