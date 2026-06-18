@@ -60,8 +60,9 @@ from nf_metro.layout.routing.context import (
     _tb_x_offset,
 )
 from nf_metro.layout.routing.corners import (
-    bypass_radii,
+    bypass_stagger,
     l_shape_radii,
+    l_shape_stagger,
 )
 from nf_metro.layout.routing.normalize import (
     _clear_channel_x_in_band,
@@ -713,17 +714,16 @@ def _route_bypass(
 
     # Per-line lateral deltas at each gap's vertical channel; the centreline +
     # build_tapered_bundle below derive every corner radius from the geometry.
-    delta1, delta2 = bypass_radii(
+    delta1, delta2 = bypass_stagger(
         g1_j,
         g1_n,
         g2_j,
         g2_n,
         horizontal=horizontal,
         offset_step=ctx.offset_step,
-        base_radius=ctx.curve_radius,
         gap1_vertical=gap1_vertical,
         gap2_vertical=gap2_vertical,
-    )[:2]
+    )
     by = base_y + nest_offset
 
     # Initial gap-channel centres and per-line positions.  These centre each
@@ -739,13 +739,7 @@ def _route_bypass(
             # channel on the gap slot, but never left of the near-source
             # position or the curve would start behind the junction (nubbin).
             ui, un = fan
-            fan_delta = l_shape_radii(
-                ui,
-                un,
-                vertical=gap1_vertical,
-                offset_step=ctx.offset_step,
-                base_radius=ctx.curve_radius,
-            )[0]
+            fan_delta = l_shape_stagger(ui, un, gap1_vertical, ctx.offset_step)
             near = sx + ctx.curve_radius + (un - 1) * ctx.offset_step / 2
             slot = _gap_channel_base(graph, src_col, src_row, un, ctx.offset_step)
             fan_mid_x = max(near, slot)
@@ -823,13 +817,7 @@ def _route_bypass(
             # the RIGHT regardless of dx (left-entry wrap, around-section-
             # below) are dispatched through their own handlers, not here.
             ui, un = fan
-            fan_delta = l_shape_radii(
-                ui,
-                un,
-                vertical=gap1_vertical,
-                offset_step=ctx.offset_step,
-                base_radius=ctx.curve_radius,
-            )[0]
+            fan_delta = l_shape_stagger(ui, un, gap1_vertical, ctx.offset_step)
             near = sx - ctx.curve_radius - (un - 1) * ctx.offset_step / 2
             slot = _gap_channel_base(graph, src_col - 1, src_row, un, ctx.offset_step)
             fan_mid_x = min(near, slot)
@@ -1551,13 +1539,7 @@ def _wrap_fan_geometry(
     """
     fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
     pos_i, pos_n = fan if fan is not None else (i, n)
-    delta = l_shape_radii(
-        pos_i,
-        pos_n,
-        vertical=vertical,
-        offset_step=ctx.offset_step,
-        base_radius=ctx.curve_radius,
-    )[0]
+    delta = l_shape_stagger(pos_i, pos_n, vertical, ctx.offset_step)
     mid_x = src.x + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
     corner_x = _v1_corner_x(ctx, src, src.x, mid_x)
     return fan, pos_n, delta, corner_x
@@ -1980,13 +1962,9 @@ def _route_around_section_below(
     # at their own ranks against the same centreline, so build_concentric_bundle
     # nests every corner without a hand-signed radius and the R-D-L-U-R loop
     # cannot flip.
-    delta = l_shape_radii(
-        pos_i,
-        pos_n,
-        vertical=vertical_direction(ey - sy),
-        offset_step=ctx.offset_step,
-        base_radius=ctx.curve_radius,
-    )[0]
+    delta = l_shape_stagger(
+        pos_i, pos_n, vertical_direction(ey - sy), ctx.offset_step
+    )
     fan_mid_x = sx + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
 
     # Bypass Y below all sections in the column range so the route

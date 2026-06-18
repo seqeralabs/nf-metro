@@ -335,6 +335,24 @@ def reference_anchored_radius(
 # ---------------------------------------------------------------------------
 
 
+def l_shape_stagger(
+    i: int, n: int, vertical: Direction, offset_step: float = OFFSET_STEP
+) -> float:
+    """Signed lateral offset of line *i* in an *n*-line L-shape vertical channel.
+
+    The ``delta`` half of :func:`l_shape_radii` -- where line *i* sits relative
+    to the channel centre -- with no radius computation.  A centreline builder
+    derives every corner radius from the geometry it lays out, so a handler that
+    only needs to place the channel (not size a hand-rolled arc) takes this.
+
+    Going DOWN, ``i = 0`` is rightmost (positive delta); going UP it is leftmost
+    (negative delta), matching :func:`l_shape_radii`'s inside/outside convention.
+    """
+    if vertical is Direction.D:
+        return ((n - 1) / 2 - i) * offset_step
+    return (i - (n - 1) / 2) * offset_step
+
+
 def l_shape_radii(
     i: int,
     n: int,
@@ -389,17 +407,14 @@ def l_shape_radii(
     """
     off = (n - 1 - i) * offset_step
     max_off = (n - 1) * offset_step
+    delta = l_shape_stagger(i, n, vertical, offset_step)
 
     if vertical is Direction.D:
-        # i=0 -> rightmost (positive delta)
-        delta = ((n - 1) / 2 - i) * offset_step
         # Corner 1 (CW):  rightmost = outside -> largest radius
         r_first = corner_radius(off, max_off, outside=True, base_radius=base_radius)
         # Corner 2 (CCW): rightmost = inside  -> smallest radius
         r_second = corner_radius(off, max_off, outside=False, base_radius=base_radius)
     else:
-        # i=0 -> leftmost (negative delta)
-        delta = (i - (n - 1) / 2) * offset_step
         # Corner 1 (CCW): leftmost = inside  -> smallest radius
         r_first = corner_radius(off, max_off, outside=False, base_radius=base_radius)
         # Corner 2 (CW):  leftmost = outside -> largest radius
@@ -413,23 +428,22 @@ def l_shape_radii(
 # ---------------------------------------------------------------------------
 
 
-def bypass_radii(
+def bypass_stagger(
     g1_i: int,
     g1_n: int,
     g2_i: int,
     g2_n: int,
     horizontal: Direction,
     offset_step: float = OFFSET_STEP,
-    base_radius: float = CURVE_RADIUS,
     gap1_vertical: Direction = Direction.D,
     gap2_vertical: Direction = Direction.U,
-) -> tuple[float, float, float, float, float, float]:
-    """Compute deltas and radii for a U-shaped bypass route.
+) -> tuple[float, float]:
+    """Per-line lateral offsets at a U-shaped bypass's two vertical channels.
 
-    A bypass is two back-to-back L-shapes with corners 1-2 at gap1 and
-    corners 3-4 at gap2.  This function wraps two ``l_shape_radii``
-    calls so that all four corners satisfy the same ``delta + r = const``
-    concentricity invariant used everywhere else.
+    A bypass is two back-to-back L-shapes (corners 1-2 at gap1, corners 3-4 at
+    gap2).  The centreline builder derives every corner radius from the geometry,
+    so a handler needs only where each line sits in the two channels: this
+    returns ``(delta1, delta2)``, the :func:`l_shape_stagger` of each gap.
 
     Parameters
     ----------
@@ -441,49 +455,20 @@ def bypass_radii(
         ``Direction.R`` when the bypass travels rightward (dx > 0),
         ``Direction.L`` when leftward.  Left-going bypasses mirror the
         inside/outside assignment.
-    offset_step, base_radius : float
-        Passed through to ``l_shape_radii``.
     gap1_vertical : Direction
-        Vertical direction at gap1.  ``Direction.D`` when the trunk is
-        below the source (standard case), ``Direction.U`` when the
-        source is below the trunk (e.g. bottom of a tall section
-        bypassing a shorter neighbour).
+        Vertical direction at gap1.  ``Direction.D`` when the trunk is below the
+        source (standard case), ``Direction.U`` when the source is below it.
     gap2_vertical : Direction
-        Vertical direction at gap2.  Almost always ``Direction.U``
-        (trunk below target).
-
-    Returns
-    -------
-    delta1 : float
-        X offset from gap1 channel center for this line.
-    delta2 : float
-        X offset from gap2 channel center for this line.
-    r1, r2, r3, r4 : float
-        Corner radii at each of the four corners.
+        Vertical direction at gap2.  Almost always ``Direction.U``.
     """
     # For left-going bypasses, reverse indices so the outside/inside
     # assignment matches the mirrored corner geometry.
     going_right = horizontal is Direction.R
     g1_idx = g1_i if going_right else g1_n - 1 - g1_i
     g2_idx = g2_i if going_right else g2_n - 1 - g2_i
-
-    # Gap1 L-shape (corners 1 and 2)
-    delta1, r1, r2 = l_shape_radii(
-        g1_idx,
-        g1_n,
-        vertical=gap1_vertical,
-        offset_step=offset_step,
-        base_radius=base_radius,
-    )
-    # Gap2 L-shape (corners 3 and 4)
-    delta2, r3, r4 = l_shape_radii(
-        g2_idx,
-        g2_n,
-        vertical=gap2_vertical,
-        offset_step=offset_step,
-        base_radius=base_radius,
-    )
-    return delta1, delta2, r1, r2, r3, r4
+    delta1 = l_shape_stagger(g1_idx, g1_n, gap1_vertical, offset_step)
+    delta2 = l_shape_stagger(g2_idx, g2_n, gap2_vertical, offset_step)
+    return delta1, delta2
 
 
 # ---------------------------------------------------------------------------

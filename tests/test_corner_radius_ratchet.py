@@ -48,7 +48,6 @@ APPROVED_RADIUS_HELPERS = frozenset(
     {
         "corner_radius",
         "l_shape_radii",
-        "bypass_radii",
         "tb_exit_corner",
         "tb_entry_corner",
         "concentric_corner_radius",

@@ -16,11 +16,12 @@ import pytest
 from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
 from nf_metro.layout.routing.common import Direction
 from nf_metro.layout.routing.corners import (
-    bypass_radii,
+    bypass_stagger,
     concentric_corner_radius,
     corner_outside_sign,
     corner_radius,
     l_shape_radii,
+    l_shape_stagger,
     reference_anchored_radius,
     resolve_curve_radii,
     reversed_offset,
@@ -296,99 +297,57 @@ class TestLShapeRadii:
 
 
 # ---------------------------------------------------------------------------
-# bypass_radii
+# l_shape_stagger
 # ---------------------------------------------------------------------------
 
 
-class TestBypassRadii:
-    """Test the U-shaped bypass (two back-to-back L-shapes)."""
+class TestLShapeStagger:
+    """The stagger helper must agree with l_shape_radii's delta exactly."""
 
-    @pytest.mark.parametrize("horizontal", [Direction.R, Direction.L])
-    @pytest.mark.parametrize("n", [1, 2, 3])
-    def test_all_radii_are_concentric(self, n: int, horizontal: Direction):
-        """All four radii must be base + k * step."""
+    @pytest.mark.parametrize("vertical", [Direction.D, Direction.U])
+    @pytest.mark.parametrize("n", [1, 2, 3, 4])
+    def test_matches_l_shape_radii_delta(self, n: int, vertical: Direction):
         for i in range(n):
-            _, _, r1, r2, r3, r4 = bypass_radii(i, n, i, n, horizontal)
-            for label, r in [("r1", r1), ("r2", r2), ("r3", r3), ("r4", r4)]:
-                k = (r - CURVE_RADIUS) / OFFSET_STEP
-                assert k == pytest.approx(round(k)), (
-                    f"{label}={r} not concentric for i={i}, n={n}, h={horizontal}"
-                )
-
-    @pytest.mark.parametrize("horizontal", [Direction.R, Direction.L])
-    @pytest.mark.parametrize("n", [2, 3])
-    def test_gap1_concentricity_invariant(self, n: int, horizontal: Direction):
-        """delta1 - r1 and delta1 + r2 must be constant across lines."""
-        vals_c1 = []
-        vals_c2 = []
-        for i in range(n):
-            d1, _, r1, r2, _, _ = bypass_radii(i, n, i, n, horizontal)
-            vals_c1.append(d1 - r1)
-            vals_c2.append(d1 + r2)
-        for j in range(1, n):
-            assert vals_c1[j] == pytest.approx(vals_c1[0]), (
-                f"Corner 1 invariant broken: {vals_c1}"
-            )
-            assert vals_c2[j] == pytest.approx(vals_c2[0]), (
-                f"Corner 2 invariant broken: {vals_c2}"
+            assert l_shape_stagger(i, n, vertical) == pytest.approx(
+                l_shape_radii(i, n, vertical)[0]
             )
 
-    @pytest.mark.parametrize("horizontal", [Direction.R, Direction.L])
-    @pytest.mark.parametrize("n", [2, 3])
-    def test_gap2_concentricity_invariant(self, n: int, horizontal: Direction):
-        """delta2 - r3 and delta2 + r4 must be constant across lines."""
-        vals_c3 = []
-        vals_c4 = []
-        for i in range(n):
-            _, d2, _, _, r3, r4 = bypass_radii(i, n, i, n, horizontal)
-            vals_c3.append(d2 - r3)
-            vals_c4.append(d2 + r4)
-        for j in range(1, n):
-            assert vals_c3[j] == pytest.approx(vals_c3[0]), (
-                f"Corner 3 invariant broken: {vals_c3}"
-            )
-            assert vals_c4[j] == pytest.approx(vals_c4[0]), (
-                f"Corner 4 invariant broken: {vals_c4}"
-            )
+    @pytest.mark.parametrize("vertical", [Direction.D, Direction.U])
+    @pytest.mark.parametrize("n", [2, 3, 4])
+    def test_symmetric_about_zero(self, n: int, vertical: Direction):
+        deltas = [l_shape_stagger(i, n, vertical) for i in range(n)]
+        assert sum(deltas) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# bypass_stagger
+# ---------------------------------------------------------------------------
+
+
+class TestBypassStagger:
+    """The U-shaped bypass's two channel offsets (deltas only)."""
 
     def test_single_line(self):
-        """Single line gets base radius at all corners, zero deltas."""
-        d1, d2, r1, r2, r3, r4 = bypass_radii(0, 1, 0, 1, horizontal=Direction.R)
+        """A single line sits on the channel centre in both gaps."""
+        d1, d2 = bypass_stagger(0, 1, 0, 1, horizontal=Direction.R)
         assert d1 == 0.0
         assert d2 == 0.0
-        assert r1 == CURVE_RADIUS
-        assert r2 == CURVE_RADIUS
-        assert r3 == CURVE_RADIUS
-        assert r4 == CURVE_RADIUS
+
+    @pytest.mark.parametrize("n", [1, 2, 3])
+    def test_horizontal_r_matches_l_shape(self, n: int):
+        """Going right, each gap's delta matches l_shape_stagger directly."""
+        for i in range(n):
+            d1, d2 = bypass_stagger(i, n, i, n, horizontal=Direction.R)
+            assert d1 == pytest.approx(l_shape_stagger(i, n, Direction.D))
+            assert d2 == pytest.approx(l_shape_stagger(i, n, Direction.U))
 
     @pytest.mark.parametrize("n", [2, 3])
-    def test_r1_r2_complementary(self, n: int):
-        """r1 + r2 = 2*base + (n-1)*step (same as L-shape invariant)."""
-        expected = 2 * CURVE_RADIUS + (n - 1) * OFFSET_STEP
+    def test_left_going_mirrors_indices(self, n: int):
+        """Going left reverses the index so the inside/outside sense mirrors."""
         for i in range(n):
-            _, _, r1, r2, _, _ = bypass_radii(i, n, i, n, horizontal=Direction.R)
-            assert r1 + r2 == pytest.approx(expected)
-
-    @pytest.mark.parametrize("n", [2, 3])
-    def test_r3_r4_complementary(self, n: int):
-        """r3 + r4 = 2*base + (n-1)*step (same as L-shape invariant)."""
-        expected = 2 * CURVE_RADIUS + (n - 1) * OFFSET_STEP
-        for i in range(n):
-            _, _, _, _, r3, r4 = bypass_radii(i, n, i, n, horizontal=Direction.R)
-            assert r3 + r4 == pytest.approx(expected)
-
-    def test_horizontal_r_matches_l_shape(self):
-        """For horizontal=R, bypass_radii must match two l_shape_radii calls."""
-        for i in range(3):
-            d1, d2, r1, r2, r3, r4 = bypass_radii(i, 3, i, 3, horizontal=Direction.R)
-            d1_ref, r1_ref, r2_ref = l_shape_radii(i, 3, vertical=Direction.D)
-            d2_ref, r3_ref, r4_ref = l_shape_radii(i, 3, vertical=Direction.U)
-            assert d1 == pytest.approx(d1_ref)
-            assert d2 == pytest.approx(d2_ref)
-            assert r1 == pytest.approx(r1_ref)
-            assert r2 == pytest.approx(r2_ref)
-            assert r3 == pytest.approx(r3_ref)
-            assert r4 == pytest.approx(r4_ref)
+            d1, d2 = bypass_stagger(i, n, i, n, horizontal=Direction.L)
+            assert d1 == pytest.approx(l_shape_stagger(n - 1 - i, n, Direction.D))
+            assert d2 == pytest.approx(l_shape_stagger(n - 1 - i, n, Direction.U))
 
 
 # ---------------------------------------------------------------------------
