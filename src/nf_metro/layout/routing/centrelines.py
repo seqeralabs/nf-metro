@@ -178,6 +178,49 @@ def route_tapered(
     return next((r for r in routes if r.line_id == edge.line_id), None)
 
 
+def route_tapered_anchored(
+    member: _TaperedMember,
+    centerline: list[_Vec],
+    *,
+    transition_leg: int,
+    base_radius: float,
+    src_bundle_offsets: Sequence[float],
+    tgt_bundle_offsets: Sequence[float],
+    min_radius: float | None = None,
+    normalize_exempt: bool = True,
+) -> RoutedPath:
+    """Route one tapering *member* anchored on two independent channel fans.
+
+    :func:`route_tapered` derives the corner anchors from the members it routes,
+    so the source-region and target-region corners share one fan.  A bundle
+    whose two ends are *separately* fanned -- the source-region legs by one
+    channel's line count and the target-region legs by another's, the two paired
+    asymmetrically so neither channel's spread pulls the other's per-corner
+    anchor -- cannot describe its anchors that way.  This routes a single member
+    (``(edge, line_id, src_offset, tgt_offset)``) and assembles that paired
+    ``bundle_offsets`` from the two fans: every source-channel offset paired with
+    *member*'s own target offset, and *member*'s own source offset paired with
+    every target-channel offset.  The builder then anchors the source-region
+    corners on the source channel's innermost-of-turn line and the target-region
+    corners on the target channel's, so a tapering loop whose two channels carry
+    different line counts nests correctly at both ends.
+    """
+    _e, _lid, src_off, tgt_off = member
+    bundle = [(s, tgt_off) for s in src_bundle_offsets] + [
+        (src_off, t) for t in tgt_bundle_offsets
+    ]
+    routes = build_tapered_bundle(
+        [member],
+        centerline,
+        transition_leg,
+        base_radius=base_radius,
+        min_radius=min_radius,
+        bundle_offsets=bundle,
+        normalize_exempt=normalize_exempt,
+    )
+    return routes[0]
+
+
 def route_hvh_tapered(
     ctx: _RoutingCtx,
     edge: Edge,

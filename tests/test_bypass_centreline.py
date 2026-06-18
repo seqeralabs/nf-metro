@@ -22,12 +22,15 @@ import pytest
 from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing.bundle import build_tapered_bundle
+from nf_metro.layout.routing.centrelines import route_tapered_anchored
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
     check_bundle_order_preserved,
     check_concentric_bundle_corners,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.model import Edge
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = REPO_ROOT / "examples"
@@ -111,3 +114,52 @@ def test_single_line_bypass_descent_turns_tight() -> None:
     # curve_radii[0:2] are the two source-side (gap1 descent) corners.
     assert qc.curve_radii[0] == pytest.approx(CURVE_RADIUS, abs=0.01)
     assert qc.curve_radii[1] == pytest.approx(CURVE_RADIUS, abs=0.01)
+
+
+def test_route_tapered_anchored_pairs_the_two_channel_fans() -> None:
+    """The anchored helper reproduces the bypass's hand-paired ``bundle_offsets``.
+
+    ``_route_bypass`` describes its U as a centreline plus two *independent*
+    channel fans (the source gap's and the target gap's), paired so each gap's
+    spread anchors only its own corners.  ``route_tapered_anchored`` assembles
+    that pairing internally; building the same single member through
+    ``build_tapered_bundle`` with the pairing done by hand must yield the
+    identical route.  Asymmetric fan sizes (a two-line source gap, a three-line
+    target gap) exercise the tapering case the helper exists for.
+    """
+    edge = Edge(source="a", target="b", line_id="x")
+    centerline = [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, -30.0),
+        (40.0, -30.0),
+        (40.0, -60.0),
+        (60.0, -60.0),
+    ]
+    src_off, tgt_off = 4.0, -3.0
+    src_fan = [4.0, 12.0]
+    tgt_fan = [-3.0, 5.0, 13.0]
+    member = (edge, edge.line_id, src_off, tgt_off)
+
+    got = route_tapered_anchored(
+        member,
+        centerline,
+        transition_leg=3,
+        base_radius=CURVE_RADIUS,
+        src_bundle_offsets=src_fan,
+        tgt_bundle_offsets=tgt_fan,
+        normalize_exempt=False,
+    )
+
+    manual = [(s, tgt_off) for s in src_fan] + [(src_off, t) for t in tgt_fan]
+    expected = build_tapered_bundle(
+        [member],
+        centerline,
+        transition_leg=3,
+        base_radius=CURVE_RADIUS,
+        bundle_offsets=manual,
+        normalize_exempt=False,
+    )[0]
+
+    assert got.points == expected.points
+    assert got.curve_radii == expected.curve_radii

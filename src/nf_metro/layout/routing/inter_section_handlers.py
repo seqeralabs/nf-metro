@@ -34,6 +34,7 @@ from nf_metro.layout.routing.centrelines import (
     route_hvh_tapered,
     route_straight,
     route_tapered,
+    route_tapered_anchored,
 )
 from nf_metro.layout.routing.common import (
     Direction,
@@ -1075,19 +1076,15 @@ def _route_bypass(
 
     src_anchor = channel_fan(sigma1, g1_j, g1_n, n1x)
     tgt_anchor = channel_fan(sigma2, g2_j, g2_n, n3x)
-    # Pair each gap's fan with THIS line's offset in the other gap (not 0): the
-    # source corners read only the source spread and the target corners only the
-    # target spread, so neither gap's fan pulls the other's per-corner anchor.
-    bundle = [(s, sigma2) for s in src_anchor] + [(sigma1, t) for t in tgt_anchor]
-    routes = build_tapered_bundle(
-        [(edge, edge.line_id, sigma1, sigma2)],
+    return route_tapered_anchored(
+        (edge, edge.line_id, sigma1, sigma2),
         centerline,
         transition_leg=3,
         base_radius=ctx.curve_radius,
-        bundle_offsets=bundle,
+        src_bundle_offsets=src_anchor,
+        tgt_bundle_offsets=tgt_anchor,
         normalize_exempt=False,
     )
-    return routes[0]
 
 
 def _route_l_shape(
