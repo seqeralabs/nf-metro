@@ -61,7 +61,6 @@ from nf_metro.layout.routing.context import (
 )
 from nf_metro.layout.routing.corners import (
     bypass_stagger,
-    l_shape_radii,
     l_shape_stagger,
 )
 from nf_metro.layout.routing.normalize import (
@@ -959,7 +958,7 @@ def _route_l_shape(
     fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
     if fan is None:
         return _route_l_shape_plain(edge, src, tgt, n, ctx)
-    return _route_l_shape_fan(edge, src, tgt, i, n, fan, ctx)
+    return _route_l_shape_fan(edge, src, tgt, fan, ctx)
 
 
 def _route_l_shape_plain(
@@ -1006,48 +1005,39 @@ def _route_l_shape_fan(
     edge: Edge,
     src: Station,
     tgt: Station,
-    i: int,
-    n: int,
     fan: tuple[int, int],
     ctx: _RoutingCtx,
 ) -> RoutedPath:
     """L-shape whose first corner is shared with bypass siblings.
 
-    The combined fan-out at the first corner (``fan``) differs from the
-    sub-bundle that turns the second corner (``i, n``): bypass siblings join the
-    first corner but continue past instead of turning.  A bundle with two
-    distinct fan groupings is not a single rigid offset of one centreline, so it
-    is built per-line rather than through ``build_concentric_bundle``.
+    The source-side curve is shared with bypass siblings that pivot through the
+    same channel but continue past instead of turning, so the channel is placed
+    and fanned on the combined junction fan-out (``fan``), like the entry-wrap
+    handlers.  A short horizontal lead-in lets the upstream exit -> junction
+    segment curve into the descent::
+
+        (lead_x, sy) -> (vx, sy) -> (vx, ty) -> (tx, ty)
+
+    This is the bundle's centreline; the lone member sits ``delta`` off it and
+    its fan-mates sit at their own ranks against the same centreline, so
+    :func:`build_concentric_bundle` derives every corner radius from the turn
+    geometry and the bundle cannot flip or pinch.
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
-    dx = tx - sx
-    dy = ty - sy
-    horizontal = horizontal_direction(dx)
-    vertical = vertical_direction(dy)
+    horizontal = horizontal_direction(tx - sx)
+    vertical = vertical_direction(ty - sy)
 
     ui, un = fan
-    # First corner: unified position within the combined fan-out.
-    # Use the going_right fan_mid_x formula so corner_x - r_first
-    # lands at junction.x and the upstream segment terminates at
-    # the curve start with NO nubbin past the curve start.  This
-    # is independent of the route's overall dx sign since the
-    # source-side curve in a wrap-style fan is always on the
-    # OUTSIDE (right) of the source section.
-    delta, r_first, _ = l_shape_radii(
-        ui,
-        un,
-        vertical=vertical,
-        offset_step=ctx.offset_step,
-        base_radius=ctx.curve_radius,
-    )
-    # mid_x places all lines so they diverge at sx
-    mid_x = sx + horizontal.sign * (ctx.curve_radius + (un - 1) * ctx.offset_step / 2)
-    # The fan pivots the channel through ``sx +/- curve_radius``,
-    # which hugs the source section's edge.  When that edge is also a
-    # section bbox border the descent grazes it incidentally:
-    # push the channel outward so the nearest line clears the edge.
+    delta = l_shape_stagger(ui, un, vertical, ctx.offset_step)
+    # Channel centre within the combined fan-out: every fan line diverges at sx,
+    # so the source-side curve sits on the OUTSIDE of the source section.  The
+    # sign follows travel; the fan half-width keeps the whole bundle clear.
     half_width = (un - 1) * ctx.offset_step / 2
+    mid_x = sx + horizontal.sign * (ctx.curve_radius + half_width)
+    # The fan pivots through ``sx +/- curve_radius``, hugging the source edge;
+    # when that edge is a section bbox border the descent grazes it, so push the
+    # channel outward until the nearest line clears.
     mid_x = clear_channel_of_section_edge(
         ctx.graph,
         mid_x,
@@ -1056,57 +1046,32 @@ def _route_l_shape_fan(
         max(sy, ty),
         endpoint_port_xs(ctx.graph, edge),
     )
-    # Second corner: from sub-bundle (only L-shape siblings turn here)
-    _, _, r_second = l_shape_radii(
-        i,
-        n,
-        vertical=vertical,
-        offset_step=ctx.offset_step,
-        base_radius=ctx.curve_radius,
-    )
 
-    vx = mid_x + delta
-
-    # When the vertical segment is too short for both corners at full
-    # radius, reduce the base radius so r_first + r_second fits while
-    # preserving the offset_step difference (concentricity invariant).
-    seg = abs(dy)
-    if r_first + r_second > seg and seg > 0:
-        # r_first + r_second = 2*base + (n-1)*step  (for any i)
-        # Solve: 2*new_base + (n-1)*step = seg
-        effective_n = max(n, un)
-        new_base = max(0.0, (seg - (effective_n - 1) * ctx.offset_step) / 2)
-        _, r_first, _ = l_shape_radii(
-            ui, un, vertical=vertical, offset_step=ctx.offset_step, base_radius=new_base
-        )
-        _, _, r_second = l_shape_radii(
-            i, n, vertical=vertical, offset_step=ctx.offset_step, base_radius=new_base
-        )
-
-    # vx == sx (corner at junction): the first segment (sx, sy) -> (vx, sy) is
-    # zero-length, which prevents the renderer from drawing the corner curve.
-    # Extend pts[0] back by the lead-in corner's own radius LEFT of the junction
-    # so the first corner gets its full arc with a horizontal lead-in
-    # (overlapping the upstream exit_port -> junction segment, fine since they
-    # share the line colour).  The lead-in corner sits at the fanned vertical X
-    # (vx == mid_x + delta), so it must take the concentric ``r_first`` for this
-    # fan position; a flat base radius would pinch the bundle through the bend.
+    # Lead-in long enough for the outermost fan line's first-corner arc; it
+    # overlaps the upstream same-line tail (re-joined by the fan-out tail pass),
+    # so the extra length is free.
+    lead_len = ctx.curve_radius + 2 * half_width
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-    lead_len = max(r_first, ctx.curve_radius)
-    return RoutedPath(
-        edge=edge,
-        line_id=edge.line_id,
-        points=[
-            (vx - lead_len, sy + src_off),
-            (vx, sy + src_off),
-            (vx, ty + tgt_off),
-            (tx, ty + tgt_off),
-        ],
-        is_inter_section=True,
-        curve_radii=[r_first, r_second],
-        offsets_applied=True,
+    centerline = [
+        (mid_x - horizontal.sign * lead_len, sy + src_off + delta),
+        (mid_x, sy + src_off + delta),
+        (mid_x, ty + tgt_off + delta),
+        (tx, ty + tgt_off + delta),
+    ]
+    # Not normalize-exempt: L-shape fans from one junction to different targets
+    # share the inter-column gap, and _normalize_gap_channels restacks them into
+    # distinct channels so two lines never overlay the same descent.
+    route = route_along(
+        edge,
+        [(edge, edge.line_id, -delta)],
+        centerline,
+        base_radius=ctx.curve_radius,
+        bundle_offsets=fan_offsets(un, ctx.offset_step),
+        normalize_exempt=False,
     )
+    assert route is not None  # the lone member is always in its own bundle
+    return route
 
 
 def _source_exit_side(graph: MetroGraph, src: Station) -> Direction | None:
