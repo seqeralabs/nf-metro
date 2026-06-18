@@ -24,11 +24,29 @@ from nf_metro.layout.routing.bundle import (
 )
 from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.layout.routing.context import _get_offset, _RoutingCtx
-from nf_metro.parser.model import Edge, Station
+from nf_metro.parser.model import Edge, MetroGraph, Station
 
 _Vec = tuple[float, float]
 _Member = tuple[Edge, str, float]
 _TaperedMember = tuple[Edge, str, float, float]
+
+
+def gather_member_edges(
+    graph: MetroGraph, edge: Edge
+) -> tuple[list[Edge], list[str], dict[str, Edge]]:
+    """The bundle of edges co-travelling ``edge.source -> edge.target``.
+
+    Returns ``(member_edges, line_ids, edge_by_line)``: every edge sharing this
+    edge's source and target, the distinct line ids in first-seen order, and a
+    ``line_id -> edge`` map.  The membership query carries no offset convention,
+    so callers that need a per-line offset other than :func:`_get_offset` (e.g.
+    a perpendicular riser lateral or a TB trunk X) keep that logic at the call
+    site and feed these line ids to it.
+    """
+    member_edges = [e for e in graph.edges_to(edge.target) if e.source == edge.source]
+    line_ids = list(dict.fromkeys(e.line_id for e in member_edges))
+    edge_by_line = {e.line_id: e for e in member_edges}
+    return member_edges, line_ids, edge_by_line
 
 
 def fan_offsets(n: int, step: float) -> list[float]:
@@ -75,11 +93,7 @@ def gather_tapered_bundle(
     ``src_center`` / ``tgt_center`` are the mean source / target offsets to
     centre the centreline on each side.
     """
-    member_edges = [
-        e for e in ctx.graph.edges_to(edge.target) if e.source == edge.source
-    ]
-    line_ids = list(dict.fromkeys(e.line_id for e in member_edges))
-    edge_by_line = {e.line_id: e for e in member_edges}
+    _member_edges, line_ids, edge_by_line = gather_member_edges(ctx.graph, edge)
 
     src_offs = {lid: _get_offset(ctx, edge.source, lid) for lid in line_ids}
     tgt_offs = {lid: _get_offset(ctx, edge.target, lid) for lid in line_ids}

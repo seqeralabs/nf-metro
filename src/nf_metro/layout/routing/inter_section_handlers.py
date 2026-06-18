@@ -19,6 +19,7 @@ from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import (
     fan_offsets,
     gather_bundle,
+    gather_member_edges,
     gather_tapered_bundle,
     route_along,
     route_hvh_tapered,
@@ -1242,8 +1243,7 @@ def _route_perp_exit_over(
     # the same target rises into the corridor together.  Each contributes its
     # source-side lateral so the builder anchors every corner on the bundle's
     # innermost-of-turn line.
-    member_edges = [e for e in graph.edges_to(edge.target) if e.source == edge.source]
-    line_ids = list(dict.fromkeys(e.line_id for e in member_edges))
+    _member_edges, line_ids, _edge_by_line = gather_member_edges(graph, edge)
 
     def source_lateral(line_id: str) -> float:
         """The centreline's source-side perpendicular offset for *line_id*.
@@ -1405,11 +1405,7 @@ def _route_top_entry_l_shape(
     # radius is derived from the turn geometry rather than hand-signed.  The
     # source-side legs carry the source fan offset and the final drop the target
     # offset (transition_leg below), so the bundle tapers when they differ.
-    member_edges = [
-        e for e in ctx.graph.edges_to(edge.target) if e.source == edge.source
-    ]
-    line_ids = list(dict.fromkeys(e.line_id for e in member_edges))
-    edge_by_line = {e.line_id: e for e in member_edges}
+    _member_edges, line_ids, edge_by_line = gather_member_edges(ctx.graph, edge)
 
     def src_offset(line_id: str) -> float:
         return _get_offset(ctx, edge.source, line_id)
