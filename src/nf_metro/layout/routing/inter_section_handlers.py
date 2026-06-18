@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 
 from nf_metro.layout.constants import (
     BYPASS_CLEARANCE,
@@ -349,32 +350,59 @@ def _route_left_entry_family(f: _InterFacts) -> RoutedPath | None:
     return _route_left_entry_wrap(edge, src, tgt, f.i, f.n, ctx)
 
 
-def _route_merge_entry_family(f: _InterFacts) -> RoutedPath | None:
-    """Non-bypass feed into a merge junction, routed to its entry port.
+class _MergeEntryRoute(Enum):
+    """Which shape :func:`_route_merge_entry_family` builds for a merge feeder."""
 
-    A near-collinear feed connects straight to avoid a cramped curve.  A LEFT
-    entry whose L-shape horizontal would cross a foreign section descends the
-    clear corridor if one exists, else loops around below; otherwise a standard
-    L-shape into the entry port.
+    STRAIGHT = "straight"
+    CORRIDOR = "corridor"
+    AROUND_BELOW = "around_below"
+    L_SHAPE = "l_shape"
+
+
+def _merge_entry_route_kind(f: _InterFacts) -> _MergeEntryRoute:
+    """Classify a non-bypass merge-junction feed without building the route.
+
+    A near-collinear feed connects ``STRAIGHT`` to avoid a cramped curve.  A
+    LEFT entry whose L-shape horizontal would cross a foreign section descends
+    the clear ``CORRIDOR`` if one exists, else loops ``AROUND_BELOW``;
+    otherwise a standard ``L_SHAPE`` into the entry port.
     """
-    edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
+    src, ctx, graph = f.src, f.ctx, f.graph
     ep = f.merge_ep
     assert ep is not None
     if abs(ep.y - f.sy) < ctx.curve_radius:
-        return RoutedPath(
-            edge=edge,
-            line_id=edge.line_id,
-            points=[(f.sx, f.sy), (ep.x, ep.y)],
-            is_inter_section=True,
-        )
+        return _MergeEntryRoute.STRAIGHT
     ep_port = graph.ports.get(ep.id)
     if ep_port and ep_port.side == PortSide.LEFT:
         exclude = {src.section_id} if src.section_id else set[str]()
         if _h_segment_crosses_other_section(graph, f.sx, ep.x, ep.y, exclude):
             if _corridor_is_viable(ctx, src, ep):
-                return _route_inter_row_gap_corridor(edge, src, tgt, ep, f.i, f.n, ctx)
-            return _route_around_section_below(edge, src, tgt, ep, f.i, f.n, ctx)
-    return _route_l_shape(edge, src, ep, f.i, f.n, ctx)
+                return _MergeEntryRoute.CORRIDOR
+            return _MergeEntryRoute.AROUND_BELOW
+    return _MergeEntryRoute.L_SHAPE
+
+
+def _route_merge_entry_family(f: _InterFacts) -> RoutedPath | None:
+    """Non-bypass feed into a merge junction, routed to its entry port."""
+    edge, src, tgt, ctx = f.edge, f.src, f.tgt, f.ctx
+    ep = f.merge_ep
+    assert ep is not None
+    builders = {
+        _MergeEntryRoute.STRAIGHT: lambda: RoutedPath(
+            edge=edge,
+            line_id=edge.line_id,
+            points=[(f.sx, f.sy), (ep.x, ep.y)],
+            is_inter_section=True,
+        ),
+        _MergeEntryRoute.CORRIDOR: lambda: _route_inter_row_gap_corridor(
+            edge, src, tgt, ep, f.i, f.n, ctx
+        ),
+        _MergeEntryRoute.AROUND_BELOW: lambda: _route_around_section_below(
+            edge, src, tgt, ep, f.i, f.n, ctx
+        ),
+        _MergeEntryRoute.L_SHAPE: lambda: _route_l_shape(edge, src, ep, f.i, f.n, ctx),
+    }
+    return builders[_merge_entry_route_kind(f)]()
 
 
 def _right_entry_plough_needs_bypass(f: _InterFacts) -> bool:
@@ -660,6 +688,27 @@ def _route_merge_branch(
     )
 
 
+def _would_route_around_section_below(edge: Edge, ctx: _RoutingCtx) -> bool:
+    """Whether *edge* dispatches to :func:`_route_around_section_below`.
+
+    A merge-junction feeder reaches the around-below loop only through the
+    merge-entry family, and only when :func:`_merge_entry_route_kind` selects
+    it, so this consults the dispatch table rather than re-deriving the
+    bypass / section-crossing predicates.
+    """
+    src = ctx.graph.stations.get(edge.source)
+    tgt = ctx.graph.stations.get(edge.target)
+    if src is None or tgt is None:
+        return False
+    f = _build_inter_facts(edge, src, tgt, ctx)
+    rule = _match_inter_section_rule(f)
+    return (
+        rule is not None
+        and rule.route is _route_merge_entry_family
+        and _merge_entry_route_kind(f) is _MergeEntryRoute.AROUND_BELOW
+    )
+
+
 def _has_around_section_sibling(
     edge: Edge, ep: Station, ep_port: Port | None, ctx: _RoutingCtx
 ) -> bool:
@@ -673,40 +722,20 @@ def _has_around_section_sibling(
     around-section sibling can pull their V_up away from the target edge
     (see ``trunk_v_up_pull_away`` in :func:`_route_bypass`).
 
-    Mirrors the dispatcher in ``_route_inter_section``: another edge
-    that would ACTUALLY dispatch to ``_route_around_section_below``.
-    That requires the sibling to take the merge-non-bypass path (lines
-    660-666) - i.e. needs_bypass must be False - and its L-shape's H
-    segment at ``ep.y`` to cross a non-source section.  Siblings whose
-    span pushes them into the bypass dispatch (line 553) end up as
-    merge-branches or trunk routes, not around-section, so they do NOT
-    compete for the same channel and pulling the trunk away on their
-    behalf produces the visible unbundling that #388 introduced on
-    03b_fan_in_merge.
+    A sibling competes only when it ACTUALLY dispatches to
+    :func:`_route_around_section_below`, which
+    :func:`_would_route_around_section_below` answers via the dispatch table.
+    Siblings whose span pushes them into the bypass dispatch end up as
+    merge-branches or trunk routes, not around-section, so they do NOT compete
+    for the same channel and pulling the trunk away on their behalf produces
+    the visible unbundling that #388 introduced on 03b_fan_in_merge.
     """
     if ep_port is None or ep_port.side != PortSide.LEFT:
         return False
-    graph = ctx.graph
-    ep_col = _resolve_section_col(graph, ep)
-    # Find all edges whose target is the same merge junction.
     for other in ctx.graph.edges_to(edge.target):
         if other.source == edge.source:
             continue
-        other_src = graph.stations.get(other.source)
-        if other_src is None:
-            continue
-        # Skip siblings that would dispatch through the bypass branch.
-        # needs_bypass = (|tgt_col - src_col| > 1) AND intervening.
-        other_col, other_row = _resolve_section_colrow(graph, other_src)
-        if (
-            other_col is not None
-            and ep_col is not None
-            and abs(ep_col - other_col) > 1
-            and _has_intervening_sections(graph, other_col, ep_col, other_row)
-        ):
-            continue
-        exclude = {other_src.section_id} if other_src.section_id else set()
-        if _h_segment_crosses_other_section(graph, other_src.x, ep.x, ep.y, exclude):
+        if _would_route_around_section_below(other, ctx):
             return True
     return False
 

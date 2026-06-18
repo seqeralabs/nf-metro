@@ -283,8 +283,12 @@
     "note": "Reachable only via a defective render (inter-row corridor grazes the source section); see #722.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if _h_segment_crosses_other_section(graph, other_src.x, ep.x, ep.y, exclude):::#1": {
-    "note": "The L545 filter only skips bypass siblings; a non-bypass sibling is in an adjacent column or a gap with no same-row intervening section, so its horizontal at ep.y never crosses another section. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+  "inter_section_handlers.py::if _would_route_around_section_below(other, ctx):::#1": {
+    "note": "Competing-sibling detection in _has_around_section_sibling, routed through the dispatch table (#813). A non-bypass sibling feeding the same merge junction sits in an adjacent column or a gap with no same-row intervening section, so it dispatches to an L-shape, not the around-below loop; corpus instrumentation across the fixtures confirms the arm is never taken. Defensive.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::if src is None or tgt is None:::#1": {
+    "note": "Endpoint lookup guard in _would_route_around_section_below; every edge endpoint is a registered station after parse+resolve, so graph.stations.get never returns None here. Defensive.",
     "status": "defensive"
   },
   "inter_section_handlers.py::if abs(ep.y - f.sy) < ctx.curve_radius:::#1": {
@@ -378,10 +382,6 @@
   "inter_section_handlers.py::if mapped_ep != ep_id:::#1": {
     "note": "Reachable only via a defective render (merge-junction tangle); see #721.",
     "status": "needs-review"
-  },
-  "inter_section_handlers.py::if other_src is None:::#1": {
-    "note": "Every edge endpoint is a registered station after parse+resolve, so graph.stations.get(other.source) is never None here.",
-    "status": "defensive"
   },
   "inter_section_handlers.py::if shared_vx is not None:::#1": {
     "note": "_fan_left_entry_descent_x returns None only when col_left<=0; col_left_edge for the target's own column is always >0.",

@@ -171,6 +171,68 @@ def test_rule_selection(overrides: dict[str, object], expected: str) -> None:
     assert _selected(**overrides) == expected
 
 
+def test_merge_entry_family_route_is_in_table() -> None:
+    """``_would_route_around_section_below`` keys off the merge-entry route fn.
+
+    It matches the dispatcher by callable identity; if that builder were dropped
+    from the table the helper would silently never match, so sibling detection
+    would always abstain.
+    """
+    assert H._route_merge_entry_family in {r.route for r in H._INTER_SECTION_RULES}
+
+
+# ``_would_route_around_section_below`` must claim a sibling only when the
+# dispatch table routes it through the merge-entry family AND that family's
+# classifier picks the around-below loop.  These cases stub the three
+# collaborators so the combining logic is pinned without graph geometry (the
+# around-below arm is defensive - no corpus fixture reaches it).
+_AROUND = H._MergeEntryRoute.AROUND_BELOW
+_L_SHAPE = H._MergeEntryRoute.L_SHAPE
+_OTHER_ROUTE = H._route_bypass_family
+_SIBLING_CASES = [
+    pytest.param(H._route_merge_entry_family, _AROUND, True, id="merge-family-around"),
+    pytest.param(
+        H._route_merge_entry_family, _L_SHAPE, False, id="merge-family-l-shape"
+    ),
+    pytest.param(_OTHER_ROUTE, _AROUND, False, id="shadowed-by-earlier-rule"),
+    pytest.param(None, _AROUND, False, id="no-rule-claims-it"),
+]
+
+
+@pytest.mark.parametrize("route, kind, expected", _SIBLING_CASES)
+def test_would_route_around_section_below(
+    monkeypatch: pytest.MonkeyPatch,
+    route: object,
+    kind: H._MergeEntryRoute,
+    expected: bool,
+) -> None:
+    edge = SimpleNamespace(source="s", target="t", line_id="L")
+    ctx = SimpleNamespace(
+        graph=SimpleNamespace(stations={"s": object(), "t": object()})
+    )
+    sentinel = object()
+    matched = None if route is None else SimpleNamespace(route=route)
+
+    monkeypatch.setattr(H, "_build_inter_facts", lambda *a: sentinel)
+    monkeypatch.setattr(H, "_match_inter_section_rule", lambda f: matched)
+    monkeypatch.setattr(H, "_merge_entry_route_kind", lambda f: kind)
+
+    assert H._would_route_around_section_below(edge, ctx) is expected  # type: ignore[arg-type]
+
+
+def test_would_route_around_section_below_abstains_on_missing_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    edge = SimpleNamespace(source="s", target="absent", line_id="L")
+    ctx = SimpleNamespace(graph=SimpleNamespace(stations={"s": object()}))
+
+    def fail(*_a: object) -> object:
+        raise AssertionError("must not dispatch when an endpoint is missing")
+
+    monkeypatch.setattr(H, "_build_inter_facts", fail)
+    assert H._would_route_around_section_below(edge, ctx) is False  # type: ignore[arg-type]
+
+
 def test_rule_names_unique() -> None:
     names = [r.name for r in H._INTER_SECTION_RULES]
     assert len(names) == len(set(names))
