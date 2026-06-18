@@ -87,9 +87,9 @@ def test_perp_exit_over_corner_radii_anchored_at_floor(path: Path) -> None:
     """Every up-and-over corner sits at or above the floor radius.
 
     The builder anchors the bundle's innermost-of-turn line at ``CURVE_RADIUS``
-    from the declared fan, so no inside-of-turn arc falls below it.  The
-    hand-rolled route anchored its corners on the raw port centre instead, so an
-    inside-of-turn line dipped below the floor; this catches that.
+    from the declared fan, so no inside-of-turn arc falls below it.  Anchoring
+    corners on the raw port centre rather than the declared fan lets an
+    inside-of-turn line dip below the floor; this catches that.
     """
     graph, _offsets, routes = _route(path)
     over = _over_routes(graph, routes)

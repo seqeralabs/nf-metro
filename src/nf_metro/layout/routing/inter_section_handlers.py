@@ -1254,8 +1254,12 @@ def _route_perp_exit_over(
         reverses it on a BOTTOM one; the right-hand normal on the centreline's
         vertical legs reverses the BOTTOM sign back, so it is negated here.
         """
-        d = _perp_riser_lateral(ctx, edge.source, line_id, src_port.side, src.section_id)
+        d = _perp_riser_lateral(
+            ctx, edge.source, line_id, src_port.side, src.section_id
+        )
         return d if is_top else -d
+
+    src_offs = {lid: source_lateral(lid) for lid in line_ids}
 
     # Corridor Y: the header band clearing the source section's near edge.
     cy_base = (
@@ -1277,7 +1281,6 @@ def _route_perp_exit_over(
         # X, so ending the corridor short of the port centre keeps the two
         # legs one continuous line instead of jogging onto the port marker.
         centerline = [(sx, sy), (sx, cy_base), (tx, cy_base), (tx, ty)]
-        src_offs = {lid: source_lateral(lid) for lid in line_ids}
         route = route_along(
             edge,
             [(edge, edge.line_id, src_offs[edge.line_id])],
@@ -1300,7 +1303,6 @@ def _route_perp_exit_over(
             (gap_x, ty),
             (tx, ty),
         ]
-        src_offs = {lid: source_lateral(lid) for lid in line_ids}
         tgt_offs = {lid: _get_offset(ctx, edge.target, lid) for lid in line_ids}
         routes = build_tapered_bundle(
             [(edge, edge.line_id, src_offs[edge.line_id], tgt_offs[edge.line_id])],
