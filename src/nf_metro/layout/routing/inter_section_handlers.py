@@ -693,8 +693,6 @@ def _route_merge_branch(
     graph = ctx.graph
     sx, sy = src.x, src.y
     src_off = _get_offset(ctx, edge.source, edge.line_id)
-
-    # Trunk bypass Y level (branches drop to meet it)
     by = ctx.merge.trunk_by.get(edge.target, sy)
 
     # Descend just outside the source section on the side the junction sits on.
