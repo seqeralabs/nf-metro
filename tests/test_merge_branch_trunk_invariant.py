@@ -70,17 +70,19 @@ def test_genomeassembly_organellar_assemblies_connected() -> None:
     assert not violations, "\n".join(v.message() for v in violations)
 
 
-def test_checker_fires_when_context_ignores_cross_row(
+def test_checker_fires_when_context_disagrees_with_trunk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reverting the context's ``cross_row`` decision desyncs the branch drop
-    level from the trunk channel, reproducing the hanging stubs the invariant
-    is meant to catch.  Proves the check is not vacuous."""
+    """Desyncing the context's channel decision from the trunk route's
+    reproduces the hanging stubs the invariant is meant to catch: the branches
+    drop to the context's level while the trunk runs elsewhere.  Patching only
+    the context's reference (the trunk route keeps its own) forces the
+    disagreement.  Proves the check is not vacuous."""
     monkeypatch.setattr(
         routing_context,
         "merge_trunk_force_cross_row",
-        lambda *args, **kwargs: False,
+        lambda *args, **kwargs: True,
     )
     graph, routes, offsets = _route(FIXTURES / "genomeassembly_organellar.mmd")
     violations = check_merge_branches_meet_trunk(graph, routes, offsets)
-    assert violations, "expected hanging branches when context ignores cross_row"
+    assert violations, "expected hanging branches when context disagrees with trunk"

@@ -131,6 +131,10 @@
     "note": "Null/port-source guard: edges to an exit port always originate at an internal (non-port) station after _resolve_sections, so the continue arm (None or port source) only guards a malformed pre-resolve graph.",
     "status": "defensive"
   },
+  "common.py::if src_row is None or tgt_row != src_row:::#1": {
+    "note": "merge_trunk_force_cross_row early-out: the True arm (no same-row trunk, so no forced dive) needs a merge whose bypass trunk pred sits in a different grid row than the merge, or an unresolved row. Corpus merges all reconverge within their row, so the early-out is never taken; same-row trunks fall through to the graze test.",
+    "status": "defensive"
+  },
   "common.py::if src_row is not None:::#1": {
     "note": "Header-clamp guard: the False arm (src_row is None) needs an unresolvable source section, but inter-section bypass sources always resolve to a grid row after layout; a guard against an unresolved source that doesn't occur.",
     "status": "defensive"
@@ -569,6 +573,10 @@
   },
   "normalize.py::if left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE:::#1": {
     "note": "Row-agnostic union-gap fallback in _match_channel_gap is provably unreachable: the union gap [max(col_lo right edges), min(col_hi left edges)] is a subset of every per-row gap that brackets a channel, so overlap_match/bracket_match always resolve first and the union fallback is never reached. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+    "status": "defensive"
+  },
+  "normalize.py::if left_ok and (not right_ok or abs(left_x - x) <= abs(right_x - x)):::#1": {
+    "note": "Left-shift branch of _clear_channel_x_in_band, the deep-descent channel cleaner: it fires only when a bypass descent dives deep enough to cross an oversized other-row section's bbox and the left cleared edge is the nearer (or only) escape. The corpus's sole exerciser was the genomeassembly_organellar merge trunk's spurious below-everything dive; now that a same-row merge trunk routes through the inter-row gap (the gap floor clears the lower header), no fixture drives a descent across an oversized section, so this branch is unexercised. Reachable in principle by deeper cross-row bypasses.",
     "status": "defensive"
   },
   "normalize.py::if len(signs) != 1:::#1": {

@@ -593,6 +593,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "below the out-of-range section.",
     ),
     (
+        "merge_trunk_over_low_section",
+        TOPOLOGIES_DIR,
+        "A same-row merge trunk bypasses past a tall intervening section while "
+        "a lower-row section sits within the merge column range. The inter-row "
+        "gap clears the lower section's header, so the trunk (and its branches) "
+        "route through that gap rather than diving below the whole canvas.",
+    ),
+    (
         "peeloff_riser_respace",
         TOPOLOGIES_DIR,
         "Four lines from two sources ride one shared bypass trunk and rise "

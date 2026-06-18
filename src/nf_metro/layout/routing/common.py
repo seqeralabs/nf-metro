@@ -756,30 +756,6 @@ def bypass_bottom_y(
     return candidate
 
 
-def has_other_row_section_in_col_range(
-    graph: MetroGraph,
-    src_col: int,
-    tgt_col: int,
-    src_row: int,
-) -> bool:
-    """Check if a section in a row OTHER than *src_row* sits anywhere in the
-    column range ``[min(src_col, tgt_col), max(src_col, tgt_col)]``.
-
-    Used to decide whether a same-row bypass channel would visually collide
-    with another row's section title text.  When no such other-row section
-    exists in the column range, the standard channel sits in empty inter-row
-    space and there is nothing to push the trunk further down for - so the
-    ``cross_row=False`` placement is preferred.
-    """
-    lo, hi = min(src_col, tgt_col), max(src_col, tgt_col)
-    for s in graph.sections.values():
-        if s.bbox_w <= 0 or s.grid_row == src_row:
-            continue
-        if lo <= s.grid_col <= hi:
-            return True
-    return False
-
-
 def merge_trunk_force_cross_row(
     graph: MetroGraph,
     src_col: int,
@@ -787,18 +763,38 @@ def merge_trunk_force_cross_row(
     src_row: int | None,
     tgt_row: int | None,
 ) -> bool:
-    """Whether a merge trunk must route its bypass below ALL sections.
+    """Whether a same-row merge trunk must route its bypass below ALL sections.
 
-    The trunk's same-row bypass channel would collide with another row's
-    section titles when the trunk shares the merge's row but its column span
-    straddles a section in a different row.  The branch drop level computed in
-    the routing context and the trunk route itself must agree on this, or
-    branches land at a different Y from where the trunk runs.
+    A same-row trunk normally bypasses in the inter-row gap just below its
+    row.  That gap also holds the next row's section title badges, so the
+    shallow channel is forced below everything only when a lower-row section
+    actually pokes up into it -- i.e. ``bypass_bottom_y``'s header-clearance
+    clamp cannot keep the shallow channel clear of the section header.  When
+    the gap has room, the shallow channel clears the header and diving below
+    the whole canvas would loop needlessly deep.
+
+    Both the routing context (branch drop level) and the trunk route consult
+    this, so branches land at the Y the trunk actually runs.
     """
-    return (
-        src_row is not None
-        and tgt_row == src_row
-        and has_other_row_section_in_col_range(graph, src_col, tgt_col, src_row)
+    if src_row is None or tgt_row != src_row:
+        return False
+    shallow = bypass_bottom_y(
+        graph,
+        src_col,
+        tgt_col,
+        BYPASS_CLEARANCE,
+        src_row=src_row,
+        cross_row=False,
+        tgt_row=tgt_row,
+    )
+    lo, hi = min(src_col, tgt_col), max(src_col, tgt_col)
+    return any(
+        s.bbox_w > 0
+        and s.grid_row > src_row
+        and lo <= s.grid_col <= hi
+        and shallow
+        > s.bbox_y - SECTION_HEADER_PROTRUSION - HEADER_CLEARANCE + COORD_TOLERANCE
+        for s in graph.sections.values()
     )
 
 
