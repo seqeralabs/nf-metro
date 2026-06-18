@@ -1760,6 +1760,14 @@ def assert_render_curve_invariants(
     curve aborts the render with a message naming the offending edge instead of
     being drawn.
 
+    It is a **backstop**, not the primary correctness mechanism.  Every
+    inter-section route is built from a centreline through the bundle builder
+    (see ``docs/dev/inter_section_dispatch.md``), which makes a flip, a pinch,
+    or a collinear overlay impossible by construction.  In normal operation
+    these checks never fire; a failure means a genuinely new, un-tabled shape
+    reached the renderer built some other way, and the fix is to route it
+    through the builder too -- not to relax the check.
+
     Set ``NF_METRO_ALLOW_BAD_CURVES=1`` to downgrade to a warning (debugging a
     work-in-progress handler only; not a supported render mode).
     """
