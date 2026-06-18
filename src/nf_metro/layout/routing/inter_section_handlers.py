@@ -1507,6 +1507,21 @@ def _left_entry_descent_x(
     return anchor_x - base_gap - extra_clearance + signed_delta
 
 
+def _right_entry_descent_x(
+    ctx: _RoutingCtx, anchor_x: float, n_outer: int, signed_delta: float = 0.0
+) -> float:
+    """Descent-channel X for a RIGHT-entry bundle, right of *anchor_x*.
+
+    The mirror of :func:`_left_entry_descent_x`: places the bundle ``base_gap``
+    right of *anchor_x*, bumping further when that gap would bring the bundle's
+    innermost line within ``SECTION_ROUTE_CLEARANCE`` of the edge.
+    """
+    base_gap = ctx.curve_radius + ctx.offset_step
+    max_delta = (n_outer - 1) * ctx.offset_step / 2
+    extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
+    return anchor_x + base_gap + extra_clearance + signed_delta
+
+
 def _v1_corner_x(ctx: _RoutingCtx, src: Station, sx: float, corner_x: float) -> float:
     """Push *corner_x* right so the source-side V1 channel keeps
     ``SECTION_ROUTE_CLEARANCE`` from the source section's right edge.
@@ -1523,6 +1538,33 @@ def _v1_corner_x(ctx: _RoutingCtx, src: Station, sx: float, corner_x: float) -> 
         section_right = sx
     current_gap = sx + ctx.curve_radius - section_right
     return corner_x + max(0.0, SECTION_ROUTE_CLEARANCE - current_gap)
+
+
+def _wrap_fan_geometry(
+    ctx: _RoutingCtx, edge: Edge, src: Station, i: int, n: int, vertical: Direction
+) -> tuple[tuple[int, int] | None, int, float, float]:
+    """Resolve an entry-wrap's bundle stagger and source-side first corner.
+
+    Unifies the junction fan and the edge's own ``(i, n)`` sub-bundle into one
+    stagger: a fanned wrap takes its rank from the shared junction fan (so its
+    V1 downturn stays bundled with the junction's other downturning siblings),
+    an un-fanned one from its own sub-bundle.  Returns ``(fan, pos_n, delta,
+    corner_x)`` -- the fan tuple (or ``None``), the bundle size, this line's
+    lateral offset, and the first-corner X (lead-in right of the source, clear
+    of its edge).
+    """
+    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
+    pos_i, pos_n = fan if fan is not None else (i, n)
+    delta = l_shape_radii(
+        pos_i,
+        pos_n,
+        vertical=vertical,
+        offset_step=ctx.offset_step,
+        base_radius=ctx.curve_radius,
+    )[0]
+    mid_x = src.x + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
+    corner_x = _v1_corner_x(ctx, src, src.x, mid_x)
+    return fan, pos_n, delta, corner_x
 
 
 def _route_left_entry_wrap(
@@ -1553,22 +1595,7 @@ def _route_left_entry_wrap(
     dy = ty - sy
     vertical = vertical_direction(dy)
 
-    # Unify the junction fan and the edge's own sub-bundle into one stagger.
-    # The shared first corner pivots all of the junction's outgoing edges
-    # through one fan, so a fanned wrap takes its position from (ui, un); an
-    # un-fanned one from its own (i, n).
-    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
-    pos_i, pos_n = fan if fan is not None else (i, n)
-    delta = l_shape_radii(
-        pos_i,
-        pos_n,
-        vertical=vertical,
-        offset_step=ctx.offset_step,
-        base_radius=ctx.curve_radius,
-    )[0]
-    # First-corner X centre: lead-in right of the source, clear of its edge.
-    mid_x = sx + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
-    corner_x = _v1_corner_x(ctx, src, sx, mid_x)
+    fan, pos_n, delta, corner_x = _wrap_fan_geometry(ctx, edge, src, i, n, vertical)
 
     # Horizontal channel Y in the inter-row gap.  ``inter_row_channel_y`` clamps
     # the per-line stagger inside the clearance band (a narrow gap must not let
@@ -2155,32 +2182,14 @@ def _route_right_entry_wrap(
 
     assert src_col is not None and tgt_col is not None
 
-    # Unify the junction fan and the edge's own sub-bundle into one stagger.
-    # Sharing the source-side first corner keeps a fanned wrap's V1 downturn
-    # bundled with the junction's other downturning siblings.
-    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
-    pos_i, pos_n = fan if fan is not None else (i, n)
-    delta = l_shape_radii(
-        pos_i,
-        pos_n,
-        vertical=vertical,
-        offset_step=ctx.offset_step,
-        base_radius=ctx.curve_radius,
-    )[0]
-
-    # First-corner X centre: lead-in right of the source, clear of its edge.
-    mid_x = sx + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
-    v1_x = _v1_corner_x(ctx, src, sx, mid_x)
+    _fan, pos_n, delta, corner_x = _wrap_fan_geometry(ctx, edge, src, i, n, vertical)
 
     # Horizontal channel Y centre, below the source row's sections.
     hy = bypass_bottom_y(ctx.graph, src_col, tgt_col, BYPASS_CLEARANCE, src_row=src_row)
 
     # V2 descent channel centre, just past the entry port in the gap to the
     # right of the target column.
-    base_gap = ctx.curve_radius + ctx.offset_step
-    max_delta = (pos_n - 1) * ctx.offset_step / 2
-    extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
-    vx = tx + base_gap + extra_clearance
+    vx = _right_entry_descent_x(ctx, tx, pos_n)
 
     # Centreline: R-D-R-D-L loop pinned to the source.  Each port endpoint
     # pre-subtracts the member's normal-projected offset so the line lands
@@ -2190,8 +2199,8 @@ def _route_right_entry_wrap(
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
     centerline = [
         (sx, sy + src_off + delta),
-        (v1_x, sy + src_off + delta),
-        (v1_x, hy),
+        (corner_x, sy + src_off + delta),
+        (corner_x, hy),
         (vx, hy),
         (vx, ty + tgt_off - delta),
         (tx, ty + tgt_off - delta),
@@ -2287,20 +2296,7 @@ def _build_right_entry_wrap_route(
     ex, ey = entry_port.x, entry_port.y
     vertical = vertical_direction(ey - sy)
 
-    # Unify the junction fan and the edge's own sub-bundle into one stagger.
-    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
-    pos_i, pos_n = fan if fan is not None else (i, n)
-    delta = l_shape_radii(
-        pos_i,
-        pos_n,
-        vertical=vertical,
-        offset_step=ctx.offset_step,
-        base_radius=ctx.curve_radius,
-    )[0]
-
-    # First-corner X centre: lead-in right of the source, clear of its edge.
-    mid_x = sx + ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
-    corner_x = _v1_corner_x(ctx, src, sx, mid_x)
+    _fan, pos_n, delta, corner_x = _wrap_fan_geometry(ctx, edge, src, i, n, vertical)
 
     # V_down/up channel centre, just RIGHT of the target section's bbox in the
     # gap to the right of the target column.
@@ -2312,10 +2308,7 @@ def _build_right_entry_wrap_route(
         if ep_section and ep_section.bbox_w > 0
         else ex
     )
-    base_gap = ctx.curve_radius + ctx.offset_step
-    max_delta = (pos_n - 1) * ctx.offset_step / 2
-    extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
-    vx = section_right + base_gap + extra_clearance
+    vx = _right_entry_descent_x(ctx, section_right, pos_n)
 
     # Centreline: R-D-R-D-L loop pinned to the source, right out of the source,
     # down to the traverse channel, right past the target's right edge, to the
