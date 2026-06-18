@@ -37,7 +37,9 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import (
     _get_offset,
     _RoutingCtx,
-    _tb_x_offset,
+)
+from nf_metro.layout.routing.perp import (
+    _perp_riser_lateral,
 )
 from nf_metro.layout.routing.tb_handlers import (
     _compute_diagonal_placement,
@@ -197,59 +199,44 @@ def _route_perp_exit_bundle(
 ) -> RoutedPath | None:
     """Fan a co-travelling perpendicular-exit bundle along one turning centreline.
 
-    The centreline runs the trunk at the bundle's mean source-side render Y,
-    turns once, and leaves vertically at the bundle's mean exit X::
+    The centreline runs the trunk to the exit X, turns once, and leaves
+    vertically::
 
-        (sx, hy) -> (vx, hy) -> (vx, ty)
+        (sx, sy) -> (tx, sy) -> (tx, ty)
 
-    Every line is a perpendicular offset of it: the trunk run carries each line's
-    source-side render Y and the vertical leg its exit X.
-    :func:`build_tapered_bundle` anchors the bend on the bundle's
+    Each line is a perpendicular offset of it: the trunk run carries the line's
+    source-side render Y and the vertical leg its exit-trunk X (via
+    :func:`~nf_metro.layout.routing.perp._perp_riser_lateral`, the shared TOP/BOTTOM
+    convention).  :func:`build_tapered_bundle` anchors the bend on the bundle's
     innermost-of-turn line, so the per-line gap stays constant through the corner
     and no inside-of-turn arc pinches below the floor radius.
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
     is_top = side == PortSide.TOP
-    _member_edges, line_ids, edge_by_line = gather_member_edges(ctx.graph, edge)
+    _member_edges, line_ids, _edge_by_line = gather_member_edges(ctx.graph, edge)
 
-    src_offs = {lid: _get_offset(ctx, edge.source, lid) for lid in line_ids}
-    # The vertical leg leaves on the target trunk's per-line X: a TOP exit reads
-    # it straight off the station offset; a BOTTOM exit reverses it into the
-    # TB-trunk convention, matching how a vertical drop into that trunk stacks.
-    tgt_x = {
-        lid: _get_offset(ctx, edge.target, lid)
-        if is_top
-        else _tb_x_offset(ctx, edge.target, lid, src.section_id)
-        for lid in line_ids
-    }
-    src_center = sum(src_offs.values()) / len(src_offs)
-    tgt_center = sum(tgt_x.values()) / len(tgt_x)
-    hy_c = sy + src_center
-    vx_c = tx + tgt_center
+    # The trunk run turns +/-x to the exit X; on an RL section the builder's
+    # right-hand normal flips the run's per-line render Y, so the source offset
+    # carries that leg's travel sign.
+    hsign = 1.0 if tx >= sx else -1.0
 
-    # Offsets are perpendicular displacements from the centreline in the builder's
-    # right-hand-normal convention, so each picks up the sign of its leg's travel
-    # direction: the trunk run turns +/-x and the vertical leave rises (TOP) or
-    # descends (BOTTOM).
-    hsign = 1.0 if vx_c >= sx else -1.0
-    vsign = 1.0 if ty >= hy_c else -1.0
-    src_member = {lid: (src_offs[lid] - src_center) * hsign for lid in line_ids}
-    tgt_member = {lid: -(tgt_x[lid] - tgt_center) * vsign for lid in line_ids}
+    def source_offset(line_id: str) -> float:
+        return _get_offset(ctx, edge.source, line_id) * hsign
+
+    def exit_offset(line_id: str) -> float:
+        # The vertical leave seats each line on the exit trunk's per-line X; the
+        # right-hand normal reverses a BOTTOM (descending) leg, so the lateral is
+        # negated there to cancel it back.
+        d = _perp_riser_lateral(ctx, edge.target, line_id, side, src.section_id)
+        return d if is_top else -d
 
     routes = build_tapered_bundle(
-        [
-            (
-                edge_by_line[edge.line_id],
-                edge.line_id,
-                src_member[edge.line_id],
-                tgt_member[edge.line_id],
-            )
-        ],
-        [(sx, hy_c), (vx_c, hy_c), (vx_c, ty)],
+        [(edge, edge.line_id, source_offset(edge.line_id), exit_offset(edge.line_id))],
+        [(sx, sy), (tx, sy), (tx, ty)],
         transition_leg=1,
         base_radius=ctx.curve_radius,
-        bundle_offsets=[(src_member[lid], tgt_member[lid]) for lid in line_ids],
+        bundle_offsets=[(source_offset(lid), exit_offset(lid)) for lid in line_ids],
         is_inter_section=False,
         normalize_exempt=False,
     )
