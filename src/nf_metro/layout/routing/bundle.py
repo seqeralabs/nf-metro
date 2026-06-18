@@ -153,8 +153,8 @@ def build_tapered_bundle(
     ----------
     members
         ``(edge, line_id, src_offset, tgt_offset)`` per line.  ``src_offset ==
-        tgt_offset`` for every line reduces to the rigid bundle, byte-identical
-        to :func:`build_concentric_bundle`.
+        tgt_offset`` for every line reduces to the rigid bundle, equivalent to
+        :func:`build_concentric_bundle`.
     centerline
         ``>= 2`` axis-aligned vertices; each consecutive pair differs in exactly
         one axis.

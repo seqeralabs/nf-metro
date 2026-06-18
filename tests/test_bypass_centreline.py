@@ -74,8 +74,8 @@ def test_bypass_corner_radii_anchored_at_floor(path: Path) -> None:
 
     The builder anchors each gap's innermost-of-turn line at ``CURVE_RADIUS``
     from the declared fan, so no inside-of-turn arc of a deep fan falls below it.
-    A single-member call that failed to declare its fan would re-introduce a
-    sub-floor (eventually negative) arc, which this catches.
+    A single-member call that fails to declare its fan produces a sub-floor
+    (eventually negative) arc, which this catches.
     """
     _graph, _offsets, routes = _route(path)
     bypasses = _bypass_routes(routes)

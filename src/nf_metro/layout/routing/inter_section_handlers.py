@@ -937,17 +937,23 @@ def _route_bypass(
         (gap2_mid, tgt_y),
         (effective_tx, tgt_y),
     ]
+
     # Declare each gap's CHANNEL bundle so the builder anchors its corners on
     # the innermost line that actually co-travels the descent/rise -- the
     # ``g*_n`` lines sharing the channel, not the wider junction fan that only
     # shares the lead-in pivot.  A line that peels off and descends alone
     # (``g1_n == 1``) then turns at the floor with a single-line radius rather
-    # than the fan's wide sweep.  Each bundle is built relative to this line at
-    # its own ``g*_j`` rank (the member is always included, whatever the
-    # lead-in position), and paired with the other gap's centre so the
-    # per-corner anchor reads only its own gap's spread.
-    src_anchor = [sigma1 + (g1_j - i) * ctx.offset_step * n1x for i in range(g1_n)]
-    tgt_anchor = [sigma2 + (g2_j - i) * ctx.offset_step * n3x for i in range(g2_n)]
+    # than the fan's wide sweep.  Each fan is built relative to this line at its
+    # own ``g*_j`` rank, so the member is always included whatever the lead-in
+    # position placed its offset at.
+    def channel_fan(member_off: float, rank: int, n: int, sign: float) -> list[float]:
+        return [member_off + (rank - i) * ctx.offset_step * sign for i in range(n)]
+
+    src_anchor = channel_fan(sigma1, g1_j, g1_n, n1x)
+    tgt_anchor = channel_fan(sigma2, g2_j, g2_n, n3x)
+    # Pair each gap's fan with THIS line's offset in the other gap (not 0): the
+    # source corners read only the source spread and the target corners only the
+    # target spread, so neither gap's fan pulls the other's per-corner anchor.
     bundle = [(s, sigma2) for s in src_anchor] + [(sigma1, t) for t in tgt_anchor]
     routes = build_tapered_bundle(
         [(edge, edge.line_id, sigma1, sigma2)],
