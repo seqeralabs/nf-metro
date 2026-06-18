@@ -194,6 +194,7 @@ class Edge:
     source: str
     target: str
     line_id: str
+    source_line: int | None = None
 
 
 @dataclass

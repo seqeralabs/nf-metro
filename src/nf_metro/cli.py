@@ -306,13 +306,12 @@ def validate(input_file: Path) -> None:
     text = input_file.read_text()
     try:
         graph = parse_metro_mermaid(text)
-    except Exception as e:
-        click.echo(f"Parse error: {e}", err=True)
-        raise SystemExit(1)
+    except ValueError as e:
+        raise click.ClickException(str(e))
 
     errors = [issue for issue in validate_graph(graph) if issue.severity == ERROR]
     if errors:
-        _fail_validation(issue.message for issue in errors)
+        _fail_validation(issue.format(input_file) for issue in errors)
 
     try:
         compute_layout(graph)

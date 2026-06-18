@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import warnings
+from collections import defaultdict
 
 from nf_metro.parser.directives import _apply_directive
 from nf_metro.parser.grammar import (
@@ -40,6 +41,11 @@ from nf_metro.parser.resolve import (
     _remove_empty_sections,
     _resolve_sections,
 )
+
+
+def _line_hint(line: int | None) -> str:
+    """Return `` (line N)`` when a source line is known, else empty string."""
+    return f" (line {line})" if line is not None else ""
 
 
 def _check_unsupported_input(text: str) -> None:
@@ -102,12 +108,15 @@ def _validate_edge_annotations(graph: MetroGraph) -> None:
         return
 
     bad_edges = []
-    undeclared_lines = set()
+    undeclared_lines: defaultdict[str, set[int]] = defaultdict(set)
     for edge in graph.edges:
         if edge.line_id == "default":
             bad_edges.append(edge)
         elif graph.lines and edge.line_id not in graph.lines:
-            undeclared_lines.add(edge.line_id)
+            if edge.source_line is not None:
+                undeclared_lines[edge.line_id].add(edge.source_line)
+            else:
+                undeclared_lines.setdefault(edge.line_id, set())
 
     if bad_edges:
         examples = []
@@ -116,7 +125,9 @@ def _validate_edge_annotations(graph: MetroGraph) -> None:
             key = (edge.source, edge.target)
             if key not in seen:
                 seen.add(key)
-                examples.append(f"  {edge.source} --> {edge.target}")
+                examples.append(
+                    f"  {edge.source} --> {edge.target}{_line_hint(edge.source_line)}"
+                )
         raise ValueError(
             "Some edges have no metro line annotation. "
             "Every edge must specify which line(s) it belongs to "
@@ -131,7 +142,10 @@ def _validate_edge_annotations(graph: MetroGraph) -> None:
     if undeclared_lines:
         raise ValueError(
             "Some edges reference undeclared metro lines: "
-            + ", ".join(sorted(undeclared_lines))
+            + ", ".join(
+                f"'{lid}'{_line_hint(min(undeclared_lines[lid], default=None))}"
+                for lid in sorted(undeclared_lines)
+            )
             + "\n\n"
             "Declare each line with a %%metro line: directive, e.g.:\n"
             + "\n".join(
@@ -323,4 +337,11 @@ def _apply_edge(edge: _Edge, graph: MetroGraph, section_id: str | None) -> None:
             _ensure_station(graph, node_id, section_id)
 
     for line_id in edge.line_ids:
-        graph.add_edge(Edge(source=edge.source, target=edge.target, line_id=line_id))
+        graph.add_edge(
+            Edge(
+                source=edge.source,
+                target=edge.target,
+                line_id=line_id,
+                source_line=edge.line_no,
+            )
+        )
