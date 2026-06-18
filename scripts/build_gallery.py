@@ -601,6 +601,21 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "route through that gap rather than diving below the whole canvas.",
     ),
     (
+        "merge_pullaway",
+        TOPOLOGIES_DIR,
+        "One line converges on a merge from two stacked rows of the same "
+        "column; the cross-row feeder drops onto the trunk's pull-away bypass "
+        "channel and the two travel as a single stroke into the entry.",
+    ),
+    (
+        "merge_right_entry",
+        TOPOLOGIES_DIR,
+        "One line converges on a RIGHT entry from feeders spread across "
+        "several columns: the farthest carries the trunk that loops under the "
+        "sink, and the nearer feeder drops onto that same channel instead of "
+        "taking a second path over the top.",
+    ),
+    (
         "peeloff_riser_respace",
         TOPOLOGIES_DIR,
         "Four lines from two sources ride one shared bypass trunk and rise "

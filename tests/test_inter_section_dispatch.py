@@ -49,6 +49,7 @@ def _facts(**overrides: object) -> H._InterFacts:
         bottom_exit_junctions=set(),
         tb_sections=set(),
         station_offsets={},
+        merge=SimpleNamespace(trunk_source={}),
     )
     defaults: dict[str, object] = dict(
         edge=SimpleNamespace(source="a", target="b", line_id="L"),
@@ -98,6 +99,7 @@ _CASES = [
                 bottom_exit_junctions=set(),
                 tb_sections={"src_sec"},
                 station_offsets={"x": 1.0},
+                merge=SimpleNamespace(trunk_source={}),
             ),
         ),
         "TB bottom exit",
@@ -118,10 +120,46 @@ _CASES = [
                 bottom_exit_junctions={"j"},
                 tb_sections=set(),
                 station_offsets={},
+                merge=SimpleNamespace(trunk_source={}),
             ),
         ),
         "bottom-exit junction",
         id="bottom-exit-junction",
+    ),
+    pytest.param(
+        # The trunk feeder of a merge routes to the entry port even when it
+        # also needs a bypass; "merge trunk" must win over "bypass family".
+        dict(
+            edge=SimpleNamespace(source="t", target="m", line_id="L"),
+            needs_bypass=True,
+            ctx=SimpleNamespace(
+                junction_ids=set(),
+                bottom_exit_junctions=set(),
+                tb_sections=set(),
+                station_offsets={},
+                merge=SimpleNamespace(trunk_source={"m": "t"}),
+            ),
+        ),
+        "merge trunk",
+        id="merge-trunk-beats-bypass",
+    ),
+    pytest.param(
+        # A non-trunk feeder of a merge descends onto the trunk channel as a
+        # branch even when it would otherwise route as a plain merge-entry
+        # feed; "merge branch" must win over "merge entry family".
+        dict(
+            edge=SimpleNamespace(source="b", target="m", line_id="L"),
+            merge_ep=SimpleNamespace(id="ep", x=0.0, y=0.0, section_id="m"),
+            ctx=SimpleNamespace(
+                junction_ids=set(),
+                bottom_exit_junctions=set(),
+                tb_sections=set(),
+                station_offsets={},
+                merge=SimpleNamespace(trunk_source={"m": "t"}),
+            ),
+        ),
+        "merge branch",
+        id="merge-branch-beats-merge-entry",
     ),
     pytest.param(dict(needs_bypass=True), "bypass family", id="bypass"),
     pytest.param(
@@ -133,6 +171,7 @@ _CASES = [
                 bottom_exit_junctions=set(),
                 tb_sections=set(),
                 station_offsets={},
+                merge=SimpleNamespace(trunk_source={}),
             ),
         ),
         "near-vertical same-col junction",

@@ -1,0 +1,35 @@
+%%metro title: Merge Right Entry Cross Row
+%%metro style: dark
+%%metro line: main | Main | #0570b0
+%%metro grid: sink | 0,0
+%%metro grid: source | 2,1
+%%metro grid: extra | 4,1
+%%metro grid: step_a | 6,1
+
+graph LR
+    subgraph sink [Sink]
+        %%metro entry: right | main
+        t1[Collect]
+        t2[Report]
+        t1 -->|main| t2
+    end
+    subgraph source [Source]
+        s1[Produce]
+        s2[Prepare]
+        s1 -->|main| s2
+    end
+    subgraph extra [Extra]
+        e1[Extra]
+        e2[Extra Out]
+        e1 -->|main| e2
+    end
+    subgraph step_a [Step A]
+        a1[Process A]
+        a2[Out A]
+        a1 -->|main| a2
+    end
+    s2 -->|main| e1
+    s2 -->|main| t1
+    e2 -->|main| a1
+    e2 -->|main| t1
+    a2 -->|main| t1

@@ -1,0 +1,40 @@
+%%metro title: Merge trunk pull-away cross-row sibling
+%%metro style: dark
+%%metro line: main | Main | #0570b0
+%%metro grid: wide_src | 0,0
+%%metro grid: obstacle | 1,0
+%%metro grid: sibling_sec | 0,1
+%%metro grid: side_dst | 2,1
+%%metro grid: target | 2,0
+
+graph LR
+    subgraph wide_src [Wide Source]
+        w1[Start]
+        w2[Out]
+        w1 -->|main| w2
+    end
+    subgraph obstacle [Obstacle]
+        o1[Block]
+        o2[Pass]
+        o1 -->|main| o2
+    end
+    subgraph sibling_sec [Sibling]
+        s1[Step]
+        s2[Done]
+        s1 -->|main| s2
+    end
+    subgraph side_dst [Side Dest]
+        sd1[Side]
+        sd2[Out]
+        sd1 -->|main| sd2
+    end
+    subgraph target [Target]
+        %%metro entry: left | main
+        t1[Merge]
+        t2[Report]
+        t1 -->|main| t2
+    end
+    w2 -->|main| o1
+    w2 -->|main| t1
+    s2 -->|main| sd1
+    s2 -->|main| t1

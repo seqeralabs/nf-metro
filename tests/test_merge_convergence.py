@@ -1,0 +1,132 @@
+"""Same-line merge feeders converge as a single stroke.
+
+A merge junction has N>1 feeders of one metro line converging on a single
+entry port.  The farthest feeder carries a full bypass to the entry (the
+"trunk"); every other feeder is a branch that descends onto the trunk's bypass
+channel, so the converging line is a single stroke up to the point it genuinely
+diverges.  Two invariants pin that: no two same-line feeders run offset-parallel
+(which would draw as duplicate tracks, or abort the render when their descents
+land an offset-step apart), and each non-trunk feeder terminates on the trunk's
+channel rather than reaching the entry port on an independent path.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS, DIAGONAL_RUN
+from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing.context import _build_routing_context
+from nf_metro.layout.routing.invariants import check_no_same_line_parallel_descents
+from nf_metro.parser.mermaid import parse_metro_mermaid
+
+_ROOT = Path(__file__).resolve().parents[1]
+_TOPOLOGIES = _ROOT / "examples" / "topologies"
+
+# around_below converges a merge from two stacked rows of the same column, with
+# the merge entry in the bottommost grid row.  It is kept inline rather than as
+# a corpus fixture: its trunk's inter-row bypass channel grazes the upper row's
+# box in the cramped gap above the bottom row (an independent placement defect),
+# which the validate=True corpus checks would flag for reasons unrelated to the
+# convergence this module pins.
+_AROUND_BELOW = """\
+%%metro title: Around Below Col0 Merge Entry
+%%metro style: dark
+%%metro line: a | A | #e63946
+%%metro line: b | B | #0570b0
+%%metro grid: src_fanA | 2,0
+%%metro grid: src_fanB | 2,1
+%%metro grid: side_a | 3,0
+%%metro grid: middle | 1,1
+%%metro grid: target | 0,2
+
+graph LR
+    subgraph src_fanA [Fan Source A]
+        fsa1[In]
+        fsa2[Out]
+        fsa1 -->|a| fsa2
+    end
+    subgraph src_fanB [Fan Source B]
+        fsb1[In]
+        fsb2[Out]
+        fsb1 -->|a| fsb2
+    end
+    subgraph side_a [Side]
+        %%metro entry: left | a
+        sia1[Side]
+        sia2[Out]
+        sia1 -->|a| sia2
+    end
+    subgraph middle [Middle]
+        m1[Process]
+        m2[Out]
+        m1 -->|b| m2
+    end
+    subgraph target [Target]
+        %%metro entry: left | a
+        t1[Process]
+        t2[Out]
+        t1 -->|a| t2
+    end
+    fsa2 -->|a| t1
+    fsa2 -->|a| sia1
+    fsb2 -->|a| t1
+    fsb2 -->|a| sia1
+"""
+
+# merge_pullaway and merge_right_entry are clean topology fixtures; around_below
+# carries an independent residual (see above) so it lives inline as mmd text.
+_FIXTURES = {
+    "around_below": _AROUND_BELOW,
+    "merge_pullaway": (_TOPOLOGIES / "merge_pullaway.mmd").read_text(),
+    "merge_right_entry": (_TOPOLOGIES / "merge_right_entry.mmd").read_text(),
+}
+
+
+def _layout_and_route(mmd: str):
+    graph = parse_metro_mermaid(mmd)
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    ctx = _build_routing_context(graph, DIAGONAL_RUN, CURVE_RADIUS, offsets)
+    return graph, routes, offsets, ctx
+
+
+@pytest.mark.parametrize("name", sorted(_FIXTURES))
+def test_no_same_line_parallel_merge_descents(name: str) -> None:
+    """No two same-line feeders of a merge run offset-parallel on the V axis."""
+    graph, routes, offsets, _ctx = _layout_and_route(_FIXTURES[name])
+    violations = check_no_same_line_parallel_descents(graph, routes, offsets)
+    assert not violations, "\n".join(v.message() for v in violations)
+
+
+@pytest.mark.parametrize("name", sorted(_FIXTURES))
+def test_merge_branches_join_trunk_channel(name: str) -> None:
+    """Each non-trunk feeder terminates on the trunk's bypass channel.
+
+    A branch that ends at the channel ``Y`` (``trunk_by``) has dropped onto the
+    trunk to travel as one stroke; one that ends elsewhere (at the entry port,
+    or looping around below) is a second independent stroke into the merge.
+    """
+    graph, routes, _offsets, ctx = _layout_and_route(_FIXTURES[name])
+    by_key = {(r.edge.source, r.edge.target, r.line_id): r for r in routes}
+    checked = 0
+    for mjid, trunk_src in ctx.merge.trunk_source.items():
+        trunk_by = ctx.merge.trunk_by[mjid]
+        for e in graph.edges_to(mjid):
+            if e.source == trunk_src:
+                continue
+            rp = by_key.get((e.source, e.target, e.line_id))
+            if rp is None:
+                continue
+            checked += 1
+            end_y = rp.points[-1][1]
+            assert abs(end_y - trunk_by) <= COORD_TOLERANCE, (
+                f"{name}: non-trunk feeder {e.source}->{mjid} ends at "
+                f"y={end_y:.1f}, not on the trunk channel y={trunk_by:.1f} -- "
+                "routed as a separate stroke rather than joining the trunk"
+            )
+    assert checked, f"{name}: expected at least one non-trunk merge feeder"
