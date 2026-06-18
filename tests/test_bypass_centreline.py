@@ -94,3 +94,20 @@ def test_bypass_routes_are_offset_baked(path: Path) -> None:
     bypasses = _bypass_routes(routes)
     assert bypasses, f"{path.stem}: expected at least one U-shaped bypass route"
     assert all(r.offsets_applied for r in bypasses)
+
+
+def test_single_line_bypass_descent_turns_tight() -> None:
+    """A line that peels off and descends a gap alone turns at the floor radius.
+
+    The QC line in ``bypass_fan_in_outer_slot`` shares a five-line junction fan
+    at its lead-in but descends the gap on its own, so its descent corners
+    (lead-in turn and the turn into the below-row traverse) must take the
+    single-line floor radius.  Anchoring them on the wider junction fan rather
+    than the gap's own one-line channel would sweep the lone line wide.
+    """
+    path = EXAMPLES / "topologies" / "bypass_fan_in_outer_slot.mmd"
+    _graph, _offsets, routes = _route(path)
+    qc = next(r for r in _bypass_routes(routes) if r.line_id == "qc")
+    # curve_radii[0:2] are the two source-side (gap1 descent) corners.
+    assert qc.curve_radii[0] == pytest.approx(CURVE_RADIUS, abs=0.01)
+    assert qc.curve_radii[1] == pytest.approx(CURVE_RADIUS, abs=0.01)
