@@ -388,7 +388,8 @@ def _points_to_svg_path(
 ) -> str:
     """Convert a list of waypoints to an SVG path 'd' attribute.
 
-    Uses resolve_curve_radii for consistent radius clamping with svg.py.
+    Shares ``resolve_curve_radii`` and ``curve_tangents`` with the static SVG
+    renderer so animation corners round identically to the drawn map.
     """
     if len(pts) < 2:
         return ""

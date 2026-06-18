@@ -681,6 +681,19 @@ def _q_corner_triples(d: str) -> list[tuple[tuple, tuple, tuple]]:
     return triples
 
 
+def _expected_q_triples(tangents) -> list[tuple[tuple, tuple, tuple]]:
+    """Curved tangents rounded to the 2dp that a path 'd' string emits."""
+    return [
+        (
+            (round(t.before[0], 2), round(t.before[1], 2)),
+            (round(t.corner[0], 2), round(t.corner[1], 2)),
+            (round(t.after[0], 2), round(t.after[1], 2)),
+        )
+        for t in tangents
+        if t.curved
+    ]
+
+
 class TestSharedCornerTangents:
     """Static SVG and animation must round each corner identically.
 
@@ -720,17 +733,8 @@ class TestSharedCornerTangents:
         pts = self.POLYLINES[name]
         resolved = resolve_curve_radii(pts, None, default_radius=CURVE_RADIUS)
         shared = curve_tangents(pts, resolved)
-        expected = [
-            (
-                (round(t.before[0], 2), round(t.before[1], 2)),
-                (round(t.corner[0], 2), round(t.corner[1], 2)),
-                (round(t.after[0], 2), round(t.after[1], 2)),
-            )
-            for t in shared
-            if t.curved
-        ]
         d = _points_to_svg_path(pts, curve_radius=CURVE_RADIUS)
-        assert _q_corner_triples(d) == expected
+        assert _q_corner_triples(d) == _expected_q_triples(shared)
 
     @pytest.mark.parametrize(
         "fixture",
@@ -756,17 +760,7 @@ class TestSharedCornerTangents:
             d = _points_to_svg_path(
                 pts, curve_radius=CURVE_RADIUS, route_curve_radii=route.curve_radii
             )
-            anim = _q_corner_triples(d)
-            expected = [
-                (
-                    (round(t.before[0], 2), round(t.before[1], 2)),
-                    (round(t.corner[0], 2), round(t.corner[1], 2)),
-                    (round(t.after[0], 2), round(t.after[1], 2)),
-                )
-                for t in shared
-                if t.curved
-            ]
-            assert anim == expected
+            assert _q_corner_triples(d) == _expected_q_triples(shared)
             checked += 1
         if checked == 0:
             pytest.skip(f"no multi-corner routes in {fixture.stem}")
