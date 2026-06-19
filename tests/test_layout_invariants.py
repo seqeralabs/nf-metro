@@ -63,7 +63,11 @@ from nf_metro.layout.phases.off_track import (
     _reanchor_off_track_to_consumer,
     _section_distinct_trunk_ys,
 )
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    compute_station_offsets,
+    route_edges,
+    route_edges_centred,
+)
 from nf_metro.layout.routing.common import resolve_section
 from nf_metro.layout.routing.invariants import (
     check_bundle_order_preserved,
@@ -2015,15 +2019,15 @@ _LABEL_STRIKE_FIXTURES = _params_with_xfails(ALL_FIXTURES, _LABEL_STRIKE_DIAGONA
 def _label_glyph_strikes(fixture: str) -> list[tuple[str, str]]:
     """Return ``(station_id, line_id)`` pairs where a foreign line strikes a label.
 
-    Mirrors the renderer: ``route_edges`` mutates Station.x via diagonal
-    centring and the renderer places labels on that mutated geometry, so the
-    label glyph-ink boxes are built without restoring X.  A pair is reported
-    when a segment of a line the station does not carry (and which is not an
-    endpoint of the segment's edge) crosses the label's glyph-ink box.
+    Mirrors the renderer: ``route_edges_centred`` settles the diagonal-centred
+    markers onto the graph and the renderer places labels on that geometry, so
+    the label glyph-ink boxes are built on the centred markers.  A pair is
+    reported when a segment of a line the station does not carry (and which is
+    not an endpoint of the segment's edge) crosses the label's glyph-ink box.
     """
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
-    routes = route_edges(graph, station_offsets=offsets)
+    routes = route_edges_centred(graph, station_offsets=offsets)
     theme = THEMES["nfcore"]
     icon_obstacles = _compute_icon_obstacles(graph, theme, offsets)
     placements = place_labels(

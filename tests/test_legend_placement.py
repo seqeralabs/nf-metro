@@ -47,7 +47,7 @@ def _place(text: str):
     graph = parse_metro_mermaid(text)
     compute_layout(graph)
     offsets = S.compute_station_offsets(graph)
-    routes = S.route_edges(graph, station_offsets=offsets)
+    routes = S.route_edges_centred(graph, station_offsets=offsets)
     max_x, max_y = S._compute_canvas_bounds(graph, routes, False)
     pos = graph.legend_position
     show_logo = bool(graph.logo_path and Path(graph.logo_path).is_file())

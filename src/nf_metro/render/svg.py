@@ -25,7 +25,11 @@ from nf_metro.layout.labels import (
     font_scale_context,
     place_labels,
 )
-from nf_metro.layout.routing import RoutedPath, compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    RoutedPath,
+    compute_station_offsets,
+    route_edges_centred,
+)
 from nf_metro.layout.routing.corners import curve_tangents, resolve_curve_radii
 from nf_metro.layout.routing.invariants import assert_render_curve_invariants
 from nf_metro.manifest import node_data_attrs
@@ -456,7 +460,7 @@ def _render_svg_scaled(
     )
 
     station_offsets = compute_station_offsets(graph)
-    routes = route_edges(graph, station_offsets=station_offsets)
+    routes = route_edges_centred(graph, station_offsets=station_offsets)
     assert_render_curve_invariants(graph, routes, station_offsets)
 
     # Compute labels early so section bbox expansions are applied

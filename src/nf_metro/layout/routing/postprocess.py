@@ -471,12 +471,17 @@ def _apply_station_moves(
     graph: MetroGraph,
     candidates: dict[str, _StationMoveCandidate],
     original_x: dict[str, float],
+    moves: dict[str, float],
 ) -> None:
-    """Second pass: apply station-move candidates with companion consensus.
+    """Second pass: record station-move requests with companion consensus.
 
     Only moves a station when all column companions (visible stations at
     the same original X in the same section) are also candidates.  This
     preserves column alignment when only some stations want to centre.
+
+    The X-target is recorded in ``moves`` (a request the render path applies);
+    the routes bounding the station are adjusted here, since those are routing
+    output.  ``graph.stations`` is left untouched so routing is placement-pure.
     """
     for sid, (
         new_x,
@@ -509,7 +514,7 @@ def _apply_station_moves(
                 if any(c not in candidates for c in companions):
                     continue
 
-        station.x = new_x
+        moves[sid] = new_x
         for r in in_routes:
             r.points[-1] = (new_x, r.points[-1][1])
         for r in flat_in:
@@ -524,13 +529,23 @@ def _align_uncentered_siblings(
     routes: list[RoutedPath],
     graph: MetroGraph,
     original_x: dict[str, float],
+    moves: dict[str, float],
 ) -> None:
     """Post-pass: drag unmoved stations to match their centered siblings.
 
     Groups stations by (section, original_x).  Only operates when moved
     stations disagree (spread > 1px): finds the majority X position and
     realigns outliers and unmoved stations to match.
+
+    Reads each station's settled X from ``moves`` (the requests
+    :func:`_apply_station_moves` recorded), falling back to ``original_x``;
+    its own realignments are recorded back into ``moves`` rather than written
+    to ``graph.stations``, so routing stays placement-pure.
     """
+
+    def settled_x(sid: str) -> float:
+        return moves.get(sid, original_x[sid])
+
     col_groups: dict[tuple[str | None, float], list[str]] = defaultdict(list)
     for sid, s in graph.stations.items():
         if s.is_port or s.is_hidden:
@@ -552,17 +567,17 @@ def _align_uncentered_siblings(
         moved = [
             sid
             for sid in group
-            if abs(graph.stations[sid].x - original_x[sid]) > STATION_MOVE_TOLERANCE
+            if abs(settled_x(sid) - original_x[sid]) > STATION_MOVE_TOLERANCE
         ]
         unmoved = [
             sid
             for sid in group
-            if abs(graph.stations[sid].x - original_x[sid]) <= STATION_MOVE_TOLERANCE
+            if abs(settled_x(sid) - original_x[sid]) <= STATION_MOVE_TOLERANCE
         ]
         if not moved:
             continue
 
-        moved_xs = [graph.stations[sid].x for sid in moved]
+        moved_xs = [settled_x(sid) for sid in moved]
         if max(moved_xs) - min(moved_xs) <= 1.0:
             continue
         # Moved stations disagree on target X.  Find the majority
@@ -582,8 +597,8 @@ def _align_uncentered_siblings(
         target_x = majority_x
 
         for sid in unmoved:
-            old_x = graph.stations[sid].x
-            graph.stations[sid].x = target_x
+            old_x = settled_x(sid)
+            moves[sid] = target_x
             for rp in routes_by_src.get(sid, []):
                 if abs(rp.points[0][0] - old_x) < STATION_MOVE_TOLERANCE:
                     rp.points[0] = (target_x, rp.points[0][1])
@@ -592,7 +607,9 @@ def _align_uncentered_siblings(
                     rp.points[-1] = (target_x, rp.points[-1][1])
 
 
-def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None:
+def _center_bubble_stations(
+    routes: list[RoutedPath], graph: MetroGraph
+) -> dict[str, float]:
     """Shift diagonals so bubble stations sit centred on their flat segments.
 
     A "bubble station" branches off the trunk at a different Y, with a
@@ -606,15 +623,21 @@ def _center_bubble_stations(routes: list[RoutedPath], graph: MetroGraph) -> None
     1. **Candidate collection** - identifies stations needing centering;
        shifts simple diagonals directly, collects complex cases as
        station-move candidates.
-    2. **Station moves** - applies moves only when all column companions
+    2. **Station moves** - records moves only when all column companions
        also want to move (preserving column alignment).
     3. **Sibling alignment** - drags remaining unmoved stations to match
        the majority of their centered column group.
+
+    Route points are adjusted in place (routing output); the per-station
+    X-targets are returned as ``{station_id: x}`` move requests for the
+    render path to apply, so ``route_edges`` leaves ``graph.stations`` intact.
     """
     ctx = _build_bubble_ctx(routes, graph)
     candidates = _collect_centering_candidates(graph, ctx)
-    _apply_station_moves(graph, candidates, ctx.original_x)
-    _align_uncentered_siblings(routes, graph, ctx.original_x)
+    moves: dict[str, float] = {}
+    _apply_station_moves(graph, candidates, ctx.original_x, moves)
+    _align_uncentered_siblings(routes, graph, ctx.original_x, moves)
+    return moves
 
 
 def _clear_bypass_v_label_strikes(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:

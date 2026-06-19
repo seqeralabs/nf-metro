@@ -730,16 +730,10 @@ def _line_crossed_file_icon_sinks(graph: MetroGraph) -> set[str]:
     if not leaf_sinks:
         return set()
 
-    # route_edges' diagonal-centring pass mutates Station.x in place; this is
-    # a read-only probe, so snapshot and restore X around the call.
-    saved_x = {sid: s.x for sid, s in graph.stations.items()}
     try:
         routes = route_edges(graph, station_offsets=offsets)
     except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
         return set()
-    finally:
-        for sid, x in saved_x.items():
-            graph.stations[sid].x = x
 
     crossed: set[str] = set()
     for r in routes:

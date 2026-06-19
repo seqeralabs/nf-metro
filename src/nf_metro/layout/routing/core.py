@@ -133,11 +133,19 @@ def route_edges(
     diagonal_run: float = DIAGONAL_RUN,
     curve_radius: float = CURVE_RADIUS,
     station_offsets: dict[tuple[str, str], float] | None = None,
+    station_moves: dict[str, float] | None = None,
 ) -> list[RoutedPath]:
     """Route all edges with smooth direction changes.
 
     Detects cross-row edges (large Y gap relative to X gap) and routes
     them through a vertical connector at the fold edge.
+
+    Routing is pure with respect to placement: it never moves stations.  The
+    bubble-centring pass instead emits per-station X-targets as *move
+    requests*; when ``station_moves`` is supplied it is populated with
+    ``{station_id: x}`` for the render path to apply (settling the markers on
+    their centred flats).  Callers that omit it get a route they can inspect
+    without perturbing ``graph.stations``.
     """
     if graph.line_spread is LineSpread.RAILS:
         from nf_metro.layout.routing.rail import route_rail_edges
@@ -195,7 +203,9 @@ def route_edges(
         if result is not None:
             routes.append(result)
 
-    _center_bubble_stations(routes, graph)
+    moves = _center_bubble_stations(routes, graph)
+    if station_moves is not None:
+        station_moves.update(moves)
     _spread_diagonal_bundles(routes, ctx)
     _normalize_gap_channels(routes, ctx)
     _normalize_bypass_trunks(routes, ctx)
@@ -210,4 +220,36 @@ def route_edges(
     _join_fanout_upstream_tails(routes, ctx)
     _clear_bypass_v_label_strikes(routes, ctx)
 
+    return routes
+
+
+def route_edges_centred(
+    graph: MetroGraph,
+    diagonal_run: float = DIAGONAL_RUN,
+    curve_radius: float = CURVE_RADIUS,
+    station_offsets: dict[tuple[str, str], float] | None = None,
+) -> list[RoutedPath]:
+    """Route, then settle the bubble-centred markers onto ``graph.stations``.
+
+    The drawn variant of :func:`route_edges`: it applies the centring move
+    requests so any reader of marker / label geometry after routing (the SVG
+    render, the label-overlap spacing search, the render-output strike guards)
+    sees the markers on their centred flats.  Unlike :func:`route_edges` this
+    is *not* placement-pure -- it is the single named home for that mutation.
+
+    Inside a ``_restoring_layout_geometry`` scope the move is undone on exit,
+    so a probe can inspect the drawn geometry without perturbing the settled
+    layout.  Bisection / placement guards that must read the *un-centred*
+    placement geometry call :func:`route_edges` directly instead.
+    """
+    moves: dict[str, float] = {}
+    routes = route_edges(
+        graph,
+        diagonal_run=diagonal_run,
+        curve_radius=curve_radius,
+        station_offsets=station_offsets,
+        station_moves=moves,
+    )
+    for sid, x in moves.items():
+        graph.stations[sid].x = x
     return routes

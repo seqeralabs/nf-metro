@@ -30,18 +30,26 @@ class TestAlignUncenteredSiblings:
         station_specs: list[tuple[str, float, float]],
         original_xs: dict[str, float],
         edge_pairs: list[tuple[str, str]] | None = None,
-    ) -> tuple[MetroGraph, list[RoutedPath], dict[str, float]]:
-        """Build a minimal graph, routes, and original_x mapping.
+    ) -> tuple[MetroGraph, list[RoutedPath], dict[str, float], dict[str, float]]:
+        """Build a minimal graph, routes, original_x and settled-move mapping.
 
-        station_specs: list of (id, x, y) tuples.
+        station_specs: list of (id, x, y) tuples, where ``x`` is the station's
+        *settled* X (the move :func:`_apply_station_moves` would have recorded).
         original_xs: mapping of station id -> original x.
         edge_pairs: optional list of (source, target) pairs for routes.
+
+        Routing is placement-pure, so the settled positions are carried in a
+        ``moves`` dict rather than written to ``graph.stations``; the returned
+        dict seeds that input the way an upstream :func:`_apply_station_moves`
+        would.
         """
         graph = MetroGraph()
+        moves: dict[str, float] = {}
         for sid, x, y in station_specs:
             graph.stations[sid] = Station(
                 id=sid, label=sid.upper(), x=x, y=y, section_id="sec1"
             )
+            moves[sid] = x
 
         routes: list[RoutedPath] = []
         if edge_pairs:
@@ -56,7 +64,7 @@ class TestAlignUncenteredSiblings:
                 )
                 routes.append(rp)
 
-        return graph, routes, original_xs
+        return graph, routes, original_xs, moves
 
     def test_majority_path_aligns_outlier(self):
         """When >50% of moved stations agree on X, outliers are realigned.
@@ -72,11 +80,11 @@ class TestAlignUncenteredSiblings:
         ]
         original_xs = {"a": 100.0, "b": 100.0, "c": 100.0, "d": 100.0}
 
-        graph, routes, ox = self._make_graph_and_routes(specs, original_xs)
-        _align_uncentered_siblings(routes, graph, ox)
+        graph, routes, ox, moves = self._make_graph_and_routes(specs, original_xs)
+        _align_uncentered_siblings(routes, graph, ox, moves)
 
         # Outlier d should be dragged to 120.0 (majority X)
-        assert abs(graph.stations["d"].x - 120.0) < 0.5
+        assert abs(moves["d"] - 120.0) < 0.5
 
     def test_tie_skips_alignment(self):
         """When no clear majority (<=50%), alignment is skipped entirely.
@@ -92,15 +100,13 @@ class TestAlignUncenteredSiblings:
         ]
         original_xs = {"a": 100.0, "b": 100.0, "c": 100.0, "d": 100.0}
 
-        graph, routes, ox = self._make_graph_and_routes(specs, original_xs)
+        graph, routes, ox, moves = self._make_graph_and_routes(specs, original_xs)
 
-        # Record positions before
-        xs_before = {sid: s.x for sid, s in graph.stations.items()}
-        _align_uncentered_siblings(routes, graph, ox)
+        moves_before = dict(moves)
+        _align_uncentered_siblings(routes, graph, ox, moves)
 
-        # No majority -> no changes
-        for sid in ("a", "b", "c", "d"):
-            assert graph.stations[sid].x == xs_before[sid]
+        # No majority -> no settled positions change
+        assert moves == moves_before
 
     def test_majority_updates_route_endpoints(self):
         """Route endpoints should be updated when stations are dragged.
@@ -124,12 +130,14 @@ class TestAlignUncenteredSiblings:
         }
         edge_pairs = [("c", "d"), ("d", "e")]
 
-        graph, routes, ox = self._make_graph_and_routes(specs, original_xs, edge_pairs)
-        _align_uncentered_siblings(routes, graph, ox)
+        graph, routes, ox, moves = self._make_graph_and_routes(
+            specs, original_xs, edge_pairs
+        )
+        _align_uncentered_siblings(routes, graph, ox, moves)
 
         # d and e should be dragged to 120.0
-        assert abs(graph.stations["d"].x - 120.0) < 0.5
-        assert abs(graph.stations["e"].x - 120.0) < 0.5
+        assert abs(moves["d"] - 120.0) < 0.5
+        assert abs(moves["e"] - 120.0) < 0.5
 
         # Route c->d: target endpoint should be updated
         cd_route = [r for r in routes if r.edge.target == "d"][0]

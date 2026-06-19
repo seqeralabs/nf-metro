@@ -43,12 +43,12 @@ def _probe_label_placements(
     labels overlap their neighbours in a way the search should react to.
     """
     from nf_metro.layout.labels import place_labels
-    from nf_metro.layout.routing import compute_station_offsets, route_edges
+    from nf_metro.layout.routing import compute_station_offsets, route_edges_centred
 
     with _restoring_layout_geometry(graph):
         try:
             offsets = compute_station_offsets(graph)
-            routes = route_edges(graph, station_offsets=offsets)
+            routes = route_edges_centred(graph, station_offsets=offsets)
             placements = place_labels(
                 graph,
                 station_offsets=offsets,
