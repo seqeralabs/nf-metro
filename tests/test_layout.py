@@ -1557,7 +1557,7 @@ def test_section_gap_bundle_aware_minimum():
     """Bundle-aware enforcement widens the gap for multi-line bundles."""
     import warnings
 
-    from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
+    from nf_metro.layout.section_placement import _min_gap_for_bundles
 
     # 5 lines routing between two sections
     mmd_text = (
@@ -1589,7 +1589,7 @@ def test_section_gap_bundle_aware_minimum():
         assert len(gap_warnings) >= 1, "Expected a warning about gap widening"
 
     # Physical gap should be at least the bundle minimum
-    min_needed = 2 * (CURVE_RADIUS + 4 * OFFSET_STEP)
+    min_needed = _min_gap_for_bundles([5])
     physical_gap = (
         graph.sections["sec2"].bbox_x
         - graph.sections["sec1"].bbox_x

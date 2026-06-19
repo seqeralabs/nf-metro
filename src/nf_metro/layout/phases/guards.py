@@ -2548,8 +2548,10 @@ def _guard_inter_section_descent_edge_clearance(
         port_xs = endpoint_port_xs(graph, rp.edge)
         pts = rp.points
         for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
-            if abs(x1 - x0) > tol:
-                continue  # vertical segments only
+            # A short horizontal hop also has small dx, so dx alone would
+            # misclassify it as a descent; require a meaningful dy too.
+            if abs(x1 - x0) > tol or abs(y1 - y0) < tol:
+                continue
             vx = (x0 + x1) / 2
             if any(abs(vx - px) <= COORD_TOLERANCE for px in port_xs):
                 continue  # legitimate port-to-port drop

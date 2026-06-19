@@ -523,6 +523,23 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
                 graph.stations[sid].y = trunk_y + off * y_spacing
 
 
+def _section_row_pitch(graph: MetroGraph, section_id: str, default: float) -> float:
+    """The Y-grid pitch of the row ``section_id`` belongs to.
+
+    Reads the frozen per-row grid info recorded by ``_align_row_y_grids``.
+    A row whose widest bundle inflates the slot pitch past the base
+    ``y_spacing`` keeps every section, port and inter-section trunk on
+    that wider pitch; fanning content at the base pitch instead would
+    leave re-fanned stations a fraction of a slot off the trunk line.
+    Falls back to ``default`` for sections not in a multi-section row.
+    """
+    grid_info = graph._row_y_grid_info
+    for info in grid_info.values():
+        if section_id in info["section_ids"]:
+            return info["slot_spacing"]
+    return default
+
+
 def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
     """Re-fan full-bundle station columns around the row's final trunk Y.
 
@@ -581,6 +598,7 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
         # to a single-station full-bundle column (natural pass-through), then
         # the median Y.
         anchor_y = _section_lr_port_anchor_y(graph, section)
+        pitch = _section_row_pitch(graph, section.id, y_spacing)
         if anchor_y is None:
             single_ys = [
                 graph.stations[full[0]].y
@@ -624,4 +642,4 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
             n = len(participants)
             offsets = _fan_offsets(n)
             for sid, off in zip(participants, offsets):
-                graph.stations[sid].y = anchor_y + off * y_spacing
+                graph.stations[sid].y = anchor_y + off * pitch

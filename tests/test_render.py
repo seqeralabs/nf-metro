@@ -1057,6 +1057,15 @@ def test_label_halo_emits_aria_hidden_backing_copy():
     assert halo[0].get("data-station-id") is None
     assert fill[0].get("data-station-id") == "a"
 
+    # The halo is a stroked knockout: it must paint the resolved halo colour on
+    # both fill and stroke at the theme width, and sit under the visible glyph.
+    resolved = _label_halo_color(NFCORE_THEME)
+    assert halo[0].get("stroke") == halo[0].get("fill") == resolved
+    assert float(halo[0].get("stroke-width")) == NFCORE_THEME.label_halo_width
+    assert texts.index(halo[0]) < texts.index(fill[0]), (
+        "halo must precede the visible label in document order so it draws under it"
+    )
+
 
 def test_label_halo_suppressed_when_disabled():
     graph = parse_metro_mermaid(
