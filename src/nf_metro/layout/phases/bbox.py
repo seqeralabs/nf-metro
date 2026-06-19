@@ -675,13 +675,14 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
     if not graph.sections:
         return
 
-    from nf_metro.layout.section_placement import _wrap_bundle_row_minimums
+    from nf_metro.layout.section_placement import _inter_row_routing_minimums
 
-    # An inter-row wrap bundle needs a wider gap than the bare
-    # ``section_y_gap`` so its horizontal run clears both bounding
-    # sections; honour that minimum here so tightening doesn't reclaim
-    # the space ``_enforce_min_row_gaps`` reserved at placement.
-    wrap_min = _wrap_bundle_row_minimums(graph)
+    # A horizontal run an inter-row gap must host -- an entry-wrap bundle or a
+    # bottommost-row merge-trunk channel -- needs a wider gap than the bare
+    # ``section_y_gap`` so it clears both bounding sections; honour that
+    # minimum here so tightening doesn't reclaim the space
+    # ``_enforce_min_row_gaps`` reserved at placement.
+    routing_min = _inter_row_routing_minimums(graph)
 
     sections_by_start_row: dict[int, list[Section]] = defaultdict(list)
     sections_by_end_row: dict[int, list[Section]] = defaultdict(list)
@@ -714,7 +715,7 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
         bypass_spans = _aggregate_bypass_spans(graph, ending_at_prev)
         effective_floor = max(max_above_bot, max(bypass_spans.values(), default=0.0))
         current_top = min(s.bbox_y for s in lower)
-        target_gap = max(section_y_gap, wrap_min.get((r - 1, r), 0.0))
+        target_gap = max(section_y_gap, routing_min.get((r - 1, r), 0.0))
         slack = current_top - (effective_floor + target_gap)
         if slack <= SAME_COORD_TOLERANCE:
             continue

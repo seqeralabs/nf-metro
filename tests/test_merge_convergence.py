@@ -36,63 +36,9 @@ from nf_metro.parser.mermaid import parse_metro_mermaid
 _ROOT = Path(__file__).resolve().parents[1]
 _TOPOLOGIES = _ROOT / "examples" / "topologies"
 
-# around_below converges a merge from two stacked rows of the same column, with
-# the merge entry in the bottommost grid row.  It is kept inline rather than as
-# a corpus fixture: its trunk's inter-row bypass channel grazes the upper row's
-# box in the cramped gap above the bottom row (an independent placement defect),
-# which the validate=True corpus checks would flag for reasons unrelated to the
-# convergence this module pins.
-_AROUND_BELOW = """\
-%%metro title: Around Below Col0 Merge Entry
-%%metro style: dark
-%%metro line: a | A | #e63946
-%%metro line: b | B | #0570b0
-%%metro grid: src_fanA | 2,0
-%%metro grid: src_fanB | 2,1
-%%metro grid: side_a | 3,0
-%%metro grid: middle | 1,1
-%%metro grid: target | 0,2
-
-graph LR
-    subgraph src_fanA [Fan Source A]
-        fsa1[In]
-        fsa2[Out]
-        fsa1 -->|a| fsa2
-    end
-    subgraph src_fanB [Fan Source B]
-        fsb1[In]
-        fsb2[Out]
-        fsb1 -->|a| fsb2
-    end
-    subgraph side_a [Side]
-        %%metro entry: left | a
-        sia1[Side]
-        sia2[Out]
-        sia1 -->|a| sia2
-    end
-    subgraph middle [Middle]
-        m1[Process]
-        m2[Out]
-        m1 -->|b| m2
-    end
-    subgraph target [Target]
-        %%metro entry: left | a
-        t1[Process]
-        t2[Out]
-        t1 -->|a| t2
-    end
-    fsa2 -->|a| t1
-    fsa2 -->|a| sia1
-    fsb2 -->|a| t1
-    fsb2 -->|a| sia1
-"""
-
-# merge_pullaway and merge_right_entry are clean topology fixtures; around_below
-# carries an independent residual (see above) so it lives inline as mmd text.
 _FIXTURES = {
-    "around_below": _AROUND_BELOW,
-    "merge_pullaway": (_TOPOLOGIES / "merge_pullaway.mmd").read_text(),
-    "merge_right_entry": (_TOPOLOGIES / "merge_right_entry.mmd").read_text(),
+    name: (_TOPOLOGIES / f"{name}.mmd").read_text()
+    for name in ("around_below", "merge_pullaway", "merge_right_entry")
 }
 
 

@@ -986,9 +986,5 @@
   "normalize.py::if ch is None:::#3": {
     "note": "Defensive guard: a merge branch route opens horizontal-then-vertical (lead, then descent onto the trunk channel), so its initial fan-out descent is always found; the skip arm is never taken.",
     "status": "defensive"
-  },
-  "normalize.py::if abs(ch.x - trunk_ch.x) > COORD_TOLERANCE:::#1": {
-    "note": "A same-column merge feeder descends in the same inter-column gap as the trunk but at its own per-route X, so the snap arm fires; the already-coincident arm (feeder X within COORD_TOLERANCE of the trunk's, needing no snap) is the no-op case and is never the binding outcome in the corpus.",
-    "status": "defensive"
   }
 }

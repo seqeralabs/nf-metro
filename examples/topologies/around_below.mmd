@@ -1,0 +1,42 @@
+%%metro title: Around Below Col0 Merge Entry
+%%metro style: dark
+%%metro line: a | A | #e63946
+%%metro line: b | B | #0570b0
+%%metro grid: src_fanA | 2,0
+%%metro grid: src_fanB | 2,1
+%%metro grid: side_a | 3,0
+%%metro grid: middle | 1,1
+%%metro grid: target | 0,2
+
+graph LR
+    subgraph src_fanA [Fan Source A]
+        fsa1[In]
+        fsa2[Out]
+        fsa1 -->|a| fsa2
+    end
+    subgraph src_fanB [Fan Source B]
+        fsb1[In]
+        fsb2[Out]
+        fsb1 -->|a| fsb2
+    end
+    subgraph side_a [Side]
+        %%metro entry: left | a
+        sia1[Side]
+        sia2[Out]
+        sia1 -->|a| sia2
+    end
+    subgraph middle [Middle]
+        m1[Process]
+        m2[Out]
+        m1 -->|b| m2
+    end
+    subgraph target [Target]
+        %%metro entry: left | a
+        t1[Process]
+        t2[Out]
+        t1 -->|a| t2
+    end
+    fsa2 -->|a| t1
+    fsa2 -->|a| sia1
+    fsb2 -->|a| t1
+    fsb2 -->|a| sia1
