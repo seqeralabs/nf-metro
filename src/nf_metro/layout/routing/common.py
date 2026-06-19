@@ -126,6 +126,19 @@ def row_top_edge(
     return min((s.bbox_y for s in secs), default=default) if secs else default
 
 
+def max_grid_row_with_content(graph: MetroGraph) -> int | None:
+    """Bottommost grid row occupied by a section with rendered width.
+
+    The single definition of "the bottom row" shared by the routing
+    decision to bypass in the gap *above* a bottommost-row target
+    (:func:`bypass_bottom_y`) and the placement reservation that keeps that
+    gap wide enough (``_merge_trunk_row_minimums``); ``None`` when no section
+    has width yet.
+    """
+    rows = [s.grid_row for s in graph.sections.values() if s.bbox_w > 0]
+    return max(rows) if rows else None
+
+
 def header_corridor_y(
     graph: MetroGraph,
     row: int,
@@ -700,8 +713,8 @@ def bypass_bottom_y(
     lo, hi = min(src_col, tgt_col), max(src_col, tgt_col)
 
     if cross_row:
-        rows = [s.grid_row for s in graph.sections.values() if s.bbox_w > 0]
-        if tgt_row is not None and rows and tgt_row == max(rows) and tgt_row > 0:
+        max_content_row = max_grid_row_with_content(graph)
+        if tgt_row is not None and tgt_row == max_content_row and tgt_row > 0:
             # Target is in the bottommost row: route in the gap ABOVE it
             # rather than below the whole canvas (which would overshoot
             # and loop back up to the entry port).

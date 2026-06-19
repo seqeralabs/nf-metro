@@ -33,6 +33,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.routing.common import (
     inter_row_wrap_band,
+    max_grid_row_with_content,
     resolve_section,
     section_exists_above_row,
 )
@@ -442,7 +443,7 @@ def _place_section_group(
             graph,
             row_assign,
             requested_gap=section_y_gap,
-            wrap_min_by_pair=_wrap_bundle_row_minimums(graph),
+            wrap_min_by_pair=_inter_row_routing_minimums(graph),
         )
 
 
@@ -652,6 +653,67 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     for gap, ports in per_gap.items():
         widest = max(len(lines) for lines in ports.values())
         minimums[gap] = inter_row_wrap_band(widest)
+    return minimums
+
+
+def _merge_trunk_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]:
+    """Minimum bbox-to-bbox row gap a bottommost-row merge trunk needs.
+
+    A merge junction whose entry sits in the bottommost grid row is fed by a
+    trunk that crosses rows; rather than diving below the whole canvas, its
+    bypass channel routes in the inter-row gap *above* the bottom row (see
+    ``bypass_bottom_y``).  That channel is a horizontal run spanning the
+    trunk's columns, so -- like an inter-row wrap bundle -- it needs
+    ``INTER_ROW_EDGE_CLEARANCE`` below the upper row's bbox, the bundle span,
+    and ``INTER_ROW_HEADER_CLEARANCE`` above the bottom row's header.  Unlike a
+    wrap, the bottom-row target need not share a column with the upper-row
+    sections the channel crosses, so the column-overlap test that gates header
+    widening misses this gap; the reservation here makes the placement pass
+    widen it via the envelope rule instead.
+
+    Returns the required bbox-to-bbox gap for the ``(max_row - 1, max_row)``
+    pair when any such merge exists; empty otherwise.
+    """
+    merge_ids = {j for j in graph.junctions if j.startswith("__merge_")}
+    if not merge_ids:
+        return {}
+    max_row = max_grid_row_with_content(graph)
+    if not max_row:
+        return {}
+
+    widest = 0
+    for mjid in merge_ids:
+        mst = graph.stations.get(mjid)
+        if mst is None or not mst.section_id:
+            continue
+        tgt_sec = graph.sections.get(mst.section_id)
+        if tgt_sec is None or tgt_sec.grid_row != max_row:
+            continue
+        lines: set[str] = set()
+        crosses_row = False
+        for edge in graph.edges_to(mjid):
+            src_sec = resolve_section(graph, graph.stations.get(edge.source))
+            if src_sec is not None and src_sec.grid_row < max_row:
+                crosses_row = True
+            lines.add(edge.line_id)
+        if crosses_row:
+            widest = max(widest, len(lines))
+
+    if widest == 0:
+        return {}
+    return {(max_row - 1, max_row): inter_row_wrap_band(widest)}
+
+
+def _inter_row_routing_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]:
+    """Per-gap bbox-to-bbox minimum for every horizontal run an inter-row gap
+    must host: entry-wrap bundles and bottommost-row merge-trunk channels.
+
+    Both place a flush horizontal run in the gap; a pair claimed by both takes
+    the wider reservation.
+    """
+    minimums = dict(_wrap_bundle_row_minimums(graph))
+    for gap, band in _merge_trunk_row_minimums(graph).items():
+        minimums[gap] = max(minimums.get(gap, 0.0), band)
     return minimums
 
 
@@ -899,13 +961,13 @@ def _enforce_min_row_gaps(
     bottom to the lower section's header top (bbox_y - protrusion).
     Only checks section pairs that share horizontal extent.
 
-    ``wrap_min_by_pair`` (see :func:`_wrap_bundle_row_minimums`) adds a
+    ``wrap_min_by_pair`` (see :func:`_inter_row_routing_minimums`) adds a
     second, routing-aware constraint: an adjacent-row gap that hosts an
-    inter-row wrap bundle is widened so the bundle's horizontal run keeps
-    full clearance from both bounding sections.  That requirement is
-    bbox-to-bbox (no header protrusion) and spans the row envelope, so it
-    is checked against the tightest envelope edges rather than only
-    horizontally-overlapping pairs.
+    inter-row horizontal run (an entry-wrap bundle or a bottommost-row
+    merge-trunk channel) is widened so the run keeps full clearance from
+    both bounding sections.  That requirement is bbox-to-bbox (no header
+    protrusion) and spans the row envelope, so it is checked against the
+    tightest envelope edges rather than only horizontally-overlapping pairs.
     """
     if not row_assign:
         return
