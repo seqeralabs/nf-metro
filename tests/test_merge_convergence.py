@@ -12,15 +12,22 @@ channel rather than reaching the entry port on an independent path.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS, DIAGONAL_RUN
+from nf_metro.layout.constants import (
+    COORD_TOLERANCE,
+    CURVE_RADIUS,
+    DIAGONAL_RUN,
+    EDGE_TO_BUNDLE_CLEARANCE,
+)
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.context import _build_routing_context
 from nf_metro.layout.routing.invariants import check_no_same_line_parallel_descents
+from nf_metro.layout.routing.normalize import _final_port_approach
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -130,3 +137,35 @@ def test_merge_branches_join_trunk_channel(name: str) -> None:
                 "routed as a separate stroke rather than joining the trunk"
             )
     assert checked, f"{name}: expected at least one non-trunk merge feeder"
+
+
+@pytest.mark.parametrize("name", sorted(_FIXTURES))
+def test_same_line_port_approaches_coincide(name: str) -> None:
+    """Same-line vertical approaches converging on one entry port share an X.
+
+    The merge trunk ends at the entry port carrying the merge junction as its
+    edge target; a same-line feed arriving directly at that port (an exit-port
+    source not folded into the merge) must share the trunk's final riser rather
+    than running an offset apart beside it.
+    """
+    _graph, routes, _offsets, ctx = _layout_and_route(_FIXTURES[name])
+    by_port: dict[tuple[str, str, bool], list[float]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        ch = _final_port_approach(rp)
+        if ch is None:
+            continue
+        target = ctx.merge.entry_port_for.get(rp.edge.target, rp.edge.target)
+        by_port[(target, rp.line_id, ch.down)].append(ch.x)
+    for (target, line, _down), xs in by_port.items():
+        # Consecutive same-line approaches to one port must be either coincident
+        # (one fused track) or genuinely distant (separate corridors beyond the
+        # fuse band); a small offset between them is the duplicate-riser defect.
+        for a, b in zip(sorted(xs), sorted(xs)[1:]):
+            gap = b - a
+            assert gap <= COORD_TOLERANCE or gap > EDGE_TO_BUNDLE_CLEARANCE, (
+                f"{name}: line {line!r} approaches port {target!r} on two "
+                f"near-parallel risers (x={a:.1f}, {b:.1f}; {gap:.1f}px apart) "
+                "instead of one fused track"
+            )

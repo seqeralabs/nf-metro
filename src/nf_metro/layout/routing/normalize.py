@@ -680,7 +680,9 @@ def _final_port_approach(rp: RoutedPath) -> _VChannel | None:
     )
 
 
-def _coincide_convergent_port_approaches(routes: list[RoutedPath]) -> None:
+def _coincide_convergent_port_approaches(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
     """Fuse same-line vertical approaches converging on one port into one track.
 
     Several inter-section edges of the SAME metro line can arrive at one entry
@@ -701,7 +703,13 @@ def _coincide_convergent_port_approaches(routes: list[RoutedPath]) -> None:
     already approached from.  Flanking corners reset to the base radius: the
     fused descents are a single track, so the concentric-bundle radii no
     longer apply.
+
+    A merge trunk's route ends at the entry port but carries the merge junction
+    as its edge target; map that to the entry port so the trunk and any sibling
+    feed of the same line arriving directly at the port (e.g. an exit-port
+    source not folded into the merge) share one approach key and fuse.
     """
+    entry_port_for = ctx.merge.entry_port_for
     by_port: dict[tuple[str, str, bool], list[_VChannel]] = defaultdict(list)
     for rp in routes:
         if not rp.is_inter_section:
@@ -713,7 +721,8 @@ def _coincide_convergent_port_approaches(routes: list[RoutedPath]) -> None:
         # same-line descents into one port can land a per-line offset apart
         # before render offsets are applied, and keying on the raw endpoint
         # would split that single convergence into two.
-        key = (rp.edge.target, rp.line_id, ch.down)
+        target = entry_port_for.get(rp.edge.target, rp.edge.target)
+        key = (target, rp.line_id, ch.down)
         by_port[key].append(ch)
 
     band = EDGE_TO_BUNDLE_CLEARANCE

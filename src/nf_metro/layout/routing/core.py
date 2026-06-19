@@ -200,7 +200,7 @@ def route_edges(
     _normalize_gap_channels(routes, ctx)
     _normalize_bypass_trunks(routes, ctx)
     _reorder_convergence_peeloff(routes, ctx)
-    _coincide_convergent_port_approaches(routes)
+    _coincide_convergent_port_approaches(routes, ctx)
     _coincide_divergent_fanout_descents(routes)
     _coincide_merge_feeder_descents(routes, ctx)
     _join_fanout_upstream_tails(routes, ctx)
