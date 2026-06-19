@@ -5,6 +5,7 @@ from __future__ import annotations
 __all__ = ["apply_route_offsets", "render_svg"]
 
 import html
+import re
 import textwrap
 import warnings
 from dataclasses import replace
@@ -387,6 +388,7 @@ def render_svg(
     animate: bool | None = None,
     debug: bool = False,
     legend_position: str | None = None,
+    responsive: bool = False,
 ) -> str:
     """Render a metro map graph to an SVG string.
 
@@ -395,6 +397,11 @@ def render_svg(
 
     If ``legend_position`` is given it overrides ``graph.legend_position``
     for this render only, without mutating the graph.
+
+    If ``responsive`` is True the root ``<svg>`` element omits fixed
+    ``width``/``height`` attributes and adds
+    ``preserveAspectRatio="xMinYMin meet"``, so a host page can scale the
+    diagram with CSS (e.g. ``width: 100%; height: auto``).
     """
     if not graph.stations:
         return '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
@@ -417,6 +424,7 @@ def render_svg(
             animate=animate,
             debug=debug,
             legend_position=legend_position,
+            responsive=responsive,
         )
 
 
@@ -449,6 +457,7 @@ def _render_svg_scaled(
     animate: bool,
     debug: bool,
     legend_position: str | None,
+    responsive: bool = False,
 ) -> str:
     """Render body, run with ``theme`` fonts and label metrics already scaled."""
     effective_legend_position = (
@@ -543,7 +552,10 @@ def _render_svg_scaled(
     svg_width = width or int(auto_width)
     svg_height = height or int(auto_height)
 
-    d = draw.Drawing(svg_width, svg_height)
+    if responsive:
+        d = draw.Drawing(svg_width, svg_height, preserveAspectRatio="xMinYMin meet")
+    else:
+        d = draw.Drawing(svg_width, svg_height)
 
     # Embed the machine-readable manifest first, so the file is a durable,
     # self-describing contract regardless of what is drawn below it.
@@ -650,7 +662,21 @@ def _render_svg_scaled(
             )
         )
 
-    return d.as_svg()
+    svg = d.as_svg()
+    if responsive:
+        svg = _strip_svg_dimensions(svg)
+    return svg
+
+
+_SVG_OPEN_TAG_RE = re.compile(r"(<svg\b[^>]*?>)", re.DOTALL)
+_SVG_WH_ATTR_RE = re.compile(r'\s+(?:width|height)="[^"]*"')
+
+
+def _strip_svg_dimensions(svg: str) -> str:
+    """Remove fixed width/height attributes from the root <svg> opening tag."""
+    return _SVG_OPEN_TAG_RE.sub(
+        lambda m: _SVG_WH_ATTR_RE.sub("", m.group(1)), svg, count=1
+    )
 
 
 def _legend_overlaps_sections(

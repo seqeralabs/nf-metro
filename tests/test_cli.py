@@ -245,6 +245,23 @@ def test_validate_svg_no_manifest(tmp_path):
     assert result.exit_code == 1
 
 
+def test_render_responsive_flag_omits_fixed_dimensions(tmp_path):
+    """--responsive omits fixed width/height from root <svg> element."""
+    import xml.etree.ElementTree as ET
+
+    out = tmp_path / "responsive.svg"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["render", str(RNASEQ_MMD), "-o", str(out), "--responsive"]
+    )
+    assert result.exit_code == 0, result.output
+    root = ET.fromstring(out.read_text())
+    assert root.get("width") is None
+    assert root.get("height") is None
+    assert root.get("viewBox") is not None
+    assert root.get("preserveAspectRatio") == "xMinYMin meet"
+
+
 def test_validate_svg_rejects_nonconforming(tmp_path):
     """validate-svg fails when the embedded manifest violates the schema."""
     import re

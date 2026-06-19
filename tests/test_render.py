@@ -1082,3 +1082,44 @@ def test_label_halo_suppressed_when_disabled():
     ns = "{http://www.w3.org/2000/svg}"
     texts = [t for t in root.iter(f"{ns}text") if (t.text or "") == "Input"]
     assert len(texts) == 1, "halo copy should be absent when haloing is disabled"
+
+
+# ---------------------------------------------------------------------------
+# Responsive render mode
+# ---------------------------------------------------------------------------
+
+
+def _graph_for_responsive():
+    graph = parse_metro_mermaid(
+        "%%metro title: Responsive Test\n"
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n"
+        "    a[Start]\n"
+        "    b[End]\n"
+        "    a -->|main| b\n"
+    )
+    compute_layout(graph)
+    return graph
+
+
+def test_responsive_render_omits_fixed_dimensions():
+    svg = render_svg(_graph_for_responsive(), NFCORE_THEME, responsive=True)
+    root = ET.fromstring(svg)
+    assert root.get("width") is None, "responsive SVG must not carry a fixed width"
+    assert root.get("height") is None, "responsive SVG must not carry a fixed height"
+
+
+def test_responsive_render_has_viewbox_and_aspect_ratio():
+    svg = render_svg(_graph_for_responsive(), NFCORE_THEME, responsive=True)
+    root = ET.fromstring(svg)
+    assert root.get("viewBox") is not None, "responsive SVG must have a viewBox"
+    assert root.get("preserveAspectRatio") == "xMinYMin meet", (
+        "responsive SVG must declare preserveAspectRatio"
+    )
+
+
+def test_default_render_retains_fixed_dimensions():
+    svg = render_svg(_graph_for_responsive(), NFCORE_THEME)
+    root = ET.fromstring(svg)
+    assert root.get("width") is not None, "default SVG must carry a fixed width"
+    assert root.get("height") is not None, "default SVG must carry a fixed height"

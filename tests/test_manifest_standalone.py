@@ -121,6 +121,17 @@ def test_overlay_svg_shares_the_manifest_viewbox() -> None:
     assert layer.endswith("<circle/></svg>")
 
 
+def test_overlay_svg_responsive_omits_fixed_dimensions() -> None:
+    manifest = build_manifest_data(title=None, width=360, height=92, nodes=[])
+    layer = overlay_svg(manifest, "<circle/>", responsive=True)
+    assert 'viewBox="0 0 360 92"' in layer
+    assert 'preserveAspectRatio="xMinYMin meet"' in layer
+    assert 'width="360"' not in layer
+    assert 'height="92"' not in layer
+    assert manifest["width"] == 360
+    assert manifest["height"] == 92
+
+
 def test_matching_node_ids_is_case_insensitive_and_ordered() -> None:
     patterns = {"align": ["ALIGN.*"], "qc": ["fastqc", "multiqc"], "none": []}
     assert matching_node_ids("nfcore:rnaseq:alignhisat2", patterns) == ["align"]

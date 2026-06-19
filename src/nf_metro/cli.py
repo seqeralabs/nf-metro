@@ -180,6 +180,11 @@ def _resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
     default=None,
     help="Pipeline title (overrides the %%metro title: directive).",
 )
+@click.option(
+    "--responsive/--no-responsive",
+    default=False,
+    help="Emit viewBox only (no fixed width/height) for CSS-scalable embedding.",
+)
 @layout_cli_options
 def render(
     input_file: Path,
@@ -192,6 +197,7 @@ def render(
     legend: str | None,
     from_nextflow: bool,
     title: str | None,
+    responsive: bool,
     **layout_opts: object,
 ) -> None:
     """Render a Mermaid metro map definition to SVG or interactive HTML."""
@@ -240,7 +246,7 @@ def render(
     if format_ == "html":
         content = render_html(graph, theme_obj, debug=debug, embed_basename=output.name)
     else:
-        content = render_svg(graph, theme_obj, debug=debug)
+        content = render_svg(graph, theme_obj, debug=debug, responsive=responsive)
 
     output.write_text(content if content.endswith("\n") else content + "\n")
     click.echo(

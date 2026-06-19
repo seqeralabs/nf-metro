@@ -113,7 +113,11 @@ def manifest_metadata_svg(manifest: Mapping[str, Any]) -> str:
 
 
 def overlay_svg(
-    manifest: Mapping[str, Any], body: str = "", *, extra_attrs: str = ""
+    manifest: Mapping[str, Any],
+    body: str = "",
+    *,
+    extra_attrs: str = "",
+    responsive: bool = False,
 ) -> str:
     """An overlay ``<svg>`` sized to the manifest, to stack over the base diagram.
 
@@ -124,12 +128,20 @@ def overlay_svg(
     can't mismatch the coordinate space.  ``extra_attrs`` is verbatim attributes
     for the root element (e.g. ``'class="overlay"'`` or
     ``'style="pointer-events:none"'``).
+
+    If ``responsive`` is True the root element omits fixed ``width``/``height``
+    and adds ``preserveAspectRatio="xMinYMin meet"``, matching a responsive base
+    SVG so both layers scale identically in a host page.  The manifest's own
+    ``width``/``height`` fields are unaffected and continue to supply the
+    ``viewBox`` origin.
     """
     width, height = manifest["width"], manifest["height"]
     extra = f" {extra_attrs}" if extra_attrs else ""
+    wh = "" if responsive else f'width="{width}" height="{height}" '
+    par = ' preserveAspectRatio="xMinYMin meet"' if responsive else ""
     return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
-        f'viewBox="0 0 {width} {height}"{extra}>{body}</svg>'
+        f'<svg xmlns="http://www.w3.org/2000/svg" {wh}'
+        f'viewBox="0 0 {width} {height}"{par}{extra}>{body}</svg>'
     )
 
 
