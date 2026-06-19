@@ -20,6 +20,7 @@ gallery example and topology fixture.
 
 from __future__ import annotations
 
+import math
 import os
 import warnings
 from collections import defaultdict, deque
@@ -834,8 +835,46 @@ class CollinearOverlapViolation:
         )
 
 
+@dataclass(frozen=True)
+class DiagonalOverlapViolation:
+    """Two distinct-line diagonal segments running on top of each other.
+
+    The axis-aligned :class:`CollinearOverlapViolation` cannot see this: a
+    fixed-axis (Y for LR, baked-X for TB) per-line offset gives a perpendicular
+    separation of only ``OFFSET_STEP * sin(theta)`` on a diagonal, which
+    collapses toward zero as the diagonal nears the offset axis.  ``perp_sep`` is
+    the measured perpendicular gap between the two co-running diagonals;
+    ``span`` is the overlapping length along the shared direction.
+    """
+
+    line_a: str
+    line_b: str
+    edge_a: tuple[str, str]
+    edge_b: tuple[str, str]
+    perp_sep: float
+    span: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"diagonal overlay: line {self.line_a!r} "
+            f"({self.edge_a[0]}->{self.edge_a[1]}) and line {self.line_b!r} "
+            f"({self.edge_b[0]}->{self.edge_b[1]}) run {self.perp_sep:.2f}px apart "
+            f"on a shared diagonal over {self.span:.1f}px "
+            f"(need >= {_DIAGONAL_MIN_PERP_SEP:.1f}px)"
+        )
+
+
 _COLLINEAR_LATERAL_TOL = 1.0
 _COLLINEAR_MIN_SPAN = 40.0
+
+# A diagonal bundle's lines must keep a true perpendicular separation, not a
+# fixed-axis one whose perpendicular component degrades to zero as the diagonal
+# nears the offset axis.  Flag any distinct-line pair that runs closer than this
+# along a shared diagonal: half an OFFSET_STEP is the point at which ~3-4px
+# strokes visibly fuse into one fat line.
+_DIAGONAL_MIN_PERP_SEP = OFFSET_STEP * 0.5
+_DIAGONAL_SLOPE_TOL = 0.12  # radians (~7 degrees); near-parallel diagonals
 
 
 def _axis_aligned(
@@ -1039,6 +1078,140 @@ def _converges_at_shared_port(
         if reach <= _COLLINEAR_MIN_SPAN:
             return True
     return False
+
+
+def _diagonal_segments(
+    rp: RoutedPath, offsets: dict[tuple[str, str], float]
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    """Final-render diagonal segments of *rp* (both axes change appreciably)."""
+    pts = _route_render_points(rp, offsets)
+    out: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    for p1, p2 in zip(pts, pts[1:]):
+        if (
+            abs(p1[0] - p2[0]) > _COLLINEAR_LATERAL_TOL
+            and abs(p1[1] - p2[1]) > _COLLINEAR_LATERAL_TOL
+        ):
+            out.append((p1, p2))
+    return out
+
+
+def _diagonal_coincidence(
+    seg_a: tuple[tuple[float, float], tuple[float, float]],
+    seg_b: tuple[tuple[float, float], tuple[float, float]],
+) -> tuple[float, float] | None:
+    """Perpendicular gap and overlap span of two near-parallel diagonals.
+
+    Returns ``None`` when the segments are not near-parallel, do not overlap
+    when projected onto the shared direction, or cross (opposite-sign
+    perpendicular offsets at the overlap ends) -- a crossing is a normal metro
+    junction, not a parallel overlay.  Otherwise returns ``(perp_sep, span)``
+    where ``perp_sep`` is the *widest* perpendicular gap across the overlap and
+    ``span`` its projected length.
+
+    Keying on the widest gap is what separates a true co-running bundle (close
+    at both ends) from a fan diverging out of a shared hub (close at the hub end
+    only): the diverging pair is wide at the far end, so it is not flagged even
+    though it is near-parallel and shares an endpoint.
+    """
+    (ax1, ay1), (ax2, ay2) = seg_a
+    (bx1, by1), (bx2, by2) = seg_b
+    ang_a = math.atan2(ay2 - ay1, ax2 - ax1)
+    ang_b = math.atan2(by2 - by1, bx2 - bx1)
+    # Compare as undirected lines: a half-turn between the two travel
+    # directions is the same orientation.
+    d = abs(ang_a - ang_b) % math.pi
+    d = min(d, math.pi - d)
+    if d > _DIAGONAL_SLOPE_TOL:
+        return None
+
+    ux, uy = ax2 - ax1, ay2 - ay1
+    length = math.hypot(ux, uy)
+    if length < COORD_TOLERANCE:
+        return None
+    ux, uy = ux / length, uy / length
+    nx, ny = -uy, ux  # unit normal of seg_a
+
+    def project(px: float, py: float) -> float:
+        return (px - ax1) * ux + (py - ay1) * uy
+
+    def perp(px: float, py: float) -> float:
+        return (px - ax1) * nx + (py - ay1) * ny
+
+    ta0, ta1 = 0.0, length
+    tb0, tb1 = sorted((project(bx1, by1), project(bx2, by2)))
+    olo, ohi = max(ta0, tb0), min(ta1, tb1)
+    span = ohi - olo
+    if span <= _COLLINEAR_MIN_SPAN:
+        return None
+
+    # Perpendicular gap is linear in the projection parameter, so evaluate it at
+    # the two ends of the overlap interval.  A sign flip between them is a
+    # crossing (not a parallel overlay); otherwise the widest of the two is how
+    # far the lines ever separate across the shared run.
+    tb_lo, tb_hi = project(bx1, by1), project(bx2, by2)
+    pb_lo, pb_hi = perp(bx1, by1), perp(bx2, by2)
+    if abs(tb_hi - tb_lo) < COORD_TOLERANCE:
+        return None
+
+    def perp_at(t: float) -> float:
+        frac = (t - tb_lo) / (tb_hi - tb_lo)
+        return pb_lo + frac * (pb_hi - pb_lo)
+
+    g_lo, g_hi = perp_at(olo), perp_at(ohi)
+    if g_lo * g_hi < -COORD_TOLERANCE_FINE:
+        return None
+    return max(abs(g_lo), abs(g_hi)), span
+
+
+def check_no_collinear_distinct_diagonals(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[DiagonalOverlapViolation]:
+    """Return distinct-line diagonal segments collapsed on top of each other.
+
+    The diagonal counterpart to :func:`check_no_collinear_distinct_lines` and
+    :func:`check_intra_section_collinear_distinct_lines`, which only inspect
+    axis-aligned segments.  A bundle's per-line offset is applied along a fixed
+    axis, so on a diagonal the perpendicular separation shrinks to
+    ``OFFSET_STEP * sin(theta)`` and the lines fuse into one stroke.  This flags
+    any different-line pair whose diagonals run near-parallel, overlap by more
+    than ``_COLLINEAR_MIN_SPAN``, and stay closer than ``_DIAGONAL_MIN_PERP_SEP``
+    apart without crossing.  Rail-section internal edges (rendered on explicit
+    parallel rails) are excluded, matching the axis-aligned intra check.
+    """
+    skip_rail = getattr(graph, "has_rail_sections", False)
+    diags: list[tuple[str, tuple[str, str], tuple[tuple[float, float], ...]]] = []
+    for rp in routes:
+        if skip_rail and _edge_in_rail_section(graph, rp.edge):
+            continue
+        for seg in _diagonal_segments(rp, offsets):
+            diags.append((rp.line_id, (rp.edge.source, rp.edge.target), seg))
+
+    violations: list[DiagonalOverlapViolation] = []
+    for i in range(len(diags)):
+        la, ea, sa = diags[i]
+        for j in range(i + 1, len(diags)):
+            lb, eb, sb = diags[j]
+            if la == lb:
+                continue
+            result = _diagonal_coincidence(sa, sb)  # type: ignore[arg-type]
+            if result is None:
+                continue
+            perp_sep, span = result
+            if perp_sep >= _DIAGONAL_MIN_PERP_SEP:
+                continue
+            violations.append(
+                DiagonalOverlapViolation(
+                    line_a=la,
+                    line_b=lb,
+                    edge_a=ea,
+                    edge_b=eb,
+                    perp_sep=perp_sep,
+                    span=span,
+                )
+            )
+    return violations
 
 
 def check_partial_branch_offset_gaps(
@@ -2086,6 +2259,10 @@ def assert_render_curve_invariants(
             check_intra_section_collinear_distinct_lines(graph, routes, offsets),
         ),
         (
+            "collinear distinct diagonals",
+            check_no_collinear_distinct_diagonals(graph, routes, offsets),
+        ),
+        (
             "same-line parallel descents",
             check_no_same_line_parallel_descents(graph, routes, offsets),
         ),
@@ -2133,6 +2310,7 @@ def assert_render_curve_invariants(
 __all__ = [
     "BundleOrderViolation",
     "CollinearOverlapViolation",
+    "DiagonalOverlapViolation",
     "CurveInvariantError",
     "FanoutTailGap",
     "MergeBranchHang",
@@ -2154,6 +2332,7 @@ __all__ = [
     "check_merge_branches_meet_trunk",
     "check_merge_port_approach_side",
     "check_no_collinear_distinct_lines",
+    "check_no_collinear_distinct_diagonals",
     "check_no_same_line_parallel_descents",
     "check_peeloff_concentric",
     "check_perp_entry_boundary_consistent",

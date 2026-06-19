@@ -12,6 +12,7 @@ from nf_metro.layout.constants import (
     CURVE_RADIUS,
     DIAGONAL_RUN,
     LABEL_BBOX_MARGIN,
+    MIN_STATION_FLAT_LENGTH,
     MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
     STATION_MOVE_TOLERANCE,
@@ -45,44 +46,59 @@ def _is_diagonal_route(rp: RoutedPath) -> bool:
 
 
 def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
-    """Translate diagonal start/end X per-line so bundled diagonals spread apart.
+    """Spread bundled diagonals so co-travelling lines keep a perpendicular gap.
 
-    For L-shapes the ``delta`` from :func:`l_shape_radii` translates each
-    line's vertical channel X, giving perpendicular separation.  Diagonals
-    lack this: all lines share the same ``diag_start_x`` / ``diag_end_x``,
-    so the only separation is the Y offset (~2.1 px perpendicular on a 45-
-    degree line).  This post-pass adds a complementary X translation derived
-    from the per-line Y offset so that bundled diagonals are parallel but
-    horizontally spread.
+    A per-line offset is a fixed-axis displacement (Y for the render-time LR
+    regime, baked X for TB / inter-section routes), so on a diagonal its
+    perpendicular component shrinks to ``OFFSET_STEP * sin(theta)`` and the lines
+    collapse onto one stroke.  This post-pass adds a complementary translation
+    along the *other* axis to each diagonal's waypoints, restoring the full
+    ``OFFSET_STEP`` perpendicular separation while keeping the lines parallel.
+
+    Same-edge bundles (exactly parallel) are spread first on their own geometry;
+    the fan / convergence hubs then spread their remaining single-line-per-edge
+    branches apart.
     """
     if ctx.station_offsets is None:
         return
 
-    # Collect diagonal routes grouped by shared fork / join station.
-    fork_groups: dict[str, list[RoutedPath]] = defaultdict(list)
-    join_groups: dict[str, list[RoutedPath]] = defaultdict(list)
+    # Track routes already spread so we don't shift one twice.
+    spread: set[tuple[str, str, str]] = set()
 
+    def _edge_key(rp: RoutedPath) -> tuple[str, str, str]:
+        return (rp.edge.source, rp.edge.target, rp.line_id)
+
+    # A multi-line same-edge diagonal is a co-travelling bundle whose lines are
+    # exactly parallel, so it spreads to the full perpendicular gap on its own
+    # geometry.  Do these first; a fan/convergence hub's branches to *different*
+    # targets are not parallel, so spreading them together (below) under one
+    # representative slope only approximates -- this claims the precise case so
+    # the hub pass is left with the genuinely cross-target branches.
+    edge_groups: dict[tuple[str, str], list[RoutedPath]] = defaultdict(list)
     for rp in routes:
         if not _is_diagonal_route(rp):
             continue
-        # Skip bypass V hops: the two legs (P -> V and V -> T) are
-        # spread independently and the V-side MIN_STRAIGHT_EDGE bound
-        # forces asymmetric clamping, producing a visible kink at V.
-        # Bypass V routes are short and the perpendicular separation
-        # from per-line Y offsets alone is sufficient for visibility.
-        if is_bypass_v(rp.edge.source) or is_bypass_v(rp.edge.target):
+        edge_groups[(rp.edge.source, rp.edge.target)].append(rp)
+    for (src, _tgt), group in edge_groups.items():
+        if len(group) < 2:
+            continue
+        _apply_diagonal_spread(group, src, ctx=ctx)
+        spread.update(_edge_key(rp) for rp in group)
+
+    # Spread the remaining single-line-per-edge fan / convergence branches apart
+    # at their shared hub so they do not overlap leaving (or entering) it.  Baked
+    # routes are already handled per-edge above; the hub pass is render-only.
+    fork_groups: dict[str, list[RoutedPath]] = defaultdict(list)
+    join_groups: dict[str, list[RoutedPath]] = defaultdict(list)
+    for rp in routes:
+        if not _is_diagonal_route(rp) or rp.offsets_applied:
+            continue
+        if _edge_key(rp) in spread:
             continue
         if rp.edge.source in ctx.fork_stations:
             fork_groups[rp.edge.source].append(rp)
         if rp.edge.target in ctx.join_stations:
             join_groups[rp.edge.target].append(rp)
-
-    # Track routes already spread so we don't double-shift a route that
-    # appears in both a fork and a join group.
-    spread: set[tuple[str, str, str]] = set()
-
-    def _edge_key(rp: RoutedPath) -> tuple[str, str, str]:
-        return (rp.edge.source, rp.edge.target, rp.line_id)
 
     for station_id, group in list(fork_groups.items()) + list(join_groups.items()):
         unseen = [rp for rp in group if _edge_key(rp) not in spread]
@@ -99,17 +115,118 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
         spread.update(_edge_key(rp) for rp in unseen)
 
 
+def _stub_minimums(rp: RoutedPath) -> tuple[float, float]:
+    """Minimum flat run at a route's (source, target) ends after spreading.
+
+    A bypass-V helper must keep a visible horizontal flat through it
+    (``MIN_STATION_FLAT_LENGTH``), longer than the ``MIN_STRAIGHT_EDGE`` that a
+    plain corner needs, so the spread cannot pull its diagonal in far enough to
+    seat V on the curve apex.
+    """
+    src_min = (
+        MIN_STATION_FLAT_LENGTH if is_bypass_v(rp.edge.source) else MIN_STRAIGHT_EDGE
+    )
+    tgt_min = (
+        MIN_STATION_FLAT_LENGTH if is_bypass_v(rp.edge.target) else MIN_STRAIGHT_EDGE
+    )
+    return src_min, tgt_min
+
+
+def _fit_spread_translation(
+    group: list[RoutedPath], deltas: list[float], sign: float, ai: int
+) -> float | None:
+    """A uniform shift along axis *ai* keeping every flat stub above the minimum.
+
+    The per-line ``deltas`` already encode the full perpendicular separation; a
+    rigid translation of the whole sub-group preserves that separation while
+    repositioning it.  When a line's diagonal start sits at the
+    ``MIN_STRAIGHT_EDGE`` floor (a fan-out hub with a short lead-in), the
+    symmetric spread would drive some lines' stubs below the floor; sliding the
+    bundle toward the side with room restores the full separation that a
+    per-line clamp would otherwise null.  ``ai`` is the translation axis (0 for
+    the X-shifted LR regime, 1 for the Y-shifted baked regime); the bounding
+    stubs run along that same axis.
+
+    Returns the shift closest to zero within the feasible band (zero when the
+    raw deltas already fit, so an un-clamped bundle is untouched), or ``None``
+    when no shift fits -- the cramped case the caller falls back to clamping.
+    """
+    los: list[float] = []
+    his: list[float] = []
+    for rp, delta in zip(group, deltas):
+        src_min, tgt_min = _stub_minimums(rp)
+        # sign * (P1[ai] + delta + c - bound_src) >= 0  and
+        # sign * (bound_tgt - (P2[ai] + delta + c)) >= 0
+        a = rp.points[1][ai] + delta - (rp.points[0][ai] + sign * src_min)
+        b = (rp.points[3][ai] - sign * tgt_min) - (rp.points[2][ai] + delta)
+        if sign > 0:
+            los.append(-a)
+            his.append(b)
+        else:
+            los.append(b)
+            his.append(-a)
+    lo, hi = max(los), min(his)
+    if lo > hi + COORD_TOLERANCE_FINE:
+        return None
+    return min(max(0.0, lo), hi)
+
+
+def _baked_spread_deltas(
+    group: list[RoutedPath],
+    offsets: list[float],
+    center: float,
+    d_a: float,
+    d_b: float,
+    hypot: float,
+    bi: int,
+) -> list[float]:
+    """Per-line Y deltas that lift a baked bundle to a full perpendicular gap.
+
+    A baked route already carries its offset baked along X, so its lines start
+    with a perpendicular separation of ``OFFSET_STEP * sin(theta)`` on the
+    diagonal.  Each line's current signed perpendicular offset is read straight
+    from that baked X displacement, then a Y delta is added that drives the
+    separation up to the full ``|off - center|`` while preserving the line
+    ordering -- the sign of the baked offset is honoured rather than assumed, so
+    whichever way the builder baked the fan, the lines splay apart.
+    """
+    # Baked diagonals spread along Y (ai == 1), so the baked baseline sits on X.
+    dx_diag, dy_diag = d_b, d_a
+    centroid_x = sum(rp.points[1][bi] for rp in group) / len(group)
+    deltas: list[float] = []
+    for rp, off in zip(group, offsets):
+        rx = rp.points[1][bi] - centroid_x
+        p0 = rx * dy_diag / hypot
+        target = (1.0 if p0 >= 0 else -1.0) * abs(off - center)
+        if abs(dx_diag) <= COORD_TOLERANCE_FINE:
+            deltas.append(0.0)
+        else:
+            deltas.append((rx * dy_diag - target * hypot) / dx_diag)
+    return deltas
+
+
+def _shift_diagonal(rp: RoutedPath, delta: float, ai: int) -> None:
+    """Translate a route's two diagonal waypoints by *delta* along axis *ai*."""
+    for idx in (1, 2):
+        p = rp.points[idx]
+        rp.points[idx] = (p[0] + delta, p[1]) if ai == 0 else (p[0], p[1] + delta)
+
+
 def _apply_diagonal_spread(
     group: list[RoutedPath],
     station_id: str,
     *,
     ctx: _RoutingCtx,
 ) -> None:
-    """Compute and apply per-line X deltas to a diagonal sub-group.
+    """Spread a diagonal sub-group so its lines keep a true perpendicular gap.
 
-    All routes in *group* share the same diagonal direction (up or down).
-    The delta translates both diagonal waypoints (indices 1 and 2) so
-    the diagonal segments are parallel but horizontally spread.
+    All routes in *group* share one diagonal direction.  Each line's signed
+    offset becomes a translation of both diagonal waypoints that restores the
+    full ``OFFSET_STEP`` perpendicular separation the fixed-axis offset loses on
+    a diagonal.  The translation runs along the axis the baseline offset does
+    *not* use: X for the render-time Y-offset (LR) regime, Y for the baked X
+    regime (TB / inter-section), so on either the lines fan to a real gap rather
+    than collapsing onto one stroke.
     """
     # Only reached from _spread_diagonal_bundles, which returns early on None.
     assert ctx.station_offsets is not None
@@ -117,34 +234,46 @@ def _apply_diagonal_spread(
     center = sum(offsets) / len(offsets)
 
     rep = group[0]
-    dx = rep.points[2][0] - rep.points[1][0]
-    dy = rep.points[2][1] - rep.points[1][1]
-    sign = 1.0 if dx >= 0 else -1.0
-    down_sign = -1.0 if dy > 0 else 1.0
+    # Baked routes carry their offset along X already, so the complementary
+    # spread runs along Y; render-time routes are the mirror image.
+    ai = 1 if rep.offsets_applied else 0
+    bi = 1 - ai
+    d_a = rep.points[2][ai] - rep.points[1][ai]
+    d_b = rep.points[2][bi] - rep.points[1][bi]
+    sign = 1.0 if d_a >= 0 else -1.0
+    hypot = math.hypot(d_a, d_b)
 
-    # On a diagonal at angle theta, Y-only offset gives reduced
-    # perpendicular separation (OFFSET_STEP * cos(theta)).  This scale
-    # restores the full OFFSET_STEP: (hypot - |dx|) / |dy|.
-    # For 45 degrees: sqrt(2) - 1 ~ 0.414.
-    hypot = math.hypot(dx, dy)
-    abs_dy = abs(dy)
-    spread_scale = (hypot - abs(dx)) / abs_dy if abs_dy > COORD_TOLERANCE_FINE else 0.0
+    if rep.offsets_applied:
+        deltas = _baked_spread_deltas(group, offsets, center, d_a, d_b, hypot, bi)
+    else:
+        # On a diagonal at angle theta a Y-only offset gives only
+        # OFFSET_STEP * cos(theta) of perpendicular separation; this scale
+        # restores the full step.  For a 45-degree leg it is sqrt(2) - 1 ~ 0.414.
+        abs_b = abs(d_b)
+        scale = (hypot - abs(d_a)) / abs_b if abs_b > COORD_TOLERANCE_FINE else 0.0
+        cross_sign = -1.0 if d_b > 0 else 1.0
+        deltas = [cross_sign * (off - center) * scale * sign for off in offsets]
 
-    for rp, offset in zip(group, offsets):
-        delta = down_sign * (offset - center) * spread_scale * sign
+    shift = _fit_spread_translation(group, deltas, sign, ai)
 
-        # Clamp so the horizontal runs don't collapse below minimum.
-        bound_src = rp.points[0][0] + sign * MIN_STRAIGHT_EDGE
-        bound_tgt = rp.points[3][0] - sign * MIN_STRAIGHT_EDGE
+    if shift is not None:
+        for rp, delta in zip(group, deltas):
+            _shift_diagonal(rp, delta + shift, ai)
+        return
+
+    # No uniform shift fits both stubs: the lead-in is too short for the full
+    # separation, so clamp each line back to the floor for the best partial.
+    for rp, delta in zip(group, deltas):
+        src_min, tgt_min = _stub_minimums(rp)
+        bound_src = rp.points[0][ai] + sign * src_min
+        bound_tgt = rp.points[3][ai] - sign * tgt_min
         overshoot = max(
-            sign * (bound_src - (rp.points[1][0] + delta)),
-            sign * ((rp.points[2][0] + delta) - bound_tgt),
+            sign * (bound_src - (rp.points[1][ai] + delta)),
+            sign * ((rp.points[2][ai] + delta) - bound_tgt),
         )
         if overshoot > 0 and abs(delta) > COORD_TOLERANCE_FINE:
             delta *= max(0.0, 1.0 - overshoot / abs(delta))
-
-        rp.points[1] = (rp.points[1][0] + delta, rp.points[1][1])
-        rp.points[2] = (rp.points[2][0] + delta, rp.points[2][1])
+        _shift_diagonal(rp, delta, ai)
 
 
 @dataclass

@@ -1038,6 +1038,72 @@ def test_intra_section_collinear_check_detects_overlay():
 
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_no_collinear_distinct_diagonals(fixture):
+    """Two different lines must keep a true perpendicular gap on a diagonal.
+
+    The axis-aligned collinear checks only inspect horizontal/vertical
+    segments, so a fixed-axis per-line offset whose perpendicular component
+    degrades on a diagonal (collapsing a co-travelling bundle into one stroke)
+    slips past them.  This scans the final, offset-applied geometry for
+    distinct-line diagonals that run near-parallel, overlap meaningfully, and
+    stay closer than half an ``OFFSET_STEP`` apart.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_no_collinear_distinct_diagonals,
+    )
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    violations = check_no_collinear_distinct_diagonals(graph, routes, offsets)
+    assert not violations, "; ".join(v.message() for v in violations)
+
+
+def test_diagonal_overlay_check_detects_collapse():
+    """Meaningfulness guard: the diagonal check fires on a collapsed bundle.
+
+    Two different lines whose diagonals run near-parallel and closer than
+    ``_DIAGONAL_MIN_PERP_SEP`` over more than ``_COLLINEAR_MIN_SPAN``, with no
+    crossing, must be flagged; a pair that diverges out of a shared point (wide
+    at the far end) must not.
+    """
+    from types import SimpleNamespace
+
+    from nf_metro.layout.routing.common import RoutedPath
+    from nf_metro.layout.routing.invariants import (
+        check_no_collinear_distinct_diagonals,
+    )
+    from nf_metro.parser.model import Edge
+
+    def _diag(src, tgt, line, pts):
+        return RoutedPath(
+            edge=Edge(source=src, target=tgt, line_id=line),
+            line_id=line,
+            points=pts,
+            is_inter_section=False,
+            offsets_applied=True,
+        )
+
+    graph = SimpleNamespace(stations={})
+    # Two near-vertical diagonals 0.5px apart over a long span: collapsed.
+    collapsed = [
+        _diag("a", "b", "red", [(0.0, 0.0), (30.0, 300.0)]),
+        _diag("a", "b", "blue", [(0.5, 0.0), (30.5, 300.0)]),
+    ]
+    violations = check_no_collinear_distinct_diagonals(graph, collapsed, {})
+    assert violations, "expected a diagonal overlay to be detected"
+    assert {violations[0].line_a, violations[0].line_b} == {"red", "blue"}
+
+    # A fan diverging out of a shared point is near-parallel at the hub but
+    # wide at the far end: not flagged.
+    diverging = [
+        _diag("a", "b", "red", [(0.0, 0.0), (30.0, 300.0)]),
+        _diag("a", "c", "blue", [(0.0, 0.0), (45.0, 300.0)]),
+    ]
+    assert not check_no_collinear_distinct_diagonals(graph, diverging, {})
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_no_stacked_elbow_graze(fixture):
     """Two stacked, non-parallel inter-section risers must not graze.
 

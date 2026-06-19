@@ -954,5 +954,9 @@
   "offsets.py::if any(::#2": {
     "note": "Skip guard in _order_convergence_entry_ports: every bypass-convergence LEFT entry port on the corpus is in declaration order and must be re-slotted to approach order, so the already-ordered no-op skip arm is never taken.",
     "status": "defensive"
+  },
+  "postprocess.py::if abs(dx_diag) <= COORD_TOLERANCE_FINE:::#1": {
+    "note": "Defensive guard: a near-vertical baked diagonal (dx_diag ~ 0) already separates near-fully along the baked X axis, so it needs no Y spread and the divide-by-dx_diag is skipped. No corpus fixture bakes a near-vertical diagonal, so the guard arm is never taken.",
+    "status": "defensive"
   }
 }
