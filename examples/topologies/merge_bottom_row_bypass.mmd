@@ -1,4 +1,4 @@
-%%metro title: Around Below Col0 Merge Entry
+%%metro title: Bottommost-Row Merge Inter-Row Bypass
 %%metro style: dark
 %%metro line: a | A | #e63946
 %%metro line: b | B | #0570b0
@@ -31,7 +31,8 @@ graph LR
         m1 -->|b| m2
     end
     subgraph target [Target]
-        %%metro entry: left | a
+        %%metro direction: RL
+        %%metro entry: right | a
         t1[Process]
         t2[Out]
         t1 -->|a| t2

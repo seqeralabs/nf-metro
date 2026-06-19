@@ -38,7 +38,7 @@ _TOPOLOGIES = _ROOT / "examples" / "topologies"
 
 _FIXTURES = {
     name: (_TOPOLOGIES / f"{name}.mmd").read_text()
-    for name in ("around_below", "merge_pullaway", "merge_right_entry")
+    for name in ("merge_bottom_row_bypass", "merge_pullaway", "merge_right_entry")
 }
 
 
