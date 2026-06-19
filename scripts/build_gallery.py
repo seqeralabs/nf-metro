@@ -601,14 +601,6 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "route through that gap rather than diving below the whole canvas.",
     ),
     (
-        "around_below",
-        TOPOLOGIES_DIR,
-        "A merge whose entry sits in the bottommost grid row: the trunk's "
-        "inter-row bypass routes in the cramped gap above that row. Placement "
-        "reserves the gap so the channel clears the upper row's section boxes "
-        "instead of grazing them.",
-    ),
-    (
         "merge_pullaway",
         TOPOLOGIES_DIR,
         "One line converges on a merge from two stacked rows of the same "
