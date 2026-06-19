@@ -12,7 +12,6 @@ from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MIN_CORRIDOR_Y_OVERLAP,
@@ -519,8 +518,9 @@ def _set_vchannel_x(ch: _VChannel, new_x: float) -> None:
         return
     for radius_idx in (k - 1, k):
         if 0 <= radius_idx < len(rp.curve_radii):
+            prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
             rp.curve_radii[radius_idx] = concentric_corner_radius_at(
-                pts[radius_idx], pts[radius_idx + 1], pts[radius_idx + 2], 0.0
+                prev_pt, corner_pt, next_pt, 0.0
             )
 
 
