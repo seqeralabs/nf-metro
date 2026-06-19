@@ -1080,12 +1080,15 @@ def _converges_at_shared_port(
     return False
 
 
+_Seg = tuple[tuple[float, float], tuple[float, float]]
+
+
 def _diagonal_segments(
     rp: RoutedPath, offsets: dict[tuple[str, str], float]
-) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+) -> list[_Seg]:
     """Final-render diagonal segments of *rp* (both axes change appreciably)."""
     pts = _route_render_points(rp, offsets)
-    out: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    out: list[_Seg] = []
     for p1, p2 in zip(pts, pts[1:]):
         if (
             abs(p1[0] - p2[0]) > _COLLINEAR_LATERAL_TOL
@@ -1095,10 +1098,7 @@ def _diagonal_segments(
     return out
 
 
-def _diagonal_coincidence(
-    seg_a: tuple[tuple[float, float], tuple[float, float]],
-    seg_b: tuple[tuple[float, float], tuple[float, float]],
-) -> tuple[float, float] | None:
+def _diagonal_coincidence(seg_a: _Seg, seg_b: _Seg) -> tuple[float, float] | None:
     """Perpendicular gap and overlap span of two near-parallel diagonals.
 
     Returns ``None`` when the segments are not near-parallel, do not overlap
@@ -1137,21 +1137,19 @@ def _diagonal_coincidence(
     def perp(px: float, py: float) -> float:
         return (px - ax1) * nx + (py - ay1) * ny
 
-    ta0, ta1 = 0.0, length
-    tb0, tb1 = sorted((project(bx1, by1), project(bx2, by2)))
-    olo, ohi = max(ta0, tb0), min(ta1, tb1)
+    tb_lo, tb_hi = project(bx1, by1), project(bx2, by2)
+    pb_lo, pb_hi = perp(bx1, by1), perp(bx2, by2)
+    olo, ohi = max(0.0, min(tb_lo, tb_hi)), min(length, max(tb_lo, tb_hi))
     span = ohi - olo
     if span <= _COLLINEAR_MIN_SPAN:
+        return None
+    if abs(tb_hi - tb_lo) < COORD_TOLERANCE:
         return None
 
     # Perpendicular gap is linear in the projection parameter, so evaluate it at
     # the two ends of the overlap interval.  A sign flip between them is a
     # crossing (not a parallel overlay); otherwise the widest of the two is how
     # far the lines ever separate across the shared run.
-    tb_lo, tb_hi = project(bx1, by1), project(bx2, by2)
-    pb_lo, pb_hi = perp(bx1, by1), perp(bx2, by2)
-    if abs(tb_hi - tb_lo) < COORD_TOLERANCE:
-        return None
 
     def perp_at(t: float) -> float:
         frac = (t - tb_lo) / (tb_hi - tb_lo)
@@ -1181,7 +1179,7 @@ def check_no_collinear_distinct_diagonals(
     parallel rails) are excluded, matching the axis-aligned intra check.
     """
     skip_rail = getattr(graph, "has_rail_sections", False)
-    diags: list[tuple[str, tuple[str, str], tuple[tuple[float, float], ...]]] = []
+    diags: list[tuple[str, tuple[str, str], _Seg]] = []
     for rp in routes:
         if skip_rail and _edge_in_rail_section(graph, rp.edge):
             continue
@@ -1195,7 +1193,7 @@ def check_no_collinear_distinct_diagonals(
             lb, eb, sb = diags[j]
             if la == lb:
                 continue
-            result = _diagonal_coincidence(sa, sb)  # type: ignore[arg-type]
+            result = _diagonal_coincidence(sa, sb)
             if result is None:
                 continue
             perp_sep, span = result

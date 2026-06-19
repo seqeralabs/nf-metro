@@ -196,8 +196,10 @@ def _baked_spread_deltas(
     deltas: list[float] = []
     for rp, off in zip(group, offsets):
         rx = rp.points[1][bi] - centroid_x
-        p0 = rx * dy_diag / hypot
-        target = (1.0 if p0 >= 0 else -1.0) * abs(off - center)
+        # Keep each line on the side its baked offset already places it (the
+        # sign of its current perpendicular, rx * dy_diag), scaled up to a full
+        # gap.
+        target = (1.0 if rx * dy_diag >= 0 else -1.0) * abs(off - center)
         if abs(dx_diag) <= COORD_TOLERANCE_FINE:
             deltas.append(0.0)
         else:
@@ -246,9 +248,10 @@ def _apply_diagonal_spread(
     if rep.offsets_applied:
         deltas = _baked_spread_deltas(group, offsets, center, d_a, d_b, hypot, bi)
     else:
-        # On a diagonal at angle theta a Y-only offset gives only
-        # OFFSET_STEP * cos(theta) of perpendicular separation; this scale
-        # restores the full step.  For a 45-degree leg it is sqrt(2) - 1 ~ 0.414.
+        # A Y-only offset under-separates a diagonal: its perpendicular component
+        # is only OFFSET_STEP times the sine of the diagonal's angle to the Y
+        # axis.  This scale restores the full step; for a 45-degree leg it is
+        # sqrt(2) - 1 ~ 0.414.
         abs_b = abs(d_b)
         scale = (hypot - abs(d_a)) / abs_b if abs_b > COORD_TOLERANCE_FINE else 0.0
         cross_sign = -1.0 if d_b > 0 else 1.0
