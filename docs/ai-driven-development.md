@@ -5,7 +5,7 @@ There's a lot of coverage of AI-driven development right now, and broadly it see
 - AI tooling is frickin' awesome and will make us all obsolete tomorrow
 - AI is making us all stupid and unable to write and review good code any more
 
-nf-metro, the project whose source these docs live in, has been my side project for a few months, built almost entirely by AI. Working on it has shown me the limitations of both of those viewpoints. Here's what I've learned and where I think we're going, with links into the code where the claims are checkable.
+nf-metro has been my side project for a few months now, built almost entirely by AI, and working on it has shown me the limitations of both of those viewpoints. Here's what I've learned and where I think we're going, with links into the code wherever I make a concrete claim.
 
 ## Metro maps and workflow visualisation: a problem AI can't solve
 
