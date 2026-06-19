@@ -569,9 +569,18 @@ def _final_port_approach(rp: RoutedPath) -> _VChannel | None:
     )
 
 
-# A group of same-line vertical legs that must render as one track, paired
-# with the single X they all snap to.
-_Coincidence = tuple[list[_VChannel], float]
+class _Coincidence(NamedTuple):
+    """A set of same-line vertical legs to fuse, and the X they share."""
+
+    channels: list[_VChannel]
+    ref_x: float
+
+
+def _snap_group(group: _Coincidence) -> None:
+    """Snap every channel in a coincidence group onto its shared reference X."""
+    for ch in group.channels:
+        if abs(ch.x - group.ref_x) > COORD_TOLERANCE:
+            _set_vchannel_x(ch, group.ref_x)
 
 
 def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
@@ -583,28 +592,24 @@ def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> No
     duplicate strokes of one line.  Each such group should read as ONE track
     that splits only where the routes genuinely diverge.
 
-    Three group kinds contribute legs, applied in order so a route touched by
-    more than one (a short merge feeder whose opening descent is also its final
-    approach) settles on the last reference, as when the passes ran in
-    sequence:
+    Three group kinds contribute legs:
 
     * convergent -- final descents into one entry port;
     * divergent -- opening descents leaving one source;
     * merge feeders -- a merge's same-column feeders, onto the trunk's descent.
 
-    Each builder yields ``(channels, reference_x)``; every member snaps to that
-    X (resetting its flanking corners, since a single track has no concentric
-    nesting).
+    They are fused in that order so a route touched by more than one kind (a
+    short merge feeder whose opening descent is also its final approach) settles
+    on the last group's reference X; each member snaps onto its group's X,
+    resetting its flanking corners since a single track has no concentric
+    nesting.
     """
-    for builder in (
-        _convergent_port_groups,
-        _divergent_source_groups,
-        _merge_feeder_groups,
-    ):
-        for chans, ref_x in builder(routes, ctx):
-            for ch in chans:
-                if abs(ch.x - ref_x) > COORD_TOLERANCE:
-                    _set_vchannel_x(ch, ref_x)
+    for group in _convergent_port_groups(routes, ctx):
+        _snap_group(group)
+    for group in _divergent_source_groups(routes):
+        _snap_group(group)
+    for group in _merge_feeder_groups(routes, ctx):
+        _snap_group(group)
 
 
 def _band_clusters(chans: list[_VChannel], band: float) -> list[list[_VChannel]]:
@@ -665,7 +670,7 @@ def _convergent_port_groups(
             if len(cluster) < 2:
                 continue
             ref_x = min(cluster, key=lambda c: abs(c.x - ex)).x
-            groups.append((cluster, ref_x))
+            groups.append(_Coincidence(cluster, ref_x))
     return groups
 
 
@@ -701,9 +706,7 @@ def _initial_fanout_descent(rp: RoutedPath) -> _VChannel | None:
     return _VChannel(route=rp, idx=1, x=x, y_lo=y_lo, y_hi=y_hi, down=down)
 
 
-def _divergent_source_groups(
-    routes: list[RoutedPath], ctx: _RoutingCtx
-) -> list[_Coincidence]:
+def _divergent_source_groups(routes: list[RoutedPath]) -> list[_Coincidence]:
     """Same-line opening descents leaving one source, grouped to fuse.
 
     The mirror of :func:`_convergent_port_groups`: where that groups same-line
@@ -737,7 +740,7 @@ def _divergent_source_groups(
             continue
         sx = chans[0].route.points[0][0]
         ref_x = min(chans, key=lambda c: abs(c.x - sx)).x
-        groups.append((chans, ref_x))
+        groups.append(_Coincidence(chans, ref_x))
     return groups
 
 
@@ -795,7 +798,7 @@ def _merge_feeder_groups(
                 continue
             members.append(ch)
         if members:
-            groups.append((members, trunk_ch.x))
+            groups.append(_Coincidence(members, trunk_ch.x))
     return groups
 
 
