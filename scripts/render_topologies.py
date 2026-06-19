@@ -84,7 +84,9 @@ def render_file(
     theme = THEMES[theme_name]
 
     try:
-        svg_str = render_svg(graph, theme, debug=debug)
+        # chrome_css=False bakes concrete colors so the cairosvg PNG step below
+        # works (cairosvg cannot parse the var() chrome custom properties).
+        svg_str = render_svg(graph, theme, debug=debug, chrome_css=False)
     except Exception as e:
         return name, [f"RENDER ERROR: {e}"]
 

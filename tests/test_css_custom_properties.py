@@ -5,6 +5,8 @@ CSS custom properties so a host can recolor without re-rendering.  Line/route
 colors remain baked as presentation attributes (semantic).
 """
 
+import pytest
+
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.svg import render_svg
@@ -178,3 +180,36 @@ def test_legend_text_has_nf_metro_legend_text_class():
     """Legend text entries should carry the nf-metro-legend-text class."""
     svg = render_svg(_make_graph(), NFCORE_THEME)
     assert "nf-metro-legend-text" in svg
+
+
+# ---------------------------------------------------------------------------
+# chrome_css=False: concrete colors for raster export (cairosvg)
+# ---------------------------------------------------------------------------
+
+
+def test_chrome_css_false_omits_var_references():
+    """chrome_css=False emits no var() so non-CSS-custom-property renderers cope."""
+    svg = render_svg(_make_graph(), NFCORE_THEME, chrome_css=False)
+    assert "var(--nfm" not in svg
+
+
+def test_chrome_css_false_keeps_concrete_chrome_colors():
+    """Dropping the var() block leaves concrete colors baked on chrome elements."""
+    svg = render_svg(_make_graph(), NFCORE_THEME, chrome_css=False)
+    # The background rect and section boxes keep their theme fills.
+    assert f'fill="{NFCORE_THEME.background_color}"' in svg
+    assert f'fill="{NFCORE_THEME.section_fill}"' in svg
+
+
+def test_chrome_css_default_emits_var_block():
+    """The default keeps the var() block so a host can recolor the map live."""
+    svg = render_svg(_make_graph(), NFCORE_THEME)
+    assert "var(--nfm-bg" in svg
+
+
+def test_chrome_css_false_rasterizes_with_cairosvg():
+    """chrome_css=False output is consumable by cairosvg, which cannot parse var()."""
+    cairosvg = pytest.importorskip("cairosvg")
+    svg = render_svg(_make_graph(), NFCORE_THEME, chrome_css=False)
+    png = cairosvg.svg2png(bytestring=svg.encode())
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"

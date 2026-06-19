@@ -399,6 +399,7 @@ def render_svg(
     font_portability: Literal["embed", "paths"] | None = None,
     svg_class_prefix: str = "",
     inject_dark_mode_css: bool = True,
+    chrome_css: bool = True,
     bare: bool = False,
 ) -> str:
     """Render a metro map graph to an SVG string.
@@ -431,6 +432,14 @@ def render_svg(
     ``<style>`` block is omitted.  Useful when a host page manages its own
     theme and the injected media query would fight it.
 
+    ``chrome_css``: when False, the chrome ``--nfm-*`` CSS custom-property
+    ``<style>`` block is omitted.  Chrome elements carry their concrete theme
+    colors as presentation attributes regardless, so both modes render the
+    same map; what False drops is a host page's ability to recolor it live
+    with ``var()``.  Set this False for raster export (e.g. cairosvg, which
+    cannot parse ``var()``) or any consumer without CSS custom-property
+    support.
+
     ``bare``: when True, omits the title and outer padding so the canvas
     hugs the diagram content.  The attribution watermark is kept.  Use for
     embedding the SVG inside a host page that supplies its own frame and
@@ -459,6 +468,7 @@ def render_svg(
             legend_position=legend_position,
             responsive=responsive,
             inject_dark_mode_css=inject_dark_mode_css,
+            chrome_css=chrome_css,
             bare=bare,
         )
 
@@ -506,6 +516,7 @@ def _render_svg_scaled(
     legend_position: str | None,
     responsive: bool = False,
     inject_dark_mode_css: bool = True,
+    chrome_css: bool = True,
     bare: bool = False,
 ) -> str:
     """Render body, run with ``theme`` fonts and label metrics already scaled."""
@@ -619,7 +630,8 @@ def _render_svg_scaled(
 
     # Chrome CSS: custom properties so hosts can recolor without re-rendering.
     # Injected before the background rect so browser parsing order is correct.
-    _inject_chrome_css(d, theme)
+    if chrome_css:
+        _inject_chrome_css(d, theme)
 
     # Dark-mode CSS for transparent-background themes so that elements
     # rendered directly on the canvas (section labels, number badges,

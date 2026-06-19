@@ -223,6 +223,17 @@ def _resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
     ),
 )
 @click.option(
+    "--no-chrome-css",
+    is_flag=True,
+    default=False,
+    help=(
+        "Omit the chrome --nfm-* CSS custom-property <style> block. Colors "
+        "still render (they are baked as presentation attributes); only live "
+        "host recoloring is dropped. Use for raster export: cairosvg and "
+        "similar rasterizers cannot parse var() and fail without this."
+    ),
+)
+@click.option(
     "--bare/--no-bare",
     default=False,
     help=(
@@ -248,6 +259,7 @@ def render(
     text_to_paths: bool,
     svg_class_prefix: str,
     no_dark_mode_css: bool,
+    no_chrome_css: bool,
     bare: bool,
     **layout_opts: object,
 ) -> None:
@@ -299,7 +311,34 @@ def render(
     )
 
     if format_ == "html":
-        content = render_html(graph, theme_obj, debug=debug, embed_basename=output.name)
+        # The interactive page supplies its own responsive frame, chrome, and
+        # per-map class scoping, so the SVG-only sizing/namespacing flags have
+        # nothing to act on. Font portability and the dark-mode block do reach
+        # the inlined SVG, so they are threaded through.
+        ignored = [
+            name
+            for name, enabled in (
+                ("--responsive", responsive),
+                ("--bare", bare),
+                ("--svg-class-prefix", bool(svg_class_prefix)),
+            )
+            if enabled
+        ]
+        if ignored:
+            click.echo(
+                f"Note: {', '.join(ignored)} only affect --format svg and are "
+                "ignored for --format html (the interactive page is already "
+                "responsive and scopes each map independently).",
+                err=True,
+            )
+        content = render_html(
+            graph,
+            theme_obj,
+            debug=debug,
+            embed_basename=output.name,
+            font_portability=font_portability,
+            inject_dark_mode_css=not no_dark_mode_css,
+        )
     else:
         content = render_svg(
             graph,
@@ -309,6 +348,7 @@ def render(
             font_portability=font_portability,
             svg_class_prefix=svg_class_prefix,
             inject_dark_mode_css=not no_dark_mode_css,
+            chrome_css=not no_chrome_css,
             bare=bare,
         )
 

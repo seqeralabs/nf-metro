@@ -141,3 +141,57 @@ def test_render_html_title_in_markup():
 
     assert graph.title
     assert graph.title in html_out
+
+
+# ---------------------------------------------------------------------------
+# Embedding flags forwarded to the inlined SVG
+# ---------------------------------------------------------------------------
+
+
+def test_render_html_forwards_font_portability_embed():
+    """font_portability='embed' inlines the webfont into the page's SVG."""
+    text = RNASEQ_MMD.read_text()
+    graph = parse_metro_mermaid(text)
+    compute_layout(graph)
+
+    plain = render_html(graph, THEMES["nfcore"])
+    embedded = render_html(graph, THEMES["nfcore"], font_portability="embed")
+
+    assert "@font-face" not in plain
+    assert "@font-face" in embedded
+
+
+def test_render_html_embed_font_via_cli(tmp_path):
+    """render --format html --embed-font reaches the inlined SVG."""
+    out = tmp_path / "out.html"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["render", str(RNASEQ_MMD), "-o", str(out), "--format", "html", "--embed-font"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "@font-face" in out.read_text()
+
+
+def test_render_html_warns_on_svg_only_flags(tmp_path):
+    """SVG-only sizing/namespacing flags warn (not silently ignored) for html."""
+    out = tmp_path / "out.html"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "render",
+            str(RNASEQ_MMD),
+            "-o",
+            str(out),
+            "--format",
+            "html",
+            "--bare",
+            "--svg-class-prefix",
+            "foo",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "--bare" in result.output
+    assert "--svg-class-prefix" in result.output
+    assert "ignored for --format html" in result.output
