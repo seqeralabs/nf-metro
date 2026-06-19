@@ -1,0 +1,57 @@
+%%metro title: Fan-out + bypass nesting
+%%metro line: dna | DNA | #2db572
+%%metro line: rna | RNA | #e63946
+%%metro line: qc | QC | #f4a261
+
+graph LR
+    subgraph src [Source]
+        s_in[In]
+        s_hub[Hub]
+        s_in -->|dna,rna,qc| s_hub
+    end
+
+    subgraph straight [Straight]
+        st_a[A]
+        st_b[B]
+        st_a -->|dna| st_b
+    end
+
+    subgraph down1 [Down 1]
+        d1_a[C1]
+        d1_b[C2]
+        d1_a -->|dna| d1_b
+    end
+
+    subgraph down2 [Down 2]
+        d2_a[E1]
+        d2_b[E2]
+        d2_a -->|rna| d2_b
+    end
+
+    subgraph down3 [Down 3]
+        d3_a[F1]
+        d3_b[F2]
+        d3_a -->|rna| d3_b
+    end
+
+    subgraph mid [Mid]
+        m_a[M1]
+        m_b[M2]
+        m_a -->|dna,rna| m_b
+    end
+
+    subgraph sink [Report]
+        rp_a[R1]
+        rp_b[R2]
+        rp_a -->|dna,rna,qc| rp_b
+    end
+
+    s_hub -->|dna| st_a
+    s_hub -->|dna| d1_a
+    s_hub -->|rna| d2_a
+    s_hub -->|rna| d3_a
+    s_hub -->|qc| rp_a
+    d1_b -->|dna| m_a
+    d2_b -->|rna| m_a
+    d3_b -->|rna| m_a
+    m_b -->|dna,rna| rp_a

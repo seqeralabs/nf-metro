@@ -7,7 +7,7 @@ preamble at the top of the relevant `SKILL.md`.
 
 ## Cohort map
 
-The six skills fall into three conceptual groups.
+The skills fall into three conceptual groups.
 
 ### Pipeline-side
 
@@ -26,6 +26,7 @@ For someone changing nf-metro itself:
 |---|---|
 | [`fix-issue`](fix-issue/SKILL.md) | General end-to-end workflow for a GitHub issue: worktree, environment, implement, test, push, PR. The "skeleton" most other nf-metro authoring tasks build on. |
 | [`nf-metro-layout-fix`](nf-metro-layout-fix/SKILL.md) | Drive code-level fixes to nf-metro layout when a real pipeline render exposes a bug. Savepoint pattern, invariant-test-first-then-fix-then-runtime-validator loop, conditional gating, the "improvement ratchet". |
+| [`nf-metro-gate-triage`](nf-metro-gate-triage/SKILL.md) | Run a routing gate-arm triage slice: give every un-exercised branch in a `layout/routing/` module a verdict (reachable -> fixture, defensive, candidate-dead, or reachable-but-defective -> file a bug). Wraps the methodology in [`docs/dev/routing_gate_triage.md`](../../docs/dev/routing_gate_triage.md). |
 | [`pr-chain-vet`](pr-chain-vet/SKILL.md) | Per-PR vetting on a stacked PR chain: gallery diff vs `main`, classify every changed example, `/simplify` pass, sweep narrative comments, get CI green, post-merge cleanup in the right order. |
 
 ### Visual verification

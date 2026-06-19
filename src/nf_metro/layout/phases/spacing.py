@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from nf_metro.layout.constants import DIAGONAL_SLOPE_RATIO
+from nf_metro.layout.constants import DIAGONAL_SLOPE_RATIO, MIN_STATION_FLAT_LENGTH
 from nf_metro.layout.phases._common import _restoring_layout_geometry
 from nf_metro.parser.model import MetroGraph
 
@@ -103,9 +103,12 @@ def _struck_label_station_ids(
     glyphs either way.
 
     Segments a longer flat run cannot relocate are excluded: flat (near-
-    horizontal) trunk runs, bypass-V crossings, off-track output sweeps (placed
-    by the off-track machinery, not the in-grid runway), and angled labels
-    (handled by their rotated footprint).
+    horizontal) trunk runs, off-track output sweeps (placed by the off-track
+    machinery, not the in-grid runway), and angled labels (handled by their
+    rotated footprint).  A bypass-V leg counts only against its own diverging or
+    merging station's label, since the per-column runway relocates that
+    divergence but not the V's fixed-offset crossing of any other label (see
+    ``relocatable_for`` below).
     """
     from nf_metro.layout.labels import segment_strikes_label
     from nf_metro.render.svg import apply_route_offsets
@@ -114,23 +117,44 @@ def _struck_label_station_ids(
         st = graph.stations.get(node_id)
         return bool(st and st.off_track)
 
-    seg_lists = [
-        (
-            apply_route_offsets(r, offsets),
-            r.edge.source.startswith("__bypass_")
-            or r.edge.target.startswith("__bypass_")
-            or _off_track(r.edge.source)
-            or _off_track(r.edge.target),
-        )
-        for r in routes
-    ]
+    def _bypass_endpoint(r: RoutedPath) -> str | None:
+        """The real station a bypass-V leg diverges from or merges at, if any."""
+        src_bypass = r.edge.source.startswith("__bypass_")
+        tgt_bypass = r.edge.target.startswith("__bypass_")
+        if src_bypass == tgt_bypass:
+            return None
+        return r.edge.target if src_bypass else r.edge.source
+
+    # Each route carries which labels its diagonal can be made to clear by a
+    # longer flat run: ``None`` -- never (off-track sweeps the off-track
+    # machinery owns; nothing for the runway to relocate); ``ANY_STATION`` -- a
+    # fan/convergence/descent diagonal that rakes whichever label it crosses; a
+    # station id -- a bypass-V leg, which rakes only its own diverging/merging
+    # station's label (its crossing of any other label sits at a fixed track
+    # offset the per-column runway cannot relocate, left to the router's
+    # flat-run seating).
+    ANY_STATION = ""
+
+    def _segment_applies(relocatable_for: str | None, station_id: str) -> bool:
+        if relocatable_for is None:
+            return False
+        return relocatable_for in (ANY_STATION, station_id)
+
+    seg_lists = []
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        if _off_track(r.edge.source) or _off_track(r.edge.target):
+            relocatable_for = None
+        else:
+            relocatable_for = _bypass_endpoint(r) or ANY_STATION
+        seg_lists.append((pts, relocatable_for))
     struck: set[str] = set()
     for p in placements:
         station = graph.stations.get(p.station_id)
         if station is None or not station.label.strip() or p.angle:
             continue
-        for pts, skip in seg_lists:
-            if skip:
+        for pts, relocatable_for in seg_lists:
+            if not _segment_applies(relocatable_for, p.station_id):
                 continue
             if any(
                 segment_strikes_label(x1, y1, x2, y2, p)
@@ -203,6 +227,85 @@ def _struck_stations_and_collinear(graph: MetroGraph) -> tuple[set[str], bool]:
     offsets, routes, placements = probe
     struck = _struck_label_station_ids(graph, offsets, routes, placements)
     return struck, _collinear_from(graph, offsets, routes)
+
+
+def _bypass_v_flat_gaps_from(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> set[tuple[str, int]]:
+    """Gap layers that would restore bypass-V flats collapsed below the minimum.
+
+    A bypass V should present a visible horizontal run through its X like a
+    regular fork/join station.  When the run *into* V (from the station it
+    diverges from) is shorter than ``MIN_STATION_FLAT_LENGTH``, a gap before V's
+    own layer pushes the bypassed node a grid column out; when the run *out of*
+    V (to the merge target) is too short, a gap before the merge target's layer
+    pushes that target out.  Returns ``(section_id, gap_layer)`` pairs.
+    """
+    gaps: set[tuple[str, int]] = set()
+    for r in routes:
+        into_v = r.edge.target.startswith("__bypass_")
+        out_of_v = r.edge.source.startswith("__bypass_")
+        if into_v == out_of_v:
+            continue
+        v = graph.stations.get(r.edge.target if into_v else r.edge.source)
+        sec = graph.sections.get(v.section_id) if v and v.section_id else None
+        if (
+            v is None
+            or sec is None
+            or sec.direction not in ("LR", "RL")
+            or graph.is_rail_section(sec.id)
+        ):
+            continue
+        flat = (
+            abs(r.points[-1][0] - r.points[-2][0])
+            if into_v
+            else abs(r.points[1][0] - r.points[0][0])
+        )
+        if flat < MIN_STATION_FLAT_LENGTH - 0.5:
+            gaps.add((sec.id, v.layer if into_v else v.layer + 1))
+    return gaps
+
+
+def _bypass_v_collapsed_flat_gaps(graph: MetroGraph) -> set[tuple[str, int]]:
+    """Standalone bypass-V flat probe for the runtime guard.
+
+    Free (no route+place) for a graph with no bypass V.  Otherwise routes
+    through :func:`_probe_label_placements`, which restores the in-place
+    geometry mutations, so this never perturbs the live layout.  See
+    :func:`_bypass_v_flat_gaps_from`.
+    """
+    if not any(
+        e.source.startswith("__bypass_") or e.target.startswith("__bypass_")
+        for e in graph.edges
+    ):
+        return set()
+    probe = _probe_label_placements(graph, allow_hyphenation=True)
+    if probe is None:
+        return set()
+    _offsets, routes, _placements = probe
+    return _bypass_v_flat_gaps_from(graph, routes)
+
+
+def _label_clearance_issues(
+    graph: MetroGraph,
+) -> tuple[set[str], bool, set[tuple[str, int]]]:
+    """One probe: struck labels, the collinear flag, and collapsed bypass-V gaps.
+
+    The strike-clearance loop reads all three from a single route+place pass, so
+    a step's grow/step-back decision never pays for a redundant probe.  See
+    :func:`_struck_label_station_ids`, :func:`_collinear_from`, and
+    :func:`_bypass_v_flat_gaps_from`.
+    """
+    probe = _probe_label_placements(graph, allow_hyphenation=True)
+    if probe is None:
+        return set(), False, set()
+    offsets, routes, placements = probe
+    struck = _struck_label_station_ids(graph, offsets, routes, placements)
+    return (
+        struck,
+        _collinear_from(graph, offsets, routes),
+        _bypass_v_flat_gaps_from(graph, routes),
+    )
 
 
 def _placed_name_label_station_ids(graph: MetroGraph) -> set[str]:

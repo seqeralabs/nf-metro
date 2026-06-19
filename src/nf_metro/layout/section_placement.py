@@ -16,8 +16,8 @@ from typing import TypeGuard
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
+    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
-    INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MERGE_GAP_MIN,
     MIN_INTER_SECTION_GAP,
@@ -27,10 +27,16 @@ from nf_metro.layout.constants import (
     PLACEMENT_X_GAP,
     PLACEMENT_Y_GAP,
     PORT_MIN_GAP,
+    SAME_COORD_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
 )
-from nf_metro.layout.routing.common import resolve_section
+from nf_metro.layout.routing.common import (
+    inter_row_wrap_band,
+    max_grid_row_with_content,
+    resolve_section,
+    section_exists_above_row,
+)
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
 
@@ -345,7 +351,7 @@ def _finalize_spanning_sections(
             continue
         target_left = min(s.offset_x + s.bbox_x for s in peers)
         current_left = section.offset_x + section.bbox_x
-        if abs(current_left - target_left) > 0.5:
+        if abs(current_left - target_left) > SAME_COORD_TOLERANCE:
             section.offset_x -= current_left - target_left
 
         rspan = section.grid_row_span
@@ -437,7 +443,7 @@ def _place_section_group(
             graph,
             row_assign,
             requested_gap=section_y_gap,
-            wrap_min_by_pair=_wrap_bundle_row_minimums(graph),
+            wrap_min_by_pair=_inter_row_routing_minimums(graph),
         )
 
 
@@ -474,6 +480,7 @@ def place_sections(
     components = _weakly_connected_components(graph, section_edges)
     if len(components) <= 1 or graph._explicit_grid:
         _place_section_group(graph, section_edges, section_x_gap, section_y_gap, None)
+        _reserve_over_top_headroom(graph)
         return
 
     # Deterministic stacking order: top-most original row first, then the
@@ -507,6 +514,42 @@ def place_sections(
             s.offset_y += dy
             s.offset_x += dx
         stack_y += (bottom - top) + section_y_gap
+    _reserve_over_top_headroom(graph)
+
+
+def _reserve_over_top_headroom(graph: MetroGraph) -> None:
+    """Shift rows down to clear the canvas title for an over-the-top loop.
+
+    A RIGHT-entry TB section fed by a same-row, lower-column source is reached
+    by a loop over the section's top (see ``_route_right_entry_over_top``).
+    When no section sits above that section's row, the loop's horizontal would
+    climb into the canvas-top title band.  Reserve a header-clearance band above
+    the topmost such row -- pushing it and every lower row down -- so the loop
+    runs between the title and the section's header badge.
+    """
+    headroom = INTER_ROW_HEADER_CLEARANCE + CURVE_RADIUS
+    target_rows: set[int] = set()
+    for port in graph.ports.values():
+        if not (port.is_entry and port.side == PortSide.RIGHT):
+            continue
+        psec = graph.sections.get(port.section_id)
+        if psec is None or psec.direction != "TB":
+            continue
+        for edge in graph.edges_to(port.id):
+            src_port = graph.ports.get(edge.source)
+            ssec = graph.sections.get(src_port.section_id) if src_port else None
+            if ssec is None:
+                continue
+            if ssec.grid_row == psec.grid_row and ssec.grid_col < psec.grid_col:
+                if not section_exists_above_row(graph, psec.grid_row):
+                    target_rows.add(psec.grid_row)
+                break
+    if not target_rows:
+        return
+    min_target = min(target_rows)
+    for section in graph.sections.values():
+        if section.grid_row >= min_target:
+            section.offset_y += headroom
 
 
 def _rows_overlap(a: Section, b: Section) -> bool:
@@ -609,8 +652,68 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     minimums: dict[tuple[int, int], float] = {}
     for gap, ports in per_gap.items():
         widest = max(len(lines) for lines in ports.values())
-        span = (widest - 1) * OFFSET_STEP
-        minimums[gap] = INTER_ROW_EDGE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE
+        minimums[gap] = inter_row_wrap_band(widest)
+    return minimums
+
+
+def _merge_trunk_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]:
+    """Minimum bbox-to-bbox row gap a bottommost-row merge trunk needs.
+
+    A merge junction whose entry sits in the bottommost grid row is fed by a
+    trunk that crosses rows; rather than diving below the whole canvas, its
+    bypass channel routes in the inter-row gap *above* the bottom row (see
+    ``bypass_bottom_y``).  That channel is a horizontal run spanning the
+    trunk's columns, so -- like an inter-row wrap bundle -- it needs
+    ``INTER_ROW_EDGE_CLEARANCE`` below the upper row's bbox, the bundle span,
+    and ``INTER_ROW_HEADER_CLEARANCE`` above the bottom row's header.  Unlike a
+    wrap, the bottom-row target need not share a column with the upper-row
+    sections the channel crosses, so the column-overlap test that gates header
+    widening misses this gap; the reservation here makes the placement pass
+    widen it via the envelope rule instead.
+
+    Returns the required bbox-to-bbox gap for the ``(max_row - 1, max_row)``
+    pair when any such merge exists; empty otherwise.
+    """
+    merge_ids = {j for j in graph.junctions if j.startswith("__merge_")}
+    if not merge_ids:
+        return {}
+    max_row = max_grid_row_with_content(graph)
+    if not max_row:
+        return {}
+
+    widest = 0
+    for mjid in merge_ids:
+        mst = graph.stations.get(mjid)
+        if mst is None or not mst.section_id:
+            continue
+        tgt_sec = graph.sections.get(mst.section_id)
+        if tgt_sec is None or tgt_sec.grid_row != max_row:
+            continue
+        lines: set[str] = set()
+        crosses_row = False
+        for edge in graph.edges_to(mjid):
+            src_sec = resolve_section(graph, graph.stations.get(edge.source))
+            if src_sec is not None and src_sec.grid_row < max_row:
+                crosses_row = True
+            lines.add(edge.line_id)
+        if crosses_row:
+            widest = max(widest, len(lines))
+
+    if widest == 0:
+        return {}
+    return {(max_row - 1, max_row): inter_row_wrap_band(widest)}
+
+
+def _inter_row_routing_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]:
+    """Per-gap bbox-to-bbox minimum for every horizontal run an inter-row gap
+    must host: entry-wrap bundles and bottommost-row merge-trunk channels.
+
+    Both place a flush horizontal run in the gap; a pair claimed by both takes
+    the wider reservation.
+    """
+    minimums = dict(_wrap_bundle_row_minimums(graph))
+    for gap, band in _merge_trunk_row_minimums(graph).items():
+        minimums[gap] = max(minimums.get(gap, 0.0), band)
     return minimums
 
 
@@ -858,13 +961,13 @@ def _enforce_min_row_gaps(
     bottom to the lower section's header top (bbox_y - protrusion).
     Only checks section pairs that share horizontal extent.
 
-    ``wrap_min_by_pair`` (see :func:`_wrap_bundle_row_minimums`) adds a
+    ``wrap_min_by_pair`` (see :func:`_inter_row_routing_minimums`) adds a
     second, routing-aware constraint: an adjacent-row gap that hosts an
-    inter-row wrap bundle is widened so the bundle's horizontal run keeps
-    full clearance from both bounding sections.  That requirement is
-    bbox-to-bbox (no header protrusion) and spans the row envelope, so it
-    is checked against the tightest envelope edges rather than only
-    horizontally-overlapping pairs.
+    inter-row horizontal run (an entry-wrap bundle or a bottommost-row
+    merge-trunk channel) is widened so the run keeps full clearance from
+    both bounding sections.  That requirement is bbox-to-bbox (no header
+    protrusion) and spans the row envelope, so it is checked against the
+    tightest envelope edges rather than only horizontally-overlapping pairs.
     """
     if not row_assign:
         return

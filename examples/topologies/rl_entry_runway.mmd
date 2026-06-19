@@ -1,0 +1,32 @@
+%%metro title: RL Entry Runway
+%%metro style: dark
+%%metro line: l1 | L1 | #2db572
+%%metro line: l2 | L2 | #e63946
+%%metro grid: rl_sec | 0,0
+%%metro grid: src_sec | 1,0
+
+graph LR
+    subgraph src_sec [Source]
+        %%metro exit: left | l1,l2
+        s1[Start]
+        s2[Prep A]
+        s3[Prep B]
+        s1 -->|l1| s2
+        s1 -->|l2| s3
+    end
+
+    subgraph rl_sec [RL Section]
+        %%metro direction: RL
+        %%metro entry: right | l1,l2
+        r1[Stage One]
+        r2[Stage Two]
+        r3[Stage Three]
+        r4[Deep Target]
+        r1 -->|l1| r2
+        r2 -->|l1| r3
+        r3 -->|l1| r4
+        r1 -->|l2| r2
+    end
+
+    s2 -->|l1| r4
+    s3 -->|l2| r1

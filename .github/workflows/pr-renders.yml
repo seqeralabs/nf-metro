@@ -30,6 +30,7 @@ jobs:
         run: |
           mkdir -p /tmp/pr_renders
           cp docs/assets/renders/*.svg docs/assets/renders/manifest.json /tmp/pr_renders/
+          cp docs/assets/renders/metrics.json /tmp/pr_renders/ 2>/dev/null || true
 
       # --- Render with base branch code ---
       - name: Clean renders before base render
@@ -49,6 +50,7 @@ jobs:
           mkdir -p /tmp/base_renders
           cp docs/assets/renders/*.svg /tmp/base_renders/
           cp docs/assets/renders/manifest.json /tmp/base_renders/ 2>/dev/null || true
+          cp docs/assets/renders/metrics.json /tmp/base_renders/ 2>/dev/null || true
 
       # --- Generate diff ---
       - name: Checkout PR branch (for diff script)

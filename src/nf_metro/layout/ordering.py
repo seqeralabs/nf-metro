@@ -15,10 +15,12 @@ from collections import defaultdict
 import networkx as nx
 
 from nf_metro.layout.constants import (
+    COORD_TOLERANCE_FINE,
     DEFAULT_LINE_PRIORITY,
     DIAMOND_COMPRESSION,
     FANOUT_SPACING,
     LINE_GAP,
+    SAME_COORD_TOLERANCE,
     SIDE_BRANCH_NUDGE,
 )
 from nf_metro.parser.model import LineSpread, MetroGraph
@@ -234,7 +236,7 @@ def _is_track_occupied_at_layer(
     layer: int,
     layer_occupancy: dict[int, dict[str, float]],
     exclude_node: str,
-    tolerance: float = 0.5,
+    tolerance: float = SAME_COORD_TOLERANCE,
 ) -> bool:
     """Check if any already-placed station at this layer occupies the given track."""
     placed = layer_occupancy.get(layer, {})
@@ -264,7 +266,7 @@ def _find_free_nearby_track(
     # Rank by distance from pred_track (prefer closer to predecessor)
     existing.sort(key=lambda t: abs(t - pred_track))
     for t in existing:
-        if abs(t - pred_track) < 0.01:
+        if abs(t - pred_track) < COORD_TOLERANCE_FINE:
             # Skip the predecessor's own track (would be a flat line)
             continue
         if not _is_track_occupied_at_layer(t, layer, layer_occupancy, exclude_node):
@@ -799,10 +801,10 @@ def _equalize_fork_groups(
         #   2 stations  - gap exceeds line_gap (multi-line station padding)
         #   3+ stations - spacing is uneven
         if len(group) == 2:
-            if spacings[0] <= line_gap + 0.01:
+            if spacings[0] <= line_gap + COORD_TOLERANCE_FINE:
                 continue
         else:
-            if max(spacings) - min(spacings) < 0.01:
+            if max(spacings) - min(spacings) < COORD_TOLERANCE_FINE:
                 continue
 
         # Distribute as signed offsets around an anchor so the column

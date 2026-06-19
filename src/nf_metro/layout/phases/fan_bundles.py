@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from nf_metro.layout.constants import (
+    SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
 )
 from nf_metro.layout.phases._common import (
@@ -111,8 +112,8 @@ def _divergence_target_ys(graph: MetroGraph) -> set[str]:
         # at or beyond either extreme can snap freely - the snap won't
         # collapse a diagonal onto a target track.
         sy = st.y
-        has_below = any(ty < sy - 0.5 for ty in tgt_ys)
-        has_above = any(ty > sy + 0.5 for ty in tgt_ys)
+        has_below = any(ty < sy - SAME_COORD_TOLERANCE for ty in tgt_ys)
+        has_above = any(ty > sy + SAME_COORD_TOLERANCE for ty in tgt_ys)
         if has_below and has_above:
             anchors.add(src_id)
     return anchors
@@ -320,7 +321,7 @@ def _apply_half_grid_2branch_symfan(
         if content_ys:
             new_top = min(content_ys) - section_y_padding
             delta = new_top - section.bbox_y
-            if delta > 0.5:
+            if delta > SAME_COORD_TOLERANCE:
                 section.bbox_y = new_top
                 section.bbox_h = max(0.0, section.bbox_h - delta)
 
@@ -370,7 +371,7 @@ def _section_symfan_uses_half_grid(graph: MetroGraph, section: Section) -> bool:
         by_col[round(st.x, 3)] += 1
     if has_off_track or len(branches) != 2:
         return False
-    if abs(branches[0].x - branches[1].x) >= 0.5:
+    if abs(branches[0].x - branches[1].x) >= SAME_COORD_TOLERANCE:
         return False
     # No other column may have a multi-branch population (would force
     # full-grid height anyway).  With exactly two branches sharing one

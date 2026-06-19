@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -361,126 +363,51 @@ def test_around_section_below_dispatched_for_cross_row_left_entry():
         )
 
 
-# ---------------------------------------------------------------------------
-# Stepped-descent concentric bundling (#508)
-# ---------------------------------------------------------------------------
-
-
-def _stepped_descent_ctx(line_ids):
-    """Minimal _RoutingCtx + stations triggering a nested stepped descent.
-
-    An oversized source section (col 0) whose right edge sits well right of a
-    narrow target column (col 1) entry port, junction-sourced, so a multi-line
-    bundle fans down through the stepped staircase.
+@pytest.mark.parametrize(
+    ("fixture", "handler"),
+    [
+        ("around_section_below.mmd", "_route_around_section_below"),
+        ("around_below_ep_col_gt0.mmd", "_route_around_section_below"),
+        ("corridor_narrow_gap_fallback.mmd", "_route_around_section_below"),
+        ("self_crossing_bridge.mmd", "_route_around_section_below"),
+        ("genomic_pipeline.mmd", "_route_inter_row_gap_corridor"),
+    ],
+)
+def test_around_and_corridor_routes_built_from_centreline(fixture, handler):
+    """The around-below and inter-row-corridor handlers route via the
+    centreline builder, so each is a 6-point loop with concentric, derived
+    corner radii (never hand-rolled) and route_edges' always-on curve
+    invariants stay green.
     """
-    from nf_metro.layout.routing import core
-    from nf_metro.parser.model import (
-        MetroGraph,
-        Port,
-        PortSide,
-        Section,
-        Station,
-    )
+    import nf_metro.layout.routing.inter_section_handlers as ish
 
-    g = MetroGraph(title="t", style="nfcore")
-    g.sections["A"] = Section(
-        id="A",
-        name="A",
-        grid_col=0,
-        grid_row=0,
-        bbox_x=0.0,
-        bbox_y=0.0,
-        bbox_w=400.0,
-        bbox_h=100.0,
-    )
-    g.sections["B"] = Section(
-        id="B",
-        name="B",
-        grid_col=1,
-        grid_row=0,
-        bbox_x=120.0,
-        bbox_y=200.0,
-        bbox_w=60.0,
-        bbox_h=80.0,
-    )
-    src = Station(id="J", label="", section_id="A", x=50.0, y=50.0)
-    g.stations["J"] = src
-    ep = Station(id="P", label="", section_id="B", is_port=True, x=150.0, y=230.0)
-    g.stations["P"] = ep
-    g.ports["P"] = Port(
-        id="P", section_id="B", side=PortSide.RIGHT, is_entry=True, x=150.0, y=230.0
-    )
-    offs = {("J", lid): (k - 1) * 3.0 for k, lid in enumerate(line_ids)}
-    offs.update({("P", lid): (k - 1) * 3.0 for k, lid in enumerate(line_ids)})
-    ctx = core._RoutingCtx(
-        graph=g,
-        fold_x=0.0,
-        junction_ids={"J"},
-        bottom_exit_junctions=set(),
-        bottom_exit_junction_ports={},
-        offset_step=3.0,
-        fork_stations=set(),
-        join_stations=set(),
-        tb_sections=set(),
-        tb_right_entry=set(),
-        bundle_info={},
-        bypass_gap_idx={},
-        station_offsets=offs,
-        diagonal_run=20.0,
-        curve_radius=10.0,
-    )
-    return core, ctx, src, ep
+    root = Path(__file__).parent.parent / "examples"
+    candidate = root / "topologies" / fixture
+    path = candidate if candidate.exists() else root / fixture
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
 
+    real = getattr(ish, handler)
+    captured: list = []
 
-def _arc_centre_from_points(pts, corner_idx, r):
-    """Arc centre at points[corner_idx+1] for a 90-degree rounded corner."""
-    a, c, b = pts[corner_idx], pts[corner_idx + 1], pts[corner_idx + 2]
+    def hook(*args):
+        result = real(*args)
+        captured.append(result)
+        return result
 
-    def unit(p, q):
-        dx, dy = q[0] - p[0], q[1] - p[1]
-        m = (dx * dx + dy * dy) ** 0.5 or 1.0
-        return dx / m, dy / m
+    setattr(ish, handler, hook)
+    try:
+        # route_edges runs assert_render_curve_invariants on its output; a flip
+        # or non-concentric corner from these handlers would raise here.
+        route_edges(graph)
+    finally:
+        setattr(ish, handler, real)
 
-    ti = unit(a, c)
-    to = unit(c, b)
-    return (c[0] + r * (to[0] - ti[0]), c[1] + r * (to[1] - ti[1]))
-
-
-def test_stepped_descent_single_line_uses_base_radius():
-    from nf_metro.parser.model import Edge
-
-    core, ctx, src, ep = _stepped_descent_ctx(["solo"])
-    assert core._should_step_descent(ctx.graph, src, ep, ctx.graph.ports["P"])
-    rp = core._route_stepped_descent(Edge("J", "P", "solo"), src, ep, 0, 1, ctx)
-    assert rp.curve_radii == [ctx.curve_radius] * 4
-
-
-def test_stepped_descent_bundle_is_concentric():
-    from nf_metro.parser.model import Edge
-
-    lines = ["l0", "l1", "l2"]
-    core, ctx, src, ep = _stepped_descent_ctx(lines)
-    n = len(lines)
-    routes = [
-        core._route_stepped_descent(Edge("J", "P", lid), src, ep, i, n, ctx)
-        for i, lid in enumerate(lines)
-    ]
-    # The two middle rungs (corners 1 and 2: down->left, left->down) are fanned
-    # by ``spread`` on BOTH legs, so they are genuinely concentric - every
-    # line's arc centre must coincide.  (Corners 0 and 3 join a spread-fanned
-    # vertical to a port-offset horizontal, so they are transition corners,
-    # sized to keep the vertical legs aligned rather than to share a centre.)
-    for corner_idx in (1, 2):
-        centres = [
-            _arc_centre_from_points(rp.points, corner_idx, rp.curve_radii[corner_idx])
-            for rp in routes
-        ]
-        for cx, cy in centres[1:]:
-            assert abs(cx - centres[0][0]) < 1e-6
-            assert abs(cy - centres[0][1]) < 1e-6
-    # All four corners stay nested (radii monotonic across the bundle), so the
-    # arcs never cross regardless of the transition-corner sizing.
-    for corner_idx in range(4):
-        radii = [rp.curve_radii[corner_idx] for rp in routes]
-        diffs = [b - a for a, b in zip(radii, radii[1:])]
-        assert all(d > 0 for d in diffs) or all(d < 0 for d in diffs)
+    assert captured, f"{handler} was not dispatched for {fixture}"
+    for r in captured:
+        assert len(r.points) == 6, f"expected a 6-point loop, got {r.points}"
+        assert r.curve_radii is not None and len(r.curve_radii) == 4, (
+            f"expected 4 derived corner radii, got {r.curve_radii}"
+        )
+        assert all(c > 0 for c in r.curve_radii)
+        assert r.offsets_applied

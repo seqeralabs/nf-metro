@@ -1,0 +1,51 @@
+%%metro title: Cross-track interchange
+%%metro style: dark
+%%metro legend: br
+%%metro line: tumor | Tumor | #d62728
+%%metro line: normal | Normal | #0570b0
+%%metro file: fastq_in | FASTQ
+%%metro file: out | VCF
+
+%% The two lanes are NOT parallel everywhere: they share a pre-processing trunk
+%% (a real convergence), fan out to their own aligners, and merge again at
+%% Annotate (a real fan-in, where the lines pinch to a point). MarkDuplicates is
+%% the exception -- both lanes run it but never merge there, so it renders as a
+%% cross-track interchange that keeps each lane straight on its own track rather
+%% than pinching them together. (Auto-layout infers this same interchange even
+%% without the directive, since the lanes through MarkDuplicates are parallel;
+%% Annotate is left as a convergence because both lanes leave it for one MultiQC.)
+%%metro interchange: markduplicates | tumor | normal
+
+graph LR
+    subgraph prep [Pre-processing]
+        fastq_in[ ]
+        fastqc[FastQC]
+        fastp[fastp]
+        fastq_in -->|tumor,normal| fastqc
+        fastqc -->|tumor,normal| fastp
+    end
+
+    subgraph calling [Alignment & calling]
+        bwa_t[BWA tumour]
+        bwa_n[BWA normal]
+        markduplicates[MarkDuplicates]
+        mutect2[Mutect2]
+        haplotypecaller[GATK HC]
+        bwa_t -->|tumor| markduplicates
+        bwa_n -->|normal| markduplicates
+        markduplicates -->|tumor| mutect2
+        markduplicates -->|normal| haplotypecaller
+    end
+
+    subgraph reporting [Annotation & reporting]
+        annotate[VEP]
+        multiqc[MultiQC]
+        out[ ]
+        annotate -->|tumor,normal| multiqc
+        multiqc -->|tumor,normal| out
+    end
+
+    fastp -->|tumor| bwa_t
+    fastp -->|normal| bwa_n
+    mutect2 -->|tumor| annotate
+    haplotypecaller -->|normal| annotate

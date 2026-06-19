@@ -1,0 +1,50 @@
+%%metro title: Merge Trunk Over Low Section
+%%metro style: dark
+%%metro line: flow | Flow | #0570b0
+%%metro line: side | Side | #2db572
+
+%%metro grid: ingest | 0,0
+%%metro grid: tall | 1,0
+%%metro grid: proc2 | 2,0
+%%metro grid: collect | 3,0
+%%metro grid: sub | 2,1
+
+graph LR
+    subgraph ingest [Ingest]
+        i1[Read]
+        i2[Split]
+        i1 -->|flow,side| i2
+    end
+
+    subgraph tall [Tall]
+        ta[Branch]
+        tb1[Path A]
+        tb2[Path B]
+        tb3[Path C]
+        ta -->|flow| tb1
+        ta -->|flow| tb2
+        ta -->|flow| tb3
+    end
+
+    subgraph proc2 [Proc 2]
+        q1[Step]
+    end
+
+    subgraph collect [Collect]
+        c1[Gather]
+        c2[Report]
+        c1 -->|flow| c2
+    end
+
+    subgraph sub [Sub]
+        d1[Aux]
+        d2[Done]
+        d1 -->|side| d2
+    end
+
+    i2 -->|flow| ta
+    i2 -->|flow| c1
+    tb1 -->|flow| q1
+    tb1 -->|flow| c1
+    q1 -->|flow| c1
+    i2 -->|side| d1

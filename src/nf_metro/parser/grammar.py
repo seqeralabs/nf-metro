@@ -76,6 +76,7 @@ class _Subgraph:
 
     section_id: str
     name: str
+    line_no: int | None = None
 
 
 @dataclass
@@ -89,6 +90,7 @@ class _Directive:
 
     key: str
     value: str
+    line_no: int | None = None
 
 
 @dataclass
@@ -109,6 +111,7 @@ class _Node:
 
     node_id: str
     label: str
+    line_no: int | None = None
 
 
 @dataclass
@@ -126,6 +129,7 @@ class _Edge:
     line_ids: list[str]
     source_label: str | None = None
     target_label: str | None = None
+    line_no: int | None = None
 
 
 _Statement = (
@@ -183,7 +187,11 @@ class _StatementTransformer(Transformer[Token, list[_Statement]]):
         m = _SUBGRAPH_PATTERN.match(str(items[0]))
         if not m:
             return _Junk(str(items[0]))
-        return _Subgraph(m.group(1), _unquote((m.group(2) or m.group(1)).strip()))
+        return _Subgraph(
+            m.group(1),
+            _unquote((m.group(2) or m.group(1)).strip()),
+            line_no=items[0].line,
+        )
 
     def end_stmt(self, items: list[Token]) -> _Statement:
         return _End()
@@ -193,7 +201,7 @@ class _StatementTransformer(Transformer[Token, list[_Statement]]):
         key, sep, rest = content.partition(":")
         if not sep:
             return _Comment()
-        return _Directive(key, rest.strip())
+        return _Directive(key, rest.strip(), line_no=items[0].line)
 
     def comment(self, items: list[Token]) -> _Statement:
         return _Comment()
@@ -204,7 +212,7 @@ class _StatementTransformer(Transformer[Token, list[_Statement]]):
     def node(self, items: list[Token]) -> _Statement:
         name = str(items[0])
         label = _shape_label(str(items[1])) if len(items) > 1 else name
-        return _Node(name, label)
+        return _Node(name, label, line_no=items[0].line)
 
     def edge(self, items: list[Token]) -> _Statement:
         # items: NAME [SHAPE] ARROW [EDGELABEL] NAME [SHAPE]
@@ -226,7 +234,12 @@ class _StatementTransformer(Transformer[Token, list[_Statement]]):
             else None
         )
         return _Edge(
-            source, target, _edge_line_ids(edge_label), source_label, target_label
+            source,
+            target,
+            _edge_line_ids(edge_label),
+            source_label,
+            target_label,
+            line_no=items[0].line,
         )
 
     def start(self, items: list[_Statement]) -> list[_Statement]:

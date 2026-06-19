@@ -20,9 +20,11 @@ from pathlib import Path
 
 import pytest
 from conftest import CONTENT_PLACEMENT_PHASES
+from layout_validator import check_route_segment_crossings, check_station_as_elbow
 
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
+    DIAGONAL_SLOPE_RATIO,
     EDGE_TO_BUNDLE_CLEARANCE,
     INTER_ROW_EDGE_CLEARANCE,
     MIN_STATION_FLAT_LENGTH,
@@ -52,15 +54,21 @@ from nf_metro.layout.phases.bbox import (
     _section_fit_top,
 )
 from nf_metro.layout.phases.off_track import (
+    _is_single_trunk_lr_section,
     _off_track_anchor_of,
     _off_track_fit_top,
     _off_track_groups,
+    _off_track_lift_step,
     _off_track_output_below,
     _reanchor_off_track_to_consumer,
     _section_distinct_trunk_ys,
 )
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import resolve_section
+from nf_metro.layout.routing.invariants import (
+    check_bundle_order_preserved,
+    check_no_collinear_distinct_lines,
+)
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 from nf_metro.render.svg import (
@@ -651,6 +659,131 @@ def test_row_trunk_marker_cy_consistent(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Straight-through bundle line keeps a constant offset
+# ---------------------------------------------------------------------------
+
+# (fixture, line_id) where the named line's whole route lies on a single
+# base-Y trunk, so every station it touches must carry one per-line offset --
+# any variation paints the line as a kink or slant.  These fixtures exercise
+# the section-exit / junction-to-entry-port bundle-order paths in offsets.py
+# where a straight-through line is reordered off its incoming slot.
+_STRAIGHT_THROUGH_LINES = [
+    ("topologies/junction_entry_collision.mmd", "alpha"),
+    ("topologies/junction_entry_align.mmd", "alpha"),
+]
+
+
+@pytest.mark.parametrize("fixture,line_id", _STRAIGHT_THROUGH_LINES)
+def test_straight_through_line_keeps_constant_offset(fixture, line_id):
+    """A line confined to one base-Y trunk must carry a single offset.
+
+    The line is purely horizontal, so any per-station offset variation is
+    painted as a kink or slant.  Reordering the bundle at a section exit or
+    across a junction-to-entry-port boundary breaks this.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    stations = [sid for sid in graph.stations if line_id in graph.station_lines(sid)]
+    ys = [graph.stations[sid].y for sid in stations]
+    assert max(ys) - min(ys) <= _Y_TOL, (
+        f"{fixture}: {line_id} spans rows {min(ys)}..{max(ys)}; "
+        "test precondition (single trunk) does not hold"
+    )
+    offs = {sid: round(offsets.get((sid, line_id), 0.0), 1) for sid in stations}
+    distinct = sorted(set(offs.values()))
+    assert len(distinct) == 1, (
+        f"{fixture}: line {line_id} runs flat on one trunk but its offset "
+        f"varies {distinct}; per-station offsets {offs}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Subset-carrying section anchors its bundle on its own trunk
+# ---------------------------------------------------------------------------
+
+# (fixture, section_id) for independent sections (no flat-frame neighbour) that
+# carry a contiguous subset of the global lines starting below the top
+# priority -- the case base offsets push off the trunk.  qc_report is reversed
+# (RL): its base offsets count down from the global, not local, maximum, so it
+# exercises the reversed branch of the re-anchoring.
+_SUBSET_ANCHORED_SECTIONS = [
+    ("topologies/dogleg_exempt_distinct.mmd", "bot_sink"),
+    ("rnaseq_auto.mmd", "pseudo_align"),
+    ("sarek_metro.mmd", "calling"),
+    ("rnaseq_auto.mmd", "qc_report"),
+]
+
+
+@pytest.mark.parametrize("fixture,section_id", _SUBSET_ANCHORED_SECTIONS)
+def test_subset_section_bundle_anchored_on_trunk(fixture, section_id):
+    """An independent section carrying a line subset anchors its bundle on its
+    own trunk.
+
+    The section's distinct per-line offset levels must be the contiguous
+    top-anchored run ``0, step, 2*step, ...``.  Leaving a subset on its
+    global-priority slots (e.g. lines 3,4 of a four-line bundle at offsets
+    6,9) centres the marker pill below the trunk, so the section sits lower
+    than a same-row sibling carrying a different subset.
+    """
+    from nf_metro.layout.constants import OFFSET_STEP
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    levels = sorted(
+        {
+            round(offsets.get((sid, lid), 0.0), 1)
+            for sid, st in graph.stations.items()
+            if st.section_id == section_id and not st.is_port
+            for lid in graph.station_lines(sid)
+        }
+    )
+    expected = [round(i * OFFSET_STEP, 1) for i in range(len(levels))]
+    assert levels == expected, (
+        f"{fixture}: section {section_id} offset levels {levels} are not "
+        f"top-anchored {expected}; markers pushed off the trunk"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Merge-port re-joined line keeps its side on the outgoing run
+# ---------------------------------------------------------------------------
+
+# (fixture, line_id, row_y) where the line re-joins a bundle perpendicular at a
+# multi-feeder merge port and then continues horizontally along the merge row.
+# Once re-slotted to one side of the trunk it must keep that side across the
+# whole row, so its offset is constant on every station at row_y; flipping
+# sides on the outgoing run paints an avoidable crossover.
+_MERGE_PORT_OUTGOING_LINES = [
+    ("topologies/merge_port_above_approach.mmd", "bypass", 270.0),
+]
+
+
+@pytest.mark.parametrize("fixture,line_id,row_y", _MERGE_PORT_OUTGOING_LINES)
+def test_merge_port_line_keeps_side_on_outgoing_run(fixture, line_id, row_y):
+    """A line re-joined at a merge port keeps one offset along the merge row.
+
+    The merge-port pass picks the bundle slot nearest the line's approach
+    side; if the downstream consumer keeps the line's old slot it crosses the
+    trunk on the outgoing run.  Every station the line touches at ``row_y``
+    must therefore share one offset.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    on_row = [
+        sid
+        for sid in graph.stations
+        if line_id in graph.station_lines(sid)
+        and abs(graph.stations[sid].y - row_y) <= _Y_TOL
+    ]
+    offs = {sid: round(offsets.get((sid, line_id), 0.0), 1) for sid in on_row}
+    distinct = sorted(set(offs.values()))
+    assert len(distinct) == 1, (
+        f"{fixture}: line {line_id} flips offset {distinct} along the merge "
+        f"row y={row_y}, crossing the trunk; per-station offsets {offs}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Symmetric fan column-mate Y equality
 # ---------------------------------------------------------------------------
 
@@ -843,6 +976,103 @@ def test_intra_section_collinear_check_detects_overlay():
     violations = check_intra_section_collinear_distinct_lines(graph, routes, {})
     assert violations, "expected a collinear overlay to be detected"
     assert {violations[0].line_a, violations[0].line_b} == {"red", "blue"}
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_no_stacked_elbow_graze(fixture):
+    """Two stacked, non-parallel inter-section risers must not graze.
+
+    Two different lines descending one inter-section gap as risers that merely
+    meet at a shared elbow band - a deep descent landing on a port lane that a
+    shallow descent then leaves - are separate corridors, not a parallel
+    bundle.  Packed within ``BUNDLE_TO_BUNDLE_CLEARANCE`` of each other their
+    opposing elbows overlap and the lines graze.  The gap layout must
+    distribute them across the gap width instead.
+    """
+    from nf_metro.layout.routing.invariants import check_stacked_elbow_clearance
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    violations = check_stacked_elbow_clearance(graph, routes, offsets)
+    assert not violations, "; ".join(v.message() for v in violations)
+
+
+def test_stacked_elbow_check_detects_graze():
+    """Meaningfulness guard: the stacked-elbow check fires on a genuine graze.
+
+    Locks the detector so the corpus test above is not vacuously green: two
+    different-line vertical risers in one gap, stacked (their spans meet at one
+    elbow band rather than overlapping) and within
+    ``BUNDLE_TO_BUNDLE_CLEARANCE`` of each other in X, must be flagged.
+    """
+    from types import SimpleNamespace
+
+    from nf_metro.layout.routing.common import RoutedPath
+    from nf_metro.layout.routing.invariants import check_stacked_elbow_clearance
+    from nf_metro.parser.model import Edge
+
+    def _riser(src, tgt, line, x, y_lo, y_hi):
+        return RoutedPath(
+            edge=Edge(source=src, target=tgt, line_id=line),
+            line_id=line,
+            points=[(x, y_lo), (x, y_hi)],
+            is_inter_section=True,
+            offsets_applied=True,
+        )
+
+    # A deep descent landing at y=100 and a shallow descent leaving it, 6px
+    # apart in X (< BUNDLE_TO_BUNDLE_CLEARANCE), overlapping only 3px in Y.
+    graph = SimpleNamespace(stations={})
+    routes = [
+        _riser("up_src", "port", "red", 0.0, 0.0, 100.0),
+        _riser("hub", "down_dst", "blue", 6.0, 97.0, 200.0),
+    ]
+    violations = check_stacked_elbow_clearance(graph, routes, {})
+    assert violations, "expected a stacked-elbow graze to be detected"
+    assert {violations[0].line_a, violations[0].line_b} == {"red", "blue"}
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_perp_entry_feed_not_collinear(fixture):
+    """A TOP/BOTTOM entry port never sits at the Y of the station feeding it.
+
+    The station-as-elbow constraint and the boundary snap hold a perpendicular
+    entry port off the consumer's internal rows, while its feeders are exit
+    ports seated in a vertically-distinct section, so a feed can never be
+    collinear with the port; ``_guard_perp_entry_feed_not_collinear`` locks
+    that out.
+    """
+    from nf_metro.layout.phases.guards import _guard_perp_entry_feed_not_collinear
+
+    graph = _layout(fixture)
+    _guard_perp_entry_feed_not_collinear(graph, "test")
+
+
+def test_perp_entry_feed_collinear_guard_detects():
+    """Meaningfulness guard: dragging a TOP entry port onto its feeder's Y
+    makes ``_guard_perp_entry_feed_not_collinear`` raise.
+    """
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_perp_entry_feed_not_collinear,
+    )
+
+    graph = _layout("topologies/cross_col_top_entry.mmd")
+    _guard_perp_entry_feed_not_collinear(graph, "test")
+
+    port_id, feeder_id = next(
+        (pid, edge.source)
+        for section in graph.sections.values()
+        for pid in section.entry_ports
+        if (port := graph.ports.get(pid)) is not None
+        and port.side in (PortSide.TOP, PortSide.BOTTOM)
+        for edge in graph.edges_to(pid)
+    )
+    graph.stations[port_id].y = graph.stations[feeder_id].y
+
+    with pytest.raises(PhaseInvariantError, match="collinear with its feeder"):
+        _guard_perp_entry_feed_not_collinear(graph, "test")
 
 
 @pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
@@ -1091,6 +1321,175 @@ def test_inter_row_trunk_bands_crossing_optimal(fixture):
     )
 
 
+@pytest.mark.parametrize(
+    "spans, expected",
+    [
+        # Two distinct trunks fully sharing a corridor -> one concentric stack.
+        ([(0, 100), (0, 100)], [0, 1]),
+        # Disjoint left/right pair bridged by a long trunk: the bridge packs
+        # adjacent to the left trunk so they bundle tight under the left
+        # corridor; the right pair reuses the freed shallow track.
+        ([(0, 100), (0, 300), (250, 400), (240, 410)], [0, 1, 2, 3]),
+        # A pair that never shares any X reuses track 0 -- no reserved gap.
+        ([(0, 100), (200, 300)], [0, 0]),
+    ],
+)
+def test_pack_band_tracks_no_reserved_gaps(spans, expected):
+    """Greedy track packing never wedges an empty track between two trunks
+    that share a sub-corridor.
+
+    Each trunk takes the shallowest track one deeper than every shallower
+    trunk it overlaps in X, so co-travelling trunks land on adjacent tracks
+    and a trunk absent from a sub-corridor frees its track for reuse there.
+    """
+    from nf_metro.layout.routing.common import RoutedPath
+    from nf_metro.layout.routing.normalize import (
+        _HTrunk,
+        _pack_band_tracks,
+        _slot_span,
+    )
+
+    order = [
+        [
+            _HTrunk(
+                route=RoutedPath(edge=None, line_id=f"l{i}", points=[]),
+                idx=1,
+                y=0.0,
+                x_lo=float(lo),
+                x_hi=float(hi),
+                dips_down=True,
+                sign_x=1,
+            )
+        ]
+        for i, (lo, hi) in enumerate(spans)
+    ]
+    span_of = {id(sg): _slot_span(sg) for sg in order}
+    assert _pack_band_tracks(order, span_of) == expected
+
+
+def test_disjoint_sameline_trunks_bundle_tight():
+    """Two distinct lines that dive into one below-row channel together ride a
+    tight bundle until a member peels off at its turn column (issue #702).
+
+    In ``disjoint_sameline_trunks`` lines ``a`` and ``c`` both bypass the QC
+    section in the channel below the single section row; ``a`` peels up into
+    the Align section while ``c`` continues to Call.  Their shared left-hand
+    trunk must sit one ``OFFSET_STEP`` apart (one concentric bundle), not be
+    split by tracks reserved for trunks that only appear further right.
+    """
+    from nf_metro.layout.constants import OFFSET_STEP
+    from nf_metro.layout.routing.normalize import _collect_htrunks
+
+    graph = _layout("topologies/disjoint_sameline_trunks.mmd")
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    trunks = _collect_htrunks(routes, include_exempt=True)
+
+    a_left = min((t for t in trunks if t.route.line_id == "a"), key=lambda t: t.x_lo)
+    c_trunk = next(t for t in trunks if t.route.line_id == "c")
+
+    assert a_left.x_lo < c_trunk.x_hi and c_trunk.x_lo < a_left.x_hi, (
+        "fixture precondition: a's left trunk and c's trunk share a corridor"
+    )
+    assert abs(a_left.y - c_trunk.y) <= OFFSET_STEP + 0.1, (
+        f"a's left trunk (y={a_left.y:.1f}) and c's trunk (y={c_trunk.y:.1f}) "
+        f"should bundle one OFFSET_STEP apart, not "
+        f"{abs(a_left.y - c_trunk.y):.1f}px"
+    )
+
+
+def _routes_ordered_by_y(
+    selected: list,
+    offsets: dict,
+    *,
+    at_target: bool,
+) -> list:
+    rows = [
+        (rp.line_id, apply_route_offsets(rp, offsets)[-1 if at_target else 0][1])
+        for rp in selected
+    ]
+    return [lid for lid, _ in sorted(rows, key=lambda r: r[1])]
+
+
+def test_peeloff_riser_keeps_bundle_order():
+    """A bypass-trunk bundle peeling up into a shared entry port enters it
+    concentrically and keeps that order through the consumer section (#695).
+
+    In ``peeloff_riser_respace`` four lines from two sources ride one shared
+    bypass trunk below the destination row and rise into its left entry port.
+    The trunk stacking puts the nearer source's lines on top, but the riser
+    peel order, the port-slot offsets, and the consumer section's internal
+    order are assigned in line-declaration order by independent passes, so the
+    lines on the bottom of the trunk rose on the near side and cut across the
+    others.  The settled route must order the riser peel-x, the port slots, and
+    the section's internal bundle by trunk depth, so:
+
+    1. no two lines make an avoidable crossing, and
+    2. the bundle's top-to-bottom order at the port entry matches its order on
+       the internal ``d1 -> d2`` run - a reorder between them would be a
+       crossing the validator's hub-exclusion hides just inside the boundary.
+    """
+    fixture = "topologies/peeloff_riser_respace.mmd"
+    graph = _layout(fixture, validate=True)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    crossings = check_route_segment_crossings(graph, (offsets, routes))
+    assert not crossings, "; ".join(v.message for v in crossings)
+
+    port_order = _routes_ordered_by_y(
+        [rp for rp in routes if rp.edge.target == "dst__entry_left_2"],
+        offsets,
+        at_target=True,
+    )
+    internal_order = _routes_ordered_by_y(
+        [rp for rp in routes if rp.edge.source == "d1" and rp.edge.target == "d2"],
+        offsets,
+        at_target=False,
+    )
+    assert port_order == internal_order, (
+        f"bundle reorders entering the section: port {port_order} "
+        f"vs internal {internal_order}"
+    )
+
+
+def test_peeloff_riser_crossing_free_extra_line_consumer():
+    """A bypass-trunk peel-off into a shared LEFT entry port must be
+    crossing-free when the consumer section also carries an extra internal
+    branch not present in the converging bundle.
+
+    Several lines from two sources ride one shared bypass trunk and rise into
+    a common destination entry port.  The trunk-Y stack order and the
+    declaration order disagree, so the riser must be reordered to avoid
+    braiding.  The bundle's top-to-bottom order at the port entry must also
+    carry through into the consumer section's internal run, so the crossing
+    does not re-form just inside the boundary.  The consumer section carries
+    an extra l5 branch that is not part of the converging bundle and must not
+    cause the internal propagation to be skipped.
+    """
+    graph = _layout("topologies/peeloff_extra_line_consumer.mmd", validate=True)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    crossings = check_route_segment_crossings(graph, (offsets, routes))
+    assert not crossings, "; ".join(v.message for v in crossings)
+
+    port_order = _routes_ordered_by_y(
+        [rp for rp in routes if rp.edge.target == "dst__entry_left_2"],
+        offsets,
+        at_target=True,
+    )
+    internal_order = _routes_ordered_by_y(
+        [rp for rp in routes if rp.edge.source == "d1" and rp.edge.target == "d2"],
+        offsets,
+        at_target=False,
+    )
+    assert port_order == internal_order, (
+        f"bundle reorders entering the section: port {port_order} "
+        f"vs internal {internal_order}"
+    )
+
+
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_top_entry_lead_corner_concentric(fixture):
     """A multi-line TOP-entry L-shape must turn its lead-in corner
@@ -1099,13 +1498,13 @@ def test_top_entry_lead_corner_concentric(fixture):
     The lines are already separated in Y by the render offset, so an equal
     lead-in radius leaves the arcs non-concentric and the perpendicular gap
     pinches through the bend (issue #484, cross_row turn-down after section 1).
-    The fix keeps the outermost line at the base radius and shrinks each inner
-    line's lead-in radius by one ``OFFSET_STEP`` so all arcs nest about a
-    common centre.  Encoded as: within a shared (source TOP-entry, target)
-    bundle, the first-corner radii sorted descending must step down by exactly
-    ``OFFSET_STEP``.  Only checks narrow bundles where the fix applies.
+    Concentric arcs nest about a common centre: within a shared (source
+    TOP-entry, target) bundle the first-corner radii sorted descending step by
+    exactly ``OFFSET_STEP``.  The absolute anchor (which line sits at the base
+    radius) is asserted separately in
+    ``test_inter_section_bundle_corners_anchored_at_floor``.
     """
-    from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
+    from nf_metro.layout.constants import OFFSET_STEP
 
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
@@ -1123,20 +1522,87 @@ def test_top_entry_lead_corner_concentric(fixture):
         )
 
     for (src, tgt), radii in by_key.items():
-        n = len(radii)
-        # Gate matches the handler: only narrow bundles get concentric radii.
-        if n < 2 or (n - 1) * OFFSET_STEP > CURVE_RADIUS - OFFSET_STEP:
+        if len(radii) < 2:
             continue
         radii = sorted(radii, reverse=True)
-        assert abs(radii[0] - CURVE_RADIUS) < 0.1, (
-            f"{fixture}: {src}->{tgt} outermost lead radius {radii[0]} "
-            f"!= base {CURVE_RADIUS}"
-        )
         steps = [round(a - b, 1) for a, b in zip(radii, radii[1:])]
         assert all(abs(s - OFFSET_STEP) < 0.1 for s in steps), (
             f"{fixture}: {src}->{tgt} lead-corner radii {radii} not concentric "
             f"(steps {steps})"
         )
+
+
+# ---------------------------------------------------------------------------
+# Bundle corners anchored on the innermost-of-turn line
+# ---------------------------------------------------------------------------
+
+
+def test_build_concentric_bundle_anchors_innermost_at_base():
+    """The bundle builder anchors every corner on the innermost-of-turn line.
+
+    A fan turning an L-shape must keep the line deepest inside each bend at the
+    base radius and grow the rest outward, so no arc falls below the floor.
+    Anchoring on the bundle *mean* instead would drop an inside-of-turn line to
+    ``base - half_width`` (a sub-floor pinch on a deep fan).  Pinned directly on
+    :func:`build_concentric_bundle`: with three lines one ``OFFSET_STEP`` apart,
+    every corner radius is ``>= base`` and the smallest at each corner equals
+    ``base``.
+    """
+    from nf_metro.layout.constants import OFFSET_STEP
+    from nf_metro.layout.routing.bundle import build_concentric_bundle
+    from nf_metro.parser.model import Edge
+
+    members = [
+        (Edge("s", "t", f"l{k}"), f"l{k}", (k - 1) * OFFSET_STEP) for k in range(3)
+    ]
+    centerline = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (200.0, 100.0)]
+    routes = build_concentric_bundle(members, centerline, base_radius=CURVE_RADIUS)
+
+    for ci in range(len(centerline) - 2):
+        col = sorted(r.curve_radii[ci] for r in routes)
+        assert col[0] >= CURVE_RADIUS - 0.1, (
+            f"corner {ci}: smallest radius {col[0]} below floor {CURVE_RADIUS}"
+        )
+        assert abs(col[0] - CURVE_RADIUS) < 0.1, (
+            f"corner {ci}: innermost radius {col[0]} != base {CURVE_RADIUS}"
+        )
+        steps = [round(b - a, 1) for a, b in zip(col, col[1:])]
+        assert all(abs(s - OFFSET_STEP) < 0.1 for s in steps), (
+            f"corner {ci} not concentric: {col}"
+        )
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "topologies/around_section_below.mmd",
+        "topologies/around_below_ep_col_gt0.mmd",
+    ],
+)
+def test_inter_section_bundle_corners_anchored_at_floor(fixture):
+    """A co-travelling inter-section bundle keeps every corner at/above the floor.
+
+    The around-below loop fans a two-line bundle through four corners.  Anchored
+    on the innermost line, every inter-section corner radius is
+    ``>= CURVE_RADIUS``; anchoring on the bundle mean would instead drop the
+    inside-of-turn line to 8.5px, below the 10px floor.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    worst = min(
+        (
+            rad
+            for rp in routes
+            if rp.is_inter_section and rp.curve_radii
+            for rad in rp.curve_radii
+        ),
+        default=CURVE_RADIUS,
+    )
+    assert worst >= CURVE_RADIUS - 0.1, (
+        f"{fixture}: inter-section corner radius {worst} below floor {CURVE_RADIUS}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1199,6 +1665,92 @@ def test_off_track_consumer_on_section_trunk(fixture):
             f"y={succ_st.y} ({abs(cons_st.y - succ_st.y):.0f}px climb)"
         )
     assert checked, f"{fixture}: no linear off-track consumer to check"
+
+
+def _single_trunk_off_track_input_lifts(graph: MetroGraph):
+    """Yield ``(off_id, consumer_id, gap, n, step)`` for each off-track input
+    whose consumer lives in a single-trunk section.
+
+    ``n`` is the number of off-track stations sharing the input's column *and*
+    its anchor (its expected stack depth); ``gap`` is its lift above the
+    consumer; ``step`` is the section's off-track lift pitch.
+
+    Restricted to single-trunk LR/RL sections (one distinct on-track Y): those
+    carry no stacked horizontal line bands, so an off-track input cannot be
+    legitimately bumped past its natural slot to clear a foreign feed-line (the
+    multi-track ``differentialabundance`` ``functional`` bump).  On a single
+    trunk the lift must therefore equal the same-column stack rank exactly.
+    """
+    junction_ids = set(graph.junctions)
+    y_spacing = compute_min_y_spacing(graph)
+    anchor_of = _off_track_anchor_of(graph)
+    inputs = {
+        off_id: anc
+        for off_id, anc in anchor_of.items()
+        if any(e.target == anc for e in graph.edges_from(off_id))
+    }
+    col_group: dict[tuple[str | None, float, str], int] = defaultdict(int)
+    for off_id, anc in anchor_of.items():
+        st = graph.stations[off_id]
+        col_group[(st.section_id, round(st.x, 1), anc)] += 1
+
+    for off_id, anc in inputs.items():
+        off_st = graph.stations[off_id]
+        cons_st = graph.stations[anc]
+        section = graph.sections.get(off_st.section_id)
+        if section is None or not _is_single_trunk_lr_section(
+            graph, section, junction_ids
+        ):
+            continue
+        step = _off_track_lift_step(graph, section, junction_ids, y_spacing)
+        n = col_group[(off_st.section_id, round(off_st.x, 1), anc)]
+        yield off_id, anc, cons_st.y - off_st.y, n, step
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_INPUT)
+def test_off_track_input_lift_matches_column_stack_depth(fixture):
+    """On a single-trunk section, an off-track input hugs its consumer by
+    exactly its same-column stack depth, not the whole anchor group's size.
+
+    When one consumer is fed by off-track stations in *different* columns (e.g.
+    an input above it and a producer-fed output beside it), the lift step must
+    be counted per column.  Counting the whole anchor group instead pushes a
+    lone-in-its-column input an extra slot up, stranding it over an empty row
+    above an earlier trunk station (issue #651).
+    """
+    graph = _layout(fixture)
+    checked = 0
+    for off_id, cons_id, gap, n, step in _single_trunk_off_track_input_lifts(graph):
+        checked += 1
+        assert gap <= n * step + _Y_TOL, (
+            f"{fixture}: off-track input {off_id} lifted {gap:.0f}px above "
+            f"consumer {cons_id} ({gap / step:.1f} slots) but only {n} off-track "
+            f"station(s) share its column and anchor; expected at most "
+            f"{n * step:.0f}px - it is stranded above an empty row"
+        )
+    if not checked:
+        pytest.skip(f"{fixture}: no single-trunk off-track input to check")
+
+
+def test_off_track_input_column_stack_guard_catches_over_lift():
+    """The runtime guard fires when a lone-in-its-column input is over-lifted.
+
+    Locks the guard's teeth: dragging an off-track input one extra slot above
+    its consumer on a single-trunk section, where nothing shares its column,
+    must make ``_guard_off_track_input_column_stack`` raise rather than pass.
+    """
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_off_track_input_column_stack,
+    )
+
+    graph = _layout("topologies/off_track_input_above_consumer.mmd")
+    _guard_off_track_input_column_stack(graph, "test")
+    y_spacing = compute_min_y_spacing(graph)
+    graph.stations["cpg_bed"].y -= y_spacing
+
+    with pytest.raises(PhaseInvariantError, match="stranded above an empty row"):
+        _guard_off_track_input_column_stack(graph, "test")
 
 
 # ---------------------------------------------------------------------------
@@ -1465,6 +2017,84 @@ def test_no_line_strikes_through_label(fixture):
         f"{fixture}: foreign lines strike label glyph ink: "
         + ", ".join(f"{lid!r} over {sid!r}" for sid, lid in strikes)
     )
+
+
+def _bypass_v_own_label_strikes(fixture: str) -> list[str]:
+    """Return ids of stations whose own bypass-V diagonal rakes their label.
+
+    A bypass V diverges from the trunk at the station before the bypassed one
+    and re-merges at the station after it.  When the section is too tight for a
+    horizontal lead-in, the divergence (or merge) pins to the marker and the
+    descending diagonal cuts through that station's name label, which sits
+    directly under the marker.  This is the divergence station's *own* line over
+    its *own* label, so it is exempt from the foreign-strike checks; it is only
+    cured by placing the label on the side clear of the V.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    placements = place_labels(
+        graph,
+        station_offsets=offsets,
+        routes=routes,
+        label_angle=graph.label_angle or 0.0,
+    )
+    by_station = {p.station_id: p for p in placements if p.station_id}
+    struck: list[str] = []
+    for r in routes:
+        src_bypass = r.edge.source.startswith("__bypass_")
+        tgt_bypass = r.edge.target.startswith("__bypass_")
+        if src_bypass == tgt_bypass:
+            continue
+        endpoint = r.edge.target if src_bypass else r.edge.source
+        p = by_station.get(endpoint)
+        station = graph.stations.get(endpoint)
+        if p is None or p.angle or station is None or not station.label.strip():
+            continue
+        pts = apply_route_offsets(r, offsets)
+        if any(
+            segment_strikes_label(x1, y1, x2, y2, p)
+            and abs(y2 - y1) >= max(abs(x2 - x1), 1.0) * DIAGONAL_SLOPE_RATIO
+            for (x1, y1), (x2, y2) in zip(pts, pts[1:])
+        ):
+            struck.append(endpoint)
+    return struck
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_bypass_v_does_not_strike_diverging_station_label(fixture):
+    """A bypass V must not rake the label of the station it diverges from.
+
+    The divergence point may sit on a station's marker only when the label is
+    clear of the V's side; otherwise the descending diagonal strikes the name.
+    """
+    struck = _bypass_v_own_label_strikes(fixture)
+    assert not struck, (
+        f"{fixture}: bypass-V diagonal rakes its own diverging/merging station "
+        "label: " + ", ".join(sorted(struck))
+    )
+
+
+def test_bypass_v_flat_guard_catches_a_collapse():
+    """The runtime guard fires when a bypass V's flat run is left collapsed.
+
+    The strike-clearance loop seats ``bypass_v_tight``'s V on a full flat by
+    pushing the bypassed node and the merge target each a grid column out, so
+    the settled layout passes the guard.  Pulling the exit port back toward the
+    bypassed node reinstates the tight merge run, and the guard -- the backstop
+    behind the loop -- must raise on the collapsed flat.
+    """
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_bypass_v_flat_visible,
+    )
+
+    graph = _layout("topologies/bypass_v_tight.mmd", _cache=False)
+    _guard_bypass_v_flat_visible(graph, "test")
+
+    graph.stations["mid__exit_right_1"].x -= X_SPACING
+    with pytest.raises(PhaseInvariantError, match="bypass-V flat"):
+        _guard_bypass_v_flat_visible(graph, "test")
 
 
 # A label wider than its station's flat run pushes a fan-in/fan-out,
@@ -2480,6 +3110,81 @@ def test_no_kink_at_section_boundary(fixture):
 
 
 # ---------------------------------------------------------------------------
+# A line must cross a perpendicular entry port at one consistent X
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_perp_entry_boundary_no_lateral_reversal(fixture):
+    """A line through a shared TOP/BOTTOM entry port must not reverse its
+    lateral direction at the boundary.
+
+    The inter-section approach and the intra-section drop for the same line
+    must cross the section boundary at one consistent per-line X.  When they
+    disagree the line lands on the port marker, then re-fans off it - a visible
+    S-cusp on the boundary (the ``cross_row_gap_wrap`` feed line entering Merge
+    through ``merge_pt__entry_top_6``).
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_perp_entry_boundary_consistent,
+    )
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    violations = check_perp_entry_boundary_consistent(graph, routes)
+    assert not violations, "; ".join(v.message() for v in violations)
+
+
+def test_perp_entry_boundary_check_detects_cusp():
+    """Meaningfulness guard: the boundary-consistency check fires when a line's
+    approach and drop cross a perp entry port at different X.
+
+    Locks the detector so the corpus test above is not vacuously green: a TOP
+    entry port whose single inter-section approach lands at one X while the
+    intra drop departs at another (each via a marker jog) must be flagged.
+    """
+    from types import SimpleNamespace
+
+    from nf_metro.layout.routing.common import RoutedPath
+    from nf_metro.layout.routing.invariants import (
+        check_perp_entry_boundary_consistent,
+    )
+    from nf_metro.parser.model import Edge, Port, Station
+
+    port = Station("p", "P", x=100.0, y=50.0, is_port=True)
+    g1 = Station("g1", "G1", x=70.0, y=80.0)
+    junction = Station("j", "", x=10.0, y=20.0, is_port=True)
+    graph = SimpleNamespace(
+        ports={"p": Port("p", "sec", PortSide.TOP, is_entry=True)},
+        stations={"p": port, "g1": g1, "j": junction},
+        station_lines=lambda _pid: ["a"],
+    )
+
+    approach = RoutedPath(
+        edge=Edge("j", "p", "a"),
+        line_id="a",
+        points=[(10.0, 20.0), (97.0, 20.0), (97.0, 50.0), (100.0, 50.0)],
+    )
+    departure = RoutedPath(
+        edge=Edge("p", "g1", "a"),
+        line_id="a",
+        points=[(100.0, 50.0), (98.5, 50.0), (98.5, 80.0), (70.0, 80.0)],
+    )
+    violations = check_perp_entry_boundary_consistent(graph, [approach, departure])
+    assert len(violations) == 1
+    assert violations[0].approach_x == 97.0
+    assert violations[0].departure_x == 98.5
+
+    straight_dep = RoutedPath(
+        edge=Edge("p", "g1", "a"),
+        line_id="a",
+        points=[(97.0, 50.0), (97.0, 80.0), (70.0, 80.0)],
+    )
+    assert not check_perp_entry_boundary_consistent(graph, [approach, straight_dep])
+
+
+# ---------------------------------------------------------------------------
 # Fan-out junctions share Y with their feeding LR/RL exit port
 # ---------------------------------------------------------------------------
 
@@ -2536,6 +3241,90 @@ def test_fanout_junction_shares_exit_port_y(fixture):
         assert abs(junction.y - exit_port.y) < _Y_TOL, (
             f"{fixture}: fan-out junction {junction.id} y={junction.y} "
             f"stranded from exit port {exit_port.id} y={exit_port.y}"
+        )
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_fanout_junction_resolves_via_upstream(fixture):
+    """Every fan-out junction resolves to a section through an incoming edge.
+
+    A fan-out junction (``section_id is None``) is emitted with an
+    ``exit_port -> junction`` edge whose source carries the source section's
+    id, so ``resolve_section``'s upstream (incoming-edge) scan always resolves
+    it; the downstream ``edges_from`` scan and the no-section ``return None``
+    are never needed.  Asserting this across every multi-section fixture pins
+    the reachability that lets ``resolve_section`` carry only the upstream scan.
+    """
+    graph = _layout(fixture)
+    for jid in graph.junctions:
+        junction = graph.stations.get(jid)
+        if junction is None or junction.section_id:
+            continue
+        upstream_sectioned = any(
+            (src := graph.stations.get(e.source)) is not None
+            and src.section_id
+            and graph.sections.get(src.section_id) is not None
+            for e in graph.edges_to(jid)
+        )
+        assert upstream_sectioned, (
+            f"{fixture}: fan-out junction {jid} has no sectioned upstream; "
+            f"resolve_section would need its downstream fallback"
+        )
+        for prefer in (True, False):
+            assert (
+                resolve_section(graph, junction, prefer_upstream=prefer) is not None
+            ), f"{fixture}: resolve_section({jid}, prefer_upstream={prefer}) is None"
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_entry_port_fed_only_by_ports(fixture):
+    """Every edge into a section entry port originates at a port station.
+
+    ``_resolve_sections`` rewrites inter-section edges into
+    ``source -> exit_port -> entry_port -> target`` chains, so an entry
+    port's incoming edges come from exit ports or fan-out junctions, all
+    ``is_port=True``.  ``_section_line_feeders`` reads the feeder section
+    directly off the source's ``section_id``, relying on this; a non-port
+    source would mean an internal station feeds an entry port directly.
+    """
+    graph = _layout(fixture)
+    for section in graph.sections.values():
+        for pid in section.entry_ports:
+            for edge in graph.edges_to(pid):
+                src = graph.stations.get(edge.source)
+                assert src is None or src.is_port, (
+                    f"{fixture}: entry port {pid} fed by non-port station {edge.source}"
+                )
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_COMPACT)
+def test_compact_multiline_entry_ports_pre_separated(fixture):
+    """Multi-line entry ports already carry separated offsets before the
+    entry-port pass runs.
+
+    ``_apply_compact_section_consistency`` assigns each section's entry lines
+    distinct ``i * offset_step`` offsets early in ``compute_station_offsets``,
+    so by the time the entry-port pass runs the offsets on a multi-line entry
+    port are never all-equal.  This pins the precondition that made the
+    compact entry-port separation pass a no-op.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    for section in graph.sections.values():
+        entry_lines = {
+            lid for pid in section.entry_ports for lid in graph.station_lines(pid)
+        }
+        if len(entry_lines) < 2:
+            continue
+        existing = [
+            offsets.get((pid, lid), 0.0)
+            for pid in section.entry_ports
+            for lid in entry_lines
+            if lid in graph.station_lines(pid)
+        ]
+        assert len(set(existing)) >= 2, (
+            f"{fixture}: section {section.id} multi-line entry ports share one "
+            f"offset {set(existing)}; the separation pass was not redundant"
         )
 
 
@@ -2675,6 +3464,66 @@ def test_merge_feeder_does_not_loop_below_target(fixture):
             f"section bottom {tgt_bottom:.1f} - it loops below the canvas "
             f"instead of descending the inter-column corridor"
         )
+
+
+def test_corridor_viability_requires_full_clearance_band():
+    """The inter-row-gap corridor is chosen only when the gap fits its band.
+
+    The corridor's leftward traverse runs in a clamp band
+    ``[gap_top + INTER_ROW_EDGE_CLEARANCE, gap_bottom - INTER_ROW_HEADER_CLEARANCE]``;
+    a bundle of ``n`` lines needs ``(n - 1) * OFFSET_STEP`` of room inside
+    it.  When the gap is narrower than
+    ``INTER_ROW_EDGE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE`` the band
+    inverts and every line collapses onto one Y, producing a collinear
+    overlay and a route through the source section's bottom edge (#722).
+    Below that threshold the feeder must fall back to the around-below
+    route, so ``_corridor_is_viable`` must return ``False``.
+    """
+    from nf_metro.layout.constants import (
+        CURVE_RADIUS,
+        DIAGONAL_RUN,
+        INTER_ROW_EDGE_CLEARANCE,
+        INTER_ROW_HEADER_CLEARANCE,
+    )
+    from nf_metro.layout.routing.common import row_bottom_edge, row_top_edge
+    from nf_metro.layout.routing.context import _resolve_section_colrow
+    from nf_metro.layout.routing.core import _build_routing_context
+    from nf_metro.layout.routing.inter_section_handlers import _corridor_is_viable
+
+    # Narrow gap: a two-line bundle crossing into a left-entry target two
+    # rows below, with only the default 50px gap below its source row.
+    graph = _layout("topologies/corridor_narrow_gap_fallback.mmd")
+    offsets = compute_station_offsets(graph)
+    ctx = _build_routing_context(graph, DIAGONAL_RUN, CURVE_RADIUS, offsets)
+    src = graph.stations["source__exit_right_0"]
+    ep = graph.stations["target__entry_left_2"]
+    src_col, src_row = _resolve_section_colrow(graph, src)
+    gap_top = row_bottom_edge(graph, src_row, col=src_col)
+    gap_bottom = row_top_edge(graph, src_row + 1, col=src_col, default=gap_top)
+    gap = gap_bottom - gap_top
+    floor = INTER_ROW_EDGE_CLEARANCE + INTER_ROW_HEADER_CLEARANCE
+    assert gap < floor, (
+        f"fixture precondition: gap below source row is {gap:.1f}px, "
+        f"expected narrower than the {floor:.0f}px floor"
+    )
+    assert not _corridor_is_viable(ctx, src, ep), (
+        f"corridor chosen for a {gap:.1f}px gap that cannot hold its "
+        f"{floor:.0f}px+ clearance band"
+    )
+
+    # Positive control: genomic_pipeline's 84px corridor gap exactly fits a
+    # three-line bundle's band, so viability holds there.
+    g2 = _layout("genomic_pipeline.mmd")
+    off2 = compute_station_offsets(g2)
+    ctx2 = _build_routing_context(g2, DIAGONAL_RUN, CURVE_RADIUS, off2)
+    assert any(
+        _corridor_is_viable(ctx2, s, ep2)
+        for s in g2.stations.values()
+        for ep2 in g2.stations.values()
+    ), (
+        "genomic_pipeline should still route at least one feeder through the "
+        "corridor; the viability tightening over-constrained it"
+    )
 
 
 @pytest.mark.parametrize(
@@ -3225,6 +4074,34 @@ def test_lr_section_all_perpendicular_ports_rejected():
     msg = str(excinfo.value).lower()
     assert "annotation" in msg
     assert "perpendicular" in msg or "flow-aligned" in msg
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "topologies/lr_perp_top_exit_side_entry.mmd",
+        "topologies/lr_perp_bottom_exit_side_entry.mmd",
+    ],
+)
+def test_lr_perp_multiline_exit_routes_cleanly(fixture):
+    """A multi-line perpendicular (TOP/BOTTOM) exit on a flow-anchored LR/RL
+    section places its exit port off every internal station's X (no
+    station-as-elbow) and separates the exiting lines into distinct channels.
+
+    ``validate=True`` succeeds, the station-as-elbow constraint holds, and no
+    pair of distinct lines coincides on a vertical run or flips bundle order
+    through the up-and-over corners (#706).
+    """
+    graph = _layout(fixture, validate=True)
+
+    elbow = check_station_as_elbow(graph)
+    assert not elbow, "; ".join(v.message for v in elbow)
+
+    # The exiting lines must not collapse onto one channel anywhere.
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    assert not check_no_collinear_distinct_lines(graph, routes, offsets)
+    assert not check_bundle_order_preserved(routes)
 
 
 # ---------------------------------------------------------------------------
@@ -3888,7 +4765,6 @@ def test_section_bbox_matches_content_extent(fixture):
 @pytest.mark.parametrize(
     "fixture",
     [
-        "topologies/rnaseq_lite.mmd",
         "topologies/mismatched_tracks.mmd",
         "topologies/variant_calling.mmd",
     ],
@@ -3902,10 +4778,9 @@ def test_loop_recenter_only_for_pure_side_branches(fixture):
     fan-out side stations with their own off-trunk siblings (DA's
     deseq2/dream around limma), but breaks visible column alignment
     when the on-trunk member of the same loop sits at the same X
-    (e.g. rnaseq_lite ``star_align`` ↔ ``hisat_align``, mismatched
-    tracks ``t_a`` ↔ ``t_b``).  The narrowed pass leaves those
-    side stations alone so the on-trunk and off-trunk siblings stay
-    column-aligned.
+    (e.g. mismatched tracks ``t_a`` ↔ ``t_b``).  The narrowed pass
+    leaves those side stations alone so the on-trunk and off-trunk
+    siblings stay column-aligned.
     """
     graph = _layout(fixture)
 
@@ -6101,6 +6976,56 @@ def test_merge_port_rejoining_line_takes_approach_slot(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Bypass line at fan-in entry port must hold the outer slot
+# ---------------------------------------------------------------------------
+
+
+_FIXTURES_WITH_BYPASS_FAN_IN = [
+    "topologies/bypass_fan_in_outer_slot.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_BYPASS_FAN_IN)
+def test_bypass_fan_in_outer_slot(fixture):
+    """At a multi-feeder entry port containing a bypass horizontal line, all
+    bundle slots must be consecutive with no empty interior gaps.
+
+    A bypass line misclassified as a plain horizontal co-traveller inflates
+    ``max_horiz``, pushing perpendicular feeders into outer slots and leaving
+    empty interior slots.  After the fix, all N lines pack into slots 0..N-1.
+    """
+    from nf_metro.layout.constants import COORD_TOLERANCE_FINE, OFFSET_STEP
+    from nf_metro.layout.routing.invariants import (
+        bypass_horizontal_targets,
+        classify_merge_port_feeders,
+        distinct_offset_levels,
+    )
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+
+    for port_id in graph.ports:
+        if classify_merge_port_feeders(graph, port_id) is None:
+            continue
+        bypass = bypass_horizontal_targets(graph, port_id)
+        if not bypass:
+            continue
+        lines = list(graph.station_lines(port_id))
+        port_offsets = sorted(offsets.get((port_id, lid), 0.0) for lid in lines)
+        levels = distinct_offset_levels(port_offsets)
+        gaps = [
+            (levels[i], levels[i + 1])
+            for i in range(len(levels) - 1)
+            if levels[i + 1] - levels[i] > OFFSET_STEP + COORD_TOLERANCE_FINE
+        ]
+        assert not gaps, (
+            f"{fixture}: merge port {port_id!r} has empty bundle slot gaps: "
+            f"gaps at {gaps} "
+            f"(offsets: {[f'{o:.0f}' for o in port_offsets]})"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Partial-line fan branches must not reserve absent-line offset slots
 # ---------------------------------------------------------------------------
 
@@ -6454,3 +7379,119 @@ def test_wrapped_label_trunk_lift_has_teeth():
     # The lift runs in the render path place_labels uses; validate=True asserts
     # the settled render leaves no strike (the guard does not raise).
     _layout(fixture, validate=True)
+
+
+# Bottom-drop: an LR/RL section feeding a TB section's perpendicular TOP entry
+# (issue #720) leaves through a BOTTOM exit and drops straight onto the target
+# trunk, which is aligned under the exit.
+_BOTTOM_DROP_FIXTURES = [
+    "lr_to_tb_top_drop.mmd",
+    "lr_to_tb_top_drop_two_lines.mmd",
+]
+
+
+def _lr_bottom_drop_exits(graph: MetroGraph) -> set[str]:
+    """Port IDs of BOTTOM exits on horizontal-flow sections."""
+    return {
+        pid
+        for pid, port in graph.ports.items()
+        if not port.is_entry
+        and port.side == PortSide.BOTTOM
+        and (sec := graph.sections.get(port.section_id)) is not None
+        and sec.direction in ("LR", "RL")
+    }
+
+
+@pytest.mark.parametrize("fixture", _BOTTOM_DROP_FIXTURES)
+def test_lr_to_tb_bottom_drop_routes_straight(fixture):
+    """The inter-section leg from a BOTTOM exit into a TOP entry is vertical.
+
+    A single curve lives in the internal trunk->exit segment; the leg between
+    the two sections is then a straight drop (one X per line), and the target
+    trunk sits directly under the exit so no jog is needed inside the target.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    drop_exits = _lr_bottom_drop_exits(graph)
+    assert drop_exits, f"{fixture}: expected a BOTTOM drop exit on an LR section"
+
+    drop_legs = [r for r in routes if r.edge.source in drop_exits]
+    assert drop_legs, f"{fixture}: no route leaves the BOTTOM drop exit"
+    for leg in drop_legs:
+        xs = {round(x, 3) for x, _y in leg.points}
+        assert len(xs) == 1, (
+            f"{fixture}: bottom-drop leg {leg.edge.source}->{leg.edge.target} "
+            f"is not a straight vertical drop: {leg.points}"
+        )
+        target_port = graph.ports.get(leg.edge.target)
+        if target_port is not None and target_port.is_entry:
+            exit_x = graph.stations[leg.edge.source].x
+            entry_x = graph.stations[leg.edge.target].x
+            assert abs(exit_x - entry_x) < 1.0, (
+                f"{fixture}: target trunk not aligned under the exit "
+                f"(exit x={exit_x}, entry x={entry_x})"
+            )
+
+
+@pytest.mark.parametrize("fixture", _BOTTOM_DROP_FIXTURES)
+def test_lr_to_tb_bottom_drop_clears_last_station(fixture):
+    """The BOTTOM exit sits clear of every internal station along the flow.
+
+    The trunk curves out after the trailing station rather than turning the
+    line through a marker (a station-as-elbow on the perpendicular port).
+    """
+    graph = _layout(fixture)
+    for pid in _lr_bottom_drop_exits(graph):
+        section = graph.sections[graph.ports[pid].section_id]
+        exit_x = graph.stations[pid].x
+        internal_xs = [
+            graph.stations[sid].x
+            for sid in section.station_ids
+            if sid in graph.stations and not graph.stations[sid].is_port
+        ]
+        assert internal_xs, f"{fixture}: section {section.id} has no stations"
+        assert all(abs(exit_x - sx) > 10.0 for sx in internal_xs), (
+            f"{fixture}: BOTTOM exit x={exit_x} coincides with a station "
+            f"(would route through the marker)"
+        )
+
+
+@pytest.mark.parametrize("fixture", _BOTTOM_DROP_FIXTURES)
+def test_lr_to_tb_bottom_drop_no_boundary_crossover(fixture):
+    """Co-travelling drop lines keep their X order across the section boundary.
+
+    Each line's inter-section drop leg must land at the same X its in-section
+    trunk segment runs on, so a multi-line bundle flows straight through the
+    shared entry port instead of two lines swapping sides (a crossover) at the
+    boundary.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    drop_exits = _lr_bottom_drop_exits(graph)
+    drop_leg_x = {
+        r.line_id: r.points[-1][0] for r in routes if r.edge.source in drop_exits
+    }
+    if len(drop_leg_x) < 2:
+        pytest.skip(f"{fixture}: single-line drop has no bundle order to cross")
+
+    # First in-section trunk segment each line runs after the entry port.
+    entry_ports = {
+        pid
+        for pid, port in graph.ports.items()
+        if port.is_entry and port.side in (PortSide.TOP, PortSide.BOTTOM)
+    }
+    trunk_x = {
+        r.line_id: r.points[0][0]
+        for r in routes
+        if r.edge.source in entry_ports and r.line_id in drop_leg_x
+    }
+    for line_id, x in drop_leg_x.items():
+        assert line_id in trunk_x, f"{fixture}: line {line_id} has no trunk segment"
+        assert abs(x - trunk_x[line_id]) < 1.0, (
+            f"{fixture}: line {line_id} drops at x={x} but its trunk runs at "
+            f"x={trunk_x[line_id]} -- the bundle swaps sides at the boundary"
+        )

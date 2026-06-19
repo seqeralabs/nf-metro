@@ -85,7 +85,7 @@ def test_checker_fires_without_merge_passes(
         routing_core, "_coincide_divergent_fanout_descents", lambda routes: None
     )
     monkeypatch.setattr(
-        routing_core, "_coincide_convergent_port_approaches", lambda routes: None
+        routing_core, "_coincide_convergent_port_approaches", lambda routes, ctx: None
     )
     graph, routes, offsets = _route(EXAMPLES / fixture)
     violations = check_no_same_line_parallel_descents(graph, routes, offsets)

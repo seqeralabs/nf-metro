@@ -36,7 +36,7 @@ git worktree add /tmp/nf-metro-fix-<N> -b fix/<N>-<slug> origin/main
 # Fix environment
 ulimit -n 1000000 && export CONDA_OVERRIDE_OSX=15.0 && /opt/homebrew/bin/micromamba create -n nf-metro-fix-<N> python=3.11 cairo -y
 source ~/.local/bin/mm-activate nf-metro-fix-<N>
-pip install -e "/tmp/nf-metro-fix-<N>[docs]"
+pip install -e "/tmp/nf-metro-fix-<N>[dev,docs]"
 ```
 
 All subsequent work happens inside `/tmp/nf-metro-fix-<N>`.
@@ -151,16 +151,62 @@ Pre-existing mis-formats in scripts, docs config, etc. will trip CI on
 your PR even though they predate your change.
 
 ```bash
-source ~/.local/bin/mm-activate nf-metro-fix-<N> && cd /tmp/nf-metro-fix-<N> && ruff format . && ruff check .
+source ~/.local/bin/mm-activate nf-metro-fix-<N> && cd /tmp/nf-metro-fix-<N> && ruff format . && ruff check . && mypy
 ```
 
 Run from the repo root, no path restriction. Fix or commit any deltas
 that appear (a separate `style: ruff format whole repo` commit is fine).
+
+Alternatively, the repo ships a `.pre-commit-config.yaml` that runs the
+same checks. If you installed the hooks (`pip install pre-commit &&
+pre-commit install`), they fire automatically on commit. To run them
+manually:
+
+```bash
+pre-commit run --all-files
+```
+
 Then run the test suite:
 
 ```bash
 pytest
 ```
+
+### If your change touched `layout/routing/`: the gate-coverage ratchet
+
+Adding, removing, or rewriting an `if`/`while` in a `layout/routing/`
+module - or adding a topology fixture that closes a gap - can red one of
+the three ratchet tests in `tests/test_routing_gate_coverage.py`. These
+are **not** flaky; each names a specific reconciliation you owe in this
+same PR. Do not silence them by hand-editing the baseline or the
+generated matrix doc, and do not delete a triage entry just to make a
+test pass.
+
+- `test_no_new_un_exercised_routing_gate_arm` - your change added a gate
+  with an un-exercised arm. Either author a fixture that hits both arms,
+  or - if the arm is genuinely unreachable - confirm that and regenerate
+  the baseline to acknowledge it.
+- `test_gate_coverage_baseline_in_sync` - your change closed a gap or
+  removed a gate the baseline still lists. Regenerate the baseline.
+- `test_triage_sidecar_references_open_gaps` - you edited a gate's
+  condition text or removed it, so its entry in
+  `tests/data/routing_gate_triage.json` now names a non-gap. Prune (or
+  re-key) that entry.
+
+Regenerate with the coverage script (needs the `[dev]` extra and the
+pinned interpreter):
+
+```bash
+python scripts/routing_gate_coverage.py --write   # rewrites the matrix doc + baseline
+```
+
+**Gotcha:** the arc model is CPython-version-specific, so these tests
+**skip** off the pinned `BASELINE_PYTHON` (3.11). If your fix env is a
+different Python you will not see the failure locally - it surfaces only
+in CI. When in doubt, regenerate under 3.11. The full methodology (the
+four verdicts, why these tests exist, the phantom-arc trap) is in
+[`docs/dev/routing_gate_triage.md`](../../../docs/dev/routing_gate_triage.md);
+for a dedicated triage campaign use the `nf-metro-gate-triage` skill.
 
 ## Step 8: Visual Review via Render Preview
 

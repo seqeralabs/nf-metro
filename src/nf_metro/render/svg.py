@@ -13,7 +13,11 @@ from typing import Any, NamedTuple
 
 import drawsvg as draw
 
-from nf_metro.layout.constants import LABEL_LINE_HEIGHT, Y_SPACING
+from nf_metro.layout.constants import (
+    LABEL_LINE_HEIGHT,
+    SAME_COORD_TOLERANCE,
+    Y_SPACING,
+)
 from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.labels import (
     LabelPlacement,
@@ -22,7 +26,8 @@ from nf_metro.layout.labels import (
     place_labels,
 )
 from nf_metro.layout.routing import RoutedPath, compute_station_offsets, route_edges
-from nf_metro.layout.routing.corners import resolve_curve_radii
+from nf_metro.layout.routing.corners import curve_tangents, resolve_curve_radii
+from nf_metro.layout.routing.invariants import assert_render_curve_invariants
 from nf_metro.manifest import node_data_attrs
 from nf_metro.parser.model import (
     ICON_TYPE_DIR,
@@ -31,6 +36,7 @@ from nf_metro.parser.model import (
     MARKER_FILL_OPEN,
     MARKER_FILL_SOLID,
     MARKER_SHAPE_PILL,
+    Interchange,
     MarkerStyle,
     MetroGraph,
     PortSide,
@@ -451,6 +457,7 @@ def _render_svg_scaled(
 
     station_offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=station_offsets)
+    assert_render_curve_invariants(graph, routes, station_offsets)
 
     # Compute labels early so section bbox expansions are applied
     # before section boxes are drawn and canvas bounds are computed.
@@ -973,20 +980,10 @@ def _curve_tangents(
     before: dict[int, tuple[float, float]] = {}
     after: dict[int, tuple[float, float]] = {}
     curved: dict[int, bool] = {}
-    for i in range(1, len(pts) - 1):
-        prev, curr, nxt = pts[i - 1], pts[i], pts[i + 1]
-        dx1, dy1 = curr[0] - prev[0], curr[1] - prev[1]
-        len1 = (dx1**2 + dy1**2) ** 0.5
-        dx2, dy2 = nxt[0] - curr[0], nxt[1] - curr[1]
-        len2 = (dx2**2 + dy2**2) ** 0.5
-        r = resolved[i - 1]
-        if len1 > 0 and len2 > 0:
-            before[i] = (curr[0] - dx1 / len1 * r, curr[1] - dy1 / len1 * r)
-            after[i] = (curr[0] + dx2 / len2 * r, curr[1] + dy2 / len2 * r)
-            curved[i] = True
-        else:
-            before[i] = after[i] = curr
-            curved[i] = False
+    for i, tan in enumerate(curve_tangents(pts, resolved), start=1):
+        before[i] = tan.before
+        after[i] = tan.after
+        curved[i] = tan.curved
     return before, after, curved
 
 
@@ -1154,73 +1151,51 @@ def _rail_marker_fill(marker: MarkerStyle | None, theme: Theme) -> str | None:
     return marker_fill_color(marker.fill, theme)
 
 
-def _render_rail_pill(
-    d: draw.Drawing,
-    graph: MetroGraph,
-    station: Station,
+def _draw_interchange_glyph(
+    d: draw.Group | draw.Drawing,
+    x: float,
+    knobs: list[tuple[str, float]],
     theme: Theme,
     r: float,
-    fill_override: str | None = None,
+    *,
+    interior_fill: str,
+    outline: str,
+    station_data: dict[str, str],
+    data_station_id: str,
 ) -> None:
-    """Render a rail-mode multi-rail station as the metro interchange idiom.
+    """Draw the metro interchange idiom: a knob on each used rail joined by a
+    link bar spanning them (the classic metro / nf-core-sarek glyph).
 
-    The station draws as a *white circle on each rail it uses* joined by a
-    *white link* running between the topmost and bottommost used rails - a
-    continuous outlined white interchange (the classic metro / nf-core-sarek
-    idiom).  The link is the station fill colour (not a dark stroke), so it
-    reads as connecting the circles; the dark station stroke forms the OUTER
-    boundary of the whole circles+link glyph rather than cutting across it.
-
-    The glyph is built in two stacked layers so the outline is continuous and
-    never gaps where the link meets a circle: first an outline layer (the link
-    bar plus a disc at each used rail, each grown by the stroke width) paints
-    the union's outer boundary, then an interior layer of the same shapes (at
-    the true radii) paints the interior on top.  A rail that falls within the
-    span but is NOT used by the station gets no circle; the link passes behind
-    it.
-
-    ``fill_override`` tints the interior layer (link bar + knobs) with a marker
-    fill colour while keeping the interchange shape, so a spanning rail station
-    can carry its ``%%metro marker:`` colour.  A tinted interchange takes the
-    light marker outline (``marker_stroke``) so the fill reads against the dark
-    background, matching every other coloured marker glyph.
+    ``knobs`` is one ``(line_id, y)`` per rail the glyph stops on.  It is built
+    in two stacked layers so the outline stays continuous where the link meets a
+    knob: an outline layer (link bar + discs grown by the stroke width) paints
+    the union's outer boundary, then an interior layer at the true radii fills
+    it.  The link is the *fill* colour, not the stroke, so it reads as joining
+    the knobs rather than cutting across them.
     """
-    interior_fill = fill_override if fill_override is not None else theme.station_fill
-    outline = (
-        marker_stroke_color(theme)
-        if fill_override is not None
-        else theme.station_stroke
-    )
-    used_ys = [y for y in station.rail_used_ys] or [station.y]
-    top_y = min(used_ys)
-    bot_y = max(used_ys)
-    station_data = _station_data_attrs(graph, station)
-
+    if not knobs:
+        return
+    ys = [y for _, y in knobs]
+    top_y, bot_y = min(ys), max(ys)
     sw = theme.station_stroke_width
-    # A spanning interchange draws each used rail as a knob slightly larger than
-    # the bare marker, bulging out of a slightly narrower link bar like a real
-    # metro interchange.  A non-bridging station (a single used rail, hence no
-    # link bar) has nothing to bulge from, so its lone marker uses the standard
-    # radius rather than the inflated interchange knob size.
-    is_spanning = (bot_y - top_y) > 0.5
+    # A spanning interchange draws each rail's knob slightly larger than the bare
+    # marker, bulging out of a narrower link bar.  A single-knob stop has nothing
+    # to bulge from, so it uses the standard marker radius.
+    is_spanning = (bot_y - top_y) > SAME_COORD_TOLERANCE
     knob_r = r * RAIL_KNOB_RADIUS_RATIO if is_spanning else r
     bar_half = r * RAIL_LINK_HALF_WIDTH_RATIO
-    # rail_used_ys is recorded parallel to the line-definition order (see
-    # rail_mode._layout_section_rails), so zip the knobs against that same
-    # order rather than the alphabetical order of graph.station_lines.
-    served = graph.station_lines_ordered(station.id)
 
     def _link_bar(width: float, stroke: str, **extra: object) -> None:
         # A round-capped line of the given width is a capsule; used here only
-        # for its straight body between top and bottom used rails (the caps are
-        # covered by the circles), so it joins the knobs with no seam.
-        if bot_y - top_y <= 0.5:
+        # for its straight body between the top and bottom knobs (the caps are
+        # covered by the circles), so it joins them with no seam.
+        if bot_y - top_y <= SAME_COORD_TOLERANCE:
             return
         d.append(
             draw.Line(
-                station.x,
+                x,
                 top_y,
-                station.x,
+                x,
                 bot_y,
                 stroke=stroke,
                 stroke_width=width,
@@ -1229,27 +1204,20 @@ def _render_rail_pill(
             )
         )
 
-    def _knobs(radius: float, fill: str, stroke: str, **extra: object) -> None:
-        # Only rails the station USES get a knob; a rail that falls within the
-        # connector's span but belongs to a line this station does not use
-        # passes behind the bar (no knob), so the interchange reads as not
-        # stopping there.
-        for lid, y in zip(served, station.rail_used_ys):
+    def _knobs(radius: float, fill: str, **extra: object) -> None:
+        for lid, y in knobs:
             d.append(
                 draw.Circle(
-                    station.x,
+                    x,
                     y,
                     radius,
                     fill=fill,
-                    stroke=stroke,
+                    stroke=fill,
                     stroke_width=0,
                     **{**extra, "data-line-id": lid},
                 )
             )
 
-    # Outer-boundary layer: the link bar and the knob discs grown by the stroke
-    # width, all painted in the outline colour.  Their union is the continuous
-    # outline of the finished glyph.
     _link_bar(
         (bar_half + sw) * 2,
         outline,
@@ -1258,18 +1226,99 @@ def _render_rail_pill(
     _knobs(
         knob_r + sw,
         outline,
-        outline,
-        **{"class_": "nf-metro-rail-knob-outline", "data-station-id": station.id},
+        **{"class_": "nf-metro-rail-knob-outline", "data-station-id": data_station_id},
     )
-
-    # White interior layer: the same shapes at their true radii, filling the
-    # interior of the outlined union with the interior fill.
     _link_bar(bar_half * 2, interior_fill)
     _knobs(
         knob_r,
         interior_fill,
-        interior_fill,
-        **{"class_": "nf-metro-rail-knob", "data-station-id": station.id},
+        **{"class_": "nf-metro-rail-knob", "data-station-id": data_station_id},
+    )
+
+
+def _render_rail_pill(
+    d: draw.Drawing,
+    graph: MetroGraph,
+    station: Station,
+    theme: Theme,
+    r: float,
+    fill_override: str | None = None,
+) -> None:
+    """Render a rail-mode multi-rail station as the metro interchange glyph.
+
+    ``fill_override`` tints the interior (link bar + knobs) with a marker fill
+    colour while keeping the interchange shape, so a spanning rail station can
+    carry its ``%%metro marker:`` colour; a tinted interchange takes the light
+    marker outline so the fill reads against the dark background.
+    """
+    interior_fill = fill_override if fill_override is not None else theme.station_fill
+    outline = (
+        marker_stroke_color(theme)
+        if fill_override is not None
+        else theme.station_stroke
+    )
+    # rail_used_ys is recorded parallel to the line-definition order (see
+    # rail_mode._layout_section_rails); zip the knobs against that same order.  A
+    # rail within the connector's span but not used by the station gets no knob.
+    served = graph.station_lines_ordered(station.id)
+    knobs = list(zip(served, station.rail_used_ys))
+    _draw_interchange_glyph(
+        d,
+        station.x,
+        knobs,
+        theme,
+        r,
+        interior_fill=interior_fill,
+        outline=outline,
+        station_data=_station_data_attrs(graph, station),
+        data_station_id=station.id,
+    )
+
+
+def _render_interchange(
+    d: draw.Group | draw.Drawing,
+    graph: MetroGraph,
+    ic: Interchange,
+    theme: Theme,
+    station_offsets: dict[tuple[str, str], float] | None,
+    r: float,
+) -> None:
+    """Draw a cross-track interchange as one glyph across its member stations.
+
+    Each member sub-station sits at the same X on its own track; the glyph is a
+    knob where each line crosses (its laid-out, offset-applied Y) joined by a
+    link bar spanning the members, built in the same two stacked layers as the
+    rail-mode interchange so the outline stays continuous.
+    """
+    members = [graph.stations[mid] for mid in ic.member_ids if mid in graph.stations]
+    if not members:
+        return
+    offs = station_offsets or {}
+    # One knob per (member, line it carries) at the line's rendered Y.
+    knobs = [
+        (lid, m.y + offs.get((m.id, lid), 0.0))
+        for m in members
+        for lid in graph.station_lines_ordered(m.id)
+    ]
+    # A marker on the anchor tints the glyph and takes the light marker outline,
+    # mirroring a marked rail-mode interchange.
+    fill_override = _rail_marker_fill(members[0].marker, theme)
+    _draw_interchange_glyph(
+        d,
+        members[0].x,
+        knobs,
+        theme,
+        r,
+        interior_fill=fill_override
+        if fill_override is not None
+        else theme.station_fill,
+        outline=(
+            marker_stroke_color(theme)
+            if fill_override is not None
+            else theme.station_stroke
+        ),
+        station_data=_station_data_attrs(graph, members[0]),
+        data_station_id=ic.node_id,
     )
 
 
@@ -1371,6 +1420,21 @@ def _render_station_into(
     embedded, or the drawing itself under ``--no-manifest``.
     """
     r = theme.station_radius
+
+    # Cross-track interchange: the whole glyph is drawn once, anchored on the
+    # node the interchange kept (its id equals interchange_id); the other member
+    # sub-stations contribute knobs but draw nothing of their own.  A marker on
+    # the anchor tints the glyph (like a rail-mode interchange) rather than
+    # suppressing it.
+    if station.interchange_id is not None:
+        if station.id == station.interchange_id:
+            ic = next(
+                (c for c in graph.interchanges if c.node_id == station.interchange_id),
+                None,
+            )
+            if ic is not None and ic.member_ids:
+                _render_interchange(d, graph, ic, theme, station_offsets, r)
+        return
 
     # Rail mode: a blank terminus terminates its converged bundle exactly
     # like any other render -- the standard unrounded nub (via _pill_box)

@@ -19,8 +19,10 @@ from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import RoutedPath
+from nf_metro.layout.routing.corners import curve_tangents, resolve_curve_radii
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.render.svg import apply_route_offsets, render_svg
+from nf_metro.render.animate import _points_to_svg_path
+from nf_metro.render.svg import _curve_tangents, apply_route_offsets, render_svg
 from nf_metro.themes import NFCORE_THEME
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
@@ -653,3 +655,112 @@ class TestConcentricArcCenters:
     def test_topology_fixtures(self, fixture):
         _, routes, offsets, _ = _layout_and_route_file(fixture)
         self._check(routes, offsets)
+
+
+# ---------------------------------------------------------------------------
+# Shared rounded-corner tangent geometry (svg.py <-> animate.py)
+# ---------------------------------------------------------------------------
+
+
+def _q_corner_triples(d: str) -> list[tuple[tuple, tuple, tuple]]:
+    """Extract ``(before, corner, after)`` triples from a path's Q commands.
+
+    Both renderers draw a rounded corner as ``L before  Q corner after``,
+    so the corner's tangent points are the preceding L endpoint, the Q
+    control point, and the Q endpoint.
+    """
+    cmds = _parse_path_commands(d)
+    triples = []
+    for idx, (cmd, args) in enumerate(cmds):
+        if cmd == "Q":
+            prev_args = cmds[idx - 1][1]
+            before = (prev_args[-2], prev_args[-1])
+            corner = (args[0], args[1])
+            after = (args[2], args[3])
+            triples.append((before, corner, after))
+    return triples
+
+
+def _expected_q_triples(tangents) -> list[tuple[tuple, tuple, tuple]]:
+    """Curved tangents rounded to the 2dp that a path 'd' string emits."""
+    return [
+        (
+            (round(t.before[0], 2), round(t.before[1], 2)),
+            (round(t.corner[0], 2), round(t.corner[1], 2)),
+            (round(t.after[0], 2), round(t.after[1], 2)),
+        )
+        for t in tangents
+        if t.curved
+    ]
+
+
+class TestSharedCornerTangents:
+    """Static SVG and animation must round each corner identically.
+
+    Both renderers derive their tangent points from the shared
+    ``curve_tangents`` helper; these tests pin both to it so a future change
+    to corner geometry in one renderer can't silently diverge from the other.
+    """
+
+    POLYLINES = {
+        "l_shape": [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)],
+        "u_shape": [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)],
+        "staircase": [
+            (0.0, 0.0),
+            (50.0, 0.0),
+            (50.0, 50.0),
+            (100.0, 50.0),
+            (100.0, 100.0),
+        ],
+        # A duplicated waypoint gives two zero-length-leg vertices, exercising
+        # the "leg too short -> no curve" fallback both renderers implement.
+        "degenerate_leg": [(0.0, 0.0), (50.0, 0.0), (50.0, 0.0), (50.0, 50.0)],
+    }
+
+    @pytest.mark.parametrize("name", sorted(POLYLINES))
+    def test_svg_adapter_matches_shared_helper(self, name):
+        pts = self.POLYLINES[name]
+        resolved = resolve_curve_radii(pts, None, default_radius=CURVE_RADIUS)
+        shared = curve_tangents(pts, resolved)
+        before, after, curved = _curve_tangents(pts, resolved)
+        for i, tan in enumerate(shared, start=1):
+            assert curved[i] == tan.curved
+            assert before[i] == tan.before
+            assert after[i] == tan.after
+
+    @pytest.mark.parametrize("name", sorted(POLYLINES))
+    def test_animation_corners_match_shared_helper(self, name):
+        pts = self.POLYLINES[name]
+        resolved = resolve_curve_radii(pts, None, default_radius=CURVE_RADIUS)
+        shared = curve_tangents(pts, resolved)
+        d = _points_to_svg_path(pts, curve_radius=CURVE_RADIUS)
+        assert _q_corner_triples(d) == _expected_q_triples(shared)
+
+    @pytest.mark.parametrize(
+        "fixture",
+        sorted(TOPOLOGIES_DIR.glob("*.mmd")),
+        ids=lambda p: p.stem,
+    )
+    def test_real_routes_agree_across_renderers(self, fixture):
+        graph, routes, _, _ = _layout_and_route_file(fixture)
+        checked = 0
+        for route in routes:
+            pts = route.points
+            if len(pts) < 3:
+                continue
+            resolved = resolve_curve_radii(
+                pts, route.curve_radii, default_radius=CURVE_RADIUS
+            )
+            shared = curve_tangents(pts, resolved)
+            before, after, curved = _curve_tangents(pts, resolved)
+            for i, tan in enumerate(shared, start=1):
+                assert curved[i] == tan.curved
+                assert before[i] == tan.before
+                assert after[i] == tan.after
+            d = _points_to_svg_path(
+                pts, curve_radius=CURVE_RADIUS, route_curve_radii=route.curve_radii
+            )
+            assert _q_corner_triples(d) == _expected_q_triples(shared)
+            checked += 1
+        if checked == 0:
+            pytest.skip(f"no multi-corner routes in {fixture.stem}")

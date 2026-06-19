@@ -81,6 +81,41 @@ def test_no_bundle_order_violations_in_gallery(path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Cross-column perpendicular-exit -> perpendicular-entry bundles
+# ---------------------------------------------------------------------------
+
+_CROSS_COL_PERP_ENTRY_FIXTURES = [
+    "lr_perp_top_exit_perp_entry",
+    "lr_perp_bottom_exit_perp_entry",
+    "lr_perp_top_exit_perp_entry_diverging",
+]
+
+
+@pytest.mark.parametrize("stem", _CROSS_COL_PERP_ENTRY_FIXTURES)
+def test_cross_column_perp_entry_preserves_bundle_order(stem: str) -> None:
+    """A co-travelling bundle taken over the corridor from a perpendicular
+    exit on one LR section into the perpendicular entry of another LR
+    section in a different column keeps a single left/right order through
+    the whole riser -> corridor -> entry-drop chain.
+
+    The entry-drop leg's per-line channel order must agree with the
+    corridor's descent order; a disagreement flips the bundle at the
+    entry -> first-station corner, which both trips the runtime guard
+    and renders a crossover at the drop.
+    """
+    path = EXAMPLES / "topologies" / f"{stem}.mmd"
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    violations = check_bundle_order_preserved(routes)
+    assert violations == [], (
+        f"{stem}: {len(violations)} bundle-order violation(s); "
+        f"first: {violations[0].message() if violations else ''}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Route-level negative test: a synthetic flipped corner is caught
 # ---------------------------------------------------------------------------
 

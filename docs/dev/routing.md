@@ -43,18 +43,20 @@ The order in `route_edges` is:
    family of sub-handlers (L-shape, top-entry L-shape, left/right-entry
    wraps, TB bottom-exit, merge trunk/branch, bypass, stepped descent,
    inter-row corridors, around-section-below).
-2. `_route_tb_internal` - internal edges within a `TB` section, drawn as
-   vertical drops.
-3. `_route_tb_lr_exit` - internal station to a LEFT/RIGHT exit port in a
-   `TB` section.
-4. `_route_tb_lr_entry` - LEFT/RIGHT entry port to an internal station in
-   a `TB` section.
-5. `_route_perp_entry` - TOP/BOTTOM port to an internal station, with
-   upstream merging.
-6. `_route_entry_runway` - flow-side entry port to a deep internal
+2. `_route_tb_section` - edges touching a `TB` section.  Dispatches over
+   the ordered `_TB_SECTION_SHAPES` tuple (first match wins): internal
+   vertical drops (`_route_tb_internal`), internal station to a LEFT/RIGHT
+   exit port (`_route_tb_lr_exit`), LEFT/RIGHT entry port to an internal
+   station (`_route_tb_lr_entry`), and TOP/BOTTOM port to an internal
+   station (`_route_perp_entry`).  Each shape describes a centreline and
+   fans it through the bundle builder (`build_tapered_bundle` /
+   `build_offset_bundle`), so no handler hand-assembles per-line points or
+   curve radii; the perpendicular-entry corridor variant
+   (`_route_perp_entry_from_corridor`) routes the same way.
+3. `_route_entry_runway` - flow-side entry port to a deep internal
    station: compresses the diagonal into the entry region and runs a
    horizontal runway past the bypassed early-layer stations.
-7. `_route_intra_section` - the general intra-section case: diagonals,
+4. `_route_intra_section` - the general intra-section case: diagonals,
    cross-row fold routing, and straight lines.  This is also the
    fallback for port/junction-to-port/junction edges that the inter-
    section family did not claim.
@@ -107,11 +109,19 @@ dispatcher handles those degenerate cases directly.
 
 | Module | Responsibility |
 | --- | --- |
-| `core.py` | `route_edges` dispatcher and all handler functions |
+| `core.py` | `route_edges` dispatcher; re-exports handlers from sibling modules for backward-compatible imports |
+| `context.py` | `_RoutingCtx` dataclass and `_build_routing_context`; per-station offset helpers; shared section-geometry helpers (`_resolve_section_col`, `_has_intervening_sections`, `compute_junction_fan_info`, …) |
+| `inter_section_handlers.py` | handler 1 family: bypass, left/right entry wraps, around-section, inter-row corridors, stepped descent, L-shape |
+| `tb_handlers.py` | TB section shapes dispatched by `_route_tb_section` over `_TB_SECTION_SHAPES` (`_route_tb_internal`, `_route_tb_lr_exit`, `_route_tb_lr_entry`, `_route_perp_entry`, `_route_perp_entry_from_corridor`) and `_compute_diagonal_placement` |
+| `intra_handlers.py` | `_route_entry_runway` and `_route_intra_section` (the general intra-section fallback) |
+| `bundle.py` | constructive bundle-curve builders (`build_concentric_bundle`, `build_tapered_bundle`, `build_offset_bundle`); fans a centreline into per-line offset paths with concentric corners |
+| `centrelines.py` | centreline templates and bundle-gathering helpers (`gather_member_edges`, `route_along`, `route_tapered`, …) layered over `bundle.py` |
+| `postprocess.py` | post-routing passes: diagonal bundle spread and bubble-station centring |
+| `normalize.py` | channel and trunk normalization passes (`_normalize_gap_channels`, htrunk restacking, riser/port-approach alignment, …) |
 | `common.py` | `RoutedPath`, `Direction`, bundle/channel helpers |
 | `corners.py` | corner radii and curve smoothing |
-| `inter_section.py` | `WRAP_TABLE` descriptor catalogue |
+| `inter_section.py` | `WRAP_TABLE` descriptor catalogue (documentation reference; not used at runtime) |
 | `offsets.py` | per-station Y offsets for parallel lines |
 | `reversal.py` | fold/reversal (serpentine row) routing |
-| `invariants.py` | runtime routing guards |
+| `invariants.py` | runtime routing guards (`check_bundle_order_preserved`) |
 | `rail.py` | `route_rail_edges` straight-rail router for rail mode |

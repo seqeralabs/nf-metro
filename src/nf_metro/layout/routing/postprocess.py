@@ -527,8 +527,9 @@ def _align_uncentered_siblings(
 ) -> None:
     """Post-pass: drag unmoved stations to match their centered siblings.
 
-    Groups stations by (section, original_x).  Only drags unmoved stations
-    when a clear majority (>50%) of the group already moved to the same X.
+    Groups stations by (section, original_x).  Only operates when moved
+    stations disagree (spread > 1px): finds the majority X position and
+    realigns outliers and unmoved stations to match.
     """
     col_groups: dict[tuple[str | None, float], list[str]] = defaultdict(list)
     for sid, s in graph.stations.items():
@@ -562,28 +563,23 @@ def _align_uncentered_siblings(
             continue
 
         moved_xs = [graph.stations[sid].x for sid in moved]
-        if max(moved_xs) - min(moved_xs) > 1.0:
-            # Moved stations disagree on target X.  Find the majority
-            # position and treat outliers as needing alignment too.
-            rounded = [round(x, 1) for x in moved_xs]
-            ((majority_x, majority_count),) = Counter(rounded).most_common(1)
-            if majority_count <= len(moved) / 2:
-                continue  # no clear majority, skip
-            outliers = [
-                sid
-                for sid, x in zip(moved, moved_xs)
-                if abs(round(x, 1) - majority_x) > 1.0
-            ]
-            if not outliers:
-                continue
-            unmoved = unmoved + outliers
-            target_x = majority_x
-        else:
-            if not unmoved:
-                continue
-            if len(moved) <= len(unmoved):
-                continue
-            target_x = sum(moved_xs) / len(moved_xs)
+        if max(moved_xs) - min(moved_xs) <= 1.0:
+            continue
+        # Moved stations disagree on target X.  Find the majority
+        # position and treat outliers as needing alignment too.
+        rounded = [round(x, 1) for x in moved_xs]
+        ((majority_x, majority_count),) = Counter(rounded).most_common(1)
+        if majority_count <= len(moved) / 2:
+            continue  # no clear majority, skip
+        outliers = [
+            sid
+            for sid, x in zip(moved, moved_xs)
+            if abs(round(x, 1) - majority_x) > 1.0
+        ]
+        if not outliers:
+            continue
+        unmoved = unmoved + outliers
+        target_x = majority_x
 
         for sid in unmoved:
             old_x = graph.stations[sid].x

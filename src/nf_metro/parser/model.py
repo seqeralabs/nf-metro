@@ -166,6 +166,11 @@ class Station:
     # is absent here belongs to a line the station does not use and passes
     # behind the pill with no knob.  Empty when not laid out in rail mode.
     rail_used_ys: list[float] = field(default_factory=list)
+    # Set on the sub-stations an interchange expands into (see
+    # :class:`Interchange`): the ``node_id`` of the owning interchange.  The
+    # renderer draws the whole interchange as one glyph anchored on its first
+    # member and skips the others.  None for ordinary stations.
+    interchange_id: str | None = None
 
     @property
     def is_terminus(self) -> bool:
@@ -189,6 +194,7 @@ class Edge:
     source: str
     target: str
     line_id: str
+    source_line: int | None = None
 
 
 @dataclass
@@ -203,6 +209,32 @@ class StationGroup:
     label: str
     station_ids: list[str] = field(default_factory=list)
     position: Literal["above", "below"] = "below"
+
+
+@dataclass
+class Interchange:
+    """A cross-track interchange: one logical step several lines pass through
+    on their own tracks, drawn as a single connector glyph rather than a point
+    the lines converge to.
+
+    Authored as ``%%metro interchange: node | rail-1 lines | rail-2 lines`` (or
+    inferred by auto-layout).  In :func:`resolve._expand_interchanges` the named
+    node is expanded into one ordinary sub-station per rail (``member_ids``, top
+    to bottom), each carrying that rail's lines; its edges are repointed to the
+    sub-station whose rail owns the edge's line.  The renderer then draws the
+    members as a single glyph (link bar + per-line knobs) under the shared
+    ``label``.
+    """
+
+    node_id: str
+    rails: list[list[str]] = field(default_factory=list)
+    label: str = ""
+    # Sub-station ids created for each rail, parallel to ``rails`` (filled in by
+    # the expansion pass); empty until the node has been expanded.
+    member_ids: list[str] = field(default_factory=list)
+    # True when auto-layout inferred this interchange rather than the author
+    # writing it; carried only for diagnostics (``info``/``explain``).
+    inferred: bool = False
 
 
 @dataclass
@@ -334,6 +366,10 @@ class MetroGraph:
     # Query via ``section_line_spread`` / ``is_rail_section`` / ``station_is_rail``.
     line_spread: LineSpread = LineSpread.BUNDLE
     line_spread_overrides: dict[str, LineSpread] = field(default_factory=dict)
+    # Cross-track interchanges (see :class:`Interchange`), authored via
+    # ``%%metro interchange:`` or inferred by auto-layout; expanded into
+    # co-column sub-stations in ``resolve._expand_interchanges``.
+    interchanges: list["Interchange"] = field(default_factory=list)
     legend_position: str = "bottom"
     legend_min_height: float = 0.0
     # Opt-in diagonal station labels. None means "use the theme

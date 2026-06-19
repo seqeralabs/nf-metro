@@ -1,0 +1,30 @@
+%%metro title: Dogleg Off Exempt Trunks - Same Line Regime
+%%metro style: dark
+%%metro line: wrap | Wrap | #0570b0
+
+%%metro grid: left_tgt | 0,0
+%%metro grid: right_src | 1,1
+%%metro grid: new_tgt | 2,1
+
+graph LR
+    subgraph left_tgt [Left Target]
+        %%metro entry: left | wrap
+        lt1[Collect]
+        lt2[Output]
+        lt1 -->|wrap| lt2
+    end
+
+    subgraph right_src [Right Source]
+        rs1[Input R]
+        rs2[Hub R]
+        rs1 -->|wrap| rs2
+    end
+
+    subgraph new_tgt [New Target]
+        nt1[Hub N]
+        nt2[Out N]
+        nt1 -->|wrap| nt2
+    end
+
+    rs2 -->|wrap| lt1
+    lt2 -->|wrap| nt1

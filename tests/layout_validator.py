@@ -1656,6 +1656,11 @@ def check_serpentine_no_backtrack(
         tgt_sec = graph.section_for_station(route.edge.target)
         if src_sec != tgt_sec or src_sec not in serpentine_sections:
             continue
+        port = graph.ports.get(route.edge.source)
+        if port and port.is_entry and port.side in (PortSide.LEFT, PortSide.RIGHT):
+            # A LEFT/RIGHT entry port's turn-in to the trunk is the entry, one
+            # leg perpendicular to flow, not a serpentine fold-back.
+            continue
         section = graph.sections[src_sec]
         forward = 1.0 if section.direction != "RL" else -1.0
         pts = apply_route_offsets(route, offsets)

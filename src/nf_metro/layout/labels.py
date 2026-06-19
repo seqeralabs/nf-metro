@@ -43,6 +43,7 @@ from nf_metro.layout.constants import (
     LABEL_OVERLAP_TOL,
     LABEL_WRAP_MIN_LINE_CHARS,
     PORT_LABEL_MAX_DX,
+    SAME_COORD_TOLERANCE,
     TB_LABEL_H_SPACING,
     TB_LINE_Y_OFFSET,
     TB_PILL_EDGE_OFFSET,
@@ -602,7 +603,7 @@ def find_label_overlaps(
     Shared by the wrapping pass, the runtime guard, and the layout validator
     so all three agree on what "overlap" means.
     """
-    eps = 0.5
+    eps = SAME_COORD_TOLERANCE
     labels = [
         p
         for p in placements

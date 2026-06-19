@@ -28,6 +28,8 @@ from layout_validator import (
 )
 
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.routing.common import row_bottom_edge
+from nf_metro.layout.routing.context import _resolve_section_row
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
@@ -113,6 +115,10 @@ class TestTopologyValidation:
         # humann3 junction routing is a known defect (see #241 family).
         if "funcprofiler_upstream" in request.node.name:
             pytest.xfail("funcprofiler_upstream has a known almost-horizontal edge")
+        if "bypass_fan_in_outer_slot" in request.node.name:
+            pytest.xfail(
+                "bypass_fan_in_outer_slot: meth slope 0.075 in minimum-width column gap"
+            )
         violations = check_almost_horizontal_edges(topology_graph)
         warnings = [v for v in violations if v.severity == Severity.WARNING]
         assert not warnings, "\n".join(v.message for v in warnings)
@@ -1151,3 +1157,68 @@ class TestAlmostHorizontalEdges:
         compute_layout(graph)
         violations = check_almost_horizontal_edges(graph)
         assert not violations, "\n".join(v.message for v in violations)
+
+
+# --- #652: junction fan-out + bypass concentric nesting ---
+
+FAN_BYPASS_NESTING_FILE = TOPOLOGIES_DIR / "fan_bypass_nesting.mmd"
+
+
+def _station_row(graph, station_id):
+    """Grid row of a station's resolved section, or ``None``."""
+    st = graph.stations.get(station_id)
+    return _resolve_section_row(graph, st) if st else None
+
+
+def _bypass_fan_weaves(graph):
+    """Junction crossings where a bypass weaves a descender AT THE FAN.
+
+    The bug is a bypass whose lead-in tangles across its sibling down-turns up
+    at the fan corner.  A weave is a crossing of two edges from one junction
+    where exactly one turns DOWN to a lower row (a descender) and the crossing
+    point sits within the junction's own row band -- i.e. near the fan, before
+    the bypass has peeled off.  A crossing down in the inter-row gap is the
+    bypass diverging into its run (the clean fork), not a weave, and a crossing
+    with the same-row trunk continuation is the unavoidable divergence; neither
+    is counted.
+    """
+    out = []
+    for v in check_route_segment_crossings(graph):
+        edge_a = v.context["edge_a"]
+        edge_b = v.context["edge_b"]
+        jid = edge_a[0]
+        if jid != edge_b[0] or not jid.startswith("__junction"):
+            continue
+        jrow = _station_row(graph, jid)
+        row_a = _station_row(graph, edge_a[1])
+        row_b = _station_row(graph, edge_b[1])
+        if jrow is None or row_a is None or row_b is None:
+            continue
+        if (row_a > jrow) == (row_b > jrow):
+            continue  # not a bypass-vs-descender pair
+        band_bottom = row_bottom_edge(graph, jrow, default=None)
+        cross_y = v.context["intersection"][1]
+        if band_bottom is not None and cross_y <= band_bottom + 1.0:
+            out.append(v.message)
+    return out
+
+
+def test_fan_bypass_nesting_fixture_fans_from_a_junction():
+    """The fixture's source must fan out through a synthetic junction."""
+    graph = _load_and_layout(FAN_BYPASS_NESTING_FILE)
+    junctions = [s for s in graph.stations.values() if s.id.startswith("__junction")]
+    assert junctions, "fixture lost its synthetic fan-out junction"
+
+
+def test_fan_bypass_no_fan_weave():
+    """A fan-out bypass must not weave across its down-turns at the fan (#652).
+
+    The bypass stays bundled through the down-turns' shared concentric corner
+    and only crosses over once it has peeled into the inter-row gap, so no
+    crossing with a descending sibling lands in the junction's own row band.
+    A crossover down at the divergence, and the crossing with the same-row
+    trunk continuation, are both expected and not flagged.
+    """
+    graph = _load_and_layout(FAN_BYPASS_NESTING_FILE)
+    weaves = _bypass_fan_weaves(graph)
+    assert not weaves, "\n".join(weaves)

@@ -9,12 +9,16 @@ Usage:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
+sys.path.insert(0, str(project_root / "tests"))
+
+from layout_metrics import compute_metrics  # noqa: E402
 
 from nf_metro.convert import convert_nextflow_dag  # noqa: E402
 from nf_metro.layout.engine import compute_layout  # noqa: E402
@@ -50,6 +54,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "trunk that cascades downward, `centered` balances that bundle about "
         "the midline, and `rails` draws each line as a parallel rail with "
         "shared stations as interchanges.",
+    ),
+    (
+        "cross_track_interchange",
+        EXAMPLES_DIR,
+        "Demonstrates `%%metro interchange:`: parallel tumour/normal lanes share "
+        "one MarkDuplicates step without merging, drawn as a cross-track "
+        "interchange so each lane stays straight on its own track instead of "
+        "pinching together to a point. Auto-layout infers the same interchange "
+        "for fully-parallel lanes even without the directive.",
     ),
     (
         "rnaseq_auto",
@@ -315,6 +328,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     ),
     # --- Offset and bypass ---
     (
+        "bypass_fan_in_outer_slot",
+        TOPOLOGIES_DIR,
+        "A bypass line (QC) skips hub and alignment to reach a deeper station "
+        "(MultiQC Report) in the Integration section, while dna/meth/rna/atac "
+        "converge at a fan-in entry port. The bypass line claims the outer slot "
+        "so no empty interior gaps appear (issue #655).",
+    ),
+    (
         "mismatched_tracks",
         TOPOLOGIES_DIR,
         "Lines with mismatched track counts at shared stations.",
@@ -333,6 +354,88 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "(`_clear_bypass_v_label_strikes`).",
     ),
     (
+        "bypass_label_rake_left",
+        TOPOLOGIES_DIR,
+        "Mirror of the bypass-label rake: the dip's descending leg, not its "
+        "climb, crosses the wide 'Quantification Step' label, so its V corner "
+        "lands in the label's left half and the router seats it clear of the "
+        "left edge (`_clear_bypass_v_label_strikes`).",
+    ),
+    (
+        "bypass_v_tight",
+        TOPOLOGIES_DIR,
+        "An intra-section bypass V at a tight column pitch: without room for a "
+        "lead-in the descent would diverge on the 'Process A' marker and rake "
+        "its label. The engine pushes the bypassed node to a further grid "
+        "column so the V diverges past the label and keeps a visible flat run "
+        "through its X (issue #688).",
+    ),
+    (
+        "fan_bypass_nesting",
+        TOPOLOGIES_DIR,
+        "A junction fans to a straight continuation, three down-turns into "
+        "stacked rows, and one far-column bypass. The bypass joins the same "
+        "concentric corner as the down-turns and descends in the shared "
+        "channel, peeling into its lane at the inter-row gap rather than "
+        "grazing the down-turn corners near the junction (issue #652).",
+    ),
+    (
+        "divergent_fanout_split",
+        TOPOLOGIES_DIR,
+        "One line fans out from a single source to a near and a far target in "
+        "the row below. The two descents stay fused as one trunk until the near "
+        "branch turns off, so the farther branch never peels onto the inside of "
+        "the nearer one and crosses it (issue #702).",
+    ),
+    (
+        "disjoint_sameline_trunks",
+        TOPOLOGIES_DIR,
+        "Two lines diving into one below-row channel to bypass a section ride a "
+        "tight concentric bundle until a member peels up at its turn column, "
+        "rather than being split apart by a track reserved for a trunk that only "
+        "appears further along the channel (issue #702).",
+    ),
+    (
+        "dogleg_exempt_distinct",
+        TOPOLOGIES_DIR,
+        "A bypass line cleared off a different line's exempt wrap trunk in the "
+        "inter-row gap runs parallel above it as a tight bundle, rather than "
+        "doglegging onto the crossing side where its riser would pierce the "
+        "wrap run twice (issue #702).",
+    ),
+    (
+        "dogleg_exempt_sameline",
+        TOPOLOGIES_DIR,
+        "Two opposing flows of one line fused in the inter-row gap are pulled "
+        "apart into a dogleg; the down-moved trunk stops short of the next "
+        "row's section header badge, keeping the required clearance rather "
+        "than crowding it (issue #698).",
+    ),
+    (
+        "merge_offrow_continuation",
+        TOPOLOGIES_DIR,
+        "A perpendicular feeder re-slots at a multi-feeder merge port, and the "
+        "single re-joined line leaves the merge row before reaching its "
+        "consumer one row up, so the bundle-offset walk stops at the off-row "
+        "exit rather than carrying the slot off the row.",
+    ),
+    (
+        "right_entry_gap_above_empty_row",
+        TOPOLOGIES_DIR,
+        "A right-entry feed from a source two rows above its target finds the "
+        "immediate next row empty, collapsing the inter-row band so the "
+        "gap-above route is unavailable and the feed falls back to the "
+        "around-below loop.",
+    ),
+    (
+        "corridor_narrow_gap_fallback",
+        TOPOLOGIES_DIR,
+        "A left-entry feed crosses two rows past a wider intervening section "
+        "whose inter-row gap is too narrow for the corridor's clearance band, "
+        "so it falls back to the around-below loop clear of that section while "
+        "the adjacent feeder takes the corridor (issue #722).",
+    ),
+    (
         "off_track_convergence",
         TOPOLOGIES_DIR,
         "Multiple off-track file inputs converging on a single consumer. "
@@ -347,6 +450,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "dragged to the section floor (issue #650).",
     ),
     (
+        "off_track_input_above_consumer",
+        TOPOLOGIES_DIR,
+        "A section whose mid-trunk station consumes an off-track input while a "
+        "neighbouring station feeds an off-track output. The input hugs one row "
+        "above its consumer instead of towering an extra slot up because it "
+        "shares an anchor with the differently-columned output (issue #651).",
+    ),
+    (
         "around_section_below",
         TOPOLOGIES_DIR,
         "Cross-row route to a LEFT-entry target where the natural inter-row "
@@ -359,6 +470,43 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "A right-exit bundle wrapping down to a left-entry in the row below. "
         "The horizontal run sits centred in the inter-row gap, clear of both "
         "the section above and the next row's header.",
+    ),
+    # --- Routing-gate coverage fixtures ---
+    (
+        "cross_col_top_entry",
+        TOPOLOGIES_DIR,
+        "A cross-column feed from a RIGHT-exit producer into a TOP-entry "
+        "consumer: the entry port is placed on the section boundary rather "
+        "than floating above the canvas (issue #740).",
+    ),
+    (
+        "bypass_gap2_rightward_overflow",
+        TOPOLOGIES_DIR,
+        "A seven-line rightward bypass whose gap-2 bundle right edge overflows "
+        "the inter-column gap limit and is clamped, keeping the bundle inside "
+        "the gap.",
+    ),
+    (
+        "right_entry_wrap_no_fan",
+        TOPOLOGIES_DIR,
+        "A single line wrapping from an LR exit into a cross-row RL section's "
+        "RIGHT entry, with no junction siblings (the solo `_route_right_entry_"
+        "wrap` lead-in).",
+    ),
+    (
+        "tb_right_entry_stack",
+        TOPOLOGIES_DIR,
+        "A two-line bundle into a stacked TB section's RIGHT entry from a "
+        "same-row left source: it loops over the section top and descends into "
+        "the port, the U-turn transposing the bundle, with concentric corners "
+        "built via `build_concentric_bundle` (#707).",
+    ),
+    (
+        "around_below_ep_col_gt0",
+        TOPOLOGIES_DIR,
+        "A two-line bundle looping around below the canvas into a non-zero-"
+        "column LEFT-entry target, past an intervening middle-row section that "
+        "blocks the direct wrap.",
     ),
     # --- Complex auto-layout regression isolation ---
     (
@@ -385,6 +533,193 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "A cross-row feed runs its horizontal in the inter-row gap and drops "
         "straight in, rather than diving under the return row counter to its "
         "flow.",
+    ),
+    (
+        "rl_entry_runway",
+        TOPOLOGIES_DIR,
+        "A right-to-left section whose flow-side entry skips ahead to a deep "
+        "off-track target, compressing the diagonal into the entry region and "
+        "running a horizontal runway past the bypassed stations.",
+    ),
+    (
+        "terminus_join",
+        TOPOLOGIES_DIR,
+        "Two lines converge on a single file-icon terminus in a sectionless "
+        "flat graph, so the join lands directly on the terminus rather than a "
+        "synthesised convergence junction.",
+    ),
+    (
+        "compact_hidden_passthrough",
+        TOPOLOGIES_DIR,
+        "Compact mode keeps a hidden single-line pass-through station on its "
+        "bundle slot so the two lines weave consistently through the section.",
+    ),
+    (
+        "compact_gap_peer_conflict",
+        TOPOLOGIES_DIR,
+        "A fork-join whose hub carries non-consecutive offset slots safely "
+        "abandons gap-compaction when a visible same-layer peer carries the "
+        "intervening line, rather than cascading the reorder.",
+    ),
+    (
+        "merge_port_above_approach",
+        TOPOLOGIES_DIR,
+        "A line descending into a multi-feeder merge port from a section above "
+        "keeps the above-trunk slot all the way to the output, so its riser "
+        "joins the bundle without crossing the trunk on the outgoing run "
+        "(issue #704).",
+    ),
+    (
+        "junction_entry_collision",
+        TOPOLOGIES_DIR,
+        "A three-line fan-out where one line continues straight to its own "
+        "destination while the other two branch away: the straight line keeps "
+        "a constant bundle slot across the source exit so its trunk stays "
+        "horizontal (issue #704).",
+    ),
+    (
+        "junction_entry_align",
+        TOPOLOGIES_DIR,
+        "A two-line bundle whose order is preserved across the "
+        "junction-to-entry-port boundary, so the straight-through line stays "
+        "horizontal instead of slanting to swap slots (issue #704).",
+    ),
+    (
+        "merge_trunk_out_of_range_section",
+        TOPOLOGIES_DIR,
+        "Two same-row sources merge into one sink past an intervening section "
+        "while another row's section sits outside the merge column range, so "
+        "the merge trunk keeps its same-row bypass channel rather than crossing "
+        "below the out-of-range section.",
+    ),
+    (
+        "merge_trunk_over_low_section",
+        TOPOLOGIES_DIR,
+        "A same-row merge trunk bypasses past a tall intervening section while "
+        "a lower-row section sits within the merge column range. The inter-row "
+        "gap clears the lower section's header, so the trunk (and its branches) "
+        "route through that gap rather than diving below the whole canvas.",
+    ),
+    (
+        "merge_bottom_row_bypass",
+        TOPOLOGIES_DIR,
+        "A merge whose entry sits in the bottommost grid row: the trunk's "
+        "inter-row bypass routes in the cramped gap above that row. Placement "
+        "reserves the gap so the channel clears the upper row's section boxes "
+        "instead of grazing them.",
+    ),
+    (
+        "merge_pullaway",
+        TOPOLOGIES_DIR,
+        "One line converges on a merge from two stacked rows of the same "
+        "column; the cross-row feeder drops onto the trunk's pull-away bypass "
+        "channel and the two travel as a single stroke into the entry.",
+    ),
+    (
+        "merge_right_entry",
+        TOPOLOGIES_DIR,
+        "One line converges on a RIGHT entry from feeders spread across "
+        "several columns: the farthest carries the trunk that loops under the "
+        "sink, and the nearer feeder drops onto that same channel instead of "
+        "taking a second path over the top.",
+    ),
+    (
+        "peeloff_riser_respace",
+        TOPOLOGIES_DIR,
+        "Four lines from two sources ride one shared bypass trunk and rise "
+        "into a common destination entry port, where the trunk-Y order and "
+        "the entry-port slot order disagree. Each source bundle keeps its "
+        "declaration order at the peel-off corner instead of inverting "
+        "(issue #695).",
+    ),
+    (
+        "peeloff_extra_line_consumer",
+        TOPOLOGIES_DIR,
+        "Same peel-off topology as peeloff_riser_respace but the destination "
+        "section also carries an extra internal branch (l5). The riser reorder "
+        "must still fire and keep the bundle crossing-free at the shared entry "
+        "port regardless of extra lines in the consumer section (issue #751).",
+    ),
+    # --- LR section feeding a TB section's TOP entry ---
+    (
+        "lr_to_tb_top_drop",
+        TOPOLOGIES_DIR,
+        "An LR section feeds the TOP entry of a TB section stacked directly "
+        "below. With no explicit exit side the engine infers a BOTTOM exit: "
+        "the line curves out of the trunk after the last station and drops "
+        "straight onto the target trunk, which is aligned under the exit.",
+    ),
+    (
+        "lr_to_tb_top_drop_two_lines",
+        TOPOLOGIES_DIR,
+        "Two co-travelling lines drop out of an LR section's explicit BOTTOM "
+        "exit into a TB section's shared TOP entry below, staying parallel "
+        "through the corner and down to the trunk without crossing.",
+    ),
+    (
+        "lr_to_tb_top_near_vertical",
+        TOPOLOGIES_DIR,
+        "A RIGHT-exit LR section feeds the TOP entry of a TB section stacked "
+        "directly below. The explicit right exit leaves on the right, clears "
+        "the source box, and doubles back over the inter-row gap to drop "
+        "straight onto the target trunk rather than elbowing in through the "
+        "top-right corner.",
+    ),
+    (
+        "lr_to_tb_top_cross_col",
+        TOPOLOGIES_DIR,
+        "A junction source feeds both a same-row RIGHT-entry consumer and a "
+        "TB section's TOP entry two rows below. The downward branch drops onto "
+        "the target trunk without crossing the section boundary off-port.",
+    ),
+    (
+        "lr_to_tb_top_two_lines",
+        TOPOLOGIES_DIR,
+        "Two co-travelling lines from a RIGHT-exit LR section double back into "
+        "a TB section's shared TOP entry below, landing on their trunk X "
+        "offsets so the bundle stays parallel through the boundary without "
+        "pinching or crossing.",
+    ),
+    # --- Multi-line perpendicular exit that does not drop straight down ---
+    (
+        "lr_perp_top_exit_side_entry",
+        TOPOLOGIES_DIR,
+        "Two co-travelling lines leave an LR section through an explicit TOP "
+        "exit and feed the LEFT entry of a same-row neighbour. The exit port "
+        "sits past the last station, and the bundle rises into the header "
+        "band, runs across, and descends to the consumer's row to enter "
+        "straight, staying parallel through every concentric corner.",
+    ),
+    (
+        "lr_perp_bottom_exit_side_entry",
+        TOPOLOGIES_DIR,
+        "The BOTTOM-exit mirror of lr_perp_top_exit_side_entry: the bundle "
+        "drops below the source section, runs across the under-row band, and "
+        "rises back to the consumer's row to enter straight.",
+    ),
+    (
+        "lr_perp_top_exit_perp_entry",
+        TOPOLOGIES_DIR,
+        "Two co-travelling lines leave an LR section through a TOP exit and "
+        "feed the TOP entry of a same-row neighbour in another column. The "
+        "bundle rises over the header band and drops into the consumer trunk, "
+        "keeping a single left/right order across the shared entry port so it "
+        "stays parallel without crossing at the drop.",
+    ),
+    (
+        "lr_perp_bottom_exit_perp_entry",
+        TOPOLOGIES_DIR,
+        "The BOTTOM-exit mirror of lr_perp_top_exit_perp_entry: the bundle "
+        "drops under the row, runs across, and rises into the consumer's "
+        "BOTTOM entry, staying parallel through the corridor.",
+    ),
+    (
+        "lr_perp_top_exit_perp_entry_diverging",
+        TOPOLOGIES_DIR,
+        "A TOP-exit bundle taken over the corridor into a TOP entry where the "
+        "two lines split to different downstream stations. Consistent corridor "
+        "ordering routes each line to its target without a convergence jog at "
+        "the entry.",
     ),
 ]
 
@@ -457,6 +792,12 @@ PIPELINE_ENTRIES: list[tuple[str, str, str, str]] = [
 # Populated by each render function, written to RENDERS_DIR/manifest.json.
 _manifest: dict[str, str] = {}
 
+# Layout-quality scorecard per SVG filename, written to RENDERS_DIR/metrics.json
+# and reported as per-render deltas in the render-diff page. Advisory only.
+_metrics: dict[str, dict[str, float]] = {}
+
+_SVG_DIMS_RE = re.compile(r'<svg[^>]*\bwidth="([\d.]+)"[^>]*\bheight="([\d.]+)"')
+
 
 def render_drawn_svg(graph, theme, **kwargs) -> str:
     """Render the drawn map only, with the embedded data manifest disabled.
@@ -469,6 +810,20 @@ def render_drawn_svg(graph, theme, **kwargs) -> str:
     return render_svg(graph, theme, **kwargs)
 
 
+def _record_metrics(graph, svg_name: str, svg_str: str) -> None:
+    """Compute the layout-quality scorecard for a freshly rendered graph.
+
+    Computed alongside the render so the scores reflect the same engine version
+    that drew the SVG. A failure here never aborts a render.
+    """
+    match = _SVG_DIMS_RE.search(svg_str)
+    canvas = (float(match.group(1)), float(match.group(2))) if match else None
+    try:
+        _metrics[svg_name] = compute_metrics(graph, canvas=canvas)
+    except Exception as e:  # noqa: BLE001 - metrics are advisory, never fatal
+        print(f"    metrics FAIL for {svg_name}: {e}")
+
+
 def render_mmd(mmd_path: Path, svg_path: Path, *, debug: bool = DEBUG_RENDERS) -> None:
     """Parse, layout, and render a .mmd file to SVG."""
     text = mmd_path.read_text()
@@ -478,6 +833,7 @@ def render_mmd(mmd_path: Path, svg_path: Path, *, debug: bool = DEBUG_RENDERS) -
     theme = THEMES[theme_name]
     svg_str = render_drawn_svg(graph, theme, debug=debug)
     svg_path.write_text(svg_str)
+    _record_metrics(graph, svg_path.name, svg_str)
 
 
 def clean_name(stem: str) -> str:
@@ -529,6 +885,7 @@ def render_guide_examples() -> None:
             theme = THEMES[theme_name]
             svg_str = render_drawn_svg(graph, theme, debug=True)
             debug_svg.write_text(svg_str)
+            _record_metrics(graph, debug_svg.name, svg_str)
             _manifest[debug_svg.name] = section
             print("  rnaseq_auto_debug: OK")
         except Exception as e:
@@ -622,6 +979,7 @@ def render_nextflow_examples() -> None:
             theme = THEMES[graph.style if graph.style in THEMES else "nfcore"]
             svg_str = render_drawn_svg(graph, theme, debug=DEBUG_RENDERS)
             svg_path.write_text(svg_str)
+            _record_metrics(graph, svg_path.name, svg_str)
             _manifest[svg_path.name] = section
             print(f"  nf_{mmd_path.stem}: OK")
         except Exception as e:
@@ -725,7 +1083,7 @@ def render_test_fixtures() -> None:
     RENDERS_DIR.mkdir(parents=True, exist_ok=True)
     section = "Test Fixtures"
     print("Test fixtures:")
-    for stem in ("multiline_labels", "rnaseq_simple"):
+    for stem in ("multiline_labels", "rnaseq_simple", "genomeassembly_organellar"):
         mmd_path = TEST_FIXTURES_DIR / f"{stem}.mmd"
         if not mmd_path.exists():
             continue
@@ -746,6 +1104,13 @@ def write_manifest() -> None:
     print(f"Manifest written to {manifest_path} ({len(_manifest)} entries)")
 
 
+def write_metrics() -> None:
+    """Write the per-render layout-quality scorecard for the render-diff page."""
+    metrics_path = RENDERS_DIR / "metrics.json"
+    metrics_path.write_text(json.dumps(_metrics, indent=2, sort_keys=True) + "\n")
+    print(f"Metrics written to {metrics_path} ({len(_metrics)} entries)")
+
+
 if __name__ == "__main__":
     # Clean stale renders so removed gallery entries don't persist
     if RENDERS_DIR.exists():
@@ -757,3 +1122,4 @@ if __name__ == "__main__":
     render_test_fixtures()
     build_gallery()
     write_manifest()
+    write_metrics()

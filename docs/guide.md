@@ -536,6 +536,7 @@ These go at the top of the file, before `graph LR`.
 | `%%metro compact_offsets: true` | Compact line offsets within stations (see below) |
 | `%%metro center_ports: true` | Centre inter-section ports on the shorter of the two connected sections, so lines enter/exit at the visual midpoint. |
 | `%%metro line_spread: <mode>[ \| <id>...]` | How lines sharing a station relate vertically (see below). `<mode>` is `bundle` (default), `centered`, or `rails`. The bare form sets the graph default; `<mode> \| sectionA, sectionB` overrides those sections. |
+| `%%metro interchange: <node> \| <rail-1 lines> \| <rail-2 lines> [\| ...]` | Render a shared step as a cross-track interchange instead of a convergence point (see below). Each pipe-group is one rail (comma-separated lines bundle on it). Auto-layout infers this for fully-parallel lanes, so the directive is only needed to pin a grouping. |
 | `%%metro legend_min_height: <pixels>` | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 | `%%metro process: <station> \| <regex>` | _Experimental._ Tie a station to the Nextflow process(es) it represents, for live progress (see [Live progress](live.md)). The regex matches the fully-qualified process name; repeat the directive to attach several patterns to one station. Pure metadata - it never affects the rendered map. |
 
@@ -583,6 +584,18 @@ Append `| <section>, ...` to override individual sections, so one map can mix mo
 
 Here every section defaults to `centered` while `pathways` is laid out as parallel rails; ordinary section placement positions both. The [`line_spread`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/line_spread.mmd) example shows all three modes in one map via per-section overrides. For `rails`, inter-section edges into or out of a rail section are not yet supported - a rail section should be self-contained.
 
+**Cross-track interchanges.** Sometimes a single step is shared by lines that otherwise run as separate parallel lanes - a tumour and a normal lane both running MarkDuplicates, say - but the lanes never actually merge. In `bundle` mode each lane has to dip off its track to touch that shared node and dip back, pinching the lines together at a point that isn't really a join. An *interchange* renders the shared step the way a real metro map would: each lane stays straight on its own track, and the step is drawn as a connector (a knob on each rail joined by a link bar) spanning them.
+
+Unlike `line_spread: rails`, this is per-node and works in ordinary `bundle`/`centered` layout - only the one shared step becomes an interchange; everything else stays as it was. Internally the node is expanded into one ordinary sub-station per rail, so the normal layout engine keeps each lane straight and routes it; only the glyph is special.
+
+Auto-layout infers an interchange automatically wherever the lanes are *fully parallel* - every line through the node has its own predecessor and its own successor, so converging them buys nothing. You only need the directive to pin a specific rail grouping (e.g. bundling two lines onto one rail), or to force an interchange where lines share a neighbour:
+
+```text
+%%metro interchange: markduplicates | tumor | normal
+```
+
+The lanes are listed one rail per pipe-group; commas bundle several lines onto the same rail. Auto-detection deliberately abstains when two lines share a predecessor or successor (e.g. two callers feeding one merge): there the convergence is doing real work, so it is left alone. It also abstains when another lane's rail would fall between the interchange's rails, since the connector bar would then cut across that lane's stations. Interchanges are skipped inside `rails` sections, which already lay every line on its own rail. The [cross_track_interchange](https://github.com/pinin4fjords/nf-metro/blob/main/examples/cross_track_interchange.mmd) example shows a shared MarkDuplicates step across parallel tumour/normal lanes.
+
 ### Section directives
 
 These go inside `subgraph` blocks.
@@ -629,6 +642,20 @@ Set the directive in your committed `.mmd` so the map reproduces from the file a
 | `animate:` | `--animate` / `--no-animate` | off |
 
 `--output`, `--format`, `--from-nextflow`, and `--debug` have no directive: they select the output target or a diagnostic overlay rather than describing the diagram.
+
+## Bridge glyphs
+
+When two distinct lines cross at a point that is neither a shared station nor a
+merge/junction, nf-metro automatically draws a **bridge glyph**: a short gap in
+the under-route where it passes beneath the over-route.  This disambiguates a
+crossing from an interchange (where a gap would mean the lines genuinely share a
+node).
+
+Bridge glyphs are computed automatically — there is no directive to enable them.
+If your diagram has a visual crossing that you do not expect, check whether the
+two lines genuinely share an endpoint.  If they should converge, connect them
+with a shared station; if the crossing is unavoidable layout-wise, the bridge
+glyph is the correct rendering.
 
 ## Tips
 

@@ -42,8 +42,6 @@ from nf_metro.layout.routing.inter_section_handlers import (  # noqa: F401
     _has_around_section_sibling,
     _has_bypass_sibling_to_same_entry,
     _left_entry_descent_x,
-    _nested_target_clear_channel_x,
-    _radius_inputs,
     _right_entry_gap_above_is_clear,
     _right_entry_gap_above_target_y,
     _route_around_section_below,
@@ -59,12 +57,8 @@ from nf_metro.layout.routing.inter_section_handlers import (  # noqa: F401
     _route_right_entry_around_below,
     _route_right_entry_via_gap_above,
     _route_right_entry_wrap,
-    _route_stepped_descent,
     _route_tb_bottom_exit,
     _route_top_entry_l_shape,
-    _route_top_entry_offset_bundle,
-    _should_step_descent,
-    _unit_step,
     _v1_corner_x,
 )
 from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
@@ -74,13 +68,13 @@ from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
     _route_intra_section,
 )
 from nf_metro.layout.routing.normalize import (  # noqa: F401
-    _align_peeloff_riser_gaps,
     _band_order_crossings,
     _build_gap_intervals,
     _clamp_inter_row_band_top,
     _clear_channel_x_in_band,
     _coincide_convergent_port_approaches,
     _coincide_divergent_fanout_descents,
+    _coincide_merge_feeder_descents,
     _coincident_trunk_slots,
     _collect_htrunks,
     _collect_vchannels,
@@ -90,19 +84,17 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _gap_channel_base,
     _group_channel_trunks,
     _h_segment_crosses_other_section,
-    _has_other_row_section_in_col_range,
     _HTrunk,
     _inter_row_gap_band,
     _join_fanout_upstream_tails,
     _normalize_bypass_trunks,
     _normalize_gap_channels,
-    _peeloff_riser,
     _plan_trunk_band,
-    _respace_risers_to_trunk,
+    _port_peeloff_tail,
+    _reorder_convergence_peeloff,
     _restack_channel,
     _restack_htrunk,
     _restack_trunk_band,
-    _set_riser_x_and_radii,
     _set_vchannel_x,
     _suboptimal_trunk_bands,
     _VChannel,
@@ -122,14 +114,13 @@ from nf_metro.layout.routing.postprocess import (  # noqa: F401
 )
 from nf_metro.layout.routing.tb_handlers import (  # noqa: F401
     _compute_diagonal_placement,
-    _find_upstream_for_merge,
     _perp_entry_drop_delta,
     _route_perp_entry,
-    _route_perp_entry_merged,
     _route_tb_diagonal,
     _route_tb_internal,
     _route_tb_lr_entry,
     _route_tb_lr_exit,
+    _route_tb_section,
 )
 from nf_metro.parser.model import (
     LineSpread,
@@ -195,13 +186,7 @@ def route_edges(
         # The first handler that returns a RoutedPath wins.
         result = _route_inter_section(edge, src, tgt, ctx)
         if result is None:
-            result = _route_tb_internal(edge, src, tgt, ctx)
-        if result is None:
-            result = _route_tb_lr_exit(edge, src, tgt, ctx)
-        if result is None:
-            result = _route_tb_lr_entry(edge, src, tgt, ctx)
-        if result is None:
-            result = _route_perp_entry(edge, src, tgt, ctx)
+            result = _route_tb_section(edge, src, tgt, ctx)
         if result is None:
             result = _route_entry_runway(edge, src, tgt, ctx)
         if result is None:
@@ -214,9 +199,14 @@ def route_edges(
     _spread_diagonal_bundles(routes, ctx)
     _normalize_gap_channels(routes, ctx)
     _normalize_bypass_trunks(routes, ctx)
-    _align_peeloff_riser_gaps(routes, ctx)
-    _coincide_convergent_port_approaches(routes)
+    _reorder_convergence_peeloff(routes, ctx)
+    # The coincidence passes run after the trunk/gap channels are finalised:
+    # each snaps same-line tracks onto a reference read from that final
+    # geometry (the port-side track, the source-side track, and the merge
+    # trunk's descent respectively), so a single line reads as one stroke.
+    _coincide_convergent_port_approaches(routes, ctx)
     _coincide_divergent_fanout_descents(routes)
+    _coincide_merge_feeder_descents(routes, ctx)
     _join_fanout_upstream_tails(routes, ctx)
     _clear_bypass_v_label_strikes(routes, ctx)
 

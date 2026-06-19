@@ -11,7 +11,7 @@ import drawsvg as draw
 
 from nf_metro.layout.routing import RoutedPath
 from nf_metro.layout.routing.common import point_on_polyline
-from nf_metro.layout.routing.corners import resolve_curve_radii
+from nf_metro.layout.routing.corners import curve_tangents, resolve_curve_radii
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render.constants import (
     ANIMATION_BALL_OPACITY,
@@ -388,7 +388,8 @@ def _points_to_svg_path(
 ) -> str:
     """Convert a list of waypoints to an SVG path 'd' attribute.
 
-    Uses resolve_curve_radii for consistent radius clamping with svg.py.
+    Shares ``resolve_curve_radii`` and ``curve_tangents`` with the static SVG
+    renderer so animation corners round identically to the drawn map.
     """
     if len(pts) < 2:
         return ""
@@ -399,33 +400,15 @@ def _points_to_svg_path(
     parts = [f"M {pts[0][0]:.2f} {pts[0][1]:.2f}"]
     resolved = resolve_curve_radii(pts, route_curve_radii, default_radius=curve_radius)
 
-    for i in range(1, len(pts) - 1):
-        prev = pts[i - 1]
-        curr = pts[i]
-        nxt = pts[i + 1]
-
-        dx1 = curr[0] - prev[0]
-        dy1 = curr[1] - prev[1]
-        len1 = math.hypot(dx1, dy1)
-
-        dx2 = nxt[0] - curr[0]
-        dy2 = nxt[1] - curr[1]
-        len2 = math.hypot(dx2, dy2)
-
-        r = resolved[i - 1]
-
-        if len1 > 0 and len2 > 0:
-            before_x = curr[0] - (dx1 / len1) * r
-            before_y = curr[1] - (dy1 / len1) * r
-            after_x = curr[0] + (dx2 / len2) * r
-            after_y = curr[1] + (dy2 / len2) * r
-
+    for tan in curve_tangents(pts, resolved):
+        if tan.curved:
             parts.append(
-                f"L {before_x:.2f} {before_y:.2f} "
-                f"Q {curr[0]:.2f} {curr[1]:.2f} {after_x:.2f} {after_y:.2f}"
+                f"L {tan.before[0]:.2f} {tan.before[1]:.2f} "
+                f"Q {tan.corner[0]:.2f} {tan.corner[1]:.2f} "
+                f"{tan.after[0]:.2f} {tan.after[1]:.2f}"
             )
         else:
-            parts.append(f"L {curr[0]:.2f} {curr[1]:.2f}")
+            parts.append(f"L {tan.corner[0]:.2f} {tan.corner[1]:.2f}")
 
     parts.append(f"L {pts[-1][0]:.2f} {pts[-1][1]:.2f}")
 

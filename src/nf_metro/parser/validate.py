@@ -9,6 +9,7 @@ separately in ``tests/layout_validator.py``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import networkx as nx
 
@@ -50,10 +51,20 @@ class ValidationIssue:
     """A single graph-semantic finding.
 
     ``severity`` is one of :data:`ERROR` or :data:`WARNING`.
+    ``line`` is the 1-based source line number where the problem originates,
+    or ``None`` when the position is not tracked.
     """
 
     severity: str
     message: str
+    line: int | None = None
+
+    def format(self, path: Path | str | None = None) -> str:
+        """Format as a compiler-style diagnostic: ``[path:]line: message``."""
+        prefix = f"{path}:" if path else ""
+        if self.line is not None:
+            return f"{prefix}line {self.line}: {self.message}"
+        return self.message
 
 
 def validate_graph(graph: MetroGraph) -> list[ValidationIssue]:
@@ -71,6 +82,7 @@ def validate_graph(graph: MetroGraph) -> list[ValidationIssue]:
                     ERROR,
                     f"Edge {edge.source} -> {edge.target} references "
                     f"undefined line '{edge.line_id}'",
+                    line=edge.source_line,
                 )
             )
 

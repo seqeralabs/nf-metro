@@ -1,0 +1,22 @@
+%%metro title: Right Entry Wrap No Fan
+%%metro style: dark
+%%metro line: a | A | #e63946
+%%metro grid: source | 0,0
+%%metro grid: target | 1,1
+
+graph LR
+    subgraph source [Source]
+        s1[Start]
+        s2[Process]
+        s1 -->|a| s2
+    end
+
+    subgraph target [Target]
+        %%metro direction: RL
+        %%metro entry: right | a
+        t1[Step One]
+        t2[Step Two]
+        t1 -->|a| t2
+    end
+
+    s2 -->|a| t1

@@ -1,0 +1,12 @@
+%%metro title: Terminus Join
+%%metro style: dark
+%%metro line: l1 | Line 1 | #e63946
+%%metro line: l2 | Line 2 | #2db572
+%%metro file: sink_out | OUT | Results
+
+graph LR
+    src_a[Process A]
+    src_b[Process B]
+    sink_out[ ]
+    src_a -->|l1| sink_out
+    src_b -->|l2| sink_out

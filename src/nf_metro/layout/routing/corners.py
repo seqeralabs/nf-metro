@@ -23,6 +23,7 @@ is NEVER variable beyond the line's position within the bundle.
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
 from nf_metro.layout.routing.common import Direction
@@ -106,6 +107,55 @@ def resolve_curve_radii(
         effective.append(min(desired_r, max_len1, max_len2))
 
     return effective
+
+
+class CornerTangent(NamedTuple):
+    """Rounded-corner tangent points for one interior vertex.
+
+    ``before``/``after`` are where the smoothing curve leaves the incoming
+    leg and rejoins the outgoing leg; ``corner`` is the vertex the curve
+    bends around.  ``curved`` is False for a degenerate vertex (a
+    zero-length neighbouring leg), where all three points collapse to the
+    vertex itself and no curve is drawn.
+    """
+
+    curved: bool
+    before: tuple[float, float]
+    corner: tuple[float, float]
+    after: tuple[float, float]
+
+
+def curve_tangents(
+    points: list[tuple[float, float]],
+    resolved: list[float],
+) -> list[CornerTangent]:
+    """Per-interior-vertex rounded-corner tangent points.
+
+    For each interior vertex ``i`` (``1..len(points)-2``) the smoothing
+    curve leaves the incoming leg at ``before`` and rejoins the outgoing leg
+    at ``after``, each a distance ``resolved[i-1]`` from the corner along the
+    respective unit leg vector.
+
+    This is the single source of tangent geometry shared by the static SVG
+    renderer and the animation renderer, so a corner is rounded identically
+    in both.  ``resolved`` is the clamped radius list from
+    :func:`resolve_curve_radii` (length ``len(points) - 2``).
+    """
+    tangents: list[CornerTangent] = []
+    for i in range(1, len(points) - 1):
+        prev, curr, nxt = points[i - 1], points[i], points[i + 1]
+        dx1, dy1 = curr[0] - prev[0], curr[1] - prev[1]
+        len1 = (dx1**2 + dy1**2) ** 0.5
+        dx2, dy2 = nxt[0] - curr[0], nxt[1] - curr[1]
+        len2 = (dx2**2 + dy2**2) ** 0.5
+        r = resolved[i - 1]
+        if len1 > 0 and len2 > 0:
+            before = (curr[0] - dx1 / len1 * r, curr[1] - dy1 / len1 * r)
+            after = (curr[0] + dx2 / len2 * r, curr[1] + dy2 / len2 * r)
+            tangents.append(CornerTangent(True, before, curr, after))
+        else:
+            tangents.append(CornerTangent(False, curr, curr, curr))
+    return tangents
 
 
 def reversed_offset(offset: float, max_offset: float) -> float:
@@ -238,6 +288,52 @@ def concentric_corner_radius(
     return reference_anchored_radius(-dx * ux, base_radius, min_radius=min_radius)
 
 
+def _corner_travel_units(
+    prev: tuple[float, float],
+    corner: tuple[float, float],
+    nxt: tuple[float, float],
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Axis-aligned unit travel vectors into and out of an axis-aligned corner.
+
+    Each leg snaps to its dominant axis, so a segment carrying sub-pixel
+    off-axis drift resolves to a clean cardinal unit.
+    """
+
+    def unit(a: tuple[float, float], b: tuple[float, float]) -> tuple[float, float]:
+        sx, sy = b[0] - a[0], b[1] - a[1]
+        if abs(sx) >= abs(sy):
+            return (math.copysign(1.0, sx) if sx else 0.0, 0.0)
+        return (0.0, math.copysign(1.0, sy) if sy else 0.0)
+
+    return unit(prev, corner), unit(corner, nxt)
+
+
+def concentric_corner_radius_at(
+    prev: tuple[float, float],
+    corner: tuple[float, float],
+    nxt: tuple[float, float],
+    dx: float,
+    base_radius: float = CURVE_RADIUS,
+    *,
+    min_radius: float | None = None,
+) -> float:
+    """Concentric radius for one bundle line, deriving the turn from the points.
+
+    Geometry-keyed entry point for a wholesale-translated 90° corner: it reads
+    the two travel vectors from the corner's own three waypoints (*prev* ->
+    *corner* -> *nxt*) and forwards them to :func:`concentric_corner_radius`, so
+    a caller supplies only the corner geometry and this line's signed
+    displacement *dx* from the bundle reference - never a hand-picked sign.  Use
+    this at every wholesale-translated bundle corner; reserve raw
+    :func:`reference_anchored_radius` for transition corners (one leg pinned,
+    e.g. a converging port jog) where non-concentric is intended.
+    """
+    turn_in, turn_out = _corner_travel_units(prev, corner, nxt)
+    return concentric_corner_radius(
+        turn_in, turn_out, dx, base_radius, min_radius=min_radius
+    )
+
+
 def reference_anchored_radius(
     signed_offset: float,
     base_radius: float = CURVE_RADIUS,
@@ -287,6 +383,24 @@ def reference_anchored_radius(
 # ---------------------------------------------------------------------------
 # Standard inter-section L-shape (horizontal -> vertical -> horizontal)
 # ---------------------------------------------------------------------------
+
+
+def l_shape_stagger(
+    i: int, n: int, vertical: Direction, offset_step: float = OFFSET_STEP
+) -> float:
+    """Signed lateral offset of line *i* in an *n*-line L-shape vertical channel.
+
+    The ``delta`` half of :func:`l_shape_radii` -- where line *i* sits relative
+    to the channel centre -- with no radius computation.  A centreline builder
+    derives every corner radius from the geometry it lays out, so a handler that
+    only needs to place the channel (not size a hand-rolled arc) takes this.
+
+    Going DOWN, ``i = 0`` is rightmost (positive delta); going UP it is leftmost
+    (negative delta), matching :func:`l_shape_radii`'s inside/outside convention.
+    """
+    if vertical is Direction.D:
+        return ((n - 1) / 2 - i) * offset_step
+    return (i - (n - 1) / 2) * offset_step
 
 
 def l_shape_radii(
@@ -343,17 +457,14 @@ def l_shape_radii(
     """
     off = (n - 1 - i) * offset_step
     max_off = (n - 1) * offset_step
+    delta = l_shape_stagger(i, n, vertical, offset_step)
 
     if vertical is Direction.D:
-        # i=0 -> rightmost (positive delta)
-        delta = ((n - 1) / 2 - i) * offset_step
         # Corner 1 (CW):  rightmost = outside -> largest radius
         r_first = corner_radius(off, max_off, outside=True, base_radius=base_radius)
         # Corner 2 (CCW): rightmost = inside  -> smallest radius
         r_second = corner_radius(off, max_off, outside=False, base_radius=base_radius)
     else:
-        # i=0 -> leftmost (negative delta)
-        delta = (i - (n - 1) / 2) * offset_step
         # Corner 1 (CCW): leftmost = inside  -> smallest radius
         r_first = corner_radius(off, max_off, outside=False, base_radius=base_radius)
         # Corner 2 (CW):  leftmost = outside -> largest radius
@@ -367,23 +478,22 @@ def l_shape_radii(
 # ---------------------------------------------------------------------------
 
 
-def bypass_radii(
+def bypass_stagger(
     g1_i: int,
     g1_n: int,
     g2_i: int,
     g2_n: int,
     horizontal: Direction,
     offset_step: float = OFFSET_STEP,
-    base_radius: float = CURVE_RADIUS,
     gap1_vertical: Direction = Direction.D,
     gap2_vertical: Direction = Direction.U,
-) -> tuple[float, float, float, float, float, float]:
-    """Compute deltas and radii for a U-shaped bypass route.
+) -> tuple[float, float]:
+    """Per-line lateral offsets at a U-shaped bypass's two vertical channels.
 
-    A bypass is two back-to-back L-shapes with corners 1-2 at gap1 and
-    corners 3-4 at gap2.  This function wraps two ``l_shape_radii``
-    calls so that all four corners satisfy the same ``delta + r = const``
-    concentricity invariant used everywhere else.
+    A bypass is two back-to-back L-shapes (corners 1-2 at gap1, corners 3-4 at
+    gap2).  The centreline builder derives every corner radius from the geometry,
+    so a handler needs only where each line sits in the two channels: this
+    returns ``(delta1, delta2)``, the :func:`l_shape_stagger` of each gap.
 
     Parameters
     ----------
@@ -395,168 +505,17 @@ def bypass_radii(
         ``Direction.R`` when the bypass travels rightward (dx > 0),
         ``Direction.L`` when leftward.  Left-going bypasses mirror the
         inside/outside assignment.
-    offset_step, base_radius : float
-        Passed through to ``l_shape_radii``.
     gap1_vertical : Direction
-        Vertical direction at gap1.  ``Direction.D`` when the trunk is
-        below the source (standard case), ``Direction.U`` when the
-        source is below the trunk (e.g. bottom of a tall section
-        bypassing a shorter neighbour).
+        Vertical direction at gap1.  ``Direction.D`` when the trunk is below the
+        source (standard case), ``Direction.U`` when the source is below it.
     gap2_vertical : Direction
-        Vertical direction at gap2.  Almost always ``Direction.U``
-        (trunk below target).
-
-    Returns
-    -------
-    delta1 : float
-        X offset from gap1 channel center for this line.
-    delta2 : float
-        X offset from gap2 channel center for this line.
-    r1, r2, r3, r4 : float
-        Corner radii at each of the four corners.
+        Vertical direction at gap2.  Almost always ``Direction.U``.
     """
     # For left-going bypasses, reverse indices so the outside/inside
     # assignment matches the mirrored corner geometry.
     going_right = horizontal is Direction.R
     g1_idx = g1_i if going_right else g1_n - 1 - g1_i
     g2_idx = g2_i if going_right else g2_n - 1 - g2_i
-
-    # Gap1 L-shape (corners 1 and 2)
-    delta1, r1, r2 = l_shape_radii(
-        g1_idx,
-        g1_n,
-        vertical=gap1_vertical,
-        offset_step=offset_step,
-        base_radius=base_radius,
-    )
-    # Gap2 L-shape (corners 3 and 4)
-    delta2, r3, r4 = l_shape_radii(
-        g2_idx,
-        g2_n,
-        vertical=gap2_vertical,
-        offset_step=offset_step,
-        base_radius=base_radius,
-    )
-    return delta1, delta2, r1, r2, r3, r4
-
-
-# ---------------------------------------------------------------------------
-# TB section LEFT/RIGHT exit L-shape (vertical drop -> horizontal)
-# ---------------------------------------------------------------------------
-
-
-def tb_exit_corner(
-    src_off: float,
-    max_src_off: float,
-    exit_right: bool,
-    base_radius: float = CURVE_RADIUS,
-) -> tuple[float, float, float]:
-    """Compute offsets and radius for a TB section exit L-shape.
-
-    Routes: vertical drop from last station -> corner -> horizontal to
-    the LEFT or RIGHT exit port.
-
-    Parameters
-    ----------
-    src_off : float
-        This line's X offset within the TB section.
-    max_src_off : float
-        Maximum X offset across all lines at this station.
-    exit_right : bool
-        ``True`` for a RIGHT exit port, ``False`` for LEFT.
-    base_radius : float
-        Minimum curve radius (innermost line).
-
-    Returns
-    -------
-    vert_x_off : float
-        X offset for the vertical segment.
-    horiz_y_off : float
-        Y offset for the horizontal segment.
-    corner_radius : float
-        Concentric arc radius at the corner.
-
-    Geometry
-    --------
-    The horizontal Y offset always uses the reversed offset so that the
-    outermost vertical line (furthest from center) maps to the largest
-    radius.
-
-    RIGHT exit (DOWN -> RIGHT, CCW turn):
-        Vertical X uses the non-reversed offset.  The line with the
-        largest non-reversed offset is on the outside of the CCW turn.
-
-    LEFT exit (DOWN -> LEFT, CW turn):
-        Vertical X uses the reversed offset.  The line with the largest
-        reversed offset is on the outside of the CW turn.
-    """
-    rev = reversed_offset(src_off, max_src_off)
-    horiz_y_off = rev
-    # The line at src_off is on the INSIDE of both LEFT and RIGHT
-    # exit turns, so the radius uses the reversed offset.
-    r = corner_radius(src_off, max_src_off, outside=False, base_radius=base_radius)
-
-    if exit_right:
-        vert_x_off = src_off
-    else:
-        vert_x_off = rev
-
-    return vert_x_off, horiz_y_off, r
-
-
-# ---------------------------------------------------------------------------
-# TB section LEFT/RIGHT entry L-shape (horizontal -> vertical drop)
-# ---------------------------------------------------------------------------
-
-
-def tb_entry_corner(
-    tgt_off: float,
-    max_tgt_off: float,
-    entry_right: bool,
-    base_radius: float = CURVE_RADIUS,
-) -> tuple[float, float]:
-    """Compute offsets and radius for a TB section entry L-shape.
-
-    Routes: horizontal from LEFT or RIGHT entry port -> corner ->
-    vertical drop to the first internal station.
-
-    Parameters
-    ----------
-    tgt_off : float
-        This line's X offset at the target station in the TB section.
-    max_tgt_off : float
-        Maximum X offset across all lines at the target station.
-    entry_right : bool
-        ``True`` for a RIGHT entry port, ``False`` for LEFT.
-    base_radius : float
-        Minimum curve radius (innermost line).
-
-    Returns
-    -------
-    vert_x_off : float
-        X offset for the vertical segment.
-    corner_radius : float
-        Concentric arc radius at the corner.
-
-    Geometry
-    --------
-    RIGHT entry (LEFT -> DOWN, CW turn):
-        Vertical X uses the non-reversed offset.
-
-    LEFT entry (RIGHT -> DOWN, CCW turn):
-        Vertical X uses the reversed offset.
-
-    The corner radius always uses the reversed target offset so that
-    the outermost vertical line gets the largest radius.
-    """
-    rev = reversed_offset(tgt_off, max_tgt_off)
-    # The line at tgt_off is on the INSIDE of both LEFT and RIGHT
-    # entry turns, so the radius uses the reversed offset.
-    r = corner_radius(tgt_off, max_tgt_off, outside=False, base_radius=base_radius)
-
-    if entry_right:
-        vert_x_off = tgt_off
-    else:
-        vert_x_off = rev
-
-    return vert_x_off, r
+    delta1 = l_shape_stagger(g1_idx, g1_n, gap1_vertical, offset_step)
+    delta2 = l_shape_stagger(g2_idx, g2_n, gap2_vertical, offset_step)
+    return delta1, delta2

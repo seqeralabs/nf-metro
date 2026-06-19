@@ -1,0 +1,21 @@
+%%metro title: Backward Feed RL
+%%metro style: dark
+%%metro line: main | Main | #0570b0
+%%metro grid: rl_a | 1,0
+%%metro grid: rl_b | 2,0
+
+graph LR
+    subgraph rl_a [Source]
+        %%metro direction: RL
+        a1[Input]
+        a2[Process]
+        a1 -->|main| a2
+    end
+    subgraph rl_b [Target]
+        %%metro direction: RL
+        b1[Collect]
+        b2[Report]
+        b1 -->|main| b2
+    end
+
+    a2 -->|main| b1

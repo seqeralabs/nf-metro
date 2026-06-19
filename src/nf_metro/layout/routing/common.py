@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
 
@@ -18,6 +19,7 @@ from nf_metro.layout.constants import (
     INTER_ROW_HEADER_CLEARANCE,
     OFFSET_STEP,
     SECTION_HEADER_PROTRUSION,
+    SECTION_ROUTE_CLEARANCE,
 )
 from nf_metro.parser.model import Edge, MetroGraph, Section, Station
 
@@ -57,7 +59,6 @@ def _sections_in_col(
     graph: MetroGraph,
     col: int | None,
     row: int | None = None,
-    y_band: tuple[float, float] | None = None,
 ) -> list[Section]:
     """Sections in a specific grid column with non-zero width.
 
@@ -66,19 +67,12 @@ def _sections_in_col(
     in one row must measure the gap against that row's sections only,
     otherwise a section stacked in another row of the same column (e.g. a
     wide output section below) corrupts the gap edges.
-
-    When *y_band* ``(lo, hi)`` is given, restrict to sections whose bbox
-    overlaps that vertical span - used when a descent's vertical run must
-    clear only the sections it would actually cross, not the whole column.
     """
     secs = [s for s in graph.sections.values() if s.grid_col == col and s.bbox_w > 0]
     if row is not None:
         secs = [
             s for s in secs if s.grid_row <= row <= s.grid_row + s.grid_row_span - 1
         ]
-    if y_band is not None:
-        lo, hi = y_band
-        secs = [s for s in secs if not (hi < s.bbox_y or lo > s.bbox_y + s.bbox_h)]
     return secs
 
 
@@ -130,6 +124,61 @@ def row_top_edge(
     if col is not None:
         secs = [s for s in secs if s.grid_col == col]
     return min((s.bbox_y for s in secs), default=default) if secs else default
+
+
+def max_grid_row_with_content(graph: MetroGraph) -> int | None:
+    """Bottommost grid row occupied by a section with rendered width.
+
+    The single definition of "the bottom row" shared by the routing
+    decision to bypass in the gap *above* a bottommost-row target
+    (:func:`bypass_bottom_y`) and the placement reservation that keeps that
+    gap wide enough (``_merge_trunk_row_minimums``); ``None`` when no section
+    has width yet.
+    """
+    rows = [s.grid_row for s in graph.sections.values() if s.bbox_w > 0]
+    return max(rows) if rows else None
+
+
+def header_corridor_y(
+    graph: MetroGraph,
+    row: int,
+    *,
+    below: bool,
+    base_radius: float,
+    default: float = 0.0,
+) -> float:
+    """Y of an inter-row routing channel that clears a row's header band.
+
+    Above the row (``below=False``) the channel sits a header band above the
+    top edge; below it sits a route's clearance under the bottom edge.  The
+    full :data:`INTER_ROW_HEADER_CLEARANCE` applies only when a section
+    occupies the gap above the row (contributing a header badge); the topmost
+    row has only the canvas-top title band, so the smaller
+    :data:`SECTION_ROUTE_CLEARANCE` keeps the channel from overshooting it.
+    """
+    if below:
+        return (
+            row_bottom_edge(graph, row, default=default)
+            + SECTION_ROUTE_CLEARANCE
+            + base_radius
+        )
+    clearance = (
+        INTER_ROW_HEADER_CLEARANCE
+        if section_exists_above_row(graph, row)
+        else SECTION_ROUTE_CLEARANCE
+    )
+    return row_top_edge(graph, row, default=default) - clearance - base_radius
+
+
+def section_exists_above_row(graph: MetroGraph, row: int) -> bool:
+    """True if any section lies entirely above grid *row* (its bottom row is
+    a higher row than *row*).
+
+    Distinguishes a row with a genuine inter-row gap above it (a section
+    contributes a header badge there) from the topmost row, which has only
+    the canvas-top padding above.
+    """
+    return any(s.grid_row + s.grid_row_span - 1 < row for s in graph.sections.values())
 
 
 def column_gap_midpoint(
@@ -229,6 +278,102 @@ class RoutedPath:
     Set by wrap / around-section / TOP-entry handlers whose vertical
     channels follow a special concentric loop (all corners share one
     radius) that the standard L-shape re-stacking would break."""
+
+
+def initial_fanout_descent_span(
+    rp: RoutedPath,
+) -> tuple[float, float, float, bool] | None:
+    """``(x, y_lo, y_hi, down)`` of the descent leaving a route's source.
+
+    A fan-out branch opens ``(sx, sy) -> (vx, sy) -> (vx, dy) -> ...``: a
+    short horizontal lead off the shared source, then a vertical descent in
+    its own channel.  Returns ``None`` when the route does not open
+    horizontal-then-vertical.
+    """
+    pts = rp.points
+    if len(pts) < 3:
+        return None
+    (x0, y0), (x1, y1), (x2, y2) = pts[0], pts[1], pts[2]
+    if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
+        return None
+    if abs(x2 - x1) > COORD_TOLERANCE or abs(y2 - y1) <= COORD_TOLERANCE:
+        return None
+    return x1, min(y1, y2), max(y1, y2), y2 > y1
+
+
+@dataclass(frozen=True)
+class HTrunkSeg:
+    """One interior horizontal leg of a route, flanked by two vertical legs.
+
+    The trunk runs at ``y`` from ``xa`` to ``xb`` (traversal order, not
+    sorted); its two flanking risers stand at those Xs and climb/drop to
+    ``before_y`` (at ``xa``) and ``after_y`` (at ``xb``) -- the bottom or top
+    of a U-shaped bypass.
+    """
+
+    y: float
+    xa: float
+    xb: float
+    before_y: float
+    after_y: float
+
+    @property
+    def x_lo(self) -> float:
+        return min(self.xa, self.xb)
+
+    @property
+    def x_hi(self) -> float:
+        return max(self.xa, self.xb)
+
+
+def iter_horizontal_trunks(rp: RoutedPath) -> Iterator[tuple[int, HTrunkSeg]]:
+    """Yield ``(waypoint_index, segment)`` for each interior horizontal trunk.
+
+    A trunk is an interior horizontal leg whose two flanking neighbours are
+    both vertical, i.e. the bottom (or top) leg of a U-shaped bypass.  The
+    index is the trunk leg's first waypoint, ``points[index] -> [index+1]``.
+    """
+    pts = rp.points
+    for k in range(1, len(pts) - 2):
+        x0, y0 = pts[k]
+        x1, y1 = pts[k + 1]
+        if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
+            continue
+        if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:
+            continue
+        if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:
+            continue
+        yield k, HTrunkSeg(y0, x0, x1, pts[k - 1][1], pts[k + 2][1])
+
+
+def _vert_horiz_cross(
+    vx: float, vy0: float, vy1: float, hy: float, hx0: float, hx1: float
+) -> bool:
+    """True when a vertical segment crosses a horizontal one in their interior.
+
+    Shared-endpoint touches (T-junctions, corners) are excluded: the crossing
+    point must lie strictly inside both segments.
+    """
+    lo, hi = min(vy0, vy1), max(vy0, vy1)
+    xlo, xhi = min(hx0, hx1), max(hx0, hx1)
+    return (
+        xlo + COORD_TOLERANCE < vx < xhi - COORD_TOLERANCE
+        and lo + COORD_TOLERANCE < hy < hi - COORD_TOLERANCE
+    )
+
+
+def trunk_segments_cross(a: HTrunkSeg, b: HTrunkSeg) -> tuple[float, float] | None:
+    """Return where trunks *a* and *b* cross, or ``None`` if they don't.
+
+    A crossing is a riser of one trunk piercing the horizontal run of the
+    other (the two parallel runs themselves never cross).  Returns the first
+    crossing point found.
+    """
+    for seg, other in ((a, b), (b, a)):
+        for vx, vy in ((seg.xa, seg.before_y), (seg.xb, seg.after_y)):
+            if _vert_horiz_cross(vx, seg.y, vy, other.y, other.x_lo, other.x_hi):
+                return vx, other.y
+    return None
 
 
 def compute_bundle_info(
@@ -525,6 +670,17 @@ def point_on_polyline(
     return None
 
 
+def section_header_top(section: Section) -> float:
+    """Y of a section's header badge top, which protrudes above the bbox."""
+    return section.bbox_y - SECTION_HEADER_PROTRUSION
+
+
+def section_header_safe_cap(section: Section) -> float:
+    """Lowest Y a routing channel may occupy that clears the section's header
+    badge by ``HEADER_CLEARANCE``."""
+    return section_header_top(section) - HEADER_CLEARANCE
+
+
 def bypass_bottom_y(
     graph: MetroGraph,
     src_col: int,
@@ -557,8 +713,8 @@ def bypass_bottom_y(
     lo, hi = min(src_col, tgt_col), max(src_col, tgt_col)
 
     if cross_row:
-        rows = [s.grid_row for s in graph.sections.values() if s.bbox_w > 0]
-        if tgt_row is not None and rows and tgt_row == max(rows) and tgt_row > 0:
+        max_content_row = max_grid_row_with_content(graph)
+        if tgt_row is not None and tgt_row == max_content_row and tgt_row > 0:
             # Target is in the bottommost row: route in the gap ABOVE it
             # rather than below the whole canvas (which would overshoot
             # and loop back up to the entry port).
@@ -612,9 +768,9 @@ def bypass_bottom_y(
     if src_row is not None:
         for s in graph.sections.values():
             if s.bbox_w > 0 and lo <= s.grid_col <= hi and s.grid_row > src_row:
-                header_top = s.bbox_y - SECTION_HEADER_PROTRUSION
+                header_top = section_header_top(s)
                 row_bottom = candidate - clearance
-                safe_cap = header_top - HEADER_CLEARANCE
+                safe_cap = section_header_safe_cap(s)
                 if candidate > safe_cap:
                     if safe_cap >= row_bottom:
                         candidate = safe_cap
@@ -622,6 +778,50 @@ def bypass_bottom_y(
                         candidate = (row_bottom + header_top) / 2
 
     return candidate
+
+
+def merge_trunk_force_cross_row(
+    graph: MetroGraph,
+    src_col: int,
+    tgt_col: int,
+    src_row: int | None,
+    tgt_row: int | None,
+) -> bool:
+    """Whether a same-row merge trunk must route its bypass below ALL sections.
+
+    A same-row trunk normally bypasses in the inter-row gap just below its
+    row.  That gap also holds the next row's section title badges, so the
+    shallow channel is forced below everything only when a lower-row section
+    actually pokes up into it -- i.e. ``bypass_bottom_y``'s header-clearance
+    clamp cannot keep the shallow channel clear of the section header.  When
+    the gap has room, the shallow channel clears the header and diving below
+    the whole canvas would loop needlessly deep.
+
+    Both the routing context (branch drop level) and the trunk route consult
+    this, so branches land at the Y the trunk actually runs.
+    """
+    if src_row is None or tgt_row != src_row:
+        return False
+    shallow = bypass_bottom_y(
+        graph,
+        src_col,
+        tgt_col,
+        BYPASS_CLEARANCE,
+        src_row=src_row,
+        cross_row=False,
+        tgt_row=tgt_row,
+    )
+    # A lower section grazes the shallow channel only where bypass_bottom_y's
+    # own clamp could not pull the channel down to section_header_safe_cap; the
+    # tolerance keeps a sub-pixel near-miss from forcing a needless deep dive.
+    lo, hi = min(src_col, tgt_col), max(src_col, tgt_col)
+    return any(
+        s.bbox_w > 0
+        and s.grid_row > src_row
+        and lo <= s.grid_col <= hi
+        and shallow > section_header_safe_cap(s) + COORD_TOLERANCE
+        for s in graph.sections.values()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -640,9 +840,10 @@ def resolve_section(
     For junctions (``section_id is None``), traces edges to find a
     connected port's section.
 
-    When *prefer_upstream* is True (default), incoming edges are checked
-    first so the junction resolves to the upstream section.  When False,
-    both directions are scanned in a single pass with no preference.
+    When *prefer_upstream* is True (default), the junction is resolved
+    through its incoming edges, yielding the upstream section.  When False,
+    both directions are scanned in a single ``graph.edges`` pass with no
+    preference.
 
     A ``None`` station (e.g. an unresolved lookup) yields ``None``.
     """
@@ -654,12 +855,6 @@ def resolve_section(
     if prefer_upstream:
         for e in graph.edges_to(station.id):
             other = graph.stations.get(e.source)
-            if other and other.section_id:
-                sec = graph.sections.get(other.section_id)
-                if sec:
-                    return sec
-        for e in graph.edges_from(station.id):
-            other = graph.stations.get(e.target)
             if other and other.section_id:
                 sec = graph.sections.get(other.section_id)
                 if sec:
@@ -683,6 +878,21 @@ def resolve_section(
     return None
 
 
+def inter_row_wrap_band(n_lines: int) -> float:
+    """Bbox-to-bbox row gap a wrap bundle of *n_lines* needs.
+
+    A horizontal inter-row run keeps :data:`INTER_ROW_EDGE_CLEARANCE` below
+    the upper box edge and :data:`INTER_ROW_HEADER_CLEARANCE` above the next
+    row's header badge, with the bundle's ``(n_lines - 1) * OFFSET_STEP``
+    stagger between.  Section placement reserves this band
+    (:func:`~nf_metro.layout.section_placement._wrap_bundle_row_minimums`)
+    and the corridor checks against it (``_corridor_is_viable``); the single
+    definition keeps the two in lockstep.
+    """
+    span = max(n_lines - 1, 0) * OFFSET_STEP
+    return INTER_ROW_EDGE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE
+
+
 def inter_row_channel_y(
     graph: MetroGraph,
     src: Station,
@@ -691,12 +901,18 @@ def inter_row_channel_y(
     ty: float,
     dy: float,
     max_r: float,
+    offset: float = 0.0,
 ) -> float:
     """Compute Y for a horizontal channel in an inter-row gap.
 
     Vertical equivalent of ``inter_column_channel_x``: places the
     channel in the inter-row gap, clear of section headers (numbered
     circle + label rendered above/below bbox_y).
+
+    ``offset`` shifts the run by a caller's per-line bundle stagger.  In
+    the adjacent-row case it is clamped inside the clearance band (see
+    :func:`_center_inter_row_channel`) so an over-sized stagger can't lift
+    the run past the box edge.
     """
     src_sec = resolve_section(graph, src)
     tgt_sec = resolve_section(graph, tgt)
@@ -716,7 +932,7 @@ def inter_row_channel_y(
             else:
                 upper_bottom = row_bottom_edge(graph, tgt_row, default=ty)
                 lower_top = row_top_edge(graph, src_row, default=sy)
-            return _center_inter_row_channel(upper_bottom, lower_top)
+            return _center_inter_row_channel(upper_bottom, lower_top, offset)
 
         # Multi-row crossing: an intervening row sits between source and
         # target.  Keep the legacy midpoint so ``_route_around_section_below``
@@ -725,20 +941,22 @@ def inter_row_channel_y(
         if dy > 0:
             bottom = row_bottom_edge(graph, src_row, default=sy)
             top = row_top_edge(graph, tgt_row, default=ty)
-            return (bottom + (top - HEADER_CLEARANCE)) / 2
+            return (bottom + (top - HEADER_CLEARANCE)) / 2 + offset
         else:
             top = row_top_edge(graph, src_row, default=sy)
             bottom = row_bottom_edge(graph, tgt_row, default=ty)
-            return (top + (bottom + HEADER_CLEARANCE)) / 2
+            return (top + (bottom + HEADER_CLEARANCE)) / 2 + offset
 
     # Fallback: place near target, clearing the header zone
     if dy > 0:
-        return ty - HEADER_CLEARANCE - max_r
+        return ty - HEADER_CLEARANCE - max_r + offset
     else:
-        return ty + HEADER_CLEARANCE + max_r
+        return ty + HEADER_CLEARANCE + max_r + offset
 
 
-def _center_inter_row_channel(upper_bottom: float, lower_top: float) -> float:
+def _center_inter_row_channel(
+    upper_bottom: float, lower_top: float, offset: float = 0.0
+) -> float:
     """Y for a horizontal channel in the gap between two stacked rows.
 
     The channel is centred in the band that keeps
@@ -748,14 +966,21 @@ def _center_inter_row_channel(upper_bottom: float, lower_top: float) -> float:
     than just the bbox edge, so the run doesn't graze the next-row label.
     When the gap is too narrow to satisfy both margins the channel biases
     to ``hi`` so it still clears the badge.
+
+    A non-zero ``offset`` (a per-line bundle stagger) shifts the run off
+    centre.  When the band has room it is clamped to stay inside, so a
+    stagger sized from a larger bundle than the gap was reserved for can't
+    push the run past the box edge or header badge; in the degenerate
+    too-narrow band the stagger is applied unclamped so co-travelling lines
+    stay distinct rather than collapsing onto one Y.
     """
     lo = upper_bottom + INTER_ROW_EDGE_CLEARANCE
     hi = lower_top - INTER_ROW_HEADER_CLEARANCE
     if lo <= hi:
-        return (lo + hi) / 2
+        return min(max((lo + hi) / 2 + offset, lo), hi)
     # Gap too narrow for both margins (typically a heterogeneous-row case
     # where the global row edges over-state the obstruction at this x).
     # Bias to ``hi`` so the run still clears the next-row header badge --
     # the visually intrusive side -- and the source side keeps whatever
     # the gap allows, rather than the geometric midpoint that grazes both.
-    return hi
+    return hi + offset

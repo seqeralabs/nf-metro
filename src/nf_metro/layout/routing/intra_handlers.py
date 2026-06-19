@@ -1,4 +1,12 @@
-"""Intra-section routing: entry runway and in-section diagonal handlers."""
+"""Intra-section routing: entry runway, shape dispatch, and in-section diagonals.
+
+``_route_intra_section`` is an ordered dispatch over the distinct shapes an
+edge inside (or leaving) a section can take -- a fold gutter, a perpendicular
+exit, two straight cases -- with the horizontal-diagonal-horizontal run as the
+fall-through.  ``_route_entry_runway`` is a sibling shape kept as its own
+first-match handler in ``core.py`` because it claims an edge before the
+section's internal handlers run.
+"""
 
 from __future__ import annotations
 
@@ -17,11 +25,21 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.labels import (
     label_text_width,
 )
+from nf_metro.layout.routing.bundle import (
+    build_tapered_bundle,
+)
+from nf_metro.layout.routing.centrelines import (
+    gather_member_edges,
+)
 from nf_metro.layout.routing.common import (
     RoutedPath,
 )
 from nf_metro.layout.routing.context import (
+    _get_offset,
     _RoutingCtx,
+)
+from nf_metro.layout.routing.perp import (
+    _perp_riser_lateral,
 )
 from nf_metro.layout.routing.tb_handlers import (
     _compute_diagonal_placement,
@@ -115,42 +133,163 @@ def _route_entry_runway(
     )
 
 
+def _route_fold_edge(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> RoutedPath | None:
+    """Cross-row fold edge: out to the fold gutter, down the row gap, back in.
+
+    A backward, cross-row edge between two sections (the target sits on a lower
+    row to the left) routes out past the right edge of the fold column, drops in
+    the gutter, and runs back in -- rather than cutting diagonally across the
+    intervening rows.  Intra-section RL edges are excluded (they share a section
+    and run within it).
+    """
+    same_section = bool(src.section_id and src.section_id == tgt.section_id)
+    dy = tgt.y - src.y
+    if not (tgt.x - src.x <= 0 and abs(dy) > CROSS_ROW_THRESHOLD and not same_section):
+        return None
+    fold_right = ctx.fold_x + FOLD_MARGIN
+    return RoutedPath(
+        edge=edge,
+        line_id=edge.line_id,
+        points=[
+            (src.x, src.y),
+            (fold_right, src.y),
+            (fold_right, tgt.y),
+            (tgt.x, tgt.y),
+        ],
+    )
+
+
+def _route_perp_exit(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> RoutedPath | None:
+    """Internal station -> perpendicular (TOP/BOTTOM) exit port on an LR/RL section.
+
+    The line runs along the trunk to the exit X, then turns once and leaves
+    vertically.  The corner sits past the trailing station so the line bends
+    after the marker rather than through it.  A single line is a plain 3-point
+    L; co-travelling lines fan the bend through the bundle builder.
+    """
+    tgt_port = ctx.graph.ports.get(tgt.id)
+    src_section = ctx.graph.sections.get(src.section_id) if src.section_id else None
+    if not (
+        not src.is_port
+        and tgt_port is not None
+        and not tgt_port.is_entry
+        and tgt_port.side in (PortSide.TOP, PortSide.BOTTOM)
+        and src_section is not None
+        and src_section.direction in ("LR", "RL")
+    ):
+        return None
+    sibling_count = sum(
+        1 for e in ctx.graph.edges_from(edge.source) if e.target == edge.target
+    )
+    if sibling_count <= 1:
+        return RoutedPath(
+            edge=edge,
+            line_id=edge.line_id,
+            points=[(src.x, src.y), (tgt.x, src.y), (tgt.x, tgt.y)],
+        )
+    return _route_perp_exit_bundle(edge, src, tgt, tgt_port.side, ctx)
+
+
+def _route_perp_exit_bundle(
+    edge: Edge, src: Station, tgt: Station, side: PortSide, ctx: _RoutingCtx
+) -> RoutedPath | None:
+    """Fan a co-travelling perpendicular-exit bundle along one turning centreline.
+
+    The centreline runs the trunk to the exit X, turns once, and leaves
+    vertically::
+
+        (sx, sy) -> (tx, sy) -> (tx, ty)
+
+    Each line is a perpendicular offset of it: the trunk run carries the line's
+    source-side render Y and the vertical leg its exit-trunk X (via
+    :func:`~nf_metro.layout.routing.perp._perp_riser_lateral`, the shared TOP/BOTTOM
+    convention).  :func:`build_tapered_bundle` anchors the bend on the bundle's
+    innermost-of-turn line, so the per-line gap stays constant through the corner
+    and no inside-of-turn arc pinches below the floor radius.
+    """
+    sx, sy = src.x, src.y
+    tx, ty = tgt.x, tgt.y
+    is_top = side == PortSide.TOP
+    _member_edges, line_ids, _edge_by_line = gather_member_edges(ctx.graph, edge)
+
+    # The trunk run turns +/-x to the exit X; on an RL section the builder's
+    # right-hand normal flips the run's per-line render Y, so the source offset
+    # carries that leg's travel sign.
+    hsign = 1.0 if tx >= sx else -1.0
+
+    def source_offset(line_id: str) -> float:
+        return _get_offset(ctx, edge.source, line_id) * hsign
+
+    def exit_offset(line_id: str) -> float:
+        # The vertical leave seats each line on the exit trunk's per-line X; the
+        # right-hand normal reverses a BOTTOM (descending) leg, so the lateral is
+        # negated there to cancel it back.
+        d = _perp_riser_lateral(ctx, edge.target, line_id, side, src.section_id)
+        return d if is_top else -d
+
+    routes = build_tapered_bundle(
+        [(edge, edge.line_id, source_offset(edge.line_id), exit_offset(edge.line_id))],
+        [(sx, sy), (tx, sy), (tx, ty)],
+        transition_leg=1,
+        base_radius=ctx.curve_radius,
+        bundle_offsets=[(source_offset(lid), exit_offset(lid)) for lid in line_ids],
+        is_inter_section=False,
+        normalize_exempt=False,
+    )
+    return next((r for r in routes if r.line_id == edge.line_id), None)
+
+
+def _route_same_track_straight(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> RoutedPath | None:
+    """Endpoints on one track (shared Y): a straight segment."""
+    if abs(src.y - tgt.y) >= COORD_TOLERANCE_FINE:
+        return None
+    return RoutedPath(
+        edge=edge, line_id=edge.line_id, points=[(src.x, src.y), (tgt.x, tgt.y)]
+    )
+
+
+def _route_near_zero_gap_straight(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> RoutedPath | None:
+    """Endpoints all but stacked (near-zero X gap): a straight segment."""
+    if abs(tgt.x - src.x) >= COORD_TOLERANCE:
+        return None
+    return RoutedPath(
+        edge=edge, line_id=edge.line_id, points=[(src.x, src.y), (tgt.x, tgt.y)]
+    )
+
+
+# Intra-section shape dispatch.  The first shape that claims the edge owns the
+# route; order is significant (earlier shapes shadow later ones).  The
+# horizontal-diagonal-horizontal run in ``_route_diagonal`` is the fall-through
+# when no shape claims the edge.
+_INTRA_SECTION_SHAPES = (
+    _route_fold_edge,
+    _route_perp_exit,
+    _route_same_track_straight,
+    _route_near_zero_gap_straight,
+)
+
+
 def _route_intra_section(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> RoutedPath | None:
-    """Route intra-section edges: diagonals, fold routing, straight lines."""
-    sx, sy = src.x, src.y
-    tx, ty = tgt.x, tgt.y
-    dx = tx - sx
-    dy = ty - sy
+    """Route an intra-section edge via the first shape that claims it.
 
-    # Cross-row fold edge (skip for intra-section RL edges)
-    same_section = src.section_id and src.section_id == tgt.section_id
-    if dx <= 0 and abs(dy) > CROSS_ROW_THRESHOLD and not same_section:
-        fold_right = ctx.fold_x + FOLD_MARGIN
-        return RoutedPath(
-            edge=edge,
-            line_id=edge.line_id,
-            points=[(sx, sy), (fold_right, sy), (fold_right, ty), (tx, ty)],
-        )
-
-    # Same track: straight line
-    if abs(sy - ty) < COORD_TOLERANCE_FINE:
-        return RoutedPath(
-            edge=edge,
-            line_id=edge.line_id,
-            points=[(sx, sy), (tx, ty)],
-        )
-
-    # Near-zero X gap: straight line
-    if abs(dx) < COORD_TOLERANCE:
-        return RoutedPath(
-            edge=edge,
-            line_id=edge.line_id,
-            points=[(sx, sy), (tx, ty)],
-        )
-
-    # Different tracks: horizontal -> diagonal -> horizontal
+    Each shape in :data:`_INTRA_SECTION_SHAPES` returns a :class:`RoutedPath`
+    when it owns the edge or ``None`` to pass; :func:`_route_diagonal` is the
+    fall-through.
+    """
+    for shape in _INTRA_SECTION_SHAPES:
+        result = shape(edge, src, tgt, ctx)
+        if result is not None:
+            return result
     return _route_diagonal(edge, src, tgt, ctx)
 
 
