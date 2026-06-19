@@ -12,6 +12,9 @@ Covers:
   fan-out tail gaps.
 * Targeted: ``variant_calling_tuned`` ``__junction_6`` (the reported
   defect) joins continuously for both ``main`` and ``qc``.
+* Structural: the handoff join runs as a step of
+  ``_coincide_same_line_tracks`` (the same-line coincidence family), not
+  as a separate post-pass.
 """
 
 from __future__ import annotations
@@ -21,7 +24,8 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import compute_station_offsets, normalize, route_edges
+from nf_metro.layout.routing.context import _build_routing_context
 from nf_metro.layout.routing.invariants import (
     check_fanout_tail_join,
     fanout_junctions,
@@ -72,6 +76,29 @@ def test_variant_calling_tuned_junction6_joins() -> None:
     gaps = check_fanout_tail_join(routes, graph)
     j6_gaps = [g for g in gaps if g.junction_id == "__junction_6"]
     assert not j6_gaps, "\n".join(g.message() for g in j6_gaps)
+
+
+def test_handoff_join_is_driven_by_coincide_pass(monkeypatch) -> None:
+    """The fan-out handoff join is the horizontal-tail member of the
+    same-line coincidence family: it must run as a step of
+    ``_coincide_same_line_tracks`` rather than as a separate post-pass, so
+    all "make one line read as one stroke" snapping lives in one stage."""
+    path = EXAMPLES / "variant_calling_tuned.mmd"
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+    ctx = _build_routing_context(graph, 60.0, 12.0, compute_station_offsets(graph))
+
+    calls: list[bool] = []
+    real_join = normalize._join_fanout_upstream_tails
+    monkeypatch.setattr(
+        normalize,
+        "_join_fanout_upstream_tails",
+        lambda routes, c: (calls.append(True), real_join(routes, c))[1],
+    )
+    normalize._coincide_same_line_tracks([], ctx)
+    assert calls, (
+        "_join_fanout_upstream_tails must run within _coincide_same_line_tracks"
+    )
 
 
 def test_merge_junctions_excluded_from_fanout() -> None:

@@ -536,7 +536,8 @@ def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> No
     duplicate strokes of one line.  Each such group should read as ONE track
     that splits only where the routes genuinely diverge.
 
-    Three group kinds contribute legs:
+    Four kinds of same-line track contribute. Three fuse near-parallel
+    VERTICAL legs onto a shared reference X:
 
     * convergent -- final descents into one entry port;
     * divergent -- opening descents leaving one source;
@@ -547,6 +548,13 @@ def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> No
     on the last group's reference X; each member snaps onto its group's X,
     resetting its flanking corners since a single track has no concentric
     nesting.
+
+    The fourth, :func:`_join_fanout_upstream_tails`, closes the HORIZONTAL
+    handoff seam at a fan-out junction: it extends the upstream tail so it
+    meets the paired downstream route's start. It runs last because the
+    downstream start X it reads is the materialised value the earlier passes
+    (and the vertical fusions above) leave behind, not a routing-time value
+    the handler could have anticipated.
     """
     for group in _convergent_port_groups(routes, ctx):
         _snap_group(group)
@@ -554,6 +562,7 @@ def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> No
         _snap_group(group)
     for group in _merge_feeder_groups(routes, ctx):
         _snap_group(group)
+    _join_fanout_upstream_tails(routes, ctx)
 
 
 def _band_clusters(chans: list[_VChannel], band: float) -> list[list[_VChannel]]:
@@ -1342,6 +1351,11 @@ def _restack_htrunk(
 def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
     """Snap each fan-out junction's upstream tail onto its downstream start.
 
+    The horizontal-handoff member of the same-line coincidence family (see
+    :func:`_coincide_same_line_tracks`, which drives it): where the three
+    group passes fuse near-parallel vertical legs of one line, this closes
+    the seam where the line hands off horizontally across a fan-out junction.
+
     At a *fan-out* junction (single upstream source, one or more
     inter-section targets), the incoming ``port -> junction`` route and
     the outgoing ``junction -> target`` route are two separate
@@ -1351,6 +1365,11 @@ def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> N
     past the junction), while the upstream route ends at the bare junction
     coordinate.  The mismatch renders as a seam / notch where the two
     segments meet end-to-end instead of one continuous flowing line.
+
+    The downstream start X read here is the value materialisation leaves
+    behind, not a routing-time coordinate: the gap- and trunk-slot passes
+    shift it after the handlers run, so this fusion cannot be hoisted into
+    the handler that routes the upstream tail.
 
     This pass extends the upstream route's final, horizontal segment so
     it ends at the X of the paired (same ``line_id``) downstream route's

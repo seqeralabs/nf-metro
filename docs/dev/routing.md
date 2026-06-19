@@ -64,7 +64,7 @@ The order in `route_edges` is:
 After all edges are routed, `route_edges` runs a series of post-passes
 that adjust the assembled polylines as a set (for example
 `_spread_diagonal_bundles`, `_materialize_gap_slots`,
-`_normalize_bypass_trunks`, `_join_fanout_upstream_tails`).
+`_materialize_trunk_slots`, `_coincide_same_line_tracks`).
 
 ## Bundles and offsets
 

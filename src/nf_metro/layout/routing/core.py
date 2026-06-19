@@ -82,7 +82,6 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _h_segment_crosses_other_section,
     _HTrunk,
     _inter_row_gap_band,
-    _join_fanout_upstream_tails,
     _materialize_gap_slots,
     _materialize_trunk_slots,
     _plan_trunk_band,
@@ -199,10 +198,9 @@ def _route_edges(
     _reorder_convergence_peeloff(routes, ctx)
     # Coincidence runs after the trunk/gap channels are finalised: it snaps
     # same-line tracks onto a reference read from that final geometry (the
-    # port-side track, the source-side track, and the merge trunk's descent),
-    # so a single line reads as one stroke.
+    # port-side track, the source-side track, the merge trunk's descent, and
+    # the fan-out junction handoff tail), so a single line reads as one stroke.
     _coincide_same_line_tracks(routes, ctx)
-    _join_fanout_upstream_tails(routes, ctx)
     _clear_bypass_v_label_strikes(routes, ctx)
 
     return routes, moves
