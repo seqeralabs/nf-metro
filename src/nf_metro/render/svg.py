@@ -869,10 +869,6 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme) -> None:
             f" stroke: var(--nfm-section-stroke, {theme.section_stroke})",
         ),
         _rule("nf-metro-section-label", f"fill: var(--nfm-section-label-color, {tc})"),
-        _rule(
-            "nf-metro-section-num-circle",
-            f"fill: var(--nfm-section-label-color, {tc})",
-        ),
         _rule("nf-metro-group-label", f"fill: var(--nfm-section-label-color, {tc})"),
         _rule(
             "nf-metro-group-underline",
