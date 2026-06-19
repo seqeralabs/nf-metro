@@ -98,6 +98,7 @@ from nf_metro.render.constants import (
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
     TITLE_Y_OFFSET,
+    WATERMARK_BARE_X_INSET,
     WATERMARK_FILL,
     WATERMARK_FONT_SIZE,
     WATERMARK_PADDING_RATIO,
@@ -398,6 +399,7 @@ def render_svg(
     font_portability: Literal["embed", "paths"] | None = None,
     svg_class_prefix: str = "",
     inject_dark_mode_css: bool = True,
+    bare: bool = False,
 ) -> str:
     """Render a metro map graph to an SVG string.
 
@@ -428,6 +430,11 @@ def render_svg(
     ``inject_dark_mode_css``: when False, the ``prefers-color-scheme: dark``
     ``<style>`` block is omitted.  Useful when a host page manages its own
     theme and the injected media query would fight it.
+
+    ``bare``: when True, omits the title and outer padding so the canvas
+    hugs the diagram content.  The attribution watermark is kept.  Use for
+    embedding the SVG inside a host page that supplies its own frame and
+    heading.
     """
     if not graph.stations:
         return '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
@@ -452,6 +459,7 @@ def render_svg(
             legend_position=legend_position,
             responsive=responsive,
             inject_dark_mode_css=inject_dark_mode_css,
+            bare=bare,
         )
 
     if font_portability == "paths":
@@ -498,6 +506,7 @@ def _render_svg_scaled(
     legend_position: str | None,
     responsive: bool = False,
     inject_dark_mode_css: bool = True,
+    bare: bool = False,
 ) -> str:
     """Render body, run with ``theme`` fonts and label metrics already scaled."""
     effective_legend_position = (
@@ -583,10 +592,10 @@ def _render_svg_scaled(
         logo_y = LOGO_Y_STANDALONE
         max_x = max(max_x, logo_x + logo_w)
 
-    # Right margin: use one padding width (content origin already provides
-    # the left margin).  Bottom margin: just enough room for the watermark
-    # text below the last content element.
-    auto_width = max_x + padding
+    # Right margin: one padding width in full mode; none in bare mode so the
+    # canvas hugs the content.  Bottom margin is always just enough room for
+    # the watermark text.
+    auto_width = max_x + (0.0 if bare else padding)
     auto_height = max_y + WATERMARK_Y_INSET * 2 + WATERMARK_FONT_SIZE
 
     svg_width = width or int(auto_width)
@@ -634,22 +643,23 @@ def _render_svg_scaled(
             )
         )
 
-    # Title / Logo (standalone logo only when not embedded in legend)
-    if show_logo and not logo_in_legend:
-        _render_logo(d, graph.logo_path, logo_x, logo_y, logo_w, logo_h)
-    elif graph.title and not logo_in_legend:
-        d.append(
-            draw.Text(
-                graph.title,
-                theme.title_font_size,
-                padding,
-                TITLE_Y_OFFSET,
-                fill=theme.title_color,
-                font_family=theme.label_font_family,
-                font_weight="bold",
-                **{"class": _ns("nf-metro-title")},
+    # Title / Logo (omitted in bare mode; standalone logo only when not in legend)
+    if not bare:
+        if show_logo and not logo_in_legend:
+            _render_logo(d, graph.logo_path, logo_x, logo_y, logo_w, logo_h)
+        elif graph.title and not logo_in_legend:
+            d.append(
+                draw.Text(
+                    graph.title,
+                    theme.title_font_size,
+                    padding,
+                    TITLE_Y_OFFSET,
+                    fill=theme.title_color,
+                    font_family=theme.label_font_family,
+                    font_weight="bold",
+                    **{"class": _ns("nf-metro-title")},
+                )
             )
-        )
 
     # Sections
     if graph.sections:
@@ -691,11 +701,14 @@ def _render_svg_scaled(
         )
 
     # Attribution watermark
+    watermark_x_inset = (
+        WATERMARK_BARE_X_INSET if bare else padding * WATERMARK_PADDING_RATIO
+    )
     d.append(
         draw.Text(
             f"created with nf-metro {_version_string()}",
             WATERMARK_FONT_SIZE,
-            svg_width - padding * WATERMARK_PADDING_RATIO,
+            svg_width - watermark_x_inset,
             svg_height - WATERMARK_Y_INSET,
             fill=WATERMARK_FILL,
             font_family=theme.label_font_family,
@@ -708,7 +721,7 @@ def _render_svg_scaled(
             draw.Text(
                 graph.caption,
                 CAPTION_FONT_SIZE,
-                padding * WATERMARK_PADDING_RATIO,
+                watermark_x_inset,
                 svg_height - WATERMARK_Y_INSET,
                 fill=CAPTION_FILL,
                 font_family=theme.label_font_family,

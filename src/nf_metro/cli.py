@@ -222,6 +222,15 @@ def _resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
         "media query would conflict."
     ),
 )
+@click.option(
+    "--bare/--no-bare",
+    default=False,
+    help=(
+        "Omit the title and outer padding so the canvas hugs the diagram "
+        "content. The attribution watermark is kept. Suitable for embedding "
+        "in a host page that supplies its own frame and heading."
+    ),
+)
 @layout_cli_options
 def render(
     input_file: Path,
@@ -239,6 +248,7 @@ def render(
     text_to_paths: bool,
     svg_class_prefix: str,
     no_dark_mode_css: bool,
+    bare: bool,
     **layout_opts: object,
 ) -> None:
     """Render a Mermaid metro map definition to SVG or interactive HTML."""
@@ -299,6 +309,7 @@ def render(
             font_portability=font_portability,
             svg_class_prefix=svg_class_prefix,
             inject_dark_mode_css=not no_dark_mode_css,
+            bare=bare,
         )
 
     output.write_text(content if content.endswith("\n") else content + "\n")
