@@ -201,6 +201,27 @@ def _resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
         "Loses selectable text. Requires fonttools[woff]."
     ),
 )
+@click.option(
+    "--svg-class-prefix",
+    type=str,
+    default="",
+    help=(
+        "Prefix every SVG presentation class with this string (e.g. 'myapp' "
+        "produces 'myapp-nf-metro-station'). Use distinct prefixes for each map "
+        "on a shared page to prevent CSS collisions. Has no effect on the "
+        "interactive HTML output, which already scopes each map independently."
+    ),
+)
+@click.option(
+    "--no-dark-mode-css",
+    is_flag=True,
+    default=False,
+    help=(
+        "Suppress the prefers-color-scheme: dark <style> block. "
+        "Useful when a host page manages its own theme and the injected "
+        "media query would conflict."
+    ),
+)
 @layout_cli_options
 def render(
     input_file: Path,
@@ -216,6 +237,8 @@ def render(
     responsive: bool,
     embed_font: bool,
     text_to_paths: bool,
+    svg_class_prefix: str,
+    no_dark_mode_css: bool,
     **layout_opts: object,
 ) -> None:
     """Render a Mermaid metro map definition to SVG or interactive HTML."""
@@ -274,6 +297,8 @@ def render(
             debug=debug,
             responsive=responsive,
             font_portability=font_portability,
+            svg_class_prefix=svg_class_prefix,
+            inject_dark_mode_css=not no_dark_mode_css,
         )
 
     output.write_text(content if content.endswith("\n") else content + "\n")

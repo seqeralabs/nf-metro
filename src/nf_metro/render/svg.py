@@ -4,6 +4,7 @@ from __future__ import annotations
 
 __all__ = ["apply_route_offsets", "render_svg"]
 
+import contextvars
 import html
 import re
 import textwrap
@@ -118,6 +119,18 @@ from nf_metro.render.legend import (
 )
 from nf_metro.render.manifest import build_manifest, manifest_metadata_svg
 from nf_metro.render.style import Theme
+
+# Per-render SVG class namespace.  Set by render_svg() for the duration of one
+# render call so all helper functions pick it up without extra parameters.
+_render_class_prefix: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "_render_class_prefix", default=""
+)
+
+
+def _ns(cls: str) -> str:
+    """Apply the active render namespace prefix to an SVG class name."""
+    p = _render_class_prefix.get()
+    return f"{p}-{cls}" if p else cls
 
 
 def apply_route_offsets(
@@ -394,6 +407,8 @@ def render_svg(
     legend_position: str | None = None,
     responsive: bool = False,
     font_portability: Literal["embed", "paths"] | None = None,
+    svg_class_prefix: str = "",
+    inject_dark_mode_css: bool = True,
 ) -> str:
     """Render a metro map graph to an SVG string.
 
@@ -414,6 +429,16 @@ def render_svg(
     - ``"paths"``: converts all text to vector paths, removing font
       dependencies entirely (requires ``fontTools[woff]``).
     - ``None`` (default): bare ``font-family`` reference, resolved by the host renderer.
+
+    ``svg_class_prefix``: when non-empty, every SVG presentation class (e.g.
+    ``nf-metro-station``, ``metro-line-<id>``) is prefixed with
+    ``<svg_class_prefix>-``.  Use distinct prefixes for each map on a shared
+    page to prevent CSS collisions between maps or with host-page styles.
+    ``data-*`` attributes and manifest element ids are not affected.
+
+    ``inject_dark_mode_css``: when False, the ``prefers-color-scheme: dark``
+    ``<style>`` block is omitted.  Useful when a host page manages its own
+    theme and the injected media query would fight it.
     """
     if not graph.stations:
         return '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
@@ -426,18 +451,23 @@ def render_svg(
         animate = graph.animate
 
     scaled_theme = _scale_theme_fonts(theme, graph.font_scale)
-    with font_scale_context(graph.font_scale):
-        svg = _render_svg_scaled(
-            graph,
-            scaled_theme,
-            width=width,
-            height=height,
-            padding=padding,
-            animate=animate,
-            debug=debug,
-            legend_position=legend_position,
-            responsive=responsive,
-        )
+    token = _render_class_prefix.set(svg_class_prefix)
+    try:
+        with font_scale_context(graph.font_scale):
+            svg = _render_svg_scaled(
+                graph,
+                scaled_theme,
+                width=width,
+                height=height,
+                padding=padding,
+                animate=animate,
+                debug=debug,
+                legend_position=legend_position,
+                responsive=responsive,
+                inject_dark_mode_css=inject_dark_mode_css,
+            )
+    finally:
+        _render_class_prefix.reset(token)
 
     if font_portability == "paths":
         from nf_metro.render.font_embed import text_to_paths as _text_to_paths
@@ -482,6 +512,7 @@ def _render_svg_scaled(
     debug: bool,
     legend_position: str | None,
     responsive: bool = False,
+    inject_dark_mode_css: bool = True,
 ) -> str:
     """Render body, run with ``theme`` fonts and label metrics already scaled."""
     effective_legend_position = (
@@ -595,7 +626,9 @@ def _render_svg_scaled(
     # Dark-mode CSS for transparent-background themes so that elements
     # rendered directly on the canvas (section labels, number badges,
     # title) remain readable when the browser provides a dark background.
-    if not theme.background_color or theme.background_color == "none":
+    if inject_dark_mode_css and (
+        not theme.background_color or theme.background_color == "none"
+    ):
         _inject_dark_mode_style(d)
 
     # Background (skip for transparent themes)
@@ -617,7 +650,7 @@ def _render_svg_scaled(
                 fill=theme.title_color,
                 font_family=theme.label_font_family,
                 font_weight="bold",
-                **{"class": "nf-metro-title"},
+                **{"class": _ns("nf-metro-title")},
             )
         )
 
@@ -817,12 +850,15 @@ def _inject_dark_mode_style(d: draw.Drawing) -> None:
     media query adjusts those elements so they remain readable.  CSS rules
     override SVG presentation attributes, so we only need class selectors.
     """
-    css = textwrap.dedent("""\
-        @media (prefers-color-scheme: dark) {
-            .nf-metro-section-label { fill: #d0d0d0; }
-            .nf-metro-section-num-circle { fill: #777777; }
-            .nf-metro-title { fill: #ffffff; }
-        }
+    sl = _ns("nf-metro-section-label")
+    sc = _ns("nf-metro-section-num-circle")
+    ti = _ns("nf-metro-title")
+    css = textwrap.dedent(f"""\
+        @media (prefers-color-scheme: dark) {{
+            .{sl} {{ fill: #d0d0d0; }}
+            .{sc} {{ fill: #777777; }}
+            .{ti} {{ fill: #ffffff; }}
+        }}
     """)
     d.append(draw.Raw(f"<style>{css}</style>"))
 
@@ -858,7 +894,7 @@ def _render_first_class_sections(
                 fill=theme.section_fill,
                 stroke=theme.section_stroke,
                 stroke_width=SECTION_STROKE_WIDTH,
-                class_="nf-metro-section-box",
+                class_=_ns("nf-metro-section-box"),
                 **section_data,
             )
         )
@@ -898,7 +934,7 @@ def _render_first_class_sections(
                 circle_r,
                 fill=theme.station_stroke,
                 **{
-                    "class": "nf-metro-section-num-circle",
+                    "class": _ns("nf-metro-section-num-circle"),
                     "data-section-id": section.id,
                 },
             )
@@ -929,7 +965,10 @@ def _render_first_class_sections(
                 font_family=theme.label_font_family,
                 font_weight="bold",
                 dy=TEXT_VCENTER_DY,
-                **{"class": "nf-metro-section-label", "data-section-id": section.id},
+                **{
+                    "class": _ns("nf-metro-section-label"),
+                    "data-section-id": section.id,
+                },
             )
         )
 
@@ -963,7 +1002,7 @@ def _render_edges(
         line = graph.lines.get(route.line_id)
         color = line.color if line else FALLBACK_LINE_COLOR
         style_kw = line_style_kwargs(line.style) if line else {}
-        class_name = f"metro-line-{route.line_id}"
+        class_name = _ns(f"metro-line-{route.line_id}")
         breaks = bridges.get(id(route))
 
         if breaks:
@@ -1176,7 +1215,7 @@ def _station_data_attrs(graph: MetroGraph, station: Station) -> dict[str, str]:
     because drawsvg does not escape unknown kwargs.
     """
     data = {
-        "class_": "nf-metro-station",
+        "class_": _ns("nf-metro-station"),
         "data-station-id": station.id,
         "data-station-lines": ",".join(graph.station_lines(station.id)),
         "data-station-label": html.escape(station.label or station.id),
@@ -1271,18 +1310,21 @@ def _draw_interchange_glyph(
     _link_bar(
         (bar_half + sw) * 2,
         outline,
-        **{**station_data, "class_": "nf-metro-rail-connector"},
+        **{**station_data, "class_": _ns("nf-metro-rail-connector")},
     )
     _knobs(
         knob_r + sw,
         outline,
-        **{"class_": "nf-metro-rail-knob-outline", "data-station-id": data_station_id},
+        **{
+            "class_": _ns("nf-metro-rail-knob-outline"),
+            "data-station-id": data_station_id,
+        },
     )
     _link_bar(bar_half * 2, interior_fill)
     _knobs(
         knob_r,
         interior_fill,
-        **{"class_": "nf-metro-rail-knob", "data-station-id": data_station_id},
+        **{"class_": _ns("nf-metro-rail-knob"), "data-station-id": data_station_id},
     )
 
 
@@ -1416,7 +1458,7 @@ def _station_group_attrs(
         station.section_id if section is not None and not section.is_implicit else None
     )
     return {
-        "class_": "nf-metro-station-group",
+        "class_": _ns("nf-metro-station-group"),
         **node_data_attrs(
             id=station.id,
             x=station.x,
@@ -1905,7 +1947,7 @@ def _render_labels(
         label_data: dict[str, str] = {}
         if label.station_id and not label.station_id.startswith("__"):
             label_data["data-station-id"] = label.station_id
-            label_data["class_"] = "nf-metro-station-label"
+            label_data["class_"] = _ns("nf-metro-station-label")
 
         if label.angle:
             # Diagonal labels: anchor at the pill and rotate about
@@ -2260,7 +2302,7 @@ def _render_station_groups(
             fill="none",
             stroke_linecap="round",
             stroke_linejoin="round",
-            class_="nf-metro-group-underline",
+            class_=_ns("nf-metro-group-underline"),
         )
         bracket.M(band.x_left, band.rule_y + band.tick_dy)
         bracket.L(band.x_left, band.rule_y)
@@ -2278,7 +2320,7 @@ def _render_station_groups(
                 font_weight="bold",
                 text_anchor="middle",
                 dominant_baseline=band.baseline,
-                class_="nf-metro-group-label",
+                class_=_ns("nf-metro-group-label"),
             )
         )
 
