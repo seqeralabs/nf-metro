@@ -1,9 +1,9 @@
-"""Symbolic gap-slot migration (#845-B).
+"""Symbolic gap slots (#845-B).
 
 ``GapSlot`` lets a handler declare *where* a vertical channel run sits in a gap
-bundle -- which inter-column corridor, which row, travelling which way -- so the
-single :func:`_materialize_gap_slots` pass can assign the concentric X, replacing
-the geometric rediscovery the deleted ``_normalize_gap_channels`` performed.
+bundle -- which inter-column corridor, which row, travelling which way -- and the
+single :func:`_materialize_gap_slots` pass groups the declared slots by ``(gap,
+row, direction)`` and assigns the concentric X.
 """
 
 from __future__ import annotations

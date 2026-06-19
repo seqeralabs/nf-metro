@@ -56,6 +56,7 @@ from nf_metro.layout.routing.common import (
     inter_column_channel_x,
     inter_row_channel_y,
     inter_row_wrap_band,
+    iter_vertical_segments,
     merge_trunk_force_cross_row,
     resolve_section,
     row_bottom_edge,
@@ -1251,18 +1252,14 @@ def _declare_channel(
     if route is None:
         return
     down = direction is Direction.D
-    pts = route.points
     best = None
     best_d = None
-    for k in range(len(pts) - 1):
-        (x0, y0), (x1, y1) = pts[k], pts[k + 1]
-        if abs(x1 - x0) >= COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:
+    for _k, sx, y_lo, y_hi, seg_down in iter_vertical_segments(route):
+        if seg_down is not down:
             continue
-        if (y1 > y0) is not down:
-            continue
-        d = abs(x0 - x)
+        d = abs(sx - x)
         if best_d is None or d < best_d:
-            best_d, best = d, (x0, min(y0, y1), max(y0, y1))
+            best_d, best = d, (sx, y_lo, y_hi)
     if best is None:
         return
     match = gap_lo_for_x(ctx.graph, best[0], best[1], best[2])

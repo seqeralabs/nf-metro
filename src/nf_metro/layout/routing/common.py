@@ -263,6 +263,23 @@ def gap_lo_for_x(
     return None
 
 
+def iter_vertical_segments(
+    rp: RoutedPath,
+) -> Iterator[tuple[int, float, float, float, bool]]:
+    """Yield ``(idx, x, y_lo, y_hi, down)`` for each vertical leg of *rp*.
+
+    ``idx`` is the segment's start index in ``rp.points`` and ``down`` is True
+    when the leg travels in increasing Y.  A leg is a segment that holds X
+    constant while changing Y by more than :data:`COORD_TOLERANCE`.
+    """
+    pts = rp.points
+    for k in range(len(pts) - 1):
+        x0, y0 = pts[k]
+        x1, y1 = pts[k + 1]
+        if abs(x1 - x0) < COORD_TOLERANCE and abs(y1 - y0) > COORD_TOLERANCE:
+            yield k, x0, min(y0, y1), max(y0, y1), y1 > y0
+
+
 def symmetric_bundle_midpoint(
     gap_left: float,
     gap_right: float,

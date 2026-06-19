@@ -127,7 +127,7 @@
   "normalize.py::elif up_ok:::#1",
   "normalize.py::for _ in range(8):::#1",
   "normalize.py::for grp in groups:::#3",
-  "normalize.py::for k in range(len(pts) - 1):::#1",
+  "normalize.py::for k, x, y_lo, y_hi, seg_down in iter_vertical_segments(rp):::#1",
   "normalize.py::for sign in (1, -1):::#1",
   "normalize.py::if 0 <= k - 1 < len(rp.curve_radii):::#1",
   "normalize.py::if 0 <= k - 1 < len(rp.curve_radii):::#2",

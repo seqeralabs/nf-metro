@@ -29,6 +29,7 @@ from nf_metro.layout.routing.common import (
     column_gap_edges,
     initial_fanout_descent_span,
     iter_horizontal_trunks,
+    iter_vertical_segments,
     row_bottom_edge,
     row_top_edge,
     symmetric_bundle_midpoint,
@@ -177,24 +178,9 @@ def _locate_slot_channel(
     if right <= left:
         return None
     down = slot.direction is Direction.D
-    pts = rp.points
-    for k in range(len(pts) - 1):
-        x0, y0 = pts[k]
-        x1, y1 = pts[k + 1]
-        if abs(x1 - x0) >= COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:
-            continue
-        if (y1 > y0) is not down:
-            continue
-        if not (left - COORD_TOLERANCE <= x0 <= right + COORD_TOLERANCE):
-            continue
-        return _VChannel(
-            route=rp,
-            idx=k,
-            x=x0,
-            y_lo=min(y0, y1),
-            y_hi=max(y0, y1),
-            down=down,
-        )
+    for k, x, y_lo, y_hi, seg_down in iter_vertical_segments(rp):
+        if seg_down is down and left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE:
+            return _VChannel(route=rp, idx=k, x=x, y_lo=y_lo, y_hi=y_hi, down=down)
     return None
 
 

@@ -45,6 +45,7 @@ from nf_metro.layout.routing.common import (
     horizontal_direction,
     initial_fanout_descent_span,
     iter_horizontal_trunks,
+    iter_vertical_segments,
     trunk_segments_cross,
     vertical_direction,
 )
@@ -1903,23 +1904,17 @@ def check_gap_channels_materialized(
         if not rp.is_inter_section or rp.normalize_exempt:
             continue
         declared = {(s.gap_lo_col, s.direction is Direction.D) for s in rp.gap_slots}
-        pts = rp.points
-        for k in range(len(pts) - 1):
-            x0, y0 = pts[k]
-            x1, y1 = pts[k + 1]
-            if abs(x1 - x0) >= COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:
-                continue
-            match = gap_lo_for_x(graph, x0, min(y0, y1), max(y0, y1))
+        for _k, x, y_lo, y_hi, down in iter_vertical_segments(rp):
+            match = gap_lo_for_x(graph, x, y_lo, y_hi)
             if match is None:
                 continue
             lo, _row = match
-            down = y1 > y0
             if (lo, down) not in declared:
                 out.append(
                     UndeclaredGapChannel(
                         line_id=rp.line_id,
                         edge=(rp.edge.source, rp.edge.target),
-                        x=x0,
+                        x=x,
                         lo_col=lo,
                         down=down,
                     )
