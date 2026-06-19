@@ -12,7 +12,6 @@ from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MIN_CORRIDOR_Y_OVERLAP,
@@ -40,9 +39,9 @@ from nf_metro.layout.routing.context import (
     _RoutingCtx,
 )
 from nf_metro.layout.routing.corners import (
+    concentric_corner_radius_at,
     corner_radius,
     l_shape_radii,
-    reference_anchored_radius,
 )
 from nf_metro.parser.model import MetroGraph, PortSide
 
@@ -501,10 +500,14 @@ def _convergent_port_groups(
 
 
 def _set_vchannel_x(ch: _VChannel, new_x: float) -> None:
-    """Move a vertical channel to *new_x*, resetting its flanking corners.
+    """Move a vertical channel to *new_x*, re-deriving its flanking corners.
 
-    Fusing same-line descents into one track removes the concentric-bundle
-    nesting, so both flanking corners take the base ``CURVE_RADIUS``.
+    Fusing same-line descents into one track makes them a single stroke with
+    no concentric nesting (zero displacement from itself), so each flanking
+    corner is re-derived from the route's *final* waypoints as a zero-offset
+    concentric corner via :func:`concentric_corner_radius_at` -- the same
+    central helper the routing handlers use -- rather than hand-set to a fixed
+    radius after the move.  A zero-offset corner resolves to the base radius.
     """
     rp = ch.route
     pts = rp.points
@@ -515,7 +518,10 @@ def _set_vchannel_x(ch: _VChannel, new_x: float) -> None:
         return
     for radius_idx in (k - 1, k):
         if 0 <= radius_idx < len(rp.curve_radii):
-            rp.curve_radii[radius_idx] = reference_anchored_radius(0.0, CURVE_RADIUS)
+            prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
+            rp.curve_radii[radius_idx] = concentric_corner_radius_at(
+                prev_pt, corner_pt, next_pt, 0.0
+            )
 
 
 def _initial_fanout_descent(rp: RoutedPath) -> _VChannel | None:
