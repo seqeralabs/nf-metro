@@ -609,6 +609,15 @@ class PeeloffSlot(NamedTuple):
     rank: int
 
 
+def trunk_depths_contiguous(trunk_ys: list[float], n: int, step: float) -> bool:
+    """Whether ``n`` trunk depths span at most one concentric bundle width.
+
+    The members of a single concentric bundle sit within ``(n-1)*step`` of one
+    another; a wider span is two channels rows apart, not one bundle.
+    """
+    return max(trunk_ys) - min(trunk_ys) <= (n - 1) * step + COORD_TOLERANCE
+
+
 def iter_port_peeloff_bundles(
     routes: list[RoutedPath], graph: MetroGraph, step: float
 ) -> Iterator[PortPeeloffBundle]:
@@ -645,7 +654,7 @@ def iter_port_peeloff_bundles(
         trunk_ys = sorted(t.trunk_y for t in per_line.values())
         if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:
             continue  # no distinct trunk depths to order by
-        if trunk_ys[-1] - trunk_ys[0] > (n - 1) * step + COORD_TOLERANCE:
+        if not trunk_depths_contiguous(trunk_ys, n, step):
             continue  # not one contiguous concentric bundle
         signs = {t.trunk_sign for t in per_line.values()}
         if len(signs) != 1:

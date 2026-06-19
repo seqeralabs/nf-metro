@@ -32,6 +32,7 @@ from nf_metro.layout.routing.common import (
     iter_inter_row_gaps,
     iter_vertical_segments,
     symmetric_bundle_midpoint,
+    trunk_depths_contiguous,
     trunk_segments_cross,
 )
 from nf_metro.layout.routing.context import (
@@ -1327,10 +1328,7 @@ def _convergence_line_order(
     # cross-row fan-in whose legs start rows apart is a divergence the standard
     # crossing-minimiser orders, not a single-trunk convergence.
     trunk_ys = [ch.y_hi for ch in chans]
-    if (
-        max(trunk_ys) - min(trunk_ys)
-        > (len(src_col) - 1) * OFFSET_STEP + COORD_TOLERANCE
-    ):
+    if not trunk_depths_contiguous(trunk_ys, len(src_col), OFFSET_STEP):
         return None
     return sorted(_distinct_line_order(chans), key=lambda lid: -src_col[lid])
 
