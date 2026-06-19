@@ -1352,9 +1352,9 @@ def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> N
     """Snap each fan-out junction's upstream tail onto its downstream start.
 
     The horizontal-handoff member of the same-line coincidence family (see
-    :func:`_coincide_same_line_tracks`, which drives it): where the three
-    group passes fuse near-parallel vertical legs of one line, this closes
-    the seam where the line hands off horizontally across a fan-out junction.
+    :func:`_coincide_same_line_tracks`): where the three group passes fuse
+    near-parallel vertical legs of one line, this closes the seam where the
+    line hands off horizontally across a fan-out junction.
 
     At a *fan-out* junction (single upstream source, one or more
     inter-section targets), the incoming ``port -> junction`` route and
