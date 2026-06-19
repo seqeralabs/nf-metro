@@ -954,6 +954,21 @@ def inter_row_channel_y(
         return ty + HEADER_CLEARANCE + max_r + offset
 
 
+def _inter_row_band_fits(upper_bottom: float, lower_top: float) -> bool:
+    """Whether a horizontal run fits between two stacked rows with clearance.
+
+    True when the band keeps :data:`INTER_ROW_EDGE_CLEARANCE` below the upper
+    row's bottom edge and :data:`INTER_ROW_HEADER_CLEARANCE` above the lower
+    row's header badge.  When it does not, a centred run grazes one edge, so a
+    route prefers a different channel (the around-below loop / canvas-bottom
+    dive) over this band.
+    """
+    return (
+        upper_bottom + INTER_ROW_EDGE_CLEARANCE
+        <= lower_top - INTER_ROW_HEADER_CLEARANCE
+    )
+
+
 def _center_inter_row_channel(
     upper_bottom: float, lower_top: float, offset: float = 0.0
 ) -> float:
@@ -976,7 +991,7 @@ def _center_inter_row_channel(
     """
     lo = upper_bottom + INTER_ROW_EDGE_CLEARANCE
     hi = lower_top - INTER_ROW_HEADER_CLEARANCE
-    if lo <= hi:
+    if _inter_row_band_fits(upper_bottom, lower_top):
         return min(max((lo + hi) / 2 + offset, lo), hi)
     # Gap too narrow for both margins (typically a heterogeneous-row case
     # where the global row edges over-state the obstruction at this x).

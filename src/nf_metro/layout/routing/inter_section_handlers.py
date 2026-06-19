@@ -41,6 +41,7 @@ from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
     _center_inter_row_channel,
+    _inter_row_band_fits,
     bundle_width,
     bypass_bottom_y,
     clear_channel_of_section_edge,
@@ -315,7 +316,7 @@ def _route_merge_trunk_feeder(f: _InterFacts) -> RoutedPath | None:
     """Dispatch wrapper: the trunk feeder's full bypass to the entry port."""
     assert f.src_col is not None and f.tgt_col is not None
     return _route_merge_trunk(
-        f.edge, f.src, f.tgt, f.i, f.src_col, f.tgt_col, f.ctx, f.src_row
+        f.edge, f.src, f.tgt, f.i, f.n, f.src_col, f.tgt_col, f.ctx, f.src_row
     )
 
 
@@ -345,17 +346,31 @@ def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
         if not _h_segment_crosses_other_section(graph, f.sx, f.tx, f.ty, exclude):
             return _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
     if f.right_entry_from_left:
-        if (
-            f.src_row is not None
-            and f.tgt_row is not None
-            and f.src_row < f.tgt_row
-            and _right_entry_gap_above_is_clear(graph, src, tgt, tgt, f.src_row)
-        ):
-            return _route_right_entry_via_gap_above(
-                edge, src, tgt, tgt, f.i, f.n, ctx, f.src_row
-            )
-        return _route_right_entry_around_below(edge, src, tgt, tgt, f.i, f.n, ctx)
+        return _route_right_entry_cross_row(f)
     return _route_bypass(edge, src, tgt, f.i, f.src_col, f.tgt_col, ctx, f.src_row)
+
+
+def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
+    """Cross-row feed into a RIGHT entry, reached from the port's outward side.
+
+    A standard L-shape drops its vertical channel across the source or target
+    box to reach the far-edge RIGHT port.  Instead run the long horizontal in
+    the clear inter-row band just above the target row (then drop straight down
+    the target's right side into the port) when that band is clear; otherwise
+    loop around below the whole target row.  Both approaches enter the RIGHT
+    port from ``x >= port.x`` and never cross a section interior.
+    """
+    edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
+    if (
+        f.src_row is not None
+        and f.tgt_row is not None
+        and f.src_row < f.tgt_row
+        and _right_entry_gap_above_is_clear(graph, src, tgt, tgt, f.src_row)
+    ):
+        return _route_right_entry_via_gap_above(
+            edge, src, tgt, tgt, f.i, f.n, ctx, f.src_row
+        )
+    return _route_right_entry_around_below(edge, src, tgt, tgt, f.i, f.n, ctx)
 
 
 def _route_left_entry_family(f: _InterFacts) -> RoutedPath | None:
@@ -495,7 +510,15 @@ _INTER_SECTION_RULES: list[_Rule] = [
         lambda f: f.entry_side is PortSide.TOP,
         lambda f: _route_top_entry_l_shape(f.edge, f.src, f.tgt, f.n, f.ctx),
     ),
-    _Rule("same-X vertical drop", lambda f: f.same_x, _route_straight_connector),
+    # Same X, but NOT a stacked LEFT-exit -> LEFT-entry: that pair shares the
+    # column's left-edge X, so a straight vertical drop would run down the
+    # source section's own edge and through its box; the serpentine rule below
+    # leads it out into a clear left-of-column channel instead.
+    _Rule(
+        "same-X vertical drop",
+        lambda f: f.same_x and not f.is_serpentine_left_exit_left_entry,
+        _route_straight_connector,
+    ),
     _Rule(
         "bottom-exit junction",
         lambda f: f.edge.source in f.ctx.bottom_exit_junctions,
@@ -515,8 +538,9 @@ _INTER_SECTION_RULES: list[_Rule] = [
         lambda f: f.is_near_vertical_same_col_junction,
         _route_near_vertical_junction,
     ),
-    # RIGHT entry fed from the left: wrap around the right side rather than cut
-    # through the interior.
+    # RIGHT entry fed from the left: wrap around the right side (over the top for
+    # a same-row source, below the source row for a cross-row one) rather than
+    # cut through the interior.
     _Rule(
         "RIGHT entry wrap",
         lambda f: f.entry_side is PortSide.RIGHT and f.horizontal is Direction.R,
@@ -543,6 +567,24 @@ _INTER_SECTION_RULES: list[_Rule] = [
         "RIGHT entry plough -> bypass",
         _right_entry_plough_needs_bypass,
         _route_right_entry_plough_bypass,
+    ),
+    # A feed from a row ABOVE into a RIGHT entry one or more rows down, from a
+    # source on the port's RIGHT (travelling left) with no intervening section to
+    # bypass: the standard L-shape drops its vertical channel across the source
+    # box to reach the far-edge port.  Run the long horizontal in the band above
+    # the target (or around below it) so the port is entered from its outward
+    # side.  This rule carries no obstacle test, so the plough rule (earlier)
+    # claims the with-obstacle cases and this is the obstacle-free remainder.
+    _Rule(
+        "RIGHT entry cross-row wrap",
+        lambda f: (
+            f.entry_side is PortSide.RIGHT
+            and f.horizontal is Direction.L
+            and f.src_row is not None
+            and f.tgt_row is not None
+            and f.src_row < f.tgt_row
+        ),
+        _route_right_entry_cross_row,
     ),
 ]
 
@@ -784,6 +826,7 @@ def _route_merge_trunk(
     src: Station,
     tgt: Station,
     i: int,
+    n: int,
     src_col: int,
     tgt_col: int,
     ctx: _RoutingCtx,
@@ -798,6 +841,16 @@ def _route_merge_trunk(
     different Y from the actual entry port; without the Y override the
     bypass terminates at the merge junction's Y and leaves a visible
     "hanging" curve disconnected from the entry port.
+
+    A LEFT entry port with no clear inter-column channel to its left (the
+    target sits in the leftmost column, fed from its right) has no gap for the
+    bypass to rise in on the port's own side; the U-shape's gap2 lands to the
+    RIGHT of the box and its final port-approach leg ploughs leftward through
+    the target interior.  Route such a trunk around below the target instead,
+    rising on the far (left) side and entering the LEFT port from outside.  The
+    around-below traverse runs at the trunk's ``bypass_bottom_y`` channel, the
+    same Y the branch feeders drop onto, so the converging lines overlay as one
+    stroke.
 
     When the trunk and entry are in the same grid row but separated by
     intervening row-mates, the standard above-row bypass channel sits
@@ -820,6 +873,21 @@ def _route_merge_trunk(
     effective_tx = ep.x if ep else tgt.x
     effective_ty = ep.y if ep else tgt.y
     tgt_row = _resolve_section_row(ctx.graph, tgt)
+
+    if ep is not None and ep_port is not None and ep_port.side == PortSide.LEFT:
+        ep_col, ep_row = _resolve_section_colrow(ctx.graph, ep)
+        no_left_channel = (
+            ep_col is None
+            or ep_row is None
+            or _corridor_descent_x(ctx, ep_col, ep_row, 0.0) is None
+        )
+        if no_left_channel:
+            trunk_by = ctx.merge.trunk_by.get(edge.target)
+            around = _route_around_section_below(
+                edge, src, tgt, ep, i, n, ctx, channel_y=trunk_by
+            )
+            assert around is not None  # the trunk is always its own bundle member
+            return around
     force_cross_row = merge_trunk_force_cross_row(
         ctx.graph, src_col, tgt_col, src_row, tgt_row
     )
@@ -2118,6 +2186,7 @@ def _route_around_section_below(
     i: int,
     n: int,
     ctx: _RoutingCtx,
+    channel_y: float | None = None,
 ) -> RoutedPath | None:
     """Route to a LEFT entry port by going AROUND BELOW the target section.
 
@@ -2142,6 +2211,12 @@ def _route_around_section_below(
     merge junction).  *entry_port* is the actual endpoint of the route
     (the LEFT entry port station resolved from the merge junction or
     equal to *tgt* when the edge targets a port directly).
+
+    *channel_y* overrides the leftward traverse Y.  A merge trunk reaching a
+    leftmost target passes its ``bypass_bottom_y`` channel (the inter-row gap
+    its converging branches drop onto) so the trunk runs left at that shared Y
+    and descends on the target's far side, rather than diving to the canvas
+    bottom where the branches could not meet it.
     """
     sy = src.y
     ex, ey = entry_port.x, entry_port.y
@@ -2161,13 +2236,17 @@ def _route_around_section_below(
     # Fallbacks if a column can't be resolved (degenerate cases).
     bc_src_col = src_col if src_col is not None else 0
     bc_tgt_col = ep_col if ep_col is not None else bc_src_col
-    by = bypass_bottom_y(
-        ctx.graph,
-        bc_src_col,
-        bc_tgt_col,
-        BYPASS_CLEARANCE,
-        src_row=src_row,
-        cross_row=True,
+    by = (
+        channel_y
+        if channel_y is not None
+        else bypass_bottom_y(
+            ctx.graph,
+            bc_src_col,
+            bc_tgt_col,
+            BYPASS_CLEARANCE,
+            src_row=src_row,
+            cross_row=True,
+        )
     )
 
     # Vertical V_up channel sits just left of the target section's bbox.
@@ -2381,12 +2460,17 @@ def _right_entry_gap_above_is_clear(
     The route runs its long horizontal in the band just below the source
     row, then drops straight down the RIGHT side of the target column into
     the port.  Viable only when that band genuinely exists (the next row's
-    top is below the source row's bottom) and the horizontal at the band's
-    centre crosses no section interior between the source and the target's
-    right edge.
+    top is below the source row's bottom), is wide enough for the traverse to
+    clear both the source row's bottom edge and the lower row's header badge,
+    and the horizontal at the band's centre crosses no section interior
+    between the source and the target's right edge.
     """
     gap_top, gap_bottom = _right_entry_gap_above_target_y(graph, src_row)
     if gap_bottom <= gap_top:
+        return False
+    # A band too narrow for both clearances makes the centred run graze the
+    # source box bottom, so the feed loops around below the target row instead.
+    if not _inter_row_band_fits(gap_top, gap_bottom):
         return False
     gy = _center_inter_row_channel(gap_top, gap_bottom)
 

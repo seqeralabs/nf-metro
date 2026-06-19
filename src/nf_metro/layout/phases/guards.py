@@ -48,7 +48,14 @@ from nf_metro.layout.phases.spacing import (
     _placed_name_label_station_ids,
     _residual_label_overlaps,
 )
-from nf_metro.parser.model import LineSpread, MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import (
+    LineSpread,
+    MetroGraph,
+    Port,
+    PortSide,
+    Section,
+    Station,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -2168,6 +2175,34 @@ def _guard_feeder_exits_section_through_side(
                     )
 
 
+def _route_landing_entry_port(
+    graph: MetroGraph, rp: RoutedPath, tol: float
+) -> Port | None:
+    """The entry port a route physically lands on, or ``None``.
+
+    A port-targeted edge resolves directly from ``edge.target``.  A merge or
+    bypass trunk targets a virtual ``__merge_*`` / ``__junction_*`` node but is
+    extended to terminate on the section's entry-port station; that landing is
+    found by matching the route's final point to an entry port's coordinates,
+    so a trunk crossing its own target box to reach a far-side port is judged
+    on the same outward-approach rule as a direct port edge.
+    """
+    port = graph.ports.get(rp.edge.target)
+    if port is not None:
+        return port if port.is_entry else None
+    # Only an inter-section route (a merge/bypass trunk targeting a virtual
+    # node) lands on a far section's entry-port station; intra-section and
+    # off-track routes end at internal stations, so they skip the scan.
+    pts = rp.points
+    if not rp.is_inter_section or len(pts) < 2:
+        return None
+    ex, ey = pts[-1]
+    for p in graph.ports.values():
+        if p.is_entry and abs(p.x - ex) <= tol and abs(p.y - ey) <= tol:
+            return p
+    return None
+
+
 def _entry_approach_offenders(
     graph: MetroGraph, routes: list[RoutedPath]
 ) -> list[tuple[RoutedPath, str, str]]:
@@ -2185,8 +2220,8 @@ def _entry_approach_offenders(
     offenders: list[tuple[RoutedPath, str, str]] = []
     tol = GUARD_TOLERANCE
     for rp in routes:
-        port = graph.ports.get(rp.edge.target)
-        if port is None or not port.is_entry:
+        port = _route_landing_entry_port(graph, rp, tol)
+        if port is None:
             continue
         section = graph.sections.get(port.section_id) if port.section_id else None
         if section is None or section.bbox_w <= 0 or section.bbox_h <= 0:
@@ -2204,23 +2239,19 @@ def _entry_approach_offenders(
                 continue
             if port.side == PortSide.RIGHT and prev[0] < bx1 - tol:
                 offenders.append(
-                    (rp, rp.edge.target, "approaches RIGHT entry from inside box")
+                    (rp, port.id, "approaches RIGHT entry from inside box")
                 )
             elif port.side == PortSide.LEFT and prev[0] > bx0 + tol:
-                offenders.append(
-                    (rp, rp.edge.target, "approaches LEFT entry from inside box")
-                )
+                offenders.append((rp, port.id, "approaches LEFT entry from inside box"))
         elif port.side in (PortSide.TOP, PortSide.BOTTOM):
             if abs(prev[0] - end[0]) > tol:
                 continue
             if port.side == PortSide.BOTTOM and prev[1] < by1 - tol:
                 offenders.append(
-                    (rp, rp.edge.target, "approaches BOTTOM entry from inside box")
+                    (rp, port.id, "approaches BOTTOM entry from inside box")
                 )
             elif port.side == PortSide.TOP and prev[1] > by0 + tol:
-                offenders.append(
-                    (rp, rp.edge.target, "approaches TOP entry from inside box")
-                )
+                offenders.append((rp, port.id, "approaches TOP entry from inside box"))
     return offenders
 
 
@@ -2294,6 +2325,7 @@ def _guard_no_artefactual_counter_flow(
     """
     from nf_metro.layout.routing.common import (
         _center_inter_row_channel,
+        _inter_row_band_fits,
         resolve_section,
         row_bottom_edge,
         row_top_edge,
@@ -2326,6 +2358,9 @@ def _guard_no_artefactual_counter_flow(
         if port is None or not port.is_entry or port.side != PortSide.RIGHT:
             continue
         tgt_top = row_top_edge(graph, tgt_row, default=tgt_sec.bbox_y)
+        tgt_bottom = row_bottom_edge(
+            graph, tgt_row, default=tgt_sec.bbox_y + tgt_sec.bbox_h
+        )
         pts = rp.points
         if len(pts) < 2:
             continue
@@ -2337,13 +2372,22 @@ def _guard_no_artefactual_counter_flow(
         gap_bottom = tgt_top
         if gap_bottom <= gap_top:
             continue  # no inter-row band above target -> dive was forced
+        # The with-flow band is a genuine alternative only when wide enough to
+        # clear both the upper row's bottom edge and the target row's header
+        # badge; a band too narrow for that forces the dive below.
+        if not _inter_row_band_fits(gap_top, gap_bottom):
+            continue
         gy = _center_inter_row_channel(gap_top, gap_bottom)
         exclude = {sid for sid in (src_sec.id, tgt_sec.id) if sid is not None}
         for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
             if abs(y2 - y1) > tol or abs(x2 - x1) <= tol:
                 continue  # horizontal runs only
-            if y1 < tgt_top - tol:
-                continue  # run sits above the target row's top -> with-flow band
+            # Only a long horizontal diving BELOW the whole row is artefactual.
+            # A run above the row bottom is either the with-flow band above the
+            # row or the intrinsic in-row approach into a far-side port (the
+            # outward-approach guard covers that), neither of which this catches.
+            if y1 < tgt_bottom - tol:
+                continue
             # (a) the run goes counter to the target row's flow.
             counter = (x2 < x1 - tol) if flow == "LR" else (x2 > x1 + tol)
             if not counter:

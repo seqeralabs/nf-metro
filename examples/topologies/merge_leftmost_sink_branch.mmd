@@ -1,0 +1,46 @@
+%%metro title: Merge Leftmost Sink Branch
+%%metro style: dark
+%%metro line: a | A | #e63946
+
+%%metro grid: blocker | 1,0
+%%metro grid: step_a | 3,0
+%%metro grid: step_b | 5,0
+%%metro grid: extra | 6,0
+%%metro grid: sink | 0,1
+
+graph LR
+    subgraph blocker [Blocker]
+        bl1[Block Start]
+        bl2[Block End]
+        bl1 -->|a| bl2
+    end
+
+    subgraph step_a [Step A]
+        a1[Process A]
+        a2[Out A]
+        a1 -->|a| a2
+    end
+
+    subgraph step_b [Step B]
+        b1[Process B]
+        b2[Out B]
+        b1 -->|a| b2
+    end
+
+    subgraph extra [Extra]
+        e1[Extra]
+        e2[Extra Out]
+        e1 -->|a| e2
+    end
+
+    subgraph sink [Sink]
+        t1[Collect]
+        t2[Report]
+        t1 -->|a| t2
+    end
+
+    bl2 -->|a| a1
+    a2 -->|a| b1
+    a2 -->|a| t1
+    b2 -->|a| e1
+    b2 -->|a| t1

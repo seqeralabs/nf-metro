@@ -1,0 +1,24 @@
+%%metro title: Stacked Left Exit Drop
+%%metro style: dark
+%%metro line: a | A | #e63946
+
+%%metro grid: sec1 | 0,0
+%%metro grid: sec2 | 0,1
+
+graph LR
+    subgraph sec1 [Section 1]
+        %%metro direction: RL
+        %%metro exit: left | a
+        s1[Start]
+        s2[Step]
+        s1 -->|a| s2
+    end
+
+    subgraph sec2 [Section 2]
+        %%metro entry: left | a
+        t1[Final]
+        t2[Done]
+        t1 -->|a| t2
+    end
+
+    s2 -->|a| t1

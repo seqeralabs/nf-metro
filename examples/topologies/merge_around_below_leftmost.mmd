@@ -1,0 +1,39 @@
+%%metro title: Merge Around Below Leftmost
+%%metro style: nfcore
+%%metro line: a | A | #e63946
+%%metro grid: src1  | 1,0
+%%metro grid: src2  | 2,0
+%%metro grid: extra | 3,0
+%%metro grid: tgt   | 0,1
+
+graph LR
+    subgraph src1 [Source 1]
+        a1[Step A]
+        a2[Out A]
+        a1 -->|a| a2
+    end
+
+    subgraph src2 [Source 2]
+        b1[Step B]
+        b2[Out B]
+        b1 -->|a| b2
+    end
+
+    subgraph extra [Extra]
+        %%metro entry: left | a
+        e1[Extra Step]
+        e2[Extra Out]
+        e1 -->|a| e2
+    end
+
+    subgraph tgt [Target]
+        %%metro entry: left | a
+        t1[Combine]
+        t2[Result]
+        t1 -->|a| t2
+    end
+
+    a2 -->|a| e1
+    a2 -->|a| t1
+    b2 -->|a| e1
+    b2 -->|a| t1

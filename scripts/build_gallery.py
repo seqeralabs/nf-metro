@@ -508,6 +508,37 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "column LEFT-entry target, past an intervening middle-row section that "
         "blocks the direct wrap.",
     ),
+    # --- Section-boundary routing discipline ---
+    (
+        "stacked_left_exit_drop",
+        TOPOLOGIES_DIR,
+        "A LEFT exit feeding a LEFT entry stacked directly below it: the "
+        "connector leads out into a clean channel left of the column and drops, "
+        "rather than dropping straight down the shared edge through the source "
+        "box.",
+    ),
+    (
+        "right_entry_from_above",
+        TOPOLOGIES_DIR,
+        "A RIGHT entry one row below a source on its right: the feed wraps to "
+        "approach the port from its outward (right) side instead of an L-shape "
+        "that slices across the source box.",
+    ),
+    (
+        "merge_leftmost_sink_branch",
+        TOPOLOGIES_DIR,
+        "A leftward merge whose trunk reaches a leftmost-column sink's LEFT "
+        "entry: the trunk wraps to rise on the box's far (left) side, with the "
+        "branch feeders converging on its shared channel, rather than crossing "
+        "the sink interior to the far-side port.",
+    ),
+    (
+        "merge_around_below_leftmost",
+        TOPOLOGIES_DIR,
+        "Two sources merging into a leftmost-column LEFT entry: the trunk routes "
+        "around the target's left side to enter from outside while the second "
+        "merge target is reached in-row.",
+    ),
     # --- Complex auto-layout regression isolation ---
     (
         "route_around_intervening",

@@ -259,10 +259,6 @@
     "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::for mj_id, mapped_ep in ctx.merge.entry_port_for.items():::#1": {
-    "note": "Reachable only via a defective render (merge-junction tangle); see #721.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if _corridor_is_viable(ctx, src, ep):::#1": {
     "note": "Reachable only via a defective render (route skirts/crosses section boundary); see #724.",
     "status": "needs-review"
@@ -353,10 +349,6 @@
   },
   "inter_section_handlers.py::if js and js.is_port:::#1": {
     "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
-    "status": "needs-review"
-  },
-  "inter_section_handlers.py::if mapped_ep != ep_id:::#1": {
-    "note": "Reachable only via a defective render (merge-junction tangle); see #721.",
     "status": "needs-review"
   },
   "inter_section_handlers.py::if shared_vx is not None:::#1": {
