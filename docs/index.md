@@ -89,6 +89,20 @@ Every layout/render option below also has a `%%metro` directive twin; an explici
 | `--height INTEGER` | auto | Output height in pixels |
 | `--animate / --no-animate` | off | Add animated balls traveling along lines |
 
+#### Embedding options
+
+Flags for producing an SVG to embed in another page or application. The [Embedding guide](embedding.md) explains when to use each.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--responsive / --no-responsive` | off | Emit `viewBox` only (no fixed `width`/`height`) for CSS-scalable embedding |
+| `--embed-font / --no-embed-font` | off | Inline Inter as a base64 `@font-face` so the SVG renders identically anywhere |
+| `--text-to-paths / --no-text-to-paths` | off | Convert text to vector paths (no font dependency; loses selectable text) |
+| `--bare / --no-bare` | off | Omit the title and outer padding so the canvas hugs the content (keeps the watermark) |
+| `--svg-class-prefix TEXT` | none | Prefix every SVG presentation class so multiple maps on one page don't collide |
+| `--no-dark-mode-css` | off | Suppress the `prefers-color-scheme: dark` block when the host manages its own theme |
+| `--no-chrome-css` | off | Bake concrete chrome colors instead of `--nfm-*` `var()` (needed for raster export, e.g. cairosvg) |
+
 #### Interactive HTML output
 
 `--format html` produces a self-contained `.html` file with the SVG inlined plus a small JS/CSS layer (no external dependencies, no network):
@@ -141,6 +155,10 @@ nf-metro info INPUT_FILE
 ## Writing metro maps
 
 Read the [Guide](guide.md) to learn how to write `.mmd` files, from minimal examples to multi-section pipelines with custom grid layouts.
+
+## Embedding maps in your own page
+
+Read the [Embedding guide](embedding.md) to put a rendered map into a docs site, dashboard, or app: responsive sizing, font portability, host theming, and driving a progress overlay from a running pipeline.
 
 ## Gallery
 

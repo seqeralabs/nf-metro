@@ -79,17 +79,32 @@ nf-metro render [OPTIONS] INPUT_FILE
 | `--height INTEGER` | auto | SVG height in pixels |
 | `--x-spacing FLOAT` | auto | Horizontal spacing between layers (widened from 60 only when wide labels would otherwise collide) |
 | `--y-spacing FLOAT` | auto | Vertical spacing between tracks (derived from the map's content so captioned icons and dense labels don't collide) |
-| `--max-layers-per-row INTEGER` | auto | Max layers before folding to next row |
+| `--fold-threshold INTEGER` | `15` | Max station-columns a section row may reach before wrapping to the next row |
 | `--animate / --no-animate` | off | Add animated balls traveling along lines |
 | `--debug / --no-debug` | off | Show debug overlay (ports, hidden stations, edge waypoints) |
 | `--logo PATH` | none | Logo image path (overrides `%%metro logo:` directive) |
-| `--line-order [definition\|span]` | from file | Line ordering strategy: `definition` preserves `.mmd` order, `span` sorts by section span (longest first) |
-| `--straight-diamonds / --no-straight-diamonds` | on | Keep top branch of diamond fork-joins on the main track. Use `--no-straight-diamonds` for symmetric fan-out. |
+| `--line-order [definition\|span]` | `definition` | Line ordering strategy: `definition` preserves `.mmd` order, `span` sorts by section span (longest first) |
+| `--diamond-style [straight\|symmetric]` | `straight` | Fork-join layout: `straight` keeps the top branch on the main track; `symmetric` fans the branches evenly |
 | `--center-ports / --no-center-ports` | off | Centre inter-section ports on the shorter of the two connected sections |
 | `--section-x-gap FLOAT` | `50` | Horizontal gap between sections |
-| `--section-y-gap FLOAT` | `40` | Vertical gap between sections |
+| `--section-y-gap FLOAT` | `50` | Vertical gap between sections |
 | `--from-nextflow` | off | Convert Nextflow `-with-dag` mermaid input before rendering |
-| `--title TEXT` | none | Pipeline title (used with `--from-nextflow`) |
+| `--title TEXT` | none | Pipeline title (overrides the `%%metro title:` directive) |
+
+#### Embedding options
+
+Flags for producing an SVG to embed in another page or application. See the
+[embedding guide](docs/embedding.md) for when to use each.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--responsive / --no-responsive` | off | Emit `viewBox` only (no fixed `width`/`height`) so the host can scale with CSS |
+| `--embed-font / --no-embed-font` | off | Inline Inter as a base64 `@font-face` so the SVG renders identically on any host |
+| `--text-to-paths / --no-text-to-paths` | off | Convert text to vector paths (no font dependency; loses selectable text; needs `fonttools[woff]`) |
+| `--bare / --no-bare` | off | Omit the title and outer padding so the canvas hugs the content (keeps the watermark) |
+| `--svg-class-prefix TEXT` | none | Prefix every SVG presentation class, so multiple maps on one page don't collide |
+| `--no-dark-mode-css` | off | Suppress the `prefers-color-scheme: dark` block when the host manages its own theme |
+| `--no-chrome-css` | off | Bake concrete chrome colors instead of `--nfm-*` `var()` (needed for raster export, e.g. cairosvg) |
 
 The `--logo` flag lets you use the same `.mmd` file with different logos for dark/light themes:
 

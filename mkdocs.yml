@@ -38,8 +38,10 @@ exclude_docs: |
 nav:
   - Home: index.md
   - Guide: guide.md
+  - Embedding: embedding.md
   - Live progress: live.md
   - Data manifest: manifest.md
+  - Embed contract: embed.md
   - Nextflow Import: nextflow.md
   - nf-core Pipelines: pipelines/index.md
   - Gallery: gallery/index.md
