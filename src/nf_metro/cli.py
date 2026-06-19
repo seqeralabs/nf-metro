@@ -768,3 +768,28 @@ def validate_svg_cmd(svg_file: Path) -> None:
         f"Valid: {len(manifest.get('nodes', []))} nodes, "
         f"schema version {manifest.get('version')}"
     )
+
+
+@cli.command(name="embed-script")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write to a file instead of stdout.",
+)
+def embed_script_cmd(output: Path | None) -> None:
+    """Output the nf-metro embed driver JS.
+
+    Prints the ``attachMetroMap()`` driver to stdout (or writes to ``-o``).
+    Load it on a host page alongside an nf-metro SVG to get the documented
+    interactive API.  See ``docs/embed.md`` for usage.
+    """
+    from nf_metro.render.driver import get_driver_js
+
+    js = get_driver_js()
+    if output is not None:
+        output.write_text(js)
+        click.echo(f"Written to {output}")
+    else:
+        click.echo(js, nl=False)
