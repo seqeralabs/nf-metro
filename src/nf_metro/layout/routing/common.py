@@ -126,6 +126,37 @@ def row_top_edge(
     return min((s.bbox_y for s in secs), default=default) if secs else default
 
 
+def iter_inter_row_gaps(graph: MetroGraph) -> Iterator[tuple[int, float, float]]:
+    """Yield ``(upper_row, top, bottom)`` for each inter-row gap, top to bottom.
+
+    The gap between adjacent grid rows ``upper_row`` and ``upper_row + 1`` spans
+    ``[top, bottom]`` (the upper row's bottom edge to the lower row's top edge).
+    A row pair where either edge is absent (no section in that row) is skipped.
+    """
+    rows = sorted({s.grid_row for s in graph.sections.values()})
+    for upper, lower in zip(rows, rows[1:]):
+        top = row_bottom_edge(graph, upper, default=None)  # type: ignore[arg-type]
+        bottom = row_top_edge(graph, lower, default=None)  # type: ignore[arg-type]
+        if top is None or bottom is None:
+            continue
+        yield upper, top, bottom
+
+
+def inter_row_gap_upper_row(graph: MetroGraph, y: float) -> int | None:
+    """Grid row directly above the inter-row gap that contains *y*.
+
+    Returns the upper of the two rows bounding the gap whose
+    ``[row_bottom, next_row_top]`` band holds *y*; ``None`` when *y* falls in no
+    gap (e.g. a deep dive below every row).  A handler declares this row-pair
+    identity on a :class:`TrunkSlot` so the materialization pass groups trunks
+    by gap without re-deriving it from their Ys.
+    """
+    for upper, top, bottom in iter_inter_row_gaps(graph):
+        if top - COORD_TOLERANCE <= y <= bottom + COORD_TOLERANCE:
+            return upper
+    return None
+
+
 def max_grid_row_with_content(graph: MetroGraph) -> int | None:
     """Bottommost grid row occupied by a section with rendered width.
 
@@ -363,6 +394,28 @@ class GapSlot:
     n_slots: int
 
 
+@dataclass(frozen=True)
+class TrunkSlot:
+    """The inter-row gap a route's horizontal bypass trunk runs in.
+
+    The trunk twin of :class:`GapSlot`.  A U-shaped bypass route runs its
+    interior horizontal leg through an inter-row gap; a handler declares *which*
+    gap without committing to a concrete Y, and :func:`_materialize_trunk_slots`
+    groups every declared trunk by gap and fans the co-travelling lines into a
+    concentric band.
+
+    ``gap_upper_row`` is the grid row directly above the gap (the gap separates
+    rows ``gap_upper_row`` and ``gap_upper_row + 1``), or ``None`` for a deep
+    cross-row dive that clears every row and so sits in no single inter-row gap.
+    A present-but-``None`` slot thus distinguishes a trunk in no gap from a route
+    with no trunk at all (``trunk_slot is None``).  The trunk's traversal
+    direction and its rank within the band are read from the routed geometry at
+    materialization, so they are not declared here.
+    """
+
+    gap_upper_row: int | None
+
+
 @dataclass
 class RoutedPath:
     """A routed path for an edge, consisting of (x, y) waypoints."""
@@ -385,6 +438,12 @@ class RoutedPath:
     Empty until a handler declares placement symbolically.  A route may own
     more than one (a U-shaped bypass declares both its descent and its ascent
     channel); :func:`_materialize_gap_slots` resolves each to a concrete X."""
+    trunk_slot: TrunkSlot | None = None
+    """Symbolic inter-row gap for this route's horizontal bypass trunk.
+
+    ``None`` until a handler that emits a U-shaped bypass declares which gap its
+    trunk runs in; :func:`_materialize_trunk_slots` resolves it to a concrete Y.
+    A route owns at most one trunk, so this is a single slot, not a list."""
 
     def declare_gap_slot(
         self,
@@ -415,6 +474,15 @@ class RoutedPath:
                 n_slots=n_slots,
             )
         )
+
+    def declare_trunk_slot(self, *, gap_upper_row: int | None) -> None:
+        """Record the inter-row gap this route's horizontal bypass trunk runs in.
+
+        :func:`_materialize_trunk_slots` groups every declared trunk by
+        ``gap_upper_row`` and assigns the final concentric Y, reading each
+        trunk's direction and band rank from the routed geometry.
+        """
+        self.trunk_slot = TrunkSlot(gap_upper_row=gap_upper_row)
 
 
 def initial_fanout_descent_span(

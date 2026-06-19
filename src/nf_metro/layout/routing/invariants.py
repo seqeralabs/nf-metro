@@ -1922,6 +1922,55 @@ def check_gap_channels_materialized(
     return out
 
 
+@dataclass
+class UndeclaredTrunk:
+    """An inter-section route's horizontal bypass trunk carries no :class:`TrunkSlot`.
+
+    :func:`~nf_metro.layout.routing.normalize._materialize_trunk_slots` only fans
+    trunks a handler declared, so an undeclared trunk is excluded from its gap's
+    band and left fused on a sibling at its raw routing Y -- the overlap the
+    materialization exists to resolve.  A handler that emits a U-shaped bypass
+    must route through :func:`_route_inter_section` (which calls
+    :func:`_declare_trunk`) so its trunk is annotated.
+    """
+
+    line_id: str
+    edge: tuple[str, str]
+    y: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"undeclared trunk: line {self.line_id!r} "
+            f"({self.edge[0]}->{self.edge[1]}) runs a horizontal bypass trunk at "
+            f"y={self.y:.1f} with no declared TrunkSlot"
+        )
+
+
+def check_trunks_declared(routes: list[RoutedPath]) -> list[UndeclaredTrunk]:
+    """Return inter-section horizontal trunks a handler placed but did not declare.
+
+    Every inter-section route carrying a U-shaped bypass trunk must annotate it
+    with a :class:`TrunkSlot` so :func:`_materialize_trunk_slots` can fan it into
+    its gap's concentric band.  A trunk on a route with no slot escaped the
+    declaration chokepoint and would be left at its raw Y.
+    """
+    out: list[UndeclaredTrunk] = []
+    for rp in routes:
+        if not rp.is_inter_section or rp.trunk_slot is not None:
+            continue
+        trunks = list(iter_horizontal_trunks(rp))
+        if trunks:
+            out.append(
+                UndeclaredTrunk(
+                    line_id=rp.line_id,
+                    edge=(rp.edge.source, rp.edge.target),
+                    y=trunks[0][1].y,
+                )
+            )
+    return out
+
+
 class CurveInvariantError(RuntimeError):
     """A rendered route contains a bundle-curve defect.
 
@@ -1990,6 +2039,10 @@ def assert_render_curve_invariants(
             "undeclared gap channel",
             check_gap_channels_materialized(graph, routes),
         ),
+        (
+            "undeclared trunk",
+            check_trunks_declared(routes),
+        ),
     ]
     messages: list[str] = []
     for label, violations in named_checks:
@@ -2029,8 +2082,10 @@ __all__ = [
     "Side",
     "StackedElbowGraze",
     "UndeclaredGapChannel",
+    "UndeclaredTrunk",
     "check_bundle_order_preserved",
     "check_gap_channels_materialized",
+    "check_trunks_declared",
     "check_concentric_bundle_corners",
     "check_fanout_tail_join",
     "check_merge_branches_meet_trunk",

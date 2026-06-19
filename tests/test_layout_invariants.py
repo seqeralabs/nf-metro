@@ -1238,7 +1238,7 @@ def test_inter_row_trunks_bundle_tightly(fixture):
     tight bundle; opposite-direction flows sit on separate, clear bands.
 
     Several bypass routes dipping into the same inter-row channel used to land
-    at a loose smear of distinct Ys (issue #484).  ``_normalize_bypass_trunks``
+    at a loose smear of distinct Ys (issue #484).  ``_materialize_trunk_slots``
     now splits the channel by traversal direction (``sign_x``) and lays each
     direction on its own band: SAME-direction co-travellers fan tight
     (``OFFSET_STEP``), while OPPOSITE-direction flows are pushed onto separate
@@ -1300,7 +1300,7 @@ def test_opposite_direction_trunks_on_separate_bands(fixture):
     """Opposite-direction flows sharing one inter-row gap must sit on separate,
     clear bands - never smooshed into one tight bundle (issue #484).
 
-    ``_normalize_bypass_trunks`` splits a shared inter-row channel by traversal
+    ``_materialize_trunk_slots`` splits a shared inter-row channel by traversal
     direction (``sign_x``) and lays each direction on its own band with a clear
     ``BUNDLE_TO_BUNDLE_CLEARANCE`` gap.  Two overlapping trunks of OPPOSITE
     direction must therefore never fan to within one ``OFFSET_STEP`` of each

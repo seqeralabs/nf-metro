@@ -29,9 +29,8 @@ from nf_metro.layout.routing.common import (
     column_gap_edges,
     initial_fanout_descent_span,
     iter_horizontal_trunks,
+    iter_inter_row_gaps,
     iter_vertical_segments,
-    row_bottom_edge,
-    row_top_edge,
     symmetric_bundle_midpoint,
     trunk_segments_cross,
 )
@@ -292,37 +291,52 @@ def _collect_htrunks(
     return out
 
 
-def _group_channel_trunks(
-    trunks: list[_HTrunk], step: float, ctx: _RoutingCtx | None = None
-) -> list[list[_HTrunk]]:
+def _declared_htrunks(routes: list[RoutedPath]) -> list[_HTrunk]:
+    """Every horizontal bypass trunk whose handler declared a :class:`TrunkSlot`.
+
+    The trunks the materialization pass owns: exempt and non-exempt alike,
+    filtered to those carrying a declared slot so an undeclared leg (which would
+    have no gap to fan into) is left to :func:`_dogleg_off_exempt_trunks`.
+    """
+    return [
+        t
+        for t in _collect_htrunks(routes, include_exempt=True)
+        if t.route.trunk_slot is not None
+    ]
+
+
+def _group_channel_trunks(trunks: list[_HTrunk], step: float) -> list[list[_HTrunk]]:
     """Group horizontal bypass trunks that visually share one channel.
 
     Trunks belong together when they share a dip direction and transitively
     overlap in X within one channel.  Channel membership is decided two ways:
 
-    - When *ctx* is given and both trunks fall inside the SAME inter-row gap
-      (the ``[row_bottom, next_row_top]`` envelope from
-      :func:`_inter_row_gap_band`), they share that channel however far apart
-      their current Ys sit.  Several bypass routes that dip into one inter-row
-      gap are one visual channel even when their per-bundle ``nest_offset``
-      left them a smear of distinct Ys, so they must fan into a single tight
-      ``OFFSET_STEP`` bundle rather than separate loose groups.
-    - Otherwise (no ctx, or a trunk outside every inter-row gap) membership
-      falls back to proximity to the NEAREST current member: trunks arrive
-      pre-stacked by their per-bundle ``nest_offset``, so a trunk one ``step``
-      deeper than the group's current deepest member still belongs.  A
-      genuinely separate channel a full row away (Ys far outside the chain)
+    - When both trunks declare the SAME inter-row gap (the ``gap_upper_row`` on
+      their :class:`TrunkSlot`), they share that channel however far apart their
+      current Ys sit.  Several bypass routes that dip into one inter-row gap are
+      one visual channel even when their per-bundle ``nest_offset`` left them a
+      smear of distinct Ys, so they must fan into a single tight ``OFFSET_STEP``
+      bundle rather than separate loose groups.
+    - For a deep cross-row dive declaring no gap (``gap_upper_row is None``)
+      membership falls back to proximity to the NEAREST current member: such
+      trunks arrive pre-stacked by their per-bundle ``nest_offset``, so a trunk
+      one ``step`` deeper than the group's current deepest member still belongs.
+      A genuinely separate channel a full row away (Ys far outside the chain)
       then starts its own group.
 
     The shared X-overlap requirement keeps distinct corridors in the same gap
     band - different X regions that never overlap - in separate groups.
     """
     band = max(step, COORD_TOLERANCE)
-    gap_of = {id(t): _inter_row_gap_band(ctx, t.y) for t in trunks} if ctx else {}
 
     def _same_channel(o: _HTrunk, t: _HTrunk) -> bool:
-        go, gt = gap_of.get(id(o)), gap_of.get(id(t))
-        if go is not None and go == gt:
+        go, gt = o.route.trunk_slot, t.route.trunk_slot
+        if (
+            go is not None
+            and gt is not None
+            and go.gap_upper_row is not None
+            and go.gap_upper_row == gt.gap_upper_row
+        ):
             return True
         return abs(o.y - t.y) <= band
 
@@ -381,7 +395,7 @@ def _reorder_convergence_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> 
 
     Several inter-section lines ride one bypass trunk - a single concentric
     bundle, ``OFFSET_STEP`` apart - below a LEFT entry port's row and rise
-    into that common port.  ``_normalize_bypass_trunks`` stacks the trunk by
+    into that common port.  ``_materialize_trunk_slots`` stacks the trunk by
     spatial approach (the nearer source's lines on top), but the riser peel
     x-order and the port-slot Ys are assigned in line-declaration order by
     independent passes.  When the two orders disagree, a line on the bottom of
@@ -802,33 +816,33 @@ def _merge_feeder_groups(
     return groups
 
 
-def _normalize_bypass_trunks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
-    """Separate horizontal bypass trunks that share one below-row channel.
+def _materialize_trunk_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Resolve every declared :class:`TrunkSlot` to a concentric channel Y.
 
-    Several inter-section bypass routes can dip into the same below-row
-    channel and, with their per-line ``nest_offset`` resolved independently
-    per bundle, end up drawn at the *same* Y (overlapping) or at a loose
-    smear of distinct Ys (issue #484).  This post-pass mirrors
-    :func:`_materialize_gap_slots` for the horizontal trunk legs: trunks
-    that share a channel (same inter-row gap, same dip direction, overlapping
-    X) are fanned ``OFFSET_STEP`` apart into a concentric bundle, with the
-    widest-reaching trunk on the outside so the nesting introduces no
-    crossings.
+    The horizontal-trunk twin of :func:`_materialize_gap_slots`.  Handlers that
+    emit a U-shaped bypass annotate its trunk with the inter-row gap it occupies
+    (:meth:`RoutedPath.declare_trunk_slot`); this pass groups the trunks by that
+    declared gap and fans the lines sharing a channel into one concentric
+    ``OFFSET_STEP`` bundle, widest-reaching trunk outermost so the nesting
+    introduces no crossings.  The gap is taken from the annotation, not the
+    trunk's Y, precisely because this pass reassigns that Y.  Each trunk's
+    traversal direction and band rank are read from its current geometry.
 
-    Channel membership uses the inter-row gap envelope, so wrap-route trunks
-    placed by their own handler (``normalize_exempt``) that co-travel through
-    the same gap join the bundle too; they are only fanned when grouped with a
-    non-exempt trunk in that gap (a genuine shared multi-line channel), so a
-    pure-exempt run keeps its handler-owned Y and is left to
+    Concentric fanning, crossing-minimal slot ordering and the flanking-radius
+    recompute are per-gap geometry a single handler cannot do alone (it needs
+    every trunk in the gap at once), so they stay here.  A group of only
+    handler-owned (``normalize_exempt``) trunks keeps its geometry untouched;
+    an exempt trunk sharing a channel with a non-exempt one joins the fan, and a
+    non-exempt trunk left fused on an unbundled exempt run is cleared by
     :func:`_dogleg_off_exempt_trunks`.
 
-    Trunks already at distinct Ys, or alone in their channel, are left
+    Trunks alone in their channel, or already at distinct Ys, are left
     untouched; the flanking corner radii are recomputed for any trunk that
     actually moves so the bundle stays concentric.
     """
     step = ctx.offset_step
-    trunks = _collect_htrunks(routes, include_exempt=True)
-    groups = _group_channel_trunks(trunks, step, ctx) if len(trunks) >= 2 else []
+    trunks = _declared_htrunks(routes)
+    groups = _group_channel_trunks(trunks, step) if len(trunks) >= 2 else []
 
     # Routes whose trunk this pass has placed into a concentric bundle; the
     # dogleg pass treats exempt trunks as fixed obstacles and shoves nearby
@@ -1093,14 +1107,14 @@ def _suboptimal_trunk_bands(
     """Same-direction inter-row trunk bands whose realized Y order leaves
     avoidable crossings: ``(band y, current crossings, best achievable)``.
 
-    Reconstructs the bands :func:`_normalize_bypass_trunks` reorders, then
+    Reconstructs the bands :func:`_materialize_trunk_slots` reorders, then
     checks each realized top-to-bottom order against the crossing-minimal
     permutation.  An empty result means every band is crossing-optimal.
     """
-    trunks = _collect_htrunks(routes, include_exempt=True)
+    trunks = _declared_htrunks(routes)
     if len(trunks) < 2:
         return []
-    groups = _group_channel_trunks(trunks, ctx.offset_step, ctx)
+    groups = _group_channel_trunks(trunks, ctx.offset_step)
     out: list[tuple[float, int, int]] = []
     for grp in groups:
         if len({id(t.route) for t in grp}) < 2:
@@ -1182,12 +1196,7 @@ def _inter_row_gap_band(ctx: _RoutingCtx, y: float) -> tuple[float, float] | Non
     Scans adjacent grid rows for the gap whose ``[row_bottom, next_row_top]``
     band contains *y*; returns ``None`` when *y* doesn't fall in any gap.
     """
-    rows = sorted({s.grid_row for s in ctx.graph.sections.values()})
-    for upper, lower in zip(rows, rows[1:]):
-        top = row_bottom_edge(ctx.graph, upper, default=None)  # type: ignore[arg-type]
-        bottom = row_top_edge(ctx.graph, lower, default=None)  # type: ignore[arg-type]
-        if top is None or bottom is None:
-            continue
+    for _upper, top, bottom in iter_inter_row_gaps(ctx.graph):
         if top - COORD_TOLERANCE <= y <= bottom + COORD_TOLERANCE:
             return top, bottom
     return None

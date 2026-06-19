@@ -84,7 +84,7 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _inter_row_gap_band,
     _join_fanout_upstream_tails,
     _materialize_gap_slots,
-    _normalize_bypass_trunks,
+    _materialize_trunk_slots,
     _plan_trunk_band,
     _port_peeloff_tail,
     _reorder_convergence_peeloff,
@@ -196,7 +196,7 @@ def _route_edges(
     moves = _center_bubble_stations(routes, graph)
     _spread_diagonal_bundles(routes, ctx)
     _materialize_gap_slots(routes, ctx)
-    _normalize_bypass_trunks(routes, ctx)
+    _materialize_trunk_slots(routes, ctx)
     _reorder_convergence_peeloff(routes, ctx)
     # Coincidence runs after the trunk/gap channels are finalised: it snaps
     # same-line tracks onto a reference read from that final geometry (the

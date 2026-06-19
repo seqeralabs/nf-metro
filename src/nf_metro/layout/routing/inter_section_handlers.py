@@ -55,7 +55,9 @@ from nf_metro.layout.routing.common import (
     horizontal_direction,
     inter_column_channel_x,
     inter_row_channel_y,
+    inter_row_gap_upper_row,
     inter_row_wrap_band,
+    iter_horizontal_trunks,
     iter_vertical_segments,
     merge_trunk_force_cross_row,
     resolve_section,
@@ -612,9 +614,12 @@ def _route_inter_section(
     f = _build_inter_facts(edge, src, tgt, ctx)
     rule = _match_inter_section_rule(f)
     if rule is not None:
-        return rule.route(f)
-    # Standard L-shape: the default when no rule above claims the edge.
-    return _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
+        route = rule.route(f)
+    else:
+        # Standard L-shape: the default when no rule above claims the edge.
+        route = _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
+    _declare_trunk(route, ctx)
+    return route
 
 
 def _match_inter_section_rule(f: _InterFacts) -> _Rule | None:
@@ -1228,6 +1233,26 @@ def _route_bypass(
     _declare_channel(route, ctx, gap1_x, gap1_vertical, g1_j, g1_n)
     _declare_channel(route, ctx, gap2_x, gap2_vertical, g2_j, g2_n)
     return route
+
+
+def _declare_trunk(route: RoutedPath | None, ctx: _RoutingCtx) -> None:
+    """Declare the inter-row gap an inter-section route's horizontal trunk runs in.
+
+    Called once per inter-section route from :func:`_route_inter_section`; a
+    no-op for routes with no interior horizontal trunk.  Read from the built
+    geometry like :func:`_declare_channel`: the trunk leg's actual Y names its
+    gap via :func:`inter_row_gap_upper_row`.  A deep dive that clears every row
+    falls in no gap and declares ``gap_upper_row=None``;
+    :func:`_materialize_trunk_slots` then groups those by proximity rather than
+    a shared gap.
+    """
+    if route is None:
+        return
+    trunk = next(iter(iter_horizontal_trunks(route)), None)
+    if trunk is None:
+        return
+    _k, seg = trunk
+    route.declare_trunk_slot(gap_upper_row=inter_row_gap_upper_row(ctx.graph, seg.y))
 
 
 def _declare_channel(
