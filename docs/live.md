@@ -75,6 +75,9 @@ the same standard any non-metro tool can emit. Set `%%metro manifest: false`
 (or `--no-manifest`) to emit the drawn map only, with no manifest, no
 `data-node-*` attributes, and no station-group wrapper.
 
+`serve` is one ready-made consumer of that manifest. To drive the overlay from
+your **own** application instead, see the [Embedding guide](embedding.md).
+
 ## 2. Serve the map
 
 `serve` hosts **one** map at a stable URL. Each run's `started` event resets it,

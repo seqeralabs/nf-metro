@@ -1,4 +1,9 @@
-# Embed contract
+# Embed contract: `data-*` attributes and driver API
+
+This is the **reference** for the stable surface a host depends on. If you are
+starting out, read the task-oriented [Embedding guide](embedding.md) first - it
+explains which output to produce and how to size, theme, and drive a map - and
+come here for the exact attribute vocabulary and driver method signatures.
 
 !!! warning "Experimental - pre-1.0, not yet stable"
     The embed contract is new and still being shaped.  The `data-*` attribute
@@ -61,18 +66,10 @@ svg.querySelectorAll('[data-section-lines]')
 
 ### Manifest set
 
-These attributes are written by the manifest system and carry the coordinate
-and pattern data for overlays.  They are documented in full on the [Data
-manifest](manifest.md) page.
-
-| Attribute | Element | Value |
-|-----------|---------|-------|
-| `data-node-id` | Station wrapper `<g>` | Stable id, matches `data-station-id` and `node.id` in the manifest. |
-| `data-node-cx` | Station wrapper `<g>` | Centre x in SVG user units. |
-| `data-node-cy` | Station wrapper `<g>` | Centre y in SVG user units. |
-| `data-node-r` | Station wrapper `<g>` | Nominal marker radius. |
-| `data-node-groups` | Station wrapper `<g>` | Comma-separated line ids (same as `data-station-lines`). |
-| `data-node-region` | Station wrapper `<g>` | Section id, omitted when the station has no section. |
+A second set - `data-node-id` and `data-node-cx`/`-cy`/`-r` (plus
+`data-node-groups`/`-region`) - carries the coordinate and pattern data overlays
+need. It is written by the manifest system and specified in full under
+[Per-node attributes](manifest.md#per-node-attributes) on the Data manifest page.
 
 Both sets join on the station id (`data-station-id` = `data-node-id` =
 `node.id` in the manifest JSON).
@@ -125,7 +122,7 @@ const api = attachMetroMap({
 
 The `lines` array must match the lines embedded in the SVG.  The easiest way to
 obtain it is from the `groups` array in the manifest (see
-[`getManifest`](#getmanifestid) below).
+[`getManifest`](#getmanifest) below).
 
 ### API methods
 
@@ -202,30 +199,12 @@ Alias for `clearHighlight()`.
 ## Overlay path
 
 For a coordinate-accurate progress overlay (e.g. lighting up stations as a
-pipeline runs), use the manifest `overlay_svg()` helper to create a
-transparent SVG layer that shares the base SVG's `viewBox`:
-
-```python
-from nf_metro.manifest import read_manifest, matching_node_ids, overlay_svg
-
-base_svg = open('map.svg').read()
-manifest = read_manifest(base_svg)
-
-# Find which station(s) represent a running process:
-ids = matching_node_ids(manifest, 'NFCORE_RNASEQ:RNASEQ:ALIGN_STAR_SALMON:STAR_ALIGN')
-
-# Build status markers:
-markers = ''.join(
-    f'<circle cx="{n["x"]}" cy="{n["y"]}" r="{n["r"] + 4}" '
-    f'fill="none" stroke="#4c9" stroke-width="2"/>'
-    for n in manifest['nodes'] if n['id'] in ids
-)
-overlay = overlay_svg(manifest, body=markers)
-```
-
-Stack the overlay over the base SVG in your HTML using absolute positioning
-and matching `viewBox` values.  The manifest's `width`/`height` fields give
-the shared coordinate space.
+pipeline runs), draw a transparent layer that shares the base SVG's `viewBox`
+and place markers at each node's manifest coordinates. The
+[`overlay_svg()`](manifest.md#the-functions) helper builds that layer, and the
+manifest tutorial,
+[Light up a diagram as a job runs](manifest.md#tutorial-light-up-a-diagram-as-a-job-runs),
+walks the full read-match-draw recipe end to end.
 
 The `highlightLine` / `selectNode` API and the overlay approach are
 complementary:

@@ -249,52 +249,26 @@ the overlay is a cheap, disposable status layer. The coordinate-space rules:
 - Each node's `x`/`y`/`r` are absolute units in that space, so an overlay
   marker at `(x, y)` lands on the node.
 
-A worked end-to-end example - read the embedded manifest, match a runtime
-process name to a node, and draw a status layer with `overlay_svg()` - is in the
-manifest tutorial:
-**[Light up a diagram as a job runs](manifest.md#tutorial-light-up-a-diagram-as-a-job-runs)**.
+The recipe is always the same three steps: `read_manifest` the committed SVG,
+`match_node_ids` each runtime event to a node, and redraw an `overlay_svg()`
+status layer over the base. The manifest tutorial,
+**[Light up a diagram as a job runs](manifest.md#tutorial-light-up-a-diagram-as-a-job-runs)**,
+walks it end to end in ~50 lines of Python (with the matching semantics and the
+node state model documented alongside it on the [Data manifest](manifest.md)
+page).
 
-The sketch, in Python:
-
-```python
-from nf_metro.manifest import read_manifest, match_node_ids, overlay_svg
-
-manifest = read_manifest(open("pipeline.svg").read())
-
-def status_layer(states):  # {node_id: "running" | "done" | ...}
-    colors = {"running": "#ffc23a", "done": "#2bee92", "failed": "#ff4d4d"}
-    markers = "".join(
-        f'<circle cx="{n["x"]}" cy="{n["y"]}" r="{n["r"] + 5}" fill="none" '
-        f'stroke="{colors[states[n["id"]]]}" stroke-width="3.5"/>'
-        for n in manifest["nodes"] if n["id"] in states
-    )
-    return overlay_svg(manifest, markers, extra_attrs='style="pointer-events:none"')
-
-# On each event from your runtime:
-#   ids = match_node_ids(manifest, "NFCORE_RNASEQ:RNASEQ:ALIGN_STAR_SALMON:STAR_ALIGN")
-#   update a {node_id: state} map, then re-render status_layer(states) on top.
-```
-
-For a ready-made server that does exactly this for a live Nextflow run, see
-[Live progress](live.md).
+For a ready-made server that does exactly this for a live Nextflow run - no code
+to write - see [Live progress](live.md).
 
 ## Versioning and stability
 
 The manifest schema and the driver contract are versioned independently, both
-`1.0` today:
-
-```python
-from nf_metro.manifest import MANIFEST_SCHEMA_VERSION       # "1.0"
-from nf_metro.render.driver import DRIVER_CONTRACT_VERSION  # "1.0"
-```
-
-The schema version is `major.minor`: the minor part increments for additive,
-backward-compatible changes; the major part for breaking ones. **Consumers must
-ignore unknown fields.** Stable surface (keyed to the version): the `data-*`
-attribute names, the manifest fields, the `0 0 w h` coordinate rule, and the
-driver method names. Everything else - exact pixel coordinates, internal class
-names beyond the documented ones, the layout - is internal and may change.
-Until a stability notice, pin to a specific nf-metro release.
+`1.0` today. The stable surface keyed to those versions - the `data-*` attribute
+names, the manifest fields, the `0 0 w h` coordinate rule, and the driver method
+names - and the `major.minor` rules for changing it are specified under
+[Versioning](embed.md#versioning) on the Embed contract page. **Consumers must
+ignore unknown fields**, and until a stability notice, pin to a specific
+nf-metro release.
 
 ## Attribution
 

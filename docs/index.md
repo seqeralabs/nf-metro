@@ -113,13 +113,7 @@ nf-metro render pipeline.mmd --format html -o pipeline.html
 
 The page supports drag-to-pan, scroll-to-zoom, station hover tooltips, and a clickable line legend. Clicking a line isolates it: stations and sections not carrying that line are hidden and the view zooms to the bounding box of what remains. Click again, hit `Esc`, or use the Reset button to restore.
 
-The **Embed&hellip;** button opens a panel with three copyable snippets:
-
-- **Inline HTML** - a self-contained `<div>` you paste into any HTML host (MkDocs, Confluence, Notion, blog templates). Keeps full interactivity, no iframe.
-- **iframe** - a one-liner pointing at the hosted `.html` file.
-- **Static SVG** - the raw `<svg>` markup for hosts that strip scripts.
-
-GitHub READMEs strip `<script>` tags, so embed there as a static SVG (or link out to a hosted version). Most static-site generators and internal wikis run the inline-HTML snippet as-is.
+The **Embed&hellip;** button opens a panel with copyable inline-HTML, iframe, and static-SVG snippets. The [Embedding guide](embedding.md) explains when to reach for each, plus responsive sizing, font portability, host theming, and progress overlays.
 
 ### `nf-metro convert`
 
