@@ -20,6 +20,7 @@ from nf_metro.layout.constants import (
     CURVE_RADIUS,
     DIAGONAL_RUN,
     MIN_STRAIGHT_EDGE,
+    OFFSET_STEP,
     RAIL_TERMINUS_FAN_LEAD,
 )
 from nf_metro.layout.routing.bundle import build_tapered_bundle
@@ -61,42 +62,46 @@ def _line_rail_y(graph: MetroGraph, station_id: str, line_id: str) -> float:
     return st.y
 
 
-def _off_track_drop_stagger(
+def _off_track_drop_order(
     graph: MetroGraph,
     feeder: Station,
-    edge: Edge,
-) -> float:
-    """Horizontal offset for an off-track feeder line's vertical drop.
+    on_rail: Station,
+) -> list[str]:
+    """Lines bundled through one off-track elbow, in left-to-right drop order.
 
-    Several lines feeding the same consumer from one off-track input would
-    otherwise drop on the same X and overlap in the vertical leg (merging into
-    one fat line).  Each feeding line instead drops on its own X, ordered by
-    its target rail Y (top rail leftmost), one OFFSET_STEP apart and centred on
-    the feeder, so the bundle stays as parallel lines and the elbows form a
-    tidy staircase into the rails.
+    Several lines feeding (or fed by) the same consumer would otherwise drop on
+    the same X and merge into one fat vertical leg.  Each drops on its own X, one
+    OFFSET_STEP apart and centred on the feeder, so the bundle stays parallel.
+
+    The order is chosen so the bundle nests through the elbow's single corner
+    without twisting: the line on the inside of the turn takes the inside drop X.
+    For the baseline corner -- consumer to the right of the feeder, feeder above
+    the rails (drop down, turn right) -- the lowest rail (largest Y) drops
+    leftmost.  A mirrored corner (consumer to the left, or feeder below the
+    rails) flips one of the turn's two axes, so the drop order reverses; without
+    that the bundle crosses itself through the bend.
     """
-    from nf_metro.layout.constants import OFFSET_STEP
-
-    feeder_id = feeder.id
-    consumer_id = edge.target if edge.source == feeder_id else edge.source
-    # Sibling feeder lines: every line carried by an edge between this feeder
-    # and the same consumer, ordered by their target rail Y.
     sib_rails: list[tuple[float, str]] = []
     for e in graph.edges:
-        if {e.source, e.target} != {feeder_id, consumer_id}:
+        if {e.source, e.target} != {feeder.id, on_rail.id}:
             continue
-        on_rail_id = e.target if e.source == feeder_id else e.source
-        sib_rails.append((_line_rail_y(graph, on_rail_id, e.line_id), e.line_id))
-    # Order the drop Xs so the bundle does NOT twist through the drop->rail
-    # elbow: the line landing on the LOWER rail (larger Y) drops on the LEFT
-    # (smaller X), matching the left/right ordering the rightward outgoing run
-    # expects (a D->R corner maps the down run's left side to the run's bottom).
+        sib_rails.append((_line_rail_y(graph, on_rail.id, e.line_id), e.line_id))
     sib_rails.sort(reverse=True)
     order = [lid for _y, lid in sib_rails]
-    if edge.line_id not in order or len(order) <= 1:
+    if sib_rails:
+        consumer_left = on_rail.x < feeder.x
+        feeder_below = feeder.y > sib_rails[0][0]
+        if consumer_left != feeder_below:
+            order.reverse()
+    return order
+
+
+def _drop_stagger(order: list[str], line_id: str) -> float:
+    """Signed lateral offset of *line_id*'s drop from the feeder centre."""
+    n = len(order)
+    if n <= 1 or line_id not in order:
         return 0.0
-    k = order.index(edge.line_id)
-    return (k - (len(order) - 1) / 2.0) * OFFSET_STEP
+    return (order.index(line_id) - (n - 1) / 2.0) * OFFSET_STEP
 
 
 def _route_off_track_elbow(
@@ -108,12 +113,6 @@ def _route_off_track_elbow(
 ) -> RoutedPath:
     """Route one off-track feeder line as a drop -> turn-onto-rail elbow.
 
-    An off-track source/target sits above the rails and feeds (or is fed by) the
-    consumer's rail.  The line drops on its own staggered X, turns once, and runs
-    flat to the consumer.  Sibling feeder lines (a bundle feeding the same
-    consumer) drop on staggered Xs centred on the feeder, so the bundle straddles
-    the bend: one line lands on the inside of the turn.
-
     Routed through :func:`build_tapered_bundle` with this line as the lone member
     and the full sibling fan declared as ``bundle_offsets``, so the corner anchors
     on the bundle's innermost-of-turn line and no arc falls below the floor.  The
@@ -121,6 +120,7 @@ def _route_off_track_elbow(
     is zero and the staggered drop is the only fan on the turning leg.
     """
     rail_y = _line_rail_y(graph, on_rail.id, edge.line_id)
+    order = _off_track_drop_order(graph, feeder, on_rail)
     # The staggered drop displaces the vertical leg in X; the builder's normal
     # flips that X by the leg's travel direction, so pre-sign the stagger by the
     # direction the vertical leg runs in the centreline below.  Feeding in
@@ -129,17 +129,13 @@ def _route_off_track_elbow(
     drop_to_rail = 1.0 if rail_y >= feeder.y else -1.0
     vert_dir = drop_to_rail if off_src else -drop_to_rail
 
-    def drop_off(e: Edge) -> float:
-        return -vert_dir * _off_track_drop_stagger(graph, feeder, e)
+    def drop_off(line_id: str) -> float:
+        return -vert_dir * _drop_stagger(order, line_id)
 
-    siblings: list[tuple[float, float]] = []
-    for e in graph.edges:
-        if {e.source, e.target} != {feeder.id, on_rail.id}:
-            continue
-        sib_rail_y = _line_rail_y(graph, on_rail.id, e.line_id)
-        siblings.append((drop_off(e), sib_rail_y - rail_y))
-
-    drop = drop_off(edge)
+    siblings = [
+        (drop_off(lid), _line_rail_y(graph, on_rail.id, lid) - rail_y) for lid in order
+    ]
+    drop = drop_off(edge.line_id)
     if off_src:
         centerline = [(feeder.x, feeder.y), (feeder.x, rail_y), (on_rail.x, rail_y)]
         member = (edge, edge.line_id, drop, 0.0)
@@ -218,13 +214,9 @@ def route_rail_edges(
         if src is None or tgt is None:
             continue
 
-        # Off-track input: the source sits above the rails and feeds into the
-        # target's rail.  Drop straight down (a clean perpendicular crossing of
-        # any rails above the target reads far better than a steep diagonal
-        # merge), then turn onto the rail with a rounded elbow and run flat into
-        # the consumer.  Sibling feeder lines (a bundle feeding the same
-        # consumer) drop on staggered Xs - one per rail, lower rails turning
-        # later - so the bundle stays two parallel lines and never merges.
+        # An off-track endpoint sits off the rails: drop straight down onto the
+        # consumer's rail (a clean perpendicular crossing reads better than a
+        # steep diagonal merge), turn once, and run flat into the consumer.
         off_src = src.off_track and not tgt.off_track
         off_tgt = tgt.off_track and not src.off_track
         if off_src or off_tgt:

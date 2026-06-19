@@ -13,6 +13,11 @@ innermost-of-turn line instead, so the innermost arc lands at the floor and the
 rest fan outward -- no arc below the floor.  Unlike the TB perp-entry fan, the
 rail stagger is centred, so a real multi-line off-track bundle straddles the
 bend naturally; no synthetic fan is injected.
+
+``rail_offtrack_fan`` carries a bundle in both directions: an off-track input
+(consumer to the right, a down-then-right corner) and an off-track output
+(consumer to the left, a left-then-up corner).  The drop order reverses for the
+mirrored output corner, so the render-curve invariants catch a twist there too.
 """
 
 from __future__ import annotations
@@ -31,10 +36,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = REPO_ROOT / "examples"
 TOPOLOGIES = EXAMPLES / "topologies"
 
-# Rail-mode fixtures carrying a multi-line off-track bundle that feeds one
-# consumer -- the centred stagger straddles the bend, so the inside line pinches
-# on a reference-anchored corner.
-_OFFTRACK_FIXTURES = ["rail_mode", "rail_offtrack_fan"]
+# Rail-mode fixture -> number of multi-line off-track bundles it must produce.
+# The centred stagger straddles the bend, so the inside line pinches on a
+# reference-anchored corner.  rail_offtrack_fan carries one in each direction
+# (off-track input + off-track output) to lock both corner orientations.
+_OFFTRACK_FIXTURES = {"rail_mode": 1, "rail_offtrack_fan": 2}
 
 
 def _find_fixture(stem: str) -> Path:
@@ -61,8 +67,8 @@ def _offtrack_elbow_bundles(graph, routes):
     return groups
 
 
-@pytest.mark.parametrize("stem", _OFFTRACK_FIXTURES)
-def test_rail_offtrack_elbow_clears_floor(stem: str) -> None:
+@pytest.mark.parametrize("stem,n_bundles", _OFFTRACK_FIXTURES.items())
+def test_rail_offtrack_elbow_clears_floor(stem: str, n_bundles: int) -> None:
     """Every off-track elbow arc lands at or above the floor radius.
 
     The inside-of-turn line of a straddling off-track bundle anchors at
@@ -76,7 +82,9 @@ def test_rail_offtrack_elbow_clears_floor(stem: str) -> None:
 
     groups = _offtrack_elbow_bundles(graph, routes)
     multi = {k: v for k, v in groups.items() if len({r.line_id for r in v}) > 1}
-    assert multi, f"{stem}: expected a multi-line off-track bundle"
+    assert len(multi) == n_bundles, (
+        f"{stem}: expected {n_bundles} multi-line off-track bundle(s), got {len(multi)}"
+    )
 
     offenders = [
         (k, r.line_id, [round(x, 2) for x in r.curve_radii])

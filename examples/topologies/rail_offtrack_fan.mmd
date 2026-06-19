@@ -22,5 +22,5 @@ graph LR
         meta_csv -->|a,b,c| run
         prep -->|a,b,c| run
         run -->|a,b,c| sink
-        sink -->|a| report_csv
+        sink -->|a,b,c| report_csv
     end
