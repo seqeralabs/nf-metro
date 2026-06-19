@@ -30,11 +30,8 @@ from nf_metro.layout.routing.common import (
     initial_fanout_descent_span,
     iter_horizontal_trunks,
     iter_inter_row_gaps,
-    iter_port_peeloff_bundles,
     iter_vertical_segments,
-    peeloff_target_slots,
     symmetric_bundle_midpoint,
-    tail_on_slot,
     trunk_segments_cross,
 )
 from nf_metro.layout.routing.context import (
@@ -46,7 +43,7 @@ from nf_metro.layout.routing.corners import (
     l_shape_radii,
     reference_anchored_radius,
 )
-from nf_metro.parser.model import MetroGraph
+from nf_metro.parser.model import MetroGraph, PortSide
 
 
 @dataclass
@@ -124,7 +121,10 @@ def _layout_gap_bundle(
     # per-line slotting: multiple segments sharing one line_id (a fan
     # whose line feeds several targets) overlay at a single x rather
     # than each claiming an OFFSET_STEP slot.
-    line_orders = [_distinct_line_order(c) for _, c in bundles]
+    line_orders = [
+        _convergence_line_order(c, ctx.graph) or _distinct_line_order(c)
+        for _, c in bundles
+    ]
     # Skip a lone bundle carrying a single distinct line: nothing to
     # re-bundle and centring risks disturbing wrap geometry.
     if len(bundles) == 1 and len(line_orders[0]) <= 1:
@@ -355,134 +355,6 @@ def _group_channel_trunks(trunks: list[_HTrunk], step: float) -> list[list[_HTru
         if not placed:
             groups.append([t])
     return groups
-
-
-def _reorder_convergence_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
-    """Order one concentric bundle peeling off a shared trunk into a port.
-
-    Several inter-section lines ride one bypass trunk - a single concentric
-    bundle, ``OFFSET_STEP`` apart - below a LEFT entry port's row and rise
-    into that common port.  ``_materialize_trunk_slots`` stacks the trunk by
-    spatial approach (the nearer source's lines on top), but the riser peel
-    x-order and the port-slot Ys are assigned in line-declaration order by
-    independent passes.  When the two orders disagree, a line on the bottom of
-    the trunk rises on the near side and cuts across the lines stacked above it
-    just before the port.
-
-    For each contiguous concentric bundle (see :func:`iter_port_peeloff_bundles`)
-    re-slot every line's peel-off x and its port-slot Y by trunk depth (the slots
-    from :func:`peeloff_target_slots`) so the bundle turns into the port
-    concentrically.  The trunk Ys are untouched; the peel x and the port-slot Y
-    are permuted among the slots the bundle already occupies, so spacing is
-    preserved.  The pass acts on the riser-x / port-slot axis, leaving the trunk
-    Y stacking to :func:`_materialize_trunk_slots`.
-    """
-    step = ctx.offset_step
-    for bundle in iter_port_peeloff_bundles(routes, ctx.graph, step):
-        per_line = bundle.per_line
-        targets = peeloff_target_slots(bundle)
-        n = len(per_line)
-        if all(tail_on_slot(per_line[lid], targets[lid]) for lid in per_line):
-            continue  # already in trunk-depth order
-        for rp, _t in bundle.entries:
-            slot = targets[rp.edge.line_id]
-            pts = rp.points
-            pts[-3] = (slot.peel_x, pts[-3][1])
-            pts[-2] = (slot.peel_x, slot.port_y)
-            pts[-1] = (pts[-1][0], slot.port_y)
-            _set_peeloff_radii(rp, slot.rank, n, step, ctx.curve_radius, bundle.reverse)
-
-        # Propagate slot order to the consumer section: without it the crossing
-        # removed from the riser re-forms between the port and the first station.
-        if _section_reorderable(ctx, bundle.port_id, set(per_line)):
-            ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
-            port_rank = {
-                lid: r
-                for r, lid in enumerate(
-                    sorted(ranked, key=lambda lid: targets[lid].port_y)
-                )
-            }
-            _apply_section_bundle_order(ctx, bundle.port_id, port_rank, step)
-
-
-def _set_peeloff_radii(
-    rp: RoutedPath,
-    peel_rank: int,
-    n: int,
-    step: float,
-    base_radius: float,
-    reverse: bool,
-) -> None:
-    """Size a moved peel-off riser's two flanking corners concentrically.
-
-    The riser ``points[-3] -> points[-2]`` is a Z-step: its trunk-side and
-    port-side corners turn opposite ways, so the line outermost at one is
-    innermost at the other.  Each corner's radii therefore step with peel-x
-    rank in opposite directions, ``base_radius`` (innermost) up by one
-    ``step`` per rank so the nested arcs stay an equal gap apart.  The
-    rank-to-radius direction flips with the trunk's traversal sense
-    (``reverse``), matching which trunk end the bundle peels at.
-    """
-    pts = rp.points
-    if rp.curve_radii is None:
-        return
-    k = len(pts) - 3  # riser is pts[k] -> pts[k+1]
-    inner_first = peel_rank if not reverse else (n - 1 - peel_rank)
-    offset = inner_first * step
-    max_offset = (n - 1) * step
-    # Trunk-side corner: outermost peel slot is on the outside of its turn;
-    # the port-side corner turns the other way, so the same line is inside.
-    trunk_r = corner_radius(offset, max_offset, outside=True, base_radius=base_radius)
-    port_r = corner_radius(offset, max_offset, outside=False, base_radius=base_radius)
-    if 0 <= k - 1 < len(rp.curve_radii):
-        rp.curve_radii[k - 1] = trunk_r
-    if k < len(rp.curve_radii) and k + 2 < len(pts):
-        rp.curve_radii[k] = port_r
-
-
-def _section_reorderable(
-    ctx: _RoutingCtx, port_id: str, bundle_lines: set[str]
-) -> bool:
-    """Whether *port_id*'s section can absorb the bundle's slot order.
-
-    The propagation writes one dense ``rank * step`` offset per bundle line to
-    every section station.  This is safe when all stations that carry at least
-    one bundle line share the same trunk Y (single-row for the bundle).
-    Stations that carry no bundle lines are ignored: the propagation never
-    touches them, so their Y does not constrain this check.
-    Non-LR sections use different offset semantics and are always excluded.
-    """
-    if ctx.station_offsets is None:
-        return False
-    sec = ctx.graph.sections.get(ctx.graph.ports[port_id].section_id)
-    if sec is None or sec.direction != "LR":
-        return False
-    ys = [
-        st.y
-        for sid in sec.station_ids
-        if not (st := ctx.graph.stations[sid]).is_port
-        and any(lid in bundle_lines for lid in ctx.graph.station_lines(sid))
-    ]
-    return not ys or max(ys) - min(ys) <= COORD_TOLERANCE
-
-
-def _apply_section_bundle_order(
-    ctx: _RoutingCtx, port_id: str, port_rank: dict[str, int], step: float
-) -> None:
-    """Set the per-line offsets of *port_id*'s section to ``port_rank`` order.
-
-    The bundle's order entering the port (``port_rank`` 0 = topmost slot) is
-    carried onto every station of the consumer section it reaches, so the
-    section's internal bundle stays in the same order as the port and no
-    crossing forms just inside the boundary.
-    """
-    if ctx.station_offsets is None:
-        return
-    # Section ``station_ids`` already includes the port station.
-    for sid in ctx.graph.sections[ctx.graph.ports[port_id].section_id].station_ids:
-        for lid in ctx.graph.station_lines(sid):
-            if lid in port_rank:
-                ctx.station_offsets[(sid, lid)] = port_rank[lid] * step
 
 
 def _final_port_approach(rp: RoutedPath) -> _VChannel | None:
@@ -1413,6 +1285,54 @@ def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> N
         # approach into the bend stays horizontal.
         if abs(p_prev[1] - p_last[1]) <= COORD_TOLERANCE_FINE:
             up.points[-1] = (down.points[0][0], p_last[1])
+
+
+def _convergence_line_order(
+    chans: list[_VChannel], graph: MetroGraph
+) -> list[str] | None:
+    """Approach order for a bundle converging into one shared LEFT entry port.
+
+    Several inter-section lines ride one bypass trunk and rise (an UP bundle)
+    into a common LEFT entry port from two or more source-section columns.
+    Their crossing-free order is by approach depth on the trunk - the nearer
+    source (higher grid column) rides the shallow, port-near slot - which the
+    fan/divergence crossing-minimiser of :func:`_distinct_line_order` has no
+    model for.  Ordering by descending source column reproduces that
+    trunk-depth stacking, so the risers turn into the port concentrically
+    through the standard :func:`_restack_channel` path.
+
+    Returns ``None`` for any bundle that is not such a convergence; the
+    standard ordering then applies.  Only the cross-source stacking is set
+    here: lines from one source keep their standard relative order.
+    """
+    if not chans or any(ch.down for ch in chans):
+        return None
+    targets = {ch.route.edge.target for ch in chans}
+    if len(targets) != 1:
+        return None
+    port = graph.ports.get(next(iter(targets)))
+    if port is None or not port.is_entry or port.side is not PortSide.LEFT:
+        return None
+    src_col: dict[str, int] = {}
+    for ch in chans:
+        src = graph.stations.get(ch.route.edge.source)
+        col = _resolve_section_col(graph, src) if src else None
+        if col is None:
+            return None
+        src_col[ch.route.line_id] = col
+    if len(set(src_col.values())) < 2:
+        return None
+    # The risers must peel off ONE shared trunk: their trunk-side Ys (the
+    # bottom of each UP leg, ``y_hi``) cluster within one bundle width.  A
+    # cross-row fan-in whose legs start rows apart is a divergence the standard
+    # crossing-minimiser orders, not a single-trunk convergence.
+    trunk_ys = [ch.y_hi for ch in chans]
+    if (
+        max(trunk_ys) - min(trunk_ys)
+        > (len(src_col) - 1) * OFFSET_STEP + COORD_TOLERANCE
+    ):
+        return None
+    return sorted(_distinct_line_order(chans), key=lambda lid: -src_col[lid])
 
 
 def _distinct_line_order(chans: list[_VChannel]) -> list[str]:

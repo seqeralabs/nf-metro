@@ -2008,8 +2008,9 @@ def check_peeloff_concentric(
     rising into a common LEFT entry port - must have its riser peel-x and
     port-slot Y ordered by trunk depth so the bundle nests crossing-free into the
     port.  A member off its depth-earned slot rises across the lines stacked with
-    it, braiding the bundle just before the port.  The ordering is set by
-    ``_reorder_convergence_peeloff``.
+    it, braiding the bundle just before the port.  The ordering is set up front by
+    ``_convergence_line_order`` (riser peel-x) and ``_order_convergence_entry_ports``
+    (port slots), so the bundle nests through the standard layout path.
     """
     out: list[PeeloffBundleCrossing] = []
     for bundle in iter_port_peeloff_bundles(routes, graph, OFFSET_STEP):

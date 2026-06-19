@@ -1554,15 +1554,18 @@ def test_peeloff_riser_crossing_free_extra_line_consumer():
 )
 def test_peeloff_concentric_runtime_guard(fixture):
     """The always-on peel-off guard passes the settled routes and fires when the
-    reordering pass is suppressed.
+    convergence bundle ordering is suppressed.
 
     ``check_peeloff_concentric`` runs on every render: a bundle riding one shared
     bypass trunk into a common LEFT entry port must rise in trunk-depth order.
-    The guard must find no braid on the real routes, and (suppressing
-    ``_reorder_convergence_peeloff``) must flag the braid that pass removes - so
-    it is a meaningful regression guard, not a vacuous pass.
+    The gap-bundle orderer slots the risers by approach (``_convergence_line_order``)
+    so they turn in concentrically through the standard path.  The guard must find
+    no braid on the real routes, and (suppressing that approach ordering, so the
+    risers fall back to declaration order while the port slots stay in approach
+    order) must flag the braid - so it is a meaningful regression guard, not a
+    vacuous pass.
     """
-    from nf_metro.layout.routing import core
+    from nf_metro.layout.routing import normalize
     from nf_metro.layout.routing.invariants import check_peeloff_concentric
 
     graph = _layout(fixture, validate=True)
@@ -1572,14 +1575,14 @@ def test_peeloff_concentric_runtime_guard(fixture):
 
     suppressed = _layout(fixture)
     suppressed_offsets = compute_station_offsets(suppressed)
-    original = core._reorder_convergence_peeloff
-    core._reorder_convergence_peeloff = lambda routes, ctx: None
+    original = normalize._convergence_line_order
+    normalize._convergence_line_order = lambda chans, graph: None
     try:
         unordered = route_edges(suppressed, station_offsets=suppressed_offsets)
     finally:
-        core._reorder_convergence_peeloff = original
+        normalize._convergence_line_order = original
     assert check_peeloff_concentric(suppressed, unordered), (
-        "guard must flag the braid the reordering pass removes"
+        "guard must flag the braid the approach ordering removes"
     )
 
 

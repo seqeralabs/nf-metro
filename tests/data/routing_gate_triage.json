@@ -475,10 +475,6 @@
     "note": "Bounds guard in _restack_channel: the skip arm fires only for k==0 (channel at the route start), which the restacked gap channels (interior verticals after a horizontal lead-in) never are.",
     "status": "defensive"
   },
-  "normalize.py::if 0 <= k - 1 < len(rp.curve_radii):::#3": {
-    "note": "Lead-corner bounds guard in _restack_channel: a gap-channel vertical is never the route's first segment, so its index k is at least 1 (instrumented k range across the corpus is [1,3]); the lower-bound skip arm never fires. Defensive bounds guard.",
-    "status": "defensive"
-  },
   "normalize.py::if 0 <= radius_idx < len(rp.curve_radii):::#1": {
     "note": "Bounds guard in _set_vchannel_x: radius_idx in (k-1, k) for a real channel stays in range; the out-of-range skip arm is defensive.",
     "status": "defensive"
@@ -511,14 +507,6 @@
     "note": "Trunk-restack channel-merge arm reached only when two co-column trunks carry distinct channel keys. Migrating the simple inter-section shapes onto baked-offset centrelines (build_concentric_bundle) shifted which routes this pass sees, leaving this arm un-exercised; render-diff confirms no visual change.",
     "status": "needs-review"
   },
-  "normalize.py::if ctx.station_offsets is None:::#1": {
-    "note": "Null-offsets guard in _section_reorderable: station_offsets is built for every graph carrying edges, and the peel-off pass runs only when routes exist; instrumented across the corpus the guard never sees None. Defensive null guard (cf. #728 context.py precedent).",
-    "status": "defensive"
-  },
-  "normalize.py::if ctx.station_offsets is None:::#2": {
-    "note": "Null-offsets guard in _apply_section_bundle_order, the twin of the L623 guard. _apply_section_bundle_order runs only after _section_reorderable returned True, which already requires non-None offsets, so this guard never sees None. Defensive null guard.",
-    "status": "defensive"
-  },
   "normalize.py::if down is None or len(up.points) < 2:::#1": {
     "note": "Every line entering a fan-out junction also exits it to an entry port, so _fanout_route_maps always pairs a downstream route for each (jid, line_id) upstream; all handlers emit >=2-point routes. The skip arm in _join_fanout_upstream_tails is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
@@ -537,10 +525,6 @@
   },
   "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#2": {
     "note": "Bounds guard in _restack_channel: the skip arm guards k or k+2 out of range for a real interior channel; defensive.",
-    "status": "defensive"
-  },
-  "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#3": {
-    "note": "Trail-corner bounds guard in _restack_channel: the restacked vertical always has a following segment (k+2 < len(pts)) and a radius slot, so across the corpus (804 calls) the skip arm never fires. Defensive bounds guard.",
     "status": "defensive"
   },
   "normalize.py::if len(slots) < 2 or len(slots) > _MAX_BAND_PERMUTE:::#1": {
@@ -575,10 +559,6 @@
     "note": "curve_radii is always set for inter-section routes; the None arm in _restack_channel is a defensive guard.",
     "status": "defensive"
   },
-  "normalize.py::if rp.curve_radii is None:::#4": {
-    "note": "Null-radii guard in _restack_channel: routes built by the router always carry a curve_radii list; instrumented across the corpus, all 804 _restack_channel calls have non-None radii. Defensive null guard.",
-    "status": "defensive"
-  },
   "common.py::if s.bbox_h <= 0:::#1": {
     "note": "Degenerate-bbox guard in _grid_row_bands: a laid-out section always has bbox_h > 0, so the skip arm only protects against a zero/negative-height section that the layout never produces.",
     "status": "defensive"
@@ -589,10 +569,6 @@
   },
   "normalize.py::if s.bbox_w <= 0:::#2": {
     "note": "Degenerate-bbox guard in _h_segment_crosses_other_section: mirror of the bbox_w<=0 guard; sections always have positive width.",
-    "status": "defensive"
-  },
-  "normalize.py::if sec is None or sec.direction != \"LR\":::#1": {
-    "note": "Non-LR consumer arm of _section_reorderable. The dense rank*step offset propagation is only valid for single-row LR sections; TB and other directions use different offset semantics. The riser reorder fires unconditionally; only the section-internal propagation is skipped. No clean single-purpose fixture exercises this arm in isolation.",
     "status": "defensive"
   },
   "normalize.py::if sg[0].sign_x != t.sign_x:::#1": {
@@ -692,7 +668,7 @@
     "status": "needs-review"
   },
   "offsets.py::if lid not in seen:::#1": {
-    "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable \u2014 the dedup happens at set construction, making the `seen` guard dead code. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+    "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable — the dedup happens at set construction, making the `seen` guard dead code. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
   "offsets.py::if max_steps <= 0:::#1": {
@@ -776,7 +752,7 @@
     "status": "needs-review"
   },
   "offsets.py::if src_st and not src_st.is_port:::#1": {
-    "note": "In `_rewrite_edges_with_junctions` (resolve.py L594), edges to exit ports are always created as `Edge(source=edge.source, target=exit_port_id)` where `edge.source` is the original inter-section edge's source \u2014 an internal section station, not a port. So `src_st` is never None and `src_st.is_port` is always False. The false arm cannot be taken by any valid parsed graph.",
+    "note": "In `_rewrite_edges_with_junctions` (resolve.py L594), edges to exit ports are always created as `Edge(source=edge.source, target=exit_port_id)` where `edge.source` is the original inter-section edge's source — an internal section station, not a port. So `src_st` is never None and `src_st.is_port` is always False. The false arm cannot be taken by any valid parsed graph.",
     "status": "defensive"
   },
   "offsets.py::if src_st and not src_st.is_port:::#2": {
@@ -961,6 +937,22 @@
   },
   "normalize.py::if ch is None:::#3": {
     "note": "Defensive guard: a merge branch route opens horizontal-then-vertical (lead, then descent onto the trunk channel), so its initial fan-out descent is always found; the skip arm is never taken.",
+    "status": "defensive"
+  },
+  "normalize.py::if col is None:::#1": {
+    "note": "Defensive guard in _convergence_line_order: a peel-off riser channel always resolves to a source-section column, so the unresolved-column early return is never taken on the corpus.",
+    "status": "defensive"
+  },
+  "offsets.py::if src is None:::#1": {
+    "note": "Defensive guard in _bypass_convergence_feeders: every edge feeding an entry port has a source station, so the missing-source early return is never taken.",
+    "status": "defensive"
+  },
+  "offsets.py::if tgt_col is None:::#1": {
+    "note": "Defensive guard in _bypass_convergence_feeders: a LEFT entry port section always has a grid column after placement, so the unresolved-target-column early return is never taken.",
+    "status": "defensive"
+  },
+  "offsets.py::if any(::#2": {
+    "note": "Skip guard in _order_convergence_entry_ports: every bypass-convergence LEFT entry port on the corpus is in declaration order and must be re-slotted to approach order, so the already-ordered no-op skip arm is never taken.",
     "status": "defensive"
   }
 }

@@ -11,6 +11,11 @@ from nf_metro.layout.constants import (
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
 )
+from nf_metro.layout.routing.context import (
+    _has_intervening_sections,
+    _resolve_section_col,
+    _resolve_section_colrow,
+)
 from nf_metro.layout.routing.corners import reversed_offset
 from nf_metro.layout.routing.invariants import (
     check_partial_branch_offset_gaps,
@@ -1390,6 +1395,75 @@ def _apply_offsets_along_bundle(
             queue.append(tgt_id)
 
 
+def _bypass_convergence_feeders(ctx: _OffsetCtx, port_id: str) -> dict[str, int] | None:
+    """Source columns of a LEFT entry port's bypass-convergence bundle.
+
+    Returns ``{line_id: source_grid_col}`` when every line feeding *port_id*
+    arrives on a bypass (a multi-column hop past intervening sections) and the
+    feeders span two or more source columns - the static signature of several
+    lines riding one shared bypass trunk into a common port.  Returns ``None``
+    for any port that is not such a convergence.
+    """
+    graph = ctx.graph
+    tgt_col = _resolve_section_col(graph, graph.stations[port_id])
+    if tgt_col is None:
+        return None
+    line_col: dict[str, int] = {}
+    for edge in graph.edges_to(port_id):
+        src = graph.stations.get(edge.source)
+        if src is None:
+            return None
+        col, row = _resolve_section_colrow(graph, src)
+        if (
+            col is None
+            or abs(tgt_col - col) <= 1
+            or not _has_intervening_sections(graph, col, tgt_col, row)
+        ):
+            return None
+        line_col[edge.line_id] = col
+    if len(set(line_col.values())) < 2:
+        return None
+    return line_col
+
+
+def _order_convergence_entry_ports(ctx: _OffsetCtx) -> None:
+    """Slot a LEFT entry port's bypass-convergence bundle by approach order.
+
+    Lines from two or more source columns ride one bypass trunk into a shared
+    LEFT entry port.  Their crossing-free slot order is by approach depth - the
+    nearer source (higher grid column) on the shallow, port-near slot - not the
+    declaration order the base offsets give.  Assign each line the offset its
+    approach rank earns and carry it along the consumer section so the bundle
+    stays in that order from the port to its first station.  The matching peel
+    order on the risers is set by ``_convergence_line_order`` at routing time.
+    """
+    if ctx.compact:
+        return
+    graph = ctx.graph
+    for port_id, port in graph.ports.items():
+        if not (port.is_entry and port.side is PortSide.LEFT):
+            continue
+        sec = graph.sections.get(port.section_id)
+        if (
+            sec is None
+            or sec.direction != "LR"
+            or port.section_id in ctx.reversed_sections
+        ):
+            continue
+        line_col = _bypass_convergence_feeders(ctx, port_id)
+        if line_col is None:
+            continue
+        ordered = sorted(
+            line_col, key=lambda lid: (-line_col[lid], ctx.line_priority.get(lid, 0))
+        )
+        new_offs = {lid: rank * ctx.offset_step for rank, lid in enumerate(ordered)}
+        cur = {lid: ctx.offsets.get((port_id, lid), 0.0) for lid in ordered}
+        if any(
+            abs(new_offs[lid] - cur[lid]) > _OFFSET_EQ_TOLERANCE for lid in new_offs
+        ):
+            _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
+
+
 def _recenter_partial_fan_branches(ctx: _OffsetCtx) -> None:
     """Collapse reserved absent-line slots at independent fan branches.
 
@@ -1531,6 +1605,10 @@ def compute_station_offsets(
     7b. **Merge-port approach-side allocation** - at multi-feeder LR/RL
        entry ports, re-slots a perpendicular re-joining line to the
        bundle slot nearest its approach side (non-compact only).
+    7c. **Convergence entry-port ordering** - at a LEFT entry port fed by
+       a bypass trunk from two or more source columns, slots the bundle
+       by approach depth (nearer source on the port-near slot) so its
+       risers turn in concentrically (non-compact only).
     8. **Horizontal reconciliation** - snaps mismatched offsets on
        same-Y edges to eliminate almost-horizontal slopes.
     9. **Partial fan-branch re-centring** - collapses reserved
@@ -1556,6 +1634,7 @@ def compute_station_offsets(
     _compute_entry_port_offsets(ctx)
     _align_junction_to_entry_port(ctx)
     _allocate_merge_ports_by_approach(ctx)
+    _order_convergence_entry_ports(ctx)
     _reconcile_horizontal_offsets(ctx)
     _recenter_partial_fan_branches(ctx)
     _reverse_tb_right_entry_offsets(ctx)
