@@ -177,6 +177,9 @@ WATERMARK_PADDING_RATIO: float = 0.5
 WATERMARK_Y_INSET: float = 8.0
 """Y distance from bottom edge for watermark text."""
 
+WATERMARK_BARE_X_INSET: float = 8.0
+"""X distance from right/left canvas edge for watermark text in bare mode."""
+
 WATERMARK_FILL: str = "rgba(150, 150, 150, 0.6)"
 """Fill color for the muted attribution watermark."""
 
