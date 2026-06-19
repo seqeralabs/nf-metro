@@ -1,0 +1,26 @@
+%%metro title: Rail off-track fan
+%%metro style: dark
+%%metro line_spread: rails
+%%metro line: a | Alpha | #2db572
+%%metro line: b | Beta | #f4a300
+%%metro line: c | Gamma | #0570b0
+%%metro file: meta_csv | CSV | Meta
+%%metro file: report_csv | CSV | Report
+%%metro off_track: meta_csv
+%%metro off_track: report_csv
+
+graph LR
+    subgraph sec [Section]
+        seed[ ]
+        prep[Prepare]
+        meta_csv[ ]
+        run[Run]
+        sink[Collect]
+        report_csv[ ]
+
+        seed -->|a,b,c| prep
+        meta_csv -->|a,b,c| run
+        prep -->|a,b,c| run
+        run -->|a,b,c| sink
+        sink -->|a| report_csv
+    end

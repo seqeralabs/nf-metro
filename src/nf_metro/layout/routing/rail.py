@@ -22,8 +22,8 @@ from nf_metro.layout.constants import (
     MIN_STRAIGHT_EDGE,
     RAIL_TERMINUS_FAN_LEAD,
 )
+from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.common import RoutedPath
-from nf_metro.layout.routing.corners import concentric_corner_radius_at
 from nf_metro.parser.model import Edge, MetroGraph, Station
 
 
@@ -99,6 +99,68 @@ def _off_track_drop_stagger(
     return (k - (len(order) - 1) / 2.0) * OFFSET_STEP
 
 
+def _route_off_track_elbow(
+    graph: MetroGraph,
+    edge: Edge,
+    feeder: Station,
+    on_rail: Station,
+    off_src: bool,
+) -> RoutedPath:
+    """Route one off-track feeder line as a drop -> turn-onto-rail elbow.
+
+    An off-track source/target sits above the rails and feeds (or is fed by) the
+    consumer's rail.  The line drops on its own staggered X, turns once, and runs
+    flat to the consumer.  Sibling feeder lines (a bundle feeding the same
+    consumer) drop on staggered Xs centred on the feeder, so the bundle straddles
+    the bend: one line lands on the inside of the turn.
+
+    Routed through :func:`build_tapered_bundle` with this line as the lone member
+    and the full sibling fan declared as ``bundle_offsets``, so the corner anchors
+    on the bundle's innermost-of-turn line and no arc falls below the floor.  The
+    centreline's flat leg sits at this line's own rail Y, so its rail-leg offset
+    is zero and the staggered drop is the only fan on the turning leg.
+    """
+    rail_y = _line_rail_y(graph, on_rail.id, edge.line_id)
+    # The staggered drop displaces the vertical leg in X; the builder's normal
+    # flips that X by the leg's travel direction, so pre-sign the stagger by the
+    # direction the vertical leg runs in the centreline below.  Feeding in
+    # (``off_src``) the leg runs feeder -> rail; feeding out it runs rail ->
+    # feeder, so the sign inverts.
+    drop_to_rail = 1.0 if rail_y >= feeder.y else -1.0
+    vert_dir = drop_to_rail if off_src else -drop_to_rail
+
+    def drop_off(e: Edge) -> float:
+        return -vert_dir * _off_track_drop_stagger(graph, feeder, e)
+
+    siblings: list[tuple[float, float]] = []
+    for e in graph.edges:
+        if {e.source, e.target} != {feeder.id, on_rail.id}:
+            continue
+        sib_rail_y = _line_rail_y(graph, on_rail.id, e.line_id)
+        siblings.append((drop_off(e), sib_rail_y - rail_y))
+
+    drop = drop_off(edge)
+    if off_src:
+        centerline = [(feeder.x, feeder.y), (feeder.x, rail_y), (on_rail.x, rail_y)]
+        member = (edge, edge.line_id, drop, 0.0)
+        bundle = siblings
+    else:
+        centerline = [(on_rail.x, rail_y), (feeder.x, rail_y), (feeder.x, feeder.y)]
+        member = (edge, edge.line_id, 0.0, drop)
+        bundle = [(rail_off, sib_drop) for sib_drop, rail_off in siblings]
+
+    routes = build_tapered_bundle(
+        [member],
+        centerline,
+        transition_leg=1,
+        base_radius=CURVE_RADIUS,
+        bundle_offsets=bundle,
+        is_inter_section=False,
+        normalize_exempt=False,
+    )
+    return routes[0]
+
+
 def _diagonal_placement(
     sx: float,
     tx: float,
@@ -168,31 +230,7 @@ def route_rail_edges(
         if off_src or off_tgt:
             feeder = src if off_src else tgt
             on_rail = tgt if off_src else src
-            rail_y = _line_rail_y(graph, on_rail.id, edge.line_id)
-            drop_x = feeder.x + _off_track_drop_stagger(graph, feeder, edge)
-            l_points = [
-                (drop_x, feeder.y),
-                (drop_x, rail_y),
-                (on_rail.x, rail_y),
-            ]
-            if off_tgt:
-                l_points.reverse()
-            # Staggered sibling drops fan the elbow's vertical leg by
-            # ``drop_x - feeder.x``; the turn onto the rail takes the
-            # concentric radius for that offset so the bundle keeps a
-            # constant gap through the bend instead of a base-radius pinch.
-            elbow_r = concentric_corner_radius_at(
-                l_points[0], l_points[1], l_points[2], drop_x - feeder.x, CURVE_RADIUS
-            )
-            routes.append(
-                RoutedPath(
-                    edge=edge,
-                    line_id=edge.line_id,
-                    points=l_points,
-                    curve_radii=[elbow_r],
-                    offsets_applied=True,
-                )
-            )
+            routes.append(_route_off_track_elbow(graph, edge, feeder, on_rail, off_src))
             continue
 
         y_src = _line_rail_y(graph, edge.source, edge.line_id)
