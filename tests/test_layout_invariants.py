@@ -7177,6 +7177,23 @@ def test_descent_edge_clearance_distinguishes_descent_from_short_hop(
         _guard_inter_section_descent_edge_clearance(graph, "test", routes=[rp])
 
 
+def test_refanned_trunk_stays_on_inflated_row_pitch():
+    """Re-fanning a full-bundle column uses the row's own slot pitch.
+
+    In ``genomeassembly_organellar`` the scaffolding row's pitch is inflated
+    past the base ``y_spacing`` by a wider sibling section, and the
+    inter-section ``assemblies`` trunk (YaHS, the exit port, downstream
+    asmstats) rides that inflated pitch.  Re-fanning the section's internal
+    full-bundle columns at the base pitch would leave them a fraction of a
+    slot off the trunk; recentering at the row pitch keeps the whole trunk
+    -- the fanned ``minimap2``/``cooler``, the hub ``yahs`` and the exit port
+    -- collinear."""
+    graph = _layout("genomeassembly_organellar.mmd")
+    trunk = ["scaffolding_minimap2", "yahs", "cooler", "scaffolding__exit_right_3"]
+    ys = [graph.stations[sid].y for sid in trunk]
+    assert max(ys) - min(ys) < 1.0, dict(zip(trunk, ys))
+
+
 # ---------------------------------------------------------------------------
 # TOP-entry cross-column bundle: concentric corners
 # ---------------------------------------------------------------------------
