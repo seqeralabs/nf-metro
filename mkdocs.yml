@@ -43,6 +43,7 @@ nav:
   - Nextflow Import: nextflow.md
   - nf-core Pipelines: pipelines/index.md
   - Gallery: gallery/index.md
+  - Building with AI: ai-driven-development.md
   - Internals:
     - Architecture: dev/architecture.md
     - Layout pipeline: dev/layout_pipeline.md
