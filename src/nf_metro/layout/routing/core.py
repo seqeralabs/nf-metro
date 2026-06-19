@@ -69,7 +69,6 @@ from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
 )
 from nf_metro.layout.routing.normalize import (  # noqa: F401
     _band_order_crossings,
-    _build_gap_intervals,
     _clamp_inter_row_band_top,
     _clear_channel_x_in_band,
     _coincide_convergent_port_approaches,
@@ -77,7 +76,6 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _coincide_merge_feeder_descents,
     _coincident_trunk_slots,
     _collect_htrunks,
-    _collect_vchannels,
     _distinct_line_order,
     _dogleg_off_exempt_trunks,
     _final_port_approach,
@@ -87,8 +85,8 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _HTrunk,
     _inter_row_gap_band,
     _join_fanout_upstream_tails,
+    _materialize_gap_slots,
     _normalize_bypass_trunks,
-    _normalize_gap_channels,
     _plan_trunk_band,
     _port_peeloff_tail,
     _reorder_convergence_peeloff,
@@ -199,7 +197,7 @@ def _route_edges(
 
     moves = _center_bubble_stations(routes, graph)
     _spread_diagonal_bundles(routes, ctx)
-    _normalize_gap_channels(routes, ctx)
+    _materialize_gap_slots(routes, ctx)
     _normalize_bypass_trunks(routes, ctx)
     _reorder_convergence_peeloff(routes, ctx)
     # The coincidence passes run after the trunk/gap channels are finalised:

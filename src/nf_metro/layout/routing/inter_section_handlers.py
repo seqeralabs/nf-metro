@@ -50,6 +50,7 @@ from nf_metro.layout.routing.common import (
     column_gap_edges,
     column_gap_midpoint,
     endpoint_port_xs,
+    gap_lo_for_x,
     header_corridor_y,
     horizontal_direction,
     inter_column_channel_x,
@@ -307,9 +308,11 @@ def _route_near_vertical_junction(f: _InterFacts) -> RoutedPath | None:
         channel_x = f.sx + ctx.curve_radius + ctx.offset_step
     else:
         channel_x = f.sx - ctx.curve_radius - ctx.offset_step
-    return route_hvh_tapered(
+    route = route_hvh_tapered(
         ctx, f.edge, f.src, f.tgt, channel_x, base_radius=ctx.curve_radius
     )
+    _declare_channel(route, ctx, channel_x, vertical_direction(f.ty - f.sy))
+    return route
 
 
 def _route_merge_trunk_feeder(f: _InterFacts) -> RoutedPath | None:
@@ -755,7 +758,7 @@ def _route_merge_branch(
     # One branch line per call: a single descent with no bundle to fan, so the
     # centreline carries this line's own offset and both corners take the base
     # radius (the concentric radius at zero displacement).
-    return route_along(
+    route = route_along(
         edge,
         [(edge, edge.line_id, 0.0)],
         [
@@ -767,6 +770,8 @@ def _route_merge_branch(
         base_radius=ctx.curve_radius,
         normalize_exempt=False,
     )
+    _declare_channel(route, ctx, lead_x, vertical_direction(by - sy))
+    return route
 
 
 def _would_route_around_section_below(edge: Edge, ctx: _RoutingCtx) -> bool:
@@ -1001,7 +1006,7 @@ def _route_bypass(
 
     # Initial gap-channel centres and per-line positions.  These centre each
     # leg in its (row-aware) gap via _gap_channel_base; the post-routing
-    # _normalize_gap_channels pass then re-stacks all inter-section channels
+    # _materialize_gap_slots pass then re-stacks all inter-section channels
     # into their final centred / B-separated bundle positions.
     half_g1 = (g1_n - 1) * ctx.offset_step / 2
     half_g2 = (g2_n - 1) * ctx.offset_step / 2
@@ -1210,7 +1215,7 @@ def _route_bypass(
 
     src_anchor = channel_fan(sigma1, g1_j, g1_n, n1x)
     tgt_anchor = channel_fan(sigma2, g2_j, g2_n, n3x)
-    return route_tapered_anchored(
+    route = route_tapered_anchored(
         (edge, edge.line_id, sigma1, sigma2),
         centerline,
         transition_leg=3,
@@ -1218,6 +1223,59 @@ def _route_bypass(
         src_bundle_offsets=src_anchor,
         tgt_bundle_offsets=tgt_anchor,
         normalize_exempt=False,
+    )
+    _declare_channel(route, ctx, gap1_x, gap1_vertical, g1_j, g1_n)
+    _declare_channel(route, ctx, gap2_x, gap2_vertical, g2_j, g2_n)
+    return route
+
+
+def _declare_channel(
+    route: RoutedPath | None,
+    ctx: _RoutingCtx,
+    x: float,
+    direction: Direction,
+    slot_index: int = 0,
+    n_slots: int = 1,
+) -> None:
+    """Declare the gap channel a handler just placed at *x* on *route*.
+
+    The handler knows the channel's final X, so the gap it occupies is named by
+    :func:`gap_lo_for_x` from the leg's ACTUAL geometry on the built route (the
+    segment travelling *direction* nearest *x* -- a per-line offset or clearance
+    nudge can carry it into the adjacent gap).  ``slot_index`` / ``n_slots`` are
+    provisional -- :func:`_materialize_gap_slots` re-ranks each gap bundle from
+    geometry.  A channel that lands outside every inter-column gap (hugging a
+    section edge) declares nothing, matching the post-pass which would not have
+    bundled it either.
+    """
+    if route is None:
+        return
+    down = direction is Direction.D
+    pts = route.points
+    best = None
+    best_d = None
+    for k in range(len(pts) - 1):
+        (x0, y0), (x1, y1) = pts[k], pts[k + 1]
+        if abs(x1 - x0) >= COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:
+            continue
+        if (y1 > y0) is not down:
+            continue
+        d = abs(x0 - x)
+        if best_d is None or d < best_d:
+            best_d, best = d, (x0, min(y0, y1), max(y0, y1))
+    if best is None:
+        return
+    match = gap_lo_for_x(ctx.graph, best[0], best[1], best[2])
+    if match is None:
+        return
+    lo, matched_row = match
+    route.declare_gap_slot(
+        lo_col=lo,
+        hi_col=lo + 1,
+        row=matched_row,
+        direction=direction,
+        slot_index=slot_index,
+        n_slots=n_slots,
     )
 
 
@@ -1259,7 +1317,7 @@ def _route_l_shape_plain(
         endpoint_port_xs(ctx.graph, edge),
     )
 
-    return route_hvh_tapered(
+    route = route_hvh_tapered(
         ctx,
         edge,
         src,
@@ -1269,6 +1327,8 @@ def _route_l_shape_plain(
         min_radius=COORD_TOLERANCE,
         fit_segment=True,
     )
+    _declare_channel(route, ctx, mid_x, vertical_direction(ty - sy))
+    return route
 
 
 def _route_l_shape_fan(
@@ -1330,7 +1390,7 @@ def _route_l_shape_fan(
         (tx, ty + tgt_off + delta),
     ]
     # Not normalize-exempt: L-shape fans from one junction to different targets
-    # share the inter-column gap, and _normalize_gap_channels restacks them into
+    # share the inter-column gap, and _materialize_gap_slots restacks them into
     # distinct channels so two lines never overlay the same descent.
     route = route_along(
         edge,
@@ -1341,6 +1401,7 @@ def _route_l_shape_fan(
         normalize_exempt=False,
     )
     assert route is not None  # the lone member is always in its own bundle
+    _declare_channel(route, ctx, mid_x, vertical_direction(ty - sy), ui, un)
     return route
 
 
@@ -1895,7 +1956,7 @@ def _route_left_entry_wrap(
             if shared_vx is not None:
                 vx = shared_vx
 
-    return _route_entry_wrap(
+    route = _route_entry_wrap(
         edge,
         src,
         tgt,
@@ -1907,6 +1968,8 @@ def _route_left_entry_wrap(
         descent_x=vx,
         entry_side=PortSide.LEFT,
     )
+    _declare_channel(route, ctx, vx, vertical_direction(ty - hy))
+    return route
 
 
 def _has_bypass_sibling_to_same_entry(
@@ -2146,7 +2209,7 @@ def _route_inter_row_gap_corridor(
         vx = _corridor_descent_x(ctx, ep_col, ep_row, 0.0)
     assert vx is not None
 
-    return _route_entry_wrap(
+    route = _route_entry_wrap(
         edge,
         src,
         entry_port,
@@ -2158,6 +2221,8 @@ def _route_inter_row_gap_corridor(
         descent_x=vx,
         entry_side=PortSide.LEFT,
     )
+    _declare_channel(route, ctx, vx, vertical_direction(entry_port.y - gy_base))
+    return route
 
 
 def _descent_rightward_clearable_pierce(
@@ -2296,7 +2361,7 @@ def _route_around_section_below(
 
     # R-D-L-U-R loop: down past the target row's bottom (by), left of the target
     # column (vx), up to the entry Y, and into the LEFT port from below.
-    return _route_entry_wrap(
+    route = _route_entry_wrap(
         edge,
         src,
         entry_port,
@@ -2308,6 +2373,8 @@ def _route_around_section_below(
         descent_x=vx,
         entry_side=PortSide.LEFT,
     )
+    _declare_channel(route, ctx, vx, vertical_direction(ey - by))
+    return route
 
 
 def _route_right_entry_over_top(
@@ -2358,7 +2425,9 @@ def _route_right_entry_over_top(
         (descent_x, mid_ey),
         (ex, mid_ey),
     ]
-    return route_along(edge, members, centerline, base_radius=ctx.curve_radius)
+    route = route_along(edge, members, centerline, base_radius=ctx.curve_radius)
+    _declare_channel(route, ctx, descent_x, vertical_direction(mid_ey - channel_y))
+    return route
 
 
 def _route_right_entry_wrap(
@@ -2420,7 +2489,7 @@ def _route_right_entry_wrap(
     # right of the target column.
     vx = _right_entry_descent_x(ctx, tx, pos_n)
 
-    return _route_entry_wrap(
+    route = _route_entry_wrap(
         edge,
         src,
         tgt,
@@ -2432,6 +2501,15 @@ def _route_right_entry_wrap(
         descent_x=vx,
         entry_side=PortSide.RIGHT,
     )
+    route.declare_gap_slot(
+        lo_col=tgt_col,
+        hi_col=tgt_col + 1,
+        row=tgt_row,
+        direction=vertical_direction(ty - hy),
+        slot_index=0,
+        n_slots=1,
+    )
+    return route
 
 
 def _right_entry_gap_above_target_y(
@@ -2535,7 +2613,7 @@ def _build_right_entry_wrap_route(
 
     # R-D-R-D-L loop: down to the traverse channel, right past the target's
     # right edge, then in to the RIGHT port from its own outward side.
-    return _route_entry_wrap(
+    route = _route_entry_wrap(
         edge,
         src,
         entry_port,
@@ -2547,6 +2625,8 @@ def _build_right_entry_wrap_route(
         descent_x=vx,
         entry_side=PortSide.RIGHT,
     )
+    _declare_channel(route, ctx, vx, vertical_direction(entry_port.y - channel_y_base))
+    return route
 
 
 def _route_right_entry_via_gap_above(

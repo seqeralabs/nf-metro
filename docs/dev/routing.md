@@ -63,7 +63,7 @@ The order in `route_edges` is:
 
 After all edges are routed, `route_edges` runs a series of post-passes
 that adjust the assembled polylines as a set (for example
-`_spread_diagonal_bundles`, `_normalize_gap_channels`,
+`_spread_diagonal_bundles`, `_materialize_gap_slots`,
 `_normalize_bypass_trunks`, `_join_fanout_upstream_tails`).
 
 ## Bundles and offsets
@@ -117,7 +117,7 @@ dispatcher handles those degenerate cases directly.
 | `bundle.py` | constructive bundle-curve builders (`build_concentric_bundle`, `build_tapered_bundle`, `build_offset_bundle`); fans a centreline into per-line offset paths with concentric corners |
 | `centrelines.py` | centreline templates and bundle-gathering helpers (`gather_member_edges`, `route_along`, `route_tapered`, …) layered over `bundle.py` |
 | `postprocess.py` | post-routing passes: diagonal bundle spread and bubble-station centring |
-| `normalize.py` | channel and trunk normalization passes (`_normalize_gap_channels`, htrunk restacking, riser/port-approach alignment, …) |
+| `normalize.py` | channel and trunk normalization passes (`_materialize_gap_slots`, htrunk restacking, riser/port-approach alignment, …) |
 | `common.py` | `RoutedPath`, `Direction`, bundle/channel helpers |
 | `corners.py` | corner radii and curve smoothing |
 | `inter_section.py` | `WRAP_TABLE` descriptor catalogue (documentation reference; not used at runtime) |

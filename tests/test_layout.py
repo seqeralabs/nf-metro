@@ -2310,12 +2310,12 @@ def test_normalization_adds_no_inter_line_crossings(fixture):
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
 
-    orig = core._normalize_gap_channels
-    core._normalize_gap_channels = lambda *a, **k: None
+    orig = core._materialize_gap_slots
+    core._materialize_gap_slots = lambda *a, **k: None
     try:
         pre = _count_inter_line_crossings(route_edges(graph))
     finally:
-        core._normalize_gap_channels = orig
+        core._materialize_gap_slots = orig
     post = _count_inter_line_crossings(route_edges(graph))
 
     assert post <= pre, (

@@ -472,7 +472,7 @@
     "status": "defensive"
   },
   "normalize.py::if abs(ly - pts[1][1]) < COORD_TOLERANCE:::#1": {
-    "note": "A re-stacked gap channel at points-index 1 always has a horizontal lead-in (L-shape and bypass routes open with a horizontal segment); routes opening non-horizontally are normalize_exempt and excluded from _collect_vchannels. The non-horizontal-lead return in _restack_channel is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+    "note": "A re-stacked gap channel at points-index 1 always has a horizontal lead-in (L-shape and bypass routes open with a horizontal segment); routes opening non-horizontally are normalize_exempt and skipped by the materialization. The non-horizontal-lead return in _restack_channel is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
   "normalize.py::if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:::#2": {
@@ -535,10 +535,6 @@
     "note": "Trail-corner bounds guard in _restack_channel: the restacked vertical always has a following segment (k+2 < len(pts)) and a radius slot, so across the corpus (804 calls) the skip arm never fires. Defensive bounds guard.",
     "status": "defensive"
   },
-  "normalize.py::if left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE:::#1": {
-    "note": "Row-agnostic union-gap fallback in _match_channel_gap is provably unreachable: the union gap [max(col_lo right edges), min(col_hi left edges)] is a subset of every per-row gap that brackets a channel, so overlap_match/bracket_match always resolve first and the union fallback is never reached. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
-    "status": "defensive"
-  },
   "normalize.py::if len(signs) != 1:::#1": {
     "note": "Mixed-peel-end guard in _reorder_convergence_peeloff: a concentric peel-off bundle into a LEFT entry port is always fed from the left, so every member's trunk traverses toward the peel corner with the same trunk_sign. Lines approaching from the right of the port form an entry-wrap route, not a peel-off tail (verified: a right-side source produces zero peel tails), so the bundle never mixes signs. Belt-and-suspenders beyond the L535 contiguity check.",
     "status": "defensive"
@@ -553,14 +549,6 @@
   },
   "normalize.py::if len({id(t.route) for t in grp}) < 2:::#2": {
     "note": "Single-route-group skip in _suboptimal_trunk_bands, validate-only: called from the _guard_* validator and a unit test, not the production render path the validate=False sweep exercises. Defensive.",
-    "status": "defensive"
-  },
-  "normalize.py::if not (left + COORD_TOLERANCE < ch.x < right - COORD_TOLERANCE):::#1": {
-    "note": "Float-precision guard in _bucket_gap_channels: routing centres channels in inter-column gaps with >= 16px clearance from section edges (min observed across the corpus), far outside the 1px COORD_TOLERANCE edge band, so the on/outside-edge arm is never entered.",
-    "status": "defensive"
-  },
-  "normalize.py::if not (left <= ch.x <= right):::#1": {
-    "note": "Downstream of the gap-edge band guard (L243); only reached when a channel x sits within 1px of a gap boundary, which the >=16px clearance never produces, so both arms are unreachable.",
     "status": "defensive"
   },
   "normalize.py::if not any(not t.route.normalize_exempt for t in grp):::#2": {
@@ -587,8 +575,8 @@
     "note": "Null-radii guard in _restack_channel: routes built by the router always carry a curve_radii list; instrumented across the corpus, all 804 _restack_channel calls have non-None radii. Defensive null guard.",
     "status": "defensive"
   },
-  "normalize.py::if s.bbox_h <= 0:::#1": {
-    "note": "Degenerate-bbox guard in _build_row_bands: a laid-out section always has bbox_h > 0, so the skip arm only protects against a zero/negative-height section that the layout never produces.",
+  "common.py::if s.bbox_h <= 0:::#1": {
+    "note": "Degenerate-bbox guard in _grid_row_bands: a laid-out section always has bbox_h > 0, so the skip arm only protects against a zero/negative-height section that the layout never produces.",
     "status": "defensive"
   },
   "normalize.py::if s.bbox_w <= 0:::#1": {

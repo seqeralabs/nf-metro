@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from nf_metro.layout.constants import (
@@ -207,6 +207,62 @@ def column_gap_edges(
     return right, left
 
 
+def _grid_row_bands(graph: MetroGraph) -> dict[int, tuple[float, float]]:
+    """Per grid-row vertical band ``(top, bottom)`` spanned by its sections."""
+    bands: dict[int, tuple[float, float]] = {}
+    for s in graph.sections.values():
+        if s.bbox_h <= 0:
+            continue
+        for r in range(s.grid_row, s.grid_row + max(1, s.grid_row_span)):
+            top, bot = bands.get(r, (s.bbox_y, s.bbox_y + s.bbox_h))
+            bands[r] = (min(top, s.bbox_y), max(bot, s.bbox_y + s.bbox_h))
+    return bands
+
+
+def gap_lo_for_x(
+    graph: MetroGraph,
+    x: float,
+    y_lo: float,
+    y_hi: float,
+    tol: float = COORD_TOLERANCE,
+) -> tuple[int, int | None] | None:
+    """``(lower column, row)`` of the inter-column gap a vertical leg occupies.
+
+    Lets a handler that has just placed a vertical channel name the gap it sits
+    in, so it can declare a :class:`GapSlot` without the post-routing pass having
+    to rediscover it from raw geometry.  A leg at *x* spanning ``[y_lo, y_hi]``
+    is matched to the row whose gap edges bracket *x* AND whose vertical band the
+    leg overlaps; failing that, to any row whose edges bracket *x*; failing that,
+    to the row-agnostic union (``row = None``).  ``None`` when *x* sits outside
+    every inter-column gap.
+    """
+    cols = sorted({s.grid_col for s in graph.sections.values() if s.bbox_w > 0})
+    rows = sorted({s.grid_row for s in graph.sections.values() if s.bbox_w > 0})
+    bands = _grid_row_bands(graph)
+    bracket: tuple[int, int | None] | None = None
+    for r in rows:
+        for lo, hi in zip(cols, cols[1:]):
+            if hi != lo + 1:
+                continue
+            left, right = column_gap_edges(graph, lo, hi, row=r)
+            if not (right > left and left - tol <= x <= right + tol):
+                continue
+            if bracket is None:
+                bracket = (lo, r)
+            band = bands.get(r)
+            if band is not None and y_lo < band[1] and band[0] < y_hi:
+                return lo, r
+    if bracket is not None:
+        return bracket
+    for lo, hi in zip(cols, cols[1:]):
+        if hi != lo + 1:
+            continue
+        left, right = column_gap_edges(graph, lo, hi, row=None)
+        if right > left and left - tol <= x <= right + tol:
+            return lo, None
+    return None
+
+
 def symmetric_bundle_midpoint(
     gap_left: float,
     gap_right: float,
@@ -276,13 +332,15 @@ class GapSlot:
     The corridor is the inter-column gap bounded by the adjacent grid columns
     ``gap_lo_col`` and ``gap_hi_col`` (``gap_hi_col == gap_lo_col + 1``); the run
     traverses grid ``row`` in ``direction`` (:attr:`Direction.U` or
-    :attr:`Direction.D`).  ``slot_index`` is this line's 0-based rank among the
-    ``n_slots`` lines sharing the same gap and direction.
+    :attr:`Direction.D`).  ``row`` is ``None`` for a channel that is matched to
+    the row-agnostic gap union (a leg whose row could not be pinned to a single
+    grid row).  ``slot_index`` is this line's 0-based rank among the ``n_slots``
+    lines sharing the same gap and direction.
     """
 
     gap_lo_col: int
     gap_hi_col: int
-    row: int
+    row: int | None
     direction: Direction
     slot_index: int
     n_slots: int
@@ -304,11 +362,42 @@ class RoutedPath:
     Set by wrap / around-section / TOP-entry handlers whose vertical
     channels follow a special concentric loop (all corners share one
     radius) that the standard L-shape re-stacking would break."""
-    gap_slot: GapSlot | None = None
-    """Symbolic gap-relative slot for this route's vertical channel run.
+    gap_slots: list[GapSlot] = field(default_factory=list)
+    """Symbolic gap-relative slots for this route's vertical channel runs.
 
-    ``None`` until a handler is migrated to declare placement symbolically; the
-    materialization pass resolves a non-``None`` slot to concrete channel X."""
+    Empty until a handler declares placement symbolically.  A route may own
+    more than one (a U-shaped bypass declares both its descent and its ascent
+    channel); :func:`_materialize_gap_slots` resolves each to a concrete X."""
+
+    def declare_gap_slot(
+        self,
+        *,
+        lo_col: int,
+        hi_col: int,
+        row: int | None,
+        direction: Direction,
+        slot_index: int,
+        n_slots: int,
+    ) -> None:
+        """Record that one of this route's vertical legs runs in a gap bundle.
+
+        Handlers call this where they place a vertical channel; ``slot_index``
+        / ``n_slots`` are the line's provisional rank among the siblings the
+        handler can see.  :func:`_materialize_gap_slots` groups every declared
+        slot by ``(lo_col, row, direction)`` and assigns the final concentric X,
+        re-ranking each gap bundle from the routed geometry rather than from the
+        provisional rank.
+        """
+        self.gap_slots.append(
+            GapSlot(
+                gap_lo_col=lo_col,
+                gap_hi_col=hi_col,
+                row=row,
+                direction=direction,
+                slot_index=slot_index,
+                n_slots=n_slots,
+            )
+        )
 
 
 def initial_fanout_descent_span(

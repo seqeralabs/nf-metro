@@ -604,7 +604,7 @@ def _compute_junction_fan_info(
         has_wrap = False
         # Source-side channels anchored NEAR the junction (no resolvable
         # inter-column gap to centre in) keyed by their rounded X.  These are
-        # NOT touched by ``_normalize_gap_channels`` (which only re-stacks
+        # NOT touched by ``_materialize_gap_slots`` (which only re-stacks
         # channels inside a real column gap), so two distinct lines to two
         # distinct targets that resolve to the same near-source X overlay
         # there; the unified fan is the only thing that separates them.
@@ -640,7 +640,7 @@ def _compute_junction_fan_info(
             else:
                 has_lshape = True
             # A plain L-shape into an ADJACENT column gets a true inter-column
-            # gap channel that _normalize_gap_channels centres + separates, so
+            # gap channel that _materialize_gap_slots centres + separates, so
             # it is not a near-source overlay.  Every other source-anchored
             # case - a non-adjacent / same-column L-shape (near-source
             # fallback) or a wrap (source-side V1 hugging the junction, exempt
@@ -666,7 +666,7 @@ def _compute_junction_fan_info(
         #   * near_src_collision: distinct lines to distinct targets sharing
         #     one source-hugging channel that no gap-normalise pass reaches.
         # A junction whose source-side channels are all distinct (e.g. a pure
-        # adjacent-column L-shape fan whose gap channels _normalize_gap_channels
+        # adjacent-column L-shape fan whose gap channels _materialize_gap_slots
         # separates) needs no shared first corner.
         needs_unified = (
             (has_lshape and has_bypass)

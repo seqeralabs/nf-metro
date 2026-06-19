@@ -22,8 +22,10 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.routing.common import (
     Direction,
+    GapSlot,
     HTrunkSeg,
     RoutedPath,
+    _grid_row_bands,
     column_gap_edges,
     initial_fanout_descent_span,
     iter_horizontal_trunks,
@@ -66,121 +68,6 @@ class _VChannel:
     down: bool
 
 
-def _collect_vchannels(routes: list[RoutedPath]) -> list[_VChannel]:
-    """Find every vertical channel segment in inter-section routes."""
-    out: list[_VChannel] = []
-    for rp in routes:
-        if not rp.is_inter_section or rp.normalize_exempt:
-            continue
-        pts = rp.points
-        for k in range(len(pts) - 1):
-            x0, y0 = pts[k]
-            x1, y1 = pts[k + 1]
-            if abs(x1 - x0) < COORD_TOLERANCE and abs(y1 - y0) > COORD_TOLERANCE:
-                out.append(
-                    _VChannel(
-                        route=rp,
-                        idx=k,
-                        x=x0,
-                        y_lo=min(y0, y1),
-                        y_hi=max(y0, y1),
-                        down=y1 > y0,
-                    )
-                )
-    return out
-
-
-def _build_gap_intervals(
-    graph: MetroGraph,
-) -> dict[int | None, list[tuple[int, float, float]]]:
-    """Per-row list of ``(lo_col, gap_left, gap_right)`` for adjacent columns.
-
-    The row key is the grid row; a single combined ``None`` entry is also
-    produced (row-agnostic union) as a fallback for channels whose row
-    can't be matched precisely.
-    """
-    cols = sorted({s.grid_col for s in graph.sections.values() if s.bbox_w > 0})
-    rows = sorted({s.grid_row for s in graph.sections.values() if s.bbox_w > 0})
-    intervals: dict[int | None, list[tuple[int, float, float]]] = {}
-    for row in list(rows) + [None]:
-        per_row: list[tuple[int, float, float]] = []
-        for lo, hi in zip(cols, cols[1:]):
-            if hi != lo + 1:
-                continue
-            left, right = column_gap_edges(graph, lo, hi, row=row)
-            if right > left:
-                per_row.append((lo, left, right))
-        intervals[row] = per_row
-    return intervals
-
-
-def _build_row_bands(graph: MetroGraph) -> dict[int, tuple[float, float]]:
-    """Per grid-row vertical band (top/bottom Y) spanned by its sections.
-
-    Lets a channel be matched to the row whose gap it actually travels in,
-    not merely the first row whose x-interval brackets it: two channels in
-    the same column gap but different grid rows (e.g. a row-0 fan and a
-    row-1 bypass) must NOT merge into one bundle.
-    """
-    row_bands: dict[int, tuple[float, float]] = {}
-    for s in graph.sections.values():
-        if s.bbox_h <= 0:
-            continue
-        for r in range(s.grid_row, s.grid_row + max(1, s.grid_row_span)):
-            top, bot = row_bands.get(r, (s.bbox_y, s.bbox_y + s.bbox_h))
-            row_bands[r] = (min(top, s.bbox_y), max(bot, s.bbox_y + s.bbox_h))
-    return row_bands
-
-
-def _match_channel_gap(
-    ch: _VChannel,
-    gap_intervals: dict[int | None, list[tuple[int, float, float]]],
-    row_bands: dict[int, tuple[float, float]],
-) -> tuple[int, int | None, float, float] | None:
-    """Match a channel to ``(lo_col, row, gap_left, gap_right)``.
-
-    Prefer the row whose x-interval brackets the channel AND whose vertical
-    band the channel overlaps; fall back to any bracketing row, then to the
-    row-agnostic union.
-
-    A channel that vertically crosses several rows must clear sections in
-    ALL of them, so its gap is narrowed to the intersection of every crossed
-    row's gap in the same column.  Otherwise a fan climbing out of a row
-    whose section edge sits further out than a sibling row's would centre in
-    the wider sibling gap and step back behind its source section edge (#386).
-    """
-    x = ch.x
-    overlap_match: tuple[int, int | None, float, float] | None = None
-    bracket_match: tuple[int, int | None, float, float] | None = None
-    for row in gap_intervals:
-        if row is None:
-            continue
-        for lo, left, right in gap_intervals[row]:
-            if not (left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE):
-                continue
-            if bracket_match is None:
-                bracket_match = (lo, row, left, right)
-            band = row_bands.get(row)
-            if band is not None and ch.y_lo < band[1] and band[0] < ch.y_hi:
-                if overlap_match is None:
-                    overlap_match = (lo, row, left, right)
-    match = overlap_match or bracket_match
-    if match is not None:
-        lo, row, left, right = match
-        for r, band in row_bands.items():
-            if not (ch.y_lo < band[1] and band[0] < ch.y_hi):
-                continue
-            for rlo, rleft, rright in gap_intervals.get(r, []):
-                if rlo == lo:
-                    left = max(left, rleft)
-                    right = min(right, rright)
-        return (lo, row, left, right)
-    for lo, left, right in gap_intervals.get(None, []):
-        if left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE:
-            return (lo, None, left, right)
-    return None
-
-
 def _split_corridors(chans: list[_VChannel]) -> list[list[_VChannel]]:
     """Split a bucket into corridors of substantially y-overlapping channels.
 
@@ -221,42 +108,6 @@ def _section_intrudes(graph: MetroGraph, x: float, y_lo: float, y_hi: float) -> 
             if y_lo < sy_b and sy_t < y_hi:
                 return True
     return False
-
-
-def _bucket_gap_channels(
-    channels: list[_VChannel],
-    gap_intervals: dict[int | None, list[tuple[int, float, float]]],
-    row_bands: dict[int, tuple[float, float]],
-) -> tuple[
-    dict[tuple[int, int | None, bool], list[_VChannel]],
-    dict[tuple[int, int | None], tuple[float, float]],
-]:
-    """Bucket channels per ``(gap lo_col, row, direction)`` with shared bounds.
-
-    A channel is only a candidate when its x lands strictly inside the gap
-    interior (so a near-vertical drop hugging a section edge is left
-    untouched).  Bundles sharing a ``(gap, row)`` are laid out together in
-    one x-range, so the shared bound is narrowed to the intersection of every
-    member's crossed rows rather than letting the last channel win.
-    """
-    buckets: dict[tuple[int, int | None, bool], list[_VChannel]] = defaultdict(list)
-    gap_bounds: dict[tuple[int, int | None], tuple[float, float]] = {}
-    for ch in channels:
-        gap = _match_channel_gap(ch, gap_intervals, row_bands)
-        if gap is None:
-            continue
-        lo, row, left, right = gap
-        if not (left + COORD_TOLERANCE < ch.x < right - COORD_TOLERANCE):
-            # x sits on / outside a section edge: not a clean gap channel.
-            if not (left <= ch.x <= right):
-                continue
-        prev = gap_bounds.get((lo, row))
-        if prev is not None:
-            left = max(left, prev[0])
-            right = min(right, prev[1])
-        gap_bounds[(lo, row)] = (left, right)
-        buckets[(lo, row, ch.down)].append(ch)
-    return buckets, gap_bounds
 
 
 def _layout_gap_bundle(
@@ -309,43 +160,95 @@ def _layout_gap_bundle(
             _restack_channel(ch, nx, li, n, step, ctx.curve_radius)
 
 
-def _normalize_gap_channels(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
-    """Re-bundle inter-section vertical channels sharing a gap + direction.
+def _locate_slot_channel(
+    rp: RoutedPath, slot: GapSlot, graph: MetroGraph
+) -> _VChannel | None:
+    """Find the vertical leg on *rp* that *slot* describes, or ``None``.
 
-    Post-routing pass that enforces the uniform inter-section gap geometry
-    regardless of which handler placed each leg:
+    The leg is the route segment running ``slot.direction`` whose x sits inside
+    the gap ``slot`` names; a handler declares at most one slot per physical
+    leg, so direction plus gap membership identifies it uniquely.  Returns
+    ``None`` when no segment matches (the leg was nudged out of the gap, so the
+    materialization leaves it where the handler placed it).
+    """
+    left, right = column_gap_edges(
+        graph, slot.gap_lo_col, slot.gap_hi_col, row=slot.row
+    )
+    if right <= left:
+        return None
+    down = slot.direction is Direction.D
+    pts = rp.points
+    for k in range(len(pts) - 1):
+        x0, y0 = pts[k]
+        x1, y1 = pts[k + 1]
+        if abs(x1 - x0) >= COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:
+            continue
+        if (y1 > y0) is not down:
+            continue
+        if not (left - COORD_TOLERANCE <= x0 <= right + COORD_TOLERANCE):
+            continue
+        return _VChannel(
+            route=rp,
+            idx=k,
+            x=x0,
+            y_lo=min(y0, y1),
+            y_hi=max(y0, y1),
+            down=down,
+        )
+    return None
 
-    * All same-direction channels sharing one inter-column gap collapse
-      into ONE concentric bundle, ``OFFSET_STEP`` apart, centred.
+
+def _materialize_gap_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Resolve every declared :class:`GapSlot` to a concentric channel X.
+
+    Handlers annotate each vertical inter-section leg with the gap it occupies
+    (:meth:`RoutedPath.declare_gap_slot`); this pass groups the legs by that
+    declared ``(gap, row)`` and lays each gap out under the uniform contract:
+
+    * All same-direction channels sharing one inter-column gap collapse into
+      ONE concentric bundle, ``OFFSET_STEP`` apart, centred.
     * A downward bundle and an upward bundle sharing a gap are held
       ``BUNDLE_TO_BUNDLE_CLEARANCE`` (B) apart, centred as a group.
     * A lone bundle centres in its gap with at least
       ``EDGE_TO_BUNDLE_CLEARANCE`` (A) from each bounding section edge.
 
-    Only channels whose current x already lands inside a real inter-column
-    gap are touched, so wrap / around-section legs that deliberately sit
-    outside the immediate gap are left alone.  Corner radii flanking each
-    re-stacked channel are recomputed so the bundle stays concentric.
+    The grouping is read from the declared slots rather than rediscovered from
+    raw geometry; the concentric layout and flanking-radius recompute are the
+    same per-gap logic a single handler cannot do alone (it needs every leg in
+    the gap at once).
     """
     graph = ctx.graph
-    channels = _collect_vchannels(routes)
-    if not channels:
-        return
-    gap_intervals = _build_gap_intervals(graph)
-    row_bands = _build_row_bands(graph)
+    by_gap: dict[tuple[int, int | None], list[_VChannel]] = defaultdict(list)
+    for rp in routes:
+        if rp.normalize_exempt:
+            continue
+        for slot in rp.gap_slots:
+            ch = _locate_slot_channel(rp, slot, graph)
+            if ch is not None:
+                by_gap[(slot.gap_lo_col, slot.row)].append(ch)
 
-    buckets, gap_bounds = _bucket_gap_channels(channels, gap_intervals, row_bands)
-
-    # Assemble bundles per (gap, row): one per corridor, both directions,
-    # laid out together so a down/up pair sharing a gap is B-separated.
-    by_gap: dict[tuple[int, int | None], list[tuple[bool, list[_VChannel]]]]
-    by_gap = defaultdict(list)
-    for (lo, row, down), chans in buckets.items():
-        for corridor in _split_corridors(chans):
-            by_gap[(lo, row)].append((down, corridor))
-
-    for (lo, _row), bundles in by_gap.items():
-        gap_left, gap_right = gap_bounds[(lo, _row)]
+    bands = _grid_row_bands(graph)
+    for (lo, row), chans in by_gap.items():
+        gap_left, gap_right = column_gap_edges(graph, lo, lo + 1, row=row)
+        if gap_right <= gap_left:
+            continue
+        # A channel crossing several rows must clear sections in ALL of them, so
+        # narrow the gap to the intersection of every crossed row's edges -- else
+        # a leg climbing through a row whose section edge sits further out than a
+        # sibling row's would centre in the wider gap and step back behind its
+        # source edge.
+        for r, band in bands.items():
+            if not any(c.y_lo < band[1] and band[0] < c.y_hi for c in chans):
+                continue
+            r_left, r_right = column_gap_edges(graph, lo, lo + 1, row=r)
+            if r_right > r_left:
+                gap_left = max(gap_left, r_left)
+                gap_right = min(gap_right, r_right)
+        bundles: list[tuple[bool, list[_VChannel]]] = []
+        for down in (True, False):
+            same = [c for c in chans if c.down is down]
+            for corridor in _split_corridors(same):
+                bundles.append((down, corridor))
         _layout_gap_bundle(bundles, gap_left, gap_right, ctx)
 
 
@@ -881,7 +784,7 @@ def _normalize_bypass_trunks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     channel and, with their per-line ``nest_offset`` resolved independently
     per bundle, end up drawn at the *same* Y (overlapping) or at a loose
     smear of distinct Ys (issue #484).  This post-pass mirrors
-    :func:`_normalize_gap_channels` for the horizontal trunk legs: trunks
+    :func:`_materialize_gap_slots` for the horizontal trunk legs: trunks
     that share a channel (same inter-row gap, same dip direction, overlapping
     X) are fanned ``OFFSET_STEP`` apart into a concentric bundle, with the
     widest-reaching trunk on the outside so the nesting introduces no
@@ -1698,7 +1601,7 @@ def _gap_channel_base(
     """Centred midline x for a bundle of *n* lines in gap ``(lo, lo+1)``.
 
     This is only the initial placement during routing; the post-routing
-    :func:`_normalize_gap_channels` pass re-stacks every inter-section
+    :func:`_materialize_gap_slots` pass re-stacks every inter-section
     channel into its final centred / B-separated position, so the value
     here just needs to land the channel in the right gap.
     """
