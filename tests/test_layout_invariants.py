@@ -1545,6 +1545,44 @@ def test_peeloff_riser_crossing_free_extra_line_consumer():
     )
 
 
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "topologies/peeloff_riser_respace.mmd",
+        "topologies/peeloff_extra_line_consumer.mmd",
+    ],
+)
+def test_peeloff_concentric_runtime_guard(fixture):
+    """The always-on peel-off guard passes the settled routes and fires when the
+    reordering pass is suppressed.
+
+    ``check_peeloff_concentric`` runs on every render: a bundle riding one shared
+    bypass trunk into a common LEFT entry port must rise in trunk-depth order.
+    The guard must find no braid on the real routes, and (suppressing
+    ``_reorder_convergence_peeloff``) must flag the braid that pass removes - so
+    it is a meaningful regression guard, not a vacuous pass.
+    """
+    from nf_metro.layout.routing import core
+    from nf_metro.layout.routing.invariants import check_peeloff_concentric
+
+    graph = _layout(fixture, validate=True)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    assert not check_peeloff_concentric(graph, routes)
+
+    suppressed = _layout(fixture)
+    suppressed_offsets = compute_station_offsets(suppressed)
+    original = core._reorder_convergence_peeloff
+    core._reorder_convergence_peeloff = lambda routes, ctx: None
+    try:
+        unordered = route_edges(suppressed, station_offsets=suppressed_offsets)
+    finally:
+        core._reorder_convergence_peeloff = original
+    assert check_peeloff_concentric(suppressed, unordered), (
+        "guard must flag the braid the reordering pass removes"
+    )
+
+
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_top_entry_lead_corner_concentric(fixture):
     """A multi-line TOP-entry L-shape must turn its lead-in corner

@@ -86,7 +86,6 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _materialize_gap_slots,
     _materialize_trunk_slots,
     _plan_trunk_band,
-    _port_peeloff_tail,
     _reorder_convergence_peeloff,
     _restack_channel,
     _restack_htrunk,

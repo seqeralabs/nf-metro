@@ -51,6 +51,10 @@
     "note": "Reject arm in initial_fanout_descent_span: a route whose first segment is horizontal (passes the prior check) always has a vertical second segment in the orthogonal inter-section route model; the non-vertical reject mirrors the proven-unreachable _final_port_approach reject (L687) and never fires.",
     "status": "defensive"
   },
+  "common.py::if abs(y4 - y3) > COORD_TOLERANCE or abs(x4 - x3) <= COORD_TOLERANCE:::#1": {
+    "note": "Trunk-not-horizontal guard in port_peeloff_tail, reached only after the earlier port-lead and riser checks returned early. In an orthogonal route segments alternate H/V, so the segment preceding a vertical riser is always horizontal; instrumenting the corpus the guard is reached but the non-horizontal-trunk arm never fires. Defensive against a degenerate collinear tail the router does not produce.",
+    "status": "defensive"
+  },
   "common.py::if all_in_range:::#1": {
     "note": "cross_row bypass guard: the False arm (no sections in the column range -> return clearance) needs an empty [lo,hi] column span, which a valid multi-section pipeline routing cross_row never has; a degenerate-range guard.",
     "status": "defensive"
@@ -77,6 +81,10 @@
   },
   "common.py::if endpoints:::#1": {
     "note": "Non-cross_row bypass guard: the endpoints list always includes the source and target sections (both in src_row), so it is never empty; the default-clearance arm only guards a degenerate empty endpoint set.",
+    "status": "defensive"
+  },
+  "common.py::if len(signs) != 1:::#1": {
+    "note": "Mixed-peel-end guard in iter_port_peeloff_bundles: a concentric peel-off bundle into a LEFT entry port is always fed from the left, so every member's trunk traverses toward the peel corner with the same trunk_sign. Lines approaching from the right of the port form an entry-wrap route, not a peel-off tail (verified: a right-side source produces zero peel tails), so the bundle never mixes signs. Belt-and-suspenders beyond the contiguity check.",
     "status": "defensive"
   },
   "common.py::if n == 0:::#1": {
@@ -134,6 +142,10 @@
   "common.py::if t < -0.01 or t > 1.01:::#1": {
     "note": "point_on_polyline parameter-range branch, reached only via the --animate renderer; the render-path coverage sweep doesn't animate. Exercised by test_animation.py / test_routing.py.",
     "status": "defensive"
+  },
+  "common.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
+    "note": "Degenerate single-Y trunk band in iter_port_peeloff_bundles: a peel-off bundle is yielded only when its members ride trunks at distinct depths, so the equal-depth arm guards a same-Y bundle the trunk-slot materialization never leaves; render-diff confirms no visual change.",
+    "status": "needs-review"
   },
   "context.py::for e in graph.edges:::#3": {
     "note": "In the public compute_junction_fan_info, called only from _guard_fan_bundles_coincide_or_separate (a validate=True guard). The coverage sweep renders with validate=False, so this function never runs on the render path; it is exercised by the layout-invariant test surface instead.",
@@ -475,12 +487,8 @@
     "note": "A re-stacked gap channel at points-index 1 always has a horizontal lead-in (L-shape and bypass routes open with a horizontal segment); routes opening non-horizontally are normalize_exempt and skipped by the materialization. The non-horizontal-lead return in _restack_channel is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
-  "normalize.py::if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:::#2": {
+  "normalize.py::if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:::#1": {
     "note": "Every non-exempt inter-section route ends with a vertical descent into the target Y then a short horizontal port lead (V->H tail); routes with non-V tails are normalize_exempt. The second-to-last-not-vertical reject in _final_port_approach is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
-    "status": "defensive"
-  },
-  "normalize.py::if abs(y4 - y3) > COORD_TOLERANCE or abs(x4 - x3) <= COORD_TOLERANCE:::#1": {
-    "note": "Trunk-not-horizontal guard in _port_peeloff_tail, reached only after the port lead is horizontal and the riser vertical (L478/L480 returned early otherwise). In an orthogonal route segments alternate H/V, so the segment preceding a vertical riser is always horizontal; instrumenting the corpus the guard is reached 866 times and the non-horizontal-trunk arm never fires. Defensive against a degenerate collinear tail the router does not produce.",
     "status": "defensive"
   },
   "normalize.py::if band is not None:::#1": {
@@ -533,10 +541,6 @@
   },
   "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#3": {
     "note": "Trail-corner bounds guard in _restack_channel: the restacked vertical always has a following segment (k+2 < len(pts)) and a radius slot, so across the corpus (804 calls) the skip arm never fires. Defensive bounds guard.",
-    "status": "defensive"
-  },
-  "normalize.py::if len(signs) != 1:::#1": {
-    "note": "Mixed-peel-end guard in _reorder_convergence_peeloff: a concentric peel-off bundle into a LEFT entry port is always fed from the left, so every member's trunk traverses toward the peel corner with the same trunk_sign. Lines approaching from the right of the port form an entry-wrap route, not a peel-off tail (verified: a right-side source produces zero peel tails), so the bundle never mixes signs. Belt-and-suspenders beyond the L535 contiguity check.",
     "status": "defensive"
   },
   "normalize.py::if len(slots) < 2 or len(slots) > _MAX_BAND_PERMUTE:::#1": {
@@ -602,10 +606,6 @@
   "inter_section_handlers.py::if route is None:::#2": {
     "note": "Defensive in _declare_trunk: _route_inter_section only reaches the declaration after a matched rule (or the L-shape fall-through) produced a route, so the None guard never fires on the corpus; it mirrors _declare_channel's same guard for a handler that returns None.",
     "status": "defensive"
-  },
-  "normalize.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
-    "note": "Degenerate single-Y trunk band in the riser-alignment pass. Left un-exercised after the simple inter-section shapes moved to baked-offset centrelines; render-diff confirms no visual change.",
-    "status": "needs-review"
   },
   "offsets.py::elif feeding_exit != edge.source:::#1": {
     "note": "This arm (single_exit=False due to multiple distinct exit ports feeding one junction) requires one junction to receive edges from two different exit ports. But _rewrite_edges_with_junctions in resolve.py creates exactly one junction per exit port fan-out, wired exclusively from that exit port's edges. A junction always has a single upstream exit port; the elif is structurally unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",

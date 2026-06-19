@@ -45,7 +45,10 @@ from nf_metro.layout.routing.common import (
     horizontal_direction,
     initial_fanout_descent_span,
     iter_horizontal_trunks,
+    iter_port_peeloff_bundles,
     iter_vertical_segments,
+    peeloff_target_slots,
+    tail_on_slot,
     trunk_segments_cross,
     vertical_direction,
 )
@@ -1971,6 +1974,60 @@ def check_trunks_declared(routes: list[RoutedPath]) -> list[UndeclaredTrunk]:
     return out
 
 
+@dataclass
+class PeeloffBundleCrossing:
+    """A peel-off bundle into a LEFT entry port braids instead of nesting.
+
+    Lines riding one shared bypass trunk that rise into a common LEFT entry port
+    must turn in concentrically: the riser peel-x (and the port-slot Y) ordered
+    by trunk depth.  A member whose realized peel-x is not the slot its trunk
+    depth earns rises across the lines stacked with it, crossing them just
+    before the port.
+    """
+
+    port_id: str
+    line_id: str
+    peel_x: float
+    expected_peel_x: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"peel-off bundle into port {self.port_id!r}: line {self.line_id!r} "
+            f"rises at peel-x {self.peel_x:.1f} but its trunk depth earns the "
+            f"slot at {self.expected_peel_x:.1f} (the bundle braids into the port)"
+        )
+
+
+def check_peeloff_concentric(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> list[PeeloffBundleCrossing]:
+    """Return peel-off bundles that braid into a LEFT entry port.
+
+    Every contiguous concentric peel-off bundle - lines sharing one bypass trunk
+    rising into a common LEFT entry port - must have its riser peel-x and
+    port-slot Y ordered by trunk depth so the bundle nests crossing-free into the
+    port.  A member off its depth-earned slot rises across the lines stacked with
+    it, braiding the bundle just before the port.  The ordering is set by
+    ``_reorder_convergence_peeloff``.
+    """
+    out: list[PeeloffBundleCrossing] = []
+    for bundle in iter_port_peeloff_bundles(routes, graph, OFFSET_STEP):
+        targets = peeloff_target_slots(bundle)
+        for line_id, tail in bundle.per_line.items():
+            slot = targets[line_id]
+            if not tail_on_slot(tail, slot):
+                out.append(
+                    PeeloffBundleCrossing(
+                        port_id=bundle.port_id,
+                        line_id=line_id,
+                        peel_x=tail.peel_x,
+                        expected_peel_x=slot.peel_x,
+                    )
+                )
+    return out
+
+
 class CurveInvariantError(RuntimeError):
     """A rendered route contains a bundle-curve defect.
 
@@ -2043,6 +2100,10 @@ def assert_render_curve_invariants(
             "undeclared trunk",
             check_trunks_declared(routes),
         ),
+        (
+            "peel-off bundle braids into port",
+            check_peeloff_concentric(graph, routes),
+        ),
     ]
     messages: list[str] = []
     for label, violations in named_checks:
@@ -2077,6 +2138,7 @@ __all__ = [
     "MergePortApproachViolation",
     "NonConcentricCornerViolation",
     "PartialBranchGapViolation",
+    "PeeloffBundleCrossing",
     "PerpEntryBoundaryViolation",
     "SameLineParallelRun",
     "Side",
@@ -2092,6 +2154,7 @@ __all__ = [
     "check_merge_port_approach_side",
     "check_no_collinear_distinct_lines",
     "check_no_same_line_parallel_descents",
+    "check_peeloff_concentric",
     "check_perp_entry_boundary_consistent",
     "bypass_horizontal_targets",
     "check_stacked_elbow_clearance",
