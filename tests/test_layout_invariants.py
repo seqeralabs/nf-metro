@@ -698,6 +698,57 @@ def test_straight_through_line_keeps_constant_offset(fixture, line_id):
 
 
 # ---------------------------------------------------------------------------
+# TB trunk passes through stations as a straight vertical column
+# ---------------------------------------------------------------------------
+
+# (fixture, section_id, line_id) where the named line runs straight down a
+# single base-X column inside a TB section.  Every station it touches must
+# carry one per-line offset; any variation paints the line bending in to
+# touch the station marker and back out, so the station reads as an elbow on
+# the trunk.  Vertical analogue of test_straight_through_line_keeps_constant
+# _offset above.
+_TB_STRAIGHT_THROUGH_LINES = [
+    ("topologies/tb_passthrough_trunk.mmd", "reporting", "rna"),
+    ("topologies/tb_passthrough_trunk.mmd", "reporting", "affy"),
+    ("topologies/tb_passthrough_trunk.mmd", "reporting", "mq"),
+]
+
+
+@pytest.mark.parametrize("fixture,section_id,line_id", _TB_STRAIGHT_THROUGH_LINES)
+def test_tb_straight_through_line_keeps_constant_offset(fixture, section_id, line_id):
+    """A line confined to one base-X column in a TB section carries one offset.
+
+    In a top-to-bottom section the trunk runs vertically, so a per-station
+    offset variation paints the line bending in to touch the station marker
+    and back out: the station reads as an elbow on the trunk.  The bundle
+    must pass through cleanly as a straight column.
+    """
+    graph = _layout(fixture)
+    assert graph.sections[section_id].direction == "TB", (
+        f"{fixture}: section {section_id} is not TB; test precondition fails"
+    )
+    offsets = compute_station_offsets(graph)
+    stations = [
+        sid
+        for sid in graph.stations
+        if graph.stations[sid].section_id == section_id
+        and not graph.stations[sid].is_port
+        and line_id in graph.station_lines(sid)
+    ]
+    xs = [graph.stations[sid].x for sid in stations]
+    assert max(xs) - min(xs) <= _Y_TOL, (
+        f"{fixture}: {line_id} spans columns {min(xs)}..{max(xs)}; "
+        "test precondition (single column) does not hold"
+    )
+    offs = {sid: round(offsets.get((sid, line_id), 0.0), 1) for sid in stations}
+    distinct = sorted(set(offs.values()))
+    assert len(distinct) == 1, (
+        f"{fixture}: line {line_id} runs straight down one column but its "
+        f"offset varies {distinct}; per-station offsets {offs}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Subset-carrying section anchors its bundle on its own trunk
 # ---------------------------------------------------------------------------
 

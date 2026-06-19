@@ -1,0 +1,29 @@
+%%metro title: TB pass-through trunk
+%%metro style: dark
+%%metro line: rna | RNA-seq | #1f9e89
+%%metro line: affy | Affymetrix | #e6550d
+%%metro line: mq | MaxQuant | #0570b0
+
+%%metro file: bundle_zip | ZIP | Bundle
+
+graph LR
+    subgraph analysis [Analysis]
+        align[Align]
+        call[Call]
+        align -->|rna,affy,mq| call
+    end
+
+    subgraph reporting [Reporting]
+        %%metro direction: TB
+        %%metro entry: left | rna, affy, mq
+        collect[Collect]
+        annotate[Annotate]
+        package[Package]
+        bundle_zip[ ]
+
+        collect -->|rna,affy,mq| annotate
+        annotate -->|rna,affy,mq| package
+        package -->|rna,affy,mq| bundle_zip
+    end
+
+    call -->|rna,affy,mq| collect

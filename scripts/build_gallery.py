@@ -502,6 +502,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "built via `build_concentric_bundle` (#707).",
     ),
     (
+        "tb_passthrough_trunk",
+        TOPOLOGIES_DIR,
+        "A three-line bundle running straight down a linear chain of stations "
+        "in a `%%metro direction: TB` section. The trunk passes through each "
+        "station as a clean vertical column: every line holds one offset, so "
+        "no station reads as an elbow.",
+    ),
+    (
         "around_below_ep_col_gt0",
         TOPOLOGIES_DIR,
         "A two-line bundle looping around below the canvas into a non-zero-"
