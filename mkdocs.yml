@@ -32,16 +32,13 @@ markdown_extensions:
   - toc:
       permalink: true
 
-exclude_docs: |
-  WEBSITE_PLAN.md
-
 nav:
   - Home: index.md
   - Guide: guide.md
   - Embedding: embedding.md
-  - Live progress: live.md
-  - Data manifest: manifest.md
   - Embed contract: embed.md
+  - Data manifest: manifest.md
+  - Live progress: live.md
   - Nextflow Import: nextflow.md
   - nf-core Pipelines: pipelines/index.md
   - Gallery: gallery/index.md
