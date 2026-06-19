@@ -200,6 +200,10 @@ def route_edges(
     _normalize_gap_channels(routes, ctx)
     _normalize_bypass_trunks(routes, ctx)
     _reorder_convergence_peeloff(routes, ctx)
+    # The coincidence passes run after the trunk/gap channels are finalised:
+    # each snaps same-line tracks onto a reference read from that final
+    # geometry (the port-side track, the source-side track, and the merge
+    # trunk's descent respectively), so a single line reads as one stroke.
     _coincide_convergent_port_approaches(routes, ctx)
     _coincide_divergent_fanout_descents(routes)
     _coincide_merge_feeder_descents(routes, ctx)
