@@ -26,6 +26,7 @@ from nf_metro.layout.routing.context import (
 from nf_metro.parser.model import (
     MetroGraph,
     Station,
+    is_bypass_v,
 )
 
 
@@ -69,9 +70,7 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
         # forces asymmetric clamping, producing a visible kink at V.
         # Bypass V routes are short and the perpendicular separation
         # from per-line Y offsets alone is sufficient for visibility.
-        if rp.edge.source.startswith("__bypass_") or rp.edge.target.startswith(
-            "__bypass_"
-        ):
+        if is_bypass_v(rp.edge.source) or is_bypass_v(rp.edge.target):
             continue
         if rp.edge.source in ctx.fork_stations:
             fork_groups[rp.edge.source].append(rp)
@@ -429,8 +428,7 @@ def _centering_candidate(
 
     # Guard: don't shift in convergence/divergence bundles.  Bypass V
     # helpers have no marker so the convergence-guard doesn't apply.
-    is_bypass_v = sid.startswith("__bypass_")
-    if not is_bypass_v:
+    if not is_bypass_v(sid):
         if out_rp and len(ctx.diag_in_sources.get(out_rp.edge.target, set())) > 1:
             return None
         if in_rp and len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1:
@@ -459,7 +457,7 @@ def _collect_centering_candidates(
     for sid, station in graph.stations.items():
         if station.is_port:
             continue
-        if station.is_hidden and not sid.startswith("__bypass_"):
+        if station.is_hidden and not is_bypass_v(sid):
             continue
         candidate = _centering_candidate(graph, ctx, sid, station)
         if candidate is not None:
@@ -494,7 +492,7 @@ def _apply_station_moves(
         # Hidden bypass V helpers have no marker, so column alignment
         # with visible companions isn't a visible concern - centre them
         # without requiring companion consensus.
-        skip_companion_check = sid.startswith("__bypass_")
+        skip_companion_check = is_bypass_v(sid)
         if not skip_companion_check and abs(new_x - station.x) > STATION_MOVE_TOLERANCE:
             ox = original_x.get(sid, station.x)
             companions = []

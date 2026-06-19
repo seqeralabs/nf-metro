@@ -117,6 +117,20 @@ class MarkerLegendEntry:
     caption: str
 
 
+BYPASS_V_PREFIX = "__bypass_"
+
+
+def is_bypass_v(station_id: str) -> bool:
+    """True if *station_id* names a hidden bypass-V helper station.
+
+    Bypass-V helpers are the routing-only nodes inserted by
+    :mod:`nf_metro.parser.resolve` to route a line around a station it does
+    not stop at.  Their ids are built with :data:`BYPASS_V_PREFIX`; this is
+    the one place the prefix is interpreted.
+    """
+    return station_id.startswith(BYPASS_V_PREFIX)
+
+
 @dataclass
 class Station:
     """A node/station in the metro map."""

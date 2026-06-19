@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import networkx as nx
 
 from nf_metro.parser.model import (
+    BYPASS_V_PREFIX,
     Edge,
     MetroGraph,
     Port,
@@ -299,7 +300,7 @@ def _insert_bypass_stations(graph: MetroGraph) -> None:
             )
             for pred_id, bypass_edges in bypass_by_pred.items():
                 bypass_count += 1
-                v_id = f"__bypass_{sid}_{pred_id}_{bypass_count}"
+                v_id = f"{BYPASS_V_PREFIX}{sid}_{pred_id}_{bypass_count}"
                 new_stations.append(
                     Station(
                         id=v_id,

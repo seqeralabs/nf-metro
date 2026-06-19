@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import DIAGONAL_SLOPE_RATIO, MIN_STATION_FLAT_LENGTH
 from nf_metro.layout.phases._common import _restoring_layout_geometry
-from nf_metro.parser.model import MetroGraph
+from nf_metro.parser.model import MetroGraph, is_bypass_v
 
 if TYPE_CHECKING:
     from nf_metro.layout.labels import LabelOverlap, LabelPlacement
@@ -119,8 +119,8 @@ def _struck_label_station_ids(
 
     def _bypass_endpoint(r: RoutedPath) -> str | None:
         """The real station a bypass-V leg diverges from or merges at, if any."""
-        src_bypass = r.edge.source.startswith("__bypass_")
-        tgt_bypass = r.edge.target.startswith("__bypass_")
+        src_bypass = is_bypass_v(r.edge.source)
+        tgt_bypass = is_bypass_v(r.edge.target)
         if src_bypass == tgt_bypass:
             return None
         return r.edge.target if src_bypass else r.edge.source
@@ -243,8 +243,8 @@ def _bypass_v_flat_gaps_from(
     """
     gaps: set[tuple[str, int]] = set()
     for r in routes:
-        into_v = r.edge.target.startswith("__bypass_")
-        out_of_v = r.edge.source.startswith("__bypass_")
+        into_v = is_bypass_v(r.edge.target)
+        out_of_v = is_bypass_v(r.edge.source)
         if into_v == out_of_v:
             continue
         v = graph.stations.get(r.edge.target if into_v else r.edge.source)
@@ -274,10 +274,7 @@ def _bypass_v_collapsed_flat_gaps(graph: MetroGraph) -> set[tuple[str, int]]:
     geometry mutations, so this never perturbs the live layout.  See
     :func:`_bypass_v_flat_gaps_from`.
     """
-    if not any(
-        e.source.startswith("__bypass_") or e.target.startswith("__bypass_")
-        for e in graph.edges
-    ):
+    if not any(is_bypass_v(e.source) or is_bypass_v(e.target) for e in graph.edges):
         return set()
     probe = _probe_label_placements(graph, allow_hyphenation=True)
     if probe is None:

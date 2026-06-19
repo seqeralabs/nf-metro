@@ -13,7 +13,15 @@ from nf_metro.layout.constants import (
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
 )
-from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
+from nf_metro.parser.model import (
+    Edge,
+    MetroGraph,
+    Port,
+    PortSide,
+    Section,
+    Station,
+    is_bypass_v,
+)
 
 if TYPE_CHECKING:
     from nf_metro.layout.routing.common import RoutedPath
@@ -103,7 +111,7 @@ def _content_station_ys(graph: MetroGraph, section: Section) -> list[float]:
         if (
             sid in graph.stations
             and not graph.stations[sid].is_port
-            and not sid.startswith("__bypass_")
+            and not is_bypass_v(sid)
         )
     ]
 
@@ -409,7 +417,7 @@ def _max_stations_per_layer(sub: MetroGraph) -> int:
     """
     layer_ys: dict[int, set[float]] = defaultdict(set)
     for s in sub.stations.values():
-        if s.id.startswith("__bypass_"):
+        if is_bypass_v(s.id):
             continue
         layer_ys[s.layer].add(s.y)
     return max((len(ys) for ys in layer_ys.values()), default=1)
@@ -529,7 +537,7 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
             if (
                 st
                 and not st.is_port
-                and not other_id.startswith("__bypass_")
+                and not is_bypass_v(other_id)
                 and set(graph.station_lines(other_id)) == bundle
             ):
                 trunk_ys.add(round(st.y, 3))

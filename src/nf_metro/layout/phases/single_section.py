@@ -43,7 +43,7 @@ from nf_metro.layout.phases.off_track import (
     _insert_phantom_pass_throughs,
     _space_off_track_outputs,
 )
-from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import MetroGraph, PortSide, Section, Station, is_bypass_v
 
 
 def _align_terminus_to_upstream(graph: MetroGraph) -> None:
@@ -258,12 +258,10 @@ def _layout_single_section(
     # section edge (~CURVE_RADIUS + half a station flat) - much less
     # than the full station_y_padding (which is reserved for label
     # clearance around real stations).
-    real_for_bbox = [
-        s for s in sub.stations.values() if not s.id.startswith("__bypass_")
-    ]
+    real_for_bbox = [s for s in sub.stations.values() if not is_bypass_v(s.id)]
     if not real_for_bbox:
         real_for_bbox = list(sub.stations.values())
-    bypass_v_ys = [s.y for s in sub.stations.values() if s.id.startswith("__bypass_")]
+    bypass_v_ys = [s.y for s in sub.stations.values() if is_bypass_v(s.id)]
     xs = [s.x for s in real_for_bbox]
     ys = [s.y for s in real_for_bbox]
     extra_label_h = _multiline_label_padding(sub)
@@ -692,10 +690,10 @@ def _adjust_lr_exit_gap(
             if edge.source not in real_ids:
                 continue
             src_id = edge.source
-            if src_id.startswith("__bypass_"):
+            if is_bypass_v(src_id):
                 pred_y = None
                 for pe in graph.edges_to(src_id):
-                    if pe.source in real_ids and not pe.source.startswith("__bypass_"):
+                    if pe.source in real_ids and not is_bypass_v(pe.source):
                         ps = sub.stations.get(pe.source)
                         if ps is not None:
                             pred_y = ps.y

@@ -37,7 +37,7 @@ from nf_metro.layout.routing.common import (
     resolve_section,
     section_exists_above_row,
 )
-from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import MetroGraph, PortSide, Section, Station, is_bypass_v
 
 
 def _assign_grid_layout(
@@ -1287,10 +1287,10 @@ def _find_connected_internal_coord(
     )
     vals: list[float] = []
     for edge in graph.edges_from(port_id):
-        if edge.target in internal_ids and not edge.target.startswith("__bypass_"):
+        if edge.target in internal_ids and not is_bypass_v(edge.target):
             vals.append(getattr(graph.stations[edge.target], axis))
     for edge in graph.edges_to(port_id):
-        if edge.source in internal_ids and not edge.source.startswith("__bypass_"):
+        if edge.source in internal_ids and not is_bypass_v(edge.source):
             vals.append(getattr(graph.stations[edge.source], axis))
     if vals:
         return sum(vals) / len(vals)

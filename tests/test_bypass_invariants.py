@@ -37,6 +37,7 @@ import pytest
 from nf_metro.layout.engine import _station_marker_bbox, compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.model import is_bypass_v
 from nf_metro.render.svg import apply_route_offsets
 
 GUIDE = Path(__file__).resolve().parent.parent / "examples" / "guide"
@@ -133,7 +134,22 @@ _BYPASS_QUIET_FIXTURES = [
 def test_no_bypass_inserted_for_quiet_fixtures(rel_path):
     text = (Path(__file__).resolve().parent.parent / rel_path).read_text()
     graph = parse_metro_mermaid(text)
-    bypass_ids = [sid for sid in graph.stations if sid.startswith("__bypass_")]
+    bypass_ids = [sid for sid in graph.stations if is_bypass_v(sid)]
     assert bypass_ids == [], (
         f"{rel_path}: expected no bypass stations, got {bypass_ids}"
     )
+
+
+@pytest.mark.parametrize("name", _GUIDE_BYPASS_FIXTURES)
+def test_is_bypass_v_recognises_resolve_generated_helpers(name):
+    """The helper ids ``resolve`` builds are recognised by ``is_bypass_v`` and
+    carry the V's defining traits (hidden, label-less).  Pins the
+    producer/consumer pairing so renaming the prefix stays a one-site change
+    rather than silently splitting the id-builder from its predicate.
+    """
+    graph = _layout_guide(name)
+    flagged = [st for sid, st in graph.stations.items() if is_bypass_v(sid)]
+    assert flagged, f"{name}: expected at least one bypass-V helper"
+    for st in flagged:
+        assert st.is_hidden, f"{name}: {st.id!r} flagged as bypass-V but is visible"
+        assert not st.label.strip(), f"{name}: bypass-V {st.id!r} carries a label"

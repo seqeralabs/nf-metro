@@ -277,7 +277,7 @@ from nf_metro.layout.phases.spacing import (  # noqa: F401
     _spread_bump,
     _struck_stations_and_collinear,
 )
-from nf_metro.parser.model import LineSpread, MetroGraph, Section
+from nf_metro.parser.model import LineSpread, MetroGraph, Section, is_bypass_v
 from nf_metro.parser.validate import (
     CyclicGraphError,
     find_cycle,
@@ -736,8 +736,7 @@ def _apply_label_strike_clearance(
     bypass_divergence_sources = {
         edge.source
         for edge in graph.edges
-        if edge.target.startswith("__bypass_")
-        and not edge.source.startswith("__bypass_")
+        if is_bypass_v(edge.target) and not is_bypass_v(edge.source)
     }
 
     def _issues() -> tuple[set[str], bool, set[tuple[str, str, int]]]:

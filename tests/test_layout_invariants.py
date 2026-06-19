@@ -74,7 +74,14 @@ from nf_metro.layout.routing.invariants import (
     check_no_collinear_distinct_lines,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import (
+    BYPASS_V_PREFIX,
+    MetroGraph,
+    PortSide,
+    Section,
+    Station,
+    is_bypass_v,
+)
 from nf_metro.render.svg import (
     _compute_icon_obstacles,
     _icon_obstacles_by_station,
@@ -308,10 +315,7 @@ def _fixtures_with_bypass() -> list[str]:
             g = _layout(name)
         except Exception:
             continue
-        if any(
-            st.is_hidden and sid.startswith("__bypass_")
-            for sid, st in g.stations.items()
-        ):
+        if any(st.is_hidden and is_bypass_v(sid) for sid, st in g.stations.items()):
             out.append(name)
     return out
 
@@ -2138,8 +2142,8 @@ def _bypass_v_own_label_strikes(fixture: str) -> list[str]:
     by_station = {p.station_id: p for p in placements if p.station_id}
     struck: list[str] = []
     for r in routes:
-        src_bypass = r.edge.source.startswith("__bypass_")
-        tgt_bypass = r.edge.target.startswith("__bypass_")
+        src_bypass = is_bypass_v(r.edge.source)
+        tgt_bypass = is_bypass_v(r.edge.target)
         if src_bypass == tgt_bypass:
             continue
         endpoint = r.edge.target if src_bypass else r.edge.source
@@ -2843,7 +2847,7 @@ def test_off_track_fit_top_clamps_to_content_above_band():
         for s in section.station_ids
         if not graph.stations[s].is_port
         and not graph.stations[s].off_track
-        and not s.startswith("__bypass_")
+        and not is_bypass_v(s)
     )
     graph.stations[on_id].y = highest - 30.0  # above the off-track band
 
@@ -2928,7 +2932,7 @@ def _fit_top_section(*, content_ys, ports=(), bypass_ys=(), grid_row=0):
         )
         section.station_ids.append(sid)
     for i, y in enumerate(bypass_ys):
-        sid = f"__bypass_{i}"
+        sid = f"{BYPASS_V_PREFIX}{i}"
         graph.stations[sid] = Station(id=sid, label="", section_id="s", y=y)
         section.station_ids.append(sid)
     return graph, section
@@ -4530,9 +4534,7 @@ def test_non_consumed_lines_route_via_virtual_station(fixture):
     # would otherwise route past annotate.  After v110, those lines
     # must enter a hidden station in the same section.
     bypass_station_ids = {
-        sid
-        for sid, st in graph.stations.items()
-        if st.is_hidden and sid.startswith("__bypass_")
+        sid for sid, st in graph.stations.items() if st.is_hidden and is_bypass_v(sid)
     }
     assert bypass_station_ids, (
         f"{fixture}: expected at least one __bypass_ hidden station "
@@ -4650,9 +4652,7 @@ def test_bypass_avoids_off_track_inputs(fixture):
     # require strictly less than one full row, ie ~12 px or more.
     MIN_CLEARANCE = 12.0
     bypass_ids = [
-        sid
-        for sid, st in graph.stations.items()
-        if st.is_hidden and sid.startswith("__bypass_")
+        sid for sid, st in graph.stations.items() if st.is_hidden and is_bypass_v(sid)
     ]
     if not bypass_ids:
         pytest.skip(f"{fixture}: no bypass virtual stations")
@@ -5148,9 +5148,7 @@ def test_bypass_v_has_horizontal_segment(fixture):
     routes = route_edges(graph, station_offsets=offsets)
 
     bypass_v_ids = {
-        sid
-        for sid, st in graph.stations.items()
-        if st.is_hidden and sid.startswith("__bypass_")
+        sid for sid, st in graph.stations.items() if st.is_hidden and is_bypass_v(sid)
     }
     assert bypass_v_ids, f"{fixture}: expected at least one __bypass_ virtual station"
 
@@ -5505,7 +5503,7 @@ def test_section_bbox_top_hugs_content(fixture):
         content_top = min(
             graph.stations[sid].y
             for sid in sec.station_ids
-            if not graph.stations[sid].is_port and not sid.startswith("__bypass_")
+            if not graph.stations[sid].is_port and not is_bypass_v(sid)
         )
         gap = content_top - sec.bbox_y
         if abs(gap - SECTION_Y_PADDING) > tol:
@@ -5855,9 +5853,7 @@ def test_bypass_clearance_from_lower_section(fixture):
 
     graph = _layout(fixture)
     bypass_stations = [
-        st
-        for sid, st in graph.stations.items()
-        if st.is_hidden and sid.startswith("__bypass_")
+        st for sid, st in graph.stations.items() if st.is_hidden and is_bypass_v(sid)
     ]
     if not bypass_stations:
         pytest.skip(f"{fixture}: no bypass virtual stations")

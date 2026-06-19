@@ -25,7 +25,7 @@ from nf_metro.layout.phases.single_section import (
     _terminus_y_overhang,
     angled_label_reach,
 )
-from nf_metro.parser.model import MetroGraph, Section, Station
+from nf_metro.parser.model import MetroGraph, Section, Station, is_bypass_v
 
 
 def _predicted_bypass_bottom_in_row(
@@ -394,7 +394,7 @@ def _predict_section_content_bottom(
             if (
                 sid in graph.stations
                 and not graph.stations[sid].is_port
-                and not sid.startswith("__bypass_")
+                and not is_bypass_v(sid)
             )
         ]
     if not content_bots:
@@ -403,7 +403,7 @@ def _predict_section_content_bottom(
     bypass_max_ys = [
         graph.stations[sid].y
         for sid in section.station_ids
-        if sid in graph.stations and sid.startswith("__bypass_")
+        if sid in graph.stations and is_bypass_v(sid)
     ]
     port_max_ys = [
         graph.stations[sid].y
@@ -573,7 +573,7 @@ def _section_content_hug_top(
     bypass_min_ys = [
         graph.stations[sid].y
         for sid in section.station_ids
-        if sid in graph.stations and sid.startswith("__bypass_")
+        if sid in graph.stations and is_bypass_v(sid)
     ]
     port_min_ys = [
         graph.stations[sid].y
@@ -606,9 +606,7 @@ def _section_band_is_empty(graph: MetroGraph, section: Section) -> bool:
         st = graph.stations.get(sid)
         if st is None:
             continue
-        if (
-            st.is_port or sid.startswith("__bypass_")
-        ) and st.y < topmost - SAME_COORD_TOLERANCE:
+        if (st.is_port or is_bypass_v(sid)) and st.y < topmost - SAME_COORD_TOLERANCE:
             return False
     return True
 

@@ -48,6 +48,7 @@ from nf_metro.parser.model import (
     Edge,
     PortSide,
     Station,
+    is_bypass_v,
 )
 
 
@@ -391,13 +392,13 @@ def _route_diagonal(
     # equal V-side flat reservations so V sits at the centre of the
     # straight segment of the bypass loop.
     v_flat_half = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
-    if tgt.is_hidden and edge.target.startswith("__bypass_"):
+    if tgt.is_hidden and is_bypass_v(edge.target):
         is_fork_flag = False
         is_join_flag = True
         tgt_min = v_flat_half
         if src_min + tgt_min + ctx.diagonal_run > abs(dx):
             tgt_min = MIN_STRAIGHT_EDGE
-    elif src.is_hidden and edge.source.startswith("__bypass_"):
+    elif src.is_hidden and is_bypass_v(edge.source):
         is_fork_flag = True
         is_join_flag = False
         src_min = v_flat_half
