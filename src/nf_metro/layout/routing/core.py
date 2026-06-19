@@ -128,29 +128,23 @@ from nf_metro.parser.model import (
 )
 
 
-def route_edges(
+def _route_edges(
     graph: MetroGraph,
-    diagonal_run: float = DIAGONAL_RUN,
-    curve_radius: float = CURVE_RADIUS,
-    station_offsets: dict[tuple[str, str], float] | None = None,
-    station_moves: dict[str, float] | None = None,
-) -> list[RoutedPath]:
-    """Route all edges with smooth direction changes.
+    diagonal_run: float,
+    curve_radius: float,
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> tuple[list[RoutedPath], dict[str, float]]:
+    """Route all edges, returning the paths and the bubble-centring moves.
 
-    Detects cross-row edges (large Y gap relative to X gap) and routes
-    them through a vertical connector at the fold edge.
-
-    Routing is pure with respect to placement: it never moves stations.  The
-    bubble-centring pass instead emits per-station X-targets as *move
-    requests*; when ``station_moves`` is supplied it is populated with
-    ``{station_id: x}`` for the render path to apply (settling the markers on
-    their centred flats).  Callers that omit it get a route they can inspect
-    without perturbing ``graph.stations``.
+    Shared body behind :func:`route_edges` (pure) and
+    :func:`route_edges_centred` (applies the moves).  The ``moves`` are the
+    per-station X-targets the bubble-centring pass produced as ``{station_id:
+    x}`` requests; the route points are adjusted in place either way.
     """
     if graph.line_spread is LineSpread.RAILS:
         from nf_metro.layout.routing.rail import route_rail_edges
 
-        return route_rail_edges(graph)
+        return route_rail_edges(graph), {}
 
     # Per-section rail mode: route each rail section's internal edges with the
     # dedicated rail router (straight rails, no bundling) and let the normal
@@ -204,8 +198,6 @@ def route_edges(
             routes.append(result)
 
     moves = _center_bubble_stations(routes, graph)
-    if station_moves is not None:
-        station_moves.update(moves)
     _spread_diagonal_bundles(routes, ctx)
     _normalize_gap_channels(routes, ctx)
     _normalize_bypass_trunks(routes, ctx)
@@ -220,6 +212,27 @@ def route_edges(
     _join_fanout_upstream_tails(routes, ctx)
     _clear_bypass_v_label_strikes(routes, ctx)
 
+    return routes, moves
+
+
+def route_edges(
+    graph: MetroGraph,
+    diagonal_run: float = DIAGONAL_RUN,
+    curve_radius: float = CURVE_RADIUS,
+    station_offsets: dict[tuple[str, str], float] | None = None,
+) -> list[RoutedPath]:
+    """Route all edges with smooth direction changes.
+
+    Detects cross-row edges (large Y gap relative to X gap) and routes
+    them through a vertical connector at the fold edge.
+
+    Routing is pure with respect to placement: it never moves stations.  The
+    bubble-centring pass emits its per-station X-targets as move requests,
+    which this entry point discards; :func:`route_edges_centred` is the variant
+    that applies them.  Callers get a route they can inspect without perturbing
+    ``graph.stations``.
+    """
+    routes, _moves = _route_edges(graph, diagonal_run, curve_radius, station_offsets)
     return routes
 
 
@@ -242,14 +255,7 @@ def route_edges_centred(
     layout.  Bisection / placement guards that must read the *un-centred*
     placement geometry call :func:`route_edges` directly instead.
     """
-    moves: dict[str, float] = {}
-    routes = route_edges(
-        graph,
-        diagonal_run=diagonal_run,
-        curve_radius=curve_radius,
-        station_offsets=station_offsets,
-        station_moves=moves,
-    )
+    routes, moves = _route_edges(graph, diagonal_run, curve_radius, station_offsets)
     for sid, x in moves.items():
         graph.stations[sid].x = x
     return routes
