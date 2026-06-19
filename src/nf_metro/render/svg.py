@@ -4,7 +4,6 @@ from __future__ import annotations
 
 __all__ = ["apply_route_offsets", "render_svg"]
 
-import contextvars
 import html
 import re
 import textwrap
@@ -118,19 +117,9 @@ from nf_metro.render.legend import (
     render_legend,
 )
 from nf_metro.render.manifest import build_manifest, manifest_metadata_svg
+from nf_metro.render.ns import class_prefix_context
+from nf_metro.render.ns import ns as _ns
 from nf_metro.render.style import Theme
-
-# Per-render SVG class namespace.  Set by render_svg() for the duration of one
-# render call so all helper functions pick it up without extra parameters.
-_render_class_prefix: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "_render_class_prefix", default=""
-)
-
-
-def _ns(cls: str) -> str:
-    """Apply the active render namespace prefix to an SVG class name."""
-    p = _render_class_prefix.get()
-    return f"{p}-{cls}" if p else cls
 
 
 def apply_route_offsets(
@@ -451,23 +440,19 @@ def render_svg(
         animate = graph.animate
 
     scaled_theme = _scale_theme_fonts(theme, graph.font_scale)
-    token = _render_class_prefix.set(svg_class_prefix)
-    try:
-        with font_scale_context(graph.font_scale):
-            svg = _render_svg_scaled(
-                graph,
-                scaled_theme,
-                width=width,
-                height=height,
-                padding=padding,
-                animate=animate,
-                debug=debug,
-                legend_position=legend_position,
-                responsive=responsive,
-                inject_dark_mode_css=inject_dark_mode_css,
-            )
-    finally:
-        _render_class_prefix.reset(token)
+    with class_prefix_context(svg_class_prefix), font_scale_context(graph.font_scale):
+        svg = _render_svg_scaled(
+            graph,
+            scaled_theme,
+            width=width,
+            height=height,
+            padding=padding,
+            animate=animate,
+            debug=debug,
+            legend_position=legend_position,
+            responsive=responsive,
+            inject_dark_mode_css=inject_dark_mode_css,
+        )
 
     if font_portability == "paths":
         from nf_metro.render.font_embed import text_to_paths as _text_to_paths
@@ -623,9 +608,14 @@ def _render_svg_scaled(
         )
         d.append(draw.Raw(manifest_metadata_svg(manifest)))
 
+    # Chrome CSS: custom properties so hosts can recolor without re-rendering.
+    # Injected before the background rect so browser parsing order is correct.
+    _inject_chrome_css(d, theme)
+
     # Dark-mode CSS for transparent-background themes so that elements
     # rendered directly on the canvas (section labels, number badges,
     # title) remain readable when the browser provides a dark background.
+    # Must follow the chrome CSS so the media-query rule wins by source order.
     if inject_dark_mode_css and (
         not theme.background_color or theme.background_color == "none"
     ):
@@ -634,7 +624,14 @@ def _render_svg_scaled(
     # Background (skip for transparent themes)
     if theme.background_color and theme.background_color != "none":
         d.append(
-            draw.Rectangle(0, 0, svg_width, svg_height, fill=theme.background_color)
+            draw.Rectangle(
+                0,
+                0,
+                svg_width,
+                svg_height,
+                fill=theme.background_color,
+                class_=_ns("nf-metro-bg"),
+            )
         )
 
     # Title / Logo (standalone logo only when not embedded in legend)
@@ -839,6 +836,58 @@ def _render_logo(
             embed=True,
         )
     )
+
+
+def _inject_chrome_css(d: draw.Drawing, theme: Theme) -> None:
+    """Inject CSS custom properties for chrome colors.
+
+    Defines ``--nfm-*`` properties on the chrome element classes so a host
+    can recolor the map's non-semantic surfaces (background, labels, section
+    boxes, legend) by setting those properties on a wrapping element.  The
+    fallback for each property is the theme's baked value.  Line/route colors
+    carry semantic meaning and remain as baked presentation attributes.
+    """
+    tc = theme.section_label_color
+
+    def _rule(cls: str, props: str) -> str:
+        return f".{_ns(cls)} {{ {props}; }}"
+
+    lines: list[str] = []
+    if theme.background_color and theme.background_color != "none":
+        lines.append(
+            _rule("nf-metro-bg", f"fill: var(--nfm-bg, {theme.background_color})")
+        )
+    lines += [
+        _rule("nf-metro-title", f"fill: var(--nfm-title-color, {theme.title_color})"),
+        _rule(
+            "nf-metro-station-label",
+            f"fill: var(--nfm-label-color, {theme.label_color})",
+        ),
+        _rule(
+            "nf-metro-section-box",
+            f"fill: var(--nfm-section-fill, {theme.section_fill});"
+            f" stroke: var(--nfm-section-stroke, {theme.section_stroke})",
+        ),
+        _rule("nf-metro-section-label", f"fill: var(--nfm-section-label-color, {tc})"),
+        _rule(
+            "nf-metro-section-num-circle",
+            f"fill: var(--nfm-section-label-color, {tc})",
+        ),
+        _rule("nf-metro-group-label", f"fill: var(--nfm-section-label-color, {tc})"),
+        _rule(
+            "nf-metro-group-underline",
+            f"stroke: var(--nfm-section-label-color, {tc})",
+        ),
+        _rule(
+            "nf-metro-legend-bg",
+            f"fill: var(--nfm-legend-bg, {theme.legend_background})",
+        ),
+        _rule(
+            "nf-metro-legend-text",
+            f"fill: var(--nfm-legend-text-color, {theme.legend_text_color})",
+        ),
+    ]
+    d.append(draw.Raw(f"<style>{chr(10).join(lines)}</style>"))
 
 
 def _inject_dark_mode_style(d: draw.Drawing) -> None:

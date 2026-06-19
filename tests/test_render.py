@@ -907,8 +907,9 @@ def test_render_group_label_caption_and_underline():
     assert "Family" in grouped_svg
     assert "nf-metro-group-label" in grouped_svg
     assert "nf-metro-group-underline" in grouped_svg
-    # The base render has neither marker.
-    assert "nf-metro-group-label" not in base_svg
+    # The base render has no group-label elements (the class may appear in the
+    # <style> block as a CSS selector, but no element should carry it).
+    assert not re.search(r'class="[^"]*nf-metro-group-label', base_svg)
 
 
 def _section_box_bottoms(svg: str) -> dict[str, float]:
