@@ -33,6 +33,7 @@ from nf_metro.layout.routing.common import (
     trunk_segments_cross,
 )
 from nf_metro.layout.routing.context import (
+    _resolve_section_col,
     _RoutingCtx,
 )
 from nf_metro.layout.routing.corners import (
@@ -679,7 +680,9 @@ def _final_port_approach(rp: RoutedPath) -> _VChannel | None:
     )
 
 
-def _coincide_convergent_port_approaches(routes: list[RoutedPath]) -> None:
+def _coincide_convergent_port_approaches(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
     """Fuse same-line vertical approaches converging on one port into one track.
 
     Several inter-section edges of the SAME metro line can arrive at one entry
@@ -700,7 +703,13 @@ def _coincide_convergent_port_approaches(routes: list[RoutedPath]) -> None:
     already approached from.  Flanking corners reset to the base radius: the
     fused descents are a single track, so the concentric-bundle radii no
     longer apply.
+
+    A merge trunk's route ends at the entry port but carries the merge junction
+    as its edge target; map that to the entry port so the trunk and any sibling
+    feed of the same line arriving directly at the port (e.g. an exit-port
+    source not folded into the merge) share one approach key and fuse.
     """
+    entry_port_for = ctx.merge.entry_port_for
     by_port: dict[tuple[str, str, bool], list[_VChannel]] = defaultdict(list)
     for rp in routes:
         if not rp.is_inter_section:
@@ -712,7 +721,8 @@ def _coincide_convergent_port_approaches(routes: list[RoutedPath]) -> None:
         # same-line descents into one port can land a per-line offset apart
         # before render offsets are applied, and keying on the raw endpoint
         # would split that single convergence into two.
-        key = (rp.edge.target, rp.line_id, ch.down)
+        target = entry_port_for.get(rp.edge.target, rp.edge.target)
+        key = (target, rp.line_id, ch.down)
         by_port[key].append(ch)
 
     band = EDGE_TO_BUNDLE_CLEARANCE
@@ -810,6 +820,58 @@ def _coincide_divergent_fanout_descents(routes: list[RoutedPath]) -> None:
         for c in chans:
             if abs(c.x - merge_x) > COORD_TOLERANCE:
                 _set_vchannel_x(c, merge_x)
+
+
+def _coincide_merge_feeder_descents(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Fuse same-column feeders of one merge onto the trunk's descent channel.
+
+    A merge with a trunk routes every other feeder as a branch dropping onto
+    the trunk's bypass channel.  Feeders sharing the trunk's source column
+    descend through the same inter-column gap; left on their own per-route X
+    they read as parallel same-colour tracks (and, since both segments
+    terminate at the merge, trip the same-line parallel-descent guard).  Snap
+    each same-column feeder's opening descent onto the trunk's so the
+    converging line drops as one track, splitting only where each feeder's
+    horizontal lead peels off at its own Y.  Feeders in other columns descend
+    in their own gap and converge along the shared horizontal channel, so they
+    are left alone.
+    """
+    merge = ctx.merge
+    if not merge.trunk_source:
+        return
+    graph = ctx.graph
+    by_key = {
+        (r.edge.source, r.edge.target, r.line_id): r
+        for r in routes
+        if r.is_inter_section
+    }
+    for mjid, trunk_src in merge.trunk_source.items():
+        trunk_rp: RoutedPath | None = None
+        branch_rps: list[RoutedPath] = []
+        for e in graph.edges_to(mjid):
+            rp = by_key.get((e.source, e.target, e.line_id))
+            if rp is None:
+                continue
+            if e.source == trunk_src:
+                trunk_rp = rp
+            else:
+                branch_rps.append(rp)
+        trunk_src_st = graph.stations.get(trunk_src)
+        if trunk_rp is None or trunk_src_st is None:
+            continue
+        trunk_ch = _initial_fanout_descent(trunk_rp)
+        if trunk_ch is None:
+            continue
+        trunk_col = _resolve_section_col(graph, trunk_src_st)
+        for rp in branch_rps:
+            src_st = graph.stations.get(rp.edge.source)
+            if src_st is None or _resolve_section_col(graph, src_st) != trunk_col:
+                continue
+            ch = _initial_fanout_descent(rp)
+            if ch is None:
+                continue
+            if abs(ch.x - trunk_ch.x) > COORD_TOLERANCE:
+                _set_vchannel_x(ch, trunk_ch.x)
 
 
 def _normalize_bypass_trunks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:

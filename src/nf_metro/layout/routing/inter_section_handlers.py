@@ -198,6 +198,24 @@ class _InterFacts:
         return self.entry_side is PortSide.RIGHT and self.sx < self.tx - COORD_TOLERANCE
 
     @property
+    def is_merge_trunk(self) -> bool:
+        """Source carries the full bypass trunk of its merge junction."""
+        return self.ctx.merge.trunk_source.get(self.edge.target) == self.edge.source
+
+    @property
+    def is_merge_branch(self) -> bool:
+        """Source is a non-trunk feeder of a merge junction that has a trunk.
+
+        Every feeder of a merge with a trunk joins the trunk's bypass channel
+        as a branch so the converging line stays a single stroke; only the
+        trunk carries the full route to the entry port.  A feeder that does not
+        individually need a bypass would otherwise route straight into the entry
+        on its own lateral slot and draw as a second parallel stroke.
+        """
+        trunk = self.ctx.merge.trunk_source.get(self.edge.target)
+        return trunk is not None and trunk != self.edge.source
+
+    @property
     def is_near_vertical_same_col_junction(self) -> bool:
         """Junction dropping almost straight into a same-column entry."""
         return (
@@ -293,24 +311,30 @@ def _route_near_vertical_junction(f: _InterFacts) -> RoutedPath | None:
     )
 
 
+def _route_merge_trunk_feeder(f: _InterFacts) -> RoutedPath | None:
+    """Dispatch wrapper: the trunk feeder's full bypass to the entry port."""
+    assert f.src_col is not None and f.tgt_col is not None
+    return _route_merge_trunk(
+        f.edge, f.src, f.tgt, f.i, f.src_col, f.tgt_col, f.ctx, f.src_row
+    )
+
+
+def _route_merge_branch_feeder(f: _InterFacts) -> RoutedPath | None:
+    """Dispatch wrapper: a non-trunk feeder's descent onto the trunk channel."""
+    assert f.src_col is not None
+    return _route_merge_branch(f.edge, f.src, f.ctx, f.src_col)
+
+
 def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
     """Multi-column hop past intervening sections (``needs_bypass``).
 
-    A merge target splits into trunk (full bypass to the entry port) and branch
-    (truncated descent to trunk level).  Otherwise: a LEFT entry one row
-    directly below drops straight in when the entry-Y horizontal is clear (no
-    canvas-bottom loop); a RIGHT entry fed from the left wraps around its
-    outward side (via the inter-row gap above when clear, else the around-below
-    loop); everything else takes the U-shaped bypass.
+    A LEFT entry one row directly below drops straight in when the entry-Y
+    horizontal is clear (no canvas-bottom loop); a RIGHT entry fed from the left
+    wraps around its outward side (via the inter-row gap above when clear, else
+    the around-below loop); everything else takes the U-shaped bypass.
     """
     edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
     assert f.src_col is not None and f.tgt_col is not None
-    if edge.target in ctx.merge.trunk_source:
-        if ctx.merge.trunk_source[edge.target] == edge.source:
-            return _route_merge_trunk(
-                edge, src, tgt, f.i, f.src_col, f.tgt_col, ctx, f.src_row
-            )
-        return _route_merge_branch(edge, src, ctx, f.src_col)
     if (
         f.entry_side is PortSide.LEFT
         and f.src_row is not None
@@ -477,6 +501,14 @@ _INTER_SECTION_RULES: list[_Rule] = [
         lambda f: f.edge.source in f.ctx.bottom_exit_junctions,
         lambda f: _route_bottom_exit_junction(f.edge, f.src, f.tgt, f.i, f.n, f.ctx),
     ),
+    # Every feeder of a merge that has a trunk routes through the merge
+    # handlers so the converging line is a single stroke: the trunk carries the
+    # full bypass to the entry port, every other feeder descends onto the
+    # trunk's channel.  These precede the bypass / merge-entry rules, which
+    # would otherwise route a non-bypass feeder straight into the entry on its
+    # own lateral slot (a second parallel stroke).
+    _Rule("merge trunk", lambda f: f.is_merge_trunk, _route_merge_trunk_feeder),
+    _Rule("merge branch", lambda f: f.is_merge_branch, _route_merge_branch_feeder),
     _Rule("bypass family", lambda f: f.needs_bypass, _route_bypass_family),
     _Rule(
         "near-vertical same-col junction",
@@ -646,32 +678,37 @@ def _route_merge_branch(
     ctx: _RoutingCtx,
     src_col: int,
 ) -> RoutedPath | None:
-    """Truncated L-shape descent from a junction to the trunk level.
+    """Truncated descent from a feeder junction onto the trunk's channel.
 
-    Routes a 4-point path: horizontal lead-in, curve down, vertical
-    drop, curve into trunk direction.  The lead-in is positioned at
-    MERGE_ROUTE_MARGIN from the source section edge.
+    Every non-trunk feeder of a merge drops to the trunk's bypass channel
+    (``trunk_by``) and turns along it toward the entry port, so the converging
+    line overlays the trunk as a single stroke.  The lead-in leaves on the gap
+    side the feeder junction already sits on (junctions are placed in the
+    inter-column gap downstream of their fork); leading toward the entry
+    instead would re-enter the source section.  The tail turns toward the entry
+    port so it overlaps the trunk's horizontal run; same-column feeders are
+    then snapped onto the trunk's exact descent channel by
+    :func:`_coincide_merge_feeder_descents`.
     """
+    graph = ctx.graph
     sx, sy = src.x, src.y
-    dx = ctx.graph.stations[edge.target].x - sx
-    horizontal = horizontal_direction(dx)
     src_off = _get_offset(ctx, edge.source, edge.line_id)
-
-    # Trunk bypass Y level (branches drop to meet it)
     by = ctx.merge.trunk_by.get(edge.target, sy)
 
-    # Position descent at MERGE_ROUTE_MARGIN from section edge
-    if horizontal is Direction.R:
-        lead_x = col_right_edge(ctx.graph, src_col) + MERGE_ROUTE_MARGIN
+    # Descend just outside the source section on the side the junction sits on.
+    left_edge = col_left_edge(graph, src_col)
+    right_edge = col_right_edge(graph, src_col)
+    if sx >= (left_edge + right_edge) / 2:
+        lead_x = max(right_edge + MERGE_ROUTE_MARGIN, sx + ctx.curve_radius)
     else:
-        lead_x = col_left_edge(ctx.graph, src_col) - MERGE_ROUTE_MARGIN
-    # Clamp to at least curve_radius from the junction
-    min_lead = sx + horizontal.sign * ctx.curve_radius
-    if horizontal is Direction.R:
-        lead_x = max(lead_x, min_lead)
-    else:
-        lead_x = min(lead_x, min_lead)
-    tail_x = lead_x + horizontal.sign * ctx.curve_radius * 2
+        lead_x = min(left_edge - MERGE_ROUTE_MARGIN, sx - ctx.curve_radius)
+
+    # Turn along the channel toward the entry port (the way the trunk runs).
+    ep_id = ctx.merge.entry_port_for.get(edge.target)
+    ep = graph.stations.get(ep_id) if ep_id else None
+    entry_x = ep.x if ep else graph.stations[edge.target].x
+    tail_sign = 1.0 if entry_x >= lead_x else -1.0
+    tail_x = lead_x + tail_sign * ctx.curve_radius * 2
 
     # One branch line per call: a single descent with no bundle to fan, so the
     # centreline carries this line's own offset and both corners take the base
