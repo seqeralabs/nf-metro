@@ -569,29 +569,77 @@ def _final_port_approach(rp: RoutedPath) -> _VChannel | None:
     )
 
 
-def _coincide_convergent_port_approaches(
+class _Coincidence(NamedTuple):
+    """A set of same-line vertical legs to fuse, and the X they share."""
+
+    channels: list[_VChannel]
+    ref_x: float
+
+
+def _snap_group(group: _Coincidence) -> None:
+    """Snap every channel in a coincidence group onto its shared reference X."""
+    for ch in group.channels:
+        if abs(ch.x - group.ref_x) > COORD_TOLERANCE:
+            _set_vchannel_x(ch, group.ref_x)
+
+
+def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Fuse same-line vertical legs that should read as a single stroke.
+
+    Handlers route each edge independently, so one metro line carried by
+    several routes that share a source, an entry port, or a merge can descend
+    as several near-parallel same-colour tracks a few pixels apart -- redundant
+    duplicate strokes of one line.  Each such group should read as ONE track
+    that splits only where the routes genuinely diverge.
+
+    Three group kinds contribute legs:
+
+    * convergent -- final descents into one entry port;
+    * divergent -- opening descents leaving one source;
+    * merge feeders -- a merge's same-column feeders, onto the trunk's descent.
+
+    They are fused in that order so a route touched by more than one kind (a
+    short merge feeder whose opening descent is also its final approach) settles
+    on the last group's reference X; each member snaps onto its group's X,
+    resetting its flanking corners since a single track has no concentric
+    nesting.
+    """
+    for group in _convergent_port_groups(routes, ctx):
+        _snap_group(group)
+    for group in _divergent_source_groups(routes):
+        _snap_group(group)
+    for group in _merge_feeder_groups(routes, ctx):
+        _snap_group(group)
+
+
+def _band_clusters(chans: list[_VChannel], band: float) -> list[list[_VChannel]]:
+    """Group X-sorted channels, breaking wherever a left-neighbour gap exceeds *band*.
+
+    Channels closer than *band* share a cluster; a wider gap starts a new one,
+    so widely-separated descents stay distinct corridors.
+    """
+    clusters: list[list[_VChannel]] = []
+    for ch in sorted(chans, key=lambda c: c.x):
+        if clusters and ch.x - clusters[-1][-1].x <= band:
+            clusters[-1].append(ch)
+        else:
+            clusters.append([ch])
+    return clusters
+
+
+def _convergent_port_groups(
     routes: list[RoutedPath], ctx: _RoutingCtx
-) -> None:
-    """Fuse same-line vertical approaches converging on one port into one track.
+) -> list[_Coincidence]:
+    """Same-line final descents converging on one entry port, grouped to fuse.
 
-    Several inter-section edges of the SAME metro line can arrive at one entry
-    port as separate near-parallel vertical descents (each turning into the
-    port via its own short horizontal lead) a few pixels apart -- redundant
-    duplicate tracks of one colour into a single convergence point (#484
-    follow-up).  Where those final descents already sit in a tight band (so
-    they are genuinely the same convergence channel, not legitimately distinct
-    corridors arriving from far apart), snap them to one shared X so the line
-    arrives as a single track and splits only upstream where each feed's
-    horizontal lead peels off at its own Y.
-
-    Channels are clustered by terminal port + line + descent direction; only
-    clusters whose members fall within ``EDGE_TO_BUNDLE_CLEARANCE`` of each
-    other are fused (the band excludes widely-staggered same-line inputs that
-    descend in separate column gaps).  The merge X is the member nearest the
-    port (smallest |vx - ex|), keeping the fused track on the side the port is
-    already approached from.  Flanking corners reset to the base radius: the
-    fused descents are a single track, so the concentric-bundle radii no
-    longer apply.
+    Several inter-section edges of one line can arrive at an entry port as
+    separate near-parallel vertical descents (each turning into the port via
+    its own short horizontal lead) a few pixels apart.  Where those descents
+    sit in a tight band they are one convergence channel and fuse onto the
+    member nearest the port (smallest |vx - ex|), so the line arrives as a
+    single track and splits only upstream where each feed peels off at its own
+    Y; descents staggered more than ``EDGE_TO_BUNDLE_CLEARANCE`` apart are
+    distinct corridors and stay separate.
 
     A merge trunk's route ends at the entry port but carries the merge junction
     as its edge target; map that to the entry port so the trunk and any sibling
@@ -611,33 +659,19 @@ def _coincide_convergent_port_approaches(
         # before render offsets are applied, and keying on the raw endpoint
         # would split that single convergence into two.
         target = entry_port_for.get(rp.edge.target, rp.edge.target)
-        key = (target, rp.line_id, ch.down)
-        by_port[key].append(ch)
+        by_port[(target, rp.line_id, ch.down)].append(ch)
 
-    band = EDGE_TO_BUNDLE_CLEARANCE
+    groups: list[_Coincidence] = []
     for chans in by_port.values():
         if len(chans) < 2:
             continue
         ex = chans[0].route.points[-1][0]
-        # Cluster by descent X proximity; widely-separated descents are
-        # distinct corridors and must not be fused.
-        chans.sort(key=lambda c: c.x)
-        cluster: list[_VChannel] = []
-
-        def _flush(cluster: list[_VChannel], ex: float = ex) -> None:
+        for cluster in _band_clusters(chans, EDGE_TO_BUNDLE_CLEARANCE):
             if len(cluster) < 2:
-                return
-            merge_x = min(cluster, key=lambda c: abs(c.x - ex)).x
-            for c in cluster:
-                if abs(c.x - merge_x) > COORD_TOLERANCE:
-                    _set_vchannel_x(c, merge_x)
-
-        for ch in chans:
-            if cluster and ch.x - cluster[-1].x > band:
-                _flush(cluster)
-                cluster = []
-            cluster.append(ch)
-        _flush(cluster)
+                continue
+            ref_x = min(cluster, key=lambda c: abs(c.x - ex)).x
+            groups.append(_Coincidence(cluster, ref_x))
+    return groups
 
 
 def _set_vchannel_x(ch: _VChannel, new_x: float) -> None:
@@ -672,24 +706,24 @@ def _initial_fanout_descent(rp: RoutedPath) -> _VChannel | None:
     return _VChannel(route=rp, idx=1, x=x, y_lo=y_lo, y_hi=y_hi, down=down)
 
 
-def _coincide_divergent_fanout_descents(routes: list[RoutedPath]) -> None:
-    """Fuse same-line vertical descents leaving one source into one track.
+def _divergent_source_groups(routes: list[RoutedPath]) -> list[_Coincidence]:
+    """Same-line opening descents leaving one source, grouped to fuse.
 
-    The mirror of :func:`_coincide_convergent_port_approaches`: where the
-    convergent pass merges same-line descents *arriving* at one port, this
-    merges same-line descents *leaving* one source (a junction or exit port).
-    Several inter-section edges of the SAME line fanning out from one source
-    each open with their own horizontal lead and vertical channel a few pixels
-    apart.  Every such branch leaves on the same source-Y horizontal lead, so
-    they share the descent until each turns off: they are one trunk that split
-    too early.  Left apart they read as parallel same-colour tracks, and an
-    inverted split (the farther-reaching branch opening inside the nearer one)
-    crosses its sibling's descent.
+    The mirror of :func:`_convergent_port_groups`: where that groups same-line
+    descents *arriving* at one port, this groups same-line descents *leaving*
+    one source (a junction or exit port).  Several inter-section edges of one
+    line fanning out from one source each open with their own horizontal lead
+    and vertical channel a few pixels apart; every branch leaves on the same
+    source-Y lead, so they share the descent until each turns off -- one trunk
+    that split too early.  Left apart they read as parallel same-colour tracks,
+    and an inverted split (the farther-reaching branch opening inside the
+    nearer one) crosses its sibling's descent.
 
     Descents are grouped by source endpoint + line + descent direction; every
-    group of two or more is fused onto the channel nearest the source, hugging
-    the side the branches leave from.  Each branch splits off downstream at its
-    own turn Y.
+    group of two or more fuses onto the channel nearest the source, hugging the
+    side the branches leave from, and splits off downstream at each own turn Y.
+    Unlike the convergent case there is no proximity band: any same-source pair
+    overlapping in Y must collapse, however far apart their Xs.
     """
     by_source: dict[tuple[str, str, bool], list[_VChannel]] = defaultdict(list)
     for rp in routes:
@@ -698,28 +732,29 @@ def _coincide_divergent_fanout_descents(routes: list[RoutedPath]) -> None:
         ch = _initial_fanout_descent(rp)
         if ch is None:
             continue
-        key = (rp.edge.source, rp.line_id, ch.down)
-        by_source[key].append(ch)
+        by_source[(rp.edge.source, rp.line_id, ch.down)].append(ch)
 
+    groups: list[_Coincidence] = []
     for chans in by_source.values():
         if len(chans) < 2:
             continue
         sx = chans[0].route.points[0][0]
-        merge_x = min(chans, key=lambda c: abs(c.x - sx)).x
-        for c in chans:
-            if abs(c.x - merge_x) > COORD_TOLERANCE:
-                _set_vchannel_x(c, merge_x)
+        ref_x = min(chans, key=lambda c: abs(c.x - sx)).x
+        groups.append(_Coincidence(chans, ref_x))
+    return groups
 
 
-def _coincide_merge_feeder_descents(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
-    """Fuse same-column feeders of one merge onto the trunk's descent channel.
+def _merge_feeder_groups(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> list[_Coincidence]:
+    """Same-column merge feeders, grouped to fuse onto the trunk's descent.
 
     A merge with a trunk routes every other feeder as a branch dropping onto
     the trunk's bypass channel.  Feeders sharing the trunk's source column
     descend through the same inter-column gap; left on their own per-route X
     they read as parallel same-colour tracks (and, since both segments
-    terminate at the merge, trip the same-line parallel-descent guard).  Snap
-    each same-column feeder's opening descent onto the trunk's so the
+    terminate at the merge, trip the same-line parallel-descent guard).  Each
+    same-column feeder's opening descent fuses onto the trunk's so the
     converging line drops as one track, splitting only where each feeder's
     horizontal lead peels off at its own Y.  Feeders in other columns descend
     in their own gap and converge along the shared horizontal channel, so they
@@ -727,13 +762,14 @@ def _coincide_merge_feeder_descents(routes: list[RoutedPath], ctx: _RoutingCtx) 
     """
     merge = ctx.merge
     if not merge.trunk_source:
-        return
+        return []
     graph = ctx.graph
     by_key = {
         (r.edge.source, r.edge.target, r.line_id): r
         for r in routes
         if r.is_inter_section
     }
+    groups: list[_Coincidence] = []
     for mjid, trunk_src in merge.trunk_source.items():
         trunk_rp: RoutedPath | None = None
         branch_rps: list[RoutedPath] = []
@@ -752,6 +788,7 @@ def _coincide_merge_feeder_descents(routes: list[RoutedPath], ctx: _RoutingCtx) 
         if trunk_ch is None:
             continue
         trunk_col = _resolve_section_col(graph, trunk_src_st)
+        members: list[_VChannel] = []
         for rp in branch_rps:
             src_st = graph.stations.get(rp.edge.source)
             if src_st is None or _resolve_section_col(graph, src_st) != trunk_col:
@@ -759,8 +796,10 @@ def _coincide_merge_feeder_descents(routes: list[RoutedPath], ctx: _RoutingCtx) 
             ch = _initial_fanout_descent(rp)
             if ch is None:
                 continue
-            if abs(ch.x - trunk_ch.x) > COORD_TOLERANCE:
-                _set_vchannel_x(ch, trunk_ch.x)
+            members.append(ch)
+        if members:
+            groups.append(_Coincidence(members, trunk_ch.x))
+    return groups
 
 
 def _normalize_bypass_trunks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:

@@ -944,7 +944,7 @@
     "status": "defensive"
   },
   "normalize.py::if trunk_rp is None or trunk_src_st is None:::#1": {
-    "note": "Defensive guard in _coincide_merge_feeder_descents: a merge with a trunk_source always has a routed trunk edge and a resolvable trunk station, so the skip arm is never taken.",
+    "note": "Defensive guard in _merge_feeder_groups: a merge with a trunk_source always has a routed trunk edge and a resolvable trunk station, so the skip arm is never taken.",
     "status": "defensive"
   },
   "normalize.py::if trunk_ch is None:::#1": {
@@ -952,7 +952,7 @@
     "status": "defensive"
   },
   "normalize.py::if rp is None:::#1": {
-    "note": "Defensive guard: every merge feeder edge is routed, so the by-key lookup in _coincide_merge_feeder_descents always resolves; the skip arm is never taken.",
+    "note": "Defensive guard: every merge feeder edge is routed, so the by-key lookup in _merge_feeder_groups always resolves; the skip arm is never taken.",
     "status": "defensive"
   },
   "normalize.py::if ch is None:::#3": {

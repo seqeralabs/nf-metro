@@ -76,16 +76,13 @@ def test_variantbenchmarking_fans_are_single_trunks(fixture: str) -> None:
     "fixture",
     ["variantbenchmarking.mmd", "variantbenchmarking_auto.mmd"],
 )
-def test_checker_fires_without_merge_passes(
+def test_checker_fires_without_coincidence_pass(
     fixture: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Disabling the merge passes reproduces the doubled descents the
+    """Disabling same-line track coincidence reproduces the doubled descents the
     invariant is meant to catch, proving the check is not vacuous."""
     monkeypatch.setattr(
-        routing_core, "_coincide_divergent_fanout_descents", lambda routes: None
-    )
-    monkeypatch.setattr(
-        routing_core, "_coincide_convergent_port_approaches", lambda routes, ctx: None
+        routing_core, "_coincide_same_line_tracks", lambda routes, ctx: None
     )
     graph, routes, offsets = _route(EXAMPLES / fixture)
     violations = check_no_same_line_parallel_descents(graph, routes, offsets)

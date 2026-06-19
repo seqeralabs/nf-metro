@@ -92,7 +92,7 @@ def test_merge_branches_join_trunk_channel(name: str) -> None:
 def test_feeder_descent_snaps_only_in_trunk_column(name: str) -> None:
     """A feeder's opening descent fuses with the trunk's only in its column.
 
-    ``_coincide_merge_feeder_descents`` snaps a feeder onto the trunk's exact
+    ``_coincide_same_line_tracks`` snaps a feeder onto the trunk's exact
     descent X only when the feeder shares the trunk's source column; a feeder in
     another column descends in its own inter-column gap and converges along the
     shared horizontal channel instead.  Pins that scope so the pass cannot

@@ -734,7 +734,7 @@ def _route_merge_branch(
     instead would re-enter the source section.  The tail turns toward the entry
     port so it overlaps the trunk's horizontal run; same-column feeders are
     then snapped onto the trunk's exact descent channel by
-    :func:`_coincide_merge_feeder_descents`.
+    :func:`_coincide_same_line_tracks`.
     """
     graph = ctx.graph
     sx, sy = src.x, src.y
