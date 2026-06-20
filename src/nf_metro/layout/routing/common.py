@@ -701,6 +701,19 @@ def tail_on_slot(tail: PeeloffTail, slot: PeeloffSlot) -> bool:
     )
 
 
+def seat_peeloff_port_y(rp: RoutedPath, port_y: float) -> None:
+    """Move a peel-off riser's port lead onto *port_y*.
+
+    The riser turn and the lead into the port -- the last two waypoints of a
+    :func:`port_peeloff_tail` (``... -> (peel_x, port_y) -> (ex, port_y)``) --
+    drop to *port_y*, keeping their Xs.  Owns the tail's waypoint layout so a
+    caller re-seating the port slot need not index into the points.
+    """
+    pts = rp.points
+    pts[-2] = (pts[-2][0], port_y)
+    pts[-1] = (pts[-1][0], port_y)
+
+
 def _vert_horiz_cross(
     vx: float, vy0: float, vy1: float, hy: float, hx0: float, hx1: float
 ) -> bool:

@@ -2034,6 +2034,7 @@ def _route_entry_wrap(
     channel_y: float,
     descent_x: float,
     entry_side: PortSide,
+    normalize_exempt: bool = True,
 ) -> RoutedPath:
     """Fan a single-member entry-wrap loop along its centreline.
 
@@ -2078,6 +2079,7 @@ def _route_entry_wrap(
         centerline,
         base_radius=ctx.curve_radius,
         bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+        normalize_exempt=normalize_exempt,
     )
     assert route is not None  # the lone member is always in its own bundle
     return route
@@ -2755,6 +2757,7 @@ def _build_right_entry_wrap_route(
     n: int,
     ctx: _RoutingCtx,
     channel_y_base: float,
+    normalize_exempt: bool = True,
 ) -> RoutedPath:
     """Build a wrap route into a RIGHT entry port from its outward side.
 
@@ -2801,8 +2804,16 @@ def _build_right_entry_wrap_route(
         channel_y=channel_y_base,
         descent_x=vx,
         entry_side=PortSide.RIGHT,
+        normalize_exempt=normalize_exempt,
     )
     _declare_channel(route, ctx, vx, vertical_direction(entry_port.y - channel_y_base))
+    if not normalize_exempt:
+        # Open to the gap-bundle pass: its source-side lead-in also drops
+        # through an inter-column gap, so declare that channel too or the
+        # always-on gap-channel guard flags it as unmaterialised.
+        _declare_channel(
+            route, ctx, corner_x, vertical_direction(channel_y_base - src.y)
+        )
     return route
 
 
@@ -2837,8 +2848,22 @@ def _route_right_entry_via_gap_above(
     """
     gap_top, gap_bottom = _right_entry_gap_above_target_y(ctx.graph, src_row)
     channel_y_base = _center_inter_row_channel(gap_top, gap_bottom)
+    # When two or more distinct lines converge into this one RIGHT entry port,
+    # each independently picks the same descent X just right of the target
+    # column and they overlay.  Open those to the gap-bundle pass so the
+    # same-gap descents spread into concentric slots.  A lone feeder has nothing
+    # to spread against, so it stays handler-owned (a normalize restack would
+    # only re-shape its self-contained loop).
+    converging = len({e.line_id for e in ctx.graph.edges_to(entry_port.id)}) > 1
     return _build_right_entry_wrap_route(
-        edge, src, entry_port, i, n, ctx, channel_y_base
+        edge,
+        src,
+        entry_port,
+        i,
+        n,
+        ctx,
+        channel_y_base,
+        normalize_exempt=not converging,
     )
 
 

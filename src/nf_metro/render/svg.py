@@ -5,6 +5,7 @@ from __future__ import annotations
 __all__ = ["apply_route_offsets", "render_svg"]
 
 import html
+import math
 import re
 import textwrap
 import warnings
@@ -701,6 +702,10 @@ def _render_svg_scaled(
     # Draw edges (lines) behind stations
     _render_edges(d, graph, routes, station_offsets, theme)
 
+    # Directional chevrons ride on top of the lines but behind stations.
+    if graph.directional:
+        _render_directional_markers(d, graph, routes, station_offsets, theme)
+
     # Animation (after edges, before stations so balls travel behind station markers)
     if animate:
         from nf_metro.render.animate import render_animation
@@ -1134,6 +1139,121 @@ def _render_edges(
 
             path.L(*pts[-1])
             d.append(path)
+
+
+def _render_directional_markers(
+    d: draw.Drawing,
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    station_offsets: dict[tuple[str, str], float],
+    theme: Theme,
+) -> None:
+    """Draw static chevrons along each route, pointing source to target.
+
+    The flow direction is the order of the routed point sequence, so each
+    chevron simply rides the polyline at the local segment direction. Markers
+    are spaced by arc length and kept sparse and subtle by default, in the
+    spirit of a one-way transit line's direction-of-travel arrows.
+    """
+    size = theme.directional_marker_size
+    spacing = max(theme.directional_marker_spacing, 1.0)
+    opacity = theme.directional_marker_opacity
+    # A route shorter than one chevron carries no useful direction cue.
+    min_length = 2 * size
+    stroke_width = max(theme.line_width * 0.5, 1.0)
+
+    for route in routes:
+        pts = apply_route_offsets(route, station_offsets)
+        if len(pts) < 2:
+            continue
+        line = graph.lines.get(route.line_id)
+        color = theme.directional_marker_color or (
+            line.color if line else FALLBACK_LINE_COLOR
+        )
+        class_name = _ns(f"metro-direction-{route.line_id}")
+        for point, heading in _chevron_samples(pts, spacing, min_length):
+            _draw_chevron(
+                d,
+                point,
+                heading,
+                color,
+                size,
+                stroke_width,
+                opacity,
+                class_name,
+                route.line_id,
+            )
+
+
+def _chevron_samples(
+    pts: list[tuple[float, float]], spacing: float, min_length: float
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    """Sample (point, unit-heading) pairs evenly along a polyline.
+
+    Chevrons are centred on the polyline so a route reads symmetrically. A
+    route between ``min_length`` and ``spacing`` in length carries a single
+    chevron at its midpoint.
+    """
+    segments = [
+        (a, b, length)
+        for a, b in zip(pts, pts[1:])
+        if (length := math.hypot(b[0] - a[0], b[1] - a[1])) > 0
+    ]
+    total = sum(length for _, _, length in segments)
+    if total < min_length:
+        return []
+
+    count = max(1, int(total // spacing))
+    start = (total - (count - 1) * spacing) / 2
+
+    samples: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    targets = [start + i * spacing for i in range(count)]
+    travelled = 0.0
+    ti = 0
+    for (ax, ay), (bx, by), length in segments:
+        ux, uy = (bx - ax) / length, (by - ay) / length
+        while ti < len(targets) and targets[ti] <= travelled + length:
+            offset = targets[ti] - travelled
+            samples.append(((ax + ux * offset, ay + uy * offset), (ux, uy)))
+            ti += 1
+        travelled += length
+    return samples
+
+
+def _draw_chevron(
+    d: draw.Drawing,
+    point: tuple[float, float],
+    heading: tuple[float, float],
+    color: str,
+    size: float,
+    stroke_width: float,
+    opacity: float,
+    class_name: str,
+    line_id: str,
+) -> None:
+    """Draw one open ``>`` chevron centred at *point*, apex along *heading*."""
+    px, py = point
+    ux, uy = heading
+    perp = (-uy, ux)
+    apex = (px + ux * size, py + uy * size)
+    back = (px - ux * size, py - uy * size)
+    wing1 = (back[0] + perp[0] * size, back[1] + perp[1] * size)
+    wing2 = (back[0] - perp[0] * size, back[1] - perp[1] * size)
+
+    path = draw.Path(
+        stroke=color,
+        stroke_width=stroke_width,
+        fill="none",
+        stroke_linecap="round",
+        stroke_linejoin="round",
+        opacity=opacity,
+        class_=class_name,
+        **{"data-line-id": line_id},
+    )
+    path.M(*wing1)
+    path.L(*apex)
+    path.L(*wing2)
+    d.append(path)
 
 
 def _curve_tangents(

@@ -1,0 +1,32 @@
+%%metro title: Directional Flow
+%%metro style: dark
+%%metro directional: true
+%%metro line: dna | DNA variants | #E64A19
+%%metro line: rna | RNA expression | #1E88E5
+%%metro line: meth | Methylation | #43A047
+
+graph LR
+    reads[Reads]
+    qc[QC]
+    trim[Trim]
+    align[Align]
+    callvar[Call variants]
+    quant[Quantify]
+    methcall[Call methylation]
+    report[Report]
+
+    reads -->|dna| qc
+    reads -->|rna| qc
+    reads -->|meth| qc
+    qc -->|dna| trim
+    qc -->|rna| trim
+    qc -->|meth| trim
+    trim -->|dna| align
+    trim -->|rna| align
+    trim -->|meth| align
+    align -->|dna| callvar
+    align -->|rna| quant
+    align -->|meth| methcall
+    callvar -->|dna| report
+    quant -->|rna| report
+    methcall -->|meth| report
