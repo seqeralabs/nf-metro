@@ -537,10 +537,6 @@ def _render_svg_scaled(
     routes = route_edges_centred(graph, station_offsets=station_offsets)
     assert_render_curve_invariants(graph, routes, station_offsets)
     header_polylines = [apply_route_offsets(route, station_offsets) for route in routes]
-    header_placements = resolve_all_section_headers(
-        graph, theme.section_label_font_size, header_polylines
-    )
-    _guard_section_headers_clear_routes(header_placements, header_polylines)
 
     # Compute labels early so section bbox expansions are applied
     # before section boxes are drawn and canvas bounds are computed.
@@ -571,6 +567,13 @@ def _render_svg_scaled(
     # feed the section render and the canvas-bounds computation.
     if group_bands:
         _reserve_section_space_for_groups(graph, group_bands)
+
+    # Resolve headers against the final section bboxes (label and group
+    # reservations above can grow a box, moving where its header sits).
+    header_placements = resolve_all_section_headers(
+        graph, theme.section_label_font_size, header_polylines
+    )
+    _guard_section_headers_clear_routes(header_placements, header_polylines)
 
     max_x, max_y = _compute_canvas_bounds(graph, routes, header_placements, debug)
 
