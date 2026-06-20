@@ -14,6 +14,7 @@ __all__ = ["infer_section_layout", "infer_interchanges", "detect_serpentine_runs
 from collections import defaultdict, deque
 from collections.abc import Set as AbstractSet
 
+from nf_metro.layout.layers import assign_layers
 from nf_metro.parser.model import Interchange, MetroGraph, PortSide, SectionDAG
 
 
@@ -33,11 +34,13 @@ def infer_interchanges(graph: MetroGraph) -> None:
     explicit ``%%metro interchange:`` directive (or nothing).  Author-written
     interchanges are left untouched.
     """
-    explicit = {ic.node_id for ic in graph.interchanges}
+    explicit = [ic.node_id for ic in graph.interchanges]
+    explicit_set = set(explicit)
+    candidates: list[str] = []
     for sid, st in list(graph.stations.items()):
         if st.is_port or st.interchange_id is not None or st.is_terminus:
             continue
-        if sid in explicit:
+        if sid in explicit_set:
             continue
         # Rail sections already lay every line on its own rail and draw shared
         # stops as interchanges, so one here is redundant and would clash with
@@ -46,10 +49,56 @@ def infer_interchanges(graph: MetroGraph) -> None:
             continue
         if not _is_parallel_lane_hub(graph, sid):
             continue
-        if not _rails_span_is_clear(graph, sid):
-            continue
+        candidates.append(sid)
+
+    order = list(graph.lines.keys())
+
+    # Author-pinned interchanges must keep their span clear under any reorder we
+    # try; collect them so a track shuffle for an inferred hub can never push a
+    # non-member rail under an explicit bar.
+    committed = list(explicit)
+    inferred: list[str] = []
+    pending: list[str] = []
+    for sid in candidates:
+        if _rails_span_is_clear(graph, sid, order):
+            committed.append(sid)
+            inferred.append(sid)
+        else:
+            pending.append(sid)
+
+    # A straddle is an artifact of lane order, which is free unless the author
+    # fixed it with %%metro line_order:.  For each abstaining hub, try to pull
+    # its member lines into a contiguous block (the minimal disturbance that
+    # clears the bar) and keep the reorder only if every already-committed
+    # interchange -- explicit or inferred -- stays clear under it.
+    if pending and graph.line_order == "definition":
+        layers = assign_layers(graph)
+        for sid in pending:
+            # Line order only governs the bar span when every member rail runs
+            # straight through the hub.  A member line that enters or leaves via
+            # a long edge (a neighbour more than one layer away) slopes off its
+            # base track, so a contiguous lane order would not actually close the
+            # bar -- reordering would only manufacture a straddle the runtime
+            # check then trips on.  Skip those; abstaining stays correct.
+            if not _member_lines_pass_straight(graph, sid, layers):
+                continue
+            new_order = _cluster_member_lines(graph, sid, order)
+            if new_order is None or not _rails_span_is_clear(graph, sid, new_order):
+                continue
+            if not all(
+                _rails_span_is_clear(graph, other, new_order) for other in committed
+            ):
+                continue
+            order = new_order
+            committed.append(sid)
+            inferred.append(sid)
+
+    if order != list(graph.lines.keys()):
+        graph.lines = {lid: graph.lines[lid] for lid in order}
+
+    for sid in inferred:
         lines = graph.station_lines(sid)
-        ordered = [lid for lid in graph.lines if lid in lines]
+        ordered = [lid for lid in order if lid in lines]
         graph.interchanges.append(
             Interchange(node_id=sid, rails=[[lid] for lid in ordered], inferred=True)
         )
@@ -87,14 +136,15 @@ def _is_parallel_lane_hub(graph: MetroGraph, sid: str) -> bool:
     return len(preds) == len(lines) and len(succs) == len(lines)
 
 
-def _rails_span_is_clear(graph: MetroGraph, sid: str) -> bool:
+def _rails_span_is_clear(graph: MetroGraph, sid: str, order: list[str]) -> bool:
     """True when the interchange's rails would form a contiguous track block.
 
     The connector bar spans from the topmost member rail to the bottommost, so
     if a non-member line's rail falls between them its stations sit under the
-    bar (a station-as-elbow violation).  Track order follows line-definition
-    order within a section, so require the member lines to be a contiguous run
-    among the section's lines -- no other line interleaved.
+    bar (a station-as-elbow violation).  Track order follows *order* (the line
+    ordering tracks will be assigned from) within a section, so require the
+    member lines to be a contiguous run among the section's lines -- no other
+    line interleaved.
     """
     section_id = graph.stations[sid].section_id
     section = graph.sections.get(section_id) if section_id is not None else None
@@ -106,9 +156,54 @@ def _rails_span_is_clear(graph: MetroGraph, sid: str) -> bool:
         if (m := graph.stations.get(mid)) is not None and not m.is_port
         for lid in graph.station_lines(mid)
     }
-    section_order = [lid for lid in graph.lines if lid in present]
+    section_order = [lid for lid in order if lid in present]
     member_idx = sorted(section_order.index(lid) for lid in graph.station_lines(sid))
     return member_idx == list(range(member_idx[0], member_idx[-1] + 1))
+
+
+def _member_lines_pass_straight(
+    graph: MetroGraph, sid: str, layers: dict[str, int]
+) -> bool:
+    """True when every line through *sid* enters and leaves at adjacent layers.
+
+    A parallel-lane hub's rails only sit on their line base tracks -- the
+    assumption :func:`_rails_span_is_clear` makes when it reads lane order as
+    track order -- while each line runs as a straight horizontal segment past
+    the hub.  A line whose predecessor or successor is more than one layer away
+    travels a sloping long edge instead, dragging its rail off that track, so
+    lane order then fails to predict the real bar span.
+    """
+    hub_layer = layers.get(sid)
+    if hub_layer is None:
+        return False
+    for lid in graph.station_lines(sid):
+        for e in graph.edges_to(sid):
+            if e.line_id == lid and layers.get(e.source) != hub_layer - 1:
+                return False
+        for e in graph.edges_from(sid):
+            if e.line_id == lid and layers.get(e.target) != hub_layer + 1:
+                return False
+    return True
+
+
+def _cluster_member_lines(
+    graph: MetroGraph, sid: str, order: list[str]
+) -> list[str] | None:
+    """Return *order* with *sid*'s member lines pulled into a contiguous block.
+
+    The block keeps the members' relative order and is seated where the first
+    member currently sits, so every non-member lane keeps its relative position
+    (the smallest reshuffle that closes the straddle).  Returns ``None`` when
+    the node carries fewer than two lines (nothing to bridge).
+    """
+    members = graph.station_lines(sid)
+    member_block = [lid for lid in order if lid in members]
+    if len(member_block) < 2:
+        return None
+    first_idx = order.index(member_block[0])
+    rest = [lid for lid in order if lid not in members]
+    n_before = sum(1 for lid in order[:first_idx] if lid not in members)
+    return rest[:n_before] + member_block + rest[n_before:]
 
 
 def infer_section_layout(graph: MetroGraph, max_station_columns: int = 15) -> None:

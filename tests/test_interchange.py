@@ -12,6 +12,10 @@ import pytest
 
 from nf_metro.layout.constants import SAME_COORD_TOLERANCE
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.phases.guards import (
+    PhaseInvariantError,
+    _guard_interchange_bar_clears_non_members,
+)
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import render_svg
 from nf_metro.themes import THEMES
@@ -149,12 +153,70 @@ def test_example_fixture_renders_with_inferred_and_explicit_agreeing():
     assert {c.node_id for c in g_auto.interchanges if c.inferred} == {"markduplicates"}
 
 
-def test_auto_detection_abstains_when_bar_would_span_a_third_lane():
+# Two parallel lanes (top/bot) sharing one step, with a third lane (mid)
+# declared between them so its track interleaves the would-be bar span.  Every
+# lane runs straight through (neighbours one layer away), so the straddle is a
+# pure lane-order artifact the reorder can lift.
+_REORDERABLE = (
+    "%%metro line: top | Top | #d62728\n"
+    "%%metro line: mid | Mid | #2db572\n"
+    "%%metro line: bot | Bot | #f5c542\n"
+    "{directive}"
+    "graph LR\n"
+    "    subgraph s [S]\n"
+    "        top_in[ ]\n        mid_in[ ]\n        bot_in[ ]\n"
+    "        hub[Hub]\n        mid_step[Mid]\n"
+    "        top_out[ ]\n        mid_out[ ]\n        bot_out[ ]\n"
+    "        top_in -->|top| hub\n        bot_in -->|bot| hub\n"
+    "        mid_in -->|mid| mid_step\n"
+    "        hub -->|top| top_out\n        hub -->|bot| bot_out\n"
+    "        mid_step -->|mid| mid_out\n"
+    "    end\n"
+)
+
+
+def test_auto_detection_abstains_when_a_diverging_member_cannot_be_un_straddled():
     """longread's samtools_merge carries ubam+bam, but the fastq lane's track
-    sits between them; a bridge there would draw its bar over cat_fastq.  The
-    clearance rule must keep auto-detection from inferring it."""
+    sits between them.  The bam member leaves on a long edge (to a station two
+    layers downstream), so its rail slopes off its base track -- no lane order
+    can make the two member rails adjacent, and reordering would only manufacture
+    a straddle over cat_fastq.  Auto-detection must keep abstaining there."""
     g = parse_metro_mermaid((EXAMPLES / "longread_variant_calling.mmd").read_text())
     assert "samtools_merge" not in {c.node_id for c in g.interchanges}
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        _REORDERABLE.format(directive=""),
+        (EXAMPLES / "topologies" / "interchange_lane_reorder.mmd").read_text(),
+    ],
+    ids=["inline", "fixture"],
+)
+def test_auto_detection_reorders_interleaving_lane_out_of_bar_span(src):
+    """An interleaving non-member lane is reordered to an outer track so the two
+    member rails become adjacent and the bar infers cleanly, instead of
+    abstaining.  The interleaving lane's station must then sit clear of the bar."""
+    g = parse_metro_mermaid(src)
+    assert "hub" in {c.node_id for c in g.interchanges}
+    compute_layout(g)
+    ic = next(c for c in g.interchanges if c.node_id == "hub")
+    members = [g.stations[m] for m in ic.member_ids]
+    x = members[0].x
+    ys = [m.y for m in members]
+    lo, hi = min(ys), max(ys)
+    mid_step = g.stations["mid_step"]
+    assert abs(mid_step.x - x) < SAME_COORD_TOLERANCE
+    assert not (lo - SAME_COORD_TOLERANCE < mid_step.y < hi + SAME_COORD_TOLERANCE)
+
+
+def test_reorder_respects_explicit_line_order_directive():
+    """An explicit ``%%metro line_order:`` directive is the author's choice and
+    must win: the reorder that would un-straddle the bar is not applied, so the
+    hub abstains rather than silently overriding the requested track order."""
+    g = parse_metro_mermaid(_REORDERABLE.format(directive="%%metro line_order: span\n"))
+    assert list(g.lines.keys()) == ["top", "mid", "bot"]
+    assert "hub" not in {c.node_id for c in g.interchanges}
 
 
 def test_directive_bundles_multiple_lines_on_one_rail():
@@ -200,25 +262,23 @@ def test_marked_interchange_renders_as_a_tinted_interchange():
 def test_interchange_bar_never_spans_a_non_member_station(fixture):
     """An interchange connector bar runs between its top and bottom member
     rails; no other station may sit within that span at the bar's column, or
-    the bar would visibly cut through that station's marker."""
+    the bar would visibly cut through that station's marker.  This is exactly
+    the always-on guard's contract, so exercise it directly over the corpus."""
     g = parse_metro_mermaid(fixture.read_text())
     compute_layout(g)
-    for ic in g.interchanges:
-        members = [g.stations[m] for m in ic.member_ids if m in g.stations]
-        if len(members) < 2:
-            continue
-        x = members[0].x
-        ys = [m.y for m in members]
-        lo, hi = min(ys), max(ys)
-        for s in g.stations.values():
-            if s.is_port or s.id in ic.member_ids:
-                continue
-            spans = (
-                abs(s.x - x) < SAME_COORD_TOLERANCE
-                and lo - SAME_COORD_TOLERANCE < s.y < hi + SAME_COORD_TOLERANCE
-            )
-            assert not spans, (
-                f"{fixture.name}: interchange {ic.node_id!r} bar (x={x:.0f}, "
-                f"y {lo:.0f}..{hi:.0f}) spans station {s.id!r} at "
-                f"({s.x:.0f}, {s.y:.0f})"
-            )
+    _guard_interchange_bar_clears_non_members(g, fixture.name)
+
+
+def test_runtime_guard_flags_an_interchange_bar_over_a_non_member(monkeypatch):
+    """The always-on guard raises when a bar straddles a non-member station.
+
+    Forcing the lane reorder past its straight-through gate seats longread's
+    samtools_merge bar across cat_fastq; the guard must catch that geometry
+    rather than letting the broken bar render."""
+    import nf_metro.layout.auto_layout as al
+
+    monkeypatch.setattr(al, "_member_lines_pass_straight", lambda *a, **k: True)
+    g = parse_metro_mermaid((EXAMPLES / "longread_variant_calling.mmd").read_text())
+    compute_layout(g, validate=False)
+    with pytest.raises(PhaseInvariantError, match="spans non-member station"):
+        _guard_interchange_bar_clears_non_members(g, "final")

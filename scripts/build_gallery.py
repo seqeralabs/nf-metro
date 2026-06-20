@@ -294,6 +294,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     ),
     # --- Multi-line bundles ---
     (
+        "interchange_lane_reorder",
+        TOPOLOGIES_DIR,
+        "Two lanes share one step while a third lane is declared between them. "
+        "Auto-layout reorders the interleaving lane to an outer track so the "
+        "two members become adjacent and infer a clean interchange, instead of "
+        "abstaining (issue #779).",
+    ),
+    (
         "multi_line_bundle",
         TOPOLOGIES_DIR,
         "Six lines travelling through the same three-section chain.",
