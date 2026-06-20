@@ -87,6 +87,7 @@ from nf_metro.render.constants import (
     RAIL_KNOB_RADIUS_RATIO,
     RAIL_LINK_HALF_WIDTH_RATIO,
     SECTION_BOX_RADIUS,
+    SECTION_HEADER_ROUTE_PAD,
     SECTION_NUM_CIRCLE_R_LARGE,
     SECTION_NUM_FONT_SIZE,
     SECTION_STROKE_WIDTH,
@@ -160,11 +161,9 @@ def apply_route_offsets(
 def _compute_canvas_bounds(
     graph: MetroGraph,
     routes: list[RoutedPath],
-    header_placements: dict[str, SectionHeaderPlacement],
     debug: bool = False,
 ) -> tuple[float, float]:
-    """Compute max X/Y from stations, section boxes, route waypoints, and
-    section headers (which a relocated/long title can push past the box)."""
+    """Compute max X/Y from stations, section boxes, and route waypoints."""
     if debug:
         visible_stations = list(graph.stations.values())
     else:
@@ -182,11 +181,6 @@ def _compute_canvas_bounds(
         if section.bbox_w > 0:
             max_x = max(max_x, section.bbox_x + section.bbox_w)
             max_y = max(max_y, section.bbox_y + section.bbox_h)
-            placement = header_placements.get(section.id)
-            if placement is not None and placement.mode != "above":
-                _, _, hx1, hy1 = placement.keepout
-                max_x = max(max_x, hx1)
-                max_y = max(max_y, hy1)
 
     for route in routes:
         for px, py in route.points:
@@ -575,7 +569,7 @@ def _render_svg_scaled(
     )
     _guard_section_headers_clear_routes(header_placements, header_polylines)
 
-    max_x, max_y = _compute_canvas_bounds(graph, routes, header_placements, debug)
+    max_x, max_y = _compute_canvas_bounds(graph, routes, debug)
 
     # Group captions can extend below/right of the content; grow the canvas
     # so they are not clipped.
@@ -625,6 +619,16 @@ def _render_svg_scaled(
     # the watermark text.
     auto_width = max_x + (0.0 if bare else padding)
     auto_height = max_y + WATERMARK_Y_INSET * 2 + WATERMARK_FONT_SIZE
+
+    # A relocated header may sit past the box; let it use the margins already
+    # added above and only stretch the canvas for the part that overflows them,
+    # so a below/side header adds no needless blank space.
+    for placement in header_placements.values():
+        if placement.mode == "above":
+            continue
+        _, _, hx1, hy1 = placement.keepout
+        auto_width = max(auto_width, hx1 + SECTION_HEADER_ROUTE_PAD)
+        auto_height = max(auto_height, hy1 + SECTION_HEADER_ROUTE_PAD)
 
     svg_width = width or int(auto_width)
     svg_height = height or int(auto_height)
