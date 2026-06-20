@@ -413,6 +413,35 @@ def _guard_rail_one_station_per_column(graph: MetroGraph, phase: str) -> None:
                 )
 
 
+def _guard_interchange_bar_clears_non_members(graph: MetroGraph, phase: str) -> None:
+    """An interchange connector bar must not cross a non-member station.
+
+    The bar runs vertically between the top and bottom member rails at the
+    interchange column; any other station sharing that column within the span
+    would be cut by the bar (a station-as-elbow violation).  Auto-detection
+    abstains or reorders to avoid this, but the seating is geometry-dependent,
+    so verify the settled layout directly.
+    """
+    tol = GUARD_TOLERANCE
+    for ic in graph.interchanges:
+        member_ids = set(ic.member_ids)
+        members = [graph.stations[m] for m in ic.member_ids if m in graph.stations]
+        if len(members) < 2:
+            continue
+        x = members[0].x
+        ys = [m.y for m in members]
+        lo, hi = min(ys), max(ys)
+        for s in graph.stations.values():
+            if s.is_port or s.id in member_ids:
+                continue
+            if abs(s.x - x) < tol and lo - tol < s.y < hi + tol:
+                raise PhaseInvariantError(
+                    f"{phase}: interchange {ic.node_id!r} bar (x={x:.1f}, "
+                    f"y {lo:.1f}..{hi:.1f}) spans non-member station {s.id!r} "
+                    f"at ({s.x:.1f}, {s.y:.1f})"
+                )
+
+
 def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
     """After Stage 3.1+: ports must sit on their section's bounding box edge."""
     tolerance = GUARD_TOLERANCE

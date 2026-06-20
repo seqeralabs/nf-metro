@@ -1,0 +1,26 @@
+%%metro title: Rail off-track file input and output
+%%metro style: dark
+%%metro line_spread: rails
+%%metro line: a | A | #2db572
+%%metro line: b | B | #f4a300
+%%metro file: cram_in | CRAM
+%%metro file: aux_in | BED | Targets
+%%metro file: side_out | QC
+%%metro off_track: aux_in
+%%metro off_track: side_out
+
+graph LR
+    subgraph sec [Calling]
+        cram_in[ ]
+        align[Align]
+        call[Call]
+        report[Report]
+        aux_in[ ]
+        side_out[ ]
+
+        cram_in -->|a,b| align
+        align -->|a,b| call
+        call -->|a,b| report
+        aux_in -->|a| call
+        call -->|a| side_out
+    end

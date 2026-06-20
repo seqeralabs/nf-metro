@@ -31,6 +31,7 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `trunk_through_fan.mmd` | trunk bundle entering and exiting a section that has an internal fork-join diamond |
 | `terminal_symmetric_fan.mmd` | two-line bundle fanning out to three terminal nodes in a reporting section (no inter-terminal edges) |
 | `multi_line_bundle.mmd` | dense bundle / tall station pills |
+| `interchange_lane_reorder.mmd` | auto-interchange / interleaving-lane reorder (issue #779) |
 | `mismatched_tracks.mmd` | per-line track mismatch between sections |
 | `mixed_bundle_column.mmd` | mixed-cardinality fan-out into stacked column |
 | `mixed_port_sides.mmd` | multi-side exit ports (RIGHT + BOTTOM) |

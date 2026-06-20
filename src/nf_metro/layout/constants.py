@@ -623,6 +623,18 @@ The render side draws under-icon captions at ``label_font_size *
 ICON_NAME_FONT_SCALE``; using ``FONT_HEIGHT`` as an upper-bound for
 the theme label_font_size keeps the calculation theme-agnostic."""
 
+OFFTRACK_TERMINUS_NUB_CLEARANCE: float = 8.0
+"""Extra drop applied to a captioned off-track rail terminus station.
+
+A rail-mode off-track file terminus stacks its icon vertically above the line
+stub, with the buffer-stop nub seated at the stub end (``station.y``) and the
+under-icon caption hanging toward it.  Unlike an on-rail terminus -- where the
+caption sits perpendicular to the nub -- here both share the vertical axis, so
+the caption lands on the nub.  Dropping the station by this amount while the
+renderer lifts the icon by the same amount keeps the icon fixed and slides the
+nub clear below the caption.  Shared by ``rail_mode`` (the drop) and
+``render.svg`` (the matching icon lift) so the two stay in lockstep."""
+
 TERMINUS_ICON_CLEARANCE: float = 58.0
 """Minimum clearance from terminus station center to section bbox edge.
 

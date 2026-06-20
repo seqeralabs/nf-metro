@@ -284,8 +284,13 @@ def _rail_panel_label_offsets(
     from ``station.y`` to the panel's top/bottom rail (so ``_try_place`` lands
     the label outside the rail stack), or None when the station is not in a
     known rail panel.
+
+    An off-track station parks outside the rail panel on its own vertical
+    stub; forcing its label to clear the whole panel drives it across the
+    drop onto a neighbour, so it keeps the normal pill offsets and labels
+    against its own node.
     """
-    if not station.section_id:
+    if not station.section_id or station.off_track:
         return None
     extent = panel_extents.get(station.section_id)
     if extent is None:

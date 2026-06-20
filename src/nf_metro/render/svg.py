@@ -17,6 +17,7 @@ import drawsvg as draw
 
 from nf_metro.layout.constants import (
     LABEL_LINE_HEIGHT,
+    OFFTRACK_TERMINUS_NUB_CLEARANCE,
     SAME_COORD_TOLERANCE,
     Y_SPACING,
 )
@@ -1735,15 +1736,17 @@ def _render_station_into(
     # like any other render -- the standard unrounded nub (via _pill_box)
     # spanning the bundle, plus the file icon -- rather than a rail-specific
     # glyph.  The only difference is the span comes from the rail bundle
-    # (rail mode does not use station_offsets).  An off-track input drops in
-    # vertically (no horizontal fan), so it gets the icon only.
+    # (rail mode does not use station_offsets).  An off-track terminus parks
+    # off the rails and its lines converge onto a single vertical stub, so its
+    # nub is the bundle-centred square (zero span) seating the buffer stop
+    # where the stub meets the file icon, matching on-rail file termini.
     if graph.station_is_rail(station.id) and station.is_blank_terminus:
         if station.off_track:
-            _append_terminus_icons(d, station, graph, theme, r, 0.0, 0.0)
-            return
-        used = station.rail_used_ys or [station.y]
-        t_min = min(used) - station.y
-        t_max = max(used) - station.y
+            t_min = t_max = 0.0
+        else:
+            used = station.rail_used_ys or [station.y]
+            t_min = min(used) - station.y
+            t_max = max(used) - station.y
         _draw_blank_terminus_nub(
             d, station, r, t_min, t_max, _station_data_attrs(graph, station), theme
         )
@@ -1760,6 +1763,7 @@ def _render_station_into(
         graph.station_is_rail(station.id)
         and station.marker is None
         and not station.is_terminus
+        and not station.off_track
     ):
         _render_rail_pill(d, graph, station, theme, r)
         return
@@ -1961,15 +1965,26 @@ def _render_terminus_icons(
     else:
         icon_step = caption_aware_icon_step(names, name_widths, theme.terminus_width)
 
+    is_rail = graph.station_is_rail(station.id)
+    # A captioned off-track rail terminus has its station dropped by
+    # OFFTRACK_TERMINUS_NUB_CLEARANCE (see rail_mode) so the buffer-stop nub
+    # clears the under-icon caption; lift the icon stack by the same amount so
+    # it stays put while the nub slides down.
+    offtrack_nub_lift = (
+        OFFTRACK_TERMINUS_NUB_CLEARANCE
+        if (station.off_track and is_rail and station.is_captioned_terminus)
+        else 0.0
+    )
+
     centers = _terminus_icon_centers(
         station,
         section_dir,
         is_source,
         len(station.terminus_labels),
-        icon_gap + icon_half_flow,
+        icon_gap + icon_half_flow + offtrack_nub_lift,
         icon_step,
         bundle_center,
-        is_rail=graph.station_is_rail(station.id),
+        is_rail=is_rail,
     )
 
     # Captions sitting at the same Y overlap when their estimated

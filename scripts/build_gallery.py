@@ -294,6 +294,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     ),
     # --- Multi-line bundles ---
     (
+        "interchange_lane_reorder",
+        TOPOLOGIES_DIR,
+        "Two lanes share one step while a third lane is declared between them. "
+        "Auto-layout reorders the interleaving lane to an outer track so the "
+        "two members become adjacent and infer a clean interchange, instead of "
+        "abstaining (issue #779).",
+    ),
+    (
         "multi_line_bundle",
         TOPOLOGIES_DIR,
         "Six lines travelling through the same three-section chain.",
@@ -838,6 +846,23 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "The lead-in crosses to the inter-column gap and reaches the TOP entry "
         "from above the box, rather than rising up the trunk through the "
         "section's stations.",
+    ),
+    (
+        "rail_offtrack_io",
+        TOPOLOGIES_DIR,
+        "A `%%metro line_spread: rails` section with off-track `%%metro file:` "
+        "input and output. Each off-track file terminus carries a buffer-stop "
+        "nub at the rail-side end of its vertical stub (like the on-rail "
+        "CRAM/VCF termini) seated clear of its under-icon caption, rather than "
+        "the line ending bare at the icon.",
+    ),
+    (
+        "rail_offtrack_plain_io",
+        TOPOLOGIES_DIR,
+        "A `%%metro line_spread: rails` section with plain (non-file) off-track "
+        "input and output. Each plain off-track node renders a station marker at "
+        "its line end rather than a bare stub, and the input's label sits above "
+        "the node clear of its drop and the adjacent station's label.",
     ),
 ]
 

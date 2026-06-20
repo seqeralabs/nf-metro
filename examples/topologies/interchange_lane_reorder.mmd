@@ -1,0 +1,23 @@
+%%metro title: Interchange lane reorder
+%%metro style: dark
+%%metro line: top | Top | #d62728
+%%metro line: mid | Mid | #2db572
+%%metro line: bot | Bot | #f5c542
+
+graph LR
+    subgraph s [Parallel lanes]
+        top_in[ ]
+        mid_in[ ]
+        bot_in[ ]
+        hub[Shared step]
+        mid_step[Mid step]
+        top_out[ ]
+        mid_out[ ]
+        bot_out[ ]
+        top_in -->|top| hub
+        bot_in -->|bot| hub
+        mid_in -->|mid| mid_step
+        hub -->|top| top_out
+        hub -->|bot| bot_out
+        mid_step -->|mid| mid_out
+    end

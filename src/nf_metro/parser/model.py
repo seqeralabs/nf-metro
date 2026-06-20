@@ -200,6 +200,11 @@ class Station:
         """
         return self.is_terminus and not self.label.strip()
 
+    @property
+    def is_captioned_terminus(self) -> bool:
+        """A blank file-icon terminus carrying an under-icon caption."""
+        return self.is_blank_terminus and any(self.terminus_names)
+
 
 @dataclass
 class Edge:
