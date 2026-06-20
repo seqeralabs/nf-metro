@@ -101,11 +101,12 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
         # A single carrying station already sitting on its own row anchors
         # the exit there: keep it, so the level change to the downstream
         # entry becomes one riser in the inter-section gap rather than a
-        # diagonal dragging the exit down off its station.  Lift the entry
-        # up to meet it as well when all of the entry's own consumers share
-        # that row; an entry fanning out to several rows is left in place.
+        # diagonal dragging the exit down off its station.  Requires exactly
+        # one feeding station (several on a shared row form a bypass bundle).
+        # Lift the entry up to meet it as well when all of the entry's own
+        # consumers share that row; an entry fanning to several rows is left.
         if (
-            len(src_ys) == 1
+            len(set(src_ids)) == 1
             and abs(port_st.y - next(iter(src_ys))) < SAME_COORD_TOLERANCE
             and _exit_feeds_direct_entry(graph, port_id, junction_ids)
             and exit_run_corridor_clear(graph, port_id, section, src_ids)

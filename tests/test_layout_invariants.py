@@ -859,18 +859,14 @@ def _single_connector_flow_exit_ports(
 ) -> list[tuple[str, str, float]]:
     """Yield ``(port_id, carrier_id, carrier_y)`` for the exit ports this
     invariant covers: a flow-aligned (LEFT/RIGHT) exit on a non-fold LR/RL
-    section, fed from a single internal row, that runs directly into a
-    downstream entry port.
-
-    A single row may hold more than one feeding station (e.g. a sort then
-    an index on the same trunk Y); what matters is that they share a Y, so
-    the exit has one unambiguous row to sit on.
+    section, fed by a single internal station, that runs directly into a
+    downstream entry port over a clear corridor.
 
     Excluded on purpose:
       - fold sections (``grid_row_span > 1``) place exits via dedicated
         fold logic with their own contract;
-      - fan-in exits whose feeders span more than one row - the parallel-
-        caller stacking idiom is not a defect;
+      - multi-feeder exits (a bypass bundle or fan-in) - several stations
+        feeding one exit anchor it off the carrier row by design;
       - exits feeding a fan-out / merge junction, where aligning the exit to
         the junction's row (not the carrying station) is correct;
       - exits whose carrier-row corridor to the port is blocked by another
@@ -896,21 +892,19 @@ def _single_connector_flow_exit_ports(
             for e in downstream
         ):
             continue
-        carriers = [
+        carriers = {
             e.source
             for e in graph.edges_to(pid)
             if (s := graph.stations.get(e.source)) is not None
             and not s.is_port
             and s.section_id == sec.id
-        ]
-        if not carriers:
+        }
+        if len(carriers) != 1:
             continue
-        carrier_ys = [graph.stations[c].y for c in carriers]
-        if max(carrier_ys) - min(carrier_ys) > _Y_TOL:
+        carrier = next(iter(carriers))
+        if not exit_run_corridor_clear(graph, pid, sec, [carrier]):
             continue
-        if not exit_run_corridor_clear(graph, pid, sec, carriers):
-            continue
-        out.append((pid, carriers[0], carrier_ys[0]))
+        out.append((pid, carrier, graph.stations[carrier].y))
     return out
 
 

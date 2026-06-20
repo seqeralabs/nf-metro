@@ -746,12 +746,14 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
         # A single carrying station running straight into a downstream entry
         # port anchors the exit on that station's row, so the level change
         # becomes one clean riser in the inter-section gap rather than a
-        # diagonal inside the section.  A fan-in (multi-source) exit, or one
-        # feeding a fan-out / merge junction, keeps the downstream-aligned
-        # placement: there the straight inter-section run is what matters.
+        # diagonal inside the section.  Requires exactly one feeding station:
+        # several stations sharing a row feed the exit as a bypass bundle, and
+        # anchoring there would run the farther feeder through the nearer one.
+        # A fan-in exit, or one feeding a fan-out / merge junction, keeps the
+        # downstream-aligned placement so the inter-section run stays straight.
         keep_downstream_aligned = ds_y is not None and abs(port_st.y - ds_y) < 1.0
         anchors_to_carrier = (
-            single_source
+            len(set(source_ids)) == 1
             and _exit_feeds_direct_entry(graph, port_id, junction_ids)
             and exit_run_corridor_clear(graph, port_id, section, source_ids)
         )

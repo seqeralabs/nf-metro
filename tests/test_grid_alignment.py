@@ -156,18 +156,18 @@ class TestIssueK:
 
 
 class TestIssueL:
-    """A single-carrier flow exit over a clear corridor anchors on its
-    carrying station's row rather than the downstream entry's row."""
+    """A multi-feeder (bypass) exit keeps its downstream-aligned placement, so
+    the inter-section run to variant_calling stays straight."""
 
     @pytest.fixture(autouse=True)
     def setup(self):
         self.g = _load("variant_calling_tuned")
 
-    def test_alignment_exit_sits_on_carrier_row(self):
+    def test_alignment_exit_matches_variant_calling_entry(self):
         ae = self.g.stations["alignment__exit_right_1"]
-        carrier = self.g.stations["samtools_index"]
-        assert abs(ae.y - carrier.y) < 1.0, (
-            f"alignment exit y={ae.y} off its carrier samtools_index y={carrier.y}"
+        ve = self.g.stations["variant_calling__entry_left_4"]
+        assert abs(ae.y - ve.y) < 1.0, (
+            f"alignment exit y={ae.y} != variant_calling entry y={ve.y}"
         )
 
 

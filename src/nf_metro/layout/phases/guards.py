@@ -692,14 +692,16 @@ def _guard_no_mixed_entry_directions(graph: MetroGraph) -> None:
 
 
 def _guard_flow_exit_anchored_to_carrier(graph: MetroGraph, phase: str) -> None:
-    """A flow-aligned exit fed from a single internal row, running straight
-    into a downstream entry port, must sit on that row.
+    """A flow-aligned exit fed by a single internal station, running straight
+    into a downstream entry port over a clear corridor, must sit on that
+    station's row.
 
     Otherwise the link from the carrying station to the exit climbs to the
     port and renders as a diagonal inside the section instead of a clean
     horizontal run with one riser in the inter-section gap.  Fold sections,
-    cross-row fan-in exits, and exits feeding a fan-out / merge junction are
-    out of scope: there the exit anchors elsewhere by design.
+    multi-feeder (bypass / fan-in) exits, exits feeding a fan-out / merge
+    junction, and exits whose carrier-row corridor is blocked are out of
+    scope: there the exit anchors elsewhere by design.
     """
     junction_ids = graph.junction_ids
     for pid, port in graph.ports.items():
@@ -716,23 +718,25 @@ def _guard_flow_exit_anchored_to_carrier(graph: MetroGraph, phase: str) -> None:
             for e in downstream
         ):
             continue
-        carriers = [
+        carriers = {
             e.source
             for e in graph.edges_to(pid)
             if (s := graph.stations.get(e.source)) is not None
             and not s.is_port
             and s.section_id == sec.id
-        ]
-        carrier_ys = [graph.stations[c].y for c in carriers]
-        if not carrier_ys or max(carrier_ys) - min(carrier_ys) > GUARD_TOLERANCE:
+        }
+        if len(carriers) != 1:
             continue
-        if not exit_run_corridor_clear(graph, pid, sec, carriers):
+        carrier_id = next(iter(carriers))
+        if not exit_run_corridor_clear(graph, pid, sec, [carrier_id]):
             continue
+        carrier_y = graph.stations[carrier_id].y
         port_y = graph.stations[pid].y
-        if abs(port_y - carrier_ys[0]) > GUARD_TOLERANCE:
+        if abs(port_y - carrier_y) > GUARD_TOLERANCE:
             raise PhaseInvariantError(
                 f"{phase}: exit port {pid!r} at y={port_y:.1f} is off its "
-                f"carrying row y={carrier_ys[0]:.1f}; the boundary run will "
+                f"carrying station {carrier_id!r} y={carrier_y:.1f}; the "
+                f"boundary run will "
                 f"render as a diagonal instead of a clean riser"
             )
 
