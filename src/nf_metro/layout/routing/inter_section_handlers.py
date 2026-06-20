@@ -1534,6 +1534,13 @@ def _route_perp_exit_over(
     the final turn-in carries the target's per-line Y, so a side entry tapers
     between the two while a perp-entry trunk drop stays rigid.
 
+    When a perpendicular entry sits on the far side of the target from the
+    exit-side corridor (a BOTTOM exit feeding a TOP entry, or the mirror), a
+    straight descent on the trunk X would run through the target's stations.
+    Such a route crosses to the inter-column gap, rises/descends there to the
+    entry-side corridor outside the box, and turns the final leg into the port
+    from the port's own side.
+
     This is the exit end of the up-and-over shape whose entry end is
     ``tb_handlers._route_perp_entry_from_corridor``; both seat their bundle on
     the per-line lateral from ``perp._perp_riser_lateral`` (see that module for
@@ -1571,6 +1578,12 @@ def _route_perp_exit_over(
 
     src_offs = {lid: source_lateral(lid) for lid in line_ids}
 
+    def inter_col_gap_x() -> float:
+        """X of the gap between the source and target columns."""
+        src_col = src_sec.grid_col if src_sec is not None else 0
+        tgt_col = tgt_sec.grid_col if tgt_sec is not None else src_col
+        return column_gap_midpoint(graph, src_col, tgt_col, row)
+
     # Corridor Y: the header band clearing the source section's near edge.
     cy_base = (
         header_corridor_y(graph, row, below=not is_top, base_radius=base, default=sy)
@@ -1586,11 +1599,41 @@ def _route_perp_exit_over(
         and tgt_port.side in (PortSide.TOP, PortSide.BOTTOM)
     )
     if perp_entry:
-        # Perpendicular entry: descend straight on the target trunk's per-line
-        # X and stop there.  The matching entry drop continues from that same
-        # X, so ending the corridor short of the port centre keeps the two
-        # legs one continuous line instead of jogging onto the port marker.
-        centerline = [(sx, sy), (sx, cy_base), (tx, cy_base), (tx, ty)]
+        assert tgt_port is not None
+        entry_above = tgt_port.side == PortSide.TOP
+        crosses_box = (cy_base > ty) if entry_above else (cy_base < ty)
+        if crosses_box:
+            # The exit-side corridor sits on the far side of the target from its
+            # entry port, so a straight descent on the trunk X would run up
+            # through the target's stations.  Cross to the inter-column gap,
+            # switch to the entry-side corridor outside the target box, then turn
+            # the final perpendicular leg in from the port's own side.
+            gap_x = inter_col_gap_x()
+            cy_entry = (
+                header_corridor_y(
+                    graph,
+                    tgt_sec.grid_row,
+                    below=not entry_above,
+                    base_radius=base,
+                    default=ty,
+                )
+                if tgt_sec is not None
+                else (ty - base if entry_above else ty + base)
+            )
+            centerline = [
+                (sx, sy),
+                (sx, cy_base),
+                (gap_x, cy_base),
+                (gap_x, cy_entry),
+                (tx, cy_entry),
+                (tx, ty),
+            ]
+        else:
+            # Perpendicular entry: descend straight on the target trunk's per-line
+            # X and stop there.  The matching entry drop continues from that same
+            # X, so ending the corridor short of the port centre keeps the two
+            # legs one continuous line instead of jogging onto the port marker.
+            centerline = [(sx, sy), (sx, cy_base), (tx, cy_base), (tx, ty)]
         route = route_along(
             edge,
             [(edge, edge.line_id, src_offs[edge.line_id])],
@@ -1603,9 +1646,7 @@ def _route_perp_exit_over(
         # turn straight in, holding each line on the target section's per-line Y
         # so the bundle stays stacked into the station marker rather than
         # collapsing onto the entry-port Y (which would hide all but one line).
-        src_col = src_sec.grid_col if src_sec is not None else 0
-        tgt_col = tgt_sec.grid_col if tgt_sec is not None else src_col
-        gap_x = column_gap_midpoint(graph, src_col, tgt_col, row)
+        gap_x = inter_col_gap_x()
         centerline = [
             (sx, sy),
             (sx, cy_base),
