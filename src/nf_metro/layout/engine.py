@@ -172,6 +172,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_rail_above_label_band,
     _guard_rail_one_station_per_column,
     _guard_rail_stations_seat_on_rails,
+    _guard_right_entry_drop_in_when_clear,
     _guard_routes_enter_sections_at_ports,
     _guard_row_gaps,
     _guard_row_trunk_cy_consistent,
@@ -1720,6 +1721,9 @@ def _finalize_layout(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_perp_exit_over_leadin_no_overdip(
+                graph, phase, offsets=offsets, routes=routes
+            )
+            _guard_right_entry_drop_in_when_clear(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_inter_section_route_no_backtrack(graph, phase, routes=routes)

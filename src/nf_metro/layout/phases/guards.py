@@ -3248,6 +3248,42 @@ def _guard_perp_exit_over_leadin_no_overdip(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
+def _guard_right_entry_drop_in_when_clear(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: a RIGHT entry fed from above must take the direct drop-in
+    rather than loop below the box when the outward-side descent is clear.
+
+    See
+    :func:`nf_metro.layout.routing.invariants.check_right_entry_drop_in_when_clear`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_right_entry_drop_in_when_clear,
+    )
+
+    if routes is None:
+        from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+        if offsets is None:
+            offsets = compute_station_offsets(graph)
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+
+    violations = check_right_entry_drop_in_when_clear(graph, routes)
+    if not violations:
+        return
+    first = violations[0]
+    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
 def _guard_off_track_clear_of_anchor(graph: MetroGraph, phase: str) -> None:
     """At final: every off-track station must sit at least ``GUARD_TOLERANCE``
     clear of its anchor on the expected side.

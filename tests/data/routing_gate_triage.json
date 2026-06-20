@@ -283,6 +283,14 @@
     "note": "Competing-sibling detection in _has_around_section_sibling, routed through the dispatch table (#813). A non-bypass sibling feeding the same merge junction sits in an adjacent column or a gap with no same-row intervening section, so it dispatches to an L-shape, not the around-below loop; corpus instrumentation across the fixtures confirms the arm is never taken. Defensive.",
     "status": "defensive"
   },
+  "inter_section_handlers.py::if _v_segment_crosses_other_section(graph, corner_x, src.y, ey, exclude):::#1": {
+    "note": "Drop-in viability test in _right_entry_drop_in_is_clear (#889). The cross-row RIGHT-entry rule fires only when the earlier bypass / plough rules ceded the edge, i.e. no section sits between source and port, so the outward-side descent runs clear; the not-clear arm covers only an exotic descent blocked by a wide same-column sibling no corpus fixture builds. Defensive.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::if not _inter_row_band_fits(gap_top, gap_bottom):::#1": {
+    "note": "Band-fit test in _right_entry_gap_above_is_clear (#889), reached only when the cross-row RIGHT-entry drop-in is not clear (the exotic blocked-descent case above). The corpus always takes the drop-in, so neither arm of the gap-above fallback is exercised. Defensive.",
+    "status": "defensive"
+  },
   "inter_section_handlers.py::if src is None or tgt is None:::#1": {
     "note": "Endpoint lookup guard in _would_route_around_section_below; every edge endpoint is a registered station after parse+resolve, so graph.stations.get never returns None here. Defensive.",
     "status": "defensive"
@@ -569,6 +577,22 @@
   },
   "normalize.py::if s.bbox_w <= 0:::#2": {
     "note": "Degenerate-bbox guard in _h_segment_crosses_other_section: mirror of the bbox_w<=0 guard; sections always have positive width.",
+    "status": "defensive"
+  },
+  "normalize.py::if s.bbox_w <= 0:::#3": {
+    "note": "Degenerate-bbox guard in _v_segment_crosses_other_section: mirror of the _h_segment_crosses_other_section guard; sections always have positive width.",
+    "status": "defensive"
+  },
+  "normalize.py::if s.id in exclude_section_ids:::#2": {
+    "note": "_v_segment_crosses_other_section skips the excluded sections; its sole caller (_right_entry_drop_in_is_clear) excludes the source and target, so the loop only iterates them and the not-excluded fall-through is never reached on the corpus.",
+    "status": "defensive"
+  },
+  "normalize.py::if hi_y <= s.bbox_y or lo_y >= bottom:::#1": {
+    "note": "Y-interior overlap test in _v_segment_crosses_other_section: with only the excluded source/target sections iterated on the corpus, the not-overlapping skip arm is never reached.",
+    "status": "defensive"
+  },
+  "normalize.py::if s.bbox_x - margin <= x <= s.bbox_x + s.bbox_w + margin:::#1": {
+    "note": "X-band test in _v_segment_crosses_other_section: a RIGHT-entry drop-in descent runs in the clear inter-column gap just right of the source, so no non-excluded section's X band contains it; the crossing arm is never taken on the corpus.",
     "status": "defensive"
   },
   "normalize.py::if sg[0].sign_x != t.sign_x:::#1": {
