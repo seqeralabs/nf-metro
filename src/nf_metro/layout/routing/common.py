@@ -178,6 +178,7 @@ def header_corridor_y(
     below: bool,
     base_radius: float,
     default: float = 0.0,
+    col: int | None = None,
 ) -> float:
     """Y of an inter-row routing channel that clears a row's header band.
 
@@ -187,10 +188,14 @@ def header_corridor_y(
     occupies the gap above the row (contributing a header badge); the topmost
     row has only the canvas-top title band, so the smaller
     :data:`SECTION_ROUTE_CLEARANCE` keeps the channel from overshooting it.
+
+    When *col* is given the channel clears only that grid column's sections, so
+    a corridor leg confined to one column isn't pushed past a tall section
+    stacked in a different column of the same row.
     """
     if below:
         return (
-            row_bottom_edge(graph, row, default=default)
+            row_bottom_edge(graph, row, default=default, col=col)
             + SECTION_ROUTE_CLEARANCE
             + base_radius
         )
@@ -199,7 +204,7 @@ def header_corridor_y(
         if section_exists_above_row(graph, row)
         else SECTION_ROUTE_CLEARANCE
     )
-    return row_top_edge(graph, row, default=default) - clearance - base_radius
+    return row_top_edge(graph, row, default=default, col=col) - clearance - base_radius
 
 
 def section_exists_above_row(graph: MetroGraph, row: int) -> bool:

@@ -167,6 +167,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_partial_branch_offset_gaps,
     _guard_perp_entry_boundary_consistent,
     _guard_perp_entry_feed_not_collinear,
+    _guard_perp_exit_over_leadin_no_overdip,
     _guard_ports_on_boundaries,
     _guard_rail_above_label_band,
     _guard_rail_one_station_per_column,
@@ -1716,6 +1717,9 @@ def _finalize_layout(
             _guard_no_stacked_elbow_graze(graph, phase, offsets=offsets, routes=routes)
             _guard_fanout_tail_join(graph, phase, offsets=offsets, routes=routes)
             _guard_perp_entry_boundary_consistent(
+                graph, phase, offsets=offsets, routes=routes
+            )
+            _guard_perp_exit_over_leadin_no_overdip(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_inter_section_route_no_backtrack(graph, phase, routes=routes)

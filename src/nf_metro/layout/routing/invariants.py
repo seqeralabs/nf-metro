@@ -2036,6 +2036,92 @@ def check_merge_branches_meet_trunk(
     return violations
 
 
+@dataclass(frozen=True)
+class PerpExitLeadInOverdip:
+    """A cross-column perp-exit lead-in clears a section it never passes under.
+
+    The exit-side down-leg of
+    :func:`~nf_metro.layout.routing.inter_section_handlers._route_perp_exit_over`'s
+    ``crosses_box`` shape drops at the exit X and runs only to the inter-column
+    gap, so it should clear just the sections under that span.  A leg seated
+    below (BOTTOM exit) or above (TOP exit) a section whose X extent it never
+    overlaps loops needlessly to the canvas edge around a box it doesn't cross.
+    """
+
+    source: str
+    target: str
+    section_id: str
+    leg_y: float
+    section_edge: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"perp-exit lead-in {self.source!r}->{self.target!r} corridor at "
+            f"y={self.leg_y:.1f} overshoots section {self.section_id!r} "
+            f"(edge y={self.section_edge:.1f}) it never passes under"
+        )
+
+
+def check_perp_exit_over_leadin_clears_only_spanned_sections(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> list[PerpExitLeadInOverdip]:
+    """Return crosses_box perp-exit lead-ins overshooting an un-spanned section.
+
+    ``_route_perp_exit_over`` drops out of a TOP/BOTTOM exit, crosses to the
+    inter-column gap, then climbs to the entry-side corridor.  The first leg --
+    from the exit X to the gap -- need only clear the source column's sections;
+    if it dips below (BOTTOM exit) or rises above (TOP exit) a section in a
+    different column it never travels under, the route loops to the canvas edge.
+    """
+    tol = COORD_TOLERANCE
+    violations: list[PerpExitLeadInOverdip] = []
+    for r in routes:
+        src_port = graph.ports.get(r.edge.source)
+        tgt_port = graph.ports.get(r.edge.target)
+        if (
+            src_port is None
+            or tgt_port is None
+            or src_port.is_entry
+            or not tgt_port.is_entry
+            or src_port.side not in (PortSide.TOP, PortSide.BOTTOM)
+            or tgt_port.side not in (PortSide.TOP, PortSide.BOTTOM)
+            or not r.is_inter_section
+            or len(r.points) != 6
+        ):
+            continue
+        src_st = graph.stations.get(r.edge.source)
+        if src_st is None or src_st.section_id is None:
+            continue
+        src_sec = graph.sections.get(src_st.section_id)
+        if src_sec is None:
+            continue
+        (sx, _sy), (cx, cy), (gx, _gy), *_rest = r.points
+        if abs(cx - sx) > tol:  # not the exit-drop-first shape
+            continue
+        is_bottom = src_port.side == PortSide.BOTTOM
+        leg_lo, leg_hi = sorted((sx, gx))
+        for s in graph.sections.values():
+            if s.id == src_sec.id or s.grid_row != src_sec.grid_row or s.bbox_h <= 0:
+                continue
+            s_lo, s_hi = s.bbox_x, s.bbox_x + s.bbox_w
+            if leg_hi > s_lo + tol and s_hi > leg_lo + tol:
+                continue  # leg passes under this section; clearing it is expected
+            if is_bottom and cy > s.bbox_y + s.bbox_h + tol:
+                violations.append(
+                    PerpExitLeadInOverdip(
+                        r.edge.source, r.edge.target, s.id, cy, s.bbox_y + s.bbox_h
+                    )
+                )
+            elif not is_bottom and cy < s.bbox_y - tol:
+                violations.append(
+                    PerpExitLeadInOverdip(
+                        r.edge.source, r.edge.target, s.id, cy, s.bbox_y
+                    )
+                )
+    return violations
+
+
 @dataclass
 class UndeclaredGapChannel:
     """A vertical inter-section leg sits in a gap with no :class:`GapSlot`.
@@ -2336,6 +2422,7 @@ __all__ = [
     "PartialBranchGapViolation",
     "PeeloffBundleCrossing",
     "PerpEntryBoundaryViolation",
+    "PerpExitLeadInOverdip",
     "SameLineParallelRun",
     "Side",
     "StackedElbowGraze",
@@ -2353,6 +2440,7 @@ __all__ = [
     "check_no_same_line_parallel_descents",
     "check_peeloff_concentric",
     "check_perp_entry_boundary_consistent",
+    "check_perp_exit_over_leadin_clears_only_spanned_sections",
     "bypass_horizontal_targets",
     "check_stacked_elbow_clearance",
     "check_partial_branch_offset_gaps",

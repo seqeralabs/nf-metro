@@ -1609,6 +1609,23 @@ def _route_perp_exit_over(
             # switch to the entry-side corridor outside the target box, then turn
             # the final perpendicular leg in from the port's own side.
             gap_x = inter_col_gap_x()
+            # The exit-side down-leg drops at the exit X and runs across only to
+            # the inter-column gap, so it need clear just the source column's
+            # sections, not the row's deepest section in a far column (which
+            # would loop the leg to the canvas bottom around a box it never
+            # passes under).
+            cy_down = (
+                header_corridor_y(
+                    graph,
+                    row,
+                    below=not is_top,
+                    base_radius=base,
+                    default=sy,
+                    col=src_sec.grid_col if src_sec is not None else None,
+                )
+                if row is not None
+                else cy_base
+            )
             cy_entry = (
                 header_corridor_y(
                     graph,
@@ -1622,8 +1639,8 @@ def _route_perp_exit_over(
             )
             centerline = [
                 (sx, sy),
-                (sx, cy_base),
-                (gap_x, cy_base),
+                (sx, cy_down),
+                (gap_x, cy_down),
                 (gap_x, cy_entry),
                 (tx, cy_entry),
                 (tx, ty),
