@@ -14,6 +14,7 @@ two-section grid with simpler topology (variant calling).
 from __future__ import annotations
 
 import copy
+import warnings
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
@@ -4244,33 +4245,10 @@ def test_lr_section_all_perpendicular_ports_rejected():
     assert "perpendicular" in msg or "flow-aligned" in msg
 
 
-@pytest.mark.parametrize(
-    ("fixture", "bridged_section"),
-    [
-        ("regressions/cross_column_perp_entry_overflow.mmd", "reporting"),
-        ("regressions/cross_column_perp_drop_target_overflow.mmd", "scaffolding"),
-    ],
-)
-def test_cross_column_perp_drop_stays_in_bbox(fixture, bridged_section):
-    """A ``direction:`` override that feeds a section's perpendicular entry/drop
-    from outside its own grid column keeps the run/trunk on the section's own
-    column, in-bbox.
-
-    A perpendicular entry/drop whose feeding source X lands outside the
-    section's box is a cross-column connection: the run (LR/RL perp entry) and
-    the trunk (TB drop target) stay on the section's grid column rather than
-    aligning to the off-box source X, and routing bridges the drop as a
-    best-effort L-shaped lead-in.  Every station stays within its section bbox,
-    and the render completes -- the strict render-curve invariants relax to a
-    warning for the acknowledged-degraded bundle through the forced
-    perpendicular drop (#879).
-    """
-    graph = _layout(fixture, center_ports=False)
-
-    assert bridged_section in graph._cross_column_perp_bridges
-
+def _bbox_spilled_stations(graph: MetroGraph) -> list[str]:
+    """Stations whose centre lies outside their section bbox (guard tolerance)."""
     tol = GUARD_TOLERANCE
-    spilled = [
+    return [
         sid
         for sid, st in graph.stations.items()
         if not st.is_port
@@ -4280,10 +4258,46 @@ def test_cross_column_perp_drop_stays_in_bbox(fixture, bridged_section):
             and sec.bbox_y - tol <= st.y <= sec.bbox_y + sec.bbox_h + tol
         )
     ]
-    assert not spilled, f"stations outside their bbox: {spilled}"
 
-    # The render path (route + curve assertion) must complete without aborting;
-    # the forced-perpendicular bundle relaxes the curve check to a warning.
+
+def test_cross_column_perp_drop_renders_cleanly():
+    """A perpendicular drop fed from a different grid column lays out cleanly.
+
+    A ``direction: TB`` section fed by a perpendicular drop from a section in
+    another grid column keeps its vertical trunk on its own column (in-bbox)
+    and bridges the cross-column feed with an L-shaped inter-section lead-in.
+    The drop is flagged as a cross-column bridge, every station stays within
+    its section bbox, and the bundle satisfies the render-curve invariants
+    with no warning (the corpus invariants over this fixture pin the clean
+    geometry) (#879).
+    """
+    graph = _layout("topologies/cross_column_perp_drop.mmd")
+
+    assert "qc" in graph._cross_column_perp_bridges
+    assert not _bbox_spilled_stations(graph)
+
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        assert_render_curve_invariants(graph, routes, offsets)
+
+
+def test_cross_column_perp_entry_stays_in_bbox():
+    """A cross-column perpendicular entry never spills a station out of its bbox.
+
+    On a fold-stacked LR sink whose only feed is a perpendicular entry from a
+    wider same-column neighbour (the source X sits past the sink's box), the
+    run stays on the sink's own column instead of being dragged off it.  The
+    bundle through this forced-perpendicular drop is an unsupported shape, so
+    the render relaxes the curve invariant to a warning rather than aborting,
+    but no station leaves its section bbox (#879).
+    """
+    graph = _layout("regressions/cross_column_perp_entry_overflow.mmd")
+
+    assert "reporting" in graph._cross_column_perp_bridges
+    assert not _bbox_spilled_stations(graph)
+
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
     with pytest.warns(UserWarning, match="bridged across grid columns"):
