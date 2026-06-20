@@ -839,6 +839,23 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "from above the box, rather than rising up the trunk through the "
         "section's stations.",
     ),
+    (
+        "rail_offtrack_io",
+        TOPOLOGIES_DIR,
+        "A `%%metro line_spread: rails` section with off-track `%%metro file:` "
+        "input and output. Each off-track file terminus carries a buffer-stop "
+        "nub at the rail-side end of its vertical stub (like the on-rail "
+        "CRAM/VCF termini) seated clear of its under-icon caption, rather than "
+        "the line ending bare at the icon.",
+    ),
+    (
+        "rail_offtrack_plain_io",
+        TOPOLOGIES_DIR,
+        "A `%%metro line_spread: rails` section with plain (non-file) off-track "
+        "input and output. Each plain off-track node renders a station marker at "
+        "its line end rather than a bare stub, and the input's label sits above "
+        "the node clear of its drop and the adjacent station's label.",
+    ),
 ]
 
 # Category headers inserted before specific entries

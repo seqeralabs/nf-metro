@@ -871,10 +871,6 @@
     "note": "Reached only for a non-port spanning station, whose rail_used_ys is station_lines_ordered filtered to the section's per_line_y - itself built from the same _section_lines_in_order. So a served line is always in per_line_y (lengths match) and _line_rail_y is only called with a line the touching edge carries (always served). The fall-through return st.y is a defensive fallback no render-path call reaches.",
     "status": "defensive"
   },
-  "rail.py::if n <= 1 or line_id not in order:::#1": {
-    "note": "The single-feeder early-return (n<=1) is reachable only via a single-line off-track input or output, and off-track I/O renders defectively in rail mode (bare rail-ends, label overlap). Parked pending #744 (reachable-but-defective). The 'line_id not in order' disjunct is dead: the routed edge is always in the feeder<->consumer set that builds order.",
-    "status": "needs-review"
-  },
   "rail.py::if port is not None:::#1": {
     "note": "The port branch is reachable only via whole-graph line_spread:rails with an inter-section edge (per-section rail mode excludes port edges from the rail router), and that topology renders defectively (dangling port stubs + avoidable crossings). Parked pending #743 rather than fixtured (reachable-but-defective, the #688 pattern).",
     "status": "needs-review"

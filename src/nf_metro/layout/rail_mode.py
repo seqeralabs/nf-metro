@@ -30,6 +30,7 @@ from nf_metro.layout.constants import (
     DIAGONAL_RUN,
     MIN_STRAIGHT_EDGE,
     OFFSET_STEP,
+    OFFTRACK_TERMINUS_NUB_CLEARANCE,
     RAIL_ABOVE_LABEL_TOP_PAD,
     SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
@@ -370,7 +371,9 @@ def _layout_section_rails(
             feed_col = max(0.0, consumer_col - 0.5)
             st.layer = consumer_col
             st.x = _col_x(feed_col)
-            st.y = off_track_y
+            st.y = off_track_y + (
+                OFFTRACK_TERMINUS_NUB_CLEARANCE if st.is_captioned_terminus else 0.0
+            )
             st.track = 0.0
             st.rail_used_ys = []
             st.rail_top_y = None
