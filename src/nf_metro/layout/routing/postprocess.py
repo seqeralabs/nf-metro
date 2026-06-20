@@ -68,32 +68,14 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     def _edge_key(rp: RoutedPath) -> tuple[str, str, str]:
         return (rp.edge.source, rp.edge.target, rp.line_id)
 
-    # A multi-line same-edge diagonal is a co-travelling bundle whose lines are
-    # exactly parallel, so it spreads to the full perpendicular gap on its own
-    # geometry.  Do these first; a fan/convergence hub's branches to *different*
-    # targets are not parallel, so spreading them together (below) under one
-    # representative slope only approximates -- this claims the precise case so
-    # the hub pass is left with the genuinely cross-target branches.
-    edge_groups: dict[tuple[str, str], list[RoutedPath]] = defaultdict(list)
-    for rp in routes:
-        if not _is_diagonal_route(rp):
-            continue
-        edge_groups[(rp.edge.source, rp.edge.target)].append(rp)
-    for (src, _tgt), group in edge_groups.items():
-        if len(group) < 2:
-            continue
-        _apply_diagonal_spread(group, src, ctx=ctx)
-        spread.update(_edge_key(rp) for rp in group)
-
-    # Spread the remaining single-line-per-edge fan / convergence branches apart
-    # at their shared hub so they do not overlap leaving (or entering) it.  Baked
-    # routes are already handled per-edge above; the hub pass is render-only.
+    # Spread fan / convergence hubs first: a hub already carries most multi-line
+    # bundles, and grouping a whole fan together keeps it as compact as the hub
+    # geometry allows (the section-spacing phase reserves room for whatever this
+    # produces, so an over-eager per-edge spread would inflate the layout).
     fork_groups: dict[str, list[RoutedPath]] = defaultdict(list)
     join_groups: dict[str, list[RoutedPath]] = defaultdict(list)
     for rp in routes:
         if not _is_diagonal_route(rp) or rp.offsets_applied:
-            continue
-        if _edge_key(rp) in spread:
             continue
         if rp.edge.source in ctx.fork_stations:
             fork_groups[rp.edge.source].append(rp)
@@ -113,6 +95,21 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
             if len(subgroup) >= 2:
                 _apply_diagonal_spread(subgroup, station_id, ctx=ctx)
         spread.update(_edge_key(rp) for rp in unseen)
+
+    # Then spread any multi-line same-edge bundle the hub pass did not reach: a
+    # bypass-V leg, an inter-section bundle landing on a shared exit port, or a
+    # baked TB fan-out.  These are exactly parallel, so each spreads to the full
+    # perpendicular gap on its own geometry.
+    edge_groups: dict[tuple[str, str], list[RoutedPath]] = defaultdict(list)
+    for rp in routes:
+        if not _is_diagonal_route(rp) or _edge_key(rp) in spread:
+            continue
+        edge_groups[(rp.edge.source, rp.edge.target)].append(rp)
+    for (src, _tgt), group in edge_groups.items():
+        if len(group) < 2:
+            continue
+        _apply_diagonal_spread(group, src, ctx=ctx)
+        spread.update(_edge_key(rp) for rp in group)
 
 
 def _stub_minimums(rp: RoutedPath) -> tuple[float, float]:
