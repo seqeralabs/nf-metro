@@ -55,9 +55,10 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     along the *other* axis to each diagonal's waypoints, restoring the full
     ``OFFSET_STEP`` perpendicular separation while keeping the lines parallel.
 
-    Same-edge bundles (exactly parallel) are spread first on their own geometry;
-    the fan / convergence hubs then spread their remaining single-line-per-edge
-    branches apart.
+    Fan / convergence hubs are spread first as whole groups (kept compact, since
+    the section-spacing phase reserves room for the result); the remaining
+    multi-line same-edge bundles a hub does not reach are then spread on their
+    own geometry.
     """
     if ctx.station_offsets is None:
         return
