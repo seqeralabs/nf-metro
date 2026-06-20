@@ -494,6 +494,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "wrap` lead-in).",
     ),
     (
+        "left_entry_up_wrap",
+        TOPOLOGIES_DIR,
+        "A two-line bundle wrapping up-and-left from a source below-and-right "
+        "into a cross-row section's LEFT entry (the `_route_left_entry_wrap` "
+        "up-riser path); the bundle order is preserved concentrically around "
+        "the wrap.",
+    ),
+    (
         "tb_right_entry_stack",
         TOPOLOGIES_DIR,
         "A two-line bundle into a stacked TB section's RIGHT entry from a "

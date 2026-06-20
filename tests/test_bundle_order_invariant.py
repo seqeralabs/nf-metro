@@ -116,6 +116,61 @@ def test_cross_column_perp_entry_preserves_bundle_order(stem: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Left-entry wrap: bundle order preserved in both riser directions
+# ---------------------------------------------------------------------------
+
+_LEFT_ENTRY_WRAP = """\
+%%metro title: Left-entry wrap {direction}
+%%metro style: dark
+%%metro line: w1 | W1 | #e63946
+%%metro line: w2 | W2 | #0570b0
+%%metro grid: left_tgt | 0,{tgt_row}
+%%metro grid: right_src | 1,{src_row}
+graph LR
+    subgraph left_tgt [Left Target]
+        %%metro entry: left | w1, w2
+        lt1[Collect]
+        lt2[Output]
+        lt1 -->|w1,w2| lt2
+    end
+    subgraph right_src [Right Source]
+        rs1[Input R]
+        rs2[Hub R]
+        rs1 -->|w1,w2| rs2
+    end
+    rs2 -->|w1,w2| lt1
+"""
+
+
+@pytest.mark.parametrize(
+    ("direction", "tgt_row", "src_row"),
+    [("up", 0, 1), ("down", 1, 0)],
+)
+def test_left_entry_wrap_preserves_bundle_order(
+    direction: str, tgt_row: int, src_row: int
+) -> None:
+    """A multi-line bundle wrapping into a LEFT entry keeps one left/right
+    order around the wrap, whether the riser climbs (source below the
+    target) or descends (source above it).
+
+    Both wrap runs go rightward, so the order is fixed by the port-offset
+    stacking rather than the riser's vertical direction.
+    """
+    text = _LEFT_ENTRY_WRAP.format(
+        direction=direction, tgt_row=tgt_row, src_row=src_row
+    )
+    graph = parse_metro_mermaid(text)
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    violations = check_bundle_order_preserved(routes)
+    assert violations == [], (
+        f"left-entry {direction}-wrap: {len(violations)} bundle-order "
+        f"violation(s); first: {violations[0].message() if violations else ''}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Route-level negative test: a synthetic flipped corner is caught
 # ---------------------------------------------------------------------------
 
