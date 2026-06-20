@@ -13,6 +13,7 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
     CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
+    FLOW_ALIGNED_PORT_ADVICE,
     GUARD_TOLERANCE,
     ICON_HALF_HEIGHT,
     INTER_ROW_EDGE_CLEARANCE,
@@ -271,9 +272,7 @@ def _guard_stations_within_bbox(graph: MetroGraph, phase: str) -> None:
                 f"; section {st.section_id!r} is internally {sec.direction} "
                 f"but its only ports are perpendicular to that flow, so the "
                 f"run has no flow-aligned port to anchor it to the bbox. "
-                f"Give the section a flow-aligned entry/exit port "
-                f"(left/right for LR/RL, top/bottom for TB/BT) or change "
-                f"its '%%metro direction:'."
+                f"{FLOW_ALIGNED_PORT_ADVICE}"
             )
         raise PhaseInvariantError(detail)
 

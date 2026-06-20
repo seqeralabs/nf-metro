@@ -424,6 +424,14 @@ class MetroGraph:
     # list alone cannot tell an author side from an inferred one).
     _explicit_entry: set[str] = field(default_factory=set)
     _explicit_exit: set[str] = field(default_factory=set)
+    # Section IDs whose perpendicular (TOP/BOTTOM) connection had to be bridged
+    # across grid columns because its feeding source sits outside the section's
+    # own column.  The run/trunk is held on the section's column (in-bbox) and
+    # routing draws a best-effort L-shaped lead-in; the multi-line bundle
+    # through such a forced-perpendicular drop may not satisfy the strict
+    # render-curve invariants, so their presence relaxes that check to a
+    # warning instead of a hard render abort.
+    _cross_column_perp_bridges: set[str] = field(default_factory=set)
     # Pending terminus designations: station_id ->
     # list of (label, icon_type, name, banner)
     _pending_terminus: dict[str, list[tuple[str, str, str, bool]]] = field(

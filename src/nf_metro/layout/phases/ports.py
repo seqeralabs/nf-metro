@@ -248,9 +248,18 @@ def _align_tb_entry_port(
         elif entry_section.direction in ("LR", "RL"):
             _nudge_port_from_stations(port_id, entry_section, graph)
     else:
-        # Same-column: align X with source for vertical drop
+        # Same grid column: a stacked source drops in vertically, so align X
+        # to it -- but only when that X lands within the section's own box.  A
+        # same-column neighbour whose actual X sits outside the box (a wide
+        # upstream section sharing the column) would otherwise drag the perp
+        # port off the section's columns; keep the port on its own column and
+        # let routing bridge the cross-column drop instead.
         src_x, _, _ = sources[0]
-        _set_port_x(graph, port_id, src_x)
+        if _drop_x_within_section(entry_section, src_x):
+            _set_port_x(graph, port_id, src_x)
+        elif entry_section.direction in ("LR", "RL"):
+            _nudge_port_from_stations(port_id, entry_section, graph)
+            graph._cross_column_perp_bridges.add(entry_section.id)
 
 
 def _tb_trunk_x(graph: MetroGraph, section: Section) -> float | None:
@@ -271,6 +280,20 @@ def _tb_trunk_x(graph: MetroGraph, section: Section) -> float | None:
     if not xs:
         return None
     return xs[len(xs) // 2]
+
+
+def _drop_x_within_section(section: Section, drop_x: float) -> bool:
+    """True when *drop_x* lands within the section's own grid column (bbox).
+
+    A perpendicular entry port aligns its X to a feeding source only for an
+    in-column drop -- one whose X falls inside the section's box.  A source X
+    outside the box (a wider neighbour sharing the grid column, or a producer
+    in a different column entirely) would drag the port -- and the run that
+    opens a station-elbow gap from it -- off the section's columns and past
+    its bbox; the port stays on its own column and routing bridges the
+    cross-column drop with an L-shaped inter-section lead-in instead.
+    """
+    return section.bbox_x <= drop_x <= section.bbox_x + section.bbox_w
 
 
 def _vertical_drop_source_x(
@@ -886,6 +909,14 @@ def _align_drop_target_trunk(graph: MetroGraph, port_id: str, exit_x: float) -> 
     for tgt_section in _drop_targets(graph, port_id):
         trunk_x = _tb_trunk_x(graph, tgt_section)
         if trunk_x is None:
+            continue
+        # Only a same-column drop (the exit X lands within the target's own
+        # box) shifts the trunk to meet it.  A cross-column exit far off the
+        # box would drag the trunk -- and its stations -- out of the bbox; the
+        # trunk stays on its grid column and routing bridges the cross-column
+        # drop with an L-shaped inter-section lead-in instead.
+        if not _drop_x_within_section(tgt_section, exit_x):
+            graph._cross_column_perp_bridges.add(tgt_section.id)
             continue
         delta = exit_x - trunk_x
         if abs(delta) < SAME_COORD_TOLERANCE:

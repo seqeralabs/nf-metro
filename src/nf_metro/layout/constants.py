@@ -4,6 +4,16 @@ Centralizes magic numbers from engine.py, routing.py, labels.py,
 section_placement.py, and ordering.py.
 """
 
+FLOW_ALIGNED_PORT_ADVICE: str = (
+    "Give the section a flow-aligned entry/exit port "
+    "(left/right for LR/RL, top/bottom for TB/BT) or change "
+    "its '%%metro direction:'."
+)
+"""Actionable advice for a section whose ports are all perpendicular to its
+flow, or whose connection has to be bridged across grid columns.  Shared by the
+bbox-containment guard and the render-curve invariant so the two surface one
+consistent fix."""
+
 # ---------------------------------------------------------------------------
 # Font / text metrics
 # ---------------------------------------------------------------------------

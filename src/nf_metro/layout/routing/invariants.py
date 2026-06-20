@@ -35,6 +35,7 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
     CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
+    FLOW_ALIGNED_PORT_ADVICE,
     MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
@@ -2238,6 +2239,14 @@ def assert_render_curve_invariants(
 
     Set ``NF_METRO_ALLOW_BAD_CURVES=1`` to downgrade to a warning (debugging a
     work-in-progress handler only; not a supported render mode).
+
+    A layout that bridges a perpendicular connection across grid columns (a
+    ``direction:`` override -- explicit or inferred -- that feeds a section's
+    perpendicular entry/drop from outside its own column) also downgrades to a
+    warning.  The run/trunk is held in its bbox, but the multi-line bundle
+    through such a forced-perpendicular drop is an unsupported shape the builder
+    cannot make clean; the render proceeds best-effort and the warning names the
+    actionable fix rather than aborting.
     """
     named_checks: list[tuple[str, Sequence[_HasMessage]]] = [
         (
@@ -2301,6 +2310,16 @@ def assert_render_curve_invariants(
     )
     if os.environ.get("NF_METRO_ALLOW_BAD_CURVES"):
         warnings.warn(msg, stacklevel=2)
+        return
+    bridged = sorted(graph._cross_column_perp_bridges)
+    if bridged:
+        warnings.warn(
+            f"section(s) {', '.join(bridged)} have a perpendicular connection "
+            f"bridged across grid columns; routing draws a best-effort lead-in "
+            f"and the bundle geometry through the drop may be imperfect. "
+            f"{FLOW_ALIGNED_PORT_ADVICE}\n  {detail}",
+            stacklevel=2,
+        )
         return
     raise CurveInvariantError(msg)
 

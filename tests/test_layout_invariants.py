@@ -26,6 +26,7 @@ from nf_metro.layout.constants import (
     CURVE_RADIUS,
     DIAGONAL_SLOPE_RATIO,
     EDGE_TO_BUNDLE_CLEARANCE,
+    GUARD_TOLERANCE,
     INTER_ROW_EDGE_CLEARANCE,
     MIN_STATION_FLAT_LENGTH,
     ROW_BAND_SLACK,
@@ -70,6 +71,7 @@ from nf_metro.layout.routing import (
 )
 from nf_metro.layout.routing.common import resolve_section
 from nf_metro.layout.routing.invariants import (
+    assert_render_curve_invariants,
     check_bundle_order_preserved,
     check_no_collinear_distinct_lines,
 )
@@ -4240,6 +4242,52 @@ def test_lr_section_all_perpendicular_ports_rejected():
     msg = str(excinfo.value).lower()
     assert "annotation" in msg
     assert "perpendicular" in msg or "flow-aligned" in msg
+
+
+@pytest.mark.parametrize(
+    ("fixture", "bridged_section"),
+    [
+        ("regressions/cross_column_perp_entry_overflow.mmd", "reporting"),
+        ("regressions/cross_column_perp_drop_target_overflow.mmd", "scaffolding"),
+    ],
+)
+def test_cross_column_perp_drop_stays_in_bbox(fixture, bridged_section):
+    """A ``direction:`` override that feeds a section's perpendicular entry/drop
+    from outside its own grid column keeps the run/trunk on the section's own
+    column, in-bbox.
+
+    A perpendicular entry/drop whose feeding source X lands outside the
+    section's box is a cross-column connection: the run (LR/RL perp entry) and
+    the trunk (TB drop target) stay on the section's grid column rather than
+    aligning to the off-box source X, and routing bridges the drop as a
+    best-effort L-shaped lead-in.  Every station stays within its section bbox,
+    and the render completes -- the strict render-curve invariants relax to a
+    warning for the acknowledged-degraded bundle through the forced
+    perpendicular drop (#879).
+    """
+    graph = _layout(fixture, center_ports=False)
+
+    assert bridged_section in graph._cross_column_perp_bridges
+
+    tol = GUARD_TOLERANCE
+    spilled = [
+        sid
+        for sid, st in graph.stations.items()
+        if not st.is_port
+        and (sec := graph.sections.get(st.section_id)) is not None
+        and not (
+            sec.bbox_x - tol <= st.x <= sec.bbox_x + sec.bbox_w + tol
+            and sec.bbox_y - tol <= st.y <= sec.bbox_y + sec.bbox_h + tol
+        )
+    ]
+    assert not spilled, f"stations outside their bbox: {spilled}"
+
+    # The render path (route + curve assertion) must complete without aborting;
+    # the forced-perpendicular bundle relaxes the curve check to a warning.
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    with pytest.warns(UserWarning, match="bridged across grid columns"):
+        assert_render_curve_invariants(graph, routes, offsets)
 
 
 @pytest.mark.parametrize(
