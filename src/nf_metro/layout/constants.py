@@ -449,9 +449,6 @@ TB_LINE_Y_OFFSET: float = 3.0
 ENTRY_SHIFT_TB: float = 1.0
 """Entry shift multiplier for TB sections with perpendicular entry."""
 
-ENTRY_SHIFT_TB_CROSS: float = 1.0
-"""Entry shift multiplier for TB sections with cross-column TOP entry."""
-
 ENTRY_INSET_LR: float = 0.3
 """Entry inset multiplier for LR/RL sections with perpendicular entry."""
 

@@ -9,7 +9,6 @@ from nf_metro.layout.constants import (
     DIAGONAL_LABEL_OFFSET,
     ENTRY_SHIFT_LR,
     ENTRY_SHIFT_TB,
-    ENTRY_SHIFT_TB_CROSS,
     EXIT_GAP_MULTIPLIER,
     FONT_HEIGHT,
     ICON_CAPTION_FONT_HEIGHT,
@@ -564,12 +563,18 @@ def _adjust_tb_entry_shifts(
     graph: MetroGraph,
     y_spacing: float,
 ) -> None:
-    """Apply TB section entry shifts for perpendicular and cross-column entries."""
+    """Shift TB section stations down to clear a perpendicular entry port.
+
+    A TB TOP/BOTTOM entry port sits on the section trunk X
+    (``_assign_entry_port_position``), so its drop onto the first station is
+    a clean vertical continuation and the cross-column lead-in turns in the
+    header corridor above the box, never inside it -- no in-section room is
+    needed for it.  Only a perpendicular (LEFT/RIGHT) entry, whose port would
+    otherwise coincide with the first station, needs the stations nudged
+    down."""
     if section.direction != "TB":
         return
 
-    # Perpendicular entry: shift stations down so first station isn't
-    # at the entry port (avoiding station-as-elbow).
     has_perp_entry = any(
         graph.ports[pid].side in (PortSide.LEFT, PortSide.RIGHT)
         for pid in section.entry_ports
@@ -577,27 +582,6 @@ def _adjust_tb_entry_shifts(
     )
     if has_perp_entry:
         entry_shift = y_spacing * ENTRY_SHIFT_TB
-        for s in sub.stations.values():
-            s.y += entry_shift
-        section.bbox_h += entry_shift
-
-    # Cross-column TOP entry: shift stations down for L-shape routing room.
-    has_cross_col_top_entry = False
-    for pid in section.entry_ports:
-        port = graph.ports.get(pid)
-        if not port or port.side != PortSide.TOP:
-            continue
-        for edge in graph.edges_to(pid):
-            src = graph.stations.get(edge.source)
-            if src and src.section_id:
-                src_sec = graph.sections.get(src.section_id)
-                if src_sec and src_sec.grid_col != section.grid_col:
-                    has_cross_col_top_entry = True
-                    break
-        if has_cross_col_top_entry:
-            break
-    if has_cross_col_top_entry:
-        entry_shift = y_spacing * ENTRY_SHIFT_TB_CROSS
         for s in sub.stations.values():
             s.y += entry_shift
         section.bbox_h += entry_shift

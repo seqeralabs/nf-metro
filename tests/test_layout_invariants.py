@@ -55,6 +55,7 @@ from nf_metro.layout.phases.bbox import (
     _section_content_hug_top,
     _section_fit_top,
 )
+from nf_metro.layout.phases.guards import _tb_top_entry_drop_overshoot
 from nf_metro.layout.phases.off_track import (
     _is_single_trunk_lr_section,
     _off_track_anchor_of,
@@ -1104,6 +1105,30 @@ def test_diagonal_overlay_check_detects_collapse():
         _diag("a", "c", "blue", [(0.0, 0.0), (45.0, 300.0)]),
     ]
     assert not check_no_collinear_distinct_diagonals(graph, diverging, {})
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_tb_top_entry_clean_drop_hugs_top(fixture):
+    """A TB section whose TOP entry drops straight onto its first station
+    must seat that station at the standard top padding, with no extra
+    reserved gap.
+
+    A TB/BT entry port on the TOP/BOTTOM boundary is placed on the section
+    trunk X (``_assign_entry_port_position``), so the port -> first-station
+    segment is always a clean vertical drop and the up-and-over lead-in
+    turns in the header corridor *above* the box, never inside it.  Reserving
+    in-section L-shape room for a cross-column source therefore only pushes
+    the first station needlessly far below the box top.  Excludes sections
+    with a perpendicular (LEFT/RIGHT) entry, which legitimately shift their
+    stations down to clear the entry port (``ENTRY_SHIFT_TB``).
+    """
+    graph = _layout(fixture)
+    offenders = _tb_top_entry_drop_overshoot(graph)
+    assert not offenders, "; ".join(
+        f"{sid}: first station {gap:.0f}px below box top "
+        f"(expected <= {SECTION_Y_PADDING:.0f})"
+        for sid, gap in offenders
+    )
 
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)

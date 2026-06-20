@@ -22,6 +22,7 @@ from nf_metro.layout.constants import (
     ROW_BAND_SLACK,
     SAME_COORD_TOLERANCE,
     SECTION_Y_GAP,
+    SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
     X_SPACING,
 )
@@ -430,6 +431,72 @@ def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
                 f"({sec.bbox_x:.1f}, {sec.bbox_y:.1f}, "
                 f"w={sec.bbox_w:.1f}, h={sec.bbox_h:.1f})"
             )
+
+
+def _tb_top_entry_drop_overshoot(
+    graph: MetroGraph,
+) -> list[tuple[str, float]]:
+    """Return ``(section_id, gap)`` for TB sections whose first station sits
+    further below the box top than the standard padding despite the TOP
+    entry being a clean vertical drop.
+
+    A TB entry port on the TOP boundary is placed on the section trunk X, so
+    the port -> first-station segment is a straight vertical drop and the
+    cross-column lead-in turns in the header corridor above the box, not
+    inside it.  Any in-section room above the first station is then unused.
+    Sections with a perpendicular (LEFT/RIGHT) entry are excluded: they
+    legitimately shift their stations down to clear the entry port.
+    """
+    tol = GUARD_TOLERANCE
+    offenders: list[tuple[str, float]] = []
+    for sid, sec in graph.sections.items():
+        if sec.direction != "TB" or sec.bbox_h == 0:
+            continue
+        top_ports = [
+            graph.ports[pid]
+            for pid in sec.entry_ports
+            if pid in graph.ports and graph.ports[pid].side == PortSide.TOP
+        ]
+        if not top_ports:
+            continue
+        has_perp_entry = any(
+            graph.ports[pid].side in (PortSide.LEFT, PortSide.RIGHT)
+            for pid in sec.entry_ports
+            if pid in graph.ports
+        )
+        if has_perp_entry:
+            continue
+        # Include hidden stations: a hidden trunk-head (e.g. a fan-out hub)
+        # is what the port drops onto, so it -- not the first visible marker
+        # further down the trunk -- sets the port -> first-station distance.
+        body = [
+            graph.stations[s]
+            for s in sec.station_ids
+            if s in graph.stations and not graph.stations[s].is_port
+        ]
+        if not body:
+            continue
+        first = min(body, key=lambda st: st.y)
+        port_xs = [graph.stations[p.id].x for p in top_ports if p.id in graph.stations]
+        if not any(abs(first.x - px) <= tol for px in port_xs):
+            continue
+        gap = first.y - sec.bbox_y
+        if gap > SECTION_Y_PADDING + tol:
+            offenders.append((sid, gap))
+    return offenders
+
+
+def _guard_tb_top_entry_drop_hugs_top(graph: MetroGraph, phase: str) -> None:
+    """Final: a clean TB TOP-entry drop must seat its first station at the
+    standard top padding, with no unused in-section reservation."""
+    offenders = _tb_top_entry_drop_overshoot(graph)
+    if offenders:
+        sid, gap = offenders[0]
+        raise PhaseInvariantError(
+            f"{phase}: section {sid!r} first station sits {gap:.1f}px below "
+            f"its box top despite a clean vertical TOP-entry drop "
+            f"(expected <= {SECTION_Y_PADDING:.1f})"
+        )
 
 
 def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:

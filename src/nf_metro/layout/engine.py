@@ -183,6 +183,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_stations_in_sections,
     _guard_stations_within_bbox,
     _guard_tall_anchor_stack_well_formed,
+    _guard_tb_top_entry_drop_hugs_top,
     _guard_terminus_icons_within_bbox,
     _guard_topmost_row_top_entry_hugs_section,
     _guard_trunk_bands_crossing_optimal,
@@ -647,6 +648,7 @@ def _compute_layout_scaled(
         _guard_single_trunk_off_track_step(graph, "final")
         _guard_off_track_consumer_on_trunk(graph, "final")
         _guard_off_track_input_column_stack(graph, "final")
+        _guard_tb_top_entry_drop_hugs_top(graph, "final")
 
 
 def _apply_label_strike_clearance(
