@@ -65,7 +65,6 @@
   "context.py::if tgt_col is None:::#2",
   "core.py::if not src or not tgt:::#1",
   "core.py::if result is not None:::#1",
-  "corners.py::if len1 > 0 and len2 > 0:::#1",
   "inter_section.py::for prev, curr in zip(self.corners, self.corners[1:]):::#1",
   "inter_section.py::if (self.in_tangent, self.out_tangent) in _CW_TURNS:::#1",
   "inter_section.py::if pair not in _CW_TURNS and pair not in _CCW_TURNS:::#1",

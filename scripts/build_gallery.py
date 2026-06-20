@@ -771,6 +771,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "ordering routes each line to its target without a convergence jog at "
         "the entry.",
     ),
+    (
+        "cross_column_perp_drop",
+        TOPOLOGIES_DIR,
+        "A `%%metro direction: TB` section fed by a perpendicular drop from a "
+        "section in a different grid column. The vertical trunk stays on the "
+        "QC section's own column and the cross-column feed comes over the top "
+        "and drops into the trunk head, rather than the trunk being dragged "
+        "out toward the off-column source.",
+    ),
 ]
 
 # Category headers inserted before specific entries
