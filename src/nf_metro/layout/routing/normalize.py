@@ -32,6 +32,7 @@ from nf_metro.layout.routing.common import (
     iter_port_peeloff_bundles,
     iter_vertical_segments,
     peeloff_target_slots,
+    seat_peeloff_port_y,
     symmetric_bundle_midpoint,
     tail_on_slot,
     trunk_depths_contiguous,
@@ -478,19 +479,16 @@ def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -
             slot = targets[rp.edge.line_id]
             if tail_on_slot(tail, slot):
                 continue
-            pts = rp.points
-            k = len(pts) - 3  # riser leg points[-3] -> points[-2]
             ch = _VChannel(
                 route=rp,
-                idx=k,
+                idx=len(rp.points) - 3,  # riser leg points[-3] -> points[-2]
                 x=tail.peel_x,
                 y_lo=min(tail.trunk_y, tail.port_y),
                 y_hi=max(tail.trunk_y, tail.port_y),
                 down=tail.port_y > tail.trunk_y,
             )
             _restack_channel(ch, slot.peel_x, slot.rank, n, step, ctx.curve_radius)
-            pts[-2] = (pts[-2][0], slot.port_y)
-            pts[-1] = (pts[-1][0], slot.port_y)
+            seat_peeloff_port_y(rp, slot.port_y)
 
 
 def _band_clusters(chans: list[_VChannel], band: float) -> list[list[_VChannel]]:
