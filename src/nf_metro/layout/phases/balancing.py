@@ -22,7 +22,7 @@ from nf_metro.layout.phases.bbox import (
     _loop_corner_x,
     _push_lower_rows_after_bbox_grow,
 )
-from nf_metro.layout.phases.ports import _set_port_y
+from nf_metro.layout.phases.ports import _exit_feeds_direct_entry, _set_port_y
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
 
@@ -66,70 +66,110 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
             continue
 
         # Find downstream entry port(s) in the same row.
-        targets: list[float] = []
-        for edge in graph.edges_from(port_id):
-            entry_candidates: list[str] = []
-            tgt_port = graph.ports.get(edge.target)
-            if tgt_port and tgt_port.is_entry:
-                entry_candidates.append(edge.target)
-            elif edge.target in junction_ids:
-                for e2 in graph.edges_from(edge.target):
-                    tp2 = graph.ports.get(e2.target)
-                    if tp2 and tp2.is_entry:
-                        entry_candidates.append(e2.target)
-            for eid in entry_candidates:
-                ep = graph.ports.get(eid)
-                if ep is None or ep.side not in (PortSide.LEFT, PortSide.RIGHT):
-                    continue
-                ds_sec = graph.sections.get(ep.section_id)
-                if ds_sec is None or ds_sec.grid_row != section.grid_row:
-                    continue
-                ep_st = graph.stations.get(eid)
-                if ep_st is not None:
-                    targets.append(ep_st.y)
+        entry_ids = _downstream_same_row_entry_ports(
+            graph, port_id, section, junction_ids
+        )
+        targets = [
+            graph.stations[eid].y for eid in entry_ids if eid in graph.stations
+        ]
         if not targets:
             continue
         target_y = min(targets, key=lambda y: abs(y - port_st.y))
         if abs(port_st.y - target_y) < SAME_COORD_TOLERANCE:
             continue
 
-        # Fan-in exits (multiple distinct internal source Ys) want to
-        # keep their centred-midpoint convergence Y, so don't move the
-        # exit port itself.  Instead, snap the downstream entry port
-        # to the exit port's Y so the inter-section trunk stays flat.
         port_set = section.port_ids
         src_ys: set[float] = set()
         for edge in graph.edges_to(port_id):
             src = graph.stations.get(edge.source)
             if src and not src.is_port and edge.source not in port_set:
                 src_ys.add(round(src.y, 1))
+
+        # Fan-in exits (multiple distinct internal source Ys) want to
+        # keep their centred-midpoint convergence Y, so don't move the
+        # exit port itself.  Instead, snap the downstream entry port
+        # to the exit port's Y so the inter-section trunk stays flat.
         if len(src_ys) >= 2:
-            for edge in graph.edges_from(port_id):
-                entry_candidates = []
-                tgt_port = graph.ports.get(edge.target)
-                if tgt_port and tgt_port.is_entry:
-                    entry_candidates.append(edge.target)
-                elif edge.target in junction_ids:
-                    for e2 in graph.edges_from(edge.target):
-                        tp2 = graph.ports.get(e2.target)
-                        if tp2 and tp2.is_entry:
-                            entry_candidates.append(e2.target)
-                for eid in entry_candidates:
-                    ep = graph.ports.get(eid)
-                    if ep is None or ep.side not in (PortSide.LEFT, PortSide.RIGHT):
-                        continue
-                    ds_sec = graph.sections.get(ep.section_id)
-                    if ds_sec is None or ds_sec.grid_row != section.grid_row:
-                        continue
-                    ep_st = graph.stations.get(eid)
-                    if ep_st is None or abs(ep_st.y - port_st.y) < SAME_COORD_TOLERANCE:
-                        continue
-                    _set_port_y(graph, eid, port_st.y)
+            for eid in entry_ids:
+                ep_st = graph.stations.get(eid)
+                if ep_st is None or abs(ep_st.y - port_st.y) < SAME_COORD_TOLERANCE:
+                    continue
+                _set_port_y(graph, eid, port_st.y)
+            continue
+
+        # A single carrying station already sitting on its own row anchors
+        # the exit there: keep it, so the level change to the downstream
+        # entry becomes one riser in the inter-section gap rather than a
+        # diagonal dragging the exit down off its station.  Lift the entry
+        # up to meet it as well when all of the entry's own consumers share
+        # that row; an entry fanning out to several rows is left in place.
+        if (
+            len(src_ys) == 1
+            and abs(port_st.y - next(iter(src_ys))) < SAME_COORD_TOLERANCE
+            and _exit_feeds_direct_entry(graph, port_id, junction_ids)
+        ):
+            carrier_y = next(iter(src_ys))
+            for eid in entry_ids:
+                ep_st = graph.stations.get(eid)
+                if ep_st is None or abs(ep_st.y - carrier_y) < SAME_COORD_TOLERANCE:
+                    continue
+                consumer_ys = _entry_consumer_ys(graph, eid)
+                if consumer_ys and all(
+                    abs(cy - carrier_y) < SAME_COORD_TOLERANCE for cy in consumer_ys
+                ):
+                    _set_port_y(graph, eid, carrier_y)
             continue
 
         if not explicit_grid:
             continue
         _set_port_y(graph, port_id, target_y)
+
+
+def _downstream_same_row_entry_ports(
+    graph: MetroGraph,
+    exit_port_id: str,
+    section: Section,
+    junction_ids: set[str],
+) -> list[str]:
+    """LEFT/RIGHT entry ports in *section*'s row reached from an exit port.
+
+    Follows the exit's edges to entry ports directly or through a single
+    fan-out / merge junction.
+    """
+    out: list[str] = []
+    for edge in graph.edges_from(exit_port_id):
+        candidates: list[str] = []
+        tgt_port = graph.ports.get(edge.target)
+        if tgt_port and tgt_port.is_entry:
+            candidates.append(edge.target)
+        elif edge.target in junction_ids:
+            for e2 in graph.edges_from(edge.target):
+                tp2 = graph.ports.get(e2.target)
+                if tp2 and tp2.is_entry:
+                    candidates.append(e2.target)
+        for eid in candidates:
+            ep = graph.ports.get(eid)
+            if ep is None or ep.side not in (PortSide.LEFT, PortSide.RIGHT):
+                continue
+            ds_sec = graph.sections.get(ep.section_id)
+            if ds_sec is None or ds_sec.grid_row != section.grid_row:
+                continue
+            if eid in graph.stations:
+                out.append(eid)
+    return out
+
+
+def _entry_consumer_ys(graph: MetroGraph, entry_id: str) -> list[float]:
+    """Ys of the internal stations an entry port feeds inside its section."""
+    ep = graph.ports.get(entry_id)
+    if ep is None:
+        return []
+    ys: list[float] = []
+    for edge in graph.edges_from(entry_id):
+        st = graph.stations.get(edge.target)
+        if st is not None and not st.is_port and st.section_id == ep.section_id:
+            ys.append(st.y)
+    return ys
 
 
 def _fan_free_content_upward(

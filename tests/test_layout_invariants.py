@@ -847,6 +847,81 @@ def test_merge_port_line_keeps_side_on_outgoing_run(fixture, line_id, row_y):
 
 
 # ---------------------------------------------------------------------------
+# Flow-aligned exit port anchors to its single carrying station's row
+# ---------------------------------------------------------------------------
+
+
+def _single_connector_flow_exit_ports(
+    graph: MetroGraph,
+) -> list[tuple[str, str, float]]:
+    """Yield ``(port_id, carrier_id, carrier_y)`` for the exit ports this
+    invariant covers: a flow-aligned (LEFT/RIGHT) exit on a non-fold LR/RL
+    section, fed by exactly one internal station, that runs directly into a
+    downstream entry port.
+
+    Excluded on purpose:
+      - fold sections (``grid_row_span > 1``) place exits via dedicated
+        fold logic with their own contract;
+      - fan-in exits (more than one internal feeder) - the parallel-caller
+        stacking idiom is not a defect;
+      - exits feeding a fan-out / merge junction, where aligning the exit to
+        the junction's row (not the carrying station) is correct.
+    """
+    out: list[tuple[str, str, float]] = []
+    junction_ids = graph.junction_ids
+    for pid, port in graph.ports.items():
+        if port.is_entry:
+            continue
+        if port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        sec = graph.sections.get(port.section_id)
+        if sec is None or sec.direction not in ("LR", "RL"):
+            continue
+        if sec.grid_row_span > 1:
+            continue
+        downstream = list(graph.edges_from(pid))
+        if any(e.target in junction_ids for e in downstream):
+            continue
+        if not any(
+            (p := graph.ports.get(e.target)) is not None and p.is_entry
+            for e in downstream
+        ):
+            continue
+        carriers = {
+            e.source
+            for e in graph.edges_to(pid)
+            if (s := graph.stations.get(e.source)) is not None
+            and not s.is_port
+            and s.section_id == sec.id
+        }
+        if len(carriers) != 1:
+            continue
+        carrier = next(iter(carriers))
+        out.append((pid, carrier, graph.stations[carrier].y))
+    return out
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_flow_exit_port_anchors_to_carrying_station(fixture):
+    """A flow-aligned exit fed by a single internal station and running
+    straight into a downstream entry port must sit on that station's row.
+
+    When the exit instead aligns to the downstream entry's row while its
+    carrying station sits elsewhere, the boundary run climbs to the port and
+    renders as a shallow diagonal inside the section instead of a clean
+    horizontal with one riser in the inter-section gap.
+    """
+    graph = _layout(fixture)
+    for pid, carrier, carrier_y in _single_connector_flow_exit_ports(graph):
+        port_y = graph.stations[pid].y
+        assert abs(port_y - carrier_y) <= _Y_TOL, (
+            f"{fixture}: exit port {pid} y={port_y:.1f} is off its carrying "
+            f"station {carrier} y={carrier_y:.1f}; the boundary run will read "
+            f"as a diagonal instead of a clean riser"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Symmetric fan column-mate Y equality
 # ---------------------------------------------------------------------------
 

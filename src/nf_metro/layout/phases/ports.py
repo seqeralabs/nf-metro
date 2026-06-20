@@ -732,16 +732,25 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
 
         ds_y = _resolve_downstream_entry_y(graph, port_id, junction_ids)
 
-        # Already aligned with downstream entry: straight run is correct
-        # even if internal sources sit at a different Y.
-        if ds_y is not None and abs(port_st.y - ds_y) < 1.0:
-            continue
-
         unique_source_ys = sorted(set(source_ys))
         spread = unique_source_ys[-1] - unique_source_ys[0]
         n_unique = len(unique_source_ys)
+        single_source = n_unique == 1 or spread <= 1.0
 
-        if n_unique == 1 or spread <= 1.0:
+        # A single carrying station running straight into a downstream entry
+        # port anchors the exit on that station's row, so the level change
+        # becomes one clean riser in the inter-section gap rather than a
+        # diagonal inside the section.  A fan-in (multi-source) exit, or one
+        # feeding a fan-out / merge junction, keeps the downstream-aligned
+        # placement: there the straight inter-section run is what matters.
+        keep_downstream_aligned = ds_y is not None and abs(port_st.y - ds_y) < 1.0
+        anchors_to_carrier = single_source and _exit_feeds_direct_entry(
+            graph, port_id, junction_ids
+        )
+        if keep_downstream_aligned and not anchors_to_carrier:
+            continue
+
+        if single_source:
             target_y = source_ys[0]
         else:
             # Multi-Y sources: snap onto the source that aligns with the
@@ -758,6 +767,27 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
 
         if abs(port_st.y - target_y) >= 1.0:
             port_st.y = target_y
+
+
+def _exit_feeds_direct_entry(
+    graph: MetroGraph,
+    exit_port_id: str,
+    junction_ids: set[str],
+) -> bool:
+    """Whether an exit port runs straight into a downstream entry port.
+
+    True only when every outgoing edge lands on an entry port: a fan-out or
+    merge junction on the far side means the exit should align to the
+    junction's row, not to its own carrying station.
+    """
+    found = False
+    for edge in graph.edges_from(exit_port_id):
+        if edge.target in junction_ids:
+            return False
+        tgt_port = graph.ports.get(edge.target)
+        if tgt_port is not None and tgt_port.is_entry:
+            found = True
+    return found
 
 
 def _resolve_downstream_entry_y(
