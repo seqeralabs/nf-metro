@@ -22,7 +22,11 @@ from nf_metro.layout.phases.bbox import (
     _loop_corner_x,
     _push_lower_rows_after_bbox_grow,
 )
-from nf_metro.layout.phases.ports import _exit_feeds_direct_entry, _set_port_y
+from nf_metro.layout.phases.ports import (
+    _exit_feeds_direct_entry,
+    _exit_run_corridor_clear,
+    _set_port_y,
+)
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
 
@@ -80,10 +84,12 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
 
         port_set = section.port_ids
         src_ys: set[float] = set()
+        src_ids: list[str] = []
         for edge in graph.edges_to(port_id):
             src = graph.stations.get(edge.source)
             if src and not src.is_port and edge.source not in port_set:
                 src_ys.add(round(src.y, 1))
+                src_ids.append(edge.source)
 
         # Fan-in exits (multiple distinct internal source Ys) want to
         # keep their centred-midpoint convergence Y, so don't move the
@@ -107,6 +113,7 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
             len(src_ys) == 1
             and abs(port_st.y - next(iter(src_ys))) < SAME_COORD_TOLERANCE
             and _exit_feeds_direct_entry(graph, port_id, junction_ids)
+            and _exit_run_corridor_clear(graph, port_id, section, src_ids)
         ):
             carrier_y = next(iter(src_ys))
             for eid in entry_ids:

@@ -135,17 +135,18 @@ class TestGridInvariants:
 
 
 class TestIssueK:
-    """Stage 4.4 must not drag exit ports away from matching downstream entry."""
+    """A single-carrier flow exit anchors on its carrying station's row, so
+    the level change to the downstream entry is a riser in the gap."""
 
     @pytest.fixture(autouse=True)
     def setup(self):
         self.g = _load("variantbenchmarking")
 
-    def test_preprocess_exit_matches_normalization_entry(self):
+    def test_preprocess_exit_sits_on_carrier_row(self):
         pe = self.g.stations["preprocess__exit_right_1"]
-        ne = self.g.stations["normalization__entry_left_7"]
-        assert abs(pe.y - ne.y) < 1.0, (
-            f"preprocess exit y={pe.y} != normalization entry y={ne.y}"
+        carrier = self.g.stations["liftover"]
+        assert abs(pe.y - carrier.y) < 1.0, (
+            f"preprocess exit y={pe.y} off its carrier liftover y={carrier.y}"
         )
 
 
@@ -155,17 +156,18 @@ class TestIssueK:
 
 
 class TestIssueL:
-    """Stage 4.4 must preserve straight alignment->variant_calling connection."""
+    """A single-carrier flow exit over a clear corridor anchors on its
+    carrying station's row rather than the downstream entry's row."""
 
     @pytest.fixture(autouse=True)
     def setup(self):
         self.g = _load("variant_calling_tuned")
 
-    def test_alignment_exit_matches_variant_calling_entry(self):
+    def test_alignment_exit_sits_on_carrier_row(self):
         ae = self.g.stations["alignment__exit_right_1"]
-        ve = self.g.stations["variant_calling__entry_left_4"]
-        assert abs(ae.y - ve.y) < 1.0, (
-            f"alignment exit y={ae.y} != variant_calling entry y={ve.y}"
+        carrier = self.g.stations["samtools_index"]
+        assert abs(ae.y - carrier.y) < 1.0, (
+            f"alignment exit y={ae.y} off its carrier samtools_index y={carrier.y}"
         )
 
 

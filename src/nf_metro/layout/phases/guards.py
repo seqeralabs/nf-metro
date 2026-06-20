@@ -715,14 +715,17 @@ def _guard_flow_exit_anchored_to_carrier(graph: MetroGraph, phase: str) -> None:
             for e in downstream
         ):
             continue
-        carrier_ys = [
-            graph.stations[e.source].y
+        carriers = [
+            e.source
             for e in graph.edges_to(pid)
             if (s := graph.stations.get(e.source)) is not None
             and not s.is_port
             and s.section_id == sec.id
         ]
+        carrier_ys = [graph.stations[c].y for c in carriers]
         if not carrier_ys or max(carrier_ys) - min(carrier_ys) > GUARD_TOLERANCE:
+            continue
+        if not _carrier_to_port_corridor_clear(graph, pid, sec, carriers):
             continue
         port_y = graph.stations[pid].y
         if abs(port_y - carrier_ys[0]) > GUARD_TOLERANCE:
@@ -731,6 +734,33 @@ def _guard_flow_exit_anchored_to_carrier(graph: MetroGraph, phase: str) -> None:
                 f"carrying row y={carrier_ys[0]:.1f}; the boundary run will "
                 f"render as a diagonal instead of a clean riser"
             )
+
+
+def _carrier_to_port_corridor_clear(
+    graph: MetroGraph,
+    exit_port_id: str,
+    section: Section,
+    carrier_ids: list[str],
+) -> bool:
+    """Whether the X span between the carrier(s) and the exit port holds no
+    other section station (else the carrier-row run would plough through it).
+    """
+    port_st = graph.stations.get(exit_port_id)
+    carrier_xs = [graph.stations[c].x for c in carrier_ids if c in graph.stations]
+    if port_st is None or not carrier_xs:
+        return False
+    inner_x = max(carrier_xs) if section.direction == "LR" else min(carrier_xs)
+    lo, hi = sorted((inner_x, port_st.x))
+    carrier_set = set(carrier_ids)
+    for sid in section.station_ids:
+        if sid == exit_port_id or sid in carrier_set:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.is_port:
+            continue
+        if lo + SAME_COORD_TOLERANCE < st.x < hi - SAME_COORD_TOLERANCE:
+            return False
+    return True
 
 
 def _guard_tall_anchor_stack_well_formed(graph: MetroGraph, phase: str) -> None:

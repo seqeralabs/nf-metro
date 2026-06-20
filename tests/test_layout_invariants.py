@@ -56,6 +56,7 @@ from nf_metro.layout.phases.bbox import (
     _section_fit_top,
 )
 from nf_metro.layout.phases.guards import _tb_top_entry_drop_overshoot
+from nf_metro.layout.phases.ports import _exit_run_corridor_clear
 from nf_metro.layout.phases.off_track import (
     _is_single_trunk_lr_section,
     _off_track_anchor_of,
@@ -869,7 +870,9 @@ def _single_connector_flow_exit_ports(
       - fan-in exits whose feeders span more than one row - the parallel-
         caller stacking idiom is not a defect;
       - exits feeding a fan-out / merge junction, where aligning the exit to
-        the junction's row (not the carrying station) is correct.
+        the junction's row (not the carrying station) is correct;
+      - exits whose carrier-row corridor to the port is blocked by another
+        station (e.g. an off-track output), which the run would plough through.
     """
     out: list[tuple[str, str, float]] = []
     junction_ids = graph.junction_ids
@@ -902,6 +905,8 @@ def _single_connector_flow_exit_ports(
             continue
         carrier_ys = [graph.stations[c].y for c in carriers]
         if max(carrier_ys) - min(carrier_ys) > _Y_TOL:
+            continue
+        if not _exit_run_corridor_clear(graph, pid, sec, carriers):
             continue
         out.append((pid, carriers[0], carrier_ys[0]))
     return out
