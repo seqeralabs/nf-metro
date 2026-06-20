@@ -447,21 +447,15 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
         if exit_section.grid_row != entry_section.grid_row:
             continue
 
-        # Skip when entry port is perpendicular to its section's flow.
-        # A LEFT port on a TB section must bend, so aligning it with an
-        # internal station's Y would route the line through that station.
-        _perp = False
-        if entry_section.direction == "TB" and entry_port_obj.side in (
-            PortSide.LEFT,
-            PortSide.RIGHT,
+        # Skip when the line does not enter horizontally at its consumer's Y.
+        # A LEFT/RIGHT port on a TB section bends in, and a TOP/BOTTOM port
+        # drops in vertically (on any section); aligning the upstream exit to
+        # the consumer's internal Y there pulls the exit off the trunk and
+        # bends the lead-in.
+        if entry_port_obj.side in (PortSide.TOP, PortSide.BOTTOM) or (
+            entry_section.direction in ("TB", "BT")
+            and entry_port_obj.side in (PortSide.LEFT, PortSide.RIGHT)
         ):
-            _perp = True
-        elif entry_section.direction in ("LR", "RL") and entry_port_obj.side in (
-            PortSide.TOP,
-            PortSide.BOTTOM,
-        ):
-            _perp = True
-        if _perp:
             continue
 
         internal_ids = (

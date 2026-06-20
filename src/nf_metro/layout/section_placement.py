@@ -1244,6 +1244,14 @@ def _find_downstream_bundle_y(
         ds = sections.get(ep.section_id)
         if not ds or ds.grid_row != same_row:
             continue
+        # An entry that does not arrive horizontally at its consumer's Y -- a
+        # TOP/BOTTOM port (vertical drop) or a LEFT/RIGHT port bending into a
+        # TB/BT trunk -- leaves the exit's own trunk Y to govern the lead-in;
+        # anchoring to the consumer's Y would pull the exit off its trunk.
+        if ep.side in (PortSide.TOP, PortSide.BOTTOM) or (
+            ds.direction in ("TB", "BT") and ep.side in (PortSide.LEFT, PortSide.RIGHT)
+        ):
+            continue
         ds_internal = set(ds.station_ids) - set(ds.entry_ports) - set(ds.exit_ports)
         targets: dict[str, set[str]] = {}
         for edge in graph.edges_from(eid):

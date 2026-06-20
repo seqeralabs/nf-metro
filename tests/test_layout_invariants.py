@@ -3910,6 +3910,30 @@ def test_entry_approach_arrives_from_port_side(fixture):
     )
 
 
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_no_line_folds_back_over_its_track(fixture):
+    """A line must not cover any stretch in opposing directions (#885).
+
+    Two axis-aligned legs of one line that share a constant axis and overlap
+    while pointing opposite ways draw the line out and straight back over the
+    same track.  Any station caught in that overlap is then read out of flow
+    order -- e.g. a flow-axis ``entry``/``exit`` port declared on the edge
+    opposite its consumer drives the connecting leg back through the
+    intervening stations.  Parametrised over the whole corpus so the
+    invariant generalises beyond the single reporting fixture.
+    """
+    from nf_metro.layout.phases.guards import iter_opposing_line_overlaps
+
+    graph = _layout(fixture)
+    routes = route_edges(graph)
+    overlaps = list(iter_opposing_line_overlaps(graph, routes=routes))
+    assert not overlaps, f"{fixture}: " + "; ".join(
+        f"{ov.line_id} {ov.axis}={ov.coord:.1f} over [{ov.lo:.1f},{ov.hi:.1f}] "
+        f"({ov.src_a}->{ov.tgt_a} vs {ov.src_b}->{ov.tgt_b})"
+        for ov in overlaps[:5]
+    )
+
+
 @pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION_PLUS_STACK)
 def test_no_artefactual_counter_flow(fixture):
     """A feed from a row above its target must not dive below the target row

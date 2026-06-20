@@ -54,6 +54,7 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `stacked_lr_serpentine.mmd` | tall rowspan section alongside stacked single-row sections in the same column |
 | `around_section_below.mmd` | inter-section edge routing around a section that sits below and between source and target |
 | `inter_row_wrap_clearance.mmd` | three-line bundle exiting a top section right and entering a bottom section left via the inter-row gap |
+| `tb_bottom_entry_flow_start.mmd` | flow-axis entry declared opposite its consumer (TB `entry: bottom` feeding the top station) re-anchored so the line does not fold back through the trunk (issue #885) |
 
 ---
 

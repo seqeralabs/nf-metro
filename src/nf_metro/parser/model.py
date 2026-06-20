@@ -418,6 +418,11 @@ class MetroGraph:
     section_dag: SectionDAG | None = None
     # Section IDs that had explicit %%metro direction: directives
     _explicit_directions: set[str] = field(default_factory=set)
+    # Section IDs whose flow direction was flipped at resolve time to keep a
+    # flow-axis port on its consumer/producer's end (see resolve.py
+    # _reanchor_flow_axis_ports).  Their exit-port offsets anchor on the
+    # feeder bundle frame rather than re-centring on zero.
+    _fold_reoriented_sections: set[str] = field(default_factory=set)
     # Section IDs whose entry/exit port sides were author-specified via
     # %%metro entry:/exit: directives (tracked separately because auto_layout
     # fills entry_hints/exit_hints for sections that have none, so the hint
