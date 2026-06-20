@@ -1,0 +1,25 @@
+%%metro title: Top Entry Header Clash
+%%metro style: dark
+%%metro line: a | A | #e63946
+
+%%metro grid: src_sec | 0,0
+%%metro grid: tgt_sec | 0,1
+
+graph LR
+    subgraph src_sec [Read QC]
+        %%metro direction: LR
+        s1[Trim]
+        s2[Filter]
+        s1 -->|a| s2
+    end
+
+    subgraph tgt_sec [Alignment and Sorting]
+        %%metro direction: TB
+        %%metro entry: top | a
+        %%metro exit: right | a
+        t1[Map Reads]
+        t2[Sort BAM]
+        t1 -->|a| t2
+    end
+
+    s2 -->|a| t1

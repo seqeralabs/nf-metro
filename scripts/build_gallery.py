@@ -730,6 +730,28 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "offsets so the bundle stays parallel through the boundary without "
         "pinching or crossing.",
     ),
+    # --- Section header relocated clear of a top-entry drop ---
+    (
+        "top_entry_header_clash",
+        TOPOLOGIES_DIR,
+        "A TB section's title is long enough to reach under the trunk that drops "
+        "into its TOP entry. Rather than route the line around the title, the "
+        "header relocates below the box so the drop enters cleanly.",
+    ),
+    (
+        "header_side_rotated",
+        TOPOLOGIES_DIR,
+        "A TB section whose trunk drops through the top edge and exits the bottom "
+        "edge blocks the header on both horizontal edges. The title rotates and "
+        "runs down the clear left edge instead of crossing the line.",
+    ),
+    (
+        "header_nudge",
+        TOPOLOGIES_DIR,
+        "A title too long to fit a rotated side, on a section blocked top and "
+        "bottom by its trunk: the header shifts right past the trunk as a last "
+        "resort, the canvas growing to keep it visible.",
+    ),
     # --- Multi-line perpendicular exit that does not drop straight down ---
     (
         "lr_perp_top_exit_side_entry",

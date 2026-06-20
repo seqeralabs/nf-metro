@@ -44,7 +44,6 @@ from nf_metro.parser.model import (
     Interchange,
     MarkerStyle,
     MetroGraph,
-    PortSide,
     Section,
     Station,
 )
@@ -88,11 +87,8 @@ from nf_metro.render.constants import (
     RAIL_KNOB_RADIUS_RATIO,
     RAIL_LINK_HALF_WIDTH_RATIO,
     SECTION_BOX_RADIUS,
-    SECTION_LABEL_REGION_RATIO,
-    SECTION_LABEL_TEXT_OFFSET,
     SECTION_NUM_CIRCLE_R_LARGE,
     SECTION_NUM_FONT_SIZE,
-    SECTION_NUM_Y_OFFSET,
     SECTION_STROKE_WIDTH,
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
@@ -120,6 +116,12 @@ from nf_metro.render.legend import (
 from nf_metro.render.manifest import build_manifest, manifest_metadata_svg
 from nf_metro.render.ns import class_prefix_context
 from nf_metro.render.ns import ns as _ns
+from nf_metro.render.section_header import (
+    SectionHeaderClashError,
+    SectionHeaderPlacement,
+    check_section_headers_clear_routes,
+    resolve_all_section_headers,
+)
 from nf_metro.render.style import Theme
 
 
@@ -158,9 +160,11 @@ def apply_route_offsets(
 def _compute_canvas_bounds(
     graph: MetroGraph,
     routes: list[RoutedPath],
+    header_placements: dict[str, SectionHeaderPlacement],
     debug: bool = False,
 ) -> tuple[float, float]:
-    """Compute max X/Y from stations, section boxes, and route waypoints."""
+    """Compute max X/Y from stations, section boxes, route waypoints, and
+    section headers (which a relocated/long title can push past the box)."""
     if debug:
         visible_stations = list(graph.stations.values())
     else:
@@ -178,6 +182,11 @@ def _compute_canvas_bounds(
         if section.bbox_w > 0:
             max_x = max(max_x, section.bbox_x + section.bbox_w)
             max_y = max(max_y, section.bbox_y + section.bbox_h)
+            placement = header_placements.get(section.id)
+            if placement is not None:
+                _, _, hx1, hy1 = placement.keepout
+                max_x = max(max_x, hx1)
+                max_y = max(max_y, hy1)
 
     for route in routes:
         for px, py in route.points:
@@ -527,6 +536,11 @@ def _render_svg_scaled(
     station_offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=station_offsets)
     assert_render_curve_invariants(graph, routes, station_offsets)
+    header_polylines = [apply_route_offsets(route, station_offsets) for route in routes]
+    header_placements = resolve_all_section_headers(
+        graph, theme.section_label_font_size, header_polylines
+    )
+    _guard_section_headers_clear_routes(header_placements, header_polylines)
 
     # Compute labels early so section bbox expansions are applied
     # before section boxes are drawn and canvas bounds are computed.
@@ -558,7 +572,7 @@ def _render_svg_scaled(
     if group_bands:
         _reserve_section_space_for_groups(graph, group_bands)
 
-    max_x, max_y = _compute_canvas_bounds(graph, routes, debug)
+    max_x, max_y = _compute_canvas_bounds(graph, routes, header_placements, debug)
 
     # Group captions can extend below/right of the content; grow the canvas
     # so they are not clipped.
@@ -675,7 +689,7 @@ def _render_svg_scaled(
 
     # Sections
     if graph.sections:
-        _render_first_class_sections(d, graph, theme)
+        _render_first_class_sections(d, graph, theme, header_placements)
 
     # Draw edges (lines) behind stations
     _render_edges(d, graph, routes, station_offsets, theme)
@@ -933,10 +947,21 @@ def _inject_dark_mode_style(d: draw.Drawing) -> None:
     d.append(draw.Raw(f"<style>{css}</style>"))
 
 
+def _guard_section_headers_clear_routes(
+    placements: dict[str, SectionHeaderPlacement],
+    polylines: list[list[tuple[float, float]]],
+) -> None:
+    """Fail loudly if any section header was placed over a routed line."""
+    clashes = check_section_headers_clear_routes(placements, polylines)
+    if clashes:
+        raise SectionHeaderClashError("; ".join(c.message() for c in clashes))
+
+
 def _render_first_class_sections(
     d: draw.Drawing,
     graph: MetroGraph,
     theme: Theme,
+    header_placements: dict[str, SectionHeaderPlacement],
 ) -> None:
     """Render first-class sections using pre-computed bounding boxes."""
     for section in graph.sections.values():
@@ -969,39 +994,15 @@ def _render_first_class_sections(
             )
         )
 
-        # Determine whether the label should go below the section box.
-        # When a section has a TOP entry port near the left edge (where the
-        # label sits) but no BOTTOM exit, placing the label above would
-        # overlap with incoming lines.  Only flip when the nearest top port
-        # is close enough to actually conflict with the label.
-        label_region_max_x = (
-            section.bbox_x + section.bbox_w * SECTION_LABEL_REGION_RATIO
-        )
-        has_nearby_top_entry = any(
-            graph.ports.get(pid)
-            and graph.ports[pid].side == PortSide.TOP
-            and graph.ports[pid].x <= label_region_max_x
-            for pid in section.entry_ports
-        )
-        has_bottom_exit = any(
-            graph.ports.get(pid) and graph.ports[pid].side == PortSide.BOTTOM
-            for pid in section.exit_ports
-        )
-        label_below = has_nearby_top_entry and not has_bottom_exit
-
-        # Numbered circle, left-aligned
-        circle_r = SECTION_NUM_CIRCLE_R_LARGE
-        cx = section.bbox_x + circle_r
-        if label_below:
-            cy = section.bbox_y + section.bbox_h + circle_r + SECTION_NUM_Y_OFFSET
-        else:
-            cy = section.bbox_y - circle_r - SECTION_NUM_Y_OFFSET
+        # Place the header (number badge + title) clear of any route that would
+        # otherwise cross it; the resolver never moves a route to do so.
+        placement = header_placements[section.id]
 
         d.append(
             draw.Circle(
-                cx,
-                cy,
-                circle_r,
+                placement.badge_cx,
+                placement.badge_cy,
+                SECTION_NUM_CIRCLE_R_LARGE,
                 fill=theme.station_stroke,
                 **{
                     "class": _ns("nf-metro-section-num-circle"),
@@ -1013,8 +1014,8 @@ def _render_first_class_sections(
             draw.Text(
                 str(section.number),
                 SECTION_NUM_FONT_SIZE,
-                cx,
-                cy,
+                placement.badge_cx,
+                placement.badge_cy,
                 fill=theme.station_fill,
                 font_family=theme.label_font_family,
                 font_weight="bold",
@@ -1024,21 +1025,26 @@ def _render_first_class_sections(
             )
         )
 
-        # Section name to the right of the circle
+        label_kwargs: dict[str, object] = {
+            "class": _ns("nf-metro-section-label"),
+            "data-section-id": section.id,
+        }
+        if placement.label_rotation:
+            label_kwargs["transform"] = (
+                f"rotate({placement.label_rotation} "
+                f"{placement.label_x} {placement.label_y})"
+            )
         d.append(
             draw.Text(
                 section.name,
                 theme.section_label_font_size,
-                cx + circle_r + SECTION_LABEL_TEXT_OFFSET,
-                cy,
+                placement.label_x,
+                placement.label_y,
                 fill=theme.section_label_color,
                 font_family=theme.label_font_family,
                 font_weight="bold",
                 dy=TEXT_VCENTER_DY,
-                **{
-                    "class": _ns("nf-metro-section-label"),
-                    "data-section-id": section.id,
-                },
+                **label_kwargs,
             )
         )
 

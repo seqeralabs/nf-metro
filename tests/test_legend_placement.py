@@ -48,7 +48,11 @@ def _place(text: str):
     compute_layout(graph)
     offsets = S.compute_station_offsets(graph)
     routes = S.route_edges_centred(graph, station_offsets=offsets)
-    max_x, max_y = S._compute_canvas_bounds(graph, routes, False)
+    polylines = [S.apply_route_offsets(route, offsets) for route in routes]
+    placements = S.resolve_all_section_headers(
+        graph, NFCORE_THEME.section_label_font_size, polylines
+    )
+    max_x, max_y = S._compute_canvas_bounds(graph, routes, placements, False)
     pos = graph.legend_position
     show_logo = bool(graph.logo_path and Path(graph.logo_path).is_file())
     logo_in_legend = show_logo and pos != "none"
