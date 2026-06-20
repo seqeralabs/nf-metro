@@ -915,10 +915,6 @@
     "note": "Descending-run mirror of the ascending collapse clamp (#1 of `if diag_end < diag_start:`): fires only when |run| < 2*MIN_STRAIGHT_EDGE (20px), but connected diagonal endpoints are always >= one grid pitch (40/60px) apart on the run axis. Unreachable degenerate-geometry guard.",
     "status": "defensive"
   },
-  "corners.py::if len1 > 0 and len2 > 0:::#1": {
-    "note": "Defensive guard in curve_tangents: a corner with a zero-length neighbouring leg (coincident consecutive waypoints) collapses to the vertex with no curve. Routed polylines never place consecutive waypoints at the same point, so the no-curve arm is never taken on the corpus.",
-    "status": "defensive"
-  },
   "inter_section_handlers.py::if sx >= (left_edge + right_edge) / 2:::#1": {
     "note": "Defensive symmetry: a merge feeder junction sits in the inter-column gap downstream of its fork, i.e. right of its source section's centre, so the exit-right arm always fires in the corpus. The exit-left arm mirrors it for a junction sitting left of centre; no fixture places a merge feeder there.",
     "status": "defensive"

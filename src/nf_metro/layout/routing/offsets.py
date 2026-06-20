@@ -843,6 +843,17 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
             key=lambda lid: (abs(line_avg_y[lid] - port_y), spatial_offs[lid]),
         )
         anchor_off = spatial_offs[anchor_line]
+        # A section whose flow was flipped to keep this exit on its producer's
+        # end (a re-oriented backward feed) carries a cross-row fan whose
+        # feeders sit on non-zero base slots; re-centring the port-nearest line
+        # on zero would desync the port from those feeders and leave the bundle
+        # on non-adjacent slots after reconciliation.  Anchor on the feeder's
+        # own offset instead so the whole bundle keeps one frame.
+        if port_obj.section_id in graph._fold_reoriented_sections:
+            anchor_feeders = line_feeders.get(anchor_line)
+            if anchor_feeders:
+                anchor_feeder_id = anchor_feeders[0][0]
+                anchor_off -= ctx.offsets.get((anchor_feeder_id, anchor_line), 0.0)
         spatial_offs = {lid: off - anchor_off for lid, off in spatial_offs.items()}
 
         for lid, off in spatial_offs.items():

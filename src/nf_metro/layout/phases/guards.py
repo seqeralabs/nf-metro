@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, NamedTuple
 
 from nf_metro.layout.constants import (
+    COLLINEAR_AXIS_TOL,
     COMPONENT_BAND_OVERLAP_TOLERANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
@@ -1215,6 +1216,148 @@ def _guard_no_line_crosses_file_icon(
                         f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
                         f"({p1[0]:.1f},{p1[1]:.1f})->({p2[0]:.1f},{p2[1]:.1f})"
                     )
+
+
+class OpposingOverlap(NamedTuple):
+    """Two segments of one line covering a stretch in opposing directions."""
+
+    line_id: str
+    axis: str  # "V" (shared X) or "H" (shared Y)
+    coord: float  # the shared constant-axis value
+    lo: float  # overlap start along the variable axis
+    hi: float  # overlap end along the variable axis
+    src_a: str
+    tgt_a: str
+    src_b: str
+    tgt_b: str
+
+
+class _AxisLeg(NamedTuple):
+    """One axis-aligned leg of a rendered path, with its travel direction."""
+
+    axis: str  # "V" (shared X) or "H" (shared Y)
+    coord: float  # the constant-axis value
+    lo: float  # span start along the variable axis
+    hi: float  # span end along the variable axis
+    direction: int  # +1 advancing in the increasing-coordinate sense, else -1
+    src: str
+    tgt: str
+
+
+def _line_axis_segments(
+    pts: list[tuple[float, float]],
+    src: str,
+    tgt: str,
+) -> Iterator[_AxisLeg]:
+    """Yield the axis-aligned legs of a rendered path.
+
+    Diagonal legs carry no single constant axis and are skipped.
+    """
+    for k in range(len(pts) - 1):
+        (x1, y1), (x2, y2) = pts[k], pts[k + 1]
+        if abs(x1 - x2) <= COLLINEAR_AXIS_TOL and abs(y1 - y2) > GUARD_TOLERANCE:
+            yield _AxisLeg(
+                "V",
+                (x1 + x2) / 2,
+                min(y1, y2),
+                max(y1, y2),
+                1 if y2 > y1 else -1,
+                src,
+                tgt,
+            )
+        elif abs(y1 - y2) <= COLLINEAR_AXIS_TOL and abs(x1 - x2) > GUARD_TOLERANCE:
+            yield _AxisLeg(
+                "H",
+                (y1 + y2) / 2,
+                min(x1, x2),
+                max(x1, x2),
+                1 if x2 > x1 else -1,
+                src,
+                tgt,
+            )
+
+
+def iter_opposing_line_overlaps(
+    graph: MetroGraph,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> Iterator[OpposingOverlap]:
+    """Yield every stretch a single line covers twice in opposing directions.
+
+    Two axis-aligned legs of the *same* line that share a constant axis (same
+    X for vertical legs, same Y for horizontal) and overlap along the other
+    axis while pointing in opposite senses draw the line back over itself --
+    a fold-back.  Spatially the line reads as running one way then doubling
+    straight back, so a station caught in the overlap is visited out of flow
+    order (#885).  Legs are compared only within one ``line_id``: distinct
+    lines sharing a channel are carried on their own offset slots, not on the
+    same track.
+    """
+    from nf_metro.render.svg import apply_route_offsets
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+
+    by_line: dict[str, list[_AxisLeg]] = defaultdict(list)
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        for leg in _line_axis_segments(pts, r.edge.source, r.edge.target):
+            by_line[r.line_id].append(leg)
+
+    for line_id, legs in by_line.items():
+        for i, a in enumerate(legs):
+            for b in legs[i + 1 :]:
+                if a.axis != b.axis or abs(a.coord - b.coord) > COLLINEAR_AXIS_TOL:
+                    continue
+                if a.direction * b.direction >= 0:
+                    continue
+                if min(a.hi, b.hi) - max(a.lo, b.lo) > GUARD_TOLERANCE:
+                    yield OpposingOverlap(
+                        line_id,
+                        a.axis,
+                        (a.coord + b.coord) / 2,
+                        max(a.lo, b.lo),
+                        min(a.hi, b.hi),
+                        a.src,
+                        a.tgt,
+                        b.src,
+                        b.tgt,
+                    )
+
+
+def _guard_no_opposing_line_overlap(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """After routing: no location may be covered by one line travelling in
+    opposing directions.
+
+    A line that runs out along a track and straight back over the same track
+    folds on itself; any station in the overlap is read out of flow order
+    (#885).  This is the general safety net complementing the placement fix
+    that keeps a flow-axis entry/exit port on its consumer's side.
+    """
+    for ov in iter_opposing_line_overlaps(graph, offsets=offsets, routes=routes):
+        axis = "x" if ov.axis == "V" else "y"
+        raise PhaseInvariantError(
+            f"{phase}: line {ov.line_id!r} covers {axis}={ov.coord:.1f} "
+            f"over [{ov.lo:.1f},{ov.hi:.1f}] in opposing directions "
+            f"(legs {ov.src_a!r}->{ov.tgt_a!r} and {ov.src_b!r}->{ov.tgt_b!r}); "
+            f"the line folds back over its own track"
+        )
 
 
 class LabelStrike(NamedTuple):

@@ -14,6 +14,7 @@ two-section grid with simpler topology (variant calling).
 from __future__ import annotations
 
 import copy
+import warnings
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
@@ -3910,6 +3911,30 @@ def test_entry_approach_arrives_from_port_side(fixture):
     )
 
 
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_no_line_folds_back_over_its_track(fixture):
+    """A line must not cover any stretch in opposing directions (#885).
+
+    Two axis-aligned legs of one line that share a constant axis and overlap
+    while pointing opposite ways draw the line out and straight back over the
+    same track.  Any station caught in that overlap is then read out of flow
+    order -- e.g. a flow-axis ``entry``/``exit`` port declared on the edge
+    opposite its consumer drives the connecting leg back through the
+    intervening stations.  Parametrised over the whole corpus so the
+    invariant generalises beyond the single reporting fixture.
+    """
+    from nf_metro.layout.phases.guards import iter_opposing_line_overlaps
+
+    graph = _layout(fixture)
+    routes = route_edges(graph)
+    overlaps = list(iter_opposing_line_overlaps(graph, routes=routes))
+    assert not overlaps, f"{fixture}: " + "; ".join(
+        f"{ov.line_id} {ov.axis}={ov.coord:.1f} over [{ov.lo:.1f},{ov.hi:.1f}] "
+        f"({ov.src_a}->{ov.tgt_a} vs {ov.src_b}->{ov.tgt_b})"
+        for ov in overlaps[:5]
+    )
+
+
 @pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION_PLUS_STACK)
 def test_no_artefactual_counter_flow(fixture):
     """A feed from a row above its target must not dive below the target row
@@ -4244,33 +4269,10 @@ def test_lr_section_all_perpendicular_ports_rejected():
     assert "perpendicular" in msg or "flow-aligned" in msg
 
 
-@pytest.mark.parametrize(
-    ("fixture", "bridged_section"),
-    [
-        ("regressions/cross_column_perp_entry_overflow.mmd", "reporting"),
-        ("regressions/cross_column_perp_drop_target_overflow.mmd", "scaffolding"),
-    ],
-)
-def test_cross_column_perp_drop_stays_in_bbox(fixture, bridged_section):
-    """A ``direction:`` override that feeds a section's perpendicular entry/drop
-    from outside its own grid column keeps the run/trunk on the section's own
-    column, in-bbox.
-
-    A perpendicular entry/drop whose feeding source X lands outside the
-    section's box is a cross-column connection: the run (LR/RL perp entry) and
-    the trunk (TB drop target) stay on the section's grid column rather than
-    aligning to the off-box source X, and routing bridges the drop as a
-    best-effort L-shaped lead-in.  Every station stays within its section bbox,
-    and the render completes -- the strict render-curve invariants relax to a
-    warning for the acknowledged-degraded bundle through the forced
-    perpendicular drop (#879).
-    """
-    graph = _layout(fixture, center_ports=False)
-
-    assert bridged_section in graph._cross_column_perp_bridges
-
+def _bbox_spilled_stations(graph: MetroGraph) -> list[str]:
+    """Stations whose centre lies outside their section bbox (guard tolerance)."""
     tol = GUARD_TOLERANCE
-    spilled = [
+    return [
         sid
         for sid, st in graph.stations.items()
         if not st.is_port
@@ -4280,10 +4282,46 @@ def test_cross_column_perp_drop_stays_in_bbox(fixture, bridged_section):
             and sec.bbox_y - tol <= st.y <= sec.bbox_y + sec.bbox_h + tol
         )
     ]
-    assert not spilled, f"stations outside their bbox: {spilled}"
 
-    # The render path (route + curve assertion) must complete without aborting;
-    # the forced-perpendicular bundle relaxes the curve check to a warning.
+
+def test_cross_column_perp_drop_renders_cleanly():
+    """A perpendicular drop fed from a different grid column lays out cleanly.
+
+    A ``direction: TB`` section fed by a perpendicular drop from a section in
+    another grid column keeps its vertical trunk on its own column (in-bbox);
+    the cross-column feed comes over the top and drops into the trunk head.
+    The drop is flagged as a cross-column bridge, every station stays within
+    its section bbox, and the bundle satisfies the render-curve invariants with
+    no warning -- the corpus invariants over this fixture pin the clean
+    geometry (#879).
+    """
+    graph = _layout("topologies/cross_column_perp_drop.mmd")
+
+    assert "qc" in graph._cross_column_perp_bridges
+    assert not _bbox_spilled_stations(graph)
+
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        assert_render_curve_invariants(graph, routes, offsets)
+
+
+def test_cross_column_perp_entry_stays_in_bbox():
+    """A cross-column perpendicular entry never spills a station out of its bbox.
+
+    On a fold-stacked LR sink whose only feed is a perpendicular entry from a
+    wider same-column neighbour (the source X sits past the sink's box), the
+    run stays on the sink's own column instead of being dragged off it.  The
+    bundle through this forced-perpendicular drop is an unsupported shape, so
+    the render relaxes the curve invariant to a warning rather than aborting,
+    but no station leaves its section bbox (#879).
+    """
+    graph = _layout("regressions/cross_column_perp_entry_overflow.mmd")
+
+    assert "reporting" in graph._cross_column_perp_bridges
+    assert not _bbox_spilled_stations(graph)
+
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
     with pytest.warns(UserWarning, match="bridged across grid columns"):
@@ -4303,7 +4341,7 @@ def test_cross_column_perp_drop_leadin_clears_trunk():
     """
     from nf_metro.layout.phases.guards import _entry_approach_offenders
 
-    graph = _layout("topologies/cross_column_perp_drop.mmd")
+    graph = _layout("topologies/cross_column_perp_drop_far_exit.mmd")
     routes = route_edges(graph)
 
     # The lead-in must not overlay the target trunk through its stations.

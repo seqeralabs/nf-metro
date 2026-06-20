@@ -9,6 +9,7 @@ junctions, and resolving inter-section edges into port-to-port chains.
 from __future__ import annotations
 
 import warnings
+from collections import defaultdict
 from dataclasses import dataclass
 
 import networkx as nx
@@ -479,8 +480,9 @@ def _resolve_sections(graph: MetroGraph) -> None:
     to multiple target sections. ONE entry port per target section per side
     (side from hints or LEFT default).
     """
-    entry_side_for_line = _build_entry_side_mapping(graph)
     internal_edges, inter_section_edges = _classify_edges(graph)
+    _reanchor_flow_axis_ports(graph, inter_section_edges)
+    entry_side_for_line = _build_entry_side_mapping(graph)
 
     if inter_section_edges:
         _create_ports_and_junctions(
@@ -489,6 +491,150 @@ def _resolve_sections(graph: MetroGraph) -> None:
         _insert_merge_junctions(graph)
 
     _assign_section_numbers(graph)
+
+
+_LEADING_SIDE = {"LR": PortSide.LEFT, "RL": PortSide.RIGHT, "TB": PortSide.TOP}
+_TRAILING_SIDE = {"LR": PortSide.RIGHT, "RL": PortSide.LEFT, "TB": PortSide.BOTTOM}
+_FLIP_HORIZONTAL = {"LR": "RL", "RL": "LR"}
+
+
+def _section_flow_ranks(section: Section) -> dict[str, int]:
+    """Longest-path rank of each station along a section's internal flow.
+
+    Rank 0 is the flow-source end (leading edge); the maximum rank is the
+    flow-sink end (trailing edge).  Returns an empty dict if the internal
+    edges form a cycle.
+    """
+    g: nx.DiGraph[str] = nx.DiGraph()
+    g.add_nodes_from(section.station_ids)
+    for e in section.internal_edges:
+        if e.source in g and e.target in g:
+            g.add_edge(e.source, e.target)
+    try:
+        order = list(nx.topological_sort(g))
+    except nx.NetworkXUnfeasible:
+        return {}
+    ranks: dict[str, int] = {}
+    for node in order:
+        preds = list(g.predecessors(node))
+        ranks[node] = max((ranks[p] for p in preds), default=-1) + 1
+    return ranks
+
+
+def _port_fold_target(
+    side: PortSide,
+    endpoints: set[str],
+    ranks: dict[str, int],
+    leading: PortSide,
+    trailing: PortSide,
+    *,
+    is_entry: bool,
+) -> PortSide | None:
+    """The flow-axis edge a port should sit on, or ``None`` if it doesn't fold.
+
+    The connecting leg runs from an entry port toward its consumer, or from a
+    producer toward an exit port.  It folds only against the flow: an entry on
+    the trailing edge whose consumer is the flow-source (enter at the back,
+    reach to the front), or an exit on the leading edge whose producer is the
+    flow-sink (leave at the front having started at the back).  Either returns
+    the opposite flow-axis edge; everything that runs with the flow, is
+    cross-axis, or straddles ranks returns ``None``.
+    """
+    if side not in (leading, trailing) or not endpoints:
+        return None
+    lo, hi = min(ranks.values()), max(ranks.values())
+    if is_entry and side == trailing and all(ranks[s] == lo for s in endpoints):
+        return leading
+    if not is_entry and side == leading and all(ranks[s] == hi for s in endpoints):
+        return trailing
+    return None
+
+
+def _reanchor_flow_axis_ports(
+    graph: MetroGraph, inter_section_edges: list[Edge]
+) -> None:
+    """Keep a flow-axis entry/exit port on the same end as its consumer/producer.
+
+    A LEFT/RIGHT (LR/RL) or TOP/BOTTOM (TB) port lies on the section's flow
+    axis.  When an entry sits on the edge opposite its consumer -- or an exit
+    opposite its producer -- the connecting leg runs the length of the trunk
+    and doubles straight back, folding through every intervening station
+    (#885).  Two corrections resolve it: a horizontal section whose direction
+    was inferred is re-oriented (LR<->RL) so the flow runs toward the declared
+    port and the connecting station lands beside it; a section with an explicit
+    direction (or a vertical TB one, which has no horizontal twin) instead has
+    the offending port moved to its connecting station's own edge.  Ports that
+    run with the flow, and cross-axis ports, are left alone.
+    """
+    consumers: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    producers: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    for e in inter_section_edges:
+        tgt_sec = graph.section_for_station(e.target)
+        if tgt_sec:
+            consumers[tgt_sec][e.line_id].add(e.target)
+        src_sec = graph.section_for_station(e.source)
+        if src_sec:
+            producers[src_sec][e.line_id].add(e.source)
+
+    for sec_id, section in graph.sections.items():
+        leading = _LEADING_SIDE.get(section.direction)
+        trailing = _TRAILING_SIDE.get(section.direction)
+        if leading is None or trailing is None:
+            continue
+        ranks = _section_flow_ranks(section)
+        if not ranks or min(ranks.values()) == max(ranks.values()):
+            continue
+
+        flow_ports: list[tuple[list[tuple[PortSide, list[str]]], int]] = []
+        folds: list[tuple[list[tuple[PortSide, list[str]]], int, PortSide]] = []
+        for hints, ep_map, is_entry in (
+            (section.entry_hints, consumers.get(sec_id, {}), True),
+            (section.exit_hints, producers.get(sec_id, {}), False),
+        ):
+            for idx, (side, lines) in enumerate(hints):
+                if side not in (leading, trailing):
+                    continue
+                eps = {s for lid in lines for s in ep_map.get(lid, set()) if s in ranks}
+                if not eps:
+                    continue
+                flow_ports.append((hints, idx))
+                target = _port_fold_target(
+                    side, eps, ranks, leading, trailing, is_entry=is_entry
+                )
+                if target is not None:
+                    folds.append((hints, idx, target))
+        if not folds:
+            continue
+
+        # Re-orienting the section moves every flow extreme to the opposite
+        # edge, so it is safe only when every flow-axis port is folding;
+        # otherwise it would push a with-flow port into a fold.
+        if (
+            section.direction in _FLIP_HORIZONTAL
+            and sec_id not in graph._explicit_directions
+            and len(folds) == len(flow_ports)
+        ):
+            new_dir = _FLIP_HORIZONTAL[section.direction]
+            warnings.warn(
+                f"Section '{sec_id}': flow re-oriented {section.direction}->"
+                f"{new_dir} so its declared port faces its connecting section "
+                f"instead of routing back through the section's stations.",
+                stacklevel=2,
+            )
+            section.direction = new_dir
+            graph._explicit_directions.add(sec_id)
+            graph._fold_reoriented_sections.add(sec_id)
+        else:
+            for hints, idx, target in folds:
+                side, lines = hints[idx]
+                hints[idx] = (target, lines)
+                warnings.warn(
+                    f"Section '{sec_id}': port declared on {side.value} but its "
+                    f"connecting station sits at the {target.value} end; "
+                    f"re-anchored to {target.value} so the line does not route "
+                    f"back through the section's other stations.",
+                    stacklevel=2,
+                )
 
 
 def _assign_section_numbers(graph: MetroGraph) -> None:
