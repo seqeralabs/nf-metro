@@ -711,10 +711,24 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
         # Bypass routes dip below intervening bboxes into the inter-row
         # gap; tightening must not pull lower rows up into them.
         bypass_spans = _aggregate_bypass_spans(graph, ending_at_prev)
-        effective_floor = max(max_above_bot, max(bypass_spans.values(), default=0.0))
-        current_top = min(s.bbox_y for s in lower)
         target_gap = max(section_y_gap, routing_min.get((r - 1, r), 0.0))
-        slack = current_top - (effective_floor + target_gap)
+        # The whole row shifts up by one amount, so it can rise only as far as
+        # its most-constrained section allows -- hence the min over ``lower``.
+        # Each section's floor counts only the bypass spans whose columns it
+        # actually sits under (as ``_push_lower_rows_after_bbox_grow`` does):
+        # a bypass running over columns a section never spans reserves no
+        # clearance against it.
+        slack = float("inf")
+        for ls in lower:
+            ls_lo = ls.grid_col
+            ls_hi = ls.grid_col + ls.grid_col_span - 1
+            floor = max_above_bot
+            for (lo, hi), bypass_bot in bypass_spans.items():
+                if ls_hi < lo or ls_lo > hi:
+                    continue
+                if bypass_bot > floor:
+                    floor = bypass_bot
+            slack = min(slack, ls.bbox_y - (floor + target_gap))
         if slack <= SAME_COORD_TOLERANCE:
             continue
 
