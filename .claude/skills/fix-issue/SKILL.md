@@ -36,7 +36,10 @@ git worktree add /tmp/nf-metro-fix-<N> -b fix/<N>-<slug> origin/main
 # Fix environment
 ulimit -n 1000000 && export CONDA_OVERRIDE_OSX=15.0 && /opt/homebrew/bin/micromamba create -n nf-metro-fix-<N> python=3.11 cairo -y
 source ~/.local/bin/mm-activate nf-metro-fix-<N>
-pip install -e "/tmp/nf-metro-fix-<N>[dev,docs]"
+pip install -e "/tmp/nf-metro-fix-<N>[dev,docs,font]"
+
+# Install pre-commit hooks so lint runs automatically on every commit
+cd /tmp/nf-metro-fix-<N> && pre-commit install
 ```
 
 All subsequent work happens inside `/tmp/nf-metro-fix-<N>`.
@@ -144,26 +147,17 @@ refactor: tighten <area> after fix for #<N>
 Keeping `fix:` and `refactor:` commits separate makes the fix itself easy
 to review and easy to revert in isolation if regressions surface.
 
-## Step 7: Whole-Repo Lint
+## Step 7: Lint and Tests
 
-CI lint scans the entire repository, not just `src/` and `tests/`.
-Pre-existing mis-formats in scripts, docs config, etc. will trip CI on
-your PR even though they predate your change.
+Pre-commit hooks were installed in Step 2 and run automatically on every
+`git commit` (ruff check/format on `src/` and `tests/`, mypy, trailing
+whitespace, yaml). If a commit fails due to hook errors, fix the issues
+and re-commit. Never skip hooks with `--no-verify`.
 
-```bash
-source ~/.local/bin/mm-activate nf-metro-fix-<N> && cd /tmp/nf-metro-fix-<N> && ruff format . && ruff check . && mypy
-```
-
-Run from the repo root, no path restriction. Fix or commit any deltas
-that appear (a separate `style: ruff format whole repo` commit is fine).
-
-Alternatively, the repo ships a `.pre-commit-config.yaml` that runs the
-same checks. If you installed the hooks (`pip install pre-commit &&
-pre-commit install`), they fire automatically on commit. To run them
-manually:
+To run the checks without committing:
 
 ```bash
-pre-commit run --all-files
+cd /tmp/nf-metro-fix-<N> && pre-commit run --all-files
 ```
 
 Then run the test suite:
