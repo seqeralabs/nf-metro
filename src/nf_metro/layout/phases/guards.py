@@ -690,6 +690,49 @@ def _guard_no_mixed_entry_directions(graph: MetroGraph) -> None:
         )
 
 
+def _guard_flow_exit_anchored_to_carrier(graph: MetroGraph, phase: str) -> None:
+    """A flow-aligned exit fed from a single internal row, running straight
+    into a downstream entry port, must sit on that row.
+
+    Otherwise the link from the carrying station to the exit climbs to the
+    port and renders as a diagonal inside the section instead of a clean
+    horizontal run with one riser in the inter-section gap.  Fold sections,
+    cross-row fan-in exits, and exits feeding a fan-out / merge junction are
+    out of scope: there the exit anchors elsewhere by design.
+    """
+    junction_ids = graph.junction_ids
+    for pid, port in graph.ports.items():
+        if port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        sec = graph.sections.get(port.section_id)
+        if sec is None or sec.direction not in ("LR", "RL") or sec.grid_row_span > 1:
+            continue
+        downstream = list(graph.edges_from(pid))
+        if any(e.target in junction_ids for e in downstream):
+            continue
+        if not any(
+            (p := graph.ports.get(e.target)) is not None and p.is_entry
+            for e in downstream
+        ):
+            continue
+        carrier_ys = [
+            graph.stations[e.source].y
+            for e in graph.edges_to(pid)
+            if (s := graph.stations.get(e.source)) is not None
+            and not s.is_port
+            and s.section_id == sec.id
+        ]
+        if not carrier_ys or max(carrier_ys) - min(carrier_ys) > GUARD_TOLERANCE:
+            continue
+        port_y = graph.stations[pid].y
+        if abs(port_y - carrier_ys[0]) > GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: exit port {pid!r} at y={port_y:.1f} is off its "
+                f"carrying row y={carrier_ys[0]:.1f}; the boundary run will "
+                f"render as a diagonal instead of a clean riser"
+            )
+
+
 def _guard_tall_anchor_stack_well_formed(graph: MetroGraph, phase: str) -> None:
     """A tall-anchor vertical stack keeps its anchor's downstream chain
     stacked in one column within the anchor's row span, all horizontal.

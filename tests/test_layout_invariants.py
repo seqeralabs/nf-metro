@@ -856,14 +856,18 @@ def _single_connector_flow_exit_ports(
 ) -> list[tuple[str, str, float]]:
     """Yield ``(port_id, carrier_id, carrier_y)`` for the exit ports this
     invariant covers: a flow-aligned (LEFT/RIGHT) exit on a non-fold LR/RL
-    section, fed by exactly one internal station, that runs directly into a
+    section, fed from a single internal row, that runs directly into a
     downstream entry port.
+
+    A single row may hold more than one feeding station (e.g. a sort then
+    an index on the same trunk Y); what matters is that they share a Y, so
+    the exit has one unambiguous row to sit on.
 
     Excluded on purpose:
       - fold sections (``grid_row_span > 1``) place exits via dedicated
         fold logic with their own contract;
-      - fan-in exits (more than one internal feeder) - the parallel-caller
-        stacking idiom is not a defect;
+      - fan-in exits whose feeders span more than one row - the parallel-
+        caller stacking idiom is not a defect;
       - exits feeding a fan-out / merge junction, where aligning the exit to
         the junction's row (not the carrying station) is correct.
     """
@@ -887,17 +891,19 @@ def _single_connector_flow_exit_ports(
             for e in downstream
         ):
             continue
-        carriers = {
+        carriers = [
             e.source
             for e in graph.edges_to(pid)
             if (s := graph.stations.get(e.source)) is not None
             and not s.is_port
             and s.section_id == sec.id
-        }
-        if len(carriers) != 1:
+        ]
+        if not carriers:
             continue
-        carrier = next(iter(carriers))
-        out.append((pid, carrier, graph.stations[carrier].y))
+        carrier_ys = [graph.stations[c].y for c in carriers]
+        if max(carrier_ys) - min(carrier_ys) > _Y_TOL:
+            continue
+        out.append((pid, carriers[0], carrier_ys[0]))
     return out
 
 
@@ -3375,6 +3381,12 @@ def test_no_kink_at_section_boundary(fixture):
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     rows = _row_lr_sections(graph)
+    # Exits that legitimately sit on their single carrying station's row run
+    # one intentional riser to the downstream entry rather than a trunk that
+    # should be flat across the boundary, so they are not "kinks" here.
+    carrier_anchored = {
+        pid for pid, _carrier, _y in _single_connector_flow_exit_ports(graph)
+    }
     for row, sections in rows.items():
         sorted_secs = sorted(sections, key=lambda s: s.grid_col)
         for sec, nxt in zip(sorted_secs, sorted_secs[1:]):
@@ -3384,6 +3396,8 @@ def test_no_kink_at_section_boundary(fixture):
             for pid in sec.exit_ports:
                 port = graph.ports.get(pid)
                 if port is None or port.side != PortSide.RIGHT:
+                    continue
+                if pid in carrier_anchored:
                     continue
                 exit_lines = graph.station_lines(pid)
                 if not exit_lines:
