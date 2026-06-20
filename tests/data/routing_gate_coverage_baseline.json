@@ -184,6 +184,7 @@
   "offsets.py::if abs(exit_st.y - j_st.y) <= _SAME_Y_TOLERANCE:::#1",
   "offsets.py::if abs(nbr_cur - new_off) < _OFFSET_EQ_TOLERANCE:::#1",
   "offsets.py::if all(::#1",
+  "offsets.py::if anchor_feeders:::#1",
   "offsets.py::if any(::#2",
   "offsets.py::if cur in seen:::#1",
   "offsets.py::if dag is not None:::#1",

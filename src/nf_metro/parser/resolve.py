@@ -623,6 +623,7 @@ def _reanchor_flow_axis_ports(
             )
             section.direction = new_dir
             graph._explicit_directions.add(sec_id)
+            graph._fold_reoriented_sections.add(sec_id)
         else:
             for hints, idx, target in folds:
                 side, lines = hints[idx]

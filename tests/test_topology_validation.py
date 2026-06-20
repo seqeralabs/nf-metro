@@ -119,12 +119,6 @@ class TestTopologyValidation:
             pytest.xfail(
                 "bypass_fan_in_outer_slot: meth slope 0.075 in minimum-width column gap"
             )
-        if "rl_entry_runway" in request.node.name:
-            pytest.xfail(
-                "rl_entry_runway: re-orienting the backward-feed fan to RL "
-                "leaves l2's exit-port bundle 4px off the entry-port Y "
-                "(a sub-pixel cross-section bundle-offset artifact, #887)"
-            )
         violations = check_almost_horizontal_edges(topology_graph)
         warnings = [v for v in violations if v.severity == Severity.WARNING]
         assert not warnings, "\n".join(v.message for v in warnings)

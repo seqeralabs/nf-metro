@@ -469,13 +469,7 @@ def _params_with_xfails(fixtures: list[str], xfails: dict[str, str]) -> list:
 # because the row-bundle trunk Y drifts between sections in the same row.
 # Surfaced by the cross-corpus parametrization; tracked separately from
 # this coverage PR.  See nf-metro audit /tmp/invariant-audit.md item 1.
-_XFAIL_ROW_TRUNK_CY: dict[str, str] = {
-    "topologies/rl_entry_runway.mmd": (
-        "re-orienting the backward-feed fan to RL leaves src_sec's two-line "
-        "exit-port bundle centred 2px off rl_sec's trunk (a sub-pixel "
-        "cross-section bundle-offset artifact, #887)"
-    ),
-}
+_XFAIL_ROW_TRUNK_CY: dict[str, str] = {}
 
 
 # Inter-section exit-port cy drifts from the matching entry-port cy in
