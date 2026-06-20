@@ -50,6 +50,7 @@ from nf_metro.layout.routing.common import (
     iter_port_peeloff_bundles,
     iter_vertical_segments,
     peeloff_target_slots,
+    resolve_section,
     tail_on_slot,
     trunk_segments_cross,
     vertical_direction,
@@ -2090,10 +2091,7 @@ def check_perp_exit_over_leadin_clears_only_spanned_sections(
             or len(r.points) != 6
         ):
             continue
-        src_st = graph.stations.get(r.edge.source)
-        if src_st is None or src_st.section_id is None:
-            continue
-        src_sec = graph.sections.get(src_st.section_id)
+        src_sec = resolve_section(graph, graph.stations.get(r.edge.source))
         if src_sec is None:
             continue
         (sx, _sy), (cx, cy), (gx, _gy), *_rest = r.points
