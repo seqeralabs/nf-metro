@@ -780,6 +780,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "and drops into the trunk head, rather than the trunk being dragged "
         "out toward the off-column source.",
     ),
+    (
+        "cross_column_perp_drop_far_exit",
+        TOPOLOGIES_DIR,
+        "The cross-column perpendicular drop where the source's exit side faces "
+        "away from the target's entry side (a BOTTOM exit feeding a TOP entry). "
+        "The lead-in crosses to the inter-column gap and reaches the TOP entry "
+        "from above the box, rather than rising up the trunk through the "
+        "section's stations.",
+    ),
 ]
 
 # Category headers inserted before specific entries

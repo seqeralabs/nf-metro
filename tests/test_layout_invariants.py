@@ -4328,6 +4328,57 @@ def test_cross_column_perp_entry_stays_in_bbox():
         assert_render_curve_invariants(graph, routes, offsets)
 
 
+def test_cross_column_perp_drop_leadin_clears_trunk():
+    """A cross-column perpendicular drop whose source exit side faces away from
+    the target's entry side reaches the entry port from the port's own side,
+    not by rising up the trunk column through the target's stations (#886).
+
+    The ``align`` exit is on the BOTTOM but ``qc``'s entry is on the TOP, so the
+    exit-side corridor sits below the target.  The lead-in must cross to the
+    inter-column gap and turn down into the TOP port from above the box; a
+    straight rise on the trunk X would run up through ``collect`` and
+    ``multiqc`` and read the declared ``collect -> multiqc`` order backwards.
+    """
+    from nf_metro.layout.phases.guards import _entry_approach_offenders
+
+    graph = _layout("topologies/cross_column_perp_drop_far_exit.mmd")
+    routes = route_edges(graph)
+
+    # The lead-in must not overlay the target trunk through its stations.
+    assert not _entry_approach_offenders(graph, routes)
+
+    qc = graph.sections["qc"]
+    trunk_x = graph.stations["collect"].x
+    feeder = next(
+        r
+        for r in routes
+        if r.edge.source == "align__exit_bottom_0"
+        and r.edge.target == "qc__entry_top_1"
+    )
+
+    # The final segment enters the TOP port from above the section boundary.
+    last = feeder.points[-1]
+    prev = feeder.points[-2]
+    assert abs(last[0] - trunk_x) <= GUARD_TOLERANCE
+    assert prev[1] <= qc.bbox_y + GUARD_TOLERANCE, (
+        f"final approach starts inside the box at y={prev[1]:.1f} "
+        f"(box top {qc.bbox_y:.1f})"
+    )
+
+    # No feeder segment may travel the trunk X down inside the box, where the
+    # target's stations sit; the only trunk-X leg is the port drop from above.
+    for (x0, y0), (x1, y1) in zip(feeder.points, feeder.points[1:]):
+        on_trunk = (
+            abs(x0 - trunk_x) <= GUARD_TOLERANCE
+            and abs(x1 - trunk_x) <= GUARD_TOLERANCE
+        )
+        if on_trunk:
+            assert max(y0, y1) <= qc.bbox_y + GUARD_TOLERANCE, (
+                f"lead-in runs the trunk X into the box: "
+                f"({x0:.1f},{y0:.1f})->({x1:.1f},{y1:.1f})"
+            )
+
+
 @pytest.mark.parametrize(
     "fixture",
     [
