@@ -1241,6 +1241,11 @@ def _find_downstream_bundle_y(
         ep = ports.get(eid)
         if not ep:
             continue
+        # A TOP/BOTTOM entry drops the line in vertically, so the exit's own
+        # trunk Y -- not the downstream consumer's Y -- governs the lead-in;
+        # anchoring to the consumer would pull the exit off its trunk.
+        if ep.side in (PortSide.TOP, PortSide.BOTTOM):
+            continue
         ds = sections.get(ep.section_id)
         if not ds or ds.grid_row != same_row:
             continue
