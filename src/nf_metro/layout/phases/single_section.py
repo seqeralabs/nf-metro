@@ -991,8 +991,6 @@ def _shift_lr_perp_entry_stations(
             continue  # gap is already sufficient
 
         # Shift internal stations away from the entry side.
-        # Stage 1.1 (_adjust_lr_entry_inset) already reserved bbox space
-        # for this shift, so no bbox expansion is needed here.
         for sid in section.station_ids:
             if sid in port_ids:
                 continue
@@ -1003,3 +1001,14 @@ def _shift_lr_perp_entry_stations(
                 s.x += shift
             else:
                 s.x -= shift
+
+        # _adjust_lr_entry_inset reserves bbox width on the right to match an
+        # LR section's rightward shift; an RL run shifts left, so extend the
+        # bbox left by the same amount to keep the trailing station inside it.
+        # Guarded to a same-column drop, where the entry port sits within the
+        # run's span (nearest_x is the run's far edge here): a cross-column
+        # port would drag the run off its own columns, an unsupported shape
+        # left to fail loudly downstream.
+        if section.direction == "RL" and min(internal_xs) <= port_x <= nearest_x:
+            section.bbox_x -= shift
+            section.bbox_w += shift

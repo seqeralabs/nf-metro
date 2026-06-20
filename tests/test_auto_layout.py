@@ -1,5 +1,6 @@
 """Tests for auto-layout inference logic."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -685,3 +686,51 @@ def test_folded_grid_preserves_topo_order_in_serpentine_read(fixture, threshold)
                 f"its successor {sid!r} at grid {grid[sid]} (read-rank "
                 f"{rank[sid]}) in serpentine read order"
             )
+
+
+_GRID_DIRECTIVE_RE = re.compile(r"^\s*%%metro\s+(grid|direction)\s*:", re.IGNORECASE)
+
+
+def _strip_grid_and_direction(text: str) -> str:
+    """Drop every ``%%metro grid:``/``direction:`` line so the map lays out
+    under pure auto-inference."""
+    return "\n".join(
+        line for line in text.splitlines() if not _GRID_DIRECTIVE_RE.match(line)
+    )
+
+
+@pytest.mark.parametrize("fixture", ["sarek_metro.mmd", "rnaseq_auto.mmd"])
+def test_perp_entry_run_stays_in_section_bbox(fixture):
+    """A perpendicular-entry shift keeps the run inside its section bbox (#875).
+
+    Auto-layout can place a horizontal (LR/RL) section as a run fed by a
+    same-column vertical drop, so its only port is a perpendicular TOP entry.
+    Opening the station-elbow gap shifts the run away from that port; the bbox
+    must follow on the shift side.  Stripping ``sarek_metro``'s explicit
+    ``grid:`` directives drives its ``annotation`` section into exactly this
+    state -- before the fix the leftmost station spilled past ``bbox_x`` and
+    the always-on bbox-containment guard aborted the render.  ``rnaseq_auto``
+    is a clean auto-layout that must keep passing.
+    """
+    from nf_metro.layout.constants import GUARD_TOLERANCE
+    from nf_metro.layout.engine import compute_layout
+
+    text = _strip_grid_and_direction((EXAMPLES / fixture).read_text())
+    graph = parse_metro_mermaid(text)
+    compute_layout(graph)
+
+    tol = GUARD_TOLERANCE
+    junction_ids = graph.junction_ids
+    for sid, station in graph.stations.items():
+        if station.is_port or sid in junction_ids:
+            continue
+        sec = graph.sections.get(station.section_id or "")
+        if sec is None or sec.bbox_w == 0:
+            continue
+        left = sec.bbox_x - tol
+        right = sec.bbox_x + sec.bbox_w + tol
+        assert left <= station.x <= right, (
+            f"{fixture}: station {sid!r} x={station.x:.1f} outside section "
+            f"{station.section_id!r} bbox x-range "
+            f"[{sec.bbox_x:.1f}, {sec.bbox_x + sec.bbox_w:.1f}]"
+        )
