@@ -12,7 +12,11 @@ from nf_metro.layout.constants import (
     SAME_COORD_TOLERANCE,
     STATION_ELBOW_TOLERANCE,
 )
-from nf_metro.layout.phases._common import _expand_bbox_for_y, _grid_group_section_ids
+from nf_metro.layout.phases._common import (
+    _expand_bbox_for_y,
+    _grid_group_section_ids,
+    exit_run_corridor_clear,
+)
 from nf_metro.layout.phases.guards import _section_lacks_flow_aligned_port
 from nf_metro.layout.phases.junctions import (
     _resolve_source_section_id,
@@ -749,7 +753,7 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
         anchors_to_carrier = (
             single_source
             and _exit_feeds_direct_entry(graph, port_id, junction_ids)
-            and _exit_run_corridor_clear(graph, port_id, section, source_ids)
+            and exit_run_corridor_clear(graph, port_id, section, source_ids)
         )
         if keep_downstream_aligned and not anchors_to_carrier:
             continue
@@ -773,40 +777,6 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
             port_st.y = target_y
 
 
-def _exit_run_corridor_clear(
-    graph: MetroGraph,
-    exit_port_id: str,
-    section: Section,
-    carrier_ids: list[str],
-) -> bool:
-    """Whether the X span between the carrier(s) and the exit port is free of
-    other section stations.
-
-    Anchoring the exit to its carrier row only helps when the straight run
-    from the carrier to the port stays clear; a station seated in that span
-    (e.g. an off-track output hung off the carrier) would be ploughed
-    through, so the exit keeps its downstream-aligned placement instead.
-    """
-    port_st = graph.stations.get(exit_port_id)
-    carrier_xs = [
-        graph.stations[c].x for c in carrier_ids if c in graph.stations
-    ]
-    if port_st is None or not carrier_xs:
-        return False
-    inner_x = max(carrier_xs) if section.direction == "LR" else min(carrier_xs)
-    lo, hi = sorted((inner_x, port_st.x))
-    carrier_set = set(carrier_ids)
-    for sid in section.station_ids:
-        if sid == exit_port_id or sid in carrier_set:
-            continue
-        st = graph.stations.get(sid)
-        if st is None or st.is_port:
-            continue
-        if lo + SAME_COORD_TOLERANCE < st.x < hi - SAME_COORD_TOLERANCE:
-            return False
-    return True
-
-
 def _exit_feeds_direct_entry(
     graph: MetroGraph,
     exit_port_id: str,
@@ -818,14 +788,12 @@ def _exit_feeds_direct_entry(
     merge junction on the far side means the exit should align to the
     junction's row, not to its own carrying station.
     """
-    found = False
-    for edge in graph.edges_from(exit_port_id):
-        if edge.target in junction_ids:
-            return False
-        tgt_port = graph.ports.get(edge.target)
-        if tgt_port is not None and tgt_port.is_entry:
-            found = True
-    return found
+    edges = graph.edges_from(exit_port_id)
+    if any(e.target in junction_ids for e in edges):
+        return False
+    return any(
+        (tp := graph.ports.get(e.target)) is not None and tp.is_entry for e in edges
+    )
 
 
 def _resolve_downstream_entry_y(

@@ -701,3 +701,35 @@ def _grow_section_bbox_downward(
     _pull_section_ports_to_edge(
         graph, section, PortSide.BOTTOM, section.bbox_y + section.bbox_h
     )
+
+
+def exit_run_corridor_clear(
+    graph: MetroGraph,
+    exit_port_id: str,
+    section: Section,
+    carrier_ids: list[str],
+) -> bool:
+    """Whether the X span between the carrier(s) and the exit port is free of
+    other section stations.
+
+    Anchoring a flow-aligned exit to its carrier row only helps when the
+    straight run from the carrier to the port stays clear; a station seated
+    in that span (e.g. an off-track output hung off the carrier) would be
+    ploughed through, so the exit keeps its downstream-aligned placement.
+    """
+    port_st = graph.stations.get(exit_port_id)
+    carrier_xs = [graph.stations[c].x for c in carrier_ids if c in graph.stations]
+    if port_st is None or not carrier_xs:
+        return False
+    inner_x = max(carrier_xs) if section.direction == "LR" else min(carrier_xs)
+    lo, hi = sorted((inner_x, port_st.x))
+    carrier_set = set(carrier_ids)
+    for sid in section.station_ids:
+        if sid == exit_port_id or sid in carrier_set:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.is_port:
+            continue
+        if lo + SAME_COORD_TOLERANCE < st.x < hi - SAME_COORD_TOLERANCE:
+            return False
+    return True

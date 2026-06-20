@@ -16,17 +16,14 @@ from nf_metro.layout.phases._common import (
     _ref_y,
     _section_bundle_lines,
     _section_lr_port_anchor_y,
+    exit_run_corridor_clear,
 )
 from nf_metro.layout.phases.bbox import (
     _lift_would_cause_uturn,
     _loop_corner_x,
     _push_lower_rows_after_bbox_grow,
 )
-from nf_metro.layout.phases.ports import (
-    _exit_feeds_direct_entry,
-    _exit_run_corridor_clear,
-    _set_port_y,
-)
+from nf_metro.layout.phases.ports import _exit_feeds_direct_entry, _set_port_y
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
 
@@ -113,7 +110,7 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
             len(src_ys) == 1
             and abs(port_st.y - next(iter(src_ys))) < SAME_COORD_TOLERANCE
             and _exit_feeds_direct_entry(graph, port_id, junction_ids)
-            and _exit_run_corridor_clear(graph, port_id, section, src_ids)
+            and exit_run_corridor_clear(graph, port_id, section, src_ids)
         ):
             carrier_y = next(iter(src_ys))
             for eid in entry_ids:
