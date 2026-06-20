@@ -1,0 +1,18 @@
+%%metro title: TB Bottom Entry Flow Start
+%%metro style: nfcore
+%%metro line: reads | Reads | #1f77b4
+
+graph LR
+    subgraph up [Up]
+        a[A]
+        b[B]
+        a -->|reads| b
+    end
+    subgraph qc [QC]
+        %%metro direction: TB
+        %%metro entry: bottom | reads
+        collect[Collect]
+        multiqc[MultiQC]
+        collect -->|reads| multiqc
+    end
+    b -->|reads| collect

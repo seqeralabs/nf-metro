@@ -422,10 +422,10 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "right_entry_gap_above_empty_row",
         TOPOLOGIES_DIR,
-        "A right-entry feed from a source two rows above its target finds the "
-        "immediate next row empty, collapsing the inter-row band so the "
-        "gap-above route is unavailable and the feed falls back to the "
-        "around-below loop.",
+        "A right-entry feed from a source two rows above its target, where the "
+        "target flows right-to-left so its flow-start consumer sits at the "
+        "entry edge: the feed loops around below into the port beside the "
+        "consumer rather than crossing the box and folding back (#885).",
     ),
     (
         "corridor_narrow_gap_fallback",
@@ -510,6 +510,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "no station reads as an elbow.",
     ),
     (
+        "tb_bottom_entry_flow_start",
+        TOPOLOGIES_DIR,
+        "A `%%metro direction: TB` section given `%%metro entry: bottom` whose "
+        "consumer is the flow-start (top) station. The bottom entry is "
+        "re-anchored to the top so the line enters beside its consumer and "
+        "flows down, rather than running up through MultiQC to reach Collect "
+        "and folding back (#885).",
+    ),
+    (
         "around_below_ep_col_gt0",
         TOPOLOGIES_DIR,
         "A two-line bundle looping around below the canvas into a non-zero-"
@@ -528,9 +537,10 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "right_entry_from_above",
         TOPOLOGIES_DIR,
-        "A RIGHT entry one row below a source on its right: the feed wraps to "
-        "approach the port from its outward (right) side instead of an L-shape "
-        "that slices across the source box.",
+        "A RIGHT entry whose consumer is the section's flow-start station: the "
+        "section flows right-to-left so the consumer sits at the entry edge and "
+        "the feed enters beside it, rather than running across the box to the "
+        "far station and folding back (#885).",
     ),
     (
         "merge_leftmost_sink_branch",
@@ -576,9 +586,10 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "rl_entry_runway",
         TOPOLOGIES_DIR,
-        "A right-to-left section whose flow-side entry skips ahead to a deep "
-        "off-track target, compressing the diagonal into the entry region and "
-        "running a horizontal runway past the bypassed stations.",
+        "A source section feeding a left-hand target via `%%metro exit: left`: "
+        "it flows right-to-left so its producers sit at the left exit edge and "
+        "the runway leaves beside them, rather than the producers exiting left "
+        "back through the start station (#885).",
     ),
     (
         "terminus_join",
@@ -657,10 +668,10 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "merge_right_entry",
         TOPOLOGIES_DIR,
-        "One line converges on a RIGHT entry from feeders spread across "
-        "several columns: the farthest carries the trunk that loops under the "
-        "sink, and the nearer feeder drops onto that same channel instead of "
-        "taking a second path over the top.",
+        "One line converges on a RIGHT entry whose consumer is the sink's "
+        "flow-start station: the sink flows right-to-left so the merge arrives "
+        "beside its consumer, and the trunk loops under the sink onto that "
+        "channel rather than slicing across the box to the far station (#885).",
     ),
     (
         "peeloff_riser_respace",

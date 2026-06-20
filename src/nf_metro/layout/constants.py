@@ -666,6 +666,11 @@ from untouched ones when checking column-companion consensus."""
 GUARD_TOLERANCE: float = 5.0
 """Tolerance for stage-boundary invariant checks (port-on-boundary, etc.)."""
 
+COLLINEAR_AXIS_TOL: float = 0.5
+"""Maximum constant-axis separation for two axis-aligned legs to count as
+sharing one track.  Tight (sub-pixel) so legs on a single track register as
+collinear while neighbouring legs one slot apart in a routing channel do not."""
+
 COMPONENT_BAND_OVERLAP_TOLERANCE: float = 0.5
 """Slack permitted when checking that independently-stacked disconnected
 components occupy disjoint vertical bands."""

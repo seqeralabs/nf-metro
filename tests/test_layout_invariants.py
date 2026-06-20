@@ -469,7 +469,13 @@ def _params_with_xfails(fixtures: list[str], xfails: dict[str, str]) -> list:
 # because the row-bundle trunk Y drifts between sections in the same row.
 # Surfaced by the cross-corpus parametrization; tracked separately from
 # this coverage PR.  See nf-metro audit /tmp/invariant-audit.md item 1.
-_XFAIL_ROW_TRUNK_CY: dict[str, str] = {}
+_XFAIL_ROW_TRUNK_CY: dict[str, str] = {
+    "topologies/rl_entry_runway.mmd": (
+        "re-orienting the backward-feed fan to RL leaves src_sec's two-line "
+        "exit-port bundle centred 2px off rl_sec's trunk (a sub-pixel "
+        "cross-section bundle-offset artifact, #887)"
+    ),
+}
 
 
 # Inter-section exit-port cy drifts from the matching entry-port cy in
@@ -3905,6 +3911,30 @@ def test_entry_approach_arrives_from_port_side(fixture):
     assert not offenders, f"{fixture}: " + "; ".join(
         f"{rp.line_id} {rp.edge.source}->{rp.edge.target}: {reason}"
         for rp, _pid, reason in offenders[:5]
+    )
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_no_line_folds_back_over_its_track(fixture):
+    """A line must not cover any stretch in opposing directions (#885).
+
+    Two axis-aligned legs of one line that share a constant axis and overlap
+    while pointing opposite ways draw the line out and straight back over the
+    same track.  Any station caught in that overlap is then read out of flow
+    order -- e.g. a flow-axis ``entry``/``exit`` port declared on the edge
+    opposite its consumer drives the connecting leg back through the
+    intervening stations.  Parametrised over the whole corpus so the
+    invariant generalises beyond the single reporting fixture.
+    """
+    from nf_metro.layout.phases.guards import iter_opposing_line_overlaps
+
+    graph = _layout(fixture)
+    routes = route_edges(graph)
+    overlaps = list(iter_opposing_line_overlaps(graph, routes=routes))
+    assert not overlaps, f"{fixture}: " + "; ".join(
+        f"{ov.line_id} {ov.axis}={ov.coord:.1f} over [{ov.lo:.1f},{ov.hi:.1f}] "
+        f"({ov.src_a}->{ov.tgt_a} vs {ov.src_b}->{ov.tgt_b})"
+        for ov in overlaps[:5]
     )
 
 

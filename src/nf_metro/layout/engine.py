@@ -152,6 +152,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_line_strikes_label,
     _guard_no_mixed_entry_directions,
     _guard_no_negative_grid_columns,
+    _guard_no_opposing_line_overlap,
     _guard_no_route_through_section,
     _guard_no_same_line_parallel_descents,
     _guard_no_same_row_backward_feed,
@@ -1342,6 +1343,13 @@ def _place_pass_c_content(
     # then re-align row bbox tops, compact, and re-snap inter-section
     # port pairs.  Stage 6 below handles the rest of Pass C.
 
+    # A TB/BT section's perpendicular entry port is pinned a fixed offset
+    # above its first station; the bbox growth between Stage 3.2's alignment
+    # and here can lift the section top past it, leaving the port off its
+    # boundary edge.  Re-align before the pass-C guards check boundaries
+    # (Stage 6.16 re-aligns again after the late vertical settling).
+    _align_entry_ports(graph, tb_only=True)
+
     # Stage 5.1: Position junction stations in the inter-section gap.
     _position_junctions(graph)
     _snap(graph, "5.1")
@@ -1722,6 +1730,9 @@ def _finalize_layout(
                 graph, phase, routes=routes, offsets=offsets
             )
             _guard_entry_approach_from_port_side(graph, phase, routes=routes)
+            _guard_no_opposing_line_overlap(
+                graph, phase, offsets=offsets, routes=routes
+            )
             _guard_serpentine_no_backtrack(graph, phase, routes=routes)
             _guard_no_artefactual_counter_flow(graph, phase, routes=routes)
             _guard_inter_row_run_clearance(graph, phase, routes=routes)
