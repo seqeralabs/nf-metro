@@ -616,16 +616,16 @@
     "status": "defensive"
   },
   "offsets.py::for edge in graph.edges_to(jid):::#2": {
-    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). That topology renders with a bundle-order flip inside the reversal curves - filed as #760 - so no clean fixture can be shipped yet. Reachable-but-defective; revisit when #760 lands.",
-    "status": "needs-review"
+    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive.",
+    "status": "defensive"
   },
   "offsets.py::for lid, off in desired.items():::#1": {
-    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). That topology renders with a bundle-order flip inside the reversal curves - filed as #760 - so no clean fixture can be shipped yet. Reachable-but-defective; revisit when #760 lands.",
-    "status": "needs-review"
+    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive.",
+    "status": "defensive"
   },
   "offsets.py::for lid, off in desired.items():::#2": {
-    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). That topology renders with a bundle-order flip inside the reversal curves - filed as #760 - so no clean fixture can be shipped yet. Reachable-but-defective; revisit when #760 lands.",
-    "status": "needs-review"
+    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive.",
+    "status": "defensive"
   },
   "offsets.py::for other in lines:::#1": {
     "note": "In _reorder_one_exit_line, the loop over `lines` always finds the swap partner: desired_off is the min or max of all_offs, which by construction is held by another line, so the loop-exhausted-without-match arm is never taken (0/128). Defensive. Reclassified defensive (#762).",
@@ -648,16 +648,16 @@
     "status": "defensive"
   },
   "offsets.py::if abs(exit_st.y - j_st.y) <= _SAME_Y_TOLERANCE:::#1": {
-    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). That topology renders with a bundle-order flip inside the reversal curves - filed as #760 - so no clean fixture can be shipped yet. Reachable-but-defective; revisit when #760 lands. Its Y-differs arm (->1147) is additionally defensive: only a BOTTOM-exit junction is offset in Y from its exit, but such a junction sits below the consumer row and never meets the body's all-entries-within-tolerance precondition.",
-    "status": "needs-review"
+    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its Y-differs arm (->1147) is additionally defensive: only a BOTTOM-exit junction is offset in Y from its exit, but such a junction sits below the consumer row and never meets the body's all-entries-within-tolerance precondition.",
+    "status": "defensive"
   },
   "offsets.py::if abs(nbr_cur - new_off) < _OFFSET_EQ_TOLERANCE:::#1": {
     "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
     "status": "needs-review"
   },
   "offsets.py::if all(::#1": {
-    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). That topology renders with a bundle-order flip inside the reversal curves - filed as #760 - so no clean fixture can be shipped yet. Reachable-but-defective; revisit when #760 lands. The already-aligned arm (->1190) is exercised by the corpus; the body arm (->1192) is the reachable-but-defective one.",
-    "status": "needs-review"
+    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. The already-aligned arm (->1190) is exercised by the corpus; the body arm (->1192) is the reachable-but-defective one.",
+    "status": "defensive"
   },
   "offsets.py::if cur in seen:::#1": {
     "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
@@ -672,12 +672,12 @@
     "status": "defensive"
   },
   "offsets.py::if exit_lines == set(j_lines):::#1": {
-    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). That topology renders with a bundle-order flip inside the reversal curves - filed as #760 - so no clean fixture can be shipped yet. Reachable-but-defective; revisit when #760 lands. Its lines-differ arm (->1147) is additionally defensive: a fan-out junction carries exactly its single exit port's fanned lines, so exit_lines == j_lines always.",
-    "status": "needs-review"
+    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its lines-differ arm (->1147) is additionally defensive: a fan-out junction carries exactly its single exit port's fanned lines, so exit_lines == j_lines always.",
+    "status": "defensive"
   },
   "offsets.py::if feeding_exit is None:::#1": {
-    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). That topology renders with a bundle-order flip inside the reversal curves - filed as #760 - so no clean fixture can be shipped yet. Reachable-but-defective; revisit when #760 lands.",
-    "status": "needs-review"
+    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive.",
+    "status": "defensive"
   },
   "offsets.py::if graph.stations[peer_sid].is_hidden:::#1": {
     "note": "For this arm to fire, the compaction BFS must arrive at a neighbor N whose same-layer peers include a hidden station (bypass-V or converge). Bypass-V stations get their layer from the predecessor P (P.layer+1), so a bypass-V at N.layer requires P at N.layer-1. But P must carry the bypassed line (not in the gap), while the gap seed must NOT carry that line. These constraints force P and the gap seed to be at the same layer (seed.layer = P.layer = N.layer-1) but connected through independent chains to N, a topologically exotic arrangement no standard mmd pattern produces. In all tested bypass+gap topologies, the bypass-V ends up co-layer with the gap seed, not with the BFS neighbor.",
@@ -764,16 +764,16 @@
     "status": "defensive"
   },
   "offsets.py::if single_exit and feeding_exit is not None:::#1": {
-    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). That topology renders with a bundle-order flip inside the reversal curves - filed as #760 - so no clean fixture can be shipped yet. Reachable-but-defective; revisit when #760 lands. Its False arm (->1147) is additionally defensive: a >=2-line junction reaching this body is always a single-exit-port-fed fan-out junction (merge junctions carry one line and are skipped by len(j_lines)<2).",
-    "status": "needs-review"
+    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its False arm (->1147) is additionally defensive: a >=2-line junction reaching this body is always a single-exit-port-fed fan-out junction (merge junctions carry one line and are skipped by len(j_lines)<2).",
+    "status": "defensive"
   },
   "offsets.py::if src and not src.is_port and src.section_id == sec_id:::#1": {
     "note": "The false arm fires when an edge source is an internal station (not a port) whose section_id differs from sec_id. After _resolve_sections(), all inter-section edges run through port stations; no direct edge from an internal station of section A to an internal station of section B exists. DFS back-walk via edges_to() from within a section can only reach: (a) entry ports (return True), (b) same-section internal stations (pushed), or (c) other-section ports (is_port=True, skipped by `port and port.is_entry` check). Cross-section internal stations are structurally unreachable via direct edges after resolution.",
     "status": "defensive"
   },
   "offsets.py::if src_port and not src_port.is_entry:::#2": {
-    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). That topology renders with a bundle-order flip inside the reversal curves - filed as #760 - so no clean fixture can be shipped yet. Reachable-but-defective; revisit when #760 lands. Its else arm (->1203) is additionally defensive: the sole feeder of a >=2-line fan-out junction is its exit port, a non-entry port.",
-    "status": "needs-review"
+    "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its else arm (->1203) is additionally defensive: the sole feeder of a >=2-line fan-out junction is its exit port, a non-entry port.",
+    "status": "defensive"
   },
   "offsets.py::if src_st and not src_st.is_port:::#1": {
     "note": "In `_rewrite_edges_with_junctions` (resolve.py L594), edges to exit ports are always created as `Edge(source=edge.source, target=exit_port_id)` where `edge.source` is the original inter-section edge's source — an internal section station, not a port. So `src_st` is never None and `src_st.is_port` is always False. The false arm cannot be taken by any valid parsed graph.",

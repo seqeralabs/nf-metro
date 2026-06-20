@@ -49,6 +49,23 @@ def vertical_direction(dy: float) -> Direction:
     return Direction.D if dy > 0 else Direction.U
 
 
+def tb_right_entry_sections(graph: MetroGraph) -> set[str]:
+    """IDs of TB sections that have a RIGHT entry port.
+
+    A RIGHT-entry TB section runs its internal column in raw priority order;
+    every other TB section runs it reversed.  Both the offset assignment and
+    the section-reversal detection key on this distinction.
+    """
+    return {
+        port.section_id
+        for port in graph.ports.values()
+        if port.is_entry
+        and port.side == PortSide.RIGHT
+        and graph.sections.get(port.section_id) is not None
+        and graph.sections[port.section_id].direction == "TB"
+    }
+
+
 # ---------------------------------------------------------------------------
 # Grid-position helpers
 # ---------------------------------------------------------------------------
