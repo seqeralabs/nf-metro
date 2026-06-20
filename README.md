@@ -81,6 +81,7 @@ nf-metro render [OPTIONS] INPUT_FILE
 | `--y-spacing FLOAT` | auto | Vertical spacing between tracks (derived from the map's content so captioned icons and dense labels don't collide) |
 | `--fold-threshold INTEGER` | `15` | Max station-columns a section row may reach before wrapping to the next row |
 | `--animate / --no-animate` | off | Add animated balls traveling along lines |
+| `--directional / --no-directional` | off | Draw static chevrons along each route pointing in the flow direction (source to target) |
 | `--debug / --no-debug` | off | Show debug overlay (ports, hidden stations, edge waypoints) |
 | `--logo PATH` | none | Logo image path (overrides `%%metro logo:` directive) |
 | `--line-order [definition\|span]` | `definition` | Line ordering strategy: `definition` preserves `.mmd` order, `span` sorts by section span (longest first) |

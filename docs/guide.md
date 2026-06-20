@@ -529,6 +529,7 @@ These go at the top of the file, before `graph LR`.
 | `%%metro width: <pixels>` | Output width in pixels (default: auto from content) |
 | `%%metro height: <pixels>` | Output height in pixels (default: auto from content) |
 | `%%metro animate: true` | Add animated balls traveling along the metro lines |
+| `%%metro directional: true` | Draw static chevrons along each route pointing in the flow direction (source to target). Off by default; CLI equivalent `--directional`. Marker size, spacing, opacity, and colour are theme knobs (`directional_marker_*`). |
 | `%%metro file: <station> \| <label> [\| <name>] [\| banner]` | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon; optional `banner` draws the label on a dark strip across the icon. |
 | `%%metro files: <station> \| <label> [\| <name>] [\| banner]` | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption; optional `banner` strip. |
 | `%%metro dir: <station> \| <label> [\| <name>]` | Mark a station with a folder icon (e.g. output directory). Optional `name` caption. |

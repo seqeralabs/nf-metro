@@ -203,6 +203,12 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         help="Add animated balls traveling along the metro lines.",
     ),
     LayoutOption(
+        name="directional",
+        kind="bool",
+        help="Draw static chevrons along each route pointing in the flow "
+        "direction (source to target). Off by default.",
+    ),
+    LayoutOption(
         name="manifest",
         attr="embed_manifest",
         kind="bool",

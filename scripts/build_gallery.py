@@ -47,6 +47,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Minimal two-line pipeline with no sections.",
     ),
     (
+        "directional_flow",
+        EXAMPLES_DIR,
+        "Opt-in static flow chevrons via `%%metro directional: true` (CLI: "
+        "`--directional`): periodic open chevrons ride each route pointing "
+        "source to target, making fan-out and merge direction legible without "
+        "the animated `--animate` balls. Marker size, spacing, opacity, and "
+        "colour are `Theme` knobs.",
+    ),
+    (
         "line_spread",
         EXAMPLES_DIR,
         "Demonstrates the `%%metro line_spread:` axis with one per-section "

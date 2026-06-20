@@ -1,0 +1,25 @@
+%%metro title: Directional Flow
+%%metro style: dark
+%%metro directional: true
+%%metro line: dna | DNA variants | #E64A19
+%%metro line: rna | RNA expression | #1E88E5
+
+graph LR
+    reads[Reads]
+    trim[Trim]
+    align[Align]
+    snv[Call SNVs]
+    sv[Call SVs]
+    merge[Merge calls]
+    quant[Quantify]
+    report[Report]
+
+    reads -->|dna| trim
+    trim -->|dna| align
+    align -->|dna| snv
+    align -->|dna| sv
+    snv -->|dna| merge
+    sv -->|dna| merge
+    merge -->|dna| report
+    reads -->|rna| quant
+    quant -->|rna| report
