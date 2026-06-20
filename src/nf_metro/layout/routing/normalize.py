@@ -1604,3 +1604,33 @@ def _h_segment_crosses_other_section(
         if s.bbox_y - margin <= y <= s.bbox_y + s.bbox_h + margin:
             return True
     return False
+
+
+def _v_segment_crosses_other_section(
+    graph: MetroGraph,
+    x: float,
+    y1: float,
+    y2: float,
+    exclude_section_ids: set[str],
+    margin: float = 0.0,
+) -> bool:
+    """Return True if a vertical segment at *x* crosses any section interior.
+
+    The vertical mirror of :func:`_h_segment_crosses_other_section`: sections
+    in *exclude_section_ids* are skipped, all others are tested against their
+    open interior.  The segment runs from ``min(y1, y2)`` to ``max(y1, y2)``;
+    a section is crossed when the segment penetrates its open Y interior while
+    *x* falls within ``[bbox_x - margin, bbox_x + bbox_w + margin]``.
+    """
+    lo_y, hi_y = (y1, y2) if y1 <= y2 else (y2, y1)
+    for s in graph.sections.values():
+        if s.bbox_w <= 0:
+            continue
+        if s.id in exclude_section_ids:
+            continue
+        bottom = s.bbox_y + s.bbox_h
+        if hi_y <= s.bbox_y or lo_y >= bottom:
+            continue
+        if s.bbox_x - margin <= x <= s.bbox_x + s.bbox_w + margin:
+            return True
+    return False

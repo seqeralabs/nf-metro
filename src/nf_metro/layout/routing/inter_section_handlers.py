@@ -83,6 +83,7 @@ from nf_metro.layout.routing.normalize import (
     _clear_channel_x_in_band,
     _gap_channel_base,
     _h_segment_crosses_other_section,
+    _v_segment_crosses_other_section,
 )
 from nf_metro.layout.routing.perp import (
     _perp_riser_lateral,
@@ -356,22 +357,116 @@ def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
     return _route_bypass(edge, src, tgt, f.i, f.src_col, f.tgt_col, ctx, f.src_row)
 
 
+def _right_entry_drop_in_is_clear(
+    graph: MetroGraph,
+    src: Station,
+    entry_port: Station,
+    corner_x: float,
+) -> bool:
+    """Whether a RIGHT entry can be reached by a straight drop down *corner_x*.
+
+    Viable only when the source already sits past the target's right edge, so
+    the descent channel ``corner_x`` lands on the port's outward side: a single
+    drop from the source Y to the entry Y, then a leftward turn into the port,
+    crossing no section interior.  Both legs are checked against every other
+    section so an intervening box in the descent column (or under the inward
+    turn) defers to the gap-above / around-below loops instead.
+    """
+    ex, ey = entry_port.x, entry_port.y
+    ep_section = (
+        graph.sections.get(entry_port.section_id) if entry_port.section_id else None
+    )
+    section_right = (
+        ep_section.bbox_x + ep_section.bbox_w
+        if ep_section and ep_section.bbox_w > 0
+        else ex
+    )
+    if corner_x < section_right - COORD_TOLERANCE:
+        return False
+    exclude = {
+        sid for sid in (src.section_id, entry_port.section_id) if sid is not None
+    }
+    if _v_segment_crosses_other_section(graph, corner_x, src.y, ey, exclude):
+        return False
+    return not _h_segment_crosses_other_section(graph, corner_x, ex, ey, exclude)
+
+
+def _route_right_entry_drop_in(
+    edge: Edge,
+    src: Station,
+    entry_port: Station,
+    ctx: _RoutingCtx,
+    *,
+    pos_n: int,
+    delta: float,
+    corner_x: float,
+) -> RoutedPath:
+    """Route a RIGHT entry by dropping straight down the source's outward side.
+
+    Used when the source sits above and past the target's right edge with no
+    section in the way (:func:`_right_entry_drop_in_is_clear`).  The R-D-L path
+    leads right out of the source, drops down the lead-out channel directly to
+    the entry Y, then turns left into the RIGHT port from ``x >= port.x``::
+
+        (sx, sy)        -> H lead-in right of the source
+        (corner_x, sy)  ; turn down
+        (corner_x, ey)  -> V straight to the entry Y
+        (ex, ey)        -> H into the port from its own outward side
+
+    The bundle stagger (*pos_n*, *delta*) and lead-out *corner_x* come from the
+    caller's single :func:`_wrap_fan_geometry` resolution, shared with the
+    viability check.
+    """
+    sx, sy = src.x, src.y
+    ex, ey = entry_port.x, entry_port.y
+    src_off = _get_offset(ctx, edge.source, edge.line_id)
+    tgt_off = _get_offset(ctx, edge.target, edge.line_id)
+    centerline = [
+        (sx, sy + src_off + delta),
+        (corner_x, sy + src_off + delta),
+        (corner_x, ey + tgt_off - delta),
+        (ex, ey + tgt_off - delta),
+    ]
+    route = route_along(
+        edge,
+        [(edge, edge.line_id, -delta)],
+        centerline,
+        base_radius=ctx.curve_radius,
+        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+    )
+    assert route is not None  # the lone member is always in its own bundle
+    _declare_channel(route, ctx, corner_x, vertical_direction(ey - sy))
+    return route
+
+
 def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
     """Cross-row feed into a RIGHT entry, reached from the port's outward side.
 
     A standard L-shape drops its vertical channel across the source or target
-    box to reach the far-edge RIGHT port.  Instead run the long horizontal in
-    the clear inter-row band just above the target row (then drop straight down
-    the target's right side into the port) when that band is clear; otherwise
-    loop around below the whole target row.  Both approaches enter the RIGHT
-    port from ``x >= port.x`` and never cross a section interior.
+    box to reach the far-edge RIGHT port.  When the source already sits past
+    the target's right edge with a clear descent column, drop straight down its
+    outward side to the entry Y and turn in.  Otherwise run the long horizontal
+    in the clear inter-row band just above the target row (then drop down the
+    target's right side into the port) when that band is clear, else loop
+    around below the whole target row.  Every approach enters the RIGHT port
+    from ``x >= port.x`` and never crosses a section interior.
+
+    The dispatch rule guarantees ``src_row < tgt_row`` and, by ceding obstacle
+    cases to the earlier bypass / plough rules, that no section sits between the
+    source and the port; the outward-side drop-in is therefore the usual path,
+    and the gap-above / around-below fallbacks cover only an exotic descent
+    blocked by a wide same-column sibling.
     """
     edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
-    if (
-        f.src_row is not None
-        and f.tgt_row is not None
-        and f.src_row < f.tgt_row
-        and _right_entry_gap_above_is_clear(graph, src, tgt, tgt, f.src_row)
+    _fan, pos_n, delta, corner_x = _wrap_fan_geometry(
+        ctx, edge, src, f.i, f.n, vertical_direction(tgt.y - src.y)
+    )
+    if _right_entry_drop_in_is_clear(graph, src, tgt, corner_x):
+        return _route_right_entry_drop_in(
+            edge, src, tgt, ctx, pos_n=pos_n, delta=delta, corner_x=corner_x
+        )
+    if f.src_row is not None and _right_entry_gap_above_is_clear(
+        graph, src, tgt, tgt, f.src_row
     ):
         return _route_right_entry_via_gap_above(
             edge, src, tgt, tgt, f.i, f.n, ctx, f.src_row

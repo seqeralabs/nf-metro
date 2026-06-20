@@ -548,7 +548,17 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "A RIGHT entry whose consumer is the section's flow-start station: the "
         "section flows right-to-left so the consumer sits at the entry edge and "
         "the feed enters beside it, rather than running across the box to the "
-        "far station and folding back (#885).",
+        "far station and folding back (#885).  Fed from a higher row past the "
+        "target's right edge, the line drops straight down its outward side to "
+        "the entry Y rather than looping below the box (#889).",
+    ),
+    (
+        "right_entry_from_above_far",
+        TOPOLOGIES_DIR,
+        "A RIGHT entry fed from two rows up, past the target's right edge: the "
+        "line drops straight down its outward side across the empty intervening "
+        "row to the entry Y and turns in, rather than diving below the box and "
+        "climbing back up (#889).",
     ),
     (
         "merge_leftmost_sink_branch",

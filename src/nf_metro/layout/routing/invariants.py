@@ -2223,6 +2223,87 @@ def check_perp_exit_over_leadin_clears_only_spanned_sections(
     return violations
 
 
+@dataclass(frozen=True)
+class RightEntryNeedlessDive:
+    """A RIGHT entry fed from above loops below the box though a drop-in fits.
+
+    :func:`~nf_metro.layout.routing.inter_section_handlers._route_right_entry_cross_row`
+    drops straight down the source's outward side into the RIGHT port when that
+    descent column is clear past the target's right edge, reserving the
+    around-below loop for cases where the direct drop is obstructed.  A route
+    that dives below the target box while the drop-in column was clear took the
+    loop needlessly.
+    """
+
+    source: str
+    target: str
+    dive_y: float
+    box_bottom: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"RIGHT-entry feed {self.source!r}->{self.target!r} dives to "
+            f"y={self.dive_y:.1f} below target box bottom {self.box_bottom:.1f} "
+            f"though a clear drop-in down the outward side reaches the entry Y"
+        )
+
+
+def check_right_entry_drop_in_when_clear(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> list[RightEntryNeedlessDive]:
+    """Return RIGHT-entry-from-above routes that loop below a clear drop-in.
+
+    A feed from a higher row into a RIGHT entry whose source already sits past
+    the target's right edge can drop straight down the source's outward side to
+    the entry Y; the descent X the route leads out to (``points[1].x``) and the
+    router's own :func:`_right_entry_drop_in_is_clear` decide whether that drop
+    is unobstructed.  A route diving below the target box while that drop-in was
+    clear is a needless around-below loop.
+    """
+    from nf_metro.layout.routing.inter_section_handlers import (
+        _right_entry_drop_in_is_clear,
+    )
+
+    tol = COORD_TOLERANCE
+    violations: list[RightEntryNeedlessDive] = []
+    for r in routes:
+        tgt_port = graph.ports.get(r.edge.target)
+        if (
+            tgt_port is None
+            or not tgt_port.is_entry
+            or tgt_port.side is not PortSide.RIGHT
+            or not r.is_inter_section
+            or len(r.points) < 2
+        ):
+            continue
+        src_sec = resolve_section(graph, graph.stations.get(r.edge.source))
+        tgt_sec = resolve_section(graph, graph.stations.get(r.edge.target))
+        if (
+            src_sec is None
+            or tgt_sec is None
+            or src_sec.grid_row is None
+            or tgt_sec.grid_row is None
+            or src_sec.grid_row >= tgt_sec.grid_row
+            or tgt_sec.bbox_h <= 0
+        ):
+            continue
+        box_bottom = tgt_sec.bbox_y + tgt_sec.bbox_h
+        dive_y = max(y for _, y in r.points)
+        if dive_y <= box_bottom + tol:
+            continue
+        src_station = graph.stations.get(r.edge.source)
+        tgt_station = graph.stations.get(r.edge.target)
+        if src_station is None or tgt_station is None:
+            continue
+        corner_x = r.points[1][0]
+        if _right_entry_drop_in_is_clear(graph, src_station, tgt_station, corner_x):
+            violations.append(
+                RightEntryNeedlessDive(r.edge.source, r.edge.target, dive_y, box_bottom)
+            )
+    return violations
+
+
 @dataclass
 class UndeclaredGapChannel:
     """A vertical inter-section leg sits in a gap with no :class:`GapSlot`.
@@ -2529,6 +2610,7 @@ __all__ = [
     "PeeloffBundleCrossing",
     "PerpEntryBoundaryViolation",
     "PerpExitLeadInOverdip",
+    "RightEntryNeedlessDive",
     "SameLineParallelRun",
     "Side",
     "StackedElbowGraze",
@@ -2548,6 +2630,7 @@ __all__ = [
     "check_peeloff_concentric",
     "check_perp_entry_boundary_consistent",
     "check_perp_exit_over_leadin_clears_only_spanned_sections",
+    "check_right_entry_drop_in_when_clear",
     "bypass_horizontal_targets",
     "check_stacked_elbow_clearance",
     "check_partial_branch_offset_gaps",
