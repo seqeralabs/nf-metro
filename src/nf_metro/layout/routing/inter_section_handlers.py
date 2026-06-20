@@ -357,14 +357,6 @@ def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
     return _route_bypass(edge, src, tgt, f.i, f.src_col, f.tgt_col, ctx, f.src_row)
 
 
-def _right_entry_drop_in_corner_x(f: _InterFacts) -> float:
-    """The source-side lead-out X a RIGHT-entry drop-in would descend down."""
-    _fan, _pos_n, _delta, corner_x = _wrap_fan_geometry(
-        f.ctx, f.edge, f.src, f.i, f.n, vertical_direction(f.tgt.y - f.src.y)
-    )
-    return corner_x
-
-
 def _right_entry_drop_in_is_clear(
     graph: MetroGraph,
     src: Station,
@@ -403,9 +395,11 @@ def _route_right_entry_drop_in(
     edge: Edge,
     src: Station,
     entry_port: Station,
-    i: int,
-    n: int,
     ctx: _RoutingCtx,
+    *,
+    pos_n: int,
+    delta: float,
+    corner_x: float,
 ) -> RoutedPath:
     """Route a RIGHT entry by dropping straight down the source's outward side.
 
@@ -418,12 +412,13 @@ def _route_right_entry_drop_in(
         (corner_x, sy)  ; turn down
         (corner_x, ey)  -> V straight to the entry Y
         (ex, ey)        -> H into the port from its own outward side
+
+    The bundle stagger (*pos_n*, *delta*) and lead-out *corner_x* come from the
+    caller's single :func:`_wrap_fan_geometry` resolution, shared with the
+    viability check.
     """
     sx, sy = src.x, src.y
     ex, ey = entry_port.x, entry_port.y
-    _fan, pos_n, delta, corner_x = _wrap_fan_geometry(
-        ctx, edge, src, i, n, vertical_direction(ey - sy)
-    )
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
     centerline = [
@@ -463,9 +458,13 @@ def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
     blocked by a wide same-column sibling.
     """
     edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
-    corner_x = _right_entry_drop_in_corner_x(f)
+    _fan, pos_n, delta, corner_x = _wrap_fan_geometry(
+        ctx, edge, src, f.i, f.n, vertical_direction(tgt.y - src.y)
+    )
     if _right_entry_drop_in_is_clear(graph, src, tgt, corner_x):
-        return _route_right_entry_drop_in(edge, src, tgt, f.i, f.n, ctx)
+        return _route_right_entry_drop_in(
+            edge, src, tgt, ctx, pos_n=pos_n, delta=delta, corner_x=corner_x
+        )
     if f.src_row is not None and _right_entry_gap_above_is_clear(
         graph, src, tgt, tgt, f.src_row
     ):
