@@ -70,9 +70,7 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
         entry_ids = _downstream_same_row_entry_ports(
             graph, port_id, section, junction_ids
         )
-        targets = [
-            graph.stations[eid].y for eid in entry_ids if eid in graph.stations
-        ]
+        targets = [graph.stations[eid].y for eid in entry_ids if eid in graph.stations]
         if not targets:
             continue
         target_y = min(targets, key=lambda y: abs(y - port_st.y))

@@ -49,13 +49,15 @@ from nf_metro.layout.labels import (
     place_labels,
     segment_strikes_label,
 )
-from nf_metro.layout.phases._common import _grow_section_bbox_upward
+from nf_metro.layout.phases._common import (
+    _grow_section_bbox_upward,
+    exit_run_corridor_clear,
+)
 from nf_metro.layout.phases.bbox import (
     _section_band_is_empty,
     _section_content_hug_top,
     _section_fit_top,
 )
-from nf_metro.layout.phases._common import exit_run_corridor_clear
 from nf_metro.layout.phases.guards import _tb_top_entry_drop_overshoot
 from nf_metro.layout.phases.off_track import (
     _is_single_trunk_lr_section,
