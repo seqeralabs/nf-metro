@@ -438,12 +438,9 @@ def _tb_top_entry_drop_overshoot(
 ) -> list[tuple[str, float]]:
     """Return ``(section_id, gap)`` for TB sections whose first station sits
     further below the box top than the standard padding despite the TOP
-    entry being a clean vertical drop.
+    entry being a clean vertical drop (see :func:`_adjust_tb_entry_shifts`
+    for why such a drop is always vertical).
 
-    A TB entry port on the TOP boundary is placed on the section trunk X, so
-    the port -> first-station segment is a straight vertical drop and the
-    cross-column lead-in turns in the header corridor above the box, not
-    inside it.  Any in-section room above the first station is then unused.
     Sections with a perpendicular (LEFT/RIGHT) entry are excluded: they
     legitimately shift their stations down to clear the entry port.
     """
@@ -452,23 +449,16 @@ def _tb_top_entry_drop_overshoot(
     for sid, sec in graph.sections.items():
         if sec.direction != "TB" or sec.bbox_h == 0:
             continue
-        top_ports = [
-            graph.ports[pid]
-            for pid in sec.entry_ports
-            if pid in graph.ports and graph.ports[pid].side == PortSide.TOP
+        entry_ports = [
+            graph.ports[pid] for pid in sec.entry_ports if pid in graph.ports
         ]
+        top_ports = [p for p in entry_ports if p.side == PortSide.TOP]
         if not top_ports:
             continue
-        has_perp_entry = any(
-            graph.ports[pid].side in (PortSide.LEFT, PortSide.RIGHT)
-            for pid in sec.entry_ports
-            if pid in graph.ports
-        )
-        if has_perp_entry:
+        if any(p.side in (PortSide.LEFT, PortSide.RIGHT) for p in entry_ports):
             continue
-        # Include hidden stations: a hidden trunk-head (e.g. a fan-out hub)
-        # is what the port drops onto, so it -- not the first visible marker
-        # further down the trunk -- sets the port -> first-station distance.
+        # A hidden trunk-head (e.g. a fan-out hub) is a valid drop target, so
+        # do not filter to visible markers further down the trunk.
         body = [
             graph.stations[s]
             for s in sec.station_ids

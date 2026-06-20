@@ -1111,16 +1111,9 @@ def test_diagonal_overlay_check_detects_collapse():
 def test_tb_top_entry_clean_drop_hugs_top(fixture):
     """A TB section whose TOP entry drops straight onto its first station
     must seat that station at the standard top padding, with no extra
-    reserved gap.
-
-    A TB/BT entry port on the TOP/BOTTOM boundary is placed on the section
-    trunk X (``_assign_entry_port_position``), so the port -> first-station
-    segment is always a clean vertical drop and the up-and-over lead-in
-    turns in the header corridor *above* the box, never inside it.  Reserving
-    in-section L-shape room for a cross-column source therefore only pushes
-    the first station needlessly far below the box top.  Excludes sections
-    with a perpendicular (LEFT/RIGHT) entry, which legitimately shift their
-    stations down to clear the entry port (``ENTRY_SHIFT_TB``).
+    reserved gap (see ``_adjust_tb_entry_shifts`` for why the drop is always
+    vertical).  Excludes sections with a perpendicular (LEFT/RIGHT) entry,
+    which legitimately shift their stations down to clear the entry port.
     """
     graph = _layout(fixture)
     offenders = _tb_top_entry_drop_overshoot(graph)
