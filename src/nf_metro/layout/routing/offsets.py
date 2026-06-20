@@ -852,7 +852,8 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         if port_obj.section_id in graph._fold_reoriented_sections:
             anchor_feeders = line_feeders.get(anchor_line)
             if anchor_feeders:
-                anchor_off -= ctx.offsets.get((anchor_feeders[0][0], anchor_line), 0.0)
+                anchor_feeder_id = anchor_feeders[0][0]
+                anchor_off -= ctx.offsets.get((anchor_feeder_id, anchor_line), 0.0)
         spatial_offs = {lid: off - anchor_off for lid, off in spatial_offs.items()}
 
         for lid, off in spatial_offs.items():
