@@ -51,9 +51,10 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         EXAMPLES_DIR,
         "Opt-in static flow chevrons via `%%metro directional: true` (CLI: "
         "`--directional`): periodic open chevrons ride each route pointing "
-        "source to target, making fan-out and merge direction legible without "
-        "the animated `--animate` balls. Marker size, spacing, opacity, and "
-        "colour are `Theme` knobs.",
+        "source to target. A three-line bundled trunk fans out to per-line "
+        "analyses and converges again, so the chevrons make bundle, fan-out, "
+        "and merge direction legible without the animated `--animate` balls. "
+        "Marker size, spacing, opacity, and colour are `Theme` knobs.",
     ),
     (
         "line_spread",
