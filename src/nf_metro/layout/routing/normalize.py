@@ -29,8 +29,11 @@ from nf_metro.layout.routing.common import (
     initial_fanout_descent_span,
     iter_horizontal_trunks,
     iter_inter_row_gaps,
+    iter_port_peeloff_bundles,
     iter_vertical_segments,
+    peeloff_target_slots,
     symmetric_bundle_midpoint,
+    tail_on_slot,
     trunk_depths_contiguous,
     trunk_segments_cross,
 )
@@ -358,18 +361,33 @@ def _group_channel_trunks(trunks: list[_HTrunk], step: float) -> list[list[_HTru
 
 
 def _final_port_approach(rp: RoutedPath) -> _VChannel | None:
-    """The final vertical descent into a port, when the route ends V then H.
+    """The final vertical descent into a port, when the tail ends on a vertical.
 
-    A converging port approach ends ``... (vx, y) -> (vx, ey) -> (ex, ey)``:
-    a vertical leg into the entry Y, then a short horizontal lead into the
-    port.  Returns the ``_VChannel`` for that vertical (``idx`` points at
-    ``points[-3]``), or ``None`` when the tail is not vertical-then-horizontal.
+    A converging port approach usually ends ``... (vx, y) -> (vx, ey) ->
+    (ex, ey)``: a vertical leg into the entry Y, then a short horizontal lead
+    into the port (``idx`` points at ``points[-3]``).  When the feeder is
+    aligned on the port's own X it lands as a bare vertical drop with no
+    horizontal lead -- ``... (vx, y) -> (vx, ey)`` -- and the final segment
+    itself is the descent (``idx`` points at ``points[-2]``).  Returns the
+    ``_VChannel`` for that vertical, or ``None`` when the tail does not end on
+    one.
     """
     pts = rp.points
-    if len(pts) < 3:
+    if len(pts) < 2:
         return None
     x1, y1 = pts[-1]
     x2, y2 = pts[-2]
+    if abs(x2 - x1) <= COORD_TOLERANCE and abs(y2 - y1) > COORD_TOLERANCE:
+        return _VChannel(
+            route=rp,
+            idx=len(pts) - 2,
+            x=x1,
+            y_lo=min(y1, y2),
+            y_hi=max(y1, y2),
+            down=y1 > y2,
+        )
+    if len(pts) < 3:
+        return None
     x3, y3 = pts[-3]
     if abs(y2 - y1) > COORD_TOLERANCE or abs(x2 - x1) <= COORD_TOLERANCE:
         return None  # last segment is not a horizontal lead
@@ -435,6 +453,44 @@ def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> No
     for group in _merge_feeder_groups(routes, ctx):
         _snap_group(group)
     _join_fanout_upstream_tails(routes, ctx)
+
+
+def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Re-stack peel-off risers onto the slot their settled trunk depth earns.
+
+    The riser order is assigned during gap materialisation from the trunk
+    depths known then, but the later trunk-slot pass can repack those depths --
+    a hand-authored grid can stagger them against their source columns -- which
+    can leave a riser on a slot a different depth earns: the braid
+    :func:`check_peeloff_concentric` flags.  Running after the trunk pass, this
+    reads the settled depths and permutes each off-slot riser onto the
+    depth-earned slot -- its peel-x via the standard :func:`_restack_channel`
+    path and its port-slot Y to match -- the per-line slot assignment the guard
+    certifies.  The in-section continuation leaves the port at its base Y, so
+    this only re-seats the concentric stagger at the port, never the section
+    linkage.
+    """
+    step = ctx.offset_step
+    for bundle in iter_port_peeloff_bundles(routes, ctx.graph, step):
+        targets = peeloff_target_slots(bundle)
+        n = len(bundle.per_line)
+        for rp, tail in bundle.entries:
+            slot = targets[rp.edge.line_id]
+            if tail_on_slot(tail, slot):
+                continue
+            pts = rp.points
+            k = len(pts) - 3  # riser leg points[-3] -> points[-2]
+            ch = _VChannel(
+                route=rp,
+                idx=k,
+                x=tail.peel_x,
+                y_lo=min(tail.trunk_y, tail.port_y),
+                y_hi=max(tail.trunk_y, tail.port_y),
+                down=tail.port_y > tail.trunk_y,
+            )
+            _restack_channel(ch, slot.peel_x, slot.rank, n, step, ctx.curve_radius)
+            pts[-2] = (pts[-2][0], slot.port_y)
+            pts[-1] = (pts[-1][0], slot.port_y)
 
 
 def _band_clusters(chans: list[_VChannel], band: float) -> list[list[_VChannel]]:
@@ -1301,12 +1357,18 @@ def _convergence_line_order(
 
     Several inter-section lines ride one bypass trunk and rise (an UP bundle)
     into a common LEFT entry port from two or more source-section columns.
-    Their crossing-free order is by approach depth on the trunk - the nearer
-    source (higher grid column) rides the shallow, port-near slot - which the
-    fan/divergence crossing-minimiser of :func:`_distinct_line_order` has no
-    model for.  Ordering by descending source column reproduces that
-    trunk-depth stacking, so the risers turn into the port concentrically
-    through the standard :func:`_restack_channel` path.
+    Their crossing-free order is by approach depth on the trunk - the shallow,
+    port-near trunk Y takes the port-near slot - which the fan/divergence
+    crossing-minimiser of :func:`_distinct_line_order` has no model for.
+    Ordering by realized trunk depth reproduces that stacking, so the risers
+    turn into the port concentrically through the standard
+    :func:`_restack_channel` path, matching the slots
+    :func:`check_peeloff_concentric` enforces.
+
+    Source column is the usual proxy for trunk depth (the nearer source rides
+    the shallower trunk), but a hand-authored grid can stagger the trunks
+    against their source columns; ordering by the trunk depth the routing
+    actually produced keeps the risers nesting whichever way the trunks landed.
 
     Returns ``None`` for any bundle that is not such a convergence; the
     standard ordering then applies.  Only the cross-source stacking is set
@@ -1320,23 +1382,26 @@ def _convergence_line_order(
     port = graph.ports.get(next(iter(targets)))
     if port is None or not port.is_entry or port.side is not PortSide.LEFT:
         return None
-    src_col: dict[str, int] = {}
+    src_cols: set[int] = set()
+    trunk_depth: dict[str, float] = {}
     for ch in chans:
         src = graph.stations.get(ch.route.edge.source)
         col = _resolve_section_col(graph, src) if src else None
         if col is None:
             return None
-        src_col[ch.route.line_id] = col
-    if len(set(src_col.values())) < 2:
+        src_cols.add(col)
+        lid = ch.route.line_id
+        trunk_depth[lid] = min(trunk_depth.get(lid, ch.y_hi), ch.y_hi)
+    if len(src_cols) < 2:
         return None
     # The risers must peel off ONE shared trunk: their trunk-side Ys (the
     # bottom of each UP leg, ``y_hi``) cluster within one bundle width.  A
     # cross-row fan-in whose legs start rows apart is a divergence the standard
     # crossing-minimiser orders, not a single-trunk convergence.
     trunk_ys = [ch.y_hi for ch in chans]
-    if not trunk_depths_contiguous(trunk_ys, len(src_col), OFFSET_STEP):
+    if not trunk_depths_contiguous(trunk_ys, len(src_cols), OFFSET_STEP):
         return None
-    return sorted(_distinct_line_order(chans), key=lambda lid: -src_col[lid])
+    return sorted(_distinct_line_order(chans), key=lambda lid: trunk_depth[lid])
 
 
 def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
@@ -1602,5 +1667,35 @@ def _h_segment_crosses_other_section(
             continue
         # Y inside bbox (with optional margin so headers/footers count).
         if s.bbox_y - margin <= y <= s.bbox_y + s.bbox_h + margin:
+            return True
+    return False
+
+
+def _v_segment_crosses_other_section(
+    graph: MetroGraph,
+    x: float,
+    y1: float,
+    y2: float,
+    exclude_section_ids: set[str],
+    margin: float = 0.0,
+) -> bool:
+    """Return True if a vertical segment at *x* crosses any section interior.
+
+    The vertical mirror of :func:`_h_segment_crosses_other_section`: sections
+    in *exclude_section_ids* are skipped, all others are tested against their
+    open interior.  The segment runs from ``min(y1, y2)`` to ``max(y1, y2)``;
+    a section is crossed when the segment penetrates its open Y interior while
+    *x* falls within ``[bbox_x - margin, bbox_x + bbox_w + margin]``.
+    """
+    lo_y, hi_y = (y1, y2) if y1 <= y2 else (y2, y1)
+    for s in graph.sections.values():
+        if s.bbox_w <= 0:
+            continue
+        if s.id in exclude_section_ids:
+            continue
+        bottom = s.bbox_y + s.bbox_h
+        if hi_y <= s.bbox_y or lo_y >= bottom:
+            continue
+        if s.bbox_x - margin <= x <= s.bbox_x + s.bbox_w + margin:
             return True
     return False

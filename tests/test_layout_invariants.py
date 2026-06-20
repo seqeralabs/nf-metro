@@ -1636,6 +1636,33 @@ def test_peeloff_riser_crossing_free_extra_line_consumer():
     )
 
 
+def test_rl_return_row_convergence_renders_cleanly():
+    """A compact 2-row serpentine with an RL return row converging into shared
+    entry ports routes without tripping the render-curve invariants (#876).
+
+    ``rl_return_row_convergence`` is the top-left-anchored manual grid the #670
+    auto-layout wish describes: row 0 flows LR, row 1 returns RL, and several
+    cross-row feeders converge into shared entry ports on the return row.  Three
+    convergence idioms in one map exercised the LEFT/LR/upward-only assumptions
+    in the convergence machinery:
+
+    * a RIGHT entry port on an RL section fed by two distinct lines (they must
+      take distinct channels, not collapse onto one);
+    * a same-line feeder arriving as a pure vertical drop onto the port, which
+      must fuse with the line's sibling descent into one stroke; and
+    * a LEFT entry port whose peel-off risers must order by trunk depth even
+      when an adjacent-column feeder also lands at the port directly.
+
+    The render-curve backstop names the exact edge for each; a clean render is
+    the lock that all three settle.
+    """
+    graph = _layout("topologies/rl_return_row_convergence.mmd")
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    # Raises CurveInvariantError naming the offending edge on regression.
+    assert_render_curve_invariants(graph, routes, offsets)
+
+
 @pytest.mark.parametrize(
     "fixture",
     [
@@ -1656,7 +1683,7 @@ def test_peeloff_concentric_runtime_guard(fixture):
     order) must flag the braid - so it is a meaningful regression guard, not a
     vacuous pass.
     """
-    from nf_metro.layout.routing import normalize
+    from nf_metro.layout.routing import core, normalize
     from nf_metro.layout.routing.invariants import check_peeloff_concentric
 
     graph = _layout(fixture, validate=True)
@@ -1667,11 +1694,14 @@ def test_peeloff_concentric_runtime_guard(fixture):
     suppressed = _layout(fixture)
     suppressed_offsets = compute_station_offsets(suppressed)
     original = normalize._convergence_line_order
+    original_reconcile = core._reconcile_port_peeloff_risers
     normalize._convergence_line_order = lambda chans, graph: None
+    core._reconcile_port_peeloff_risers = lambda routes, ctx: None
     try:
         unordered = route_edges(suppressed, station_offsets=suppressed_offsets)
     finally:
         normalize._convergence_line_order = original
+        core._reconcile_port_peeloff_risers = original_reconcile
     assert check_peeloff_concentric(suppressed, unordered), (
         "guard must flag the braid the approach ordering removes"
     )

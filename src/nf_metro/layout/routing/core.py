@@ -85,6 +85,7 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _materialize_gap_slots,
     _materialize_trunk_slots,
     _plan_trunk_band,
+    _reconcile_port_peeloff_risers,
     _restack_channel,
     _restack_htrunk,
     _restack_trunk_band,
@@ -194,6 +195,9 @@ def _route_edges(
     _spread_diagonal_bundles(routes, ctx)
     _materialize_gap_slots(routes, ctx)
     _materialize_trunk_slots(routes, ctx)
+    # Re-stack peel-off risers against the settled trunk depths, so each rises
+    # on the concentric slot its post-repack depth earns.
+    _reconcile_port_peeloff_risers(routes, ctx)
     # Coincidence runs after the trunk/gap channels are finalised: it snaps
     # same-line tracks onto a reference read from that final geometry (the
     # port-side track, the source-side track, the merge trunk's descent, and
