@@ -183,7 +183,7 @@ def _compute_canvas_bounds(
             max_x = max(max_x, section.bbox_x + section.bbox_w)
             max_y = max(max_y, section.bbox_y + section.bbox_h)
             placement = header_placements.get(section.id)
-            if placement is not None:
+            if placement is not None and placement.mode != "above":
                 _, _, hx1, hy1 = placement.keepout
                 max_x = max(max_x, hx1)
                 max_y = max(max_y, hy1)
