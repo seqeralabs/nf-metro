@@ -2037,6 +2037,109 @@ def check_merge_branches_meet_trunk(
     return violations
 
 
+# A routed endpoint farther than this from every real anchor (a station/
+# port/junction marker or another route's path) reads as a path hanging in
+# open space rather than one terminating on the structure it serves.  Two
+# corner radii of slack covers the endpoint's turn-in arc and the per-line
+# bundle offset that fans it off the marker; a genuine hang (a desynced drop
+# level, a stub that never reaches its trunk) is an order of magnitude larger.
+_HANGING_ROUTE_TOL = 2 * CURVE_RADIUS
+
+
+@dataclass(frozen=True)
+class HangingRoute:
+    """A routed path whose endpoint terminates disconnected from any anchor.
+
+    Every route must begin and end on a real anchor: a station, port, or
+    junction marker, or a point on another route it legitimately joins (a
+    bundle mate, a branch onto a trunk, a peel-off).  An endpoint farther than
+    :data:`_HANGING_ROUTE_TOL` from all of those is a stub hanging in open
+    space -- the universal symptom underneath the family-specific endpoint
+    desyncs (merge branches, rail stubs).  ``which`` names the offending end
+    (``"source"`` or ``"target"``); ``gap`` is the distance to the nearest
+    anchor.
+    """
+
+    source: str
+    target: str
+    line_id: str
+    which: str
+    endpoint: tuple[float, float]
+    gap: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"route {self.source!r}->{self.target!r} on {self.line_id!r}: "
+            f"{self.which} endpoint "
+            f"({self.endpoint[0]:.1f},{self.endpoint[1]:.1f}) is {self.gap:.1f}px "
+            f"from the nearest station, port, junction, or joining route -- "
+            f"a path hanging in open space"
+        )
+
+
+def check_no_hanging_routes(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[HangingRoute]:
+    """Return routes whose endpoints terminate disconnected from any anchor.
+
+    The general backstop for the hanging-path defect class: it asserts the
+    property every family-specific endpoint guard encodes locally -- that a
+    routed segment terminates at a real anchor -- once, over every route.  An
+    endpoint is anchored when it lies within :data:`_HANGING_ROUTE_TOL` of a
+    station/port/junction marker (all live in ``graph.stations``, including
+    terminus/file-icon hosts) or of any *other* route's rendered path (the
+    join point of a bundle mate, a branch onto its trunk, or a peel-off).
+
+    Rail-mode endpoints are skipped: a rail stub terminates on its rail rather
+    than a marker, a distinct idiom with its own dedicated stub tracking.  This
+    complements -- and does not replace -- the precise family-specific checks
+    such as :func:`check_merge_branches_meet_trunk`; they stay as sharper
+    diagnostics.
+    """
+    anchor_xy = [(st.x, st.y) for st in graph.stations.values()]
+    rendered = [(r, _route_render_points(r, offsets)) for r in routes]
+    polylines = [(r, pts) for r, pts in rendered if len(pts) >= 2]
+
+    violations: list[HangingRoute] = []
+    for r, pts in rendered:
+        if len(pts) < 2:
+            continue
+        ends = (("source", pts[0], r.edge.source), ("target", pts[-1], r.edge.target))
+        for which, end, node in ends:
+            if graph.station_is_rail(node):
+                continue
+            d_marker = min(
+                (((end[0] - x) ** 2 + (end[1] - y) ** 2) ** 0.5 for x, y in anchor_xy),
+                default=float("inf"),
+            )
+            if d_marker <= _HANGING_ROUTE_TOL:
+                continue
+            d_join = min(
+                (
+                    _point_to_polyline_distance(end, other_pts)
+                    for other, other_pts in polylines
+                    if other is not r
+                ),
+                default=float("inf"),
+            )
+            if d_join <= _HANGING_ROUTE_TOL:
+                continue
+            violations.append(
+                HangingRoute(
+                    source=r.edge.source,
+                    target=r.edge.target,
+                    line_id=r.line_id,
+                    which=which,
+                    endpoint=end,
+                    gap=min(d_marker, d_join),
+                )
+            )
+    return violations
+
+
 @dataclass(frozen=True)
 class PerpExitLeadInOverdip:
     """A cross-column perp-exit lead-in clears a section it never passes under.
@@ -2362,6 +2465,10 @@ def assert_render_curve_invariants(
             check_merge_branches_meet_trunk(graph, routes, offsets),
         ),
         (
+            "route hanging in open space",
+            check_no_hanging_routes(graph, routes, offsets),
+        ),
+        (
             "undeclared gap channel",
             check_gap_channels_materialized(graph, routes),
         ),
@@ -2414,6 +2521,7 @@ __all__ = [
     "DiagonalOverlapViolation",
     "CurveInvariantError",
     "FanoutTailGap",
+    "HangingRoute",
     "MergeBranchHang",
     "MergePortApproachViolation",
     "NonConcentricCornerViolation",
@@ -2433,6 +2541,7 @@ __all__ = [
     "check_fanout_tail_join",
     "check_merge_branches_meet_trunk",
     "check_merge_port_approach_side",
+    "check_no_hanging_routes",
     "check_no_collinear_distinct_lines",
     "check_no_collinear_distinct_diagonals",
     "check_no_same_line_parallel_descents",

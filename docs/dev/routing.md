@@ -78,6 +78,26 @@ offset propagation at each corner (the corner-radius helpers live in
 `check_bundle_order_preserved` (in `routing/invariants.py`) catches any
 regression where a line crosses over its bundle-mates.
 
+## Render-time guards
+
+`assert_render_curve_invariants` (in `routing/invariants.py`) runs a set of
+correctness checks on the final `route_edges` output every render -- the exact
+geometry the renderer is about to draw -- so a defective route aborts the
+render with a message naming the offending edge rather than being shipped.  It
+is always on, independent of `compute_layout`'s `validate` flag.
+
+Among these are the **endpoint guards**, which assert that a routed segment
+terminates at a real anchor rather than hanging in open space:
+
+* `check_merge_branches_meet_trunk` -- a merge feeder must land on its trunk's
+  channel (merge junctions only).
+* `check_no_hanging_routes` -- the general backstop: **every** route's two
+  endpoints must each lie within `2 * CURVE_RADIUS` of a station/port/junction
+  marker or of another route it joins (a bundle mate, a branch onto a trunk, a
+  peel-off).  Rail-mode endpoints are skipped (a rail stub terminates on its
+  rail).  This generalises the merge-only check to any route family; the
+  family-specific checks remain as sharper diagnostics.
+
 ## The descriptor catalogue (`WRAP_TABLE`)
 
 [`routing/inter_section.py`](https://github.com/pinin4fjords/nf-metro/blob/main/src/nf_metro/layout/routing/inter_section.py)
