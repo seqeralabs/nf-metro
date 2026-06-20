@@ -1,0 +1,19 @@
+%%metro title: Left-entry up-wrap bundle
+%%metro style: dark
+%%metro line: w1 | W1 | #e63946
+%%metro line: w2 | W2 | #0570b0
+%%metro grid: left_tgt | 0,0
+%%metro grid: right_src | 1,1
+graph LR
+    subgraph left_tgt [Left Target]
+        %%metro entry: left | w1, w2
+        lt1[Collect]
+        lt2[Output]
+        lt1 -->|w1,w2| lt2
+    end
+    subgraph right_src [Right Source]
+        rs1[Input R]
+        rs2[Hub R]
+        rs1 -->|w1,w2| rs2
+    end
+    rs2 -->|w1,w2| lt1
