@@ -1654,9 +1654,16 @@ def test_rl_return_row_convergence_renders_cleanly():
       when an adjacent-column feeder also lands at the port directly.
 
     The render-curve backstop names the exact edge for each; a clean render is
-    the lock that all three settle.
+    the lock that all three settle.  The fixture lives outside the topology
+    corpus because the dense compact grid also has inter-feeder corridor
+    crossings the strict layout-quality guards reject; those crossings are
+    inherent to the hand-authored 2-row fold, not the routing-curve defect
+    #876 is about.
     """
-    graph = _layout("topologies/rl_return_row_convergence.mmd")
+    path = Path(__file__).parent / "fixtures" / "curve_invariant_repros"
+    path = path / "rl_return_row_convergence.mmd"
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
     # Raises CurveInvariantError naming the offending edge on regression.
