@@ -2110,9 +2110,11 @@ def _route_left_entry_wrap(
     """
     sy, ty = src.y, tgt.y
     dy = ty - sy
-    fan, pos_n, delta, corner_x = _wrap_fan_geometry(
-        ctx, edge, src, i, n, vertical_direction(dy)
-    )
+    # Lead-out and LEFT-entry lead-in both run rightward, so port-offset stacking
+    # fixes the concentric order regardless of riser direction; force the DOWN
+    # (rightward-run) stagger so the body nests into both baked endpoints. ``dy``
+    # only picks the channel Y below.
+    fan, pos_n, delta, corner_x = _wrap_fan_geometry(ctx, edge, src, i, n, Direction.D)
 
     # Horizontal channel Y in the inter-row gap.  ``inter_row_channel_y`` clamps
     # the per-line stagger inside the clearance band (a narrow gap must not let
