@@ -94,6 +94,7 @@ from nf_metro.render.svg import (
     _compute_icon_obstacles,
     _icon_obstacles_by_station,
     apply_route_offsets,
+    render_svg,
 )
 from nf_metro.themes import THEMES
 
@@ -4359,16 +4360,14 @@ _BBOX_PARAM_SETS = [
     pytest.param({}, id="default"),
 ]
 
-# The full corpus plus a deliberately-unsupported topology (an internally
+# The full corpus.  A deliberately-unsupported topology (an internally
 # horizontal section whose only ports are perpendicular, leaving no
-# flow-aligned edge to anchor the horizontal run -- issue #424).  On the
-# corpus the invariant holds outright; on the regression fixture the engine
-# must either keep content in-bbox or reject it loudly, never silently
-# overflow.
-_BBOX_CONTAINMENT_FIXTURES = [
-    *ALL_FIXTURES,
-    "regressions/lr_perpendicular_ports_overflow.mmd",
-]
+# flow-aligned edge to anchor the horizontal run -- issue #424) is exercised
+# by ``test_lr_section_all_perpendicular_ports_rejected``: the engine lays it
+# out with content outside the bbox, and the render path rejects it loudly
+# (warn by default, raise under ``--strict``), so it is not part of this
+# clean-corpus in-bbox assertion.
+_BBOX_CONTAINMENT_FIXTURES = list(ALL_FIXTURES)
 
 
 @pytest.mark.parametrize("fixture", _BBOX_CONTAINMENT_FIXTURES)
@@ -4377,9 +4376,7 @@ def test_section_bbox_contains_all_content(fixture, params):
     """Every section's bbox must contain its on-track stations and any
     off-track / terminus icons, on both axes.  Catches regressions where
     an icon (off-track input or single-icon terminus) is placed near the
-    bbox top so the icon spills outside the section background, and where
-    an internally-horizontal section lays its stations out to the right of
-    its own bbox (issue #424).
+    bbox top so the icon spills outside the section background.
 
     Margin: on-track station markers reach ~9.5 px above the centre,
     file icons reach ``terminus_height / 2 = 16`` px above the centre
@@ -4389,15 +4386,8 @@ def test_section_bbox_contains_all_content(fixture, params):
     ``station.y + reach <= bbox_y + bbox_h + 0.5`` vertically, and the
     station centre within ``[bbox_x - 0.5, bbox_x + bbox_w + 0.5]``
     horizontally.
-
-    A loud ``PhaseInvariantError`` upholds the invariant: it means the
-    engine refused to ship an out-of-bbox layout rather than rendering it
-    silently.  The dedicated rejection test below pins that path.
     """
-    try:
-        graph = _layout(fixture, **params)
-    except PhaseInvariantError:
-        return
+    graph = _layout(fixture, **params)
     junction_ids = set(graph.junctions)
 
     for sec_id, section in graph.sections.items():
@@ -4435,16 +4425,34 @@ def test_lr_section_all_perpendicular_ports_rejected():
     """An internally-LR/RL section whose only ports are perpendicular
     (every entry/exit on top/bottom) has no flow-aligned edge to anchor
     its horizontal run, so its stations are laid out past the right of
-    its own bbox.  The engine must reject this loudly with an actionable
+    its own bbox.  The render path must flag this loudly with an actionable
     message naming the section, rather than rendering it silently (#424).
+
+    The Tier-A bbox guard runs on the render path (#923): a default render
+    warns and proceeds best-effort, ``--strict`` raises ``LayoutInvariantError``.
     """
+    from nf_metro.layout.phases.guards import LayoutInvariantError
+
     text = (
         FIXTURES / "regressions" / "lr_perpendicular_ports_overflow.mmd"
     ).read_text()
-    graph = parse_metro_mermaid(text)
-    graph.center_ports = True
-    with pytest.raises(PhaseInvariantError) as excinfo:
+
+    def _laid_out() -> MetroGraph:
+        graph = parse_metro_mermaid(text)
+        graph.center_ports = True
         compute_layout(graph)
+        return graph
+
+    with pytest.warns(UserWarning, match="Tier-A invariants") as record:
+        render_svg(_laid_out(), THEMES["nfcore"])
+    warned = "\n".join(str(w.message).lower() for w in record)
+    assert "annotation" in warned
+    assert "perpendicular" in warned or "flow-aligned" in warned
+
+    strict_graph = _laid_out()
+    strict_graph.strict = True
+    with pytest.raises(LayoutInvariantError) as excinfo:
+        render_svg(strict_graph, THEMES["nfcore"])
     msg = str(excinfo.value).lower()
     assert "annotation" in msg
     assert "perpendicular" in msg or "flow-aligned" in msg

@@ -180,7 +180,6 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_single_trunk_off_track_step,
     _guard_station_x_column_drift,
     _guard_stations_in_sections,
-    _guard_stations_within_bbox,
     _guard_tall_anchor_stack_well_formed,
     _guard_tb_exit_corner_column_order,
     _guard_tb_top_entry_drop_hugs_top,
@@ -510,7 +509,6 @@ def _compute_layout_scaled(
             section_y_padding=section_y_padding,
             section_y_gap=section_y_gap,
         )
-        _guard_stations_within_bbox(graph, "final")
         return
 
     auto_x = x_spacing is None
@@ -628,11 +626,6 @@ def _compute_layout_scaled(
     # layout has fully settled so the box matches what the renderer draws.
     graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
 
-    # Always-on backstop (independent of ``validate``): the settled layout
-    # must never leave a station outside its own section bbox.  Runs on the
-    # render path so an unsupported directive combination fails loudly
-    # instead of shipping a silently-broken diagram (issue #424).
-    _guard_stations_within_bbox(graph, "final")
     _snap(graph, "final")
 
     if validate:

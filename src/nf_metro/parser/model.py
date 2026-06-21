@@ -374,6 +374,7 @@ class MetroGraph:
     height: int | None = None
     animate: bool = False
     directional: bool = False
+    strict: bool = False
     embed_manifest: bool = True
     # Max station-columns a section row may reach before the auto-layout wraps
     # it onto the next row. None falls back to 15; raise it to keep a long

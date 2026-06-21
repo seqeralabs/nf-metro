@@ -97,6 +97,17 @@ def _all_guard_specs() -> list:
     return [*GUARD_REGISTRY, *guards.INLINE_GUARD_REGISTRY]
 
 
+def test_render_layout_chokepoint_is_tier_a_minus_authoring_guards() -> None:
+    """The render-layout chokepoint runs exactly the Tier-A guards that are
+    observational postconditions: every Tier-A guard from both registries minus
+    the two authoring-error guards, which raise a ``ValueError`` on
+    un-renderable input and stay always-on hard fails in the engine."""
+    tier_a = {spec.name for spec in _all_guard_specs() if spec.tier == "A"}
+    chokepoint = {spec.name for spec in guards.render_layout_invariant_specs()}
+    assert chokepoint == tier_a - guards._RENDER_CHOKEPOINT_AUTHORING_GUARDS
+    assert guards._RENDER_CHOKEPOINT_AUTHORING_GUARDS <= tier_a
+
+
 def _guards_citing_an_issue() -> dict[str, set[str]]:
     """Map every ``_guard_*`` whose source cites a ``#NNN`` issue to those
     issue tokens, so a guard born of a specific bug cannot silently drop the

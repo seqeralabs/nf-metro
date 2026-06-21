@@ -7,18 +7,23 @@ nf-metro defends its layout output with two families of runtime invariant:
 - **`check_*` functions** in `src/nf_metro/layout/routing/invariants.py` —
   return a list of violation objects; a caller decides whether to raise.
 
-Almost all of the `_guard_*` suite is gated behind `compute_layout(validate=True)`,
-which the `nf-metro render` path never sets. Only `_guard_stations_within_bbox`
-(always-on in `engine.py`) and the routing `check_*` invariants that
-`assert_render_curve_invariants` runs on every render reach an end user. A
-novel pipeline can therefore ship a silently-broken SVG that only our own
-`validate=True` tests would have caught.
+The render path runs the cheap **Tier-A** subset of both families on the
+settled geometry, so a layout defect reaches the end user as a warning (or a
+`--strict` error) instead of a silently-broken SVG:
+
+- `assert_render_layout_invariants` (`phases/guards.py`) runs the Tier-A
+  `_guard_*` postconditions, and
+- `assert_render_curve_invariants` (`routing/invariants.py`) runs the Tier-A
+  routing `check_*` invariants.
+
+The **Tier-B** remainder of the `_guard_*` suite is gated behind
+`compute_layout(validate=True)`, which the `nf-metro render` path never sets;
+it is costlier or depends on a mid-pipeline reroute.
 
 This page is the cost-tier classification that the always-on promotion
 (#923) and the consolidation pass (#922) build on. It is **descriptive of the
-current tree** and **prescriptive of the target tier** — the two coincide for
-Tier A (already always-on) and diverge where a Tier-A *candidate* is still
-gated.
+current tree**: Tier A is the always-on render-path set, Tier B is the
+`validate=True` set.
 
 ## Tiers
 
@@ -54,6 +59,14 @@ The classification is data, not prose:
   `CHECK_REGISTRY` it is *classification* only (no `needs` / `bisection_safe`
   dispatch data), so every defined `_guard_*` lives in exactly one of the two
   guard registries and none escapes tier / issue-pin classification.
+
+The Tier-A `_guard_*` postconditions across both registries are run on the
+render path by `assert_render_layout_invariants`, the sibling of the routing
+chokepoint. `render_layout_invariant_specs` selects them: every Tier-A guard
+except `_RENDER_CHOKEPOINT_AUTHORING_GUARDS`, the two authoring-error guards
+(`_guard_no_same_row_backward_feed`, `_guard_no_mixed_entry_directions`) that
+raise a `ValueError` on un-renderable input and stay always-on hard fails in
+the engine rather than joining the warn-by-default chokepoint.
 - **`CHECK_REGISTRY`** (`routing/invariants.py`) — the same `GuardSpec` schema
   applied to the routing checks. Because checks return lists rather than
   raising, this is a *classification* registry, not a dispatcher; the runtime
@@ -66,8 +79,10 @@ from, kept as data so consolidation cannot lose the regression trail) and
 `narrow_reason` (why an issue-pinned guard stays scoped to its case rather than
 being a general property). `tests/test_guard_registry.py` keeps these honest:
 every guard and check is registered exactly once, the Tier-A check set equals
-the render chokepoint exactly, no validate-only guard duplicates an always-on
-check, and every issue-pinned guard records its issue and a `narrow_reason`.
+the curve render chokepoint exactly, the render-layout chokepoint equals the
+Tier-A guard set minus the authoring guards, no validate-only guard duplicates
+an always-on check, and every issue-pinned guard records its issue and a
+`narrow_reason`.
 
 ## Cost audit
 

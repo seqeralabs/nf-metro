@@ -530,6 +530,7 @@ These go at the top of the file, before `graph LR`.
 | `%%metro height: <pixels>` | Output height in pixels (default: auto from content) |
 | `%%metro animate: true` | Add animated balls traveling along the metro lines |
 | `%%metro directional: true` | Draw static chevrons along each route pointing in the flow direction (source to target). Off by default; CLI equivalent `--directional`. Marker size, spacing, opacity, and colour are theme knobs (`directional_marker_*`). |
+| `%%metro strict: true` | Treat a layout-invariant violation on the rendered geometry (e.g. a station pushed outside its section box) as an error that aborts the render, instead of a warning. Off by default; CLI equivalent `--strict`. See [When a layout is broken](#when-a-layout-is-broken). |
 | `%%metro file: <station> \| <label> [\| <name>] [\| banner]` | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon; optional `banner` draws the label on a dark strip across the icon. |
 | `%%metro files: <station> \| <label> [\| <name>] [\| banner]` | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption; optional `banner` strip. |
 | `%%metro dir: <station> \| <label> [\| <name>]` | Mark a station with a folder icon (e.g. output directory). Optional `name` caption. |
@@ -641,8 +642,36 @@ Set the directive in your committed `.mmd` so the map reproduces from the file a
 | `width:` | `--width` | auto |
 | `height:` | `--height` | auto |
 | `animate:` | `--animate` / `--no-animate` | off |
+| `strict:` | `--strict` / `--no-strict` | off |
 
 `--output`, `--format`, `--from-nextflow`, and `--debug` have no directive: they select the output target or a diagnostic overlay rather than describing the diagram.
+
+## When a layout is broken
+
+Some directive combinations leave the layout engine no clean way to place a
+map - for example, an internally left-to-right section whose only ports are on
+the top and bottom edges has no flow-aligned edge to anchor its row, so its
+stations end up outside their own section box. nf-metro renders such a map
+**best-effort and prints a warning to stderr** naming the problem, rather than
+refusing to produce anything:
+
+```
+$ nf-metro render broken.mmd -o broken.svg
+... the settled layout violates Tier-A invariants the renderer is about to draw ...
+Rendered 12 stations, 11 edges, 1 lines -> broken.svg
+```
+
+Pass `--strict` (or add `%%metro strict: true`) to turn that warning into a
+hard error with a non-zero exit, so a broken map fails your build instead of
+shipping a visibly-wrong diagram:
+
+```
+$ nf-metro render broken.mmd -o broken.svg --strict
+Error: the settled layout violates Tier-A invariants ...
+```
+
+`--strict` has the same meaning for `nf-metro validate --with-layout`, which
+checks a map without rendering it.
 
 ## Bridge glyphs
 
