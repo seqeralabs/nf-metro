@@ -2975,9 +2975,13 @@ def _check_spec(
 ) -> GuardSpec:
     """Build a :class:`GuardSpec` for a routing ``check_*`` invariant.
 
-    ``needs`` is read from the function signature (the subset of ``graph`` /
-    ``routes`` / ``offsets`` it declares), so the classification stays correct
-    if a check gains or drops an input.
+    ``needs`` is read from the function signature, so the classification stays
+    correct if a check gains or drops an input.  Unlike a guard -- which always
+    takes ``(graph, phase)`` positionally and lists only the *extra* keyword
+    inputs in ``needs`` -- a check has no universal first argument, so ``needs``
+    is its full input set (the subset of ``graph`` / ``routes`` / ``offsets``).
+    A check is therefore dispatched by passing every ``needs`` entry as a
+    keyword (see ``scripts/guard_cost_audit.py``).
     """
     params = set(inspect.signature(fn).parameters)
     return GuardSpec(

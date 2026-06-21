@@ -25,7 +25,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import inspect
 import json
 import sys
 import time
@@ -40,9 +39,9 @@ from nf_metro.layout.engine import compute_layout  # noqa: E402
 from nf_metro.layout.phases.guards import GUARD_REGISTRY  # noqa: E402
 from nf_metro.layout.routing import (  # noqa: E402
     compute_station_offsets,
-    invariants,
     route_edges,
 )
+from nf_metro.layout.routing.invariants import CHECK_REGISTRY  # noqa: E402
 from nf_metro.parser.mermaid import parse_metro_mermaid  # noqa: E402
 
 
@@ -66,15 +65,6 @@ def discover_fixtures() -> list[Path]:
             seen.add(p)
             out.append(p)
     return out
-
-
-def _routing_checks() -> dict[str, Callable[..., Any]]:
-    """Every ``check_*`` invariant defined in ``routing/invariants.py``."""
-    return {
-        name: fn
-        for name, fn in vars(invariants).items()
-        if name.startswith("check_") and callable(fn)
-    }
 
 
 def _time_call(fn: Callable[..., Any], repeats: int) -> tuple[float, bool]:
@@ -104,8 +94,7 @@ def audit(fixtures: list[Path], repeats: int) -> dict[str, dict[str, Any]]:
         s["fixtures"] += 1
         s["raises"] += int(raised)
 
-    guard_tier = {spec.name: spec.tier for spec in GUARD_REGISTRY}
-    checks = _routing_checks()
+    tier_by_name = {spec.name: spec.tier for spec in (*GUARD_REGISTRY, *CHECK_REGISTRY)}
 
     for path in fixtures:
         graph = parse_metro_mermaid(path.read_text())
@@ -132,20 +121,17 @@ def audit(fixtures: list[Path], repeats: int) -> dict[str, dict[str, Any]]:
             )
             record("guard", spec.name, seconds, raised)
 
-        for name, fn in checks.items():
-            params = inspect.signature(fn).parameters
-            if "routes" in params and routes is None:
+        for spec in CHECK_REGISTRY:
+            if "routes" in spec.needs and routes is None:
                 continue
-            kwargs = {k: pool[k] for k in params if k in pool}
-            if "routes" in params and "routes" not in kwargs:
-                continue
-            seconds, raised = _time_call(lambda f=fn, k=kwargs: f(**k), repeats)
-            record("check", name, seconds, raised)
+            kwargs = {n: pool[n] for n in spec.needs}
+            seconds, raised = _time_call(lambda f=spec.fn, k=kwargs: f(**k), repeats)
+            record("check", spec.name, seconds, raised)
 
     for name, s in stats.items():
         s["mean_us"] = (s["total_s"] / s["fixtures"]) * 1e6 if s["fixtures"] else 0.0
         s["total_us"] = s["total_s"] * 1e6
-        s["tier"] = guard_tier.get(name)
+        s["tier"] = tier_by_name.get(name)
     return stats
 
 
