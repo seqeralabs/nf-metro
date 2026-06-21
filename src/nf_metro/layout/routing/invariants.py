@@ -2305,6 +2305,84 @@ def check_right_entry_drop_in_when_clear(
 
 
 @dataclass
+class BottomRowClimbDive:
+    """A bottommost-row source dives below its row to climb to a higher target.
+
+    :func:`~nf_metro.layout.routing.inter_section_handlers._route_bypass` keeps
+    a bottommost-row source's run at its own Y when the row level to the right
+    is clear (no same-row section in the spanned columns), since the sections
+    that classified the edge as a bypass sit in higher rows above that run.  A
+    route diving below the source box while its corridor was clear took the
+    canvas-floor loop needlessly.
+    """
+
+    source: str
+    target: str
+    dive_y: float
+    box_bottom: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"bottommost-row climb {self.source!r}->{self.target!r} dives to "
+            f"y={self.dive_y:.1f} below source box bottom {self.box_bottom:.1f} "
+            f"though its row-level corridor to the target was clear"
+        )
+
+
+def check_bottom_row_climb_stays_at_row_level(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> list[BottomRowClimbDive]:
+    """Return bottommost-row climbs that dive below a clear row-level corridor.
+
+    When the source sits in the bottommost content row, the target is in a
+    higher row, and the spanned columns hold no same-row section, the run can
+    stay at the source's Y and climb at the end.  A route that instead dips
+    below the source box took a gratuitous downward dogleg.
+    """
+    from nf_metro.layout.routing.inter_section_handlers import (
+        _bottom_row_climb_corridor_clear,
+    )
+
+    tol = COORD_TOLERANCE
+    violations: list[BottomRowClimbDive] = []
+    for r in routes:
+        if not r.is_inter_section or len(r.points) < 2:
+            continue
+        tgt_port = graph.ports.get(r.edge.target)
+        if tgt_port is None or not tgt_port.is_entry:
+            # A merge/fan junction target collects feeders onto a shared trunk
+            # below the row; that channel is not the single-line dogleg this
+            # guard polices, which always lands on a real section entry port.
+            continue
+        src_sec = resolve_section(graph, graph.stations.get(r.edge.source))
+        tgt_sec = resolve_section(graph, graph.stations.get(r.edge.target))
+        if (
+            src_sec is None
+            or tgt_sec is None
+            or src_sec.grid_row is None
+            or tgt_sec.grid_row is None
+            or src_sec.bbox_h <= 0
+        ):
+            continue
+        if not _bottom_row_climb_corridor_clear(
+            graph,
+            src_sec.grid_row,
+            tgt_sec.grid_row,
+            src_sec.grid_col,
+            tgt_sec.grid_col,
+        ):
+            continue
+        box_bottom = src_sec.bbox_y + src_sec.bbox_h
+        dive_y = max(y for _, y in r.points)
+        if dive_y > box_bottom + tol:
+            violations.append(
+                BottomRowClimbDive(r.edge.source, r.edge.target, dive_y, box_bottom)
+            )
+    return violations
+
+
+@dataclass
 class UndeclaredGapChannel:
     """A vertical inter-section leg sits in a gap with no :class:`GapSlot`.
 
@@ -2550,6 +2628,10 @@ def assert_render_curve_invariants(
             check_no_hanging_routes(graph, routes, offsets),
         ),
         (
+            "bottommost-row climb dives below clear corridor",
+            check_bottom_row_climb_stays_at_row_level(graph, routes),
+        ),
+        (
             "undeclared gap channel",
             check_gap_channels_materialized(graph, routes),
         ),
@@ -2597,6 +2679,7 @@ def assert_render_curve_invariants(
 
 
 __all__ = [
+    "BottomRowClimbDive",
     "BundleOrderViolation",
     "CollinearOverlapViolation",
     "DiagonalOverlapViolation",
@@ -2616,6 +2699,7 @@ __all__ = [
     "StackedElbowGraze",
     "UndeclaredGapChannel",
     "UndeclaredTrunk",
+    "check_bottom_row_climb_stays_at_row_level",
     "check_bundle_order_preserved",
     "check_gap_channels_materialized",
     "check_trunks_declared",

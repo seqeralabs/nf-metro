@@ -59,6 +59,7 @@ from nf_metro.layout.routing.common import (
     inter_row_wrap_band,
     iter_horizontal_trunks,
     iter_vertical_segments,
+    max_grid_row_with_content,
     merge_trunk_force_cross_row,
     resolve_section,
     row_bottom_edge,
@@ -1016,6 +1017,27 @@ def _route_merge_trunk(
     )
 
 
+def _bottom_row_climb_corridor_clear(
+    graph: MetroGraph,
+    src_row: int,
+    tgt_row: int,
+    src_col: int,
+    tgt_col: int,
+) -> bool:
+    """Whether a bottommost-row source can climb to a higher-row target by
+    running along its own row level instead of diving below it.
+
+    True when the source sits in the bottommost content row, the target is in a
+    higher row, and no same-row section occupies the columns the rightward run
+    would cross.  In that case the intervening sections that classified the edge
+    as a bypass are all in higher rows (above a run at the source's Y), so the
+    canyon below the source row is clear and the dive is gratuitous.
+    """
+    if tgt_row >= src_row or src_row != max_grid_row_with_content(graph):
+        return False
+    return not _has_intervening_sections(graph, src_col, tgt_col, src_row)
+
+
 def _route_bypass(
     edge: Edge,
     src: Station,
@@ -1082,6 +1104,23 @@ def _route_bypass(
         cross_row=cross_row,
         tgt_row=tgt_row,
     )
+
+    # A bottommost-row source climbing to a higher-row target keeps its run at
+    # its own Y when the row level to the right is clear: the sections that
+    # forced the bypass classification sit in higher rows, above this run, so
+    # diving below the source row and climbing back up is a gratuitous dogleg.
+    # A merge/fan junction target collects feeders onto a shared trunk below the
+    # row, so this only applies to a route landing on a real section entry port.
+    tgt_entry = graph.ports.get(edge.target)
+    if (
+        cross_row
+        and src_row is not None
+        and tgt_row is not None
+        and tgt_entry is not None
+        and tgt_entry.is_entry
+        and _bottom_row_climb_corridor_clear(graph, src_row, tgt_row, src_col, tgt_col)
+    ):
+        base_y = sy
 
     # Determine actual vertical direction at each gap from the geometry.
     # Gap1 goes from source Y to trunk Y; gap2 from trunk Y to target Y.

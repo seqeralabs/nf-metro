@@ -1,0 +1,37 @@
+%%metro title: Bottom-row climb over a clear corridor
+%%metro style: dark
+%%metro line: main | Main | #2db572
+%%metro line: side | Side | #ff8c00
+%%metro grid: feed | 0,0
+%%metro grid: mid_a | 2,0
+%%metro grid: mid_b | 3,0
+%%metro grid: dest | 4,0
+%%metro grid: low | 1,1
+
+graph LR
+    subgraph feed [Feed]
+        a[A]
+    end
+
+    subgraph low [Low]
+        x[X]
+    end
+
+    subgraph mid_a [Mid A]
+        m[M]
+    end
+
+    subgraph mid_b [Mid B]
+        n[N]
+    end
+
+    subgraph dest [Dest]
+        z[Z]
+    end
+
+    a -->|main| m
+    m -->|main| n
+    n -->|main| z
+
+    a -->|side| x
+    x -->|side| z
