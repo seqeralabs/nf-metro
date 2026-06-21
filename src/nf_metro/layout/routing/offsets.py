@@ -269,10 +269,11 @@ def _assert_sections_anchored_on_trunk(ctx: _OffsetCtx) -> None:
     contiguous top-anchored levels ``0, step, ..., (m-1)*step``.  A section that
     shares a flat frame with a neighbour is exempt -- it may legitimately sit on
     a sub-range so a line stays level across the boundary -- since re-basing
-    there is left to the global frame.  Fails loudly if a future change stops
-    re-anchoring an independent subset-carrying section rather than letting the
-    misaligned markers reach the canvas.  Compact mode allocates slots by a
-    different rule (max lines per side) and is exempt.
+    there is gated on the flat-run check in :func:`_reindex_local_priority_gaps`.
+    Fails loudly if a future change stops re-anchoring an independent
+    subset-carrying section rather than letting the misaligned markers reach the
+    canvas.  Compact mode allocates slots by a different rule (max lines per
+    side) and is exempt.
     """
     if ctx.compact:
         return
@@ -296,6 +297,98 @@ def _assert_sections_anchored_on_trunk(ctx: _OffsetCtx) -> None:
             )
 
 
+def _trunk_endpoint_offset(
+    ctx: _OffsetCtx,
+    node_id: str,
+    lid: str,
+    section_local: dict[str, dict[str, int]],
+) -> float | None:
+    """Offset *lid* settles to at the section anchoring *node_id*'s trunk.
+
+    A section-bound node (station or section port) returns its own section's
+    predicted offset.  A bypass-trunk junction (no section) carries the offset of
+    whatever section feeds it, so it is followed back along *lid* to the nearest
+    section.  Returns ``None`` if the chain leaves no section to anchor on.
+    """
+    graph = ctx.graph
+    seen: set[str] = set()
+    cur: str | None = node_id
+    while cur is not None and cur not in seen:
+        seen.add(cur)
+        section_id = graph.stations[cur].section_id
+        if section_id is not None:
+            return _predicted_local_offset(ctx, section_id, lid, section_local)
+        cur = next(
+            (e.source for e in graph.edges_to(cur) if e.line_id == lid),
+            None,
+        )
+    return None
+
+
+def _reanchor_keeps_runs_level(
+    ctx: _OffsetCtx,
+    sec_id: str,
+    candidate: dict[str, int],
+    section_local: dict[str, dict[str, int]],
+) -> bool:
+    """Whether re-anchoring *sec_id* onto *candidate* leaves level runs level.
+
+    Every edge crossing the section's ports already either runs level (its line's
+    offset matches the connected trunk) or steps (the offsets differ, so routing
+    bridges it).  Re-anchoring is rejected only when it would pull a currently
+    level run off level -- the case that paints a straight-through line as a kink
+    or an almost-horizontal slope.  A run that already steps stays free, which is
+    why a member fed only through a bypass that re-based upstream may re-anchor.
+    """
+    graph = ctx.graph
+    section = graph.sections[sec_id]
+    reverse = sec_id in ctx.reversed_sections
+    local_max = len(candidate) - 1
+    for pid in (*section.entry_ports, *section.exit_ports):
+        for edge in (*graph.edges_to(pid), *graph.edges_from(pid)):
+            lid = edge.line_id
+            slot = candidate.get(lid)
+            if slot is None:
+                continue
+            other_id = edge.target if edge.source == pid else edge.source
+            other = graph.stations.get(other_id)
+            if other is None or other.section_id == sec_id:
+                # An edge into the section's own interior carries the bundle as a
+                # whole; re-anchoring shifts both ends together, so it is never a
+                # boundary run to keep level.
+                continue
+            rank = local_max - slot if reverse else slot
+            cand_off = rank * ctx.offset_step
+            current = _predicted_local_offset(ctx, sec_id, lid, section_local)
+            neighbour = _trunk_endpoint_offset(ctx, other_id, lid, section_local)
+            if neighbour is None:
+                continue
+            currently_level = abs(neighbour - current) <= SAME_Y_TOLERANCE
+            if currently_level and abs(cand_off - neighbour) > SAME_Y_TOLERANCE:
+                return False
+    return True
+
+
+def _predicted_local_offset(
+    ctx: _OffsetCtx, sec_id: str, lid: str, section_local: dict[str, dict[str, int]]
+) -> float:
+    """Offset *lid* will take in *sec_id* given the current re-index decisions.
+
+    Re-indexed sections draw from their section-local order; the rest keep their
+    base (global-priority) offset.  Reversed sections count from the bottom.
+    """
+    reverse = sec_id in ctx.reversed_sections
+    if sec_id in section_local:
+        local = section_local[sec_id]
+        slot = local.get(lid, 0)
+        local_max = max(local.values()) if local else 0
+        rank = local_max - slot if reverse else slot
+    else:
+        pri = ctx.line_priority.get(lid, 0)
+        rank = ctx.max_priority - pri if reverse else pri
+    return rank * ctx.offset_step
+
+
 def _reindex_local_priority_gaps(ctx: _OffsetCtx) -> dict[str, dict[str, int]]:
     """Re-anchor section bundles on their trunk, returning the section-local
     orderings.
@@ -305,13 +398,13 @@ def _reindex_local_priority_gaps(ctx: _OffsetCtx) -> dict[str, dict[str, int]]:
     its trunk off-centre.
 
     Re-basing is gated on whether a section shares a flat offset frame with a
-    neighbour.  A section with a flat-frame neighbour passes a line straight
-    across the boundary on one trunk Y, so its bundle order is coordinated with
-    that neighbour (and its entry/exit ports) through the global frame; for it
-    re-basing is limited to closing interior priority gaps.  An *independent*
-    section -- one whose lines reach it through a vertical leg, not flat from an
-    adjacent column -- can re-centre any subset that does not already sit on the
-    top-anchored slots, so two non-interacting sections on the same row align.
+    neighbour.  An *independent* section -- one whose lines reach it through a
+    vertical leg, not flat from an adjacent column -- re-centres any subset off
+    the top-anchored slots, so two non-interacting sections on the same row
+    align.  A section in a multi-member frame closes interior priority gaps
+    unconditionally; a frame member sitting below its trunk with no interior gap
+    re-anchors only when a second pass confirms it carries no line flat across an
+    adjacent-neighbour boundary (such a line would slope if its slot moved).
     """
     graph = ctx.graph
     present = _section_present_lines(graph)
@@ -320,24 +413,42 @@ def _reindex_local_priority_gaps(ctx: _OffsetCtx) -> dict[str, dict[str, int]]:
     component_size = Counter(roots.values())
 
     section_local: dict[str, dict[str, int]] = {}
+    ordered_by_section: dict[str, list[str]] = {}
+    not_anchored_frame: list[str] = []
     for sec_id in graph.sections:
         ordered = sorted(present[sec_id], key=lambda lid: ctx.line_priority.get(lid, 0))
+        ordered_by_section[sec_id] = ordered
         global_pris = [ctx.line_priority.get(lid, 0) for lid in ordered]
         n = len(global_pris)
+        if sec_id in ctx.reversed_sections:
+            anchored_run = list(range(ctx.max_priority - n + 1, ctx.max_priority + 1))
+        else:
+            anchored_run = list(range(n))
+        not_anchored = global_pris != anchored_run
         if component_size[roots[sec_id]] > 1:
-            # Coordinated through the shared frame: only close interior gaps.
-            needs_reindex = any(
+            # Coordinated through the shared frame: an interior gap closes here;
+            # a below-trunk bundle with no interior gap is deferred to the second
+            # pass, which re-anchors it only when no flat boundary run slants.
+            interior_gap = any(
                 global_pris[i + 1] - global_pris[i] > 1 for i in range(n - 1)
             )
-        else:
+            if interior_gap:
+                section_local[sec_id] = {lid: i for i, lid in enumerate(ordered)}
+            elif not_anchored:
+                not_anchored_frame.append(sec_id)
+        elif not_anchored:
             # Independent: re-centre any subset off the top-anchored run.
-            if sec_id in ctx.reversed_sections:
-                anchored_run = range(ctx.max_priority - n + 1, ctx.max_priority + 1)
-            else:
-                anchored_run = range(n)
-            needs_reindex = global_pris != list(anchored_run)
-        if needs_reindex:
             section_local[sec_id] = {lid: i for i, lid in enumerate(ordered)}
+
+    # Second pass: a frame member sitting below its trunk re-anchors to the top
+    # only when doing so keeps every flat run to an adjacent frame neighbour
+    # level.  A member fed solely through risers or bypass junctions has no such
+    # run and re-bases like its independently-anchored siblings; one carrying a
+    # line straight across a flat boundary keeps its slot so the line stays level.
+    for sec_id in not_anchored_frame:
+        candidate = {lid: i for i, lid in enumerate(ordered_by_section[sec_id])}
+        if _reanchor_keeps_runs_level(ctx, sec_id, candidate, section_local):
+            section_local[sec_id] = candidate
 
     for sid_s, station in graph.stations.items():
         st_sec = station.section_id

@@ -813,6 +813,91 @@ def test_subset_section_bundle_anchored_on_trunk(fixture, section_id):
 
 
 # ---------------------------------------------------------------------------
+# Flat-frame member fed only through risers re-anchors on its own trunk
+# ---------------------------------------------------------------------------
+
+# (fixture, section_id, expected sorted offset levels in OFFSET_STEP units).
+# A flat-frame member whose lines reach it through risers or bypass junctions
+# (not flat from an adjacent neighbour) has nothing pinning its bundle to a high
+# slot, so it must re-anchor on its trunk like an independent subset-carrier
+# rather than inheriting the global slots of the full bundle.  annotation in
+# convergent_offrow_exit_climb carries snvvcf+svvcf (global slots 4,5); fed by a
+# bypass that re-based upstream, it must drop to local slots 0,1.
+_FRAME_MEMBER_ANCHORED_SECTIONS = [
+    ("topologies/convergent_offrow_exit_climb.mmd", "annotation", [0, 1]),
+]
+
+
+@pytest.mark.parametrize(
+    "fixture,section_id,expected_slots", _FRAME_MEMBER_ANCHORED_SECTIONS
+)
+def test_frame_member_reanchors_when_fed_through_risers(
+    fixture, section_id, expected_slots
+):
+    """A bypass-fed flat-frame member anchors its bundle on its own trunk."""
+    from nf_metro.layout.constants import OFFSET_STEP
+
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    levels = sorted(
+        {
+            round(offsets.get((sid, lid), 0.0), 1)
+            for sid, st in graph.stations.items()
+            if st.section_id == section_id and not st.is_port
+            for lid in graph.station_lines(sid)
+        }
+    )
+    expected = [round(slot * OFFSET_STEP, 1) for slot in expected_slots]
+    assert levels == expected, (
+        f"{fixture}: section {section_id} offset levels {levels} are not the "
+        f"trunk-anchored {expected}; markers pushed a sub-bundle below the row"
+    )
+
+
+# ---------------------------------------------------------------------------
+# A flat inter-section run stays level after a member re-anchors
+# ---------------------------------------------------------------------------
+
+# (fixture, source_section, target_section, line_id): a line leaving one section
+# and entering an adjacent one on the same trunk Y.  Both ports share that Y, so
+# the per-line offset must match at each end or the inter-section run slopes.
+_LEVEL_BOUNDARY_RUNS = [
+    ("topologies/convergent_offrow_exit_climb.mmd", "annotation", "reports", "svvcf"),
+]
+
+
+@pytest.mark.parametrize("fixture,src_sec,dst_sec,line_id", _LEVEL_BOUNDARY_RUNS)
+def test_flat_frame_boundary_run_stays_level(fixture, src_sec, dst_sec, line_id):
+    """A shared line crossing a flat section boundary carries one offset.
+
+    The exit port of *src_sec* and the entry port of *dst_sec* sit on the same
+    base Y, so *line_id* must hold the same per-line offset at both or the run
+    between them slopes instead of running level.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    exit_port = next(
+        pid
+        for pid in graph.sections[src_sec].exit_ports
+        if line_id in graph.station_lines(pid)
+    )
+    entry_port = next(
+        pid
+        for pid in graph.sections[dst_sec].entry_ports
+        if line_id in graph.station_lines(pid)
+    )
+    assert abs(graph.stations[exit_port].y - graph.stations[entry_port].y) <= _Y_TOL, (
+        f"{fixture}: {src_sec}->{dst_sec} ports not on one Y; precondition fails"
+    )
+    exit_off = round(offsets.get((exit_port, line_id), 0.0), 1)
+    entry_off = round(offsets.get((entry_port, line_id), 0.0), 1)
+    assert exit_off == entry_off, (
+        f"{fixture}: {line_id} leaves {src_sec} at offset {exit_off} but enters "
+        f"{dst_sec} at {entry_off}; the flat run slopes"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Merge-port re-joined line keeps its side on the outgoing run
 # ---------------------------------------------------------------------------
 
