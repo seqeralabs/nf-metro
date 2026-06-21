@@ -14,7 +14,6 @@
   "common.py::if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:::#1",
   "common.py::if abs(y4 - y3) > COORD_TOLERANCE or abs(x4 - x3) <= COORD_TOLERANCE:::#1",
   "common.py::if all_in_range:::#1",
-  "common.py::if any(abs(adjusted - px) <= port_tol for px in port_xs):::#1",
   "common.py::if bundle_index < 0 or bundle_index >= n:::#1",
   "common.py::if dx > 0:::#1",
   "common.py::if dy > 0:::#2",

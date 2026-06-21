@@ -666,6 +666,13 @@ def _compute_junction_fan_info(
         # its bypass category and the wrap-only / L-only fallback would
         # leave the wrap routes free to pick a different corner X than
         # the bypass routes.
+        # The cross-row bypass clause below is scoped to multi-line junctions:
+        # it newly classifies a cross-row sibling as a bypass so distinct lines
+        # peeling to different targets share one fan corner.  A single-line
+        # fan-out is fused by the coincidence pass, so applying it there would
+        # only reroute it identically (or, worse, perturb a merge feeder), so a
+        # single-line junction keeps the same-row-only classification main uses.
+        multi_line = len({e.line_id for e in graph.edges_from(jid)}) >= 2
         outgoing: list[Edge] = []
         has_lshape = False
         has_bypass = False
@@ -690,11 +697,12 @@ def _compute_junction_fan_info(
             # leg runs at the target entry Y - the target row, plowed through
             # even when the source row is clear.  A fan-out junction sits in its
             # source row while its targets sit a row below, so the target-row
-            # clause is what classifies the bypassing sibling here.
+            # clause is what classifies the bypassing sibling (multi-line only).
             is_bypass = abs(tgt_col - src_col) > 1 and (
                 _has_intervening_sections(graph, src_col, tgt_col, src_row)
                 or (
-                    src_row is not None
+                    multi_line
+                    and src_row is not None
                     and tgt_row is not None
                     and tgt_row != src_row
                     and _has_intervening_sections(graph, src_col, tgt_col, tgt_row)
@@ -753,12 +761,7 @@ def _compute_junction_fan_info(
             or (has_wrap and (has_lshape or has_bypass))
             or near_src_collision
         )
-        # The unified fan exists to separate distinct lines that would otherwise
-        # overlay one source-side channel.  A single-line fan-out has nothing to
-        # separate -- its same-line tracks are fused by the coincidence pass --
-        # so leave it on that path rather than rerouting it identically here.
-        distinct_lines = {e.line_id for e in graph.edges_from(jid)}
-        if not outgoing or not needs_unified or len(distinct_lines) < 2:
+        if not outgoing or not needs_unified:
             continue
 
         # Assign one position per unique line_id (sorted by priority).
