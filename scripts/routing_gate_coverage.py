@@ -26,8 +26,10 @@ baseline.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -52,11 +54,37 @@ TRIAGE_STATUSES = frozenset({"defensive", "candidate-dead", "needs-review"})
 # version.
 BASELINE_PYTHON = (3, 11)
 
+# Operand-level arc coverage is also sensitive to the interpreter's hash seed:
+# the layout engine iterates hash-ordered sets while rendering, so which operand
+# of a short-circuit ``and``/``or`` decides the branch can vary run to run even
+# though the rendered SVG is identical.  Pinning the seed makes the matrix and
+# baseline reproducible (the sibling of the interpreter-version pin above); the
+# sweep re-execs under this value when invoked without it.
+PINNED_HASH_SEED = "0"
+
 # The gate matrix scopes to routing *decision* modules: the dispatch handlers
 # and the post-routing passes.  ``invariants.py`` is the validator (its branches
 # only fire under ``validate=True``, a separate test surface), and ``__init__``
 # is re-exports; neither holds a topology gate.
 EXCLUDED_MODULES = {"__init__.py", "invariants.py"}
+
+
+def ensure_pinned_hash_seed() -> None:
+    """Re-exec under :data:`PINNED_HASH_SEED` unless it is already in effect.
+
+    Hash randomization is fixed at interpreter start, so a sweep that wants
+    reproducible operand-level coverage must run under a known seed.  When the
+    seed differs (the default randomized seed, or any other value) this re-execs
+    the same command with the seed pinned; on the second pass the early return
+    lets it proceed.
+    """
+    if os.environ.get("PYTHONHASHSEED") == PINNED_HASH_SEED:
+        return
+    os.execve(
+        sys.executable,
+        [sys.executable, *sys.argv],
+        {**os.environ, "PYTHONHASHSEED": PINNED_HASH_SEED},
+    )
 
 
 @dataclass
@@ -89,6 +117,29 @@ class Gate:
     @property
     def fully_covered(self) -> bool:
         return all(a.covered for a in self.arms)
+
+    def to_payload(self) -> dict:
+        """Serialize to the ``--json`` dump's per-gate shape."""
+        return {
+            "module": self.module,
+            "line": self.src_line,
+            "code": self.code,
+            "occurrence": self.occurrence,
+            "fully_covered": self.fully_covered,
+            "arms": [{"dst": a.dst_line, "fixtures": a.fixtures} for a in self.arms],
+        }
+
+    @classmethod
+    def from_payload(cls, entry: dict) -> Gate:
+        """Reconstruct a gate from one :meth:`to_payload` entry."""
+        gate = cls(
+            module=entry["module"],
+            src_line=entry["line"],
+            code=entry["code"],
+            occurrence=entry["occurrence"],
+        )
+        gate.arms = [GateArm(a["dst"], list(a["fixtures"])) for a in entry["arms"]]
+        return gate
 
 
 def _collect_corpus() -> list[tuple[Path, bool]]:
@@ -162,6 +213,112 @@ def _render_under_coverage(corpus: list[tuple[Path, bool]]):
     return cov
 
 
+def _expandable_boolean_conditions(
+    source: str,
+) -> dict[int, tuple[str, list[int], int]]:
+    """Map each cleanly operand-expandable multi-line ``and``/``or`` condition to
+    ``(operator, operand_lines, body_line)``, keyed by the opening ``if``/``while``
+    line.
+
+    CPython emits no branch bytecode at the opening line of a wrapped boolean
+    condition -- the short-circuit branches live on the operand lines -- so the
+    static arc coverage attributes to the opening line is *phantom*.  This finds
+    the conditions whose operand structure is simple enough to re-attribute the
+    decision to its operand lines without guessing: each operand is single-line
+    and not itself a ``BoolOp``, and the operands sit on strictly increasing,
+    distinct lines.  Anything more tangled (a nested ``and``/``or``, an operand
+    spanning lines, two operands sharing a line) is omitted, leaving the caller
+    on coverage's collapsed view rather than risking a wrong operand attribution.
+    """
+    out: dict[int, tuple[str, list[int], int]] = {}
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, (ast.If, ast.While)):
+            continue
+        test = node.test
+        if not isinstance(test, ast.BoolOp) or test.lineno == test.end_lineno:
+            continue
+        operands = test.values
+        lines = [o.lineno for o in operands]
+        if any(isinstance(o, ast.BoolOp) for o in operands):
+            continue
+        if any(o.lineno != o.end_lineno for o in operands):
+            continue
+        if lines != sorted(set(lines)):
+            continue
+        op = "or" if isinstance(test.op, ast.Or) else "and"
+        out[node.lineno] = (op, lines, node.body[0].lineno)
+    return out
+
+
+def _operand_arms(
+    dsts: list[int],
+    condition: tuple[str, list[int], int],
+    executed_from_operands: set[tuple[int, int]],
+) -> list[tuple[int, list[int]]] | None:
+    """Decompose a phantom boolean gate into one ``(operand_line, [dsts])`` per
+    operand, or ``None`` to fall back to the collapsed opening-line gate.
+
+    The collapsed gate has exactly two destinations: the body (``condition``'s
+    ``body_line``) and the else/loop-back line.  Each operand short-circuits to
+    one of them (``or`` -> body when true, ``and`` -> else when false) or, when
+    it does not decide, falls through to the next operand line; the final operand
+    takes the remaining destination.  The synthesized arcs are validated against
+    the arcs actually executed from the operand lines: if any executed arc is
+    unaccounted for, the model of this condition is wrong and we fall back.
+    """
+    op, operand_lines, body_line = condition
+    if len(dsts) != 2:
+        return None
+    else_candidates = [d for d in dsts if d != body_line]
+    if len(else_candidates) != 1:
+        return None
+    else_line = else_candidates[0]
+
+    synthesized: set[tuple[int, int]] = set()
+    specs: list[tuple[int, list[int]]] = []
+    for i, line in enumerate(operand_lines):
+        is_last = i == len(operand_lines) - 1
+        if op == "or":
+            decided = body_line
+            fallthrough = else_line if is_last else operand_lines[i + 1]
+        else:
+            decided = else_line
+            fallthrough = body_line if is_last else operand_lines[i + 1]
+        specs.append((line, sorted({decided, fallthrough})))
+        synthesized.add((line, decided))
+        synthesized.add((line, fallthrough))
+
+    if not executed_from_operands <= synthesized:
+        return None
+    return specs
+
+
+def _build_gate(
+    module: str,
+    src_line: int,
+    dsts: list[int],
+    hitter_index: dict[tuple[int, int], list[str]],
+    source_lines: list[str],
+    code_seen: dict[str, int],
+) -> Gate:
+    """Construct a :class:`Gate` at ``src_line`` with one arm per destination.
+
+    ``code_seen`` is the module-wide occurrence counter that keys gates by their
+    source text, so it must be shared across collapsed and operand-level gates.
+    """
+    code = (
+        source_lines[src_line - 1].strip()
+        if 0 < src_line <= len(source_lines)
+        else "<unknown>"
+    )
+    occurrence = code_seen.get(code, 0) + 1
+    code_seen[code] = occurrence
+    gate = Gate(module=module, src_line=src_line, code=code, occurrence=occurrence)
+    for dst in sorted(dsts):
+        gate.arms.append(GateArm(dst, hitter_index.get((src_line, dst), [])))
+    return gate
+
+
 def compute_gate_coverage() -> list[Gate]:
     """Render the corpus and return one :class:`Gate` per routing branch point.
 
@@ -186,11 +343,20 @@ def compute_gate_coverage() -> list[Gate]:
     # ``translate_arcs`` collapses each physical endpoint onto that logical
     # first line, so a genuinely-taken branch lands on the same arc the static
     # view names instead of looking un-exercised.
+    # ``phys_hitters`` keeps the *untranslated* physical arcs: a wrapped boolean
+    # condition's operand line is the real branch source that the translated view
+    # collapses onto the opening line.
     arc_hitters: dict[str, dict[tuple[int, int], list[str]]] = {f: {} for f in measured}
+    phys_hitters: dict[str, dict[tuple[int, int], list[str]]] = {
+        f: {} for f in measured
+    }
     for fx in fixtures:
         data.set_query_context(fx)
         for f in measured:
-            for arc in reporters[f].translate_arcs(data.arcs(f) or []):
+            raw = data.arcs(f) or []
+            for arc in raw:
+                phys_hitters[f].setdefault(arc, []).append(fx)
+            for arc in reporters[f].translate_arcs(raw):
                 arc_hitters[f].setdefault(arc, []).append(fx)
 
     gates: list[Gate] = []
@@ -204,7 +370,10 @@ def compute_gate_coverage() -> list[Gate]:
         possible = reporters[f].arcs()
         if not possible:
             continue
-        source_lines = Path(f).read_text().splitlines()
+        source = Path(f).read_text()
+        source_lines = source.splitlines()
+        boolean_conditions = _expandable_boolean_conditions(source)
+        phys_src_lines = {arc[0] for arc in phys_hitters[f]}
 
         # Group possible arcs by source line; a gate is a line with >=2 arms.
         arcs_by_src: dict[int, list[int]] = {}
@@ -218,23 +387,48 @@ def compute_gate_coverage() -> list[Gate]:
             dsts = arcs_by_src[src_line]
             if len(dsts) < 2:
                 continue  # not a branch point
-            code = (
-                source_lines[src_line - 1].strip()
-                if 0 < src_line <= len(source_lines)
-                else "<unknown>"
-            )
-            occurrence = code_seen.get(code, 0) + 1
-            code_seen[code] = occurrence
 
-            gate = Gate(
-                module=module, src_line=src_line, code=code, occurrence=occurrence
+            # A wrapped boolean ``if (``/``while (`` carries no branch bytecode
+            # at its opening line (no physical arc originates there); its arms
+            # are phantom.  Re-attribute the decision to its operand lines so a
+            # genuinely un-exercised short-circuit branch surfaces as its own
+            # gate instead of hiding behind the collapsed opening-line arm.
+            condition = boolean_conditions.get(src_line)
+            if condition is not None and src_line not in phys_src_lines:
+                operand_lines = set(condition[1])
+                executed = {a for a in phys_hitters[f] if a[0] in operand_lines}
+                specs = _operand_arms(dsts, condition, executed)
+                if specs is not None:
+                    for operand_line, operand_dsts in specs:
+                        gates.append(
+                            _build_gate(
+                                module,
+                                operand_line,
+                                operand_dsts,
+                                phys_hitters[f],
+                                source_lines,
+                                code_seen,
+                            )
+                        )
+                    continue
+
+            gates.append(
+                _build_gate(
+                    module, src_line, dsts, arc_hitters[f], source_lines, code_seen
+                )
             )
-            for dst in sorted(dsts):
-                hitters = arc_hitters[f].get((src_line, dst), [])
-                gate.arms.append(GateArm(dst, hitters))
-            gates.append(gate)
 
     return gates
+
+
+def gates_from_payload(payload: list[dict]) -> list[Gate]:
+    """Reconstruct :class:`Gate` objects from the ``--json`` dump.
+
+    Lets a caller obtain gates from a seed-pinned subprocess (see
+    :data:`PINNED_HASH_SEED`) rather than computing them in-process, which keeps
+    operand-level coverage reproducible.
+    """
+    return [Gate.from_payload(entry) for entry in payload]
 
 
 def gap_keys(gates: list[Gate]) -> list[str]:
@@ -288,9 +482,10 @@ def _render_markdown(gates: list[Gate], triage: dict[str, dict[str, str]]) -> st
     out.append("")
     out.append(
         "Auto-generated by `scripts/routing_gate_coverage.py` under CPython "
-        f"{BASELINE_PYTHON[0]}.{BASELINE_PYTHON[1]} (the arc model is "
-        "interpreter-specific). Do not edit by hand; run the script to "
-        "regenerate."
+        f"{BASELINE_PYTHON[0]}.{BASELINE_PYTHON[1]} with "
+        f"`PYTHONHASHSEED={PINNED_HASH_SEED}` (the arc model is "
+        "interpreter-specific and operand-level coverage is hash-seed "
+        "sensitive). Do not edit by hand; run the script to regenerate."
     )
     out.append("")
     out.append(
@@ -359,6 +554,8 @@ def _render_markdown(gates: list[Gate], triage: dict[str, dict[str, str]]) -> st
 
 
 def main() -> int:
+    ensure_pinned_hash_seed()
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--write",
@@ -379,6 +576,16 @@ def main() -> int:
 
     gates = compute_gate_coverage()
     triage = load_triage()
+
+    # ``--json`` is the machine-readable dump the ratchet test consumes; it must
+    # emit even when the triage sidecar is stale so the dedicated stale-triage
+    # test can report the specific offenders rather than the whole run aborting.
+    if args.json:
+        payload = [{**g.to_payload(), "triage": triage.get(g.key)} for g in gates]
+        json.dump(payload, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 0
+
     stale = triage_stale_keys(gates, triage)
     if stale:
         sys.exit(
@@ -386,23 +593,6 @@ def main() -> int:
             "(or whose key has shifted). Remove the stale entr(y/ies) from "
             f"{TRIAGE_PATH.relative_to(PROJECT_ROOT)}:\n  " + "\n  ".join(stale)
         )
-
-    if args.json:
-        payload = [
-            {
-                "module": g.module,
-                "line": g.src_line,
-                "code": g.code,
-                "occurrence": g.occurrence,
-                "fully_covered": g.fully_covered,
-                "triage": triage.get(g.key),
-                "arms": [{"dst": a.dst_line, "fixtures": a.fixtures} for a in g.arms],
-            }
-            for g in gates
-        ]
-        json.dump(payload, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return 0
 
     markdown = _render_markdown(gates, triage)
 
