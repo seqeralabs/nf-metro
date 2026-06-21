@@ -12,6 +12,7 @@ from nf_metro.layout.constants import (
     SAME_COORD_TOLERANCE,
     STATION_RADIUS_APPROX,
 )
+from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.labels import active_font_scale
 from nf_metro.layout.phases._common import (
     _classify_multi_station_ys,
@@ -31,12 +32,16 @@ def _group_sections_by_row(
     section_subgraphs: dict[str, MetroGraph],
     row_assign: dict[str, int],
 ) -> dict[tuple[int, str], list[str]]:
-    """Group non-TB sections by their (grid row, direction)."""
+    """Group lane-on-Y sections by their (grid row, direction).
+
+    Vertical-flow (TB/BT) sections separate their lines along X, not Y, so
+    they share no row Y-grid and are left out of the grouping.
+    """
     groups: dict[tuple[int, str], list[str]] = defaultdict(list)
     for sec_id in section_subgraphs:
         section = graph.sections[sec_id]
         row = row_assign.get(sec_id, -1)
-        if row < 0 or section.direction == "TB":
+        if row < 0 or not lanes_run_along_y(section.direction):
             continue
         groups[(row, section.direction)].append(sec_id)
     return groups
@@ -473,7 +478,7 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
         if (
             section.bbox_h <= 0
             or section.grid_row < 0
-            or section.direction not in ("LR", "RL")
+            or not lanes_run_along_y(section.direction)
             or section.grid_row_span > 1
         ):
             continue

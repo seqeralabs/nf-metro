@@ -13,6 +13,7 @@ from nf_metro.layout.constants import (
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
 )
+from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.parser.model import (
     Edge,
     MetroGraph,
@@ -25,6 +26,17 @@ from nf_metro.parser.model import (
 
 if TYPE_CHECKING:
     from nf_metro.layout.routing.common import RoutedPath
+
+
+def _is_fold_section(section: Section) -> bool:
+    """``True`` for a section the row-fold logic produced.
+
+    A fold either spans more than one grid row or runs its flow vertically
+    (TB/BT).  Its exit ports are placed by the fold exit-port path
+    (``_align_exit_ports``) rather than the row-level exit passes, which expect
+    a single-row horizontal-flow section.
+    """
+    return section.grid_row_span > 1 or not lanes_run_along_y(section.direction)
 
 
 @contextmanager
@@ -513,7 +525,7 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
     helpers (ids starting with ``__bypass_``) are skipped - they exist
     only for routing and must not anchor the row's trunk.
     """
-    if section.direction not in ("LR", "RL"):
+    if not lanes_run_along_y(section.direction):
         return None
     bundle = _section_bundle_lines(graph, section)
     if not bundle:
