@@ -265,3 +265,7 @@ Source (col 2, row 0) sends a two-line bundle both directly to Target (col 0, ro
 ### Inter-Row Wrap Clearance
 
 A three-line bundle exits the top section's right port, wraps via the inter-row gap, and enters the bottom section's left port. The two sections are stacked directly (same column, adjacent rows). Tests that the wrap uses the clear gap between rows rather than clipping the section boxes, and that port alignment is maintained across the wrap.
+
+### Multi-Carrier Off-Row Exit Climb
+
+The long-read variant-calling pipeline on a single-row grid (#878). The pre-processing exit carries two lines (`bam`, `other`) from two stations sharing a trunk row that sits below the port row, then fans out through a junction to several downstream rows. Tests that a multi-carrier parallel bundle anchors on its shared carrier row so it runs flat inside the section, with the fan-out risers in the inter-section gap, rather than both lines climbing a diagonal up to the port inside the section (#938, extending the single-carrier anchor of #877).

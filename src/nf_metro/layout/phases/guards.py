@@ -36,14 +36,13 @@ from nf_metro.layout.geometry import (
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _canvas_width,
-    _is_fold_section,
     _restoring_layout_geometry,
     _route_crosses_section_boundary,
     _section_bundle_lines,
     _station_marker_bbox,
-    exit_run_corridor_clear,
     first_vertical_leg_sign,
     first_vertical_leg_x,
+    flow_exit_carrier_anchor,
     is_loop_side_branch_station,
     routes_through_unrelated_sections,
 )
@@ -742,52 +741,32 @@ def _guard_no_mixed_entry_directions(graph: MetroGraph) -> None:
 
 
 def _guard_flow_exit_anchored_to_carrier(graph: MetroGraph, phase: str) -> None:
-    """A flow-aligned exit fed by a single internal station, running straight
-    into a downstream entry port over a clear corridor, must sit on that
-    station's row.
+    """A flow-aligned exit anchoring to a shared carrier row must sit on it.
 
-    Otherwise the link from the carrying station to the exit climbs to the
-    port and renders as a diagonal inside the section instead of a clean
-    horizontal run with one riser in the inter-section gap.  Fold sections,
-    multi-feeder (bypass / fan-in) exits, exits feeding a fan-out / merge
-    junction, and exits whose carrier-row corridor is blocked are out of
-    scope: there the exit anchors elsewhere by design.
+    Otherwise the link from the carriers to the exit climbs to the port and
+    renders as a diagonal inside the section instead of a clean horizontal run
+    with one riser in the inter-section gap.  Scope (single carrier or parallel
+    bundle, direct entry or fan-out junction, clear corridor, non-fold section)
+    is exactly :func:`flow_exit_carrier_anchor`; everything else anchors
+    elsewhere by design.
     """
     junction_ids = graph.junction_ids
     for pid, port in graph.ports.items():
         if port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
         sec = graph.sections.get(port.section_id)
-        if sec is None or _is_fold_section(sec):
+        if sec is None:
             continue
-        downstream = list(graph.edges_from(pid))
-        if any(e.target in junction_ids for e in downstream):
+        anchor = flow_exit_carrier_anchor(graph, pid, sec, junction_ids)
+        if anchor is None:
             continue
-        if not any(
-            (p := graph.ports.get(e.target)) is not None and p.is_entry
-            for e in downstream
-        ):
-            continue
-        carriers = {
-            e.source
-            for e in graph.edges_to(pid)
-            if (s := graph.stations.get(e.source)) is not None
-            and not s.is_port
-            and s.section_id == sec.id
-        }
-        if len(carriers) != 1:
-            continue
-        carrier_id = next(iter(carriers))
-        if not exit_run_corridor_clear(graph, pid, sec, [carrier_id]):
-            continue
-        carrier_y = graph.stations[carrier_id].y
+        carrier_y, carrier_ids = anchor
         port_y = graph.stations[pid].y
         if abs(port_y - carrier_y) > GUARD_TOLERANCE:
             raise PhaseInvariantError(
                 f"{phase}: exit port {pid!r} at y={port_y:.1f} is off its "
-                f"carrying station {carrier_id!r} y={carrier_y:.1f}; the "
-                f"boundary run will "
-                f"render as a diagonal instead of a clean riser"
+                f"carrier row y={carrier_y:.1f} (carriers {sorted(carrier_ids)}); "
+                f"the boundary run will render as a diagonal instead of a riser"
             )
 
 
