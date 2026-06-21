@@ -16,8 +16,11 @@ from nf_metro.render.manifest import (
     read_manifest,
 )
 from nf_metro.render.svg import render_svg
+from nf_metro.render.validate import RenderFinding, validate_render
 
 __all__ = [
+    "RenderFinding",
+    "validate_render",
     "MANIFEST_ELEMENT_ID",
     "MANIFEST_SCHEMA_VERSION",
     "build_manifest",

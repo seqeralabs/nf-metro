@@ -30,7 +30,7 @@ from nf_metro.parser import (
 )
 from nf_metro.parser.directives import apply_legend_directive
 from nf_metro.parser.model import LineSpread, MetroGraph
-from nf_metro.render import render_svg
+from nf_metro.render import render_svg, validate_render
 from nf_metro.render.html import render_html
 from nf_metro.render.style import Theme
 from nf_metro.themes import THEMES
@@ -246,6 +246,17 @@ def _resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
         "in a host page that supplies its own frame and heading."
     ),
 )
+@click.option(
+    "--validate",
+    "validate_geometry",
+    is_flag=True,
+    default=False,
+    help=(
+        "After rendering, run the render-geometry guards on the produced SVG "
+        "(the picture as drawn, including render-time offsets and label "
+        "lifts) and fail if any defect is found. SVG output only."
+    ),
+)
 @layout_cli_options
 def render(
     input_file: Path,
@@ -265,6 +276,7 @@ def render(
     no_dark_mode_css: bool,
     no_chrome_css: bool,
     bare: bool,
+    validate_geometry: bool,
     **layout_opts: object,
 ) -> None:
     """Render a Mermaid metro map definition to SVG or interactive HTML."""
@@ -363,6 +375,17 @@ def render(
             )
     except PhaseInvariantError as e:
         raise click.ClickException(str(e))
+
+    if validate_geometry:
+        if format_ == "html":
+            raise click.ClickException("--validate applies to --format svg only.")
+        findings = validate_render(content)
+        if findings:
+            detail = "\n".join(f"  - {f.message}" for f in findings)
+            raise click.ClickException(
+                f"render-geometry validation found {len(findings)} "
+                f"defect(s) in the drawn SVG:\n{detail}"
+            )
 
     output.write_text(content if content.endswith("\n") else content + "\n")
     click.echo(
@@ -867,8 +890,22 @@ def check_mapping_cmd(
 
 @cli.command(name="validate-svg")
 @click.argument("svg_file", type=click.Path(exists=True, path_type=Path))
-def validate_svg_cmd(svg_file: Path) -> None:
-    """Validate an SVG's embedded manifest against the manifest JSON Schema."""
+@click.option(
+    "--geometry",
+    is_flag=True,
+    default=False,
+    help=(
+        "Also run the render-geometry guards on the drawn ink (the picture as "
+        "rendered, including render-time offsets and label lifts), not just the "
+        "manifest schema."
+    ),
+)
+def validate_svg_cmd(svg_file: Path, geometry: bool) -> None:
+    """Validate an SVG's embedded manifest against the manifest JSON Schema.
+
+    With ``--geometry`` it additionally runs the render-geometry guards on the
+    drawn ink and reports any defect.
+    """
     from nf_metro.render import manifest_schema, read_manifest
 
     try:
@@ -878,7 +915,8 @@ def validate_svg_cmd(svg_file: Path) -> None:
             "validate-svg needs the jsonschema package: pip install jsonschema"
         )
 
-    manifest = read_manifest(svg_file.read_text())
+    svg = svg_file.read_text()
+    manifest = read_manifest(svg)
     if manifest is None:
         click.echo(f"{svg_file}: no diagram manifest embedded", err=True)
         raise SystemExit(1)
@@ -891,9 +929,20 @@ def validate_svg_cmd(svg_file: Path) -> None:
         click.echo(f"  at {where}: {e.message}", err=True)
         raise SystemExit(1)
 
+    if geometry:
+        findings = validate_render(svg)
+        if findings:
+            click.echo(
+                f"{svg_file}: {len(findings)} render-geometry defect(s)", err=True
+            )
+            for finding in findings:
+                click.echo(f"  - {finding.message}", err=True)
+            raise SystemExit(1)
+
     click.echo(
         f"Valid: {len(manifest.get('nodes', []))} nodes, "
         f"schema version {manifest.get('version')}"
+        + (", render geometry clean" if geometry else "")
     )
 
 
