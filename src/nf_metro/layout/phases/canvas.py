@@ -12,8 +12,8 @@ def _renumber_sections_by_grid(graph: MetroGraph) -> None:
     Groups sections into flow sweeps separated by fold boundaries:
     each left-to-right (or right-to-left) run is one sweep, with
     TB fold sections belonging to the sweep they terminate.  Within
-    each sweep, sections are numbered by (grid_col, grid_row) so
-    columns go left-to-right and stacked sections go top-to-bottom.
+    each sweep, sections are numbered by (grid_row, grid_col) so
+    rows go top-to-bottom and sections within a row go left-to-right.
     All numbers in sweep N+1 are greater than those in sweep N.
     """
     from collections import deque
@@ -79,7 +79,7 @@ def _renumber_sections_by_grid(graph: MetroGraph) -> None:
     def _sort_key(s: Section) -> tuple[int, int, int]:
         sw = sweep[s.id]
         col = -s.grid_col if sweep_is_rl.get(sw, False) else s.grid_col
-        return (sw, col, s.grid_row)
+        return (sw, s.grid_row, col)
 
     sorted_sections = sorted(graph.sections.values(), key=_sort_key)
     for i, section in enumerate(sorted_sections, start=1):
