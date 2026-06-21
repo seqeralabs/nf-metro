@@ -571,6 +571,31 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "and folding back (#885).",
     ),
     (
+        "tb_lr_exit_left",
+        TOPOLOGIES_DIR,
+        "A `%%metro direction: TB` section dropping in through its TOP entry and "
+        "leaving through a LEFT exit into a section below-left (the "
+        "`_route_tb_lr_exit` LEFT arm): the station drops, turns once, and runs "
+        "out of the box's left side, the vertical leg fanned by the reversed "
+        "station offset so the outermost line takes the widest arc (#917).",
+    ),
+    (
+        "tb_lr_exit_right",
+        TOPOLOGIES_DIR,
+        "A `%%metro direction: TB` section dropping in through its TOP entry and "
+        "leaving through a RIGHT exit into the next forward section (the "
+        "`_route_tb_lr_exit` RIGHT arm): the mirror of the LEFT exit, fanned by "
+        "the exit port's own offset (#917).",
+    ),
+    (
+        "tb_internal_diagonal",
+        TOPOLOGIES_DIR,
+        "A fan-out inside a `%%metro direction: TB` section where the two "
+        "branch stations sit on different X tracks, so one internal edge is a "
+        "vertical drop and the other a 45-degree diagonal (the "
+        "`_route_tb_internal` diagonal arm) (#917).",
+    ),
+    (
         "around_below_ep_col_gt0",
         TOPOLOGIES_DIR,
         "A two-line bundle looping around below the canvas into a non-zero-"
