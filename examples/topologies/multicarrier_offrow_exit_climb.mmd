@@ -1,0 +1,45 @@
+%%metro title: Multi-carrier off-row exit climb
+%%metro style: dark
+%%metro line: ubam | uBAM | #0570b0
+%%metro line: fastq | FASTQ | #2db572
+%%metro line: bam | BAM | #f5c542
+%%metro line: other | Other | #ff8c00
+%%metro files: fastq_in | FASTQ
+%%metro files: bam_in | BAM
+%%metro files: ubam_in | uBAM
+%%metro grid: prep | 0,0
+%%metro grid: variants | 1,0
+%%metro grid: depth | 1,1
+
+graph LR
+    subgraph prep [Pre-processing]
+        fastq_in[ ]
+        bam_in[ ]
+        ubam_in[ ]
+        cat_fastq[cat FASTQ]
+        samtools_merge[samtools\nmerge]
+        minimap2_align[minimap2]
+        samtools_sort_index[samtools\nsort/index]
+        mosdepth[mosdepth]
+
+        fastq_in -->|fastq| cat_fastq
+        ubam_in -->|ubam| samtools_merge
+        bam_in -->|bam| samtools_merge
+        cat_fastq -->|fastq| minimap2_align
+        samtools_merge -->|ubam| minimap2_align
+        minimap2_align -->|bam| samtools_sort_index
+        samtools_merge -->|bam| samtools_sort_index
+        samtools_sort_index -->|bam| mosdepth
+    end
+    subgraph variants [Small variant calling]
+        clair3[Clair3]
+        deepvariant[Deepvariant]
+    end
+    subgraph depth [Depth & repeats]
+        longtr[LongTR]
+        ontspectre[ont-spectre]
+    end
+    samtools_sort_index -->|bam| clair3
+    samtools_sort_index -->|bam| deepvariant
+    samtools_sort_index -->|bam| longtr
+    mosdepth -->|other| ontspectre

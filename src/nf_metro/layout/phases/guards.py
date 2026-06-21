@@ -36,14 +36,13 @@ from nf_metro.layout.geometry import (
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _canvas_width,
-    _is_fold_section,
     _restoring_layout_geometry,
     _route_crosses_section_boundary,
     _section_bundle_lines,
     _station_marker_bbox,
-    exit_run_corridor_clear,
     first_vertical_leg_sign,
     first_vertical_leg_x,
+    flow_exit_carrier_anchor,
     is_loop_side_branch_station,
     routes_through_unrelated_sections,
 )
@@ -742,52 +741,90 @@ def _guard_no_mixed_entry_directions(graph: MetroGraph) -> None:
 
 
 def _guard_flow_exit_anchored_to_carrier(graph: MetroGraph, phase: str) -> None:
-    """A flow-aligned exit fed by a single internal station, running straight
-    into a downstream entry port over a clear corridor, must sit on that
-    station's row.
+    """A flow-aligned exit anchoring to a shared carrier row must sit on it.
 
-    Otherwise the link from the carrying station to the exit climbs to the
-    port and renders as a diagonal inside the section instead of a clean
-    horizontal run with one riser in the inter-section gap.  Fold sections,
-    multi-feeder (bypass / fan-in) exits, exits feeding a fan-out / merge
-    junction, and exits whose carrier-row corridor is blocked are out of
-    scope: there the exit anchors elsewhere by design.
+    Otherwise the link from the carriers to the exit climbs to the port and
+    renders as a diagonal inside the section instead of a clean horizontal run
+    with one riser in the inter-section gap.  Scope (single carrier or parallel
+    bundle, direct entry or fan-out junction, clear corridor, non-fold section)
+    is exactly :func:`flow_exit_carrier_anchor`; everything else anchors
+    elsewhere by design.
     """
     junction_ids = graph.junction_ids
     for pid, port in graph.ports.items():
         if port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
         sec = graph.sections.get(port.section_id)
-        if sec is None or _is_fold_section(sec):
+        if sec is None:
             continue
-        downstream = list(graph.edges_from(pid))
-        if any(e.target in junction_ids for e in downstream):
+        anchor = flow_exit_carrier_anchor(graph, pid, sec, junction_ids)
+        if anchor is None:
             continue
-        if not any(
-            (p := graph.ports.get(e.target)) is not None and p.is_entry
-            for e in downstream
-        ):
-            continue
-        carriers = {
-            e.source
-            for e in graph.edges_to(pid)
-            if (s := graph.stations.get(e.source)) is not None
-            and not s.is_port
-            and s.section_id == sec.id
-        }
-        if len(carriers) != 1:
-            continue
-        carrier_id = next(iter(carriers))
-        if not exit_run_corridor_clear(graph, pid, sec, [carrier_id]):
-            continue
-        carrier_y = graph.stations[carrier_id].y
+        carrier_y, carrier_ids = anchor
         port_y = graph.stations[pid].y
         if abs(port_y - carrier_y) > GUARD_TOLERANCE:
             raise PhaseInvariantError(
                 f"{phase}: exit port {pid!r} at y={port_y:.1f} is off its "
-                f"carrying station {carrier_id!r} y={carrier_y:.1f}; the "
-                f"boundary run will "
-                f"render as a diagonal instead of a clean riser"
+                f"carrier row y={carrier_y:.1f} (carriers {sorted(carrier_ids)}); "
+                f"the boundary run will render as a diagonal instead of a riser"
+            )
+
+
+def _guard_post_convergence_trunk_continues(graph: MetroGraph, phase: str) -> None:
+    """The sole successor of an in-section convergence station continues on
+    that station's row.
+
+    When two or more in-section branches merge onto a station and that merge
+    station has a single linear successor inside the same horizontal section,
+    the successor must share the merge station's Y. Otherwise the merged trunk
+    immediately dives onto one of the incoming branch rows, rendering a needless
+    diagonal right after the merge (#946). Vertical (TB/BT) sections, ports,
+    hidden, and off-track stations are out of scope.
+    """
+
+    def _real_in_section(sid: str, section_id: str) -> bool:
+        s = graph.stations.get(sid)
+        return (
+            s is not None
+            and not s.is_port
+            and not s.is_hidden
+            and not s.off_track
+            and s.section_id == section_id
+        )
+
+    for sid, station in graph.stations.items():
+        section_id = station.section_id
+        if section_id is None or not _real_in_section(sid, section_id):
+            continue
+        sec = graph.sections.get(section_id)
+        if sec is None or not lanes_run_along_y(sec.direction):
+            continue
+        preds = {
+            e.source for e in graph.edges_to(sid) if _real_in_section(e.source, sec.id)
+        }
+        if len(preds) != 1:
+            continue
+        merge = next(iter(preds))
+        succs = {
+            e.target
+            for e in graph.edges_from(merge)
+            if _real_in_section(e.target, sec.id)
+        }
+        if succs != {sid}:
+            continue
+        merge_preds = {
+            e.source
+            for e in graph.edges_to(merge)
+            if _real_in_section(e.source, sec.id)
+        }
+        if len(merge_preds) < 2:
+            continue
+        merge_y = graph.stations[merge].y
+        if abs(station.y - merge_y) > GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: post-convergence station {sid!r} at y={station.y:.1f} "
+                f"is off its merge station {merge!r} y={merge_y:.1f}; the trunk "
+                f"dives onto a branch row right after the merge"
             )
 
 
@@ -3771,6 +3808,16 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     GuardSpec(_guard_fanout_junction_resolves_upstream, "B"),
     GuardSpec(_guard_entry_port_fed_only_by_ports, "B"),
     GuardSpec(_guard_flow_exit_anchored_to_carrier, "B"),
+    GuardSpec(
+        _guard_post_convergence_trunk_continues,
+        "B",
+        issue_pin=("#946",),
+        narrow_reason=(
+            "Scoped to a single in-section linear successor of an in-section "
+            "merge: a merge with multiple successors fans out by design, and a "
+            "cross-section convergence anchors its successor via port alignment."
+        ),
+    ),
     GuardSpec(_guard_perp_entry_feed_not_collinear, "B"),
     GuardSpec(_guard_merge_port_approach_side, "B", needs=frozenset({"offsets"})),
     GuardSpec(

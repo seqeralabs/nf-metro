@@ -939,6 +939,24 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "the exit port straight, with the single level change a clean riser at "
         "the far gap rather than a one-offset-step jog at the exit corner.",
     ),
+    (
+        "multicarrier_offrow_exit_climb",
+        TOPOLOGIES_DIR,
+        "A section's exit port carries two lines from two stations that share a "
+        "trunk row off the port row, then fans out through a junction to "
+        "several rows. The parallel bundle anchors on the shared carrier row so "
+        "it runs flat inside the section and the fan-out risers fall in the "
+        "inter-section gap, rather than both lines climbing a diagonal up to "
+        "the port inside the section.",
+    ),
+    (
+        "post_convergence_trunk",
+        TOPOLOGIES_DIR,
+        "Two stacked inputs converge on a station inside one LR section. The "
+        "merge station's single linear successor continues flat on the merge "
+        "row rather than dropping back onto one of the incoming branch rows, so "
+        "the post-merge trunk runs straight instead of zigzagging.",
+    ),
 ]
 
 # Category headers inserted before specific entries
