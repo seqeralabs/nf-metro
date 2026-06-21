@@ -462,8 +462,12 @@ def _order_reconvergence_by_feeder_row(
     When several single-line feeders converge from distinct rows, the merge is
     crossing-free only if the bundle stacks in feeder-row order (nearer row on
     the near slot); declaration order can interleave a deeper feeder between two
-    shallower ones.  Only fires when the feeders span at least two rows.
+    shallower ones.  Scoped to TB sections (whose bundle stacks across the flow
+    in row order); LR/RL merges keep the approach-side handling.  Only fires when
+    the feeders span at least two rows.
     """
+    if sec_id not in ctx.tb_sections:
+        return
     graph = ctx.graph
     feeder_row: dict[str, int] = {}
     for lid, fid in line_feeder.items():
