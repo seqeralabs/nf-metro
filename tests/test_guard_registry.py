@@ -97,14 +97,6 @@ def _all_guard_specs() -> list:
     return [*GUARD_REGISTRY, *guards.INLINE_GUARD_REGISTRY]
 
 
-def _issue_pins(spec) -> tuple[str, ...]:
-    """Normalise a spec's ``issue_pin`` to a tuple of ``#NNN`` tokens."""
-    pin = spec.issue_pin
-    if not pin:
-        return ()
-    return (pin,) if isinstance(pin, str) else tuple(pin)
-
-
 def _guards_citing_an_issue() -> dict[str, set[str]]:
     """Map every ``_guard_*`` whose source cites a ``#NNN`` issue to those
     issue tokens, so a guard born of a specific bug cannot silently drop the
@@ -160,7 +152,7 @@ def test_issue_pinned_guards_record_their_issue_as_data() -> None:
     missing = {}
     for name, issues in _guards_citing_an_issue().items():
         spec = by_name.get(name)
-        pinned = set(_issue_pins(spec)) if spec else set()
+        pinned = set(spec.issue_pin) if spec else set()
         absent = issues - pinned
         if absent:
             missing[name] = sorted(absent)
@@ -174,7 +166,7 @@ def test_issue_pinned_guards_document_why_they_are_narrow() -> None:
     undocumented = [
         spec.name
         for spec in _all_guard_specs()
-        if _issue_pins(spec) and not spec.narrow_reason
+        if spec.issue_pin and not spec.narrow_reason
     ]
     assert not undocumented, (
         f"issue-pinned guards with no narrow_reason: {sorted(undocumented)}"
