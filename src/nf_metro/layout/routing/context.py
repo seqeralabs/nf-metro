@@ -503,6 +503,8 @@ def fanout_divergence_peel_order(
             return None
         if edge.target in claimed and claimed[edge.target] != edge.line_id:
             return None  # two distinct lines share a target: co-travelling
+        if edge.line_id in reach:
+            return None  # a line splitting to several targets is not a per-line fan
         claimed[edge.target] = edge.line_id
         reach[edge.line_id] = tcol - src_col
         drow[edge.line_id] = trow - src_row
