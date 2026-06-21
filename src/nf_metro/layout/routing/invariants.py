@@ -20,6 +20,7 @@ gallery example and topology fixture.
 
 from __future__ import annotations
 
+import inspect
 import math
 import os
 import warnings
@@ -28,6 +29,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
+
+from nf_metro.layout.phases.guards import GuardSpec
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -2849,7 +2852,71 @@ def assert_render_curve_invariants(
     raise CurveInvariantError(msg)
 
 
+def _check_spec(
+    fn: object,
+    tier: str,
+    *,
+    issue_pin: str | None = None,
+    narrow_reason: str | None = None,
+) -> GuardSpec:
+    """Build a :class:`GuardSpec` for a routing ``check_*`` invariant.
+
+    ``needs`` is read from the function signature (the subset of ``graph`` /
+    ``routes`` / ``offsets`` it declares), so the classification stays correct
+    if a check gains or drops an input.
+    """
+    params = set(inspect.signature(fn).parameters)
+    return GuardSpec(
+        fn=fn,
+        tier=tier,
+        needs=frozenset(params & {"graph", "routes", "offsets"}),
+        issue_pin=issue_pin,
+        narrow_reason=narrow_reason,
+    )
+
+
+# The routing invariants, classified with the same schema as the guard
+# registry (``phases/guards.py``).  Unlike ``_guard_*`` these return violation
+# lists rather than raising, so this is a *classification* registry, not a
+# dispatcher; the runtime chokepoint is :func:`assert_render_curve_invariants`.
+#
+# Tier A == already always-on: run on every render via that chokepoint.
+# Tier B == validate-only: invoked by a ``_guard_*`` wrapper, so they reach
+# the canvas only under ``compute_layout(validate=True)``.  See
+# ``docs/dev/guard_tiers.md``.
+CHECK_REGISTRY: tuple[GuardSpec, ...] = (
+    # --- Tier A: the always-on render chokepoint set (in chokepoint order) ---
+    _check_spec(check_bundle_order_preserved, "A"),
+    _check_spec(check_concentric_bundle_corners, "A"),
+    _check_spec(check_no_collinear_distinct_lines, "A"),
+    _check_spec(check_intra_section_collinear_distinct_lines, "A"),
+    _check_spec(check_no_collinear_distinct_diagonals, "A"),
+    _check_spec(check_no_same_line_parallel_descents, "A"),
+    _check_spec(check_merge_branches_meet_trunk, "A"),
+    _check_spec(check_no_hanging_routes, "A"),
+    _check_spec(check_bottom_row_climb_stays_at_row_level, "A"),
+    _check_spec(check_gap_channels_materialized, "A"),
+    _check_spec(check_trunks_declared, "A"),
+    _check_spec(check_peeloff_concentric, "A"),
+    # --- Tier B: invoked only by a validate-path ``_guard_*`` wrapper ---
+    _check_spec(check_tb_exit_corner_preserves_column_order, "B"),
+    _check_spec(check_fanout_tail_join, "B"),
+    _check_spec(check_merge_port_approach_side, "B"),
+    _check_spec(check_merge_port_outgoing_side_preserved, "B"),
+    _check_spec(check_exit_inherits_entry_bundle_order, "B"),
+    _check_spec(check_partial_branch_offset_gaps, "B"),
+    _check_spec(check_no_split_same_line_fanout_descents, "B"),
+    _check_spec(check_no_dogleg_crosses_exempt_trunk, "B"),
+    _check_spec(check_stacked_elbow_clearance, "B"),
+    _check_spec(check_perp_entry_boundary_consistent, "B"),
+    _check_spec(check_perp_exit_over_leadin_clears_only_spanned_sections, "B"),
+    _check_spec(check_right_entry_drop_in_when_clear, "B"),
+)
+
+
 __all__ = [
+    "CHECK_REGISTRY",
+    "GuardSpec",
     "BottomRowClimbDive",
     "BundleOrderViolation",
     "CollinearOverlapViolation",
