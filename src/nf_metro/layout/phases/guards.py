@@ -27,10 +27,15 @@ from nf_metro.layout.constants import (
     STATION_RADIUS_APPROX,
     X_SPACING,
 )
-from nf_metro.layout.geometry import BBoxXIndex, segment_intersects_bbox
+from nf_metro.layout.geometry import (
+    BBoxXIndex,
+    lanes_run_along_y,
+    segment_intersects_bbox,
+)
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _canvas_width,
+    _is_fold_section,
     _restoring_layout_geometry,
     _route_crosses_section_boundary,
     _section_bundle_lines,
@@ -738,7 +743,7 @@ def _guard_flow_exit_anchored_to_carrier(graph: MetroGraph, phase: str) -> None:
         if port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
         sec = graph.sections.get(port.section_id)
-        if sec is None or sec.direction not in ("LR", "RL") or sec.grid_row_span > 1:
+        if sec is None or _is_fold_section(sec):
             continue
         downstream = list(graph.edges_from(pid))
         if any(e.target in junction_ids for e in downstream):
@@ -1822,7 +1827,7 @@ def _guard_row_trunk_cy_consistent(
         if (
             sec.bbox_h <= 0
             or sec.grid_row < 0
-            or sec.direction not in ("LR", "RL")
+            or not lanes_run_along_y(sec.direction)
             or sec.grid_row_span > 1
         ):
             continue

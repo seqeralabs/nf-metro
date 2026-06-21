@@ -271,7 +271,7 @@ def _compute_row_heights(
     max_row: int,
     section_y_gap: float,
 ) -> dict[int, float]:
-    """Per-row height: tallest single-row horizontal-flow section, expanded for spans."""
+    """Per-row height: tallest single-row lane-on-Y section, expanded for spans."""
     row_heights: dict[int, float] = defaultdict(float)
     for sid, section in scoped.items():
         if section.grid_row_span == 1 and lanes_run_along_y(section.direction):

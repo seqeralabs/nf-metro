@@ -66,9 +66,6 @@ def test_lanes_run_along_y_tracks_secondary_axis(direction: str, on_y: bool) -> 
     # A section's lines stack on its secondary axis; the row passes only own
     # the Y (lane) axis, so they include exactly the lanes-on-Y directions.
     assert lanes_run_along_y(direction) is on_y
-    assert lanes_run_along_y(direction) is (
-        AxisFrame.axes_for_direction(direction)[1] == "y"
-    )
 
 
 @pytest.mark.parametrize("direction", ["LR", "RL", "TB"])

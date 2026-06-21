@@ -845,7 +845,7 @@ def _resolve_downstream_entry_y(
 def _align_exit_ports(graph: MetroGraph) -> None:
     """Align LEFT/RIGHT exit ports on fold sections with their target's Y.
 
-    Applies to sections with grid_row_span > 1 OR TB direction (fold bridges).
+    Applies to fold sections (multi-row span or vertical flow; fold bridges).
     These have exit ports placed near the section bottom, but the target
     section's entry may be at a different Y. Aligning ensures a straight
     horizontal inter-section connection.
