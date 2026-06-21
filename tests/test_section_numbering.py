@@ -116,3 +116,30 @@ class TestSectionNumberingOrder:
         nums = [s.number for s in top_row]
         for i in range(len(nums) - 1):
             assert nums[i] < nums[i + 1], f"Top row numbers not increasing: {nums}"
+
+
+class TestDisconnectedSectionNumbering:
+    """Disconnected sections must be interleaved by grid position into reading order."""
+
+    FIXTURES = [
+        "topologies/disconnected_section_badge_order",
+        "topologies/peeloff_riser_respace",
+    ]
+
+    @pytest.mark.parametrize("name", FIXTURES)
+    def test_badges_increase_left_to_right(self, name):
+        """Badges across the top row must increase left-to-right."""
+        text = (EXAMPLES_DIR / f"{name}.mmd").read_text()
+        g = parse_metro_mermaid(text)
+        compute_layout(g)
+        top_row = sorted(
+            (s for s in g.sections.values() if s.grid_row == 0),
+            key=lambda s: s.grid_col,
+        )
+        nums = [s.number for s in top_row]
+        names = [s.name for s in top_row]
+        for i in range(len(nums) - 1):
+            assert nums[i] < nums[i + 1], (
+                f"{name}: badges not increasing left-to-right across top row: "
+                f"{list(zip(names, nums))}"
+            )

@@ -1,0 +1,20 @@
+%%metro title: Disconnected section badge order (#715)
+%%metro style: dark
+%%metro line: l1 | L1 | #e63946
+%%metro grid: a | 0,0
+%%metro grid: mid | 1,0
+%%metro grid: b | 2,0
+
+graph LR
+    subgraph a [A]
+        %%metro exit: right | l1
+        a1[A1]
+    end
+    subgraph mid [Mid]
+        m1[Mid]
+    end
+    subgraph b [B]
+        %%metro entry: left | l1
+        b1[B1]
+    end
+    a1 -->|l1| b1

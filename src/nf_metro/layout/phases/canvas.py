@@ -66,21 +66,6 @@ def _renumber_sections_by_grid(graph: MetroGraph) -> None:
         if sid not in sweep:
             sweep[sid] = 0
 
-    # Disconnected components: number each flow fully before the next,
-    # ordered by the topmost grid_row so top flows come first.
-    from nf_metro.layout.section_placement import _weakly_connected_components
-
-    section_edges = graph.section_dag.section_edges if graph.section_dag else set()
-    comp_idx: dict[str, int] = {}
-    for rank, comp in enumerate(
-        sorted(
-            _weakly_connected_components(graph, section_edges),
-            key=lambda c: min(graph.sections[sid].grid_row for sid in c),
-        )
-    ):
-        for sid in comp:
-            comp_idx[sid] = rank
-
     # Determine flow direction for each sweep: RL sweeps number
     # columns right-to-left (descending grid_col) to match the flow.
     sweep_is_rl: dict[int, bool] = {}
@@ -91,10 +76,10 @@ def _renumber_sections_by_grid(graph: MetroGraph) -> None:
         elif sw not in sweep_is_rl and s.direction == "LR":
             sweep_is_rl[sw] = False
 
-    def _sort_key(s: Section) -> tuple[int, int, int, int]:
+    def _sort_key(s: Section) -> tuple[int, int, int]:
         sw = sweep[s.id]
         col = -s.grid_col if sweep_is_rl.get(sw, False) else s.grid_col
-        return (comp_idx.get(s.id, 0), sw, col, s.grid_row)
+        return (sw, col, s.grid_row)
 
     sorted_sections = sorted(graph.sections.values(), key=_sort_key)
     for i, section in enumerate(sorted_sections, start=1):
