@@ -779,44 +779,6 @@ def _route_tb_bottom_exit(
     )
 
 
-def _bottom_exit_fan_center(
-    ctx: _RoutingCtx, jid: str, target_id: str, src: Station, tgt: Station
-) -> float | None:
-    """Descent-channel centre for the bundle of *jid* heading to *target_id*.
-
-    A bottom-exit junction that fans to targets on two or more rows must order
-    its descent channels by target-row depth, not by the (reversed) trunk
-    offset: the bundle turning at the shallower row sits on the inside of the
-    turn so the deeper bundle's descent never crosses it.  Returns the X offset
-    from ``src.x`` for this bundle's channel, or ``None`` when the fan reaches a
-    single row (where the trunk-offset channel already suffices).
-    """
-    graph = ctx.graph
-    by_target: dict[str, list[str]] = {}
-    rows: dict[str, int] = {}
-    for e in graph.edges_from(jid):
-        _, row = _resolve_section_colrow(graph, graph.stations[e.target])
-        if row is None:
-            return None
-        by_target.setdefault(e.target, []).append(e.line_id)
-        rows[e.target] = row
-    if len(set(rows.values())) < 2:
-        return None
-    # A left turn (target to the junction's left) wants the deeper bundle on the
-    # outer (larger X) channel; a right turn mirrors it.
-    turn_left = tgt.x < src.x
-    order = sorted(by_target, key=lambda t: rows[t])
-    if not turn_left:
-        order = order[::-1]
-    start = 0
-    for t in order:
-        count = len(by_target[t])
-        if t == target_id:
-            return (start + (count - 1) / 2) * ctx.offset_step
-        start += count
-    return None
-
-
 def _route_bottom_exit_junction(
     edge: Edge, src: Station, tgt: Station, i: int, n: int, ctx: _RoutingCtx
 ) -> RoutedPath | None:
@@ -827,9 +789,7 @@ def _route_bottom_exit_junction(
     Because the channel is anchored on the exit fan rather than the per-line
     endpoint offsets, this corner is fanned rigidly -- one offset on every leg
     -- so the bundle is built with each line's source offset on both ends and
-    ``route_tapered`` sends it down its rigid (``route_along``) path.  When the
-    junction fans to several rows the channel centre is taken from the
-    target-row fan instead, so the bundles nest in depth order.
+    ``route_tapered`` sends it down its rigid (``route_along``) path.
     """
     exit_pid = ctx.bottom_exit_junction_ports[edge.source]
     exit_src = ctx.graph.stations.get(exit_pid)
@@ -842,12 +802,8 @@ def _route_bottom_exit_junction(
         return l_shape_stagger(bi, bn, Direction.D, ctx.offset_step)
 
     members, _, tgt_center = gather_tapered_bundle(ctx, edge)
-    fan_center = _bottom_exit_fan_center(ctx, edge.source, edge.target, src, tgt)
-    if fan_center is not None:
-        vx = src.x + fan_center
-    else:
-        exit_offs = [exit_x_offset(line_id) for _e, line_id, _s, _t in members]
-        vx = src.x + sum(exit_offs) / len(exit_offs)
+    exit_offs = [exit_x_offset(line_id) for _e, line_id, _s, _t in members]
+    vx = src.x + sum(exit_offs) / len(exit_offs)
     hy = tgt.y + tgt_center
     # Each line keeps its source offset on both legs: the channel is anchored
     # on the exit fan, so a per-end taper would detach the descent from the
