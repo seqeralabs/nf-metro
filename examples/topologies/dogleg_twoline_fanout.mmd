@@ -1,0 +1,30 @@
+%%metro title: Two flows leaving one section
+%%metro style: dark
+%%metro line: to_src | To Source | #e7298a
+%%metro line: to_new | To New | #0570b0
+
+%%metro grid: left_tgt | 0,0
+%%metro grid: right_src | 1,1
+%%metro grid: new_tgt | 2,1
+
+graph LR
+    subgraph left_tgt [Left Target]
+        lt1[Collect]
+        lt2[Output]
+        lt1 -->|to_src,to_new| lt2
+    end
+
+    subgraph right_src [Right Source]
+        rs1[Input R]
+        rs2[Hub R]
+        rs1 -->|to_src| rs2
+    end
+
+    subgraph new_tgt [New Target]
+        nt1[Hub N]
+        nt2[Out N]
+        nt1 -->|to_new| nt2
+    end
+
+    lt2 -->|to_src| rs1
+    lt2 -->|to_new| nt1

@@ -80,7 +80,9 @@ def test_tier_a_checks_are_exactly_the_render_chokepoint() -> None:
     the set called by :func:`assert_render_curve_invariants`, so the two must
     match exactly -- a check moved in or out of the chokepoint must move tier."""
     chokepoint = set(
-        re.findall(r"\bcheck_[a-z_]+", inspect.getsource(assert_render_curve_invariants))
+        re.findall(
+            r"\bcheck_[a-z_]+", inspect.getsource(assert_render_curve_invariants)
+        )
     )
     tier_a = {spec.name for spec in CHECK_REGISTRY if spec.tier == "A"}
     assert tier_a == chokepoint, (

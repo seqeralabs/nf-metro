@@ -139,9 +139,7 @@ def audit(fixtures: list[Path], repeats: int) -> dict[str, dict[str, Any]]:
             kwargs = {k: pool[k] for k in params if k in pool}
             if "routes" in params and "routes" not in kwargs:
                 continue
-            seconds, raised = _time_call(
-                lambda f=fn, k=kwargs: f(**k), repeats
-            )
+            seconds, raised = _time_call(lambda f=fn, k=kwargs: f(**k), repeats)
             record("check", name, seconds, raised)
 
     for name, s in stats.items():
@@ -175,9 +173,13 @@ def main() -> int:
     stats = audit(fixtures, args.repeats)
 
     rows = sorted(stats.items(), key=lambda kv: kv[1]["mean_us"], reverse=True)
-    print(f"# guard cost audit over {len(fixtures)} fixtures (repeats={args.repeats})\n")
-    print(f"{'guard / check':<52}{'kind':<7}{'mean us':>10}{'total us':>11}"
-          f"{'raises':>8}{'tier':>6}")
+    print(
+        f"# guard cost audit over {len(fixtures)} fixtures (repeats={args.repeats})\n"
+    )
+    print(
+        f"{'guard / check':<52}{'kind':<7}{'mean us':>10}{'total us':>11}"
+        f"{'raises':>8}{'tier':>6}"
+    )
     print("-" * 94)
     for name, s in rows:
         print(

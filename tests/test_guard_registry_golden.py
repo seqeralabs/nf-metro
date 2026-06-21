@@ -54,12 +54,13 @@ def _rel(fixture: str) -> str:
 def collect_guard_trace(fixture: str) -> dict[str, Any]:
     """Run a ``validate=True`` layout and record the guard call sequence.
 
-    Returns ``{"trace": [[guard_name, phase], ...], "raised": None | [type,
+    Returns ``{"trace": ["guard_name|phase", ...], "raised": None | [type,
     message]}``.  ``trace`` is the in-order list of every ``_guard_*`` function
-    entered; when the layout aborts, the offending guard is the final ``trace``
-    entry and ``raised`` carries its exception type and message.
+    entered (name and phase joined for a compact, one-per-line baseline); when
+    the layout aborts, the offending guard is the final ``trace`` entry and
+    ``raised`` carries its exception type and message.
     """
-    trace: list[list[str | None]] = []
+    trace: list[str] = []
 
     def _profiler(frame: FrameType, event: str, arg: Any):
         if event != "call":
@@ -67,7 +68,7 @@ def collect_guard_trace(fixture: str) -> dict[str, Any]:
         name = frame.f_code.co_name
         if name.startswith("_guard_"):
             phase = frame.f_locals.get("phase")
-            trace.append([name, phase])
+            trace.append(f"{name}|{phase}")
 
     raised: list[str] | None = None
     prev = sys.getprofile()
@@ -121,8 +122,6 @@ def test_guard_trace_matches_golden_baseline(fixture: str) -> None:
         f"{key}: terminal raise changed\n  expected: {expected['raised']}\n"
         f"  got:      {live['raised']}"
     )
-    # Tuple-vs-list normalisation: JSON round-trips the recorded [name, phase]
-    # pairs as lists, so compare against the live lists directly.
     assert live["trace"] == expected["trace"], (
         f"{key}: guard call sequence changed "
         f"({len(expected['trace'])} -> {len(live['trace'])} calls)"

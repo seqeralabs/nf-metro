@@ -28,6 +28,7 @@ from nf_metro.layout.constants import (
     TERMINUS_ICON_CLEARANCE_V,
     TERMINUS_WIDTH,
 )
+from nf_metro.layout.geometry import AxisFrame
 from nf_metro.layout.labels import (
     _label_text_height,
     active_font_scale,
@@ -328,10 +329,8 @@ def _resolve_station_collisions(
     such collisions and shifts the later-defined station along the section's
     secondary axis by one spacing unit, repeating until the cell is unique.
     """
-    if section.direction == "TB":
-        primary, secondary, primary_step, step = "y", "x", y_spacing, x_spacing
-    else:
-        primary, secondary, primary_step, step = "x", "y", x_spacing, y_spacing
+    frame = AxisFrame.for_direction(section.direction, x_spacing, y_spacing)
+    primary, secondary = frame.primary, frame.secondary
 
     EPS = SAME_COORD_TOLERANCE
     # Off-track stations carry a placeholder Y here (the off-track lift in
@@ -349,10 +348,10 @@ def _resolve_station_collisions(
     # row for TB).  Use the primary-axis step size; the bucket spans a
     # half-step either side of a layer centre so off-grid layer_extra
     # offsets stay in the same bucket as their layer peers.
-    primary_step_norm = max(primary_step, 1.0)
+    primary_step_norm = max(primary.step, 1.0)
     by_primary: dict[float, list[Station]] = {}
     for s in real:
-        bucket = round(getattr(s, primary) / primary_step_norm)
+        bucket = round(primary.get(s) / primary_step_norm)
         by_primary.setdefault(bucket, []).append(s)
 
     # Stable tiebreaker so the earlier-defined station keeps its slot
@@ -362,14 +361,14 @@ def _resolve_station_collisions(
     for stations in by_primary.values():
         if len(stations) < 2:
             continue
-        stations.sort(key=lambda s: (getattr(s, secondary), order.get(s.id, 0)))
+        stations.sort(key=lambda s: (secondary.get(s), order.get(s.id, 0)))
         used: list[float] = []
         for s in stations:
-            pos = getattr(s, secondary)
-            while any(abs(pos - u) < step - EPS for u in used):
-                pos += step
-            if pos != getattr(s, secondary):
-                setattr(s, secondary, pos)
+            pos = secondary.get(s)
+            while any(abs(pos - u) < secondary.step - EPS for u in used):
+                pos += secondary.step
+            if pos != secondary.get(s):
+                secondary.set(s, pos)
             used.append(pos)
 
 

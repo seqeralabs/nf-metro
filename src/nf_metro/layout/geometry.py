@@ -4,6 +4,50 @@ from __future__ import annotations
 
 import bisect
 from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import Protocol
+
+
+class _HasXY(Protocol):
+    x: float
+    y: float
+
+
+@dataclass(frozen=True)
+class Axis:
+    """A coordinate axis (``"x"`` or ``"y"``) and its spacing unit."""
+
+    name: str
+    step: float
+
+    def get(self, station: _HasXY) -> float:
+        return getattr(station, self.name)
+
+    def set(self, station: _HasXY, value: float) -> None:
+        setattr(station, self.name, value)
+
+
+@dataclass(frozen=True)
+class AxisFrame:
+    """A section's layer (``primary``) and track (``secondary``) axes.
+
+    LR/RL place layers along X and stack lines along Y; TB transposes the two.
+    ``primary_sign`` is ``-1`` for RL, which runs the primary axis in reverse (as
+    ``single_section._mirror_rl`` does by hand), else ``+1``.
+    """
+
+    primary: Axis
+    secondary: Axis
+    primary_sign: float
+
+    @classmethod
+    def for_direction(
+        cls, direction: str, x_spacing: float, y_spacing: float
+    ) -> AxisFrame:
+        if direction == "TB":
+            return cls(Axis("y", y_spacing), Axis("x", x_spacing), 1.0)
+        sign = -1.0 if direction == "RL" else 1.0
+        return cls(Axis("x", x_spacing), Axis("y", y_spacing), sign)
 
 
 def segment_intersects_quad(

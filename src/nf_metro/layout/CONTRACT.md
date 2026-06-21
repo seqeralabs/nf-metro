@@ -71,6 +71,32 @@ Stages split into three regimes:
 3. **Post-Stage-3.1**: ports sit on bbox edges (validated by
    `_guard_ports_on_boundaries`).
 
+## Axis vocabulary (TB policy)
+
+TB sections run the identical LR machinery and swap axes only at coordinate
+assignment (`single_section.py`). Every heuristic written against the LR
+*interpretation* of `x`/`y` (horizontal trunks, layers spread along X, lines
+stacked along Y) is wrong-by-default for TB, and the historical fix was to
+hand-write a one-off `if direction == "TB"` mirror per heuristic. That count
+only grew.
+
+The sanctioned alternative is the `AxisFrame` primitive in `geometry.py`:
+`AxisFrame.for_direction(direction, x_spacing, y_spacing)` returns the
+**primary** axis (the layer/flow axis: X for LR/RL, Y for TB) and the
+**secondary** axis (the track axis: Y for LR/RL, X for TB), each carrying its
+`step` and `get`/`set` accessors, plus `primary_sign` (`-1` for RL, which runs
+the LR primary axis reversed). A heuristic expressed against primary/secondary
+instead of raw `x`/`y` has a TB path that is *the same code* as its LR path, so
+it needs no branch.
+
+**Policy:** no new one-off TB branches. A heuristic that needs TB awareness is
+the trigger to convert it to the axis vocabulary, not to add another branch.
+This is machine-enforced by `tests/test_tb_branch_ratchet.py`, which counts
+`"TB"` literals / `.TB` attribute accesses across the layout package and fails
+CI if the total rises above its baseline (mirroring the corner-radius and
+gate-coverage ratchets). Migrating a heuristic onto `AxisFrame` removes its
+branch and lowers the count; lower the baseline in the same change to lock it in.
+
 ## Validate-mode guards
 
 `compute_layout(validate=True)` runs these guards at fixed checkpoints:

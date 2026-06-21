@@ -77,35 +77,36 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 | `_guard_section_bboxes_positive` | A | 0.4 | bisection (first valid: start) |
 | `_guard_stations_in_sections` | A | 3.5 | bisection (first valid: after Stage 5.3) |
 | `_guard_ports_on_boundaries` | A | 1.3 | bisection (first valid: start) |
-| `_guard_no_station_overlap` | A | 14.0 | bisection (first valid: after Stage 6.4) |
+| `_guard_no_station_overlap` | A | 13.5 | bisection (first valid: after Stage 6.4) |
 | `_guard_no_coincident_station_coords` | A | 3.3 | bisection (first valid: after Stage 6.4) |
-| `_guard_no_line_crosses_non_consumer` | B | 78.7 | bisection (first valid: after Stage 6.14) |
-| `_guard_station_x_column_drift` | A | 6.2 | bisection (first valid: start) |
-| `_guard_row_trunk_cy_consistent` | B | 12.4 | final-only |
-| `_guard_off_track_clear_of_anchor` | B | 3.6 | final-only |
+| `_guard_no_line_crosses_non_consumer` | B | 76.5 | bisection (first valid: after Stage 6.14) |
+| `_guard_station_x_column_drift` | A | 6.0 | bisection (first valid: start) |
+| `_guard_row_trunk_cy_consistent` | B | 12.1 | final-only |
+| `_guard_off_track_clear_of_anchor` | B | 3.5 | final-only |
 | `_guard_fanout_junction_shares_exit_port_y` | B | 0.9 | final-only |
 | `_guard_fanout_junction_resolves_upstream` | B | 0.7 | final-only |
 | `_guard_entry_port_fed_only_by_ports` | B | 0.7 | final-only |
-| `_guard_flow_exit_anchored_to_carrier` | B | 3.6 | final-only |
+| `_guard_flow_exit_anchored_to_carrier` | B | 3.5 | final-only |
 | `_guard_perp_entry_feed_not_collinear` | B | 0.7 | final-only |
-| `_guard_merge_port_approach_side` | B | 5.1 | final-only |
-| `_guard_merge_port_outgoing_side_preserved` | B | 5.2 | final-only |
-| `_guard_exit_inherits_entry_bundle_order` | B | 2.0 | final-only |
-| `_guard_bypass_port_no_slot_gaps` | B | 5.0 | final-only |
-| `_guard_partial_branch_offset_gaps` | B | 2.2 | final-only |
+| `_guard_merge_port_approach_side` | B | 5.0 | final-only |
+| `_guard_merge_port_outgoing_side_preserved` | B | 5.0 | final-only |
+| `_guard_exit_inherits_entry_bundle_order` | B | 1.9 | final-only |
+| `_guard_bypass_port_no_slot_gaps` | B | 4.9 | final-only |
+| `_guard_partial_branch_offset_gaps` | B | 2.1 | final-only |
 | `_guard_row_gaps` | B | 0.5 | final-only |
 | `_guard_section_top_padding` | B | 0.6 | final-only |
 | `_guard_terminus_icons_within_bbox` | B | 0.4 | final-only |
-| `_guard_inter_section_routes_in_row_band` | B | 4.8 | final-only |
-| `_guard_topmost_row_top_entry_hugs_section` | B | 6.8 | final-only |
-| `_guard_off_track_output_clears_non_producer` | B | 2.5 | final-only |
-| `_guard_bundle_order_preserved` | B | 35.9 | final-only |
+| `_guard_inter_section_routes_in_row_band` | B | 4.6 | final-only |
+| `_guard_topmost_row_top_entry_hugs_section` | B | 6.7 | final-only |
+| `_guard_off_track_output_clears_non_producer` | B | 2.4 | final-only |
+| `_guard_bundle_order_preserved` | B | 35.0 | final-only |
 | `_guard_tb_exit_corner_column_order` | B | 2.0 | final-only |
-| `_guard_concentric_bundle_corners` | B | 42.5 | final-only |
-| `_guard_no_collinear_distinct_lines` | B | 17.2 | final-only |
-| `_guard_no_intra_section_collinear_distinct_lines` | B | 108.0 | final-only |
-| `_guard_no_same_line_parallel_descents` | B | 6.2 | final-only |
+| `_guard_concentric_bundle_corners` | B | 41.9 | final-only |
+| `_guard_no_collinear_distinct_lines` | B | 17.0 | final-only |
+| `_guard_no_intra_section_collinear_distinct_lines` | B | 105.3 | final-only |
+| `_guard_no_same_line_parallel_descents` | B | 6.0 | final-only |
 | `_guard_no_split_same_line_fanout_descents` | B | 2.4 | final-only |
+| `_guard_no_distinct_line_fanout_crossing` | B | 3.4 | final-only |
 | `_guard_no_dogleg_crosses_exempt_trunk` | B | 1.9 | final-only |
 | `_guard_no_stacked_elbow_graze` | B | 7.6 | final-only |
 | `_guard_fanout_tail_join` | B | 2.7 | final-only |
@@ -113,47 +114,48 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 | `_guard_perp_exit_over_leadin_no_overdip` | B | 2.9 | final-only |
 | `_guard_right_entry_drop_in_when_clear` | B | 2.5 | final-only |
 | `_guard_inter_section_route_no_backtrack` | B | 5.3 | final-only |
-| `_guard_inter_section_route_no_full_width_backtrack` | B | 6.0 | final-only |
-| `_guard_routes_enter_sections_at_ports` | B | 63.3 | final-only |
-| `_guard_no_route_through_section` | B | 94.7 | final-only |
-| `_guard_feeder_exits_section_through_side` | B | 8.5 | final-only |
-| `_guard_entry_approach_from_port_side` | B | 5.4 | final-only |
-| `_guard_no_opposing_line_overlap` | B | 86.8 | final-only |
+| `_guard_inter_section_route_no_full_width_backtrack` | B | 5.9 | final-only |
+| `_guard_routes_enter_sections_at_ports` | B | 61.9 | final-only |
+| `_guard_no_route_through_section` | B | 92.9 | final-only |
+| `_guard_feeder_exits_section_through_side` | B | 8.2 | final-only |
+| `_guard_entry_approach_from_port_side` | B | 5.3 | final-only |
+| `_guard_no_opposing_line_overlap` | B | 86.1 | final-only |
 | `_guard_serpentine_no_backtrack` | B | 4.1 | final-only |
-| `_guard_no_artefactual_counter_flow` | B | 4.7 | final-only |
+| `_guard_no_artefactual_counter_flow` | B | 4.6 | final-only |
 | `_guard_inter_row_run_clearance` | B | 3.6 | final-only |
-| `_guard_trunk_bands_crossing_optimal` | B | 56.3 | final-only |
-| `_guard_inter_section_descent_edge_clearance` | B | 7.5 | final-only |
-| `_guard_fan_bundles_coincide_or_separate` | B | 13.2 | final-only |
+| `_guard_trunk_bands_crossing_optimal` | B | 56.9 | final-only |
+| `_guard_inter_section_descent_edge_clearance` | B | 7.1 | final-only |
+| `_guard_fan_bundles_coincide_or_separate` | B | 14.5 | final-only |
 
 ### Routing checks (`CHECK_REGISTRY`)
 
 | check | tier | mean us | runs |
 |---|---|--:|---|
-| `check_bundle_order_preserved` | A | 35.5 | render chokepoint (always-on) |
-| `check_concentric_bundle_corners` | A | 42.2 | render chokepoint (always-on) |
-| `check_no_collinear_distinct_lines` | A | 16.9 | render chokepoint (always-on) |
-| `check_intra_section_collinear_distinct_lines` | A | 113.4 | render chokepoint (always-on) |
-| `check_no_collinear_distinct_diagonals` | A | 89.5 | render chokepoint (always-on) |
-| `check_no_same_line_parallel_descents` | A | 5.7 | render chokepoint (always-on) |
-| `check_merge_branches_meet_trunk` | A | 7.1 | render chokepoint (always-on) |
-| `check_no_hanging_routes` | A | 468.7 | render chokepoint (always-on) |
-| `check_bottom_row_climb_stays_at_row_level` | A | 3.0 | render chokepoint (always-on) |
-| `check_gap_channels_materialized` | A | 22.6 | render chokepoint (always-on) |
+| `check_bundle_order_preserved` | A | 34.9 | render chokepoint (always-on) |
+| `check_concentric_bundle_corners` | A | 41.1 | render chokepoint (always-on) |
+| `check_no_collinear_distinct_lines` | A | 16.6 | render chokepoint (always-on) |
+| `check_intra_section_collinear_distinct_lines` | A | 103.6 | render chokepoint (always-on) |
+| `check_no_collinear_distinct_diagonals` | A | 79.8 | render chokepoint (always-on) |
+| `check_no_same_line_parallel_descents` | A | 5.6 | render chokepoint (always-on) |
+| `check_merge_branches_meet_trunk` | A | 6.9 | render chokepoint (always-on) |
+| `check_no_hanging_routes` | A | 430.0 | render chokepoint (always-on) |
+| `check_bottom_row_climb_stays_at_row_level` | A | 2.9 | render chokepoint (always-on) |
+| `check_gap_channels_materialized` | A | 22.5 | render chokepoint (always-on) |
 | `check_trunks_declared` | A | 1.8 | render chokepoint (always-on) |
-| `check_peeloff_concentric` | A | 4.3 | render chokepoint (always-on) |
+| `check_peeloff_concentric` | A | 4.2 | render chokepoint (always-on) |
 | `check_tb_exit_corner_preserves_column_order` | B | 1.5 | via `_guard_*` wrapper |
-| `check_fanout_tail_join` | B | 2.4 | via `_guard_*` wrapper |
+| `check_fanout_tail_join` | B | 2.3 | via `_guard_*` wrapper |
 | `check_merge_port_approach_side` | B | 4.6 | via `_guard_*` wrapper |
-| `check_merge_port_outgoing_side_preserved` | B | 4.7 | via `_guard_*` wrapper |
+| `check_merge_port_outgoing_side_preserved` | B | 4.6 | via `_guard_*` wrapper |
 | `check_exit_inherits_entry_bundle_order` | B | 1.6 | via `_guard_*` wrapper |
 | `check_partial_branch_offset_gaps` | B | 1.8 | via `_guard_*` wrapper |
 | `check_no_split_same_line_fanout_descents` | B | 2.0 | via `_guard_*` wrapper |
+| `check_no_distinct_line_fanout_crossing` | B | 2.9 | via `_guard_*` wrapper |
 | `check_no_dogleg_crosses_exempt_trunk` | B | 1.5 | via `_guard_*` wrapper |
-| `check_stacked_elbow_clearance` | B | 7.2 | via `_guard_*` wrapper |
-| `check_perp_entry_boundary_consistent` | B | 7.1 | via `_guard_*` wrapper |
-| `check_perp_exit_over_leadin_clears_only_spanned_sections` | B | 2.6 | via `_guard_*` wrapper |
-| `check_right_entry_drop_in_when_clear` | B | 2.2 | via `_guard_*` wrapper |
+| `check_stacked_elbow_clearance` | B | 7.1 | via `_guard_*` wrapper |
+| `check_perp_entry_boundary_consistent` | B | 6.9 | via `_guard_*` wrapper |
+| `check_perp_exit_over_leadin_clears_only_spanned_sections` | B | 2.5 | via `_guard_*` wrapper |
+| `check_right_entry_drop_in_when_clear` | B | 2.1 | via `_guard_*` wrapper |
 
 ### Inline guards (not in `GUARD_REGISTRY`)
 

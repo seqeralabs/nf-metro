@@ -438,6 +438,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "than crowding it (issue #698).",
     ),
     (
+        "dogleg_twoline_fanout",
+        TOPOLOGIES_DIR,
+        "Two distinct lines leave one section through a shared exit junction to "
+        "different sections in the row below. They descend as one concentric "
+        "bundle and split only where the near line peels into its target while "
+        "the far line continues over it, rather than diverging at the junction "
+        "and crossing (issue #719).",
+    ),
+    (
         "merge_offrow_continuation",
         TOPOLOGIES_DIR,
         "A perpendicular feeder re-slots at a multi-feeder merge port, and the "

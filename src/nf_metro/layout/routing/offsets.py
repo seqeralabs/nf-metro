@@ -16,6 +16,7 @@ from nf_metro.layout.routing.context import (
     _has_intervening_sections,
     _resolve_section_col,
     _resolve_section_colrow,
+    fanout_divergence_peel_order,
 )
 from nf_metro.layout.routing.corners import reversed_offset
 from nf_metro.layout.routing.invariants import (
@@ -369,6 +370,37 @@ def _section_line_feeders(ctx: _OffsetCtx, section: Section) -> dict[str, str]:
     return line_feeder
 
 
+def _section_present_line_set(ctx: _OffsetCtx, sec_id: str) -> set[str]:
+    """Lines that appear on any station of section *sec_id*."""
+    present: set[str] = set()
+    for sid_s, station in ctx.graph.stations.items():
+        if station.section_id == sec_id:
+            present |= set(ctx.graph.station_lines(sid_s))
+    return present
+
+
+def _apply_section_line_order(
+    ctx: _OffsetCtx, sec_id: str, new_order: list[str]
+) -> None:
+    """Re-slot every station in *sec_id* onto the bundle order *new_order*.
+
+    Slot 0 is the top (smallest offset); reversed sections count from the
+    bottom so the same logical order draws on the same trunk side.
+    """
+    new_local = {lid: i for i, lid in enumerate(new_order)}
+    local_max = len(new_order) - 1
+    reverse = sec_id in ctx.reversed_sections
+    for sid_s, station in ctx.graph.stations.items():
+        if station.section_id != sec_id:
+            continue
+        for lid in ctx.graph.station_lines(sid_s):
+            p = new_local.get(lid, 0)
+            if reverse:
+                ctx.offsets[(sid_s, lid)] = (local_max - p) * ctx.offset_step
+            else:
+                ctx.offsets[(sid_s, lid)] = p * ctx.offset_step
+
+
 def _reorder_reconvergence(
     ctx: _OffsetCtx, section_local: dict[str, dict[str, int]]
 ) -> None:
@@ -395,11 +427,7 @@ def _reorder_reconvergence(
         primary_order = section_local.get(primary_fid, ctx.line_priority)
         continuing = sorted(primary_lines, key=lambda lid: primary_order.get(lid, 0))
 
-        sec_present: set[str] = set()
-        for sid_s, station in graph.stations.items():
-            if station.section_id == sec_id:
-                sec_present |= set(graph.station_lines(sid_s))
-
+        sec_present = _section_present_line_set(ctx, sec_id)
         returning = sorted(
             sec_present - primary_lines,
             key=lambda lid: ctx.line_priority.get(lid, 0),
@@ -412,18 +440,60 @@ def _reorder_reconvergence(
         if new_order == global_ordered:
             continue
 
-        new_local = {lid: i for i, lid in enumerate(new_order)}
-        local_max = len(new_order) - 1
-        reverse = sec_id in ctx.reversed_sections
-        for sid_s, station in graph.stations.items():
-            if station.section_id != sec_id:
-                continue
-            for lid in graph.station_lines(sid_s):
-                p = new_local.get(lid, 0)
-                if reverse:
-                    ctx.offsets[(sid_s, lid)] = (local_max - p) * ctx.offset_step
-                else:
-                    ctx.offsets[(sid_s, lid)] = p * ctx.offset_step
+        _apply_section_line_order(ctx, sec_id, new_order)
+
+
+def _section_exit_fanout_junction(ctx: _OffsetCtx, section: Section) -> str | None:
+    """The single fan-out junction *section* exits into, if exactly one."""
+    junction_ids = ctx.graph.junction_ids
+    junctions = {
+        e.target
+        for pid in section.exit_ports
+        for e in ctx.graph.edges_from(pid)
+        if e.target in junction_ids
+    }
+    return next(iter(junctions)) if len(junctions) == 1 else None
+
+
+def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
+    """Order a section's bundle by where its lines peel off a shared exit fan.
+
+    When distinct lines leave one section through a shared exit junction and drop
+    to different columns on another row, they should descend as one bundle and
+    split only where each peels into its target.  That is crossing-free only when
+    the bundle's lead-in Y order matches the descent X order the fan channel
+    assigns, so the source-section bundle is re-slotted into the same peel order
+    (:func:`fanout_divergence_peel_order`) before the exit/junction ports inherit
+    their offsets.
+
+    Non-compact LR/RL sections only -- the divergence analog of
+    :func:`_reorder_reconvergence`.
+    """
+    if ctx.compact:
+        return
+    graph = ctx.graph
+    for sec_id, section in graph.sections.items():
+        if section.direction not in ("LR", "RL"):
+            continue
+        jid = _section_exit_fanout_junction(ctx, section)
+        if jid is None:
+            continue
+        peel_order = fanout_divergence_peel_order(graph, jid, ctx.line_priority)
+        if peel_order is None:
+            continue
+
+        sec_present = _section_present_line_set(ctx, sec_id)
+        rest = sorted(
+            sec_present - set(peel_order),
+            key=lambda lid: ctx.line_priority.get(lid, 0),
+        )
+        new_order = [lid for lid in peel_order if lid in sec_present] + rest
+        if new_order == sorted(
+            sec_present, key=lambda lid: ctx.line_priority.get(lid, 0)
+        ):
+            continue
+
+        _apply_section_line_order(ctx, sec_id, new_order)
 
 
 def _reindex_section_local(ctx: _OffsetCtx) -> None:
@@ -1652,6 +1722,7 @@ def compute_station_offsets(
     _reindex_section_local(ctx)
     _assert_sections_anchored_on_trunk(ctx)
     _reorder_exit_only_lines(ctx)
+    _reorder_fanout_divergence(ctx)
     _apply_compact_section_consistency(ctx)
     _compact_station_gaps(ctx)
     _compute_exit_port_offsets(ctx)

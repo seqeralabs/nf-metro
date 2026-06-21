@@ -6,7 +6,7 @@ import math
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from nf_metro.layout.constants import (
     COLLINEAR_AXIS_TOL,
@@ -3077,6 +3077,29 @@ def _guard_no_split_same_line_fanout_descents(
     )
 
 
+def _guard_no_distinct_line_fanout_crossing(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: distinct lines diverging from one fan-out stay bundled.
+
+    Wraps :func:`check_no_distinct_line_fanout_crossing`: at a clean-divergence
+    junction (distinct lines peeling to disjoint targets), the bundle must
+    descend as one unit and split only where each line turns into its target,
+    never crossing a mate's run on the way down.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_no_distinct_line_fanout_crossing,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_no_distinct_line_fanout_crossing, offsets, routes
+    )
+
+
 def _guard_no_dogleg_crosses_exempt_trunk(
     graph: MetroGraph,
     phase: str,
@@ -3671,6 +3694,7 @@ valid mid-pipeline.  Update when adding or removing a Pass C
 checkpoint in ``_compute_section_layout``.
 """
 
+
 def _bisection_should_run(guard_name: str, phase: str) -> bool:
     """True if ``guard_name`` should run at bisection checkpoint ``phase``.
 
@@ -3776,7 +3800,7 @@ class GuardSpec:
     a guard kept deliberately narrow rather than generalised.
     """
 
-    fn: Callable[..., None]
+    fn: Callable[..., Any]
     tier: str
     needs: frozenset[str] = field(default_factory=frozenset)
     bisection_safe: bool = False
@@ -3837,9 +3861,7 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     # --- final-only set (run only at the closing ``after final`` boundary) ---
     # The row trunk Y is only finalised once Stage 6.7 has re-centred
     # ``center_ports`` graphs, so this cannot bisect.
-    GuardSpec(
-        _guard_row_trunk_cy_consistent, "B", needs=frozenset({"offsets"})
-    ),
+    GuardSpec(_guard_row_trunk_cy_consistent, "B", needs=frozenset({"offsets"})),
     # Stage 6.4's snap-to-grid shifts the on-track anchor Y by up to half a
     # pitch before Stage 6.6 re-anchors the off-track station, so this cannot
     # bisect.
@@ -3849,9 +3871,7 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     GuardSpec(_guard_entry_port_fed_only_by_ports, "B"),
     GuardSpec(_guard_flow_exit_anchored_to_carrier, "B"),
     GuardSpec(_guard_perp_entry_feed_not_collinear, "B"),
-    GuardSpec(
-        _guard_merge_port_approach_side, "B", needs=frozenset({"offsets"})
-    ),
+    GuardSpec(_guard_merge_port_approach_side, "B", needs=frozenset({"offsets"})),
     GuardSpec(
         _guard_merge_port_outgoing_side_preserved,
         "B",
@@ -3862,12 +3882,8 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         "B",
         needs=frozenset({"offsets"}),
     ),
-    GuardSpec(
-        _guard_bypass_port_no_slot_gaps, "B", needs=frozenset({"offsets"})
-    ),
-    GuardSpec(
-        _guard_partial_branch_offset_gaps, "B", needs=frozenset({"offsets"})
-    ),
+    GuardSpec(_guard_bypass_port_no_slot_gaps, "B", needs=frozenset({"offsets"})),
+    GuardSpec(_guard_partial_branch_offset_gaps, "B", needs=frozenset({"offsets"})),
     GuardSpec(_guard_row_gaps, "B", needs=frozenset({"section_y_gap"})),
     GuardSpec(
         _guard_section_top_padding,
@@ -3928,6 +3944,11 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         needs=frozenset({"offsets", "routes"}),
     ),
     GuardSpec(
+        _guard_no_distinct_line_fanout_crossing,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
         _guard_no_dogleg_crosses_exempt_trunk,
         "B",
         needs=frozenset({"offsets", "routes"}),
@@ -3937,9 +3958,7 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         "B",
         needs=frozenset({"offsets", "routes"}),
     ),
-    GuardSpec(
-        _guard_fanout_tail_join, "B", needs=frozenset({"offsets", "routes"})
-    ),
+    GuardSpec(_guard_fanout_tail_join, "B", needs=frozenset({"offsets", "routes"})),
     GuardSpec(
         _guard_perp_entry_boundary_consistent,
         "B",
@@ -3990,15 +4009,9 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         "B",
         needs=frozenset({"offsets", "routes"}),
     ),
-    GuardSpec(
-        _guard_serpentine_no_backtrack, "B", needs=frozenset({"routes"})
-    ),
-    GuardSpec(
-        _guard_no_artefactual_counter_flow, "B", needs=frozenset({"routes"})
-    ),
-    GuardSpec(
-        _guard_inter_row_run_clearance, "B", needs=frozenset({"routes"})
-    ),
+    GuardSpec(_guard_serpentine_no_backtrack, "B", needs=frozenset({"routes"})),
+    GuardSpec(_guard_no_artefactual_counter_flow, "B", needs=frozenset({"routes"})),
+    GuardSpec(_guard_inter_row_run_clearance, "B", needs=frozenset({"routes"})),
     GuardSpec(
         _guard_trunk_bands_crossing_optimal,
         "B",
