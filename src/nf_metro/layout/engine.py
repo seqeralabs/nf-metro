@@ -146,6 +146,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_no_coincident_station_coords,
     _guard_no_collinear_distinct_lines,
     _guard_no_diagonal_strikes_horizontal_label,
+    _guard_no_distinct_line_fanout_crossing,
     _guard_no_dogleg_crosses_exempt_trunk,
     _guard_no_intra_section_collinear_distinct_lines,
     _guard_no_label_overlap,
@@ -1720,6 +1721,9 @@ def _finalize_layout(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_no_split_same_line_fanout_descents(
+                graph, phase, offsets=offsets, routes=routes
+            )
+            _guard_no_distinct_line_fanout_crossing(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_no_dogleg_crosses_exempt_trunk(

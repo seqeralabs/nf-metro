@@ -3076,6 +3076,29 @@ def _guard_no_split_same_line_fanout_descents(
     )
 
 
+def _guard_no_distinct_line_fanout_crossing(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: distinct lines diverging from one fan-out stay bundled.
+
+    Wraps :func:`check_no_distinct_line_fanout_crossing`: at a clean-divergence
+    junction (distinct lines peeling to disjoint targets), the bundle must
+    descend as one unit and split only where each line turns into its target,
+    never crossing a mate's run on the way down.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_no_distinct_line_fanout_crossing,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_no_distinct_line_fanout_crossing, offsets, routes
+    )
+
+
 def _guard_no_dogleg_crosses_exempt_trunk(
     graph: MetroGraph,
     phase: str,

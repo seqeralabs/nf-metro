@@ -450,6 +450,74 @@ def _has_intervening_sections(
     return False
 
 
+def fanout_divergence_peel_order(
+    graph: MetroGraph,
+    jid: str,
+    line_priority: dict[str, int],
+) -> list[str] | None:
+    """Peel order for distinct lines diverging from a shared fan-out junction.
+
+    Returns the outgoing line ids ordered outermost-to-innermost for the turn
+    out of *jid* -- the order that lets each line peel into its own target
+    without crossing a bundle mate -- or ``None`` when *jid* is not a clean
+    divergence and the bundle should keep its declaration order.
+
+    The order is crossing-free only when the farthest-reaching line rides the
+    outer side of the descent (dropping DOWN, the top slot; rising UP, the
+    bottom): then the nearer line peels off on the inside and clears the farther
+    line's onward run.  Both the fan-channel assignment and the source-section
+    bundle ordering read this single order so the descent X order and the
+    lead-in Y order stay in phase.
+
+    The clean-divergence preconditions: one upstream source; at least two
+    distinct lines; every line reaches its own target section (disjoint targets,
+    so a co-travelling multi-target bundle is left alone); all lines drop the
+    same way to at least two distinct columns.
+    """
+    sources = {e.source for e in graph.edges_to(jid)}
+    if len(sources) != 1:
+        return None
+    jst = graph.stations.get(jid)
+    if jst is None:
+        return None
+    src_col, src_row = _resolve_section_colrow(graph, jst)
+    if src_col is None or src_row is None:
+        return None
+
+    reach: dict[str, int] = {}
+    drow: dict[str, int] = {}
+    claimed: dict[str, str] = {}
+    for edge in graph.edges_from(jid):
+        tgt = graph.stations.get(edge.target)
+        if tgt is None or not (tgt.is_port or edge.target in graph.junction_ids):
+            return None
+        tgt_port = graph.ports.get(edge.target)
+        if tgt_port is None or not tgt_port.is_entry:
+            return None
+        tcol, trow = _resolve_section_colrow(graph, tgt)
+        if tcol is None or trow is None or trow == src_row:
+            return None
+        if edge.target in claimed and claimed[edge.target] != edge.line_id:
+            return None  # two distinct lines share a target: co-travelling
+        claimed[edge.target] = edge.line_id
+        reach[edge.line_id] = tcol - src_col
+        drow[edge.line_id] = trow - src_row
+
+    if len(reach) < 2 or len(set(reach.values())) < 2:
+        return None
+    if len({d > 0 for d in drow.values()}) != 1:
+        return None
+
+    drop_down = next(iter(drow.values())) > 0
+    return sorted(
+        reach,
+        key=lambda lid: (
+            -abs(reach[lid]) if drop_down else abs(reach[lid]),
+            line_priority.get(lid, 0),
+        ),
+    )
+
+
 def _compute_bypass_gap_indices(
     graph: MetroGraph,
     junction_ids: set[str],
@@ -617,8 +685,20 @@ def _compute_junction_fan_info(
             if tgt_col is None:
                 continue
             tgt_port = graph.ports.get(edge.target)
-            is_bypass = abs(tgt_col - src_col) > 1 and _has_intervening_sections(
-                graph, src_col, tgt_col, src_row
+            # Mirror ``_build_inter_facts.needs_bypass``: an intervening section
+            # blocks the source row, or - for a cross-row hop, whose horizontal
+            # leg runs at the target entry Y - the target row, plowed through
+            # even when the source row is clear.  A fan-out junction sits in its
+            # source row while its targets sit a row below, so the target-row
+            # clause is what classifies the bypassing sibling here.
+            is_bypass = abs(tgt_col - src_col) > 1 and (
+                _has_intervening_sections(graph, src_col, tgt_col, src_row)
+                or (
+                    src_row is not None
+                    and tgt_row is not None
+                    and tgt_row != src_row
+                    and _has_intervening_sections(graph, src_col, tgt_col, tgt_row)
+                )
             )
             dx_edge = tgt.x - jst.x
             is_wrap = (
@@ -673,7 +753,12 @@ def _compute_junction_fan_info(
             or (has_wrap and (has_lshape or has_bypass))
             or near_src_collision
         )
-        if not outgoing or not needs_unified:
+        # The unified fan exists to separate distinct lines that would otherwise
+        # overlay one source-side channel.  A single-line fan-out has nothing to
+        # separate -- its same-line tracks are fused by the coincidence pass --
+        # so leave it on that path rather than rerouting it identically here.
+        distinct_lines = {e.line_id for e in graph.edges_from(jid)}
+        if not outgoing or not needs_unified or len(distinct_lines) < 2:
             continue
 
         # Assign one position per unique line_id (sorted by priority).
@@ -688,10 +773,18 @@ def _compute_junction_fan_info(
             if (es := graph.stations.get(e.target)) is not None
             and (es.is_port or e.target in junction_ids)
         ]
-        line_ids = sorted(
-            {e.line_id for e in all_outgoing},
-            key=lambda lid: line_priority.get(lid, 0),
-        )
+        # A clean divergence (distinct lines peeling to disjoint targets) is
+        # ordered outermost-to-innermost by reach so the descent X order stays
+        # in phase with the source-section bundle's lead-in Y order; every other
+        # fan (co-travelling bundles, mixed targets) keeps declaration order.
+        peel_order = fanout_divergence_peel_order(graph, jid, line_priority)
+        if peel_order is not None:
+            line_ids = peel_order
+        else:
+            line_ids = sorted(
+                {e.line_id for e in all_outgoing},
+                key=lambda lid: line_priority.get(lid, 0),
+            )
         line_pos = {lid: i for i, lid in enumerate(line_ids)}
         n = len(line_ids)
 

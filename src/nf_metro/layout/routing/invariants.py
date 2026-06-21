@@ -43,6 +43,7 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
+    _vert_horiz_cross,
     gap_lo_for_x,
     horizontal_direction,
     initial_fanout_descent_span,
@@ -1597,6 +1598,120 @@ def check_no_split_same_line_fanout_descents(
 
 
 @dataclass(frozen=True)
+class DistinctFanoutCrossing:
+    """Two distinct lines leaving one fan-out junction cross before diverging.
+
+    Several distinct lines fanning out from a single junction must descend as
+    one bundle and split only where each peels into its target.  When the line
+    peeling to the nearer target rides the outer side of the descent, its drop
+    crosses the farther line's onward run; when the bundle's lead-in Y order is
+    out of phase with the descent X order, the two cross at the shared corner.
+    Either way the two colours cross in open space instead of running parallel.
+    """
+
+    junction: str
+    line_a: str
+    line_b: str
+    x: float
+    y: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"distinct fan-out crossing: lines {self.line_a!r} and "
+            f"{self.line_b!r} leaving {self.junction} cross at "
+            f"({self.x:.1f},{self.y:.1f}) instead of staying bundled until they "
+            f"peel into their targets"
+        )
+
+
+def _route_axis_segments(
+    rp: RoutedPath,
+) -> tuple[list[tuple[float, float, float]], list[tuple[float, float, float]]]:
+    """Split *rp*'s polyline into vertical and horizontal interior segments.
+
+    Returns ``(verticals, horizontals)`` where each vertical is ``(x, y0, y1)``
+    and each horizontal ``(y, x0, x1)``; sub-pixel segments are dropped.
+    """
+    verticals: list[tuple[float, float, float]] = []
+    horizontals: list[tuple[float, float, float]] = []
+    for (x0, y0), (x1, y1) in zip(rp.points, rp.points[1:]):
+        if abs(x1 - x0) <= COORD_TOLERANCE and abs(y1 - y0) > COORD_TOLERANCE:
+            verticals.append((x0, y0, y1))
+        elif abs(y1 - y0) <= COORD_TOLERANCE and abs(x1 - x0) > COORD_TOLERANCE:
+            horizontals.append((y0, x0, x1))
+    return verticals, horizontals
+
+
+def check_no_distinct_line_fanout_crossing(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],  # noqa: ARG001 - uniform guard signature
+) -> list[DistinctFanoutCrossing]:
+    """Return distinct-line pairs that cross while diverging from a fan-out
+    junction whose lines peel off to disjoint targets.
+
+    Scoped to *clean divergence* junctions -- distinct lines peeling to disjoint
+    targets, all dropping the same way to different columns
+    (:func:`fanout_divergence_peel_order`).  There the bundle should descend as
+    one unit and split only where each line turns into its target, so a riser of
+    one line piercing a horizontal run of another is the avoidable crossing this
+    guards against.  Shared corners and endpoints are excluded, so the genuine
+    divergence never flags.  Co-travelling and mixed-target fans are out of scope
+    (they carry tolerated weaves and are left to the general crossing report).
+    """
+    from nf_metro.layout.routing.context import fanout_divergence_peel_order
+
+    line_priority = {lid: i for i, lid in enumerate(graph.lines.keys())}
+    clean = {
+        jid
+        for jid in fanout_junctions(graph)
+        if fanout_divergence_peel_order(graph, jid, line_priority) is not None
+    }
+    if not clean:
+        return []
+
+    by_junction: dict[str, list[RoutedPath]] = defaultdict(list)
+    for rp in routes:
+        if rp.edge.source in clean and len(rp.points) >= 2:
+            by_junction[rp.edge.source].append(rp)
+
+    violations: list[DistinctFanoutCrossing] = []
+    for jid, rps in by_junction.items():
+        for i in range(len(rps)):
+            for j in range(i + 1, len(rps)):
+                a, b = rps[i], rps[j]
+                if a.line_id == b.line_id:
+                    continue
+                va, ha = _route_axis_segments(a)
+                vb, hb = _route_axis_segments(b)
+                hit = _first_axis_crossing(va, hb) or _first_axis_crossing(vb, ha)
+                if hit is not None:
+                    violations.append(
+                        DistinctFanoutCrossing(
+                            junction=jid,
+                            line_a=a.line_id,
+                            line_b=b.line_id,
+                            x=hit[0],
+                            y=hit[1],
+                        )
+                    )
+    return violations
+
+
+def _first_axis_crossing(
+    verticals: list[tuple[float, float, float]],
+    horizontals: list[tuple[float, float, float]],
+) -> tuple[float, float] | None:
+    """First interior crossing of a vertical against a horizontal, or ``None``."""
+    for vx, vy0, vy1 in verticals:
+        for hy, hx0, hx1 in horizontals:
+            if _vert_horiz_cross(vx, vy0, vy1, hy, hx0, hx1):
+                return vx, hy
+    return None
+
+
+@dataclass(frozen=True)
 class DoglegCrossesExemptTrunk:
     """A non-exempt trunk doglegged off an exempt run that crosses it.
 
@@ -2876,6 +2991,7 @@ __all__ = [
     "check_trunks_declared",
     "check_concentric_bundle_corners",
     "check_fanout_tail_join",
+    "check_no_distinct_line_fanout_crossing",
     "check_merge_branches_meet_trunk",
     "check_merge_port_approach_side",
     "check_no_hanging_routes",
