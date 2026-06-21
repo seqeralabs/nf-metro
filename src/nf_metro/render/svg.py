@@ -28,6 +28,7 @@ from nf_metro.layout.labels import (
     font_scale_context,
     place_labels,
 )
+from nf_metro.layout.phases.guards import assert_render_layout_invariants
 from nf_metro.layout.routing import (
     RoutedPath,
     compute_station_offsets,
@@ -532,6 +533,7 @@ def _render_svg_scaled(
     station_offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=station_offsets)
     assert_render_curve_invariants(graph, routes, station_offsets)
+    assert_render_layout_invariants(graph, routes, station_offsets, strict=graph.strict)
     header_polylines = [apply_route_offsets(route, station_offsets) for route in routes]
 
     # Compute labels early so section bbox expansions are applied

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -74,6 +75,20 @@ if TYPE_CHECKING:
 
 class PhaseInvariantError(Exception):
     """Raised when a layout phase produces invalid intermediate state."""
+
+
+class LayoutInvariantError(PhaseInvariantError):
+    """Raised on the render path under ``--strict`` when the settled layout
+    violates a Tier-A invariant.
+
+    The render-path chokepoint :func:`assert_render_layout_invariants` runs the
+    cheap Tier-A layout guards on the final geometry the renderer is about to
+    draw.  Without ``--strict`` a violation is a warning, so the user receives
+    a best-effort diagram carrying a visible diagnosis; with ``--strict`` the
+    chokepoint raises this instead.  Subclassing :class:`PhaseInvariantError`
+    lets the CLI's existing layout-error handler surface it as a clean message
+    rather than a traceback.
+    """
 
 
 class BackwardFlowError(ValueError):
@@ -4068,3 +4083,72 @@ def run_validate_guards(
             continue
         spec.fn(graph, phase, **{name: available[name] for name in spec.needs})
     return offsets, routes
+
+
+# Tier-A guards that the render chokepoint does NOT run.  These two raise an
+# *authoring* error (a ``ValueError`` the CLI surfaces as invalid input) on an
+# un-renderable topology, not an observational ``PhaseInvariantError`` on the
+# settled geometry, and the engine already runs them always-on at Stage 1.1.
+# Warning-then-rendering an un-renderable map would be wrong, so they stay hard
+# fails outside this warn-by-default chokepoint.
+_RENDER_CHOKEPOINT_AUTHORING_GUARDS = frozenset(
+    {"_guard_no_same_row_backward_feed", "_guard_no_mixed_entry_directions"}
+)
+
+# Every Tier-A spec from both registries except the authoring-error guards.
+# Declaration order across ``GUARD_REGISTRY`` then ``INLINE_GUARD_REGISTRY``
+# fixes the order violations are reported in.  Computed once over the immutable
+# registries so the render chokepoint allocates nothing per render.
+_RENDER_LAYOUT_INVARIANT_SPECS: tuple[GuardSpec, ...] = tuple(
+    spec
+    for spec in (*GUARD_REGISTRY, *INLINE_GUARD_REGISTRY)
+    if spec.tier == "A" and spec.name not in _RENDER_CHOKEPOINT_AUTHORING_GUARDS
+)
+
+
+def render_layout_invariant_specs() -> tuple[GuardSpec, ...]:
+    """The Tier-A guards :func:`assert_render_layout_invariants` runs."""
+    return _RENDER_LAYOUT_INVARIANT_SPECS
+
+
+def assert_render_layout_invariants(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+    *,
+    strict: bool = False,
+) -> None:
+    """Run the cheap Tier-A layout guards on the final settled geometry.
+
+    Sibling of :func:`assert_render_curve_invariants`: both run on the exact
+    geometry the renderer is about to draw, so a layout defect is visible to
+    end users instead of shipping a silently-broken SVG.  The render path
+    already pays for ``offsets`` and ``routes``, and the guards are
+    observational, so this is near-zero cost and cannot move a pixel.
+
+    Each Tier-A guard raises ``PhaseInvariantError`` on its first violation
+    rather than returning a list, so each runs in isolation and its message is
+    captured; the aggregate is one message.  Without *strict* the aggregate is
+    a :class:`UserWarning`; with *strict* it raises :class:`LayoutInvariantError`
+    (modelled on the ``NF_METRO_ALLOW_BAD_CURVES`` chokepoint).
+    """
+    available: dict[str, Any] = {"offsets": offsets, "routes": routes}
+    messages: list[str] = []
+    for spec in render_layout_invariant_specs():
+        try:
+            spec.fn(graph, "render", **{name: available[name] for name in spec.needs})
+        except PhaseInvariantError as exc:
+            messages.append(f"[{spec.name}] {exc}")
+    if not messages:
+        return
+
+    detail = "\n  ".join(messages)
+    msg = (
+        "the settled layout violates Tier-A invariants the renderer is about "
+        "to draw. The map will render but is visibly broken; fix the layout "
+        "(or the directive combination) that produced this geometry.\n  "
+        f"{detail}"
+    )
+    if strict:
+        raise LayoutInvariantError(msg)
+    warnings.warn(msg, stacklevel=2)

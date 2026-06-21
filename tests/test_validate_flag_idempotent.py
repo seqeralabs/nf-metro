@@ -18,6 +18,7 @@ column/alignment guards (they fired on the ``validate=True`` artifact).
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,8 @@ from conftest import content_corpus
 
 from nf_metro.convert import convert_nextflow_dag
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.phases.guards import assert_render_layout_invariants
+from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
 
@@ -81,3 +84,27 @@ def test_shared_column_survives_validate(name):
     assert validated.stations["gatk"].x == pytest.approx(
         validated.stations["deepvariant"].x
     ), f"{name}: gatk/deepvariant must share their column under validate=True"
+
+
+@pytest.mark.parametrize("fixture", CORPUS, ids=[fid for fid, _, _ in CORPUS])
+def test_render_layout_chokepoint_is_observational(fixture):
+    """``assert_render_layout_invariants`` must not perturb station geometry.
+
+    The render path runs it on the settled geometry; like the ``validate``
+    flag it adds checks only and must never move a coordinate.
+    """
+    fid, path, is_nextflow = fixture
+    graph = _layout(path, is_nextflow, validate=False)
+
+    before = _coords(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert_render_layout_invariants(graph, routes, offsets, strict=False)
+    after = _coords(graph)
+
+    diffs = {
+        sid: (before[sid], after[sid]) for sid in before if before[sid] != after[sid]
+    }
+    assert not diffs, f"{fid}: render-layout chokepoint perturbed geometry: {diffs}"

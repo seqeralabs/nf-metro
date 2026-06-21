@@ -335,26 +335,34 @@ def render(
                 "responsive and scopes each map independently).",
                 err=True,
             )
-        content = render_html(
-            graph,
-            theme_obj,
-            debug=debug,
-            embed_basename=output.name,
-            font_portability=font_portability,
-            inject_dark_mode_css=not no_dark_mode_css,
-        )
-    else:
-        content = render_svg(
-            graph,
-            theme_obj,
-            debug=debug,
-            responsive=responsive,
-            font_portability=font_portability,
-            svg_class_prefix=svg_class_prefix,
-            inject_dark_mode_css=not no_dark_mode_css,
-            chrome_css=not no_chrome_css,
-            bare=bare,
-        )
+
+    # Tier-A layout-invariant violations on the settled geometry surface here
+    # under --strict (LayoutInvariantError is a PhaseInvariantError); without
+    # --strict they are warnings the default handler prints to stderr.
+    try:
+        if format_ == "html":
+            content = render_html(
+                graph,
+                theme_obj,
+                debug=debug,
+                embed_basename=output.name,
+                font_portability=font_portability,
+                inject_dark_mode_css=not no_dark_mode_css,
+            )
+        else:
+            content = render_svg(
+                graph,
+                theme_obj,
+                debug=debug,
+                responsive=responsive,
+                font_portability=font_portability,
+                svg_class_prefix=svg_class_prefix,
+                inject_dark_mode_css=not no_dark_mode_css,
+                chrome_css=not no_chrome_css,
+                bare=bare,
+            )
+    except PhaseInvariantError as e:
+        raise click.ClickException(str(e))
 
     output.write_text(content if content.endswith("\n") else content + "\n")
     click.echo(
