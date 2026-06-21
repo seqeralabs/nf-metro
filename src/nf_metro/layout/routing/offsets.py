@@ -297,6 +297,26 @@ def _assert_sections_anchored_on_trunk(ctx: _OffsetCtx) -> None:
             )
 
 
+def _predicted_local_offset(
+    ctx: _OffsetCtx, sec_id: str, lid: str, section_local: dict[str, dict[str, int]]
+) -> float:
+    """Offset *lid* will take in *sec_id* given the current re-index decisions.
+
+    Re-indexed sections draw from their section-local order; the rest keep their
+    base (global-priority) offset.  Reversed sections count from the bottom.
+    """
+    reverse = sec_id in ctx.reversed_sections
+    if sec_id in section_local:
+        local = section_local[sec_id]
+        slot = local.get(lid, 0)
+        local_max = max(local.values()) if local else 0
+        rank = local_max - slot if reverse else slot
+    else:
+        pri = ctx.line_priority.get(lid, 0)
+        rank = ctx.max_priority - pri if reverse else pri
+    return rank * ctx.offset_step
+
+
 def _trunk_endpoint_offset(
     ctx: _OffsetCtx,
     node_id: str,
@@ -363,30 +383,10 @@ def _reanchor_keeps_runs_level(
             neighbour = _trunk_endpoint_offset(ctx, other_id, lid, section_local)
             if neighbour is None:
                 continue
-            currently_level = abs(neighbour - current) <= SAME_Y_TOLERANCE
-            if currently_level and abs(cand_off - neighbour) > SAME_Y_TOLERANCE:
+            currently_level = abs(neighbour - current) <= _SAME_Y_TOLERANCE
+            if currently_level and abs(cand_off - neighbour) > _SAME_Y_TOLERANCE:
                 return False
     return True
-
-
-def _predicted_local_offset(
-    ctx: _OffsetCtx, sec_id: str, lid: str, section_local: dict[str, dict[str, int]]
-) -> float:
-    """Offset *lid* will take in *sec_id* given the current re-index decisions.
-
-    Re-indexed sections draw from their section-local order; the rest keep their
-    base (global-priority) offset.  Reversed sections count from the bottom.
-    """
-    reverse = sec_id in ctx.reversed_sections
-    if sec_id in section_local:
-        local = section_local[sec_id]
-        slot = local.get(lid, 0)
-        local_max = max(local.values()) if local else 0
-        rank = local_max - slot if reverse else slot
-    else:
-        pri = ctx.line_priority.get(lid, 0)
-        rank = ctx.max_priority - pri if reverse else pri
-    return rank * ctx.offset_step
 
 
 def _reindex_local_priority_gaps(ctx: _OffsetCtx) -> dict[str, dict[str, int]]:
