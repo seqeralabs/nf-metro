@@ -6,10 +6,11 @@ and label ink boxes (drawn ``<text>`` ink) and checks the picture as drawn --
 the geometry the pre-render layout guards never see, including render-time
 offsets and the wrapped-label lift.
 
-These tests pin that the clean gallery corpus has zero label strikes, that an
-injected strike is caught and an exempt (carried-line) overlap is not, and that
-the SVG parser recovers smoothing corners exactly and breaks at bridge-hop gaps
-rather than spanning them.
+These tests pin that the clean gallery corpus has zero label strikes, marker
+crossings, and offset-collapses; that an injected defect of each kind is caught
+while its accepted idiom (a carried-line overlap, a rail interchange, a
+same-slot bundle) is not; and that the SVG parser recovers smoothing corners
+exactly and breaks at bridge-hop gaps rather than spanning them.
 """
 
 from __future__ import annotations
@@ -25,6 +26,10 @@ from nf_metro.render import render_svg, validate_render
 from nf_metro.render.manifest import read_manifest
 from nf_metro.render.validate import (
     LABEL_STRIKE,
+    MARKER_CROSS,
+    OFFSET_COLLAPSE,
+    check_marker_crossings,
+    parse_rail_station_ids,
     parse_route_polylines,
     parse_station_labels,
 )
@@ -70,6 +75,30 @@ def test_clean_corpus_has_no_label_strike(name: str) -> None:
     findings = validate_render(_render(name))
     strikes = [f for f in findings if f.kind == LABEL_STRIKE]
     assert not strikes, f"{name}: {[f.message for f in strikes]}"
+
+
+@pytest.mark.parametrize("name", CORPUS)
+def test_clean_corpus_has_no_marker_cross(name: str) -> None:
+    """No gallery render rakes a line through a non-consumer station marker.
+
+    The two corpus crossings are rail interchanges (the intended idiom); the
+    guard exempts them by reading the rail markers back from the SVG.
+    """
+    findings = validate_render(_render(name))
+    crossings = [f for f in findings if f.kind == MARKER_CROSS]
+    assert not crossings, f"{name}: {[f.message for f in crossings]}"
+
+
+@pytest.mark.parametrize("name", CORPUS)
+def test_clean_corpus_has_no_offset_collapse(name: str) -> None:
+    """No gallery render draws an offset-spread line pair flush into one stroke.
+
+    Passing the laid-out graph enables the offset-pitch-aware check; a clean
+    corpus has only same-slot bundles, which it does not flag.
+    """
+    findings = validate_render(_render(name), graph=_LAID_OUT[name])
+    collapses = [f for f in findings if f.kind == OFFSET_COLLAPSE]
+    assert not collapses, f"{name}: {[f.message for f in collapses]}"
 
 
 def _a_foreign_label(svg: str) -> tuple[str, float, float, str]:
@@ -184,3 +213,123 @@ def test_corpus_is_nonempty() -> None:
     """The corpus parametrization actually collected fixtures (guards a silent
     empty-glob that would make the regression lock vacuous)."""
     assert len(CORPUS) > 30
+
+
+@pytest.mark.parametrize("name", ["line_spread.mmd", "sarek_metro.mmd"])
+def test_rail_interchange_crossing_is_exempt_yet_detectable(name: str) -> None:
+    """A line through a rail interchange knob is exempt, not a marker cross.
+
+    Bypassing the rail exemption surfaces the same crossing, so the clean
+    result is the exemption working, not the check missing the geometry.
+    """
+    if name not in CORPUS:
+        pytest.skip(f"{name} not in renderable corpus")
+    svg = _render(name)
+    manifest = read_manifest(svg)
+    routes = parse_route_polylines(svg)
+
+    assert not check_marker_crossings(svg, manifest, routes)
+
+    rails = parse_rail_station_ids(svg)
+    assert rails, f"{name} has no rail markers to exempt"
+    svg_no_rail = svg
+    for sid in rails:
+        svg_no_rail = svg_no_rail.replace(
+            f'data-station-id="{sid}"', "data-station-id="
+        )
+    unexempted = check_marker_crossings(svg_no_rail, manifest, routes)
+    struck = {f.station_id for f in unexempted}
+    assert struck & rails, f"{name}: rail exemption masked nothing real"
+
+
+def test_injected_marker_cross_through_non_consumer_is_caught() -> None:
+    """A foreign line drawn over a non-rail station marker is a marker cross."""
+    svg = _render("rnaseq_sections.mmd")
+    manifest = read_manifest(svg)
+    rails = parse_rail_station_ids(svg)
+    all_lines = [grp["id"] for grp in manifest["groups"]]
+    node, foreign = next(
+        (n, lid)
+        for n in manifest["nodes"]
+        if n["id"] not in rails and n.get("groups")
+        for lid in all_lines
+        if lid not in n["groups"]
+    )
+    r = node.get("r", 5.0)
+    struck = _inject_segment(
+        svg, foreign, (node["x"] - r, node["y"]), (node["x"] + r, node["y"])
+    )
+    crossings = [
+        f
+        for f in validate_render(struck)
+        if f.kind == MARKER_CROSS and f.station_id == node["id"]
+    ]
+    assert len(crossings) == 1
+    assert crossings[0].line_id == foreign
+
+
+def _parallel_drawn_pair(svg: str) -> tuple[str, str, float, float, float, float]:
+    """A distinct horizontal line pair one offset step apart on a shared x-run.
+
+    Returns ``(line_a, line_b, y_a, y_b, x_lo, x_hi)``; raises if none exists.
+    """
+    segs = [
+        (lid, sub[i], sub[i + 1])
+        for lid, subs in parse_route_polylines(svg)
+        for sub in subs
+        for i in range(len(sub) - 1)
+    ]
+    for i, (la, a1, a2) in enumerate(segs):
+        if abs(a1[1] - a2[1]) > 0.1 or abs(a2[0] - a1[0]) < 24:
+            continue
+        for lb, b1, b2 in segs[i + 1 :]:
+            if lb == la or abs(b1[1] - b2[1]) > 0.1:
+                continue
+            if not 3.4 <= abs(b1[1] - a1[1]) <= 4.6:
+                continue
+            x_lo = max(min(a1[0], a2[0]), min(b1[0], b2[0]))
+            x_hi = min(max(a1[0], a2[0]), max(b1[0], b2[0]))
+            if x_hi - x_lo >= 24:
+                return la, lb, a1[1], b1[1], x_lo, x_hi
+    raise AssertionError("no offset-step-separated horizontal pair found")
+
+
+def test_offset_collapse_caught_when_spread_pair_drawn_flush() -> None:
+    """An offset-spread pair drawn onto one Y collapses into a single stroke."""
+    svg = _render("genomic_pipeline.mmd")
+    graph = _LAID_OUT["genomic_pipeline.mmd"]
+    clean = validate_render(svg, graph=graph)
+    assert not [f for f in clean if f.kind == OFFSET_COLLAPSE]
+
+    line_a, line_b, _y_a, y_b, x_lo, x_hi = _parallel_drawn_pair(svg)
+    merged = _inject_segment(svg, line_a, (x_lo + 2, y_b), (x_hi - 2, y_b))
+    collapses = [
+        f for f in validate_render(merged, graph=graph) if f.kind == OFFSET_COLLAPSE
+    ]
+    assert collapses
+    assert {line_a, line_b} == set(collapses[0].message.split("'")[1::2][:2])
+
+
+def test_same_slot_bundle_is_not_offset_collapse() -> None:
+    """Distinct lines the regime put on one slot draw flush without a finding."""
+    name = "topologies/funcprofiler_upstream.mmd"
+    if name not in CORPUS:
+        pytest.skip(f"{name} not in renderable corpus")
+    from nf_metro.render.validate import _flush_run
+
+    svg = _render(name)
+    segs = [
+        (lid, sub[i], sub[i + 1])
+        for lid, subs in parse_route_polylines(svg)
+        for sub in subs
+        for i in range(len(sub) - 1)
+    ]
+    flush = any(
+        la != lb and _flush_run((a1, a2), (b1, b2)) is not None
+        for i, (la, a1, a2) in enumerate(segs)
+        for lb, b1, b2 in segs[i + 1 :]
+    )
+    assert flush, "fixture no longer exercises a same-slot flush bundle"
+
+    findings = validate_render(svg, graph=_LAID_OUT[name])
+    assert not [f for f in findings if f.kind == OFFSET_COLLAPSE]

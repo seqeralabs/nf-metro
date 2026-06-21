@@ -15,17 +15,27 @@ drawn.  Because the predicate is the project's authoritative one
 ink, a finding means the rendered image is wrong, not that a re-derivation
 diverged.
 
-The checks are decoupled from the engine: they need only the SVG string, so
-they validate a produced file in CI or standalone without re-running layout,
-and they see the render-only geometry the pre-render guards cannot.
+Three checks run on the drawn ink.  The **label-strike** and **marker-cross**
+checks are pure artifact oracles -- they need only the SVG string, so they
+validate a produced file standalone without re-running layout.  The
+**offset-collapse** check is offset-pitch-aware: telling an acceptable
+same-slot bundle (distinct lines the regime put on one offset, drawn flush by
+design) from a real collapse (lines the regime spread apart, drawn flush)
+needs the assigned offsets, which the bare artifact cannot supply.  It
+therefore runs only when the laid-out ``graph`` is passed alongside the SVG;
+the standalone path runs the two artifact-only checks.
+
+All three see the render-only geometry (the offset regime, label Y-shifts, the
+wrapped-label lift) that the pre-render layout guards never observe.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
-from nf_metro.layout.constants import LABEL_FONT_SIZE, LABEL_LINE_HEIGHT
+from nf_metro.layout.constants import LABEL_FONT_SIZE, LABEL_LINE_HEIGHT, OFFSET_STEP
+from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.labels import (
     LabelPlacement,
     font_scale_context,
@@ -33,8 +43,25 @@ from nf_metro.layout.labels import (
 )
 from nf_metro.manifest import read_manifest
 
+if TYPE_CHECKING:
+    from nf_metro.parser.model import MetroGraph
+
 # The defect family of a finding; one per render-geometry check.
 LABEL_STRIKE = "label-strike"
+MARKER_CROSS = "marker-cross"
+OFFSET_COLLAPSE = "offset-collapse"
+
+# A drawn run shorter than this reads as a corner nub, not a parallel stretch;
+# two lines closer than ``_FLUSH_TOL`` perpendicular read as a single stroke.
+_RUN_MIN = 8.0
+_FLUSH_TOL = 1.5
+# A pair the offset regime spread by a full step (allowing diagonal foreshorten
+# and rounding) is meant to read as two lines; drawn flush, it has collapsed.
+_PITCH_MIN = OFFSET_STEP - 0.5
+
+_Point = tuple[float, float]
+_Segment = tuple[_Point, _Point]
+_Subpaths = list[list[_Point]]
 
 
 class RenderFinding(NamedTuple):
@@ -186,6 +213,33 @@ def _nodes_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {node["id"]: node for node in manifest.get("nodes", [])}
 
 
+# Rail-mode markers (knob, knob outline, connector bar) all carry both an
+# ``...-rail-...`` class and the station id; a line threading an interchange
+# knob is the intended rail idiom, so the station id signals a marker-cross
+# exemption straight from the artifact (the manifest carries no rail flag).
+_RAIL_MARKER = re.compile(r"<\w+\b[^>]*?\brail\b[^>]*?/?>", re.DOTALL)
+
+
+def parse_rail_station_ids(svg: str) -> set[str]:
+    """Recover the set of rail-station ids from the drawn rail markers.
+
+    A line passing through a rail interchange's knob is the deliberate rail
+    idiom (the same reason the hanging-route guard skips rail endpoints), so
+    :func:`check_marker_crossings` reads these ids back from the SVG to exempt
+    rail stations without a manifest schema addition.
+    """
+    ids: set[str] = set()
+    for match in _RAIL_MARKER.finditer(svg):
+        element = match.group(0)
+        cls = _attr(element, "class") or ""
+        if "rail" not in cls:
+            continue
+        sid = _attr(element, "data-station-id")
+        if sid is not None:
+            ids.add(sid)
+    return ids
+
+
 def check_label_strikes(
     svg: str,
     manifest: dict[str, Any],
@@ -240,16 +294,223 @@ def _first_striking_segment(
     return None
 
 
-def validate_render(svg: str) -> list[RenderFinding]:
+def check_marker_crossings(
+    svg: str,
+    manifest: dict[str, Any],
+    routes: list[tuple[str, _Subpaths]],
+) -> list[RenderFinding]:
+    """A drawn route segment passing through a non-consumer station's marker.
+
+    A line raking across a station marker reads as the route running through
+    that station, so it must touch only the markers of stations that carry it.
+    A segment is exempt when its line is one the marker's station carries (the
+    manifest ``groups``, which subsumes the station being that edge's own
+    endpoint).  Rail-interchange stations are exempt too: a line threading an
+    interchange knob is the intended rail idiom, and their ids are read back
+    from the drawn rail markers.  The render-side companion to the layout
+    guard ``_guard_no_line_crosses_non_consumer``, read from the artifact so
+    it also catches any marker crossing introduced after the offset regime.
+    """
+    nodes = _nodes_by_id(manifest)
+    rail = parse_rail_station_ids(svg)
+    findings: list[RenderFinding] = []
+    for line_id, subpaths in routes:
+        for sid, node in nodes.items():
+            if sid in rail or line_id in node.get("groups", ()):
+                continue
+            radius = node.get("r", 0.0)
+            bbox = (
+                node["x"] - radius,
+                node["y"] - radius,
+                node["x"] + radius,
+                node["y"] + radius,
+            )
+            hit = _first_crossing_segment(subpaths, bbox)
+            if hit is not None:
+                findings.append(
+                    RenderFinding(
+                        MARKER_CROSS,
+                        line_id,
+                        sid,
+                        f"line {line_id!r} crosses the marker of non-consumer "
+                        f"station {sid!r}",
+                        hit,
+                    )
+                )
+    return findings
+
+
+def _first_crossing_segment(
+    subpaths: _Subpaths, bbox: tuple[float, float, float, float]
+) -> _Segment | None:
+    for subpath in subpaths:
+        for i in range(len(subpath) - 1):
+            (x1, y1), (x2, y2) = subpath[i], subpath[i + 1]
+            if segment_intersects_bbox(x1, y1, x2, y2, bbox):
+                return ((x1, y1), (x2, y2))
+    return None
+
+
+def check_offset_collapse(
+    graph: MetroGraph,
+    routes: list[tuple[str, _Subpaths]],
+) -> list[RenderFinding]:
+    """Distinct lines drawn flush where the offset regime spread them apart.
+
+    Two lines the regime assigned the same offset slot legitimately draw flush
+    (a shared-trunk bundle), so a bare perpendicular-distance floor cannot
+    distinguish that from a real collapse.  This compares the *drawn* gap on a
+    shared run against the gap the offset regime *assigned* the pair there: a
+    pair drawn flush whose assigned gap is at least one offset step has
+    collapsed into a single stroke.  The assigned geometry comes from the
+    engine, the drawn geometry from the artifact, so a finding is a real
+    render-time merge, not a re-derivation mismatch.
+    """
+    expected = _expected_line_segments(graph)
+    if not expected:
+        return []
+    drawn = [
+        (line_id, subpath[i], subpath[i + 1])
+        for line_id, subpaths in routes
+        for subpath in subpaths
+        for i in range(len(subpath) - 1)
+    ]
+    findings: list[RenderFinding] = []
+    seen: set[tuple[str, str, int, int]] = set()
+    for i, (line_a, a1, a2) in enumerate(drawn):
+        for line_b, b1, b2 in drawn[i + 1 :]:
+            if line_b == line_a:
+                continue
+            run = _flush_run((a1, a2), (b1, b2))
+            if run is None:
+                continue
+            midpoint = run
+            anchor = _nearest_vertex(expected.get(line_a, ()), midpoint)
+            if anchor is None:
+                continue
+            assigned = _perp_gap(anchor, expected.get(line_b, ()))
+            if assigned is None or assigned < _PITCH_MIN:
+                continue
+            pair = tuple(sorted((line_a, line_b)))
+            key = (pair[0], pair[1], round(midpoint[0]), round(midpoint[1]))
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(
+                RenderFinding(
+                    OFFSET_COLLAPSE,
+                    line_a,
+                    "",
+                    f"lines {pair[0]!r} and {pair[1]!r} draw flush near "
+                    f"({midpoint[0]:.1f},{midpoint[1]:.1f}) but the offset regime "
+                    f"spread them by {assigned:.1f}px",
+                    (a1, a2),
+                )
+            )
+    return findings
+
+
+def _expected_line_segments(graph: MetroGraph) -> dict[str, list[_Segment]]:
+    """The post-offset routed segments the engine assigns, grouped by line."""
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+    from nf_metro.layout.routing.common import apply_route_offsets
+
+    offsets = compute_station_offsets(graph)
+    try:
+        routes = route_edges(graph, station_offsets=offsets)
+    except Exception:  # noqa: BLE001 - routing failure surfaces on the render path
+        return {}
+    segments: dict[str, list[_Segment]] = {}
+    for routed in routes:
+        pts = apply_route_offsets(routed, offsets)
+        line = segments.setdefault(routed.line_id, [])
+        for i in range(len(pts) - 1):
+            line.append((pts[i], pts[i + 1]))
+    return segments
+
+
+def _flush_run(a: _Segment, b: _Segment) -> _Point | None:
+    """Midpoint of the stretch where *a* and *b* run collinear and flush.
+
+    ``None`` unless the two segments are parallel, perpendicular-closer than
+    ``_FLUSH_TOL``, and overlap for at least ``_RUN_MIN`` along their shared
+    direction (so a mere corner touch never counts).
+    """
+    (ax1, ay1), (ax2, ay2) = a
+    ux, uy = ax2 - ax1, ay2 - ay1
+    length = (ux * ux + uy * uy) ** 0.5
+    if length < _RUN_MIN:
+        return None
+    ux, uy = ux / length, uy / length
+    (bx1, by1), (bx2, by2) = b
+    if abs((bx2 - bx1) * uy - (by2 - by1) * ux) > 1e-3 * length:
+        return None
+    if abs((bx1 - ax1) * (-uy) + (by1 - ay1) * ux) >= _FLUSH_TOL:
+        return None
+    t0 = (bx1 - ax1) * ux + (by1 - ay1) * uy
+    t1 = (bx2 - ax1) * ux + (by2 - ay1) * uy
+    lo = max(0.0, min(t0, t1))
+    hi = min(length, max(t0, t1))
+    if hi - lo < _RUN_MIN:
+        return None
+    mid = (lo + hi) / 2
+    return (ax1 + ux * mid, ay1 + uy * mid)
+
+
+def _nearest_vertex(
+    segments: tuple[_Segment, ...] | list[_Segment], point: _Point
+) -> _Point | None:
+    best: _Point | None = None
+    best_d = 0.0
+    for (x1, y1), (x2, y2) in segments:
+        for vx, vy in ((x1, y1), (x2, y2)):
+            d = (vx - point[0]) ** 2 + (vy - point[1]) ** 2
+            if best is None or d < best_d:
+                best, best_d = (vx, vy), d
+    return best
+
+
+def _perp_gap(
+    point: _Point, segments: tuple[_Segment, ...] | list[_Segment]
+) -> float | None:
+    """Shortest distance from *point* to any segment it projects onto."""
+    best: float | None = None
+    px, py = point
+    for (x1, y1), (x2, y2) in segments:
+        dx, dy = x2 - x1, y2 - y1
+        length_sq = dx * dx + dy * dy
+        if length_sq < 1e-9:
+            continue
+        t = ((px - x1) * dx + (py - y1) * dy) / length_sq
+        if t < -0.05 or t > 1.05:
+            continue
+        cx, cy = x1 + t * dx, y1 + t * dy
+        d = ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+        if best is None or d < best:
+            best = d
+    return best
+
+
+def validate_render(
+    svg: str, *, graph: MetroGraph | None = None
+) -> list[RenderFinding]:
     """Run the render-geometry guards on a rendered SVG and return findings.
 
     Reads the embedded manifest for node identities and parses the drawn route
-    and label ink, then checks for label strikes on the geometry as drawn.
-    Returns an empty list for a clean render, or when the SVG carries no
-    manifest (nothing addressable to validate).
+    and label ink, then checks the geometry as drawn for label strikes and
+    non-consumer marker crossings (both pure artifact oracles).  When the
+    laid-out *graph* is supplied it additionally checks for offset-pitch
+    collapse, which needs the engine's assigned offsets to tell an intended
+    same-slot bundle from a real merge.  Returns an empty list for a clean
+    render, or when the SVG carries no manifest (nothing addressable to
+    validate).
     """
     manifest = read_manifest(svg)
     if manifest is None:
         return []
     routes = parse_route_polylines(svg)
-    return check_label_strikes(svg, manifest, routes)
+    findings = check_label_strikes(svg, manifest, routes)
+    findings += check_marker_crossings(svg, manifest, routes)
+    if graph is not None:
+        findings += check_offset_collapse(graph, routes)
+    return findings

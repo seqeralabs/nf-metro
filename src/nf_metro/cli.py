@@ -379,7 +379,7 @@ def render(
     if validate_geometry:
         if format_ == "html":
             raise click.ClickException("--validate applies to --format svg only.")
-        findings = validate_render(content)
+        findings = validate_render(content, graph=graph)
         if findings:
             detail = "\n".join(f"  - {f.message}" for f in findings)
             raise click.ClickException(
@@ -895,16 +895,17 @@ def check_mapping_cmd(
     is_flag=True,
     default=False,
     help=(
-        "Also run the render-geometry guards on the drawn ink (the picture as "
-        "rendered, including render-time offsets and label lifts), not just the "
-        "manifest schema."
+        "Also run the artifact-only render-geometry guards on the drawn ink "
+        "(label strikes and non-consumer marker crossings), not just the "
+        "manifest schema. The offset-collapse check needs the engine's assigned "
+        "offsets and runs only via 'render --validate'."
     ),
 )
 def validate_svg_cmd(svg_file: Path, geometry: bool) -> None:
     """Validate an SVG's embedded manifest against the manifest JSON Schema.
 
-    With ``--geometry`` it additionally runs the render-geometry guards on the
-    drawn ink and reports any defect.
+    With ``--geometry`` it additionally runs the artifact-only render-geometry
+    guards on the drawn ink and reports any defect.
     """
     from nf_metro.render import manifest_schema, read_manifest
 
