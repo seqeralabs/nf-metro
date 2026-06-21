@@ -29,6 +29,7 @@ from nf_metro.render.validate import (
     MARKER_CROSS,
     OFFSET_COLLAPSE,
     check_marker_crossings,
+    drawn_segments,
     parse_rail_station_ids,
     parse_route_polylines,
     parse_station_labels,
@@ -273,12 +274,7 @@ def _parallel_drawn_pair(svg: str) -> tuple[str, str, float, float, float, float
 
     Returns ``(line_a, line_b, y_a, y_b, x_lo, x_hi)``; raises if none exists.
     """
-    segs = [
-        (lid, sub[i], sub[i + 1])
-        for lid, subs in parse_route_polylines(svg)
-        for sub in subs
-        for i in range(len(sub) - 1)
-    ]
+    segs = drawn_segments(parse_route_polylines(svg))
     for i, (la, a1, a2) in enumerate(segs):
         if abs(a1[1] - a2[1]) > 0.1 or abs(a2[0] - a1[0]) < 24:
             continue
@@ -307,7 +303,9 @@ def test_offset_collapse_caught_when_spread_pair_drawn_flush() -> None:
         f for f in validate_render(merged, graph=graph) if f.kind == OFFSET_COLLAPSE
     ]
     assert collapses
-    assert {line_a, line_b} == set(collapses[0].message.split("'")[1::2][:2])
+    assert collapses[0].line_id in {line_a, line_b}
+    assert f"'{line_a}'" in collapses[0].message
+    assert f"'{line_b}'" in collapses[0].message
 
 
 def test_same_slot_bundle_is_not_offset_collapse() -> None:
@@ -318,12 +316,7 @@ def test_same_slot_bundle_is_not_offset_collapse() -> None:
     from nf_metro.render.validate import _flush_run
 
     svg = _render(name)
-    segs = [
-        (lid, sub[i], sub[i + 1])
-        for lid, subs in parse_route_polylines(svg)
-        for sub in subs
-        for i in range(len(sub) - 1)
-    ]
+    segs = drawn_segments(parse_route_polylines(svg))
     flush = any(
         la != lb and _flush_run((a1, a2), (b1, b2)) is not None
         for i, (la, a1, a2) in enumerate(segs)

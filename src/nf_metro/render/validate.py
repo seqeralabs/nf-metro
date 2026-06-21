@@ -145,6 +145,18 @@ def parse_route_polylines(
     return routes
 
 
+def drawn_segments(
+    routes: list[tuple[str, _Subpaths]],
+) -> list[tuple[str, _Point, _Point]]:
+    """Flatten parsed route subpaths into ``(line_id, p1, p2)`` drawn segments."""
+    return [
+        (line_id, subpath[i], subpath[i + 1])
+        for line_id, subpaths in routes
+        for subpath in subpaths
+        for i in range(len(subpath) - 1)
+    ]
+
+
 def parse_station_labels(svg: str) -> list[_Label]:
     """Reconstruct station-label ink placements from the drawn ``<text>`` ink.
 
@@ -369,22 +381,16 @@ def check_offset_collapse(
     expected = _expected_line_segments(graph)
     if not expected:
         return []
-    drawn = [
-        (line_id, subpath[i], subpath[i + 1])
-        for line_id, subpaths in routes
-        for subpath in subpaths
-        for i in range(len(subpath) - 1)
-    ]
+    drawn = drawn_segments(routes)
     findings: list[RenderFinding] = []
     seen: set[tuple[str, str, int, int]] = set()
     for i, (line_a, a1, a2) in enumerate(drawn):
         for line_b, b1, b2 in drawn[i + 1 :]:
             if line_b == line_a:
                 continue
-            run = _flush_run((a1, a2), (b1, b2))
-            if run is None:
+            midpoint = _flush_run((a1, a2), (b1, b2))
+            if midpoint is None:
                 continue
-            midpoint = run
             anchor = _nearest_vertex(expected.get(line_a, ()), midpoint)
             if anchor is None:
                 continue
