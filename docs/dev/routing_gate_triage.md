@@ -115,6 +115,16 @@ needs-review-linked.
   tooling noise - do not hand-classify them as `defensive`; fix the detector in
   the script instead (an un-exercised arc `(src, dst)` is phantom when `dst` is
   reached by an executed arc from a different source line in the same construct).
+- **A collapsed phantom gate can hide a real operand gap (#741).** When a wrapped
+  `and`/`or` condition's opening line carries *no* branch bytecode at all (every
+  arc originates on an operand line), the matrix re-attributes the decision to its
+  operand lines: each operand short-circuit becomes its own gate. This is what
+  keeps a `defensive` verdict on the collapsed opening line from masking an
+  operand whose short-circuit no fixture takes (e.g. an `or` chain's final
+  fall-through). Triage the operand rows on their own merits; a contract-guard
+  operand (`x is not None`) is `defensive`, a reachable-but-untested one wants a
+  fixture. Only conditions whose operands are each single-line and non-nested are
+  expanded; tangled ones stay collapsed.
 - **"Corpus doesn't hit it" is not "no valid topology reaches it."** A *correction
   pass* arm with zero corpus hits is usually **reachable** (author a fixture that
   triggers the correction), not **defensive**. Labeling such an arm defensive on a
@@ -129,6 +139,12 @@ needs-review-linked.
 - **The arc model is CPython-version-specific.** The script pins
   `BASELINE_PYTHON = (3, 11)`; the ratchet tests skip on any other interpreter.
   Regenerate the baseline only under the pinned version.
+- **Operand-level coverage is hash-seed sensitive.** The layout engine iterates
+  hash-ordered sets while rendering, so which operand of a short-circuit decides
+  a branch can vary by `PYTHONHASHSEED` even though the SVG is identical. The
+  script pins `PINNED_HASH_SEED = "0"` (re-execing itself when run without it) and
+  the ratchet test runs the sweep in a seed-pinned subprocess. Regenerate the
+  baseline only at the pinned seed.
 - **Use `FileReporter.arcs()`, not `missing_branch_arcs()`**, and exclude
   `invariants.py` (it is the `validate=True` checker, not a routing decision gate)
   and `__init__.py`.
@@ -152,7 +168,9 @@ pass and a tooling-quality issue:
   #727-#733 the long-tail modules.
 - **#689** is the deferred **deletion** pass over the `candidate-dead` arms.
 - **#746** fixes the phantom-arc tooling defect so future slices triage only real
-  gaps.
+  gaps; **#741** extends it to operand granularity, expanding a fully-phantom
+  wrapped `and`/`or` into per-operand gates so a hidden short-circuit gap surfaces
+  as its own row.
 
 The triage program is also a bug *finder*: the `reachable-but-defective` lane has
 spawned engine fixes (#688, #695, #696, #698, #736, ...). Those are filed and

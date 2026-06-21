@@ -491,6 +491,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     ),
     # --- Routing-gate coverage fixtures ---
     (
+        "junction_entry_reversed_fold",
+        TOPOLOGIES_DIR,
+        "A two-line bundle exits a TB section's RIGHT side, wraps into a Source "
+        "section, then fans out at a junction into two same-row destinations. The "
+        "bundle order is carried concentrically through the reversal corners so "
+        "the lines never cross at a station, and the fan-out peels off cleanly "
+        "(issue #760).",
+    ),
+    (
         "cross_col_top_entry",
         TOPOLOGIES_DIR,
         "A cross-column feed from a RIGHT-exit producer into a TOP-entry "

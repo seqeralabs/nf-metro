@@ -237,6 +237,177 @@ def _check_pair(
 
 
 # ---------------------------------------------------------------------------
+# TB exit-corner column-order preservation
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TBExitColumnFlip:
+    """A TB section's exit-corner drop reverses the in-section column order.
+
+    At ``station_id`` a line drops out of the vertical in-section column and
+    turns through a LEFT/RIGHT exit port.  The drop leg is a continuation of
+    the column, so each line's drop X must keep the column's left/right
+    ordering; when the corner handler derives the drop X from a different
+    reversal convention than the column, two lines swap X and cross *at the
+    feeder station marker* before they leave the box.
+    """
+
+    section_id: str
+    station_id: str
+    line_a: str
+    line_b: str
+    column_x_a: float
+    column_x_b: float
+    drop_x_a: float
+    drop_x_b: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"TB exit corner flips column order at station {self.station_id!r} "
+            f"(section {self.section_id!r}): lines {self.line_a!r}/{self.line_b!r} "
+            f"run x={self.column_x_a:.1f}/{self.column_x_b:.1f} in the column but "
+            f"drop at x={self.drop_x_a:.1f}/{self.drop_x_b:.1f} into the exit port"
+        )
+
+
+def _vertical_x_at_station(
+    pts: Sequence[tuple[float, float]], station: Station, *, at_end: bool
+) -> float | None:
+    """X of the vertical segment touching the station endpoint, else ``None``.
+
+    ``at_end`` selects the last segment (a column edge ending at the station)
+    versus the first (an exit edge leaving it).  Returns ``None`` when that
+    segment is not vertical.
+    """
+    if len(pts) < 2:
+        return None
+    if at_end:
+        a, b = pts[-1], pts[-2]
+    else:
+        a, b = pts[0], pts[1]
+    if abs(a[1] - station.y) > SAME_Y_TOLERANCE:
+        return None
+    if abs(a[0] - b[0]) <= COORD_TOLERANCE and abs(a[1] - b[1]) > COORD_TOLERANCE:
+        return a[0]
+    return None
+
+
+def _per_line_drop_x(
+    graph: MetroGraph,
+    station: Station,
+    neighbors: list[str],
+    by_edge: dict[tuple[str, str, str], RoutedPath],
+    offsets: dict[tuple[str, str], float],
+    *,
+    at_end: bool,
+) -> dict[str, float]:
+    """Per-line vertical X at ``station`` across edges to/from ``neighbors``.
+
+    Lines that resolve to more than one distinct X (a fan, not a single
+    column) are dropped so only the simple-bundle case is compared.
+    """
+    neighbor_set = set(neighbors)
+    incident = graph.edges_to(station.id) if at_end else graph.edges_from(station.id)
+    result: dict[str, float] = {}
+    multi: set[str] = set()
+    for edge in incident:
+        nb = edge.source if at_end else edge.target
+        if nb not in neighbor_set:
+            continue
+        rp = by_edge.get((edge.source, edge.target, edge.line_id))
+        if rp is None:
+            continue
+        x = _vertical_x_at_station(
+            _route_render_points(rp, offsets), station, at_end=at_end
+        )
+        if x is None:
+            continue
+        if edge.line_id in result and abs(result[edge.line_id] - x) > COORD_TOLERANCE:
+            multi.add(edge.line_id)
+        result[edge.line_id] = x
+    for lid in multi:
+        result.pop(lid, None)
+    return result
+
+
+def check_tb_exit_corner_preserves_column_order(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[TBExitColumnFlip]:
+    """Return TB exit corners that reverse the in-section bundle order.
+
+    In a TB section the bundle runs as a vertical column.  Where a station
+    turns the bundle out through a LEFT/RIGHT exit port, the drop into that
+    corner continues the column, so each line's drop X must keep the column's
+    left/right ordering.  A handler that derives the drop X from a different
+    reversal convention than the column swaps two lines' X and crosses them at
+    the feeder station marker.
+    """
+    tb_sections = {sid for sid, s in graph.sections.items() if s.direction == "TB"}
+    if not tb_sections:
+        return []
+
+    by_edge: dict[tuple[str, str, str], RoutedPath] = {}
+    for r in routes:
+        by_edge[(r.edge.source, r.edge.target, r.line_id)] = r
+
+    violations: list[TBExitColumnFlip] = []
+    for station in graph.stations.values():
+        sid = station.section_id
+        if sid not in tb_sections or station.is_port:
+            continue
+        exit_targets = [
+            edge.target
+            for edge in graph.edges_from(station.id)
+            if (p := graph.ports.get(edge.target)) is not None
+            and not p.is_entry
+            and p.side in (PortSide.LEFT, PortSide.RIGHT)
+        ]
+        if not exit_targets:
+            continue
+        column_sources = [
+            edge.source
+            for edge in graph.edges_to(station.id)
+            if (s := graph.stations.get(edge.source)) is not None
+            and not s.is_port
+            and s.section_id == sid
+        ]
+        if not column_sources:
+            continue
+        col_x = _per_line_drop_x(
+            graph, station, column_sources, by_edge, offsets, at_end=True
+        )
+        drop_x = _per_line_drop_x(
+            graph, station, exit_targets, by_edge, offsets, at_end=False
+        )
+        shared = sorted(set(col_x) & set(drop_x))
+        for ia in range(len(shared)):
+            for ib in range(ia + 1, len(shared)):
+                la, lb = shared[ia], shared[ib]
+                col_cmp = col_x[la] - col_x[lb]
+                drop_cmp = drop_x[la] - drop_x[lb]
+                if abs(col_cmp) <= COORD_TOLERANCE or abs(drop_cmp) <= COORD_TOLERANCE:
+                    continue
+                if (col_cmp > 0) != (drop_cmp > 0):
+                    violations.append(
+                        TBExitColumnFlip(
+                            section_id=sid,
+                            station_id=station.id,
+                            line_a=la,
+                            line_b=lb,
+                            column_x_a=col_x[la],
+                            column_x_b=col_x[lb],
+                            drop_x_a=drop_x[la],
+                            drop_x_b=drop_x[lb],
+                        )
+                    )
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # Fan-out junction tail join
 # ---------------------------------------------------------------------------
 

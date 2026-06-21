@@ -212,11 +212,11 @@ def _route_tb_lr_exit(
     """Route internal station -> LEFT/RIGHT exit port in a TB section.
 
     The line drops from the station, turns once, and runs out to the port: a
-    vertical leg fanned by the station's X offset (reversed for a LEFT exit, so
-    the outermost line takes the widest arc), a horizontal leg fanned by the
-    port's own Y offset.  The port offset (not the station's reversed offset)
-    pins the horizontal Y so the inside and outside segments share the Y at
-    which the port -> junction route departs.
+    vertical leg fanned by the station's in-section column X offset (via
+    :func:`_tb_x_offset`, so the drop continues the column without crossing
+    lines at the feeder station), a horizontal leg fanned by the port's own Y
+    offset.  The exit-port Y order is the reverse of the column order, so the
+    drop -> turn corner nests concentrically.
     """
     graph = ctx.graph
     tgt_port = graph.ports.get(edge.target)
@@ -235,14 +235,11 @@ def _route_tb_lr_exit(
     assert tgt_port is not None
 
     _members, line_ids, _edge_by_line = gather_member_edges(graph, edge)
-    exit_right = tgt_port.side == PortSide.RIGHT
     td = _sign(tgt.y - src.y)
     hd = _sign(tgt.x - src.x)
-    max_src_off = _max_offset_at(ctx, edge.source)
 
     def vert_x_off(line_id: str) -> float:
-        off = _get_offset(ctx, edge.source, line_id)
-        return off if exit_right else reversed_offset(off, max_src_off)
+        return _tb_x_offset(ctx, edge.source, line_id, src.section_id)
 
     def source_offset(line_id: str) -> float:
         return -td * vert_x_off(line_id)

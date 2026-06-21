@@ -186,6 +186,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_stations_in_sections,
     _guard_stations_within_bbox,
     _guard_tall_anchor_stack_well_formed,
+    _guard_tb_exit_corner_column_order,
     _guard_tb_top_entry_drop_hugs_top,
     _guard_terminus_icons_within_bbox,
     _guard_topmost_row_top_entry_hugs_section,
@@ -1703,6 +1704,9 @@ def _finalize_layout(
                 graph, phase, offsets=offsets, routes=routes
             )
             _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
+            _guard_tb_exit_corner_column_order(
+                graph, phase, offsets=offsets, routes=routes
+            )
             _guard_concentric_bundle_corners(
                 graph, phase, offsets=offsets, routes=routes
             )

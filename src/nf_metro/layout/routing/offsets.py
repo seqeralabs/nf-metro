@@ -11,6 +11,7 @@ from nf_metro.layout.constants import (
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
 )
+from nf_metro.layout.routing.common import tb_right_entry_sections
 from nf_metro.layout.routing.context import (
     _has_intervening_sections,
     _resolve_section_col,
@@ -733,14 +734,22 @@ def _propagate_exit_offsets_to_hubs(
 def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
     """Compute exit port offsets for TB and LR/RL sections.
 
-    TB sections with LEFT/RIGHT exits: reverse internal offsets so the
-    concentric arc ordering is correct.
+    TB sections with LEFT/RIGHT exits: the exit-port Y order is whatever makes
+    the drop -> turn concentric corner nest without pinching.  The drop
+    continues the in-section column order (raw internal offset for a RIGHT-entry
+    section, its reverse otherwise, mirroring :func:`_tb_x_offset`).  A RIGHT
+    exit (down -> east turn) reverses the column across the corner, so its port
+    order is the reverse of the column; a LEFT exit (down -> west turn) keeps
+    it, so its port order equals the column.  Reversing unconditionally double-
+    reverses a non-right-entry RIGHT exit and crosses the bundle at the feeder
+    station.
 
     LR/RL sections with LEFT/RIGHT exits: use spatial Y ordering of
     feeding stations to prevent visual crossings, and propagate to
     upstream hub stations.
     """
     graph = ctx.graph
+    tb_right_entry = tb_right_entry_sections(graph)
 
     # TB section LEFT/RIGHT exit ports
     for port_id, port_obj in graph.ports.items():
@@ -757,8 +766,13 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
                 )
         if internal_offs:
             max_int = max(internal_offs.values())
+            right_entry = port_obj.section_id in tb_right_entry
+            right_exit = port_obj.side == PortSide.RIGHT
             for lid, ioff in internal_offs.items():
-                ctx.offsets[(port_id, lid)] = max_int - ioff
+                column_off = ioff if right_entry else max_int - ioff
+                ctx.offsets[(port_id, lid)] = (
+                    max_int - column_off if right_exit else column_off
+                )
 
     # LR/RL section LEFT/RIGHT exit ports: spatial Y ordering
     for port_id, port_obj in graph.ports.items():

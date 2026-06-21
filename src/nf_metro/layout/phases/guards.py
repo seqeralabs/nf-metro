@@ -2936,6 +2936,30 @@ def _guard_bundle_order_preserved(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
+def _guard_tb_exit_corner_column_order(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: a TB section's LEFT/RIGHT exit corner must continue its
+    in-section column order, so the bundle does not cross at the feeder station.
+
+    Wraps :func:`check_tb_exit_corner_preserves_column_order`.  A TB exit corner
+    that derives its vertical-drop X from a different reversal convention than
+    the column swaps two lines' X and renders a crossing through the feeder
+    station marker.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_tb_exit_corner_preserves_column_order,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_tb_exit_corner_preserves_column_order, offsets, routes
+    )
+
+
 def _guard_no_collinear_distinct_lines(
     graph: MetroGraph,
     phase: str,
