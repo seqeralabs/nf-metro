@@ -198,6 +198,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _section_lacks_flow_aligned_port,
     inter_section_route_backtrack_legs,
     iter_line_label_strikes,
+    run_validate_guards,
 )
 from nf_metro.layout.phases.junctions import (  # noqa: F401
     _junction_incoming_line_count,
@@ -1764,93 +1765,10 @@ def _finalize_layout(
         _run_pass_c_guards(graph, "after Stage 6.16")
 
     if validate:
-        phase = "after final"
-        offsets, routes = _run_pass_c_guards(graph, phase)
-        _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
-        _guard_off_track_clear_of_anchor(graph, phase)
-        _guard_fanout_junction_shares_exit_port_y(graph, phase)
-        _guard_fanout_junction_resolves_upstream(graph, phase)
-        _guard_entry_port_fed_only_by_ports(graph, phase)
-        _guard_flow_exit_anchored_to_carrier(graph, phase)
-        _guard_perp_entry_feed_not_collinear(graph, phase)
-        _guard_merge_port_approach_side(graph, phase, offsets=offsets)
-        _guard_merge_port_outgoing_side_preserved(graph, phase, offsets=offsets)
-        _guard_exit_inherits_entry_bundle_order(graph, phase, offsets=offsets)
-        _guard_bypass_port_no_slot_gaps(graph, phase, offsets=offsets)
-        _guard_partial_branch_offset_gaps(graph, phase, offsets=offsets)
-        _guard_row_gaps(graph, phase, section_y_gap=section_y_gap)
-        _guard_section_top_padding(
+        run_validate_guards(
             graph,
-            phase,
-            section_y_padding=section_y_padding,
+            "after final",
+            include_final=True,
             section_y_gap=section_y_gap,
+            section_y_padding=section_y_padding,
         )
-        _guard_terminus_icons_within_bbox(graph, phase)
-        if routes is not None:
-            _guard_inter_section_routes_in_row_band(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_topmost_row_top_entry_hugs_section(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_off_track_output_clears_non_producer(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
-            _guard_tb_exit_corner_column_order(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_concentric_bundle_corners(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_no_collinear_distinct_lines(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_no_intra_section_collinear_distinct_lines(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_no_same_line_parallel_descents(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_no_split_same_line_fanout_descents(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_no_dogleg_crosses_exempt_trunk(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_no_stacked_elbow_graze(graph, phase, offsets=offsets, routes=routes)
-            _guard_fanout_tail_join(graph, phase, offsets=offsets, routes=routes)
-            _guard_perp_entry_boundary_consistent(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_perp_exit_over_leadin_no_overdip(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_right_entry_drop_in_when_clear(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_inter_section_route_no_backtrack(graph, phase, routes=routes)
-            _guard_inter_section_route_no_full_width_backtrack(
-                graph, phase, routes=routes
-            )
-            _guard_routes_enter_sections_at_ports(graph, phase, routes=routes)
-            _guard_no_route_through_section(
-                graph, phase, routes=routes, offsets=offsets
-            )
-            _guard_feeder_exits_section_through_side(
-                graph, phase, routes=routes, offsets=offsets
-            )
-            _guard_entry_approach_from_port_side(graph, phase, routes=routes)
-            _guard_no_opposing_line_overlap(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_serpentine_no_backtrack(graph, phase, routes=routes)
-            _guard_no_artefactual_counter_flow(graph, phase, routes=routes)
-            _guard_inter_row_run_clearance(graph, phase, routes=routes)
-            _guard_trunk_bands_crossing_optimal(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_inter_section_descent_edge_clearance(graph, phase, routes=routes)
-            _guard_fan_bundles_coincide_or_separate(
-                graph, phase, offsets=offsets, routes=routes
-            )
