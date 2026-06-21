@@ -401,29 +401,27 @@ def _apply_section_line_order(
                 ctx.offsets[(sid_s, lid)] = p * ctx.offset_step
 
 
-def _sections_share_flat_frame(graph: MetroGraph, sec_a: str, sec_b: str) -> bool:
-    """Whether two sections sit in one grid row, adjacent columns, sharing a line.
+def _share_flat_frame(ctx: _OffsetCtx, sec_a: str, sec_b: str) -> bool:
+    """Whether two sections belong to one flat-frame component.
 
-    The pairwise condition :func:`_flat_frame_components` builds its frames from:
-    such a pair passes a common line straight across their boundary on one trunk
-    Y, so their bundles are coordinated rather than independently anchored.
+    Members of a frame pass their common lines straight across the boundaries
+    between them on shared trunk Ys, so their bundles are coordinated rather
+    than anchored independently.  Reads the components
+    :func:`_reindex_local_priority_gaps` records on ``ctx.frame_roots``.
     """
-    sa = graph.sections.get(sec_a)
-    sb = graph.sections.get(sec_b)
-    if sa is None or sb is None:
-        return False
-    if sa.grid_row != sb.grid_row or abs(sa.grid_col - sb.grid_col) != 1:
-        return False
-    present = _section_present_lines(graph)
-    return bool(present.get(sec_a, set()) & present.get(sec_b, set()))
+    roots = ctx.frame_roots
+    return sec_a in roots and roots.get(sec_a) == roots.get(sec_b)
 
 
 def _section_line_offsets(ctx: _OffsetCtx, sec_id: str) -> dict[str, float]:
-    """Current offset of each line on section *sec_id* from a representative
-    station (offsets are per-line constant within a section)."""
+    """Offset of each line on section *sec_id* from a representative station
+    (offsets are per-line constant within a section)."""
+    section = ctx.graph.sections.get(sec_id)
     result: dict[str, float] = {}
-    for sid_s, station in ctx.graph.stations.items():
-        if station.is_port or station.section_id != sec_id:
+    if section is None:
+        return result
+    for sid_s in section.station_ids:
+        if ctx.graph.stations[sid_s].is_port:
             continue
         for lid in ctx.graph.station_lines(sid_s):
             result.setdefault(lid, ctx.offsets.get((sid_s, lid), 0.0))
@@ -431,7 +429,11 @@ def _section_line_offsets(ctx: _OffsetCtx, sec_id: str) -> dict[str, float]:
 
 
 def _align_reconvergence_to_feeder(
-    ctx: _OffsetCtx, sec_id: str, continuing: list[str], returning: list[str], feeder: str
+    ctx: _OffsetCtx,
+    sec_id: str,
+    continuing: list[str],
+    returning: list[str],
+    feeder: str,
 ) -> None:
     """Pin a section's continuing lines onto their flat-frame feeder's offsets.
 
@@ -446,9 +448,7 @@ def _align_reconvergence_to_feeder(
     band_bottom = max(new_off.values())
     for rank, lid in enumerate(returning, start=1):
         new_off[lid] = band_bottom + rank * ctx.offset_step
-    for sid_s, station in ctx.graph.stations.items():
-        if station.section_id != sec_id:
-            continue
+    for sid_s in ctx.graph.sections[sec_id].station_ids:
         for lid in ctx.graph.station_lines(sid_s):
             if lid in new_off:
                 ctx.offsets[(sid_s, lid)] = new_off[lid]
@@ -491,7 +491,7 @@ def _reorder_reconvergence(
             key=lambda lid: ctx.line_priority.get(lid, 0),
         )
 
-        if _sections_share_flat_frame(graph, sec_id, primary_fid):
+        if _share_flat_frame(ctx, sec_id, primary_fid):
             _align_reconvergence_to_feeder(
                 ctx, sec_id, continuing, returning, primary_fid
             )

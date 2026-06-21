@@ -511,16 +511,13 @@ def fanout_divergence_peel_order(
         return None
 
     if len(set(reach.values())) == 1:
-        # Vertical fan: every line reaches the same column but peels to a
-        # different row.  The descenders must drop the same way, and the
-        # crossing-free lead-in Y order simply mirrors the target rows top to
-        # bottom -- a same-row continuation (drow 0) leads as the shallowest.
+        # Same-column vertical fan: a same-row continuation (drow 0) is a valid
+        # member that leads as the shallowest peel, unlike the column-spreading
+        # branch below, which rejects any zero descent.
         descenders = [d for d in drow.values() if d != 0]
         if len(set(drow.values())) < 2 or len({d > 0 for d in descenders}) != 1:
             return None
-        return sorted(
-            reach, key=lambda lid: (drow[lid], line_priority.get(lid, 0))
-        )
+        return sorted(reach, key=lambda lid: (drow[lid], line_priority.get(lid, 0)))
 
     if 0 in drow.values():
         return None
