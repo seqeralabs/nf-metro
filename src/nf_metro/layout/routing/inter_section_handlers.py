@@ -1110,6 +1110,7 @@ def _route_bypass(
     # diving below the source row and climbing back up is a gratuitous dogleg.
     # A merge/fan junction target collects feeders onto a shared trunk below the
     # row, so this only applies to a route landing on a real section entry port.
+    src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_entry = graph.ports.get(edge.target)
     if (
         cross_row
@@ -1119,7 +1120,13 @@ def _route_bypass(
         and tgt_entry.is_entry
         and _bottom_row_climb_corridor_clear(graph, src_row, tgt_row, src_col, tgt_col)
     ):
-        base_y = sy
+        # Keep the run on the line's in-section track (its per-line offset), not
+        # the bare port-marker row, so it leaves the exit corner straight rather
+        # than stepping off by ``src_off``. The source offsets already separate
+        # co-travelling lines, so the below-row traverse's nest separation would
+        # double up here.
+        base_y = sy + src_off
+        nest_offset = 0.0
 
     # Determine actual vertical direction at each gap from the geometry.
     # Gap1 goes from source Y to trunk Y; gap2 from trunk Y to target Y.
@@ -1318,7 +1325,6 @@ def _route_bypass(
     # traverse, and the port approach can each run either way (a leftward
     # bypass out of a right-edge junction leads in rightward), so a single
     # direction would mis-sign the compensation.
-    src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
     gap1_mid = gap1_x - off1
     gap2_mid = gap2_x - delta2

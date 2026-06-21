@@ -25,7 +25,7 @@ import math
 import os
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
@@ -60,7 +60,7 @@ from nf_metro.layout.routing.common import (
     trunk_segments_cross,
     vertical_direction,
 )
-from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
+from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
 
 # Segments shorter than this are sub-pixel artefacts of per-line
 # offsets and carry no meaningful direction of travel.
@@ -2677,30 +2677,54 @@ class BottomRowClimbDive:
         )
 
 
-def check_bottom_row_climb_stays_at_row_level(
-    graph: MetroGraph, routes: list[RoutedPath]
-) -> list[BottomRowClimbDive]:
-    """Return bottommost-row climbs that dive below a clear row-level corridor.
+@dataclass
+class BottomRowClimbOffTrack:
+    """A bottom-row level run that stepped off its source's offset track.
 
-    When the source sits in the bottommost content row, the target is in a
-    higher row, and the spanned columns hold no same-row section, the run can
-    stay at the source's Y and climb at the end.  A route that instead dips
-    below the source box took a gratuitous downward dogleg.
+    When a bottommost-row climb keeps its run at row level, the line leaves its
+    exit port on its own per-line offset track and runs flat until the climb at
+    the end.  A traverse sitting on a different Y than the source endpoint means
+    the line took a gratuitous vertical step off its offset at the exit corner.
+    """
+
+    source: str
+    target: str
+    run_y: float
+    src_y: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"bottommost-row climb {self.source!r}->{self.target!r} runs its "
+            f"traverse at y={self.run_y:.1f}, off the source track "
+            f"y={self.src_y:.1f} -- a dogleg step off the line's offset at the "
+            f"exit corner"
+        )
+
+
+def _iter_bottom_row_climbs(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> Iterator[tuple[RoutedPath, Section]]:
+    """Yield ``(route, source_section)`` for each row-level bottom-row climb.
+
+    A bottommost-row source climbing to a higher-row entry port over a clear
+    corridor keeps its run at row level (see
+    :func:`~nf_metro.layout.routing.inter_section_handlers._route_bypass`).  The
+    two guards below police that run from different angles, so they share this
+    gate.
     """
     from nf_metro.layout.routing.inter_section_handlers import (
         _bottom_row_climb_corridor_clear,
     )
 
-    tol = COORD_TOLERANCE
-    violations: list[BottomRowClimbDive] = []
     for r in routes:
         if not r.is_inter_section or len(r.points) < 2:
             continue
         tgt_port = graph.ports.get(r.edge.target)
         if tgt_port is None or not tgt_port.is_entry:
             # A merge/fan junction target collects feeders onto a shared trunk
-            # below the row; that channel is not the single-line dogleg this
-            # guard polices, which always lands on a real section entry port.
+            # below the row; that channel is not the single-line dogleg these
+            # guards police, which always lands on a real section entry port.
             continue
         src_sec = resolve_section(graph, graph.stations.get(r.edge.source))
         tgt_sec = resolve_section(graph, graph.stations.get(r.edge.target))
@@ -2720,11 +2744,63 @@ def check_bottom_row_climb_stays_at_row_level(
             tgt_sec.grid_col,
         ):
             continue
+        yield r, src_sec
+
+
+def check_bottom_row_climb_stays_at_row_level(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> list[BottomRowClimbDive]:
+    """Return bottommost-row climbs that dive below a clear row-level corridor.
+
+    When the source sits in the bottommost content row, the target is in a
+    higher row, and the spanned columns hold no same-row section, the run can
+    stay at the source's Y and climb at the end.  A route that instead dips
+    below the source box took a gratuitous downward dogleg.
+    """
+    tol = COORD_TOLERANCE
+    violations: list[BottomRowClimbDive] = []
+    for r, src_sec in _iter_bottom_row_climbs(graph, routes):
         box_bottom = src_sec.bbox_y + src_sec.bbox_h
         dive_y = max(y for _, y in r.points)
         if dive_y > box_bottom + tol:
             violations.append(
                 BottomRowClimbDive(r.edge.source, r.edge.target, dive_y, box_bottom)
+            )
+    return violations
+
+
+def check_bottom_row_climb_run_on_source_track(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> list[BottomRowClimbOffTrack]:
+    """Return bottom-row climbs whose level run stepped off the source track.
+
+    When the climb stays at row level, the line leaves its exit port on its own
+    per-line offset track and runs flat until the end-of-traverse climb.  An
+    offset line whose long horizontal traverse instead sits on the bare
+    port-marker row took a gratuitous vertical step off its offset right at the
+    exit corner.  Only flagged when the source endpoint genuinely carries an
+    offset and the traverse landed back on the marker row: a legitimate climb
+    runs its traverse far from both, not on the marker.
+    """
+    tol = COORD_TOLERANCE
+    violations: list[BottomRowClimbOffTrack] = []
+    for r, _src_sec in _iter_bottom_row_climbs(graph, routes):
+        src_station = graph.stations.get(r.edge.source)
+        if src_station is None:
+            continue
+        marker_y = src_station.y
+        src_y = r.points[0][1]
+        if abs(src_y - marker_y) <= tol:
+            continue  # no per-line offset at the port, so no off-track step
+        best_dx = 0.0
+        run_y = src_y
+        for (x0, y0), (x1, y1) in zip(r.points, r.points[1:]):
+            if abs(y1 - y0) <= tol and abs(x1 - x0) > best_dx:
+                best_dx = abs(x1 - x0)
+                run_y = y0
+        if abs(run_y - marker_y) <= tol and abs(run_y - src_y) > tol:
+            violations.append(
+                BottomRowClimbOffTrack(r.edge.source, r.edge.target, run_y, src_y)
             )
     return violations
 
@@ -2983,6 +3059,10 @@ def assert_render_curve_invariants(
             check_bottom_row_climb_stays_at_row_level(graph, routes),
         ),
         (
+            "bottommost-row climb run off source track",
+            check_bottom_row_climb_run_on_source_track(graph, routes),
+        ),
+        (
             "undeclared gap channel",
             check_gap_channels_materialized(graph, routes),
         ),
@@ -3077,6 +3157,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_no_hanging_routes, "A"),
     _check_spec(check_deferred_offsets_apply_laterally, "A"),
     _check_spec(check_bottom_row_climb_stays_at_row_level, "A"),
+    _check_spec(check_bottom_row_climb_run_on_source_track, "A"),
     _check_spec(check_gap_channels_materialized, "A"),
     _check_spec(check_trunks_declared, "A"),
     _check_spec(check_peeloff_concentric, "A"),
@@ -3101,6 +3182,7 @@ __all__ = [
     "CHECK_REGISTRY",
     "GuardSpec",
     "BottomRowClimbDive",
+    "BottomRowClimbOffTrack",
     "BundleOrderViolation",
     "CollinearOverlapViolation",
     "DiagonalOverlapViolation",
@@ -3122,6 +3204,7 @@ __all__ = [
     "UndeclaredGapChannel",
     "UndeclaredTrunk",
     "check_bottom_row_climb_stays_at_row_level",
+    "check_bottom_row_climb_run_on_source_track",
     "check_bundle_order_preserved",
     "check_gap_channels_materialized",
     "check_trunks_declared",

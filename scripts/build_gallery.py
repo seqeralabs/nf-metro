@@ -931,6 +931,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "and looping back up.",
     ),
     (
+        "exit_corner_offset_dogleg",
+        TOPOLOGIES_DIR,
+        "A passing line runs through a section on a per-line bundle offset, then "
+        "exits and bypasses a higher row to climb to a far target. The onward "
+        "run keeps the line's offset over the row-level traverse so it leaves "
+        "the exit port straight, with the single level change a clean riser at "
+        "the far gap rather than a one-offset-step jog at the exit corner.",
+    ),
+    (
         "multicarrier_offrow_exit_climb",
         TOPOLOGIES_DIR,
         "A section's exit port carries two lines from two stations that share a "
