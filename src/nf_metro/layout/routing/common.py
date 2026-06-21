@@ -1070,7 +1070,7 @@ def clear_channel_of_section_edge(
         # pushing left clears the left edge with the rightmost line.
         push_right = (
             target_x >= right
-            if target_x is not None and not (left < target_x < right)
+            if target_x is not None and (target_x <= left or target_x >= right)
             else right - adjusted <= adjusted - left
         )
         if push_right:
