@@ -108,6 +108,8 @@ def test_cli_rejects_mixed_entry_directions(
     args = [command, str(path)]
     if command == "render":
         args += ["-o", str(tmp_path / "out.svg")]
+    elif command == "validate":
+        args += ["--with-layout"]
 
     result = CliRunner().invoke(cli, args)
 
