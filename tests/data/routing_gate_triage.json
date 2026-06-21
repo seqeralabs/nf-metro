@@ -507,10 +507,6 @@
     "note": "_suboptimal_trunk_bands crossing-comparison: validate-only, not on the render path.",
     "status": "defensive"
   },
-  "normalize.py::if ca != cb:::#1": {
-    "note": "Trunk-restack channel-merge arm reached only when two co-column trunks carry distinct channel keys. Migrating the simple inter-section shapes onto baked-offset centrelines (build_concentric_bundle) shifted which routes this pass sees, leaving this arm un-exercised; render-diff confirms no visual change.",
-    "status": "needs-review"
-  },
   "normalize.py::if down is None or len(up.points) < 2:::#1": {
     "note": "Every line entering a fan-out junction also exits it to an entry port, so _fanout_route_maps always pairs a downstream route for each (jid, line_id) upstream; all handlers emit >=2-point routes. The skip arm in _join_fanout_upstream_tails is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"

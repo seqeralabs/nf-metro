@@ -265,3 +265,7 @@ Source (col 2, row 0) sends a two-line bundle both directly to Target (col 0, ro
 ### Inter-Row Wrap Clearance
 
 A three-line bundle exits the top section's right port, wraps via the inter-row gap, and enters the bottom section's left port. The two sections are stacked directly (same column, adjacent rows). Tests that the wrap uses the clear gap between rows rather than clipping the section boxes, and that port alignment is maintained across the wrap.
+
+### Convergent Off-Row Exit Climb
+
+A hand-authored single-row grid for `longread_variant_calling` (issue #910): two lines (`bam`, `other`) leave the same trunk row for a shared multi-carrier exit port that sits on the section-header row, off the trunk. They climb the same diagonal and must stay a concentric bundle, settling any order change on the flat trunk run rather than swapping order mid-diagonal. Backs `test_convergent_climb_concentric` and the `check_convergent_climb_concentric` guard.

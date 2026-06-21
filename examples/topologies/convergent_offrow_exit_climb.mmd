@@ -1,0 +1,157 @@
+%% Manual single-row grid for longread_variant_calling (issue #910): two lines
+%% (bam, other) leave the same trunk row for a shared multi-carrier exit port
+%% sitting on the section-header row, so they climb the same diagonal. The pair
+%% must stay concentric on the climb rather than swapping order mid-diagonal.
+%%metro title: Long-read Variant Calling
+%%metro style: dark
+%%metro directional: true
+%%metro files: fastq_in | FASTQ
+%%metro files: bam_in | BAM
+%%metro files: ubam_in | uBAM
+%%metro line: ubam | uBAM | #0570b0
+%%metro line: fastq | FASTQ | #2db572
+%%metro line: bam | BAM | #f5c542
+%%metro line: other | Other | #ff8c00
+%%metro line: snvvcf | SNV VCF | #e63946
+%%metro line: svvcf | SV VCF | #9d4edd
+%%metro legend: tl
+%%metro grid: preprocessing | 0,0
+%%metro grid: small_variants | 1,0
+%%metro grid: tr_calling | 1,1
+%%metro grid: phasing | 2,0
+%%metro grid: cnv_calling | 2,1
+%%metro grid: structural_variants | 3,0
+%%metro grid: jointcalling | 4,0
+%%metro grid: annotation | 5,0
+%%metro grid: reports | 6,0
+
+graph LR
+    subgraph preprocessing [Pre-processing]
+
+        fastq_in[ ]
+        bam_in[ ]
+        ubam_in[ ]
+        cat_fastq[cat FASTQ]
+        samtools_merge[samtools\nmerge]
+        minimap2_align[minimap2]
+        samtools_sort_index[samtools\nsort/index]
+        mosdepth[mosdepth]
+
+        fastq_in -->|fastq| cat_fastq
+        ubam_in -->|ubam| samtools_merge
+        bam_in -->|bam| samtools_merge
+        cat_fastq -->|fastq| minimap2_align
+        samtools_merge -->|ubam| minimap2_align
+        minimap2_align -->|bam| samtools_sort_index
+        samtools_merge -->|bam| samtools_sort_index
+        samtools_sort_index -->|bam| mosdepth
+    end
+
+    subgraph small_variants [Small variant calling]
+
+        clair3[Clair3]
+        deepvariant[Deepvariant]
+    end
+
+    subgraph cnv_calling [CNVs]
+
+        ontspectre_cnvcaller[ont-spectre CNVCaller]
+    end
+
+    subgraph tr_calling [Repeats]
+
+        longtr[LongTR]
+        straglr[Straglr]
+        trgt[TRGT]
+    end
+
+    subgraph phasing [Phasing]
+
+        whatshap_phase[WhatsHap Phase]
+        whatshap_haplotag[WhatsHap Haplotag]
+
+        whatshap_phase -->|bam,snvvcf| whatshap_haplotag
+    end
+
+    subgraph structural_variants [Structural Variants]
+
+        sniffles[Sniffles]
+        cutesv[CuteSV]
+        jasminesv_callers[Jasmine merge callers]
+
+        sniffles -->|svvcf,bam| jasminesv_callers
+        cutesv -->|svvcf,bam| jasminesv_callers
+    end
+
+    subgraph jointcalling [Joint Calling]
+
+        jasminesv_samples[Jasmine merge samples]
+        glnexus[GLNexus]
+    end
+
+    subgraph annotation [Annotation]
+
+        vep[VEP]
+        snpeff[SnpEff]
+        annotsv[AnnotSV]
+    end
+
+    subgraph reports [Reports]
+
+        geneyx[Geneyx]
+        sv_report[SV Report]
+    end
+
+
+    %% Inter-section edges
+    samtools_sort_index -->|bam| clair3
+    samtools_sort_index -->|bam| deepvariant
+    samtools_sort_index -->|bam| longtr
+    samtools_sort_index -->|bam| straglr
+    samtools_sort_index -->|bam| trgt
+
+    mosdepth -->|other| ontspectre_cnvcaller
+
+    straglr -->|other| geneyx
+
+    clair3 -->|snvvcf| ontspectre_cnvcaller
+    deepvariant -->|snvvcf| ontspectre_cnvcaller
+
+    clair3 -->|bam,snvvcf| whatshap_phase
+    deepvariant -->|bam,snvvcf| whatshap_phase
+
+    clair3 -->|snvvcf| glnexus
+    deepvariant -->|snvvcf| glnexus
+
+    clair3 -->|snvvcf| vep
+    deepvariant -->|snvvcf| vep
+
+    whatshap_haplotag -->|bam| sniffles
+    whatshap_haplotag -->|bam| cutesv
+    whatshap_haplotag -->|bam| jasminesv_samples
+
+    ontspectre_cnvcaller -->|other| geneyx
+
+    sniffles -->|svvcf| jasminesv_samples
+    sniffles -->|svvcf| vep
+    sniffles -->|svvcf| snpeff
+    sniffles -->|svvcf| annotsv
+    sniffles -->|svvcf| geneyx
+
+    cutesv -->|svvcf| jasminesv_samples
+    cutesv -->|svvcf| vep
+    cutesv -->|svvcf| snpeff
+    cutesv -->|svvcf| annotsv
+    cutesv -->|svvcf| geneyx
+
+    jasminesv_callers -->|svvcf| jasminesv_samples
+    jasminesv_callers -->|svvcf| vep
+    jasminesv_callers -->|svvcf| snpeff
+    jasminesv_callers -->|svvcf| annotsv
+    jasminesv_callers -->|svvcf| geneyx
+    jasminesv_callers -->|svvcf| sv_report
+
+    snpeff -->|svvcf| sv_report
+    annotsv -->|svvcf| sv_report
+
+    glnexus -->|snvvcf| vep

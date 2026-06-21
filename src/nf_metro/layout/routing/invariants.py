@@ -24,7 +24,7 @@ import inspect
 import math
 import os
 import warnings
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -1714,6 +1714,127 @@ def _first_axis_crossing(
 
 
 @dataclass(frozen=True)
+class ConvergentClimbCrossing:
+    """Two lines leaving one trunk row for a shared port that cross mid-climb.
+
+    Co-travelling lines that turn off the same trunk row up (or down) to a shared
+    off-row port must climb as a concentric bundle, settling any order change on
+    the flat trunk run.  When the convergent diagonals are not parallel the
+    perpendicular bundle spread splays them in the wrong rotational order and the
+    two colours cross inside the diagonal instead of running parallel (the
+    crossing-on-a-corner defect).
+    """
+
+    target: str
+    line_a: str
+    line_b: str
+    x: float
+    y: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"convergent climb crossing: lines {self.line_a!r} and "
+            f"{self.line_b!r} climbing to {self.target} cross at "
+            f"({self.x:.1f},{self.y:.1f}) instead of staying concentric on the "
+            f"diagonal"
+        )
+
+
+def _segment_interior_crossing(
+    a0: tuple[float, float],
+    a1: tuple[float, float],
+    b0: tuple[float, float],
+    b1: tuple[float, float],
+) -> tuple[float, float] | None:
+    """Interior intersection of segments ``a0-a1`` and ``b0-b1``, or ``None``.
+
+    Returns the crossing point only when both parameters land strictly inside
+    the segments, so a shared endpoint (the common port corner two convergent
+    diagonals run into) is not reported.
+    """
+    rx, ry = a1[0] - a0[0], a1[1] - a0[1]
+    sx, sy = b1[0] - b0[0], b1[1] - b0[1]
+    denom = rx * sy - ry * sx
+    if abs(denom) <= COORD_TOLERANCE_FINE:
+        return None
+    qpx, qpy = b0[0] - a0[0], b0[1] - a0[1]
+    t = (qpx * sy - qpy * sx) / denom
+    u = (qpx * ry - qpy * rx) / denom
+    eps = 1e-6
+    if eps < t < 1 - eps and eps < u < 1 - eps:
+        return a0[0] + t * rx, a0[1] + t * ry
+    return None
+
+
+def check_convergent_climb_concentric(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[ConvergentClimbCrossing]:
+    """Return distinct-line pairs that cross while climbing to a shared port.
+
+    Routes are grouped by ``(target, trunk row, climb direction)`` over the
+    diagonal climbs converging onto a join station from one trunk row.  Within a
+    group every diagonal ends at the same port corner, so a concentric bundle
+    never crosses; an interior intersection of two members' diagonal legs is the
+    avoidable corner crossing this guards against
+    (:func:`postprocess._concentre_convergent_climbs` settles it on the flat run).
+    """
+    # A convergence target: a port, or any station two or more edges feed.
+    # Deliberately broader than the router's ``ctx.join_stations`` (sources > 1),
+    # since a single-upstream shared port is also a corner to nest into; the
+    # guard has no ``_RoutingCtx``, so it derives the set from in-degree here.
+    indeg = Counter(e.target for e in graph.edges)
+    join = {
+        sid
+        for sid in indeg
+        if (st := graph.stations.get(sid)) and (st.is_port or indeg[sid] >= 2)
+    }
+
+    ClimbMember = tuple[RoutedPath, list[tuple[float, float]]]
+    groups: dict[tuple[str, bool, float], list[ClimbMember]] = defaultdict(list)
+    for rp in routes:
+        if len(rp.points) != 4 or rp.edge.target not in join:
+            continue
+        pts = _route_render_points(rp, offsets)
+        if abs(pts[1][0] - pts[2][0]) <= COORD_TOLERANCE:
+            continue  # L-shape, not a diagonal climb
+        climbs_up = pts[2][1] < pts[1][1]
+        # Group on the base (pre-offset) trunk row: the per-line offset shifts
+        # each render-time source Y apart, so the unoffset Y is what identifies
+        # co-travelling lines on one trunk.
+        row = round(rp.points[0][1] / COORD_TOLERANCE) * COORD_TOLERANCE
+        groups[(rp.edge.target, climbs_up, row)].append((rp, pts))
+
+    violations: list[ConvergentClimbCrossing] = []
+    for (target, _up, _row), members in groups.items():
+        for i in range(len(members)):
+            (ra, pa) = members[i]
+            for j in range(i + 1, len(members)):
+                (rb, pb) = members[j]
+                if ra.line_id == rb.line_id:
+                    continue
+                # Scope to a genuine convergence of distinct producers onto one
+                # port: lines sharing a source are an ordinary same-edge bundle
+                # whose corner weave the bundle-order checks own.
+                if ra.edge.source == rb.edge.source:
+                    continue
+                hit = _segment_interior_crossing(pa[1], pa[2], pb[1], pb[2])
+                if hit is not None:
+                    violations.append(
+                        ConvergentClimbCrossing(
+                            target=target,
+                            line_a=ra.line_id,
+                            line_b=rb.line_id,
+                            x=hit[0],
+                            y=hit[1],
+                        )
+                    )
+    return violations
+
+
+@dataclass(frozen=True)
 class DoglegCrossesExemptTrunk:
     """A non-exempt trunk doglegged off an exempt run that crosses it.
 
@@ -2931,6 +3052,10 @@ def assert_render_curve_invariants(
             "peel-off bundle braids into port",
             check_peeloff_concentric(graph, routes),
         ),
+        (
+            "convergent climb crossing",
+            check_convergent_climb_concentric(graph, routes, offsets),
+        ),
     ]
     messages: list[str] = []
     for label, violations in named_checks:
@@ -3016,6 +3141,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_gap_channels_materialized, "A"),
     _check_spec(check_trunks_declared, "A"),
     _check_spec(check_peeloff_concentric, "A"),
+    _check_spec(check_convergent_climb_concentric, "A"),
     # --- Tier B: invoked only by a validate-path ``_guard_*`` wrapper ---
     _check_spec(check_tb_exit_corner_preserves_column_order, "B"),
     _check_spec(check_fanout_tail_join, "B"),
@@ -3039,6 +3165,7 @@ __all__ = [
     "BottomRowClimbDive",
     "BundleOrderViolation",
     "CollinearOverlapViolation",
+    "ConvergentClimbCrossing",
     "DiagonalOverlapViolation",
     "CurveInvariantError",
     "FanoutTailGap",
@@ -3061,6 +3188,7 @@ __all__ = [
     "check_gap_channels_materialized",
     "check_trunks_declared",
     "check_concentric_bundle_corners",
+    "check_convergent_climb_concentric",
     "check_fanout_tail_join",
     "check_no_distinct_line_fanout_crossing",
     "check_merge_branches_meet_trunk",

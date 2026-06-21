@@ -63,6 +63,8 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     if ctx.station_offsets is None:
         return
 
+    _concentre_convergent_climbs(routes, ctx)
+
     # Track routes already spread so we don't shift one twice.
     spread: set[tuple[str, str, str]] = set()
 
@@ -111,6 +113,47 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
             continue
         _apply_diagonal_spread(group, src, ctx=ctx)
         spread.update(_edge_key(rp) for rp in group)
+
+
+def _concentre_convergent_climbs(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Snap diagonals converging into one join port onto a shared climb.
+
+    Lines leaving the same trunk row for a common off-row port (a multi-carrier
+    exit, a fan-in junction) each turn up at their own ``diag_start``: the line
+    whose source sits nearest the port is pushed back to its min-straight floor
+    while the farther line keeps the natural start, so the two diagonals converge
+    on the port corner instead of running parallel.  The perpendicular spread
+    that follows then splays a *convergent* pair in the wrong rotational order
+    and the lines cross mid-climb.
+
+    Grouping such routes by target, trunk row, and climb direction, every member
+    is snapped to the most port-ward ``diag_start`` so the diagonals coincide.
+    The spread then fans them to a true concentric bundle, settling any order
+    change on the flat trunk run rather than inside the diagonal.
+    """
+    groups: dict[tuple[str, bool, float], list[RoutedPath]] = defaultdict(list)
+    for rp in routes:
+        if not _is_diagonal_route(rp) or rp.offsets_applied:
+            continue
+        if rp.edge.target not in ctx.join_stations:
+            continue
+        climbs_up = rp.points[2][1] < rp.points[1][1]
+        row = round(rp.points[0][1] / COORD_TOLERANCE) * COORD_TOLERANCE
+        groups[(rp.edge.target, climbs_up, row)].append(rp)
+
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        # Only a genuine convergence onto one corner: every member's diagonal
+        # must end at the same point, so snapping the start leaves them coincident.
+        ends = {(round(r.points[2][0], 1), round(r.points[2][1], 1)) for r in group}
+        if len(ends) != 1:
+            continue
+        end_x = group[0].points[2][0]
+        binding = min((r.points[1][0] for r in group), key=lambda x: abs(x - end_x))
+        for rp in group:
+            _, corner_y = rp.points[1]
+            rp.points[1] = (binding, corner_y)
 
 
 def _stub_minimums(rp: RoutedPath) -> tuple[float, float]:

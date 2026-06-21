@@ -930,6 +930,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "at the end rather than diving below the source row to the canvas floor "
         "and looping back up.",
     ),
+    (
+        "convergent_offrow_exit_climb",
+        TOPOLOGIES_DIR,
+        "A hand-authored single-row grid for longread_variant_calling where two "
+        "lines leave the same trunk row for a shared multi-carrier exit port "
+        "sitting on the section-header row. They climb the same diagonal as a "
+        "concentric bundle and settle their order on the flat trunk run rather "
+        "than crossing inside the diagonal.",
+    ),
 ]
 
 # Category headers inserted before specific entries
