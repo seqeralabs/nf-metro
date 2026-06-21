@@ -5,7 +5,8 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING, NamedTuple
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from nf_metro.layout.constants import (
     COLLINEAR_AXIS_TOL,
@@ -3693,29 +3694,6 @@ valid mid-pipeline.  Update when adding or removing a Pass C
 checkpoint in ``_compute_section_layout``.
 """
 
-# Each entry: bisection-runnable guard -> first checkpoint at which its
-# invariant must hold.  Before that checkpoint, the guard is skipped in
-# bisection mode; the final guard block (phase ``"after Stage 5.1
-# (final)"``, which is not in ``_PASS_C_BISECTION_ORDER``) always runs it.
-#
-# - stations_in_sections: Stage 5.2 lifts off-track stations above their
-#   section's pre-grow bbox top; Stage 5.3's row top-align grows the
-#   bbox upward to enclose them.
-# - no_station_overlap: pre-snap fan placement can sit a fraction of a
-#   pitch off the row grid; Stage 6.4's snap pulls every station onto the
-#   grid and keeps same-column stations on distinct slots, after which
-#   markers must be collision-free.
-# - no_line_crosses_non_consumer: a sparse loop-side station (single
-#   line in, single line out, full-bundle row-mates) sits on the trunk
-#   Y until Stage 6.14 shifts it to a half-grid offset; before that,
-#   the sibling line bundle's route passes through its marker bbox.
-_BISECTION_FIRST_VALID: dict[str, str] = {
-    "_guard_stations_in_sections": "after Stage 5.3",
-    "_guard_no_station_overlap": "after Stage 6.4",
-    "_guard_no_coincident_station_coords": "after Stage 6.4",
-    "_guard_no_line_crosses_non_consumer": "after Stage 6.14",
-}
-
 
 def _bisection_should_run(guard_name: str, phase: str) -> bool:
     """True if ``guard_name`` should run at bisection checkpoint ``phase``.
@@ -3741,68 +3719,24 @@ def _run_pass_c_guards(
     offsets: dict[tuple[str, str], float] | None = None,
     routes: list[RoutedPath] | None = None,
 ) -> tuple[dict[tuple[str, str], float], list[RoutedPath] | None]:
-    """Bisection guards run after every Pass C sub-phase boundary in
-    ``validate=True`` mode.
+    """Run the per-checkpoint bisection guard set at a Pass C sub-phase boundary.
 
     The Pass C tidy-up pipeline is a sequence of ~20 mutating passes
-    over a shared graph; before this helper, ``validate=True`` only
-    sampled the final state, so a regression introduced at e.g.
-    Stage 6.7 surfaced as ``after final: ...`` with no way to
-    bisect.  Running the same overlap / breeze-past / column-drift
-    checks at each boundary localises the culprit to a single phase.
+    over a shared graph; sampling guards only at the final state surfaces
+    a regression introduced at e.g. Stage 6.7 as ``after final: ...`` with
+    no way to bisect.  Running the bisection-safe overlap / breeze-past /
+    column-drift checks at each boundary localises the culprit to a single
+    phase.
 
-    Guards transient through specific Pass C sub-phases are gated
-    by ``_BISECTION_FIRST_VALID`` and skipped before they're valid.
-    See that table for the per-guard transient windows.
-
-    Always excluded from the bisection set (only meaningful at the
-    final boundary):
-
-    * ``_guard_off_track_clear_of_anchor`` -- Stage 6.4's snap-to-grid
-      shifts the on-track anchor (consumer or producer) Y by up to half
-      a pitch before Stage 6.6 re-anchors the off-track station.
-    * ``_guard_row_trunk_cy_consistent`` -- the row trunk Y is only
-      finalised once Stage 6.7 has re-centred ``center_ports`` graphs.
-    * ``_guard_inter_section_routes_in_row_band`` -- row-band height
-      tolerance assumes final bboxes, which Stages 6.13 / 6.14 may still be
-      shrinking.
-
-    The final guard block (``after final``) composes this
-    helper with the three excluded guards above, sharing
-    ``offsets``/``routes`` for a single computation per checkpoint.
-    Returns the computed ``(offsets, routes)`` so callers (e.g. the
-    final block) can pass them on to the remaining guards.
+    Dispatches the ``bisection_safe`` entries of :data:`GUARD_REGISTRY`
+    (gated by each spec's ``first_valid_stage``); the final-only entries are
+    skipped here and run by :func:`run_validate_guards` at the closing
+    ``after final`` boundary.  Returns the computed ``(offsets, routes)`` so
+    the caller can pass them on.
     """
-    from nf_metro.layout.routing import compute_station_offsets, route_edges
-
-    if offsets is None:
-        offsets = compute_station_offsets(graph)
-    if routes is None:
-        # route_edges is placement-pure: routing here to inspect the routes
-        # leaves graph.stations untouched, so this guard stays observational
-        # even running mid-pipeline between Pass C stages.
-        try:
-            routes = route_edges(graph, station_offsets=offsets)
-        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
-            routes = None
-
-    _guard_coordinates_finite(graph, phase)
-    _guard_section_bboxes_positive(graph, phase)
-    if _bisection_should_run("_guard_stations_in_sections", phase):
-        _guard_stations_in_sections(graph, phase)
-    _guard_ports_on_boundaries(graph, phase)
-    if _bisection_should_run("_guard_no_station_overlap", phase):
-        _guard_no_station_overlap(graph, phase, offsets=offsets)
-    if _bisection_should_run("_guard_no_coincident_station_coords", phase):
-        _guard_no_coincident_station_coords(graph, phase)
-    if routes is not None and _bisection_should_run(
-        "_guard_no_line_crosses_non_consumer", phase
-    ):
-        _guard_no_line_crosses_non_consumer(
-            graph, phase, offsets=offsets, routes=routes
-        )
-    _guard_station_x_column_drift(graph, phase)
-    return offsets, routes
+    return run_validate_guards(
+        graph, phase, include_final=False, offsets=offsets, routes=routes
+    )
 
 
 def _guard_no_label_overlap(graph: MetroGraph, phase: str) -> None:
@@ -3844,3 +3778,325 @@ def _guard_file_icon_no_name_label(graph: MetroGraph, phase: str) -> None:
             f"name label, overprinting the icon caption and tracks; a "
             f"%%metro file: station must not carry a node-name label"
         )
+
+
+@dataclass(frozen=True)
+class GuardSpec:
+    """One ``validate=True`` guard, with the dispatch + classification data
+    that used to be scattered across hand-written call sites and the
+    ``_BISECTION_FIRST_VALID`` table.
+
+    ``fn`` is the guard function; every guard takes ``(graph, phase)`` and the
+    optional keyword inputs named in ``needs`` (a subset of ``offsets``,
+    ``routes``, ``section_y_gap``, ``section_y_padding``).  The dispatcher
+    passes exactly those keywords, so heterogeneous signatures need no
+    wrapping.
+
+    ``bisection_safe`` guards run at every Pass C checkpoint (gated by
+    ``first_valid_stage``, the earliest checkpoint at which their invariant
+    holds) as well as at the closing ``after final`` boundary; the rest run
+    only at ``after final``.  ``tier`` is the cost-tier classification
+    (``docs/dev/guard_tiers.md``).  ``issue_pin`` / ``narrow_reason`` document
+    a guard kept deliberately narrow rather than generalised.
+    """
+
+    fn: Callable[..., Any]
+    tier: str
+    needs: frozenset[str] = field(default_factory=frozenset)
+    bisection_safe: bool = False
+    first_valid_stage: str | None = None
+    issue_pin: str | None = None
+    narrow_reason: str | None = None
+
+    @property
+    def name(self) -> str:
+        return self.fn.__name__
+
+
+# The single ordered source of truth for the ``validate=True`` guard
+# sequence.  The runner iterates this list in order, so its order *is* the
+# guard call order; the bisection-safe prefix is what ``_run_pass_c_guards``
+# runs at each Pass C checkpoint, and the whole list is what
+# ``run_validate_guards`` runs at ``after final``.
+GUARD_REGISTRY: tuple[GuardSpec, ...] = (
+    # --- bisection-safe set (run at every Pass C checkpoint + at final) ---
+    GuardSpec(_guard_coordinates_finite, "A", bisection_safe=True),
+    GuardSpec(_guard_section_bboxes_positive, "A", bisection_safe=True),
+    # Stage 5.2 lifts off-track stations above their section's pre-grow bbox
+    # top; Stage 5.3's row top-align grows the bbox upward to enclose them.
+    GuardSpec(
+        _guard_stations_in_sections,
+        "A",
+        bisection_safe=True,
+        first_valid_stage="after Stage 5.3",
+    ),
+    GuardSpec(_guard_ports_on_boundaries, "A", bisection_safe=True),
+    # Pre-snap fan placement can sit a fraction of a pitch off the row grid;
+    # Stage 6.4's snap pulls every station onto the grid and onto distinct
+    # same-column slots, after which markers must be collision-free.
+    GuardSpec(
+        _guard_no_station_overlap,
+        "A",
+        needs=frozenset({"offsets"}),
+        bisection_safe=True,
+        first_valid_stage="after Stage 6.4",
+    ),
+    GuardSpec(
+        _guard_no_coincident_station_coords,
+        "A",
+        bisection_safe=True,
+        first_valid_stage="after Stage 6.4",
+    ),
+    # A sparse loop-side station (single line in/out, full-bundle row-mates)
+    # sits on the trunk Y until Stage 6.14 shifts it to a half-grid offset;
+    # before that the sibling bundle's route passes through its marker bbox.
+    GuardSpec(
+        _guard_no_line_crosses_non_consumer,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+        bisection_safe=True,
+        first_valid_stage="after Stage 6.14",
+    ),
+    GuardSpec(_guard_station_x_column_drift, "A", bisection_safe=True),
+    # --- final-only set (run only at the closing ``after final`` boundary) ---
+    # The row trunk Y is only finalised once Stage 6.7 has re-centred
+    # ``center_ports`` graphs, so this cannot bisect.
+    GuardSpec(_guard_row_trunk_cy_consistent, "B", needs=frozenset({"offsets"})),
+    # Stage 6.4's snap-to-grid shifts the on-track anchor Y by up to half a
+    # pitch before Stage 6.6 re-anchors the off-track station, so this cannot
+    # bisect.
+    GuardSpec(_guard_off_track_clear_of_anchor, "B"),
+    GuardSpec(_guard_fanout_junction_shares_exit_port_y, "B"),
+    GuardSpec(_guard_fanout_junction_resolves_upstream, "B"),
+    GuardSpec(_guard_entry_port_fed_only_by_ports, "B"),
+    GuardSpec(_guard_flow_exit_anchored_to_carrier, "B"),
+    GuardSpec(_guard_perp_entry_feed_not_collinear, "B"),
+    GuardSpec(_guard_merge_port_approach_side, "B", needs=frozenset({"offsets"})),
+    GuardSpec(
+        _guard_merge_port_outgoing_side_preserved,
+        "B",
+        needs=frozenset({"offsets"}),
+    ),
+    GuardSpec(
+        _guard_exit_inherits_entry_bundle_order,
+        "B",
+        needs=frozenset({"offsets"}),
+    ),
+    GuardSpec(_guard_bypass_port_no_slot_gaps, "B", needs=frozenset({"offsets"})),
+    GuardSpec(_guard_partial_branch_offset_gaps, "B", needs=frozenset({"offsets"})),
+    GuardSpec(_guard_row_gaps, "B", needs=frozenset({"section_y_gap"})),
+    GuardSpec(
+        _guard_section_top_padding,
+        "B",
+        needs=frozenset({"section_y_gap", "section_y_padding"}),
+    ),
+    GuardSpec(_guard_terminus_icons_within_bbox, "B"),
+    # Row-band height tolerance assumes final bboxes, which Stages 6.13 / 6.14
+    # may still be shrinking, so this cannot bisect.
+    GuardSpec(
+        _guard_inter_section_routes_in_row_band,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_topmost_row_top_entry_hugs_section,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_off_track_output_clears_non_producer,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_bundle_order_preserved,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_tb_exit_corner_column_order,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_concentric_bundle_corners,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_no_collinear_distinct_lines,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_no_intra_section_collinear_distinct_lines,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_no_same_line_parallel_descents,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_no_split_same_line_fanout_descents,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_no_distinct_line_fanout_crossing,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_no_dogleg_crosses_exempt_trunk,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_no_stacked_elbow_graze,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(_guard_fanout_tail_join, "B", needs=frozenset({"offsets", "routes"})),
+    GuardSpec(
+        _guard_perp_entry_boundary_consistent,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_perp_exit_over_leadin_no_overdip,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_right_entry_drop_in_when_clear,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_inter_section_route_no_backtrack,
+        "B",
+        needs=frozenset({"routes"}),
+    ),
+    GuardSpec(
+        _guard_inter_section_route_no_full_width_backtrack,
+        "B",
+        needs=frozenset({"routes"}),
+    ),
+    GuardSpec(
+        _guard_routes_enter_sections_at_ports,
+        "B",
+        needs=frozenset({"routes"}),
+    ),
+    GuardSpec(
+        _guard_no_route_through_section,
+        "B",
+        needs=frozenset({"routes", "offsets"}),
+    ),
+    GuardSpec(
+        _guard_feeder_exits_section_through_side,
+        "B",
+        needs=frozenset({"routes", "offsets"}),
+    ),
+    GuardSpec(
+        _guard_entry_approach_from_port_side,
+        "B",
+        needs=frozenset({"routes"}),
+    ),
+    GuardSpec(
+        _guard_no_opposing_line_overlap,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(_guard_serpentine_no_backtrack, "B", needs=frozenset({"routes"})),
+    GuardSpec(_guard_no_artefactual_counter_flow, "B", needs=frozenset({"routes"})),
+    GuardSpec(_guard_inter_row_run_clearance, "B", needs=frozenset({"routes"})),
+    GuardSpec(
+        _guard_trunk_bands_crossing_optimal,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_inter_section_descent_edge_clearance,
+        "B",
+        needs=frozenset({"routes"}),
+    ),
+    GuardSpec(
+        _guard_fan_bundles_coincide_or_separate,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+)
+
+
+# Derived from the registry so the bisection thresholds stay single-sourced.
+# Kept as a module attribute for the engine re-export and the threshold tests.
+_BISECTION_FIRST_VALID: dict[str, str] = {
+    spec.name: spec.first_valid_stage
+    for spec in GUARD_REGISTRY
+    if spec.bisection_safe and spec.first_valid_stage is not None
+}
+
+
+def _ensure_pass_c_inputs(
+    graph: MetroGraph,
+    offsets: dict[tuple[str, str], float] | None,
+    routes: list[RoutedPath] | None,
+) -> tuple[dict[tuple[str, str], float], list[RoutedPath] | None]:
+    """Compute the shared ``offsets`` / ``routes`` a guard run inspects, once.
+
+    ``route_edges`` is placement-pure: routing here to inspect the routes
+    leaves ``graph.stations`` untouched, so the routes-consuming guards stay
+    observational even running mid-pipeline between Pass C stages.  A routing
+    failure leaves ``routes`` as ``None`` (it surfaces elsewhere); guards that
+    need routes are then skipped.
+    """
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+    if offsets is None:
+        offsets = compute_station_offsets(graph)
+    if routes is None:
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            routes = None
+    return offsets, routes
+
+
+def run_validate_guards(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    include_final: bool,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+    section_y_gap: float | None = None,
+    section_y_padding: float | None = None,
+) -> tuple[dict[tuple[str, str], float], list[RoutedPath] | None]:
+    """Dispatch :data:`GUARD_REGISTRY` for one ``validate=True`` checkpoint.
+
+    At a Pass C checkpoint (``include_final=False``) only the bisection-safe
+    specs run, each gated by its ``first_valid_stage``.  At the closing
+    ``after final`` boundary (``include_final=True``) the bisection-safe specs
+    run first (none gated, since ``after final`` is past every threshold)
+    followed by the final-only specs, reproducing the historical call order.
+    A spec needing ``routes`` is skipped when routing failed.  Returns the
+    shared ``(offsets, routes)``.
+    """
+    offsets, routes = _ensure_pass_c_inputs(graph, offsets, routes)
+    available: dict[str, object] = {
+        "offsets": offsets,
+        "routes": routes,
+        "section_y_gap": section_y_gap,
+        "section_y_padding": section_y_padding,
+    }
+    for spec in GUARD_REGISTRY:
+        if not spec.bisection_safe and not include_final:
+            continue
+        if spec.bisection_safe and not _bisection_should_run(spec.name, phase):
+            continue
+        if "routes" in spec.needs and routes is None:
+            continue
+        spec.fn(graph, phase, **{name: available[name] for name in spec.needs})
+    return offsets, routes

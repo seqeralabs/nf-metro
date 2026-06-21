@@ -49,5 +49,6 @@ nav:
     - Inter-section dispatch: dev/inter_section_dispatch.md
     - Routing gate coverage: dev/routing_gate_coverage.md
     - Routing gate triage: dev/routing_gate_triage.md
+    - Guard tiers: dev/guard_tiers.md
     - Parser: dev/parser.md
     - Testing: dev/testing.md
