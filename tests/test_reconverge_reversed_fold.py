@@ -1,24 +1,25 @@
 """Regression tests for issue #705 (reconvergence reversed fold).
 
-The fixture is a serpentine-fold reconvergence pipeline.  Two defects were
-reported; this PR fixes two of the three crossing sites plus the offset:
+The fixture is a serpentine-fold reconvergence pipeline whose lines fan out to
+stacked analysis sections and reconverge onto a reversed return row.  Each test
+pins one routing property the layout must hold:
 
-* **Defect 2 - return-row offset.**  ``final_report`` is an independent
-  reversed reconvergence section.  ``_reorder_reconvergence`` built its bundle
-  order top-down, but ``_apply_section_line_order`` draws a reversed section
-  bottom-up, so the returning line landed on the top slot and pushed the whole
-  bundle one offset low.  The ``bio_interp -> final_report`` back-run then sloped
-  (almost horizontal) instead of running level.
+* **Return-row offset.**  ``final_report`` is a reversed reconvergence section
+  whose primary feeder is a flat-frame neighbour, so its continuing lines carry
+  the feeder's offsets and the ``bio_interp -> final_report`` back-run is level.
 
-* **Defect 1, junction_14.**  ``preprocessing`` fans out to three analysis
-  sections stacked in one column.  ``fanout_divergence_peel_order`` only handled
-  fans spreading across columns, so this vertical fan kept declaration order and
-  ``atac``/``protein`` crossed inside the fan corner.  Ordering the vertical fan
-  by target row settles the bundle on the straight run.
+* **Vertical fan-out (junction_14).**  ``preprocessing`` fans out to three
+  analysis sections stacked in one column; the same-column fan orders by target
+  row, so the lines peel without crossing inside the corner.
 
-The ``integration`` merge and ``junction_15`` crossings are out of scope: they
-are coupled through ``integration``'s single TB trunk and need the bottom-exit
-fan ordered by row depth (tracked in #928).
+* **TB merge-in (integration entry).**  ``integration`` is a TB section fed by
+  three single-line feeders from distinct rows; its bundle stacks in feeder-row
+  order so the merge is concentric.
+
+* **Bottom-exit fan (junction_15).**  ``integration``'s bottom exit fans to two
+  rows; the descent channels order by target-row depth, so the deeper bundle
+  nests outside the turn and the shallower bundle runs straight into its section
+  as a tight bundle.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ import pytest
 
 import nf_metro.layout.routing.context as routing_context
 import nf_metro.layout.routing.offsets as routing_offsets
+from nf_metro.layout.constants import OFFSET_STEP
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.context import fanout_divergence_peel_order
@@ -214,3 +216,47 @@ def test_vertical_fan_crosses_without_peel_order(monkeypatch):
             if hit is not None:
                 crossings.append((a.line_id, b.line_id, hit))
     assert crossings, "expected a fan corner crossing with the peel order disabled"
+
+
+# --- TB merge-in and bottom-exit fan run crossing-free ------------------------
+
+
+def test_integration_entry_orders_bundle_by_feeder_row():
+    """integration's TB bundle stacks rna<atac<protein, matching feeder rows 0/1/2."""
+    graph, offsets = _layout()
+    bundle = {
+        lid: offsets[("int_merge", lid)] for lid in graph.station_lines("int_merge")
+    }
+    assert bundle["rna"] < bundle["atac"] < bundle["protein"], bundle
+
+
+def test_bottom_exit_fan_enters_section_as_tight_bundle():
+    """rna+atac descend from junction_15 and enter bio_interp on adjacent slots,
+    with protein on the outer channel rather than wedged between them."""
+    graph, offsets = _layout()
+    routes = route_edges(graph, station_offsets=offsets)
+    descents = {
+        r.line_id: [x for x, _y in r.points]
+        for r in routes
+        if r.edge.source.startswith("__junction")
+        and r.edge.source in graph.junction_ids
+        for tgt in [graph.stations.get(r.edge.target)]
+        if tgt is not None and tgt.section_id in ("bio_interp", "tech_qc")
+    }
+    if not {"rna", "atac", "protein"} <= set(descents):
+        pytest.skip("junction_15 descent not present")
+    descent_x = {lid: max(xs) for lid, xs in descents.items()}
+    # rna and atac (bio_interp) ride adjacent inner channels; protein (tech_qc,
+    # the deeper row) rides the outer channel past them.
+    assert abs(descent_x["rna"] - descent_x["atac"]) <= OFFSET_STEP + 1, descent_x
+    inner = max(descent_x["rna"], descent_x["atac"])
+    assert descent_x["protein"] > inner, descent_x
+
+
+def test_fixture_routes_without_avoidable_crossings():
+    """The whole fixture routes with no avoidable segment crossings."""
+    from layout_validator import check_route_segment_crossings
+
+    graph, _ = _layout()
+    violations = check_route_segment_crossings(graph)
+    assert not violations, "\n".join(v.message for v in violations)
