@@ -2970,7 +2970,7 @@ def _check_spec(
     fn: Callable[..., Any],
     tier: str,
     *,
-    issue_pin: str | None = None,
+    issue_pin: tuple[str, ...] = (),
     narrow_reason: str | None = None,
 ) -> GuardSpec:
     """Build a :class:`GuardSpec` for a routing ``check_*`` invariant.

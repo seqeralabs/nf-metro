@@ -34,8 +34,8 @@ needs the routed geometry or is materially more expensive; the most expensive
 members (`check_no_hanging_routes` ~470 us, the collinear-distinct checks
 ~100 us) are routed-geometry sweeps. **Tier C is empty on the current tree**:
 every guard and check is reachable from `compute_layout` or the render
-chokepoint, none is a pure test oracle. It is documented here as the target
-bucket for #922 — see [Consolidation candidates](#consolidation-candidates).
+chokepoint, none is a pure test oracle. The de-duplication that kept it empty
+is recorded under [Consolidation](#consolidation).
 
 ## Registries
 
@@ -48,15 +48,26 @@ The classification is data, not prose:
   guard takes), `bisection_safe` (runs at every Pass C checkpoint, gated by
   `first_valid_stage`) vs final-only, and the `_BISECTION_FIRST_VALID` data
   derived back out for the engine re-export.
+- **`INLINE_GUARD_REGISTRY`** (`phases/guards.py`) — the same `GuardSpec`
+  schema applied to the guards `engine.py` invokes directly at a specific
+  pipeline stage rather than through the Pass C / final runner. Like
+  `CHECK_REGISTRY` it is *classification* only (no `needs` / `bisection_safe`
+  dispatch data), so every defined `_guard_*` lives in exactly one of the two
+  guard registries and none escapes tier / issue-pin classification.
 - **`CHECK_REGISTRY`** (`routing/invariants.py`) — the same `GuardSpec` schema
   applied to the routing checks. Because checks return lists rather than
   raising, this is a *classification* registry, not a dispatcher; the runtime
-  chokepoint stays `assert_render_curve_invariants`. The two registries are
+  chokepoint stays `assert_render_curve_invariants`. The registries are
   unified through the shared schema and this page, **not** by merging the
   raise-vs-return error protocols.
 
-`tests/test_guard_registry.py` keeps both honest: every guard and check must be
-registered, and the Tier-A check set must equal the render chokepoint exactly.
+Each `GuardSpec` also carries `issue_pin` (the `#NNN` issues a guard was born
+from, kept as data so consolidation cannot lose the regression trail) and
+`narrow_reason` (why an issue-pinned guard stays scoped to its case rather than
+being a general property). `tests/test_guard_registry.py` keeps these honest:
+every guard and check is registered exactly once, the Tier-A check set equals
+the render chokepoint exactly, no validate-only guard duplicates an always-on
+check, and every issue-pinned guard records its issue and a `narrow_reason`.
 
 ## Cost audit
 
@@ -99,12 +110,7 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 | `_guard_inter_section_routes_in_row_band` | B | 4.6 | final-only |
 | `_guard_topmost_row_top_entry_hugs_section` | B | 6.7 | final-only |
 | `_guard_off_track_output_clears_non_producer` | B | 2.4 | final-only |
-| `_guard_bundle_order_preserved` | B | 35.0 | final-only |
 | `_guard_tb_exit_corner_column_order` | B | 2.0 | final-only |
-| `_guard_concentric_bundle_corners` | B | 41.9 | final-only |
-| `_guard_no_collinear_distinct_lines` | B | 17.0 | final-only |
-| `_guard_no_intra_section_collinear_distinct_lines` | B | 105.3 | final-only |
-| `_guard_no_same_line_parallel_descents` | B | 6.0 | final-only |
 | `_guard_no_split_same_line_fanout_descents` | B | 2.4 | final-only |
 | `_guard_no_distinct_line_fanout_crossing` | B | 3.4 | final-only |
 | `_guard_no_dogleg_crosses_exempt_trunk` | B | 1.9 | final-only |
@@ -157,12 +163,13 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 | `check_perp_exit_over_leadin_clears_only_spanned_sections` | B | 2.5 | via `_guard_*` wrapper |
 | `check_right_entry_drop_in_when_clear` | B | 2.1 | via `_guard_*` wrapper |
 
-### Inline guards (not in `GUARD_REGISTRY`)
+### Inline guards (`INLINE_GUARD_REGISTRY`)
 
 These `_guard_*` functions are invoked directly at specific pipeline stages
-rather than through the Pass C / final dispatch, so they are classified here
-but not dispatched from `GUARD_REGISTRY`. Costs are not separately measured;
-each is a single structural pass.
+rather than through the Pass C / final dispatch, so they carry no `needs` /
+`bisection_safe` dispatch data — only their tier and any `issue_pin` /
+`narrow_reason`. Costs are not separately measured; each is a single structural
+pass.
 
 | guard | tier | role |
 |---|---|---|
@@ -182,23 +189,36 @@ each is a single structural pass.
 | `_guard_no_line_crosses_file_icon` | B | No rendered line passes through a file/terminus icon. |
 | `_guard_no_line_strikes_label` | B | No rendered line strikes through a station label. |
 | `_guard_no_wrapped_label_trunk_strike` | B | No wrapped label overruns a foreign horizontal trunk. |
-| `_guard_off_track_consumer_on_trunk` | B | An off-track input's straight-through consumer stays on trunk. |
-| `_guard_off_track_input_column_stack` | B | Single-trunk off-track inputs hug their consumer column. |
+| `_guard_off_track_consumer_on_trunk` | B | An off-track input's straight-through consumer stays on trunk (`#650`). |
+| `_guard_off_track_input_column_stack` | B | Single-trunk off-track inputs hug their consumer column (`#651`). |
 | `_guard_rail_above_label_band` | B | A rail section reserves room above its top rail for labels. |
 | `_guard_rail_one_station_per_column` | B | Rails place one distinct station per column. |
 | `_guard_rail_stations_seat_on_rails` | B | Rail stations seat on their lines' fixed rails. |
-| `_guard_single_trunk_off_track_step` | B | Single-trunk sections lift off-track stations by the base pitch. |
+| `_guard_single_trunk_off_track_step` | B | Single-trunk sections lift off-track stations by the base pitch (`#580`). |
 | `_guard_tall_anchor_stack_well_formed` | B | A tall-anchor vertical stack keeps its downstream chain intact. |
 | `_guard_tb_top_entry_drop_hugs_top` | B | A clean TB TOP-entry drop seats its first station at the top. |
 
-## Consolidation candidates
+## Consolidation
 
-For #922, the clearest Tier-C / de-duplication targets are the `_guard_*`
-wrappers that exist only to raise around a `CHECK_REGISTRY` check —
-`_guard_bundle_order_preserved`/`check_bundle_order_preserved`,
-`_guard_concentric_bundle_corners`/`check_concentric_bundle_corners`, the
-collinear-distinct pair, and the merge-port pair. The check is the oracle; the
-guard is a thin raising adapter. The collinear-distinct family
-(`check_no_collinear_distinct_lines`, `check_intra_section_collinear_distinct_lines`,
-`check_no_collinear_distinct_diagonals`) is also a candidate to fold into one
-parametrised check.
+The consolidation pass (#922) removed the validate-only `_guard_*` wrappers
+that only raised around a check already in the always-on render chokepoint —
+`_guard_bundle_order_preserved`, `_guard_concentric_bundle_corners`,
+`_guard_no_collinear_distinct_lines`,
+`_guard_no_intra_section_collinear_distinct_lines`, and
+`_guard_no_same_line_parallel_descents`. Each check is the single authority and
+runs on every render via `assert_render_curve_invariants`, so the wrapper was
+pure duplication; `test_no_registry_guard_duplicates_an_always_on_check` keeps
+the duplication from returning.
+
+The remaining issue-pinned guards each express a distinct geometric property
+(their docstrings explicitly distinguish them from one another), so rather than
+force-merging bodies the pass records each guard's originating issue in
+`issue_pin` and documents its scope in `narrow_reason`. The two genuinely
+general inline guards (`_guard_no_negative_grid_columns`,
+`_guard_explicit_grid_directions`) carry no pin: they state a general structural
+property, not a special case.
+
+A further candidate left for later is folding the collinear-distinct check
+family (`check_no_collinear_distinct_lines`,
+`check_intra_section_collinear_distinct_lines`,
+`check_no_collinear_distinct_diagonals`) into one parametrised check.

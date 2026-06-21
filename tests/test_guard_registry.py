@@ -88,3 +88,86 @@ def test_tier_a_checks_are_exactly_the_render_chokepoint() -> None:
     assert tier_a == chokepoint, (
         f"Tier-A checks {sorted(tier_a)} != chokepoint {sorted(chokepoint)}"
     )
+
+
+def _all_guard_specs() -> list:
+    """Every classified guard: the dispatched ``GUARD_REGISTRY`` plus the
+    classification-only ``INLINE_GUARD_REGISTRY`` (guards engine.py invokes at
+    a specific stage rather than through the Pass C / final runner)."""
+    return [*GUARD_REGISTRY, *guards.INLINE_GUARD_REGISTRY]
+
+
+def _guards_citing_an_issue() -> dict[str, set[str]]:
+    """Map every ``_guard_*`` whose source cites a ``#NNN`` issue to those
+    issue tokens, so a guard born of a specific bug cannot silently drop the
+    regression trail."""
+    out: dict[str, set[str]] = {}
+    for name, obj in vars(guards).items():
+        if name.startswith("_guard_") and inspect.isfunction(obj):
+            issues = set(re.findall(r"#\d{3,}", inspect.getsource(obj)))
+            if issues:
+                out[name] = issues
+    return out
+
+
+def test_no_registry_guard_duplicates_an_always_on_check() -> None:
+    """A ``validate=True`` guard that merely raises around a check already in
+    the always-on render chokepoint is pure duplication: the check runs on
+    every render regardless of ``validate``.  The check is the single
+    authority; the guard wrapper must not re-register it."""
+    chokepoint = set(
+        re.findall(
+            r"\bcheck_[a-z_]+", inspect.getsource(assert_render_curve_invariants)
+        )
+    )
+    offenders = {}
+    for spec in GUARD_REGISTRY:
+        refs = set(re.findall(r"\bcheck_[a-z_]+", inspect.getsource(spec.fn)))
+        dup = refs & chokepoint
+        if dup:
+            offenders[spec.name] = sorted(dup)
+    assert not offenders, (
+        "validate-only guards duplicate always-on render-chokepoint checks "
+        f"(drop the wrapper; the check already runs on every render): {offenders}"
+    )
+
+
+def test_every_guard_is_classified_in_exactly_one_registry() -> None:
+    """Every defined ``_guard_*`` lives in exactly one of the two guard
+    registries, so no guard escapes tier / issue-pin classification."""
+    defined = _defined(guards, "_guard_")
+    names = [spec.name for spec in _all_guard_specs()]
+    duplicated = {n for n in names if names.count(n) > 1}
+    assert not duplicated, f"guards in more than one registry: {sorted(duplicated)}"
+    unclassified = defined - set(names)
+    assert not unclassified, f"unclassified guards: {sorted(unclassified)}"
+    stale = set(names) - defined
+    assert not stale, f"registry names with no guard: {sorted(stale)}"
+
+
+def test_issue_pinned_guards_record_their_issue_as_data() -> None:
+    """Every guard whose source cites an issue carries that issue in its
+    spec's ``issue_pin``, so consolidation cannot lose the regression trail."""
+    by_name = {spec.name: spec for spec in _all_guard_specs()}
+    missing = {}
+    for name, issues in _guards_citing_an_issue().items():
+        spec = by_name.get(name)
+        pinned = set(spec.issue_pin) if spec else set()
+        absent = issues - pinned
+        if absent:
+            missing[name] = sorted(absent)
+    assert not missing, f"guards citing an issue but not pinning it as data: {missing}"
+
+
+def test_issue_pinned_guards_document_why_they_are_narrow() -> None:
+    """A guard kept pinned to a past issue must populate ``narrow_reason``
+    saying why it stays narrow rather than expressing a general property, so
+    the field is an enforced contract rather than optional documentation."""
+    undocumented = [
+        spec.name
+        for spec in _all_guard_specs()
+        if spec.issue_pin and not spec.narrow_reason
+    ]
+    assert not undocumented, (
+        f"issue-pinned guards with no narrow_reason: {sorted(undocumented)}"
+    )
