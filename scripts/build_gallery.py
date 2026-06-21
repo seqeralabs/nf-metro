@@ -339,6 +339,12 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Stacked analysis sections feeding through a fold into branching targets.",
     ),
     (
+        "reconverge_reversed_fold",
+        TOPOLOGIES_DIR,
+        "Serpentine-fold reconvergence: a multi-modal pipeline fanning out to "
+        "stacked analysis sections and reconverging onto a reversed return row.",
+    ),
+    (
         "stacked_lr_serpentine",
         TOPOLOGIES_DIR,
         "Same-direction sections stacked in one grid column, chained via short "

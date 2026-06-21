@@ -401,10 +401,68 @@ def _apply_section_line_order(
                 ctx.offsets[(sid_s, lid)] = p * ctx.offset_step
 
 
+def _sections_share_flat_frame(graph: MetroGraph, sec_a: str, sec_b: str) -> bool:
+    """Whether two sections sit in one grid row, adjacent columns, sharing a line.
+
+    The pairwise condition :func:`_flat_frame_components` builds its frames from:
+    such a pair passes a common line straight across their boundary on one trunk
+    Y, so their bundles are coordinated rather than independently anchored.
+    """
+    sa = graph.sections.get(sec_a)
+    sb = graph.sections.get(sec_b)
+    if sa is None or sb is None:
+        return False
+    if sa.grid_row != sb.grid_row or abs(sa.grid_col - sb.grid_col) != 1:
+        return False
+    present = _section_present_lines(graph)
+    return bool(present.get(sec_a, set()) & present.get(sec_b, set()))
+
+
+def _section_line_offsets(ctx: _OffsetCtx, sec_id: str) -> dict[str, float]:
+    """Current offset of each line on section *sec_id* from a representative
+    station (offsets are per-line constant within a section)."""
+    result: dict[str, float] = {}
+    for sid_s, station in ctx.graph.stations.items():
+        if station.is_port or station.section_id != sec_id:
+            continue
+        for lid in ctx.graph.station_lines(sid_s):
+            result.setdefault(lid, ctx.offsets.get((sid_s, lid), 0.0))
+    return result
+
+
+def _align_reconvergence_to_feeder(
+    ctx: _OffsetCtx, sec_id: str, continuing: list[str], returning: list[str], feeder: str
+) -> None:
+    """Pin a section's continuing lines onto their flat-frame feeder's offsets.
+
+    The continuing lines run level out of *feeder*, so they must keep the
+    feeder's trunk Y across the boundary; stack the returning lines just past
+    the band (their final side is settled by the perpendicular merge re-slot).
+    """
+    feeder_off = _section_line_offsets(ctx, feeder)
+    if not all(lid in feeder_off for lid in continuing):
+        return
+    new_off = {lid: feeder_off[lid] for lid in continuing}
+    band_bottom = max(new_off.values())
+    for rank, lid in enumerate(returning, start=1):
+        new_off[lid] = band_bottom + rank * ctx.offset_step
+    for sid_s, station in ctx.graph.stations.items():
+        if station.section_id != sec_id:
+            continue
+        for lid in ctx.graph.station_lines(sid_s):
+            if lid in new_off:
+                ctx.offsets[(sid_s, lid)] = new_off[lid]
+
+
 def _reorder_reconvergence(
     ctx: _OffsetCtx, section_local: dict[str, dict[str, int]]
 ) -> None:
-    """Keep primary-feeder lines together at the top of each reconvergence section."""
+    """Settle each reconvergence section's bundle on its primary feeder.
+
+    When the primary feeder is a flat-frame neighbour the continuing lines must
+    keep the feeder's offsets so the inter-section run stays level; otherwise
+    they reach the section through a riser and just lead the bundle at the top.
+    """
     graph = ctx.graph
     for sec_id, section in graph.sections.items():
         if not section.entry_ports:
@@ -432,8 +490,14 @@ def _reorder_reconvergence(
             sec_present - primary_lines,
             key=lambda lid: ctx.line_priority.get(lid, 0),
         )
-        new_order = continuing + returning
 
+        if _sections_share_flat_frame(graph, sec_id, primary_fid):
+            _align_reconvergence_to_feeder(
+                ctx, sec_id, continuing, returning, primary_fid
+            )
+            continue
+
+        new_order = continuing + returning
         global_ordered = sorted(
             sec_present, key=lambda lid: ctx.line_priority.get(lid, 0)
         )
