@@ -19,6 +19,8 @@ without regenerating, fails this test.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -26,26 +28,16 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_PATH = PROJECT_ROOT / "tests" / "data" / "routing_gate_coverage_baseline.json"
-
-
-def _coverage_already_running() -> bool:
-    try:
-        import coverage
-    except ImportError:
-        return False
-    return coverage.Coverage.current() is not None
+SCRIPT_PATH = PROJECT_ROOT / "scripts" / "routing_gate_coverage.py"
 
 
 @pytest.fixture(scope="module")
 def rgc():
-    """The coverage script as an importable module, behind the skip guards.
+    """The coverage script as an importable module, behind the version skip.
 
-    Skips the whole module when a coverage tracer is already active (it cannot
-    be nested) or the interpreter differs from the pinned baseline (the arc
-    model is version-specific).
+    The arc model is interpreter-specific, so the baseline only holds on the
+    pinned CPython; skip elsewhere.
     """
-    if _coverage_already_running():
-        pytest.skip("cannot nest a Coverage tracer inside an active coverage run")
     sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
     import routing_gate_coverage as module
 
@@ -62,10 +54,21 @@ def rgc():
 def gates(rgc):
     """Every routing gate with per-arm coverage, computed once per module.
 
-    Rendering the corpus under coverage is the dominant cost, so all assertions
-    share a single run.
+    The sweep runs in a seed-pinned subprocess (``PYTHONHASHSEED`` fixed) rather
+    than in-process: operand-level arc coverage is hash-seed sensitive because
+    the layout engine iterates hash-ordered sets, so a fixed seed makes the gate
+    set reproducible.  A fresh interpreter also sidesteps the can't-nest rule
+    when the suite itself runs under a coverage tracer.
     """
-    return rgc.compute_gate_coverage()
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT_PATH), "--json"],
+        cwd=str(PROJECT_ROOT),
+        env={**os.environ, "PYTHONHASHSEED": rgc.PINNED_HASH_SEED},
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, f"coverage sweep failed:\n{proc.stderr[-3000:]}"
+    return rgc.gates_from_payload(json.loads(proc.stdout))
 
 
 @pytest.fixture(scope="module")
@@ -129,7 +132,10 @@ def _gate(gates, key):
 # annotation), while the tracer records the executed transition from an operand
 # or body-element line.  Both logical arms are exercised by the corpus, so once
 # the executed arcs are normalized to logical lines the gate is fully covered,
-# not a gap.
+# not a gap.  These keep the collapsed opening-line view because their opening
+# line *does* carry branch bytecode in 3.11; a wrapped ``and``/``or`` whose
+# opening line carries none is instead expanded to operand gates (covered by
+# ``test_phantom_boolean_gate_expands_to_operand_arms``).
 PHANTOM_MULTILINE_GATES = [
     "tb_handlers.py::if not (::#1",  # wrapped condition fall-through
     "tb_handlers.py::if not (::#2",
@@ -176,4 +182,62 @@ def test_genuine_dead_arm_not_masked_as_covered(gates):
     assert not gate.fully_covered, (
         "the tautologically-dead false arm is now reported covered; arc "
         "normalization must not merge a never-taken branch onto a live one"
+    )
+
+
+# Operand-level gates that exist only once a phantom multi-line ``and``/``or``
+# condition (no branch bytecode on its opening line) is re-attributed to its
+# operand lines.  Each carries an un-exercised short-circuit arm the collapsed
+# opening-line view masked behind a single phantom verdict.
+EXPANDED_OPERAND_GATES = [
+    "reversal.py::or (sec_id, succ_id) in horizontal_succ_pairs::#1",
+    "inter_section_handlers.py::and src_sec is not None::#1",
+    "tb_handlers.py::and tgt_sec is not None::#1",
+    "normalize.py::go is not None::#1",
+    "offsets.py::sec is None::#1",
+]
+
+
+@pytest.mark.parametrize("key", EXPANDED_OPERAND_GATES)
+def test_phantom_boolean_gate_expands_to_operand_arms(gates, key):
+    """A phantom wrapped boolean condition surfaces one gate per operand line.
+
+    CPython emits no branch bytecode on the opening ``if (``/``while (`` line of
+    a wrapped ``and``/``or``; the short-circuit branches live on the operand
+    lines.  The matrix re-attributes the decision there, so an operand whose
+    short-circuit no fixture takes is its own gate instead of hiding behind the
+    collapsed opening-line arm.
+    """
+    gate = _gate(gates, key)
+    assert gate is not None, (
+        f"expected operand-level gate {key!r}; a phantom multi-line boolean "
+        "condition must be re-attributed to its operand lines"
+    )
+    assert not gate.fully_covered, (
+        f"{key} should carry an un-exercised operand arm (a short-circuit branch "
+        "no corpus fixture takes)"
+    )
+
+
+def test_reversal_fallthrough_gap_not_masked_by_collapsed_gate(gates):
+    """The reversal-propagation fall-through is its own gate, not a phantom one.
+
+    A reversed non-TB section whose cross-section successor is neither on the
+    same grid row nor a horizontal LEFT/RIGHT port pair correctly does *not*
+    propagate reversal, but no corpus topology exercises that path.  It must show
+    as the un-exercised final operand of the ``or`` chain, not collapse onto the
+    opening ``if (`` where a single verdict would mask it.
+    """
+    operand = _gate(
+        gates, "reversal.py::or (sec_id, succ_id) in horizontal_succ_pairs::#1"
+    )
+    assert operand is not None and not operand.fully_covered
+    collapsed = [
+        g.key
+        for g in gates
+        if g.module == "reversal.py" and g.code == "if (" and not g.fully_covered
+    ]
+    assert not collapsed, (
+        "a collapsed `reversal.py::if (` gate is still reported as a gap; its "
+        f"phantom opening-line arms should be expanded to operands: {collapsed}"
     )
