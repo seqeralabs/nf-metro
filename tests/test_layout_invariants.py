@@ -42,7 +42,7 @@ from nf_metro.layout.engine import (
     compute_min_y_spacing,
     is_loop_side_branch_station,
 )
-from nf_metro.layout.geometry import segment_intersects_bbox
+from nf_metro.layout.geometry import lanes_run_along_y, segment_intersects_bbox
 from nf_metro.layout.labels import (
     _label_bbox,
     find_wrapped_label_trunk_strikes,
@@ -7360,7 +7360,7 @@ def test_post_convergence_trunk_continues(fixture):
         if not _real_in_section(graph, sid, station.section_id):
             continue
         sec = graph.sections.get(station.section_id)
-        if sec is None or sec.direction in ("TB", "BT"):
+        if sec is None or not lanes_run_along_y(sec.direction):
             continue
         preds = {
             e.source
@@ -7385,7 +7385,7 @@ def test_post_convergence_trunk_continues(fixture):
         if len(merge_preds) < 2:
             continue
         merge_y = graph.stations[merge].y
-        assert abs(station.y - merge_y) <= 2.0, (
+        assert abs(station.y - merge_y) <= GUARD_TOLERANCE, (
             f"{fixture} section {sec.id}: post-convergence station {sid!r} "
             f"detached from merge {merge!r} (station_y={station.y:.1f}, "
             f"merge_y={merge_y:.1f})"
@@ -7401,10 +7401,10 @@ def test_post_convergence_trunk_continues_repro():
     mm_y = graph.stations["mm"].y
     st_y = graph.stations["st"].y
     fq_y = graph.stations["fq"].y
-    assert abs(st_y - mm_y) <= 2.0, (
+    assert abs(st_y - mm_y) <= GUARD_TOLERANCE, (
         f"successor st (y={st_y:.1f}) detached from merge mm (y={mm_y:.1f})"
     )
-    assert abs(mm_y - fq_y) <= 2.0, (
+    assert abs(mm_y - fq_y) <= GUARD_TOLERANCE, (
         f"merge mm (y={mm_y:.1f}) not on the entry trunk row fq (y={fq_y:.1f})"
     )
 
