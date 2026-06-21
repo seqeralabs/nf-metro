@@ -44,6 +44,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.8",
     "types-networkx",
+    "numpy<2.5",
     "jsonschema>=4.0",
 ]
 docs = [
