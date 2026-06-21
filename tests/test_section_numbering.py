@@ -129,9 +129,7 @@ class TestDisconnectedSectionNumbering:
     @pytest.mark.parametrize("name", FIXTURES)
     def test_badges_increase_left_to_right(self, name):
         """Badges across the top row must increase left-to-right."""
-        text = (EXAMPLES_DIR / f"{name}.mmd").read_text()
-        g = parse_metro_mermaid(text)
-        compute_layout(g)
+        g = _load(name)
         top_row = sorted(
             (s for s in g.sections.values() if s.grid_row == 0),
             key=lambda s: s.grid_col,
