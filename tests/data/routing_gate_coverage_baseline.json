@@ -92,7 +92,6 @@
   "inter_section_handlers.py::if abs(ep.y - f.sy) < ctx.curve_radius:::#1",
   "inter_section_handlers.py::if abs(lx0 - final_x) <= ctx.curve_radius:::#1",
   "inter_section_handlers.py::if abs(tx - sx) <= COORD_TOLERANCE:::#1",
-  "inter_section_handlers.py::if best is None:::#1",
   "inter_section_handlers.py::if col_left <= 0.0:::#1",
   "inter_section_handlers.py::if ctx.station_offsets:::#1",
   "inter_section_handlers.py::if cur in graph.junctions:::#1",

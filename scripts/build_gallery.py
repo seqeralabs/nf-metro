@@ -930,6 +930,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "at the end rather than diving below the source row to the canvas floor "
         "and looping back up.",
     ),
+    (
+        "exit_corner_offset_dogleg",
+        TOPOLOGIES_DIR,
+        "A passing line runs through a section on a per-line bundle offset, then "
+        "exits and bypasses a higher row to climb to a far target. The onward "
+        "run keeps the line's offset over the row-level traverse so it leaves "
+        "the exit port straight, with the single level change a clean riser at "
+        "the far gap rather than a one-offset-step jog at the exit corner.",
+    ),
 ]
 
 # Category headers inserted before specific entries
