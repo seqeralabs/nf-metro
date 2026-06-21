@@ -15,9 +15,9 @@ graph LR
         %%metro direction: TB
         %%metro entry: top | a,b
         hub[Demux]
-        left[Branch A]
-        right[Branch B]
-        hub -->|a| left
-        hub -->|b| right
+        left[Lane A]
+        right[Lane B]
+        hub -->|a,b| left
+        hub -->|a,b| right
     end
     s2 -->|a,b| hub

@@ -58,7 +58,7 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `tb_bottom_entry_flow_start.mmd` | flow-axis entry declared opposite its consumer (TB `entry: bottom` feeding the top station) re-anchored so the line does not fold back through the trunk (issue #885) |
 | `tb_lr_exit_left.mmd` | TB section leaving through a LEFT exit into a section below-left (`_route_tb_lr_exit` LEFT arm) (issue #917) |
 | `tb_lr_exit_right.mmd` | TB section leaving through a RIGHT exit into the next forward section (`_route_tb_lr_exit` RIGHT arm) (issue #917) |
-| `tb_internal_diagonal.mmd` | fan-out inside a TB section onto two X tracks, forcing a 45-degree internal diagonal (`_route_tb_internal` diagonal arm) (issue #917) |
+| `tb_internal_diagonal.mmd` | symmetric fan-out inside a TB section onto X tracks either side of the hub, routing both internal edges as 45-degree diagonals (`_route_tb_internal` diagonal arm) (issue #917) |
 
 ---
 

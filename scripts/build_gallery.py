@@ -590,9 +590,9 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "tb_internal_diagonal",
         TOPOLOGIES_DIR,
-        "A fan-out inside a `%%metro direction: TB` section where the two "
-        "branch stations sit on different X tracks, so one internal edge is a "
-        "vertical drop and the other a 45-degree diagonal (the "
+        "A symmetric fan-out inside a `%%metro direction: TB` section: the hub "
+        "centres over its two branch stations, which sit on X tracks either "
+        "side of it, so both internal edges route as 45-degree diagonals (the "
         "`_route_tb_internal` diagonal arm) (#917).",
     ),
     (
