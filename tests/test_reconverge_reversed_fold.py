@@ -111,7 +111,9 @@ def test_return_row_drops_off_top_slot_with_forward_order(monkeypatch):
             if len(primary_lines) < 2:
                 continue
             primary_order = section_local.get(primary_fid, ctx.line_priority)
-            continuing = sorted(primary_lines, key=lambda lid: primary_order.get(lid, 0))
+            continuing = sorted(
+                primary_lines, key=lambda lid: primary_order.get(lid, 0)
+            )
             sec_present = routing_offsets._section_present_line_set(ctx, sec_id)
             returning = sorted(
                 sec_present - primary_lines,
@@ -164,9 +166,7 @@ def test_preprocessing_fanout_has_no_corner_crossing():
             va, ha = _route_axis_segments(a)
             vb, hb = _route_axis_segments(b)
             hit = _first_axis_crossing(va, hb) or _first_axis_crossing(vb, ha)
-            assert hit is None, (
-                f"{a.line_id}/{b.line_id} cross at {hit} leaving {jid}"
-            )
+            assert hit is None, f"{a.line_id}/{b.line_id} cross at {hit} leaving {jid}"
 
 
 def test_vertical_fan_crosses_without_peel_order(monkeypatch):
