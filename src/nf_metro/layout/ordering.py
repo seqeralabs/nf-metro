@@ -317,6 +317,19 @@ def _place_single_node(
         for p in preds:
             pred_lines.update(graph.station_lines(p))
         if len(pred_lines) > len(node_lines):
+            # Linear trunk continuation past a convergence: when this node is
+            # the sole successor of a single predecessor that is itself a merge
+            # (>=2 predecessors), it carries fewer lines only because the merged
+            # branches' lines ended at the junction, not because it is a branch
+            # peeling off a fork.  Continue the merge's track so the post-merge
+            # trunk stays flat instead of dropping onto an incoming branch row
+            # (#946).
+            if (
+                len(preds) == 1
+                and G.in_degree(preds[0]) > 1
+                and list(G.successors(preds[0])) == [node]
+            ):
+                return pred_avg
             # Check if this is a diamond (temporary fork-join)
             node_layer = layers.get(node, 0) if layers else 0
             if diamond_members is not None and node in diamond_members:

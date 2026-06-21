@@ -141,6 +141,15 @@ nf-metro validate-svg pipeline.svg
 (`validate-svg` uses `jsonschema`; install it with `pip install jsonschema` if it
 isn't already present.)
 
+Add `--geometry` to also check the *drawn* picture, not just the schema: it flags
+a route drawn through a station's label or marker (rail interchanges excepted).
+The offset-collapse check (distinct lines merging into one stroke) needs the
+engine's assigned offsets, so it runs only via [`render --validate`](index.md#validating-the-rendered-geometry).
+
+```bash
+nf-metro validate-svg pipeline.svg --geometry
+```
+
 In another language, extract the `<metadata id="diagram-manifest">` JSON the same
 way and feed it, with the shipped `schema.json`, to any standard JSON Schema
 validator.

@@ -73,6 +73,71 @@ def lanes_run_along_y(direction: str) -> bool:
     return AxisFrame.axes_for_direction(direction)[1] == "y"
 
 
+Point = tuple[float, float]
+
+
+def axis_point(primary_axis: str, primary: float, secondary: float) -> Point:
+    """Assemble an ``(x, y)`` point from a ``(primary, secondary)`` coordinate pair.
+
+    *primary_axis* is the flow-axis name (``"x"`` for LR/RL, ``"y"`` for TB/BT)
+    from :meth:`AxisFrame.axes_for_direction`; *secondary* lands on the other
+    axis.  The inverse of :func:`axis_split`.
+    """
+    return (primary, secondary) if primary_axis == "x" else (secondary, primary)
+
+
+def axis_split(primary_axis: str, point: Point) -> Point:
+    """Decompose an ``(x, y)`` point into its ``(primary, secondary)`` coordinates.
+
+    The inverse of :func:`axis_point`.
+    """
+    px, py = point
+    return (px, py) if primary_axis == "x" else (py, px)
+
+
+def single_corner_centreline(
+    direction: str, src: Point, tgt: Point, *, flow_first: bool
+) -> list[Point]:
+    """Three-point centreline turning one right-angle corner from *src* to *tgt*.
+
+    The two legs run along a section's flow (primary) and lane (secondary) axes.
+    With *flow_first* the first leg runs along the flow axis to the target's flow
+    coordinate, then turns onto the lane axis into the port -- the exit-port
+    shape (an LR/RL trunk run then perpendicular rise, a TB drop then run out to
+    a side port).  Without it the legs swap order, lane axis first then flow --
+    the lane-axis entry shape (a TB side-port run in then drop onto the trunk).
+    """
+    primary_axis, _secondary_axis = AxisFrame.axes_for_direction(direction)
+    src_primary, src_secondary = axis_split(primary_axis, src)
+    tgt_primary, tgt_secondary = axis_split(primary_axis, tgt)
+    if flow_first:
+        corner = axis_point(primary_axis, tgt_primary, src_secondary)
+    else:
+        corner = axis_point(primary_axis, src_primary, tgt_secondary)
+    return [src, corner, tgt]
+
+
+def diagonal_centreline(
+    direction: str, src: Point, tgt: Point, primary_start: float, primary_end: float
+) -> list[Point]:
+    """Four-point centreline: a flow-axis run, a 45-degree diagonal, a flow-axis run.
+
+    *primary_start* and *primary_end* are the flow-axis coordinates where the
+    diagonal begins and ends (from ``_compute_diagonal_placement``).  The first
+    straight run carries the source's lane coordinate, the second the target's,
+    so the line steps from one lane to the other across the diagonal.
+    """
+    primary_axis, _secondary_axis = AxisFrame.axes_for_direction(direction)
+    _src_primary, src_secondary = axis_split(primary_axis, src)
+    _tgt_primary, tgt_secondary = axis_split(primary_axis, tgt)
+    return [
+        src,
+        axis_point(primary_axis, primary_start, src_secondary),
+        axis_point(primary_axis, primary_end, tgt_secondary),
+        tgt,
+    ]
+
+
 def segment_intersects_quad(
     x1: float,
     y1: float,

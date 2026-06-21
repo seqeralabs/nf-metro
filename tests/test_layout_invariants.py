@@ -42,7 +42,7 @@ from nf_metro.layout.engine import (
     compute_min_y_spacing,
     is_loop_side_branch_station,
 )
-from nf_metro.layout.geometry import segment_intersects_bbox
+from nf_metro.layout.geometry import lanes_run_along_y, segment_intersects_bbox
 from nf_metro.layout.labels import (
     _label_bbox,
     find_wrapped_label_trunk_strikes,
@@ -7313,6 +7313,83 @@ def test_trunk_exit_follows_reconvergence(fixture):
     assert tested >= 1, (
         f"{fixture}: no pass-through section with a reconvergence-fed "
         f"exit port matched the precondition"
+    )
+
+
+def _real_in_section(graph: MetroGraph, sid: str, section_id: str) -> bool:
+    """True for a visible, on-track station belonging to *section_id*."""
+    s = graph.stations.get(sid)
+    return (
+        s is not None
+        and not s.is_port
+        and not s.is_hidden
+        and not s.off_track
+        and s.section_id == section_id
+    )
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_post_convergence_trunk_continues(fixture):
+    """The single in-section successor of an in-section convergence station
+    sits on that station's row.
+
+    When two or more in-section branches merge onto a station inside a
+    horizontal (LR/RL) section, and that merge station has exactly one
+    in-section linear successor, the successor must share the merge station's
+    Y.  Otherwise the merged trunk dives straight back down onto one of the
+    incoming branch rows, kinking the post-merge trunk (#946).
+    """
+    graph = _layout(fixture)
+    for sid, station in graph.stations.items():
+        if not _real_in_section(graph, sid, station.section_id):
+            continue
+        sec = graph.sections.get(station.section_id)
+        if sec is None or not lanes_run_along_y(sec.direction):
+            continue
+        preds = {
+            e.source
+            for e in graph.edges_to(sid)
+            if _real_in_section(graph, e.source, sec.id)
+        }
+        if len(preds) != 1:
+            continue
+        merge = next(iter(preds))
+        succs = {
+            e.target
+            for e in graph.edges_from(merge)
+            if _real_in_section(graph, e.target, sec.id)
+        }
+        if succs != {sid}:
+            continue
+        merge_preds = {
+            e.source
+            for e in graph.edges_to(merge)
+            if _real_in_section(graph, e.source, sec.id)
+        }
+        if len(merge_preds) < 2:
+            continue
+        merge_y = graph.stations[merge].y
+        assert abs(station.y - merge_y) <= GUARD_TOLERANCE, (
+            f"{fixture} section {sec.id}: post-convergence station {sid!r} "
+            f"detached from merge {merge!r} (station_y={station.y:.1f}, "
+            f"merge_y={merge_y:.1f})"
+        )
+
+
+def test_post_convergence_trunk_continues_repro():
+    """Focused lock for #946 on the minimal repro: the merge ``mm`` sits on
+    the trunk and its sole successor ``st`` continues on that same row rather
+    than dropping onto the lower ``ub`` input branch row.
+    """
+    graph = _layout("topologies/post_convergence_trunk.mmd")
+    mm_y = graph.stations["mm"].y
+    st_y = graph.stations["st"].y
+    fq_y = graph.stations["fq"].y
+    assert abs(st_y - mm_y) <= GUARD_TOLERANCE, (
+        f"successor st (y={st_y:.1f}) detached from merge mm (y={mm_y:.1f})"
+    )
+    assert abs(mm_y - fq_y) <= GUARD_TOLERANCE, (
+        f"merge mm (y={mm_y:.1f}) not on the entry trunk row fq (y={fq_y:.1f})"
     )
 
 

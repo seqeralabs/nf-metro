@@ -10,6 +10,10 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     MIN_STRAIGHT_EDGE,
 )
+from nf_metro.layout.geometry import (
+    diagonal_centreline,
+    single_corner_centreline,
+)
 from nf_metro.layout.routing.bundle import (
     build_offset_bundle,
     build_tapered_bundle,
@@ -76,7 +80,8 @@ def _route_tb_internal(
 
     # Different X tracks: route with vertical runs + 45-degree diagonal
     if abs(dx) >= COORD_TOLERANCE:
-        return _route_tb_diagonal(edge, sx, sy, tx, ty, ctx)
+        direction = graph.sections[src_sec].direction
+        return _route_tb_diagonal(edge, sx, sy, tx, ty, ctx, direction)
 
     # Same track: straight vertical drop
     return RoutedPath(
@@ -143,8 +148,15 @@ def _route_tb_diagonal(
     tx: float,
     ty: float,
     ctx: _RoutingCtx,
+    direction: str,
 ) -> RoutedPath:
-    """Route TB edges with vertical runs and a 45-degree diagonal transition."""
+    """Route TB edges with vertical runs and a 45-degree diagonal transition.
+
+    The flow-axis sibling of ``_route_diagonal``: the diagonal is placed along
+    the flow axis (Y for TB) by the shared ``_compute_diagonal_placement`` and
+    laid out by :func:`~nf_metro.layout.geometry.diagonal_centreline`, which maps
+    the flow-axis run back to vertical legs for a vertical-flow *direction*.
+    """
     diag_start_y, diag_end_y = _compute_diagonal_placement(
         sy,
         ty,
@@ -158,7 +170,9 @@ def _route_tb_diagonal(
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
-        points=[(sx, sy), (sx, diag_start_y), (tx, diag_end_y), (tx, ty)],
+        points=diagonal_centreline(
+            direction, (sx, sy), (tx, ty), diag_start_y, diag_end_y
+        ),
         offset_regime=OffsetRegime.BAKED,
     )
 
@@ -251,7 +265,12 @@ def _route_tb_lr_exit(
     return _route_single_corner(
         edge,
         ctx,
-        [(src.x, src.y), (src.x, tgt.y), (tgt.x, tgt.y)],
+        single_corner_centreline(
+            graph.sections[src.section_id].direction,
+            (src.x, src.y),
+            (tgt.x, tgt.y),
+            flow_first=True,
+        ),
         line_ids,
         source_offset,
         target_offset,
@@ -297,7 +316,12 @@ def _route_tb_lr_entry(
     return _route_single_corner(
         edge,
         ctx,
-        [(src.x, src.y), (tgt.x, src.y), (tgt.x, tgt.y)],
+        single_corner_centreline(
+            graph.sections[src.section_id].direction,
+            (src.x, src.y),
+            (tgt.x, tgt.y),
+            flow_first=False,
+        ),
         line_ids,
         source_offset,
         target_offset,
@@ -396,6 +420,11 @@ def _route_perp_entry_l_shape(
 
     The centreline references the port X; each line fans by its drop channel on
     the vertical leg and by its target-station Y offset on the turn-in leg.
+
+    The drop is vertical-first because the entry port is TOP/BOTTOM, regardless
+    of the target section's flow axis -- so this is a direct V-H build, not the
+    flow-relative ``single_corner_centreline`` (which would invert the leg order
+    for a horizontal-flow target).
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y

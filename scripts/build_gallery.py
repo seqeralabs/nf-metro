@@ -940,6 +940,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "inter-section gap, rather than both lines climbing a diagonal up to "
         "the port inside the section.",
     ),
+    (
+        "post_convergence_trunk",
+        TOPOLOGIES_DIR,
+        "Two stacked inputs converge on a station inside one LR section. The "
+        "merge station's single linear successor continues flat on the merge "
+        "row rather than dropping back onto one of the incoming branch rows, so "
+        "the post-merge trunk runs straight instead of zigzagging.",
+    ),
 ]
 
 # Category headers inserted before specific entries
