@@ -15,7 +15,11 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.common import Direction, RoutedPath
 from nf_metro.layout.routing.invariants import (
     BundleOrderViolation,
@@ -248,7 +252,7 @@ def _synthetic_route(line_id: str, points: list[tuple[float, float]]) -> RoutedP
         line_id=line_id,
         points=points,
         is_inter_section=True,
-        offsets_applied=True,
+        offset_regime=OffsetRegime.BAKED,
     )
 
 

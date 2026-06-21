@@ -70,6 +70,7 @@ from nf_metro.layout.phases.off_track import (
     _section_distinct_trunk_ys,
 )
 from nf_metro.layout.routing import (
+    OffsetRegime,
     compute_station_offsets,
     route_edges,
     route_edges_centred,
@@ -1113,7 +1114,7 @@ def test_intra_section_collinear_check_detects_overlay():
             line_id=line,
             points=[(0.0, 100.0), (200.0, 100.0)],
             is_inter_section=False,
-            offsets_applied=True,
+            offset_regime=OffsetRegime.BAKED,
         )
 
     graph = SimpleNamespace(stations={})  # no endpoints => no convergence excuse
@@ -1167,7 +1168,7 @@ def test_diagonal_overlay_check_detects_collapse():
             line_id=line,
             points=pts,
             is_inter_section=False,
-            offsets_applied=True,
+            offset_regime=OffsetRegime.BAKED,
         )
 
     graph = SimpleNamespace(stations={})
@@ -1246,7 +1247,7 @@ def test_stacked_elbow_check_detects_graze():
             line_id=line,
             points=[(x, y_lo), (x, y_hi)],
             is_inter_section=True,
-            offsets_applied=True,
+            offset_regime=OffsetRegime.BAKED,
         )
 
     # A deep descent landing at y=100 and a shallow descent leaving it, 6px

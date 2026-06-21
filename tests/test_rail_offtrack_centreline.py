@@ -28,7 +28,11 @@ import pytest
 
 from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.invariants import assert_render_curve_invariants
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
@@ -106,4 +110,6 @@ def test_rail_offtrack_render_is_clean(stem: str) -> None:
     assert_render_curve_invariants(graph, routes, offsets)
     bundles = _offtrack_elbow_bundles(graph, routes)
     assert bundles, f"{stem}: expected routed off-track elbow edges"
-    assert all(r.offsets_applied for v in bundles.values() for r in v)
+    assert all(
+        r.offset_regime is OffsetRegime.BAKED for v in bundles.values() for r in v
+    )

@@ -44,8 +44,10 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.phases.guards import GuardSpec
 from nf_metro.layout.routing.common import (
     Direction,
+    OffsetRegime,
     RoutedPath,
     _vert_horiz_cross,
+    apply_route_offsets,
     gap_lo_for_x,
     horizontal_direction,
     initial_fanout_descent_span,
@@ -323,7 +325,7 @@ def _per_line_drop_x(
         if rp is None:
             continue
         x = _vertical_x_at_station(
-            _route_render_points(rp, offsets), station, at_end=at_end
+            apply_route_offsets(rp, offsets), station, at_end=at_end
         )
         if x is None:
             continue
@@ -1065,30 +1067,6 @@ def _axis_aligned(
     return None, 0.0
 
 
-def _route_render_points(
-    rp: RoutedPath, offsets: dict[tuple[str, str], float]
-) -> list[tuple[float, float]]:
-    """Final render geometry for a route (mirrors render.apply_route_offsets)."""
-    if rp.offsets_applied:
-        return list(rp.points)
-    src_off = offsets.get((rp.edge.source, rp.line_id), 0.0)
-    tgt_off = offsets.get((rp.edge.target, rp.line_id), 0.0)
-    orig_sy = rp.points[0][1]
-    orig_ty = rp.points[-1][1]
-    out: list[tuple[float, float]] = []
-    last = len(rp.points) - 1
-    for k, (x, y) in enumerate(rp.points):
-        if k == 0:
-            out.append((x, y + src_off))
-        elif k == last:
-            out.append((x, y + tgt_off))
-        elif abs(y - orig_sy) <= abs(y - orig_ty):
-            out.append((x, y + src_off))
-        else:
-            out.append((x, y + tgt_off))
-    return out
-
-
 def _collinear_overlay_violations(
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
@@ -1111,7 +1089,7 @@ def _collinear_overlay_violations(
     for rp in routes:
         if rp.is_inter_section != inter_section:
             continue
-        pts = _route_render_points(rp, offsets)
+        pts = apply_route_offsets(rp, offsets)
         edge = (rp.edge.source, rp.edge.target)
         for p1, p2 in zip(pts, pts[1:]):
             axis, coord = _axis_aligned(p1, p2)
@@ -1263,7 +1241,7 @@ def _diagonal_segments(
     rp: RoutedPath, offsets: dict[tuple[str, str], float]
 ) -> list[_Seg]:
     """Final-render diagonal segments of *rp* (both axes change appreciably)."""
-    pts = _route_render_points(rp, offsets)
+    pts = apply_route_offsets(rp, offsets)
     out: list[_Seg] = []
     for p1, p2 in zip(pts, pts[1:]):
         if (
@@ -1479,7 +1457,7 @@ def check_no_same_line_parallel_descents(
     for rp in routes:
         if not rp.is_inter_section:
             continue
-        pts = _route_render_points(rp, offsets)
+        pts = apply_route_offsets(rp, offsets)
         edge = (rp.edge.source, rp.edge.target)
         for p1, p2 in zip(pts, pts[1:]):
             axis, coord = _axis_aligned(p1, p2)
@@ -1869,7 +1847,7 @@ def check_stacked_elbow_clearance(
     for rp in routes:
         if not rp.is_inter_section:
             continue
-        pts = _route_render_points(rp, offsets)
+        pts = apply_route_offsets(rp, offsets)
         edge = (rp.edge.source, rp.edge.target)
         for p1, p2 in zip(pts, pts[1:]):
             axis, coord = _axis_aligned(p1, p2)
@@ -2012,7 +1990,7 @@ def check_concentric_bundle_corners(
     for (src_id, tgt_id), bundle in bundles.items():
         if len(bundle) < 2:
             continue
-        rendered = [(r, _route_render_points(r, offsets)) for r in bundle]
+        rendered = [(r, apply_route_offsets(r, offsets)) for r in bundle]
         radii = {id(r): _resolved_corner_radii(r, pts) for r, pts in rendered}
         for ai in range(len(rendered)):
             ra, pa = rendered[ai]
@@ -2296,7 +2274,7 @@ def check_merge_branches_meet_trunk(
         for e in feeders:
             r = by_key.get((e.source, e.target, e.line_id))
             if r is not None and len(r.points) >= 2:
-                polylines.append((e, _route_render_points(r, offsets)))
+                polylines.append((e, apply_route_offsets(r, offsets)))
         for edge, pts in polylines:
             end = pts[-1]
             d_merge = ((end[0] - merge_st.x) ** 2 + (end[1] - merge_st.y) ** 2) ** 0.5
@@ -2388,7 +2366,7 @@ def check_no_hanging_routes(
     diagnostics.
     """
     anchor_xy = [(st.x, st.y) for st in graph.stations.values()]
-    rendered = [(r, _route_render_points(r, offsets)) for r in routes]
+    rendered = [(r, apply_route_offsets(r, offsets)) for r in routes]
     polylines = [(r, pts) for r, pts in rendered if len(pts) >= 2]
 
     violations: list[HangingRoute] = []
@@ -2423,6 +2401,84 @@ def check_no_hanging_routes(
                     which=which,
                     endpoint=end,
                     gap=min(d_marker, d_join),
+                )
+            )
+    return violations
+
+
+_LATERAL_OFFSET_TOL = 1.0
+
+
+@dataclass(frozen=True)
+class RegimeOffsetMisapplied:
+    """A deferred route's endpoint separation would shift it along its travel.
+
+    A :attr:`~nf_metro.layout.routing.common.OffsetRegime.DEFERRED` route's
+    line separation is applied at render as a Y-shift of its endpoints, which
+    only reads as a lateral separation when the terminal segment is horizontal
+    (the run travels in X).  A deferred route whose terminal segment is
+    vertical carries a non-zero endpoint offset that the renderer would apply
+    *along* the line's own travel rather than across it -- the route belongs in
+    the :attr:`~nf_metro.layout.routing.common.OffsetRegime.BAKED` regime
+    (a TB / rail / bundle path that pre-bakes its separation) but was left
+    deferred.  This is the latent two-regimes defect made loud.
+    """
+
+    source: str
+    target: str
+    line_id: str
+    which: str
+    offset: float
+    segment: tuple[tuple[float, float], tuple[float, float]]
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        (x1, y1), (x2, y2) = self.segment
+        return (
+            f"deferred route {self.source!r}->{self.target!r} on "
+            f"{self.line_id!r}: {self.which} offset {self.offset:.1f}px applies "
+            f"along a non-horizontal terminal segment "
+            f"(({x1:.1f},{y1:.1f})->({x2:.1f},{y2:.1f})); the route must be "
+            f"OffsetRegime.BAKED, not DEFERRED"
+        )
+
+
+def check_deferred_offsets_apply_laterally(
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[RegimeOffsetMisapplied]:
+    """Flag deferred routes whose endpoint separation is not a lateral shift.
+
+    The render-time offset regime (:func:`apply_route_offsets`) shifts a
+    deferred route's endpoints in Y; that is a clean per-line separation only
+    when the terminal segment runs horizontally.  A deferred route with a
+    non-zero endpoint offset on a vertical terminal segment would be
+    mis-separated -- the structural signature of a route left in the wrong
+    regime -- so it must instead bake its separation
+    (:attr:`~nf_metro.layout.routing.common.OffsetRegime.BAKED`).
+    """
+    violations: list[RegimeOffsetMisapplied] = []
+    for r in routes:
+        if r.offset_regime is not OffsetRegime.DEFERRED or len(r.points) < 2:
+            continue
+        ends = (
+            ("source", r.edge.source, r.points[0], r.points[1]),
+            ("target", r.edge.target, r.points[-1], r.points[-2]),
+        )
+        for which, node, end, neighbour in ends:
+            off = offsets.get((node, r.line_id), 0.0)
+            if abs(off) <= _LATERAL_OFFSET_TOL:
+                continue
+            if abs(end[1] - neighbour[1]) <= _LATERAL_OFFSET_TOL:
+                continue  # terminal segment is horizontal: shift is lateral
+            violations.append(
+                RegimeOffsetMisapplied(
+                    source=r.edge.source,
+                    target=r.edge.target,
+                    line_id=r.line_id,
+                    which=which,
+                    offset=off,
+                    segment=(end, neighbour),
                 )
             )
     return violations
@@ -2916,6 +2972,10 @@ def assert_render_curve_invariants(
             check_no_hanging_routes(graph, routes, offsets),
         ),
         (
+            "deferred route offset applied along travel",
+            check_deferred_offsets_apply_laterally(routes, offsets),
+        ),
+        (
             "bottommost-row climb dives below clear corridor",
             check_bottom_row_climb_stays_at_row_level(graph, routes),
         ),
@@ -3012,6 +3072,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_no_same_line_parallel_descents, "A"),
     _check_spec(check_merge_branches_meet_trunk, "A"),
     _check_spec(check_no_hanging_routes, "A"),
+    _check_spec(check_deferred_offsets_apply_laterally, "A"),
     _check_spec(check_bottom_row_climb_stays_at_row_level, "A"),
     _check_spec(check_gap_channels_materialized, "A"),
     _check_spec(check_trunks_declared, "A"),
@@ -3050,6 +3111,7 @@ __all__ = [
     "PeeloffBundleCrossing",
     "PerpEntryBoundaryViolation",
     "PerpExitLeadInOverdip",
+    "RegimeOffsetMisapplied",
     "RightEntryNeedlessDive",
     "SameLineParallelRun",
     "Side",
@@ -3061,6 +3123,7 @@ __all__ = [
     "check_gap_channels_materialized",
     "check_trunks_declared",
     "check_concentric_bundle_corners",
+    "check_deferred_offsets_apply_laterally",
     "check_fanout_tail_join",
     "check_no_distinct_line_fanout_crossing",
     "check_merge_branches_meet_trunk",

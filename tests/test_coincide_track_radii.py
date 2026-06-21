@@ -36,7 +36,11 @@ import pytest
 import nf_metro.layout.routing.normalize as normalize
 from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.layout.routing.corners import concentric_corner_radius_at
 from nf_metro.layout.routing.normalize import _set_vchannel_x, _VChannel
@@ -127,7 +131,7 @@ def test_set_vchannel_x_rederives_flanking_corners_from_waypoints() -> None:
         line_id="l",
         points=points,
         is_inter_section=True,
-        offsets_applied=True,
+        offset_regime=OffsetRegime.BAKED,
         curve_radii=[19.0, 19.0],
     )
     channel = _VChannel(route=route, idx=1, x=50.0, y_lo=0.0, y_hi=100.0, down=True)

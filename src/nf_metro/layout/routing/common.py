@@ -25,6 +25,27 @@ from nf_metro.layout.constants import (
 from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
 
 
+class OffsetRegime(Enum):
+    """When a route's parallel-line separations are applied.
+
+    A diagram routes lines on two separation regimes, and any pass reasoning
+    about spacing must know which one a given route is in:
+
+    ``DEFERRED``
+        The stored points sit on the trunk centreline; the per-line separation
+        is applied at render by :func:`apply_route_offsets` as a lateral (Y)
+        shift of the endpoints.  The default for plain LR/RL runs.
+    ``BAKED``
+        The stored points already carry the separation -- a TB X-stagger, a
+        rail's per-line Y, or a bundle's concentric corner fan -- because it is
+        geometry a uniform endpoint Y-shift cannot express.  Render-time
+        offsetting is skipped so the separation is not applied twice.
+    """
+
+    DEFERRED = "deferred"
+    BAKED = "baked"
+
+
 class Direction(Enum):
     """Cardinal travel direction for a horizontal or vertical run."""
 
@@ -448,7 +469,8 @@ class RoutedPath:
     points: list[tuple[float, float]]
     is_inter_section: bool = False
     curve_radii: list[float] | None = None
-    offsets_applied: bool = False
+    offset_regime: OffsetRegime = OffsetRegime.DEFERRED
+    """Which separation regime this route is in (see :class:`OffsetRegime`)."""
     normalize_exempt: bool = False
     """Skip this route in the gap-channel normalization post-pass.
 
@@ -506,6 +528,43 @@ class RoutedPath:
         trunk's direction and band rank from the routed geometry.
         """
         self.trunk_slot = TrunkSlot(gap_upper_row=gap_upper_row)
+
+
+def apply_route_offsets(
+    route: RoutedPath,
+    station_offsets: dict[tuple[str, str], float],
+) -> list[tuple[float, float]]:
+    """The route's final render geometry, with its line separation applied.
+
+    The single place a route's stored points become drawable coordinates, so
+    every spacing-aware pass (the renderer, the label-strike search, the render
+    invariants) reads one regime-aware result instead of re-deriving it.
+
+    A :attr:`~OffsetRegime.BAKED` route already carries its separation, so its
+    points are returned verbatim.  A :attr:`~OffsetRegime.DEFERRED` route is
+    shifted in Y: the source-side waypoints by the source offset, the
+    target-side by the target offset, each interior point assigned to whichever
+    end it is closer to.
+    """
+    if route.offset_regime is OffsetRegime.BAKED:
+        return list(route.points)
+
+    src_off = station_offsets.get((route.edge.source, route.line_id), 0.0)
+    tgt_off = station_offsets.get((route.edge.target, route.line_id), 0.0)
+    orig_sy = route.points[0][1]
+    orig_ty = route.points[-1][1]
+    last = len(route.points) - 1
+    pts: list[tuple[float, float]] = []
+    for i, (x, y) in enumerate(route.points):
+        if i == 0:
+            pts.append((x, y + src_off))
+        elif i == last:
+            pts.append((x, y + tgt_off))
+        elif abs(y - orig_sy) <= abs(y - orig_ty):
+            pts.append((x, y + src_off))
+        else:
+            pts.append((x, y + tgt_off))
+    return pts
 
 
 def initial_fanout_descent_span(
