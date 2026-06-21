@@ -1588,35 +1588,76 @@ def _apply_offsets_along_bundle(
             queue.append(tgt_id)
 
 
-def _bypass_convergence_feeders(ctx: _OffsetCtx, port_id: str) -> dict[str, int] | None:
-    """Source columns of a LEFT entry port's bypass-convergence bundle.
+def _convergence_feeders(
+    graph: MetroGraph, port_id: str
+) -> list[tuple[str, int, bool]] | None:
+    """Classify a LEFT entry port's bypass-convergence feeders.
 
-    Returns ``{line_id: source_grid_col}`` when every line feeding *port_id*
-    arrives on a bypass (a multi-column hop past intervening sections) and the
-    feeders span two or more source columns - the static signature of several
-    lines riding one shared bypass trunk into a common port.  Returns ``None``
-    for any port that is not such a convergence.
+    Returns ``[(line_id, source_col, is_bypass), ...]`` when several lines
+    riding one shared bypass trunk converge into *port_id* and want
+    approach-depth slotting; ``None`` otherwise.
+
+    A feeder is a *bypass* when it hops two or more columns past intervening
+    sections, so it must route around their boxes and climb a riser into the
+    port.  Two shapes qualify:
+
+    * **All-bypass** - every feeder is a bypass spanning two or more source
+      columns: one shared bypass trunk into a common port.
+    * **Climb-with-shallow-feeder** - a climbing bundle of two or more bypass
+      feeders from distinct columns, joined by shallow feeders from adjacent
+      columns.  Left in declaration order a shallow feeder is slotted port-far
+      and weaves across the climbing risers at the turn; admitting it lets
+      approach-depth slot it port-near so the bundle turns concentrically.
+      Requires one feeder edge per line and one line per source column, so a
+      fan-in (a line or column feeding the port more than once) does not match.
+
+    A single bypass joined by a shallow feeder is one riser plus a flat line,
+    not a bundle to weave through, so two distinct bypass columns are required.
     """
-    graph = ctx.graph
     tgt_col = _resolve_section_col(graph, graph.stations[port_id])
     if tgt_col is None:
         return None
-    line_col: dict[str, int] = {}
+
+    feeders: list[tuple[str, int, bool]] = []
     for edge in graph.edges_to(port_id):
         src = graph.stations.get(edge.source)
         if src is None:
             return None
         col, row = _resolve_section_colrow(graph, src)
-        if (
-            col is None
-            or abs(tgt_col - col) <= 1
-            or not _has_intervening_sections(graph, col, tgt_col, row)
-        ):
+        if col is None:
             return None
-        line_col[edge.line_id] = col
-    if len(set(line_col.values())) < 2:
+        is_bypass = abs(tgt_col - col) > 1 and _has_intervening_sections(
+            graph, col, tgt_col, row
+        )
+        feeders.append((edge.line_id, col, is_bypass))
+
+    if len({col for _, col, _ in feeders}) < 2:
         return None
-    return line_col
+
+    if all(is_bypass for _, _, is_bypass in feeders):
+        return feeders
+
+    bypass_cols = {col for _, col, is_bypass in feeders if is_bypass}
+    if (
+        len({col for _, col, _ in feeders}) == len(feeders)
+        and len({lid for lid, _, _ in feeders}) == len(feeders)
+        and len(bypass_cols) >= 2
+    ):
+        return feeders
+    return None
+
+
+def _bypass_convergence_feeders(
+    graph: MetroGraph, port_id: str
+) -> dict[str, int] | None:
+    """Source columns ``{line_id: source_grid_col}`` of a qualifying convergence.
+
+    Thin view over :func:`_convergence_feeders` for callers ordering by column.
+    """
+    feeders = _convergence_feeders(graph, port_id)
+    if feeders is None:
+        return None
+    return {lid: col for lid, col, _ in feeders}
 
 
 def _order_convergence_entry_ports(ctx: _OffsetCtx) -> None:
@@ -1643,7 +1684,7 @@ def _order_convergence_entry_ports(ctx: _OffsetCtx) -> None:
             or port.section_id in ctx.reversed_sections
         ):
             continue
-        line_col = _bypass_convergence_feeders(ctx, port_id)
+        line_col = _bypass_convergence_feeders(graph, port_id)
         if line_col is None:
             continue
         ordered = sorted(

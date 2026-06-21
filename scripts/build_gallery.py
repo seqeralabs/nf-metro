@@ -957,6 +957,16 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "row rather than dropping back onto one of the incoming branch rows, so "
         "the post-merge trunk runs straight instead of zigzagging.",
     ),
+    (
+        "junction_fanout_convergence",
+        TOPOLOGIES_DIR,
+        "Three lines converge into one joint-calling entry port: two bypass the "
+        "intervening sections and climb risers into the port while the third "
+        "joins flat from the adjacent column. The flat shallow feeder takes the "
+        "port-near slot on top of the climbing pair so the bundle turns into the "
+        "port concentrically, instead of the flat line weaving across the risers "
+        "at the corner.",
+    ),
 ]
 
 # Category headers inserted before specific entries
