@@ -257,7 +257,7 @@ from nf_metro.layout.phases.single_section import (  # noqa: F401
     _enforce_min_extent,
     _has_horizontal_predecessor_section,
     _layout_single_section,
-    _mirror_rl,
+    _mirror_primary,
     _multiline_label_padding,
     _multiline_track_spacing,
     _normalize_min,

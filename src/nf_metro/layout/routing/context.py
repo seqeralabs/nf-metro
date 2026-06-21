@@ -471,8 +471,12 @@ def fanout_divergence_peel_order(
 
     The clean-divergence preconditions: one upstream source; at least two
     distinct lines; every line reaches its own target section (disjoint targets,
-    so a co-travelling multi-target bundle is left alone); all lines drop the
-    same way to at least two distinct columns.
+    so a co-travelling multi-target bundle is left alone); all descending lines
+    drop the same way.  Two fan shapes qualify: a horizontal fan spreading to at
+    least two distinct columns (farthest column outermost), and a vertical fan
+    whose lines share one column but peel to at least two distinct rows (the
+    lead-in Y order mirrors the target rows top to bottom, a same-row
+    continuation leading as the shallowest).
     """
     sources = {e.source for e in graph.edges_to(jid)}
     if len(sources) != 1:
@@ -495,15 +499,29 @@ def fanout_divergence_peel_order(
         if tgt_port is None or not tgt_port.is_entry:
             return None
         tcol, trow = _resolve_section_colrow(graph, tgt)
-        if tcol is None or trow is None or trow == src_row:
+        if tcol is None or trow is None:
             return None
         if edge.target in claimed and claimed[edge.target] != edge.line_id:
             return None  # two distinct lines share a target: co-travelling
+        if edge.line_id in reach:
+            return None  # a line splitting to several targets is not a per-line fan
         claimed[edge.target] = edge.line_id
         reach[edge.line_id] = tcol - src_col
         drow[edge.line_id] = trow - src_row
 
-    if len(reach) < 2 or len(set(reach.values())) < 2:
+    if len(reach) < 2:
+        return None
+
+    if len(set(reach.values())) == 1:
+        # Same-column vertical fan: a same-row continuation (drow 0) is a valid
+        # member that leads as the shallowest peel, unlike the column-spreading
+        # branch below, which rejects any zero descent.
+        descenders = [d for d in drow.values() if d != 0]
+        if len(set(drow.values())) < 2 or len({d > 0 for d in descenders}) != 1:
+            return None
+        return sorted(reach, key=lambda lid: (drow[lid], line_priority.get(lid, 0)))
+
+    if 0 in drow.values():
         return None
     if len({d > 0 for d in drow.values()}) != 1:
         return None

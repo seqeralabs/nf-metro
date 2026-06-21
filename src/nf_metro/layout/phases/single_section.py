@@ -28,7 +28,7 @@ from nf_metro.layout.constants import (
     TERMINUS_ICON_CLEARANCE_V,
     TERMINUS_WIDTH,
 )
-from nf_metro.layout.geometry import AxisFrame
+from nf_metro.layout.geometry import Axis, AxisFrame
 from nf_metro.layout.labels import (
     _label_text_height,
     active_font_scale,
@@ -202,7 +202,14 @@ def _layout_single_section(
     # Widen track spacing when multi-line labels need more vertical room
     effective_y_spacing = _multiline_track_spacing(sub, y_spacing)
 
-    # Assign local coordinates based on section direction
+    # Assign local coordinates along the section's layer (primary) and
+    # track (secondary) axes; TB transposes which screen axis each maps to.
+    frame = AxisFrame.for_direction(section.direction, x_spacing, y_spacing)
+    # Track ranks widen for multi-line labels only when the track axis is Y
+    # (the LR/RL regime); a TB section stacks lines along X at the base step.
+    rank_step = (
+        effective_y_spacing if frame.secondary.name == "y" else frame.secondary.step
+    )
     for sid, station in sub.stations.items():
         station.layer = layers.get(sid, 0)
         station.track = tracks.get(sid, 0)
@@ -217,22 +224,14 @@ def _layout_single_section(
         rank = track_rank.get(station.track, 0.0)
         output_offset = output_extra.get(sid, 0.0)
         layer_push = output_layer_push.get(station.layer, 0.0)
-        if section.direction == "TB":
-            station.x = rank * x_spacing
-            station.y = (
-                station.layer * y_spacing
-                + layer_extra.get(station.layer, 0)
-                + layer_push
-                + output_offset
-            )
-        else:
-            station.x = (
-                station.layer * x_spacing
-                + layer_extra.get(station.layer, 0)
-                + layer_push
-                + output_offset
-            )
-            station.y = rank * effective_y_spacing
+        frame.primary.set(
+            station,
+            station.layer * frame.primary.step
+            + layer_extra.get(station.layer, 0)
+            + layer_push
+            + output_offset,
+        )
+        frame.secondary.set(station, rank * rank_step)
 
     # Resolve same-cell station collisions: two stations on the same line
     # priority can land on identical (x,y) when the track allocator collapses
@@ -242,9 +241,9 @@ def _layout_single_section(
     # Normalize Y so minimum is 0 (raw tracks can be negative)
     _normalize_min(sub, axis="y")
 
-    # RL: mirror X so layer 0 is rightmost
-    if section.direction == "RL":
-        _mirror_rl(sub)
+    # RL runs the primary axis in reverse: mirror it so layer 0 is at the far end.
+    if frame.primary_sign < 0:
+        _mirror_primary(sub, frame.primary)
 
     # Normalize local X so leftmost station is at x=0
     _normalize_min(sub, axis="x")
@@ -489,17 +488,17 @@ def _normalize_min(sub: MetroGraph, axis: str) -> None:
                 setattr(s, axis, getattr(s, axis) - min_val)
 
 
-def _mirror_rl(sub: MetroGraph) -> None:
-    """Mirror X coordinates for RL sections so layer 0 is rightmost.
+def _mirror_primary(sub: MetroGraph, axis: Axis) -> None:
+    """Mirror the layer (primary) axis so layer 0 sits at the far end (RL).
 
     Anchors on non-terminus stations so adding terminus layers
-    extends leftward without shifting the entry point.
+    extends outward without shifting the entry point.
     """
     non_term = [s for s in sub.stations.values() if not (s.is_blank_terminus)]
     anchor_stations = non_term if non_term else list(sub.stations.values())
-    max_x_val = max(s.x for s in anchor_stations)
+    max_val = max(axis.get(s) for s in anchor_stations)
     for s in sub.stations.values():
-        s.x = max_x_val - s.x
+        axis.set(s, max_val - axis.get(s))
 
 
 def _enforce_min_extent(
@@ -509,22 +508,13 @@ def _enforce_min_extent(
     y_spacing: float,
 ) -> None:
     """Ensure minimum inner extent so stations sit on visible track."""
-    xs = [s.x for s in sub.stations.values()]
-    ys = [s.y for s in sub.stations.values()]
-    if section.direction == "TB":
-        inner_h = max(ys) - min(ys)
-        min_inner_h = y_spacing
-        if inner_h < min_inner_h:
-            shift = (min_inner_h - inner_h) / 2
-            for station in sub.stations.values():
-                station.y += shift
-    else:
-        inner_w = max(xs) - min(xs)
-        min_inner_w = x_spacing
-        if inner_w < min_inner_w:
-            shift = (min_inner_w - inner_w) / 2
-            for station in sub.stations.values():
-                station.x += shift
+    axis = AxisFrame.for_direction(section.direction, x_spacing, y_spacing).primary
+    vals = [axis.get(s) for s in sub.stations.values()]
+    inner = max(vals) - min(vals)
+    if inner < axis.step:
+        shift = (axis.step - inner) / 2
+        for station in sub.stations.values():
+            axis.set(station, axis.get(station) + shift)
 
 
 def _adjust_tb_labels(

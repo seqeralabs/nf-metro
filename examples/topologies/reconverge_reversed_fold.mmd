@@ -1,0 +1,103 @@
+%%metro title: Reconvergence Reversed Alt
+%%metro style: dark
+%%metro line: rna | scRNA-seq | #e63946
+%%metro line: protein | CITE-seq | #f5c542
+%%metro line: atac | scATAC-seq | #457b9d
+
+graph LR
+    subgraph preprocessing [Preprocessing]
+        pp_input[Input]
+        pp_demux[Demux]
+        pp_qc_raw[Raw QC]
+        pp_trim[Trim]
+        pp_filter[Filter]
+        pp_qc_clean[Clean QC]
+        pp_classify[Classify]
+        pp_sort[Sort]
+
+        pp_input -->|rna,atac,protein| pp_demux
+        pp_demux -->|rna,atac,protein| pp_qc_raw
+        pp_qc_raw -->|rna,atac,protein| pp_trim
+        pp_trim -->|rna,atac,protein| pp_filter
+        pp_filter -->|rna,atac,protein| pp_qc_clean
+        pp_qc_clean -->|rna,atac,protein| pp_classify
+        pp_classify -->|rna,atac,protein| pp_sort
+    end
+
+    subgraph rna_analysis [RNA Analysis]
+        rna_norm[Normalize]
+        rna_cluster[Cluster]
+        rna_markers[Markers]
+        rna_trajectories[Trajectories]
+        rna_dge[DGE]
+
+        rna_norm -->|rna| rna_cluster
+        rna_cluster -->|rna| rna_markers
+        rna_markers -->|rna| rna_trajectories
+        rna_trajectories -->|rna| rna_dge
+    end
+
+    subgraph atac_analysis [ATAC Analysis]
+        atac_peaks[Peak Calling]
+        atac_motif[Motif Analysis]
+        atac_footprint[Footprinting]
+        atac_coverage[Coverage]
+
+        atac_peaks -->|atac| atac_motif
+        atac_motif -->|atac| atac_footprint
+        atac_footprint -->|atac| atac_coverage
+    end
+
+    subgraph protein_analysis [Protein Analysis]
+        prot_norm[Normalize]
+        prot_quant[Quantify]
+        prot_viz[Visualize]
+
+        prot_norm -->|protein| prot_quant
+        prot_quant -->|protein| prot_viz
+    end
+
+    subgraph integration [Multi-Modal Integration]
+        int_merge[Merge Modalities]
+        int_wnn[WNN]
+        int_umap[UMAP]
+
+        int_merge -->|rna,atac,protein| int_wnn
+        int_wnn -->|rna,atac,protein| int_umap
+    end
+
+    subgraph bio_interp [Biological Interpretation]
+        bio_celltype[Cell Typing]
+        bio_trajectory[Trajectory]
+        bio_grn[Gene Reg. Network]
+
+        bio_celltype -->|rna,atac| bio_trajectory
+        bio_trajectory -->|rna,atac| bio_grn
+    end
+
+    subgraph tech_qc [Technical QC]
+        tqc_doublet[Doublet Detection]
+        tqc_ambient[Ambient RNA]
+        tqc_metrics[QC Metrics]
+
+        tqc_doublet -->|protein| tqc_ambient
+        tqc_ambient -->|protein| tqc_metrics
+    end
+
+    subgraph final_report [Final Report]
+        fr_aggregate[Aggregate]
+        fr_report[Render Report]
+
+        fr_aggregate -->|rna,atac,protein| fr_report
+    end
+
+    pp_sort -->|rna| rna_norm
+    pp_sort -->|atac| atac_peaks
+    pp_sort -->|protein| prot_norm
+    rna_dge -->|rna| int_merge
+    atac_coverage -->|atac| int_merge
+    prot_viz -->|protein| int_merge
+    int_umap -->|rna,atac| bio_celltype
+    int_umap -->|protein| tqc_doublet
+    bio_grn -->|rna,atac| fr_aggregate
+    tqc_metrics -->|protein| fr_aggregate
