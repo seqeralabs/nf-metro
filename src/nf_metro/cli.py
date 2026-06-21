@@ -5,7 +5,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Literal, NoReturn, TypeVar
+from typing import Any, Literal, TypeVar
 
 import click
 
@@ -22,7 +22,9 @@ from nf_metro.live.server import DEFAULT_OVERLAY, OVERLAY_STYLES
 from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
 from nf_metro.parser import (
     ERROR,
+    WARNING,
     CyclicGraphError,
+    ValidationIssue,
     parse_metro_mermaid,
     validate_graph,
 )
@@ -103,12 +105,13 @@ def _apply_layout_overrides(graph: MetroGraph, opts: dict[str, object]) -> None:
 _STYLE_THEME_ALIASES = {"dark": "nfcore"}
 
 
-def _fail_validation(messages: Iterable[str]) -> NoReturn:
-    """Print validation errors to stderr and exit non-zero."""
-    click.echo("Validation errors:", err=True)
-    for message in messages:
-        click.echo(f"  - {message}", err=True)
-    raise SystemExit(1)
+def _echo_issues(
+    label: str, issues: Iterable[ValidationIssue], path: Path | str
+) -> None:
+    """Print a labelled, bulleted block of validation issues to stderr."""
+    click.echo(f"{label}:", err=True)
+    for issue in issues:
+        click.echo(f"  - {issue.format(path)}", err=True)
 
 
 def _resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
@@ -412,22 +415,65 @@ def convert(
 
 @cli.command()
 @click.argument("input_file", type=click.Path(exists=True, path_type=Path))
-def validate(input_file: Path) -> None:
-    """Validate a Mermaid metro map definition."""
+@click.option(
+    "--with-layout",
+    is_flag=True,
+    help="Also run the layout engine with its full invariant suite, reporting "
+    "any layout failure as an error instead of a traceback.",
+)
+@click.option(
+    "--strict",
+    is_flag=True,
+    help="Treat warnings (e.g. a non-LR primary direction) as errors.",
+)
+def validate(input_file: Path, with_layout: bool, strict: bool) -> None:
+    """Validate a Mermaid metro map definition.
+
+    The bare command runs graph-semantic checks: every edge references a
+    defined line, every section points at stations that exist, and the graph
+    is acyclic.  ``--with-layout`` additionally runs the layout engine with
+    its full invariant suite, reporting a layout failure as a clean error.
+    ``--strict`` escalates warnings to a non-zero exit.
+    """
     text = input_file.read_text()
-    try:
-        graph = parse_metro_mermaid(text)
-    except ValueError as e:
-        raise click.ClickException(str(e))
 
-    errors = [issue for issue in validate_graph(graph) if issue.severity == ERROR]
+    issues: list[ValidationIssue] = []
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            graph = parse_metro_mermaid(text)
+        except ValueError as e:
+            raise click.ClickException(str(e))
+
+        issues.extend(validate_graph(graph))
+
+        if with_layout:
+            try:
+                compute_layout(graph, validate=True)
+            except (
+                CyclicGraphError,
+                BackwardFlowError,
+                MixedEntryDirectionError,
+                PhaseInvariantError,
+            ) as e:
+                issues.append(ValidationIssue(ERROR, str(e)))
+
+    issues.extend(ValidationIssue(WARNING, str(w.message)) for w in caught)
+
+    errors = [i for i in issues if i.severity == ERROR]
+    warns = [i for i in issues if i.severity == WARNING]
+
+    if warns:
+        _echo_issues("Validation warnings", warns, input_file)
     if errors:
-        _fail_validation(issue.format(input_file) for issue in errors)
-
-    try:
-        compute_layout(graph)
-    except (BackwardFlowError, MixedEntryDirectionError, PhaseInvariantError) as e:
-        _fail_validation([str(e)])
+        _echo_issues("Validation errors", errors, input_file)
+        raise SystemExit(1)
+    if strict and warns:
+        click.echo(
+            f"Failed: {len(warns)} warning(s) treated as errors under --strict.",
+            err=True,
+        )
+        raise SystemExit(1)
 
     click.echo(
         f"Valid: {len(graph.stations)} stations, "

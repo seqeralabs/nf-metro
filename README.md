@@ -145,11 +145,18 @@ The node `id` is the join key between the two: it equals `data-node-id="<id>"` o
 
 ### `nf-metro validate`
 
-Check a `.mmd` file for errors without producing output.
+Check a `.mmd` file for errors without producing output. The bare command runs
+graph-semantic checks (every edge references a defined line, every section
+points at stations that exist, the graph is acyclic).
 
 ```
-nf-metro validate INPUT_FILE
+nf-metro validate [OPTIONS] INPUT_FILE
 ```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--with-layout` | off | Also run the layout engine with its full invariant suite, reporting a layout failure as an error instead of a traceback |
+| `--strict` | off | Treat warnings (e.g. a non-LR primary direction) as errors |
 
 ### `nf-metro info`
 
