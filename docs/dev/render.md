@@ -126,16 +126,28 @@ finished artifact back into geometry — node markers from the embedded
 manifest, route polylines from the drawn `<path data-line-id>` ink (splitting
 at each `M` so a bridge-hop gap is a real break, and collapsing each smoothing
 `Q` to its corner), and label ink boxes from the drawn `<text>` ink — then
-runs render-geometry checks on what was drawn. The label-strike check reuses
-the authoritative `segment_strikes_label` predicate at the label's drawn font
-scale, so a finding means the rendered image is wrong, not that a
-re-derivation diverged. It needs only the SVG string, so it validates a
-produced file (in CI, or via `validate-svg --geometry`) and behind
-`render --validate` without re-running layout.
+runs render-geometry checks on what was drawn. Three checks run:
 
-The marker-crossing and offset-pitch separation checks the same direction
-calls for are tracked separately: they fire on accepted idioms (rail
-interchanges; diagonal bundles) that the bare manifest cannot yet distinguish.
+- **label-strike** reuses the authoritative `segment_strikes_label` predicate
+  at the label's drawn font scale, so a finding means the rendered image is
+  wrong, not that a re-derivation diverged.
+- **marker-cross** flags a route segment through a non-consumer station's
+  marker (a line the station carries, via the manifest `groups`, is exempt).
+  Rail-interchange stations are exempt too — a line threading an interchange
+  knob is the intended rail idiom — and their ids are read back from the drawn
+  `...-rail-...` markers, since the manifest carries no rail flag.
+- **offset-collapse** flags two distinct lines drawn flush where the offset
+  regime assigned them a full `OFFSET_STEP` apart. Two lines on the same
+  assigned slot draw flush by design (a shared-trunk bundle), so the check
+  compares the drawn gap against the gap the regime *assigned*, not a constant.
+
+label-strike and marker-cross are pure artifact oracles (the SVG string is
+enough), so they run on a produced file in CI, via `validate-svg --geometry`,
+and behind `render --validate`. offset-collapse needs the engine's assigned
+offsets to tell an intended same-slot bundle from a real merge, so
+`validate_render(svg, *, graph=...)` runs it only when the laid-out graph is
+supplied — the `render --validate` path and the CI corpus test, not the
+standalone SVG path.
 
 ## Animation (`animate.py`)
 

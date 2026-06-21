@@ -115,6 +115,16 @@ The page supports drag-to-pan, scroll-to-zoom, station hover tooltips, and a cli
 
 The **Embed&hellip;** button opens a panel with copyable inline-HTML, iframe, and static-SVG snippets. The [Embedding guide](embedding.md) explains when to reach for each, plus responsive sizing, font portability, host theming, and progress overlays.
 
+#### Validating the rendered geometry
+
+Pass `--validate` to check the *drawn* SVG after rendering and fail (non-zero exit) if a route is drawn through a station's label or marker, or two distinct lines collapse into one stroke where they should run parallel. This reads the geometry as it ends up on the page (after the per-line offsets and label shifts the layout applies), catching defects the pre-render checks cannot see:
+
+```bash
+nf-metro render pipeline.mmd -o pipeline.svg --validate
+```
+
+To run the same geometry checks on an already-rendered SVG, use [`nf-metro validate-svg --geometry`](manifest.md#manifest-schema).
+
 ### `nf-metro convert`
 
 Convert a Nextflow `-with-dag` mermaid file to nf-metro format.
