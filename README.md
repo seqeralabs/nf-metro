@@ -82,6 +82,7 @@ nf-metro render [OPTIONS] INPUT_FILE
 | `--fold-threshold INTEGER` | `15` | Max station-columns a section row may reach before wrapping to the next row |
 | `--animate / --no-animate` | off | Add animated balls traveling along lines |
 | `--directional / --no-directional` | off | Draw static chevrons along each route pointing in the flow direction (source to target) |
+| `--strict / --no-strict` | off | Treat a layout-invariant violation on the rendered geometry (e.g. a station outside its section box) as an error that aborts the render, instead of a warning |
 | `--debug / --no-debug` | off | Show debug overlay (ports, hidden stations, edge waypoints) |
 | `--logo PATH` | none | Logo image path (overrides `%%metro logo:` directive) |
 | `--line-order [definition\|span]` | `definition` | Line ordering strategy: `definition` preserves `.mmd` order, `span` sorts by section span (longest first) |
