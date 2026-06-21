@@ -18,7 +18,7 @@ reported; this PR fixes two of the three crossing sites plus the offset:
 
 The ``integration`` merge and ``junction_15`` crossings are out of scope: they
 are coupled through ``integration``'s single TB trunk and need the bottom-exit
-fan ordered by row depth (tracked separately).
+fan ordered by row depth (tracked in #928).
 """
 
 from __future__ import annotations
