@@ -21,7 +21,11 @@ import pytest
 
 from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
     check_bundle_order_preserved,
@@ -109,4 +113,4 @@ def test_entry_wrap_routes_are_offset_baked(path: Path) -> None:
     graph, _offsets, routes = _route(path)
     wraps = _wrap_routes(graph, routes)
     assert wraps, f"{path.stem}: expected at least one entry-wrap route"
-    assert all(r.offsets_applied for r in wraps)
+    assert all(r.offset_regime is OffsetRegime.BAKED for r in wraps)

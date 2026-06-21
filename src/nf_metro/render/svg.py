@@ -30,6 +30,7 @@ from nf_metro.layout.labels import (
 )
 from nf_metro.layout.routing import (
     RoutedPath,
+    apply_route_offsets,
     compute_station_offsets,
     route_edges_centred,
 )
@@ -126,38 +127,6 @@ from nf_metro.render.section_header import (
     resolve_all_section_headers,
 )
 from nf_metro.render.style import Theme
-
-
-def apply_route_offsets(
-    route: RoutedPath,
-    station_offsets: dict[tuple[str, str], float],
-) -> list[tuple[float, float]]:
-    """Apply per-line Y offsets to a route's waypoints.
-
-    If the route already has offsets applied (e.g. TB section routes),
-    returns a copy of its points unchanged. Otherwise, shifts source-side
-    waypoints by the source offset and target-side waypoints by the target
-    offset, with intermediate points assigned to whichever end is closer.
-    """
-    if route.offsets_applied:
-        return list(route.points)
-
-    src_off = station_offsets.get((route.edge.source, route.line_id), 0.0)
-    tgt_off = station_offsets.get((route.edge.target, route.line_id), 0.0)
-
-    orig_sy = route.points[0][1]
-    orig_ty = route.points[-1][1]
-    pts: list[tuple[float, float]] = []
-    for i, (x, y) in enumerate(route.points):
-        if i == 0:
-            pts.append((x, y + src_off))
-        elif i == len(route.points) - 1:
-            pts.append((x, y + tgt_off))
-        elif abs(y - orig_sy) <= abs(y - orig_ty):
-            pts.append((x, y + src_off))
-        else:
-            pts.append((x, y + tgt_off))
-    return pts
 
 
 def _compute_canvas_bounds(

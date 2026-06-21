@@ -4,13 +4,13 @@ The straight, L-shape, single-corner and vertical-drop inter-section handlers
 construct their routes by describing a centreline and fanning it with
 ``build_concentric_bundle`` (``layout/routing/centrelines.py``) rather than
 assembling per-line ``points`` / ``curve_radii`` by hand.  A bundle built that
-way is offset-baked (``offsets_applied``) and correct by construction -- its
-corners stay concentric and its lines keep a constant side-of-travel order.
+way is offset-baked (:attr:`OffsetRegime.BAKED`) and correct by construction --
+its corners stay concentric and its lines keep a constant side-of-travel order.
 
 These tests pin that on the fixtures that exercise each shape: a regression to
-a hand-rolled, render-time-offset path would drop ``offsets_applied`` on the
-multi-line inter-section bundles, and a flat or mis-signed radius would trip the
-render-path curve guard.
+a hand-rolled, render-time-offset path would leave the multi-line inter-section
+bundles :attr:`OffsetRegime.DEFERRED`, and a flat or mis-signed radius would
+trip the render-path curve guard.
 """
 
 from __future__ import annotations
@@ -20,7 +20,11 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
     check_bundle_order_preserved,
@@ -76,4 +80,6 @@ def test_multi_line_inter_section_bundles_are_offset_baked(path: Path) -> None:
             bundles.setdefault((r.edge.source, r.edge.target), []).append(r)
     multiline = {k: v for k, v in bundles.items() if len({r.line_id for r in v}) > 1}
     assert multiline, f"{path.stem}: expected a multi-line inter-section bundle"
-    assert all(r.offsets_applied for rs in multiline.values() for r in rs)
+    assert all(
+        r.offset_regime is OffsetRegime.BAKED for rs in multiline.values() for r in rs
+    )

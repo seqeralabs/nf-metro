@@ -23,7 +23,11 @@ import pytest
 
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.bundle import (
     build_concentric_bundle,
     build_tapered_bundle,
@@ -65,7 +69,7 @@ def test_tapered_rigid_matches_concentric() -> None:
         assert t.line_id == r.line_id
         assert t.points == r.points
         assert t.curve_radii == r.curve_radii
-        assert t.offsets_applied == r.offsets_applied
+        assert t.offset_regime is r.offset_regime
 
 
 def test_tapered_lands_on_both_offsets() -> None:
@@ -95,7 +99,7 @@ def test_tapered_lands_on_both_offsets() -> None:
     assert by_line["std"].points[1][0] == pytest.approx(20.0 - 1.5)
     assert by_line["leg"].points[1][0] == pytest.approx(20.0 + 1.5)
     # Baked, so the renderer must not re-apply or deform.
-    assert all(r.offsets_applied for r in routes)
+    assert all(r.offset_regime is OffsetRegime.BAKED for r in routes)
     assert all(r.normalize_exempt for r in routes)
 
 

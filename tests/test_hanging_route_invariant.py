@@ -27,7 +27,11 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.invariants import (
     CurveInvariantError,
     assert_render_curve_invariants,
@@ -84,7 +88,7 @@ def _plant_hanging_tail(graph, routes):
             continue
         far = (r.points[-1][0] + 1000.0, r.points[-1][1] + 1000.0)
         routes[i] = dataclasses.replace(
-            r, points=[*r.points[:-1], far], offsets_applied=True
+            r, points=[*r.points[:-1], far], offset_regime=OffsetRegime.BAKED
         )
         return i
     raise AssertionError("no ordinary route available to plant a hanging tail")

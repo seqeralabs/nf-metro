@@ -316,7 +316,7 @@ def routes_through_unrelated_sections(
     """
     from nf_metro.layout.geometry import segment_intersects_bbox
     from nf_metro.layout.routing import compute_station_offsets, route_edges
-    from nf_metro.render.svg import apply_route_offsets
+    from nf_metro.layout.routing.common import apply_route_offsets
 
     if offsets is None:
         offsets = compute_station_offsets(graph)

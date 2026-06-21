@@ -24,7 +24,11 @@ import pytest
 
 from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.context import _build_routing_context
 from nf_metro.layout.routing.intra_handlers import _route_intra_section
 from nf_metro.layout.routing.invariants import (
@@ -159,4 +163,4 @@ def test_intra_perp_exit_natural_render_is_clean(path: Path) -> None:
     arm_targets = {t for (_s, t) in _arm_groups(graph)}
     arm_routes = [r for r in routes if r.edge.target in arm_targets]
     assert arm_routes, f"{path.stem}: expected routed perp-exit arm edges"
-    assert all(r.offsets_applied for r in arm_routes)
+    assert all(r.offset_regime is OffsetRegime.BAKED for r in arm_routes)

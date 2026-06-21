@@ -20,7 +20,11 @@ import pytest
 
 from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
     check_bundle_order_preserved,
@@ -107,4 +111,4 @@ def test_perp_exit_over_routes_are_offset_baked(path: Path) -> None:
     graph, _offsets, routes = _route(path)
     over = _over_routes(graph, routes)
     assert over, f"{path.stem}: expected at least one up-and-over perp-exit route"
-    assert all(r.offsets_applied for r in over)
+    assert all(r.offset_regime is OffsetRegime.BAKED for r in over)

@@ -19,7 +19,9 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.routing.common import (
+    OffsetRegime,
     RoutedPath,
+    apply_route_offsets,
 )
 from nf_metro.layout.routing.context import (
     _RoutingCtx,
@@ -76,7 +78,7 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     fork_groups: dict[str, list[RoutedPath]] = defaultdict(list)
     join_groups: dict[str, list[RoutedPath]] = defaultdict(list)
     for rp in routes:
-        if not _is_diagonal_route(rp) or rp.offsets_applied:
+        if not _is_diagonal_route(rp) or rp.offset_regime is OffsetRegime.BAKED:
             continue
         if rp.edge.source in ctx.fork_stations:
             fork_groups[rp.edge.source].append(rp)
@@ -236,14 +238,15 @@ def _apply_diagonal_spread(
     rep = group[0]
     # Baked routes carry their offset along X already, so the complementary
     # spread runs along Y; render-time routes are the mirror image.
-    ai = 1 if rep.offsets_applied else 0
+    baked = rep.offset_regime is OffsetRegime.BAKED
+    ai = 1 if baked else 0
     bi = 1 - ai
     d_a = rep.points[2][ai] - rep.points[1][ai]
     d_b = rep.points[2][bi] - rep.points[1][bi]
     sign = 1.0 if d_a >= 0 else -1.0
     hypot = math.hypot(d_a, d_b)
 
-    if rep.offsets_applied:
+    if baked:
         deltas = _baked_spread_deltas(group, offsets, center, d_a, d_b, hypot, bi)
     else:
         # A Y-only offset under-separates a diagonal: its perpendicular component
@@ -794,8 +797,6 @@ def _clear_bypass_v_label_strikes(routes: list[RoutedPath], ctx: _RoutingCtx) ->
     obstacles = ctx.graph.bypass_label_obstacles
     if not obstacles or ctx.station_offsets is None:
         return
-
-    from nf_metro.render.svg import apply_route_offsets
 
     legs_by_v: dict[str, list[RoutedPath]] = defaultdict(list)
     for r in routes:

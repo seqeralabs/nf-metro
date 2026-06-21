@@ -21,7 +21,11 @@ import pytest
 
 from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import route_tapered_anchored
 from nf_metro.layout.routing.invariants import (
@@ -96,7 +100,7 @@ def test_bypass_routes_are_offset_baked(path: Path) -> None:
     _graph, _offsets, routes = _route(path)
     bypasses = _bypass_routes(routes)
     assert bypasses, f"{path.stem}: expected at least one U-shaped bypass route"
-    assert all(r.offsets_applied for r in bypasses)
+    assert all(r.offset_regime is OffsetRegime.BAKED for r in bypasses)
 
 
 def test_single_line_bypass_descent_turns_tight() -> None:

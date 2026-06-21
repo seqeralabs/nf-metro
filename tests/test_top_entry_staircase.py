@@ -11,8 +11,9 @@ that construction, across every fixture whose routing reaches the handler:
   radius that nests non-concentrically and pinches the bundle);
 * co-travelling lines keep a constant side-of-travel order (no flip/crossing);
 * the always-on render-path guard accepts the routes;
-* each staircase route bakes its per-line offset (``offsets_applied``), the
-  signature of a builder-fanned bundle rather than a renderer-offset one.
+* each staircase route bakes its per-line offset
+  (:attr:`OffsetRegime.BAKED`), the signature of a builder-fanned bundle
+  rather than a renderer-offset one.
 
 See issue #793.
 """
@@ -24,7 +25,11 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
     check_bundle_order_preserved,
@@ -81,14 +86,14 @@ def test_top_entry_routes_are_builder_fanned(rel: str) -> None:
     """Each staircase route bakes its offset, as a centreline-built bundle does.
 
     A bundle fanned by the centreline builder bakes each line's per-line offset
-    into its points (``offsets_applied``); a route that defers the offset to the
-    renderer leaves the flag unset.
+    into its points (:attr:`OffsetRegime.BAKED`); a route that defers the offset
+    to the renderer stays :attr:`OffsetRegime.DEFERRED`.
     """
     graph, _offsets, routes = _routed(rel)
     staircases = _top_entry_routes(graph, routes)
     assert staircases, f"{rel}: expected at least one TOP-entry route"
     for rp in staircases:
-        assert rp.offsets_applied, (
+        assert rp.offset_regime is OffsetRegime.BAKED, (
             f"{rel}: {rp.line_id} {rp.edge.source}->{rp.edge.target} "
             "TOP-entry route did not bake its offset (not builder-fanned)"
         )

@@ -24,7 +24,7 @@ from nf_metro.layout.constants import (
     RAIL_TERMINUS_FAN_LEAD,
 )
 from nf_metro.layout.routing.bundle import build_tapered_bundle
-from nf_metro.layout.routing.common import RoutedPath
+from nf_metro.layout.routing.common import OffsetRegime, RoutedPath
 from nf_metro.parser.model import Edge, MetroGraph, Station
 
 
@@ -275,7 +275,7 @@ def route_rail_edges(
                 edge=edge,
                 line_id=edge.line_id,
                 points=points,
-                offsets_applied=True,
+                offset_regime=OffsetRegime.BAKED,
             )
         )
     return routes

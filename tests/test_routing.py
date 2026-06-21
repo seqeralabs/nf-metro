@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 
@@ -410,4 +414,4 @@ def test_around_and_corridor_routes_built_from_centreline(fixture, handler):
             f"expected 4 derived corner radii, got {r.curve_radii}"
         )
         assert all(c > 0 for c in r.curve_radii)
-        assert r.offsets_applied
+        assert r.offset_regime is OffsetRegime.BAKED

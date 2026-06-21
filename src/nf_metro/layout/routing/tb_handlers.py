@@ -18,6 +18,7 @@ from nf_metro.layout.routing.centrelines import (
     gather_member_edges,
 )
 from nf_metro.layout.routing.common import (
+    OffsetRegime,
     RoutedPath,
 )
 from nf_metro.layout.routing.context import (
@@ -82,7 +83,7 @@ def _route_tb_internal(
         edge=edge,
         line_id=edge.line_id,
         points=[(sx, sy), (tx, ty)],
-        offsets_applied=True,
+        offset_regime=OffsetRegime.BAKED,
     )
 
 
@@ -158,7 +159,7 @@ def _route_tb_diagonal(
         edge=edge,
         line_id=edge.line_id,
         points=[(sx, sy), (sx, diag_start_y), (tx, diag_end_y), (tx, ty)],
-        offsets_applied=True,
+        offset_regime=OffsetRegime.BAKED,
     )
 
 
@@ -371,7 +372,7 @@ def _route_perp_entry(
             edge=edge,
             line_id=edge.line_id,
             points=[(x, sy), (x, tgt.y)],
-            offsets_applied=True,
+            offset_regime=OffsetRegime.BAKED,
         )
 
     _members, line_ids, edge_by_line = gather_member_edges(graph, edge)
