@@ -1,0 +1,15 @@
+%%metro title: Post-convergence trunk
+%%metro line: fastq | FASTQ | #2db572
+%%metro line: ubam | uBAM | #0570b0
+%%metro line: bam | BAM | #f5c542
+
+graph LR
+    subgraph prep [Prep]
+        fq[FQ]
+        ub[UB]
+        mm[minimap2]
+        st[samtools]
+        fq -->|fastq| mm
+        ub -->|ubam| mm
+        mm -->|bam| st
+    end

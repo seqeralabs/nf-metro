@@ -745,3 +745,95 @@ def exit_run_corridor_clear(
         if lo + SAME_COORD_TOLERANCE < st.x < hi - SAME_COORD_TOLERANCE:
             return False
     return True
+
+
+def _is_fanout_junction(graph: MetroGraph, jid: str) -> bool:
+    """Whether *jid* is a fan-out junction whose Y follows its exit port.
+
+    A stricter, single-junction variant of
+    :func:`nf_metro.layout.routing.invariants.fanout_junctions`: that one keys
+    purely on a single distinct upstream source, this one additionally requires
+    every successor to be an entry port so the anchoring caller only claims the
+    plain exit -> junction -> entries shape.  Such a junction takes its Y from
+    the single exit-port predecessor (see :func:`_position_junctions`), so
+    anchoring that exit drives the junction's row and the fan-out risers fall in
+    the inter-section gap rather than the climb falling inside the section.
+    """
+    succ = list(graph.edges_from(jid))
+    if not succ:
+        return False
+    if any((tp := graph.ports.get(e.target)) is None or not tp.is_entry for e in succ):
+        return False
+    return len({e.source for e in graph.edges_to(jid)}) == 1
+
+
+def _exit_anchorable_downstream(
+    graph: MetroGraph, exit_port_id: str, junction_ids: set[str]
+) -> bool:
+    """Whether an exit's downstream lets its level change defer to the gap.
+
+    True when every outgoing edge lands on an entry port directly, or on a
+    fan-out junction (whose Y follows this exit).  A merge junction on the far
+    side pins its own Y to the downstream entry, so the exit aligns there
+    instead and keeps its downstream-aligned placement.
+    """
+    edges = graph.edges_from(exit_port_id)
+    saw_target = False
+    for e in edges:
+        if e.target in junction_ids:
+            if not _is_fanout_junction(graph, e.target):
+                return False
+        else:
+            tp = graph.ports.get(e.target)
+            if tp is None or not tp.is_entry:
+                return False
+        saw_target = True
+    return saw_target
+
+
+def flow_exit_carrier_anchor(
+    graph: MetroGraph,
+    exit_port_id: str,
+    section: Section,
+    junction_ids: set[str],
+) -> tuple[float, list[str]] | None:
+    """Carrier row a flow-aligned exit should anchor to, with its carriers.
+
+    Returns ``(carrier_y, carrier_ids)`` when a LEFT/RIGHT exit on a non-fold
+    LR/RL section runs into a downstream entry port -- directly or through a
+    fan-out junction -- over a clear corridor and its carriers anchor it to a
+    shared row; ``None`` otherwise.  Anchoring it there turns the in-section
+    run horizontal and moves the level change to a riser in the inter-section
+    gap.
+
+    The carriers anchor when they are either a single internal station or a
+    *parallel bundle*: several stations sharing one row, one per distinct
+    carried line, so each line rides its own offset track to the port.  A
+    bypass bundle (several stations feeding one line) is excluded -- the
+    farther feeder shares the nearer carrier's track and would run straight
+    through it.  A fold section, a merge junction on the far side, or a
+    corridor blocked by another station keep the downstream-aligned placement.
+    """
+    if _is_fold_section(section) or section.direction not in ("LR", "RL"):
+        return None
+    if not _exit_anchorable_downstream(graph, exit_port_id, junction_ids):
+        return None
+    carrier_ys: dict[str, float] = {}
+    exit_lines: set[str] = set()
+    for e in graph.edges_to(exit_port_id):
+        s = graph.stations.get(e.source)
+        if s is not None and not s.is_port and s.section_id == section.id:
+            carrier_ys[e.source] = s.y
+            exit_lines.add(e.line_id)
+    if not carrier_ys:
+        return None
+    ys = list(carrier_ys.values())
+    if len(carrier_ys) > 1:
+        share_row = max(ys) - min(ys) <= SAME_COORD_TOLERANCE
+        one_line_per_carrier = len(carrier_ys) == len(exit_lines)
+        if not (share_row and one_line_per_carrier):
+            return None
+    carrier_ids = list(carrier_ys)
+    if not exit_run_corridor_clear(graph, exit_port_id, section, carrier_ids):
+        return None
+    return min(ys), carrier_ids

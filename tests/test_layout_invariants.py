@@ -42,7 +42,7 @@ from nf_metro.layout.engine import (
     compute_min_y_spacing,
     is_loop_side_branch_station,
 )
-from nf_metro.layout.geometry import segment_intersects_bbox
+from nf_metro.layout.geometry import lanes_run_along_y, segment_intersects_bbox
 from nf_metro.layout.labels import (
     _label_bbox,
     find_wrapped_label_trunk_strikes,
@@ -51,7 +51,7 @@ from nf_metro.layout.labels import (
 )
 from nf_metro.layout.phases._common import (
     _grow_section_bbox_upward,
-    exit_run_corridor_clear,
+    flow_exit_carrier_anchor,
 )
 from nf_metro.layout.phases.bbox import (
     _section_band_is_empty,
@@ -856,25 +856,27 @@ def test_merge_port_line_keeps_side_on_outgoing_run(fixture, line_id, row_y):
 # ---------------------------------------------------------------------------
 
 
-def _single_connector_flow_exit_ports(
+def _carrier_anchored_flow_exit_ports(
     graph: MetroGraph,
-) -> list[tuple[str, str, float]]:
-    """Yield ``(port_id, carrier_id, carrier_y)`` for the exit ports this
+) -> list[tuple[str, list[str], float]]:
+    """Yield ``(port_id, carrier_ids, carrier_y)`` for the exit ports this
     invariant covers: a flow-aligned (LEFT/RIGHT) exit on a non-fold LR/RL
-    section, fed by a single internal station, that runs directly into a
-    downstream entry port over a clear corridor.
+    section that runs directly into a downstream entry port over a clear
+    corridor and anchors to a shared carrier row -- a single carrying station,
+    or a parallel bundle of stations sharing one row with one distinct line
+    each.
 
     Excluded on purpose:
       - fold sections (``grid_row_span > 1``) place exits via dedicated
         fold logic with their own contract;
-      - multi-feeder exits (a bypass bundle or fan-in) - several stations
-        feeding one exit anchor it off the carrier row by design;
+      - bypass bundles (several stations feeding one line) and multi-row
+        fan-ins, which anchor off the carrier row by design;
       - exits feeding a fan-out / merge junction, where aligning the exit to
         the junction's row (not the carrying station) is correct;
       - exits whose carrier-row corridor to the port is blocked by another
         station (e.g. an off-track output), which the run would plough through.
     """
-    out: list[tuple[str, str, float]] = []
+    out: list[tuple[str, list[str], float]] = []
     junction_ids = graph.junction_ids
     for pid, port in graph.ports.items():
         if port.is_entry:
@@ -882,51 +884,33 @@ def _single_connector_flow_exit_ports(
         if port.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
         sec = graph.sections.get(port.section_id)
-        if sec is None or sec.direction not in ("LR", "RL"):
+        if sec is None:
             continue
-        if sec.grid_row_span > 1:
+        anchor = flow_exit_carrier_anchor(graph, pid, sec, junction_ids)
+        if anchor is None:
             continue
-        downstream = list(graph.edges_from(pid))
-        if any(e.target in junction_ids for e in downstream):
-            continue
-        if not any(
-            (p := graph.ports.get(e.target)) is not None and p.is_entry
-            for e in downstream
-        ):
-            continue
-        carriers = {
-            e.source
-            for e in graph.edges_to(pid)
-            if (s := graph.stations.get(e.source)) is not None
-            and not s.is_port
-            and s.section_id == sec.id
-        }
-        if len(carriers) != 1:
-            continue
-        carrier = next(iter(carriers))
-        if not exit_run_corridor_clear(graph, pid, sec, [carrier]):
-            continue
-        out.append((pid, carrier, graph.stations[carrier].y))
+        carrier_y, carrier_ids = anchor
+        out.append((pid, carrier_ids, carrier_y))
     return out
 
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_flow_exit_port_anchors_to_carrying_station(fixture):
-    """A flow-aligned exit fed by a single internal station and running
-    straight into a downstream entry port must sit on that station's row.
+    """A flow-aligned exit anchoring to a shared carrier row must sit on that
+    row, whether one station feeds it or a parallel bundle shares the row.
 
     When the exit instead aligns to the downstream entry's row while its
-    carrying station sits elsewhere, the boundary run climbs to the port and
-    renders as a shallow diagonal inside the section instead of a clean
-    horizontal with one riser in the inter-section gap.
+    carriers sit elsewhere, the boundary run climbs to the port and renders as
+    a shallow diagonal inside the section instead of a clean horizontal with
+    one riser in the inter-section gap.
     """
     graph = _layout(fixture)
-    for pid, carrier, carrier_y in _single_connector_flow_exit_ports(graph):
+    for pid, carrier_ids, carrier_y in _carrier_anchored_flow_exit_ports(graph):
         port_y = graph.stations[pid].y
         assert abs(port_y - carrier_y) <= _Y_TOL, (
-            f"{fixture}: exit port {pid} y={port_y:.1f} is off its carrying "
-            f"station {carrier} y={carrier_y:.1f}; the boundary run will read "
-            f"as a diagonal instead of a clean riser"
+            f"{fixture}: exit port {pid} y={port_y:.1f} is off its carrier "
+            f"row y={carrier_y:.1f} (carriers {sorted(carrier_ids)}); the "
+            f"boundary run will read as a diagonal instead of a clean riser"
         )
 
 
@@ -3419,11 +3403,11 @@ def test_no_kink_at_section_boundary(fixture):
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     rows = _row_lr_sections(graph)
-    # Exits that legitimately sit on their single carrying station's row run
-    # one intentional riser to the downstream entry rather than a trunk that
-    # should be flat across the boundary, so they are not "kinks" here.
+    # Exits that legitimately sit on their carrier row run one intentional
+    # riser to the downstream entry rather than a trunk that should be flat
+    # across the boundary, so they are not "kinks" here.
     carrier_anchored = {
-        pid for pid, _carrier, _y in _single_connector_flow_exit_ports(graph)
+        pid for pid, _carriers, _y in _carrier_anchored_flow_exit_ports(graph)
     }
     for row, sections in rows.items():
         sorted_secs = sorted(sections, key=lambda s: s.grid_col)
@@ -7329,6 +7313,83 @@ def test_trunk_exit_follows_reconvergence(fixture):
     assert tested >= 1, (
         f"{fixture}: no pass-through section with a reconvergence-fed "
         f"exit port matched the precondition"
+    )
+
+
+def _real_in_section(graph: MetroGraph, sid: str, section_id: str) -> bool:
+    """True for a visible, on-track station belonging to *section_id*."""
+    s = graph.stations.get(sid)
+    return (
+        s is not None
+        and not s.is_port
+        and not s.is_hidden
+        and not s.off_track
+        and s.section_id == section_id
+    )
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_post_convergence_trunk_continues(fixture):
+    """The single in-section successor of an in-section convergence station
+    sits on that station's row.
+
+    When two or more in-section branches merge onto a station inside a
+    horizontal (LR/RL) section, and that merge station has exactly one
+    in-section linear successor, the successor must share the merge station's
+    Y.  Otherwise the merged trunk dives straight back down onto one of the
+    incoming branch rows, kinking the post-merge trunk (#946).
+    """
+    graph = _layout(fixture)
+    for sid, station in graph.stations.items():
+        if not _real_in_section(graph, sid, station.section_id):
+            continue
+        sec = graph.sections.get(station.section_id)
+        if sec is None or not lanes_run_along_y(sec.direction):
+            continue
+        preds = {
+            e.source
+            for e in graph.edges_to(sid)
+            if _real_in_section(graph, e.source, sec.id)
+        }
+        if len(preds) != 1:
+            continue
+        merge = next(iter(preds))
+        succs = {
+            e.target
+            for e in graph.edges_from(merge)
+            if _real_in_section(graph, e.target, sec.id)
+        }
+        if succs != {sid}:
+            continue
+        merge_preds = {
+            e.source
+            for e in graph.edges_to(merge)
+            if _real_in_section(graph, e.source, sec.id)
+        }
+        if len(merge_preds) < 2:
+            continue
+        merge_y = graph.stations[merge].y
+        assert abs(station.y - merge_y) <= GUARD_TOLERANCE, (
+            f"{fixture} section {sec.id}: post-convergence station {sid!r} "
+            f"detached from merge {merge!r} (station_y={station.y:.1f}, "
+            f"merge_y={merge_y:.1f})"
+        )
+
+
+def test_post_convergence_trunk_continues_repro():
+    """Focused lock for #946 on the minimal repro: the merge ``mm`` sits on
+    the trunk and its sole successor ``st`` continues on that same row rather
+    than dropping onto the lower ``ub`` input branch row.
+    """
+    graph = _layout("topologies/post_convergence_trunk.mmd")
+    mm_y = graph.stations["mm"].y
+    st_y = graph.stations["st"].y
+    fq_y = graph.stations["fq"].y
+    assert abs(st_y - mm_y) <= GUARD_TOLERANCE, (
+        f"successor st (y={st_y:.1f}) detached from merge mm (y={mm_y:.1f})"
+    )
+    assert abs(mm_y - fq_y) <= GUARD_TOLERANCE, (
+        f"merge mm (y={mm_y:.1f}) not on the entry trunk row fq (y={fq_y:.1f})"
     )
 
 

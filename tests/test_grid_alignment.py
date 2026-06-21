@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.routing import route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
@@ -148,6 +149,52 @@ class TestIssueK:
         assert abs(pe.y - carrier.y) < 1.0, (
             f"preprocess exit y={pe.y} off its carrier liftover y={carrier.y}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue 938: multi-carrier off-row exit feeding a fan-out junction
+# ---------------------------------------------------------------------------
+
+
+class TestIssue938:
+    """A multi-carrier exit whose carriers share a row anchors on that row, so
+    the parallel bundle runs flat inside the section and the fan-out risers fall
+    in the inter-section gap instead of climbing diagonally to the port."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        self.g = _load("topologies/multicarrier_offrow_exit_climb")
+
+    def _fanout_junction(self):
+        return next(
+            j
+            for j in self.g.junction_ids
+            if any(e.source == "prep__exit_right_0" for e in self.g.edges_to(j))
+        )
+
+    def test_exit_and_junction_sit_on_carrier_row(self):
+        exit_st = self.g.stations["prep__exit_right_0"]
+        carrier_y = self.g.stations["samtools_sort_index"].y
+        assert abs(self.g.stations["mosdepth"].y - carrier_y) < 1.0
+        assert abs(exit_st.y - carrier_y) < 1.0, (
+            f"exit y={exit_st.y} off carrier row y={carrier_y}"
+        )
+        # The fan-out junction takes its Y from the exit, so it follows onto
+        # the carrier row too; the risers then happen past it in the gap.
+        assert abs(self.g.stations[self._fanout_junction()].y - carrier_y) < 1.0
+
+    def test_in_section_carrier_runs_are_flat(self):
+        carrier_y = self.g.stations["samtools_sort_index"].y
+        sec = self.g.sections["prep"]
+        box_right = sec.bbox_x + sec.bbox_w
+        for r in route_edges(self.g):
+            if r.edge.target != "prep__exit_right_0":
+                continue
+            inside = [(x, y) for x, y in r.points if x <= box_right + 1.0]
+            ys = {round(y, 1) for _x, y in inside}
+            assert ys == {round(carrier_y, 1)}, (
+                f"{r.edge.line_id} climbs inside the section: {inside}"
+            )
 
 
 # ---------------------------------------------------------------------------

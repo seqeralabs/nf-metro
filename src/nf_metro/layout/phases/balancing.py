@@ -16,14 +16,14 @@ from nf_metro.layout.phases._common import (
     _ref_y,
     _section_bundle_lines,
     _section_lr_port_anchor_y,
-    exit_run_corridor_clear,
+    flow_exit_carrier_anchor,
 )
 from nf_metro.layout.phases.bbox import (
     _lift_would_cause_uturn,
     _loop_corner_x,
     _push_lower_rows_after_bbox_grow,
 )
-from nf_metro.layout.phases.ports import _exit_feeds_direct_entry, _set_port_y
+from nf_metro.layout.phases.ports import _set_port_y
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
 
@@ -79,12 +79,10 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
 
         port_set = section.port_ids
         src_ys: set[float] = set()
-        src_ids: list[str] = []
         for edge in graph.edges_to(port_id):
             src = graph.stations.get(edge.source)
             if src and not src.is_port and edge.source not in port_set:
                 src_ys.add(round(src.y, 1))
-                src_ids.append(edge.source)
 
         # Fan-in exits (multiple distinct internal source Ys) want to
         # keep their centred-midpoint convergence Y, so don't move the
@@ -98,20 +96,16 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
                 _set_port_y(graph, eid, port_st.y)
             continue
 
-        # A single carrying station already sitting on its own row anchors
-        # the exit there: keep it, so the level change to the downstream
-        # entry becomes one riser in the inter-section gap rather than a
-        # diagonal dragging the exit down off its station.  Requires exactly
-        # one feeding station (several on a shared row form a bypass bundle).
+        # Carriers already sitting on their shared row anchor the exit there:
+        # keep it, so the level change to the downstream entry becomes a riser
+        # in the inter-section gap rather than a diagonal dragging the exit off
+        # its row.  Covers a single carrying station or a parallel bundle, and
+        # exits feeding a fan-out junction (see ``flow_exit_carrier_anchor``).
         # Lift the entry up to meet it as well when all of the entry's own
         # consumers share that row; an entry fanning to several rows is left.
-        if (
-            len(set(src_ids)) == 1
-            and abs(port_st.y - next(iter(src_ys))) < SAME_COORD_TOLERANCE
-            and _exit_feeds_direct_entry(graph, port_id, junction_ids)
-            and exit_run_corridor_clear(graph, port_id, section, src_ids)
-        ):
-            carrier_y = next(iter(src_ys))
+        anchor = flow_exit_carrier_anchor(graph, port_id, section, junction_ids)
+        if anchor is not None and abs(port_st.y - anchor[0]) < SAME_COORD_TOLERANCE:
+            carrier_y, _carrier_ids = anchor
             for eid in entry_ids:
                 ep_st = graph.stations.get(eid)
                 if ep_st is None or abs(ep_st.y - carrier_y) < SAME_COORD_TOLERANCE:
