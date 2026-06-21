@@ -1,0 +1,18 @@
+%%metro title: TB Trunk Through Fan
+%%metro style: dark
+%%metro line: a | A | #e63946
+%%metro line: b | B | #0570b0
+
+%%metro grid: work | 0,0
+
+graph LR
+    subgraph work [Work]
+        %%metro direction: TB
+        hub[Split]
+        main[Main]
+        sink[Collect]
+        branch[Branch]
+        hub -->|a| main
+        main -->|a| sink
+        hub -->|b| branch
+    end

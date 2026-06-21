@@ -41,6 +41,7 @@ from nf_metro.layout.constants import (
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
 )
+from nf_metro.layout.geometry import AxisFrame, axis_split, lanes_run_along_y
 from nf_metro.layout.phases.guards import GuardSpec
 from nf_metro.layout.routing.common import (
     Direction,
@@ -1692,6 +1693,94 @@ def _first_axis_crossing(
 
 
 @dataclass(frozen=True)
+class TrunkContinuationJog:
+    """A same-lane continuation edge whose route jogs off its lane.
+
+    Within one section, an edge between two non-port stations that share the
+    section's lane-axis coordinate (the trunk column for a TB/BT section, the
+    trunk row for an LR/RL one) is a straight continuation along the flow axis.
+    Its routed line must keep a constant lane coordinate; a change means the
+    line's per-station offset shifted across the edge so the router drew a
+    diagonal where a straight run belongs (issue #929).
+    """
+
+    line_id: str
+    source: str
+    target: str
+    section_id: str
+    lane_lo: float
+    lane_hi: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"trunk-continuation jog: line {self.line_id!r} on edge "
+            f"{self.source}->{self.target} in section {self.section_id!r} shares a "
+            f"lane at both ends but its route spans lane "
+            f"{self.lane_lo:.1f}..{self.lane_hi:.1f} "
+            f"(>{COORD_TOLERANCE:.1f}px) instead of running straight"
+        )
+
+
+def check_trunk_continuation_drops_straight(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[TrunkContinuationJog]:
+    """Return same-lane continuation edges whose route jogs off its lane.
+
+    Within a section, an edge between two non-port stations sharing the
+    section's lane-axis coordinate (X for TB/BT, Y for LR/RL) continues straight
+    along the flow axis.  Its line must keep a constant lane coordinate -- a
+    sibling peeling to another lane is a different edge, excluded by the
+    shared-lane gate.  A jog means the continuing line's offset changed across
+    the edge, which happens on TB/BT where the offset is reversed against a
+    per-station bundle max that shrinks at a solo child (issue #929).
+    """
+    route_by_edge = {(rp.edge.source, rp.edge.target, rp.line_id): rp for rp in routes}
+    violations: list[TrunkContinuationJog] = []
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if src is None or tgt is None or src.is_port or tgt.is_port:
+            continue
+        sec_id = src.section_id
+        if sec_id is None or sec_id != tgt.section_id:
+            continue
+        section = graph.sections.get(sec_id)
+        if section is None:
+            continue
+        # The jog is a property of a lane drawn reversed against a per-station
+        # bundle max (the vertical-flow axis).  Sections that stack lanes on Y
+        # (LR/RL) draw the lane un-reversed, and rail sections bake absolute
+        # lane Ys, so neither exhibits it.
+        if lanes_run_along_y(section.direction) or graph.is_rail_section(sec_id):
+            continue
+        primary_axis, _secondary_axis = AxisFrame.axes_for_direction(section.direction)
+        src_lane = axis_split(primary_axis, (src.x, src.y))[1]
+        tgt_lane = axis_split(primary_axis, (tgt.x, tgt.y))[1]
+        if abs(src_lane - tgt_lane) >= COORD_TOLERANCE:
+            continue
+        rp = route_by_edge.get((edge.source, edge.target, edge.line_id))
+        if rp is None or len(rp.points) < 2:
+            continue
+        lanes = [axis_split(primary_axis, pt)[1] for pt in rp.points]
+        lane_lo, lane_hi = min(lanes), max(lanes)
+        if lane_hi - lane_lo >= COORD_TOLERANCE:
+            violations.append(
+                TrunkContinuationJog(
+                    line_id=edge.line_id,
+                    source=edge.source,
+                    target=edge.target,
+                    section_id=sec_id,
+                    lane_lo=lane_lo,
+                    lane_hi=lane_hi,
+                )
+            )
+    return violations
+
+
+@dataclass(frozen=True)
 class DoglegCrossesExemptTrunk:
     """A non-exempt trunk doglegged off an exempt run that crosses it.
 
@@ -3170,6 +3259,16 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_partial_branch_offset_gaps, "B"),
     _check_spec(check_no_split_same_line_fanout_descents, "B"),
     _check_spec(check_no_distinct_line_fanout_crossing, "B"),
+    _check_spec(
+        check_trunk_continuation_drops_straight,
+        "B",
+        issue_pin=("#929",),
+        narrow_reason=(
+            "Scoped to TB sections, the only axis that draws its lane reversed "
+            "against a per-station bundle max; LR/RL draw the lane un-reversed "
+            "and keep a fan-out continuation on the trunk via base priority."
+        ),
+    ),
     _check_spec(check_no_dogleg_crosses_exempt_trunk, "B"),
     _check_spec(check_stacked_elbow_clearance, "B"),
     _check_spec(check_perp_entry_boundary_consistent, "B"),

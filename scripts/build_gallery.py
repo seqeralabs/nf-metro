@@ -602,6 +602,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "`_route_tb_internal` diagonal arm) (#917).",
     ),
     (
+        "tb_trunk_through_fan",
+        TOPOLOGIES_DIR,
+        "An asymmetric fan-out inside a `%%metro direction: TB` section: one "
+        "line continues straight down the trunk column to its child while a "
+        "sibling peels off to another column.  The continuation is slotted onto "
+        "the trunk so it drops straight instead of jogging one offset step "
+        "(#929).",
+    ),
+    (
         "around_below_ep_col_gt0",
         TOPOLOGIES_DIR,
         "A two-line bundle looping around below the canvas into a non-zero-"

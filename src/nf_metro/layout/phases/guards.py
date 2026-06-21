@@ -3024,6 +3024,28 @@ def _guard_no_distinct_line_fanout_crossing(
     )
 
 
+def _guard_trunk_continuation_drops_straight(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: a TB fan-out's in-lane continuation drops straight.
+
+    Wraps :func:`check_trunk_continuation_drops_straight`: where one line of a
+    TB fan-out continues along the trunk lane while a sibling peels off, the
+    continuing line must run straight rather than jog by one step off the trunk.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_trunk_continuation_drops_straight,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_trunk_continuation_drops_straight, offsets, routes
+    )
+
+
 def _guard_no_dogleg_crosses_exempt_trunk(
     graph: MetroGraph,
     phase: str,
@@ -3883,6 +3905,17 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         _guard_no_distinct_line_fanout_crossing,
         "B",
         needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_trunk_continuation_drops_straight,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+        issue_pin=("#929",),
+        narrow_reason=(
+            "Scoped to TB sections, the only axis that draws its lane reversed "
+            "against a per-station bundle max; LR/RL draw the lane un-reversed "
+            "and keep a fan-out continuation on the trunk via base priority."
+        ),
     ),
     GuardSpec(
         _guard_no_dogleg_crosses_exempt_trunk,
