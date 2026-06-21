@@ -803,8 +803,7 @@ def _route_bottom_exit_junction(
 
     members, _, tgt_center = gather_tapered_bundle(ctx, edge)
     exit_offs = [exit_x_offset(line_id) for _e, line_id, _s, _t in members]
-    mean_exit_x = sum(exit_offs) / len(exit_offs)
-    vx = src.x + mean_exit_x
+    vx = src.x + sum(exit_offs) / len(exit_offs)
     hy = tgt.y + tgt_center
     # Each line keeps its source offset on both legs: the channel is anchored
     # on the exit fan, so a per-end taper would detach the descent from the

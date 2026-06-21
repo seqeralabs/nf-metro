@@ -401,10 +401,101 @@ def _apply_section_line_order(
                 ctx.offsets[(sid_s, lid)] = p * ctx.offset_step
 
 
+def _share_flat_frame(ctx: _OffsetCtx, sec_a: str, sec_b: str) -> bool:
+    """Whether two sections belong to one flat-frame component.
+
+    Members of a frame pass their common lines straight across the boundaries
+    between them on shared trunk Ys, so their bundles are coordinated rather
+    than anchored independently.  Reads the components
+    :func:`_reindex_local_priority_gaps` records on ``ctx.frame_roots``.
+    """
+    roots = ctx.frame_roots
+    return sec_a in roots and roots.get(sec_a) == roots.get(sec_b)
+
+
+def _section_line_offsets(ctx: _OffsetCtx, sec_id: str) -> dict[str, float]:
+    """Offset of each line on section *sec_id* from a representative station
+    (offsets are per-line constant within a section)."""
+    section = ctx.graph.sections.get(sec_id)
+    result: dict[str, float] = {}
+    if section is None:
+        return result
+    for sid_s in section.station_ids:
+        if ctx.graph.stations[sid_s].is_port:
+            continue
+        for lid in ctx.graph.station_lines(sid_s):
+            result.setdefault(lid, ctx.offsets.get((sid_s, lid), 0.0))
+    return result
+
+
+def _align_reconvergence_to_feeder(
+    ctx: _OffsetCtx,
+    sec_id: str,
+    continuing: list[str],
+    returning: list[str],
+    feeder: str,
+) -> None:
+    """Pin a section's continuing lines onto their flat-frame feeder's offsets.
+
+    The continuing lines run level out of *feeder*, so they must keep the
+    feeder's trunk Y across the boundary; stack the returning lines just past
+    the band (their final side is settled by the perpendicular merge re-slot).
+    """
+    feeder_off = _section_line_offsets(ctx, feeder)
+    if not all(lid in feeder_off for lid in continuing):
+        return
+    new_off = {lid: feeder_off[lid] for lid in continuing}
+    band_bottom = max(new_off.values())
+    for rank, lid in enumerate(returning, start=1):
+        new_off[lid] = band_bottom + rank * ctx.offset_step
+    for sid_s in ctx.graph.sections[sec_id].station_ids:
+        for lid in ctx.graph.station_lines(sid_s):
+            if lid in new_off:
+                ctx.offsets[(sid_s, lid)] = new_off[lid]
+
+
+def _order_reconvergence_by_feeder_row(
+    ctx: _OffsetCtx, sec_id: str, line_feeder: dict[str, str]
+) -> None:
+    """Order a section's bundle by the grid row each line is fed from.
+
+    When several single-line feeders converge from distinct rows, the merge is
+    crossing-free only if the bundle stacks in feeder-row order (nearer row on
+    the near slot); declaration order can interleave a deeper feeder between two
+    shallower ones.  Scoped to TB sections (whose bundle stacks across the flow
+    in row order); LR/RL merges keep the approach-side handling.  Only fires when
+    the feeders span at least two rows.
+    """
+    if sec_id not in ctx.tb_sections:
+        return
+    graph = ctx.graph
+    feeder_row: dict[str, int] = {}
+    for lid, fid in line_feeder.items():
+        section = graph.sections.get(fid)
+        if section is not None:
+            feeder_row[lid] = section.grid_row
+    if len(set(feeder_row.values())) < 2:
+        return
+    sec_present = _section_present_line_set(ctx, sec_id)
+    new_order = sorted(
+        sec_present,
+        key=lambda lid: (feeder_row.get(lid, 0), ctx.line_priority.get(lid, 0)),
+    )
+    if new_order == sorted(sec_present, key=lambda lid: ctx.line_priority.get(lid, 0)):
+        return
+    _apply_section_line_order(ctx, sec_id, new_order)
+
+
 def _reorder_reconvergence(
     ctx: _OffsetCtx, section_local: dict[str, dict[str, int]]
 ) -> None:
-    """Keep primary-feeder lines together at the top of each reconvergence section."""
+    """Settle each reconvergence section's bundle on its primary feeder.
+
+    When the primary feeder is a flat-frame neighbour the continuing lines must
+    keep the feeder's offsets so the inter-section run stays level; otherwise
+    they reach the section through a riser and just lead the bundle at the top.
+    Single-line feeders from distinct rows order the bundle by feeder row.
+    """
     graph = ctx.graph
     for sec_id, section in graph.sections.items():
         if not section.entry_ports:
@@ -422,6 +513,7 @@ def _reorder_reconvergence(
         primary_fid = max(lines_by_feeder, key=lambda f: len(lines_by_feeder[f]))
         primary_lines = set(lines_by_feeder[primary_fid])
         if len(primary_lines) < 2:
+            _order_reconvergence_by_feeder_row(ctx, sec_id, line_feeder)
             continue
 
         primary_order = section_local.get(primary_fid, ctx.line_priority)
@@ -432,8 +524,14 @@ def _reorder_reconvergence(
             sec_present - primary_lines,
             key=lambda lid: ctx.line_priority.get(lid, 0),
         )
-        new_order = continuing + returning
 
+        if _share_flat_frame(ctx, sec_id, primary_fid):
+            _align_reconvergence_to_feeder(
+                ctx, sec_id, continuing, returning, primary_fid
+            )
+            continue
+
+        new_order = continuing + returning
         global_ordered = sorted(
             sec_present, key=lambda lid: ctx.line_priority.get(lid, 0)
         )
