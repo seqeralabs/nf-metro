@@ -152,9 +152,10 @@ def _route_tb_diagonal(
 ) -> RoutedPath:
     """Route TB edges with vertical runs and a 45-degree diagonal transition.
 
-    The transpose of ``_route_diagonal``'s horizontal-run shape: the diagonal is
-    placed along the flow axis (Y for TB) by the shared ``_compute_diagonal_placement``
-    and laid out by the shared :func:`~nf_metro.layout.geometry.diagonal_centreline`.
+    The flow-axis sibling of ``_route_diagonal``: the diagonal is placed along
+    the flow axis (Y for TB) by the shared ``_compute_diagonal_placement`` and
+    laid out by :func:`~nf_metro.layout.geometry.diagonal_centreline`, which maps
+    the flow-axis run back to vertical legs for a vertical-flow *direction*.
     """
     diag_start_y, diag_end_y = _compute_diagonal_placement(
         sy,
@@ -419,6 +420,11 @@ def _route_perp_entry_l_shape(
 
     The centreline references the port X; each line fans by its drop channel on
     the vertical leg and by its target-station Y offset on the turn-in leg.
+
+    The drop is vertical-first because the entry port is TOP/BOTTOM, regardless
+    of the target section's flow axis -- so this is a direct V-H build, not the
+    flow-relative ``single_corner_centreline`` (which would invert the leg order
+    for a horizontal-flow target).
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
