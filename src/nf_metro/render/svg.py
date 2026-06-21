@@ -1224,6 +1224,43 @@ def _pill_box(
     return cx - w / 2, cy - h / 2, w, h
 
 
+def station_marker_box(
+    graph: MetroGraph,
+    theme: Theme,
+    station: Station,
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> tuple[float, float, float, float, float]:
+    """The drawn marker's bounding box as ``(cx, cy, w, h, rx)``.
+
+    Mirrors the bundle-span / orientation logic of :func:`_render_station_into`
+    and defers to :func:`_pill_box` for the box itself, so an overlay can place
+    a shape that matches a station's pill (a circle for one line, a capsule
+    spanning the bundle for several) without re-running the renderer. Glyph
+    stations (rail interchanges, explicit markers) fall back to the same
+    bundle-span box, a reasonable footprint for those too.
+    """
+    r = theme.station_radius
+    is_tb_vert = bool(
+        station.section_id
+        and (sec := graph.sections.get(station.section_id))
+        and sec.direction == "TB"
+    )
+    if station.rail_top_y is not None and station.rail_bottom_y is not None:
+        used = station.rail_used_ys or [station.y]
+        min_off, max_off = min(used) - station.y, max(used) - station.y
+    elif station_offsets and not graph.station_is_rail(station.id):
+        offs = [
+            station_offsets.get((station.id, lid), 0.0)
+            for lid in graph.station_lines(station.id)
+        ]
+        min_off, max_off = (min(offs), max(offs)) if offs else (0.0, 0.0)
+    else:
+        min_off = max_off = 0.0
+
+    x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb_vert)
+    return x + w / 2, y + h / 2, w, h, r
+
+
 def _append_terminus_icons(
     d: draw.Drawing,
     station: Station,

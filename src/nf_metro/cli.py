@@ -18,6 +18,7 @@ from nf_metro.layout import (
     PhaseInvariantError,
     compute_layout,
 )
+from nf_metro.live.server import DEFAULT_OVERLAY, OVERLAY_STYLES
 from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
 from nf_metro.parser import (
     ERROR,
@@ -539,6 +540,13 @@ def explain(
 )
 @click.option("--theme", type=str, default=None, help="Theme name (nfcore, light).")
 @click.option(
+    "--overlay",
+    type=click.Choice(OVERLAY_STYLES),
+    default=DEFAULT_OVERLAY,
+    show_default=True,
+    help="Status-overlay style shown until a viewer picks another in the page.",
+)
+@click.option(
     "--token",
     default=None,
     help="If set, /events POSTs must supply ?token=... or an X-Metro-Token header.",
@@ -565,6 +573,7 @@ def serve(
     port: int,
     host: str,
     theme: str | None,
+    overlay: str,
     token: str | None,
     open_browser: bool,
     shutdown_after_complete: bool,
@@ -611,7 +620,9 @@ def serve(
             err=True,
         )
 
-    httpd = serve_map(graph, theme_obj, host=host, port=port, token=token)
+    httpd = serve_map(
+        graph, theme_obj, host=host, port=port, token=token, overlay=overlay
+    )
     # Local subprocesses post to a concrete loopback address, not 0.0.0.0.
     run_host = "127.0.0.1" if host == "0.0.0.0" else host
     page_url = f"http://{run_host}:{port}/"
@@ -649,12 +660,21 @@ def serve(
 )
 @click.option("--theme", type=str, default="nfcore", help="Theme name (nfcore, light).")
 @click.option(
+    "--overlay",
+    type=click.Choice(OVERLAY_STYLES),
+    default=DEFAULT_OVERLAY,
+    show_default=True,
+    help="Status-overlay style shown until a viewer picks another in the page.",
+)
+@click.option(
     "--token",
     default=None,
     help="If set, POSTs to /maps and /r/*/events must supply ?token=... "
     "or an X-Metro-Token header.",
 )
-def serve_multi_cmd(port: int, host: str, theme: str, token: str | None) -> None:
+def serve_multi_cmd(
+    port: int, host: str, theme: str, overlay: str, token: str | None
+) -> None:
     """Run a persistent live server many pipelines can report into. [experimental]
 
     Unlike `serve` (one map), this starts with no map. A pipeline registers its
@@ -680,7 +700,9 @@ def serve_multi_cmd(port: int, host: str, theme: str, token: str | None) -> None
             "use --token to restrict POSTs.",
             err=True,
         )
-    httpd = serve_multi(THEMES[theme], host=host, port=port, token=token)
+    httpd = serve_multi(
+        THEMES[theme], host=host, port=port, token=token, overlay=overlay
+    )
     display_host = "localhost" if host == "127.0.0.1" else host
     click.echo("nf-metro live progress - persistent server (experimental)")
     click.echo("")
