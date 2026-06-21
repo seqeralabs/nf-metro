@@ -111,7 +111,7 @@ def _struck_label_station_ids(
     ``relocatable_for`` below).
     """
     from nf_metro.layout.labels import segment_strikes_label
-    from nf_metro.render.svg import apply_route_offsets
+    from nf_metro.layout.routing.common import apply_route_offsets
 
     def _off_track(node_id: str) -> bool:
         st = graph.stations.get(node_id)

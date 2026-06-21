@@ -720,8 +720,12 @@ def _line_crossed_file_icon_sinks(graph: MetroGraph) -> set[str]:
     already sits clear is never lifted.
     """
     from nf_metro.layout.geometry import segment_intersects_bbox
-    from nf_metro.layout.routing import compute_station_offsets, route_edges
-    from nf_metro.render.svg import _icon_obstacles_by_station, apply_route_offsets
+    from nf_metro.layout.routing import (
+        apply_route_offsets,
+        compute_station_offsets,
+        route_edges,
+    )
+    from nf_metro.render.svg import _icon_obstacles_by_station
     from nf_metro.themes import THEMES
 
     offsets = compute_station_offsets(graph)

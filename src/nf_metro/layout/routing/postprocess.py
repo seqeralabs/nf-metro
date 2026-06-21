@@ -21,6 +21,7 @@ from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
+    apply_route_offsets,
 )
 from nf_metro.layout.routing.context import (
     _RoutingCtx,
@@ -796,8 +797,6 @@ def _clear_bypass_v_label_strikes(routes: list[RoutedPath], ctx: _RoutingCtx) ->
     obstacles = ctx.graph.bypass_label_obstacles
     if not obstacles or ctx.station_offsets is None:
         return
-
-    from nf_metro.render.svg import apply_route_offsets
 
     legs_by_v: dict[str, list[RoutedPath]] = defaultdict(list)
     for r in routes:

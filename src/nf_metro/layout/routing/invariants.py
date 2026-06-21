@@ -2406,6 +2406,9 @@ def check_no_hanging_routes(
     return violations
 
 
+# px: doubles as the floor below which an endpoint offset is negligible and the
+# slack within which a terminal segment counts as horizontal (so its Y-shift is
+# a lateral separation rather than an along-travel displacement).
 _LATERAL_OFFSET_TOL = 1.0
 
 

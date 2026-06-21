@@ -1257,7 +1257,7 @@ def _guard_no_line_crosses_non_consumer(
     sharing its trunk-Y row with a busier sibling whose inbound
     bundle traverses the sparse consumer's column.
     """
-    from nf_metro.render.svg import apply_route_offsets
+    from nf_metro.layout.routing.common import apply_route_offsets
 
     if offsets is None:
         from nf_metro.layout.routing import compute_station_offsets
@@ -1323,7 +1323,8 @@ def _guard_no_line_crosses_file_icon(
     one belonging to a line the icon's station also carries, since a
     different edge of that line is still raking the artefact.
     """
-    from nf_metro.render.svg import _icon_obstacles_by_station, apply_route_offsets
+    from nf_metro.layout.routing.common import apply_route_offsets
+    from nf_metro.render.svg import _icon_obstacles_by_station
     from nf_metro.themes import THEMES
 
     if offsets is None:
@@ -1437,7 +1438,7 @@ def iter_opposing_line_overlaps(
     lines sharing a channel are carried on their own offset slots, not on the
     same track.
     """
-    from nf_metro.render.svg import apply_route_offsets
+    from nf_metro.layout.routing.common import apply_route_offsets
 
     if offsets is None:
         from nf_metro.layout.routing import compute_station_offsets
@@ -1542,7 +1543,8 @@ def iter_line_label_strikes(
         place_labels,
         segment_strikes_label,
     )
-    from nf_metro.render.svg import _compute_icon_obstacles, apply_route_offsets
+    from nf_metro.layout.routing.common import apply_route_offsets
+    from nf_metro.render.svg import _compute_icon_obstacles
     from nf_metro.themes import THEMES
 
     if offsets is None:
@@ -1750,7 +1752,7 @@ def _guard_off_track_output_clears_non_producer(
     closes the gap by checking the output route against same-section trunk
     markers regardless of line membership, exempting only the producer.
     """
-    from nf_metro.render.svg import apply_route_offsets
+    from nf_metro.layout.routing.common import apply_route_offsets
 
     producer_of = {
         off_id: anchor_id
