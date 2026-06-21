@@ -12,9 +12,11 @@ from nf_metro.layout.constants import (
     SAME_COORD_TOLERANCE,
     STATION_ELBOW_TOLERANCE,
 )
+from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.phases._common import (
     _expand_bbox_for_y,
     _grid_group_section_ids,
+    _is_fold_section,
     exit_run_corridor_clear,
 )
 from nf_metro.layout.phases.guards import _section_lacks_flow_aligned_port
@@ -45,16 +47,18 @@ def _set_port_x(graph: MetroGraph, port_id: str, x: float) -> None:
         port.x = x
 
 
-def _align_entry_ports(graph: MetroGraph, tb_only: bool = False) -> None:
+def _align_entry_ports(graph: MetroGraph, vertical_only: bool = False) -> None:
     """Align entry ports with their incoming connection's coordinates.
 
     LEFT/RIGHT ports: align Y for straight horizontal runs.
     TOP/BOTTOM ports: align X for vertical drops or Y for cross-column.
 
-    With ``tb_only`` set, only ports on TB/BT sections are re-aligned --
-    used by the late re-alignment pass (Stage 6.16), which targets the
-    perpendicular-entry drift that vertical settling introduces in
-    TB sections without disturbing settled LR/RL geometry.
+    With ``vertical_only`` set, only ports on vertical-flow (TB/BT) sections
+    are re-aligned -- used by the late re-alignment pass (Stage 6.16), which
+    targets the perpendicular-entry drift that the vertical-settling phases
+    introduce in vertical-flow sections.  Re-aligning the horizontal-flow
+    (LR/RL) sections there would instead drag their ports off the positions
+    those same phases deliberately settled them into.
     """
     junction_ids = graph.junction_ids
 
@@ -66,7 +70,7 @@ def _align_entry_ports(graph: MetroGraph, tb_only: bool = False) -> None:
         if not entry_section:
             continue
 
-        if tb_only and entry_section.direction not in ("TB", "BT"):
+        if vertical_only and lanes_run_along_y(entry_section.direction):
             continue
 
         if port.side in (PortSide.LEFT, PortSide.RIGHT):
@@ -415,8 +419,8 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
         if not exit_section:
             continue
 
-        # Skip fold/TB sections (handled by _align_exit_ports)
-        if exit_section.grid_row_span > 1 or exit_section.direction == "TB":
+        # Skip fold sections (handled by _align_exit_ports)
+        if _is_fold_section(exit_section):
             continue
 
         if port.side not in (PortSide.LEFT, PortSide.RIGHT):
@@ -878,7 +882,7 @@ def _align_exit_ports(graph: MetroGraph) -> None:
             _align_perpendicular_exit_port(graph, port_id, port, exit_section)
             continue
 
-        if exit_section.grid_row_span <= 1 and exit_section.direction != "TB":
+        if not _is_fold_section(exit_section):
             continue
 
         if port.side in (PortSide.LEFT, PortSide.RIGHT):
@@ -1308,7 +1312,7 @@ def _space_ports_from_termini(
         real_sids = {s for s in section.station_ids if s not in all_port_ids}
 
         # Skip exit ports on fold sections -- _align_exit_ports handles them.
-        is_fold = section.grid_row_span > 1 or section.direction == "TB"
+        is_fold = _is_fold_section(section)
 
         # Classify termini by side.  A station with no in-section
         # predecessors is an entry-side (source) terminus; one with no

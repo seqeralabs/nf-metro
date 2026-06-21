@@ -97,6 +97,34 @@ CI if the total rises above its baseline (mirroring the corner-radius and
 gate-coverage ratchets). Migrating a heuristic onto `AxisFrame` removes its
 branch and lowers the count; lower the baseline in the same change to lock it in.
 
+**Row / lane membership** is the inter-section corollary. The row-level passes
+align the **Y (lane) axis**: row grouping, row trunk-Y alignment, the shared
+row Y-grid, top-aligning row-mates. A horizontal-flow (LR/RL) section stacks
+its lines along Y, so it is a first-class member of that machinery; a
+vertical-flow (TB/BT) section stacks lines along X and shares no row Y-grid, so
+those passes leave its Y alone. The predicate for this is
+`geometry.lanes_run_along_y(direction)` (built on `AxisFrame.axes_for_direction`,
+which names a section's axes without needing spacings). It replaced the
+historical mix of `direction == "TB"` and `direction not in ("LR", "RL")`
+exclusions in `row_align.py`, `grid_snap.py`, `_common._section_trunk_y`, and
+`section_placement.py`, and underlies `_common._is_fold_section`
+(`grid_row_span > 1 or not lanes_run_along_y(...)`), the row-fold predicate that
+routes a section's exit ports through the fold path rather than the row passes.
+
+**Deliberately left direct (not contortion-migrated).** Per the same judgement
+as the in-section migration, a *single-branch* TB-only heuristic with no LR
+mirror gains no polymorphism from `AxisFrame` - expressing its reads as
+`frame.primary`/`frame.secondary` would just rename `.x`/`.y` inside code that
+only ever runs for one direction. These stay direct in `phases/ports.py`:
+`_align_tb_entry_port` (its TB-trunk branch; the function also serves the LR/RL
+perpendicular case), `_clamp_tb_entry_port`, `_resolve_tb_exit_y`,
+`_align_tb_section_bbox_bottoms`, and `_tb_trunk_x` (the secondary-axis trunk
+coordinate is a *median* for a vertical section but the bundle-connected topmost
+for a horizontal one - `_section_trunk_y` - so the two are not the same code and
+should not be forced behind one name). The `section_placement.py` RL-or-TB
+column right-alignment and `_apply_tb_fold_spans` selection are domain
+groupings, not axis swaps, and likewise stay.
+
 ## Validate-mode guards
 
 `compute_layout(validate=True)` runs these guards at fixed checkpoints:
@@ -927,24 +955,36 @@ in pipeline order.
   final boundary (the last Y pass; only ports/junctions move after, via
   Stage 6.16).
 
-### Stage 6.16: re-align TB entry ports with feeders
-- **Purpose**: A TB/BT section's perpendicular entry port is pinned a fixed
-  offset above its first internal station, so the late vertical settling
-  (Stages 6.13-6.15) that shifts the section's content drags the entry port
-  off the upstream feeder Y it was snapped to in Stage 3.2, re-introducing
-  an inter-section S-kink. Re-run the alignment (TB/BT only, to leave
-  settled LR/RL geometry untouched) to re-snap the port to its now-settled
-  feeder, then re-anchor junctions to the moved ports.
-- **Helper**: `_align_entry_ports(graph, tb_only=True)` (`phases/ports.py`),
-  then `_position_junctions`.
+### Stage 6.16: re-align vertical-flow entry ports + re-anchor junctions
+- **Purpose**: A vertical-flow (TB/BT) section's perpendicular entry port is
+  pinned a fixed offset above its first internal station, so the late vertical
+  settling (Stages 6.13-6.15) that shifts the section's content drags the entry
+  port off the upstream feeder Y it was snapped to in Stage 3.2, re-introducing
+  an inter-section S-kink. Re-run the port alignment for vertical-flow sections
+  to re-snap them, then re-anchor every junction (any direction) to the settled
+  exit/entry port Ys, since junctions live in inter-section space and the
+  settling phases leave them stale.
+- **Helper**: `_align_entry_ports(graph, vertical_only=True)`
+  (`phases/ports.py`), then `_position_junctions`.
 - **Precondition**: All vertical settling done (post-6.15).
-- **Postcondition**: TB/BT entry ports share their upstream feeder's Y;
-  junctions re-anchored to the settled ports.
-- **Invariants preserved**: LR/RL entry/exit geometry (skipped by
-  `tb_only`).
+- **Postcondition**: Vertical-flow entry ports share their upstream feeder's
+  Y; all junctions re-anchored to the settled ports.
+- **Invariants preserved**: Horizontal-flow (LR/RL) entry/exit geometry, which
+  `vertical_only` leaves on the positions the settling phases deliberately gave
+  it.
 - **Validate guard after**: bisection set ("after Stage 6.16").
-- **Lifecycle:** invariant - TB/BT entry ports share their upstream
+- **Lifecycle:** invariant - vertical-flow entry ports share their upstream
   feeder Y (no-kink) and junctions track them at the final boundary.
+- **Why this pass stays (axis-generic, not removed)**: the port re-align is
+  scoped (`vertical_only`), not TB-special-cased, but it is load-bearing and
+  irreducible. Re-running the *full* alignment here would drag horizontal-flow
+  ports (9 across the corpus, e.g. longread `small_variants` by +86px) off
+  their settled positions, so the scope cannot be dropped; and removing the
+  pass re-introduces the S-kink on the vertical-flow ports it corrects (2
+  across the corpus: longread `phasing` +16.8px, `tb_file_termini` `reporting`
+  -14px). The companion `_position_junctions` is not TB-specific at all - it
+  re-anchors stale junctions (any direction) after the settling phases (17
+  across the corpus, some by hundreds of px).
 
 ## Unclear / structural-debt signals
 

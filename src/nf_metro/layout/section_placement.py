@@ -31,6 +31,7 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
 )
+from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.routing.common import (
     inter_row_wrap_band,
     max_grid_row_with_content,
@@ -270,10 +271,10 @@ def _compute_row_heights(
     max_row: int,
     section_y_gap: float,
 ) -> dict[int, float]:
-    """Per-row height: tallest single-row non-TB section, expanded for spans."""
+    """Per-row height: tallest single-row horizontal-flow section, expanded for spans."""
     row_heights: dict[int, float] = defaultdict(float)
     for sid, section in scoped.items():
-        if section.grid_row_span == 1 and section.direction != "TB":
+        if section.grid_row_span == 1 and lanes_run_along_y(section.direction):
             row = row_assign.get(sid, 0)
             row_heights[row] = max(row_heights[row], section.bbox_h)
 
@@ -1249,7 +1250,8 @@ def _find_downstream_bundle_y(
         # TB/BT trunk -- leaves the exit's own trunk Y to govern the lead-in;
         # anchoring to the consumer's Y would pull the exit off its trunk.
         if ep.side in (PortSide.TOP, PortSide.BOTTOM) or (
-            ds.direction in ("TB", "BT") and ep.side in (PortSide.LEFT, PortSide.RIGHT)
+            not lanes_run_along_y(ds.direction)
+            and ep.side in (PortSide.LEFT, PortSide.RIGHT)
         ):
             continue
         ds_internal = set(ds.station_ids) - set(ds.entry_ports) - set(ds.exit_ports)

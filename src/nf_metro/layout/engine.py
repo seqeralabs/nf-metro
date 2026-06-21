@@ -1441,12 +1441,12 @@ def _place_pass_c_content(
     # then re-align row bbox tops, compact, and re-snap inter-section
     # port pairs.  Stage 6 below handles the rest of Pass C.
 
-    # A TB/BT section's perpendicular entry port is pinned a fixed offset
-    # above its first station; the bbox growth between Stage 3.2's alignment
-    # and here can lift the section top past it, leaving the port off its
-    # boundary edge.  Re-align before the pass-C guards check boundaries
+    # A vertical-flow (TB/BT) section's perpendicular entry port is pinned a
+    # fixed offset above its first station; the bbox growth between Stage 3.2's
+    # alignment and here can lift the section top past it, leaving the port off
+    # its boundary edge.  Re-align before the pass-C guards check boundaries
     # (Stage 6.16 re-aligns again after the late vertical settling).
-    _align_entry_ports(graph, tb_only=True)
+    _align_entry_ports(graph, vertical_only=True)
 
     # Stage 5.1: Position junction stations in the inter-section gap.
     _position_junctions(graph)
@@ -1743,18 +1743,19 @@ def _finalize_layout(
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.15")
 
-    # Stage 6.16: Re-align LEFT/RIGHT entry ports with their feeders.  A
-    # TB section's perpendicular entry port is pinned a fixed offset above
-    # its first internal station, so the late vertical settling (Stages
-    # 6.13-6.15) that shifts the section's content also drags the entry
-    # port off the upstream feeder Y it was snapped to in Stage 3.2,
-    # re-introducing an inter-section S-kink.  Re-running the alignment
-    # (TB/BT sections only, to leave settled LR/RL geometry untouched)
-    # re-snaps the port to its now-settled feeder.  Junctions live in
-    # inter-section space and aren't moved by the settling phases, so
-    # re-anchor them to the settled exit/entry port Ys afterwards
-    # (otherwise a fan-out bundle dips to a stale junction Y and back).
-    _align_entry_ports(graph, tb_only=True)
+    # Stage 6.16: Re-align entry ports and junctions with their now-settled
+    # feeders.  A vertical-flow (TB/BT) section's perpendicular entry port is
+    # pinned a fixed offset above its first internal station, so the late
+    # vertical settling (Stages 6.13-6.15) that shifts the section's content
+    # also drags the entry port off the upstream feeder Y it was snapped to in
+    # Stage 3.2, re-introducing an inter-section S-kink.  Re-running the
+    # alignment for vertical-flow sections only re-snaps the port to its
+    # now-settled feeder, while leaving the horizontal-flow (LR/RL) ports on
+    # the positions the settling deliberately gave them.  Junctions then
+    # re-anchor to the settled exit/entry port Ys regardless of direction
+    # (they live in inter-section space and aren't moved by the settling
+    # phases, so otherwise a fan-out bundle dips to a stale junction Y).
+    _align_entry_ports(graph, vertical_only=True)
     _position_junctions(graph)
     _snap(graph, "6.16")
     if validate:

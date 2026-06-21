@@ -40,14 +40,37 @@ class AxisFrame:
     secondary: Axis
     primary_sign: float
 
+    @staticmethod
+    def axes_for_direction(direction: str) -> tuple[str, str]:
+        """``(primary, secondary)`` axis names for *direction*, spacing-free.
+
+        A vertical flow (TB/BT) runs its layers down Y and stacks lines along
+        X; a horizontal flow (LR/RL) does the reverse.  Exposed separately from
+        :meth:`for_direction` so passes can ask which axis is the flow axis (or
+        the lane axis) without having spacings to hand.
+        """
+        return ("y", "x") if direction in ("TB", "BT") else ("x", "y")
+
     @classmethod
     def for_direction(
         cls, direction: str, x_spacing: float, y_spacing: float
     ) -> AxisFrame:
-        if direction == "TB":
-            return cls(Axis("y", y_spacing), Axis("x", x_spacing), 1.0)
+        primary, secondary = cls.axes_for_direction(direction)
+        step = {"x": x_spacing, "y": y_spacing}
         sign = -1.0 if direction == "RL" else 1.0
-        return cls(Axis("x", x_spacing), Axis("y", y_spacing), sign)
+        return cls(Axis(primary, step[primary]), Axis(secondary, step[secondary]), sign)
+
+
+def lanes_run_along_y(direction: str) -> bool:
+    """``True`` when a section stacks its lines (the secondary/lane axis) on Y.
+
+    Row-level inter-section passes align the Y axis: row trunk-Y alignment, the
+    shared row Y-grid, top-aligning row-mates.  A horizontal (LR/RL) section's
+    lanes are Y-separated, so it is a first-class member of that machinery.  A
+    vertical (TB/BT) section runs its flow down Y and separates lines along X,
+    so it has no row-Y lane grid to share and the row passes leave its Y alone.
+    """
+    return AxisFrame.axes_for_direction(direction)[1] == "y"
 
 
 def segment_intersects_quad(
