@@ -1476,6 +1476,7 @@ def _route_l_shape_plain(
         min(sy, ty),
         max(sy, ty),
         endpoint_port_xs(ctx.graph, edge),
+        target_x=tx,
     )
 
     route = route_hvh_tapered(
@@ -1536,16 +1537,22 @@ def _route_l_shape_fan(
         min(sy, ty),
         max(sy, ty),
         endpoint_port_xs(ctx.graph, edge),
+        target_x=tx,
     )
 
     # Lead-in long enough for the outermost fan line's first-corner arc; it
     # overlaps the upstream same-line tail (re-joined by the fan-out tail pass),
-    # so the extra length is free.
+    # so the extra length is free.  When the graze correction pushed the descent
+    # past the junction, extend the lead-in back to the junction (``sx``) so the
+    # feeder rejoins there as one horizontal run instead of being dragged out to
+    # a floating stub.
     lead_len = ctx.curve_radius + 2 * half_width
+    lead_x = mid_x - horizontal.sign * lead_len
+    lead_x = min(lead_x, sx) if horizontal.sign > 0 else max(lead_x, sx)
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
     centerline = [
-        (mid_x - horizontal.sign * lead_len, sy + src_off + delta),
+        (lead_x, sy + src_off + delta),
         (mid_x, sy + src_off + delta),
         (mid_x, ty + tgt_off + delta),
         (tx, ty + tgt_off + delta),

@@ -1014,6 +1014,7 @@ def clear_channel_of_section_edge(
     port_xs: list[float],
     edge_clearance: float = EDGE_TO_BUNDLE_CLEARANCE,
     port_tol: float = COORD_TOLERANCE,
+    target_x: float | None = None,
 ) -> float:
     """Nudge a vertical channel out of an *incidental* section-edge graze.
 
@@ -1032,6 +1033,12 @@ def clear_channel_of_section_edge(
     pushing OUTWARD (away from the section interior).  Channels that
     coincide with an endpoint port (within *port_tol*) are left
     untouched.
+
+    *target_x*, when given, is the route's target X.  The channel is
+    pushed onto whichever side of the grazed section carries the target
+    so the descent keeps heading toward it; the nearer edge is used only
+    as a fallback when the target's X falls within the section's own span
+    (so neither side is closer to it) or no target is supplied.
     """
     adjusted = mid_x
     for sec in graph.sections.values():
@@ -1056,10 +1063,17 @@ def clear_channel_of_section_edge(
         # a bundle comfortably outside both edges is fine.
         if clear_of_right >= edge_clearance or clear_of_left >= edge_clearance:
             continue
-        # Push OUTWARD via the nearer edge: if the midline is closer to the
-        # right edge, push right until the leftmost line clears it; else
-        # push left until the rightmost line clears the left edge.
-        if right - adjusted <= adjusted - left:
+        # Push OUTWARD onto the target's side so the descent keeps heading
+        # toward it; if the target sits within this section's span (or is
+        # unknown) neither side is closer to it, so fall back to the nearer
+        # edge.  Pushing right clears the right edge with the leftmost line;
+        # pushing left clears the left edge with the rightmost line.
+        push_right = (
+            target_x >= right
+            if target_x is not None and not (left < target_x < right)
+            else right - adjusted <= adjusted - left
+        )
+        if push_right:
             adjusted += edge_clearance - clear_of_right
         else:
             adjusted -= edge_clearance - clear_of_left
