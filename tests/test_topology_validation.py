@@ -119,12 +119,6 @@ class TestTopologyValidation:
             pytest.xfail(
                 "bypass_fan_in_outer_slot: meth slope 0.075 in minimum-width column gap"
             )
-        if "multicarrier_offrow_exit_climb" in request.node.name:
-            pytest.xfail(
-                "multicarrier_offrow_exit_climb: svvcf junction->jointcalling "
-                "slope 0.057, a manual single-row-grid artifact unrelated to the "
-                "preprocessing exit anchor under test"
-            )
         violations = check_almost_horizontal_edges(topology_graph)
         warnings = [v for v in violations if v.severity == Severity.WARNING]
         assert not warnings, "\n".join(v.message for v in warnings)

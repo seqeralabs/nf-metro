@@ -165,8 +165,15 @@ class TestIssue938:
     def setup(self):
         self.g = _load("topologies/multicarrier_offrow_exit_climb")
 
+    def _fanout_junction(self):
+        return next(
+            j
+            for j in self.g.junction_ids
+            if any(e.source == "prep__exit_right_0" for e in self.g.edges_to(j))
+        )
+
     def test_exit_and_junction_sit_on_carrier_row(self):
-        exit_st = self.g.stations["preprocessing__exit_right_0"]
+        exit_st = self.g.stations["prep__exit_right_0"]
         carrier_y = self.g.stations["samtools_sort_index"].y
         assert abs(self.g.stations["mosdepth"].y - carrier_y) < 1.0
         assert abs(exit_st.y - carrier_y) < 1.0, (
@@ -174,14 +181,14 @@ class TestIssue938:
         )
         # The fan-out junction takes its Y from the exit, so it follows onto
         # the carrier row too; the risers then happen past it in the gap.
-        assert abs(self.g.stations["__junction_16"].y - carrier_y) < 1.0
+        assert abs(self.g.stations[self._fanout_junction()].y - carrier_y) < 1.0
 
     def test_in_section_carrier_runs_are_flat(self):
         carrier_y = self.g.stations["samtools_sort_index"].y
-        sec = self.g.sections["preprocessing"]
+        sec = self.g.sections["prep"]
         box_right = sec.bbox_x + sec.bbox_w
         for r in route_edges(self.g):
-            if r.edge.target != "preprocessing__exit_right_0":
+            if r.edge.target != "prep__exit_right_0":
                 continue
             inside = [(x, y) for x, y in r.points if x <= box_right + 1.0]
             ys = {round(y, 1) for _x, y in inside}
