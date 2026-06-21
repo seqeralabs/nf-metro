@@ -32,8 +32,8 @@ class AxisFrame:
     """A section's layer (``primary``) and track (``secondary``) axes.
 
     LR/RL place layers along X and stack lines along Y; TB transposes the two.
-    ``primary_sign`` is ``-1`` for RL, which runs the primary axis in reverse (as
-    ``single_section._mirror_rl`` does by hand), else ``+1``.
+    ``primary_sign`` is ``-1`` for RL, which runs the primary axis in reverse
+    (mirrored by ``single_section._mirror_primary``), else ``+1``.
     """
 
     primary: Axis
