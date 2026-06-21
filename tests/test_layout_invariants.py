@@ -2447,6 +2447,41 @@ def test_no_diagonal_strikes_label(fixture, x_spacing):
     assert not collinear, f"{fixture} @ x_spacing={x_spacing}: collinear overlay"
 
 
+_BYPASS_LABEL_RAKE_CASES = [
+    "topologies/bypass_label_rake.mmd",
+    "topologies/bypass_label_rake_left.mmd",
+    "topologies/bypass_label_rake_wide.mmd",
+    "guide/06a_without_hidden.mmd",
+    "guide/06b_with_hidden.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _BYPASS_LABEL_RAKE_CASES)
+def test_bypass_v_clears_wide_bypassed_label(fixture):
+    """A bypass V never rakes the label of the station it routes around.
+
+    The V's lead-in descent (or lead-out climb) can cross the bypassed station's
+    name when that label is wide enough to reach past the V's column.  The router
+    seats the V's flat-run corners clear where it can; a section too cramped to
+    fit the corner outside the label leaves a residual the strike-clearance loop
+    resolves by pushing the bypassed node out by whole grid columns.  Uses the
+    runtime guard's own strike definition, which counts a bypass-V crossing of a
+    bypassed-middle label.
+    """
+    from nf_metro.layout.phases.guards import iter_line_label_strikes
+
+    graph = _layout(fixture)
+    strikes = [
+        s
+        for s in iter_line_label_strikes(graph)
+        if is_bypass_v(s.src) or is_bypass_v(s.tgt)
+    ]
+    assert not strikes, (
+        f"{fixture}: bypass V rakes a bypassed-station label: "
+        + ", ".join(f"{s.line_id} -> {s.station_id}" for s in strikes)
+    )
+
+
 def test_label_strike_guard_catches_a_strike():
     """The runtime guard fires on a genuine glyph strike and clears a graze.
 

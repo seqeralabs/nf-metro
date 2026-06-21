@@ -380,6 +380,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "left edge (`_clear_bypass_v_label_strikes`).",
     ),
     (
+        "bypass_label_rake_wide",
+        TOPOLOGIES_DIR,
+        "An extra-wide bypassed-station label the router cannot seat the V's "
+        "flat-run corner clear of: the strike-clearance loop pushes the bypassed "
+        "node out by whole grid columns until the dip clears the glyphs, widening "
+        "rather than relying on the router's partial corner-seating (issue #700).",
+    ),
+    (
         "bypass_v_tight",
         TOPOLOGIES_DIR,
         "An intra-section bypass V at a tight column pitch: without room for a "

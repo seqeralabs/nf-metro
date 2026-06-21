@@ -197,6 +197,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _run_pass_c_guards,
     _section_lacks_flow_aligned_port,
     inter_section_route_backtrack_legs,
+    iter_line_label_strikes,
 )
 from nf_metro.layout.phases.junctions import (  # noqa: F401
     _junction_incoming_line_count,
@@ -656,6 +657,78 @@ def _compute_layout_scaled(
         _guard_tb_top_entry_drop_hugs_top(graph, "final")
 
 
+def _bypass_label_rakes(graph: MetroGraph) -> set[str]:
+    # Stations whose name label a bypass-V leg crosses, per the guard's strike
+    # definition: it counts a leg's crossing of the station the V routes around
+    # but exempts the leg's own diverging/merging endpoint, isolating the
+    # bypassed-middle rake the gap lever relocates.
+    return {
+        s.station_id
+        for s in iter_line_label_strikes(graph)
+        if is_bypass_v(s.src) or is_bypass_v(s.tgt)
+    }
+
+
+def _clear_bypass_label_rakes(
+    graph: MetroGraph,
+    *,
+    issues: Callable[[], tuple[set[str], bool, set[tuple[str, str, int]]]],
+    adjust: Callable[[tuple[str, str, int], int], None],
+    lever_value: Callable[[tuple[str, str, int]], int],
+    growable_target: Callable[[str], tuple[Section, int] | None],
+    relay: Callable[..., None],
+    reseat: Callable[[], None],
+) -> None:
+    """Push a bypassed node out by whole grid columns to clear a wide-label rake.
+
+    Separate from the fan/convergence loop in ``_apply_label_strike_clearance``
+    because it grows the gap before the *bypassed* node's layer (lengthening the
+    V's leg) rather than a struck station's own runway, and because its probe
+    must read the router's flat-run seating (obstacle boxes kept current by
+    ``reseat``) so it fires only for a rake the router could not seat clear.  The
+    seated boxes are local: the entry value is restored before returning, so the
+    fan/convergence loop reasons about unseated routes.
+    """
+    if not any(
+        v.is_hidden and v.bypasses_station_id is not None
+        for v in graph.stations.values()
+    ):
+        return
+    entry_obstacles = dict(graph.bypass_label_obstacles)
+    graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
+    rake_levers = {
+        ("gap", target[0].id, target[1])
+        for sid in _bypass_label_rakes(graph)
+        if (target := growable_target(sid)) is not None
+    }
+    struck_pre, collinear_pre, _ = issues() if rake_levers else (set(), False, ())
+    if not rake_levers or collinear_pre:
+        graph.bypass_label_obstacles = entry_obstacles
+        return
+    for _ in range(_MAX_SPREAD_ITERS):
+        for lever in rake_levers:
+            adjust(lever, 1)
+        reseat()
+        struck_now, collinear, _ = issues()
+        if collinear:
+            for lever in rake_levers:
+                adjust(lever, -1)
+            break
+        # Done once no rake remains and the shift added no new strike (struck_now
+        # is a subset of the pre-shift strikes); a residual the gaps cannot clear
+        # rolls back wholesale for the guard backstop.
+        if not _bypass_label_rakes(graph) and struck_now <= struck_pre:
+            break
+    else:
+        for lever in rake_levers:
+            while lever_value(lever) > 0:
+                adjust(lever, -1)
+    # The grow steps re-laid against seated boxes; settle the chosen levers
+    # against the restored (unseated) boxes the next loop expects.
+    graph.bypass_label_obstacles = entry_obstacles
+    relay()
+
+
 def _apply_label_strike_clearance(
     graph: MetroGraph,
     *,
@@ -690,7 +763,11 @@ def _apply_label_strike_clearance(
     back, so the loop never ships a layout worse than it found.
     """
 
-    def _relay() -> None:
+    def _relay(*, validate_layout: bool = False) -> None:
+        # Growth/shrink steps re-lay unvalidated: an intermediate lever width can
+        # carry a transient strike or overlap that a later column clears.  The
+        # settled layout is re-laid once with ``validate_layout`` so the caller's
+        # stage-boundary checks run on the result the phase ships.
         _layout_once(
             graph,
             x_spacing=x_spacing,
@@ -701,8 +778,14 @@ def _apply_label_strike_clearance(
             section_y_padding=section_y_padding,
             section_x_gap=section_x_gap,
             section_y_gap=section_y_gap,
-            validate=validate,
+            validate=validate_layout,
         )
+
+    def _reseat() -> None:
+        # Refresh the obstacle boxes after re-laying so the rake probe's routes
+        # carry the router's flat-run seating against the current geometry.
+        _relay()
+        graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
 
     def _growable_target(station_id: str) -> tuple[Section, int] | None:
         st = graph.stations.get(station_id)
@@ -752,6 +835,16 @@ def _apply_label_strike_clearance(
         struck_, collinear_, flat_gaps_ = _label_clearance_issues(graph)
         flat_levers_ = {("gap", sid, layer) for sid, layer in flat_gaps_}
         return struck_, collinear_, flat_levers_
+
+    _clear_bypass_label_rakes(
+        graph,
+        issues=_issues,
+        adjust=_adjust,
+        lever_value=_lever_value,
+        growable_target=_growable_target,
+        relay=_relay,
+        reseat=_reseat,
+    )
 
     struck, _, flat_levers = _issues()
     count = len(struck) + len(flat_levers)
@@ -814,7 +907,7 @@ def _apply_label_strike_clearance(
                 if still_struck or collinear or still_flat:
                     _adjust(lever, 1)
                     break
-        _relay()
+        _relay(validate_layout=validate)
 
 
 def _retrofit_section_rails_phase(

@@ -1,0 +1,31 @@
+%%metro title: Bypass V Past An Extra-Wide Label
+%%metro style: dark
+%%metro line: dna | DNA | #e63946
+%%metro line: rna | RNA | #0570b0
+%%metro line: prot | Protein | #2db572
+
+graph LR
+    subgraph input [Input]
+        fetch[Fetch Data]
+        validate[Validate]
+        fetch -->|dna,rna,prot| validate
+    end
+
+    subgraph processing [Processing]
+        branch[Branch]
+        align[Alignment]
+        quant[Quantification And Expression Estimation Module]
+        search[Database Search]
+        branch -->|dna,rna| align
+        branch -->|prot| search
+        align -->|rna| quant
+    end
+
+    subgraph reporting [Reporting]
+        multiqc[MultiQC]
+    end
+
+    validate -->|dna,rna,prot| branch
+    align -->|dna| multiqc
+    quant -->|rna| multiqc
+    search -->|prot| multiqc
