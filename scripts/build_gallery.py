@@ -975,6 +975,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "the post-merge trunk runs straight instead of zigzagging.",
     ),
     (
+        "bundle_terminator_continuation",
+        TOPOLOGIES_DIR,
+        "A two-line bundle enters a station where one line terminates while the "
+        "other continues to a single successor. The successor holds the trunk "
+        "row rather than dropping to its own line base, so the chain runs flat "
+        "instead of dipping into a V-kink before the section exit.",
+    ),
+    (
         "clear_channel_target_aware_push",
         TOPOLOGIES_DIR,
         "A hub fans one line down into a wide section stacked directly below and "

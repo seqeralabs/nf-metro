@@ -846,15 +846,21 @@ def _guard_perp_fed_entry_anchored_to_consumer(graph: MetroGraph, phase: str) ->
 
 
 def _guard_post_convergence_trunk_continues(graph: MetroGraph, phase: str) -> None:
-    """The sole successor of an in-section convergence station continues on
-    that station's row.
+    """The sole continuation of a line-shedding station continues on its row.
 
-    When two or more in-section branches merge onto a station and that merge
-    station has a single linear successor inside the same horizontal section,
-    the successor must share the merge station's Y. Otherwise the merged trunk
-    immediately dives onto one of the incoming branch rows, rendering a needless
-    diagonal right after the merge (#946). Vertical (TB/BT) sections, ports,
-    hidden, and off-track stations are out of scope.
+    When a horizontal-section station carries strictly more lines than its only
+    in-section successor -- because some of its lines ended there, whether a
+    merged branch that stopped (#946) or a bundled line that terminated (#977)
+    -- and that successor is its only forward path, the chain is linear with no
+    sibling branch to fan toward. The successor must share the predecessor's Y;
+    otherwise the trunk dives onto a line base row, painting a needless diagonal
+    (or an in-section V-kink) right after the junction.
+
+    A predecessor whose flow also leaves elsewhere -- a section-exit edge or a
+    bypass V routing a line *around* the successor -- genuinely forks, so its
+    successor would legitimately drop off the trunk; the predecessor's *only*
+    forward path in the whole graph must be this successor. Vertical (TB/BT)
+    sections, ports, hidden, and off-track stations are out of scope.
     """
 
     def _real_in_section(sid: str, section_id: str) -> bool:
@@ -879,27 +885,17 @@ def _guard_post_convergence_trunk_continues(graph: MetroGraph, phase: str) -> No
         }
         if len(preds) != 1:
             continue
-        merge = next(iter(preds))
-        succs = {
-            e.target
-            for e in graph.edges_from(merge)
-            if _real_in_section(e.target, sec.id)
-        }
-        if succs != {sid}:
+        pred = next(iter(preds))
+        if {e.target for e in graph.edges_from(pred)} != {sid}:
             continue
-        merge_preds = {
-            e.source
-            for e in graph.edges_to(merge)
-            if _real_in_section(e.source, sec.id)
-        }
-        if len(merge_preds) < 2:
+        if not (set(graph.station_lines(pred)) > set(graph.station_lines(sid))):
             continue
-        merge_y = graph.stations[merge].y
-        if abs(station.y - merge_y) > GUARD_TOLERANCE:
+        pred_y = graph.stations[pred].y
+        if abs(station.y - pred_y) > GUARD_TOLERANCE:
             raise PhaseInvariantError(
-                f"{phase}: post-convergence station {sid!r} at y={station.y:.1f} "
-                f"is off its merge station {merge!r} y={merge_y:.1f}; the trunk "
-                f"dives onto a branch row right after the merge"
+                f"{phase}: continuation station {sid!r} at y={station.y:.1f} "
+                f"is off its predecessor {pred!r} y={pred_y:.1f}; the trunk "
+                f"dives onto a branch row right after the junction"
             )
 
 
@@ -3951,11 +3947,13 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     GuardSpec(
         _guard_post_convergence_trunk_continues,
         "B",
-        issue_pin=("#946",),
+        issue_pin=("#946", "#977"),
         narrow_reason=(
-            "Scoped to a single in-section linear successor of an in-section "
-            "merge: a merge with multiple successors fans out by design, and a "
-            "cross-section convergence anchors its successor via port alignment."
+            "Scoped to the sole in-section forward successor of a line-shedding "
+            "predecessor: a predecessor with multiple successors (including a "
+            "bypass V) fans out by design, a successor carrying as many lines is "
+            "trunk-aligned already, and a cross-section convergence anchors its "
+            "successor via port alignment."
         ),
     ),
     GuardSpec(_guard_perp_entry_feed_not_collinear, "B"),
