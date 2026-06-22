@@ -302,6 +302,24 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   margin-top: 16px;
 }
 .modal-actions button.ghost { color: var(--muted); }
+.modal a { color: var(--accent); }
+.modal code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+}
+.modal-error {
+  margin-top: 12px;
+  color: var(--danger);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
 
 @media (max-width: 720px) {
   #split { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }

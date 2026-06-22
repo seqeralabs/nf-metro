@@ -32,6 +32,7 @@ graph LR
 const PY_GLUE = `
 import json
 from nf_metro.api import render_string
+from nf_metro.convert import convert_nextflow_dag
 
 def nfm_render(mmd, opts_json):
     opts = json.loads(opts_json)
@@ -48,11 +49,18 @@ def nfm_render(mmd, opts_json):
         return json.dumps({"ok": True, "svg": svg})
     except Exception as e:
         return json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"})
+
+def nfm_convert(nextflow_dag):
+    try:
+        return json.dumps({"ok": True, "mmd": convert_nextflow_dag(nextflow_dag)})
+    except Exception as e:
+        return json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"})
 `;
 
 const el = (id) => document.getElementById(id);
 let editor = null;
 let pyRender = null;
+let pyConvert = null;
 let lastSvg = "";
 let nfMetroVersion = "";
 const examples = {};
@@ -123,6 +131,7 @@ async function boot() {
     await micropip.install(await resolveWheel());
     pyodide.runPython(PY_GLUE);
     pyRender = pyodide.globals.get("nfm_render");
+    pyConvert = pyodide.globals.get("nfm_convert");
     nfMetroVersion = pyodide.runPython("import nf_metro; nf_metro.__version__");
     el("boot").classList.add("hidden");
     doRender();
@@ -516,6 +525,38 @@ function submitReport() {
   closeReport();
 }
 
+/* -------------------------- nextflow import --------------------------- */
+
+function openConvert() {
+  el("convert-text").value = "";
+  el("convert-error").classList.add("hidden");
+  el("convert-modal").classList.remove("hidden");
+  el("convert-text").focus();
+}
+
+function closeConvert() {
+  el("convert-modal").classList.add("hidden");
+}
+
+function submitConvert() {
+  const dag = el("convert-text").value;
+  if (!dag.trim() || !pyConvert) return;
+  let res;
+  try {
+    res = JSON.parse(pyConvert(dag));
+  } catch (err) {
+    res = { ok: false, error: String(err) };
+  }
+  if (!res.ok) {
+    const box = el("convert-error");
+    box.textContent = "Conversion failed: " + res.error;
+    box.classList.remove("hidden");
+    return;
+  }
+  editor.setValue(res.mmd);
+  closeConvert();
+}
+
 /* -------------------------------- utils -------------------------------- */
 
 function debounce(fn, ms) {
@@ -593,10 +634,18 @@ function wireControls() {
   el("report-modal").addEventListener("click", (e) => {
     if (e.target === el("report-modal")) closeReport();
   });
+
+  el("btn-convert").addEventListener("click", openConvert);
+  el("convert-cancel").addEventListener("click", closeConvert);
+  el("convert-submit").addEventListener("click", submitConvert);
+  el("convert-modal").addEventListener("click", (e) => {
+    if (e.target === el("convert-modal")) closeConvert();
+  });
+
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !el("report-modal").classList.contains("hidden")) {
-      closeReport();
-    }
+    if (e.key !== "Escape") return;
+    if (!el("report-modal").classList.contains("hidden")) closeReport();
+    if (!el("convert-modal").classList.contains("hidden")) closeConvert();
   });
 }
 
