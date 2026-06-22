@@ -567,14 +567,6 @@
     "note": "Degenerate-bbox guard in _v_segment_crosses_other_section: mirror of the _h_segment_crosses_other_section guard; sections always have positive width.",
     "status": "defensive"
   },
-  "normalize.py::if s.id in exclude_section_ids:::#2": {
-    "note": "_v_segment_crosses_other_section skips the excluded sections; its sole caller (_right_entry_drop_in_is_clear) excludes the source and target, so the loop only iterates them and the not-excluded fall-through is never reached on the corpus.",
-    "status": "defensive"
-  },
-  "normalize.py::if hi_y <= s.bbox_y or lo_y >= bottom:::#1": {
-    "note": "Y-interior overlap test in _v_segment_crosses_other_section: with only the excluded source/target sections iterated on the corpus, the not-overlapping skip arm is never reached.",
-    "status": "defensive"
-  },
   "normalize.py::if s.bbox_x - margin <= x <= s.bbox_x + s.bbox_w + margin:::#1": {
     "note": "X-band test in _v_segment_crosses_other_section: a RIGHT-entry drop-in descent runs in the clear inter-column gap just right of the source, so no non-excluded section's X band contains it; the crossing arm is never taken on the corpus.",
     "status": "defensive"
@@ -847,17 +839,21 @@
     "note": "Null guard in _align_uncentered_siblings. The loop iterates visible non-port stations and original_x is built from every non-port station, so ox is always present; the guard never fires.",
     "status": "defensive"
   },
+  "rail.py::if conn is not None:::#1": {
+    "note": "Skips the straight-rail fallback when _route_inter_section_connector handled a port-to-port bundle. The connector returns a route for every whole-graph rail inter-section edge (always a RIGHT exit feeding a LEFT entry), so the None arm (fall through to straight-rail routing) is a structural fallback no rail topology reaches.",
+    "status": "defensive"
+  },
+  "rail.py::if exit_port.side is not PortSide.RIGHT or entry_port.side is not PortSide.LEFT:::#1": {
+    "note": "Whole-graph rail mode stacks sections vertically and resolve.py always sides an inter-section edge as a RIGHT exit feeding a LEFT entry, so the early-return arm (an unmodelled side pairing) is a structural fallback no rail topology reaches.",
+    "status": "defensive"
+  },
   "rail.py::if line_id in section_rails:::#1": {
-    "note": "Gated behind the port branch, so reachable only via the same connected-whole-graph-rails topology (#743). A port always carries a line present in its own section's rail map, so the in-rails arm is the live one and the fall-through is a structural fallback. Parked pending #743 (reachable-but-defective).",
-    "status": "needs-review"
+    "note": "The whole-graph rail connector routes port-to-port edges through _line_rail_y, exercising the in-rails arm. The fall-through (a port carrying a line absent from its own section's rail map) cannot occur: a port carries only lines its section's stations carry, all present in per_line_y. Defensive fallback.",
+    "status": "defensive"
   },
   "rail.py::if line_id in served and len(st.rail_used_ys) == len(served):::#1": {
     "note": "Reached only for a non-port spanning station, whose rail_used_ys is station_lines_ordered filtered to the section's per_line_y - itself built from the same _section_lines_in_order. So a served line is always in per_line_y (lengths match) and _line_rail_y is only called with a line the touching edge carries (always served). The fall-through return st.y is a defensive fallback no render-path call reaches.",
     "status": "defensive"
-  },
-  "rail.py::if port is not None:::#1": {
-    "note": "The port branch is reachable only via whole-graph line_spread:rails with an inter-section edge (per-section rail mode excludes port edges from the rail router), and that topology renders defectively (dangling port stubs + avoidable crossings). Parked pending #743 rather than fixtured (reachable-but-defective, the #688 pattern).",
-    "status": "needs-review"
   },
   "rail.py::if sib_rails:::#1": {
     "note": "_off_track_drop_order is only called for an off-track elbow edge that exists in graph.edges, so the feeder<->consumer set it scans always contains at least that edge; the empty-sib_rails arm (skip the mirror-corner reversal) is a contract guard no render-path call reaches.",
@@ -869,6 +865,10 @@
   },
   "rail.py::if st is None:::#1": {
     "note": "_line_rail_y is only ever called with a real station id (on_rail.id, edge.source/target, or a sibling edge endpoint), all of which exist in graph.stations - the route loop pre-filters None endpoints at the src/tgt guard. The None arm is a contract guard no render-path call reaches.",
+    "status": "defensive"
+  },
+  "rail.py::if up is None or down is None:::#1": {
+    "note": "Null guard over the two ports' sections in the rail inter-section connector; a boundary port's section_id always resolves in graph.sections, so the early-return arm is a contract guard no render-path call reaches.",
     "status": "defensive"
   },
   "reversal.py::elif src.is_port:::#1": {

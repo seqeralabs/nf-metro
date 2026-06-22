@@ -350,6 +350,13 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Same-direction sections stacked in one grid column, chained via short "
         "vertical drops on alternating sides (serpentine), no wrap-around.",
     ),
+    (
+        "tb_left_exit_step",
+        TOPOLOGIES_DIR,
+        "A TB alignment section exits LEFT into a lower right-entry section with "
+        "a blocker directly below: the exit bundle steps west-down-west, routed "
+        "as a parallel staircase that keeps the feed order (issue #671).",
+    ),
     # --- Offset and bypass ---
     (
         "bypass_fan_in_outer_slot",
@@ -920,6 +927,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "The lead-in crosses to the inter-column gap and reaches the TOP entry "
         "from above the box, rather than rising up the trunk through the "
         "section's stations.",
+    ),
+    (
+        "rail_inter_section",
+        TOPOLOGIES_DIR,
+        "Two `%%metro line_spread: rails` sections joined by an inter-section "
+        "edge. The connector wraps cleanly from the upstream right exit port, "
+        "down the right margin, across the inter-section gap, and down the left "
+        "margin into the downstream left entry port - no dangling port stubs "
+        "and no avoidable crossings between co-travelling lines.",
     ),
     (
         "rail_offtrack_io",
