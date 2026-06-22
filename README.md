@@ -5,9 +5,9 @@
 Generate metro-map-style SVG diagrams from Mermaid graph definitions with `%%metro` directives. Designed for visualizing bioinformatics pipeline workflows (e.g., nf-core pipelines) as transit-style maps where each analysis route is a colored "metro line."
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/pinin4fjords/nf-metro/main/examples/rnaseq_light_animated.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/pinin4fjords/nf-metro/main/examples/rnaseq_dark_animated.svg">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/pinin4fjords/nf-metro/main/examples/rnaseq_light_animated.svg">
-  <img alt="nf-core/rnaseq metro map" src="https://raw.githubusercontent.com/pinin4fjords/nf-metro/main/examples/rnaseq_auto_light.png">
+  <img alt="nf-core/rnaseq metro map" src="https://raw.githubusercontent.com/pinin4fjords/nf-metro/main/examples/rnaseq_auto_dark.png">
 </picture>
 
 ## Installation
@@ -74,7 +74,9 @@ nf-metro render [OPTIONS] INPUT_FILE
 |--------|---------|-------------|
 | `-o`, `--output PATH` | `<input>.<format>` | Output file path |
 | `--format [svg\|html]` | `svg` | Output format: `svg` or interactive `html` |
-| `--theme [nfcore\|light]` | `nfcore` | Visual theme |
+| `--theme [nfcore\|light\|seqera]` | from `style:`, else `nfcore` | Visual theme |
+| `--legend TEXT` | auto | Legend+logo position (keyword, `keyword \| canvas`, `keyword \| dx,dy`, or `x,y`) |
+| `--line-spread [bundle\|centered\|rails]` | `bundle` | How lines sharing a station relate vertically |
 | `--width INTEGER` | auto | SVG width in pixels |
 | `--height INTEGER` | auto | SVG height in pixels |
 | `--x-spacing FLOAT` | auto | Horizontal spacing between layers (widened from 60 only when wide labels would otherwise collide) |
@@ -88,8 +90,15 @@ nf-metro render [OPTIONS] INPUT_FILE
 | `--line-order [definition\|span]` | `definition` | Line ordering strategy: `definition` preserves `.mmd` order, `span` sorts by section span (longest first) |
 | `--diamond-style [straight\|symmetric]` | `straight` | Fork-join layout: `straight` keeps the top branch on the main track; `symmetric` fans the branches evenly |
 | `--center-ports / --no-center-ports` | off | Centre inter-section ports on the shorter of the two connected sections |
+| `--compact-offsets / --no-compact-offsets` | off | Size each station only for the lines actually passing through it |
 | `--section-x-gap FLOAT` | `50` | Horizontal gap between sections |
 | `--section-y-gap FLOAT` | `50` | Vertical gap between sections |
+| `--label-angle FLOAT` | theme default | Station-label angle in degrees |
+| `--font-scale FLOAT` | `1.0` | Scale text and the label metrics that drive layout spacing |
+| `--logo-scale FLOAT` | `1.0` | Scale the logo within the legend |
+| `--legend-min-height FLOAT` | `0` | Minimum legend content height in pixels |
+| `--legend-logo-gap FLOAT` | auto | Gap between the logo and the legend entries |
+| `--validate` | off | Run the render-geometry oracle over the drawn SVG and report violations |
 | `--from-nextflow` | off | Convert Nextflow `-with-dag` mermaid input before rendering |
 | `--title TEXT` | none | Pipeline title (overrides the `%%metro title:` directive) |
 
@@ -371,6 +380,13 @@ These are automatically rewritten into port-to-port connections with junction st
 | `%%metro entry: <side> \| <lines>` | Section | Entry port hint |
 | `%%metro exit: <side> \| <lines>` | Section | Exit port hint |
 | `%%metro direction: <dir>` | Section | Flow direction: `LR`, `RL`, `TB` |
+
+## Python API
+
+nf-metro is a command-line tool. Its Python modules are importable, but the internal
+API (parser, layout engine, renderer) is not part of the public, semver-stable surface
+and may change between releases without notice. Drive nf-metro through the `nf-metro`
+CLI (or `python -m nf_metro`) for stable behaviour.
 
 ## License
 

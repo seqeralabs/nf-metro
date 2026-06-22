@@ -510,6 +510,7 @@ These go at the top of the file, before `graph LR`.
 | Directive | Description |
 |-----------|-------------|
 | `%%metro title: <text>` | Map title |
+| `%%metro caption: <text>` | Free-text caption or attribution line rendered bottom-left of the map (e.g. `Adapted from Author et al., Journal (Year)`). |
 | `%%metro logo: <path>` | Logo image, bundled into the legend (or top-left if there is no legend). |
 | `%%metro logo_scale: <factor>` | Scale the logo within the legend block (`1.0` = default auto-size). Values above 1 grow the legend box to contain the logo. |
 | `%%metro style: <name>` | Theme: `dark` (default, the nfcore theme) or `light`. Selects the render theme unless `--theme` is passed. |
@@ -541,6 +542,7 @@ These go at the top of the file, before `graph LR`.
 | `%%metro interchange: <node> \| <rail-1 lines> \| <rail-2 lines> [\| ...]` | Render a shared step as a cross-track interchange instead of a convergence point (see below). Each pipe-group is one rail (comma-separated lines bundle on it). Auto-layout infers this for fully-parallel lanes, so the directive is only needed to pin a grouping. |
 | `%%metro legend_min_height: <pixels>` | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
 | `%%metro process: <station> \| <regex>` | _Experimental._ Tie a station to the Nextflow process(es) it represents, for live progress (see [Live progress](live.md)). The regex matches the fully-qualified process name; repeat the directive to attach several patterns to one station. Pure metadata - it never affects the rendered map. |
+| `%%metro manifest: <bool>` | Embed the machine-readable data manifest (the `<metadata>` block and per-node `data-node-*` attributes) in the SVG. On by default; `%%metro manifest: false` (or `--no-manifest`) emits the drawn map only. |
 
 **Compact offsets.** By default, each line reserves a fixed vertical slot across the whole map based on its declaration order. If you define three lines, every station that carries even one of them is sized to fit all three. This keeps bundles visually consistent but wastes space when most stations only carry one or two lines.
 
