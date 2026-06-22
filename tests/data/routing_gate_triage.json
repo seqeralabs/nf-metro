@@ -507,10 +507,6 @@
     "note": "_suboptimal_trunk_bands crossing-comparison: validate-only, not on the render path.",
     "status": "defensive"
   },
-  "normalize.py::if ca != cb:::#1": {
-    "note": "Trunk-restack channel-merge arm reached only when two co-column trunks carry distinct channel keys. Migrating the simple inter-section shapes onto baked-offset centrelines (build_concentric_bundle) shifted which routes this pass sees, leaving this arm un-exercised; render-diff confirms no visual change.",
-    "status": "needs-review"
-  },
   "normalize.py::if down is None or len(up.points) < 2:::#1": {
     "note": "Every line entering a fan-out junction also exits it to an entry port, so _fanout_route_maps always pairs a downstream route for each (jid, line_id) upstream; all handlers emit >=2-point routes. The skip arm in _join_fanout_upstream_tails is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
@@ -911,10 +907,6 @@
     "note": "succ_id comes from sec_successors, built only from real tgt.section_id values, so graph.sections.get(succ_id) is never None and the continue (->187) is a defensive null guard. The fall-through static arm (->188) is phantom: control falls into the following multi-line `if (`, whose first operand line carries the real arc L186->189.",
     "status": "defensive"
   },
-  "tb_handlers.py::if pinned_crossing or abs(drop_delta) < COORD_TOLERANCE:::#1": {
-    "note": "The else (the H-V-H staircase in _route_perp_entry_staircase) is reached only by a multi-line perpendicular entry whose drop carries a non-zero stagger AND has no pinned crossing channel - i.e. a TB/BT continuation with a uniform per-line port offset and a horizontal lead-in.  Corpus TB/BT perp entries all carry the separation in src_off (drop_delta==0, L-shape arm), so the staircase fallback is never taken across the corpus.",
-    "status": "defensive"
-  },
   "tb_handlers.py::if crossing_x is not None:::#1": {
     "note": "Pair of context.py::if not indices: - the helper returns None only when no bundled feeder reaches the port, which never co-occurs with the gate that calls it (drop_delta!=0 multi-line bundle into an LR/RL section is always fed by a bundled inter-section edge).  The crossing_x-is-None fall-through is a defensive guard, never taken across the corpus.",
     "status": "defensive"
@@ -972,15 +964,19 @@
     "status": "defensive"
   },
   "offsets.py::if src is None:::#1": {
-    "note": "Defensive guard in _bypass_convergence_feeders: every edge feeding an entry port has a source station, so the missing-source early return is never taken.",
+    "note": "Defensive guard in _convergence_feeders: every edge feeding an entry port has a source station, so the missing-source early return is never taken.",
+    "status": "defensive"
+  },
+  "offsets.py::if abs(src.y - row_y) > _SAME_Y_TOLERANCE:::#1": {
+    "note": "Off-row stop in _apply_offset_upstream_on_row: it carries a reslotted shallow feeder's offset upstream while the approach stays on the port row. Every corpus shallow feeder approaches fully on-row, so the early stop when a source-side station turns off the row is never taken; it bounds the walk for a feeder whose upstream rises off the row.",
+    "status": "defensive"
+  },
+  "offsets.py::if col is None:::#1": {
+    "note": "Defensive guard in _convergence_feeders: every edge feeding a LEFT entry port has a source whose section resolves to a grid column after placement, so the unresolved-source-column early return is never taken.",
     "status": "defensive"
   },
   "offsets.py::if tgt_col is None:::#1": {
-    "note": "Defensive guard in _bypass_convergence_feeders: a LEFT entry port section always has a grid column after placement, so the unresolved-target-column early return is never taken.",
-    "status": "defensive"
-  },
-  "offsets.py::if any(::#2": {
-    "note": "Skip guard in _order_convergence_entry_ports: every bypass-convergence LEFT entry port on the corpus is in declaration order and must be re-slotted to approach order, so the already-ordered no-op skip arm is never taken.",
+    "note": "Defensive guard in _convergence_feeders: a LEFT entry port section always has a grid column after placement, so the unresolved-target-column early return is never taken.",
     "status": "defensive"
   },
   "offsets.py::sec is None::#1": {
