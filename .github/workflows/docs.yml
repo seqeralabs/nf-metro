@@ -37,6 +37,9 @@ jobs:
           WHEEL=$(basename docs/playground/wheels/*.whl)
           printf '{"wheel": "%s"}\n' "$WHEEL" > docs/playground/wheels/index.json
 
+      - name: Build playground example manifest
+        run: python scripts/build_playground_examples.py
+
       - name: Configure git for mike
         run: |
           git config user.name "github-actions[bot]"

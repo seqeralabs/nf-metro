@@ -26,6 +26,9 @@ jobs:
           WHEEL=$(basename docs/playground/wheels/*.whl)
           printf '{"wheel": "%s"}\n' "$WHEEL" > docs/playground/wheels/index.json
 
+      - name: Build playground example manifest
+        run: python scripts/build_playground_examples.py
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
