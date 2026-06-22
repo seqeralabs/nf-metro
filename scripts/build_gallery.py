@@ -350,6 +350,13 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Same-direction sections stacked in one grid column, chained via short "
         "vertical drops on alternating sides (serpentine), no wrap-around.",
     ),
+    (
+        "tb_left_exit_step",
+        TOPOLOGIES_DIR,
+        "A TB alignment section exits LEFT into a lower right-entry section with "
+        "a blocker directly below: the exit bundle steps west-down-west, routed "
+        "as a parallel staircase that keeps the feed order (issue #671).",
+    ),
     # --- Offset and bypass ---
     (
         "bypass_fan_in_outer_slot",

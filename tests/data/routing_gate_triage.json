@@ -575,14 +575,6 @@
     "note": "Degenerate-bbox guard in _v_segment_crosses_other_section: mirror of the _h_segment_crosses_other_section guard; sections always have positive width.",
     "status": "defensive"
   },
-  "normalize.py::if s.id in exclude_section_ids:::#2": {
-    "note": "_v_segment_crosses_other_section skips the excluded sections; its sole caller (_right_entry_drop_in_is_clear) excludes the source and target, so the loop only iterates them and the not-excluded fall-through is never reached on the corpus.",
-    "status": "defensive"
-  },
-  "normalize.py::if hi_y <= s.bbox_y or lo_y >= bottom:::#1": {
-    "note": "Y-interior overlap test in _v_segment_crosses_other_section: with only the excluded source/target sections iterated on the corpus, the not-overlapping skip arm is never reached.",
-    "status": "defensive"
-  },
   "normalize.py::if s.bbox_x - margin <= x <= s.bbox_x + s.bbox_w + margin:::#1": {
     "note": "X-band test in _v_segment_crosses_other_section: a RIGHT-entry drop-in descent runs in the clear inter-column gap just right of the source, so no non-excluded section's X band contains it; the crossing arm is never taken on the corpus.",
     "status": "defensive"

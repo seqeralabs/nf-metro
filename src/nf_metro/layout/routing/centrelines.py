@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.routing.bundle import (
     build_concentric_bundle,
+    build_offset_bundle,
     build_tapered_bundle,
 )
 from nf_metro.layout.routing.common import RoutedPath
@@ -128,6 +129,35 @@ def route_along(
         members,
         centerline,
         base_radius=base_radius,
+        min_radius=min_radius,
+        bundle_offsets=bundle_offsets,
+        normalize_exempt=normalize_exempt,
+    )
+    return next((r for r in routes if r.line_id == edge.line_id), None)
+
+
+def route_offset(
+    edge: Edge,
+    members: list[tuple[Edge, str, list[float]]],
+    centerline: list[_Vec],
+    *,
+    base_radius: float,
+    min_radius: float | None = None,
+    bundle_offsets: Sequence[Sequence[float]] | None = None,
+    normalize_exempt: bool = True,
+) -> RoutedPath | None:
+    """Fan per-leg-offset *members* along *centerline* and return *edge*'s line.
+
+    The offset-bundle analogue of :func:`route_along`: the seam between a
+    handler's centreline and :func:`build_offset_bundle` for a staircase that
+    fans by a different amount on more than two legs.  A handler routing its
+    siblings one at a time passes the full bundle's per-leg offsets as
+    *bundle_offsets* so the lone member anchors against the whole spread.
+    """
+    routes = build_offset_bundle(
+        members,
+        centerline,
+        base_radius,
         min_radius=min_radius,
         bundle_offsets=bundle_offsets,
         normalize_exempt=normalize_exempt,

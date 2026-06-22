@@ -33,6 +33,7 @@ from nf_metro.layout.routing.centrelines import (
     gather_tapered_bundle,
     route_along,
     route_hvh_tapered,
+    route_offset,
     route_straight,
     route_tapered,
     route_tapered_anchored,
@@ -233,12 +234,19 @@ class _InterFacts:
         )
 
     @property
-    def is_serpentine_left_exit_left_entry(self) -> bool:
-        """LEFT exit dropping into a LEFT entry stacked in the same column."""
+    def is_left_exit(self) -> bool:
+        """Source is a LEFT-side exit port (not an entry)."""
         return (
             self.src_port is not None
             and not self.src_port.is_entry
-            and self.src_port.side == PortSide.LEFT
+            and self.src_port.side is PortSide.LEFT
+        )
+
+    @property
+    def is_serpentine_left_exit_left_entry(self) -> bool:
+        """LEFT exit dropping into a LEFT entry stacked in the same column."""
+        return (
+            self.is_left_exit
             and self.entry_side is PortSide.LEFT
             and self.same_col
             and self.cross_row
@@ -358,6 +366,14 @@ def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
     return _route_bypass(edge, src, tgt, f.i, f.src_col, f.tgt_col, ctx, f.src_row)
 
 
+def _section_right_edge(graph: MetroGraph, station: Station) -> float:
+    """The right edge X of *station*'s section, falling back to its own X."""
+    section = graph.sections.get(station.section_id) if station.section_id else None
+    if section and section.bbox_w > 0:
+        return section.bbox_x + section.bbox_w
+    return station.x
+
+
 def _right_entry_drop_in_is_clear(
     graph: MetroGraph,
     src: Station,
@@ -374,15 +390,7 @@ def _right_entry_drop_in_is_clear(
     turn) defers to the gap-above / around-below loops instead.
     """
     ex, ey = entry_port.x, entry_port.y
-    ep_section = (
-        graph.sections.get(entry_port.section_id) if entry_port.section_id else None
-    )
-    section_right = (
-        ep_section.bbox_x + ep_section.bbox_w
-        if ep_section and ep_section.bbox_w > 0
-        else ex
-    )
-    if corner_x < section_right - COORD_TOLERANCE:
+    if corner_x < _section_right_edge(graph, entry_port) - COORD_TOLERANCE:
         return False
     exclude = {
         sid for sid in (src.section_id, entry_port.section_id) if sid is not None
@@ -440,6 +448,87 @@ def _route_right_entry_drop_in(
     return route
 
 
+def _left_exit_step_offsets(
+    graph: MetroGraph, edge: Edge, src: Station, ctx: _RoutingCtx
+) -> tuple[list[str], dict[str, float], dict[str, float], float]:
+    """Shared geometry of a LEFT-exit -> RIGHT-entry staircase.
+
+    Returns the bundle's line ids, each line's source and target station offset,
+    and the descent channel X.  Each line drops at ``cx + exit_off`` -- the same
+    scalar that orders the port fan -- so the westmost leg carries the topmost
+    line and the eastmost leg lands ``curve_radius`` clear of the source port.
+    """
+    _members, line_ids, _edge_by_line = gather_member_edges(graph, edge)
+    exit_offs = {lid: _get_offset(ctx, edge.source, lid) for lid in line_ids}
+    entry_offs = {lid: _get_offset(ctx, edge.target, lid) for lid in line_ids}
+    cx = src.x - ctx.curve_radius - max(exit_offs.values())
+    return line_ids, exit_offs, entry_offs, cx
+
+
+def _left_exit_right_entry_step_is_clear(
+    graph: MetroGraph, edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> bool:
+    """Whether the LEFT-exit staircase descent reaches the RIGHT entry cleanly.
+
+    Every descent leg and the inward turn at the entry Y must clear all other
+    sections, and the whole fan must sit on the port's outward side (past the
+    target section's right edge), so a blocked descent defers to the wrap /
+    around-below fallbacks instead.
+    """
+    line_ids, exit_offs, _entry_offs, cx = _left_exit_step_offsets(
+        graph, edge, src, ctx
+    )
+    exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
+    drop_xs = [cx + exit_offs[lid] for lid in line_ids]
+    if min(drop_xs) < _section_right_edge(graph, tgt) - COORD_TOLERANCE:
+        return False
+    for dx in (min(drop_xs), max(drop_xs)):
+        if _v_segment_crosses_other_section(graph, dx, src.y, tgt.y, exclude):
+            return False
+    return not _h_segment_crosses_other_section(
+        graph, min(drop_xs), tgt.x, tgt.y, exclude
+    )
+
+
+def _route_left_exit_right_entry_step(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> RoutedPath | None:
+    """Staircase from a LEFT exit port into a lower RIGHT entry (H-V-H).
+
+    The lines arrive at the left-edge exit port in their feed order and must
+    keep it into the target's RIGHT port below.  Each line fans by its own
+    offset on every leg -- its source offset on the exit run and the descent,
+    its target offset on the entry run -- so the bundle steps west, down, then
+    west into the port without inverting (the descent fans on the same scalar
+    that orders the ports, so no line crosses a bundle-mate)::
+
+        (sx, sy + so)  -> H out of the exit port
+        (cx + so, sy + so)  ; turn down
+        (cx + so, ey + to)  -> V down the fanned channel
+        (ex, ey + to)  -> H into the RIGHT port from its outward side
+    """
+    sx, sy = src.x, src.y
+    ex, ey = tgt.x, tgt.y
+    line_ids, exit_offs, entry_offs, cx = _left_exit_step_offsets(
+        ctx.graph, edge, src, ctx
+    )
+
+    def leg_offsets(line_id: str) -> list[float]:
+        return [-exit_offs[line_id], -exit_offs[line_id], -entry_offs[line_id]]
+
+    centerline = [(sx, sy), (cx, sy), (cx, ey), (ex, ey)]
+    route = route_offset(
+        edge,
+        [(edge, edge.line_id, leg_offsets(edge.line_id))],
+        centerline,
+        base_radius=ctx.curve_radius,
+        bundle_offsets=[leg_offsets(lid) for lid in line_ids],
+    )
+    if route is not None:
+        _declare_channel(route, ctx, cx, vertical_direction(ey - sy))
+    return route
+
+
 def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
     """Cross-row feed into a RIGHT entry, reached from the port's outward side.
 
@@ -457,8 +546,20 @@ def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
     source and the port; the outward-side drop-in is therefore the usual path,
     and the gap-above / around-below fallbacks cover only an exotic descent
     blocked by a wide same-column sibling.
+
+    A LEFT-side exit port is the exception: its lines reach the port travelling
+    away from the box (the stations sit to the port's right) and leave it
+    travelling the same way into the target's RIGHT port below, so the route
+    steps west -> down -> west -- two opposite-handed corners.  A concentric
+    bundle inverts its nesting through opposite turns, crossing the lines at the
+    port; the staircase builder fans each leg by its own offset so every line
+    keeps the feed order on both ports and stays parallel through the descent.
     """
     edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
+    if f.is_left_exit and _left_exit_right_entry_step_is_clear(
+        graph, edge, src, tgt, ctx
+    ):
+        return _route_left_exit_right_entry_step(edge, src, tgt, ctx)
     _fan, pos_n, delta, corner_x = _wrap_fan_geometry(
         ctx, edge, src, f.i, f.n, vertical_direction(tgt.y - src.y)
     )
