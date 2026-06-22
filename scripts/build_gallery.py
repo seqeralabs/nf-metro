@@ -914,6 +914,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "section's stations.",
     ),
     (
+        "rail_inter_section",
+        TOPOLOGIES_DIR,
+        "Two `%%metro line_spread: rails` sections joined by an inter-section "
+        "edge. The connector wraps cleanly from the upstream right exit port, "
+        "down the right margin, across the inter-section gap, and down the left "
+        "margin into the downstream left entry port - no dangling port stubs "
+        "and no avoidable crossings between co-travelling lines.",
+    ),
+    (
         "rail_offtrack_io",
         TOPOLOGIES_DIR,
         "A `%%metro line_spread: rails` section with off-track `%%metro file:` "

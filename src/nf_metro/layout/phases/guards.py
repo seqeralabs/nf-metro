@@ -2441,6 +2441,55 @@ def _guard_inter_section_route_no_full_width_backtrack(
             )
 
 
+def _guard_rail_connector_ports_no_stub(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """After routing: a whole-graph rail-mode inter-section connector must
+    leave its exit port outward and reach its entry port from outside.
+
+    Rail mode stacks sections vertically; the dedicated rail router connects a
+    RIGHT exit port to a LEFT entry port via a corridor that wraps around the
+    outside of both boxes.  A connector that instead heads back *into* the
+    section it just left (or reaches the entry port from inside the box) leaves
+    a dangling stub and slices the section's own rails (#743).  The outward
+    direction is set by the port side: a RIGHT port is left/reached rightward,
+    a LEFT port leftward.
+    """
+    if graph.line_spread is not LineSpread.RAILS:
+        return
+    routes = _ensure_routes(graph, routes)
+
+    def outward_ok(side: PortSide, anchor_x: float, neighbour_x: float) -> bool:
+        if side is PortSide.RIGHT:
+            return neighbour_x >= anchor_x - GUARD_TOLERANCE
+        if side is PortSide.LEFT:
+            return neighbour_x <= anchor_x + GUARD_TOLERANCE
+        return True
+
+    for rp in routes:
+        src = graph.ports.get(rp.edge.source)
+        tgt = graph.ports.get(rp.edge.target)
+        if src is None or tgt is None or src.section_id == tgt.section_id:
+            continue
+        if len(rp.points) < 2:
+            continue
+        if not outward_ok(src.side, rp.points[0][0], rp.points[1][0]):
+            raise PhaseInvariantError(
+                f"{phase}: rail connector {rp.edge.source!r}->{rp.edge.target!r} "
+                f"line {rp.line_id!r} leaves its {src.side.name} exit port "
+                f"x={rp.points[0][0]:.1f} inward toward x={rp.points[1][0]:.1f}"
+            )
+        if not outward_ok(tgt.side, rp.points[-1][0], rp.points[-2][0]):
+            raise PhaseInvariantError(
+                f"{phase}: rail connector {rp.edge.source!r}->{rp.edge.target!r} "
+                f"line {rp.line_id!r} reaches its {tgt.side.name} entry port "
+                f"x={rp.points[-1][0]:.1f} from inside at x={rp.points[-2][0]:.1f}"
+            )
+
+
 def _guard_routes_enter_sections_at_ports(
     graph: MetroGraph,
     phase: str,
@@ -4086,6 +4135,17 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         _guard_routes_enter_sections_at_ports,
         "B",
         needs=frozenset({"routes"}),
+    ),
+    GuardSpec(
+        _guard_rail_connector_ports_no_stub,
+        "B",
+        needs=frozenset({"routes"}),
+        issue_pin=("#743",),
+        narrow_reason=(
+            "Acts only on whole-graph rail-mode routes whose endpoints are both "
+            "boundary ports of different sections; the wrap corridor is exempt "
+            "from the X-monotonic backtrack guards by design."
+        ),
     ),
     GuardSpec(
         _guard_no_route_through_section,

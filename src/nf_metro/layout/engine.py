@@ -170,6 +170,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_ports_on_boundaries,
     _guard_post_convergence_trunk_continues,
     _guard_rail_above_label_band,
+    _guard_rail_connector_ports_no_stub,
     _guard_rail_one_station_per_column,
     _guard_rail_stations_seat_on_rails,
     _guard_right_entry_drop_in_when_clear,
