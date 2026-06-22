@@ -87,6 +87,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "showing how explicit directives can fine-tune placement.",
     ),
     (
+        "rnaseq_auto_fold1",
+        EXAMPLES_DIR / "regressions",
+        "The auto-layout pipeline pinned to `%%metro fold_threshold: 1` (maximal "
+        "folding). Regression fixture for known layout defects under aggressive "
+        "folding: fan-in station-as-elbow + crossing (#672), space-wasting "
+        "section placement and intra-section column gaps (#989), and a "
+        "non-consumer breeze-through (#990).",
+    ),
+    (
         "genomic_pipeline",
         EXAMPLES_DIR,
         "Multi-section genomic variant-calling pipeline: same-direction sections "

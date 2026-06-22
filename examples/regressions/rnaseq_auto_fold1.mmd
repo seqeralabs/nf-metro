@@ -1,0 +1,96 @@
+%%metro title: nf-core/rnaseq (folded, --fold-threshold 1)
+%%metro style: dark
+%%metro fold_threshold: 1
+%%metro line: star_rsem | Aligner: STAR, Quantification: RSEM | #0570b0
+%%metro line: star_salmon | Aligner: STAR, Quantification: Salmon (default) | #2db572
+%%metro line: hisat2 | Aligner: HISAT2, Quantification: None | #f5c542
+%%metro line: pseudo_salmon | Pseudo-aligner: Salmon, Quantification: Salmon | #e63946
+%%metro line: pseudo_kallisto | Pseudo-aligner: Kallisto, Quantification: Kallisto | #7b2d3b
+%%metro legend: bl
+
+graph LR
+    subgraph preprocessing [Pre-processing]
+        cat_fastq[cat fastq]
+        fastqc_raw[FastQC]
+        infer_strandedness[infer strandedness]
+        umi_tools_extract[UMI-tools extract]
+        fastp[FastP]
+        trimgalore[Trim Galore!]
+        fastqc_trimmed[FastQC]
+        bbsplit[BBSplit]
+        sortmerna[SortMeRNA]
+
+        cat_fastq -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| fastqc_raw
+        fastqc_raw -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| infer_strandedness
+        infer_strandedness -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| umi_tools_extract
+
+        umi_tools_extract -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| fastp
+        umi_tools_extract -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| trimgalore
+        fastp -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| fastqc_trimmed
+        trimgalore -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| fastqc_trimmed
+
+        fastqc_trimmed -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| bbsplit
+        bbsplit -->|star_salmon,star_rsem,hisat2,pseudo_salmon,pseudo_kallisto| sortmerna
+    end
+
+    subgraph genome_align [Genome alignment & quantification]
+        star[STAR]
+        hisat2_align[HISAT2]
+        rsem[RSEM]
+        salmon_quant[Salmon]
+        umi_tools_dedup[UMI-tools dedup]
+
+        star -->|star_rsem| rsem
+        star -->|star_salmon| umi_tools_dedup
+        umi_tools_dedup -->|star_salmon| salmon_quant
+        hisat2_align -->|hisat2| umi_tools_dedup
+    end
+
+    subgraph postprocessing [Post-processing]
+        samtools[SAMtools]
+        picard[Picard]
+        bedtools[BEDTools]
+        bedgraph[bedGraphToBigWig]
+        stringtie[StringTie]
+
+        samtools -->|star_salmon,star_rsem,hisat2| picard
+        picard -->|star_salmon,star_rsem,hisat2| bedtools
+        bedtools -->|star_salmon,star_rsem,hisat2| bedgraph
+        bedgraph -->|star_salmon,star_rsem,hisat2| stringtie
+    end
+
+    subgraph pseudo_align [Pseudo-alignment & quantification]
+        salmon_pseudo[Salmon]
+        kallisto[Kallisto]
+        multiqc_pseudo[MultiQC]
+
+        salmon_pseudo -->|pseudo_salmon| multiqc_pseudo
+        kallisto -->|pseudo_kallisto| multiqc_pseudo
+    end
+
+    subgraph qc_report [Quality control & reporting]
+        rseqc[RSeQC]
+        preseq[Preseq]
+        qualimap[Qualimap]
+        dupradar[dupRadar]
+        deseq2_pca[DESeq2 PCA]
+        kraken2[Kraken2/Bracken]
+        multiqc_final[MultiQC]
+
+        rseqc -->|star_salmon,star_rsem,hisat2| preseq
+        preseq -->|star_salmon,star_rsem,hisat2| qualimap
+        qualimap -->|star_salmon,star_rsem,hisat2| dupradar
+        dupradar -->|star_salmon,star_rsem,hisat2| deseq2_pca
+        deseq2_pca -->|star_salmon,star_rsem,hisat2| kraken2
+        kraken2 -->|star_salmon,star_rsem,hisat2| multiqc_final
+    end
+
+    %% Inter-section edges
+    sortmerna -->|star_salmon,star_rsem| star
+    sortmerna -->|hisat2| hisat2_align
+    sortmerna -->|pseudo_salmon| salmon_pseudo
+    sortmerna -->|pseudo_kallisto| kallisto
+    salmon_quant -->|star_salmon| samtools
+    rsem -->|star_rsem| samtools
+    umi_tools_dedup -->|hisat2| samtools
+    stringtie -->|star_salmon,star_rsem,hisat2| rseqc

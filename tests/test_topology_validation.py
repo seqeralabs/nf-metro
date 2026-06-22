@@ -23,6 +23,7 @@ from layout_validator import (
     check_route_segment_crossings,
     check_section_overlap,
     check_single_segment_diagonals,
+    check_station_as_elbow,
     check_station_containment,
     validate_layout,
 )
@@ -333,6 +334,64 @@ class TestVariantCallingDefects:
     def test_no_route_segment_crossings(self, graph):
         v = check_route_segment_crossings(graph)
         assert not v, "\n".join(vi.message for vi in v)
+
+
+# --- rnaseq_auto under aggressive folding (#672, #989, #990) ---
+#
+# `rnaseq_auto_fold1.mmd` is `rnaseq_auto.mmd` pinned to
+# `%%metro fold_threshold: 1`, so it folds maximally at the default flags
+# and reproduces three known layout defects that only surface under heavy
+# folding. Each is locked with a strict xfail keyed to its tracking issue;
+# when an engine fix lands the matching xfail flips to XPASS and reds CI,
+# prompting the marker removal.
+
+RNASEQ_AUTO_FOLD1_FILE = EXAMPLES_DIR / "regressions" / "rnaseq_auto_fold1.mmd"
+
+
+class TestRnaseqAutoFold1Defects:
+    """Lock known fold-induced layout defects in the rnaseq_auto pipeline."""
+
+    @pytest.fixture
+    def graph(self):
+        # max_station_columns=None honours the fixture's own
+        # `%%metro fold_threshold: 1` directive instead of the default 15.
+        return _load_and_layout(RNASEQ_AUTO_FOLD1_FILE, max_station_columns=None)
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="fan-in station-as-elbow under fold (TB section, side entry on "
+        "the trunk row); tracked in #672",
+    )
+    def test_no_station_as_elbow(self, graph):
+        errors = [
+            v for v in check_station_as_elbow(graph) if v.severity == Severity.ERROR
+        ]
+        assert not errors, "\n".join(v.message for v in errors)
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="space-wasting placement / intra-section column gaps under "
+        "fold; tracked in #989",
+    )
+    def test_no_excessive_column_gaps(self, graph):
+        v = check_excessive_column_gaps(graph)
+        assert not v, "\n".join(vi.message for vi in v)
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="non-consumer line breezes through downstream markers under "
+        "fold instead of bypassing; tracked in #990",
+    )
+    def test_no_breeze_through_markers(self, graph):
+        from nf_metro.render import render_svg
+        from nf_metro.render.validate import validate_render
+        from nf_metro.themes import THEMES
+
+        svg = render_svg(graph, THEMES["nfcore"])
+        crosses = [
+            v for v in validate_render(svg, graph=graph) if "non-consumer" in v.message
+        ]
+        assert not crosses, "\n".join(v.message for v in crosses)
 
 
 # --- #420: single-line linear chains must stay axis-aligned ---
