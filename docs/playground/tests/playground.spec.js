@@ -12,6 +12,13 @@ async function waitReady(p) {
   });
 }
 
+// Advanced controls live in a collapsed <details>; open it before driving them.
+async function openAdvanced() {
+  await page.evaluate(() => {
+    document.getElementById("advanced").open = true;
+  });
+}
+
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage();
   await page.goto("/index.html");
@@ -48,7 +55,18 @@ test("animate toggle adds motion elements", async () => {
   await expect(page.locator("#preview animateMotion")).toHaveCount(0);
 });
 
+test("advanced options are collapsed by default and toggle open", async () => {
+  // Progressive disclosure: power-user knobs are hidden until requested.
+  await expect(page.locator("#advanced")).not.toHaveAttribute("open", /.*/);
+  await expect(page.locator("#opt-line-spread")).toBeHidden();
+  await page.locator("#advanced > summary").click();
+  await expect(page.locator("#opt-line-spread")).toBeVisible();
+  await page.locator("#advanced > summary").click();
+  await expect(page.locator("#opt-line-spread")).toBeHidden();
+});
+
 test("directional toggle adds chevron markers", async () => {
+  await openAdvanced();
   await expect(page.locator('#preview [class*="metro-direction"]')).toHaveCount(0);
   await page.locator("#opt-directional").check();
   expect(
@@ -85,6 +103,7 @@ test("theme dropdown syncs from the source style directive", async () => {
 });
 
 test("debug toggle adds the debug overlay", async () => {
+  await openAdvanced();
   // A sectioned map has ports/waypoints for the overlay to draw.
   await page.evaluate(() =>
     window.__nfMetro.setValue(
@@ -101,6 +120,7 @@ test("debug toggle adds the debug overlay", async () => {
 });
 
 test("layout controls write %%metro directives and sync from source", async () => {
+  await openAdvanced();
   const getValue = () => page.evaluate(() => window.__nfMetro.getValue());
   await page.evaluate(() =>
     window.__nfMetro.setValue("%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n")

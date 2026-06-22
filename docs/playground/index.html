@@ -46,52 +46,59 @@
           </select>
         </label>
         <label class="check"><input type="checkbox" id="opt-animate" /> Animate</label>
-        <label class="check"><input type="checkbox" id="opt-directional" /> Chevrons</label>
-        <label class="check"><input type="checkbox" id="opt-debug" /> Debug</label>
-        <span class="sep"></span>
-        <span class="group-label">Layout</span>
-        <label>Line spread
-          <select id="opt-line-spread">
-            <option value="">auto</option>
-            <option value="bundle">bundle</option>
-            <option value="centered">centered</option>
-            <option value="rails">rails</option>
-          </select>
-        </label>
-        <label>Diamonds
-          <select id="opt-diamond-style">
-            <option value="">auto</option>
-            <option value="straight">straight</option>
-            <option value="symmetric">symmetric</option>
-          </select>
-        </label>
-        <label>Line order
-          <select id="opt-line-order">
-            <option value="">auto</option>
-            <option value="definition">definition</option>
-            <option value="span">span</option>
-          </select>
-        </label>
-        <label class="check"><input type="checkbox" id="opt-center-ports" /> Centre ports</label>
-        <label class="check"><input type="checkbox" id="opt-compact-offsets" /> Compact offsets</label>
-        <label>Font scale
-          <input type="number" id="opt-font-scale" min="0.1" step="0.1" placeholder="1.0" />
-        </label>
-        <label>Fold cols
-          <input type="number" id="opt-fold-threshold" min="1" step="1" placeholder="auto" />
-        </label>
-        <label>X-spacing
-          <input type="number" id="opt-x-spacing" min="1" step="10" placeholder="auto" />
-        </label>
-        <label>Y-spacing
-          <input type="number" id="opt-y-spacing" min="1" step="10" placeholder="auto" />
-        </label>
         <span class="sep"></span>
         <span class="group-label">Export</span>
         <button id="btn-svg">SVG</button>
         <button id="btn-png">PNG</button>
         <button id="btn-share">Share link</button>
       </div>
+
+      <details id="advanced" class="advanced">
+        <summary>Advanced options</summary>
+        <div class="pane-toolbar advanced-controls">
+          <label class="check"><input type="checkbox" id="opt-directional" /> Chevrons</label>
+          <label class="check"><input type="checkbox" id="opt-debug" /> Debug</label>
+          <span class="sep"></span>
+          <span class="group-label">Layout</span>
+          <label>Line spread
+            <select id="opt-line-spread">
+              <option value="">auto</option>
+              <option value="bundle">bundle</option>
+              <option value="centered">centered</option>
+              <option value="rails">rails</option>
+            </select>
+          </label>
+          <label>Diamonds
+            <select id="opt-diamond-style">
+              <option value="">auto</option>
+              <option value="straight">straight</option>
+              <option value="symmetric">symmetric</option>
+            </select>
+          </label>
+          <label>Line order
+            <select id="opt-line-order">
+              <option value="">auto</option>
+              <option value="definition">definition</option>
+              <option value="span">span</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="opt-center-ports" /> Centre ports</label>
+          <label class="check"><input type="checkbox" id="opt-compact-offsets" /> Compact offsets</label>
+          <label>Font scale
+            <input type="number" id="opt-font-scale" min="0.1" step="0.1" placeholder="1.0" />
+          </label>
+          <label>Fold cols
+            <input type="number" id="opt-fold-threshold" min="1" step="1" placeholder="auto" />
+          </label>
+          <label>X-spacing
+            <input type="number" id="opt-x-spacing" min="1" step="10" placeholder="auto" />
+          </label>
+          <label>Y-spacing
+            <input type="number" id="opt-y-spacing" min="1" step="10" placeholder="auto" />
+          </label>
+        </div>
+      </details>
+
       <div id="preview"></div>
       <div id="boot" class="overlay">
         <div class="spinner"></div>
