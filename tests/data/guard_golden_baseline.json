@@ -11134,6 +11134,7 @@
       "_guard_tb_exit_corner_column_order|after final",
       "_guard_no_split_same_line_fanout_descents|after final",
       "_guard_no_distinct_line_fanout_crossing|after final",
+      "_guard_trunk_continuation_drops_straight|after final",
       "_guard_no_dogleg_crosses_exempt_trunk|after final",
       "_guard_no_stacked_elbow_graze|after final",
       "_guard_fanout_tail_join|after final",
