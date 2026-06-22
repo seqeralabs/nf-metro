@@ -141,6 +141,11 @@ def _layout_gap_bundle(
     lone = len(bundles) == 1
     for bi, (_down, chans) in enumerate(bundles):
         order = line_orders[bi]
+        # The concentric outside/inside assignment mirrors with the trunk's
+        # travel direction: a leftward bypass's descent is the mirror of a
+        # rightward one, so its largest radius sits on the LEFT.  Read the leg
+        # direction from geometry; fall back to the bundle's vertical sense.
+        lead_right = _corridor_leadout_right(chans, _down)
         if lone:
             mid = (gap_left + gap_right) / 2
         else:
@@ -161,7 +166,7 @@ def _layout_gap_bundle(
         ):
             continue
         for ch, (li, nx) in targets:
-            _restack_channel(ch, nx, li, n, step, ctx.curve_radius)
+            _restack_channel(ch, nx, li, n, step, ctx.curve_radius, lead_right)
 
 
 def _locate_slot_channel(
@@ -487,7 +492,9 @@ def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -
                 y_hi=max(tail.trunk_y, tail.port_y),
                 down=tail.port_y > tail.trunk_y,
             )
-            _restack_channel(ch, slot.peel_x, slot.rank, n, step, ctx.curve_radius)
+            _restack_channel(
+                ch, slot.peel_x, slot.rank, n, step, ctx.curve_radius, ch.down
+            )
             seat_peeloff_port_y(rp, slot.port_y)
 
 
@@ -1402,6 +1409,33 @@ def _convergence_line_order(
     return sorted(_distinct_line_order(chans), key=lambda lid: trunk_depth[lid])
 
 
+def _corridor_leadout_right(chans: list[_VChannel], default: bool) -> bool:
+    """Whether a corridor's deep-end horizontal legs extend rightward.
+
+    Each channel meets the inter-section trunk at its deep (``y_hi``) endpoint;
+    the leg there runs toward the trunk's continuation, so its travel direction
+    is what the deep-end crossing model must mirror.  A rightward bypass's DOWN
+    descent leads its trunk RIGHT and its UP ascent receives it from the LEFT; a
+    leftward bypass mirrors both, which a plain ``down`` discriminant cannot see.
+
+    Returns the majority rightward verdict over channels that have a flanking
+    horizontal at the deep end, falling back to *default* when none do (a bare
+    vertical drop carries no direction).
+    """
+    votes: list[bool] = []
+    for ch in chans:
+        pts = ch.route.points
+        deep, far = (ch.idx + 1, ch.idx + 2) if ch.down else (ch.idx, ch.idx - 1)
+        if not 0 <= far < len(pts):
+            continue
+        dx = pts[far][0] - pts[deep][0]
+        if abs(dx) > COORD_TOLERANCE:
+            votes.append(dx > 0)
+    if not votes:
+        return default
+    return votes.count(True) >= votes.count(False)
+
+
 def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
     """Left-to-right order of the distinct lines in one gap-bundle corridor.
 
@@ -1429,6 +1463,12 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
     preprocess_reporting sits to the RIGHT).
     """
     down = chans[0].down if chans else True
+    # The deep-end crossing model nests by the trunk's travel direction, not the
+    # vertical's: a leftward bypass leads its DOWN trunk LEFT, so the rightward
+    # default (``down``) would mirror the order and twist the bundle at the
+    # corner.  Read the leg direction from geometry; fall back to ``down`` for a
+    # bare drop with no flanking horizontal.
+    lead_right = _corridor_leadout_right(chans, down)
 
     # Per line: the deep turn-off depths of each segment (always y_hi), the
     # deepest reach, a representative x for stable tie-breaking, and the
@@ -1451,10 +1491,10 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
 
     def peel_crossings_if_left(a: str, b: str) -> int:
         # Deep-end (divergence) crossings when a is placed LEFT of b.
-        if down:
+        if lead_right:
             # b's deeper vertical crosses a's shallower right-going lead-outs.
             return sum(1 for t in turns[a] if t < deepest[b] - COORD_TOLERANCE)
-        # UP: a's deeper vertical crosses b's shallower left-going lead-ins.
+        # Leftward: a's deeper vertical crosses b's shallower lead-outs.
         return sum(1 for t in turns[b] if t < deepest[a] - COORD_TOLERANCE)
 
     # The approach-weave term models a fan whose lead-ins enter from the LEFT
@@ -1511,6 +1551,7 @@ def _restack_channel(
     n: int,
     step: float,
     base_radius: float,
+    lead_right: bool,
 ) -> None:
     """Move one vertical channel to *new_x* and recompute its corner radii.
 
@@ -1521,9 +1562,11 @@ def _restack_channel(
     encodes the concentric (outermost-line-largest-on-the-outside)
     geometry for both the down- and up-going cases.
 
-    ``l_shape_radii`` assigns ``i = 0`` to the rightmost (DOWN) / leftmost
-    (UP) line; the bundle here is ordered left-to-right with ``i`` growing
-    rightward, so the index is mapped accordingly.
+    ``l_shape_radii`` assigns ``i = 0`` to the largest-radius outside line;
+    the bundle here is ordered left-to-right with ``i`` growing rightward.
+    Which end is the outside follows the trunk's travel direction (*lead_right*),
+    not the vertical's: a leftward bypass mirrors the assignment so the widest
+    sweep sits on the LEFT.
     """
     rp = ch.route
     pts = rp.points
@@ -1534,8 +1577,10 @@ def _restack_channel(
     if rp.curve_radii is None:
         return
     vertical = Direction.D if ch.down else Direction.U
-    # Map left-to-right index to l_shape_radii's convention.
-    li = (n - 1 - i) if ch.down else i
+    # Map left-to-right index to l_shape_radii's convention: i=0 is the outside
+    # (largest) line, which sits on the right for a rightward-leading trunk and
+    # on the left for a leftward one.
+    li = (n - 1 - i) if lead_right else i
     _, r_first, r_second = l_shape_radii(
         li, n, vertical=vertical, offset_step=step, base_radius=base_radius
     )
