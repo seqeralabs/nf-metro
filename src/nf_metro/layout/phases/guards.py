@@ -3131,6 +3131,37 @@ def _guard_merge_port_approach_side(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
+def _guard_convergence_shallow_feeder_concentric(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """Final-phase: at a LEFT entry where bypass feeders climb in from off the
+    port row and a flat shallow feeder joins them, the shallow feeder must take
+    a port-near slot above the climbing risers rather than weave across the
+    turning bundle.
+
+    See
+    :func:`nf_metro.layout.routing.invariants.check_convergence_shallow_feeder_concentric`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_convergence_shallow_feeder_concentric,
+    )
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    messages = check_convergence_shallow_feeder_concentric(graph, offsets)
+    if not messages:
+        return
+    extra = f" (+{len(messages) - 1} more)" if len(messages) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {messages[0]}{extra}")
+
+
 def _guard_merge_port_outgoing_side_preserved(
     graph: MetroGraph,
     phase: str,
@@ -3842,6 +3873,11 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     ),
     GuardSpec(_guard_perp_entry_feed_not_collinear, "B"),
     GuardSpec(_guard_merge_port_approach_side, "B", needs=frozenset({"offsets"})),
+    GuardSpec(
+        _guard_convergence_shallow_feeder_concentric,
+        "B",
+        needs=frozenset({"offsets"}),
+    ),
     GuardSpec(
         _guard_merge_port_outgoing_side_preserved,
         "B",

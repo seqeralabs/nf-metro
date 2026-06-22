@@ -758,6 +758,50 @@ def check_merge_port_approach_side(
     return violations
 
 
+def check_convergence_shallow_feeder_concentric(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    offsets: dict[tuple[str, str], float],
+) -> list[str]:
+    """Shallow feeders at a climbing convergence must nest port-near the risers.
+
+    At a LEFT entry where bypass feeders climb in from off the port row and a
+    flat shallow feeder joins them at the port row (the fan-out-junction turn),
+    the shallow feeder must take a port-near slot above the climbing risers.
+    Slotted port-far it weaves across the turning bundle at the corner.  Mirrors
+    the gating of ``_order_convergence_entry_ports``, which assigns the slot.
+    """
+    from nf_metro.layout.routing.offsets import _convergence_feeders
+    from nf_metro.layout.routing.reversal import detect_reversed_sections
+
+    if graph.compact_offsets:
+        return []
+    reversed_sections = detect_reversed_sections(graph)
+    messages: list[str] = []
+    for port_id, port in graph.ports.items():
+        if not (port.is_entry and port.side is PortSide.LEFT):
+            continue
+        sec = graph.sections.get(port.section_id)
+        if sec is None or sec.direction != "LR" or port.section_id in reversed_sections:
+            continue
+        feeders = _convergence_feeders(graph, port_id)
+        if feeders is None:
+            continue
+        shallow = [lid for lid, _, is_bypass in feeders if not is_bypass]
+        bypass = [lid for lid, _, is_bypass in feeders if is_bypass]
+        if not shallow or not bypass:
+            continue
+        max_shallow = max(offsets.get((port_id, lid), 0.0) for lid in shallow)
+        min_bypass = min(offsets.get((port_id, lid), 0.0) for lid in bypass)
+        if max_shallow > min_bypass + COORD_TOLERANCE_FINE:
+            messages.append(
+                f"convergence entry {port_id!r}: shallow feeder sits at offset "
+                f"{max_shallow:.1f}, port-far of the climbing risers (min "
+                f"{min_bypass:.1f}); it weaves across the turning bundle instead "
+                f"of nesting on top"
+            )
+    return messages
+
+
 @dataclass(frozen=True)
 class MergePortOutgoingFlip:
     """A perpendicular line re-joined at a merge port that flips its slot on
@@ -3254,6 +3298,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_tb_exit_corner_preserves_column_order, "B"),
     _check_spec(check_fanout_tail_join, "B"),
     _check_spec(check_merge_port_approach_side, "B"),
+    _check_spec(check_convergence_shallow_feeder_concentric, "B"),
     _check_spec(check_merge_port_outgoing_side_preserved, "B"),
     _check_spec(check_exit_inherits_entry_bundle_order, "B"),
     _check_spec(check_partial_branch_offset_gaps, "B"),

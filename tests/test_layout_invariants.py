@@ -1704,6 +1704,37 @@ def test_peeloff_riser_crossing_free_extra_line_consumer():
     )
 
 
+def test_junction_fanout_convergence_turns_concentric():
+    """A climbing bypass bundle joined by a shallow feeder turns concentrically
+    into a shared LEFT entry: the flat feeder must not weave across the climbing
+    risers at the corner (#940).
+
+    In ``junction_fanout_convergence`` three lines converge into
+    ``joint__entry_left_3``: ``a`` and ``b`` bypass the intervening sections and
+    climb risers into the port while ``c`` joins flat from the adjacent column.
+    In declaration order ``c`` is slotted port-far and crosses both risers on
+    the turn; approach-depth slotting must put the shallow feeder port-near
+    (top) so the three converging routes do not cross one another at the corner.
+    """
+    graph = _layout("topologies/junction_fanout_convergence.mmd", validate=True)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    port = "joint__entry_left_3"
+    converging = [rp for rp in routes if rp.edge.target == port]
+    assert {rp.edge.line_id for rp in converging} == {"a", "b", "c"}, (
+        "fixture precondition: a, b, c converge into the joint port"
+    )
+
+    crossings = check_route_segment_crossings(graph, (offsets, converging))
+    assert not crossings, "; ".join(v.message for v in crossings)
+
+    port_order = _routes_ordered_by_y(converging, offsets, at_target=True)
+    assert port_order[0] == "c", (
+        f"shallow feeder must take the port-near slot, got order {port_order}"
+    )
+
+
 def test_rl_return_row_convergence_renders_cleanly():
     """A compact 2-row serpentine with an RL return row converging into shared
     entry ports routes without tripping the render-curve invariants (#876).

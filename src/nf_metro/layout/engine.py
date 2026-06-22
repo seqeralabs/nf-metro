@@ -119,6 +119,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_bypass_port_no_slot_gaps,
     _guard_bypass_v_flat_visible,
     _guard_centered_line_spread_balanced,
+    _guard_convergence_shallow_feeder_concentric,
     _guard_coordinates_finite,
     _guard_entry_approach_from_port_side,
     _guard_entry_port_fed_only_by_ports,
