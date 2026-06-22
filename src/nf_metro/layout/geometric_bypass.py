@@ -60,11 +60,6 @@ class _LayoutEval:
     crossings: list[_Crossing] = field(default_factory=list)
 
 
-def _section_of(graph: MetroGraph, station_id: str) -> str | None:
-    station = graph.stations.get(station_id)
-    return station.section_id if station is not None else None
-
-
 def _is_bypassable_edge_endpoint(
     graph: MetroGraph, section_id: str, endpoint_id: str, *, is_target: bool
 ) -> bool:
@@ -91,13 +86,15 @@ def _is_bypassable_edge_endpoint(
     )
 
 
-def _evaluate(graph: MetroGraph) -> _LayoutEval:
+def _evaluate(graph: MetroGraph, *, with_quality: bool = True) -> _LayoutEval:
     """Route the laid-out graph and measure its non-consumer-crossing defects.
 
-    Returns the total count of non-consumer marker crossings, the count of
-    same-line fold-backs, whether the render-curve invariants hold, and the
-    subset of crossings the bypass-V idiom can claim (real station skipped by
-    an edge whose endpoints both sit inside that station's section).
+    Always returns the total count of non-consumer marker crossings and the
+    subset the bypass-V idiom can claim (real station skipped by an edge whose
+    endpoints both sit inside that station's section).  Fold-back and
+    render-curve metrics feed only the keep-or-revert comparison, so they are
+    computed only when ``with_quality`` is set - the clean common path skips
+    them.
     """
     from nf_metro.layout.phases.guards import iter_opposing_line_overlaps
     from nf_metro.layout.routing import compute_station_offsets, route_edges
@@ -126,7 +123,7 @@ def _evaluate(graph: MetroGraph) -> _LayoutEval:
         edge_index = {id(e): i for i, e in enumerate(graph.edges)}
         for r in routes:
             src, tgt, line_id = r.edge.source, r.edge.target, r.line_id
-            section_id = _section_of(graph, src)
+            section_id = graph.section_for_station(src)
             ei = edge_index.get(id(r.edge))
             edge_qualifies = (
                 section_id is not None
@@ -149,7 +146,7 @@ def _evaluate(graph: MetroGraph) -> _LayoutEval:
                     station = graph.stations.get(sid)
                     if (
                         edge_qualifies
-                        and _section_of(graph, sid) == section_id
+                        and graph.section_for_station(sid) == section_id
                         and station is not None
                         and not station.is_port
                         and not station.is_hidden
@@ -165,6 +162,9 @@ def _evaluate(graph: MetroGraph) -> _LayoutEval:
                                 cross_x=(bbox[0] + bbox[2]) / 2,
                             )
                         )
+
+    if not with_quality:
+        return _LayoutEval(breeze_total=breeze_total, crossings=crossings)
 
     foldbacks = sum(
         1 for _ in iter_opposing_line_overlaps(graph, offsets=offsets, routes=routes)
@@ -279,10 +279,11 @@ def apply_geometric_bypass(
     the final state - non-zero when a crossing exists that the idiom could not
     express or whose bypass was reverted as no improvement.
     """
-    before = _evaluate(graph)
+    before = _evaluate(graph, with_quality=False)
     if not before.crossings:
         return False, before.breeze_total
 
+    before = _evaluate(graph)
     saved_edges = list(graph.edges)
     helper_ids = _insert_helpers(graph, before.crossings)
     layout_pass(False)

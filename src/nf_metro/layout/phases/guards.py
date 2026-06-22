@@ -1395,7 +1395,7 @@ def _guard_no_line_crosses_non_consumer(
                     # The first of two layout passes defers this guard so the
                     # geometric bypass pass can fix the crossing; the re-laid-
                     # out second pass runs it for real.
-                    if getattr(graph, "_defer_breeze_guard", False):
+                    if graph._defer_breeze_guard:
                         return
                     raise PhaseInvariantError(
                         f"{phase}: line {line_id!r} on edge "
