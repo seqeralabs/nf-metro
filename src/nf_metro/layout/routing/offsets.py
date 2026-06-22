@@ -2175,32 +2175,20 @@ def _is_over_top_right_entry(
     return False
 
 
-def _reverse_tb_right_entry_offsets(ctx: _OffsetCtx) -> None:
-    """Reverse the line order of TB sections entered through a RIGHT port.
+def _reverse_offsets_from_roots(ctx: _OffsetCtx, roots: set[str]) -> None:
+    """Reverse the per-line order of *roots* and their DAG-downstream sections.
 
-    A left source reaches a RIGHT-side entry by looping over the section's top
-    and approaching from the right -- a U-turn, which transposes the bundle
-    end-to-end (see ``_route_right_entry_over_top``).  The section therefore
-    receives its lines in the opposite order to the source, so its entry port,
-    internal trunk, and bottom exit must all carry the reversed order for the
-    descent into the port and the drop out of it to stay straight.  Sections
-    downstream of that exit inherit the reversal so their feed stays aligned.
-
-    Reversal is :func:`reversed_offset` applied per station, an involution, so
-    two stations with equal offsets map to equal offsets -- the propagated
-    exit/entry equalities are preserved.
+    The shared body of the U-turn reversal passes: a section whose feed
+    transposes the bundle end-to-end carries the reversed line order, and
+    sections downstream inherit it so their feed stays aligned.  Reversal is
+    :func:`reversed_offset` per station, an involution, so stations with equal
+    offsets stay equal -- propagated port/trunk equalities are preserved.
     """
-    graph = ctx.graph
-    roots = {
-        port.section_id
-        for port in graph.ports.values()
-        if _is_over_top_right_entry(graph, port, ctx.tb_sections)
-    }
     if not roots:
         return
 
     affected = set(roots)
-    dag = graph.section_dag
+    dag = ctx.graph.section_dag
     if dag is not None:
         stack = list(roots)
         while stack:
@@ -2209,10 +2197,10 @@ def _reverse_tb_right_entry_offsets(ctx: _OffsetCtx) -> None:
                     affected.add(succ)
                     stack.append(succ)
 
-    for sid, station in graph.stations.items():
+    for sid, station in ctx.graph.stations.items():
         if station.section_id not in affected:
             continue
-        lines = graph.station_lines(sid)
+        lines = ctx.graph.station_lines(sid)
         offs = [ctx.offsets.get((sid, lid), 0.0) for lid in lines]
         if not offs:
             continue
@@ -2221,6 +2209,27 @@ def _reverse_tb_right_entry_offsets(ctx: _OffsetCtx) -> None:
             ctx.offsets[(sid, lid)] = reversed_offset(
                 ctx.offsets.get((sid, lid), 0.0), max_off
             )
+
+
+def _reverse_tb_right_entry_offsets(ctx: _OffsetCtx) -> None:
+    """Reverse the line order of TB sections entered through a RIGHT port.
+
+    A left source reaches a RIGHT-side entry by looping over the section's top
+    and approaching from the right -- a U-turn, which transposes the bundle
+    end-to-end (see ``_route_right_entry_over_top``).  The section therefore
+    receives its lines in the opposite order to the source, so its entry port,
+    internal trunk, and bottom exit all carry the reversed order for the descent
+    into the port and the drop out of it to stay straight.
+    """
+    graph = ctx.graph
+    _reverse_offsets_from_roots(
+        ctx,
+        {
+            port.section_id
+            for port in graph.ports.values()
+            if _is_over_top_right_entry(graph, port, ctx.tb_sections)
+        },
+    )
 
 
 def _is_around_below_left_entry(graph: MetroGraph, port: Port) -> bool:
@@ -2267,41 +2276,14 @@ def _reverse_around_below_left_entry_offsets(ctx: _OffsetCtx) -> None:
     bundle end-to-end (see ``_route_left_exit_around_below_left_entry``).  The
     section therefore receives its lines in the opposite order to the source, so
     its entry port and internal trunk carry the reversed order for the rise into
-    the port and the run out of it to stay straight.  Sections downstream of the
-    fed section inherit the reversal so their feed stays aligned.
-
-    Reversal is :func:`reversed_offset` per station, an involution, so two
-    stations with equal offsets map to equal offsets -- propagated port/trunk
-    equalities are preserved.
+    the port and the run out of it to stay straight.
     """
     graph = ctx.graph
-    roots = {
-        port.section_id
-        for port in graph.ports.values()
-        if _is_around_below_left_entry(graph, port)
-    }
-    if not roots:
-        return
-
-    affected = set(roots)
-    dag = graph.section_dag
-    if dag is not None:
-        stack = list(roots)
-        while stack:
-            for succ in dag.successors.get(stack.pop(), ()):
-                if succ not in affected:
-                    affected.add(succ)
-                    stack.append(succ)
-
-    for sid, station in graph.stations.items():
-        if station.section_id not in affected:
-            continue
-        lines = graph.station_lines(sid)
-        offs = [ctx.offsets.get((sid, lid), 0.0) for lid in lines]
-        if not offs:
-            continue
-        max_off = max(offs)
-        for lid in lines:
-            ctx.offsets[(sid, lid)] = reversed_offset(
-                ctx.offsets.get((sid, lid), 0.0), max_off
-            )
+    _reverse_offsets_from_roots(
+        ctx,
+        {
+            port.section_id
+            for port in graph.ports.values()
+            if _is_around_below_left_entry(graph, port)
+        },
+    )
