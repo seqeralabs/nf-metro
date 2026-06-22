@@ -18,6 +18,7 @@ from nf_metro.layout.routing.context import (
     _resolve_section_col,
     _resolve_section_colrow,
     fanout_divergence_peel_order,
+    is_far_side_around_below_left_entry,
 )
 from nf_metro.layout.routing.corners import reversed_offset
 from nf_metro.layout.routing.invariants import (
@@ -2232,41 +2233,6 @@ def _reverse_tb_right_entry_offsets(ctx: _OffsetCtx) -> None:
     )
 
 
-def _is_around_below_left_entry(graph: MetroGraph, port: Port) -> bool:
-    """Whether *port* is a LEFT entry reached by an around-below loop.
-
-    Matches the dispatch of ``_route_left_exit_around_below_left_entry``: a LEFT
-    entry fed by a LEFT-exit source a bypass away to its RIGHT (a reverse-flow
-    multi-column hop with an intervening section).  That feed leaves the source
-    travelling west, drops below every box, and rises into the far-side LEFT
-    port travelling east -- a half-turn that transposes the bundle end-to-end,
-    so the section receives its lines in the opposite order to the source.
-    """
-    if not (port.is_entry and port.side is PortSide.LEFT):
-        return False
-    psec = graph.sections.get(port.section_id)
-    pst = graph.stations.get(port.id)
-    if psec is None or pst is None:
-        return False
-    for edge in graph.edges_to(port.id):
-        src = graph.stations.get(edge.source)
-        src_port = graph.ports.get(edge.source)
-        if not (src and src_port and not src_port.is_entry):
-            continue
-        if src_port.side is not PortSide.LEFT:
-            continue
-        scol, srow = _resolve_section_colrow(graph, src)
-        if scol is None or scol - psec.grid_col <= 1:
-            continue
-        if src.x <= pst.x + COORD_TOLERANCE:
-            continue
-        if _has_intervening_sections(
-            graph, scol, psec.grid_col, srow
-        ) or _has_intervening_sections(graph, scol, psec.grid_col, psec.grid_row):
-            return True
-    return False
-
-
 def _reverse_around_below_left_entry_offsets(ctx: _OffsetCtx) -> None:
     """Reverse the line order of sections entered through an around-below LEFT port.
 
@@ -2284,6 +2250,6 @@ def _reverse_around_below_left_entry_offsets(ctx: _OffsetCtx) -> None:
         {
             port.section_id
             for port in graph.ports.values()
-            if _is_around_below_left_entry(graph, port)
+            if is_far_side_around_below_left_entry(graph, port)
         },
     )

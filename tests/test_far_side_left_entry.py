@@ -45,6 +45,14 @@ def test_far_side_wrap_passes_curve_invariants() -> None:
     assert_render_curve_invariants(graph, routes, offsets)
 
 
+def test_far_side_wrap_stays_within_canvas() -> None:
+    """The wrap rises left of the leftmost section; the layout reserves that
+    clearance so it does not run off the left canvas edge (x < 0)."""
+    _graph, _offsets, routes = _route(FIXTURE)
+    leftmost = min(px for r in routes for px, _py in r.points)
+    assert leftmost >= 0.0, f"wrap runs off the canvas at x={leftmost}"
+
+
 def test_far_side_wrap_delivers_each_line_to_its_entry_offset() -> None:
     """Each wrapped line lands on its entry-port offset, so it flows into the
     (reversed) trunk without a kink at the port."""

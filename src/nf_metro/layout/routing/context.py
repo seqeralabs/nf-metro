@@ -23,6 +23,7 @@ from nf_metro.layout.routing.corners import (
 from nf_metro.parser.model import (
     Edge,
     MetroGraph,
+    Port,
     PortSide,
     Station,
 )
@@ -447,6 +448,42 @@ def _has_intervening_sections(
         if s.bbox_w > 0 and lo < s.grid_col < hi:
             if src_row is None or s.grid_row == src_row:
                 return True
+    return False
+
+
+def is_far_side_around_below_left_entry(graph: MetroGraph, port: Port) -> bool:
+    """Whether *port* is a LEFT entry reached by an around-below wrap.
+
+    A LEFT entry fed by a LEFT-exit source more than one column to its RIGHT,
+    with an intervening section, is a reverse-flow bypass that leaves the source
+    westward, drops below every box, and rises into the far-side port from its
+    outward side -- a half-turn that transposes the bundle end-to-end.  Routed
+    by ``_route_left_exit_around_below_left_entry``; the destination section is
+    reversed to match (``_reverse_around_below_left_entry_offsets``) and the
+    layout reserves left clearance for the wrap.
+
+    Pure topology (grid columns, port sides, intervening sections), so it reads
+    the same before global coordinates are assigned and after.
+    """
+    if not (port.is_entry and port.side is PortSide.LEFT):
+        return False
+    psec = graph.sections.get(port.section_id)
+    if psec is None:
+        return False
+    for edge in graph.edges_to(port.id):
+        src = graph.stations.get(edge.source)
+        src_port = graph.ports.get(edge.source)
+        if src is None or src_port is None or src_port.is_entry:
+            continue
+        if src_port.side is not PortSide.LEFT:
+            continue
+        scol, srow = _resolve_section_colrow(graph, src)
+        if scol is None or scol - psec.grid_col <= 1:
+            continue
+        if _has_intervening_sections(
+            graph, scol, psec.grid_col, srow
+        ) or _has_intervening_sections(graph, scol, psec.grid_col, psec.grid_row):
+            return True
     return False
 
 
