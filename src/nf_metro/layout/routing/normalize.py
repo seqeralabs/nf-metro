@@ -1410,7 +1410,7 @@ def _convergence_line_order(
 
 
 def _corridor_leadout_right(chans: list[_VChannel], default: bool) -> bool:
-    """Whether a corridor's deep-end horizontal legs extend rightward.
+    """Whether a rigid bundle's deep-end horizontal legs extend rightward.
 
     Each channel meets the inter-section trunk at its deep (``y_hi``) endpoint;
     the leg there runs toward the trunk's continuation, so its travel direction
@@ -1418,10 +1418,16 @@ def _corridor_leadout_right(chans: list[_VChannel], default: bool) -> bool:
     descent leads its trunk RIGHT and its UP ascent receives it from the LEFT; a
     leftward bypass mirrors both, which a plain ``down`` discriminant cannot see.
 
-    Returns the majority rightward verdict over channels that have a flanking
-    horizontal at the deep end, falling back to *default* when none do (a bare
-    vertical drop carries no direction).
+    Only a rigid bundle -- every channel one line of a single ``(source,
+    target)`` edge -- has such a trunk; a junction fan-out or merge corridor
+    diverges to different ends at its deep endpoints, where those legs are the
+    peel-offs the ``down``-keyed crossing model already orders, so they keep the
+    *default*.  Within a rigid bundle, returns the majority rightward verdict
+    over channels that have a flanking horizontal, falling back to *default*
+    when none do (a bare vertical drop carries no direction).
     """
+    if len({(c.route.edge.source, c.route.edge.target) for c in chans}) != 1:
+        return default
     votes: list[bool] = []
     for ch in chans:
         pts = ch.route.points
