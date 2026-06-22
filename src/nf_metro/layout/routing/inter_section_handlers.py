@@ -206,6 +206,18 @@ class _InterFacts:
         return self.entry_side is PortSide.RIGHT and self.sx < self.tx - COORD_TOLERANCE
 
     @property
+    def left_entry_from_right(self) -> bool:
+        """Target is a LEFT entry port whose source sits to its right.
+
+        The mirror of :attr:`right_entry_from_left`.  A U-shaped bypass would
+        rise in the gap to the RIGHT of the target and run its final horizontal
+        LEFTWARD across the section interior to reach the far-edge (left) port;
+        instead such an edge wraps around below to enter from the port's own
+        outward side.
+        """
+        return self.entry_side is PortSide.LEFT and self.sx > self.tx + COORD_TOLERANCE
+
+    @property
     def is_merge_trunk(self) -> bool:
         """Source carries the full bypass trunk of its merge junction."""
         return self.ctx.merge.trunk_source.get(self.edge.target) == self.edge.source
@@ -348,7 +360,9 @@ def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
     A LEFT entry one row directly below drops straight in when the entry-Y
     horizontal is clear (no canvas-bottom loop); a RIGHT entry fed from the left
     wraps around its outward side (via the inter-row gap above when clear, else
-    the around-below loop); everything else takes the U-shaped bypass.
+    the around-below loop); a far-side LEFT entry fed from a LEFT exit to its
+    right wraps around below into the port's outward side; everything else takes
+    the U-shaped bypass.
     """
     edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
     assert f.src_col is not None and f.tgt_col is not None
@@ -363,6 +377,8 @@ def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
             return _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
     if f.right_entry_from_left:
         return _route_right_entry_cross_row(f)
+    if f.left_entry_from_right and f.is_left_exit:
+        return _route_left_exit_around_below_left_entry(edge, src, tgt, ctx)
     return _route_bypass(edge, src, tgt, f.i, f.src_col, f.tgt_col, ctx, f.src_row)
 
 
@@ -371,6 +387,14 @@ def _section_right_edge(graph: MetroGraph, station: Station) -> float:
     section = graph.sections.get(station.section_id) if station.section_id else None
     if section and section.bbox_w > 0:
         return section.bbox_x + section.bbox_w
+    return station.x
+
+
+def _section_left_edge(graph: MetroGraph, station: Station) -> float:
+    """The left edge X of *station*'s section, falling back to its own X."""
+    section = graph.sections.get(station.section_id) if station.section_id else None
+    if section and section.bbox_w > 0:
+        return section.bbox_x
     return station.x
 
 
@@ -526,6 +550,92 @@ def _route_left_exit_right_entry_step(
     )
     if route is not None:
         _declare_channel(route, ctx, cx, vertical_direction(ey - sy))
+    return route
+
+
+def _route_left_exit_around_below_left_entry(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> RoutedPath | None:
+    """Wrap a LEFT exit around below the target into a far-side LEFT entry.
+
+    A reverse-flow bypass (source to the RIGHT of the target, past one or more
+    intervening sections) whose target entry sits on the FAR (left) edge: the
+    lines leave the source's left-edge exit travelling away from it, drop below
+    every intervening section, run left under the target, and rise on the
+    target's far side to enter the LEFT port from its own outward side.  A
+    U-shaped bypass would instead rise in the gap to the target's right and rake
+    its delivery leftward through the box interior.
+
+    Like :func:`_route_left_exit_right_entry_step`, each line fans by its own
+    offset per leg -- its source offset out of the exit, down, and along the
+    under-run, its target offset up into the port -- so the loop's
+    opposite-handed corners cannot invert the bundle::
+
+        (sx, sy)  -> H out of the LEFT exit port (leftward)
+        (cx, sy)  ; turn down
+        (cx, by)  -> V down past the target row's bottom
+        (vx, by)  -> H left under the target
+        (vx, ey)  -> V up to the entry Y
+        (ex, ey)  -> H right into the LEFT port from its outward side
+    """
+    graph = ctx.graph
+    sx, sy = src.x, src.y
+    ex, ey = tgt.x, tgt.y
+    _members, line_ids, edge_by_line = gather_member_edges(graph, edge)
+    exit_offs = {lid: _get_offset(ctx, edge.source, lid) for lid in line_ids}
+    entry_offs = {lid: _get_offset(ctx, edge.target, lid) for lid in line_ids}
+    n = len(line_ids)
+
+    src_col, src_row = _resolve_section_colrow(graph, src)
+    tgt_col = _resolve_section_col(graph, tgt)
+    bw = bundle_width(n, ctx.offset_step)
+
+    # Descent channel in the inter-column gap just LEFT of the source.  The exit
+    # taper fans the drop rightward by the exit offset, so the channel's left
+    # member is at ``cx`` and the box-near member at ``cx + max(exit_offs)``;
+    # shift the gap midline left by half that spread to centre the fan in the
+    # gap and keep both flanks clear.
+    max_exit = max(exit_offs.values(), default=0.0)
+    if src_col is not None and src_col > 0:
+        gap_left, gap_right = column_gap_edges(graph, src_col - 1, src_col, row=src_row)
+        cx = symmetric_bundle_midpoint(gap_left, gap_right, [bw], 0) - max_exit / 2
+    else:
+        cx = _left_entry_descent_x(ctx, _section_left_edge(graph, src) - max_exit, n)
+
+    # Under-run Y below every section in the column range.
+    by = bypass_bottom_y(
+        graph,
+        src_col if src_col is not None else 0,
+        tgt_col if tgt_col is not None else (src_col if src_col is not None else 0),
+        BYPASS_CLEARANCE,
+        src_row=src_row,
+        cross_row=True,
+    )
+
+    # Ascent channel left of the target box.  The entry taper fans the lines on
+    # the ascent by their entry offset, so the line nearest the box sits
+    # ``max(entry_offs)`` to the channel's right; anchor on the box edge less
+    # that spread so even that line keeps a full curve radius of run into the
+    # port.
+    max_entry = max(entry_offs.values(), default=0.0)
+    vx = _left_entry_descent_x(ctx, _section_left_edge(graph, tgt) - max_entry, n)
+
+    # West out of the exit, around below, then east into the LEFT port is a net
+    # half-turn that transposes the bundle end-to-end.  The destination section
+    # is reversed to match (``_reverse_around_below_left_entry_offsets``), so the
+    # entry offsets here are already the transposed order; the bundle tapers from
+    # its exit offset out of the source to that entry offset into the port, the
+    # taper following the loop's natural transpose so no line crosses a mate.
+    members = [
+        (edge_by_line[lid], lid, -exit_offs[lid], entry_offs[lid]) for lid in line_ids
+    ]
+    centerline = [(sx, sy), (cx, sy), (cx, by), (vx, by), (vx, ey), (ex, ey)]
+    route = route_tapered(
+        edge, members, centerline, transition_leg=3, base_radius=ctx.curve_radius
+    )
+    if route is not None:
+        _declare_channel(route, ctx, cx, Direction.D)
+        _declare_channel(route, ctx, vx, Direction.U)
     return route
 
 

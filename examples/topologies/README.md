@@ -301,6 +301,7 @@ python scripts/list_topology_fixtures.py
 |---|---|
 | `bypass_fan_in_outer_slot.mmd` | Fan-in where the outermost bypass V lands in a slot beyond the inner bypasses - tests bypass slot reservation under mixed cardinality |
 | `bypass_gap2_rightward_overflow.mmd` | Seven-line rightward bypass gap2 overflow clamp - tests that a wide bundle does not push bypass geometry off the canvas edge |
+| `bypass_leftward_far_side_entry.mmd` | Seven-line reverse-flow bypass into a far-side LEFT entry (source LEFT-exit to the right, target entry on its own far edge) - the bundle wraps around below into the port; the half-turn transposes it, so the target section's line order is reversed to match and no line crosses (issue #974) |
 | `bypass_label_rake_left.mmd` | Bypass V climbing past a wide station label on the left side - extends `bypass_label_rake` for the left-overrun direction |
 | `bypass_label_rake_wide.mmd` | Bypass V past an extra-wide label - tests the rake shift under maximal label width |
 | `bypass_v_tight.mmd` | Two-line bypass V with minimal x-spacing - tests bypass geometry under the tightest legal x-spacing |

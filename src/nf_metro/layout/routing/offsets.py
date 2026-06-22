@@ -2134,6 +2134,7 @@ def compute_station_offsets(
     _reconcile_horizontal_offsets(ctx)
     _recenter_partial_fan_branches(ctx)
     _reverse_tb_right_entry_offsets(ctx)
+    _reverse_around_below_left_entry_offsets(ctx)
     return ctx.offsets
 
 
@@ -2194,6 +2195,90 @@ def _reverse_tb_right_entry_offsets(ctx: _OffsetCtx) -> None:
         port.section_id
         for port in graph.ports.values()
         if _is_over_top_right_entry(graph, port, ctx.tb_sections)
+    }
+    if not roots:
+        return
+
+    affected = set(roots)
+    dag = graph.section_dag
+    if dag is not None:
+        stack = list(roots)
+        while stack:
+            for succ in dag.successors.get(stack.pop(), ()):
+                if succ not in affected:
+                    affected.add(succ)
+                    stack.append(succ)
+
+    for sid, station in graph.stations.items():
+        if station.section_id not in affected:
+            continue
+        lines = graph.station_lines(sid)
+        offs = [ctx.offsets.get((sid, lid), 0.0) for lid in lines]
+        if not offs:
+            continue
+        max_off = max(offs)
+        for lid in lines:
+            ctx.offsets[(sid, lid)] = reversed_offset(
+                ctx.offsets.get((sid, lid), 0.0), max_off
+            )
+
+
+def _is_around_below_left_entry(graph: MetroGraph, port: Port) -> bool:
+    """Whether *port* is a LEFT entry reached by an around-below loop.
+
+    Matches the dispatch of ``_route_left_exit_around_below_left_entry``: a LEFT
+    entry fed by a LEFT-exit source a bypass away to its RIGHT (a reverse-flow
+    multi-column hop with an intervening section).  That feed leaves the source
+    travelling west, drops below every box, and rises into the far-side LEFT
+    port travelling east -- a half-turn that transposes the bundle end-to-end,
+    so the section receives its lines in the opposite order to the source.
+    """
+    if not (port.is_entry and port.side is PortSide.LEFT):
+        return False
+    psec = graph.sections.get(port.section_id)
+    pst = graph.stations.get(port.id)
+    if psec is None or pst is None:
+        return False
+    for edge in graph.edges_to(port.id):
+        src = graph.stations.get(edge.source)
+        src_port = graph.ports.get(edge.source)
+        if not (src and src_port and not src_port.is_entry):
+            continue
+        if src_port.side is not PortSide.LEFT:
+            continue
+        scol, srow = _resolve_section_colrow(graph, src)
+        if scol is None or scol - psec.grid_col <= 1:
+            continue
+        if src.x <= pst.x + COORD_TOLERANCE:
+            continue
+        if _has_intervening_sections(
+            graph, scol, psec.grid_col, srow
+        ) or _has_intervening_sections(graph, scol, psec.grid_col, psec.grid_row):
+            return True
+    return False
+
+
+def _reverse_around_below_left_entry_offsets(ctx: _OffsetCtx) -> None:
+    """Reverse the line order of sections entered through an around-below LEFT port.
+
+    The mirror of :func:`_reverse_tb_right_entry_offsets` for the horizontal
+    idiom: a reverse-flow bypass leaving a LEFT exit, dropping below every box,
+    and rising into a far-side LEFT entry is a half-turn that transposes the
+    bundle end-to-end (see ``_route_left_exit_around_below_left_entry``).  The
+    section therefore receives its lines in the opposite order to the source, so
+    its entry port and internal trunk carry the reversed order for the rise into
+    the port and the run out of it to stay straight.  Sections downstream of the
+    fed section inherit the reversal so their feed stays aligned.
+
+    Reversal is :func:`reversed_offset` per station, an involution, so two
+    stations with equal offsets map to equal offsets -- propagated port/trunk
+    equalities are preserved.
+    """
+    graph = ctx.graph
+    roots = {
+        port.section_id
+        for port in graph.ports.values()
+        if _is_around_below_left_entry(graph, port)
     }
     if not roots:
         return
