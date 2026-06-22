@@ -250,7 +250,12 @@ def _route_inter_section_connector(
     corridor_r = max(up.bbox_x + up.bbox_w, down.bbox_x + down.bbox_w) + clear
     corridor_l = min(up.bbox_x, down.bbox_x) - clear
     upper, lower = sorted((up, down), key=lambda s: s.bbox_y)
-    gap_y = _center_inter_row_channel(upper.bbox_y + upper.bbox_h, lower.bbox_y)
+    # Seat the whole cross-leg bundle in the gap, not just its centreline: inset
+    # the band by the bundle half-width so the outermost line clears each box
+    # edge rather than grazing it.
+    gap_y = _center_inter_row_channel(
+        upper.bbox_y + upper.bbox_h + half_width, lower.bbox_y - half_width
+    )
 
     centerline = [
         (exit_port.x, center_ye),
