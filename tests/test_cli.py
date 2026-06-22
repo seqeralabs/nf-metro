@@ -257,17 +257,16 @@ def test_render_center_ports_cli_overrides_directive(tmp_path, monkeypatch):
     from nf_metro.parser.mermaid import parse_metro_mermaid
 
     captured: dict = {}
-    original_compute_layout = None
 
-    import nf_metro.cli as cli_mod
+    import nf_metro.api as api_mod
 
-    original_compute_layout = cli_mod.compute_layout
+    original_compute_layout = api_mod.compute_layout
 
     def spy_compute_layout(graph, **kw):
         captured["center_ports"] = graph.center_ports
         return original_compute_layout(graph, **kw)
 
-    monkeypatch.setattr(cli_mod, "compute_layout", spy_compute_layout)
+    monkeypatch.setattr(api_mod, "compute_layout", spy_compute_layout)
 
     mmd_text = "%%metro center_ports: true\n" + RNASEQ_MMD.read_text()
     mmd = tmp_path / "with_directive.mmd"

@@ -20,3 +20,11 @@ docs/gallery/index.md
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 .coverage
+
+# Playground dev wheel (CI- or locally-built; never committed)
+docs/playground/wheels/
+
+# Playwright local artifacts
+docs/playground/tests/node_modules/
+docs/playground/tests/test-results/
+docs/playground/tests/playwright-report/

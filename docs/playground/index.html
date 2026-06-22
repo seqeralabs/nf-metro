@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>nf-metro playground</title>
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header id="bar">
+    <div class="brand">nf-metro <span class="muted">playground</span> <span class="beta">beta</span></div>
+  </header>
+
+  <main id="split">
+    <section id="editor-pane">
+      <div class="pane-toolbar">
+        <span class="group-label">Insert</span>
+        <button id="btn-section" title="Insert a section block">+ Section</button>
+        <button id="btn-line" title="Insert a line definition">+ Line</button>
+        <button id="btn-edge" title="Insert an edge">+ Edge</button>
+        <span class="sep"></span>
+        <span class="group-label">Lines</span>
+        <div id="line-colors" class="swatches"></div>
+      </div>
+      <textarea id="editor"></textarea>
+      <div id="error" class="hidden" role="alert"></div>
+    </section>
+
+    <section id="preview-pane">
+      <div class="pane-toolbar">
+        <label>Theme
+          <select id="opt-theme">
+            <option value="nfcore">nfcore (dark)</option>
+            <option value="light">light</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="opt-animate" /> Animate</label>
+        <label class="check"><input type="checkbox" id="opt-directional" /> Chevrons</label>
+        <label>X-spacing
+          <input type="number" id="opt-x-spacing" min="1" step="10" placeholder="auto" />
+        </label>
+        <label>Y-spacing
+          <input type="number" id="opt-y-spacing" min="1" step="10" placeholder="auto" />
+        </label>
+        <span class="sep"></span>
+        <span class="group-label">Export</span>
+        <button id="btn-svg">SVG</button>
+        <button id="btn-png">PNG</button>
+        <button id="btn-share">Share link</button>
+      </div>
+      <div id="preview"></div>
+      <div id="boot" class="overlay">
+        <div class="spinner"></div>
+        <p id="boot-msg">Starting Python runtime…</p>
+        <p class="muted small">First load fetches the WASM runtime (~10&nbsp;MB); subsequent loads are cached.</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="hidden"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/mode/simple.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.27.2/full/pyodide.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

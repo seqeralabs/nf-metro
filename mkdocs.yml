@@ -23,6 +23,11 @@ extra:
   version:
     provider: mike
 
+# The playground is shipped as static files under docs/playground/, but its
+# Playwright test harness is build-time only and must not reach the site.
+exclude_docs: |
+  playground/tests/
+
 markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
@@ -42,6 +47,7 @@ nav:
   - Nextflow Import: nextflow.md
   - nf-core Pipelines: pipelines/index.md
   - Gallery: gallery/index.md
+  - Playground (beta): playground/index.html
   - Internals:
     - Architecture: dev/architecture.md
     - Layout pipeline: dev/layout_pipeline.md

@@ -10,6 +10,7 @@ from typing import Any, Literal, TypeVar
 import click
 
 from nf_metro import __version__
+from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.explain import build_explain, format_explain_json, format_explain_text
 from nf_metro.introspect import build_info, format_info_json, format_info_text
 from nf_metro.layout import (
@@ -28,11 +29,9 @@ from nf_metro.parser import (
     parse_metro_mermaid,
     validate_graph,
 )
-from nf_metro.parser.directives import apply_legend_directive
-from nf_metro.parser.model import LineSpread, MetroGraph
+from nf_metro.parser.model import LineSpread
 from nf_metro.render import render_svg, validate_render
 from nf_metro.render.html import render_html
-from nf_metro.render.style import Theme
 from nf_metro.themes import THEMES
 
 
@@ -87,24 +86,6 @@ def layout_cli_options(f: _F) -> _F:
     return f
 
 
-def _apply_layout_overrides(graph: MetroGraph, opts: dict[str, object]) -> None:
-    """Write each explicitly-set CLI option onto its graph field.
-
-    Parse-time options (``fold_threshold``) are skipped: their value reaches
-    the graph through ``parse_metro_mermaid`` instead.
-    """
-    for opt in LAYOUT_OPTIONS:
-        if opt.parse_time:
-            continue
-        value = opts.get(opt.name)
-        if value is not None:
-            setattr(graph, opt.target_attr, value)
-
-
-# Maps legacy `style:` values onto theme keys (the nfcore theme is the dark one).
-_STYLE_THEME_ALIASES = {"dark": "nfcore"}
-
-
 def _echo_issues(
     label: str, issues: Iterable[ValidationIssue], path: Path | str
 ) -> None:
@@ -112,14 +93,6 @@ def _echo_issues(
     click.echo(f"{label}:", err=True)
     for issue in issues:
         click.echo(f"  - {issue.format(path)}", err=True)
-
-
-def _resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
-    """Pick the theme: an explicit ``--theme`` wins over the ``style:`` directive."""
-    if theme is not None:
-        return THEMES[theme]
-    name = graph.style.strip().lower()
-    return THEMES.get(_STYLE_THEME_ALIASES.get(name, name), THEMES["nfcore"])
 
 
 @cli.command()
@@ -282,34 +255,18 @@ def render(
     """Render a Mermaid metro map definition to SVG or interactive HTML."""
     text = input_file.read_text()
 
-    if from_nextflow:
-        from nf_metro.convert import convert_nextflow_dag
-
-        text = convert_nextflow_dag(text, title=title or "")
-
-    fold = layout_opts.get("fold_threshold")
     try:
-        graph = parse_metro_mermaid(
+        graph = prepare_graph(
             text,
-            max_station_columns=fold if isinstance(fold, int) else None,
+            from_nextflow=from_nextflow,
+            title=title,
+            line_spread=line_spread,
+            logo=str(logo) if logo is not None else None,
+            legend=legend,
+            layout_options=layout_opts,
         )
-    except ValueError as e:
-        raise click.ClickException(str(e))
-
-    _apply_layout_overrides(graph, layout_opts)
-
-    if line_spread is not None:
-        graph.line_spread = LineSpread(line_spread)
-    if logo is not None:
-        graph.logo_path = str(logo)
-    if legend is not None:
-        apply_legend_directive(legend, graph)
-    if title is not None:
-        graph.title = title
-
-    try:
-        compute_layout(graph)
     except (
+        ValueError,
         CyclicGraphError,
         BackwardFlowError,
         MixedEntryDirectionError,
@@ -317,7 +274,7 @@ def render(
     ) as e:
         raise click.ClickException(str(e))
 
-    theme_obj = _resolve_theme(theme, graph)
+    theme_obj = resolve_theme(theme, graph)
 
     if output is None:
         output = input_file.with_suffix(f".{format_}")
@@ -683,7 +640,7 @@ def serve(
     except (ValueError, PhaseInvariantError) as e:
         raise click.ClickException(str(e))
 
-    theme_obj = _resolve_theme(theme, graph)
+    theme_obj = resolve_theme(theme, graph)
     mapped = sorted(graph.process_mapping)
     if not mapped:
         click.echo(
