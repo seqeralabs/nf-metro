@@ -58,7 +58,10 @@ from nf_metro.layout.phases.bbox import (
     _section_content_hug_top,
     _section_fit_top,
 )
-from nf_metro.layout.phases.guards import _tb_top_entry_drop_overshoot
+from nf_metro.layout.phases.guards import (
+    _perp_fed_entry_consumer_y,
+    _tb_top_entry_drop_overshoot,
+)
 from nf_metro.layout.phases.off_track import (
     _is_single_trunk_lr_section,
     _off_track_anchor_of,
@@ -957,6 +960,29 @@ def test_flow_exit_port_anchors_to_carrying_station(fixture):
             f"{fixture}: exit port {pid} y={port_y:.1f} is off its carrier "
             f"row y={carrier_y:.1f} (carriers {sorted(carrier_ids)}); the "
             f"boundary run will read as a diagonal instead of a clean riser"
+        )
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_perp_fed_entry_anchored_to_consumer(fixture):
+    """A LEFT/RIGHT entry fed by a perpendicular-to-flow exit sits on its
+    consumer's Y so the inter-section bundle rises in the column gap and turns
+    in horizontally, rather than climbing into the single consumer station via
+    a diagonal (#908).
+
+    A TB section's exit dips structurally below its last station; anchoring the
+    downstream entry to that boundary Y leaves the final leg a diagonal.
+    """
+    graph = _layout(fixture)
+    for pid, port in graph.ports.items():
+        consumer_y = _perp_fed_entry_consumer_y(graph, pid, port)
+        if consumer_y is None:
+            continue
+        port_y = graph.stations[pid].y
+        assert abs(port_y - consumer_y) <= _Y_TOL, (
+            f"{fixture}: entry port {pid} y={port_y:.1f} is off its consumer "
+            f"row y={consumer_y:.1f}; the bundle will climb into the consumer "
+            f"via a diagonal instead of a horizontal turn-in"
         )
 
 

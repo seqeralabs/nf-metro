@@ -770,6 +770,81 @@ def _guard_flow_exit_anchored_to_carrier(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _exit_perp_to_flow(src_port: Port, src_section: Section) -> bool:
+    """Whether an exit port sits on a side perpendicular to its section's flow.
+
+    The complement of :data:`_FLOW_ALIGNED_SIDES`: a perpendicular exit lies on
+    a boundary edge rather than on a trunk (a TB section's exit dips below its
+    last station), so its Y is a structural boundary, not a row that aligns
+    with the downstream consumer.
+    """
+    flow_sides = _FLOW_ALIGNED_SIDES.get(src_section.direction)
+    return flow_sides is not None and src_port.side not in flow_sides
+
+
+def _perp_fed_entry_consumer_y(
+    graph: MetroGraph, port_id: str, port: Port
+) -> float | None:
+    """Consumer Y a LEFT/RIGHT entry fed by a perpendicular exit must anchor to.
+
+    Returns the Y of the single internal consumer station when *port* is a
+    LEFT/RIGHT entry whose sole feed is a same-row exit port sitting
+    perpendicular to its section's flow, and whose consumers share one Y.
+    Anchoring the entry there keeps the inter-section climb a riser in the
+    column gap with a horizontal turn-in, rather than a diagonal into the
+    first station (#908).  Returns ``None`` when the port is out of scope.
+    """
+    if not port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+        return None
+    entry_section = graph.sections.get(port.section_id)
+    if entry_section is None:
+        return None
+    fed_by_perp_exit = False
+    for edge in graph.edges_to(port_id):
+        src_port = graph.ports.get(edge.source)
+        if src_port is None or src_port.is_entry:
+            continue
+        src_section = graph.sections.get(src_port.section_id)
+        if src_section is None or src_section.grid_row != entry_section.grid_row:
+            continue
+        if _exit_perp_to_flow(src_port, src_section):
+            fed_by_perp_exit = True
+            break
+    if not fed_by_perp_exit:
+        return None
+    consumer_ys = {
+        round(st.y, 1)
+        for edge in graph.edges_from(port_id)
+        if (st := graph.stations.get(edge.target)) is not None
+        and not st.is_port
+        and st.section_id == entry_section.id
+    }
+    if len(consumer_ys) != 1:
+        return None
+    return consumer_ys.pop()
+
+
+def _guard_perp_fed_entry_anchored_to_consumer(graph: MetroGraph, phase: str) -> None:
+    """A LEFT/RIGHT entry fed by a perpendicular exit sits on its consumer row.
+
+    When such an entry anchors to the source exit's boundary Y instead, the
+    inter-section bundle climbs into the single consumer station via a diagonal
+    rather than rising in the column gap and entering horizontally (#908).
+    Scope is exactly :func:`_perp_fed_entry_consumer_y`.
+    """
+    for pid, port in graph.ports.items():
+        consumer_y = _perp_fed_entry_consumer_y(graph, pid, port)
+        if consumer_y is None:
+            continue
+        port_y = graph.stations[pid].y
+        if abs(port_y - consumer_y) > GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: entry port {pid!r} at y={port_y:.1f} is off its "
+                f"consumer row y={consumer_y:.1f}; the bundle will climb into "
+                f"the consumer via a diagonal instead of a horizontal turn-in"
+            )
+
+
 def _guard_post_convergence_trunk_continues(graph: MetroGraph, phase: str) -> None:
     """The sole successor of an in-section convergence station continues on
     that station's row.
@@ -3861,6 +3936,18 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     GuardSpec(_guard_fanout_junction_resolves_upstream, "B"),
     GuardSpec(_guard_entry_port_fed_only_by_ports, "B"),
     GuardSpec(_guard_flow_exit_anchored_to_carrier, "B"),
+    GuardSpec(
+        _guard_perp_fed_entry_anchored_to_consumer,
+        "B",
+        issue_pin=("#908",),
+        narrow_reason=(
+            "Scoped to a LEFT/RIGHT entry whose sole feed is a same-row "
+            "perpendicular-to-flow exit and whose internal consumers share one "
+            "Y: a multi-consumer entry fans to several rows, so no single "
+            "consumer Y can anchor it, and a trunk-aligned (non-perpendicular) "
+            "feed already arrives on the consumer row."
+        ),
+    ),
     GuardSpec(
         _guard_post_convergence_trunk_continues,
         "B",
