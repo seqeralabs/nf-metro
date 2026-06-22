@@ -244,6 +244,65 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   z-index: 20;
 }
 
+.report-btn {
+  margin-left: auto;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.report-btn:hover { border-color: var(--danger); background: var(--danger-bg); }
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 10, 0.66);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 30;
+}
+.modal {
+  width: min(560px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 22px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+.modal h2 { margin: 0 0 8px; font-size: 17px; }
+.modal p { margin: 0 0 14px; }
+.modal label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--text);
+}
+.modal label .req {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--danger);
+}
+.modal textarea {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+.modal textarea:focus { outline: none; border-color: var(--accent); }
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+.modal-actions button.ghost { color: var(--muted); }
+
 @media (max-width: 720px) {
   #split { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
   #editor-pane { border-right: none; border-bottom: 1px solid var(--border); }

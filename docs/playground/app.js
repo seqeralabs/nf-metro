@@ -3,6 +3,8 @@
 // Pinned so the install path is reproducible; bump deliberately.
 const PYODIDE_VERSION = "v0.27.2";
 
+const REPO = "pinin4fjords/nf-metro";
+
 const SEED = `%%metro title: Example Pipeline
 %%metro line: qc | QC | #2dd4bf
 %%metro line: main | Main | #c792ea
@@ -51,6 +53,7 @@ const el = (id) => document.getElementById(id);
 let editor = null;
 let pyRender = null;
 let lastSvg = "";
+let nfMetroVersion = "";
 
 /* ------------------------------- editor -------------------------------- */
 
@@ -118,6 +121,7 @@ async function boot() {
     await micropip.install(await resolveWheel());
     pyodide.runPython(PY_GLUE);
     pyRender = pyodide.globals.get("nfm_render");
+    nfMetroVersion = pyodide.runPython("import nf_metro; nf_metro.__version__");
     el("boot").classList.add("hidden");
     doRender();
     // Readiness means the runtime is up, independent of whether the first
@@ -347,16 +351,90 @@ function loadFromHash() {
   }
 }
 
-async function shareLink() {
+function shareUrl() {
   const hash = "#mmd=" + encodeURIComponent(b64urlEncode(editor.getValue()));
-  history.replaceState(null, "", location.pathname + location.search + hash);
-  const full = location.href;
+  return location.origin + location.pathname + location.search + hash;
+}
+
+async function shareLink() {
+  const url = shareUrl();
+  history.replaceState(null, "", url);
   try {
-    await navigator.clipboard.writeText(full);
+    await navigator.clipboard.writeText(url);
     toast("Share link copied to clipboard");
   } catch (_) {
     toast("Share link is in the address bar");
   }
+}
+
+/* ----------------------------- bug report ----------------------------- */
+
+function buildIssueUrl(explanation) {
+  const opts = currentOptions();
+  const mmd = editor.getValue();
+  const MAX = 6000;
+  const mmdBlock =
+    mmd.length > MAX
+      ? mmd.slice(0, MAX) + "\n... (truncated; full map in the reproduce link)"
+      : mmd;
+  const lo = opts.layout_options;
+  const body = `## What's wrong
+
+${explanation}
+
+## Map source
+
+\`\`\`
+${mmdBlock}
+\`\`\`
+
+## Reproduce
+
+[Open this map in the playground](${shareUrl()})
+
+## Environment
+
+- nf-metro: ${nfMetroVersion || "unknown"}
+- theme: ${opts.theme}
+- animate: ${lo.animate}
+- directional: ${lo.directional}
+- x-spacing: ${lo.x_spacing ?? "auto"}
+- y-spacing: ${lo.y_spacing ?? "auto"}
+- page: ${location.href.split("#")[0]}
+- user agent: ${navigator.userAgent}
+`;
+  const firstLine = explanation.trim().split("\n")[0].slice(0, 70);
+  const params = new URLSearchParams({
+    title: `[playground] ${firstLine}`,
+    body,
+    labels: "playground",
+  });
+  return `https://github.com/${REPO}/issues/new?${params.toString()}`;
+}
+
+function openReport() {
+  el("report-text").value = "";
+  el("report-submit").disabled = true;
+  el("report-modal").classList.remove("hidden");
+  el("report-text").focus();
+}
+
+function closeReport() {
+  el("report-modal").classList.add("hidden");
+}
+
+function submitReport() {
+  const explanation = el("report-text").value.trim();
+  if (!explanation) {
+    el("report-text").focus();
+    return;
+  }
+  const url = buildIssueUrl(explanation);
+  // Exposed so the e2e suite can assert the prefilled issue without
+  // navigating to github.com.
+  window.__nfMetroLastIssueUrl = url;
+  window.open(url, "_blank", "noopener");
+  closeReport();
 }
 
 /* -------------------------------- utils -------------------------------- */
@@ -386,6 +464,21 @@ function wireControls() {
   el("btn-svg").addEventListener("click", exportSvg);
   el("btn-png").addEventListener("click", exportPng);
   el("btn-share").addEventListener("click", shareLink);
+
+  el("btn-report").addEventListener("click", openReport);
+  el("report-cancel").addEventListener("click", closeReport);
+  el("report-submit").addEventListener("click", submitReport);
+  el("report-text").addEventListener("input", (e) => {
+    el("report-submit").disabled = e.target.value.trim() === "";
+  });
+  el("report-modal").addEventListener("click", (e) => {
+    if (e.target === el("report-modal")) closeReport();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el("report-modal").classList.contains("hidden")) {
+      closeReport();
+    }
+  });
 }
 
 initEditor();

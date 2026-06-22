@@ -127,6 +127,36 @@ test("SVG and PNG export produce non-empty downloads", async () => {
   expect(stat.size).toBeGreaterThan(0);
 });
 
+test("bug report builds a prefilled GitHub issue with the map and explanation", async () => {
+  await page.evaluate(() => {
+    window.__nfMetro.setValue(
+      "%%metro line: q | Q | #abc\ngraph LR\n  uniquenode[Unique] -->|q| other[Other]\n"
+    );
+    // Prevent the real github.com tab from opening during the test.
+    window.open = () => null;
+  });
+
+  await page.locator("#btn-report").click();
+  await expect(page.locator("#report-modal")).toBeVisible();
+  // The explanation is mandatory: submit stays disabled until it's filled.
+  await expect(page.locator("#report-submit")).toBeDisabled();
+
+  await page.locator("#report-text").fill("Edge renders backwards from uniquenode");
+  await expect(page.locator("#report-submit")).toBeEnabled();
+  await page.locator("#report-submit").click();
+
+  await expect(page.locator("#report-modal")).toBeHidden();
+  const issueUrl = await page.evaluate(() => window.__nfMetroLastIssueUrl);
+  const u = new URL(issueUrl);
+  expect(u.host).toBe("github.com");
+  expect(u.pathname).toBe("/pinin4fjords/nf-metro/issues/new");
+  expect(u.searchParams.get("labels")).toBe("playground");
+  const body = u.searchParams.get("body");
+  expect(body).toContain("Edge renders backwards from uniquenode");
+  expect(body).toContain("uniquenode[Unique]");
+  expect(body).toContain("#mmd=");
+});
+
 test("share link round-trips the editor content", async () => {
   const source = await page.evaluate(() => {
     const v = "%%metro line: z | Z | #0af\ngraph LR\n  s1[S1] -->|z| s2[S2]\n";

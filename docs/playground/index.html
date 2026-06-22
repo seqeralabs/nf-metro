@@ -11,6 +11,7 @@
 <body>
   <header id="bar">
     <div class="brand">nf-metro <span class="muted">playground</span> <span class="beta">beta</span></div>
+    <button id="btn-report" class="report-btn" title="Report a bug with this map">Report a bug</button>
   </header>
 
   <main id="split">
@@ -60,6 +61,24 @@
   </main>
 
   <div id="toast" class="hidden"></div>
+
+  <div id="report-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="report-title">
+    <div class="modal">
+      <h2 id="report-title">Report a bug</h2>
+      <p class="muted small">
+        This opens a pre-filled GitHub issue in a new tab with your current map,
+        options, and description. You review and submit it there (a GitHub
+        account and sign-in are required).
+      </p>
+      <label for="report-text">What's wrong? <span class="req">required</span></label>
+      <textarea id="report-text" rows="5"
+        placeholder="What did you expect, and what happened instead?"></textarea>
+      <div class="modal-actions">
+        <button id="report-cancel" class="ghost">Cancel</button>
+        <button id="report-submit" disabled>Open GitHub issue</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/mode/simple.min.js"></script>
