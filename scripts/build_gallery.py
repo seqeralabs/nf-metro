@@ -976,6 +976,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "port concentrically, instead of the flat line weaving across the risers "
         "at the corner.",
     ),
+    (
+        "convergent_offrow_exit_climb",
+        TOPOLOGIES_DIR,
+        "A single-row long-read variant-calling map. The annotation section "
+        "carries only snv and sv (the two highest-priority lines), reached through "
+        "a bypass whose source re-based them onto low slots. Its two-line bundle "
+        "anchors on its own trunk rather than inheriting the high global slots, so "
+        "its markers sit on their rows and the run into reports stays level.",
+    ),
 ]
 
 # Category headers inserted before specific entries

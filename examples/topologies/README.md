@@ -273,3 +273,7 @@ A pre-processing section whose lower trunk row carries two lines (`bam` from sam
 ### Junction Fan-out Convergence
 
 Three lines converge into one joint-calling entry port on a single-row grid: `a` and `b` bypass the intervening sections and climb risers into the port, while `c` joins flat from the adjacent column. Tests that the flat shallow feeder (`c`) takes the port-near slot on top of the climbing risers so the bundle turns into the port concentrically, rather than the flat line weaving across the climbing pair at the corner (#940).
+
+### Convergent Off-Row Exit Climb
+
+A single-row long-read variant-calling map. The annotation section carries only `snvvcf` and `svvcf` (the two highest-priority lines), reached through a bypass whose source section re-based those lines onto low slots. Tests that annotation's two-line bundle anchors on its own trunk (global slots 4,5 → local 0,1) rather than inheriting the high global slots, so its markers sit on their grid rows and the run into reports stays level instead of sloping (#941).
