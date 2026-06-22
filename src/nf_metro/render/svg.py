@@ -35,7 +35,12 @@ from nf_metro.layout.routing import (
     compute_station_offsets,
     route_edges_centred,
 )
-from nf_metro.layout.routing.corners import curve_tangents, resolve_curve_radii
+from nf_metro.layout.routing.common import tb_right_entry_sections
+from nf_metro.layout.routing.corners import (
+    curve_tangents,
+    resolve_curve_radii,
+    reversed_offset,
+)
 from nf_metro.layout.routing.invariants import assert_render_curve_invariants
 from nf_metro.manifest import node_data_attrs
 from nf_metro.parser.model import (
@@ -1301,6 +1306,37 @@ def _render_bridged_edge(
     d.append(path)
 
 
+def _drawn_bundle_span(
+    graph: MetroGraph,
+    station: Station,
+    station_offsets: dict[tuple[str, str], float],
+    tb_right_entry: set[str],
+) -> tuple[float, float]:
+    """Min/max of a station's per-line offsets *as drawn*.
+
+    A TB section draws each line at its offset reversed against the station's
+    bundle max (matching :func:`_tb_x_offset`), except a RIGHT-entry TB section
+    whose stored offsets are already in draw order; every other axis draws the
+    stored offset directly.  Spanning the marker over the drawn offsets keeps it
+    centred on the lines that actually pass through the station -- the exact
+    transpose of the LR case, which never reverses -- so a one-line or
+    off-trunk-subset station does not leave its glyph beside its own track.
+    """
+    raw = [
+        station_offsets.get((station.id, lid), 0.0)
+        for lid in graph.station_lines(station.id)
+    ]
+    if not raw:
+        return 0.0, 0.0
+    sec = graph.sections.get(station.section_id) if station.section_id else None
+    if sec is not None and sec.direction == "TB" and sec.id not in tb_right_entry:
+        bundle_max = max(raw)
+        drawn = [reversed_offset(off, bundle_max) for off in raw]
+    else:
+        drawn = raw
+    return min(drawn), max(drawn)
+
+
 def _pill_box(
     station: Station,
     r: float,
@@ -1354,11 +1390,9 @@ def station_marker_box(
         used = station.rail_used_ys or [station.y]
         min_off, max_off = min(used) - station.y, max(used) - station.y
     elif station_offsets and not graph.station_is_rail(station.id):
-        offs = [
-            station_offsets.get((station.id, lid), 0.0)
-            for lid in graph.station_lines(station.id)
-        ]
-        min_off, max_off = (min(offs), max(offs)) if offs else (0.0, 0.0)
+        min_off, max_off = _drawn_bundle_span(
+            graph, station, station_offsets, tb_right_entry_sections(graph)
+        )
     else:
         min_off = max_off = 0.0
 
@@ -1700,15 +1734,20 @@ def _render_stations(
     addressable element; with ``--no-manifest`` the glyphs are drawn directly
     with no wrapper. Skips port stations (is_port=True).
     """
+    tb_right_entry = tb_right_entry_sections(graph)
     for station in graph.stations.values():
         if station.is_port or station.is_hidden:
             continue
         if graph.embed_manifest:
             g = draw.Group(**_station_group_attrs(graph, theme, station))
-            _render_station_into(g, graph, theme, station, station_offsets)
+            _render_station_into(
+                g, graph, theme, station, station_offsets, tb_right_entry
+            )
             d.append(g)
         else:
-            _render_station_into(d, graph, theme, station, station_offsets)
+            _render_station_into(
+                d, graph, theme, station, station_offsets, tb_right_entry
+            )
 
 
 def _render_station_into(
@@ -1717,6 +1756,7 @@ def _render_station_into(
     theme: Theme,
     station: Station,
     station_offsets: dict[tuple[str, str], float] | None,
+    tb_right_entry: set[str],
 ) -> None:
     """Draw one station's glyph and terminus icons into a container.
 
@@ -1793,15 +1833,9 @@ def _render_station_into(
     # marked single-rail station's glyph must seat on the rail rather than
     # ride the bundle's mid-offset.
     if station_offsets and not graph.station_is_rail(station.id):
-        line_offsets = [
-            station_offsets.get((station.id, lid), 0.0)
-            for lid in graph.station_lines(station.id)
-        ]
-        if line_offsets:
-            min_off = min(line_offsets)
-            max_off = max(line_offsets)
-        else:
-            min_off = max_off = 0.0
+        min_off, max_off = _drawn_bundle_span(
+            graph, station, station_offsets, tb_right_entry
+        )
     else:
         min_off = max_off = 0.0
 
