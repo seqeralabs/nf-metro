@@ -27,7 +27,11 @@ from nf_metro.layout.constants import (
     X_SPACING,
 )
 from nf_metro.layout.routing.bundle import build_offset_bundle, build_tapered_bundle
-from nf_metro.layout.routing.common import OffsetRegime, RoutedPath
+from nf_metro.layout.routing.common import (
+    OffsetRegime,
+    RoutedPath,
+    _center_inter_row_channel,
+)
 from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Station
 
 
@@ -246,7 +250,7 @@ def _route_inter_section_connector(
     corridor_r = max(up.bbox_x + up.bbox_w, down.bbox_x + down.bbox_w) + clear
     corridor_l = min(up.bbox_x, down.bbox_x) - clear
     upper, lower = sorted((up, down), key=lambda s: s.bbox_y)
-    gap_y = (upper.bbox_y + upper.bbox_h + lower.bbox_y) / 2.0
+    gap_y = _center_inter_row_channel(upper.bbox_y + upper.bbox_h, lower.bbox_y)
 
     centerline = [
         (exit_port.x, center_ye),
@@ -260,9 +264,10 @@ def _route_inter_section_connector(
     # Each line is a rigid parallel offset through the corridor (exit-rail
     # spacing), tapering to its entry-rail offset only on the final lead-in, so
     # the bundle keeps its order and never flips.
+    n_legs = len(centerline) - 1
+
     def leg_offsets(line_id: str) -> list[float]:
-        eo = exit_offsets[line_id]
-        return [eo, eo, eo, eo, entry_offsets[line_id]]
+        return [exit_offsets[line_id]] * (n_legs - 1) + [entry_offsets[line_id]]
 
     members = [(e, e.line_id, leg_offsets(e.line_id)) for e, _ye, _yn in rails]
     # Self-contained baked route (like the off-track elbow): not part of the
