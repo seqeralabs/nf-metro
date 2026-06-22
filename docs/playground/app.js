@@ -120,6 +120,9 @@ async function boot() {
     pyRender = pyodide.globals.get("nfm_render");
     el("boot").classList.add("hidden");
     doRender();
+    // Readiness means the runtime is up, independent of whether the first
+    // render happened to succeed.
+    window.__nfMetroReady = true;
   } catch (err) {
     setBootMsg("Failed to start: " + err);
     el("boot").querySelector(".spinner").classList.add("hidden");
@@ -177,7 +180,6 @@ function doRender() {
     showError(res.error);
   }
   refreshLineColors();
-  window.__nfMetroReady = true;
 }
 
 /* ----------------------------- line colors ---------------------------- */
@@ -309,12 +311,11 @@ async function exportPng() {
     const ctx = canvas.getContext("2d");
     ctx.scale(scale, scale);
     ctx.drawImage(img, 0, 0);
-    await new Promise((resolve) =>
-      canvas.toBlob((b) => {
-        if (b) downloadBlob(b, "metro_map.png");
-        resolve();
-      }, "image/png")
-    );
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("canvas produced no image");
+    downloadBlob(blob, "metro_map.png");
+  } catch (err) {
+    toast("PNG export failed: " + err.message);
   } finally {
     URL.revokeObjectURL(url);
   }

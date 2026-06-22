@@ -55,6 +55,28 @@ def test_render_string_matches_cli_html(name: str, tmp_path: Path) -> None:
     assert cli_out == _as_written(api_out)
 
 
+def test_render_string_matches_cli_with_explicit_options(tmp_path: Path) -> None:
+    """Explicit registry + render options thread through to match the CLI flags."""
+    src = EXAMPLES / "rnaseq_auto.mmd"
+    cli_out = _cli_render(
+        src,
+        tmp_path / "cli.svg",
+        "--animate",
+        "--center-ports",
+        "--x-spacing",
+        "80",
+        "--responsive",
+        "--embed-font",
+    )
+    api_out = render_string(
+        src.read_text(),
+        responsive=True,
+        embed_font=True,
+        layout_options={"animate": True, "center_ports": True, "x_spacing": 80.0},
+    )
+    assert cli_out == _as_written(api_out)
+
+
 def test_render_string_honours_theme_and_layout_options() -> None:
     src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
     light = render_string(src, theme="light")
