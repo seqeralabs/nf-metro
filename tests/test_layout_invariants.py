@@ -448,14 +448,6 @@ def _fixtures_with_linear_off_track_consumer() -> list[str]:
 _FIXTURES_WITH_LINEAR_OFF_TRACK_CONSUMER = _fixtures_with_linear_off_track_consumer()
 
 
-# Pre-existing layout regressions surfaced by parametrizing single-fixture
-# invariants over the full corpus.  Each entry pins a fixture/invariant
-# pair as ``xfail(strict=False)`` so the bug is documented in code while
-# the coverage extension still ships green.  When the underlying bug is
-# fixed the entry becomes XPASS and can be removed.
-_XFAIL_KEY = "xfail"
-
-
 def _fp(name: str, fail_reason: str | None = None):
     """Return a ``pytest.param`` for ``name`` with optional xfail marker.
 
@@ -472,37 +464,6 @@ def _fp(name: str, fail_reason: str | None = None):
 def _params_with_xfails(fixtures: list[str], xfails: dict[str, str]) -> list:
     """Return a parametrize list mixing plain fixtures and xfail-marked ones."""
     return [_fp(f, xfails.get(f)) for f in fixtures]
-
-
-# Fixture entries known to fail ``test_row_trunk_marker_cy_consistent``
-# because the row-bundle trunk Y drifts between sections in the same row.
-# Surfaced by the cross-corpus parametrization; tracked separately from
-# this coverage PR.  See nf-metro audit /tmp/invariant-audit.md item 1.
-_XFAIL_ROW_TRUNK_CY: dict[str, str] = {}
-
-
-# Inter-section exit-port cy drifts from the matching entry-port cy in
-# the next section.  See nf-metro audit item 1 (the "limma kink"
-# regression family).  Limited to multi-section fixtures.
-_XFAIL_NO_KINK: dict[str, str] = {}
-
-
-# Symmetric-fan pairs (two full-bundle stations in the same column) end
-# up asymmetric around the row trunk cy.  Audit item 10.
-_XFAIL_SYMFAN: dict[str, str] = {}
-
-
-# Lines cross non-consumer station markers (the "breeze-past" regression
-# family).  Audit item 3.  Limited to the guide fixtures where the
-# regression manifests; the production maps already route around their
-# non-consumer stations.
-_XFAIL_BREEZE_PAST: dict[str, str] = {}
-
-
-# Section bbox bottom doesn't carry the configured section_y_padding
-# below the lowest station marker.  Likely linked to off-track input
-# placement in differentialabundance_default at default y_spacing.
-_XFAIL_BBOX_BOTTOM_PAD: dict[str, str] = {}
 
 
 def _row_lr_sections(graph: MetroGraph) -> dict[int, list]:
@@ -605,7 +566,7 @@ def _section_full_bundle(graph: MetroGraph, section) -> set[str] | None:
 
 @pytest.mark.parametrize(
     "fixture",
-    _params_with_xfails(_FIXTURES_MULTI_SECTION, _XFAIL_ROW_TRUNK_CY),
+    _FIXTURES_MULTI_SECTION,
 )
 def test_row_trunk_marker_cy_consistent(fixture):
     """All same-row LR sections must render their trunk marker at the
@@ -1055,7 +1016,7 @@ def _section_fan_columns(graph: MetroGraph, section) -> dict[float, list[str]]:
 
 @pytest.mark.parametrize(
     "fixture",
-    _params_with_xfails(ALL_FIXTURES, _XFAIL_SYMFAN),
+    ALL_FIXTURES,
 )
 def test_symfan_pairs_share_y(fixture):
     """When a section has exactly two full-bundle stations in the same
@@ -2359,16 +2320,6 @@ def test_off_track_outputs_below_downward_branch_producer(fixture):
         )
 
 
-# No known fixture leaves a line striking through a station's name label: fan
-# and convergence diagonals are cleared by the column-runway loop and a foreign
-# bypass V's climb is seated clear of the bypassed station's label by the router
-# (``_clear_bypass_v_label_strikes``).  New strikes are caught both here and by
-# the wired ``_guard_no_line_strikes_label`` validate guard.
-_LABEL_STRIKE_DIAGONAL_XFAIL: dict[str, str] = {}
-
-_LABEL_STRIKE_FIXTURES = _params_with_xfails(ALL_FIXTURES, _LABEL_STRIKE_DIAGONAL_XFAIL)
-
-
 def _label_glyph_strikes(fixture: str) -> list[tuple[str, str]]:
     """Return ``(station_id, line_id)`` pairs where a foreign line strikes a label.
 
@@ -2411,7 +2362,7 @@ def _label_glyph_strikes(fixture: str) -> list[tuple[str, str]]:
     return strikes
 
 
-@pytest.mark.parametrize("fixture", _LABEL_STRIKE_FIXTURES)
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_no_line_strikes_through_label(fixture):
     """No foreign line crosses a station label's glyph ink.
 
@@ -3503,7 +3454,7 @@ def test_off_track_icons_ordered_by_consumer_y(example):
 
 @pytest.mark.parametrize(
     "fixture",
-    _params_with_xfails(_FIXTURES_MULTI_SECTION, _XFAIL_NO_KINK),
+    _FIXTURES_MULTI_SECTION,
 )
 def test_no_kink_at_section_boundary(fixture):
     """Adjacent same-row LR sections must agree on the rendered cy
@@ -4072,15 +4023,7 @@ def test_inter_section_route_no_full_width_dogleg_clean(fixture):
         )
 
 
-# a multi-row collector fan-in now descends the shared inter-column corridor into
-# the left-entry ``reporting`` section, so the feeders are X-monotonic toward
-# the target and no longer trip the full-width dog-leg guard.
-_XFAIL_DOGLEG: dict[str, str] = {}
-
-
-@pytest.mark.parametrize(
-    "fixture", _params_with_xfails(_FIXTURES_DOGLEG, _XFAIL_DOGLEG)
-)
+@pytest.mark.parametrize("fixture", _FIXTURES_DOGLEG)
 def test_inter_section_route_no_full_width_dogleg(fixture):
     """A forward inter-section route may reverse in X to reach a target
     column nested inside an oversized sibling, but no single backtrack leg
@@ -5444,7 +5387,7 @@ def test_loop_recenter_only_for_pure_side_branches(fixture):
 
 @pytest.mark.parametrize(
     "fixture",
-    _params_with_xfails(ALL_FIXTURES, _XFAIL_BREEZE_PAST),
+    ALL_FIXTURES,
 )
 def test_lines_dont_cross_non_consumer_markers(fixture):
     """No rendered line segment may pass through the marker bbox of
@@ -5837,7 +5780,7 @@ def test_loop_column_stations_share_x(fixture):
 
 @pytest.mark.parametrize(
     "fixture",
-    _params_with_xfails(ALL_FIXTURES, _XFAIL_BBOX_BOTTOM_PAD),
+    ALL_FIXTURES,
 )
 def test_section_bbox_has_bottom_padding(fixture):
     """Each section's bbox bottom must sit at least ``section_y_padding``
@@ -6203,15 +6146,7 @@ def _icon_x_extent(graph: MetroGraph, station, section) -> tuple[float, float]:
     return cx - icon_half_w, cx + icon_half_w
 
 
-# a multi-row collector fan-in now descends the inter-column corridor into the
-# left-entry ``reporting`` section instead of sweeping the reporting row's
-# full width, so the merge bundle no longer crosses the file icons (#432).
-_XFAIL_ICON_OVERLAP: dict[str, str] = {}
-
-
-@pytest.mark.parametrize(
-    "fixture", _params_with_xfails(ALL_FIXTURES, _XFAIL_ICON_OVERLAP)
-)
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_no_icon_overlaps_line_path(fixture):
     """A station's rendered file icon must not be crossed by routed line
     segments belonging to lines the station neither produces nor consumes.
@@ -6510,14 +6445,9 @@ def test_section_entry_hub_on_grid(fixture):
 # ---------------------------------------------------------------------------
 
 
-# Fixtures known to fail ``test_inter_section_route_y_stays_within_row_band``
-# because a same-row inter-section route dips outside its row band.
-_XFAIL_ROW_BAND: dict[str, str] = {}
-
-
 @pytest.mark.parametrize(
     "fixture",
-    _params_with_xfails(ALL_FIXTURES, _XFAIL_ROW_BAND),
+    ALL_FIXTURES,
 )
 def test_inter_section_route_y_stays_within_row_band(fixture):
     """Inter-section routes whose endpoints both sit in grid row R must
@@ -6588,15 +6518,9 @@ def test_inter_section_route_y_stays_within_row_band(fixture):
 # ---------------------------------------------------------------------------
 
 
-# Fixtures known to fail ``test_topological_siblings_share_y_or_symmetric``
-# (audit item 15).  The sibling-Y defect this dict tracked is resolved, so
-# no fixture is currently exempted; the invariant now holds gallery-wide.
-_XFAIL_SIBLINGS: dict[str, str] = {}
-
-
 @pytest.mark.parametrize(
     "fixture",
-    _params_with_xfails(ALL_FIXTURES, _XFAIL_SIBLINGS),
+    ALL_FIXTURES,
 )
 def test_topological_siblings_share_y_or_symmetric(fixture):
     """Stations with identical ``(predecessor_set, successor_set,
@@ -6684,17 +6608,9 @@ def test_grid_snap_does_not_mutate_x(fixture):
 # ---------------------------------------------------------------------------
 
 
-# All fixtures pass with the median-column-X tolerance once
-# loop-side-branch stations (which the engine deliberately moves to the
-# midpoint of their loop's diagonal corners) are excluded.  The
-# placeholder dict locks in the invariant so a future bug-fix that
-# accidentally drifts a station off-column lights up here.
-_XFAIL_COL_DRIFT: dict[str, str] = {}
-
-
 @pytest.mark.parametrize(
     "fixture",
-    _params_with_xfails(ALL_FIXTURES, _XFAIL_COL_DRIFT),
+    ALL_FIXTURES,
 )
 def test_station_x_within_column_tolerance(fixture):
     """For each LR/RL section, every (non-loop-side-branch) station at
@@ -6854,12 +6770,10 @@ def test_label_x_anchored_to_station_marker_on_horizontal_runs(fixture):
 # Visual stack stations share their column X (issue #348)
 # ---------------------------------------------------------------------------
 
-_XFAIL_VISUAL_STACK: dict[str, str] = {}
-
 
 @pytest.mark.parametrize(
     "fixture",
-    _params_with_xfails(ALL_FIXTURES, _XFAIL_VISUAL_STACK),
+    ALL_FIXTURES,
 )
 def test_visual_stack_station_xs_share_column(fixture):
     """Stations forming a visual stack must agree in X within 1 px.
