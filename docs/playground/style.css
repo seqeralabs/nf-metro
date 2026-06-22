@@ -41,6 +41,17 @@ body {
   letter-spacing: 0.2px;
 }
 .brand .muted { color: var(--muted); font-weight: 400; }
+.brand .beta {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 1px 7px;
+  vertical-align: middle;
+}
 
 .pane-toolbar {
   display: flex;

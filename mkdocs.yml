@@ -47,7 +47,7 @@ nav:
   - Nextflow Import: nextflow.md
   - nf-core Pipelines: pipelines/index.md
   - Gallery: gallery/index.md
-  - Playground: playground/index.html
+  - Playground (beta): playground/index.html
   - Internals:
     - Architecture: dev/architecture.md
     - Layout pipeline: dev/layout_pipeline.md
