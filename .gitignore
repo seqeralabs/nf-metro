@@ -20,3 +20,14 @@ docs/gallery/index.md
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 .coverage
+
+# Local working notes and generated assets (not committed)
+AUTO_LAYOUT_FINDINGS.md
+BLOG_NOTES.md
+COST_SAVINGS.md
+LAYOUT_ENGINE_ASSESSMENT.md
+SPEC_FACTORING_RESEARCH.md
+blog_drafts/
+nf_metro_live_led.gif
+proposal_review_summary.txt
+scripts/optimize_layout.py
