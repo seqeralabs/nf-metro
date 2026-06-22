@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 import nf_metro.render.section_header as section_header
-from nf_metro.cli import _resolve_theme
+from nf_metro.api import resolve_theme
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges_centred
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -56,7 +56,7 @@ def _polylines_and_font(path: Path):
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
     polylines = [apply_route_offsets(route, offsets) for route in routes]
-    font_size = _resolve_theme(None, graph).section_label_font_size
+    font_size = resolve_theme(None, graph).section_label_font_size
     return graph, polylines, font_size
 
 
