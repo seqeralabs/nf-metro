@@ -54,6 +54,7 @@ let editor = null;
 let pyRender = null;
 let lastSvg = "";
 let nfMetroVersion = "";
+const examples = {};
 
 /* ------------------------------- editor -------------------------------- */
 
@@ -456,7 +457,38 @@ function toast(msg) {
   toastTimer = setTimeout(() => t.classList.add("hidden"), 1800);
 }
 
+/* ------------------------------ examples ------------------------------ */
+
+async function loadExamples() {
+  let entries;
+  try {
+    const resp = await fetch("examples.json", { cache: "no-store" });
+    if (!resp.ok) return;
+    entries = await resp.json();
+  } catch (_) {
+    return; // no manifest shipped; the starter remains available
+  }
+  const group = el("example-group");
+  entries.forEach(({ name, mmd }) => {
+    examples[name] = mmd;
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    group.append(opt);
+  });
+}
+
+function loadExample(value) {
+  if (!value) return;
+  const mmd = value === "__seed__" ? SEED : examples[value];
+  if (mmd != null) editor.setValue(mmd);
+  // The dropdown is an action menu, not a state mirror: reset to the
+  // placeholder so re-picking the same entry fires `change` again.
+  el("example-select").value = "";
+}
+
 function wireControls() {
+  el("example-select").addEventListener("change", (e) => loadExample(e.target.value));
   ["opt-theme", "opt-animate", "opt-directional", "opt-x-spacing", "opt-y-spacing"].forEach(
     (id) => el(id).addEventListener("change", doRender)
   );
@@ -483,4 +515,5 @@ function wireControls() {
 
 initEditor();
 wireControls();
+loadExamples();
 boot();

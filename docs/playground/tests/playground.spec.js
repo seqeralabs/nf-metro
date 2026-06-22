@@ -127,6 +127,28 @@ test("SVG and PNG export produce non-empty downloads", async () => {
   expect(stat.size).toBeGreaterThan(0);
 });
 
+test("example dropdown loads a chosen example and renders it", async () => {
+  const select = page.locator("#example-select");
+  // Manifest populated the dropdown beyond the placeholder + starter.
+  expect(await select.locator("option").count()).toBeGreaterThan(2);
+
+  await select.selectOption("rnaseq_auto");
+  await expect
+    .poll(async () => page.evaluate(() => window.__nfMetro.getValue()))
+    .toContain("graph");
+  await expect
+    .poll(async () => page.locator("#preview [data-line-id]").count())
+    .toBeGreaterThan(0);
+  // Action menu resets to its placeholder after loading.
+  await expect(select).toHaveValue("");
+
+  // The starter entry is always available even without the manifest.
+  await select.selectOption("__seed__");
+  await expect
+    .poll(async () => page.evaluate(() => window.__nfMetro.getValue()))
+    .toContain("Example Pipeline");
+});
+
 test("bug report builds a prefilled GitHub issue with the map and explanation", async () => {
   await page.evaluate(() => {
     window.__nfMetro.setValue(
