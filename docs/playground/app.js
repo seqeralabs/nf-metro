@@ -27,6 +27,25 @@ graph LR
     align -->|main| bam
 `;
 
+// Seeded into the import dialog so the expected `-with-dag` format is visible
+// and Convert works out of the box; users paste over it with their own DAG.
+const SAMPLE_NEXTFLOW_DAG = `flowchart TB
+    subgraph " "
+    v0["Channel.fromPath"]
+    end
+    subgraph "PIPELINE [PIPELINE]"
+    v1(["FASTQC"])
+    v2(["TRIM"])
+    v3(["ALIGN"])
+    v4(["MULTIQC"])
+    end
+    v0 --> v1
+    v1 --> v2
+    v2 --> v3
+    v1 --> v4
+    v3 --> v4
+`;
+
 // Glue defined inside the Pyodide runtime: returns a JSON envelope so a render
 // error surfaces as data rather than a thrown PythonError to unwind in JS.
 const PY_GLUE = `
@@ -528,7 +547,7 @@ function submitReport() {
 /* -------------------------- nextflow import --------------------------- */
 
 function openConvert() {
-  el("convert-text").value = "";
+  el("convert-text").value = SAMPLE_NEXTFLOW_DAG;
   el("convert-error").classList.add("hidden");
   el("convert-modal").classList.remove("hidden");
   el("convert-text").focus();

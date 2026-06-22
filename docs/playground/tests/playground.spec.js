@@ -140,20 +140,16 @@ test("snippet button inserts valid boilerplate and still renders", async () => {
   expect(await page.locator("#preview svg").count()).toBe(1);
 });
 
-test("Nextflow DAG import converts a pasted DAG into a metro map", async () => {
-  const dag =
-    'flowchart TB\n    subgraph " "\n    v0["Channel.of"]\n    end\n' +
-    '    subgraph "PIPE [PIPE]"\n    v1(["FASTQC"])\n    v2(["MULTIQC"])\n    end\n' +
-    "    v0 --> v1\n    v1 --> v2\n";
-
+test("Nextflow DAG import converts the seeded sample into a metro map", async () => {
   await page.locator("#btn-convert").click();
   await expect(page.locator("#convert-modal")).toBeVisible();
   // Docs link points at the Nextflow import guide.
   await expect(page.locator('#convert-modal a[href="../nextflow/"]')).toHaveCount(1);
+  // The box is pre-filled with a sample DAG, like the editor's starter map.
+  await expect(page.locator("#convert-text")).toHaveValue(/flowchart/);
 
-  await page.locator("#convert-text").fill(dag);
+  // Convert the seeded sample directly.
   await page.locator("#convert-submit").click();
-
   await expect(page.locator("#convert-modal")).toBeHidden();
   const value = await page.evaluate(() => window.__nfMetro.getValue());
   expect(value).toContain("%%metro");
