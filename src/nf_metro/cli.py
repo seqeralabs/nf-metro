@@ -657,7 +657,7 @@ def serve(
     shutdown_grace: float,
     launch_cmd: tuple[str, ...],
 ) -> None:
-    """Serve a live-progress view of a metro map. [experimental]
+    """Serve a live-progress view of a metro map.
 
     Renders the map once and serves it at http://HOST:PORT/. Point a Nextflow
     run's weblog at the events endpoint to light up stations as tasks run:
@@ -707,7 +707,7 @@ def serve(
     if token:
         events_url += f"?token={token}"
 
-    click.echo("nf-metro live progress (experimental)")
+    click.echo("nf-metro live progress")
     click.echo(f"Mapped stations: {', '.join(mapped) or '(none)'}")
     click.echo("")
     click.echo(f"    ▶ Open: {page_url}")
@@ -752,7 +752,7 @@ def serve(
 def serve_multi_cmd(
     port: int, host: str, theme: str, overlay: str, token: str | None
 ) -> None:
-    """Run a persistent live server many pipelines can report into. [experimental]
+    """Run a persistent live server many pipelines can report into.
 
     Unlike `serve` (one map), this starts with no map. A pipeline registers its
     map by POSTing the .mmd to /maps and then sends weblog events to the run's
@@ -781,7 +781,7 @@ def serve_multi_cmd(
         THEMES[theme], host=host, port=port, token=token, overlay=overlay
     )
     display_host = "localhost" if host == "127.0.0.1" else host
-    click.echo("nf-metro live progress - persistent server (experimental)")
+    click.echo("nf-metro live progress - persistent server")
     click.echo("")
     click.echo(f"    ▶ Runs index: http://{display_host}:{port}/")
     click.echo("")
@@ -822,7 +822,7 @@ def check_mapping_cmd(
     processes_file: Path | None,
     ignore: tuple[str, ...],
 ) -> None:
-    """Check a map's `%%metro process:` mapping against the processes. [experimental]
+    """Check a map's `%%metro process:` mapping against the processes.
 
     Reports processes the map can't show (drift) and station patterns that
     match nothing (stale), exiting non-zero if any are found so CI can gate on

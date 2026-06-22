@@ -1,12 +1,10 @@
 # The data manifest
 
-!!! warning "Experimental - pre-1.0, not yet stable"
-    The manifest is new and still being shaped: the schema, the
-    `diagram-manifest` element id, and the `data-node-*` attribute names may
-    change without notice before the format is declared stable. There is no
-    backward-compatibility guarantee yet, so the `version` stays `1.0` (the
-    first, not-yet-frozen schema) rather than incrementing per change. Pin to a
-    specific nf-metro release if you depend on the exact bytes.
+!!! note "Stable since 1.0"
+    The manifest schema, `diagram-manifest` element id, and `data-node-*`
+    attribute names are stable as of nf-metro 1.0 and covered by semantic
+    versioning. Incompatible schema changes will bump the `version` field and
+    the nf-metro major version together.
 
 Every SVG nf-metro renders is a **self-describing, addressable artifact**: a
 downstream tool can drive it - position overlays, restyle nodes, look up which
