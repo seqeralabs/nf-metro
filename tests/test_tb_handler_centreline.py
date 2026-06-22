@@ -5,10 +5,9 @@ station to a LEFT/RIGHT exit port (``_route_tb_lr_exit``), a LEFT/RIGHT entry
 port to an internal station (``_route_tb_lr_entry``), a TOP/BOTTOM entry port
 down into the trunk (``_route_perp_entry``), and the corridor-fed variant of the
 last (``_route_perp_entry_from_corridor``).  Each fans a co-travelling bundle
-around its corner(s) through :func:`build_tapered_bundle` /
-:func:`build_offset_bundle`, which anchor every corner on the bundle's
-innermost-of-turn line, so no arc pinches below the floor and the lines keep a
-constant side-of-travel order.
+around its corner(s) through :func:`build_tapered_bundle`, which anchors every
+corner on the bundle's innermost-of-turn line, so no arc pinches below the floor
+and the lines keep a constant side-of-travel order.
 
 The perpendicular-entry L-shape turns a single wholesale corner (drop then turn
 into the station), so a fan straddling that bend manufactures an inside-of-turn
@@ -194,6 +193,90 @@ def test_perp_entry_l_corner_clears_floor_when_fanned(stem: str) -> None:
         ]
         assert not offenders, (
             f"{stem} {source}->{target}: perp-entry corners below floor: {offenders}"
+        )
+
+
+# A TB BOTTOM exit feeding a subset of a shared TOP entry port collapses every
+# port line onto one slot while the consumer station fans them apart -- a
+# multi-line perpendicular entry whose port offsets are uniform but whose target
+# offsets are distinct.  Such a collapse forces a per-line boundary offset, so it
+# cannot pass ``check_perp_entry_boundary_consistent`` and lives inline here
+# rather than as a corpus fixture.
+_COLLAPSED_PERP_FAN_MMD = """\
+%%metro title: Collapsed Perp Fan
+%%metro line: main | Main | #0570b0
+%%metro line: feed | Feed | #e63946
+%%metro grid: up | 0,0
+%%metro grid: side | 1,0
+%%metro grid: down | 0,1
+
+graph LR
+    subgraph up [Upstream]
+        %%metro direction: TB
+        u1[Collect]
+        u2[Filter]
+        u1 -->|main| u2
+    end
+    subgraph side [Side]
+        sv1[Load]
+        sv2[Tag]
+        sv1 -->|feed| sv2
+    end
+    subgraph down [Combine]
+        %%metro direction: TB
+        c1[Merge]
+        c2[Polish]
+        c1 -->|main,feed| c2
+    end
+    u2 -->|main| c1
+    sv2 -->|feed| c1
+"""
+
+
+def test_collapsed_perp_fan_routes_as_l_shape_not_staircase() -> None:
+    """A collapsed-fan TOP entry into a TB target routes V-H, never H-V-H.
+
+    When a shared TOP/BOTTOM entry port collapses every line onto one slot but
+    the consumer station fans them apart, each line could drop straight off the
+    port and turn in (V-H, an L-shape) or jog horizontally onto a per-line
+    channel before dropping (H-V-H), which lands an S-cusp on the section
+    boundary that ``check_perp_entry_boundary_consistent`` forbids.  Assert
+    every perp-entry route leaves the port on a vertical segment, the L-shape
+    signature.
+    """
+    graph = parse_metro_mermaid(_COLLAPSED_PERP_FAN_MMD)
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    perp_routes = []
+    for r in routes:
+        port = graph.ports.get(r.edge.source)
+        tgt = graph.stations.get(r.edge.target)
+        if (
+            port is not None
+            and port.is_entry
+            and port.side in (PortSide.TOP, PortSide.BOTTOM)
+            and tgt is not None
+            and not tgt.is_port
+        ):
+            perp_routes.append(r)
+    assert perp_routes, "expected a TOP/BOTTOM perp-entry route"
+
+    # Require the collapsed-fan state (all port lines on one slot); a spread fan
+    # routes an ordinary L-shape and would pass the vertical-departure check
+    # without exercising the H-V-H temptation.
+    port_id = perp_routes[0].edge.source
+    port_offsets = {
+        offsets.get((port_id, lid), 0.0) for lid in graph.station_lines(port_id)
+    }
+    assert len(port_offsets) == 1, f"port fan not collapsed: {port_offsets}"
+
+    for r in perp_routes:
+        p0, p1 = r.points[0], r.points[1]
+        assert abs(p1[1] - p0[1]) > abs(p1[0] - p0[0]), (
+            f"{r.line_id}: perp-entry leaves the port on a horizontal jog "
+            f"{p0}->{p1} (H-V-H shape); expected a vertical drop (L-shape)"
         )
 
 

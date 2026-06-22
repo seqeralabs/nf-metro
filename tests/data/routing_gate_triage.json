@@ -907,10 +907,6 @@
     "note": "succ_id comes from sec_successors, built only from real tgt.section_id values, so graph.sections.get(succ_id) is never None and the continue (->187) is a defensive null guard. The fall-through static arm (->188) is phantom: control falls into the following multi-line `if (`, whose first operand line carries the real arc L186->189.",
     "status": "defensive"
   },
-  "tb_handlers.py::if pinned_crossing or abs(drop_delta) < COORD_TOLERANCE:::#1": {
-    "note": "The else (the H-V-H staircase in _route_perp_entry_staircase) is reached only by a multi-line perpendicular entry whose drop carries a non-zero stagger AND has no pinned crossing channel - i.e. a TB/BT continuation with a uniform per-line port offset and a horizontal lead-in.  Corpus TB/BT perp entries all carry the separation in src_off (drop_delta==0, L-shape arm), so the staircase fallback is never taken across the corpus.",
-    "status": "defensive"
-  },
   "tb_handlers.py::if crossing_x is not None:::#1": {
     "note": "Pair of context.py::if not indices: - the helper returns None only when no bundled feeder reaches the port, which never co-occurs with the gate that calls it (drop_delta!=0 multi-line bundle into an LR/RL section is always fed by a bundled inter-section edge).  The crossing_x-is-None fall-through is a defensive guard, never taken across the corpus.",
     "status": "defensive"

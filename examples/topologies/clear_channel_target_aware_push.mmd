@@ -1,0 +1,35 @@
+%%metro title: Fan descent target-aware push
+%%metro line: dna | DNA | #2db572
+%%metro line: rna | RNA | #e63946
+
+%%metro grid: src | 0,0
+%%metro grid: block | 0,1
+%%metro grid: target | 1,2
+
+graph LR
+    subgraph src [Src]
+        s_in[I]
+        s_hub[H]
+        s_in -->|dna,rna| s_hub
+    end
+    subgraph block [Block]
+        b_a[A]
+        b_b[B]
+        b_c[C]
+        b_d[D]
+        b_e[E]
+        b_f[F]
+        b_a -->|dna| b_b
+        b_b -->|dna| b_c
+        b_c -->|dna| b_d
+        b_d -->|dna| b_e
+        b_e -->|dna| b_f
+    end
+    subgraph target [Target]
+        %%metro entry: left | rna
+        t_a[T1]
+        t_b[T2]
+        t_a -->|rna| t_b
+    end
+    s_hub -->|rna| t_a
+    s_hub -->|dna| b_a

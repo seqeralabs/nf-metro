@@ -958,6 +958,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "the post-merge trunk runs straight instead of zigzagging.",
     ),
     (
+        "clear_channel_target_aware_push",
+        TOPOLOGIES_DIR,
+        "A hub fans one line down into a wide section stacked directly below and "
+        "another down-and-right to a target. The fan descent for the rightward "
+        "line grazes the wide block, so the graze correction pushes it toward "
+        "the target's side of the block rather than the nearer edge, keeping the "
+        "line heading to its target instead of detouring across the canvas.",
+    ),
+    (
         "junction_fanout_convergence",
         TOPOLOGIES_DIR,
         "Three lines converge into one joint-calling entry port: two bypass the "
