@@ -17,6 +17,7 @@ import warnings
 from collections.abc import Callable
 
 from nf_metro.layout.constants import (
+    CURVE_RADIUS,
     DESCENDER_CLEARANCE,
     FONT_HEIGHT,
     ICON_CAPTION_FONT_HEIGHT,
@@ -25,8 +26,10 @@ from nf_metro.layout.constants import (
     ICON_STACK_LABEL_CLEARANCE,
     LABEL_OFFSET,
     MIN_Y_SPACING_FLOOR,
+    OFFSET_STEP,
     ROW_GAP,
     SECTION_GAP,
+    SECTION_ROUTE_CLEARANCE,
     SECTION_X_GAP,
     SECTION_X_PADDING,
     SECTION_Y_GAP,
@@ -285,6 +288,7 @@ from nf_metro.layout.phases.spacing import (  # noqa: F401
     _spread_bump,
     _struck_stations_and_collinear,
 )
+from nf_metro.layout.routing.context import is_far_side_around_below_left_entry
 from nf_metro.parser.model import LineSpread, MetroGraph, Section, is_bypass_v
 from nf_metro.parser.validate import (
     CyclicGraphError,
@@ -379,6 +383,30 @@ def compute_min_y_spacing(
             required = max(required, pitch_icon_over_label)
 
     return required
+
+
+def _far_side_wrap_left_clearances(graph: MetroGraph) -> dict[str, float]:
+    """Left clearance each section needs for an around-below far-side LEFT entry.
+
+    Such a section is fed by a bundle that rises in a channel a bundle-width plus
+    a curve radius left of its box (see
+    ``_route_left_exit_around_below_left_entry``).  Reserving that width as extra
+    left extent lets the Stage 1.5 overshoot adjustment keep the wrap clear of
+    the canvas edge.  ``SECTION_ROUTE_CLEARANCE`` bounds the ascent channel's own
+    edge clearance, so the sum is a safe upper bound on the wrap's reach.
+    """
+    clearances: dict[str, float] = {}
+    for port in graph.ports.values():
+        if not is_far_side_around_below_left_entry(graph, port):
+            continue
+        n = len({edge.line_id for edge in graph.edges_to(port.id)})
+        clearance = (
+            (n - 1) * OFFSET_STEP + CURVE_RADIUS + OFFSET_STEP + SECTION_ROUTE_CLEARANCE
+        )
+        clearances[port.section_id] = max(
+            clearances.get(port.section_id, 0.0), clearance
+        )
+    return clearances
 
 
 def compute_layout(
@@ -1197,9 +1225,10 @@ def _compute_section_layout(
     # Increase x_offset to restore the standard margin and let the canvas
     # grow on the right (via auto_width = max_x + CANVAS_PADDING in
     # render).  Same logic for y_offset.
+    wrap_clearances = _far_side_wrap_left_clearances(graph)
     local_lefts = [
-        section.offset_x + section.bbox_x
-        for section in graph.sections.values()
+        section.offset_x + section.bbox_x - wrap_clearances.get(sec_id, 0.0)
+        for sec_id, section in graph.sections.items()
         if section.bbox_w > 0
     ]
     if local_lefts:

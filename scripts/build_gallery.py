@@ -552,6 +552,16 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "cleanly instead of twisting at the descent corner (issue #723).",
     ),
     (
+        "bypass_leftward_far_side_entry",
+        TOPOLOGIES_DIR,
+        "A seven-line reverse-flow bypass into a far-side LEFT entry: the source "
+        "exits its left edge and the target's entry port is on its own far "
+        "(left) edge, so the bundle wraps around below into the port from its "
+        "outward side. The half-turn transposes the bundle, so the target "
+        "section's line order is reversed to match and no line crosses a mate "
+        "(issue #974).",
+    ),
+    (
         "right_entry_wrap_no_fan",
         TOPOLOGIES_DIR,
         "A single line wrapping from an LR exit into a cross-row RL section's "
