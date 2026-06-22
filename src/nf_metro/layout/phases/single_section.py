@@ -36,7 +36,10 @@ from nf_metro.layout.labels import (
 )
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
-from nf_metro.layout.phases._common import _build_section_subgraph
+from nf_metro.layout.phases._common import (
+    _build_section_subgraph,
+    iter_sole_trunk_continuations,
+)
 from nf_metro.layout.phases.off_track import (
     _align_phantom_pass_throughs,
     _compute_fork_join_gaps,
@@ -101,50 +104,6 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
             st.y = src.y
 
 
-def _trunk_continuation_nodes(graph: MetroGraph, section: Section) -> frozenset[str]:
-    """Stations that are the clean sole continuation of a line-shedding pred.
-
-    A station qualifies when, inside its LR/RL section, it has exactly one
-    real in-section predecessor whose *only* forward path in the whole graph
-    is this station, and that predecessor carries strictly more lines than it
-    (some of the predecessor's lines ended there).  The chain is then linear
-    with no sibling branch -- so the successor must hold the predecessor's
-    track rather than drop to its own line base, which would paint an
-    in-section V-kink.
-
-    The full-graph successor test is the discriminator: a predecessor that
-    also feeds a section-exit edge routes that line *around* this station, so
-    keeping the station on the trunk would put it across that line.  Track
-    assignment runs on a section subgraph that has dropped exit edges, hence
-    the set is computed here where the whole graph is visible.
-    """
-    if section.direction not in ("LR", "RL"):
-        return frozenset()
-    sec_ids = set(section.station_ids)
-    nodes: set[str] = set()
-    for sid in section.station_ids:
-        st = graph.stations.get(sid)
-        if st is None or st.is_port or st.is_hidden or st.off_track:
-            continue
-        preds = {
-            e.source
-            for e in graph.edges_to(sid)
-            if e.source in sec_ids
-            and not graph.stations[e.source].is_port
-            and not graph.stations[e.source].is_hidden
-        }
-        if len(preds) != 1:
-            continue
-        pred = next(iter(preds))
-        if graph.stations[pred].off_track:
-            continue
-        if {e.target for e in graph.edges_from(pred)} != {sid}:
-            continue
-        if set(graph.station_lines(pred)) > set(graph.station_lines(sid)):
-            nodes.add(sid)
-    return frozenset(nodes)
-
-
 def _has_horizontal_predecessor_section(graph: MetroGraph, section: Section) -> bool:
     """True if any entry-port predecessor lives in an LR/RL section."""
     for pid in section.entry_ports:
@@ -192,7 +151,11 @@ def _layout_single_section(
         "RL",
     ) and _has_horizontal_predecessor_section(graph, section)
 
-    continuation_nodes = _trunk_continuation_nodes(graph, section)
+    continuation_nodes = frozenset(
+        node
+        for sec_id, _pred, node in iter_sole_trunk_continuations(graph)
+        if sec_id == section.id
+    )
     tracks = assign_tracks(
         sub, layers, entry_top=entry_top, continuation_nodes=continuation_nodes
     )

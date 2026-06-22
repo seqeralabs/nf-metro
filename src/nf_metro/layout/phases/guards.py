@@ -44,6 +44,7 @@ from nf_metro.layout.phases._common import (
     first_vertical_leg_x,
     flow_exit_carrier_anchor,
     is_loop_side_branch_station,
+    iter_sole_trunk_continuations,
     routes_through_unrelated_sections,
 )
 from nf_metro.layout.phases.bbox import _section_fit_top
@@ -862,38 +863,12 @@ def _guard_post_convergence_trunk_continues(graph: MetroGraph, phase: str) -> No
     forward path in the whole graph must be this successor. Vertical (TB/BT)
     sections, ports, hidden, and off-track stations are out of scope.
     """
-
-    def _real_in_section(sid: str, section_id: str) -> bool:
-        s = graph.stations.get(sid)
-        return (
-            s is not None
-            and not s.is_port
-            and not s.is_hidden
-            and not s.off_track
-            and s.section_id == section_id
-        )
-
-    for sid, station in graph.stations.items():
-        section_id = station.section_id
-        if section_id is None or not _real_in_section(sid, section_id):
-            continue
-        sec = graph.sections.get(section_id)
-        if sec is None or not lanes_run_along_y(sec.direction):
-            continue
-        preds = {
-            e.source for e in graph.edges_to(sid) if _real_in_section(e.source, sec.id)
-        }
-        if len(preds) != 1:
-            continue
-        pred = next(iter(preds))
-        if {e.target for e in graph.edges_from(pred)} != {sid}:
-            continue
-        if not (set(graph.station_lines(pred)) > set(graph.station_lines(sid))):
-            continue
+    for _section_id, pred, node in iter_sole_trunk_continuations(graph):
         pred_y = graph.stations[pred].y
-        if abs(station.y - pred_y) > GUARD_TOLERANCE:
+        node_y = graph.stations[node].y
+        if abs(node_y - pred_y) > GUARD_TOLERANCE:
             raise PhaseInvariantError(
-                f"{phase}: continuation station {sid!r} at y={station.y:.1f} "
+                f"{phase}: continuation station {node!r} at y={node_y:.1f} "
                 f"is off its predecessor {pred!r} y={pred_y:.1f}; the trunk "
                 f"dives onto a branch row right after the junction"
             )
