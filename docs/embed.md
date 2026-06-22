@@ -5,13 +5,13 @@ starting out, read the task-oriented [Embedding guide](embedding.md) first - it
 explains which output to produce and how to size, theme, and drive a map - and
 come here for the exact attribute vocabulary and driver method signatures.
 
-!!! warning "Experimental - pre-1.0, not yet stable"
-    The embed contract is new and still being shaped.  The `data-*` attribute
-    names, the driver API, and the manifest schema may change without notice
-    before the format is declared stable.  Pin to a specific nf-metro release
-    if you depend on the exact surface.  The driver contract version
-    (`DRIVER_CONTRACT_VERSION`) and manifest schema version
-    (`MANIFEST_SCHEMA_VERSION`) are both `1.0` at this stage.
+!!! note "Stable as of nf-metro 1.0"
+    The embed contract is a public, versioned surface. The `data-*` attribute
+    names, the driver API, and the manifest schema are governed by the driver
+    contract version (`DRIVER_CONTRACT_VERSION`) and manifest schema version
+    (`MANIFEST_SCHEMA_VERSION`), both `1.0`. Changes follow `major.minor`
+    semantics (see [Versioning](#versioning)): additive changes bump the minor,
+    breaking changes bump the major. Consumers must tolerate unknown fields.
 
 An nf-metro SVG is a **self-describing, driveable artifact**.  A host page
 can:
@@ -294,6 +294,6 @@ The schema version follows `major.minor` semantics: the minor part increments
 for additive (backward-compatible) changes; the major part increments for
 breaking changes.  Consumers must ignore unknown fields (additive tolerance).
 
-Until the contract is declared stable (version `2.0` or a dedicated
-stability notice), pin to a specific nf-metro release when building against
-this surface.
+This surface is stable as of nf-metro 1.0: within a major version the contract
+only grows in backward-compatible ways. Pin to a specific nf-metro release only
+if you depend on the exact bytes of the output.

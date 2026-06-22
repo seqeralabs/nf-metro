@@ -1,11 +1,11 @@
 # Embedding guide
 
-!!! warning "Experimental - pre-1.0, not yet stable"
-    The embedding surface (render flags, `--nfm-*` properties, the `data-*`
-    contract, and the manifest schema) is new and still being shaped. Pin to a
-    specific nf-metro release if you depend on the exact output. The manifest
-    schema version (`MANIFEST_SCHEMA_VERSION`) and driver contract version
-    (`DRIVER_CONTRACT_VERSION`) are both `1.0`.
+!!! note "Stable as of nf-metro 1.0"
+    The embedding surface (the `--nfm-*` properties, the `data-*` contract, and
+    the manifest schema) is a public, versioned surface. The manifest schema
+    version (`MANIFEST_SCHEMA_VERSION`) and driver contract version
+    (`DRIVER_CONTRACT_VERSION`) are both `1.0` and change under `major.minor`
+    semantics; see [Versioning and stability](#versioning-and-stability) below.
 
 This guide is for someone putting a rendered nf-metro map into **their own**
 page or application: a docs site, an internal dashboard, a pipeline run viewer.
@@ -266,9 +266,10 @@ The manifest schema and the driver contract are versioned independently, both
 `1.0` today. The stable surface keyed to those versions - the `data-*` attribute
 names, the manifest fields, the `0 0 w h` coordinate rule, and the driver method
 names - and the `major.minor` rules for changing it are specified under
-[Versioning](embed.md#versioning) on the Embed contract page. **Consumers must
-ignore unknown fields**, and until a stability notice, pin to a specific
-nf-metro release.
+[Versioning](embed.md#versioning) on the Embed contract page. This surface is
+stable as of nf-metro 1.0: within a major version it only grows in
+backward-compatible ways, so **consumers must ignore unknown fields**. Pin to a
+specific nf-metro release only if you depend on the exact bytes of the output.
 
 ## Attribution
 

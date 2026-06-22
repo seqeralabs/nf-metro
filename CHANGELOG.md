@@ -4,7 +4,9 @@ All notable changes to nf-metro are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 nf-metro uses [semantic versioning](https://semver.org/spec/v2.0.0.html) from
-1.0.0 onwards. The CLI and `.mmd` directive surface are the public API; the
+1.0.0 onwards. The CLI, the `.mmd` directive surface, and the embed contract
+(the `data-*` attributes, driver API, and manifest schema, versioned by
+`DRIVER_CONTRACT_VERSION` and `MANIFEST_SCHEMA_VERSION`) are the public API. The
 Python modules are not a semver-stable public API.
 
 ## [Unreleased] — 1.0.0
