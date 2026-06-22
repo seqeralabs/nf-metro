@@ -1,8 +1,8 @@
 # Testing
 
-The test suite has three layers, each adding a different kind of
-regression guard.  Run everything with `pytest`; run one file or test
-with the usual selectors:
+The test suite has four complementary validation layers, each checking a
+different artifact at a different point in the pipeline.  Run everything
+with `pytest`; run one file or test with the usual selectors:
 
 ```bash
 pytest                                   # all tests
@@ -92,3 +92,55 @@ python scripts/build_render_diff.py /tmp/base /tmp/pr /tmp/diff_site
 The gallery itself is defined by `GALLERY_ENTRIES` in
 `scripts/build_gallery.py`.  A new example only appears in the rendered
 gallery (and the render diff) once it is added to that list.
+
+## The four validation layers
+
+Validation is split across four complementary layers.  They cover different
+artifacts and different phases of the pipeline, so they are not redundant:
+each one catches a class of bug the others cannot see.
+
+| Layer | Location | Artifact checked | When it runs |
+|---|---|---|---|
+| **Layout oracle** | `tests/layout_validator.py` | In-process `MetroGraph` after layout | Every test that calls `compute_layout` |
+| **Routing invariants** | `src/nf_metro/layout/routing/invariants.py` | Routed edge waypoints (in-process) | Always-on at the end of `route_edges`; Tier B guards are opt-in or issue-pinned |
+| **Phase guards** | `src/nf_metro/layout/phases/guards.py` | Layout phase pre/post-conditions (in-process) | Always-on per-phase; issue-pinned guards fire once per corpus run |
+| **Render oracle** | `src/nf_metro/render/validate.py` | Drawn SVG artifact (post-render) | Opt-in via `--validate` / `validate-svg --geometry`; corpus pytest gate |
+
+### Layer 1 - Layout oracle (`layout_validator.py`)
+
+`check_*` functions take a laid-out `MetroGraph` and return `Violation`
+objects.  `tests/test_topology_validation.py` runs every check against
+every topology fixture.  This layer can see graph structure (which stations
+are ports, which lines share a bundle) and therefore catches spatial
+invariants that depend on that context: section-overlap, station-outside-
+bbox, station-as-elbow, port-boundary, edge-waypoint containment, and
+the crossing checks.
+
+### Layer 2 - Routing invariants (`routing/invariants.py`)
+
+The `CHECK_REGISTRY` runs after every call to `route_edges`.  Tier-A checks
+are always-on and block rendering if they fail.  Tier-B checks are either
+issue-pinned (run against the corpus to surface known defects) or guarded
+(fire only when their covering condition is met).  This layer runs inside
+the process on the raw waypoint lists before any SVG is written.
+
+### Layer 3 - Phase guards (`phases/guards.py`)
+
+`GUARD_REGISTRY` and `INLINE_GUARD_REGISTRY` record every in-phase guard
+together with its issue pin, classification (defensive, always-on, or
+needs-review), and narrow reason.  Always-on guards run every time the
+relevant phase executes.  Issue-pinned guards fire once per corpus run via
+`tests/test_guard_coverage.py` and go `XFAIL` until the issue is resolved,
+at which point CI turns red until the pin is removed.
+
+### Layer 4 - Render oracle (`render/validate.py`)
+
+`validate_render(svg, *, graph=None)` parses the **drawn SVG** and checks
+it.  Because it reads the artifact rather than the in-process graph, it
+can catch geometry problems that only emerge after the SVG is written:
+label-strike (a route polyline slicing through a station label), marker
+crossings (a route segment passing through a non-consumer node marker),
+and offset-collapse (distinct lines drawn flush where the engine assigned
+them separate offsets).  The `graph` argument is required for
+offset-collapse checks, since same-slot bundles and collapsed offsets are
+indistinguishable in the bare SVG.

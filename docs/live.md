@@ -1,9 +1,9 @@
 # Live progress
 
-!!! warning "Experimental"
-    Live progress is experimental: the `%%metro process:` directive, the
-    `nf-metro serve` / `nf-metro check-mapping` commands, and the event/overlay
-    formats may change without notice.
+!!! note "Stable since 1.0"
+    The `%%metro process:` directive, `nf-metro serve` / `nf-metro check-mapping`
+    commands, and the event/overlay formats are stable as of 1.0 and covered by
+    semantic versioning.
 
 nf-metro can light up a metro map in real time as a Nextflow pipeline runs.
 Stock Nextflow `-with-weblog` posts task events to `nf-metro serve`, which draws
