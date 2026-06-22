@@ -350,6 +350,13 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Same-direction sections stacked in one grid column, chained via short "
         "vertical drops on alternating sides (serpentine), no wrap-around.",
     ),
+    (
+        "tb_left_exit_step",
+        TOPOLOGIES_DIR,
+        "A TB alignment section exits LEFT into a lower right-entry section with "
+        "a blocker directly below: the exit bundle steps west-down-west, routed "
+        "as a parallel staircase that keeps the feed order (issue #671).",
+    ),
     # --- Offset and bypass ---
     (
         "bypass_fan_in_outer_slot",
@@ -535,6 +542,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "A seven-line rightward bypass whose gap-2 bundle right edge overflows "
         "the inter-column gap limit and is clamped, keeping the bundle inside "
         "the gap.",
+    ),
+    (
+        "bypass_leftward_overflow",
+        TOPOLOGIES_DIR,
+        "A seven-line reverse-flow (right-to-left) bypass: the trunk leads out "
+        "leftward, the mirror of every other bypass. The concentric order and "
+        "corner radii follow the trunk's travel direction so the bundle fans "
+        "cleanly instead of twisting at the descent corner (issue #723).",
     ),
     (
         "right_entry_wrap_no_fan",

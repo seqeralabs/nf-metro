@@ -347,14 +347,6 @@
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if gap1_base + (g1_n - 1) * ctx.offset_step > gap1_limit:::#1": {
-    "note": "Reachable only via a defective render (bypass overflow clamp inverts bundle order); see #723.",
-    "status": "needs-review"
-  },
-  "inter_section_handlers.py::if gap2_base - (g2_n - 1) * ctx.offset_step < gap2_limit:::#1": {
-    "note": "Reachable only via a defective render (bypass overflow clamp inverts bundle order); see #723.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if gap_right <= gap_left:::#1": {
     "note": "The column-gap enforcer keeps inter-column gaps positive, so gap_right>gap_left always holds at the target row.",
     "status": "defensive"
@@ -573,14 +565,6 @@
   },
   "normalize.py::if s.bbox_w <= 0:::#3": {
     "note": "Degenerate-bbox guard in _v_segment_crosses_other_section: mirror of the _h_segment_crosses_other_section guard; sections always have positive width.",
-    "status": "defensive"
-  },
-  "normalize.py::if s.id in exclude_section_ids:::#2": {
-    "note": "_v_segment_crosses_other_section skips the excluded sections; its sole caller (_right_entry_drop_in_is_clear) excludes the source and target, so the loop only iterates them and the not-excluded fall-through is never reached on the corpus.",
-    "status": "defensive"
-  },
-  "normalize.py::if hi_y <= s.bbox_y or lo_y >= bottom:::#1": {
-    "note": "Y-interior overlap test in _v_segment_crosses_other_section: with only the excluded source/target sections iterated on the corpus, the not-overlapping skip arm is never reached.",
     "status": "defensive"
   },
   "normalize.py::if s.bbox_x - margin <= x <= s.bbox_x + s.bbox_w + margin:::#1": {
