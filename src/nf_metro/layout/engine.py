@@ -467,7 +467,7 @@ def compute_layout(
 
     from nf_metro.layout.labels import font_scale_context
 
-    with font_scale_context(graph.font_scale):
+    def _layout_pass(validate_pass: bool) -> None:
         _compute_layout_scaled(
             graph,
             x_spacing=x_spacing,
@@ -478,8 +478,30 @@ def compute_layout(
             section_y_padding=section_y_padding,
             section_x_gap=section_x_gap,
             section_y_gap=section_y_gap,
-            validate=validate,
+            validate=validate_pass,
         )
+
+    with font_scale_context(graph.font_scale):
+        # Topology-blind bypass insertion (parse time) can miss a line drawn
+        # through a marker it doesn't consume; the geometric pass re-lays out
+        # with bypass helpers for any such crossing it can cleanly fix.  The
+        # first pass defers the breeze-through guard so the crossing is
+        # collected rather than aborting; the final state is validated below.
+        from nf_metro.layout.geometric_bypass import apply_geometric_bypass
+
+        graph._defer_breeze_guard = True
+        _layout_pass(validate)
+        changed, residual_breeze = apply_geometric_bypass(graph, _layout_pass)
+        graph._defer_breeze_guard = False
+
+        # A kept fix is re-validated in full; a crossing the pass could not fix
+        # is surfaced by the active guard on the final geometry.  A clean graph
+        # was already validated under the deferred guard in pass one.
+        if validate:
+            if changed:
+                _layout_pass(validate)
+            elif residual_breeze:
+                _guard_no_line_crosses_non_consumer(graph, "after final")
 
 
 def _compute_layout_scaled(

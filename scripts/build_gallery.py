@@ -219,6 +219,12 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Seven sections in a straight chain. Exercises the grid fold threshold.",
     ),
     (
+        "inrow_skip_breeze",
+        TOPOLOGIES_DIR,
+        "An express line skips a station three collinear stations share; the "
+        "geometric bypass pass bows it around the skipped marker (#990).",
+    ),
+    (
         "parallel_independent",
         TOPOLOGIES_DIR,
         "Two disconnected pipelines stacked vertically.",

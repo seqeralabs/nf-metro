@@ -498,6 +498,9 @@ class MetroGraph:
     # compute_layout from the NF_METRO_PHASE_SNAPSHOTS env var; read by the
     # _snap hook after each phase.  Off by default (pure observation).
     _phase_snapshots_enabled: bool = field(default=False, repr=False)
+    # Set for the first of compute_layout's two passes so the breeze-through
+    # guard defers while the geometric bypass pass collects crossings to fix.
+    _defer_breeze_guard: bool = field(default=False, repr=False)
     # Per-section rail-Y map (section_id -> {line_id: rail_y}), set by the
     # rail-mode layout so the dedicated router can resolve a port's per-line
     # rail Y.  Empty when rail mode is off.

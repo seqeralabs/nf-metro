@@ -271,6 +271,7 @@ def _layout_single_section(
     if not real_for_bbox:
         real_for_bbox = list(sub.stations.values())
     bypass_v_ys = [s.y for s in sub.stations.values() if is_bypass_v(s.id)]
+    bypass_v_xs = [s.x for s in sub.stations.values() if is_bypass_v(s.id)]
     xs = [s.x for s in real_for_bbox]
     ys = [s.y for s in real_for_bbox]
     extra_label_h = _multiline_label_padding(sub)
@@ -308,6 +309,20 @@ def _layout_single_section(
             bbox_top = min(bbox_top, v_min - v_curve_clearance)
         if v_max > y_max:
             bbox_bot = v_max + v_curve_clearance
+    # A TB section offsets its bypass V laterally (in X) rather than
+    # vertically, so grow the bbox along X by the same curve-only clearance
+    # when V sits beyond the real-station horizontal extent.
+    if bypass_v_xs:
+        x_left = section.bbox_x
+        x_right = section.bbox_x + section.bbox_w
+        v_xmin = min(bypass_v_xs)
+        v_xmax = max(bypass_v_xs)
+        if v_xmin - v_curve_clearance < x_left:
+            x_left = v_xmin - v_curve_clearance
+        if v_xmax + v_curve_clearance > x_right:
+            x_right = v_xmax + v_curve_clearance
+        section.bbox_x = x_left
+        section.bbox_w = x_right - x_left
     section.bbox_y = bbox_top
     section.bbox_h = bbox_bot - bbox_top
 
