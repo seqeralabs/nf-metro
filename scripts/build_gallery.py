@@ -544,6 +544,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "the gap.",
     ),
     (
+        "bypass_leftward_overflow",
+        TOPOLOGIES_DIR,
+        "A seven-line reverse-flow (right-to-left) bypass: the trunk leads out "
+        "leftward, the mirror of every other bypass. The concentric order and "
+        "corner radii follow the trunk's travel direction so the bundle fans "
+        "cleanly instead of twisting at the descent corner (issue #723).",
+    ),
+    (
         "right_entry_wrap_no_fan",
         TOPOLOGIES_DIR,
         "A single line wrapping from an LR exit into a cross-row RL section's "
