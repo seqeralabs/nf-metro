@@ -691,7 +691,15 @@ def _slot_trunk_continuation_lines(ctx: _OffsetCtx) -> None:
         # that is, so the continuation rides the back exactly when they agree.
         continuation_last = (sec_id in right_entry) == (sec_id in ctx.reversed_sections)
         new_order = rest + cont if continuation_last else cont + rest
-        ctx.offsets.update(_section_order_offsets(ctx, sec_id, new_order))
+        # Re-slot only the bundle stations.  A solo continuation child keeps
+        # offset 0: a TB marker is drawn at its stored offset but its line at
+        # the reversed offset, so a non-zero slot on a one-line station would
+        # leave the marker off its own track.  The reversal collapses every
+        # slot to the trunk at a solo station anyway, so the drop stays straight.
+        target = _section_order_offsets(ctx, sec_id, new_order)
+        for key, val in target.items():
+            if len(graph.station_lines(key[0])) > 1:
+                ctx.offsets[key] = val
 
 
 def _reindex_section_local(ctx: _OffsetCtx) -> None:
