@@ -27,11 +27,31 @@ graph LR
     align -->|main| bam
 `;
 
+// Seeded into the import dialog so the expected `-with-dag` format is visible
+// and Convert works out of the box; users paste over it with their own DAG.
+const SAMPLE_NEXTFLOW_DAG = `flowchart TB
+    subgraph " "
+    v0["Channel.fromPath"]
+    end
+    subgraph "PIPELINE [PIPELINE]"
+    v1(["FASTQC"])
+    v2(["TRIM"])
+    v3(["ALIGN"])
+    v4(["MULTIQC"])
+    end
+    v0 --> v1
+    v1 --> v2
+    v2 --> v3
+    v1 --> v4
+    v3 --> v4
+`;
+
 // Glue defined inside the Pyodide runtime: returns a JSON envelope so a render
 // error surfaces as data rather than a thrown PythonError to unwind in JS.
 const PY_GLUE = `
 import json
 from nf_metro.api import render_string
+from nf_metro.convert import convert_nextflow_dag
 
 def nfm_render(mmd, opts_json):
     opts = json.loads(opts_json)
@@ -42,9 +62,16 @@ def nfm_render(mmd, opts_json):
             theme=opts.get("theme") or None,
             responsive=True,
             embed_font=True,
+            debug=bool(opts.get("debug")),
             layout_options=layout,
         )
         return json.dumps({"ok": True, "svg": svg})
+    except Exception as e:
+        return json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"})
+
+def nfm_convert(nextflow_dag):
+    try:
+        return json.dumps({"ok": True, "mmd": convert_nextflow_dag(nextflow_dag)})
     except Exception as e:
         return json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"})
 `;
@@ -52,6 +79,7 @@ def nfm_render(mmd, opts_json):
 const el = (id) => document.getElementById(id);
 let editor = null;
 let pyRender = null;
+let pyConvert = null;
 let lastSvg = "";
 let nfMetroVersion = "";
 const examples = {};
@@ -122,6 +150,7 @@ async function boot() {
     await micropip.install(await resolveWheel());
     pyodide.runPython(PY_GLUE);
     pyRender = pyodide.globals.get("nfm_render");
+    pyConvert = pyodide.globals.get("nfm_convert");
     nfMetroVersion = pyodide.runPython("import nf_metro; nf_metro.__version__");
     el("boot").classList.add("hidden");
     doRender();
@@ -136,21 +165,15 @@ async function boot() {
 
 /* -------------------------------- render ------------------------------- */
 
-function numOrNull(id) {
-  const v = el(id).value.trim();
-  if (v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
 function currentOptions() {
+  // Layout/style directives live in the source (parsed on render); only the
+  // preview-overlay toggles are passed as render overrides here.
   return {
-    theme: el("opt-theme").value,
+    theme: themeKeyFromSource(),
+    debug: el("opt-debug").checked,
     layout_options: {
       animate: el("opt-animate").checked,
       directional: el("opt-directional").checked,
-      x_spacing: numOrNull("opt-x-spacing"),
-      y_spacing: numOrNull("opt-y-spacing"),
     },
   };
 }
@@ -185,6 +208,90 @@ function doRender() {
     showError(res.error);
   }
   refreshLineColors();
+  syncDirectiveControls();
+}
+
+/* ------------------------- directive controls ------------------------- */
+
+// Controls that change the map's layout or styling are source-of-truth: each
+// writes a `%%metro <key>:` directive into the editor and is synced back from
+// it, so the change is saved with the map and travels with export/share. (The
+// animate/chevrons/debug toggles are preview overlays handled separately.)
+
+// directive key for the theme; values are friendly aliases (dark == nfcore).
+const THEME_KEYS = ["nfcore", "light"];
+const THEME_STYLE_TOKEN = { nfcore: "dark", light: "light" };
+const STYLE_ALIASES = { dark: "nfcore" };
+
+// [control id, directive key, kind]
+const DIRECTIVE_CONTROLS = [
+  ["opt-line-spread", "line_spread", "choice"],
+  ["opt-diamond-style", "diamond_style", "choice"],
+  ["opt-line-order", "line_order", "choice"],
+  ["opt-center-ports", "center_ports", "bool"],
+  ["opt-compact-offsets", "compact_offsets", "bool"],
+  ["opt-font-scale", "font_scale", "number"],
+  ["opt-fold-threshold", "fold_threshold", "number"],
+  ["opt-x-spacing", "x_spacing", "number"],
+  ["opt-y-spacing", "y_spacing", "number"],
+];
+
+function readDirective(key) {
+  const m = editor.getValue().match(new RegExp(`^\\s*%%metro\\s+${key}:\\s*(.+?)\\s*$`, "m"));
+  return m ? m[1] : null;
+}
+
+// value === null removes the directive line; otherwise it is set (inserted
+// after a %%metro title: line if present, else at the top - directives must
+// precede the graph block).
+function setDirective(key, value) {
+  const lines = editor.getValue().split("\n");
+  const idx = lines.findIndex((l) => new RegExp(`^\\s*%%metro\\s+${key}:`).test(l));
+  if (value === null) {
+    if (idx >= 0) editor.replaceRange("", { line: idx, ch: 0 }, { line: idx + 1, ch: 0 });
+  } else if (idx >= 0) {
+    const updated = lines[idx].replace(new RegExp(`(%%metro\\s+${key}:\\s*).*`), `$1${value}`);
+    editor.replaceRange(updated, { line: idx, ch: 0 }, { line: idx, ch: lines[idx].length });
+  } else {
+    const titleIdx = lines.findIndex((l) => /^\s*%%metro\s+title:/.test(l));
+    const at = titleIdx >= 0 ? titleIdx + 1 : 0;
+    editor.replaceRange(`%%metro ${key}: ${value}\n`, { line: at, ch: 0 });
+  }
+}
+
+function applyDirectiveControl(id, key, kind) {
+  const control = el(id);
+  let value;
+  if (kind === "bool") {
+    value = control.checked ? "true" : null;
+  } else {
+    const raw = control.value.trim();
+    value = raw === "" ? null : raw;
+  }
+  setDirective(key, value);
+  doRender();
+}
+
+function themeKeyFromSource() {
+  const value = (readDirective("style") || "").toLowerCase();
+  const key = STYLE_ALIASES[value] || value;
+  return THEME_KEYS.includes(key) ? key : "nfcore";
+}
+
+function setThemeDirective(themeKey) {
+  setDirective("style", THEME_STYLE_TOKEN[themeKey] || themeKey);
+  doRender();
+}
+
+const _TRUE = new Set(["true", "yes", "1"]);
+
+function syncDirectiveControls() {
+  el("opt-theme").value = themeKeyFromSource();
+  for (const [id, key, kind] of DIRECTIVE_CONTROLS) {
+    const value = readDirective(key);
+    if (kind === "bool") el(id).checked = _TRUE.has((value || "").toLowerCase());
+    else el(id).value = value ?? "";
+  }
 }
 
 /* ----------------------------- line colors ---------------------------- */
@@ -397,10 +504,9 @@ ${mmdBlock}
 
 - nf-metro: ${nfMetroVersion || "unknown"}
 - theme: ${opts.theme}
+- debug: ${opts.debug}
 - animate: ${lo.animate}
 - directional: ${lo.directional}
-- x-spacing: ${lo.x_spacing ?? "auto"}
-- y-spacing: ${lo.y_spacing ?? "auto"}
 - page: ${location.href.split("#")[0]}
 - user agent: ${navigator.userAgent}
 `;
@@ -438,6 +544,38 @@ function submitReport() {
   closeReport();
 }
 
+/* -------------------------- nextflow import --------------------------- */
+
+function openConvert() {
+  el("convert-text").value = SAMPLE_NEXTFLOW_DAG;
+  el("convert-error").classList.add("hidden");
+  el("convert-modal").classList.remove("hidden");
+  el("convert-text").focus();
+}
+
+function closeConvert() {
+  el("convert-modal").classList.add("hidden");
+}
+
+function submitConvert() {
+  const dag = el("convert-text").value;
+  if (!dag.trim() || !pyConvert) return;
+  let res;
+  try {
+    res = JSON.parse(pyConvert(dag));
+  } catch (err) {
+    res = { ok: false, error: String(err) };
+  }
+  if (!res.ok) {
+    const box = el("convert-error");
+    box.textContent = "Conversion failed: " + res.error;
+    box.classList.remove("hidden");
+    return;
+  }
+  editor.setValue(res.mmd);
+  closeConvert();
+}
+
 /* -------------------------------- utils -------------------------------- */
 
 function debounce(fn, ms) {
@@ -460,21 +598,26 @@ function toast(msg) {
 /* ------------------------------ examples ------------------------------ */
 
 async function loadExamples() {
-  let entries;
+  let groups;
   try {
     const resp = await fetch("examples.json", { cache: "no-store" });
     if (!resp.ok) return;
-    entries = await resp.json();
+    groups = await resp.json();
   } catch (_) {
     return; // no manifest shipped; the starter remains available
   }
-  const group = el("example-group");
-  entries.forEach(({ name, mmd }) => {
-    examples[name] = mmd;
-    const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = name;
-    group.append(opt);
+  const select = el("example-select");
+  groups.forEach(({ label, entries }) => {
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = label;
+    entries.forEach(({ name, mmd }) => {
+      examples[name] = mmd;
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      optgroup.append(opt);
+    });
+    select.append(optgroup);
   });
 }
 
@@ -489,8 +632,12 @@ function loadExample(value) {
 
 function wireControls() {
   el("example-select").addEventListener("change", (e) => loadExample(e.target.value));
-  ["opt-theme", "opt-animate", "opt-directional", "opt-x-spacing", "opt-y-spacing"].forEach(
-    (id) => el(id).addEventListener("change", doRender)
+  el("opt-theme").addEventListener("change", (e) => setThemeDirective(e.target.value));
+  DIRECTIVE_CONTROLS.forEach(([id, key, kind]) =>
+    el(id).addEventListener("change", () => applyDirectiveControl(id, key, kind))
+  );
+  ["opt-animate", "opt-directional", "opt-debug"].forEach((id) =>
+    el(id).addEventListener("change", doRender)
   );
   Object.keys(SNIPPETS).forEach((id) => el(id).addEventListener("click", () => insertSnippet(id)));
   el("btn-svg").addEventListener("click", exportSvg);
@@ -506,10 +653,18 @@ function wireControls() {
   el("report-modal").addEventListener("click", (e) => {
     if (e.target === el("report-modal")) closeReport();
   });
+
+  el("btn-convert").addEventListener("click", openConvert);
+  el("convert-cancel").addEventListener("click", closeConvert);
+  el("convert-submit").addEventListener("click", submitConvert);
+  el("convert-modal").addEventListener("click", (e) => {
+    if (e.target === el("convert-modal")) closeConvert();
+  });
+
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !el("report-modal").classList.contains("hidden")) {
-      closeReport();
-    }
+    if (e.key !== "Escape") return;
+    if (!el("report-modal").classList.contains("hidden")) closeReport();
+    if (!el("convert-modal").classList.contains("hidden")) closeConvert();
   });
 }
 

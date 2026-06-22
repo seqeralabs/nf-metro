@@ -26,6 +26,9 @@ jobs:
           WHEEL=$(basename docs/playground/wheels/*.whl)
           printf '{"wheel": "%s"}\n' "$WHEEL" > docs/playground/wheels/index.json
 
+      - name: Install nf-metro (the manifest generator imports build_gallery)
+        run: pip install -e .
+
       - name: Build playground example manifest
         run: python scripts/build_playground_examples.py
 

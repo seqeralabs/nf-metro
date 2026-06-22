@@ -21,9 +21,9 @@
           <select id="example-select">
             <option value="" selected>example…</option>
             <option value="__seed__">Starter pipeline</option>
-            <optgroup id="example-group" label="Examples"></optgroup>
           </select>
         </label>
+        <button id="btn-convert" title="Convert a Nextflow -with-dag Mermaid into a metro map">Import Nextflow DAG</button>
         <span class="sep"></span>
         <span class="group-label">Insert</span>
         <button id="btn-section" title="Insert a section block">+ Section</button>
@@ -47,6 +47,39 @@
         </label>
         <label class="check"><input type="checkbox" id="opt-animate" /> Animate</label>
         <label class="check"><input type="checkbox" id="opt-directional" /> Chevrons</label>
+        <label class="check"><input type="checkbox" id="opt-debug" /> Debug</label>
+        <span class="sep"></span>
+        <span class="group-label">Layout</span>
+        <label>Line spread
+          <select id="opt-line-spread">
+            <option value="">auto</option>
+            <option value="bundle">bundle</option>
+            <option value="centered">centered</option>
+            <option value="rails">rails</option>
+          </select>
+        </label>
+        <label>Diamonds
+          <select id="opt-diamond-style">
+            <option value="">auto</option>
+            <option value="straight">straight</option>
+            <option value="symmetric">symmetric</option>
+          </select>
+        </label>
+        <label>Line order
+          <select id="opt-line-order">
+            <option value="">auto</option>
+            <option value="definition">definition</option>
+            <option value="span">span</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="opt-center-ports" /> Centre ports</label>
+        <label class="check"><input type="checkbox" id="opt-compact-offsets" /> Compact offsets</label>
+        <label>Font scale
+          <input type="number" id="opt-font-scale" min="0.1" step="0.1" placeholder="1.0" />
+        </label>
+        <label>Fold cols
+          <input type="number" id="opt-fold-threshold" min="1" step="1" placeholder="auto" />
+        </label>
         <label>X-spacing
           <input type="number" id="opt-x-spacing" min="1" step="10" placeholder="auto" />
         </label>
@@ -84,6 +117,26 @@
       <div class="modal-actions">
         <button id="report-cancel" class="ghost">Cancel</button>
         <button id="report-submit" disabled>Open GitHub issue</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="convert-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="convert-title">
+    <div class="modal">
+      <h2 id="convert-title">Import Nextflow DAG</h2>
+      <p class="muted small">
+        Paste a Nextflow <code>-with-dag</code> Mermaid file to convert it into a
+        starting metro map. Generate one with
+        <code>nextflow run &lt;pipeline&gt; -preview -with-dag dag.mmd</code> -
+        see the <a href="../nextflow/" target="_blank" rel="noopener">Nextflow import guide</a>.
+      </p>
+      <label for="convert-text">Nextflow DAG Mermaid</label>
+      <textarea id="convert-text" rows="8"
+        placeholder="flowchart TB&#10;    subgraph ..."></textarea>
+      <div id="convert-error" class="hidden modal-error"></div>
+      <div class="modal-actions">
+        <button id="convert-cancel" class="ghost">Cancel</button>
+        <button id="convert-submit">Convert</button>
       </div>
     </div>
   </div>

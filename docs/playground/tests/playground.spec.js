@@ -57,19 +57,106 @@ test("directional toggle adds chevron markers", async () => {
   await page.locator("#opt-directional").uncheck();
 });
 
-test("theme switch changes the rendered output", async () => {
+test("theme dropdown writes the %%metro style directive and re-renders", async () => {
+  await page.evaluate(() =>
+    window.__nfMetro.setValue("%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n")
+  );
   const before = await page.locator("#preview").innerHTML();
+
   await page.locator("#opt-theme").selectOption("light");
   await expect
-    .poll(async () => page.locator("#preview").innerHTML())
-    .not.toBe(before);
+    .poll(async () => page.evaluate(() => window.__nfMetro.getValue()))
+    .toContain("%%metro style: light");
+  await expect.poll(async () => page.locator("#preview").innerHTML()).not.toBe(before);
+
   await page.locator("#opt-theme").selectOption("nfcore");
+  await expect
+    .poll(async () => page.evaluate(() => window.__nfMetro.getValue()))
+    .toContain("%%metro style: dark");
+});
+
+test("theme dropdown syncs from the source style directive", async () => {
+  await page.evaluate(() =>
+    window.__nfMetro.setValue(
+      "%%metro style: light\n%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n"
+    )
+  );
+  await expect(page.locator("#opt-theme")).toHaveValue("light");
+});
+
+test("debug toggle adds the debug overlay", async () => {
+  // A sectioned map has ports/waypoints for the overlay to draw.
+  await page.evaluate(() =>
+    window.__nfMetro.setValue(
+      "%%metro line: a | A | #f00\ngraph LR\n" +
+        "  subgraph s1 [One]\n    n1[N1]\n  end\n" +
+        "  subgraph s2 [Two]\n    n2[N2]\n  end\n" +
+        "  n1 -->|a| n2\n"
+    )
+  );
+  const before = await page.locator("#preview").innerHTML();
+  await page.locator("#opt-debug").check();
+  await expect.poll(async () => page.locator("#preview").innerHTML()).not.toBe(before);
+  await page.locator("#opt-debug").uncheck();
+});
+
+test("layout controls write %%metro directives and sync from source", async () => {
+  const getValue = () => page.evaluate(() => window.__nfMetro.getValue());
+  await page.evaluate(() =>
+    window.__nfMetro.setValue("%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n")
+  );
+
+  // choice -> writes directive, then "auto" removes it
+  await page.locator("#opt-line-spread").selectOption("rails");
+  await expect.poll(getValue).toContain("%%metro line_spread: rails");
+  await page.locator("#opt-line-spread").selectOption("");
+  await expect.poll(getValue).not.toContain("line_spread");
+
+  // bool -> writes true, unchecking removes it
+  await page.locator("#opt-center-ports").check();
+  await expect.poll(getValue).toContain("%%metro center_ports: true");
+  await page.locator("#opt-center-ports").uncheck();
+  await expect.poll(getValue).not.toContain("center_ports");
+
+  // number -> writes the value and re-renders
+  await page.locator("#opt-font-scale").fill("1.5");
+  await page.locator("#opt-font-scale").blur();
+  await expect.poll(getValue).toContain("%%metro font_scale: 1.5");
+
+  // controls sync FROM a source directive
+  await page.evaluate(() =>
+    window.__nfMetro.setValue(
+      "%%metro line_spread: centered\n%%metro center_ports: true\n" +
+        "%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n"
+    )
+  );
+  await expect(page.locator("#opt-line-spread")).toHaveValue("centered");
+  await expect(page.locator("#opt-center-ports")).toBeChecked();
 });
 
 test("snippet button inserts valid boilerplate and still renders", async () => {
   await page.locator("#btn-line").click();
   await expect(page.locator("#error")).toBeHidden();
   expect(await page.locator("#preview svg").count()).toBe(1);
+});
+
+test("Nextflow DAG import converts the seeded sample into a metro map", async () => {
+  await page.locator("#btn-convert").click();
+  await expect(page.locator("#convert-modal")).toBeVisible();
+  // Docs link points at the Nextflow import guide.
+  await expect(page.locator('#convert-modal a[href="../nextflow/"]')).toHaveCount(1);
+  // The box is pre-filled with a sample DAG, like the editor's starter map.
+  await expect(page.locator("#convert-text")).toHaveValue(/flowchart/);
+
+  // Convert the seeded sample directly.
+  await page.locator("#convert-submit").click();
+  await expect(page.locator("#convert-modal")).toBeHidden();
+  const value = await page.evaluate(() => window.__nfMetro.getValue());
+  expect(value).toContain("%%metro");
+  expect(value.toLowerCase()).toContain("fastqc");
+  await expect
+    .poll(async () => page.locator("#preview [data-line-id]").count())
+    .toBeGreaterThan(0);
 });
 
 test("line color swatch rewrites the hex in the editor", async () => {
@@ -131,6 +218,8 @@ test("example dropdown loads a chosen example and renders it", async () => {
   const select = page.locator("#example-select");
   // Manifest populated the dropdown beyond the placeholder + starter.
   expect(await select.locator("option").count()).toBeGreaterThan(2);
+  // Entries are grouped into multiple <optgroup>s.
+  expect(await select.locator("optgroup").count()).toBeGreaterThan(1);
 
   await select.selectOption("rnaseq_auto");
   await expect
@@ -141,6 +230,12 @@ test("example dropdown loads a chosen example and renders it", async () => {
     .toBeGreaterThan(0);
   // Action menu resets to its placeholder after loading.
   await expect(select).toHaveValue("");
+
+  // A topology fixture (only in the render diff, not examples/*.mmd) loads too.
+  await select.selectOption("single_section");
+  await expect
+    .poll(async () => page.evaluate(() => window.__nfMetro.getValue()))
+    .toContain("graph");
 
   // The starter entry is always available even without the manifest.
   await select.selectOption("__seed__");
