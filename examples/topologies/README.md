@@ -269,3 +269,7 @@ A three-line bundle exits the top section's right port, wraps via the inter-row 
 ### Multi-Carrier Off-Row Exit Climb
 
 A pre-processing section whose lower trunk row carries two lines (`bam` from samtools sort/index, `other` from mosdepth) sitting below the section's port row. The exit fans out through a junction to a row-0 target (small variant calling) and a row-1 target (depth & repeats). Tests that a multi-carrier parallel bundle anchors on its shared carrier row so it runs flat inside the section, with the fan-out risers in the inter-section gap, rather than both lines climbing a diagonal up to the port inside the section (#938, extending the single-carrier anchor of #877).
+
+### Junction Fan-out Convergence
+
+Three lines converge into one joint-calling entry port on a single-row grid: `a` and `b` bypass the intervening sections and climb risers into the port, while `c` joins flat from the adjacent column. Tests that the flat shallow feeder (`c`) takes the port-near slot on top of the climbing risers so the bundle turns into the port concentrically, rather than the flat line weaving across the climbing pair at the corner (#940).
