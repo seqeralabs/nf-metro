@@ -42,6 +42,7 @@ def nfm_render(mmd, opts_json):
             theme=opts.get("theme") or None,
             responsive=True,
             embed_font=True,
+            debug=bool(opts.get("debug")),
             layout_options=layout,
         )
         return json.dumps({"ok": True, "svg": svg})
@@ -136,21 +137,15 @@ async function boot() {
 
 /* -------------------------------- render ------------------------------- */
 
-function numOrNull(id) {
-  const v = el(id).value.trim();
-  if (v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
 function currentOptions() {
+  // Layout/style directives live in the source (parsed on render); only the
+  // preview-overlay toggles are passed as render overrides here.
   return {
-    theme: el("opt-theme").value,
+    theme: themeKeyFromSource(),
+    debug: el("opt-debug").checked,
     layout_options: {
       animate: el("opt-animate").checked,
       directional: el("opt-directional").checked,
-      x_spacing: numOrNull("opt-x-spacing"),
-      y_spacing: numOrNull("opt-y-spacing"),
     },
   };
 }
@@ -185,6 +180,90 @@ function doRender() {
     showError(res.error);
   }
   refreshLineColors();
+  syncDirectiveControls();
+}
+
+/* ------------------------- directive controls ------------------------- */
+
+// Controls that change the map's layout or styling are source-of-truth: each
+// writes a `%%metro <key>:` directive into the editor and is synced back from
+// it, so the change is saved with the map and travels with export/share. (The
+// animate/chevrons/debug toggles are preview overlays handled separately.)
+
+// directive key for the theme; values are friendly aliases (dark == nfcore).
+const THEME_KEYS = ["nfcore", "light"];
+const THEME_STYLE_TOKEN = { nfcore: "dark", light: "light" };
+const STYLE_ALIASES = { dark: "nfcore" };
+
+// [control id, directive key, kind]
+const DIRECTIVE_CONTROLS = [
+  ["opt-line-spread", "line_spread", "choice"],
+  ["opt-diamond-style", "diamond_style", "choice"],
+  ["opt-line-order", "line_order", "choice"],
+  ["opt-center-ports", "center_ports", "bool"],
+  ["opt-compact-offsets", "compact_offsets", "bool"],
+  ["opt-font-scale", "font_scale", "number"],
+  ["opt-fold-threshold", "fold_threshold", "number"],
+  ["opt-x-spacing", "x_spacing", "number"],
+  ["opt-y-spacing", "y_spacing", "number"],
+];
+
+function readDirective(key) {
+  const m = editor.getValue().match(new RegExp(`^\\s*%%metro\\s+${key}:\\s*(.+?)\\s*$`, "m"));
+  return m ? m[1] : null;
+}
+
+// value === null removes the directive line; otherwise it is set (inserted
+// after a %%metro title: line if present, else at the top - directives must
+// precede the graph block).
+function setDirective(key, value) {
+  const lines = editor.getValue().split("\n");
+  const idx = lines.findIndex((l) => new RegExp(`^\\s*%%metro\\s+${key}:`).test(l));
+  if (value === null) {
+    if (idx >= 0) editor.replaceRange("", { line: idx, ch: 0 }, { line: idx + 1, ch: 0 });
+  } else if (idx >= 0) {
+    const updated = lines[idx].replace(new RegExp(`(%%metro\\s+${key}:\\s*).*`), `$1${value}`);
+    editor.replaceRange(updated, { line: idx, ch: 0 }, { line: idx, ch: lines[idx].length });
+  } else {
+    const titleIdx = lines.findIndex((l) => /^\s*%%metro\s+title:/.test(l));
+    const at = titleIdx >= 0 ? titleIdx + 1 : 0;
+    editor.replaceRange(`%%metro ${key}: ${value}\n`, { line: at, ch: 0 });
+  }
+}
+
+function applyDirectiveControl(id, key, kind) {
+  const control = el(id);
+  let value;
+  if (kind === "bool") {
+    value = control.checked ? "true" : null;
+  } else {
+    const raw = control.value.trim();
+    value = raw === "" ? null : raw;
+  }
+  setDirective(key, value);
+  doRender();
+}
+
+function themeKeyFromSource() {
+  const value = (readDirective("style") || "").toLowerCase();
+  const key = STYLE_ALIASES[value] || value;
+  return THEME_KEYS.includes(key) ? key : "nfcore";
+}
+
+function setThemeDirective(themeKey) {
+  setDirective("style", THEME_STYLE_TOKEN[themeKey] || themeKey);
+  doRender();
+}
+
+const _TRUE = new Set(["true", "yes", "1"]);
+
+function syncDirectiveControls() {
+  el("opt-theme").value = themeKeyFromSource();
+  for (const [id, key, kind] of DIRECTIVE_CONTROLS) {
+    const value = readDirective(key);
+    if (kind === "bool") el(id).checked = _TRUE.has((value || "").toLowerCase());
+    else el(id).value = value ?? "";
+  }
 }
 
 /* ----------------------------- line colors ---------------------------- */
@@ -397,10 +476,9 @@ ${mmdBlock}
 
 - nf-metro: ${nfMetroVersion || "unknown"}
 - theme: ${opts.theme}
+- debug: ${opts.debug}
 - animate: ${lo.animate}
 - directional: ${lo.directional}
-- x-spacing: ${lo.x_spacing ?? "auto"}
-- y-spacing: ${lo.y_spacing ?? "auto"}
 - page: ${location.href.split("#")[0]}
 - user agent: ${navigator.userAgent}
 `;
@@ -494,8 +572,12 @@ function loadExample(value) {
 
 function wireControls() {
   el("example-select").addEventListener("change", (e) => loadExample(e.target.value));
-  ["opt-theme", "opt-animate", "opt-directional", "opt-x-spacing", "opt-y-spacing"].forEach(
-    (id) => el(id).addEventListener("change", doRender)
+  el("opt-theme").addEventListener("change", (e) => setThemeDirective(e.target.value));
+  DIRECTIVE_CONTROLS.forEach(([id, key, kind]) =>
+    el(id).addEventListener("change", () => applyDirectiveControl(id, key, kind))
+  );
+  ["opt-animate", "opt-directional", "opt-debug"].forEach((id) =>
+    el(id).addEventListener("change", doRender)
   );
   Object.keys(SNIPPETS).forEach((id) => el(id).addEventListener("click", () => insertSnippet(id)));
   el("btn-svg").addEventListener("click", exportSvg);

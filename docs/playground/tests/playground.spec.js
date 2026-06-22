@@ -57,13 +57,81 @@ test("directional toggle adds chevron markers", async () => {
   await page.locator("#opt-directional").uncheck();
 });
 
-test("theme switch changes the rendered output", async () => {
+test("theme dropdown writes the %%metro style directive and re-renders", async () => {
+  await page.evaluate(() =>
+    window.__nfMetro.setValue("%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n")
+  );
   const before = await page.locator("#preview").innerHTML();
+
   await page.locator("#opt-theme").selectOption("light");
   await expect
-    .poll(async () => page.locator("#preview").innerHTML())
-    .not.toBe(before);
+    .poll(async () => page.evaluate(() => window.__nfMetro.getValue()))
+    .toContain("%%metro style: light");
+  await expect.poll(async () => page.locator("#preview").innerHTML()).not.toBe(before);
+
   await page.locator("#opt-theme").selectOption("nfcore");
+  await expect
+    .poll(async () => page.evaluate(() => window.__nfMetro.getValue()))
+    .toContain("%%metro style: dark");
+});
+
+test("theme dropdown syncs from the source style directive", async () => {
+  await page.evaluate(() =>
+    window.__nfMetro.setValue(
+      "%%metro style: light\n%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n"
+    )
+  );
+  await expect(page.locator("#opt-theme")).toHaveValue("light");
+});
+
+test("debug toggle adds the debug overlay", async () => {
+  // A sectioned map has ports/waypoints for the overlay to draw.
+  await page.evaluate(() =>
+    window.__nfMetro.setValue(
+      "%%metro line: a | A | #f00\ngraph LR\n" +
+        "  subgraph s1 [One]\n    n1[N1]\n  end\n" +
+        "  subgraph s2 [Two]\n    n2[N2]\n  end\n" +
+        "  n1 -->|a| n2\n"
+    )
+  );
+  const before = await page.locator("#preview").innerHTML();
+  await page.locator("#opt-debug").check();
+  await expect.poll(async () => page.locator("#preview").innerHTML()).not.toBe(before);
+  await page.locator("#opt-debug").uncheck();
+});
+
+test("layout controls write %%metro directives and sync from source", async () => {
+  const getValue = () => page.evaluate(() => window.__nfMetro.getValue());
+  await page.evaluate(() =>
+    window.__nfMetro.setValue("%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n")
+  );
+
+  // choice -> writes directive, then "auto" removes it
+  await page.locator("#opt-line-spread").selectOption("rails");
+  await expect.poll(getValue).toContain("%%metro line_spread: rails");
+  await page.locator("#opt-line-spread").selectOption("");
+  await expect.poll(getValue).not.toContain("line_spread");
+
+  // bool -> writes true, unchecking removes it
+  await page.locator("#opt-center-ports").check();
+  await expect.poll(getValue).toContain("%%metro center_ports: true");
+  await page.locator("#opt-center-ports").uncheck();
+  await expect.poll(getValue).not.toContain("center_ports");
+
+  // number -> writes the value and re-renders
+  await page.locator("#opt-font-scale").fill("1.5");
+  await page.locator("#opt-font-scale").blur();
+  await expect.poll(getValue).toContain("%%metro font_scale: 1.5");
+
+  // controls sync FROM a source directive
+  await page.evaluate(() =>
+    window.__nfMetro.setValue(
+      "%%metro line_spread: centered\n%%metro center_ports: true\n" +
+        "%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n"
+    )
+  );
+  await expect(page.locator("#opt-line-spread")).toHaveValue("centered");
+  await expect(page.locator("#opt-center-ports")).toBeChecked();
 });
 
 test("snippet button inserts valid boilerplate and still renders", async () => {
