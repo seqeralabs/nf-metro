@@ -16,16 +16,23 @@ from __future__ import annotations
 
 __all__ = ["route_rail_edges"]
 
+from collections import defaultdict
+
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
     DIAGONAL_RUN,
     MIN_STRAIGHT_EDGE,
     OFFSET_STEP,
     RAIL_TERMINUS_FAN_LEAD,
+    X_SPACING,
 )
-from nf_metro.layout.routing.bundle import build_tapered_bundle
-from nf_metro.layout.routing.common import OffsetRegime, RoutedPath
-from nf_metro.parser.model import Edge, MetroGraph, Station
+from nf_metro.layout.routing.bundle import build_offset_bundle, build_tapered_bundle
+from nf_metro.layout.routing.common import (
+    OffsetRegime,
+    RoutedPath,
+    _center_inter_row_channel,
+)
+from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Station
 
 
 def _line_rail_y(graph: MetroGraph, station_id: str, line_id: str) -> float:
@@ -191,6 +198,93 @@ def _diagonal_placement(
     )
 
 
+def _route_inter_section_connector(
+    graph: MetroGraph,
+    group: list[Edge],
+    exit_port: Port,
+    entry_port: Port,
+) -> list[RoutedPath] | None:
+    """Route a port-to-port inter-section edge bundle as a clean corridor.
+
+    Whole-graph rail mode stacks sections vertically, so a connecting edge
+    leaves the upstream section by its RIGHT exit port and enters the
+    downstream section by its LEFT entry port -- two points on opposite sides
+    of the stack.  A straight rail run between them backtracks into the section
+    interiors (a dangling stub) and crosses the sections' own rails.  Instead
+    route the bundle out past the upstream right edge, down the right margin,
+    across the inter-section gap, down the left margin, and in to the entry
+    port: every vertical leg sits outside both section boxes and the cross leg
+    sits in the empty band between them, so nothing slices an interior rail.
+
+    Returns one route per edge, or ``None`` for a port pairing this corridor
+    does not model (anything but a RIGHT exit feeding a LEFT entry), leaving
+    the caller's straight-rail routing in place.
+    """
+    if exit_port.side is not PortSide.RIGHT or entry_port.side is not PortSide.LEFT:
+        return None
+    up = graph.sections.get(exit_port.section_id)
+    down = graph.sections.get(entry_port.section_id)
+    if up is None or down is None:
+        return None
+
+    rails = [
+        (
+            e,
+            _line_rail_y(graph, e.source, e.line_id),
+            _line_rail_y(graph, e.target, e.line_id),
+        )
+        for e in group
+    ]
+    center_ye = sum(ye for _e, ye, _yn in rails) / len(rails)
+    center_yn = sum(yn for _e, _ye, yn in rails) / len(rails)
+    exit_offsets = {e.line_id: ye - center_ye for e, ye, _yn in rails}
+    entry_offsets = {e.line_id: yn - center_yn for e, _ye, yn in rails}
+    half_width = max(
+        (abs(o) for o in (*exit_offsets.values(), *entry_offsets.values())), default=0.0
+    )
+
+    # Corridor verticals clear the widest section edge by the bundle half-width
+    # plus a fixed margin; the cross leg runs through the vertical gap between
+    # the two stacked sections.
+    clear = half_width + X_SPACING / 2.0
+    corridor_r = max(up.bbox_x + up.bbox_w, down.bbox_x + down.bbox_w) + clear
+    corridor_l = min(up.bbox_x, down.bbox_x) - clear
+    upper, lower = sorted((up, down), key=lambda s: s.bbox_y)
+    # Seat the whole cross-leg bundle in the gap, not just its centreline: inset
+    # the band by the bundle half-width so the outermost line clears each box
+    # edge rather than grazing it.
+    gap_y = _center_inter_row_channel(
+        upper.bbox_y + upper.bbox_h + half_width, lower.bbox_y - half_width
+    )
+
+    centerline = [
+        (exit_port.x, center_ye),
+        (corridor_r, center_ye),
+        (corridor_r, gap_y),
+        (corridor_l, gap_y),
+        (corridor_l, center_yn),
+        (entry_port.x, center_yn),
+    ]
+
+    # Each line is a rigid parallel offset through the corridor (exit-rail
+    # spacing), tapering to its entry-rail offset only on the final lead-in, so
+    # the bundle keeps its order and never flips.
+    n_legs = len(centerline) - 1
+
+    def leg_offsets(line_id: str) -> list[float]:
+        return [exit_offsets[line_id]] * (n_legs - 1) + [entry_offsets[line_id]]
+
+    members = [(e, e.line_id, leg_offsets(e.line_id)) for e, _ye, _yn in rails]
+    # Self-contained baked route (like the off-track elbow): not part of the
+    # normal router's trunk-slot regime, so it declares no TrunkSlot.
+    return build_offset_bundle(
+        members,
+        centerline,
+        base_radius=CURVE_RADIUS,
+        is_inter_section=False,
+    )
+
+
 def route_rail_edges(
     graph: MetroGraph,
     edges: list[Edge] | None = None,
@@ -207,8 +301,30 @@ def route_rail_edges(
     mode).  In per-section rail mode the caller passes just that section's
     internal edges so the normal router handles the rest.
     """
+    edge_list = list(edges) if edges is not None else list(graph.edges)
     routes: list[RoutedPath] = []
-    for edge in edges if edges is not None else graph.edges:
+
+    # Port-to-port edges joining two sections share an inter-section corridor;
+    # gather each such bundle and route it as one connector so co-travelling
+    # lines keep their order.  (Per-section rail mode never passes these edges.)
+    connectors: dict[tuple[str, str], list[Edge]] = defaultdict(list)
+    for edge in edge_list:
+        sp = graph.ports.get(edge.source)
+        tp = graph.ports.get(edge.target)
+        if sp is not None and tp is not None and sp.section_id != tp.section_id:
+            connectors[(edge.source, edge.target)].append(edge)
+    routed_connector: set[tuple[str, str, str]] = set()
+    for (sid, tid), group in connectors.items():
+        conn = _route_inter_section_connector(
+            graph, group, graph.ports[sid], graph.ports[tid]
+        )
+        if conn is not None:
+            routes.extend(conn)
+            routed_connector.update((e.source, e.target, e.line_id) for e in group)
+
+    for edge in edge_list:
+        if (edge.source, edge.target, edge.line_id) in routed_connector:
+            continue
         src = graph.stations.get(edge.source)
         tgt = graph.stations.get(edge.target)
         if src is None or tgt is None:

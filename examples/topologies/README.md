@@ -57,6 +57,7 @@ Each fixture is tagged with the layout class(es) it primarily exercises. Use thi
 | `inter_row_wrap_clearance.mmd` | three-line bundle exiting a top section right and entering a bottom section left via the inter-row gap |
 | `tb_bottom_entry_flow_start.mmd` | flow-axis entry declared opposite its consumer (TB `entry: bottom` feeding the top station) re-anchored so the line does not fold back through the trunk (issue #885) |
 | `tb_lr_exit_left.mmd` | TB section leaving through a LEFT exit into a section below-left (`_route_tb_lr_exit` LEFT arm) (issue #917) |
+| `tb_left_exit_step.mmd` | TB section LEFT exit into a lower right-entry section: the exit bundle steps west-down-west and is routed as a parallel staircase that keeps the feed order (issue #671) |
 | `tb_lr_exit_right.mmd` | TB section leaving through a RIGHT exit into the next forward section (`_route_tb_lr_exit` RIGHT arm) (issue #917) |
 | `tb_internal_diagonal.mmd` | symmetric fan-out inside a TB section onto X tracks either side of the hub, routing both internal edges as 45-degree diagonals (`_route_tb_internal` diagonal arm) (issue #917) |
 

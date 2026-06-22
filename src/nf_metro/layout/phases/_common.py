@@ -28,6 +28,50 @@ if TYPE_CHECKING:
     from nf_metro.layout.routing.common import RoutedPath
 
 
+def iter_sole_trunk_continuations(
+    graph: MetroGraph,
+) -> Iterator[tuple[str, str, str]]:
+    """Yield ``(section_id, pred, node)`` for in-section linear continuations.
+
+    A *node* is a sole trunk continuation when, inside a horizontal (LR/RL)
+    section, it has exactly one real (non-port, non-hidden) in-section
+    predecessor whose *only* forward path in the whole graph is this node, and
+    that predecessor carries a strict superset of the node's lines (some of the
+    predecessor's lines ended there).  The chain is then linear with no sibling
+    branch to fan toward, so the node must hold the predecessor's track rather
+    than drop to its own line base.
+
+    The full-graph successor test is the discriminator: a predecessor that also
+    feeds a section-exit edge (or a bypass V) routes that line *around* the
+    node, so the node legitimately drops off the trunk.  Off-track stations are
+    excluded at both ends; their Y comes from later phases.
+    """
+    for section in graph.sections.values():
+        if not lanes_run_along_y(section.direction):
+            continue
+        sec_ids = set(section.station_ids)
+        for sid in section.station_ids:
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden or st.off_track:
+                continue
+            preds = {
+                e.source
+                for e in graph.edges_to(sid)
+                if e.source in sec_ids
+                and not graph.stations[e.source].is_port
+                and not graph.stations[e.source].is_hidden
+            }
+            if len(preds) != 1:
+                continue
+            pred = next(iter(preds))
+            if graph.stations[pred].off_track:
+                continue
+            if {e.target for e in graph.edges_from(pred)} != {sid}:
+                continue
+            if set(graph.station_lines(pred)) > set(graph.station_lines(sid)):
+                yield (section.id, pred, sid)
+
+
 def _is_fold_section(section: Section) -> bool:
     """``True`` for a section the row-fold logic produced.
 

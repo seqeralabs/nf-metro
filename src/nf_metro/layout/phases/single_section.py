@@ -36,7 +36,10 @@ from nf_metro.layout.labels import (
 )
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
-from nf_metro.layout.phases._common import _build_section_subgraph
+from nf_metro.layout.phases._common import (
+    _build_section_subgraph,
+    iter_sole_trunk_continuations,
+)
 from nf_metro.layout.phases.off_track import (
     _align_phantom_pass_throughs,
     _compute_fork_join_gaps,
@@ -148,7 +151,14 @@ def _layout_single_section(
         "RL",
     ) and _has_horizontal_predecessor_section(graph, section)
 
-    tracks = assign_tracks(sub, layers, entry_top=entry_top)
+    continuation_nodes = frozenset(
+        node
+        for sec_id, _pred, node in iter_sole_trunk_continuations(graph)
+        if sec_id == section.id
+    )
+    tracks = assign_tracks(
+        sub, layers, entry_top=entry_top, continuation_nodes=continuation_nodes
+    )
 
     if not layers:
         return None

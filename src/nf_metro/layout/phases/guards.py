@@ -44,6 +44,7 @@ from nf_metro.layout.phases._common import (
     first_vertical_leg_x,
     flow_exit_carrier_anchor,
     is_loop_side_branch_station,
+    iter_sole_trunk_continuations,
     routes_through_unrelated_sections,
 )
 from nf_metro.layout.phases.bbox import _section_fit_top
@@ -846,60 +847,30 @@ def _guard_perp_fed_entry_anchored_to_consumer(graph: MetroGraph, phase: str) ->
 
 
 def _guard_post_convergence_trunk_continues(graph: MetroGraph, phase: str) -> None:
-    """The sole successor of an in-section convergence station continues on
-    that station's row.
+    """The sole continuation of a line-shedding station continues on its row.
 
-    When two or more in-section branches merge onto a station and that merge
-    station has a single linear successor inside the same horizontal section,
-    the successor must share the merge station's Y. Otherwise the merged trunk
-    immediately dives onto one of the incoming branch rows, rendering a needless
-    diagonal right after the merge (#946). Vertical (TB/BT) sections, ports,
-    hidden, and off-track stations are out of scope.
+    When a horizontal-section station carries strictly more lines than its only
+    in-section successor -- because some of its lines ended there, whether a
+    merged branch that stopped (#946) or a bundled line that terminated (#977)
+    -- and that successor is its only forward path, the chain is linear with no
+    sibling branch to fan toward. The successor must share the predecessor's Y;
+    otherwise the trunk dives onto a line base row, painting a needless diagonal
+    (or an in-section V-kink) right after the junction.
+
+    A predecessor whose flow also leaves elsewhere -- a section-exit edge or a
+    bypass V routing a line *around* the successor -- genuinely forks, so its
+    successor would legitimately drop off the trunk; the predecessor's *only*
+    forward path in the whole graph must be this successor. Vertical (TB/BT)
+    sections, ports, hidden, and off-track stations are out of scope.
     """
-
-    def _real_in_section(sid: str, section_id: str) -> bool:
-        s = graph.stations.get(sid)
-        return (
-            s is not None
-            and not s.is_port
-            and not s.is_hidden
-            and not s.off_track
-            and s.section_id == section_id
-        )
-
-    for sid, station in graph.stations.items():
-        section_id = station.section_id
-        if section_id is None or not _real_in_section(sid, section_id):
-            continue
-        sec = graph.sections.get(section_id)
-        if sec is None or not lanes_run_along_y(sec.direction):
-            continue
-        preds = {
-            e.source for e in graph.edges_to(sid) if _real_in_section(e.source, sec.id)
-        }
-        if len(preds) != 1:
-            continue
-        merge = next(iter(preds))
-        succs = {
-            e.target
-            for e in graph.edges_from(merge)
-            if _real_in_section(e.target, sec.id)
-        }
-        if succs != {sid}:
-            continue
-        merge_preds = {
-            e.source
-            for e in graph.edges_to(merge)
-            if _real_in_section(e.source, sec.id)
-        }
-        if len(merge_preds) < 2:
-            continue
-        merge_y = graph.stations[merge].y
-        if abs(station.y - merge_y) > GUARD_TOLERANCE:
+    for _section_id, pred, node in iter_sole_trunk_continuations(graph):
+        pred_y = graph.stations[pred].y
+        node_y = graph.stations[node].y
+        if abs(node_y - pred_y) > GUARD_TOLERANCE:
             raise PhaseInvariantError(
-                f"{phase}: post-convergence station {sid!r} at y={station.y:.1f} "
-                f"is off its merge station {merge!r} y={merge_y:.1f}; the trunk "
-                f"dives onto a branch row right after the merge"
+                f"{phase}: continuation station {node!r} at y={node_y:.1f} "
+                f"is off its predecessor {pred!r} y={pred_y:.1f}; the trunk "
+                f"dives onto a branch row right after the junction"
             )
 
 
@@ -2441,6 +2412,55 @@ def _guard_inter_section_route_no_full_width_backtrack(
             )
 
 
+def _guard_rail_connector_ports_no_stub(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """After routing: a whole-graph rail-mode inter-section connector must
+    leave its exit port outward and reach its entry port from outside.
+
+    Rail mode stacks sections vertically; the dedicated rail router connects a
+    RIGHT exit port to a LEFT entry port via a corridor that wraps around the
+    outside of both boxes.  A connector that instead heads back *into* the
+    section it just left (or reaches the entry port from inside the box) leaves
+    a dangling stub and slices the section's own rails (#743).  The outward
+    direction is set by the port side: a RIGHT port is left/reached rightward,
+    a LEFT port leftward.
+    """
+    if graph.line_spread is not LineSpread.RAILS:
+        return
+    routes = _ensure_routes(graph, routes)
+
+    def outward_ok(side: PortSide, anchor_x: float, neighbour_x: float) -> bool:
+        if side is PortSide.RIGHT:
+            return neighbour_x >= anchor_x - GUARD_TOLERANCE
+        if side is PortSide.LEFT:
+            return neighbour_x <= anchor_x + GUARD_TOLERANCE
+        return True
+
+    for rp in routes:
+        src = graph.ports.get(rp.edge.source)
+        tgt = graph.ports.get(rp.edge.target)
+        if src is None or tgt is None or src.section_id == tgt.section_id:
+            continue
+        if len(rp.points) < 2:
+            continue
+        if not outward_ok(src.side, rp.points[0][0], rp.points[1][0]):
+            raise PhaseInvariantError(
+                f"{phase}: rail connector {rp.edge.source!r}->{rp.edge.target!r} "
+                f"line {rp.line_id!r} leaves its {src.side.name} exit port "
+                f"x={rp.points[0][0]:.1f} inward toward x={rp.points[1][0]:.1f}"
+            )
+        if not outward_ok(tgt.side, rp.points[-1][0], rp.points[-2][0]):
+            raise PhaseInvariantError(
+                f"{phase}: rail connector {rp.edge.source!r}->{rp.edge.target!r} "
+                f"line {rp.line_id!r} reaches its {tgt.side.name} entry port "
+                f"x={rp.points[-1][0]:.1f} from inside at x={rp.points[-2][0]:.1f}"
+            )
+
+
 def _guard_routes_enter_sections_at_ports(
     graph: MetroGraph,
     phase: str,
@@ -3951,11 +3971,13 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     GuardSpec(
         _guard_post_convergence_trunk_continues,
         "B",
-        issue_pin=("#946",),
+        issue_pin=("#946", "#977"),
         narrow_reason=(
-            "Scoped to a single in-section linear successor of an in-section "
-            "merge: a merge with multiple successors fans out by design, and a "
-            "cross-section convergence anchors its successor via port alignment."
+            "Scoped to the sole in-section forward successor of a line-shedding "
+            "predecessor: a predecessor with multiple successors (including a "
+            "bypass V) fans out by design, a successor carrying as many lines is "
+            "trunk-aligned already, and a cross-section convergence anchors its "
+            "successor via port alignment."
         ),
     ),
     GuardSpec(_guard_perp_entry_feed_not_collinear, "B"),
@@ -4086,6 +4108,17 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         _guard_routes_enter_sections_at_ports,
         "B",
         needs=frozenset({"routes"}),
+    ),
+    GuardSpec(
+        _guard_rail_connector_ports_no_stub,
+        "B",
+        needs=frozenset({"routes"}),
+        issue_pin=("#743",),
+        narrow_reason=(
+            "Acts only on whole-graph rail-mode routes whose endpoints are both "
+            "boundary ports of different sections; the wrap corridor is exempt "
+            "from the X-monotonic backtrack guards by design."
+        ),
     ),
     GuardSpec(
         _guard_no_route_through_section,

@@ -1,0 +1,18 @@
+%%metro title: Rail inter-section connector
+%%metro style: dark
+%%metro line_spread: rails
+%%metro line: a | A | #2db572
+%%metro line: b | B | #f4a300
+
+graph LR
+    subgraph one [Section one]
+        s1[Start]
+        s2[Middle]
+        s1 -->|a,b| s2
+    end
+    subgraph two [Section two]
+        t1[Next]
+        t2[End]
+        t1 -->|a,b| t2
+    end
+    s2 -->|a,b| t1
