@@ -1588,6 +1588,41 @@ def _apply_offsets_along_bundle(
             queue.append(tgt_id)
 
 
+def _apply_offset_upstream_on_row(
+    ctx: _OffsetCtx, port_id: str, line_id: str, off: float
+) -> None:
+    """Carry a reslotted feeder's offset upstream along its flat approach.
+
+    Walks ``edges_to`` from the port following *line_id*, copying *off* onto
+    each source-side station while the run stays on the port's row.  A feeder
+    re-slotted at the port whose approach is horizontal (an adjacent on-row
+    feeder) would otherwise kink where its source-side slot differs from the
+    port slot; carrying the new slot back to its source keeps it straight.  The
+    walk stops at the first station off the row, so a feeder that turns off the
+    row (a riser) transitions its slot at that turn rather than upstream.
+    """
+    graph = ctx.graph
+    row_y = graph.stations[port_id].y
+    visited = {port_id}
+    queue = deque([port_id])
+    while queue:
+        cur = queue.popleft()
+        for edge in graph.edges_to(cur):
+            if edge.line_id != line_id or edge.source in visited:
+                continue
+            src = graph.stations[edge.source]
+            if abs(src.y - row_y) > _SAME_Y_TOLERANCE:
+                continue
+            visited.add(edge.source)
+            if _would_collide(ctx, edge.source, line_id, off):
+                # Re-slotting onto another line's slot here would fuse the two
+                # into one stroke; stop before the collision and let the feeder
+                # transition its slot at this station instead.
+                continue
+            ctx.offsets[(edge.source, line_id)] = off
+            queue.append(edge.source)
+
+
 def _convergence_feeders(
     graph: MetroGraph, port_id: str
 ) -> list[tuple[str, int, bool]] | None:
@@ -1670,6 +1705,11 @@ def _order_convergence_entry_ports(ctx: _OffsetCtx) -> None:
     approach rank earns and carry it along the consumer section so the bundle
     stays in that order from the port to its first station.  The matching peel
     order on the risers is set by ``_convergence_line_order`` at routing time.
+
+    A shallow feeder joining the bundle flat from an adjacent column also has
+    its new slot carried back along its horizontal approach to its source, so
+    it runs straight into the port instead of kinking where its source-side
+    slot differs from the port slot.
     """
     if ctx.compact:
         return
@@ -1684,18 +1724,23 @@ def _order_convergence_entry_ports(ctx: _OffsetCtx) -> None:
             or port.section_id in ctx.reversed_sections
         ):
             continue
-        line_col = _bypass_convergence_feeders(graph, port_id)
-        if line_col is None:
+        feeders = _convergence_feeders(graph, port_id)
+        if feeders is None:
             continue
+        line_col = {lid: col for lid, col, _ in feeders}
         ordered = sorted(
             line_col, key=lambda lid: (-line_col[lid], ctx.line_priority.get(lid, 0))
         )
         new_offs = {lid: rank * ctx.offset_step for rank, lid in enumerate(ordered)}
         cur = {lid: ctx.offsets.get((port_id, lid), 0.0) for lid in ordered}
-        if any(
+        if not any(
             abs(new_offs[lid] - cur[lid]) > _OFFSET_EQ_TOLERANCE for lid in new_offs
         ):
-            _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
+            continue
+        _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
+        for lid, _col, is_bypass in feeders:
+            if not is_bypass:
+                _apply_offset_upstream_on_row(ctx, port_id, lid, new_offs[lid])
 
 
 def _recenter_partial_fan_branches(ctx: _OffsetCtx) -> None:

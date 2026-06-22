@@ -967,6 +967,10 @@
     "note": "Defensive guard in _convergence_feeders: every edge feeding an entry port has a source station, so the missing-source early return is never taken.",
     "status": "defensive"
   },
+  "offsets.py::if abs(src.y - row_y) > _SAME_Y_TOLERANCE:::#1": {
+    "note": "Off-row stop in _apply_offset_upstream_on_row: it carries a reslotted shallow feeder's offset upstream while the approach stays on the port row. Every corpus shallow feeder approaches fully on-row, so the early stop when a source-side station turns off the row is never taken; it bounds the walk for a feeder whose upstream rises off the row.",
+    "status": "defensive"
+  },
   "offsets.py::if col is None:::#1": {
     "note": "Defensive guard in _convergence_feeders: every edge feeding a LEFT entry port has a source whose section resolves to a grid column after placement, so the unresolved-source-column early return is never taken.",
     "status": "defensive"
