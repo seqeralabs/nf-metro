@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Protocol
@@ -34,11 +35,19 @@ class AxisFrame:
     LR/RL place layers along X and stack lines along Y; TB transposes the two.
     ``primary_sign`` is ``-1`` for RL, which runs the primary axis in reverse
     (mirrored by ``single_section._mirror_primary``), else ``+1``.
+
+    ``secondary_sign`` is the lane fan direction.  A 90-degree-CW rotation maps
+    LR's screen-down lane (+Y) to screen-left (-X), so TB fans lanes to -X
+    (``-1``).  LR/RL keep ``+1`` (RL reverses only the primary); BT's ``+1`` is
+    reserved for true BT support and is never read on a behavioural path until
+    then.  The sign is applied at the draw accessor (:func:`station_lane_coord`,
+    :func:`lane_delta`), never to a stored offset, which stays positive.
     """
 
     primary: Axis
     secondary: Axis
     primary_sign: float
+    secondary_sign: float
 
     @staticmethod
     def axes_for_direction(direction: str) -> tuple[str, str]:
@@ -58,7 +67,15 @@ class AxisFrame:
         primary, secondary = cls.axes_for_direction(direction)
         step = {"x": x_spacing, "y": y_spacing}
         sign = -1.0 if direction == "RL" else 1.0
-        return cls(Axis(primary, step[primary]), Axis(secondary, step[secondary]), sign)
+        # A 90-degree-CW rotation fans a vertical flow's lanes to -X; BT's +1 is
+        # the inert exception reserved for true BT support.
+        secondary_sign = -1.0 if secondary == "x" and direction != "BT" else 1.0
+        return cls(
+            Axis(primary, step[primary]),
+            Axis(secondary, step[secondary]),
+            sign,
+            secondary_sign,
+        )
 
 
 def lanes_run_along_y(direction: str) -> bool:
@@ -93,6 +110,50 @@ def axis_split(primary_axis: str, point: Point) -> Point:
     """
     px, py = point
     return (px, py) if primary_axis == "x" else (py, px)
+
+
+def station_lane_coord(frame: AxisFrame, station: _HasXY, offset: float) -> float:
+    """Screen coordinate of a positive lane *offset* from *station* on its lane axis.
+
+    ``station.y + offset`` for LR/RL; ``station.x - offset`` for TB.  The lane
+    sign (:attr:`AxisFrame.secondary_sign`) lives here, at the draw accessor, so
+    stored offsets stay positive and a section plots as a true rotation of LR.
+    """
+    return frame.secondary.get(station) + frame.secondary_sign * offset
+
+
+def lane_delta(frame: AxisFrame, offset: float) -> float:
+    """Signed secondary-axis displacement for a positive lane *offset*.
+
+    ``+offset`` for LR/RL, ``-offset`` for TB -- the lane-sign image of *offset*
+    on the screen axis the lines stack along, without reference to a station.
+    """
+    return frame.secondary_sign * offset
+
+
+def lane_delta_to_normal_offset(delta: float, travel: Point) -> float:
+    """Map a lane-axis delta to the bundle builder's right-normal offset.
+
+    ``routing.bundle.build_concentric_bundle`` fans members along the right-hand
+    normal of travel (``(-ty, tx)`` in screen coords, Y growing downward) and
+    expects positive offsets.  A *delta* from :func:`lane_delta` lives on the
+    secondary (lane) screen axis -- Y for a horizontal flow, X for a vertical
+    one -- so projecting it onto the unit right-normal of *travel* restates it in
+    the builder's convention; for axis-aligned travel it is a +/-1 sign lookup.
+    This is the sole point where the lane-sign and builder-normal conventions
+    meet (used by the perpendicular turn-in corner hybrid site).
+    """
+    tx, ty = travel
+    length = math.hypot(tx, ty)
+    if length == 0.0:
+        return delta
+    nx, ny = -ty / length, tx / length
+    # The call site's travel is axis-aligned, so the lane delta sits wholly on
+    # the screen axis perpendicular to travel: Y for horizontal flow, X for
+    # vertical.  Project that displacement onto the unit right-normal.
+    travels_horizontally = abs(tx) >= abs(ty)
+    dx, dy = (0.0, delta) if travels_horizontally else (delta, 0.0)
+    return dx * nx + dy * ny
 
 
 def single_corner_centreline(

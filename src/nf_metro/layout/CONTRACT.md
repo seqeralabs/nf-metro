@@ -89,6 +89,26 @@ the LR primary axis reversed). A heuristic expressed against primary/secondary
 instead of raw `x`/`y` has a TB path that is *the same code* as its LR path, so
 it needs no branch.
 
+**Lane sign (`secondary_sign`).** A transpose is a reflection: it flips
+chirality, so a TB path written as an axis swap diverges from LR in behaviour,
+not just orientation. The cure is a true 90-degree rotation, which a transpose
+is not. `AxisFrame.secondary_sign` carries the lane fan direction: a 90-degree-CW
+rotation maps LR's screen-down lane (`+Y`) to screen-left (`-X`), so TB is `-1`;
+LR/RL are `+1` (RL reverses only the primary) and BT's `+1` is reserved for true
+BT support (inert until then). The **sanctioned offset->coordinate path** applies
+this sign at the *draw accessor*, never to a stored offset, which stays positive:
+
+- `geometry.station_lane_coord(frame, station, offset)` -> `station.y + offset`
+  (LR), `station.x - offset` (TB): the screen coordinate of a positive lane
+  offset from a station.
+- `geometry.lane_delta(frame, offset)` -> `secondary_sign * offset`: the signed
+  secondary-axis displacement for a positive offset, station-free.
+- `geometry.lane_delta_to_normal_offset(lane_delta, travel)` bridges a lane delta
+  to the bundle builder's right-normal offset (`routing.bundle._right_normal`),
+  the sole point where the lane-sign and builder-normal conventions meet. The
+  builder itself fans purely geometrically along `_right_normal` of travel and is
+  not per-axis; rotation lives *above* it, in this offset->coordinate mapping.
+
 **Policy:** no new one-off TB branches. A heuristic that needs TB awareness is
 the trigger to convert it to the axis vocabulary, not to add another branch.
 This is machine-enforced by `tests/test_tb_branch_ratchet.py`, which counts

@@ -1089,7 +1089,7 @@ def _guard_terminus_icons_within_bbox(graph: MetroGraph, phase: str) -> None:
     """
     tol = 1.0
     for section in graph.sections.values():
-        if section.bbox_h <= 0 or section.direction not in ("TB", "BT"):
+        if section.bbox_h <= 0 or lanes_run_along_y(section.direction):
             continue
         top = section.bbox_y
         bottom = section.bbox_y + section.bbox_h
