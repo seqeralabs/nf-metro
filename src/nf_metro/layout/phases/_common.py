@@ -201,6 +201,19 @@ def _station_marker_bbox(
     return (st.x - radius, cy - half_h, st.x + radius, cy + half_h)
 
 
+def marker_cross_exempt(graph: MetroGraph, sid: str) -> bool:
+    """True when a non-consumer line crossing ``sid``'s marker is no defect.
+
+    A rail-mode section lays its lines on fixed parallel rails; a line whose
+    route skips an interchange runs along its rail through the interchange's
+    column and threads its knob.  That is the deliberate rail idiom, not a
+    breeze-past, so the marker-cross checks exempt it - matching the render-side
+    ``check_marker_crossings`` exemption (#942), which reads the same fact back
+    from the drawn rail markers.
+    """
+    return graph.station_is_rail(sid)
+
+
 def first_vertical_leg_x(points: list[tuple[float, float]]) -> float | None:
     """X of the first (near-)vertical leg of *points*.
 

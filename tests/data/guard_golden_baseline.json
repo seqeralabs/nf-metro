@@ -5194,10 +5194,7 @@
     ]
   },
   "examples/line_spread.mmd": {
-    "raised": [
-      "PhaseInvariantError",
-      "after final: line 'rna' on edge 'r_call' -> 'r_annotate' crosses non-consumer station 'r_filter' marker bbox (903.0,155.0)-(913.0,169.0); segment (832.0,160.0)->(984.0,160.0)"
-    ],
+    "raised": null,
     "trace": [
       "_guard_no_same_row_backward_feed|None",
       "_guard_no_mixed_entry_directions|None",
@@ -5387,12 +5384,7 @@
       "_guard_off_track_consumer_on_trunk|final",
       "_guard_off_track_input_column_stack|final",
       "_guard_interchange_bar_clears_non_members|final",
-      "_guard_tb_top_entry_drop_hugs_top|final",
-      "_guard_no_same_row_backward_feed|None",
-      "_guard_no_mixed_entry_directions|None",
-      "_guard_no_same_row_backward_feed|None",
-      "_guard_no_mixed_entry_directions|None",
-      "_guard_no_line_crosses_non_consumer|after final"
+      "_guard_tb_top_entry_drop_hugs_top|final"
     ]
   },
   "examples/longread_variant_calling.mmd": {
@@ -7168,10 +7160,7 @@
     ]
   },
   "examples/sarek_metro.mmd": {
-    "raised": [
-      "PhaseInvariantError",
-      "after final: line 'tumor_only' on edge 'mutect2' -> 'indexcov' crosses non-consumer station 'strelka2' marker bbox (641.8,660.8)-(651.8,678.8); segment (595.3,664.8)->(698.3,664.8)"
-    ],
+    "raised": null,
     "trace": [
       "_guard_no_same_row_backward_feed|None",
       "_guard_no_mixed_entry_directions|None",
@@ -7365,12 +7354,7 @@
       "_guard_off_track_consumer_on_trunk|final",
       "_guard_off_track_input_column_stack|final",
       "_guard_interchange_bar_clears_non_members|final",
-      "_guard_tb_top_entry_drop_hugs_top|final",
-      "_guard_no_same_row_backward_feed|None",
-      "_guard_no_mixed_entry_directions|None",
-      "_guard_no_same_row_backward_feed|None",
-      "_guard_no_mixed_entry_directions|None",
-      "_guard_no_line_crosses_non_consumer|after final"
+      "_guard_tb_top_entry_drop_hugs_top|final"
     ]
   },
   "examples/simple_pipeline.mmd": {
@@ -35806,13 +35790,8 @@
     "trace": []
   },
   "tests/fixtures/rail_marker_subset_interchange.mmd": {
-    "raised": [
-      "PhaseInvariantError",
-      "after final: line 'line_b' on edge 'src_b' -> 'sink_b' crosses non-consumer station 'hub' marker bbox (305.0,226.0)-(315.0,236.0); segment (190.0,231.0)->(430.0,231.0)"
-    ],
-    "trace": [
-      "_guard_no_line_crosses_non_consumer|after final"
-    ]
+    "raised": null,
+    "trace": []
   },
   "tests/fixtures/rail_pitch_vs_labels.mmd": {
     "raised": null,

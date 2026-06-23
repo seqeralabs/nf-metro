@@ -45,6 +45,7 @@ from nf_metro.layout.phases._common import (
     flow_exit_carrier_anchor,
     is_loop_side_branch_station,
     iter_sole_trunk_continuations,
+    marker_cross_exempt,
     routes_through_unrelated_sections,
 )
 from nf_metro.layout.phases.bbox import _section_fit_top
@@ -1372,6 +1373,8 @@ def _guard_no_line_crosses_non_consumer(
     boxes: list[tuple[str, tuple[float, float, float, float]]] = []
     station_lines_cache: dict[str, set[str]] = {}
     for sid in graph.stations:
+        if marker_cross_exempt(graph, sid):
+            continue
         bbox = _station_marker_bbox(graph, sid, offsets=offsets)
         if bbox is None:
             continue

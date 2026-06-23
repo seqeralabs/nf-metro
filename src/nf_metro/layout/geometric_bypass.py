@@ -27,7 +27,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from nf_metro.layout.geometry import BBoxXIndex, segment_intersects_bbox
-from nf_metro.layout.phases._common import _station_marker_bbox
+from nf_metro.layout.phases._common import _station_marker_bbox, marker_cross_exempt
 from nf_metro.parser.model import (
     BYPASS_V_PREFIX,
     Edge,
@@ -110,6 +110,8 @@ def _evaluate(graph: MetroGraph, *, with_quality: bool = True) -> _LayoutEval:
     boxes: list[tuple[str, tuple[float, float, float, float]]] = []
     station_lines: dict[str, set[str]] = {}
     for sid in graph.stations:
+        if marker_cross_exempt(graph, sid):
+            continue
         bbox = _station_marker_bbox(graph, sid, offsets=offsets)
         if bbox is None:
             continue
