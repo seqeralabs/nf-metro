@@ -228,6 +228,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 #preview.zoomed { justify-content: flex-start; }
 /* flex-shrink:0 so an explicit zoom width isn't shrunk back to the container. */
 #preview svg { max-width: 100%; height: auto; flex-shrink: 0; }
+/* Dim the preview while the Python renderer is running. The class is set just
+   before a setTimeout(0) so the browser gets one paint cycle to show it. */
+#preview.rendering { opacity: 0.45; cursor: wait; }
 
 #zoom-controls {
   position: absolute;

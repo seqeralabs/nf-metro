@@ -68,9 +68,9 @@ test("advanced options are collapsed by default and toggle open", async () => {
 test("directional toggle adds chevron markers", async () => {
   await expect(page.locator('#preview [class*="metro-direction"]')).toHaveCount(0);
   await page.locator("#opt-directional").check();
-  expect(
-    await page.locator('#preview [class*="metro-direction"]').count()
-  ).toBeGreaterThan(0);
+  await expect
+    .poll(async () => page.locator('#preview [class*="metro-direction"]').count())
+    .toBeGreaterThan(0);
   await page.locator("#opt-directional").uncheck();
 });
 

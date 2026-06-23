@@ -48,22 +48,55 @@ const SAMPLE_NEXTFLOW_DAG = `flowchart TB
 
 // Glue defined inside the Pyodide runtime: returns a JSON envelope so a render
 // error surfaces as data rather than a thrown PythonError to unwind in JS.
+//
+// Layout cache: parse+compute_layout is expensive (~200-500ms). We cache the
+// settled MetroGraph keyed on (normalised mmd + geometry options). Theme,
+// debug, animate, and directional are render-only - they don't affect station
+// coordinates, so changing them skips layout and only re-runs render_svg.
+// The style: directive is stripped before hashing so toggling theme (which
+// writes %%metro style: into the editor) doesn't bust the geometry cache.
 const PY_GLUE = `
+import hashlib
 import json
-from nf_metro.api import render_string
+import re as _re
+from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.convert import convert_nextflow_dag
+from nf_metro.render import render_svg
+
+_cached_graph = None
+_cached_key = None
+_RENDER_ONLY = frozenset({"animate", "directional"})
+_STYLE_RE = _re.compile(r"^\\s*%%metro\\s+style:.*$", _re.MULTILINE)
 
 def nfm_render(mmd, opts_json):
+    global _cached_graph, _cached_key
     opts = json.loads(opts_json)
-    layout = {k: v for k, v in (opts.get("layout_options") or {}).items() if v is not None}
+    all_layout = {k: v for k, v in (opts.get("layout_options") or {}).items() if v is not None}
+
+    layout_geom = {k: v for k, v in all_layout.items() if k not in _RENDER_ONLY}
+    render_only = {k: v for k, v in all_layout.items() if k in _RENDER_ONLY}
+
+    mmd_norm = _STYLE_RE.sub("", mmd).strip()
+    cache_key = hashlib.md5((mmd_norm + "\\x00" + json.dumps(layout_geom, sort_keys=True)).encode()).hexdigest()
+
     try:
-        svg = render_string(
-            mmd,
-            theme=opts.get("theme") or None,
-            responsive=True,
-            embed_font=True,
+        if cache_key != _cached_key:
+            graph = prepare_graph(mmd, layout_options=layout_geom)
+            _cached_graph = graph
+            _cached_key = cache_key
+        else:
+            graph = _cached_graph
+
+        for k, v in render_only.items():
+            setattr(graph, k, bool(v))
+
+        theme_obj = resolve_theme(opts.get("theme") or None, graph)
+        svg = render_svg(
+            graph,
+            theme_obj,
             debug=bool(opts.get("debug")),
-            layout_options=layout,
+            responsive=True,
+            font_portability="embed",
         )
         return json.dumps({"ok": True, "svg": svg})
     except Exception as e:
@@ -207,26 +240,36 @@ function showError(msg) {
 
 function doRender() {
   if (!pyRender) return;
+  // Snapshot inputs before the setTimeout so we render the state at the moment
+  // doRender fired, not what the editor contains when the callback runs.
   const mmd = editor.getValue();
-  let res;
-  try {
-    res = JSON.parse(pyRender(mmd, JSON.stringify(currentOptions())));
-  } catch (err) {
-    showError("Render runtime error: " + err);
-    return;
-  }
-  if (res.ok) {
-    showError(null);
-    lastSvg = res.svg;
-    el("preview").innerHTML = res.svg;
-    applyZoom();
-  } else {
-    // Keep the last good render visible; just report the problem.
-    showError(res.error);
-  }
-  refreshLineColors();
-  syncDirectiveControls();
-  reapplySelection();
+  const optsJson = JSON.stringify(currentOptions());
+  // Mark the preview as rendering and yield one paint cycle so the browser can
+  // show the dimmed state before the synchronous Python call blocks the thread.
+  el("preview").classList.add("rendering");
+  setTimeout(() => {
+    let res;
+    try {
+      res = JSON.parse(pyRender(mmd, optsJson));
+    } catch (err) {
+      el("preview").classList.remove("rendering");
+      showError("Render runtime error: " + err);
+      return;
+    }
+    el("preview").classList.remove("rendering");
+    if (res.ok) {
+      showError(null);
+      lastSvg = res.svg;
+      el("preview").innerHTML = res.svg;
+      applyZoom();
+    } else {
+      // Keep the last good render visible; just report the problem.
+      showError(res.error);
+    }
+    refreshLineColors();
+    syncDirectiveControls();
+    reapplySelection();
+  }, 0);
 }
 
 /* --------------------------------- zoom -------------------------------- */
