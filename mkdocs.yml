@@ -58,3 +58,4 @@ nav:
     - Guard tiers: dev/guard_tiers.md
     - Parser: dev/parser.md
     - Testing: dev/testing.md
+    - Contributing: dev/contributing.md
