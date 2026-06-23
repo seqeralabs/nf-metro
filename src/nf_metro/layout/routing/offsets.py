@@ -806,6 +806,85 @@ def _slot_trunk_continuation_lines(ctx: _OffsetCtx) -> None:
         _apply_section_line_order(ctx, sec_id, new_order)
 
 
+def _convergence_continuation_lines(
+    ctx: _OffsetCtx, section: Section, merge_id: str
+) -> set[str]:
+    """Lines reaching *merge_id* from a source on the merge's own lane.
+
+    The fan-in mirror of :func:`_trunk_continuation_lines`: a merge gathers
+    in-section incoming edges from two or more lanes (the line-stacking axis: X
+    for a vertical-flow section).  A line whose source shares the merge's lane
+    drops straight onto the trunk; the others arrive diagonally from a sibling
+    lane.  Returns the empty set unless the merge gathers at least two distinct
+    incoming lanes, so a single-feed or single-lane station never re-slots.
+    """
+    graph = ctx.graph
+    primary_axis = AxisFrame.axes_for_direction(section.direction)[0]
+    in_lane: dict[str, float] = {}
+    for edge in graph.edges_to(merge_id):
+        src = graph.stations.get(edge.source)
+        if src is None or src.is_port or src.section_id != section.id:
+            continue
+        in_lane[edge.line_id] = axis_split(primary_axis, (src.x, src.y))[1]
+    if len(in_lane) < 2 or len({round(v, 3) for v in in_lane.values()}) < 2:
+        return set()
+    merge = graph.stations[merge_id]
+    merge_lane = axis_split(primary_axis, (merge.x, merge.y))[1]
+    return {
+        lid for lid, lane in in_lane.items() if abs(lane - merge_lane) < COORD_TOLERANCE
+    }
+
+
+def _slot_convergence_continuation_lines(ctx: _OffsetCtx) -> None:
+    """Permute a TB merge's offsets so a collinear feeder drops straight.
+
+    The fan-in mirror of :func:`_slot_trunk_continuation_lines`: at a section's
+    terminal merge, a line whose source sits directly above on the merge's lane
+    should drop straight, but a TB section draws each line at its
+    offset reversed against a per-station bundle max that *grows* from the solo
+    feeder (one line) to the merge (the full bundle).  A collinear feeder left
+    on its priority slot is therefore drawn on the trunk at its source but
+    outboard at the merge and kinks by one step instead of dropping straight.
+    Permute the merge station's stored offsets so the collinear feeder rides the
+    trunk-drawing slot (the largest offset, which the reversal maps onto the
+    trunk) and the diagonal siblings ride outboard.
+
+    Only the merge station is touched, so the diagonal feeders' source-side
+    slots -- and any entry-port ordering upstream -- are left intact; the merge
+    must be a section sink (no outgoing edges) so no downstream edge reads its
+    re-slotted offset as a source.  LR/RL draw the lane un-reversed with
+    per-line-constant offsets, so a collinear feeder is already straight there;
+    right-entry TB sections also draw un-reversed and are left alone.  Runs after
+    the section-reversal passes so its assignment is final.
+    """
+    if ctx.compact:
+        return
+    graph = ctx.graph
+    right_entry = tb_right_entry_sections(graph)
+    for sec_id, section in graph.sections.items():
+        if sec_id not in ctx.tb_sections or graph.is_rail_section(sec_id):
+            continue
+        if sec_id in right_entry:
+            continue
+        for merge_id in section.station_ids:
+            merge = graph.stations.get(merge_id)
+            if merge is None or merge.is_port or graph.edges_from(merge_id):
+                continue
+            collinear = _convergence_continuation_lines(ctx, section, merge_id)
+            present = list(graph.station_lines(merge_id))
+            cont = [lid for lid in present if lid in collinear]
+            rest = [lid for lid in present if lid not in collinear]
+            if not cont or not rest:
+                continue
+            # The trunk-drawing slot is the largest stored offset (the reversal
+            # maps it onto the trunk); the diagonal siblings take the smaller
+            # slots.  Reassigning the merge's own offset values, rather than a
+            # fresh 0..n range, keeps its marker span set by the values present.
+            values = sorted(ctx.offsets.get((merge_id, lid), 0.0) for lid in present)
+            for lid, val in zip(rest + cont, values):
+                ctx.offsets[(merge_id, lid)] = val
+
+
 def _reindex_section_local(ctx: _OffsetCtx) -> None:
     """Re-index offsets per-section to close priority gaps (non-compact only).
 
@@ -2109,6 +2188,10 @@ def compute_station_offsets(
     9. **Partial fan-branch re-centring** - collapses reserved
        absent-line slots at independent fan branches so a partial-line
        station's marker has no interior gap (compact only).
+    10. **Convergence trunk-continuation slotting** - at a TB section's
+       terminal merge, permutes the merge's offsets so a feeder whose
+       source is collinear with it rides the trunk-drawing slot and drops
+       straight while diagonal siblings take the offset (non-compact TB).
 
     Returns dict mapping (station_id, line_id) -> y_offset.
     """
@@ -2136,6 +2219,7 @@ def compute_station_offsets(
     _recenter_partial_fan_branches(ctx)
     _reverse_tb_right_entry_offsets(ctx)
     _reverse_around_below_left_entry_offsets(ctx)
+    _slot_convergence_continuation_lines(ctx)
     return ctx.offsets
 
 

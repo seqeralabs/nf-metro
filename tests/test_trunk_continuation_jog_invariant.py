@@ -9,13 +9,20 @@ drawn X changes across the edge and the router emits a one-step diagonal jog
 instead of a straight drop (issue #929).  The LR mirror of the same shape keeps
 the continuing line straight because LR does not reverse offsets.
 
+The same shape arises at a fan-in: a feeder whose source is collinear with a
+section's terminal merge should drop straight while a sibling arrives diagonally
+from another column.  The merge's per-station bundle max is larger than the solo
+feeder's, so the collinear feeder is again drawn off its lane unless re-slotted
+(the convergence mirror, ``_slot_convergence_continuation_lines``).
+
 Covers:
 
 * Happy-path: every gallery example and topology fixture (including
-  ``tb_trunk_through_fan``, the reported defect) routes every same-lane
-  continuation edge as a straight run.
-* Meaningfulness: with the trunk-continuation slotting disabled the checker
-  fires on the reported fixture, so the invariant genuinely encodes the bug.
+  ``tb_trunk_through_fan`` and ``tb_convergence_straight_drop``, the reported
+  defects) routes every same-lane continuation edge as a straight run.
+* Meaningfulness: with the fan-out and fan-in continuation slotting each
+  disabled in turn, the checker fires on the matching fixture, so the invariant
+  genuinely encodes both bugs.
 """
 
 from __future__ import annotations
@@ -76,3 +83,18 @@ def test_checker_fires_without_continuation_slotting(
     graph, routes, offsets = _route(EXAMPLE_TOPOLOGIES / "tb_trunk_through_fan.mmd")
     violations = check_trunk_continuation_drops_straight(graph, routes, offsets)
     assert violations, "expected a trunk-continuation jog with the slotting off"
+
+
+def test_checker_fires_without_convergence_slotting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disabling the convergence slotting reproduces the collinear-feeder jog at
+    a terminal merge, proving the fan-in arm of the invariant is not vacuous."""
+    monkeypatch.setattr(
+        routing_offsets, "_slot_convergence_continuation_lines", lambda ctx: None
+    )
+    graph, routes, offsets = _route(
+        EXAMPLE_TOPOLOGIES / "tb_convergence_straight_drop.mmd"
+    )
+    violations = check_trunk_continuation_drops_straight(graph, routes, offsets)
+    assert violations, "expected a convergence-continuation jog with the slotting off"

@@ -1,0 +1,16 @@
+%%metro title: TB Convergence Straight Drop
+%%metro style: dark
+%%metro line: a | A | #e63946
+%%metro line: b | B | #0570b0
+
+%%metro grid: work | 0,0
+
+graph LR
+    subgraph work [Work]
+        %%metro direction: TB
+        top[Top]
+        side[Side]
+        merge[Merge]
+        top -->|a| merge
+        side -->|b| merge
+    end

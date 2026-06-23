@@ -3134,11 +3134,12 @@ def _guard_trunk_continuation_drops_straight(
     offsets: dict[tuple[str, str], float] | None = None,
     routes: list[RoutedPath] | None = None,
 ) -> None:
-    """Final-phase: a TB fan-out's in-lane continuation drops straight.
+    """Final-phase: a TB in-lane continuation drops straight.
 
-    Wraps :func:`check_trunk_continuation_drops_straight`: where one line of a
-    TB fan-out continues along the trunk lane while a sibling peels off, the
-    continuing line must run straight rather than jog by one step off the trunk.
+    Wraps :func:`check_trunk_continuation_drops_straight`: where one line shares
+    a TB section's trunk lane at both ends of an edge -- a fan-out continuation
+    peeling past a sibling, or a collinear feeder into a terminal merge -- it
+    must run straight rather than jog by one step off the trunk.
     """
     from nf_metro.layout.routing.invariants import (
         check_trunk_continuation_drops_straight,
@@ -4063,11 +4064,12 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         _guard_trunk_continuation_drops_straight,
         "B",
         needs=frozenset({"offsets", "routes"}),
-        issue_pin=("#929",),
+        issue_pin=("#929", "#1007"),
         narrow_reason=(
             "Scoped to TB sections, the only axis that draws its lane reversed "
             "against a per-station bundle max; LR/RL draw the lane un-reversed "
-            "and keep a fan-out continuation on the trunk via base priority."
+            "and keep a fan-out or fan-in continuation on the trunk via base "
+            "priority."
         ),
     ),
     GuardSpec(

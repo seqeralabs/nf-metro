@@ -363,6 +363,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "a blocker directly below: the exit bundle steps west-down-west, routed "
         "as a parallel staircase that keeps the feed order (issue #671).",
     ),
+    (
+        "tb_convergence_straight_drop",
+        TOPOLOGIES_DIR,
+        "Two lines converge at a TB section's terminal merge; the feeder whose "
+        "source is collinear with the merge drops dead straight while the sibling "
+        "arrives diagonally, instead of the straight feeder kinking off its lane "
+        "(issue #1007).",
+    ),
     # --- Offset and bypass ---
     (
         "bypass_fan_in_outer_slot",
