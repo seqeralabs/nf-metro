@@ -716,34 +716,50 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
         _apply_section_line_order(ctx, sec_id, new_order)
 
 
-def _trunk_continuation_lines(ctx: _OffsetCtx, section: Section) -> set[str]:
-    """Lines that continue straight across a fan-out hub on the section's trunk lane.
+def _collinear_lines_at(
+    ctx: _OffsetCtx, section: Section, station: Station, *, incoming: bool
+) -> set[str]:
+    """Lines whose edge at *station* keeps the station's own lane.
 
-    A fan-out hub is a non-port station with in-section outgoing edges reaching
-    at least two distinct lanes (the line-stacking axis: X for a vertical-flow
-    section, Y for a horizontal one).  The lines whose target keeps the hub's
-    lane continue straight along the trunk; the others peel off to a sibling
-    lane.
+    The shared core of the fan-out and fan-in continuation detectors: gather the
+    lane (the line-stacking axis coordinate: X for a vertical-flow section, Y for
+    a horizontal one) of each in-section neighbour across *station* -- its
+    sources when *incoming*, its targets otherwise.  Return the lines whose
+    neighbour is collinear with *station* itself, but only when the neighbours
+    span at least two distinct lanes, so a single-edge or single-lane station
+    yields nothing.
     """
     graph = ctx.graph
     primary_axis = AxisFrame.axes_for_direction(section.direction)[0]
+    edges = graph.edges_to(station.id) if incoming else graph.edges_from(station.id)
+    lanes: dict[str, float] = {}
+    for edge in edges:
+        nbr = graph.stations.get(edge.source if incoming else edge.target)
+        if nbr is None or nbr.is_port or nbr.section_id != section.id:
+            continue
+        lanes[edge.line_id] = axis_split(primary_axis, (nbr.x, nbr.y))[1]
+    if len(lanes) < 2 or len({round(v, 3) for v in lanes.values()}) < 2:
+        return set()
+    own_lane = axis_split(primary_axis, (station.x, station.y))[1]
+    return {
+        lid for lid, lane in lanes.items() if abs(lane - own_lane) < COORD_TOLERANCE
+    }
+
+
+def _trunk_continuation_lines(ctx: _OffsetCtx, section: Section) -> set[str]:
+    """Lines that continue straight across a fan-out hub on the section's trunk lane.
+
+    A fan-out hub is a non-port station whose in-section outgoing edges reach at
+    least two distinct lanes; the lines whose target keeps the hub's lane
+    continue straight along the trunk, the others peel off to a sibling lane.
+    """
+    graph = ctx.graph
     continuation: set[str] = set()
     for sid in section.station_ids:
         hub = graph.stations.get(sid)
         if hub is None or hub.is_port:
             continue
-        out_lane: dict[str, float] = {}
-        for edge in graph.edges_from(sid):
-            tgt = graph.stations.get(edge.target)
-            if tgt is None or tgt.is_port or tgt.section_id != section.id:
-                continue
-            out_lane[edge.line_id] = axis_split(primary_axis, (tgt.x, tgt.y))[1]
-        if len(out_lane) < 2 or len({round(v, 3) for v in out_lane.values()}) < 2:
-            continue
-        hub_lane = axis_split(primary_axis, (hub.x, hub.y))[1]
-        for lid, lane in out_lane.items():
-            if abs(lane - hub_lane) < COORD_TOLERANCE:
-                continuation.add(lid)
+        continuation |= _collinear_lines_at(ctx, section, hub, incoming=False)
     return continuation
 
 
@@ -806,35 +822,6 @@ def _slot_trunk_continuation_lines(ctx: _OffsetCtx) -> None:
         _apply_section_line_order(ctx, sec_id, new_order)
 
 
-def _convergence_continuation_lines(
-    ctx: _OffsetCtx, section: Section, merge_id: str
-) -> set[str]:
-    """Lines reaching *merge_id* from a source on the merge's own lane.
-
-    The fan-in mirror of :func:`_trunk_continuation_lines`: a merge gathers
-    in-section incoming edges from two or more lanes (the line-stacking axis: X
-    for a vertical-flow section).  A line whose source shares the merge's lane
-    drops straight onto the trunk; the others arrive diagonally from a sibling
-    lane.  Returns the empty set unless the merge gathers at least two distinct
-    incoming lanes, so a single-feed or single-lane station never re-slots.
-    """
-    graph = ctx.graph
-    primary_axis = AxisFrame.axes_for_direction(section.direction)[0]
-    in_lane: dict[str, float] = {}
-    for edge in graph.edges_to(merge_id):
-        src = graph.stations.get(edge.source)
-        if src is None or src.is_port or src.section_id != section.id:
-            continue
-        in_lane[edge.line_id] = axis_split(primary_axis, (src.x, src.y))[1]
-    if len(in_lane) < 2 or len({round(v, 3) for v in in_lane.values()}) < 2:
-        return set()
-    merge = graph.stations[merge_id]
-    merge_lane = axis_split(primary_axis, (merge.x, merge.y))[1]
-    return {
-        lid for lid, lane in in_lane.items() if abs(lane - merge_lane) < COORD_TOLERANCE
-    }
-
-
 def _slot_convergence_continuation_lines(ctx: _OffsetCtx) -> None:
     """Permute a TB merge's offsets so a collinear feeder drops straight.
 
@@ -870,7 +857,7 @@ def _slot_convergence_continuation_lines(ctx: _OffsetCtx) -> None:
             merge = graph.stations.get(merge_id)
             if merge is None or merge.is_port or graph.edges_from(merge_id):
                 continue
-            collinear = _convergence_continuation_lines(ctx, section, merge_id)
+            collinear = _collinear_lines_at(ctx, section, merge, incoming=True)
             present = list(graph.station_lines(merge_id))
             cont = [lid for lid in present if lid in collinear]
             rest = [lid for lid in present if lid not in collinear]
