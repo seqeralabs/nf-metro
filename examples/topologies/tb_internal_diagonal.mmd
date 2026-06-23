@@ -1,0 +1,23 @@
+%%metro title: TB Internal Diagonal
+%%metro style: dark
+%%metro line: a | A | #e63946
+%%metro line: b | B | #0570b0
+%%metro grid: source | 0,0
+%%metro grid: work | 1,0
+
+graph LR
+    subgraph source [Source]
+        s1[Start]
+        s2[End]
+        s1 -->|a,b| s2
+    end
+    subgraph work [Work]
+        %%metro direction: TB
+        %%metro entry: top | a,b
+        hub[Demux]
+        left[Lane A]
+        right[Lane B]
+        hub -->|a,b| left
+        hub -->|a,b| right
+    end
+    s2 -->|a,b| hub

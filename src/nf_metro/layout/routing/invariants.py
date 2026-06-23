@@ -20,13 +20,15 @@ gallery example and topology fixture.
 
 from __future__ import annotations
 
+import inspect
+import math
 import os
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol
+from typing import Any, Protocol
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -34,20 +36,32 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
     CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
+    FLOW_ALIGNED_PORT_ADVICE,
     MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
 )
+from nf_metro.layout.geometry import AxisFrame, axis_split, lanes_run_along_y
+from nf_metro.layout.phases.guards import GuardSpec
 from nf_metro.layout.routing.common import (
     Direction,
+    OffsetRegime,
     RoutedPath,
+    _vert_horiz_cross,
+    apply_route_offsets,
+    gap_lo_for_x,
     horizontal_direction,
     initial_fanout_descent_span,
     iter_horizontal_trunks,
+    iter_port_peeloff_bundles,
+    iter_vertical_segments,
+    peeloff_target_slots,
+    resolve_section,
+    tail_on_slot,
     trunk_segments_cross,
     vertical_direction,
 )
-from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
+from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
 
 # Segments shorter than this are sub-pixel artefacts of per-line
 # offsets and carry no meaningful direction of travel.
@@ -226,6 +240,177 @@ def _check_pair(
         last_dir = cur_dir
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# TB exit-corner column-order preservation
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TBExitColumnFlip:
+    """A TB section's exit-corner drop reverses the in-section column order.
+
+    At ``station_id`` a line drops out of the vertical in-section column and
+    turns through a LEFT/RIGHT exit port.  The drop leg is a continuation of
+    the column, so each line's drop X must keep the column's left/right
+    ordering; when the corner handler derives the drop X from a different
+    reversal convention than the column, two lines swap X and cross *at the
+    feeder station marker* before they leave the box.
+    """
+
+    section_id: str
+    station_id: str
+    line_a: str
+    line_b: str
+    column_x_a: float
+    column_x_b: float
+    drop_x_a: float
+    drop_x_b: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"TB exit corner flips column order at station {self.station_id!r} "
+            f"(section {self.section_id!r}): lines {self.line_a!r}/{self.line_b!r} "
+            f"run x={self.column_x_a:.1f}/{self.column_x_b:.1f} in the column but "
+            f"drop at x={self.drop_x_a:.1f}/{self.drop_x_b:.1f} into the exit port"
+        )
+
+
+def _vertical_x_at_station(
+    pts: Sequence[tuple[float, float]], station: Station, *, at_end: bool
+) -> float | None:
+    """X of the vertical segment touching the station endpoint, else ``None``.
+
+    ``at_end`` selects the last segment (a column edge ending at the station)
+    versus the first (an exit edge leaving it).  Returns ``None`` when that
+    segment is not vertical.
+    """
+    if len(pts) < 2:
+        return None
+    if at_end:
+        a, b = pts[-1], pts[-2]
+    else:
+        a, b = pts[0], pts[1]
+    if abs(a[1] - station.y) > SAME_Y_TOLERANCE:
+        return None
+    if abs(a[0] - b[0]) <= COORD_TOLERANCE and abs(a[1] - b[1]) > COORD_TOLERANCE:
+        return a[0]
+    return None
+
+
+def _per_line_drop_x(
+    graph: MetroGraph,
+    station: Station,
+    neighbors: list[str],
+    by_edge: dict[tuple[str, str, str], RoutedPath],
+    offsets: dict[tuple[str, str], float],
+    *,
+    at_end: bool,
+) -> dict[str, float]:
+    """Per-line vertical X at ``station`` across edges to/from ``neighbors``.
+
+    Lines that resolve to more than one distinct X (a fan, not a single
+    column) are dropped so only the simple-bundle case is compared.
+    """
+    neighbor_set = set(neighbors)
+    incident = graph.edges_to(station.id) if at_end else graph.edges_from(station.id)
+    result: dict[str, float] = {}
+    multi: set[str] = set()
+    for edge in incident:
+        nb = edge.source if at_end else edge.target
+        if nb not in neighbor_set:
+            continue
+        rp = by_edge.get((edge.source, edge.target, edge.line_id))
+        if rp is None:
+            continue
+        x = _vertical_x_at_station(
+            apply_route_offsets(rp, offsets), station, at_end=at_end
+        )
+        if x is None:
+            continue
+        if edge.line_id in result and abs(result[edge.line_id] - x) > COORD_TOLERANCE:
+            multi.add(edge.line_id)
+        result[edge.line_id] = x
+    for lid in multi:
+        result.pop(lid, None)
+    return result
+
+
+def check_tb_exit_corner_preserves_column_order(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[TBExitColumnFlip]:
+    """Return TB exit corners that reverse the in-section bundle order.
+
+    In a TB section the bundle runs as a vertical column.  Where a station
+    turns the bundle out through a LEFT/RIGHT exit port, the drop into that
+    corner continues the column, so each line's drop X must keep the column's
+    left/right ordering.  A handler that derives the drop X from a different
+    reversal convention than the column swaps two lines' X and crosses them at
+    the feeder station marker.
+    """
+    tb_sections = {sid for sid, s in graph.sections.items() if s.direction == "TB"}
+    if not tb_sections:
+        return []
+
+    by_edge: dict[tuple[str, str, str], RoutedPath] = {}
+    for r in routes:
+        by_edge[(r.edge.source, r.edge.target, r.line_id)] = r
+
+    violations: list[TBExitColumnFlip] = []
+    for station in graph.stations.values():
+        sid = station.section_id
+        if sid not in tb_sections or station.is_port:
+            continue
+        exit_targets = [
+            edge.target
+            for edge in graph.edges_from(station.id)
+            if (p := graph.ports.get(edge.target)) is not None
+            and not p.is_entry
+            and p.side in (PortSide.LEFT, PortSide.RIGHT)
+        ]
+        if not exit_targets:
+            continue
+        column_sources = [
+            edge.source
+            for edge in graph.edges_to(station.id)
+            if (s := graph.stations.get(edge.source)) is not None
+            and not s.is_port
+            and s.section_id == sid
+        ]
+        if not column_sources:
+            continue
+        col_x = _per_line_drop_x(
+            graph, station, column_sources, by_edge, offsets, at_end=True
+        )
+        drop_x = _per_line_drop_x(
+            graph, station, exit_targets, by_edge, offsets, at_end=False
+        )
+        shared = sorted(set(col_x) & set(drop_x))
+        for ia in range(len(shared)):
+            for ib in range(ia + 1, len(shared)):
+                la, lb = shared[ia], shared[ib]
+                col_cmp = col_x[la] - col_x[lb]
+                drop_cmp = drop_x[la] - drop_x[lb]
+                if abs(col_cmp) <= COORD_TOLERANCE or abs(drop_cmp) <= COORD_TOLERANCE:
+                    continue
+                if (col_cmp > 0) != (drop_cmp > 0):
+                    violations.append(
+                        TBExitColumnFlip(
+                            section_id=sid,
+                            station_id=station.id,
+                            line_a=la,
+                            line_b=lb,
+                            column_x_a=col_x[la],
+                            column_x_b=col_x[lb],
+                            drop_x_a=drop_x[la],
+                            drop_x_b=drop_x[lb],
+                        )
+                    )
+    return violations
 
 
 # ---------------------------------------------------------------------------
@@ -573,6 +758,50 @@ def check_merge_port_approach_side(
     return violations
 
 
+def check_convergence_shallow_feeder_concentric(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    offsets: dict[tuple[str, str], float],
+) -> list[str]:
+    """Shallow feeders at a climbing convergence must nest port-near the risers.
+
+    At a LEFT entry where bypass feeders climb in from off the port row and a
+    flat shallow feeder joins them at the port row (the fan-out-junction turn),
+    the shallow feeder must take a port-near slot above the climbing risers.
+    Slotted port-far it weaves across the turning bundle at the corner.  Mirrors
+    the gating of ``_order_convergence_entry_ports``, which assigns the slot.
+    """
+    from nf_metro.layout.routing.offsets import _convergence_feeders
+    from nf_metro.layout.routing.reversal import detect_reversed_sections
+
+    if graph.compact_offsets:
+        return []
+    reversed_sections = detect_reversed_sections(graph)
+    messages: list[str] = []
+    for port_id, port in graph.ports.items():
+        if not (port.is_entry and port.side is PortSide.LEFT):
+            continue
+        sec = graph.sections.get(port.section_id)
+        if sec is None or sec.direction != "LR" or port.section_id in reversed_sections:
+            continue
+        feeders = _convergence_feeders(graph, port_id)
+        if feeders is None:
+            continue
+        shallow = [lid for lid, _, is_bypass in feeders if not is_bypass]
+        bypass = [lid for lid, _, is_bypass in feeders if is_bypass]
+        if not shallow or not bypass:
+            continue
+        max_shallow = max(offsets.get((port_id, lid), 0.0) for lid in shallow)
+        min_bypass = min(offsets.get((port_id, lid), 0.0) for lid in bypass)
+        if max_shallow > min_bypass + COORD_TOLERANCE_FINE:
+            messages.append(
+                f"convergence entry {port_id!r}: shallow feeder sits at offset "
+                f"{max_shallow:.1f}, port-far of the climbing risers (min "
+                f"{min_bypass:.1f}); it weaves across the turning bundle instead "
+                f"of nesting on top"
+            )
+    return messages
+
+
 @dataclass(frozen=True)
 class MergePortOutgoingFlip:
     """A perpendicular line re-joined at a merge port that flips its slot on
@@ -829,8 +1058,46 @@ class CollinearOverlapViolation:
         )
 
 
+@dataclass(frozen=True)
+class DiagonalOverlapViolation:
+    """Two distinct-line diagonal segments running on top of each other.
+
+    The axis-aligned :class:`CollinearOverlapViolation` cannot see this: a
+    fixed-axis (Y for LR, baked-X for TB) per-line offset gives a perpendicular
+    separation of only ``OFFSET_STEP * sin(theta)`` on a diagonal, which
+    collapses toward zero as the diagonal nears the offset axis.  ``perp_sep`` is
+    the measured perpendicular gap between the two co-running diagonals;
+    ``span`` is the overlapping length along the shared direction.
+    """
+
+    line_a: str
+    line_b: str
+    edge_a: tuple[str, str]
+    edge_b: tuple[str, str]
+    perp_sep: float
+    span: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"diagonal overlay: line {self.line_a!r} "
+            f"({self.edge_a[0]}->{self.edge_a[1]}) and line {self.line_b!r} "
+            f"({self.edge_b[0]}->{self.edge_b[1]}) run {self.perp_sep:.2f}px apart "
+            f"on a shared diagonal over {self.span:.1f}px "
+            f"(need >= {_DIAGONAL_MIN_PERP_SEP:.1f}px)"
+        )
+
+
 _COLLINEAR_LATERAL_TOL = 1.0
 _COLLINEAR_MIN_SPAN = 40.0
+
+# A diagonal bundle's lines must keep a true perpendicular separation, not a
+# fixed-axis one whose perpendicular component degrades to zero as the diagonal
+# nears the offset axis.  Flag any distinct-line pair that runs closer than this
+# along a shared diagonal: half an OFFSET_STEP is the point at which ~3-4px
+# strokes visibly fuse into one fat line.
+_DIAGONAL_MIN_PERP_SEP = OFFSET_STEP * 0.5
+_DIAGONAL_SLOPE_TOL = 0.12  # radians (~7 degrees); near-parallel diagonals
 
 
 def _axis_aligned(
@@ -843,30 +1110,6 @@ def _axis_aligned(
     if abs(y1 - y2) < COORD_TOLERANCE_FINE and abs(x1 - x2) > _COLLINEAR_LATERAL_TOL:
         return "H", (y1 + y2) * 0.5
     return None, 0.0
-
-
-def _route_render_points(
-    rp: RoutedPath, offsets: dict[tuple[str, str], float]
-) -> list[tuple[float, float]]:
-    """Final render geometry for a route (mirrors render.apply_route_offsets)."""
-    if rp.offsets_applied:
-        return list(rp.points)
-    src_off = offsets.get((rp.edge.source, rp.line_id), 0.0)
-    tgt_off = offsets.get((rp.edge.target, rp.line_id), 0.0)
-    orig_sy = rp.points[0][1]
-    orig_ty = rp.points[-1][1]
-    out: list[tuple[float, float]] = []
-    last = len(rp.points) - 1
-    for k, (x, y) in enumerate(rp.points):
-        if k == 0:
-            out.append((x, y + src_off))
-        elif k == last:
-            out.append((x, y + tgt_off))
-        elif abs(y - orig_sy) <= abs(y - orig_ty):
-            out.append((x, y + src_off))
-        else:
-            out.append((x, y + tgt_off))
-    return out
 
 
 def _collinear_overlay_violations(
@@ -891,7 +1134,7 @@ def _collinear_overlay_violations(
     for rp in routes:
         if rp.is_inter_section != inter_section:
             continue
-        pts = _route_render_points(rp, offsets)
+        pts = apply_route_offsets(rp, offsets)
         edge = (rp.edge.source, rp.edge.target)
         for p1, p2 in zip(pts, pts[1:]):
             axis, coord = _axis_aligned(p1, p2)
@@ -1036,6 +1279,138 @@ def _converges_at_shared_port(
     return False
 
 
+_Seg = tuple[tuple[float, float], tuple[float, float]]
+
+
+def _diagonal_segments(
+    rp: RoutedPath, offsets: dict[tuple[str, str], float]
+) -> list[_Seg]:
+    """Final-render diagonal segments of *rp* (both axes change appreciably)."""
+    pts = apply_route_offsets(rp, offsets)
+    out: list[_Seg] = []
+    for p1, p2 in zip(pts, pts[1:]):
+        if (
+            abs(p1[0] - p2[0]) > _COLLINEAR_LATERAL_TOL
+            and abs(p1[1] - p2[1]) > _COLLINEAR_LATERAL_TOL
+        ):
+            out.append((p1, p2))
+    return out
+
+
+def _diagonal_coincidence(seg_a: _Seg, seg_b: _Seg) -> tuple[float, float] | None:
+    """Perpendicular gap and overlap span of two near-parallel diagonals.
+
+    Returns ``None`` when the segments are not near-parallel, do not overlap
+    when projected onto the shared direction, or cross (opposite-sign
+    perpendicular offsets at the overlap ends) -- a crossing is a normal metro
+    junction, not a parallel overlay.  Otherwise returns ``(perp_sep, span)``
+    where ``perp_sep`` is the *widest* perpendicular gap across the overlap and
+    ``span`` its projected length.
+
+    Keying on the widest gap is what separates a true co-running bundle (close
+    at both ends) from a fan diverging out of a shared hub (close at the hub end
+    only): the diverging pair is wide at the far end, so it is not flagged even
+    though it is near-parallel and shares an endpoint.
+    """
+    (ax1, ay1), (ax2, ay2) = seg_a
+    (bx1, by1), (bx2, by2) = seg_b
+    ang_a = math.atan2(ay2 - ay1, ax2 - ax1)
+    ang_b = math.atan2(by2 - by1, bx2 - bx1)
+    # Compare as undirected lines: a half-turn between the two travel
+    # directions is the same orientation.
+    d = abs(ang_a - ang_b) % math.pi
+    d = min(d, math.pi - d)
+    if d > _DIAGONAL_SLOPE_TOL:
+        return None
+
+    ux, uy = ax2 - ax1, ay2 - ay1
+    length = math.hypot(ux, uy)
+    if length < COORD_TOLERANCE:
+        return None
+    ux, uy = ux / length, uy / length
+    nx, ny = -uy, ux  # unit normal of seg_a
+
+    def project(px: float, py: float) -> float:
+        return (px - ax1) * ux + (py - ay1) * uy
+
+    def perp(px: float, py: float) -> float:
+        return (px - ax1) * nx + (py - ay1) * ny
+
+    tb_lo, tb_hi = project(bx1, by1), project(bx2, by2)
+    pb_lo, pb_hi = perp(bx1, by1), perp(bx2, by2)
+    olo, ohi = max(0.0, min(tb_lo, tb_hi)), min(length, max(tb_lo, tb_hi))
+    span = ohi - olo
+    if span <= _COLLINEAR_MIN_SPAN:
+        return None
+    if abs(tb_hi - tb_lo) < COORD_TOLERANCE:
+        return None
+
+    # Perpendicular gap is linear in the projection parameter, so evaluate it at
+    # the two ends of the overlap interval.  A sign flip between them is a
+    # crossing (not a parallel overlay); otherwise the widest of the two is how
+    # far the lines ever separate across the shared run.
+
+    def perp_at(t: float) -> float:
+        frac = (t - tb_lo) / (tb_hi - tb_lo)
+        return pb_lo + frac * (pb_hi - pb_lo)
+
+    g_lo, g_hi = perp_at(olo), perp_at(ohi)
+    if g_lo * g_hi < -COORD_TOLERANCE_FINE:
+        return None
+    return max(abs(g_lo), abs(g_hi)), span
+
+
+def check_no_collinear_distinct_diagonals(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[DiagonalOverlapViolation]:
+    """Return distinct-line diagonal segments collapsed on top of each other.
+
+    The diagonal counterpart to :func:`check_no_collinear_distinct_lines` and
+    :func:`check_intra_section_collinear_distinct_lines`, which only inspect
+    axis-aligned segments.  A bundle's per-line offset is applied along a fixed
+    axis, so on a diagonal the perpendicular separation shrinks to
+    ``OFFSET_STEP * sin(theta)`` and the lines fuse into one stroke.  This flags
+    any different-line pair whose diagonals run near-parallel, overlap by more
+    than ``_COLLINEAR_MIN_SPAN``, and stay closer than ``_DIAGONAL_MIN_PERP_SEP``
+    apart without crossing.  Rail-section internal edges (rendered on explicit
+    parallel rails) are excluded, matching the axis-aligned intra check.
+    """
+    skip_rail = getattr(graph, "has_rail_sections", False)
+    diags: list[tuple[str, tuple[str, str], _Seg]] = []
+    for rp in routes:
+        if skip_rail and _edge_in_rail_section(graph, rp.edge):
+            continue
+        for seg in _diagonal_segments(rp, offsets):
+            diags.append((rp.line_id, (rp.edge.source, rp.edge.target), seg))
+
+    violations: list[DiagonalOverlapViolation] = []
+    for i in range(len(diags)):
+        la, ea, sa = diags[i]
+        for j in range(i + 1, len(diags)):
+            lb, eb, sb = diags[j]
+            if la == lb:
+                continue
+            result = _diagonal_coincidence(sa, sb)
+            if result is None:
+                continue
+            perp_sep, span = result
+            if perp_sep >= _DIAGONAL_MIN_PERP_SEP:
+                continue
+            violations.append(
+                DiagonalOverlapViolation(
+                    line_a=la,
+                    line_b=lb,
+                    edge_a=ea,
+                    edge_b=eb,
+                    perp_sep=perp_sep,
+                    span=span,
+                )
+            )
+    return violations
+
+
 def check_partial_branch_offset_gaps(
     graph: MetroGraph,
     offsets: dict[tuple[str, str], float],
@@ -1127,7 +1502,7 @@ def check_no_same_line_parallel_descents(
     for rp in routes:
         if not rp.is_inter_section:
             continue
-        pts = _route_render_points(rp, offsets)
+        pts = apply_route_offsets(rp, offsets)
         edge = (rp.edge.source, rp.edge.target)
         for p1, p2 in zip(pts, pts[1:]):
             axis, coord = _axis_aligned(p1, p2)
@@ -1244,6 +1619,208 @@ def check_no_split_same_line_fanout_descents(
                         overlap=overlap,
                     )
                 )
+    return violations
+
+
+@dataclass(frozen=True)
+class DistinctFanoutCrossing:
+    """Two distinct lines leaving one fan-out junction cross before diverging.
+
+    Several distinct lines fanning out from a single junction must descend as
+    one bundle and split only where each peels into its target.  When the line
+    peeling to the nearer target rides the outer side of the descent, its drop
+    crosses the farther line's onward run; when the bundle's lead-in Y order is
+    out of phase with the descent X order, the two cross at the shared corner.
+    Either way the two colours cross in open space instead of running parallel.
+    """
+
+    junction: str
+    line_a: str
+    line_b: str
+    x: float
+    y: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"distinct fan-out crossing: lines {self.line_a!r} and "
+            f"{self.line_b!r} leaving {self.junction} cross at "
+            f"({self.x:.1f},{self.y:.1f}) instead of staying bundled until they "
+            f"peel into their targets"
+        )
+
+
+def _route_axis_segments(
+    rp: RoutedPath,
+) -> tuple[list[tuple[float, float, float]], list[tuple[float, float, float]]]:
+    """Split *rp*'s polyline into vertical and horizontal interior segments.
+
+    Returns ``(verticals, horizontals)`` where each vertical is ``(x, y0, y1)``
+    and each horizontal ``(y, x0, x1)``; sub-pixel segments are dropped.
+    """
+    verticals: list[tuple[float, float, float]] = []
+    horizontals: list[tuple[float, float, float]] = []
+    for (x0, y0), (x1, y1) in zip(rp.points, rp.points[1:]):
+        if abs(x1 - x0) <= COORD_TOLERANCE and abs(y1 - y0) > COORD_TOLERANCE:
+            verticals.append((x0, y0, y1))
+        elif abs(y1 - y0) <= COORD_TOLERANCE and abs(x1 - x0) > COORD_TOLERANCE:
+            horizontals.append((y0, x0, x1))
+    return verticals, horizontals
+
+
+def check_no_distinct_line_fanout_crossing(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],  # noqa: ARG001 - uniform guard signature
+) -> list[DistinctFanoutCrossing]:
+    """Return distinct-line pairs that cross while diverging from a fan-out
+    junction whose lines peel off to disjoint targets.
+
+    Scoped to *clean divergence* junctions -- distinct lines peeling to disjoint
+    targets, all dropping the same way to different columns
+    (:func:`fanout_divergence_peel_order`).  There the bundle should descend as
+    one unit and split only where each line turns into its target, so a riser of
+    one line piercing a horizontal run of another is the avoidable crossing this
+    guards against.  Shared corners and endpoints are excluded, so the genuine
+    divergence never flags.  Co-travelling and mixed-target fans are out of scope
+    (they carry tolerated weaves and are left to the general crossing report).
+    """
+    from nf_metro.layout.routing.context import fanout_divergence_peel_order
+
+    line_priority = {lid: i for i, lid in enumerate(graph.lines.keys())}
+    clean = {
+        jid
+        for jid in fanout_junctions(graph)
+        if fanout_divergence_peel_order(graph, jid, line_priority) is not None
+    }
+    if not clean:
+        return []
+
+    by_junction: dict[str, list[RoutedPath]] = defaultdict(list)
+    for rp in routes:
+        if rp.edge.source in clean and len(rp.points) >= 2:
+            by_junction[rp.edge.source].append(rp)
+
+    violations: list[DistinctFanoutCrossing] = []
+    for jid, rps in by_junction.items():
+        for i in range(len(rps)):
+            for j in range(i + 1, len(rps)):
+                a, b = rps[i], rps[j]
+                if a.line_id == b.line_id:
+                    continue
+                va, ha = _route_axis_segments(a)
+                vb, hb = _route_axis_segments(b)
+                hit = _first_axis_crossing(va, hb) or _first_axis_crossing(vb, ha)
+                if hit is not None:
+                    violations.append(
+                        DistinctFanoutCrossing(
+                            junction=jid,
+                            line_a=a.line_id,
+                            line_b=b.line_id,
+                            x=hit[0],
+                            y=hit[1],
+                        )
+                    )
+    return violations
+
+
+def _first_axis_crossing(
+    verticals: list[tuple[float, float, float]],
+    horizontals: list[tuple[float, float, float]],
+) -> tuple[float, float] | None:
+    """First interior crossing of a vertical against a horizontal, or ``None``."""
+    for vx, vy0, vy1 in verticals:
+        for hy, hx0, hx1 in horizontals:
+            if _vert_horiz_cross(vx, vy0, vy1, hy, hx0, hx1):
+                return vx, hy
+    return None
+
+
+@dataclass(frozen=True)
+class TrunkContinuationJog:
+    """A same-lane continuation edge whose route jogs off its lane.
+
+    Within one section, an edge between two non-port stations that share the
+    section's lane-axis coordinate (the trunk column for a TB/BT section, the
+    trunk row for an LR/RL one) is a straight continuation along the flow axis.
+    Its routed line must keep a constant lane coordinate; a change means the
+    line's per-station offset shifted across the edge so the router drew a
+    diagonal where a straight run belongs (issue #929).
+    """
+
+    line_id: str
+    source: str
+    target: str
+    section_id: str
+    lane_lo: float
+    lane_hi: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"trunk-continuation jog: line {self.line_id!r} on edge "
+            f"{self.source}->{self.target} in section {self.section_id!r} shares a "
+            f"lane at both ends but its route spans lane "
+            f"{self.lane_lo:.1f}..{self.lane_hi:.1f} "
+            f"(>{COORD_TOLERANCE:.1f}px) instead of running straight"
+        )
+
+
+def check_trunk_continuation_drops_straight(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[TrunkContinuationJog]:
+    """Return same-lane continuation edges whose route jogs off its lane.
+
+    Within a section, an edge between two non-port stations sharing the
+    section's lane-axis coordinate (X for TB/BT, Y for LR/RL) continues straight
+    along the flow axis.  Its line must keep a constant lane coordinate -- a
+    sibling peeling to another lane is a different edge, excluded by the
+    shared-lane gate.  A jog means the continuing line's offset changed across
+    the edge, which happens on TB/BT where the offset is reversed against a
+    per-station bundle max that shrinks at a solo child (issue #929).
+    """
+    route_by_edge = {(rp.edge.source, rp.edge.target, rp.line_id): rp for rp in routes}
+    violations: list[TrunkContinuationJog] = []
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if src is None or tgt is None or src.is_port or tgt.is_port:
+            continue
+        sec_id = src.section_id
+        if sec_id is None or sec_id != tgt.section_id:
+            continue
+        section = graph.sections.get(sec_id)
+        if section is None:
+            continue
+        # The jog is a property of a lane drawn reversed against a per-station
+        # bundle max (the vertical-flow axis).  Sections that stack lanes on Y
+        # (LR/RL) draw the lane un-reversed, and rail sections bake absolute
+        # lane Ys, so neither exhibits it.
+        if lanes_run_along_y(section.direction) or graph.is_rail_section(sec_id):
+            continue
+        primary_axis, _secondary_axis = AxisFrame.axes_for_direction(section.direction)
+        src_lane = axis_split(primary_axis, (src.x, src.y))[1]
+        tgt_lane = axis_split(primary_axis, (tgt.x, tgt.y))[1]
+        if abs(src_lane - tgt_lane) >= COORD_TOLERANCE:
+            continue
+        rp = route_by_edge.get((edge.source, edge.target, edge.line_id))
+        if rp is None or len(rp.points) < 2:
+            continue
+        lanes = [axis_split(primary_axis, pt)[1] for pt in rp.points]
+        lane_lo, lane_hi = min(lanes), max(lanes)
+        if lane_hi - lane_lo >= COORD_TOLERANCE:
+            violations.append(
+                TrunkContinuationJog(
+                    line_id=edge.line_id,
+                    source=edge.source,
+                    target=edge.target,
+                    section_id=sec_id,
+                    lane_lo=lane_lo,
+                    lane_hi=lane_hi,
+                )
+            )
     return violations
 
 
@@ -1403,7 +1980,7 @@ def check_stacked_elbow_clearance(
     for rp in routes:
         if not rp.is_inter_section:
             continue
-        pts = _route_render_points(rp, offsets)
+        pts = apply_route_offsets(rp, offsets)
         edge = (rp.edge.source, rp.edge.target)
         for p1, p2 in zip(pts, pts[1:]):
             axis, coord = _axis_aligned(p1, p2)
@@ -1546,7 +2123,7 @@ def check_concentric_bundle_corners(
     for (src_id, tgt_id), bundle in bundles.items():
         if len(bundle) < 2:
             continue
-        rendered = [(r, _route_render_points(r, offsets)) for r in bundle]
+        rendered = [(r, apply_route_offsets(r, offsets)) for r in bundle]
         radii = {id(r): _resolved_corner_radii(r, pts) for r, pts in rendered}
         for ai in range(len(rendered)):
             ra, pa = rendered[ai]
@@ -1830,7 +2407,7 @@ def check_merge_branches_meet_trunk(
         for e in feeders:
             r = by_key.get((e.source, e.target, e.line_id))
             if r is not None and len(r.points) >= 2:
-                polylines.append((e, _route_render_points(r, offsets)))
+                polylines.append((e, apply_route_offsets(r, offsets)))
         for edge, pts in polylines:
             end = pts[-1]
             d_merge = ((end[0] - merge_st.x) ** 2 + (end[1] - merge_st.y) ** 2) ** 0.5
@@ -1857,6 +2434,673 @@ def check_merge_branches_meet_trunk(
                     )
                 )
     return violations
+
+
+# A routed endpoint farther than this from every real anchor (a station/
+# port/junction marker or another route's path) reads as a path hanging in
+# open space rather than one terminating on the structure it serves.  Two
+# corner radii of slack covers the endpoint's turn-in arc and the per-line
+# bundle offset that fans it off the marker; a genuine hang (a desynced drop
+# level, a stub that never reaches its trunk) is an order of magnitude larger.
+_HANGING_ROUTE_TOL = 2 * CURVE_RADIUS
+
+
+@dataclass(frozen=True)
+class HangingRoute:
+    """A routed path whose endpoint terminates disconnected from any anchor.
+
+    Every route must begin and end on a real anchor: a station, port, or
+    junction marker, or a point on another route it legitimately joins (a
+    bundle mate, a branch onto a trunk, a peel-off).  An endpoint farther than
+    :data:`_HANGING_ROUTE_TOL` from all of those is a stub hanging in open
+    space -- the universal symptom underneath the family-specific endpoint
+    desyncs (merge branches, rail stubs).  ``which`` names the offending end
+    (``"source"`` or ``"target"``); ``gap`` is the distance to the nearest
+    anchor.
+    """
+
+    source: str
+    target: str
+    line_id: str
+    which: str
+    endpoint: tuple[float, float]
+    gap: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"route {self.source!r}->{self.target!r} on {self.line_id!r}: "
+            f"{self.which} endpoint "
+            f"({self.endpoint[0]:.1f},{self.endpoint[1]:.1f}) is {self.gap:.1f}px "
+            f"from the nearest station, port, junction, or joining route -- "
+            f"a path hanging in open space"
+        )
+
+
+def check_no_hanging_routes(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[HangingRoute]:
+    """Return routes whose endpoints terminate disconnected from any anchor.
+
+    The general backstop for the hanging-path defect class: it asserts the
+    property every family-specific endpoint guard encodes locally -- that a
+    routed segment terminates at a real anchor -- once, over every route.  An
+    endpoint is anchored when it lies within :data:`_HANGING_ROUTE_TOL` of a
+    station/port/junction marker (all live in ``graph.stations``, including
+    terminus/file-icon hosts) or of any *other* route's rendered path (the
+    join point of a bundle mate, a branch onto its trunk, or a peel-off).
+
+    Rail-mode endpoints are skipped: a rail stub terminates on its rail rather
+    than a marker, a distinct idiom with its own dedicated stub tracking.  This
+    complements -- and does not replace -- the precise family-specific checks
+    such as :func:`check_merge_branches_meet_trunk`; they stay as sharper
+    diagnostics.
+    """
+    anchor_xy = [(st.x, st.y) for st in graph.stations.values()]
+    rendered = [(r, apply_route_offsets(r, offsets)) for r in routes]
+    polylines = [(r, pts) for r, pts in rendered if len(pts) >= 2]
+
+    violations: list[HangingRoute] = []
+    for r, pts in rendered:
+        if len(pts) < 2:
+            continue
+        ends = (("source", pts[0], r.edge.source), ("target", pts[-1], r.edge.target))
+        for which, end, node in ends:
+            if graph.station_is_rail(node):
+                continue
+            d_marker = min(
+                (((end[0] - x) ** 2 + (end[1] - y) ** 2) ** 0.5 for x, y in anchor_xy),
+                default=float("inf"),
+            )
+            if d_marker <= _HANGING_ROUTE_TOL:
+                continue
+            d_join = min(
+                (
+                    _point_to_polyline_distance(end, other_pts)
+                    for other, other_pts in polylines
+                    if other is not r
+                ),
+                default=float("inf"),
+            )
+            if d_join <= _HANGING_ROUTE_TOL:
+                continue
+            violations.append(
+                HangingRoute(
+                    source=r.edge.source,
+                    target=r.edge.target,
+                    line_id=r.line_id,
+                    which=which,
+                    endpoint=end,
+                    gap=min(d_marker, d_join),
+                )
+            )
+    return violations
+
+
+# px: doubles as the floor below which an endpoint offset is negligible and the
+# slack within which a terminal segment counts as horizontal (so its Y-shift is
+# a lateral separation rather than an along-travel displacement).
+_LATERAL_OFFSET_TOL = 1.0
+
+
+@dataclass(frozen=True)
+class RegimeOffsetMisapplied:
+    """A deferred route's endpoint separation would shift it along its travel.
+
+    A :attr:`~nf_metro.layout.routing.common.OffsetRegime.DEFERRED` route's
+    line separation is applied at render as a Y-shift of its endpoints, which
+    only reads as a lateral separation when the terminal segment is horizontal
+    (the run travels in X).  A deferred route whose terminal segment is
+    vertical carries a non-zero endpoint offset that the renderer would apply
+    *along* the line's own travel rather than across it -- the route belongs in
+    the :attr:`~nf_metro.layout.routing.common.OffsetRegime.BAKED` regime
+    (a TB / rail / bundle path that pre-bakes its separation) but was left
+    deferred.  This is the latent two-regimes defect made loud.
+    """
+
+    source: str
+    target: str
+    line_id: str
+    which: str
+    offset: float
+    segment: tuple[tuple[float, float], tuple[float, float]]
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        (x1, y1), (x2, y2) = self.segment
+        return (
+            f"deferred route {self.source!r}->{self.target!r} on "
+            f"{self.line_id!r}: {self.which} offset {self.offset:.1f}px applies "
+            f"along a non-horizontal terminal segment "
+            f"(({x1:.1f},{y1:.1f})->({x2:.1f},{y2:.1f})); the route must be "
+            f"OffsetRegime.BAKED, not DEFERRED"
+        )
+
+
+def check_deferred_offsets_apply_laterally(
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[RegimeOffsetMisapplied]:
+    """Flag deferred routes whose endpoint separation is not a lateral shift.
+
+    The render-time offset regime (:func:`apply_route_offsets`) shifts a
+    deferred route's endpoints in Y; that is a clean per-line separation only
+    when the terminal segment runs horizontally.  A deferred route with a
+    non-zero endpoint offset on a vertical terminal segment would be
+    mis-separated -- the structural signature of a route left in the wrong
+    regime -- so it must instead bake its separation
+    (:attr:`~nf_metro.layout.routing.common.OffsetRegime.BAKED`).
+    """
+    violations: list[RegimeOffsetMisapplied] = []
+    for r in routes:
+        if r.offset_regime is not OffsetRegime.DEFERRED or len(r.points) < 2:
+            continue
+        ends = (
+            ("source", r.edge.source, r.points[0], r.points[1]),
+            ("target", r.edge.target, r.points[-1], r.points[-2]),
+        )
+        for which, node, end, neighbour in ends:
+            off = offsets.get((node, r.line_id), 0.0)
+            if abs(off) <= _LATERAL_OFFSET_TOL:
+                continue
+            if abs(end[1] - neighbour[1]) <= _LATERAL_OFFSET_TOL:
+                continue  # terminal segment is horizontal: shift is lateral
+            violations.append(
+                RegimeOffsetMisapplied(
+                    source=r.edge.source,
+                    target=r.edge.target,
+                    line_id=r.line_id,
+                    which=which,
+                    offset=off,
+                    segment=(end, neighbour),
+                )
+            )
+    return violations
+
+
+@dataclass(frozen=True)
+class PerpExitLeadInOverdip:
+    """A cross-column perp-exit lead-in clears a section it never passes under.
+
+    The exit-side down-leg of
+    :func:`~nf_metro.layout.routing.inter_section_handlers._route_perp_exit_over`'s
+    ``crosses_box`` shape drops at the exit X and runs only to the inter-column
+    gap, so it should clear just the sections under that span.  A leg seated
+    below (BOTTOM exit) or above (TOP exit) a section whose X extent it never
+    overlaps loops needlessly to the canvas edge around a box it doesn't cross.
+    """
+
+    source: str
+    target: str
+    section_id: str
+    leg_y: float
+    section_edge: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"perp-exit lead-in {self.source!r}->{self.target!r} corridor at "
+            f"y={self.leg_y:.1f} overshoots section {self.section_id!r} "
+            f"(edge y={self.section_edge:.1f}) it never passes under"
+        )
+
+
+def check_perp_exit_over_leadin_clears_only_spanned_sections(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> list[PerpExitLeadInOverdip]:
+    """Return crosses_box perp-exit lead-ins overshooting an un-spanned section.
+
+    ``_route_perp_exit_over`` drops out of a TOP/BOTTOM exit, crosses to the
+    inter-column gap, then climbs to the entry-side corridor.  The first leg --
+    from the exit X to the gap -- need only clear the source column's sections;
+    if it dips below (BOTTOM exit) or rises above (TOP exit) a section in a
+    different column it never travels under, the route loops to the canvas edge.
+    """
+    tol = COORD_TOLERANCE
+    violations: list[PerpExitLeadInOverdip] = []
+    for r in routes:
+        src_port = graph.ports.get(r.edge.source)
+        tgt_port = graph.ports.get(r.edge.target)
+        if (
+            src_port is None
+            or tgt_port is None
+            or src_port.is_entry
+            or not tgt_port.is_entry
+            or src_port.side not in (PortSide.TOP, PortSide.BOTTOM)
+            or tgt_port.side not in (PortSide.TOP, PortSide.BOTTOM)
+            or not r.is_inter_section
+            or len(r.points) != 6
+        ):
+            continue
+        src_sec = resolve_section(graph, graph.stations.get(r.edge.source))
+        if src_sec is None:
+            continue
+        (sx, _sy), (cx, cy), (gx, _gy), *_rest = r.points
+        if abs(cx - sx) > tol:  # not the exit-drop-first shape
+            continue
+        is_bottom = src_port.side == PortSide.BOTTOM
+        leg_lo, leg_hi = sorted((sx, gx))
+        for s in graph.sections.values():
+            if s.id == src_sec.id or s.grid_row != src_sec.grid_row or s.bbox_h <= 0:
+                continue
+            s_lo, s_hi = s.bbox_x, s.bbox_x + s.bbox_w
+            if leg_hi > s_lo + tol and s_hi > leg_lo + tol:
+                continue  # leg passes under this section; clearing it is expected
+            if is_bottom and cy > s.bbox_y + s.bbox_h + tol:
+                violations.append(
+                    PerpExitLeadInOverdip(
+                        r.edge.source, r.edge.target, s.id, cy, s.bbox_y + s.bbox_h
+                    )
+                )
+            elif not is_bottom and cy < s.bbox_y - tol:
+                violations.append(
+                    PerpExitLeadInOverdip(
+                        r.edge.source, r.edge.target, s.id, cy, s.bbox_y
+                    )
+                )
+    return violations
+
+
+@dataclass(frozen=True)
+class RightEntryNeedlessDive:
+    """A RIGHT entry fed from above loops below the box though a drop-in fits.
+
+    :func:`~nf_metro.layout.routing.inter_section_handlers._route_right_entry_cross_row`
+    drops straight down the source's outward side into the RIGHT port when that
+    descent column is clear past the target's right edge, reserving the
+    around-below loop for cases where the direct drop is obstructed.  A route
+    that dives below the target box while the drop-in column was clear took the
+    loop needlessly.
+    """
+
+    source: str
+    target: str
+    dive_y: float
+    box_bottom: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"RIGHT-entry feed {self.source!r}->{self.target!r} dives to "
+            f"y={self.dive_y:.1f} below target box bottom {self.box_bottom:.1f} "
+            f"though a clear drop-in down the outward side reaches the entry Y"
+        )
+
+
+def check_right_entry_drop_in_when_clear(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> list[RightEntryNeedlessDive]:
+    """Return RIGHT-entry-from-above routes that loop below a clear drop-in.
+
+    A feed from a higher row into a RIGHT entry whose source already sits past
+    the target's right edge can drop straight down the source's outward side to
+    the entry Y; the descent X the route leads out to (``points[1].x``) and the
+    router's own :func:`_right_entry_drop_in_is_clear` decide whether that drop
+    is unobstructed.  A route diving below the target box while that drop-in was
+    clear is a needless around-below loop.
+    """
+    from nf_metro.layout.routing.inter_section_handlers import (
+        _right_entry_drop_in_is_clear,
+    )
+
+    tol = COORD_TOLERANCE
+    violations: list[RightEntryNeedlessDive] = []
+    for r in routes:
+        tgt_port = graph.ports.get(r.edge.target)
+        if (
+            tgt_port is None
+            or not tgt_port.is_entry
+            or tgt_port.side is not PortSide.RIGHT
+            or not r.is_inter_section
+            or len(r.points) < 2
+        ):
+            continue
+        src_sec = resolve_section(graph, graph.stations.get(r.edge.source))
+        tgt_sec = resolve_section(graph, graph.stations.get(r.edge.target))
+        if (
+            src_sec is None
+            or tgt_sec is None
+            or src_sec.grid_row is None
+            or tgt_sec.grid_row is None
+            or src_sec.grid_row >= tgt_sec.grid_row
+            or tgt_sec.bbox_h <= 0
+        ):
+            continue
+        box_bottom = tgt_sec.bbox_y + tgt_sec.bbox_h
+        dive_y = max(y for _, y in r.points)
+        if dive_y <= box_bottom + tol:
+            continue
+        src_station = graph.stations.get(r.edge.source)
+        tgt_station = graph.stations.get(r.edge.target)
+        if src_station is None or tgt_station is None:
+            continue
+        corner_x = r.points[1][0]
+        if _right_entry_drop_in_is_clear(graph, src_station, tgt_station, corner_x):
+            violations.append(
+                RightEntryNeedlessDive(r.edge.source, r.edge.target, dive_y, box_bottom)
+            )
+    return violations
+
+
+@dataclass
+class BottomRowClimbDive:
+    """A bottommost-row source dives below its row to climb to a higher target.
+
+    :func:`~nf_metro.layout.routing.inter_section_handlers._route_bypass` keeps
+    a bottommost-row source's run at its own Y when the row level to the right
+    is clear (no same-row section in the spanned columns), since the sections
+    that classified the edge as a bypass sit in higher rows above that run.  A
+    route diving below the source box while its corridor was clear took the
+    canvas-floor loop needlessly.
+    """
+
+    source: str
+    target: str
+    dive_y: float
+    box_bottom: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"bottommost-row climb {self.source!r}->{self.target!r} dives to "
+            f"y={self.dive_y:.1f} below source box bottom {self.box_bottom:.1f} "
+            f"though its row-level corridor to the target was clear"
+        )
+
+
+@dataclass
+class BottomRowClimbOffTrack:
+    """A bottom-row level run that stepped off its source's offset track.
+
+    When a bottommost-row climb keeps its run at row level, the line leaves its
+    exit port on its own per-line offset track and runs flat until the climb at
+    the end.  A traverse sitting on a different Y than the source endpoint means
+    the line took a gratuitous vertical step off its offset at the exit corner.
+    """
+
+    source: str
+    target: str
+    run_y: float
+    src_y: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"bottommost-row climb {self.source!r}->{self.target!r} runs its "
+            f"traverse at y={self.run_y:.1f}, off the source track "
+            f"y={self.src_y:.1f} -- a dogleg step off the line's offset at the "
+            f"exit corner"
+        )
+
+
+def _iter_bottom_row_climbs(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> Iterator[tuple[RoutedPath, Section]]:
+    """Yield ``(route, source_section)`` for each row-level bottom-row climb.
+
+    A bottommost-row source climbing to a higher-row entry port over a clear
+    corridor keeps its run at row level (see
+    :func:`~nf_metro.layout.routing.inter_section_handlers._route_bypass`).  The
+    two guards below police that run from different angles, so they share this
+    gate.
+    """
+    from nf_metro.layout.routing.inter_section_handlers import (
+        _bottom_row_climb_corridor_clear,
+    )
+
+    for r in routes:
+        if not r.is_inter_section or len(r.points) < 2:
+            continue
+        tgt_port = graph.ports.get(r.edge.target)
+        if tgt_port is None or not tgt_port.is_entry:
+            # A merge/fan junction target collects feeders onto a shared trunk
+            # below the row; that channel is not the single-line dogleg these
+            # guards police, which always lands on a real section entry port.
+            continue
+        src_sec = resolve_section(graph, graph.stations.get(r.edge.source))
+        tgt_sec = resolve_section(graph, graph.stations.get(r.edge.target))
+        if (
+            src_sec is None
+            or tgt_sec is None
+            or src_sec.grid_row is None
+            or tgt_sec.grid_row is None
+            or src_sec.bbox_h <= 0
+        ):
+            continue
+        if not _bottom_row_climb_corridor_clear(
+            graph,
+            src_sec.grid_row,
+            tgt_sec.grid_row,
+            src_sec.grid_col,
+            tgt_sec.grid_col,
+        ):
+            continue
+        yield r, src_sec
+
+
+def check_bottom_row_climb_stays_at_row_level(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> list[BottomRowClimbDive]:
+    """Return bottommost-row climbs that dive below a clear row-level corridor.
+
+    When the source sits in the bottommost content row, the target is in a
+    higher row, and the spanned columns hold no same-row section, the run can
+    stay at the source's Y and climb at the end.  A route that instead dips
+    below the source box took a gratuitous downward dogleg.
+    """
+    tol = COORD_TOLERANCE
+    violations: list[BottomRowClimbDive] = []
+    for r, src_sec in _iter_bottom_row_climbs(graph, routes):
+        box_bottom = src_sec.bbox_y + src_sec.bbox_h
+        dive_y = max(y for _, y in r.points)
+        if dive_y > box_bottom + tol:
+            violations.append(
+                BottomRowClimbDive(r.edge.source, r.edge.target, dive_y, box_bottom)
+            )
+    return violations
+
+
+def check_bottom_row_climb_run_on_source_track(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> list[BottomRowClimbOffTrack]:
+    """Return bottom-row climbs whose level run stepped off the source track.
+
+    When the climb stays at row level, the line leaves its exit port on its own
+    per-line offset track and runs flat until the end-of-traverse climb.  An
+    offset line whose long horizontal traverse instead sits on the bare
+    port-marker row took a gratuitous vertical step off its offset right at the
+    exit corner.  Only flagged when the source endpoint genuinely carries an
+    offset and the traverse landed back on the marker row: a legitimate climb
+    runs its traverse far from both, not on the marker.
+    """
+    tol = COORD_TOLERANCE
+    violations: list[BottomRowClimbOffTrack] = []
+    for r, _src_sec in _iter_bottom_row_climbs(graph, routes):
+        src_station = graph.stations.get(r.edge.source)
+        if src_station is None:
+            continue
+        marker_y = src_station.y
+        src_y = r.points[0][1]
+        if abs(src_y - marker_y) <= tol:
+            continue  # no per-line offset at the port, so no off-track step
+        best_dx = 0.0
+        run_y = src_y
+        for (x0, y0), (x1, y1) in zip(r.points, r.points[1:]):
+            if abs(y1 - y0) <= tol and abs(x1 - x0) > best_dx:
+                best_dx = abs(x1 - x0)
+                run_y = y0
+        if abs(run_y - marker_y) <= tol and abs(run_y - src_y) > tol:
+            violations.append(
+                BottomRowClimbOffTrack(r.edge.source, r.edge.target, run_y, src_y)
+            )
+    return violations
+
+
+@dataclass
+class UndeclaredGapChannel:
+    """A vertical inter-section leg sits in a gap with no :class:`GapSlot`.
+
+    :func:`~nf_metro.layout.routing.normalize._materialize_gap_slots` only
+    re-stacks legs a handler declared, so an in-gap leg without a covering slot
+    is left at its raw routing X -- the overlap the materialization exists to
+    resolve.  A handler that emits a gap channel must call
+    :meth:`RoutedPath.declare_gap_slot` for it.
+    """
+
+    line_id: str
+    edge: tuple[str, str]
+    x: float
+    lo_col: int
+    down: bool
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        d = "down" if self.down else "up"
+        return (
+            f"undeclared gap channel: line {self.line_id!r} "
+            f"({self.edge[0]}->{self.edge[1]}) runs {d} at x={self.x:.1f} in "
+            f"gap (cols {self.lo_col},{self.lo_col + 1}) with no declared GapSlot"
+        )
+
+
+def check_gap_channels_materialized(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+) -> list[UndeclaredGapChannel]:
+    """Return inter-section gap channels a handler placed but did not declare.
+
+    Every non-exempt inter-section route's vertical leg that lands inside an
+    inter-column gap must carry a matching :class:`GapSlot`, so
+    :func:`_materialize_gap_slots` re-stacks it concentrically.  A leg in a gap
+    with no slot of the same low column and direction escaped materialization.
+    """
+    out: list[UndeclaredGapChannel] = []
+    for rp in routes:
+        if not rp.is_inter_section or rp.normalize_exempt:
+            continue
+        declared = {(s.gap_lo_col, s.direction is Direction.D) for s in rp.gap_slots}
+        for _k, x, y_lo, y_hi, down in iter_vertical_segments(rp):
+            match = gap_lo_for_x(graph, x, y_lo, y_hi)
+            if match is None:
+                continue
+            lo, _row = match
+            if (lo, down) not in declared:
+                out.append(
+                    UndeclaredGapChannel(
+                        line_id=rp.line_id,
+                        edge=(rp.edge.source, rp.edge.target),
+                        x=x,
+                        lo_col=lo,
+                        down=down,
+                    )
+                )
+    return out
+
+
+@dataclass
+class UndeclaredTrunk:
+    """An inter-section route's horizontal bypass trunk carries no :class:`TrunkSlot`.
+
+    :func:`~nf_metro.layout.routing.normalize._materialize_trunk_slots` only fans
+    trunks a handler declared, so an undeclared trunk is excluded from its gap's
+    band and left fused on a sibling at its raw routing Y -- the overlap the
+    materialization exists to resolve.  A handler that emits a U-shaped bypass
+    must route through :func:`_route_inter_section` (which calls
+    :func:`_declare_trunk`) so its trunk is annotated.
+    """
+
+    line_id: str
+    edge: tuple[str, str]
+    y: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"undeclared trunk: line {self.line_id!r} "
+            f"({self.edge[0]}->{self.edge[1]}) runs a horizontal bypass trunk at "
+            f"y={self.y:.1f} with no declared TrunkSlot"
+        )
+
+
+def check_trunks_declared(routes: list[RoutedPath]) -> list[UndeclaredTrunk]:
+    """Return inter-section horizontal trunks a handler placed but did not declare.
+
+    Every inter-section route carrying a U-shaped bypass trunk must annotate it
+    with a :class:`TrunkSlot` so :func:`_materialize_trunk_slots` can fan it into
+    its gap's concentric band.  A trunk on a route with no slot escaped the
+    declaration chokepoint and would be left at its raw Y.
+    """
+    out: list[UndeclaredTrunk] = []
+    for rp in routes:
+        if not rp.is_inter_section or rp.trunk_slot is not None:
+            continue
+        trunks = list(iter_horizontal_trunks(rp))
+        if trunks:
+            out.append(
+                UndeclaredTrunk(
+                    line_id=rp.line_id,
+                    edge=(rp.edge.source, rp.edge.target),
+                    y=trunks[0][1].y,
+                )
+            )
+    return out
+
+
+@dataclass
+class PeeloffBundleCrossing:
+    """A peel-off bundle into a LEFT entry port braids instead of nesting.
+
+    Lines riding one shared bypass trunk that rise into a common LEFT entry port
+    must turn in concentrically: the riser peel-x (and the port-slot Y) ordered
+    by trunk depth.  A member whose realized peel-x is not the slot its trunk
+    depth earns rises across the lines stacked with it, crossing them just
+    before the port.
+    """
+
+    port_id: str
+    line_id: str
+    peel_x: float
+    expected_peel_x: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"peel-off bundle into port {self.port_id!r}: line {self.line_id!r} "
+            f"rises at peel-x {self.peel_x:.1f} but its trunk depth earns the "
+            f"slot at {self.expected_peel_x:.1f} (the bundle braids into the port)"
+        )
+
+
+def check_peeloff_concentric(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> list[PeeloffBundleCrossing]:
+    """Return peel-off bundles that braid into a LEFT entry port.
+
+    Every contiguous concentric peel-off bundle - lines sharing one bypass trunk
+    rising into a common LEFT entry port - must have its riser peel-x and
+    port-slot Y ordered by trunk depth so the bundle nests crossing-free into the
+    port.  A member off its depth-earned slot rises across the lines stacked with
+    it, braiding the bundle just before the port.  The ordering is set up front by
+    ``_convergence_line_order`` (riser peel-x) and ``_order_convergence_entry_ports``
+    (port slots), so the bundle nests through the standard layout path.
+    """
+    out: list[PeeloffBundleCrossing] = []
+    for bundle in iter_port_peeloff_bundles(routes, graph, OFFSET_STEP):
+        targets = peeloff_target_slots(bundle)
+        for line_id, tail in bundle.per_line.items():
+            slot = targets[line_id]
+            if not tail_on_slot(tail, slot):
+                out.append(
+                    PeeloffBundleCrossing(
+                        port_id=bundle.port_id,
+                        line_id=line_id,
+                        peel_x=tail.peel_x,
+                        expected_peel_x=slot.peel_x,
+                    )
+                )
+    return out
 
 
 class CurveInvariantError(RuntimeError):
@@ -1897,6 +3141,14 @@ def assert_render_curve_invariants(
 
     Set ``NF_METRO_ALLOW_BAD_CURVES=1`` to downgrade to a warning (debugging a
     work-in-progress handler only; not a supported render mode).
+
+    A layout that bridges a perpendicular connection across grid columns (a
+    ``direction:`` override -- explicit or inferred -- that feeds a section's
+    perpendicular entry/drop from outside its own column) also downgrades to a
+    warning.  The run/trunk is held in its bbox, but the multi-line bundle
+    through such a forced-perpendicular drop is an unsupported shape the builder
+    cannot make clean; the render proceeds best-effort and the warning names the
+    actionable fix rather than aborting.
     """
     named_checks: list[tuple[str, Sequence[_HasMessage]]] = [
         (
@@ -1916,12 +3168,44 @@ def assert_render_curve_invariants(
             check_intra_section_collinear_distinct_lines(graph, routes, offsets),
         ),
         (
+            "collinear distinct diagonals",
+            check_no_collinear_distinct_diagonals(graph, routes, offsets),
+        ),
+        (
             "same-line parallel descents",
             check_no_same_line_parallel_descents(graph, routes, offsets),
         ),
         (
             "merge branch hanging in open space",
             check_merge_branches_meet_trunk(graph, routes, offsets),
+        ),
+        (
+            "route hanging in open space",
+            check_no_hanging_routes(graph, routes, offsets),
+        ),
+        (
+            "deferred route offset applied along travel",
+            check_deferred_offsets_apply_laterally(routes, offsets),
+        ),
+        (
+            "bottommost-row climb dives below clear corridor",
+            check_bottom_row_climb_stays_at_row_level(graph, routes),
+        ),
+        (
+            "bottommost-row climb run off source track",
+            check_bottom_row_climb_run_on_source_track(graph, routes),
+        ),
+        (
+            "undeclared gap channel",
+            check_gap_channels_materialized(graph, routes),
+        ),
+        (
+            "undeclared trunk",
+            check_trunks_declared(routes),
+        ),
+        (
+            "peel-off bundle braids into port",
+            check_peeloff_concentric(graph, routes),
         ),
     ]
     messages: list[str] = []
@@ -1945,30 +3229,143 @@ def assert_render_curve_invariants(
     if os.environ.get("NF_METRO_ALLOW_BAD_CURVES"):
         warnings.warn(msg, stacklevel=2)
         return
+    bridged = sorted(graph._cross_column_perp_bridges)
+    if bridged:
+        warnings.warn(
+            f"section(s) {', '.join(bridged)} have a perpendicular connection "
+            f"bridged across grid columns; routing draws a best-effort lead-in "
+            f"and the bundle geometry through the drop may be imperfect. "
+            f"{FLOW_ALIGNED_PORT_ADVICE}\n  {detail}",
+            stacklevel=2,
+        )
+        return
     raise CurveInvariantError(msg)
 
 
+def _check_spec(
+    fn: Callable[..., Any],
+    tier: str,
+    *,
+    issue_pin: tuple[str, ...] = (),
+    narrow_reason: str | None = None,
+) -> GuardSpec:
+    """Build a :class:`GuardSpec` for a routing ``check_*`` invariant.
+
+    ``needs`` is read from the function signature, so the classification stays
+    correct if a check gains or drops an input.  Unlike a guard -- which always
+    takes ``(graph, phase)`` positionally and lists only the *extra* keyword
+    inputs in ``needs`` -- a check has no universal first argument, so ``needs``
+    is its full input set (the subset of ``graph`` / ``routes`` / ``offsets``).
+    A check is therefore dispatched by passing every ``needs`` entry as a
+    keyword (see ``scripts/guard_cost_audit.py``).
+    """
+    params = set(inspect.signature(fn).parameters)
+    return GuardSpec(
+        fn=fn,
+        tier=tier,
+        needs=frozenset(params & {"graph", "routes", "offsets"}),
+        issue_pin=issue_pin,
+        narrow_reason=narrow_reason,
+    )
+
+
+# The routing invariants, classified with the same schema as the guard
+# registry (``phases/guards.py``).  Unlike ``_guard_*`` these return violation
+# lists rather than raising, so this is a *classification* registry, not a
+# dispatcher; the runtime chokepoint is :func:`assert_render_curve_invariants`.
+#
+# Tier A == already always-on: run on every render via that chokepoint.
+# Tier B == validate-only: invoked by a ``_guard_*`` wrapper, so they reach
+# the canvas only under ``compute_layout(validate=True)``.  See
+# ``docs/dev/guard_tiers.md``.
+CHECK_REGISTRY: tuple[GuardSpec, ...] = (
+    # --- Tier A: the always-on render chokepoint set (in chokepoint order) ---
+    _check_spec(check_bundle_order_preserved, "A"),
+    _check_spec(check_concentric_bundle_corners, "A"),
+    _check_spec(check_no_collinear_distinct_lines, "A"),
+    _check_spec(check_intra_section_collinear_distinct_lines, "A"),
+    _check_spec(check_no_collinear_distinct_diagonals, "A"),
+    _check_spec(check_no_same_line_parallel_descents, "A"),
+    _check_spec(check_merge_branches_meet_trunk, "A"),
+    _check_spec(check_no_hanging_routes, "A"),
+    _check_spec(check_deferred_offsets_apply_laterally, "A"),
+    _check_spec(check_bottom_row_climb_stays_at_row_level, "A"),
+    _check_spec(check_bottom_row_climb_run_on_source_track, "A"),
+    _check_spec(check_gap_channels_materialized, "A"),
+    _check_spec(check_trunks_declared, "A"),
+    _check_spec(check_peeloff_concentric, "A"),
+    # --- Tier B: invoked only by a validate-path ``_guard_*`` wrapper ---
+    _check_spec(check_tb_exit_corner_preserves_column_order, "B"),
+    _check_spec(check_fanout_tail_join, "B"),
+    _check_spec(check_merge_port_approach_side, "B"),
+    _check_spec(check_convergence_shallow_feeder_concentric, "B"),
+    _check_spec(check_merge_port_outgoing_side_preserved, "B"),
+    _check_spec(check_exit_inherits_entry_bundle_order, "B"),
+    _check_spec(check_partial_branch_offset_gaps, "B"),
+    _check_spec(check_no_split_same_line_fanout_descents, "B"),
+    _check_spec(check_no_distinct_line_fanout_crossing, "B"),
+    _check_spec(
+        check_trunk_continuation_drops_straight,
+        "B",
+        issue_pin=("#929",),
+        narrow_reason=(
+            "Scoped to TB sections, the only axis that draws its lane reversed "
+            "against a per-station bundle max; LR/RL draw the lane un-reversed "
+            "and keep a fan-out continuation on the trunk via base priority."
+        ),
+    ),
+    _check_spec(check_no_dogleg_crosses_exempt_trunk, "B"),
+    _check_spec(check_stacked_elbow_clearance, "B"),
+    _check_spec(check_perp_entry_boundary_consistent, "B"),
+    _check_spec(check_perp_exit_over_leadin_clears_only_spanned_sections, "B"),
+    _check_spec(check_right_entry_drop_in_when_clear, "B"),
+)
+
+
 __all__ = [
+    "CHECK_REGISTRY",
+    "GuardSpec",
+    "BottomRowClimbDive",
+    "BottomRowClimbOffTrack",
     "BundleOrderViolation",
     "CollinearOverlapViolation",
+    "DiagonalOverlapViolation",
     "CurveInvariantError",
     "FanoutTailGap",
+    "HangingRoute",
     "MergeBranchHang",
     "MergePortApproachViolation",
     "NonConcentricCornerViolation",
     "PartialBranchGapViolation",
+    "PeeloffBundleCrossing",
     "PerpEntryBoundaryViolation",
+    "PerpExitLeadInOverdip",
+    "RegimeOffsetMisapplied",
+    "RightEntryNeedlessDive",
     "SameLineParallelRun",
     "Side",
     "StackedElbowGraze",
+    "UndeclaredGapChannel",
+    "UndeclaredTrunk",
+    "check_bottom_row_climb_stays_at_row_level",
+    "check_bottom_row_climb_run_on_source_track",
     "check_bundle_order_preserved",
+    "check_gap_channels_materialized",
+    "check_trunks_declared",
     "check_concentric_bundle_corners",
+    "check_deferred_offsets_apply_laterally",
     "check_fanout_tail_join",
+    "check_no_distinct_line_fanout_crossing",
     "check_merge_branches_meet_trunk",
     "check_merge_port_approach_side",
+    "check_no_hanging_routes",
     "check_no_collinear_distinct_lines",
+    "check_no_collinear_distinct_diagonals",
     "check_no_same_line_parallel_descents",
+    "check_peeloff_concentric",
     "check_perp_entry_boundary_consistent",
+    "check_perp_exit_over_leadin_clears_only_spanned_sections",
+    "check_right_entry_drop_in_when_clear",
     "bypass_horizontal_targets",
     "check_stacked_elbow_clearance",
     "check_partial_branch_offset_gaps",

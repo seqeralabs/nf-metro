@@ -1,6 +1,6 @@
 ---
 name: nf-metro-layout-triage
-description: Build a self-contained HTML triage page for failing/xfailing layout-invariant tests in nf-metro (test_label_x_matches_segment_midpoint_on_horizontal_runs, test_stack_station_xs_share_column, test_row_trunk_marker_cy_consistent, test_no_kink_at_section_boundary, test_symfan_pairs_share_y, test_lines_dont_cross_non_consumer_markers, test_topological_siblings_share_y_or_symmetric, test_section_bbox_has_bottom_padding, test_off_track_inputs_above_consumer). Each row pairs the rendered fixture SVG with a red-bbox overlay on the offending element, a plain-English "Supposed issue" + "What to check" explanation, and bug / not-a-bug / ambiguous triage buttons whose state is saved in localStorage and exported as JSON. Use when the user asks to "triage layout invariants", "review xfails", "review failing layout tests", "build the triage page", or generally wants to triage the layout-invariant test suite by eye.
+description: Build a self-contained HTML triage page for failing/xfailing layout-invariant tests in nf-metro (test_label_x_anchored_to_station_marker_on_horizontal_runs, test_visual_stack_station_xs_share_column, test_row_trunk_marker_cy_consistent, test_no_kink_at_section_boundary, test_symfan_pairs_share_y, test_lines_dont_cross_non_consumer_markers, test_topological_siblings_share_y_or_symmetric, test_section_bbox_has_bottom_padding, test_off_track_inputs_above_consumer). Each row pairs the rendered fixture SVG with a red-bbox overlay on the offending element, a plain-English "Supposed issue" + "What to check" explanation, and bug / not-a-bug / ambiguous triage buttons whose state is saved in localStorage and exported as JSON. Use when the user asks to "triage layout invariants", "review xfails", "review failing layout tests", "build the triage page", or generally wants to triage the layout-invariant test suite by eye.
 when-to-use: The user wants to walk through every failing or xfailing case in `tests/test_layout_invariants.py` and classify each one as bug / not-a-bug / ambiguous - typically before deciding which invariants to fix in the engine vs. which to relax in the test. Trigger phrases include "triage layout invariants", "review xfails", "review failing layout tests", "triage tool", "build the triage page", or any mention of triaging the nine invariants listed in the description.
 ---
 
@@ -12,8 +12,8 @@ This skill packages the triage tool that produces a single self-contained HTML p
 
 The tool produces one card per `(fixture, invariant)` pair for these nine invariants:
 
-- `test_label_x_matches_segment_midpoint_on_horizontal_runs`
-- `test_stack_station_xs_share_column`
+- `test_label_x_anchored_to_station_marker_on_horizontal_runs`
+- `test_visual_stack_station_xs_share_column`
 - `test_row_trunk_marker_cy_consistent`
 - `test_no_kink_at_section_boundary`
 - `test_symfan_pairs_share_y`

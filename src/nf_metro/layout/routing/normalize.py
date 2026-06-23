@@ -12,7 +12,6 @@ from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MIN_CORRIDOR_Y_OVERLAP,
@@ -22,14 +21,21 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.routing.common import (
     Direction,
+    GapSlot,
     HTrunkSeg,
     RoutedPath,
+    _grid_row_bands,
     column_gap_edges,
     initial_fanout_descent_span,
     iter_horizontal_trunks,
-    row_bottom_edge,
-    row_top_edge,
+    iter_inter_row_gaps,
+    iter_port_peeloff_bundles,
+    iter_vertical_segments,
+    peeloff_target_slots,
+    seat_peeloff_port_y,
     symmetric_bundle_midpoint,
+    tail_on_slot,
+    trunk_depths_contiguous,
     trunk_segments_cross,
 )
 from nf_metro.layout.routing.context import (
@@ -37,14 +43,11 @@ from nf_metro.layout.routing.context import (
     _RoutingCtx,
 )
 from nf_metro.layout.routing.corners import (
+    concentric_corner_radius_at,
     corner_radius,
     l_shape_radii,
-    reference_anchored_radius,
 )
-from nf_metro.parser.model import (
-    MetroGraph,
-    PortSide,
-)
+from nf_metro.parser.model import MetroGraph, PortSide
 
 
 @dataclass
@@ -64,121 +67,6 @@ class _VChannel:
     y_lo: float
     y_hi: float
     down: bool
-
-
-def _collect_vchannels(routes: list[RoutedPath]) -> list[_VChannel]:
-    """Find every vertical channel segment in inter-section routes."""
-    out: list[_VChannel] = []
-    for rp in routes:
-        if not rp.is_inter_section or rp.normalize_exempt:
-            continue
-        pts = rp.points
-        for k in range(len(pts) - 1):
-            x0, y0 = pts[k]
-            x1, y1 = pts[k + 1]
-            if abs(x1 - x0) < COORD_TOLERANCE and abs(y1 - y0) > COORD_TOLERANCE:
-                out.append(
-                    _VChannel(
-                        route=rp,
-                        idx=k,
-                        x=x0,
-                        y_lo=min(y0, y1),
-                        y_hi=max(y0, y1),
-                        down=y1 > y0,
-                    )
-                )
-    return out
-
-
-def _build_gap_intervals(
-    graph: MetroGraph,
-) -> dict[int | None, list[tuple[int, float, float]]]:
-    """Per-row list of ``(lo_col, gap_left, gap_right)`` for adjacent columns.
-
-    The row key is the grid row; a single combined ``None`` entry is also
-    produced (row-agnostic union) as a fallback for channels whose row
-    can't be matched precisely.
-    """
-    cols = sorted({s.grid_col for s in graph.sections.values() if s.bbox_w > 0})
-    rows = sorted({s.grid_row for s in graph.sections.values() if s.bbox_w > 0})
-    intervals: dict[int | None, list[tuple[int, float, float]]] = {}
-    for row in list(rows) + [None]:
-        per_row: list[tuple[int, float, float]] = []
-        for lo, hi in zip(cols, cols[1:]):
-            if hi != lo + 1:
-                continue
-            left, right = column_gap_edges(graph, lo, hi, row=row)
-            if right > left:
-                per_row.append((lo, left, right))
-        intervals[row] = per_row
-    return intervals
-
-
-def _build_row_bands(graph: MetroGraph) -> dict[int, tuple[float, float]]:
-    """Per grid-row vertical band (top/bottom Y) spanned by its sections.
-
-    Lets a channel be matched to the row whose gap it actually travels in,
-    not merely the first row whose x-interval brackets it: two channels in
-    the same column gap but different grid rows (e.g. a row-0 fan and a
-    row-1 bypass) must NOT merge into one bundle.
-    """
-    row_bands: dict[int, tuple[float, float]] = {}
-    for s in graph.sections.values():
-        if s.bbox_h <= 0:
-            continue
-        for r in range(s.grid_row, s.grid_row + max(1, s.grid_row_span)):
-            top, bot = row_bands.get(r, (s.bbox_y, s.bbox_y + s.bbox_h))
-            row_bands[r] = (min(top, s.bbox_y), max(bot, s.bbox_y + s.bbox_h))
-    return row_bands
-
-
-def _match_channel_gap(
-    ch: _VChannel,
-    gap_intervals: dict[int | None, list[tuple[int, float, float]]],
-    row_bands: dict[int, tuple[float, float]],
-) -> tuple[int, int | None, float, float] | None:
-    """Match a channel to ``(lo_col, row, gap_left, gap_right)``.
-
-    Prefer the row whose x-interval brackets the channel AND whose vertical
-    band the channel overlaps; fall back to any bracketing row, then to the
-    row-agnostic union.
-
-    A channel that vertically crosses several rows must clear sections in
-    ALL of them, so its gap is narrowed to the intersection of every crossed
-    row's gap in the same column.  Otherwise a fan climbing out of a row
-    whose section edge sits further out than a sibling row's would centre in
-    the wider sibling gap and step back behind its source section edge (#386).
-    """
-    x = ch.x
-    overlap_match: tuple[int, int | None, float, float] | None = None
-    bracket_match: tuple[int, int | None, float, float] | None = None
-    for row in gap_intervals:
-        if row is None:
-            continue
-        for lo, left, right in gap_intervals[row]:
-            if not (left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE):
-                continue
-            if bracket_match is None:
-                bracket_match = (lo, row, left, right)
-            band = row_bands.get(row)
-            if band is not None and ch.y_lo < band[1] and band[0] < ch.y_hi:
-                if overlap_match is None:
-                    overlap_match = (lo, row, left, right)
-    match = overlap_match or bracket_match
-    if match is not None:
-        lo, row, left, right = match
-        for r, band in row_bands.items():
-            if not (ch.y_lo < band[1] and band[0] < ch.y_hi):
-                continue
-            for rlo, rleft, rright in gap_intervals.get(r, []):
-                if rlo == lo:
-                    left = max(left, rleft)
-                    right = min(right, rright)
-        return (lo, row, left, right)
-    for lo, left, right in gap_intervals.get(None, []):
-        if left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE:
-            return (lo, None, left, right)
-    return None
 
 
 def _split_corridors(chans: list[_VChannel]) -> list[list[_VChannel]]:
@@ -223,42 +111,6 @@ def _section_intrudes(graph: MetroGraph, x: float, y_lo: float, y_hi: float) -> 
     return False
 
 
-def _bucket_gap_channels(
-    channels: list[_VChannel],
-    gap_intervals: dict[int | None, list[tuple[int, float, float]]],
-    row_bands: dict[int, tuple[float, float]],
-) -> tuple[
-    dict[tuple[int, int | None, bool], list[_VChannel]],
-    dict[tuple[int, int | None], tuple[float, float]],
-]:
-    """Bucket channels per ``(gap lo_col, row, direction)`` with shared bounds.
-
-    A channel is only a candidate when its x lands strictly inside the gap
-    interior (so a near-vertical drop hugging a section edge is left
-    untouched).  Bundles sharing a ``(gap, row)`` are laid out together in
-    one x-range, so the shared bound is narrowed to the intersection of every
-    member's crossed rows rather than letting the last channel win.
-    """
-    buckets: dict[tuple[int, int | None, bool], list[_VChannel]] = defaultdict(list)
-    gap_bounds: dict[tuple[int, int | None], tuple[float, float]] = {}
-    for ch in channels:
-        gap = _match_channel_gap(ch, gap_intervals, row_bands)
-        if gap is None:
-            continue
-        lo, row, left, right = gap
-        if not (left + COORD_TOLERANCE < ch.x < right - COORD_TOLERANCE):
-            # x sits on / outside a section edge: not a clean gap channel.
-            if not (left <= ch.x <= right):
-                continue
-        prev = gap_bounds.get((lo, row))
-        if prev is not None:
-            left = max(left, prev[0])
-            right = min(right, prev[1])
-        gap_bounds[(lo, row)] = (left, right)
-        buckets[(lo, row, ch.down)].append(ch)
-    return buckets, gap_bounds
-
-
 def _layout_gap_bundle(
     bundles: list[tuple[bool, list[_VChannel]]],
     gap_left: float,
@@ -273,7 +125,10 @@ def _layout_gap_bundle(
     # per-line slotting: multiple segments sharing one line_id (a fan
     # whose line feeds several targets) overlay at a single x rather
     # than each claiming an OFFSET_STEP slot.
-    line_orders = [_distinct_line_order(c) for _, c in bundles]
+    line_orders = [
+        _convergence_line_order(c, ctx.graph) or _distinct_line_order(c)
+        for _, c in bundles
+    ]
     # Skip a lone bundle carrying a single distinct line: nothing to
     # re-bundle and centring risks disturbing wrap geometry.
     if len(bundles) == 1 and len(line_orders[0]) <= 1:
@@ -286,6 +141,11 @@ def _layout_gap_bundle(
     lone = len(bundles) == 1
     for bi, (_down, chans) in enumerate(bundles):
         order = line_orders[bi]
+        # The concentric outside/inside assignment mirrors with the trunk's
+        # travel direction: a leftward bypass's descent is the mirror of a
+        # rightward one, so its largest radius sits on the LEFT.  Read the leg
+        # direction from geometry; fall back to the bundle's vertical sense.
+        lead_right = _corridor_leadout_right(chans, _down)
         if lone:
             mid = (gap_left + gap_right) / 2
         else:
@@ -306,46 +166,83 @@ def _layout_gap_bundle(
         ):
             continue
         for ch, (li, nx) in targets:
-            _restack_channel(ch, nx, li, n, step, ctx.curve_radius)
+            _restack_channel(ch, nx, li, n, step, ctx.curve_radius, lead_right)
 
 
-def _normalize_gap_channels(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
-    """Re-bundle inter-section vertical channels sharing a gap + direction.
+def _locate_slot_channel(
+    rp: RoutedPath, slot: GapSlot, graph: MetroGraph
+) -> _VChannel | None:
+    """Find the vertical leg on *rp* that *slot* describes, or ``None``.
 
-    Post-routing pass that enforces the uniform inter-section gap geometry
-    regardless of which handler placed each leg:
+    The leg is the route segment running ``slot.direction`` whose x sits inside
+    the gap ``slot`` names; a handler declares at most one slot per physical
+    leg, so direction plus gap membership identifies it uniquely.  Returns
+    ``None`` when no segment matches (the leg was nudged out of the gap, so the
+    materialization leaves it where the handler placed it).
+    """
+    left, right = column_gap_edges(
+        graph, slot.gap_lo_col, slot.gap_hi_col, row=slot.row
+    )
+    if right <= left:
+        return None
+    down = slot.direction is Direction.D
+    for k, x, y_lo, y_hi, seg_down in iter_vertical_segments(rp):
+        if seg_down is down and left - COORD_TOLERANCE <= x <= right + COORD_TOLERANCE:
+            return _VChannel(route=rp, idx=k, x=x, y_lo=y_lo, y_hi=y_hi, down=down)
+    return None
 
-    * All same-direction channels sharing one inter-column gap collapse
-      into ONE concentric bundle, ``OFFSET_STEP`` apart, centred.
+
+def _materialize_gap_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Resolve every declared :class:`GapSlot` to a concentric channel X.
+
+    Handlers annotate each vertical inter-section leg with the gap it occupies
+    (:meth:`RoutedPath.declare_gap_slot`); this pass groups the legs by that
+    declared ``(gap, row)`` and lays each gap out under the uniform contract:
+
+    * All same-direction channels sharing one inter-column gap collapse into
+      ONE concentric bundle, ``OFFSET_STEP`` apart, centred.
     * A downward bundle and an upward bundle sharing a gap are held
       ``BUNDLE_TO_BUNDLE_CLEARANCE`` (B) apart, centred as a group.
     * A lone bundle centres in its gap with at least
       ``EDGE_TO_BUNDLE_CLEARANCE`` (A) from each bounding section edge.
 
-    Only channels whose current x already lands inside a real inter-column
-    gap are touched, so wrap / around-section legs that deliberately sit
-    outside the immediate gap are left alone.  Corner radii flanking each
-    re-stacked channel are recomputed so the bundle stays concentric.
+    The grouping is read from the declared slots rather than rediscovered from
+    raw geometry; the concentric layout and flanking-radius recompute are the
+    same per-gap logic a single handler cannot do alone (it needs every leg in
+    the gap at once).
     """
     graph = ctx.graph
-    channels = _collect_vchannels(routes)
-    if not channels:
-        return
-    gap_intervals = _build_gap_intervals(graph)
-    row_bands = _build_row_bands(graph)
+    by_gap: dict[tuple[int, int | None], list[_VChannel]] = defaultdict(list)
+    for rp in routes:
+        if rp.normalize_exempt:
+            continue
+        for slot in rp.gap_slots:
+            ch = _locate_slot_channel(rp, slot, graph)
+            if ch is not None:
+                by_gap[(slot.gap_lo_col, slot.row)].append(ch)
 
-    buckets, gap_bounds = _bucket_gap_channels(channels, gap_intervals, row_bands)
-
-    # Assemble bundles per (gap, row): one per corridor, both directions,
-    # laid out together so a down/up pair sharing a gap is B-separated.
-    by_gap: dict[tuple[int, int | None], list[tuple[bool, list[_VChannel]]]]
-    by_gap = defaultdict(list)
-    for (lo, row, down), chans in buckets.items():
-        for corridor in _split_corridors(chans):
-            by_gap[(lo, row)].append((down, corridor))
-
-    for (lo, _row), bundles in by_gap.items():
-        gap_left, gap_right = gap_bounds[(lo, _row)]
+    bands = _grid_row_bands(graph)
+    for (lo, row), chans in by_gap.items():
+        gap_left, gap_right = column_gap_edges(graph, lo, lo + 1, row=row)
+        if gap_right <= gap_left:
+            continue
+        # A channel crossing several rows must clear sections in ALL of them, so
+        # narrow the gap to the intersection of every crossed row's edges -- else
+        # a leg climbing through a row whose section edge sits further out than a
+        # sibling row's would centre in the wider gap and step back behind its
+        # source edge.
+        for r, band in bands.items():
+            if not any(c.y_lo < band[1] and band[0] < c.y_hi for c in chans):
+                continue
+            r_left, r_right = column_gap_edges(graph, lo, lo + 1, row=r)
+            if r_right > r_left:
+                gap_left = max(gap_left, r_left)
+                gap_right = min(gap_right, r_right)
+        bundles: list[tuple[bool, list[_VChannel]]] = []
+        for down in (True, False):
+            same = [c for c in chans if c.down is down]
+            for corridor in _split_corridors(same):
+                bundles.append((down, corridor))
         _layout_gap_bundle(bundles, gap_left, gap_right, ctx)
 
 
@@ -403,37 +300,52 @@ def _collect_htrunks(
     return out
 
 
-def _group_channel_trunks(
-    trunks: list[_HTrunk], step: float, ctx: _RoutingCtx | None = None
-) -> list[list[_HTrunk]]:
+def _declared_htrunks(routes: list[RoutedPath]) -> list[_HTrunk]:
+    """Every horizontal bypass trunk whose handler declared a :class:`TrunkSlot`.
+
+    The trunks the materialization pass owns: exempt and non-exempt alike,
+    filtered to those carrying a declared slot so an undeclared leg (which would
+    have no gap to fan into) is left to :func:`_dogleg_off_exempt_trunks`.
+    """
+    return [
+        t
+        for t in _collect_htrunks(routes, include_exempt=True)
+        if t.route.trunk_slot is not None
+    ]
+
+
+def _group_channel_trunks(trunks: list[_HTrunk], step: float) -> list[list[_HTrunk]]:
     """Group horizontal bypass trunks that visually share one channel.
 
     Trunks belong together when they share a dip direction and transitively
     overlap in X within one channel.  Channel membership is decided two ways:
 
-    - When *ctx* is given and both trunks fall inside the SAME inter-row gap
-      (the ``[row_bottom, next_row_top]`` envelope from
-      :func:`_inter_row_gap_band`), they share that channel however far apart
-      their current Ys sit.  Several bypass routes that dip into one inter-row
-      gap are one visual channel even when their per-bundle ``nest_offset``
-      left them a smear of distinct Ys, so they must fan into a single tight
-      ``OFFSET_STEP`` bundle rather than separate loose groups.
-    - Otherwise (no ctx, or a trunk outside every inter-row gap) membership
-      falls back to proximity to the NEAREST current member: trunks arrive
-      pre-stacked by their per-bundle ``nest_offset``, so a trunk one ``step``
-      deeper than the group's current deepest member still belongs.  A
-      genuinely separate channel a full row away (Ys far outside the chain)
+    - When both trunks declare the SAME inter-row gap (the ``gap_upper_row`` on
+      their :class:`TrunkSlot`), they share that channel however far apart their
+      current Ys sit.  Several bypass routes that dip into one inter-row gap are
+      one visual channel even when their per-bundle ``nest_offset`` left them a
+      smear of distinct Ys, so they must fan into a single tight ``OFFSET_STEP``
+      bundle rather than separate loose groups.
+    - For a deep cross-row dive declaring no gap (``gap_upper_row is None``)
+      membership falls back to proximity to the NEAREST current member: such
+      trunks arrive pre-stacked by their per-bundle ``nest_offset``, so a trunk
+      one ``step`` deeper than the group's current deepest member still belongs.
+      A genuinely separate channel a full row away (Ys far outside the chain)
       then starts its own group.
 
     The shared X-overlap requirement keeps distinct corridors in the same gap
     band - different X regions that never overlap - in separate groups.
     """
     band = max(step, COORD_TOLERANCE)
-    gap_of = {id(t): _inter_row_gap_band(ctx, t.y) for t in trunks} if ctx else {}
 
     def _same_channel(o: _HTrunk, t: _HTrunk) -> bool:
-        go, gt = gap_of.get(id(o)), gap_of.get(id(t))
-        if go is not None and go == gt:
+        go, gt = o.route.trunk_slot, t.route.trunk_slot
+        if (
+            go is not None
+            and gt is not None
+            and go.gap_upper_row is not None
+            and go.gap_upper_row == gt.gap_upper_row
+        ):
             return True
         return abs(o.y - t.y) <= band
 
@@ -454,217 +366,34 @@ def _group_channel_trunks(
     return groups
 
 
-class _PeeloffTail(NamedTuple):
-    """A riser peeling off a horizontal trunk into an entry port."""
-
-    trunk_y: float
-    peel_x: float
-    port_y: float
-    trunk_sign: int  # +1 trunk runs left->right toward the peel, -1 right->left
-
-
-def _port_peeloff_tail(rp: RoutedPath) -> _PeeloffTail | None:
-    """The peel-off tail of a riser ending at an entry port, or ``None``.
-
-    A peel-off-into-port tail ends ``... (tx, trunk_y) -> (peel_x, trunk_y)
-    -> (peel_x, port_y) -> (ex, port_y)``: a horizontal trunk, an upward
-    vertical riser, then a short horizontal lead into the port (the port sits
-    above the trunk).  ``trunk_sign`` records the trunk's traversal direction
-    toward the peel corner.  Returns ``None`` for any other tail.
-    """
-    pts = rp.points
-    if len(pts) < 4:
-        return None
-    (x4, y4), (x3, y3), (x2, y2), (x1, y1) = pts[-4], pts[-3], pts[-2], pts[-1]
-    if abs(y2 - y1) > COORD_TOLERANCE or abs(x2 - x1) <= COORD_TOLERANCE:
-        return None  # port lead is not horizontal
-    if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:
-        return None  # riser is not vertical
-    if abs(y4 - y3) > COORD_TOLERANCE or abs(x4 - x3) <= COORD_TOLERANCE:
-        return None  # trunk is not horizontal
-    if y2 >= y3 - COORD_TOLERANCE:
-        return None  # not an upward riser (port not above the trunk)
-    return _PeeloffTail(y3, x3, y2, 1 if x3 > x4 else -1)
-
-
-def _reorder_convergence_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
-    """Order one concentric bundle peeling off a shared trunk into a port.
-
-    Several inter-section lines ride one bypass trunk - a single concentric
-    bundle, ``OFFSET_STEP`` apart - below a LEFT entry port's row and rise
-    into that common port.  ``_normalize_bypass_trunks`` stacks the trunk by
-    spatial approach (the nearer source's lines on top), but the riser peel
-    x-order and the port-slot Ys are assigned in line-declaration order by
-    independent passes.  When the two orders disagree, a line on the bottom of
-    the trunk rises on the near side and cuts across the lines stacked above it
-    just before the port.
-
-    Re-slot each line's peel-off x and its port-slot Y by trunk depth so the
-    bundle turns into the port concentrically.  The trunk Ys are untouched; the
-    peel x and the port-slot Y are permuted among the slots the bundle already
-    occupies, so spacing is preserved.  The shallowest trunk line takes the
-    slot nearest the trunk's near end - the inner slot for a left-to-right
-    trunk, the outer slot for a right-to-left one - so the bend nests crossing
-    free whichever end the bundle peels at.  Restricted to a single contiguous
-    bundle (every member within the bundle's own ``OFFSET_STEP`` width of a
-    neighbour): lines that reach the port on separate trunks rows apart are not
-    one concentric turn and their order is owned by their own corridors.
-    """
-    by_port: dict[str, list[tuple[RoutedPath, _PeeloffTail]]] = defaultdict(list)
-    for rp in routes:
-        tail = _port_peeloff_tail(rp)
-        if tail is None:
-            continue
-        port = ctx.graph.ports.get(rp.edge.target)
-        if port is None or not port.is_entry or port.side is not PortSide.LEFT:
-            continue
-        by_port[rp.edge.target].append((rp, tail))
-
-    step = ctx.offset_step
-    for port_id, entries in by_port.items():
-        # One representative tail per distinct line (a line feeding several
-        # risers shares a single slot, so its risers move together).
-        per_line: dict[str, _PeeloffTail] = {}
-        for rp, t in entries:
-            per_line.setdefault(rp.edge.line_id, t)
-        n = len(per_line)
-        if n < 2:
-            continue
-        trunk_ys = sorted(t.trunk_y for t in per_line.values())
-        if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:
-            continue  # no distinct trunk depths to order by
-        if trunk_ys[-1] - trunk_ys[0] > (n - 1) * step + COORD_TOLERANCE:
-            continue  # not one contiguous concentric bundle
-        signs = {t.trunk_sign for t in per_line.values()}
-        if len(signs) != 1:
-            continue  # lines peel at different trunk ends; ambiguous
-        reverse = signs.pop() < 0
-
-        x_slots = sorted(t.peel_x for t in per_line.values())
-        y_slots = sorted(t.port_y for t in per_line.values())
-        ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
-        slot = list(range(n - 1, -1, -1)) if reverse else list(range(n))
-        target_x = {lid: x_slots[slot[i]] for i, lid in enumerate(ranked)}
-        target_y = {lid: y_slots[slot[i]] for i, lid in enumerate(ranked)}
-        peel_rank = {lid: slot[i] for i, lid in enumerate(ranked)}
-        if all(
-            abs(target_x[lid] - per_line[lid].peel_x) <= COORD_TOLERANCE
-            and abs(target_y[lid] - per_line[lid].port_y) <= COORD_TOLERANCE
-            for lid in ranked
-        ):
-            continue  # already in trunk-depth order
-        for rp, _t in entries:
-            lid = rp.edge.line_id
-            nx, ny = target_x[lid], target_y[lid]
-            pts = rp.points
-            pts[-3] = (nx, pts[-3][1])
-            pts[-2] = (nx, ny)
-            pts[-1] = (pts[-1][0], ny)
-            _set_peeloff_radii(rp, peel_rank[lid], n, step, ctx.curve_radius, reverse)
-
-        # Propagate slot order to the consumer section: without it the crossing
-        # removed from the riser re-forms between the port and the first station.
-        if _section_reorderable(ctx, port_id, set(per_line)):
-            port_rank = {
-                lid: r
-                for r, lid in enumerate(sorted(ranked, key=lambda lid: target_y[lid]))
-            }
-            _apply_section_bundle_order(ctx, port_id, port_rank, step)
-
-
-def _set_peeloff_radii(
-    rp: RoutedPath,
-    peel_rank: int,
-    n: int,
-    step: float,
-    base_radius: float,
-    reverse: bool,
-) -> None:
-    """Size a moved peel-off riser's two flanking corners concentrically.
-
-    The riser ``points[-3] -> points[-2]`` is a Z-step: its trunk-side and
-    port-side corners turn opposite ways, so the line outermost at one is
-    innermost at the other.  Each corner's radii therefore step with peel-x
-    rank in opposite directions, ``base_radius`` (innermost) up by one
-    ``step`` per rank so the nested arcs stay an equal gap apart.  The
-    rank-to-radius direction flips with the trunk's traversal sense
-    (``reverse``), matching which trunk end the bundle peels at.
-    """
-    pts = rp.points
-    if rp.curve_radii is None:
-        return
-    k = len(pts) - 3  # riser is pts[k] -> pts[k+1]
-    inner_first = peel_rank if not reverse else (n - 1 - peel_rank)
-    offset = inner_first * step
-    max_offset = (n - 1) * step
-    # Trunk-side corner: outermost peel slot is on the outside of its turn;
-    # the port-side corner turns the other way, so the same line is inside.
-    trunk_r = corner_radius(offset, max_offset, outside=True, base_radius=base_radius)
-    port_r = corner_radius(offset, max_offset, outside=False, base_radius=base_radius)
-    if 0 <= k - 1 < len(rp.curve_radii):
-        rp.curve_radii[k - 1] = trunk_r
-    if k < len(rp.curve_radii) and k + 2 < len(pts):
-        rp.curve_radii[k] = port_r
-
-
-def _section_reorderable(
-    ctx: _RoutingCtx, port_id: str, bundle_lines: set[str]
-) -> bool:
-    """Whether *port_id*'s section can absorb the bundle's slot order.
-
-    The propagation writes one dense ``rank * step`` offset per bundle line to
-    every section station.  This is safe when all stations that carry at least
-    one bundle line share the same trunk Y (single-row for the bundle).
-    Stations that carry no bundle lines are ignored: the propagation never
-    touches them, so their Y does not constrain this check.
-    Non-LR sections use different offset semantics and are always excluded.
-    """
-    if ctx.station_offsets is None:
-        return False
-    sec = ctx.graph.sections.get(ctx.graph.ports[port_id].section_id)
-    if sec is None or sec.direction != "LR":
-        return False
-    ys = [
-        st.y
-        for sid in sec.station_ids
-        if not (st := ctx.graph.stations[sid]).is_port
-        and any(lid in bundle_lines for lid in ctx.graph.station_lines(sid))
-    ]
-    return not ys or max(ys) - min(ys) <= COORD_TOLERANCE
-
-
-def _apply_section_bundle_order(
-    ctx: _RoutingCtx, port_id: str, port_rank: dict[str, int], step: float
-) -> None:
-    """Set the per-line offsets of *port_id*'s section to ``port_rank`` order.
-
-    The bundle's order entering the port (``port_rank`` 0 = topmost slot) is
-    carried onto every station of the consumer section it reaches, so the
-    section's internal bundle stays in the same order as the port and no
-    crossing forms just inside the boundary.
-    """
-    if ctx.station_offsets is None:
-        return
-    # Section ``station_ids`` already includes the port station.
-    for sid in ctx.graph.sections[ctx.graph.ports[port_id].section_id].station_ids:
-        for lid in ctx.graph.station_lines(sid):
-            if lid in port_rank:
-                ctx.station_offsets[(sid, lid)] = port_rank[lid] * step
-
-
 def _final_port_approach(rp: RoutedPath) -> _VChannel | None:
-    """The final vertical descent into a port, when the route ends V then H.
+    """The final vertical descent into a port, when the tail ends on a vertical.
 
-    A converging port approach ends ``... (vx, y) -> (vx, ey) -> (ex, ey)``:
-    a vertical leg into the entry Y, then a short horizontal lead into the
-    port.  Returns the ``_VChannel`` for that vertical (``idx`` points at
-    ``points[-3]``), or ``None`` when the tail is not vertical-then-horizontal.
+    A converging port approach usually ends ``... (vx, y) -> (vx, ey) ->
+    (ex, ey)``: a vertical leg into the entry Y, then a short horizontal lead
+    into the port (``idx`` points at ``points[-3]``).  When the feeder is
+    aligned on the port's own X it lands as a bare vertical drop with no
+    horizontal lead -- ``... (vx, y) -> (vx, ey)`` -- and the final segment
+    itself is the descent (``idx`` points at ``points[-2]``).  Returns the
+    ``_VChannel`` for that vertical, or ``None`` when the tail does not end on
+    one.
     """
     pts = rp.points
-    if len(pts) < 3:
+    if len(pts) < 2:
         return None
     x1, y1 = pts[-1]
     x2, y2 = pts[-2]
+    if abs(x2 - x1) <= COORD_TOLERANCE and abs(y2 - y1) > COORD_TOLERANCE:
+        return _VChannel(
+            route=rp,
+            idx=len(pts) - 2,
+            x=x1,
+            y_lo=min(y1, y2),
+            y_hi=max(y1, y2),
+            down=y1 > y2,
+        )
+    if len(pts) < 3:
+        return None
     x3, y3 = pts[-3]
     if abs(y2 - y1) > COORD_TOLERANCE or abs(x2 - x1) <= COORD_TOLERANCE:
         return None  # last segment is not a horizontal lead
@@ -680,29 +409,123 @@ def _final_port_approach(rp: RoutedPath) -> _VChannel | None:
     )
 
 
-def _coincide_convergent_port_approaches(
+class _Coincidence(NamedTuple):
+    """A set of same-line vertical legs to fuse, and the X they share."""
+
+    channels: list[_VChannel]
+    ref_x: float
+
+
+def _snap_group(group: _Coincidence) -> None:
+    """Snap every channel in a coincidence group onto its shared reference X."""
+    for ch in group.channels:
+        if abs(ch.x - group.ref_x) > COORD_TOLERANCE:
+            _set_vchannel_x(ch, group.ref_x)
+
+
+def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Fuse same-line vertical legs that should read as a single stroke.
+
+    Handlers route each edge independently, so one metro line carried by
+    several routes that share a source, an entry port, or a merge can descend
+    as several near-parallel same-colour tracks a few pixels apart -- redundant
+    duplicate strokes of one line.  Each such group should read as ONE track
+    that splits only where the routes genuinely diverge.
+
+    Four kinds of same-line track contribute. Three fuse near-parallel
+    VERTICAL legs onto a shared reference X:
+
+    * convergent -- final descents into one entry port;
+    * divergent -- opening descents leaving one source;
+    * merge feeders -- a merge's same-column feeders, onto the trunk's descent.
+
+    They are fused in that order so a route touched by more than one kind (a
+    short merge feeder whose opening descent is also its final approach) settles
+    on the last group's reference X; each member snaps onto its group's X,
+    resetting its flanking corners since a single track has no concentric
+    nesting.
+
+    The fourth, :func:`_join_fanout_upstream_tails`, closes the HORIZONTAL
+    handoff seam at a fan-out junction: it extends the upstream tail so it
+    meets the paired downstream route's start. It runs last because the
+    downstream start X it reads is the materialised value the earlier passes
+    (and the vertical fusions above) leave behind, not a routing-time value
+    the handler could have anticipated.
+    """
+    for group in _convergent_port_groups(routes, ctx):
+        _snap_group(group)
+    for group in _divergent_source_groups(routes):
+        _snap_group(group)
+    for group in _merge_feeder_groups(routes, ctx):
+        _snap_group(group)
+    _join_fanout_upstream_tails(routes, ctx)
+
+
+def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Re-stack peel-off risers onto the slot their settled trunk depth earns.
+
+    The riser order is assigned during gap materialisation from the trunk
+    depths known then, but the later trunk-slot pass can repack those depths --
+    a hand-authored grid can stagger them against their source columns -- which
+    can leave a riser on a slot a different depth earns: the braid
+    :func:`check_peeloff_concentric` flags.  Running after the trunk pass, this
+    reads the settled depths and permutes each off-slot riser onto the
+    depth-earned slot -- its peel-x via the standard :func:`_restack_channel`
+    path and its port-slot Y to match -- the per-line slot assignment the guard
+    certifies.  The in-section continuation leaves the port at its base Y, so
+    this only re-seats the concentric stagger at the port, never the section
+    linkage.
+    """
+    step = ctx.offset_step
+    for bundle in iter_port_peeloff_bundles(routes, ctx.graph, step):
+        targets = peeloff_target_slots(bundle)
+        n = len(bundle.per_line)
+        for rp, tail in bundle.entries:
+            slot = targets[rp.edge.line_id]
+            if tail_on_slot(tail, slot):
+                continue
+            ch = _VChannel(
+                route=rp,
+                idx=len(rp.points) - 3,  # riser leg points[-3] -> points[-2]
+                x=tail.peel_x,
+                y_lo=min(tail.trunk_y, tail.port_y),
+                y_hi=max(tail.trunk_y, tail.port_y),
+                down=tail.port_y > tail.trunk_y,
+            )
+            _restack_channel(
+                ch, slot.peel_x, slot.rank, n, step, ctx.curve_radius, ch.down
+            )
+            seat_peeloff_port_y(rp, slot.port_y)
+
+
+def _band_clusters(chans: list[_VChannel], band: float) -> list[list[_VChannel]]:
+    """Group X-sorted channels, breaking wherever a left-neighbour gap exceeds *band*.
+
+    Channels closer than *band* share a cluster; a wider gap starts a new one,
+    so widely-separated descents stay distinct corridors.
+    """
+    clusters: list[list[_VChannel]] = []
+    for ch in sorted(chans, key=lambda c: c.x):
+        if clusters and ch.x - clusters[-1][-1].x <= band:
+            clusters[-1].append(ch)
+        else:
+            clusters.append([ch])
+    return clusters
+
+
+def _convergent_port_groups(
     routes: list[RoutedPath], ctx: _RoutingCtx
-) -> None:
-    """Fuse same-line vertical approaches converging on one port into one track.
+) -> list[_Coincidence]:
+    """Same-line final descents converging on one entry port, grouped to fuse.
 
-    Several inter-section edges of the SAME metro line can arrive at one entry
-    port as separate near-parallel vertical descents (each turning into the
-    port via its own short horizontal lead) a few pixels apart -- redundant
-    duplicate tracks of one colour into a single convergence point (#484
-    follow-up).  Where those final descents already sit in a tight band (so
-    they are genuinely the same convergence channel, not legitimately distinct
-    corridors arriving from far apart), snap them to one shared X so the line
-    arrives as a single track and splits only upstream where each feed's
-    horizontal lead peels off at its own Y.
-
-    Channels are clustered by terminal port + line + descent direction; only
-    clusters whose members fall within ``EDGE_TO_BUNDLE_CLEARANCE`` of each
-    other are fused (the band excludes widely-staggered same-line inputs that
-    descend in separate column gaps).  The merge X is the member nearest the
-    port (smallest |vx - ex|), keeping the fused track on the side the port is
-    already approached from.  Flanking corners reset to the base radius: the
-    fused descents are a single track, so the concentric-bundle radii no
-    longer apply.
+    Several inter-section edges of one line can arrive at an entry port as
+    separate near-parallel vertical descents (each turning into the port via
+    its own short horizontal lead) a few pixels apart.  Where those descents
+    sit in a tight band they are one convergence channel and fuse onto the
+    member nearest the port (smallest |vx - ex|), so the line arrives as a
+    single track and splits only upstream where each feed peels off at its own
+    Y; descents staggered more than ``EDGE_TO_BUNDLE_CLEARANCE`` apart are
+    distinct corridors and stay separate.
 
     A merge trunk's route ends at the entry port but carries the merge junction
     as its edge target; map that to the entry port so the trunk and any sibling
@@ -722,40 +545,30 @@ def _coincide_convergent_port_approaches(
         # before render offsets are applied, and keying on the raw endpoint
         # would split that single convergence into two.
         target = entry_port_for.get(rp.edge.target, rp.edge.target)
-        key = (target, rp.line_id, ch.down)
-        by_port[key].append(ch)
+        by_port[(target, rp.line_id, ch.down)].append(ch)
 
-    band = EDGE_TO_BUNDLE_CLEARANCE
+    groups: list[_Coincidence] = []
     for chans in by_port.values():
         if len(chans) < 2:
             continue
         ex = chans[0].route.points[-1][0]
-        # Cluster by descent X proximity; widely-separated descents are
-        # distinct corridors and must not be fused.
-        chans.sort(key=lambda c: c.x)
-        cluster: list[_VChannel] = []
-
-        def _flush(cluster: list[_VChannel], ex: float = ex) -> None:
+        for cluster in _band_clusters(chans, EDGE_TO_BUNDLE_CLEARANCE):
             if len(cluster) < 2:
-                return
-            merge_x = min(cluster, key=lambda c: abs(c.x - ex)).x
-            for c in cluster:
-                if abs(c.x - merge_x) > COORD_TOLERANCE:
-                    _set_vchannel_x(c, merge_x)
-
-        for ch in chans:
-            if cluster and ch.x - cluster[-1].x > band:
-                _flush(cluster)
-                cluster = []
-            cluster.append(ch)
-        _flush(cluster)
+                continue
+            ref_x = min(cluster, key=lambda c: abs(c.x - ex)).x
+            groups.append(_Coincidence(cluster, ref_x))
+    return groups
 
 
 def _set_vchannel_x(ch: _VChannel, new_x: float) -> None:
-    """Move a vertical channel to *new_x*, resetting its flanking corners.
+    """Move a vertical channel to *new_x*, re-deriving its flanking corners.
 
-    Fusing same-line descents into one track removes the concentric-bundle
-    nesting, so both flanking corners take the base ``CURVE_RADIUS``.
+    Fusing same-line descents into one track makes them a single stroke with
+    no concentric nesting (zero displacement from itself), so each flanking
+    corner is re-derived from the route's *final* waypoints as a zero-offset
+    concentric corner via :func:`concentric_corner_radius_at` -- the same
+    central helper the routing handlers use -- rather than hand-set to a fixed
+    radius after the move.  A zero-offset corner resolves to the base radius.
     """
     rp = ch.route
     pts = rp.points
@@ -766,7 +579,10 @@ def _set_vchannel_x(ch: _VChannel, new_x: float) -> None:
         return
     for radius_idx in (k - 1, k):
         if 0 <= radius_idx < len(rp.curve_radii):
-            rp.curve_radii[radius_idx] = reference_anchored_radius(0.0, CURVE_RADIUS)
+            prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
+            rp.curve_radii[radius_idx] = concentric_corner_radius_at(
+                prev_pt, corner_pt, next_pt, 0.0
+            )
 
 
 def _initial_fanout_descent(rp: RoutedPath) -> _VChannel | None:
@@ -783,24 +599,24 @@ def _initial_fanout_descent(rp: RoutedPath) -> _VChannel | None:
     return _VChannel(route=rp, idx=1, x=x, y_lo=y_lo, y_hi=y_hi, down=down)
 
 
-def _coincide_divergent_fanout_descents(routes: list[RoutedPath]) -> None:
-    """Fuse same-line vertical descents leaving one source into one track.
+def _divergent_source_groups(routes: list[RoutedPath]) -> list[_Coincidence]:
+    """Same-line opening descents leaving one source, grouped to fuse.
 
-    The mirror of :func:`_coincide_convergent_port_approaches`: where the
-    convergent pass merges same-line descents *arriving* at one port, this
-    merges same-line descents *leaving* one source (a junction or exit port).
-    Several inter-section edges of the SAME line fanning out from one source
-    each open with their own horizontal lead and vertical channel a few pixels
-    apart.  Every such branch leaves on the same source-Y horizontal lead, so
-    they share the descent until each turns off: they are one trunk that split
-    too early.  Left apart they read as parallel same-colour tracks, and an
-    inverted split (the farther-reaching branch opening inside the nearer one)
-    crosses its sibling's descent.
+    The mirror of :func:`_convergent_port_groups`: where that groups same-line
+    descents *arriving* at one port, this groups same-line descents *leaving*
+    one source (a junction or exit port).  Several inter-section edges of one
+    line fanning out from one source each open with their own horizontal lead
+    and vertical channel a few pixels apart; every branch leaves on the same
+    source-Y lead, so they share the descent until each turns off -- one trunk
+    that split too early.  Left apart they read as parallel same-colour tracks,
+    and an inverted split (the farther-reaching branch opening inside the
+    nearer one) crosses its sibling's descent.
 
     Descents are grouped by source endpoint + line + descent direction; every
-    group of two or more is fused onto the channel nearest the source, hugging
-    the side the branches leave from.  Each branch splits off downstream at its
-    own turn Y.
+    group of two or more fuses onto the channel nearest the source, hugging the
+    side the branches leave from, and splits off downstream at each own turn Y.
+    Unlike the convergent case there is no proximity band: any same-source pair
+    overlapping in Y must collapse, however far apart their Xs.
     """
     by_source: dict[tuple[str, str, bool], list[_VChannel]] = defaultdict(list)
     for rp in routes:
@@ -809,28 +625,29 @@ def _coincide_divergent_fanout_descents(routes: list[RoutedPath]) -> None:
         ch = _initial_fanout_descent(rp)
         if ch is None:
             continue
-        key = (rp.edge.source, rp.line_id, ch.down)
-        by_source[key].append(ch)
+        by_source[(rp.edge.source, rp.line_id, ch.down)].append(ch)
 
+    groups: list[_Coincidence] = []
     for chans in by_source.values():
         if len(chans) < 2:
             continue
         sx = chans[0].route.points[0][0]
-        merge_x = min(chans, key=lambda c: abs(c.x - sx)).x
-        for c in chans:
-            if abs(c.x - merge_x) > COORD_TOLERANCE:
-                _set_vchannel_x(c, merge_x)
+        ref_x = min(chans, key=lambda c: abs(c.x - sx)).x
+        groups.append(_Coincidence(chans, ref_x))
+    return groups
 
 
-def _coincide_merge_feeder_descents(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
-    """Fuse same-column feeders of one merge onto the trunk's descent channel.
+def _merge_feeder_groups(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> list[_Coincidence]:
+    """Same-column merge feeders, grouped to fuse onto the trunk's descent.
 
     A merge with a trunk routes every other feeder as a branch dropping onto
     the trunk's bypass channel.  Feeders sharing the trunk's source column
     descend through the same inter-column gap; left on their own per-route X
     they read as parallel same-colour tracks (and, since both segments
-    terminate at the merge, trip the same-line parallel-descent guard).  Snap
-    each same-column feeder's opening descent onto the trunk's so the
+    terminate at the merge, trip the same-line parallel-descent guard).  Each
+    same-column feeder's opening descent fuses onto the trunk's so the
     converging line drops as one track, splitting only where each feeder's
     horizontal lead peels off at its own Y.  Feeders in other columns descend
     in their own gap and converge along the shared horizontal channel, so they
@@ -838,13 +655,14 @@ def _coincide_merge_feeder_descents(routes: list[RoutedPath], ctx: _RoutingCtx) 
     """
     merge = ctx.merge
     if not merge.trunk_source:
-        return
+        return []
     graph = ctx.graph
     by_key = {
         (r.edge.source, r.edge.target, r.line_id): r
         for r in routes
         if r.is_inter_section
     }
+    groups: list[_Coincidence] = []
     for mjid, trunk_src in merge.trunk_source.items():
         trunk_rp: RoutedPath | None = None
         branch_rps: list[RoutedPath] = []
@@ -863,6 +681,7 @@ def _coincide_merge_feeder_descents(routes: list[RoutedPath], ctx: _RoutingCtx) 
         if trunk_ch is None:
             continue
         trunk_col = _resolve_section_col(graph, trunk_src_st)
+        members: list[_VChannel] = []
         for rp in branch_rps:
             src_st = graph.stations.get(rp.edge.source)
             if src_st is None or _resolve_section_col(graph, src_st) != trunk_col:
@@ -870,37 +689,39 @@ def _coincide_merge_feeder_descents(routes: list[RoutedPath], ctx: _RoutingCtx) 
             ch = _initial_fanout_descent(rp)
             if ch is None:
                 continue
-            if abs(ch.x - trunk_ch.x) > COORD_TOLERANCE:
-                _set_vchannel_x(ch, trunk_ch.x)
+            members.append(ch)
+        if members:
+            groups.append(_Coincidence(members, trunk_ch.x))
+    return groups
 
 
-def _normalize_bypass_trunks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
-    """Separate horizontal bypass trunks that share one below-row channel.
+def _materialize_trunk_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Resolve every declared :class:`TrunkSlot` to a concentric channel Y.
 
-    Several inter-section bypass routes can dip into the same below-row
-    channel and, with their per-line ``nest_offset`` resolved independently
-    per bundle, end up drawn at the *same* Y (overlapping) or at a loose
-    smear of distinct Ys (issue #484).  This post-pass mirrors
-    :func:`_normalize_gap_channels` for the horizontal trunk legs: trunks
-    that share a channel (same inter-row gap, same dip direction, overlapping
-    X) are fanned ``OFFSET_STEP`` apart into a concentric bundle, with the
-    widest-reaching trunk on the outside so the nesting introduces no
-    crossings.
+    The horizontal-trunk twin of :func:`_materialize_gap_slots`.  Handlers that
+    emit a U-shaped bypass annotate its trunk with the inter-row gap it occupies
+    (:meth:`RoutedPath.declare_trunk_slot`); this pass groups the trunks by that
+    declared gap and fans the lines sharing a channel into one concentric
+    ``OFFSET_STEP`` bundle, widest-reaching trunk outermost so the nesting
+    introduces no crossings.  The gap is taken from the annotation, not the
+    trunk's Y, precisely because this pass reassigns that Y.  Each trunk's
+    traversal direction and band rank are read from its current geometry.
 
-    Channel membership uses the inter-row gap envelope, so wrap-route trunks
-    placed by their own handler (``normalize_exempt``) that co-travel through
-    the same gap join the bundle too; they are only fanned when grouped with a
-    non-exempt trunk in that gap (a genuine shared multi-line channel), so a
-    pure-exempt run keeps its handler-owned Y and is left to
+    Concentric fanning, crossing-minimal slot ordering and the flanking-radius
+    recompute are per-gap geometry a single handler cannot do alone (it needs
+    every trunk in the gap at once), so they stay here.  A group of only
+    handler-owned (``normalize_exempt``) trunks keeps its geometry untouched;
+    an exempt trunk sharing a channel with a non-exempt one joins the fan, and a
+    non-exempt trunk left fused on an unbundled exempt run is cleared by
     :func:`_dogleg_off_exempt_trunks`.
 
-    Trunks already at distinct Ys, or alone in their channel, are left
+    Trunks alone in their channel, or already at distinct Ys, are left
     untouched; the flanking corner radii are recomputed for any trunk that
     actually moves so the bundle stays concentric.
     """
     step = ctx.offset_step
-    trunks = _collect_htrunks(routes, include_exempt=True)
-    groups = _group_channel_trunks(trunks, step, ctx) if len(trunks) >= 2 else []
+    trunks = _declared_htrunks(routes)
+    groups = _group_channel_trunks(trunks, step) if len(trunks) >= 2 else []
 
     # Routes whose trunk this pass has placed into a concentric bundle; the
     # dogleg pass treats exempt trunks as fixed obstacles and shoves nearby
@@ -1165,14 +986,14 @@ def _suboptimal_trunk_bands(
     """Same-direction inter-row trunk bands whose realized Y order leaves
     avoidable crossings: ``(band y, current crossings, best achievable)``.
 
-    Reconstructs the bands :func:`_normalize_bypass_trunks` reorders, then
+    Reconstructs the bands :func:`_materialize_trunk_slots` reorders, then
     checks each realized top-to-bottom order against the crossing-minimal
     permutation.  An empty result means every band is crossing-optimal.
     """
-    trunks = _collect_htrunks(routes, include_exempt=True)
+    trunks = _declared_htrunks(routes)
     if len(trunks) < 2:
         return []
-    groups = _group_channel_trunks(trunks, ctx.offset_step, ctx)
+    groups = _group_channel_trunks(trunks, ctx.offset_step)
     out: list[tuple[float, int, int]] = []
     for grp in groups:
         if len({id(t.route) for t in grp}) < 2:
@@ -1254,12 +1075,7 @@ def _inter_row_gap_band(ctx: _RoutingCtx, y: float) -> tuple[float, float] | Non
     Scans adjacent grid rows for the gap whose ``[row_bottom, next_row_top]``
     band contains *y*; returns ``None`` when *y* doesn't fall in any gap.
     """
-    rows = sorted({s.grid_row for s in ctx.graph.sections.values()})
-    for upper, lower in zip(rows, rows[1:]):
-        top = row_bottom_edge(ctx.graph, upper, default=None)  # type: ignore[arg-type]
-        bottom = row_top_edge(ctx.graph, lower, default=None)  # type: ignore[arg-type]
-        if top is None or bottom is None:
-            continue
+    for _upper, top, bottom in iter_inter_row_gaps(ctx.graph):
         if top - COORD_TOLERANCE <= y <= bottom + COORD_TOLERANCE:
             return top, bottom
     return None
@@ -1475,6 +1291,11 @@ def _restack_htrunk(
 def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
     """Snap each fan-out junction's upstream tail onto its downstream start.
 
+    The horizontal-handoff member of the same-line coincidence family (see
+    :func:`_coincide_same_line_tracks`): where the three group passes fuse
+    near-parallel vertical legs of one line, this closes the seam where the
+    line hands off horizontally across a fan-out junction.
+
     At a *fan-out* junction (single upstream source, one or more
     inter-section targets), the incoming ``port -> junction`` route and
     the outgoing ``junction -> target`` route are two separate
@@ -1484,6 +1305,11 @@ def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> N
     past the junction), while the upstream route ends at the bare junction
     coordinate.  The mismatch renders as a seam / notch where the two
     segments meet end-to-end instead of one continuous flowing line.
+
+    The downstream start X read here is the value materialisation leaves
+    behind, not a routing-time coordinate: the gap- and trunk-slot passes
+    shift it after the handlers run, so this fusion cannot be hoisted into
+    the handler that routes the upstream tail.
 
     This pass extends the upstream route's final, horizontal segment so
     it ends at the X of the paired (same ``line_id``) downstream route's
@@ -1529,6 +1355,93 @@ def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> N
             up.points[-1] = (down.points[0][0], p_last[1])
 
 
+def _convergence_line_order(
+    chans: list[_VChannel], graph: MetroGraph
+) -> list[str] | None:
+    """Approach order for a bundle converging into one shared LEFT entry port.
+
+    Several inter-section lines ride one bypass trunk and rise (an UP bundle)
+    into a common LEFT entry port from two or more source-section columns.
+    Their crossing-free order is by approach depth on the trunk - the shallow,
+    port-near trunk Y takes the port-near slot - which the fan/divergence
+    crossing-minimiser of :func:`_distinct_line_order` has no model for.
+    Ordering by realized trunk depth reproduces that stacking, so the risers
+    turn into the port concentrically through the standard
+    :func:`_restack_channel` path, matching the slots
+    :func:`check_peeloff_concentric` enforces.
+
+    Source column is the usual proxy for trunk depth (the nearer source rides
+    the shallower trunk), but a hand-authored grid can stagger the trunks
+    against their source columns; ordering by the trunk depth the routing
+    actually produced keeps the risers nesting whichever way the trunks landed.
+
+    Returns ``None`` for any bundle that is not such a convergence; the
+    standard ordering then applies.  Only the cross-source stacking is set
+    here: lines from one source keep their standard relative order.
+    """
+    if not chans or any(ch.down for ch in chans):
+        return None
+    targets = {ch.route.edge.target for ch in chans}
+    if len(targets) != 1:
+        return None
+    port = graph.ports.get(next(iter(targets)))
+    if port is None or not port.is_entry or port.side is not PortSide.LEFT:
+        return None
+    src_cols: set[int] = set()
+    trunk_depth: dict[str, float] = {}
+    for ch in chans:
+        src = graph.stations.get(ch.route.edge.source)
+        col = _resolve_section_col(graph, src) if src else None
+        if col is None:
+            return None
+        src_cols.add(col)
+        lid = ch.route.line_id
+        trunk_depth[lid] = min(trunk_depth.get(lid, ch.y_hi), ch.y_hi)
+    if len(src_cols) < 2:
+        return None
+    # The risers must peel off ONE shared trunk: their trunk-side Ys (the
+    # bottom of each UP leg, ``y_hi``) cluster within one bundle width.  A
+    # cross-row fan-in whose legs start rows apart is a divergence the standard
+    # crossing-minimiser orders, not a single-trunk convergence.
+    trunk_ys = [ch.y_hi for ch in chans]
+    if not trunk_depths_contiguous(trunk_ys, len(src_cols), OFFSET_STEP):
+        return None
+    return sorted(_distinct_line_order(chans), key=lambda lid: trunk_depth[lid])
+
+
+def _corridor_leadout_right(chans: list[_VChannel], default: bool) -> bool:
+    """Whether a rigid bundle's deep-end horizontal legs extend rightward.
+
+    Each channel meets the inter-section trunk at its deep (``y_hi``) endpoint;
+    the leg there runs toward the trunk's continuation, so its travel direction
+    is what the deep-end crossing model must mirror.  A rightward bypass's DOWN
+    descent leads its trunk RIGHT and its UP ascent receives it from the LEFT; a
+    leftward bypass mirrors both, which a plain ``down`` discriminant cannot see.
+
+    Only a rigid bundle -- every channel one line of a single ``(source,
+    target)`` edge -- has such a trunk; a junction fan-out or merge corridor
+    diverges to different ends at its deep endpoints, where those legs are the
+    peel-offs the ``down``-keyed crossing model already orders, so they keep the
+    *default*.  Within a rigid bundle, returns the majority rightward verdict
+    over channels that have a flanking horizontal, falling back to *default*
+    when none do (a bare vertical drop carries no direction).
+    """
+    if len({(c.route.edge.source, c.route.edge.target) for c in chans}) != 1:
+        return default
+    votes: list[bool] = []
+    for ch in chans:
+        pts = ch.route.points
+        deep, far = (ch.idx + 1, ch.idx + 2) if ch.down else (ch.idx, ch.idx - 1)
+        if not 0 <= far < len(pts):
+            continue
+        dx = pts[far][0] - pts[deep][0]
+        if abs(dx) > COORD_TOLERANCE:
+            votes.append(dx > 0)
+    if not votes:
+        return default
+    return votes.count(True) >= votes.count(False)
+
+
 def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
     """Left-to-right order of the distinct lines in one gap-bundle corridor.
 
@@ -1556,6 +1469,12 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
     preprocess_reporting sits to the RIGHT).
     """
     down = chans[0].down if chans else True
+    # The deep-end crossing model nests by the trunk's travel direction, not the
+    # vertical's: a leftward bypass leads its DOWN trunk LEFT, so the rightward
+    # default (``down``) would mirror the order and twist the bundle at the
+    # corner.  Read the leg direction from geometry; fall back to ``down`` for a
+    # bare drop with no flanking horizontal.
+    lead_right = _corridor_leadout_right(chans, down)
 
     # Per line: the deep turn-off depths of each segment (always y_hi), the
     # deepest reach, a representative x for stable tie-breaking, and the
@@ -1578,10 +1497,10 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
 
     def peel_crossings_if_left(a: str, b: str) -> int:
         # Deep-end (divergence) crossings when a is placed LEFT of b.
-        if down:
+        if lead_right:
             # b's deeper vertical crosses a's shallower right-going lead-outs.
             return sum(1 for t in turns[a] if t < deepest[b] - COORD_TOLERANCE)
-        # UP: a's deeper vertical crosses b's shallower left-going lead-ins.
+        # Leftward: a's deeper vertical crosses b's shallower lead-outs.
         return sum(1 for t in turns[b] if t < deepest[a] - COORD_TOLERANCE)
 
     # The approach-weave term models a fan whose lead-ins enter from the LEFT
@@ -1638,6 +1557,7 @@ def _restack_channel(
     n: int,
     step: float,
     base_radius: float,
+    lead_right: bool,
 ) -> None:
     """Move one vertical channel to *new_x* and recompute its corner radii.
 
@@ -1648,9 +1568,11 @@ def _restack_channel(
     encodes the concentric (outermost-line-largest-on-the-outside)
     geometry for both the down- and up-going cases.
 
-    ``l_shape_radii`` assigns ``i = 0`` to the rightmost (DOWN) / leftmost
-    (UP) line; the bundle here is ordered left-to-right with ``i`` growing
-    rightward, so the index is mapped accordingly.
+    ``l_shape_radii`` assigns ``i = 0`` to the largest-radius outside line;
+    the bundle here is ordered left-to-right with ``i`` growing rightward.
+    Which end is the outside follows the trunk's travel direction (*lead_right*),
+    not the vertical's: a leftward bypass mirrors the assignment so the widest
+    sweep sits on the LEFT.
     """
     rp = ch.route
     pts = rp.points
@@ -1661,8 +1583,10 @@ def _restack_channel(
     if rp.curve_radii is None:
         return
     vertical = Direction.D if ch.down else Direction.U
-    # Map left-to-right index to l_shape_radii's convention.
-    li = (n - 1 - i) if ch.down else i
+    # Map left-to-right index to l_shape_radii's convention: i=0 is the outside
+    # (largest) line, which sits on the right for a rightward-leading trunk and
+    # on the left for a leftward one.
+    li = (n - 1 - i) if lead_right else i
     _, r_first, r_second = l_shape_radii(
         li, n, vertical=vertical, offset_step=step, base_radius=base_radius
     )
@@ -1698,7 +1622,7 @@ def _gap_channel_base(
     """Centred midline x for a bundle of *n* lines in gap ``(lo, lo+1)``.
 
     This is only the initial placement during routing; the post-routing
-    :func:`_normalize_gap_channels` pass re-stacks every inter-section
+    :func:`_materialize_gap_slots` pass re-stacks every inter-section
     channel into its final centred / B-separated position, so the value
     here just needs to land the channel in the right gap.
     """
@@ -1792,5 +1716,35 @@ def _h_segment_crosses_other_section(
             continue
         # Y inside bbox (with optional margin so headers/footers count).
         if s.bbox_y - margin <= y <= s.bbox_y + s.bbox_h + margin:
+            return True
+    return False
+
+
+def _v_segment_crosses_other_section(
+    graph: MetroGraph,
+    x: float,
+    y1: float,
+    y2: float,
+    exclude_section_ids: set[str],
+    margin: float = 0.0,
+) -> bool:
+    """Return True if a vertical segment at *x* crosses any section interior.
+
+    The vertical mirror of :func:`_h_segment_crosses_other_section`: sections
+    in *exclude_section_ids* are skipped, all others are tested against their
+    open interior.  The segment runs from ``min(y1, y2)`` to ``max(y1, y2)``;
+    a section is crossed when the segment penetrates its open Y interior while
+    *x* falls within ``[bbox_x - margin, bbox_x + bbox_w + margin]``.
+    """
+    lo_y, hi_y = (y1, y2) if y1 <= y2 else (y2, y1)
+    for s in graph.sections.values():
+        if s.bbox_w <= 0:
+            continue
+        if s.id in exclude_section_ids:
+            continue
+        bottom = s.bbox_y + s.bbox_h
+        if hi_y <= s.bbox_y or lo_y >= bottom:
+            continue
+        if s.bbox_x - margin <= x <= s.bbox_x + s.bbox_w + margin:
             return True
     return False

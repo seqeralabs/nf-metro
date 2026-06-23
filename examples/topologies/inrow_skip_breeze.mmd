@@ -1,0 +1,13 @@
+%%metro title: In-row express skip
+%%metro style: dark
+%%metro line: a | Local | #2db572
+%%metro line: b | Express | #e63946
+graph LR
+    subgraph s [Section]
+        s1[S1]
+        s2[S2]
+        s3[S3]
+        s1 -->|a| s2
+        s2 -->|a| s3
+        s1 -->|b| s3
+    end

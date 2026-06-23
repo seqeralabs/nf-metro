@@ -13,7 +13,8 @@ from collections import Counter
 
 import pytest
 
-from nf_metro.cli import _apply_layout_overrides, _resolve_theme, render
+from nf_metro.api import apply_layout_overrides, resolve_theme
+from nf_metro.cli import render
 from nf_metro.layout import compute_layout
 from nf_metro.options import LAYOUT_OPTIONS
 from nf_metro.parser.directives import _GLOBAL_DIRECTIVE_HANDLERS
@@ -106,16 +107,16 @@ def test_new_directive_malformed_ignored(directive, attr, default):
 def test_cli_override_beats_directive():
     graph = parse_metro_mermaid("%%metro x_spacing: 200\ngraph LR\n")
     assert graph.x_spacing == 200.0
-    _apply_layout_overrides(graph, {"x_spacing": 60.0})
+    apply_layout_overrides(graph, {"x_spacing": 60.0})
     assert graph.x_spacing == 60.0
-    _apply_layout_overrides(graph, {"x_spacing": None})
+    apply_layout_overrides(graph, {"x_spacing": None})
     assert graph.x_spacing == 60.0
 
 
 def test_cli_override_skips_parse_time_options():
     """fold_threshold reaches the graph through the parser, not a post-parse setattr."""
     graph = MetroGraph(fold_threshold=99)
-    _apply_layout_overrides(graph, {"fold_threshold": 5})
+    apply_layout_overrides(graph, {"fold_threshold": 5})
     assert graph.fold_threshold == 99
 
 
@@ -138,9 +139,9 @@ def test_section_x_gap_directive_drives_layout():
 
 
 def test_style_directive_selects_theme_and_cli_overrides():
-    assert _resolve_theme(None, MetroGraph(style="light")) is THEMES["light"]
-    assert _resolve_theme(None, MetroGraph(style="dark")) is THEMES["nfcore"]
-    assert _resolve_theme("nfcore", MetroGraph(style="light")) is THEMES["nfcore"]
+    assert resolve_theme(None, MetroGraph(style="light")) is THEMES["light"]
+    assert resolve_theme(None, MetroGraph(style="dark")) is THEMES["nfcore"]
+    assert resolve_theme("nfcore", MetroGraph(style="light")) is THEMES["nfcore"]
 
 
 def test_html_output_honours_graph_width_and_animate():

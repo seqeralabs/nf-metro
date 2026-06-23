@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import NamedTuple
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -21,7 +22,28 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_ROUTE_CLEARANCE,
 )
-from nf_metro.parser.model import Edge, MetroGraph, Section, Station
+from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
+
+
+class OffsetRegime(Enum):
+    """When a route's parallel-line separations are applied.
+
+    A diagram routes lines on two separation regimes, and any pass reasoning
+    about spacing must know which one a given route is in:
+
+    ``DEFERRED``
+        The stored points sit on the trunk centreline; the per-line separation
+        is applied at render by :func:`apply_route_offsets` as a lateral (Y)
+        shift of the endpoints.  The default for plain LR/RL runs.
+    ``BAKED``
+        The stored points already carry the separation -- a TB X-stagger, a
+        rail's per-line Y, or a bundle's concentric corner fan -- because it is
+        geometry a uniform endpoint Y-shift cannot express.  Render-time
+        offsetting is skipped so the separation is not applied twice.
+    """
+
+    DEFERRED = "deferred"
+    BAKED = "baked"
 
 
 class Direction(Enum):
@@ -46,6 +68,23 @@ def horizontal_direction(dx: float) -> Direction:
 def vertical_direction(dy: float) -> Direction:
     """``Direction.D`` if ``dy > 0`` else ``Direction.U`` (ties resolve to U)."""
     return Direction.D if dy > 0 else Direction.U
+
+
+def tb_right_entry_sections(graph: MetroGraph) -> set[str]:
+    """IDs of TB sections that have a RIGHT entry port.
+
+    A RIGHT-entry TB section runs its internal column in raw priority order;
+    every other TB section runs it reversed.  Both the offset assignment and
+    the section-reversal detection key on this distinction.
+    """
+    return {
+        port.section_id
+        for port in graph.ports.values()
+        if port.is_entry
+        and port.side == PortSide.RIGHT
+        and graph.sections.get(port.section_id) is not None
+        and graph.sections[port.section_id].direction == "TB"
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +165,37 @@ def row_top_edge(
     return min((s.bbox_y for s in secs), default=default) if secs else default
 
 
+def iter_inter_row_gaps(graph: MetroGraph) -> Iterator[tuple[int, float, float]]:
+    """Yield ``(upper_row, top, bottom)`` for each inter-row gap, top to bottom.
+
+    The gap between adjacent grid rows ``upper_row`` and ``upper_row + 1`` spans
+    ``[top, bottom]`` (the upper row's bottom edge to the lower row's top edge).
+    A row pair where either edge is absent (no section in that row) is skipped.
+    """
+    rows = sorted({s.grid_row for s in graph.sections.values()})
+    for upper, lower in zip(rows, rows[1:]):
+        top = row_bottom_edge(graph, upper, default=None)  # type: ignore[arg-type]
+        bottom = row_top_edge(graph, lower, default=None)  # type: ignore[arg-type]
+        if top is None or bottom is None:
+            continue
+        yield upper, top, bottom
+
+
+def inter_row_gap_upper_row(graph: MetroGraph, y: float) -> int | None:
+    """Grid row directly above the inter-row gap that contains *y*.
+
+    Returns the upper of the two rows bounding the gap whose
+    ``[row_bottom, next_row_top]`` band holds *y*; ``None`` when *y* falls in no
+    gap (e.g. a deep dive below every row).  A handler declares this row-pair
+    identity on a :class:`TrunkSlot` so the materialization pass groups trunks
+    by gap without re-deriving it from their Ys.
+    """
+    for upper, top, bottom in iter_inter_row_gaps(graph):
+        if top - COORD_TOLERANCE <= y <= bottom + COORD_TOLERANCE:
+            return upper
+    return None
+
+
 def max_grid_row_with_content(graph: MetroGraph) -> int | None:
     """Bottommost grid row occupied by a section with rendered width.
 
@@ -146,6 +216,7 @@ def header_corridor_y(
     below: bool,
     base_radius: float,
     default: float = 0.0,
+    col: int | None = None,
 ) -> float:
     """Y of an inter-row routing channel that clears a row's header band.
 
@@ -155,10 +226,14 @@ def header_corridor_y(
     occupies the gap above the row (contributing a header badge); the topmost
     row has only the canvas-top title band, so the smaller
     :data:`SECTION_ROUTE_CLEARANCE` keeps the channel from overshooting it.
+
+    When *col* is given the channel clears only that grid column's sections, so
+    a corridor leg confined to one column isn't pushed past a tall section
+    stacked in a different column of the same row.
     """
     if below:
         return (
-            row_bottom_edge(graph, row, default=default)
+            row_bottom_edge(graph, row, default=default, col=col)
             + SECTION_ROUTE_CLEARANCE
             + base_radius
         )
@@ -167,7 +242,7 @@ def header_corridor_y(
         if section_exists_above_row(graph, row)
         else SECTION_ROUTE_CLEARANCE
     )
-    return row_top_edge(graph, row, default=default) - clearance - base_radius
+    return row_top_edge(graph, row, default=default, col=col) - clearance - base_radius
 
 
 def section_exists_above_row(graph: MetroGraph, row: int) -> bool:
@@ -205,6 +280,79 @@ def column_gap_edges(
     right = col_right_edge(graph, lo, row=row)
     left = col_left_edge(graph, hi, default=right, row=row)
     return right, left
+
+
+def _grid_row_bands(graph: MetroGraph) -> dict[int, tuple[float, float]]:
+    """Per grid-row vertical band ``(top, bottom)`` spanned by its sections."""
+    bands: dict[int, tuple[float, float]] = {}
+    for s in graph.sections.values():
+        if s.bbox_h <= 0:
+            continue
+        for r in range(s.grid_row, s.grid_row + max(1, s.grid_row_span)):
+            top, bot = bands.get(r, (s.bbox_y, s.bbox_y + s.bbox_h))
+            bands[r] = (min(top, s.bbox_y), max(bot, s.bbox_y + s.bbox_h))
+    return bands
+
+
+def gap_lo_for_x(
+    graph: MetroGraph,
+    x: float,
+    y_lo: float,
+    y_hi: float,
+    tol: float = COORD_TOLERANCE,
+) -> tuple[int, int | None] | None:
+    """``(lower column, row)`` of the inter-column gap a vertical leg occupies.
+
+    Lets a handler that has just placed a vertical channel name the gap it sits
+    in, so it can declare a :class:`GapSlot` without the post-routing pass having
+    to rediscover it from raw geometry.  A leg at *x* spanning ``[y_lo, y_hi]``
+    is matched to the row whose gap edges bracket *x* AND whose vertical band the
+    leg overlaps; failing that, to any row whose edges bracket *x*; failing that,
+    to the row-agnostic union (``row = None``).  ``None`` when *x* sits outside
+    every inter-column gap.
+    """
+    cols = sorted({s.grid_col for s in graph.sections.values() if s.bbox_w > 0})
+    rows = sorted({s.grid_row for s in graph.sections.values() if s.bbox_w > 0})
+    bands = _grid_row_bands(graph)
+    bracket: tuple[int, int | None] | None = None
+    for r in rows:
+        for lo, hi in zip(cols, cols[1:]):
+            if hi != lo + 1:
+                continue
+            left, right = column_gap_edges(graph, lo, hi, row=r)
+            if not (right > left and left - tol <= x <= right + tol):
+                continue
+            if bracket is None:
+                bracket = (lo, r)
+            band = bands.get(r)
+            if band is not None and y_lo < band[1] and band[0] < y_hi:
+                return lo, r
+    if bracket is not None:
+        return bracket
+    for lo, hi in zip(cols, cols[1:]):
+        if hi != lo + 1:
+            continue
+        left, right = column_gap_edges(graph, lo, hi, row=None)
+        if right > left and left - tol <= x <= right + tol:
+            return lo, None
+    return None
+
+
+def iter_vertical_segments(
+    rp: RoutedPath,
+) -> Iterator[tuple[int, float, float, float, bool]]:
+    """Yield ``(idx, x, y_lo, y_hi, down)`` for each vertical leg of *rp*.
+
+    ``idx`` is the segment's start index in ``rp.points`` and ``down`` is True
+    when the leg travels in increasing Y.  A leg is a segment that holds X
+    constant while changing Y by more than :data:`COORD_TOLERANCE`.
+    """
+    pts = rp.points
+    for k in range(len(pts) - 1):
+        x0, y0 = pts[k]
+        x1, y1 = pts[k + 1]
+        if abs(x1 - x0) < COORD_TOLERANCE and abs(y1 - y0) > COORD_TOLERANCE:
+            yield k, x0, min(y0, y1), max(y0, y1), y1 > y0
 
 
 def symmetric_bundle_midpoint(
@@ -276,16 +424,40 @@ class GapSlot:
     The corridor is the inter-column gap bounded by the adjacent grid columns
     ``gap_lo_col`` and ``gap_hi_col`` (``gap_hi_col == gap_lo_col + 1``); the run
     traverses grid ``row`` in ``direction`` (:attr:`Direction.U` or
-    :attr:`Direction.D`).  ``slot_index`` is this line's 0-based rank among the
-    ``n_slots`` lines sharing the same gap and direction.
+    :attr:`Direction.D`).  ``row`` is ``None`` for a channel that is matched to
+    the row-agnostic gap union (a leg whose row could not be pinned to a single
+    grid row).  ``slot_index`` is this line's 0-based rank among the ``n_slots``
+    lines sharing the same gap and direction.
     """
 
     gap_lo_col: int
     gap_hi_col: int
-    row: int
+    row: int | None
     direction: Direction
     slot_index: int
     n_slots: int
+
+
+@dataclass(frozen=True)
+class TrunkSlot:
+    """The inter-row gap a route's horizontal bypass trunk runs in.
+
+    The trunk twin of :class:`GapSlot`.  A U-shaped bypass route runs its
+    interior horizontal leg through an inter-row gap; a handler declares *which*
+    gap without committing to a concrete Y, and :func:`_materialize_trunk_slots`
+    groups every declared trunk by gap and fans the co-travelling lines into a
+    concentric band.
+
+    ``gap_upper_row`` is the grid row directly above the gap (the gap separates
+    rows ``gap_upper_row`` and ``gap_upper_row + 1``), or ``None`` for a deep
+    cross-row dive that clears every row and so sits in no single inter-row gap.
+    A present-but-``None`` slot thus distinguishes a trunk in no gap from a route
+    with no trunk at all (``trunk_slot is None``).  The trunk's traversal
+    direction and its rank within the band are read from the routed geometry at
+    materialization, so they are not declared here.
+    """
+
+    gap_upper_row: int | None
 
 
 @dataclass
@@ -297,18 +469,102 @@ class RoutedPath:
     points: list[tuple[float, float]]
     is_inter_section: bool = False
     curve_radii: list[float] | None = None
-    offsets_applied: bool = False
+    offset_regime: OffsetRegime = OffsetRegime.DEFERRED
+    """Which separation regime this route is in (see :class:`OffsetRegime`)."""
     normalize_exempt: bool = False
     """Skip this route in the gap-channel normalization post-pass.
 
     Set by wrap / around-section / TOP-entry handlers whose vertical
     channels follow a special concentric loop (all corners share one
     radius) that the standard L-shape re-stacking would break."""
-    gap_slot: GapSlot | None = None
-    """Symbolic gap-relative slot for this route's vertical channel run.
+    gap_slots: list[GapSlot] = field(default_factory=list)
+    """Symbolic gap-relative slots for this route's vertical channel runs.
 
-    ``None`` until a handler is migrated to declare placement symbolically; the
-    materialization pass resolves a non-``None`` slot to concrete channel X."""
+    Empty until a handler declares placement symbolically.  A route may own
+    more than one (a U-shaped bypass declares both its descent and its ascent
+    channel); :func:`_materialize_gap_slots` resolves each to a concrete X."""
+    trunk_slot: TrunkSlot | None = None
+    """Symbolic inter-row gap for this route's horizontal bypass trunk.
+
+    ``None`` until a handler that emits a U-shaped bypass declares which gap its
+    trunk runs in; :func:`_materialize_trunk_slots` resolves it to a concrete Y.
+    A route owns at most one trunk, so this is a single slot, not a list."""
+
+    def declare_gap_slot(
+        self,
+        *,
+        lo_col: int,
+        hi_col: int,
+        row: int | None,
+        direction: Direction,
+        slot_index: int,
+        n_slots: int,
+    ) -> None:
+        """Record that one of this route's vertical legs runs in a gap bundle.
+
+        Handlers call this where they place a vertical channel; ``slot_index``
+        / ``n_slots`` are the line's provisional rank among the siblings the
+        handler can see.  :func:`_materialize_gap_slots` groups every declared
+        slot by ``(lo_col, row, direction)`` and assigns the final concentric X,
+        re-ranking each gap bundle from the routed geometry rather than from the
+        provisional rank.
+        """
+        self.gap_slots.append(
+            GapSlot(
+                gap_lo_col=lo_col,
+                gap_hi_col=hi_col,
+                row=row,
+                direction=direction,
+                slot_index=slot_index,
+                n_slots=n_slots,
+            )
+        )
+
+    def declare_trunk_slot(self, *, gap_upper_row: int | None) -> None:
+        """Record the inter-row gap this route's horizontal bypass trunk runs in.
+
+        :func:`_materialize_trunk_slots` groups every declared trunk by
+        ``gap_upper_row`` and assigns the final concentric Y, reading each
+        trunk's direction and band rank from the routed geometry.
+        """
+        self.trunk_slot = TrunkSlot(gap_upper_row=gap_upper_row)
+
+
+def apply_route_offsets(
+    route: RoutedPath,
+    station_offsets: dict[tuple[str, str], float],
+) -> list[tuple[float, float]]:
+    """The route's final render geometry, with its line separation applied.
+
+    The single place a route's stored points become drawable coordinates, so
+    every spacing-aware pass (the renderer, the label-strike search, the render
+    invariants) reads one regime-aware result instead of re-deriving it.
+
+    A :attr:`~OffsetRegime.BAKED` route already carries its separation, so its
+    points are returned verbatim.  A :attr:`~OffsetRegime.DEFERRED` route is
+    shifted in Y: the source-side waypoints by the source offset, the
+    target-side by the target offset, each interior point assigned to whichever
+    end it is closer to.
+    """
+    if route.offset_regime is OffsetRegime.BAKED:
+        return list(route.points)
+
+    src_off = station_offsets.get((route.edge.source, route.line_id), 0.0)
+    tgt_off = station_offsets.get((route.edge.target, route.line_id), 0.0)
+    orig_sy = route.points[0][1]
+    orig_ty = route.points[-1][1]
+    last = len(route.points) - 1
+    pts: list[tuple[float, float]] = []
+    for i, (x, y) in enumerate(route.points):
+        if i == 0:
+            pts.append((x, y + src_off))
+        elif i == last:
+            pts.append((x, y + tgt_off))
+        elif abs(y - orig_sy) <= abs(y - orig_ty):
+            pts.append((x, y + src_off))
+        else:
+            pts.append((x, y + tgt_off))
+    return pts
 
 
 def initial_fanout_descent_span(
@@ -375,6 +631,163 @@ def iter_horizontal_trunks(rp: RoutedPath) -> Iterator[tuple[int, HTrunkSeg]]:
         if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:
             continue
         yield k, HTrunkSeg(y0, x0, x1, pts[k - 1][1], pts[k + 2][1])
+
+
+class PeeloffTail(NamedTuple):
+    """A riser peeling off a horizontal trunk into an entry port."""
+
+    trunk_y: float
+    peel_x: float
+    port_y: float
+    trunk_sign: int  # +1 trunk runs left->right toward the peel, -1 right->left
+
+
+def port_peeloff_tail(rp: RoutedPath) -> PeeloffTail | None:
+    """The peel-off tail of a riser ending at an entry port, or ``None``.
+
+    A peel-off-into-port tail ends ``... (tx, trunk_y) -> (peel_x, trunk_y)
+    -> (peel_x, port_y) -> (ex, port_y)``: a horizontal trunk, an upward
+    vertical riser, then a short horizontal lead into the port (the port sits
+    above the trunk).  ``trunk_sign`` records the trunk's traversal direction
+    toward the peel corner.  Returns ``None`` for any other tail.
+    """
+    pts = rp.points
+    if len(pts) < 4:
+        return None
+    (x4, y4), (x3, y3), (x2, y2), (x1, y1) = pts[-4], pts[-3], pts[-2], pts[-1]
+    if abs(y2 - y1) > COORD_TOLERANCE or abs(x2 - x1) <= COORD_TOLERANCE:
+        return None  # port lead is not horizontal
+    if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:
+        return None  # riser is not vertical
+    if abs(y4 - y3) > COORD_TOLERANCE or abs(x4 - x3) <= COORD_TOLERANCE:
+        return None  # trunk is not horizontal
+    if y2 >= y3 - COORD_TOLERANCE:
+        return None  # not an upward riser (port not above the trunk)
+    return PeeloffTail(y3, x3, y2, 1 if x3 > x4 else -1)
+
+
+class PortPeeloffBundle(NamedTuple):
+    """One concentric bundle of lines peeling off a shared trunk into a port.
+
+    ``entries`` holds every ``(route, tail)`` rising into the port (a line can
+    feed several risers); ``per_line`` is one representative tail per distinct
+    line, the unit the slot order is assigned over.  ``reverse`` is the trunk's
+    traversal sense toward the peel corner (a right-to-left trunk peels at the
+    far end, so its slot order is reversed).
+    """
+
+    port_id: str
+    entries: list[tuple[RoutedPath, PeeloffTail]]
+    per_line: dict[str, PeeloffTail]
+    reverse: bool
+
+
+class PeeloffSlot(NamedTuple):
+    """A peel-off line's target peel-x, port-slot Y, and concentric rank."""
+
+    peel_x: float
+    port_y: float
+    rank: int
+
+
+def trunk_depths_contiguous(trunk_ys: list[float], n: int, step: float) -> bool:
+    """Whether ``n`` trunk depths span at most one concentric bundle width.
+
+    The members of a single concentric bundle sit within ``(n-1)*step`` of one
+    another; a wider span is two channels rows apart, not one bundle.
+    """
+    return max(trunk_ys) - min(trunk_ys) <= (n - 1) * step + COORD_TOLERANCE
+
+
+def iter_port_peeloff_bundles(
+    routes: list[RoutedPath], graph: MetroGraph, step: float
+) -> Iterator[PortPeeloffBundle]:
+    """Yield each contiguous concentric peel-off bundle into a LEFT entry port.
+
+    A bundle is several inter-section lines riding one shared bypass trunk that
+    rise into a common LEFT entry port.  Only the bundles whose ordering is a
+    single concentric turn are yielded: at least two distinct lines, distinct
+    trunk depths to order by, every member within the bundle's own
+    ``OFFSET_STEP`` width of a neighbour (one contiguous bundle, not lines that
+    reach the port on trunks rows apart), and all peeling at the same trunk end
+    (one traversal sense).  The reordering pass and its runtime guard share this
+    membership test.
+    """
+    by_port: dict[str, list[tuple[RoutedPath, PeeloffTail]]] = defaultdict(list)
+    for rp in routes:
+        tail = port_peeloff_tail(rp)
+        if tail is None:
+            continue
+        port = graph.ports.get(rp.edge.target)
+        if port is None or not port.is_entry or port.side is not PortSide.LEFT:
+            continue
+        by_port[rp.edge.target].append((rp, tail))
+
+    for port_id, entries in by_port.items():
+        # One representative tail per distinct line (a line feeding several
+        # risers shares a single slot, so its risers move together).
+        per_line: dict[str, PeeloffTail] = {}
+        for rp, t in entries:
+            per_line.setdefault(rp.edge.line_id, t)
+        n = len(per_line)
+        if n < 2:
+            continue
+        trunk_ys = sorted(t.trunk_y for t in per_line.values())
+        if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:
+            continue  # no distinct trunk depths to order by
+        if not trunk_depths_contiguous(trunk_ys, n, step):
+            continue  # not one contiguous concentric bundle
+        signs = {t.trunk_sign for t in per_line.values()}
+        if len(signs) != 1:
+            continue  # lines peel at different trunk ends; ambiguous
+        yield PortPeeloffBundle(port_id, entries, per_line, signs.pop() < 0)
+
+
+def peeloff_target_slots(bundle: PortPeeloffBundle) -> dict[str, PeeloffSlot]:
+    """Map each line of *bundle* to the slot its trunk depth earns.
+
+    The peel-x and port-slot Ys the bundle already occupies are reassigned by
+    trunk depth so the bundle turns into the port concentrically: the shallowest
+    trunk line takes the slot nearest the trunk's near end (the inner slot for a
+    left-to-right trunk, the outer for a right-to-left one).  Spacing is
+    preserved -- the slots are permuted among the bundle's existing ones.
+    """
+    per_line = bundle.per_line
+    n = len(per_line)
+    x_slots = sorted(t.peel_x for t in per_line.values())
+    y_slots = sorted(t.port_y for t in per_line.values())
+    ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
+    slot = list(range(n - 1, -1, -1)) if bundle.reverse else list(range(n))
+    return {
+        lid: PeeloffSlot(x_slots[slot[i]], y_slots[slot[i]], slot[i])
+        for i, lid in enumerate(ranked)
+    }
+
+
+def tail_on_slot(tail: PeeloffTail, slot: PeeloffSlot) -> bool:
+    """Whether a peel-off riser already sits on its depth-earned slot.
+
+    True when the riser's realized peel-x and port-slot Y both match *slot*
+    within tolerance.  The reordering pass skips a bundle whose every member is
+    on slot; the runtime guard flags a member that is not.
+    """
+    return (
+        abs(slot.peel_x - tail.peel_x) <= COORD_TOLERANCE
+        and abs(slot.port_y - tail.port_y) <= COORD_TOLERANCE
+    )
+
+
+def seat_peeloff_port_y(rp: RoutedPath, port_y: float) -> None:
+    """Move a peel-off riser's port lead onto *port_y*.
+
+    The riser turn and the lead into the port -- the last two waypoints of a
+    :func:`port_peeloff_tail` (``... -> (peel_x, port_y) -> (ex, port_y)``) --
+    drop to *port_y*, keeping their Xs.  Owns the tail's waypoint layout so a
+    caller re-seating the port slot need not index into the points.
+    """
+    pts = rp.points
+    pts[-2] = (pts[-2][0], port_y)
+    pts[-1] = (pts[-1][0], port_y)
 
 
 def _vert_horiz_cross(
@@ -601,6 +1014,7 @@ def clear_channel_of_section_edge(
     port_xs: list[float],
     edge_clearance: float = EDGE_TO_BUNDLE_CLEARANCE,
     port_tol: float = COORD_TOLERANCE,
+    target_x: float | None = None,
 ) -> float:
     """Nudge a vertical channel out of an *incidental* section-edge graze.
 
@@ -619,6 +1033,12 @@ def clear_channel_of_section_edge(
     pushing OUTWARD (away from the section interior).  Channels that
     coincide with an endpoint port (within *port_tol*) are left
     untouched.
+
+    *target_x*, when given, is the route's target X.  The channel is
+    pushed onto whichever side of the grazed section carries the target
+    so the descent keeps heading toward it; the nearer edge is used only
+    as a fallback when the target's X falls within the section's own span
+    (so neither side is closer to it) or no target is supplied.
     """
     adjusted = mid_x
     for sec in graph.sections.values():
@@ -643,10 +1063,17 @@ def clear_channel_of_section_edge(
         # a bundle comfortably outside both edges is fine.
         if clear_of_right >= edge_clearance or clear_of_left >= edge_clearance:
             continue
-        # Push OUTWARD via the nearer edge: if the midline is closer to the
-        # right edge, push right until the leftmost line clears it; else
-        # push left until the rightmost line clears the left edge.
-        if right - adjusted <= adjusted - left:
+        # Push OUTWARD onto the target's side so the descent keeps heading
+        # toward it; if the target sits within this section's span (or is
+        # unknown) neither side is closer to it, so fall back to the nearer
+        # edge.  Pushing right clears the right edge with the leftmost line;
+        # pushing left clears the left edge with the rightmost line.
+        push_right = (
+            target_x >= right
+            if target_x is not None and (target_x <= left or target_x >= right)
+            else right - adjusted <= adjusted - left
+        )
+        if push_right:
             adjusted += edge_clearance - clear_of_right
         else:
             adjusted -= edge_clearance - clear_of_left

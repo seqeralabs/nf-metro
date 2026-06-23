@@ -510,6 +510,7 @@ These go at the top of the file, before `graph LR`.
 | Directive | Description |
 |-----------|-------------|
 | `%%metro title: <text>` | Map title |
+| `%%metro caption: <text>` | Free-text caption or attribution line rendered bottom-left of the map (e.g. `Adapted from Author et al., Journal (Year)`). |
 | `%%metro logo: <path>` | Logo image, bundled into the legend (or top-left if there is no legend). |
 | `%%metro logo_scale: <factor>` | Scale the logo within the legend block (`1.0` = default auto-size). Values above 1 grow the legend box to contain the logo. |
 | `%%metro style: <name>` | Theme: `dark` (default, the nfcore theme) or `light`. Selects the render theme unless `--theme` is passed. |
@@ -529,6 +530,8 @@ These go at the top of the file, before `graph LR`.
 | `%%metro width: <pixels>` | Output width in pixels (default: auto from content) |
 | `%%metro height: <pixels>` | Output height in pixels (default: auto from content) |
 | `%%metro animate: true` | Add animated balls traveling along the metro lines |
+| `%%metro directional: true` | Draw static chevrons along each route pointing in the flow direction (source to target). Off by default; CLI equivalent `--directional`. Marker size, spacing, opacity, and colour are theme knobs (`directional_marker_*`). |
+| `%%metro strict: true` | Treat a layout-invariant violation on the rendered geometry (e.g. a station pushed outside its section box) as an error that aborts the render, instead of a warning. Off by default; CLI equivalent `--strict`. See [When a layout is broken](#when-a-layout-is-broken). |
 | `%%metro file: <station> \| <label> [\| <name>] [\| banner]` | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon; optional `banner` draws the label on a dark strip across the icon. |
 | `%%metro files: <station> \| <label> [\| <name>] [\| banner]` | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption; optional `banner` strip. |
 | `%%metro dir: <station> \| <label> [\| <name>]` | Mark a station with a folder icon (e.g. output directory). Optional `name` caption. |
@@ -538,7 +541,8 @@ These go at the top of the file, before `graph LR`.
 | `%%metro line_spread: <mode>[ \| <id>...]` | How lines sharing a station relate vertically (see below). `<mode>` is `bundle` (default), `centered`, or `rails`. The bare form sets the graph default; `<mode> \| sectionA, sectionB` overrides those sections. |
 | `%%metro interchange: <node> \| <rail-1 lines> \| <rail-2 lines> [\| ...]` | Render a shared step as a cross-track interchange instead of a convergence point (see below). Each pipe-group is one rail (comma-separated lines bundle on it). Auto-layout infers this for fully-parallel lanes, so the directive is only needed to pin a grouping. |
 | `%%metro legend_min_height: <pixels>` | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny) |
-| `%%metro process: <station> \| <regex>` | _Experimental._ Tie a station to the Nextflow process(es) it represents, for live progress (see [Live progress](live.md)). The regex matches the fully-qualified process name; repeat the directive to attach several patterns to one station. Pure metadata - it never affects the rendered map. |
+| `%%metro process: <station> \| <regex>` | Tie a station to the Nextflow process(es) it represents, for live progress (see [Live progress](live.md)). The regex matches the fully-qualified process name; repeat the directive to attach several patterns to one station. Pure metadata - it never affects the rendered map. |
+| `%%metro manifest: <bool>` | Embed the machine-readable data manifest (the `<metadata>` block and per-node `data-node-*` attributes) in the SVG. On by default; `%%metro manifest: false` (or `--no-manifest`) emits the drawn map only. |
 
 **Compact offsets.** By default, each line reserves a fixed vertical slot across the whole map based on its declaration order. If you define three lines, every station that carries even one of them is sized to fit all three. This keeps bundles visually consistent but wastes space when most stations only carry one or two lines.
 
@@ -640,8 +644,36 @@ Set the directive in your committed `.mmd` so the map reproduces from the file a
 | `width:` | `--width` | auto |
 | `height:` | `--height` | auto |
 | `animate:` | `--animate` / `--no-animate` | off |
+| `strict:` | `--strict` / `--no-strict` | off |
 
 `--output`, `--format`, `--from-nextflow`, and `--debug` have no directive: they select the output target or a diagnostic overlay rather than describing the diagram.
+
+## When a layout is broken
+
+Some directive combinations leave the layout engine no clean way to place a
+map - for example, an internally left-to-right section whose only ports are on
+the top and bottom edges has no flow-aligned edge to anchor its row, so its
+stations end up outside their own section box. nf-metro renders such a map
+**best-effort and prints a warning to stderr** naming the problem, rather than
+refusing to produce anything:
+
+```
+$ nf-metro render broken.mmd -o broken.svg
+... the settled layout violates Tier-A invariants the renderer is about to draw ...
+Rendered 12 stations, 11 edges, 1 lines -> broken.svg
+```
+
+Pass `--strict` (or add `%%metro strict: true`) to turn that warning into a
+hard error with a non-zero exit, so a broken map fails your build instead of
+shipping a visibly-wrong diagram:
+
+```
+$ nf-metro render broken.mmd -o broken.svg --strict
+Error: the settled layout violates Tier-A invariants ...
+```
+
+`--strict` has the same meaning for `nf-metro validate --with-layout`, which
+checks a map without rendering it.
 
 ## Bridge glyphs
 

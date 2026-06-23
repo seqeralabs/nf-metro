@@ -8,9 +8,12 @@ gap's innermost-of-turn line and no arc on the inside of a deep fan falls below
 the floor radius.
 
 These tests pin that on the fixtures whose bypasses run the deepest fans
-(``funcprofiler_upstream`` fans eight lines, ``bypass_gap2_rightward_overflow``
-and ``upward_bypass`` seven) alongside the tapering cases where the two gaps
-carry different line counts.
+(``funcprofiler_upstream`` fans eight lines, ``bypass_gap2_rightward_overflow``,
+``bypass_leftward_overflow`` and ``upward_bypass`` seven) alongside the tapering
+cases where the two gaps carry different line counts.  ``bypass_leftward_overflow``
+is a reverse-flow (right-to-left) bypass: its trunk leads out leftward, the mirror
+of every other fixture, so the concentric order and corner radii must follow the
+trunk's travel direction rather than a fixed rightward assumption.
 """
 
 from __future__ import annotations
@@ -21,7 +24,11 @@ import pytest
 
 from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import route_tapered_anchored
 from nf_metro.layout.routing.invariants import (
@@ -41,6 +48,7 @@ EXAMPLES = REPO_ROOT / "examples"
 BYPASS_FIXTURES = [
     EXAMPLES / "topologies" / "funcprofiler_upstream.mmd",
     EXAMPLES / "topologies" / "bypass_gap2_rightward_overflow.mmd",
+    EXAMPLES / "topologies" / "bypass_leftward_overflow.mmd",
     EXAMPLES / "topologies" / "upward_bypass.mmd",
     EXAMPLES / "topologies" / "fan_in_merge.mmd",
     EXAMPLES / "longread_variant_calling.mmd",
@@ -96,7 +104,7 @@ def test_bypass_routes_are_offset_baked(path: Path) -> None:
     _graph, _offsets, routes = _route(path)
     bypasses = _bypass_routes(routes)
     assert bypasses, f"{path.stem}: expected at least one U-shaped bypass route"
-    assert all(r.offsets_applied for r in bypasses)
+    assert all(r.offset_regime is OffsetRegime.BAKED for r in bypasses)
 
 
 def test_single_line_bypass_descent_turns_tight() -> None:

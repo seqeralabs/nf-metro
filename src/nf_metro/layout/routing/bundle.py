@@ -34,7 +34,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from nf_metro.layout.constants import COORD_TOLERANCE
-from nf_metro.layout.routing.common import RoutedPath
+from nf_metro.layout.routing.common import OffsetRegime, RoutedPath
 from nf_metro.layout.routing.corners import reference_anchored_radius
 from nf_metro.parser.model import Edge
 
@@ -104,8 +104,8 @@ def build_concentric_bundle(
     Returns
     -------
     One :class:`RoutedPath` per member, each a parallel offset of *centerline*
-    with concentric corner radii.  ``offsets_applied`` is set: the per-line
-    offset is baked into the points, not left to the renderer's heuristic.
+    with concentric corner radii.  Each is :attr:`OffsetRegime.BAKED`: the
+    per-line offset is in the points, not left to the renderer's heuristic.
     """
     n_legs = len(centerline) - 1
     if n_legs < 1:
@@ -357,7 +357,7 @@ def _fan_bundle(
                 is_inter_section=is_inter_section,
                 curve_radii=radii or None,
                 normalize_exempt=normalize_exempt,
-                offsets_applied=True,
+                offset_regime=OffsetRegime.BAKED,
             )
         )
     return routes

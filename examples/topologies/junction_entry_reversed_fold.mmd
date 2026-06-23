@@ -1,0 +1,41 @@
+%%metro title: Junction Entry Reversed Fold
+%%metro style: dark
+%%metro line: alpha | Alpha | #e63946
+%%metro line: beta | Beta | #2db572
+%%metro grid: tb | 0,0
+%%metro grid: src | 1,0
+%%metro grid: dst_a | 2,0
+%%metro grid: dst_b | 3,0
+
+graph LR
+    subgraph tb [Bridge]
+        %%metro direction: TB
+        %%metro exit: right | alpha,beta
+        tb1[Mark]
+        tb2[Recal]
+        tb1 -->|alpha,beta| tb2
+    end
+
+    subgraph src [Source]
+        %%metro entry: left | alpha,beta
+        %%metro exit: right | alpha,beta
+        s_hub[Hub]
+    end
+
+    subgraph dst_a [Dest Alpha]
+        %%metro entry: left | alpha
+        da1[Process A]
+        da2[Output A]
+        da1 -->|alpha| da2
+    end
+
+    subgraph dst_b [Dest Beta]
+        %%metro entry: left | beta
+        db1[Process B]
+        db2[Output B]
+        db1 -->|beta| db2
+    end
+
+    tb2 -->|alpha,beta| s_hub
+    s_hub -->|alpha| da1
+    s_hub -->|beta| db1

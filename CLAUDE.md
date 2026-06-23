@@ -105,8 +105,9 @@ This is the authoritative visual review and should be used for all layout or ren
 ```bash
 source ~/.local/bin/mm-activate nf-metro
 
-# Render SVG
-python -m nf_metro render examples/rnaseq_sections.mmd -o /tmp/rnaseq_sections.svg --x-spacing 60 --y-spacing 40
+# Render SVG. --no-chrome-css bakes concrete colors so cairosvg can rasterize it;
+# without it cairosvg aborts on the var() chrome custom properties.
+python -m nf_metro render examples/rnaseq_sections.mmd -o /tmp/rnaseq_sections.svg --x-spacing 60 --y-spacing 40 --no-chrome-css
 
 # Convert SVG to PNG via cairosvg (scale=2 for retina)
 python -c "import cairosvg; cairosvg.svg2png(url='/tmp/rnaseq_sections.svg', write_to='/tmp/rnaseq_sections.png', scale=2)"

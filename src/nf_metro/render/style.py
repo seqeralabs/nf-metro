@@ -49,6 +49,12 @@ class Theme:
     animation_ball_stroke_width: float = 1.0
     animation_balls_per_line: int = 1
     animation_speed: float = 80.0  # pixels per second
+    # Static directional chevrons (--directional). Kept transit-restrained:
+    # a wide spacing so most routes show only a few markers.
+    directional_marker_size: float = 4.0  # arm half-length and half-width, px
+    directional_marker_spacing: float = 64.0  # px
+    directional_marker_opacity: float = 0.75
+    directional_marker_color: str = ""  # empty = inherit the line colour
     # Terminus (file icon) settings
     terminus_width: float = TERMINUS_WIDTH
     terminus_height: float = 2 * ICON_HALF_HEIGHT

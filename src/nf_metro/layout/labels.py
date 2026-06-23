@@ -284,8 +284,13 @@ def _rail_panel_label_offsets(
     from ``station.y`` to the panel's top/bottom rail (so ``_try_place`` lands
     the label outside the rail stack), or None when the station is not in a
     known rail panel.
+
+    An off-track station parks outside the rail panel on its own vertical
+    stub; forcing its label to clear the whole panel drives it across the
+    drop onto a neighbour, so it keeps the normal pill offsets and labels
+    against its own node.
     """
-    if not station.section_id:
+    if not station.section_id or station.off_track:
         return None
     extent = panel_extents.get(station.section_id)
     if extent is None:
@@ -1868,6 +1873,26 @@ def _grow_section_for_box(
         sec.bbox_h = (y_max + margin) - sec.bbox_y
 
 
+def _route_endpoints_with_offsets(
+    route: "RoutedPath",
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> list[tuple[float, float]]:
+    """A route's points with the render-time endpoint separation applied.
+
+    Label-strike tests care only about each segment's orientation, so this
+    shifts just the endpoints (the renderer's full per-line offsetting also
+    moves interior channel points).  A baked route's points are returned as
+    routed.  Reuses the renderer's offsetting so the two stay in lockstep.
+    """
+    pts = list(route.points)
+    if station_offsets and pts:
+        from nf_metro.layout.routing.common import apply_route_offsets
+
+        shifted = apply_route_offsets(route, station_offsets)
+        pts[0], pts[-1] = shifted[0], shifted[-1]
+    return pts
+
+
 def _avoid_diagonal_routes(
     placements: list[LabelPlacement],
     graph: MetroGraph,
@@ -1885,12 +1910,7 @@ def _avoid_diagonal_routes(
     """
     diag: list[tuple[float, float, float, float]] = []
     for route in routes:
-        pts = list(route.points)
-        if station_offsets and not route.offsets_applied and pts:
-            so = station_offsets.get((route.edge.source, route.line_id), 0.0)
-            to = station_offsets.get((route.edge.target, route.line_id), 0.0)
-            pts[0] = (pts[0][0], pts[0][1] + so)
-            pts[-1] = (pts[-1][0], pts[-1][1] + to)
+        pts = _route_endpoints_with_offsets(route, station_offsets)
         for i in range(len(pts) - 1):
             (x1, y1), (x2, y2) = pts[i], pts[i + 1]
             dx, dy = x2 - x1, y2 - y1
@@ -1962,12 +1982,7 @@ def _foreign_route_segments(
     """
     segs: list[tuple[str, str, str, float, float, float, float]] = []
     for route in routes:
-        pts = list(route.points)
-        if station_offsets and not route.offsets_applied and pts:
-            so = station_offsets.get((route.edge.source, route.line_id), 0.0)
-            to = station_offsets.get((route.edge.target, route.line_id), 0.0)
-            pts[0] = (pts[0][0], pts[0][1] + so)
-            pts[-1] = (pts[-1][0], pts[-1][1] + to)
+        pts = _route_endpoints_with_offsets(route, station_offsets)
         for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
             is_diagonal = abs(y2 - y1) >= max(abs(x2 - x1), 1.0) * DIAGONAL_SLOPE_RATIO
             if is_diagonal != diagonal:

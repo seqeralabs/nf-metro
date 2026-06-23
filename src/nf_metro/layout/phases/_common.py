@@ -13,10 +13,74 @@ from nf_metro.layout.constants import (
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
 )
-from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
+from nf_metro.layout.geometry import lanes_run_along_y
+from nf_metro.parser.model import (
+    Edge,
+    MetroGraph,
+    Port,
+    PortSide,
+    Section,
+    Station,
+    is_bypass_v,
+)
 
 if TYPE_CHECKING:
     from nf_metro.layout.routing.common import RoutedPath
+
+
+def iter_sole_trunk_continuations(
+    graph: MetroGraph,
+) -> Iterator[tuple[str, str, str]]:
+    """Yield ``(section_id, pred, node)`` for in-section linear continuations.
+
+    A *node* is a sole trunk continuation when, inside a horizontal (LR/RL)
+    section, it has exactly one real (non-port, non-hidden) in-section
+    predecessor whose *only* forward path in the whole graph is this node, and
+    that predecessor carries a strict superset of the node's lines (some of the
+    predecessor's lines ended there).  The chain is then linear with no sibling
+    branch to fan toward, so the node must hold the predecessor's track rather
+    than drop to its own line base.
+
+    The full-graph successor test is the discriminator: a predecessor that also
+    feeds a section-exit edge (or a bypass V) routes that line *around* the
+    node, so the node legitimately drops off the trunk.  Off-track stations are
+    excluded at both ends; their Y comes from later phases.
+    """
+    for section in graph.sections.values():
+        if not lanes_run_along_y(section.direction):
+            continue
+        sec_ids = set(section.station_ids)
+        for sid in section.station_ids:
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.is_hidden or st.off_track:
+                continue
+            preds = {
+                e.source
+                for e in graph.edges_to(sid)
+                if e.source in sec_ids
+                and not graph.stations[e.source].is_port
+                and not graph.stations[e.source].is_hidden
+            }
+            if len(preds) != 1:
+                continue
+            pred = next(iter(preds))
+            if graph.stations[pred].off_track:
+                continue
+            if {e.target for e in graph.edges_from(pred)} != {sid}:
+                continue
+            if set(graph.station_lines(pred)) > set(graph.station_lines(sid)):
+                yield (section.id, pred, sid)
+
+
+def _is_fold_section(section: Section) -> bool:
+    """``True`` for a section the row-fold logic produced.
+
+    A fold either spans more than one grid row or runs its flow vertically
+    (TB/BT).  Its exit ports are placed by the fold exit-port path
+    (``_align_exit_ports``) rather than the row-level exit passes, which expect
+    a single-row horizontal-flow section.
+    """
+    return section.grid_row_span > 1 or not lanes_run_along_y(section.direction)
 
 
 @contextmanager
@@ -103,7 +167,7 @@ def _content_station_ys(graph: MetroGraph, section: Section) -> list[float]:
         if (
             sid in graph.stations
             and not graph.stations[sid].is_port
-            and not sid.startswith("__bypass_")
+            and not is_bypass_v(sid)
         )
     ]
 
@@ -135,6 +199,19 @@ def _station_marker_bbox(
     cy = st.y + (min_off + max_off) / 2
     half_h = (max_off - min_off) / 2 + radius
     return (st.x - radius, cy - half_h, st.x + radius, cy + half_h)
+
+
+def marker_cross_exempt(graph: MetroGraph, sid: str) -> bool:
+    """True when a non-consumer line crossing ``sid``'s marker is no defect.
+
+    A rail-mode section lays its lines on fixed parallel rails; a line whose
+    route skips an interchange runs along its rail through the interchange's
+    column and threads its knob.  That is the deliberate rail idiom, not a
+    breeze-past, so the marker-cross checks exempt it - matching the render-side
+    ``check_marker_crossings`` exemption (#942), which reads the same fact back
+    from the drawn rail markers.
+    """
+    return graph.station_is_rail(sid)
 
 
 def first_vertical_leg_x(points: list[tuple[float, float]]) -> float | None:
@@ -296,7 +373,7 @@ def routes_through_unrelated_sections(
     """
     from nf_metro.layout.geometry import segment_intersects_bbox
     from nf_metro.layout.routing import compute_station_offsets, route_edges
-    from nf_metro.render.svg import apply_route_offsets
+    from nf_metro.layout.routing.common import apply_route_offsets
 
     if offsets is None:
         offsets = compute_station_offsets(graph)
@@ -409,7 +486,7 @@ def _max_stations_per_layer(sub: MetroGraph) -> int:
     """
     layer_ys: dict[int, set[float]] = defaultdict(set)
     for s in sub.stations.values():
-        if s.id.startswith("__bypass_"):
+        if is_bypass_v(s.id):
             continue
         layer_ys[s.layer].add(s.y)
     return max((len(ys) for ys in layer_ys.values()), default=1)
@@ -505,7 +582,7 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
     helpers (ids starting with ``__bypass_``) are skipped - they exist
     only for routing and must not anchor the row's trunk.
     """
-    if section.direction not in ("LR", "RL"):
+    if not lanes_run_along_y(section.direction):
         return None
     bundle = _section_bundle_lines(graph, section)
     if not bundle:
@@ -529,7 +606,7 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
             if (
                 st
                 and not st.is_port
-                and not other_id.startswith("__bypass_")
+                and not is_bypass_v(other_id)
                 and set(graph.station_lines(other_id)) == bundle
             ):
                 trunk_ys.add(round(st.y, 3))
@@ -693,3 +770,127 @@ def _grow_section_bbox_downward(
     _pull_section_ports_to_edge(
         graph, section, PortSide.BOTTOM, section.bbox_y + section.bbox_h
     )
+
+
+def exit_run_corridor_clear(
+    graph: MetroGraph,
+    exit_port_id: str,
+    section: Section,
+    carrier_ids: list[str],
+) -> bool:
+    """Whether the X span between the carrier(s) and the exit port is free of
+    other section stations.
+
+    Anchoring a flow-aligned exit to its carrier row only helps when the
+    straight run from the carrier to the port stays clear; a station seated
+    in that span (e.g. an off-track output hung off the carrier) would be
+    ploughed through, so the exit keeps its downstream-aligned placement.
+    """
+    port_st = graph.stations.get(exit_port_id)
+    carrier_xs = [graph.stations[c].x for c in carrier_ids if c in graph.stations]
+    if port_st is None or not carrier_xs:
+        return False
+    inner_x = max(carrier_xs) if section.direction == "LR" else min(carrier_xs)
+    lo, hi = sorted((inner_x, port_st.x))
+    carrier_set = set(carrier_ids)
+    for sid in section.station_ids:
+        if sid == exit_port_id or sid in carrier_set:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.is_port:
+            continue
+        if lo + SAME_COORD_TOLERANCE < st.x < hi - SAME_COORD_TOLERANCE:
+            return False
+    return True
+
+
+def _is_fanout_junction(graph: MetroGraph, jid: str) -> bool:
+    """Whether *jid* is a fan-out junction whose Y follows its exit port.
+
+    A stricter, single-junction variant of
+    :func:`nf_metro.layout.routing.invariants.fanout_junctions`: that one keys
+    purely on a single distinct upstream source, this one additionally requires
+    every successor to be an entry port so the anchoring caller only claims the
+    plain exit -> junction -> entries shape.  Such a junction takes its Y from
+    the single exit-port predecessor (see :func:`_position_junctions`), so
+    anchoring that exit drives the junction's row and the fan-out risers fall in
+    the inter-section gap rather than the climb falling inside the section.
+    """
+    succ = list(graph.edges_from(jid))
+    if not succ:
+        return False
+    if any((tp := graph.ports.get(e.target)) is None or not tp.is_entry for e in succ):
+        return False
+    return len({e.source for e in graph.edges_to(jid)}) == 1
+
+
+def _exit_anchorable_downstream(
+    graph: MetroGraph, exit_port_id: str, junction_ids: set[str]
+) -> bool:
+    """Whether an exit's downstream lets its level change defer to the gap.
+
+    True when every outgoing edge lands on an entry port directly, or on a
+    fan-out junction (whose Y follows this exit).  A merge junction on the far
+    side pins its own Y to the downstream entry, so the exit aligns there
+    instead and keeps its downstream-aligned placement.
+    """
+    edges = graph.edges_from(exit_port_id)
+    saw_target = False
+    for e in edges:
+        if e.target in junction_ids:
+            if not _is_fanout_junction(graph, e.target):
+                return False
+        else:
+            tp = graph.ports.get(e.target)
+            if tp is None or not tp.is_entry:
+                return False
+        saw_target = True
+    return saw_target
+
+
+def flow_exit_carrier_anchor(
+    graph: MetroGraph,
+    exit_port_id: str,
+    section: Section,
+    junction_ids: set[str],
+) -> tuple[float, list[str]] | None:
+    """Carrier row a flow-aligned exit should anchor to, with its carriers.
+
+    Returns ``(carrier_y, carrier_ids)`` when a LEFT/RIGHT exit on a non-fold
+    LR/RL section runs into a downstream entry port -- directly or through a
+    fan-out junction -- over a clear corridor and its carriers anchor it to a
+    shared row; ``None`` otherwise.  Anchoring it there turns the in-section
+    run horizontal and moves the level change to a riser in the inter-section
+    gap.
+
+    The carriers anchor when they are either a single internal station or a
+    *parallel bundle*: several stations sharing one row, one per distinct
+    carried line, so each line rides its own offset track to the port.  A
+    bypass bundle (several stations feeding one line) is excluded -- the
+    farther feeder shares the nearer carrier's track and would run straight
+    through it.  A fold section, a merge junction on the far side, or a
+    corridor blocked by another station keep the downstream-aligned placement.
+    """
+    if _is_fold_section(section) or section.direction not in ("LR", "RL"):
+        return None
+    if not _exit_anchorable_downstream(graph, exit_port_id, junction_ids):
+        return None
+    carrier_ys: dict[str, float] = {}
+    exit_lines: set[str] = set()
+    for e in graph.edges_to(exit_port_id):
+        s = graph.stations.get(e.source)
+        if s is not None and not s.is_port and s.section_id == section.id:
+            carrier_ys[e.source] = s.y
+            exit_lines.add(e.line_id)
+    if not carrier_ys:
+        return None
+    ys = list(carrier_ys.values())
+    if len(carrier_ys) > 1:
+        share_row = max(ys) - min(ys) <= SAME_COORD_TOLERANCE
+        one_line_per_carrier = len(carrier_ys) == len(exit_lines)
+        if not (share_row and one_line_per_carrier):
+            return None
+    carrier_ids = list(carrier_ys)
+    if not exit_run_corridor_clear(graph, exit_port_id, section, carrier_ids):
+        return None
+    return min(ys), carrier_ids

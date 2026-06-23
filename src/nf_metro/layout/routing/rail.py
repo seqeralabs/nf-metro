@@ -16,15 +16,23 @@ from __future__ import annotations
 
 __all__ = ["route_rail_edges"]
 
+from collections import defaultdict
+
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
     DIAGONAL_RUN,
     MIN_STRAIGHT_EDGE,
+    OFFSET_STEP,
     RAIL_TERMINUS_FAN_LEAD,
+    X_SPACING,
 )
-from nf_metro.layout.routing.common import RoutedPath
-from nf_metro.layout.routing.corners import concentric_corner_radius_at
-from nf_metro.parser.model import Edge, MetroGraph, Station
+from nf_metro.layout.routing.bundle import build_offset_bundle, build_tapered_bundle
+from nf_metro.layout.routing.common import (
+    OffsetRegime,
+    RoutedPath,
+    _center_inter_row_channel,
+)
+from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Station
 
 
 def _line_rail_y(graph: MetroGraph, station_id: str, line_id: str) -> float:
@@ -61,42 +69,99 @@ def _line_rail_y(graph: MetroGraph, station_id: str, line_id: str) -> float:
     return st.y
 
 
-def _off_track_drop_stagger(
+def _off_track_drop_order(
     graph: MetroGraph,
     feeder: Station,
-    edge: Edge,
-) -> float:
-    """Horizontal offset for an off-track feeder line's vertical drop.
+    on_rail: Station,
+) -> list[str]:
+    """Lines bundled through one off-track elbow, in left-to-right drop order.
 
-    Several lines feeding the same consumer from one off-track input would
-    otherwise drop on the same X and overlap in the vertical leg (merging into
-    one fat line).  Each feeding line instead drops on its own X, ordered by
-    its target rail Y (top rail leftmost), one OFFSET_STEP apart and centred on
-    the feeder, so the bundle stays as parallel lines and the elbows form a
-    tidy staircase into the rails.
+    Several lines feeding (or fed by) the same consumer would otherwise drop on
+    the same X and merge into one fat vertical leg.  Each drops on its own X, one
+    OFFSET_STEP apart and centred on the feeder, so the bundle stays parallel.
+
+    The order is chosen so the bundle nests through the elbow's single corner
+    without twisting: the line on the inside of the turn takes the inside drop X.
+    For the baseline corner -- consumer to the right of the feeder, feeder above
+    the rails (drop down, turn right) -- the lowest rail (largest Y) drops
+    leftmost.  A mirrored corner (consumer to the left, or feeder below the
+    rails) flips one of the turn's two axes, so the drop order reverses; without
+    that the bundle crosses itself through the bend.
     """
-    from nf_metro.layout.constants import OFFSET_STEP
-
-    feeder_id = feeder.id
-    consumer_id = edge.target if edge.source == feeder_id else edge.source
-    # Sibling feeder lines: every line carried by an edge between this feeder
-    # and the same consumer, ordered by their target rail Y.
     sib_rails: list[tuple[float, str]] = []
     for e in graph.edges:
-        if {e.source, e.target} != {feeder_id, consumer_id}:
+        if {e.source, e.target} != {feeder.id, on_rail.id}:
             continue
-        on_rail_id = e.target if e.source == feeder_id else e.source
-        sib_rails.append((_line_rail_y(graph, on_rail_id, e.line_id), e.line_id))
-    # Order the drop Xs so the bundle does NOT twist through the drop->rail
-    # elbow: the line landing on the LOWER rail (larger Y) drops on the LEFT
-    # (smaller X), matching the left/right ordering the rightward outgoing run
-    # expects (a D->R corner maps the down run's left side to the run's bottom).
+        sib_rails.append((_line_rail_y(graph, on_rail.id, e.line_id), e.line_id))
     sib_rails.sort(reverse=True)
     order = [lid for _y, lid in sib_rails]
-    if edge.line_id not in order or len(order) <= 1:
+    if sib_rails:
+        consumer_left = on_rail.x < feeder.x
+        feeder_below = feeder.y > sib_rails[0][0]
+        if consumer_left != feeder_below:
+            order.reverse()
+    return order
+
+
+def _drop_stagger(order: list[str], line_id: str) -> float:
+    """Signed lateral offset of *line_id*'s drop from the feeder centre."""
+    n = len(order)
+    if n <= 1 or line_id not in order:
         return 0.0
-    k = order.index(edge.line_id)
-    return (k - (len(order) - 1) / 2.0) * OFFSET_STEP
+    return (order.index(line_id) - (n - 1) / 2.0) * OFFSET_STEP
+
+
+def _route_off_track_elbow(
+    graph: MetroGraph,
+    edge: Edge,
+    feeder: Station,
+    on_rail: Station,
+    off_src: bool,
+) -> RoutedPath:
+    """Route one off-track feeder line as a drop -> turn-onto-rail elbow.
+
+    Routed through :func:`build_tapered_bundle` with this line as the lone member
+    and the full sibling fan declared as ``bundle_offsets``, so the corner anchors
+    on the bundle's innermost-of-turn line and no arc falls below the floor.  The
+    centreline's flat leg sits at this line's own rail Y, so its rail-leg offset
+    is zero and the staggered drop is the only fan on the turning leg.
+    """
+    rail_y = _line_rail_y(graph, on_rail.id, edge.line_id)
+    order = _off_track_drop_order(graph, feeder, on_rail)
+    # The staggered drop displaces the vertical leg in X; the builder's normal
+    # flips that X by the leg's travel direction, so pre-sign the stagger by the
+    # direction the vertical leg runs in the centreline below.  Feeding in
+    # (``off_src``) the leg runs feeder -> rail; feeding out it runs rail ->
+    # feeder, so the sign inverts.
+    drop_to_rail = 1.0 if rail_y >= feeder.y else -1.0
+    vert_dir = drop_to_rail if off_src else -drop_to_rail
+
+    def drop_off(line_id: str) -> float:
+        return -vert_dir * _drop_stagger(order, line_id)
+
+    siblings = [
+        (drop_off(lid), _line_rail_y(graph, on_rail.id, lid) - rail_y) for lid in order
+    ]
+    drop = drop_off(edge.line_id)
+    if off_src:
+        centerline = [(feeder.x, feeder.y), (feeder.x, rail_y), (on_rail.x, rail_y)]
+        member = (edge, edge.line_id, drop, 0.0)
+        bundle = siblings
+    else:
+        centerline = [(on_rail.x, rail_y), (feeder.x, rail_y), (feeder.x, feeder.y)]
+        member = (edge, edge.line_id, 0.0, drop)
+        bundle = [(rail_off, sib_drop) for sib_drop, rail_off in siblings]
+
+    routes = build_tapered_bundle(
+        [member],
+        centerline,
+        transition_leg=1,
+        base_radius=CURVE_RADIUS,
+        bundle_offsets=bundle,
+        is_inter_section=False,
+        normalize_exempt=False,
+    )
+    return routes[0]
 
 
 def _diagonal_placement(
@@ -133,6 +198,93 @@ def _diagonal_placement(
     )
 
 
+def _route_inter_section_connector(
+    graph: MetroGraph,
+    group: list[Edge],
+    exit_port: Port,
+    entry_port: Port,
+) -> list[RoutedPath] | None:
+    """Route a port-to-port inter-section edge bundle as a clean corridor.
+
+    Whole-graph rail mode stacks sections vertically, so a connecting edge
+    leaves the upstream section by its RIGHT exit port and enters the
+    downstream section by its LEFT entry port -- two points on opposite sides
+    of the stack.  A straight rail run between them backtracks into the section
+    interiors (a dangling stub) and crosses the sections' own rails.  Instead
+    route the bundle out past the upstream right edge, down the right margin,
+    across the inter-section gap, down the left margin, and in to the entry
+    port: every vertical leg sits outside both section boxes and the cross leg
+    sits in the empty band between them, so nothing slices an interior rail.
+
+    Returns one route per edge, or ``None`` for a port pairing this corridor
+    does not model (anything but a RIGHT exit feeding a LEFT entry), leaving
+    the caller's straight-rail routing in place.
+    """
+    if exit_port.side is not PortSide.RIGHT or entry_port.side is not PortSide.LEFT:
+        return None
+    up = graph.sections.get(exit_port.section_id)
+    down = graph.sections.get(entry_port.section_id)
+    if up is None or down is None:
+        return None
+
+    rails = [
+        (
+            e,
+            _line_rail_y(graph, e.source, e.line_id),
+            _line_rail_y(graph, e.target, e.line_id),
+        )
+        for e in group
+    ]
+    center_ye = sum(ye for _e, ye, _yn in rails) / len(rails)
+    center_yn = sum(yn for _e, _ye, yn in rails) / len(rails)
+    exit_offsets = {e.line_id: ye - center_ye for e, ye, _yn in rails}
+    entry_offsets = {e.line_id: yn - center_yn for e, _ye, yn in rails}
+    half_width = max(
+        (abs(o) for o in (*exit_offsets.values(), *entry_offsets.values())), default=0.0
+    )
+
+    # Corridor verticals clear the widest section edge by the bundle half-width
+    # plus a fixed margin; the cross leg runs through the vertical gap between
+    # the two stacked sections.
+    clear = half_width + X_SPACING / 2.0
+    corridor_r = max(up.bbox_x + up.bbox_w, down.bbox_x + down.bbox_w) + clear
+    corridor_l = min(up.bbox_x, down.bbox_x) - clear
+    upper, lower = sorted((up, down), key=lambda s: s.bbox_y)
+    # Seat the whole cross-leg bundle in the gap, not just its centreline: inset
+    # the band by the bundle half-width so the outermost line clears each box
+    # edge rather than grazing it.
+    gap_y = _center_inter_row_channel(
+        upper.bbox_y + upper.bbox_h + half_width, lower.bbox_y - half_width
+    )
+
+    centerline = [
+        (exit_port.x, center_ye),
+        (corridor_r, center_ye),
+        (corridor_r, gap_y),
+        (corridor_l, gap_y),
+        (corridor_l, center_yn),
+        (entry_port.x, center_yn),
+    ]
+
+    # Each line is a rigid parallel offset through the corridor (exit-rail
+    # spacing), tapering to its entry-rail offset only on the final lead-in, so
+    # the bundle keeps its order and never flips.
+    n_legs = len(centerline) - 1
+
+    def leg_offsets(line_id: str) -> list[float]:
+        return [exit_offsets[line_id]] * (n_legs - 1) + [entry_offsets[line_id]]
+
+    members = [(e, e.line_id, leg_offsets(e.line_id)) for e, _ye, _yn in rails]
+    # Self-contained baked route (like the off-track elbow): not part of the
+    # normal router's trunk-slot regime, so it declares no TrunkSlot.
+    return build_offset_bundle(
+        members,
+        centerline,
+        base_radius=CURVE_RADIUS,
+        is_inter_section=False,
+    )
+
+
 def route_rail_edges(
     graph: MetroGraph,
     edges: list[Edge] | None = None,
@@ -149,50 +301,44 @@ def route_rail_edges(
     mode).  In per-section rail mode the caller passes just that section's
     internal edges so the normal router handles the rest.
     """
+    edge_list = list(edges) if edges is not None else list(graph.edges)
     routes: list[RoutedPath] = []
-    for edge in edges if edges is not None else graph.edges:
+
+    # Port-to-port edges joining two sections share an inter-section corridor;
+    # gather each such bundle and route it as one connector so co-travelling
+    # lines keep their order.  (Per-section rail mode never passes these edges.)
+    connectors: dict[tuple[str, str], list[Edge]] = defaultdict(list)
+    for edge in edge_list:
+        sp = graph.ports.get(edge.source)
+        tp = graph.ports.get(edge.target)
+        if sp is not None and tp is not None and sp.section_id != tp.section_id:
+            connectors[(edge.source, edge.target)].append(edge)
+    routed_connector: set[tuple[str, str, str]] = set()
+    for (sid, tid), group in connectors.items():
+        conn = _route_inter_section_connector(
+            graph, group, graph.ports[sid], graph.ports[tid]
+        )
+        if conn is not None:
+            routes.extend(conn)
+            routed_connector.update((e.source, e.target, e.line_id) for e in group)
+
+    for edge in edge_list:
+        if (edge.source, edge.target, edge.line_id) in routed_connector:
+            continue
         src = graph.stations.get(edge.source)
         tgt = graph.stations.get(edge.target)
         if src is None or tgt is None:
             continue
 
-        # Off-track input: the source sits above the rails and feeds into the
-        # target's rail.  Drop straight down (a clean perpendicular crossing of
-        # any rails above the target reads far better than a steep diagonal
-        # merge), then turn onto the rail with a rounded elbow and run flat into
-        # the consumer.  Sibling feeder lines (a bundle feeding the same
-        # consumer) drop on staggered Xs - one per rail, lower rails turning
-        # later - so the bundle stays two parallel lines and never merges.
+        # An off-track endpoint sits off the rails: drop straight down onto the
+        # consumer's rail (a clean perpendicular crossing reads better than a
+        # steep diagonal merge), turn once, and run flat into the consumer.
         off_src = src.off_track and not tgt.off_track
         off_tgt = tgt.off_track and not src.off_track
         if off_src or off_tgt:
             feeder = src if off_src else tgt
             on_rail = tgt if off_src else src
-            rail_y = _line_rail_y(graph, on_rail.id, edge.line_id)
-            drop_x = feeder.x + _off_track_drop_stagger(graph, feeder, edge)
-            l_points = [
-                (drop_x, feeder.y),
-                (drop_x, rail_y),
-                (on_rail.x, rail_y),
-            ]
-            if off_tgt:
-                l_points.reverse()
-            # Staggered sibling drops fan the elbow's vertical leg by
-            # ``drop_x - feeder.x``; the turn onto the rail takes the
-            # concentric radius for that offset so the bundle keeps a
-            # constant gap through the bend instead of a base-radius pinch.
-            elbow_r = concentric_corner_radius_at(
-                l_points[0], l_points[1], l_points[2], drop_x - feeder.x, CURVE_RADIUS
-            )
-            routes.append(
-                RoutedPath(
-                    edge=edge,
-                    line_id=edge.line_id,
-                    points=l_points,
-                    curve_radii=[elbow_r],
-                    offsets_applied=True,
-                )
-            )
+            routes.append(_route_off_track_elbow(graph, edge, feeder, on_rail, off_src))
             continue
 
         y_src = _line_rail_y(graph, edge.source, edge.line_id)
@@ -245,7 +391,7 @@ def route_rail_edges(
                 edge=edge,
                 line_id=edge.line_id,
                 points=points,
-                offsets_applied=True,
+                offset_regime=OffsetRegime.BAKED,
             )
         )
     return routes

@@ -1,0 +1,68 @@
+<div class="nfmm-@@sid nf-metro-root">
+<style>
+.nfmm-@@sid { display: block; width: 100%; background: #1d1d1d;
+  border: 1px solid #2a2a2a; border-radius: 8px; overflow: hidden;
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  color: #e8e8e8; line-height: 1.4; position: relative; }
+.nfmm-@@sid .nf-metro-canvas { position: relative; }
+.nfmm-@@sid .nf-metro-canvas svg { display: block; width: 100%; height: auto;
+  user-select: none; cursor: grab; }
+.nfmm-@@sid.nf-metro-grabbing .nf-metro-canvas svg { cursor: grabbing; }
+.nfmm-@@sid .nf-metro-station { cursor: pointer; }
+.nfmm-@@sid .nf-metro-station:hover { stroke-width: 3; }
+.nfmm-@@sid .nf-metro-legend { display: flex; flex-wrap: wrap; gap: 4px 6px;
+  padding: 8px 10px; background: #161616; border-top: 1px solid #2a2a2a;
+  font-size: 11px; }
+.nfmm-@@sid .nf-metro-chip { display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px; border-radius: 12px; cursor: pointer; color: #ccc;
+  user-select: none; white-space: nowrap; background: #1f1f1f;
+  border: 1px solid #2f2f2f; }
+.nfmm-@@sid .nf-metro-chip:hover { background: #2a2a2a; }
+.nfmm-@@sid .nf-metro-chip-active { background: #2a3a4a; color: #fff;
+  border-color: #3a5a7a; }
+.nfmm-@@sid .nf-metro-chip-dim { opacity: 0.45; }
+.nfmm-@@sid .nf-metro-swatch { width: 14px; height: 3px; border-radius: 2px;
+  flex-shrink: 0; }
+.nfmm-@@sid .nf-metro-reset { position: absolute; top: 8px; left: 8px;
+  background: rgba(22,22,22,0.88); color: #ccc; border: 1px solid #444;
+  padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;
+  display: none; font-family: inherit; }
+.nfmm-@@sid.nf-metro-filtering .nf-metro-reset { display: block; }
+.nfmm-@@sid.nf-metro-filtering [class^="metro-line-"] { opacity: 0.06;
+  transition: opacity 0.2s; }
+.nfmm-@@sid.nf-metro-filtering [class^="metro-line-"].nf-metro-line-active {
+  opacity: 1; }
+.nfmm-@@sid .nf-metro-hidden { display: none !important; }
+.nfmm-@@sid .nf-metro-hint { position: absolute; bottom: 6px; right: 10px;
+  font-size: 10px; color: #666; pointer-events: none; }
+.nfmm-@@sid .nf-metro-tip { position: fixed; pointer-events: none; z-index: 9999;
+  background: #1f1f1f; border: 1px solid #444; border-radius: 6px;
+  padding: 8px 10px; font-size: 12px; max-width: 240px; color: #e8e8e8;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4); opacity: 0;
+  transition: opacity 0.08s; }
+.nfmm-@@sid .nf-metro-tip-show { opacity: 1; }
+.nfmm-@@sid .nf-metro-tt-title { font-weight: 600; font-size: 13px;
+  margin-bottom: 3px; }
+.nfmm-@@sid .nf-metro-tt-section { color: #888; font-size: 11px;
+  margin-bottom: 6px; }
+.nfmm-@@sid .nf-metro-tt-line { display: flex; align-items: center;
+  gap: 6px; margin-top: 2px; }
+.nfmm-@@sid .nf-metro-tt-line .nf-metro-swatch { width: 14px; height: 3px; }
+</style>
+<div class="nf-metro-canvas">
+@@svg
+<button class="nf-metro-reset" type="button">Reset</button>
+<div class="nf-metro-hint">drag pan / cmd+scroll zoom / click line to focus</div>
+</div>
+<div class="nf-metro-legend"></div>
+<div class="nf-metro-tip"></div>
+<script>
+@@shared_js
+(function() {
+  var _root = document.currentScript.closest('.nfmm-@@sid');
+  var _api = attachMetroMap({ root: _root, lines: @@lines_json, embed: null });
+  _root.dispatchEvent(new CustomEvent(
+    'nfmetro:ready', { detail: { api: _api }, bubbles: true }));
+})();
+</script>
+</div>

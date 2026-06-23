@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from nf_metro.layout import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import LineSpread
+from nf_metro.parser.model import LineSpread, is_bypass_v
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
@@ -1600,3 +1602,34 @@ def test_rail_one_per_column_guard_catches_a_collision():
 
     with pytest.raises(PhaseInvariantError, match="one station per column"):
         _guard_rail_one_station_per_column(graph, "test")
+
+
+@pytest.mark.parametrize(
+    "fixture,crossed_id",
+    [
+        (EXAMPLES / "line_spread.mmd", "r_filter"),
+        (EXAMPLES / "sarek_metro.mmd", "strelka2"),
+        (FIXTURES / "rail_marker_subset_interchange.mmd", None),
+    ],
+    ids=["line_spread", "sarek_metro", "rail_marker_subset"],
+)
+def test_rail_bridge_over_interchange_validates_clean(fixture, crossed_id):
+    """A line whose route skips a rail interchange threads its knob rather than
+    stopping - the deliberate rail idiom, not a breeze-past.  Full-validation
+    layout must not trip the non-consumer marker-cross guard, and the geometric
+    bypass must not bow such a crossing (a bow cannot move a line off its fixed
+    rail; the helper lands collinear and changes nothing)."""
+    from test_bypass_invariants import _nonconsumer_crossings
+
+    graph = parse_metro_mermaid(fixture.read_text())
+    compute_layout(graph, validate=True)
+
+    assert not [sid for sid in graph.stations if is_bypass_v(sid)], (
+        f"{fixture.name}: a rail-interchange crossing must not get a bypass-V"
+    )
+    if crossed_id is not None:
+        assert graph.station_is_rail(crossed_id)
+        assert _nonconsumer_crossings(graph, only_station=crossed_id), (
+            f"{fixture.name}: expected a line to thread {crossed_id!r}'s marker "
+            f"so the rail-idiom exemption is load-bearing"
+        )

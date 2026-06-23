@@ -1,0 +1,32 @@
+%%metro title: TB left-exit staircase into a lower right-entry (issue #671)
+%%metro line: a | Aligner A | #0570b0
+%%metro line: b | Aligner B | #2db572
+%%metro line: c | Aligner C | #f5c542
+%%metro line: d | Side | #e63946
+%%metro grid: src | 0,0
+%%metro grid: align | 1,0
+%%metro grid: blocker | 1,1
+%%metro grid: post | 0,2
+
+graph LR
+    subgraph src [Source]
+        ingest[Ingest]
+    end
+    subgraph align [Align]
+        %%metro direction: TB
+        hub[Hub]
+        tail[Tail]
+        hub -->|a,b,c| tail
+    end
+    subgraph blocker [Side]
+        side[Side step]
+    end
+    subgraph post [Post]
+        collect[Collect]
+        report[Report]
+        collect -->|a,b,c| report
+    end
+
+    ingest -->|a,b,c| hub
+    ingest -->|d| side
+    tail -->|a,b,c| collect

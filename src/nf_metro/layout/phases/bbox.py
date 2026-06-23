@@ -25,7 +25,7 @@ from nf_metro.layout.phases.single_section import (
     _terminus_y_overhang,
     angled_label_reach,
 )
-from nf_metro.parser.model import MetroGraph, Section, Station
+from nf_metro.parser.model import MetroGraph, Section, Station, is_bypass_v
 
 
 def _predicted_bypass_bottom_in_row(
@@ -394,7 +394,7 @@ def _predict_section_content_bottom(
             if (
                 sid in graph.stations
                 and not graph.stations[sid].is_port
-                and not sid.startswith("__bypass_")
+                and not is_bypass_v(sid)
             )
         ]
     if not content_bots:
@@ -403,7 +403,7 @@ def _predict_section_content_bottom(
     bypass_max_ys = [
         graph.stations[sid].y
         for sid in section.station_ids
-        if sid in graph.stations and sid.startswith("__bypass_")
+        if sid in graph.stations and is_bypass_v(sid)
     ]
     port_max_ys = [
         graph.stations[sid].y
@@ -573,7 +573,7 @@ def _section_content_hug_top(
     bypass_min_ys = [
         graph.stations[sid].y
         for sid in section.station_ids
-        if sid in graph.stations and sid.startswith("__bypass_")
+        if sid in graph.stations and is_bypass_v(sid)
     ]
     port_min_ys = [
         graph.stations[sid].y
@@ -606,9 +606,7 @@ def _section_band_is_empty(graph: MetroGraph, section: Section) -> bool:
         st = graph.stations.get(sid)
         if st is None:
             continue
-        if (
-            st.is_port or sid.startswith("__bypass_")
-        ) and st.y < topmost - SAME_COORD_TOLERANCE:
+        if (st.is_port or is_bypass_v(sid)) and st.y < topmost - SAME_COORD_TOLERANCE:
             return False
     return True
 
@@ -713,10 +711,24 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
         # Bypass routes dip below intervening bboxes into the inter-row
         # gap; tightening must not pull lower rows up into them.
         bypass_spans = _aggregate_bypass_spans(graph, ending_at_prev)
-        effective_floor = max(max_above_bot, max(bypass_spans.values(), default=0.0))
-        current_top = min(s.bbox_y for s in lower)
         target_gap = max(section_y_gap, routing_min.get((r - 1, r), 0.0))
-        slack = current_top - (effective_floor + target_gap)
+        # The whole row shifts up by one amount, so it can rise only as far as
+        # its most-constrained section allows -- hence the min over ``lower``.
+        # Each section's floor counts only the bypass spans whose columns it
+        # actually sits under (as ``_push_lower_rows_after_bbox_grow`` does):
+        # a bypass running over columns a section never spans reserves no
+        # clearance against it.
+        slack = float("inf")
+        for ls in lower:
+            ls_lo = ls.grid_col
+            ls_hi = ls.grid_col + ls.grid_col_span - 1
+            floor = max_above_bot
+            for (lo, hi), bypass_bot in bypass_spans.items():
+                if ls_hi < lo or ls_lo > hi:
+                    continue
+                if bypass_bot > floor:
+                    floor = bypass_bot
+            slack = min(slack, ls.bbox_y - (floor + target_gap))
         if slack <= SAME_COORD_TOLERANCE:
             continue
 

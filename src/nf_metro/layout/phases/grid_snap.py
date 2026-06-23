@@ -7,6 +7,7 @@ from collections import Counter
 from nf_metro.layout.constants import (
     CANVAS_GRID_SHIFT_THRESHOLD,
 )
+from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.phases.bbox import _min_section_bbox_top
 from nf_metro.layout.phases.canvas import _translate_graph_y
 from nf_metro.layout.phases.fan_bundles import _convergence_source_ys
@@ -146,7 +147,7 @@ def _snap_group_to_grid(
         section = graph.sections.get(sec_id)
         if section is None:
             continue
-        is_tb_section = section.direction == "TB"
+        vertical_flow = not lanes_run_along_y(section.direction)
         for sid in section.station_ids:
             if sid in port_ids or sid in half_grid_ids:
                 continue
@@ -166,9 +167,10 @@ def _snap_group_to_grid(
                 continue
             if port.side not in (PortSide.LEFT, PortSide.RIGHT):
                 continue
-            # TB exit ports are anchored to the downstream entry-port Y by
-            # _resolve_tb_exit_y; preserve that alignment.
-            if is_tb_section and not port.is_entry:
+            # A vertical-flow section's perpendicular exit ports are anchored
+            # to the downstream entry-port Y by _resolve_tb_exit_y; preserve
+            # that alignment rather than snapping them to the row grid.
+            if vertical_flow and not port.is_entry:
                 continue
             if pid in convergence_sources:
                 continue

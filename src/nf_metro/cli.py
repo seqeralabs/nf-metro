@@ -5,11 +5,12 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Literal, NoReturn, TypeVar
+from typing import Any, Literal, TypeVar
 
 import click
 
 from nf_metro import __version__
+from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.explain import build_explain, format_explain_json, format_explain_text
 from nf_metro.introspect import build_info, format_info_json, format_info_text
 from nf_metro.layout import (
@@ -18,18 +19,19 @@ from nf_metro.layout import (
     PhaseInvariantError,
     compute_layout,
 )
+from nf_metro.live.server import DEFAULT_OVERLAY, OVERLAY_STYLES
 from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
 from nf_metro.parser import (
     ERROR,
+    WARNING,
     CyclicGraphError,
+    ValidationIssue,
     parse_metro_mermaid,
     validate_graph,
 )
-from nf_metro.parser.directives import apply_legend_directive
-from nf_metro.parser.model import LineSpread, MetroGraph
-from nf_metro.render import render_svg
+from nf_metro.parser.model import LineSpread
+from nf_metro.render import render_svg, validate_render
 from nf_metro.render.html import render_html
-from nf_metro.render.style import Theme
 from nf_metro.themes import THEMES
 
 
@@ -84,38 +86,13 @@ def layout_cli_options(f: _F) -> _F:
     return f
 
 
-def _apply_layout_overrides(graph: MetroGraph, opts: dict[str, object]) -> None:
-    """Write each explicitly-set CLI option onto its graph field.
-
-    Parse-time options (``fold_threshold``) are skipped: their value reaches
-    the graph through ``parse_metro_mermaid`` instead.
-    """
-    for opt in LAYOUT_OPTIONS:
-        if opt.parse_time:
-            continue
-        value = opts.get(opt.name)
-        if value is not None:
-            setattr(graph, opt.target_attr, value)
-
-
-# Maps legacy `style:` values onto theme keys (the nfcore theme is the dark one).
-_STYLE_THEME_ALIASES = {"dark": "nfcore"}
-
-
-def _fail_validation(messages: Iterable[str]) -> NoReturn:
-    """Print validation errors to stderr and exit non-zero."""
-    click.echo("Validation errors:", err=True)
-    for message in messages:
-        click.echo(f"  - {message}", err=True)
-    raise SystemExit(1)
-
-
-def _resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
-    """Pick the theme: an explicit ``--theme`` wins over the ``style:`` directive."""
-    if theme is not None:
-        return THEMES[theme]
-    name = graph.style.strip().lower()
-    return THEMES.get(_STYLE_THEME_ALIASES.get(name, name), THEMES["nfcore"])
+def _echo_issues(
+    label: str, issues: Iterable[ValidationIssue], path: Path | str
+) -> None:
+    """Print a labelled, bulleted block of validation issues to stderr."""
+    click.echo(f"{label}:", err=True)
+    for issue in issues:
+        click.echo(f"  - {issue.format(path)}", err=True)
 
 
 @cli.command()
@@ -222,6 +199,37 @@ def _resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
         "media query would conflict."
     ),
 )
+@click.option(
+    "--no-chrome-css",
+    is_flag=True,
+    default=False,
+    help=(
+        "Omit the chrome --nfm-* CSS custom-property <style> block. Colors "
+        "still render (they are baked as presentation attributes); only live "
+        "host recoloring is dropped. Use for raster export: cairosvg and "
+        "similar rasterizers cannot parse var() and fail without this."
+    ),
+)
+@click.option(
+    "--bare/--no-bare",
+    default=False,
+    help=(
+        "Omit the title and outer padding so the canvas hugs the diagram "
+        "content. The attribution watermark is kept. Suitable for embedding "
+        "in a host page that supplies its own frame and heading."
+    ),
+)
+@click.option(
+    "--validate",
+    "validate_geometry",
+    is_flag=True,
+    default=False,
+    help=(
+        "After rendering, run the render-geometry guards on the produced SVG "
+        "(the picture as drawn, including render-time offsets and label "
+        "lifts) and fail if any defect is found. SVG output only."
+    ),
+)
 @layout_cli_options
 def render(
     input_file: Path,
@@ -239,39 +247,26 @@ def render(
     text_to_paths: bool,
     svg_class_prefix: str,
     no_dark_mode_css: bool,
+    no_chrome_css: bool,
+    bare: bool,
+    validate_geometry: bool,
     **layout_opts: object,
 ) -> None:
     """Render a Mermaid metro map definition to SVG or interactive HTML."""
     text = input_file.read_text()
 
-    if from_nextflow:
-        from nf_metro.convert import convert_nextflow_dag
-
-        text = convert_nextflow_dag(text, title=title or "")
-
-    fold = layout_opts.get("fold_threshold")
     try:
-        graph = parse_metro_mermaid(
+        graph = prepare_graph(
             text,
-            max_station_columns=fold if isinstance(fold, int) else None,
+            from_nextflow=from_nextflow,
+            title=title,
+            line_spread=line_spread,
+            logo=str(logo) if logo is not None else None,
+            legend=legend,
+            layout_options=layout_opts,
         )
-    except ValueError as e:
-        raise click.ClickException(str(e))
-
-    _apply_layout_overrides(graph, layout_opts)
-
-    if line_spread is not None:
-        graph.line_spread = LineSpread(line_spread)
-    if logo is not None:
-        graph.logo_path = str(logo)
-    if legend is not None:
-        apply_legend_directive(legend, graph)
-    if title is not None:
-        graph.title = title
-
-    try:
-        compute_layout(graph)
     except (
+        ValueError,
         CyclicGraphError,
         BackwardFlowError,
         MixedEntryDirectionError,
@@ -279,7 +274,7 @@ def render(
     ) as e:
         raise click.ClickException(str(e))
 
-    theme_obj = _resolve_theme(theme, graph)
+    theme_obj = resolve_theme(theme, graph)
 
     if output is None:
         output = input_file.with_suffix(f".{format_}")
@@ -289,17 +284,65 @@ def render(
     )
 
     if format_ == "html":
-        content = render_html(graph, theme_obj, debug=debug, embed_basename=output.name)
-    else:
-        content = render_svg(
-            graph,
-            theme_obj,
-            debug=debug,
-            responsive=responsive,
-            font_portability=font_portability,
-            svg_class_prefix=svg_class_prefix,
-            inject_dark_mode_css=not no_dark_mode_css,
-        )
+        # The interactive page supplies its own responsive frame, chrome, and
+        # per-map class scoping, so the SVG-only sizing/namespacing flags have
+        # nothing to act on. Font portability and the dark-mode block do reach
+        # the inlined SVG, so they are threaded through.
+        ignored = [
+            name
+            for name, enabled in (
+                ("--responsive", responsive),
+                ("--bare", bare),
+                ("--svg-class-prefix", bool(svg_class_prefix)),
+            )
+            if enabled
+        ]
+        if ignored:
+            click.echo(
+                f"Note: {', '.join(ignored)} only affect --format svg and are "
+                "ignored for --format html (the interactive page is already "
+                "responsive and scopes each map independently).",
+                err=True,
+            )
+
+    # Tier-A layout-invariant violations on the settled geometry surface here
+    # under --strict (LayoutInvariantError is a PhaseInvariantError); without
+    # --strict they are warnings the default handler prints to stderr.
+    try:
+        if format_ == "html":
+            content = render_html(
+                graph,
+                theme_obj,
+                debug=debug,
+                embed_basename=output.name,
+                font_portability=font_portability,
+                inject_dark_mode_css=not no_dark_mode_css,
+            )
+        else:
+            content = render_svg(
+                graph,
+                theme_obj,
+                debug=debug,
+                responsive=responsive,
+                font_portability=font_portability,
+                svg_class_prefix=svg_class_prefix,
+                inject_dark_mode_css=not no_dark_mode_css,
+                chrome_css=not no_chrome_css,
+                bare=bare,
+            )
+    except PhaseInvariantError as e:
+        raise click.ClickException(str(e))
+
+    if validate_geometry:
+        if format_ == "html":
+            raise click.ClickException("--validate applies to --format svg only.")
+        findings = validate_render(content, graph=graph)
+        if findings:
+            detail = "\n".join(f"  - {f.message}" for f in findings)
+            raise click.ClickException(
+                f"render-geometry validation found {len(findings)} "
+                f"defect(s) in the drawn SVG:\n{detail}"
+            )
 
     output.write_text(content if content.endswith("\n") else content + "\n")
     click.echo(
@@ -360,22 +403,65 @@ def convert(
 
 @cli.command()
 @click.argument("input_file", type=click.Path(exists=True, path_type=Path))
-def validate(input_file: Path) -> None:
-    """Validate a Mermaid metro map definition."""
+@click.option(
+    "--with-layout",
+    is_flag=True,
+    help="Also run the layout engine with its full invariant suite, reporting "
+    "any layout failure as an error instead of a traceback.",
+)
+@click.option(
+    "--strict",
+    is_flag=True,
+    help="Treat warnings (e.g. a non-LR primary direction) as errors.",
+)
+def validate(input_file: Path, with_layout: bool, strict: bool) -> None:
+    """Validate a Mermaid metro map definition.
+
+    The bare command runs graph-semantic checks: every edge references a
+    defined line, every section points at stations that exist, and the graph
+    is acyclic.  ``--with-layout`` additionally runs the layout engine with
+    its full invariant suite, reporting a layout failure as a clean error.
+    ``--strict`` escalates warnings to a non-zero exit.
+    """
     text = input_file.read_text()
-    try:
-        graph = parse_metro_mermaid(text)
-    except ValueError as e:
-        raise click.ClickException(str(e))
 
-    errors = [issue for issue in validate_graph(graph) if issue.severity == ERROR]
+    issues: list[ValidationIssue] = []
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            graph = parse_metro_mermaid(text)
+        except ValueError as e:
+            raise click.ClickException(str(e))
+
+        issues.extend(validate_graph(graph))
+
+        if with_layout:
+            try:
+                compute_layout(graph, validate=True)
+            except (
+                CyclicGraphError,
+                BackwardFlowError,
+                MixedEntryDirectionError,
+                PhaseInvariantError,
+            ) as e:
+                issues.append(ValidationIssue(ERROR, str(e)))
+
+    issues.extend(ValidationIssue(WARNING, str(w.message)) for w in caught)
+
+    errors = [i for i in issues if i.severity == ERROR]
+    warns = [i for i in issues if i.severity == WARNING]
+
+    if warns:
+        _echo_issues("Validation warnings", warns, input_file)
     if errors:
-        _fail_validation(issue.format(input_file) for issue in errors)
-
-    try:
-        compute_layout(graph)
-    except (BackwardFlowError, MixedEntryDirectionError, PhaseInvariantError) as e:
-        _fail_validation([str(e)])
+        _echo_issues("Validation errors", errors, input_file)
+        raise SystemExit(1)
+    if strict and warns:
+        click.echo(
+            f"Failed: {len(warns)} warning(s) treated as errors under --strict.",
+            err=True,
+        )
+        raise SystemExit(1)
 
     click.echo(
         f"Valid: {len(graph.stations)} stations, "
@@ -488,6 +574,13 @@ def explain(
 )
 @click.option("--theme", type=str, default=None, help="Theme name (nfcore, light).")
 @click.option(
+    "--overlay",
+    type=click.Choice(OVERLAY_STYLES),
+    default=DEFAULT_OVERLAY,
+    show_default=True,
+    help="Status-overlay style shown until a viewer picks another in the page.",
+)
+@click.option(
     "--token",
     default=None,
     help="If set, /events POSTs must supply ?token=... or an X-Metro-Token header.",
@@ -514,13 +607,14 @@ def serve(
     port: int,
     host: str,
     theme: str | None,
+    overlay: str,
     token: str | None,
     open_browser: bool,
     shutdown_after_complete: bool,
     shutdown_grace: float,
     launch_cmd: tuple[str, ...],
 ) -> None:
-    """Serve a live-progress view of a metro map. [experimental]
+    """Serve a live-progress view of a metro map.
 
     Renders the map once and serves it at http://HOST:PORT/. Point a Nextflow
     run's weblog at the events endpoint to light up stations as tasks run:
@@ -546,7 +640,7 @@ def serve(
     except (ValueError, PhaseInvariantError) as e:
         raise click.ClickException(str(e))
 
-    theme_obj = _resolve_theme(theme, graph)
+    theme_obj = resolve_theme(theme, graph)
     mapped = sorted(graph.process_mapping)
     if not mapped:
         click.echo(
@@ -560,7 +654,9 @@ def serve(
             err=True,
         )
 
-    httpd = serve_map(graph, theme_obj, host=host, port=port, token=token)
+    httpd = serve_map(
+        graph, theme_obj, host=host, port=port, token=token, overlay=overlay
+    )
     # Local subprocesses post to a concrete loopback address, not 0.0.0.0.
     run_host = "127.0.0.1" if host == "0.0.0.0" else host
     page_url = f"http://{run_host}:{port}/"
@@ -568,7 +664,7 @@ def serve(
     if token:
         events_url += f"?token={token}"
 
-    click.echo("nf-metro live progress (experimental)")
+    click.echo("nf-metro live progress")
     click.echo(f"Mapped stations: {', '.join(mapped) or '(none)'}")
     click.echo("")
     click.echo(f"    ▶ Open: {page_url}")
@@ -598,13 +694,22 @@ def serve(
 )
 @click.option("--theme", type=str, default="nfcore", help="Theme name (nfcore, light).")
 @click.option(
+    "--overlay",
+    type=click.Choice(OVERLAY_STYLES),
+    default=DEFAULT_OVERLAY,
+    show_default=True,
+    help="Status-overlay style shown until a viewer picks another in the page.",
+)
+@click.option(
     "--token",
     default=None,
     help="If set, POSTs to /maps and /r/*/events must supply ?token=... "
     "or an X-Metro-Token header.",
 )
-def serve_multi_cmd(port: int, host: str, theme: str, token: str | None) -> None:
-    """Run a persistent live server many pipelines can report into. [experimental]
+def serve_multi_cmd(
+    port: int, host: str, theme: str, overlay: str, token: str | None
+) -> None:
+    """Run a persistent live server many pipelines can report into.
 
     Unlike `serve` (one map), this starts with no map. A pipeline registers its
     map by POSTing the .mmd to /maps and then sends weblog events to the run's
@@ -629,9 +734,11 @@ def serve_multi_cmd(port: int, host: str, theme: str, token: str | None) -> None
             "use --token to restrict POSTs.",
             err=True,
         )
-    httpd = serve_multi(THEMES[theme], host=host, port=port, token=token)
+    httpd = serve_multi(
+        THEMES[theme], host=host, port=port, token=token, overlay=overlay
+    )
     display_host = "localhost" if host == "127.0.0.1" else host
-    click.echo("nf-metro live progress - persistent server (experimental)")
+    click.echo("nf-metro live progress - persistent server")
     click.echo("")
     click.echo(f"    ▶ Runs index: http://{display_host}:{port}/")
     click.echo("")
@@ -672,7 +779,7 @@ def check_mapping_cmd(
     processes_file: Path | None,
     ignore: tuple[str, ...],
 ) -> None:
-    """Check a map's `%%metro process:` mapping against the processes. [experimental]
+    """Check a map's `%%metro process:` mapping against the processes.
 
     Reports processes the map can't show (drift) and station patterns that
     match nothing (stale), exiting non-zero if any are found so CI can gate on
@@ -740,8 +847,23 @@ def check_mapping_cmd(
 
 @cli.command(name="validate-svg")
 @click.argument("svg_file", type=click.Path(exists=True, path_type=Path))
-def validate_svg_cmd(svg_file: Path) -> None:
-    """Validate an SVG's embedded manifest against the manifest JSON Schema."""
+@click.option(
+    "--geometry",
+    is_flag=True,
+    default=False,
+    help=(
+        "Also run the artifact-only render-geometry guards on the drawn ink "
+        "(label strikes and non-consumer marker crossings), not just the "
+        "manifest schema. The offset-collapse check needs the engine's assigned "
+        "offsets and runs only via 'render --validate'."
+    ),
+)
+def validate_svg_cmd(svg_file: Path, geometry: bool) -> None:
+    """Validate an SVG's embedded manifest against the manifest JSON Schema.
+
+    With ``--geometry`` it additionally runs the artifact-only render-geometry
+    guards on the drawn ink and reports any defect.
+    """
     from nf_metro.render import manifest_schema, read_manifest
 
     try:
@@ -751,7 +873,8 @@ def validate_svg_cmd(svg_file: Path) -> None:
             "validate-svg needs the jsonschema package: pip install jsonschema"
         )
 
-    manifest = read_manifest(svg_file.read_text())
+    svg = svg_file.read_text()
+    manifest = read_manifest(svg)
     if manifest is None:
         click.echo(f"{svg_file}: no diagram manifest embedded", err=True)
         raise SystemExit(1)
@@ -764,7 +887,43 @@ def validate_svg_cmd(svg_file: Path) -> None:
         click.echo(f"  at {where}: {e.message}", err=True)
         raise SystemExit(1)
 
+    if geometry:
+        findings = validate_render(svg)
+        if findings:
+            click.echo(
+                f"{svg_file}: {len(findings)} render-geometry defect(s)", err=True
+            )
+            for finding in findings:
+                click.echo(f"  - {finding.message}", err=True)
+            raise SystemExit(1)
+
     click.echo(
         f"Valid: {len(manifest.get('nodes', []))} nodes, "
         f"schema version {manifest.get('version')}"
+        + (", render geometry clean" if geometry else "")
     )
+
+
+@cli.command(name="embed-script")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write to a file instead of stdout.",
+)
+def embed_script_cmd(output: Path | None) -> None:
+    """Output the nf-metro embed driver JS.
+
+    Prints the ``attachMetroMap()`` driver to stdout (or writes to ``-o``).
+    Load it on a host page alongside an nf-metro SVG to get the documented
+    interactive API.  See ``docs/embed.md`` for usage.
+    """
+    from nf_metro.render.driver import get_driver_js
+
+    js = get_driver_js()
+    if output is not None:
+        output.write_text(js)
+        click.echo(f"Written to {output}")
+    else:
+        click.echo(js, nl=False)

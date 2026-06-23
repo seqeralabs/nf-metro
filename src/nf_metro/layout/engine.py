@@ -17,6 +17,7 @@ import warnings
 from collections.abc import Callable
 
 from nf_metro.layout.constants import (
+    CURVE_RADIUS,
     DESCENDER_CLEARANCE,
     FONT_HEIGHT,
     ICON_CAPTION_FONT_HEIGHT,
@@ -25,8 +26,10 @@ from nf_metro.layout.constants import (
     ICON_STACK_LABEL_CLEARANCE,
     LABEL_OFFSET,
     MIN_Y_SPACING_FLOOR,
+    OFFSET_STEP,
     ROW_GAP,
     SECTION_GAP,
+    SECTION_ROUTE_CLEARANCE,
     SECTION_X_GAP,
     SECTION_X_PADDING,
     SECTION_Y_GAP,
@@ -116,11 +119,10 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _bisection_should_run,
     _ensure_routes,
     _guard_anchors_frozen_during_placement,
-    _guard_bundle_order_preserved,
     _guard_bypass_port_no_slot_gaps,
     _guard_bypass_v_flat_visible,
     _guard_centered_line_spread_balanced,
-    _guard_concentric_bundle_corners,
+    _guard_convergence_shallow_feeder_concentric,
     _guard_coordinates_finite,
     _guard_entry_approach_from_port_side,
     _guard_entry_port_fed_only_by_ports,
@@ -132,28 +134,29 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_fanout_tail_join,
     _guard_feeder_exits_section_through_side,
     _guard_file_icon_no_name_label,
+    _guard_flow_exit_anchored_to_carrier,
     _guard_independent_components_disjoint,
     _guard_inter_row_run_clearance,
     _guard_inter_section_descent_edge_clearance,
     _guard_inter_section_route_no_backtrack,
     _guard_inter_section_route_no_full_width_backtrack,
     _guard_inter_section_routes_in_row_band,
+    _guard_interchange_bar_clears_non_members,
     _guard_merge_port_approach_side,
     _guard_merge_port_outgoing_side_preserved,
     _guard_no_artefactual_counter_flow,
     _guard_no_coincident_station_coords,
-    _guard_no_collinear_distinct_lines,
     _guard_no_diagonal_strikes_horizontal_label,
+    _guard_no_distinct_line_fanout_crossing,
     _guard_no_dogleg_crosses_exempt_trunk,
-    _guard_no_intra_section_collinear_distinct_lines,
     _guard_no_label_overlap,
     _guard_no_line_crosses_file_icon,
     _guard_no_line_crosses_non_consumer,
     _guard_no_line_strikes_label,
     _guard_no_mixed_entry_directions,
     _guard_no_negative_grid_columns,
+    _guard_no_opposing_line_overlap,
     _guard_no_route_through_section,
-    _guard_no_same_line_parallel_descents,
     _guard_no_same_row_backward_feed,
     _guard_no_split_same_line_fanout_descents,
     _guard_no_stacked_elbow_graze,
@@ -166,10 +169,14 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_partial_branch_offset_gaps,
     _guard_perp_entry_boundary_consistent,
     _guard_perp_entry_feed_not_collinear,
+    _guard_perp_exit_over_leadin_no_overdip,
     _guard_ports_on_boundaries,
+    _guard_post_convergence_trunk_continues,
     _guard_rail_above_label_band,
+    _guard_rail_connector_ports_no_stub,
     _guard_rail_one_station_per_column,
     _guard_rail_stations_seat_on_rails,
+    _guard_right_entry_drop_in_when_clear,
     _guard_routes_enter_sections_at_ports,
     _guard_row_gaps,
     _guard_row_trunk_cy_consistent,
@@ -179,17 +186,21 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_single_trunk_off_track_step,
     _guard_station_x_column_drift,
     _guard_stations_in_sections,
-    _guard_stations_within_bbox,
     _guard_tall_anchor_stack_well_formed,
+    _guard_tb_exit_corner_column_order,
+    _guard_tb_top_entry_drop_hugs_top,
     _guard_terminus_icons_within_bbox,
     _guard_topmost_row_top_entry_hugs_section,
     _guard_trunk_bands_crossing_optimal,
+    _guard_trunk_continuation_drops_straight,
     _inter_section_backtrack_legs,
     _port_anchor_snapshot,
     _route_exit_side,
     _run_pass_c_guards,
     _section_lacks_flow_aligned_port,
     inter_section_route_backtrack_legs,
+    iter_line_label_strikes,
+    run_validate_guards,
 )
 from nf_metro.layout.phases.junctions import (  # noqa: F401
     _junction_incoming_line_count,
@@ -253,7 +264,7 @@ from nf_metro.layout.phases.single_section import (  # noqa: F401
     _enforce_min_extent,
     _has_horizontal_predecessor_section,
     _layout_single_section,
-    _mirror_rl,
+    _mirror_primary,
     _multiline_label_padding,
     _multiline_track_spacing,
     _normalize_min,
@@ -277,7 +288,8 @@ from nf_metro.layout.phases.spacing import (  # noqa: F401
     _spread_bump,
     _struck_stations_and_collinear,
 )
-from nf_metro.parser.model import LineSpread, MetroGraph, Section
+from nf_metro.layout.routing.context import is_far_side_around_below_left_entry
+from nf_metro.parser.model import LineSpread, MetroGraph, Section, is_bypass_v
 from nf_metro.parser.validate import (
     CyclicGraphError,
     find_cycle,
@@ -373,6 +385,30 @@ def compute_min_y_spacing(
     return required
 
 
+def _far_side_wrap_left_clearances(graph: MetroGraph) -> dict[str, float]:
+    """Left clearance each section needs for an around-below far-side LEFT entry.
+
+    Such a section is fed by a bundle that rises in a channel a bundle-width plus
+    a curve radius left of its box (see
+    ``_route_left_exit_around_below_left_entry``).  Reserving that width as extra
+    left extent lets the Stage 1.5 overshoot adjustment keep the wrap clear of
+    the canvas edge.  ``SECTION_ROUTE_CLEARANCE`` bounds the ascent channel's own
+    edge clearance, so the sum is a safe upper bound on the wrap's reach.
+    """
+    clearances: dict[str, float] = {}
+    for port in graph.ports.values():
+        if not is_far_side_around_below_left_entry(graph, port):
+            continue
+        n = len({edge.line_id for edge in graph.edges_to(port.id)})
+        clearance = (
+            (n - 1) * OFFSET_STEP + CURVE_RADIUS + OFFSET_STEP + SECTION_ROUTE_CLEARANCE
+        )
+        clearances[port.section_id] = max(
+            clearances.get(port.section_id, 0.0), clearance
+        )
+    return clearances
+
+
 def compute_layout(
     graph: MetroGraph,
     x_spacing: float | None = None,
@@ -431,7 +467,7 @@ def compute_layout(
 
     from nf_metro.layout.labels import font_scale_context
 
-    with font_scale_context(graph.font_scale):
+    def _layout_pass(validate_pass: bool) -> None:
         _compute_layout_scaled(
             graph,
             x_spacing=x_spacing,
@@ -442,8 +478,30 @@ def compute_layout(
             section_y_padding=section_y_padding,
             section_x_gap=section_x_gap,
             section_y_gap=section_y_gap,
-            validate=validate,
+            validate=validate_pass,
         )
+
+    with font_scale_context(graph.font_scale):
+        # Topology-blind bypass insertion (parse time) can miss a line drawn
+        # through a marker it doesn't consume; the geometric pass re-lays out
+        # with bypass helpers for any such crossing it can cleanly fix.  The
+        # first pass defers the breeze-through guard so the crossing is
+        # collected rather than aborting; the final state is validated below.
+        from nf_metro.layout.geometric_bypass import apply_geometric_bypass
+
+        graph._defer_breeze_guard = True
+        _layout_pass(validate)
+        changed, residual_breeze = apply_geometric_bypass(graph, _layout_pass)
+        graph._defer_breeze_guard = False
+
+        # A kept fix is re-validated in full; a crossing the pass could not fix
+        # is surfaced by the active guard on the final geometry.  A clean graph
+        # was already validated under the deferred guard in pass one.
+        if validate:
+            if changed:
+                _layout_pass(validate)
+            elif residual_breeze:
+                _guard_no_line_crosses_non_consumer(graph, "after final")
 
 
 def _compute_layout_scaled(
@@ -505,7 +563,6 @@ def _compute_layout_scaled(
             section_y_padding=section_y_padding,
             section_y_gap=section_y_gap,
         )
-        _guard_stations_within_bbox(graph, "final")
         return
 
     auto_x = x_spacing is None
@@ -623,11 +680,6 @@ def _compute_layout_scaled(
     # layout has fully settled so the box matches what the renderer draws.
     graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
 
-    # Always-on backstop (independent of ``validate``): the settled layout
-    # must never leave a station outside its own section bbox.  Runs on the
-    # render path so an unsupported directive combination fails loudly
-    # instead of shipping a silently-broken diagram (issue #424).
-    _guard_stations_within_bbox(graph, "final")
     _snap(graph, "final")
 
     if validate:
@@ -645,6 +697,80 @@ def _compute_layout_scaled(
         _guard_single_trunk_off_track_step(graph, "final")
         _guard_off_track_consumer_on_trunk(graph, "final")
         _guard_off_track_input_column_stack(graph, "final")
+        _guard_interchange_bar_clears_non_members(graph, "final")
+        _guard_tb_top_entry_drop_hugs_top(graph, "final")
+
+
+def _bypass_label_rakes(graph: MetroGraph) -> set[str]:
+    # Stations whose name label a bypass-V leg crosses, per the guard's strike
+    # definition: it counts a leg's crossing of the station the V routes around
+    # but exempts the leg's own diverging/merging endpoint, isolating the
+    # bypassed-middle rake the gap lever relocates.
+    return {
+        s.station_id
+        for s in iter_line_label_strikes(graph)
+        if is_bypass_v(s.src) or is_bypass_v(s.tgt)
+    }
+
+
+def _clear_bypass_label_rakes(
+    graph: MetroGraph,
+    *,
+    issues: Callable[[], tuple[set[str], bool, set[tuple[str, str, int]]]],
+    adjust: Callable[[tuple[str, str, int], int], None],
+    lever_value: Callable[[tuple[str, str, int]], int],
+    growable_target: Callable[[str], tuple[Section, int] | None],
+    relay: Callable[..., None],
+    reseat: Callable[[], None],
+) -> None:
+    """Push a bypassed node out by whole grid columns to clear a wide-label rake.
+
+    Separate from the fan/convergence loop in ``_apply_label_strike_clearance``
+    because it grows the gap before the *bypassed* node's layer (lengthening the
+    V's leg) rather than a struck station's own runway, and because its probe
+    must read the router's flat-run seating (obstacle boxes kept current by
+    ``reseat``) so it fires only for a rake the router could not seat clear.  The
+    seated boxes are local: the entry value is restored before returning, so the
+    fan/convergence loop reasons about unseated routes.
+    """
+    if not any(
+        v.is_hidden and v.bypasses_station_id is not None
+        for v in graph.stations.values()
+    ):
+        return
+    entry_obstacles = dict(graph.bypass_label_obstacles)
+    graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
+    rake_levers = {
+        ("gap", target[0].id, target[1])
+        for sid in _bypass_label_rakes(graph)
+        if (target := growable_target(sid)) is not None
+    }
+    struck_pre, collinear_pre, _ = issues() if rake_levers else (set(), False, ())
+    if not rake_levers or collinear_pre:
+        graph.bypass_label_obstacles = entry_obstacles
+        return
+    for _ in range(_MAX_SPREAD_ITERS):
+        for lever in rake_levers:
+            adjust(lever, 1)
+        reseat()
+        struck_now, collinear, _ = issues()
+        if collinear:
+            for lever in rake_levers:
+                adjust(lever, -1)
+            break
+        # Done once no rake remains and the shift added no new strike (struck_now
+        # is a subset of the pre-shift strikes); a residual the gaps cannot clear
+        # rolls back wholesale for the guard backstop.
+        if not _bypass_label_rakes(graph) and struck_now <= struck_pre:
+            break
+    else:
+        for lever in rake_levers:
+            while lever_value(lever) > 0:
+                adjust(lever, -1)
+    # The grow steps re-laid against seated boxes; settle the chosen levers
+    # against the restored (unseated) boxes the next loop expects.
+    graph.bypass_label_obstacles = entry_obstacles
+    relay()
 
 
 def _apply_label_strike_clearance(
@@ -681,7 +807,11 @@ def _apply_label_strike_clearance(
     back, so the loop never ships a layout worse than it found.
     """
 
-    def _relay() -> None:
+    def _relay(*, validate_layout: bool = False) -> None:
+        # Growth/shrink steps re-lay unvalidated: an intermediate lever width can
+        # carry a transient strike or overlap that a later column clears.  The
+        # settled layout is re-laid once with ``validate_layout`` so the caller's
+        # stage-boundary checks run on the result the phase ships.
         _layout_once(
             graph,
             x_spacing=x_spacing,
@@ -692,8 +822,14 @@ def _apply_label_strike_clearance(
             section_y_padding=section_y_padding,
             section_x_gap=section_x_gap,
             section_y_gap=section_y_gap,
-            validate=validate,
+            validate=validate_layout,
         )
+
+    def _reseat() -> None:
+        # Refresh the obstacle boxes after re-laying so the rake probe's routes
+        # carry the router's flat-run seating against the current geometry.
+        _relay()
+        graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
 
     def _growable_target(station_id: str) -> tuple[Section, int] | None:
         st = graph.stations.get(station_id)
@@ -736,14 +872,23 @@ def _apply_label_strike_clearance(
     bypass_divergence_sources = {
         edge.source
         for edge in graph.edges
-        if edge.target.startswith("__bypass_")
-        and not edge.source.startswith("__bypass_")
+        if is_bypass_v(edge.target) and not is_bypass_v(edge.source)
     }
 
     def _issues() -> tuple[set[str], bool, set[tuple[str, str, int]]]:
         struck_, collinear_, flat_gaps_ = _label_clearance_issues(graph)
         flat_levers_ = {("gap", sid, layer) for sid, layer in flat_gaps_}
         return struck_, collinear_, flat_levers_
+
+    _clear_bypass_label_rakes(
+        graph,
+        issues=_issues,
+        adjust=_adjust,
+        lever_value=_lever_value,
+        growable_target=_growable_target,
+        relay=_relay,
+        reseat=_reseat,
+    )
 
     struck, _, flat_levers = _issues()
     count = len(struck) + len(flat_levers)
@@ -806,7 +951,7 @@ def _apply_label_strike_clearance(
                 if still_struck or collinear or still_flat:
                     _adjust(lever, 1)
                     break
-        _relay()
+        _relay(validate_layout=validate)
 
 
 def _retrofit_section_rails_phase(
@@ -1102,9 +1247,10 @@ def _compute_section_layout(
     # Increase x_offset to restore the standard margin and let the canvas
     # grow on the right (via auto_width = max_x + CANVAS_PADDING in
     # render).  Same logic for y_offset.
+    wrap_clearances = _far_side_wrap_left_clearances(graph)
     local_lefts = [
-        section.offset_x + section.bbox_x
-        for section in graph.sections.values()
+        section.offset_x + section.bbox_x - wrap_clearances.get(sec_id, 0.0)
+        for sec_id, section in graph.sections.items()
         if section.bbox_w > 0
     ]
     if local_lefts:
@@ -1342,6 +1488,13 @@ def _place_pass_c_content(
     # once.  Stage 5.2 lifts off-track stations; Stages 5.3 to 5.5
     # then re-align row bbox tops, compact, and re-snap inter-section
     # port pairs.  Stage 6 below handles the rest of Pass C.
+
+    # A vertical-flow (TB/BT) section's perpendicular entry port is pinned a
+    # fixed offset above its first station; the bbox growth between Stage 3.2's
+    # alignment and here can lift the section top past it, leaving the port off
+    # its boundary edge.  Re-align before the pass-C guards check boundaries
+    # (Stage 6.16 re-aligns again after the late vertical settling).
+    _align_entry_ports(graph, vertical_only=True)
 
     # Stage 5.1: Position junction stations in the inter-section gap.
     _position_junctions(graph)
@@ -1638,98 +1791,29 @@ def _finalize_layout(
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.15")
 
-    # Stage 6.16: Re-align LEFT/RIGHT entry ports with their feeders.  A
-    # TB section's perpendicular entry port is pinned a fixed offset above
-    # its first internal station, so the late vertical settling (Stages
-    # 6.13-6.15) that shifts the section's content also drags the entry
-    # port off the upstream feeder Y it was snapped to in Stage 3.2,
-    # re-introducing an inter-section S-kink.  Re-running the alignment
-    # (TB/BT sections only, to leave settled LR/RL geometry untouched)
-    # re-snaps the port to its now-settled feeder.  Junctions live in
-    # inter-section space and aren't moved by the settling phases, so
-    # re-anchor them to the settled exit/entry port Ys afterwards
-    # (otherwise a fan-out bundle dips to a stale junction Y and back).
-    _align_entry_ports(graph, tb_only=True)
+    # Stage 6.16: Re-align entry ports and junctions with their now-settled
+    # feeders.  A vertical-flow (TB/BT) section's perpendicular entry port is
+    # pinned a fixed offset above its first internal station, so the late
+    # vertical settling (Stages 6.13-6.15) that shifts the section's content
+    # also drags the entry port off the upstream feeder Y it was snapped to in
+    # Stage 3.2, re-introducing an inter-section S-kink.  Re-running the
+    # alignment for vertical-flow sections only re-snaps the port to its
+    # now-settled feeder, while leaving the horizontal-flow (LR/RL) ports on
+    # the positions the settling deliberately gave them.  Junctions then
+    # re-anchor to the settled exit/entry port Ys regardless of direction
+    # (they live in inter-section space and aren't moved by the settling
+    # phases, so otherwise a fan-out bundle dips to a stale junction Y).
+    _align_entry_ports(graph, vertical_only=True)
     _position_junctions(graph)
     _snap(graph, "6.16")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.16")
 
     if validate:
-        phase = "after final"
-        offsets, routes = _run_pass_c_guards(graph, phase)
-        _guard_row_trunk_cy_consistent(graph, phase, offsets=offsets)
-        _guard_off_track_clear_of_anchor(graph, phase)
-        _guard_fanout_junction_shares_exit_port_y(graph, phase)
-        _guard_fanout_junction_resolves_upstream(graph, phase)
-        _guard_entry_port_fed_only_by_ports(graph, phase)
-        _guard_perp_entry_feed_not_collinear(graph, phase)
-        _guard_merge_port_approach_side(graph, phase, offsets=offsets)
-        _guard_merge_port_outgoing_side_preserved(graph, phase, offsets=offsets)
-        _guard_exit_inherits_entry_bundle_order(graph, phase, offsets=offsets)
-        _guard_bypass_port_no_slot_gaps(graph, phase, offsets=offsets)
-        _guard_partial_branch_offset_gaps(graph, phase, offsets=offsets)
-        _guard_row_gaps(graph, phase, section_y_gap=section_y_gap)
-        _guard_section_top_padding(
+        run_validate_guards(
             graph,
-            phase,
-            section_y_padding=section_y_padding,
+            "after final",
+            include_final=True,
             section_y_gap=section_y_gap,
+            section_y_padding=section_y_padding,
         )
-        _guard_terminus_icons_within_bbox(graph, phase)
-        if routes is not None:
-            _guard_inter_section_routes_in_row_band(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_topmost_row_top_entry_hugs_section(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_off_track_output_clears_non_producer(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_bundle_order_preserved(graph, phase, offsets=offsets, routes=routes)
-            _guard_concentric_bundle_corners(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_no_collinear_distinct_lines(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_no_intra_section_collinear_distinct_lines(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_no_same_line_parallel_descents(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_no_split_same_line_fanout_descents(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_no_dogleg_crosses_exempt_trunk(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_no_stacked_elbow_graze(graph, phase, offsets=offsets, routes=routes)
-            _guard_fanout_tail_join(graph, phase, offsets=offsets, routes=routes)
-            _guard_perp_entry_boundary_consistent(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_inter_section_route_no_backtrack(graph, phase, routes=routes)
-            _guard_inter_section_route_no_full_width_backtrack(
-                graph, phase, routes=routes
-            )
-            _guard_routes_enter_sections_at_ports(graph, phase, routes=routes)
-            _guard_no_route_through_section(
-                graph, phase, routes=routes, offsets=offsets
-            )
-            _guard_feeder_exits_section_through_side(
-                graph, phase, routes=routes, offsets=offsets
-            )
-            _guard_entry_approach_from_port_side(graph, phase, routes=routes)
-            _guard_serpentine_no_backtrack(graph, phase, routes=routes)
-            _guard_no_artefactual_counter_flow(graph, phase, routes=routes)
-            _guard_inter_row_run_clearance(graph, phase, routes=routes)
-            _guard_trunk_bands_crossing_optimal(
-                graph, phase, offsets=offsets, routes=routes
-            )
-            _guard_inter_section_descent_edge_clearance(graph, phase, routes=routes)
-            _guard_fan_bundles_coincide_or_separate(
-                graph, phase, offsets=offsets, routes=routes
-            )

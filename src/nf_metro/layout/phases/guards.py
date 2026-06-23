@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import math
+import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING, NamedTuple
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from nf_metro.layout.constants import (
+    COLLINEAR_AXIS_TOL,
     COMPONENT_BAND_OVERLAP_TOLERANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
     CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
+    FLOW_ALIGNED_PORT_ADVICE,
     GUARD_TOLERANCE,
     ICON_HALF_HEIGHT,
     INTER_ROW_EDGE_CLEARANCE,
@@ -20,10 +24,15 @@ from nf_metro.layout.constants import (
     ROW_BAND_SLACK,
     SAME_COORD_TOLERANCE,
     SECTION_Y_GAP,
+    SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
     X_SPACING,
 )
-from nf_metro.layout.geometry import BBoxXIndex, segment_intersects_bbox
+from nf_metro.layout.geometry import (
+    BBoxXIndex,
+    lanes_run_along_y,
+    segment_intersects_bbox,
+)
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _canvas_width,
@@ -33,7 +42,10 @@ from nf_metro.layout.phases._common import (
     _station_marker_bbox,
     first_vertical_leg_sign,
     first_vertical_leg_x,
+    flow_exit_carrier_anchor,
     is_loop_side_branch_station,
+    iter_sole_trunk_continuations,
+    marker_cross_exempt,
     routes_through_unrelated_sections,
 )
 from nf_metro.layout.phases.bbox import _section_fit_top
@@ -69,6 +81,20 @@ if TYPE_CHECKING:
 
 class PhaseInvariantError(Exception):
     """Raised when a layout phase produces invalid intermediate state."""
+
+
+class LayoutInvariantError(PhaseInvariantError):
+    """Raised on the render path under ``--strict`` when the settled layout
+    violates a Tier-A invariant.
+
+    The render-path chokepoint :func:`assert_render_layout_invariants` runs the
+    cheap Tier-A layout guards on the final geometry the renderer is about to
+    draw.  Without ``--strict`` a violation is a warning, so the user receives
+    a best-effort diagram carrying a visible diagnosis; with ``--strict`` the
+    chokepoint raises this instead.  Subclassing :class:`PhaseInvariantError`
+    lets the CLI's existing layout-error handler surface it as a clean message
+    rather than a traceback.
+    """
 
 
 class BackwardFlowError(ValueError):
@@ -271,9 +297,7 @@ def _guard_stations_within_bbox(graph: MetroGraph, phase: str) -> None:
                 f"; section {st.section_id!r} is internally {sec.direction} "
                 f"but its only ports are perpendicular to that flow, so the "
                 f"run has no flow-aligned port to anchor it to the bbox. "
-                f"Give the section a flow-aligned entry/exit port "
-                f"(left/right for LR/RL, top/bottom for TB/BT) or change "
-                f"its '%%metro direction:'."
+                f"{FLOW_ALIGNED_PORT_ADVICE}"
             )
         raise PhaseInvariantError(detail)
 
@@ -411,6 +435,35 @@ def _guard_rail_one_station_per_column(graph: MetroGraph, phase: str) -> None:
                 )
 
 
+def _guard_interchange_bar_clears_non_members(graph: MetroGraph, phase: str) -> None:
+    """An interchange connector bar must not cross a non-member station.
+
+    The bar runs vertically between the top and bottom member rails at the
+    interchange column; any other station sharing that column within the span
+    would be cut by the bar (a station-as-elbow violation).  Auto-detection
+    abstains or reorders to avoid this, but the seating is geometry-dependent,
+    so verify the settled layout directly.
+    """
+    tol = GUARD_TOLERANCE
+    for ic in graph.interchanges:
+        member_ids = set(ic.member_ids)
+        members = [graph.stations[m] for m in ic.member_ids if m in graph.stations]
+        if len(members) < 2:
+            continue
+        x = members[0].x
+        ys = [m.y for m in members]
+        lo, hi = min(ys), max(ys)
+        for s in graph.stations.values():
+            if s.is_port or s.id in member_ids:
+                continue
+            if abs(s.x - x) < tol and lo - tol < s.y < hi + tol:
+                raise PhaseInvariantError(
+                    f"{phase}: interchange {ic.node_id!r} bar (x={x:.1f}, "
+                    f"y {lo:.1f}..{hi:.1f}) spans non-member station {s.id!r} "
+                    f"at ({s.x:.1f}, {s.y:.1f})"
+                )
+
+
 def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
     """After Stage 3.1+: ports must sit on their section's bounding box edge."""
     tolerance = GUARD_TOLERANCE
@@ -432,6 +485,62 @@ def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _tb_top_entry_drop_overshoot(
+    graph: MetroGraph,
+) -> list[tuple[str, float]]:
+    """Return ``(section_id, gap)`` for TB sections whose first station sits
+    further below the box top than the standard padding despite the TOP
+    entry being a clean vertical drop (see :func:`_adjust_tb_entry_shifts`
+    for why such a drop is always vertical).
+
+    Sections with a perpendicular (LEFT/RIGHT) entry are excluded: they
+    legitimately shift their stations down to clear the entry port.
+    """
+    tol = GUARD_TOLERANCE
+    offenders: list[tuple[str, float]] = []
+    for sid, sec in graph.sections.items():
+        if sec.direction != "TB" or sec.bbox_h == 0:
+            continue
+        entry_ports = [
+            graph.ports[pid] for pid in sec.entry_ports if pid in graph.ports
+        ]
+        top_ports = [p for p in entry_ports if p.side == PortSide.TOP]
+        if not top_ports:
+            continue
+        if any(p.side in (PortSide.LEFT, PortSide.RIGHT) for p in entry_ports):
+            continue
+        # A hidden trunk-head (e.g. a fan-out hub) is a valid drop target, so
+        # do not filter to visible markers further down the trunk.
+        body = [
+            graph.stations[s]
+            for s in sec.station_ids
+            if s in graph.stations and not graph.stations[s].is_port
+        ]
+        if not body:
+            continue
+        first = min(body, key=lambda st: st.y)
+        port_xs = [graph.stations[p.id].x for p in top_ports if p.id in graph.stations]
+        if not any(abs(first.x - px) <= tol for px in port_xs):
+            continue
+        gap = first.y - sec.bbox_y
+        if gap > SECTION_Y_PADDING + tol:
+            offenders.append((sid, gap))
+    return offenders
+
+
+def _guard_tb_top_entry_drop_hugs_top(graph: MetroGraph, phase: str) -> None:
+    """Final: a clean TB TOP-entry drop must seat its first station at the
+    standard top padding, with no unused in-section reservation."""
+    offenders = _tb_top_entry_drop_overshoot(graph)
+    if offenders:
+        sid, gap = offenders[0]
+        raise PhaseInvariantError(
+            f"{phase}: section {sid!r} first station sits {gap:.1f}px below "
+            f"its box top despite a clean vertical TOP-entry drop "
+            f"(expected <= {SECTION_Y_PADDING:.1f})"
+        )
+
+
 def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
     """After Stage 1.1+: non-empty sections must have positive-size bboxes."""
     for sid, sec in graph.sections.items():
@@ -449,10 +558,10 @@ def _guard_no_negative_grid_columns(graph: MetroGraph, phase: str) -> None:
 
     The auto-layout serpentine packer steps a return row leftward from
     its fold bridge; without normalization that walk can run off the left
-    edge into negative columns (issue #256), which renders the section's
-    badge left of everything and snakes the inter-section trunk down the
-    left margin. ``infer_section_layout`` normalizes the grid so the
-    leftmost column is 0; this guard fails loudly if that ever regresses.
+    edge into negative columns, which renders the section's badge left of
+    everything and snakes the inter-section trunk down the left margin.
+    ``infer_section_layout`` normalizes the grid so the leftmost column is 0;
+    this guard fails loudly if that ever regresses.
     """
     # Read from grid_overrides (populated with an explicit column for every
     # placed section) rather than Section.grid_col, whose -1 sentinel for
@@ -517,10 +626,10 @@ def _guard_explicit_grid_directions(graph: MetroGraph, phase: str) -> None:
     explicit %%metro direction.
 
     A section's grid position is the author's manual layout intent, not a
-    flow-direction signal (issue #446). Direction inference therefore skips
-    explicit-grid sections; this guard fails loudly if a future change ever
-    lets inference reorient one (e.g. by reading override-aware positions),
-    which would silently elongate serpentine-stacked maps vertically.
+    flow-direction signal. Direction inference therefore skips explicit-grid
+    sections; this guard fails loudly if a future change ever lets inference
+    reorient one (e.g. by reading override-aware positions), which would
+    silently elongate serpentine-stacked maps vertically.
     """
     offenders = {
         sid: graph.sections[sid].direction
@@ -631,6 +740,139 @@ def _guard_no_mixed_entry_directions(graph: MetroGraph) -> None:
             f"so every line enters the same edge), or split it into separate "
             f"sections."
         )
+
+
+def _guard_flow_exit_anchored_to_carrier(graph: MetroGraph, phase: str) -> None:
+    """A flow-aligned exit anchoring to a shared carrier row must sit on it.
+
+    Otherwise the link from the carriers to the exit climbs to the port and
+    renders as a diagonal inside the section instead of a clean horizontal run
+    with one riser in the inter-section gap.  Scope (single carrier or parallel
+    bundle, direct entry or fan-out junction, clear corridor, non-fold section)
+    is exactly :func:`flow_exit_carrier_anchor`; everything else anchors
+    elsewhere by design.
+    """
+    junction_ids = graph.junction_ids
+    for pid, port in graph.ports.items():
+        if port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        sec = graph.sections.get(port.section_id)
+        if sec is None:
+            continue
+        anchor = flow_exit_carrier_anchor(graph, pid, sec, junction_ids)
+        if anchor is None:
+            continue
+        carrier_y, carrier_ids = anchor
+        port_y = graph.stations[pid].y
+        if abs(port_y - carrier_y) > GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: exit port {pid!r} at y={port_y:.1f} is off its "
+                f"carrier row y={carrier_y:.1f} (carriers {sorted(carrier_ids)}); "
+                f"the boundary run will render as a diagonal instead of a riser"
+            )
+
+
+def _exit_perp_to_flow(src_port: Port, src_section: Section) -> bool:
+    """Whether an exit port sits on a side perpendicular to its section's flow.
+
+    The complement of :data:`_FLOW_ALIGNED_SIDES`: a perpendicular exit lies on
+    a boundary edge rather than on a trunk (a TB section's exit dips below its
+    last station), so its Y is a structural boundary, not a row that aligns
+    with the downstream consumer.
+    """
+    flow_sides = _FLOW_ALIGNED_SIDES.get(src_section.direction)
+    return flow_sides is not None and src_port.side not in flow_sides
+
+
+def _perp_fed_entry_consumer_y(
+    graph: MetroGraph, port_id: str, port: Port
+) -> float | None:
+    """Consumer Y a LEFT/RIGHT entry fed by a perpendicular exit must anchor to.
+
+    Returns the Y of the single internal consumer station when *port* is a
+    LEFT/RIGHT entry whose sole feed is a same-row exit port sitting
+    perpendicular to its section's flow, and whose consumers share one Y.
+    Anchoring the entry there keeps the inter-section climb a riser in the
+    column gap with a horizontal turn-in, rather than a diagonal into the
+    first station (#908).  Returns ``None`` when the port is out of scope.
+    """
+    if not port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+        return None
+    entry_section = graph.sections.get(port.section_id)
+    if entry_section is None:
+        return None
+    fed_by_perp_exit = False
+    for edge in graph.edges_to(port_id):
+        src_port = graph.ports.get(edge.source)
+        if src_port is None or src_port.is_entry:
+            continue
+        src_section = graph.sections.get(src_port.section_id)
+        if src_section is None or src_section.grid_row != entry_section.grid_row:
+            continue
+        if _exit_perp_to_flow(src_port, src_section):
+            fed_by_perp_exit = True
+            break
+    if not fed_by_perp_exit:
+        return None
+    consumer_ys = {
+        round(st.y, 1)
+        for edge in graph.edges_from(port_id)
+        if (st := graph.stations.get(edge.target)) is not None
+        and not st.is_port
+        and st.section_id == entry_section.id
+    }
+    if len(consumer_ys) != 1:
+        return None
+    return consumer_ys.pop()
+
+
+def _guard_perp_fed_entry_anchored_to_consumer(graph: MetroGraph, phase: str) -> None:
+    """A LEFT/RIGHT entry fed by a perpendicular exit sits on its consumer row.
+
+    When such an entry anchors to the source exit's boundary Y instead, the
+    inter-section bundle climbs into the single consumer station via a diagonal
+    rather than rising in the column gap and entering horizontally (#908).
+    Scope is exactly :func:`_perp_fed_entry_consumer_y`.
+    """
+    for pid, port in graph.ports.items():
+        consumer_y = _perp_fed_entry_consumer_y(graph, pid, port)
+        if consumer_y is None:
+            continue
+        port_y = graph.stations[pid].y
+        if abs(port_y - consumer_y) > GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: entry port {pid!r} at y={port_y:.1f} is off its "
+                f"consumer row y={consumer_y:.1f}; the bundle will climb into "
+                f"the consumer via a diagonal instead of a horizontal turn-in"
+            )
+
+
+def _guard_post_convergence_trunk_continues(graph: MetroGraph, phase: str) -> None:
+    """The sole continuation of a line-shedding station continues on its row.
+
+    When a horizontal-section station carries strictly more lines than its only
+    in-section successor -- because some of its lines ended there, whether a
+    merged branch that stopped (#946) or a bundled line that terminated (#977)
+    -- and that successor is its only forward path, the chain is linear with no
+    sibling branch to fan toward. The successor must share the predecessor's Y;
+    otherwise the trunk dives onto a line base row, painting a needless diagonal
+    (or an in-section V-kink) right after the junction.
+
+    A predecessor whose flow also leaves elsewhere -- a section-exit edge or a
+    bypass V routing a line *around* the successor -- genuinely forks, so its
+    successor would legitimately drop off the trunk; the predecessor's *only*
+    forward path in the whole graph must be this successor. Vertical (TB/BT)
+    sections, ports, hidden, and off-track stations are out of scope.
+    """
+    for _section_id, pred, node in iter_sole_trunk_continuations(graph):
+        pred_y = graph.stations[pred].y
+        node_y = graph.stations[node].y
+        if abs(node_y - pred_y) > GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: continuation station {node!r} at y={node_y:.1f} "
+                f"is off its predecessor {pred!r} y={pred_y:.1f}; the trunk "
+                f"dives onto a branch row right after the junction"
+            )
 
 
 def _guard_tall_anchor_stack_well_formed(graph: MetroGraph, phase: str) -> None:
@@ -1114,7 +1356,7 @@ def _guard_no_line_crosses_non_consumer(
     sharing its trunk-Y row with a busier sibling whose inbound
     bundle traverses the sparse consumer's column.
     """
-    from nf_metro.render.svg import apply_route_offsets
+    from nf_metro.layout.routing.common import apply_route_offsets
 
     if offsets is None:
         from nf_metro.layout.routing import compute_station_offsets
@@ -1131,6 +1373,8 @@ def _guard_no_line_crosses_non_consumer(
     boxes: list[tuple[str, tuple[float, float, float, float]]] = []
     station_lines_cache: dict[str, set[str]] = {}
     for sid in graph.stations:
+        if marker_cross_exempt(graph, sid):
+            continue
         bbox = _station_marker_bbox(graph, sid, offsets=offsets)
         if bbox is None:
             continue
@@ -1151,6 +1395,11 @@ def _guard_no_line_crosses_non_consumer(
                 if src == sid or tgt == sid:
                     continue
                 if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
+                    # The first of two layout passes defers this guard so the
+                    # geometric bypass pass can fix the crossing; the re-laid-
+                    # out second pass runs it for real.
+                    if graph._defer_breeze_guard:
+                        return
                     raise PhaseInvariantError(
                         f"{phase}: line {line_id!r} on edge "
                         f"{src!r} -> {tgt!r} "
@@ -1180,7 +1429,8 @@ def _guard_no_line_crosses_file_icon(
     one belonging to a line the icon's station also carries, since a
     different edge of that line is still raking the artefact.
     """
-    from nf_metro.render.svg import _icon_obstacles_by_station, apply_route_offsets
+    from nf_metro.layout.routing.common import apply_route_offsets
+    from nf_metro.render.svg import _icon_obstacles_by_station
     from nf_metro.themes import THEMES
 
     if offsets is None:
@@ -1216,6 +1466,148 @@ def _guard_no_line_crosses_file_icon(
                         f"({bbox[2]:.1f},{bbox[3]:.1f}); segment "
                         f"({p1[0]:.1f},{p1[1]:.1f})->({p2[0]:.1f},{p2[1]:.1f})"
                     )
+
+
+class OpposingOverlap(NamedTuple):
+    """Two segments of one line covering a stretch in opposing directions."""
+
+    line_id: str
+    axis: str  # "V" (shared X) or "H" (shared Y)
+    coord: float  # the shared constant-axis value
+    lo: float  # overlap start along the variable axis
+    hi: float  # overlap end along the variable axis
+    src_a: str
+    tgt_a: str
+    src_b: str
+    tgt_b: str
+
+
+class _AxisLeg(NamedTuple):
+    """One axis-aligned leg of a rendered path, with its travel direction."""
+
+    axis: str  # "V" (shared X) or "H" (shared Y)
+    coord: float  # the constant-axis value
+    lo: float  # span start along the variable axis
+    hi: float  # span end along the variable axis
+    direction: int  # +1 advancing in the increasing-coordinate sense, else -1
+    src: str
+    tgt: str
+
+
+def _line_axis_segments(
+    pts: list[tuple[float, float]],
+    src: str,
+    tgt: str,
+) -> Iterator[_AxisLeg]:
+    """Yield the axis-aligned legs of a rendered path.
+
+    Diagonal legs carry no single constant axis and are skipped.
+    """
+    for k in range(len(pts) - 1):
+        (x1, y1), (x2, y2) = pts[k], pts[k + 1]
+        if abs(x1 - x2) <= COLLINEAR_AXIS_TOL and abs(y1 - y2) > GUARD_TOLERANCE:
+            yield _AxisLeg(
+                "V",
+                (x1 + x2) / 2,
+                min(y1, y2),
+                max(y1, y2),
+                1 if y2 > y1 else -1,
+                src,
+                tgt,
+            )
+        elif abs(y1 - y2) <= COLLINEAR_AXIS_TOL and abs(x1 - x2) > GUARD_TOLERANCE:
+            yield _AxisLeg(
+                "H",
+                (y1 + y2) / 2,
+                min(x1, x2),
+                max(x1, x2),
+                1 if x2 > x1 else -1,
+                src,
+                tgt,
+            )
+
+
+def iter_opposing_line_overlaps(
+    graph: MetroGraph,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> Iterator[OpposingOverlap]:
+    """Yield every stretch a single line covers twice in opposing directions.
+
+    Two axis-aligned legs of the *same* line that share a constant axis (same
+    X for vertical legs, same Y for horizontal) and overlap along the other
+    axis while pointing in opposite senses draw the line back over itself --
+    a fold-back.  Spatially the line reads as running one way then doubling
+    straight back, so a station caught in the overlap is visited out of flow
+    order (#885).  Legs are compared only within one ``line_id``: distinct
+    lines sharing a channel are carried on their own offset slots, not on the
+    same track.
+    """
+    from nf_metro.layout.routing.common import apply_route_offsets
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+    if routes is None:
+        from nf_metro.layout.routing import route_edges
+
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+
+    by_line: dict[str, list[_AxisLeg]] = defaultdict(list)
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        for leg in _line_axis_segments(pts, r.edge.source, r.edge.target):
+            by_line[r.line_id].append(leg)
+
+    for line_id, legs in by_line.items():
+        for i, a in enumerate(legs):
+            for b in legs[i + 1 :]:
+                if a.axis != b.axis or abs(a.coord - b.coord) > COLLINEAR_AXIS_TOL:
+                    continue
+                if a.direction * b.direction >= 0:
+                    continue
+                if min(a.hi, b.hi) - max(a.lo, b.lo) > GUARD_TOLERANCE:
+                    yield OpposingOverlap(
+                        line_id,
+                        a.axis,
+                        (a.coord + b.coord) / 2,
+                        max(a.lo, b.lo),
+                        min(a.hi, b.hi),
+                        a.src,
+                        a.tgt,
+                        b.src,
+                        b.tgt,
+                    )
+
+
+def _guard_no_opposing_line_overlap(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """After routing: no location may be covered by one line travelling in
+    opposing directions.
+
+    A line that runs out along a track and straight back over the same track
+    folds on itself; any station in the overlap is read out of flow order
+    (#885).  This is the general safety net complementing the placement fix
+    that keeps a flow-axis entry/exit port on its consumer's side.
+    """
+    for ov in iter_opposing_line_overlaps(graph, offsets=offsets, routes=routes):
+        axis = "x" if ov.axis == "V" else "y"
+        raise PhaseInvariantError(
+            f"{phase}: line {ov.line_id!r} covers {axis}={ov.coord:.1f} "
+            f"over [{ov.lo:.1f},{ov.hi:.1f}] in opposing directions "
+            f"(legs {ov.src_a!r}->{ov.tgt_a!r} and {ov.src_b!r}->{ov.tgt_b!r}); "
+            f"the line folds back over its own track"
+        )
 
 
 class LabelStrike(NamedTuple):
@@ -1257,7 +1649,8 @@ def iter_line_label_strikes(
         place_labels,
         segment_strikes_label,
     )
-    from nf_metro.render.svg import _compute_icon_obstacles, apply_route_offsets
+    from nf_metro.layout.routing.common import apply_route_offsets
+    from nf_metro.render.svg import _compute_icon_obstacles
     from nf_metro.themes import THEMES
 
     if offsets is None:
@@ -1465,7 +1858,7 @@ def _guard_off_track_output_clears_non_producer(
     closes the gap by checking the output route against same-section trunk
     markers regardless of line membership, exempting only the producer.
     """
-    from nf_metro.render.svg import apply_route_offsets
+    from nf_metro.layout.routing.common import apply_route_offsets
 
     producer_of = {
         off_id: anchor_id
@@ -1542,7 +1935,7 @@ def _guard_row_trunk_cy_consistent(
         if (
             sec.bbox_h <= 0
             or sec.grid_row < 0
-            or sec.direction not in ("LR", "RL")
+            or not lanes_run_along_y(sec.direction)
             or sec.grid_row_span > 1
         ):
             continue
@@ -2024,6 +2417,55 @@ def _guard_inter_section_route_no_full_width_backtrack(
                 f"line {rp.line_id!r} backtracks {span:.1f}px in one leg "
                 f"(x={x1:.1f}->{x2:.1f}), exceeding {fraction:.0%} of canvas "
                 f"width {canvas_width:.1f} - a full-width dog-leg"
+            )
+
+
+def _guard_rail_connector_ports_no_stub(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """After routing: a whole-graph rail-mode inter-section connector must
+    leave its exit port outward and reach its entry port from outside.
+
+    Rail mode stacks sections vertically; the dedicated rail router connects a
+    RIGHT exit port to a LEFT entry port via a corridor that wraps around the
+    outside of both boxes.  A connector that instead heads back *into* the
+    section it just left (or reaches the entry port from inside the box) leaves
+    a dangling stub and slices the section's own rails (#743).  The outward
+    direction is set by the port side: a RIGHT port is left/reached rightward,
+    a LEFT port leftward.
+    """
+    if graph.line_spread is not LineSpread.RAILS:
+        return
+    routes = _ensure_routes(graph, routes)
+
+    def outward_ok(side: PortSide, anchor_x: float, neighbour_x: float) -> bool:
+        if side is PortSide.RIGHT:
+            return neighbour_x >= anchor_x - GUARD_TOLERANCE
+        if side is PortSide.LEFT:
+            return neighbour_x <= anchor_x + GUARD_TOLERANCE
+        return True
+
+    for rp in routes:
+        src = graph.ports.get(rp.edge.source)
+        tgt = graph.ports.get(rp.edge.target)
+        if src is None or tgt is None or src.section_id == tgt.section_id:
+            continue
+        if len(rp.points) < 2:
+            continue
+        if not outward_ok(src.side, rp.points[0][0], rp.points[1][0]):
+            raise PhaseInvariantError(
+                f"{phase}: rail connector {rp.edge.source!r}->{rp.edge.target!r} "
+                f"line {rp.line_id!r} leaves its {src.side.name} exit port "
+                f"x={rp.points[0][0]:.1f} inward toward x={rp.points[1][0]:.1f}"
+            )
+        if not outward_ok(tgt.side, rp.points[-1][0], rp.points[-2][0]):
+            raise PhaseInvariantError(
+                f"{phase}: rail connector {rp.edge.source!r}->{rp.edge.target!r} "
+                f"line {rp.line_id!r} reaches its {tgt.side.name} entry port "
+                f"x={rp.points[-1][0]:.1f} from inside at x={rp.points[-2][0]:.1f}"
             )
 
 
@@ -2615,138 +3057,27 @@ def _guard_inter_section_descent_edge_clearance(
                     )
 
 
-def _guard_bundle_order_preserved(
+def _guard_tb_exit_corner_column_order(
     graph: MetroGraph,
     phase: str,
     *,
     offsets: dict[tuple[str, str], float] | None = None,
     routes: list[RoutedPath] | None = None,
 ) -> None:
-    """Final-phase: at every shared-xy corner where 2 or more bundled
-    lines meet, the lines' relative left/right ordering must be
-    preserved between incoming and outgoing tangents.
+    """Final-phase: a TB section's LEFT/RIGHT exit corner must continue its
+    in-section column order, so the bundle does not cross at the feeder station.
 
-    See ``src/nf_metro/layout/routing/invariants.py`` for the
-    semantic definition.  The guard is a thin wrapper: it routes the
-    edges (if not provided), invokes
-    :func:`check_bundle_order_preserved`, and raises
-    :class:`PhaseInvariantError` with the first violation's
-    self-describing message (the full violation list is summarised in
-    the count).
-
-    The check operates on the final ``route_edges`` output, so it can
-    only run at the final guard block where the routing is stable.
-    """
-    from nf_metro.layout.routing.invariants import check_bundle_order_preserved
-
-    if routes is None:
-        from nf_metro.layout.routing import compute_station_offsets, route_edges
-
-        if offsets is None:
-            offsets = compute_station_offsets(graph)
-        try:
-            routes = route_edges(graph, station_offsets=offsets)
-        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
-            return
-
-    violations = check_bundle_order_preserved(routes)
-    if not violations:
-        return
-    first = violations[0]
-    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
-    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
-
-
-def _guard_no_collinear_distinct_lines(
-    graph: MetroGraph,
-    phase: str,
-    *,
-    offsets: dict[tuple[str, str], float] | None = None,
-    routes: list[RoutedPath] | None = None,
-) -> None:
-    """Final-phase: no two distinct lines may render on top of each other.
-
-    Wraps :func:`check_no_collinear_distinct_lines`: a bundling/offset
-    defect that collapses two co-travelling lines onto one channel makes
-    one stroke obscure the other.  Operates on the final, offset-applied
-    inter-section geometry.
+    Wraps :func:`check_tb_exit_corner_preserves_column_order`.  A TB exit corner
+    that derives its vertical-drop X from a different reversal convention than
+    the column swaps two lines' X and renders a crossing through the feeder
+    station marker.
     """
     from nf_metro.layout.routing.invariants import (
-        check_no_collinear_distinct_lines,
+        check_tb_exit_corner_preserves_column_order,
     )
 
     _raise_on_first_violation(
-        graph, phase, check_no_collinear_distinct_lines, offsets, routes
-    )
-
-
-def _guard_no_intra_section_collinear_distinct_lines(
-    graph: MetroGraph,
-    phase: str,
-    *,
-    offsets: dict[tuple[str, str], float] | None = None,
-    routes: list[RoutedPath] | None = None,
-) -> None:
-    """Final-phase: no two distinct lines may render on top within a section.
-
-    Wraps :func:`check_intra_section_collinear_distinct_lines`, the
-    intra-section counterpart to :func:`_guard_no_collinear_distinct_lines`.
-    A bundling/offset defect that collapses two co-travelling lines onto one
-    channel *inside* a section hides one line behind the other.
-    """
-    from nf_metro.layout.routing.invariants import (
-        check_intra_section_collinear_distinct_lines,
-    )
-
-    _raise_on_first_violation(
-        graph, phase, check_intra_section_collinear_distinct_lines, offsets, routes
-    )
-
-
-def _guard_no_same_line_parallel_descents(
-    graph: MetroGraph,
-    phase: str,
-    *,
-    offsets: dict[tuple[str, str], float] | None = None,
-    routes: list[RoutedPath] | None = None,
-) -> None:
-    """Final-phase: one line never descends as two parallel adjacent tracks.
-
-    Wraps :func:`check_no_same_line_parallel_descents`: where a line fans out
-    from one source (or converges on one port), the branches must share a
-    single trunk over the span they travel together rather than occupying
-    adjacent offset slots that render as two same-colour tracks.
-    """
-    from nf_metro.layout.routing.invariants import (
-        check_no_same_line_parallel_descents,
-    )
-
-    _raise_on_first_violation(
-        graph, phase, check_no_same_line_parallel_descents, offsets, routes
-    )
-
-
-def _guard_concentric_bundle_corners(
-    graph: MetroGraph,
-    phase: str,
-    *,
-    offsets: dict[tuple[str, str], float] | None = None,
-    routes: list[RoutedPath] | None = None,
-) -> None:
-    """Final-phase: wholesale-translated bundle corners share an arc centre.
-
-    Wraps :func:`check_concentric_bundle_corners`, the correctness check the
-    corner-radius source ratchet (``test_corner_radius_ratchet``) cannot do:
-    a radius can trace to an approved helper yet nest non-concentrically when
-    the caller hand-picks the wrong sign.  A bundle turning a 90-degree corner
-    as a unit must keep its arcs concentric or it pinches through the bend.
-    """
-    from nf_metro.layout.routing.invariants import (
-        check_concentric_bundle_corners,
-    )
-
-    _raise_on_first_violation(
-        graph, phase, check_concentric_bundle_corners, offsets, routes
+        graph, phase, check_tb_exit_corner_preserves_column_order, offsets, routes
     )
 
 
@@ -2770,6 +3101,51 @@ def _guard_no_split_same_line_fanout_descents(
 
     _raise_on_first_violation(
         graph, phase, check_no_split_same_line_fanout_descents, offsets, routes
+    )
+
+
+def _guard_no_distinct_line_fanout_crossing(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: distinct lines diverging from one fan-out stay bundled.
+
+    Wraps :func:`check_no_distinct_line_fanout_crossing`: at a clean-divergence
+    junction (distinct lines peeling to disjoint targets), the bundle must
+    descend as one unit and split only where each line turns into its target,
+    never crossing a mate's run on the way down.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_no_distinct_line_fanout_crossing,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_no_distinct_line_fanout_crossing, offsets, routes
+    )
+
+
+def _guard_trunk_continuation_drops_straight(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: a TB fan-out's in-lane continuation drops straight.
+
+    Wraps :func:`check_trunk_continuation_drops_straight`: where one line of a
+    TB fan-out continues along the trunk lane while a sibling peels off, the
+    continuing line must run straight rather than jog by one step off the trunk.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_trunk_continuation_drops_straight,
+    )
+
+    _raise_on_first_violation(
+        graph, phase, check_trunk_continuation_drops_straight, offsets, routes
     )
 
 
@@ -2856,6 +3232,37 @@ def _guard_merge_port_approach_side(
     first = violations[0]
     extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
+def _guard_convergence_shallow_feeder_concentric(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """Final-phase: at a LEFT entry where bypass feeders climb in from off the
+    port row and a flat shallow feeder joins them, the shallow feeder must take
+    a port-near slot above the climbing risers rather than weave across the
+    turning bundle.
+
+    See
+    :func:`nf_metro.layout.routing.invariants.check_convergence_shallow_feeder_concentric`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_convergence_shallow_feeder_concentric,
+    )
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    messages = check_convergence_shallow_feeder_concentric(graph, offsets)
+    if not messages:
+        return
+    extra = f" (+{len(messages) - 1} more)" if len(messages) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {messages[0]}{extra}")
 
 
 def _guard_merge_port_outgoing_side_preserved(
@@ -3062,6 +3469,79 @@ def _guard_perp_entry_boundary_consistent(
             return
 
     violations = check_perp_entry_boundary_consistent(graph, routes)
+    if not violations:
+        return
+    first = violations[0]
+    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
+def _guard_perp_exit_over_leadin_no_overdip(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: a cross-column perp-exit lead-in must clear only the
+    sections its exit-side down-leg actually passes under, not the row's
+    deepest section in a far column.
+
+    See
+    :func:`nf_metro.layout.routing.invariants.check_perp_exit_over_leadin_clears_only_spanned_sections`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_perp_exit_over_leadin_clears_only_spanned_sections,
+    )
+
+    if routes is None:
+        from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+        if offsets is None:
+            offsets = compute_station_offsets(graph)
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+
+    violations = check_perp_exit_over_leadin_clears_only_spanned_sections(graph, routes)
+    if not violations:
+        return
+    first = violations[0]
+    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
+def _guard_right_entry_drop_in_when_clear(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+) -> None:
+    """Final-phase: a RIGHT entry fed from above must take the direct drop-in
+    rather than loop below the box when the outward-side descent is clear.
+
+    See
+    :func:`nf_metro.layout.routing.invariants.check_right_entry_drop_in_when_clear`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_right_entry_drop_in_when_clear,
+    )
+
+    if routes is None:
+        from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+        if offsets is None:
+            offsets = compute_station_offsets(graph)
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            return
+
+    violations = check_right_entry_drop_in_when_clear(graph, routes)
     if not violations:
         return
     first = violations[0]
@@ -3294,29 +3774,6 @@ valid mid-pipeline.  Update when adding or removing a Pass C
 checkpoint in ``_compute_section_layout``.
 """
 
-# Each entry: bisection-runnable guard -> first checkpoint at which its
-# invariant must hold.  Before that checkpoint, the guard is skipped in
-# bisection mode; the final guard block (phase ``"after Stage 5.1
-# (final)"``, which is not in ``_PASS_C_BISECTION_ORDER``) always runs it.
-#
-# - stations_in_sections: Stage 5.2 lifts off-track stations above their
-#   section's pre-grow bbox top; Stage 5.3's row top-align grows the
-#   bbox upward to enclose them.
-# - no_station_overlap: pre-snap fan placement can sit a fraction of a
-#   pitch off the row grid; Stage 6.4's snap pulls every station onto the
-#   grid and keeps same-column stations on distinct slots, after which
-#   markers must be collision-free.
-# - no_line_crosses_non_consumer: a sparse loop-side station (single
-#   line in, single line out, full-bundle row-mates) sits on the trunk
-#   Y until Stage 6.14 shifts it to a half-grid offset; before that,
-#   the sibling line bundle's route passes through its marker bbox.
-_BISECTION_FIRST_VALID: dict[str, str] = {
-    "_guard_stations_in_sections": "after Stage 5.3",
-    "_guard_no_station_overlap": "after Stage 6.4",
-    "_guard_no_coincident_station_coords": "after Stage 6.4",
-    "_guard_no_line_crosses_non_consumer": "after Stage 6.14",
-}
-
 
 def _bisection_should_run(guard_name: str, phase: str) -> bool:
     """True if ``guard_name`` should run at bisection checkpoint ``phase``.
@@ -3342,68 +3799,24 @@ def _run_pass_c_guards(
     offsets: dict[tuple[str, str], float] | None = None,
     routes: list[RoutedPath] | None = None,
 ) -> tuple[dict[tuple[str, str], float], list[RoutedPath] | None]:
-    """Bisection guards run after every Pass C sub-phase boundary in
-    ``validate=True`` mode.
+    """Run the per-checkpoint bisection guard set at a Pass C sub-phase boundary.
 
     The Pass C tidy-up pipeline is a sequence of ~20 mutating passes
-    over a shared graph; before this helper, ``validate=True`` only
-    sampled the final state, so a regression introduced at e.g.
-    Stage 6.7 surfaced as ``after final: ...`` with no way to
-    bisect.  Running the same overlap / breeze-past / column-drift
-    checks at each boundary localises the culprit to a single phase.
+    over a shared graph; sampling guards only at the final state surfaces
+    a regression introduced at e.g. Stage 6.7 as ``after final: ...`` with
+    no way to bisect.  Running the bisection-safe overlap / breeze-past /
+    column-drift checks at each boundary localises the culprit to a single
+    phase.
 
-    Guards transient through specific Pass C sub-phases are gated
-    by ``_BISECTION_FIRST_VALID`` and skipped before they're valid.
-    See that table for the per-guard transient windows.
-
-    Always excluded from the bisection set (only meaningful at the
-    final boundary):
-
-    * ``_guard_off_track_clear_of_anchor`` -- Stage 6.4's snap-to-grid
-      shifts the on-track anchor (consumer or producer) Y by up to half
-      a pitch before Stage 6.6 re-anchors the off-track station.
-    * ``_guard_row_trunk_cy_consistent`` -- the row trunk Y is only
-      finalised once Stage 6.7 has re-centred ``center_ports`` graphs.
-    * ``_guard_inter_section_routes_in_row_band`` -- row-band height
-      tolerance assumes final bboxes, which Stages 6.13 / 6.14 may still be
-      shrinking.
-
-    The final guard block (``after final``) composes this
-    helper with the three excluded guards above, sharing
-    ``offsets``/``routes`` for a single computation per checkpoint.
-    Returns the computed ``(offsets, routes)`` so callers (e.g. the
-    final block) can pass them on to the remaining guards.
+    Dispatches the ``bisection_safe`` entries of :data:`GUARD_REGISTRY`
+    (gated by each spec's ``first_valid_stage``); the final-only entries are
+    skipped here and run by :func:`run_validate_guards` at the closing
+    ``after final`` boundary.  Returns the computed ``(offsets, routes)`` so
+    the caller can pass them on.
     """
-    from nf_metro.layout.routing import compute_station_offsets, route_edges
-
-    if offsets is None:
-        offsets = compute_station_offsets(graph)
-    if routes is None:
-        # route_edges is placement-pure: routing here to inspect the routes
-        # leaves graph.stations untouched, so this guard stays observational
-        # even running mid-pipeline between Pass C stages.
-        try:
-            routes = route_edges(graph, station_offsets=offsets)
-        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
-            routes = None
-
-    _guard_coordinates_finite(graph, phase)
-    _guard_section_bboxes_positive(graph, phase)
-    if _bisection_should_run("_guard_stations_in_sections", phase):
-        _guard_stations_in_sections(graph, phase)
-    _guard_ports_on_boundaries(graph, phase)
-    if _bisection_should_run("_guard_no_station_overlap", phase):
-        _guard_no_station_overlap(graph, phase, offsets=offsets)
-    if _bisection_should_run("_guard_no_coincident_station_coords", phase):
-        _guard_no_coincident_station_coords(graph, phase)
-    if routes is not None and _bisection_should_run(
-        "_guard_no_line_crosses_non_consumer", phase
-    ):
-        _guard_no_line_crosses_non_consumer(
-            graph, phase, offsets=offsets, routes=routes
-        )
-    _guard_station_x_column_drift(graph, phase)
-    return offsets, routes
+    return run_validate_guards(
+        graph, phase, include_final=False, offsets=offsets, routes=routes
+    )
 
 
 def _guard_no_label_overlap(graph: MetroGraph, phase: str) -> None:
@@ -3445,3 +3858,548 @@ def _guard_file_icon_no_name_label(graph: MetroGraph, phase: str) -> None:
             f"name label, overprinting the icon caption and tracks; a "
             f"%%metro file: station must not carry a node-name label"
         )
+
+
+@dataclass(frozen=True)
+class GuardSpec:
+    """One ``validate=True`` guard, with the dispatch + classification data
+    that used to be scattered across hand-written call sites and the
+    ``_BISECTION_FIRST_VALID`` table.
+
+    ``fn`` is the guard function; every guard takes ``(graph, phase)`` and the
+    optional keyword inputs named in ``needs`` (a subset of ``offsets``,
+    ``routes``, ``section_y_gap``, ``section_y_padding``).  The dispatcher
+    passes exactly those keywords, so heterogeneous signatures need no
+    wrapping.
+
+    ``bisection_safe`` guards run at every Pass C checkpoint (gated by
+    ``first_valid_stage``, the earliest checkpoint at which their invariant
+    holds) as well as at the closing ``after final`` boundary; the rest run
+    only at ``after final``.  ``tier`` is the cost-tier classification
+    (``docs/dev/guard_tiers.md``).
+
+    ``issue_pin`` is the tuple of ``#NNN`` issues a guard was born from; it
+    keeps the regression trail as data so consolidating or renaming a guard
+    cannot let the original bug be silently re-filed.  ``narrow_reason`` states
+    why a guard pinned to an issue stays scoped to its case rather than being
+    folded into a broader geometric property -- a required field for any
+    issue-pinned guard (``test_issue_pinned_guards_document_why_they_are_narrow``).
+    """
+
+    fn: Callable[..., Any]
+    tier: str
+    needs: frozenset[str] = field(default_factory=frozenset)
+    bisection_safe: bool = False
+    first_valid_stage: str | None = None
+    issue_pin: tuple[str, ...] = ()
+    narrow_reason: str | None = None
+
+    @property
+    def name(self) -> str:
+        return self.fn.__name__
+
+
+# The single ordered source of truth for the ``validate=True`` guard
+# sequence.  The runner iterates this list in order, so its order *is* the
+# guard call order; the bisection-safe prefix is what ``_run_pass_c_guards``
+# runs at each Pass C checkpoint, and the whole list is what
+# ``run_validate_guards`` runs at ``after final``.
+GUARD_REGISTRY: tuple[GuardSpec, ...] = (
+    # --- bisection-safe set (run at every Pass C checkpoint + at final) ---
+    GuardSpec(_guard_coordinates_finite, "A", bisection_safe=True),
+    GuardSpec(_guard_section_bboxes_positive, "A", bisection_safe=True),
+    # Stage 5.2 lifts off-track stations above their section's pre-grow bbox
+    # top; Stage 5.3's row top-align grows the bbox upward to enclose them.
+    GuardSpec(
+        _guard_stations_in_sections,
+        "A",
+        bisection_safe=True,
+        first_valid_stage="after Stage 5.3",
+    ),
+    GuardSpec(_guard_ports_on_boundaries, "A", bisection_safe=True),
+    # Pre-snap fan placement can sit a fraction of a pitch off the row grid;
+    # Stage 6.4's snap pulls every station onto the grid and onto distinct
+    # same-column slots, after which markers must be collision-free.
+    GuardSpec(
+        _guard_no_station_overlap,
+        "A",
+        needs=frozenset({"offsets"}),
+        bisection_safe=True,
+        first_valid_stage="after Stage 6.4",
+    ),
+    GuardSpec(
+        _guard_no_coincident_station_coords,
+        "A",
+        bisection_safe=True,
+        first_valid_stage="after Stage 6.4",
+    ),
+    # A sparse loop-side station (single line in/out, full-bundle row-mates)
+    # sits on the trunk Y until Stage 6.14 shifts it to a half-grid offset;
+    # before that the sibling bundle's route passes through its marker bbox.
+    GuardSpec(
+        _guard_no_line_crosses_non_consumer,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+        bisection_safe=True,
+        first_valid_stage="after Stage 6.14",
+    ),
+    GuardSpec(_guard_station_x_column_drift, "A", bisection_safe=True),
+    # --- final-only set (run only at the closing ``after final`` boundary) ---
+    # The row trunk Y is only finalised once Stage 6.7 has re-centred
+    # ``center_ports`` graphs, so this cannot bisect.
+    GuardSpec(_guard_row_trunk_cy_consistent, "B", needs=frozenset({"offsets"})),
+    # Stage 6.4's snap-to-grid shifts the on-track anchor Y by up to half a
+    # pitch before Stage 6.6 re-anchors the off-track station, so this cannot
+    # bisect.
+    GuardSpec(_guard_off_track_clear_of_anchor, "B"),
+    GuardSpec(
+        _guard_fanout_junction_shares_exit_port_y,
+        "B",
+        issue_pin=("#386",),
+        narrow_reason=(
+            "Only LEFT/RIGHT exit ports are checked: BOTTOM/TOP exit ports are "
+            "intentionally offset from their fan-out junction."
+        ),
+    ),
+    GuardSpec(_guard_fanout_junction_resolves_upstream, "B"),
+    GuardSpec(_guard_entry_port_fed_only_by_ports, "B"),
+    GuardSpec(_guard_flow_exit_anchored_to_carrier, "B"),
+    GuardSpec(
+        _guard_perp_fed_entry_anchored_to_consumer,
+        "B",
+        issue_pin=("#908",),
+        narrow_reason=(
+            "Scoped to a LEFT/RIGHT entry whose sole feed is a same-row "
+            "perpendicular-to-flow exit and whose internal consumers share one "
+            "Y: a multi-consumer entry fans to several rows, so no single "
+            "consumer Y can anchor it, and a trunk-aligned (non-perpendicular) "
+            "feed already arrives on the consumer row."
+        ),
+    ),
+    GuardSpec(
+        _guard_post_convergence_trunk_continues,
+        "B",
+        issue_pin=("#946", "#977"),
+        narrow_reason=(
+            "Scoped to the sole in-section forward successor of a line-shedding "
+            "predecessor: a predecessor with multiple successors (including a "
+            "bypass V) fans out by design, a successor carrying as many lines is "
+            "trunk-aligned already, and a cross-section convergence anchors its "
+            "successor via port alignment."
+        ),
+    ),
+    GuardSpec(_guard_perp_entry_feed_not_collinear, "B"),
+    GuardSpec(_guard_merge_port_approach_side, "B", needs=frozenset({"offsets"})),
+    GuardSpec(
+        _guard_convergence_shallow_feeder_concentric,
+        "B",
+        needs=frozenset({"offsets"}),
+    ),
+    GuardSpec(
+        _guard_merge_port_outgoing_side_preserved,
+        "B",
+        needs=frozenset({"offsets"}),
+    ),
+    GuardSpec(
+        _guard_exit_inherits_entry_bundle_order,
+        "B",
+        needs=frozenset({"offsets"}),
+    ),
+    GuardSpec(_guard_bypass_port_no_slot_gaps, "B", needs=frozenset({"offsets"})),
+    GuardSpec(_guard_partial_branch_offset_gaps, "B", needs=frozenset({"offsets"})),
+    GuardSpec(_guard_row_gaps, "B", needs=frozenset({"section_y_gap"})),
+    GuardSpec(
+        _guard_section_top_padding,
+        "B",
+        needs=frozenset({"section_y_gap", "section_y_padding"}),
+        issue_pin=("#406",),
+        narrow_reason=(
+            "Mirror of the bottom-padding contract; a gap-bounded top is "
+            "allowed where the row above legitimately constrains it."
+        ),
+    ),
+    GuardSpec(
+        _guard_terminus_icons_within_bbox,
+        "B",
+        issue_pin=("#254",),
+        narrow_reason=(
+            "Scoped to TB/BT termini, whose file icon stacks vertically past "
+            "the marker and so needs explicit bbox room."
+        ),
+    ),
+    # Row-band height tolerance assumes final bboxes, which Stages 6.13 / 6.14
+    # may still be shrinking, so this cannot bisect.
+    GuardSpec(
+        _guard_inter_section_routes_in_row_band,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_topmost_row_top_entry_hugs_section,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_off_track_output_clears_non_producer,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_tb_exit_corner_column_order,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_no_split_same_line_fanout_descents,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_no_distinct_line_fanout_crossing,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_trunk_continuation_drops_straight,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+        issue_pin=("#929",),
+        narrow_reason=(
+            "Scoped to TB sections, the only axis that draws its lane reversed "
+            "against a per-station bundle max; LR/RL draw the lane un-reversed "
+            "and keep a fan-out continuation on the trunk via base priority."
+        ),
+    ),
+    GuardSpec(
+        _guard_no_dogleg_crosses_exempt_trunk,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_no_stacked_elbow_graze,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(_guard_fanout_tail_join, "B", needs=frozenset({"offsets", "routes"})),
+    GuardSpec(
+        _guard_perp_entry_boundary_consistent,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_perp_exit_over_leadin_no_overdip,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_right_entry_drop_in_when_clear,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_inter_section_route_no_backtrack,
+        "B",
+        needs=frozenset({"routes"}),
+        issue_pin=("#386",),
+        narrow_reason=(
+            "Only forward-flowing routes between two LR columns must stay "
+            "X-monotonic; away-exit wraps, normalize-exempt legs, TB folds and "
+            "same-column routes reverse legitimately and are skipped."
+        ),
+    ),
+    GuardSpec(
+        _guard_inter_section_route_no_full_width_backtrack,
+        "B",
+        needs=frozenset({"routes"}),
+    ),
+    GuardSpec(
+        _guard_routes_enter_sections_at_ports,
+        "B",
+        needs=frozenset({"routes"}),
+    ),
+    GuardSpec(
+        _guard_rail_connector_ports_no_stub,
+        "B",
+        needs=frozenset({"routes"}),
+        issue_pin=("#743",),
+        narrow_reason=(
+            "Acts only on whole-graph rail-mode routes whose endpoints are both "
+            "boundary ports of different sections; the wrap corridor is exempt "
+            "from the X-monotonic backtrack guards by design."
+        ),
+    ),
+    GuardSpec(
+        _guard_no_route_through_section,
+        "B",
+        needs=frozenset({"routes", "offsets"}),
+        issue_pin=("#484",),
+        narrow_reason=(
+            "A route may occupy a section's bbox only where it has a station "
+            "there (its source or port-entered target); exempting those is "
+            "what stops it flagging legitimate occupancy."
+        ),
+    ),
+    GuardSpec(
+        _guard_feeder_exits_section_through_side,
+        "B",
+        needs=frozenset({"routes", "offsets"}),
+        issue_pin=("#527",),
+        narrow_reason=(
+            "Checks only the source section's top/bottom edge crossing inside "
+            "its label-grown x-range; a feeder must turn down outside the drawn "
+            "side edge."
+        ),
+    ),
+    GuardSpec(
+        _guard_entry_approach_from_port_side,
+        "B",
+        needs=frozenset({"routes"}),
+        issue_pin=("#484",),
+        narrow_reason=(
+            "Catches a route reaching its OWN target's far-edge entry port by "
+            "slicing through the box interior; complements "
+            "_guard_no_route_through_section, which exempts the target section."
+        ),
+    ),
+    GuardSpec(
+        _guard_no_opposing_line_overlap,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+        issue_pin=("#885",),
+        narrow_reason=(
+            "General safety net for one line folding back over its own track; "
+            "compared only within a single line_id so distinct lines sharing a "
+            "channel are not flagged."
+        ),
+    ),
+    GuardSpec(_guard_serpentine_no_backtrack, "B", needs=frozenset({"routes"})),
+    GuardSpec(
+        _guard_no_artefactual_counter_flow,
+        "B",
+        needs=frozenset({"routes"}),
+        issue_pin=("#484",),
+        narrow_reason=(
+            "Fires only when the with-flow inter-row gap above the target was "
+            "genuinely free for the run's X-span; topological counter-flow into "
+            "LEFT/TOP/BOTTOM entries and gap-blocked dives are legitimate."
+        ),
+    ),
+    GuardSpec(_guard_inter_row_run_clearance, "B", needs=frozenset({"routes"})),
+    GuardSpec(
+        _guard_trunk_bands_crossing_optimal,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_inter_section_descent_edge_clearance,
+        "B",
+        needs=frozenset({"routes"}),
+    ),
+    GuardSpec(
+        _guard_fan_bundles_coincide_or_separate,
+        "B",
+        needs=frozenset({"offsets", "routes"}),
+    ),
+)
+
+
+# Classification-only registry (mirrors ``CHECK_REGISTRY``): these guards are
+# invoked directly by ``engine.py`` at a specific pipeline stage rather than
+# dispatched through the Pass C / final runner, so they carry no ``needs`` or
+# ``bisection_safe`` dispatch data -- only their tier and any issue pin.  Every
+# defined ``_guard_*`` lives in exactly one of the two registries
+# (``test_every_guard_is_classified_in_exactly_one_registry``).
+INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
+    GuardSpec(_guard_stations_within_bbox, "A"),
+    GuardSpec(_guard_no_negative_grid_columns, "A"),
+    GuardSpec(_guard_explicit_grid_directions, "A"),
+    GuardSpec(_guard_no_mixed_entry_directions, "A"),
+    GuardSpec(_guard_independent_components_disjoint, "A"),
+    GuardSpec(_guard_no_same_row_backward_feed, "A"),
+    GuardSpec(_guard_anchors_frozen_during_placement, "B"),
+    GuardSpec(_guard_bypass_v_flat_visible, "B"),
+    GuardSpec(_guard_centered_line_spread_balanced, "B"),
+    GuardSpec(_guard_file_icon_no_name_label, "B"),
+    GuardSpec(_guard_interchange_bar_clears_non_members, "B"),
+    GuardSpec(_guard_no_diagonal_strikes_horizontal_label, "B"),
+    GuardSpec(_guard_no_label_overlap, "B"),
+    GuardSpec(_guard_no_line_crosses_file_icon, "B"),
+    GuardSpec(_guard_no_line_strikes_label, "B"),
+    GuardSpec(_guard_no_wrapped_label_trunk_strike, "B"),
+    GuardSpec(
+        _guard_off_track_consumer_on_trunk,
+        "B",
+        issue_pin=("#650",),
+        narrow_reason=(
+            "Restricted to consumers with exactly one on-track in-section "
+            "successor, so a genuine on-track fork's off-row branches are not "
+            "dragged onto the trunk."
+        ),
+    ),
+    GuardSpec(
+        _guard_off_track_input_column_stack,
+        "B",
+        issue_pin=("#651",),
+        narrow_reason=(
+            "Restricted to single-trunk sections, whose lift pitch carries no "
+            "stacked horizontal line bands that could legitimately bump an "
+            "input past its same-column slot."
+        ),
+    ),
+    GuardSpec(_guard_rail_above_label_band, "B"),
+    GuardSpec(_guard_rail_one_station_per_column, "B"),
+    GuardSpec(_guard_rail_stations_seat_on_rails, "B"),
+    GuardSpec(
+        _guard_single_trunk_off_track_step,
+        "B",
+        issue_pin=("#580",),
+        narrow_reason=(
+            "Restricted to single-trunk sections, which have no parallel tracks "
+            "and so lift off-track stations by the base content pitch rather "
+            "than the spread-widened y_spacing."
+        ),
+    ),
+    GuardSpec(_guard_tall_anchor_stack_well_formed, "B"),
+    GuardSpec(_guard_tb_top_entry_drop_hugs_top, "B"),
+)
+
+
+# Derived from the registry so the bisection thresholds stay single-sourced.
+# Kept as a module attribute for the engine re-export and the threshold tests.
+_BISECTION_FIRST_VALID: dict[str, str] = {
+    spec.name: spec.first_valid_stage
+    for spec in GUARD_REGISTRY
+    if spec.bisection_safe and spec.first_valid_stage is not None
+}
+
+
+def _ensure_pass_c_inputs(
+    graph: MetroGraph,
+    offsets: dict[tuple[str, str], float] | None,
+    routes: list[RoutedPath] | None,
+) -> tuple[dict[tuple[str, str], float], list[RoutedPath] | None]:
+    """Compute the shared ``offsets`` / ``routes`` a guard run inspects, once.
+
+    ``route_edges`` is placement-pure: routing here to inspect the routes
+    leaves ``graph.stations`` untouched, so the routes-consuming guards stay
+    observational even running mid-pipeline between Pass C stages.  A routing
+    failure leaves ``routes`` as ``None`` (it surfaces elsewhere); guards that
+    need routes are then skipped.
+    """
+    from nf_metro.layout.routing import compute_station_offsets, route_edges
+
+    if offsets is None:
+        offsets = compute_station_offsets(graph)
+    if routes is None:
+        try:
+            routes = route_edges(graph, station_offsets=offsets)
+        except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
+            routes = None
+    return offsets, routes
+
+
+def run_validate_guards(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    include_final: bool,
+    offsets: dict[tuple[str, str], float] | None = None,
+    routes: list[RoutedPath] | None = None,
+    section_y_gap: float | None = None,
+    section_y_padding: float | None = None,
+) -> tuple[dict[tuple[str, str], float], list[RoutedPath] | None]:
+    """Dispatch :data:`GUARD_REGISTRY` for one ``validate=True`` checkpoint.
+
+    At a Pass C checkpoint (``include_final=False``) only the bisection-safe
+    specs run, each gated by its ``first_valid_stage``.  At the closing
+    ``after final`` boundary (``include_final=True``) the bisection-safe specs
+    run first (none gated, since ``after final`` is past every threshold)
+    followed by the final-only specs, reproducing the historical call order.
+    A spec needing ``routes`` is skipped when routing failed.  Returns the
+    shared ``(offsets, routes)``.
+    """
+    offsets, routes = _ensure_pass_c_inputs(graph, offsets, routes)
+    available: dict[str, object] = {
+        "offsets": offsets,
+        "routes": routes,
+        "section_y_gap": section_y_gap,
+        "section_y_padding": section_y_padding,
+    }
+    for spec in GUARD_REGISTRY:
+        if not spec.bisection_safe and not include_final:
+            continue
+        if spec.bisection_safe and not _bisection_should_run(spec.name, phase):
+            continue
+        if "routes" in spec.needs and routes is None:
+            continue
+        spec.fn(graph, phase, **{name: available[name] for name in spec.needs})
+    return offsets, routes
+
+
+# Tier-A guards that the render chokepoint does NOT run.  These two raise an
+# *authoring* error (a ``ValueError`` the CLI surfaces as invalid input) on an
+# un-renderable topology, not an observational ``PhaseInvariantError`` on the
+# settled geometry, and the engine already runs them always-on at Stage 1.1.
+# Warning-then-rendering an un-renderable map would be wrong, so they stay hard
+# fails outside this warn-by-default chokepoint.
+_RENDER_CHOKEPOINT_AUTHORING_GUARDS = frozenset(
+    {"_guard_no_same_row_backward_feed", "_guard_no_mixed_entry_directions"}
+)
+
+# Every Tier-A spec from both registries except the authoring-error guards.
+# Declaration order across ``GUARD_REGISTRY`` then ``INLINE_GUARD_REGISTRY``
+# fixes the order violations are reported in.  Computed once over the immutable
+# registries so the render chokepoint allocates nothing per render.
+_RENDER_LAYOUT_INVARIANT_SPECS: tuple[GuardSpec, ...] = tuple(
+    spec
+    for spec in (*GUARD_REGISTRY, *INLINE_GUARD_REGISTRY)
+    if spec.tier == "A" and spec.name not in _RENDER_CHOKEPOINT_AUTHORING_GUARDS
+)
+
+
+def render_layout_invariant_specs() -> tuple[GuardSpec, ...]:
+    """The Tier-A guards :func:`assert_render_layout_invariants` runs."""
+    return _RENDER_LAYOUT_INVARIANT_SPECS
+
+
+def assert_render_layout_invariants(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+    *,
+    strict: bool = False,
+) -> None:
+    """Run the cheap Tier-A layout guards on the final settled geometry.
+
+    Sibling of :func:`assert_render_curve_invariants`: both run on the exact
+    geometry the renderer is about to draw, so a layout defect is visible to
+    end users instead of shipping a silently-broken SVG.  The render path
+    already pays for ``offsets`` and ``routes``, and the guards are
+    observational, so this is near-zero cost and cannot move a pixel.
+
+    Each Tier-A guard raises ``PhaseInvariantError`` on its first violation
+    rather than returning a list, so each runs in isolation and its message is
+    captured; the aggregate is one message.  Without *strict* the aggregate is
+    a :class:`UserWarning`; with *strict* it raises :class:`LayoutInvariantError`
+    (modelled on the ``NF_METRO_ALLOW_BAD_CURVES`` chokepoint).
+    """
+    available: dict[str, Any] = {"offsets": offsets, "routes": routes}
+    messages: list[str] = []
+    for spec in render_layout_invariant_specs():
+        try:
+            spec.fn(graph, "render", **{name: available[name] for name in spec.needs})
+        except PhaseInvariantError as exc:
+            messages.append(f"[{spec.name}] {exc}")
+    if not messages:
+        return
+
+    detail = "\n  ".join(messages)
+    msg = (
+        "the settled layout violates Tier-A invariants the renderer is about "
+        "to draw. The map will render but is visibly broken; fix the layout "
+        "(or the directive combination) that produced this geometry.\n  "
+        f"{detail}"
+    )
+    if strict:
+        raise LayoutInvariantError(msg)
+    warnings.warn(msg, stacklevel=2)

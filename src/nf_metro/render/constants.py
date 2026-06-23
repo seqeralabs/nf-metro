@@ -97,6 +97,30 @@ SECTION_NUM_Y_OFFSET: int = 4
 SECTION_LABEL_TEXT_OFFSET: int = 5
 """Text X offset from section number circle."""
 
+SECTION_LABEL_CHAR_WIDTH_RATIO: float = 0.6
+"""Per-character width of a bold section label as a fraction of its font size.
+
+Used to estimate the horizontal extent of a section header (badge + title) so
+the header can be relocated off a route that would otherwise cross it.  Sized a
+touch wider than the legend/caption ratio (0.55) because section labels render
+bold.  An over-estimate is the safe direction: it only ever moves the header
+*earlier*, never leaves a clash undetected."""
+
+SECTION_HEADER_ROUTE_PAD: float = 4.0
+"""Slack between a section header's extent and a route, below which the route
+counts as clashing with the header.
+
+The placement chain leaves the chosen header position clear of every route by at
+least this margin, so the render-time header guard (which checks the raw header
+extent) always passes with breathing room."""
+
+SECTION_HEADER_SIDE_GAP: float = 6.0
+"""Gap between a section box edge and a rotated side-placed header column."""
+
+SECTION_LABEL_HALF_HEIGHT_RATIO: float = 0.8
+"""Half the visual height of a section label as a fraction of its font size,
+used to extend the header keep-out band above/below the text baseline."""
+
 TEXT_VCENTER_DY: str = "0.3em"
 """Downward dy shift applied to text that must be visually centered on
 a companion graphic (badge circles, legend swatches).  Using dy instead
@@ -176,6 +200,9 @@ WATERMARK_PADDING_RATIO: float = 0.5
 
 WATERMARK_Y_INSET: float = 8.0
 """Y distance from bottom edge for watermark text."""
+
+WATERMARK_BARE_X_INSET: float = 8.0
+"""X distance from right/left canvas edge for watermark text in bare mode."""
 
 WATERMARK_FILL: str = "rgba(150, 150, 150, 0.6)"
 """Fill color for the muted attribution watermark."""
@@ -276,9 +303,6 @@ ANIMATION_BALL_OPACITY: float = 0.9
 # ---------------------------------------------------------------------------
 # Section labels
 # ---------------------------------------------------------------------------
-SECTION_LABEL_REGION_RATIO: float = 0.5
-"""Fraction of section width used as the label region."""
-
 # ---------------------------------------------------------------------------
 # Intra-section station group captions
 # ---------------------------------------------------------------------------

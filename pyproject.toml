@@ -9,6 +9,20 @@ description = "Generate metro-map-style SVG diagrams from Mermaid graph definiti
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
+authors = [{ name = "Jonathan Manning", email = "jonathan.manning@seqera.io" }]
+maintainers = [{ name = "Jonathan Manning", email = "jonathan.manning@seqera.io" }]
+keywords = [
+    "nextflow",
+    "nf-core",
+    "bioinformatics",
+    "visualization",
+    "metro-map",
+    "mermaid",
+    "svg",
+    "pipeline",
+    "workflow",
+    "diagram",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -44,6 +58,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.8",
     "types-networkx",
+    "numpy<2.5",
     "jsonschema>=4.0",
 ]
 docs = [

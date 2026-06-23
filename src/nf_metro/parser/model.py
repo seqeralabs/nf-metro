@@ -117,6 +117,20 @@ class MarkerLegendEntry:
     caption: str
 
 
+BYPASS_V_PREFIX = "__bypass_"
+
+
+def is_bypass_v(station_id: str) -> bool:
+    """True if *station_id* names a hidden bypass-V helper station.
+
+    Bypass-V helpers are the routing-only nodes inserted by
+    :mod:`nf_metro.parser.resolve` to route a line around a station it does
+    not stop at.  Their ids are built with :data:`BYPASS_V_PREFIX`; this is
+    the one place the prefix is interpreted.
+    """
+    return station_id.startswith(BYPASS_V_PREFIX)
+
+
 @dataclass
 class Station:
     """A node/station in the metro map."""
@@ -185,6 +199,11 @@ class Station:
         rather than a labelled pill, so layout and routing treat it specially.
         """
         return self.is_terminus and not self.label.strip()
+
+    @property
+    def is_captioned_terminus(self) -> bool:
+        """A blank file-icon terminus carrying an under-icon caption."""
+        return self.is_blank_terminus and any(self.terminus_names)
 
 
 @dataclass
@@ -354,6 +373,8 @@ class MetroGraph:
     width: int | None = None
     height: int | None = None
     animate: bool = False
+    directional: bool = False
+    strict: bool = False
     embed_manifest: bool = True
     # Max station-columns a section row may reach before the auto-layout wraps
     # it onto the next row. None falls back to 15; raise it to keep a long
@@ -404,12 +425,25 @@ class MetroGraph:
     section_dag: SectionDAG | None = None
     # Section IDs that had explicit %%metro direction: directives
     _explicit_directions: set[str] = field(default_factory=set)
+    # Section IDs whose flow direction was flipped at resolve time to keep a
+    # flow-axis port on its consumer/producer's end (see resolve.py
+    # _reanchor_flow_axis_ports).  Their exit-port offsets anchor on the
+    # feeder bundle frame rather than re-centring on zero.
+    _fold_reoriented_sections: set[str] = field(default_factory=set)
     # Section IDs whose entry/exit port sides were author-specified via
     # %%metro entry:/exit: directives (tracked separately because auto_layout
     # fills entry_hints/exit_hints for sections that have none, so the hint
     # list alone cannot tell an author side from an inferred one).
     _explicit_entry: set[str] = field(default_factory=set)
     _explicit_exit: set[str] = field(default_factory=set)
+    # Section IDs whose perpendicular (TOP/BOTTOM) connection had to be bridged
+    # across grid columns because its feeding source sits outside the section's
+    # own column.  The run/trunk is held on the section's column (in-bbox) and
+    # routing draws a best-effort L-shaped lead-in; the multi-line bundle
+    # through such a forced-perpendicular drop may not satisfy the strict
+    # render-curve invariants, so their presence relaxes that check to a
+    # warning instead of a hard render abort.
+    _cross_column_perp_bridges: set[str] = field(default_factory=set)
     # Pending terminus designations: station_id ->
     # list of (label, icon_type, name, banner)
     _pending_terminus: dict[str, list[tuple[str, str, str, bool]]] = field(
@@ -464,6 +498,9 @@ class MetroGraph:
     # compute_layout from the NF_METRO_PHASE_SNAPSHOTS env var; read by the
     # _snap hook after each phase.  Off by default (pure observation).
     _phase_snapshots_enabled: bool = field(default=False, repr=False)
+    # Set for the first of compute_layout's two passes so the breeze-through
+    # guard defers while the geometric bypass pass collects crossings to fix.
+    _defer_breeze_guard: bool = field(default=False, repr=False)
     # Per-section rail-Y map (section_id -> {line_id: rail_y}), set by the
     # rail-mode layout so the dedicated router can resolve a port's per-line
     # rail Y.  Empty when rail mode is off.

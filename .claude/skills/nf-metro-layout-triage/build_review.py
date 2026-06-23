@@ -162,6 +162,7 @@ def _setup_imports(worktree: Path) -> dict:
 
 
 _Y_TOL = 1.0
+_LABEL_DRIFT_TOL = 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -718,11 +719,21 @@ def find_topo_siblings_violators(graph, engine) -> list[dict]:
     return violators
 
 
-def find_label_centering_violators(graph, engine) -> list[dict]:
-    """test_label_x_matches_segment_midpoint_on_horizontal_runs."""
+def find_label_anchor_violators(graph, engine) -> list[dict]:
+    """test_label_x_anchored_to_station_marker_on_horizontal_runs.
+
+    Flags middle-anchored labels on horizontal LR/RL runs whose X has
+    drifted more than ``_LABEL_DRIFT_TOL`` from the station marker X. The
+    expected position is the station's own marker; the box is anchored on
+    the actual rendered ``<text>`` glyph (resolved in :func:`annotate_svg`)
+    rather than the engine's logical coords, so it lands on the label the
+    reviewer sees.
+    """
     offsets = engine["compute_station_offsets"](graph)
     routes = engine["route_edges"](graph, station_offsets=offsets)
-    labels = engine["place_labels"](graph, station_offsets=offsets)
+    labels = engine["place_labels"](
+        graph, station_offsets=offsets, label_angle=graph.label_angle or 0.0
+    )
     label_by_sid = {lp.station_id: lp for lp in labels}
     in_routes = defaultdict(list)
     out_routes = defaultdict(list)
@@ -735,81 +746,50 @@ def find_label_centering_violators(graph, engine) -> list[dict]:
             continue
         if st.off_track:
             continue
+        sec = graph.sections.get(st.section_id) if st.section_id else None
+        if sec is None or sec.direction not in ("LR", "RL"):
+            continue
         lp = label_by_sid.get(sid)
-        if lp is None:
+        if lp is None or lp.text_anchor != "middle":
             continue
         ins = in_routes.get(sid, [])
         outs = out_routes.get(sid, [])
         if not ins or not outs:
             continue
-        ok = True
-        for r in ins:
-            pts = r.points
-            if (
-                len(pts) < 2
-                or abs(pts[-2][1] - pts[-1][1]) > _Y_TOL
-                or abs(pts[-1][1] - st.y) > _Y_TOL
-            ):
-                ok = False
-                break
-        if not ok:
-            continue
-        for r in outs:
-            pts = r.points
-            if (
-                len(pts) < 2
-                or abs(pts[0][1] - pts[1][1]) > _Y_TOL
-                or abs(pts[0][1] - st.y) > _Y_TOL
-            ):
-                ok = False
-                break
-        if not ok:
-            continue
-        in_xs = [
-            graph.stations[r.edge.source].x
+        in_horizontal = all(
+            len(r.points) >= 2
+            and abs(r.points[-2][1] - r.points[-1][1]) <= _Y_TOL
+            and abs(r.points[-1][1] - st.y) <= _Y_TOL
             for r in ins
-            if graph.stations.get(r.edge.source) is not None
-            and not graph.stations[r.edge.source].is_port
-            and not graph.stations[r.edge.source].is_hidden
-        ]
-        out_xs = [
-            graph.stations[r.edge.target].x
-            for r in outs
-            if graph.stations.get(r.edge.target) is not None
-            and not graph.stations[r.edge.target].is_port
-            and not graph.stations[r.edge.target].is_hidden
-        ]
-        left_cands = [x for x in in_xs if x < st.x - 1.0]
-        right_cands = [x for x in out_xs if x > st.x + 1.0]
-        if not left_cands or not right_cands:
+        )
+        if not in_horizontal:
             continue
-        left = max(left_cands)
-        right = min(right_cands)
-        mid = (left + right) / 2.0
-        if abs(lp.x - mid) > 3.0:
-            lo_x = min(lp.x, mid) - 16
-            hi_x = max(lp.x, mid) + 16
+        out_horizontal = all(
+            len(r.points) >= 2
+            and abs(r.points[0][1] - r.points[1][1]) <= _Y_TOL
+            and abs(r.points[0][1] - st.y) <= _Y_TOL
+            for r in outs
+        )
+        if not out_horizontal:
+            continue
+        drift = abs(lp.x - st.x)
+        if drift > _LABEL_DRIFT_TOL:
             violators.append(
                 {
-                    "kind": "rect",
-                    "x": lo_x,
-                    "y": lp.y - 14,
-                    "w": hi_x - lo_x,
-                    "h": 24,
+                    "kind": "label",
+                    "station_id": sid,
+                    "expected_x": st.x,
+                    "label_x": lp.x,
                     "note": (
-                        f"station {sid!r} label.x={lp.x:.1f} vs midpoint "
-                        f"{mid:.1f} (left_neighbor={left:.1f}, "
-                        f"right_neighbor={right:.1f}, drift="
-                        f"{abs(lp.x - mid):.1f}px)"
+                        f"station {sid!r} label.x={lp.x:.1f} vs marker "
+                        f"x={st.x:.1f} (drift={drift:.1f}px)"
                     ),
                     "label_info": {
                         "station_id": sid,
                         "station_x": st.x,
                         "label_x": lp.x,
-                        "expected_x": mid,
-                        "left_neighbor_x": left,
-                        "right_neighbor_x": right,
-                        "delta": lp.x - mid,
+                        "expected_x": st.x,
+                        "delta": lp.x - st.x,
                     },
                 }
             )
@@ -817,12 +797,20 @@ def find_label_centering_violators(graph, engine) -> list[dict]:
 
 
 def find_stack_x_violators(graph, engine) -> list[dict]:
-    """test_stack_station_xs_share_column."""
+    """test_visual_stack_station_xs_share_column.
+
+    A visual stack groups same-section stations by predecessor set and
+    layer (successors are deliberately omitted, mirroring the live test),
+    flagging X drift only when at least one pair sits within
+    ``STACK_Y_WINDOW`` so the group reads as a vertical column rather than
+    a side-by-side or far-spread layout.
+    """
+    from nf_metro.layout.constants import Y_SPACING
+
+    stack_y_window = 2.0 * Y_SPACING
     preds = defaultdict(set)
-    succs = defaultdict(set)
     for e in graph.edges:
         preds[e.target].add(e.source)
-        succs[e.source].add(e.target)
     violators = []
     for sec in graph.sections.values():
         if sec.bbox_h <= 0:
@@ -835,14 +823,21 @@ def find_stack_x_violators(graph, engine) -> list[dict]:
             st = graph.stations.get(sid)
             if st is None or st.is_port or st.is_hidden:
                 continue
-            key = (frozenset(preds[sid]), frozenset(succs[sid]), st.layer)
+            key = (frozenset(preds[sid]), st.layer)
             groups[key].append(sid)
         for members in groups.values():
             if len(members) < 2:
                 continue
             xs = [graph.stations[s].x for s in members]
             ys = [graph.stations[s].y for s in members]
-            if max(xs) - min(xs) > 1.0:
+            if max(xs) - min(xs) <= 1.0:
+                continue
+            visual_stack = any(
+                0 < abs(ys[i] - ys[j]) <= stack_y_window
+                for i in range(len(members))
+                for j in range(i + 1, len(members))
+            )
+            if visual_stack:
                 lo_x = min(xs) - 20
                 hi_x = max(xs) + 20
                 lo_y = min(ys) - 18
@@ -932,8 +927,8 @@ INVARIANT_FINDERS = {
     "test_lines_dont_cross_non_consumer_markers": find_breeze_past_violators,
     "test_section_bbox_has_bottom_padding": find_bbox_padding_violators,
     "test_topological_siblings_share_y_or_symmetric": find_topo_siblings_violators,
-    "test_label_x_matches_segment_midpoint_on_horizontal_runs": find_label_centering_violators,
-    "test_stack_station_xs_share_column": find_stack_x_violators,
+    "test_label_x_anchored_to_station_marker_on_horizontal_runs": find_label_anchor_violators,
+    "test_visual_stack_station_xs_share_column": find_stack_x_violators,
     "test_off_track_inputs_above_consumer": find_off_track_violators,
 }
 
@@ -944,6 +939,27 @@ INVARIANT_FINDERS = {
 
 
 _SVG_OPEN_RE = re.compile(r'<svg[^>]*viewBox="([^"]+)"[^>]*>')
+
+
+def _rendered_label_box(
+    svg_text: str, station_id: str
+) -> tuple[float, float, float, float] | None:
+    """Extent ``(x, y, w, h)`` of the rendered label glyph for ``station_id``.
+
+    The renderer applies ``text-anchor`` / ``dominant-baseline`` shifts that
+    move the drawn glyph away from the engine's logical ``label.x`` / ``label.y``,
+    so the overlay box has to be derived from the drawn ink. This defers to the
+    authoritative artifact parser the render oracle uses, so the box matches the
+    same drawn-glyph footprint those geometry guards reason about.
+    """
+    from nf_metro.layout.labels import label_glyph_ink_bbox
+    from nf_metro.render.validate import parse_station_labels
+
+    for lab in parse_station_labels(svg_text):
+        if lab.placement.station_id == station_id:
+            x0, y0, x1, y1 = label_glyph_ink_bbox(lab.placement)
+            return x0, y0, x1 - x0, y1 - y0
+    return None
 
 
 def annotate_svg(svg_text: str, violators: list[dict]) -> tuple[str, int]:
@@ -972,6 +988,23 @@ def annotate_svg(svg_text: str, violators: list[dict]) -> tuple[str, int]:
                 f'height="{2 * r:.1f}" fill="none" stroke="#ff3344" '
                 f'stroke-width="3" stroke-dasharray="6,3" '
                 f'pointer-events="none"/>'
+            )
+        elif v["kind"] == "label":
+            box = _rendered_label_box(svg_text, v["station_id"])
+            if box is None:
+                continue
+            lx, ly, lw, lh = box
+            pad = 4.0
+            overlay_parts.append(
+                f'<rect x="{lx - pad:.1f}" y="{ly - pad:.1f}" '
+                f'width="{lw + 2 * pad:.1f}" height="{lh + 2 * pad:.1f}" '
+                f'fill="none" stroke="#ff3344" stroke-width="3" '
+                f'stroke-dasharray="6,3" pointer-events="none"/>'
+            )
+            overlay_parts.append(
+                f'<line x1="{v["expected_x"]:.1f}" y1="{ly - pad:.1f}" '
+                f'x2="{v["expected_x"]:.1f}" y2="{ly + lh + pad:.1f}" '
+                f'stroke="#22aaff" stroke-width="2" pointer-events="none"/>'
             )
     overlay = (
         '<g class="xfail-overlay" style="opacity:0.95">'
@@ -1313,14 +1346,14 @@ _GENERIC_EXPLANATIONS = {
         "them, the invariant is mis-identifying siblings - flag "
         "<strong>not</strong> a bug.",
     ),
-    "test_label_x_matches_segment_midpoint_on_horizontal_runs": (
-        "A station label is not centred at the midpoint of its "
-        "horizontal segment in this fixture.",
-        "Find labels that visibly drift off the centre of their "
-        "segment. If the run isn't really horizontal, flag "
-        "Ambiguous.",
+    "test_label_x_anchored_to_station_marker_on_horizontal_runs": (
+        "A station label has drifted off its own marker on a "
+        "horizontal run in this fixture.",
+        "Find labels that visibly sit left or right of the station "
+        "circle they belong to. If the run isn't really horizontal, "
+        "flag Ambiguous.",
     ),
-    "test_stack_station_xs_share_column": (
+    "test_visual_stack_station_xs_share_column": (
         "Stations that should stack in a single column drift "
         "apart on the X axis in this fixture.",
         "Look for clusters that visibly fan out where they should "
@@ -1548,31 +1581,27 @@ def _build_explanation_blocks(
                     "the invariant is mis-identifying them as siblings and "
                     "this is <strong>not</strong> a bug."
                 )
-        elif invariant == "test_label_x_matches_segment_midpoint_on_horizontal_runs":
+        elif invariant == "test_label_x_anchored_to_station_marker_on_horizontal_runs":
             info = v.get("label_info")
             if info:
                 issue_sentences.append(
                     f"Station <code>{esc(info['station_id'])}</code>'s label "
-                    f"sits at x=<code>{info['label_x']:.1f}</code>, but the "
-                    f"midpoint between its left neighbour at "
-                    f"x=<code>{info['left_neighbor_x']:.1f}</code> and right "
-                    f"neighbour at x=<code>{info['right_neighbor_x']:.1f}</code> "
-                    f"is <code>{info['expected_x']:.1f}</code> "
+                    f"sits at x=<code>{info['label_x']:.1f}</code>, but its "
+                    f"marker is at x=<code>{info['station_x']:.1f}</code> "
                     f"(drift <code>{info['delta']:+.1f}</code>px). The "
-                    f"invariant says labels on a horizontal run should sit at "
-                    f"the midpoint of the segment between the station's "
-                    f"neighbours."
+                    f"invariant says a middle-anchored label on a horizontal "
+                    f"run should sit over its own station marker."
                 )
                 check_sentences.append(
                     f"Look at the label for station "
-                    f"<code>{esc(info['station_id'])}</code> (red bbox covers "
-                    f"both the actual label and the expected midpoint). If "
-                    f"the label visibly shifts off the centre of the "
-                    f"horizontal segment, it's a bug. If the station has "
-                    f"non-horizontal incoming or outgoing edges hidden by "
-                    f"this fixture's geometry, flag Ambiguous."
+                    f"<code>{esc(info['station_id'])}</code> (red bbox is the "
+                    f"rendered label; the blue tick marks where its marker is). "
+                    f"If the label visibly sits left or right of the station "
+                    f"circle, it's a bug. If the station has non-horizontal "
+                    f"incoming or outgoing edges hidden by this fixture's "
+                    f"geometry, flag Ambiguous."
                 )
-        elif invariant == "test_stack_station_xs_share_column":
+        elif invariant == "test_visual_stack_station_xs_share_column":
             info = v.get("stack_info")
             if info:
                 members_part = ", ".join(

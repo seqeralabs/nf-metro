@@ -31,13 +31,14 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
 )
+from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.routing.common import (
     inter_row_wrap_band,
     max_grid_row_with_content,
     resolve_section,
     section_exists_above_row,
 )
-from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import MetroGraph, PortSide, Section, Station, is_bypass_v
 
 
 def _assign_grid_layout(
@@ -270,10 +271,10 @@ def _compute_row_heights(
     max_row: int,
     section_y_gap: float,
 ) -> dict[int, float]:
-    """Per-row height: tallest single-row non-TB section, expanded for spans."""
+    """Per-row height: tallest single-row lane-on-Y section, expanded for spans."""
     row_heights: dict[int, float] = defaultdict(float)
     for sid, section in scoped.items():
-        if section.grid_row_span == 1 and section.direction != "TB":
+        if section.grid_row_span == 1 and lanes_run_along_y(section.direction):
             row = row_assign.get(sid, 0)
             row_heights[row] = max(row_heights[row], section.bbox_h)
 
@@ -1244,6 +1245,15 @@ def _find_downstream_bundle_y(
         ds = sections.get(ep.section_id)
         if not ds or ds.grid_row != same_row:
             continue
+        # An entry that does not arrive horizontally at its consumer's Y -- a
+        # TOP/BOTTOM port (vertical drop) or a LEFT/RIGHT port bending into a
+        # TB/BT trunk -- leaves the exit's own trunk Y to govern the lead-in;
+        # anchoring to the consumer's Y would pull the exit off its trunk.
+        if ep.side in (PortSide.TOP, PortSide.BOTTOM) or (
+            not lanes_run_along_y(ds.direction)
+            and ep.side in (PortSide.LEFT, PortSide.RIGHT)
+        ):
+            continue
         ds_internal = set(ds.station_ids) - set(ds.entry_ports) - set(ds.exit_ports)
         targets: dict[str, set[str]] = {}
         for edge in graph.edges_from(eid):
@@ -1287,10 +1297,10 @@ def _find_connected_internal_coord(
     )
     vals: list[float] = []
     for edge in graph.edges_from(port_id):
-        if edge.target in internal_ids and not edge.target.startswith("__bypass_"):
+        if edge.target in internal_ids and not is_bypass_v(edge.target):
             vals.append(getattr(graph.stations[edge.target], axis))
     for edge in graph.edges_to(port_id):
-        if edge.source in internal_ids and not edge.source.startswith("__bypass_"):
+        if edge.source in internal_ids and not is_bypass_v(edge.source):
             vals.append(getattr(graph.stations[edge.source], axis))
     if vals:
         return sum(vals) / len(vals)

@@ -8,6 +8,7 @@ from nf_metro.layout.labels import (
     _avoid_diagonal_routes,
     _compute_port_label_preference,
 )
+from nf_metro.layout.routing.common import OffsetRegime
 from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Station
 
 
@@ -147,7 +148,7 @@ class _FakeRoute:
     edge: _FakeEdge = field(default_factory=_FakeEdge)
     line_id: str = "L1"
     points: list = field(default_factory=list)
-    offsets_applied: bool = True
+    offset_regime: OffsetRegime = OffsetRegime.BAKED
 
 
 class TestSegmentIntersectsBbox:

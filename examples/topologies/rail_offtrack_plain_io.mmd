@@ -1,0 +1,24 @@
+%%metro title: Rail off-track plain input and output
+%%metro style: dark
+%%metro line_spread: rails
+%%metro line: a | A | #2db572
+%%metro line: b | B | #f4a300
+%%metro file: cram_in | CRAM
+
+graph LR
+    subgraph sec [Calling]
+        cram_in[ ]
+        align[Align]
+        call[Call]
+        report[Report]
+        aux[Targets BED]
+        qc[QC report]
+
+        cram_in -->|a,b| align
+        align -->|a,b| call
+        call -->|a,b| report
+        aux -->|a| call
+        call -->|a| qc
+    end
+%%metro off_track: aux
+%%metro off_track: qc

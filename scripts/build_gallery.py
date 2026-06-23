@@ -47,6 +47,16 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Minimal two-line pipeline with no sections.",
     ),
     (
+        "directional_flow",
+        EXAMPLES_DIR,
+        "Opt-in static flow chevrons via `%%metro directional: true` (CLI: "
+        "`--directional`): periodic open chevrons ride each route pointing "
+        "source to target. A three-line bundled trunk fans out to per-line "
+        "analyses and converges again, so the chevrons make bundle, fan-out, "
+        "and merge direction legible without the animated `--animate` balls. "
+        "Marker size, spacing, opacity, and colour are `Theme` knobs.",
+    ),
+    (
         "line_spread",
         EXAMPLES_DIR,
         "Demonstrates the `%%metro line_spread:` axis with one per-section "
@@ -209,6 +219,12 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Seven sections in a straight chain. Exercises the grid fold threshold.",
     ),
     (
+        "inrow_skip_breeze",
+        TOPOLOGIES_DIR,
+        "An express line skips a station three collinear stations share; the "
+        "geometric bypass pass bows it around the skipped marker (#990).",
+    ),
+    (
         "parallel_independent",
         TOPOLOGIES_DIR,
         "Two disconnected pipelines stacked vertically.",
@@ -284,6 +300,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     ),
     # --- Multi-line bundles ---
     (
+        "interchange_lane_reorder",
+        TOPOLOGIES_DIR,
+        "Two lanes share one step while a third lane is declared between them. "
+        "Auto-layout reorders the interleaving lane to an outer track so the "
+        "two members become adjacent and infer a clean interchange, instead of "
+        "abstaining (issue #779).",
+    ),
+    (
         "multi_line_bundle",
         TOPOLOGIES_DIR,
         "Six lines travelling through the same three-section chain.",
@@ -321,10 +345,23 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "Stacked analysis sections feeding through a fold into branching targets.",
     ),
     (
+        "reconverge_reversed_fold",
+        TOPOLOGIES_DIR,
+        "Serpentine-fold reconvergence: a multi-modal pipeline fanning out to "
+        "stacked analysis sections and reconverging onto a reversed return row.",
+    ),
+    (
         "stacked_lr_serpentine",
         TOPOLOGIES_DIR,
         "Same-direction sections stacked in one grid column, chained via short "
         "vertical drops on alternating sides (serpentine), no wrap-around.",
+    ),
+    (
+        "tb_left_exit_step",
+        TOPOLOGIES_DIR,
+        "A TB alignment section exits LEFT into a lower right-entry section with "
+        "a blocker directly below: the exit bundle steps west-down-west, routed "
+        "as a parallel staircase that keeps the feed order (issue #671).",
     ),
     # --- Offset and bypass ---
     (
@@ -360,6 +397,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "climb, crosses the wide 'Quantification Step' label, so its V corner "
         "lands in the label's left half and the router seats it clear of the "
         "left edge (`_clear_bypass_v_label_strikes`).",
+    ),
+    (
+        "bypass_label_rake_wide",
+        TOPOLOGIES_DIR,
+        "An extra-wide bypassed-station label the router cannot seat the V's "
+        "flat-run corner clear of: the strike-clearance loop pushes the bypassed "
+        "node out by whole grid columns until the dip clears the glyphs, widening "
+        "rather than relying on the router's partial corner-seating (issue #700).",
     ),
     (
         "bypass_v_tight",
@@ -412,6 +457,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "than crowding it (issue #698).",
     ),
     (
+        "dogleg_twoline_fanout",
+        TOPOLOGIES_DIR,
+        "Two distinct lines leave one section through a shared exit junction to "
+        "different sections in the row below. They descend as one concentric "
+        "bundle and split only where the near line peels into its target while "
+        "the far line continues over it, rather than diverging at the junction "
+        "and crossing (issue #719).",
+    ),
+    (
         "merge_offrow_continuation",
         TOPOLOGIES_DIR,
         "A perpendicular feeder re-slots at a multi-feeder merge port, and the "
@@ -422,10 +476,10 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "right_entry_gap_above_empty_row",
         TOPOLOGIES_DIR,
-        "A right-entry feed from a source two rows above its target finds the "
-        "immediate next row empty, collapsing the inter-row band so the "
-        "gap-above route is unavailable and the feed falls back to the "
-        "around-below loop.",
+        "A right-entry feed from a source two rows above its target, where the "
+        "target flows right-to-left so its flow-start consumer sits at the "
+        "entry edge: the feed loops around below into the port beside the "
+        "consumer rather than crossing the box and folding back (#885).",
     ),
     (
         "corridor_narrow_gap_fallback",
@@ -473,6 +527,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     ),
     # --- Routing-gate coverage fixtures ---
     (
+        "junction_entry_reversed_fold",
+        TOPOLOGIES_DIR,
+        "A two-line bundle exits a TB section's RIGHT side, wraps into a Source "
+        "section, then fans out at a junction into two same-row destinations. The "
+        "bundle order is carried concentrically through the reversal corners so "
+        "the lines never cross at a station, and the fan-out peels off cleanly "
+        "(issue #760).",
+    ),
+    (
         "cross_col_top_entry",
         TOPOLOGIES_DIR,
         "A cross-column feed from a RIGHT-exit producer into a TOP-entry "
@@ -487,11 +550,37 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "the gap.",
     ),
     (
+        "bypass_leftward_overflow",
+        TOPOLOGIES_DIR,
+        "A seven-line reverse-flow (right-to-left) bypass: the trunk leads out "
+        "leftward, the mirror of every other bypass. The concentric order and "
+        "corner radii follow the trunk's travel direction so the bundle fans "
+        "cleanly instead of twisting at the descent corner (issue #723).",
+    ),
+    (
+        "bypass_leftward_far_side_entry",
+        TOPOLOGIES_DIR,
+        "A seven-line reverse-flow bypass into a far-side LEFT entry: the source "
+        "exits its left edge and the target's entry port is on its own far "
+        "(left) edge, so the bundle wraps around below into the port from its "
+        "outward side. The half-turn transposes the bundle, so the target "
+        "section's line order is reversed to match and no line crosses a mate "
+        "(issue #974).",
+    ),
+    (
         "right_entry_wrap_no_fan",
         TOPOLOGIES_DIR,
         "A single line wrapping from an LR exit into a cross-row RL section's "
         "RIGHT entry, with no junction siblings (the solo `_route_right_entry_"
         "wrap` lead-in).",
+    ),
+    (
+        "left_entry_up_wrap",
+        TOPOLOGIES_DIR,
+        "A two-line bundle wrapping up-and-left from a source below-and-right "
+        "into a cross-row section's LEFT entry (the `_route_left_entry_wrap` "
+        "up-riser path); the bundle order is preserved concentrically around "
+        "the wrap.",
     ),
     (
         "tb_right_entry_stack",
@@ -508,6 +597,49 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "in a `%%metro direction: TB` section. The trunk passes through each "
         "station as a clean vertical column: every line holds one offset, so "
         "no station reads as an elbow.",
+    ),
+    (
+        "tb_bottom_entry_flow_start",
+        TOPOLOGIES_DIR,
+        "A `%%metro direction: TB` section given `%%metro entry: bottom` whose "
+        "consumer is the flow-start (top) station. The bottom entry is "
+        "re-anchored to the top so the line enters beside its consumer and "
+        "flows down, rather than running up through MultiQC to reach Collect "
+        "and folding back (#885).",
+    ),
+    (
+        "tb_lr_exit_left",
+        TOPOLOGIES_DIR,
+        "A `%%metro direction: TB` section dropping in through its TOP entry and "
+        "leaving through a LEFT exit into a section below-left (the "
+        "`_route_tb_lr_exit` LEFT arm): the station drops, turns once, and runs "
+        "out of the box's left side, the vertical leg fanned by the reversed "
+        "station offset so the outermost line takes the widest arc (#917).",
+    ),
+    (
+        "tb_lr_exit_right",
+        TOPOLOGIES_DIR,
+        "A `%%metro direction: TB` section dropping in through its TOP entry and "
+        "leaving through a RIGHT exit into the next forward section (the "
+        "`_route_tb_lr_exit` RIGHT arm): the mirror of the LEFT exit, fanned by "
+        "the exit port's own offset (#917).",
+    ),
+    (
+        "tb_internal_diagonal",
+        TOPOLOGIES_DIR,
+        "A symmetric fan-out inside a `%%metro direction: TB` section: the hub "
+        "centres over its two branch stations, which sit on X tracks either "
+        "side of it, so both internal edges route as 45-degree diagonals (the "
+        "`_route_tb_internal` diagonal arm) (#917).",
+    ),
+    (
+        "tb_trunk_through_fan",
+        TOPOLOGIES_DIR,
+        "An asymmetric fan-out inside a `%%metro direction: TB` section: one "
+        "line continues straight down the trunk column to its child while a "
+        "sibling peels off to another column.  The continuation is slotted onto "
+        "the trunk so it drops straight instead of jogging one offset step "
+        "(#929).",
     ),
     (
         "around_below_ep_col_gt0",
@@ -528,9 +660,20 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "right_entry_from_above",
         TOPOLOGIES_DIR,
-        "A RIGHT entry one row below a source on its right: the feed wraps to "
-        "approach the port from its outward (right) side instead of an L-shape "
-        "that slices across the source box.",
+        "A RIGHT entry whose consumer is the section's flow-start station: the "
+        "section flows right-to-left so the consumer sits at the entry edge and "
+        "the feed enters beside it, rather than running across the box to the "
+        "far station and folding back (#885).  Fed from a higher row past the "
+        "target's right edge, the line drops straight down its outward side to "
+        "the entry Y rather than looping below the box (#889).",
+    ),
+    (
+        "right_entry_from_above_far",
+        TOPOLOGIES_DIR,
+        "A RIGHT entry fed from two rows up, past the target's right edge: the "
+        "line drops straight down its outward side across the empty intervening "
+        "row to the entry Y and turns in, rather than diving below the box and "
+        "climbing back up (#889).",
     ),
     (
         "merge_leftmost_sink_branch",
@@ -576,9 +719,10 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "rl_entry_runway",
         TOPOLOGIES_DIR,
-        "A right-to-left section whose flow-side entry skips ahead to a deep "
-        "off-track target, compressing the diagonal into the entry region and "
-        "running a horizontal runway past the bypassed stations.",
+        "A source section feeding a left-hand target via `%%metro exit: left`: "
+        "it flows right-to-left so its producers sit at the left exit edge and "
+        "the runway leaves beside them, rather than the producers exiting left "
+        "back through the start station (#885).",
     ),
     (
         "terminus_join",
@@ -657,10 +801,10 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
     (
         "merge_right_entry",
         TOPOLOGIES_DIR,
-        "One line converges on a RIGHT entry from feeders spread across "
-        "several columns: the farthest carries the trunk that loops under the "
-        "sink, and the nearer feeder drops onto that same channel instead of "
-        "taking a second path over the top.",
+        "One line converges on a RIGHT entry whose consumer is the sink's "
+        "flow-start station: the sink flows right-to-left so the merge arrives "
+        "beside its consumer, and the trunk loops under the sink onto that "
+        "channel rather than slicing across the box to the far station (#885).",
     ),
     (
         "peeloff_riser_respace",
@@ -719,6 +863,28 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "offsets so the bundle stays parallel through the boundary without "
         "pinching or crossing.",
     ),
+    # --- Section header relocated clear of a top-entry drop ---
+    (
+        "top_entry_header_clash",
+        TOPOLOGIES_DIR,
+        "A TB section's title is long enough to reach under the trunk that drops "
+        "into its TOP entry. Rather than route the line around the title, the "
+        "header relocates below the box so the drop enters cleanly.",
+    ),
+    (
+        "header_side_rotated",
+        TOPOLOGIES_DIR,
+        "A TB section whose trunk drops through the top edge and exits the bottom "
+        "edge blocks the header on both horizontal edges. The title rotates and "
+        "runs down the clear left edge instead of crossing the line.",
+    ),
+    (
+        "header_nudge",
+        TOPOLOGIES_DIR,
+        "A title too long to fit a rotated side, on a section blocked top and "
+        "bottom by its trunk: the header shifts right past the trunk as a last "
+        "resort, the canvas growing to keep it visible.",
+    ),
     # --- Multi-line perpendicular exit that does not drop straight down ---
     (
         "lr_perp_top_exit_side_entry",
@@ -759,6 +925,122 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "two lines split to different downstream stations. Consistent corridor "
         "ordering routes each line to its target without a convergence jog at "
         "the entry.",
+    ),
+    (
+        "cross_column_perp_drop",
+        TOPOLOGIES_DIR,
+        "A `%%metro direction: TB` section fed by a perpendicular drop from a "
+        "section in a different grid column. The vertical trunk stays on the "
+        "QC section's own column and the cross-column feed comes over the top "
+        "and drops into the trunk head, rather than the trunk being dragged "
+        "out toward the off-column source.",
+    ),
+    (
+        "cross_column_perp_drop_far_exit",
+        TOPOLOGIES_DIR,
+        "The cross-column perpendicular drop where the source's exit side faces "
+        "away from the target's entry side (a BOTTOM exit feeding a TOP entry). "
+        "The lead-in crosses to the inter-column gap and reaches the TOP entry "
+        "from above the box, rather than rising up the trunk through the "
+        "section's stations.",
+    ),
+    (
+        "rail_inter_section",
+        TOPOLOGIES_DIR,
+        "Two `%%metro line_spread: rails` sections joined by an inter-section "
+        "edge. The connector wraps cleanly from the upstream right exit port, "
+        "down the right margin, across the inter-section gap, and down the left "
+        "margin into the downstream left entry port - no dangling port stubs "
+        "and no avoidable crossings between co-travelling lines.",
+    ),
+    (
+        "rail_offtrack_io",
+        TOPOLOGIES_DIR,
+        "A `%%metro line_spread: rails` section with off-track `%%metro file:` "
+        "input and output. Each off-track file terminus carries a buffer-stop "
+        "nub at the rail-side end of its vertical stub (like the on-rail "
+        "CRAM/VCF termini) seated clear of its under-icon caption, rather than "
+        "the line ending bare at the icon.",
+    ),
+    (
+        "rail_offtrack_plain_io",
+        TOPOLOGIES_DIR,
+        "A `%%metro line_spread: rails` section with plain (non-file) off-track "
+        "input and output. Each plain off-track node renders a station marker at "
+        "its line end rather than a bare stub, and the input's label sits above "
+        "the node clear of its drop and the adjacent station's label.",
+    ),
+    (
+        "bottom_row_climb_clear_corridor",
+        TOPOLOGIES_DIR,
+        "A section in the bottommost grid row sends a line up and across to a "
+        "higher-row target several columns away. The columns it spans hold no "
+        "same-row section, so the line runs along its own row level and climbs "
+        "at the end rather than diving below the source row to the canvas floor "
+        "and looping back up.",
+    ),
+    (
+        "exit_corner_offset_dogleg",
+        TOPOLOGIES_DIR,
+        "A passing line runs through a section on a per-line bundle offset, then "
+        "exits and bypasses a higher row to climb to a far target. The onward "
+        "run keeps the line's offset over the row-level traverse so it leaves "
+        "the exit port straight, with the single level change a clean riser at "
+        "the far gap rather than a one-offset-step jog at the exit corner.",
+    ),
+    (
+        "multicarrier_offrow_exit_climb",
+        TOPOLOGIES_DIR,
+        "A section's exit port carries two lines from two stations that share a "
+        "trunk row off the port row, then fans out through a junction to "
+        "several rows. The parallel bundle anchors on the shared carrier row so "
+        "it runs flat inside the section and the fan-out risers fall in the "
+        "inter-section gap, rather than both lines climbing a diagonal up to "
+        "the port inside the section.",
+    ),
+    (
+        "post_convergence_trunk",
+        TOPOLOGIES_DIR,
+        "Two stacked inputs converge on a station inside one LR section. The "
+        "merge station's single linear successor continues flat on the merge "
+        "row rather than dropping back onto one of the incoming branch rows, so "
+        "the post-merge trunk runs straight instead of zigzagging.",
+    ),
+    (
+        "bundle_terminator_continuation",
+        TOPOLOGIES_DIR,
+        "A two-line bundle enters a station where one line terminates while the "
+        "other continues to a single successor. The successor holds the trunk "
+        "row rather than dropping to its own line base, so the chain runs flat "
+        "instead of dipping into a V-kink before the section exit.",
+    ),
+    (
+        "clear_channel_target_aware_push",
+        TOPOLOGIES_DIR,
+        "A hub fans one line down into a wide section stacked directly below and "
+        "another down-and-right to a target. The fan descent for the rightward "
+        "line grazes the wide block, so the graze correction pushes it toward "
+        "the target's side of the block rather than the nearer edge, keeping the "
+        "line heading to its target instead of detouring across the canvas.",
+    ),
+    (
+        "junction_fanout_convergence",
+        TOPOLOGIES_DIR,
+        "Three lines converge into one joint-calling entry port: two bypass the "
+        "intervening sections and climb risers into the port while the third "
+        "joins flat from the adjacent column. The flat shallow feeder takes the "
+        "port-near slot on top of the climbing pair so the bundle turns into the "
+        "port concentrically, instead of the flat line weaving across the risers "
+        "at the corner.",
+    ),
+    (
+        "convergent_offrow_exit_climb",
+        TOPOLOGIES_DIR,
+        "A single-row long-read variant-calling map. The annotation section "
+        "carries only snv and sv (the two highest-priority lines), reached through "
+        "a bypass whose source re-based them onto low slots. Its two-line bundle "
+        "anchors on its own trunk rather than inheriting the high global slots, so "
+        "its markers sit on their rows and the run into reports stays level.",
     ),
 ]
 

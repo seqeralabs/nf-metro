@@ -1,0 +1,28 @@
+%%metro title: TB Right Exit
+%%metro style: dark
+%%metro line: a | A | #e63946
+%%metro line: b | B | #0570b0
+%%metro grid: prep | 0,0
+%%metro grid: work | 1,0
+%%metro grid: report | 2,0
+
+graph LR
+    subgraph prep [Prep]
+        p1[Start]
+        p2[End]
+        p1 -->|a,b| p2
+    end
+    subgraph work [Work]
+        %%metro direction: TB
+        %%metro entry: top | a,b
+        %%metro exit: right | a,b
+        w1[Process]
+        w2[Collect]
+        w1 -->|a,b| w2
+    end
+    subgraph report [Report]
+        %%metro entry: left | a,b
+        r1[Publish]
+    end
+    p2 -->|a,b| w1
+    w2 -->|a,b| r1

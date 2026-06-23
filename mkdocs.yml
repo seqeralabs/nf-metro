@@ -23,6 +23,11 @@ extra:
   version:
     provider: mike
 
+# The playground is shipped as static files under docs/playground/, but its
+# Playwright test harness is build-time only and must not reach the site.
+exclude_docs: |
+  playground/tests/
+
 markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
@@ -32,17 +37,17 @@ markdown_extensions:
   - toc:
       permalink: true
 
-exclude_docs: |
-  WEBSITE_PLAN.md
-
 nav:
   - Home: index.md
   - Guide: guide.md
-  - Live progress: live.md
+  - Embedding: embedding.md
+  - Embed contract: embed.md
   - Data manifest: manifest.md
+  - Live progress: live.md
   - Nextflow Import: nextflow.md
   - nf-core Pipelines: pipelines/index.md
   - Gallery: gallery/index.md
+  - Playground (beta): playground/index.html
   - How it's built: how-its-built.md
   - Internals:
     - Architecture: dev/architecture.md
@@ -51,5 +56,39 @@ nav:
     - Inter-section dispatch: dev/inter_section_dispatch.md
     - Routing gate coverage: dev/routing_gate_coverage.md
     - Routing gate triage: dev/routing_gate_triage.md
+    - Guard tiers: dev/guard_tiers.md
     - Parser: dev/parser.md
     - Testing: dev/testing.md
+  - Releases:
+    - Overview: releases/index.md
+    - v0.7.x:
+      - v0.7.2: releases/0.7.2.md
+      - v0.7.1: releases/0.7.1.md
+      - v0.7.0: releases/0.7.0.md
+    - v0.6.x:
+      - v0.6.1: releases/0.6.1.md
+      - v0.6.0: releases/0.6.0.md
+    - v0.5.x:
+      - v0.5.4: releases/0.5.4.md
+      - v0.5.3: releases/0.5.3.md
+      - v0.5.2: releases/0.5.2.md
+      - v0.5.1: releases/0.5.1.md
+      - v0.5.0: releases/0.5.0.md
+    - v0.4.x:
+      - v0.4.7: releases/0.4.7.md
+      - v0.4.6: releases/0.4.6.md
+      - v0.4.5: releases/0.4.5.md
+      - v0.4.4: releases/0.4.4.md
+      - v0.4.3: releases/0.4.3.md
+      - v0.4.2: releases/0.4.2.md
+      - v0.4.1: releases/0.4.1.md
+      - v0.4.0: releases/0.4.0.md
+    - v0.3.x:
+      - v0.3.0: releases/0.3.0.md
+    - v0.2.x:
+      - v0.2.2: releases/0.2.2.md
+      - v0.2.1: releases/0.2.1.md
+      - v0.2.0: releases/0.2.0.md
+    - v0.1.x:
+      - v0.1.1: releases/0.1.1.md
+      - v0.1: releases/0.1.md

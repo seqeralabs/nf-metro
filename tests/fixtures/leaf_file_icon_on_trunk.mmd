@@ -8,9 +8,11 @@ graph LR
         align[Align]
         bam_out[ ]
         sort[Sort]
+        report[Report]
         markdup[MarkDup]
 
         align -->|index| bam_out
         align -->|main| sort
+        sort -->|main| report
         sort -->|index| markdup
     end

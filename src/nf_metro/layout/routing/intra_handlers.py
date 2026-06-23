@@ -22,6 +22,10 @@ from nf_metro.layout.constants import (
     MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
 )
+from nf_metro.layout.geometry import (
+    diagonal_centreline,
+    single_corner_centreline,
+)
 from nf_metro.layout.labels import (
     label_text_width,
 )
@@ -48,6 +52,7 @@ from nf_metro.parser.model import (
     Edge,
     PortSide,
     Station,
+    is_bypass_v,
 )
 
 
@@ -129,7 +134,9 @@ def _route_entry_runway(
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
-        points=[(sx, sy), (diag_start_x, sy), (diag_end_x, ty), (tx, ty)],
+        points=diagonal_centreline(
+            section.direction, (sx, sy), (tx, ty), diag_start_x, diag_end_x
+        ),
     )
 
 
@@ -189,13 +196,22 @@ def _route_perp_exit(
         return RoutedPath(
             edge=edge,
             line_id=edge.line_id,
-            points=[(src.x, src.y), (tgt.x, src.y), (tgt.x, tgt.y)],
+            points=single_corner_centreline(
+                src_section.direction, (src.x, src.y), (tgt.x, tgt.y), flow_first=True
+            ),
         )
-    return _route_perp_exit_bundle(edge, src, tgt, tgt_port.side, ctx)
+    return _route_perp_exit_bundle(
+        edge, src, tgt, tgt_port.side, ctx, src_section.direction
+    )
 
 
 def _route_perp_exit_bundle(
-    edge: Edge, src: Station, tgt: Station, side: PortSide, ctx: _RoutingCtx
+    edge: Edge,
+    src: Station,
+    tgt: Station,
+    side: PortSide,
+    ctx: _RoutingCtx,
+    direction: str,
 ) -> RoutedPath | None:
     """Fan a co-travelling perpendicular-exit bundle along one turning centreline.
 
@@ -233,7 +249,7 @@ def _route_perp_exit_bundle(
 
     routes = build_tapered_bundle(
         [(edge, edge.line_id, source_offset(edge.line_id), exit_offset(edge.line_id))],
-        [(sx, sy), (tx, sy), (tx, ty)],
+        single_corner_centreline(direction, (sx, sy), (tx, ty), flow_first=True),
         transition_leg=1,
         base_radius=ctx.curve_radius,
         bundle_offsets=[(source_offset(lid), exit_offset(lid)) for lid in line_ids],
@@ -391,13 +407,13 @@ def _route_diagonal(
     # equal V-side flat reservations so V sits at the centre of the
     # straight segment of the bypass loop.
     v_flat_half = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
-    if tgt.is_hidden and edge.target.startswith("__bypass_"):
+    if tgt.is_hidden and is_bypass_v(edge.target):
         is_fork_flag = False
         is_join_flag = True
         tgt_min = v_flat_half
         if src_min + tgt_min + ctx.diagonal_run > abs(dx):
             tgt_min = MIN_STRAIGHT_EDGE
-    elif src.is_hidden and edge.source.startswith("__bypass_"):
+    elif src.is_hidden and is_bypass_v(edge.source):
         is_fork_flag = True
         is_join_flag = False
         src_min = v_flat_half
@@ -414,8 +430,12 @@ def _route_diagonal(
         is_join_flag,
     )
 
+    section = ctx.graph.sections.get(src.section_id or "")
+    direction = section.direction if section else "LR"
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
-        points=[(sx, sy), (diag_start_x, sy), (diag_end_x, ty), (tx, ty)],
+        points=diagonal_centreline(
+            direction, (sx, sy), (tx, ty), diag_start_x, diag_end_x
+        ),
     )

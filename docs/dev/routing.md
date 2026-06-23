@@ -63,8 +63,8 @@ The order in `route_edges` is:
 
 After all edges are routed, `route_edges` runs a series of post-passes
 that adjust the assembled polylines as a set (for example
-`_spread_diagonal_bundles`, `_normalize_gap_channels`,
-`_normalize_bypass_trunks`, `_join_fanout_upstream_tails`).
+`_spread_diagonal_bundles`, `_materialize_gap_slots`,
+`_materialize_trunk_slots`, `_coincide_same_line_tracks`).
 
 ## Bundles and offsets
 
@@ -77,6 +77,26 @@ offset propagation at each corner (the corner-radius helpers live in
 `routing/corners.py`).  The runtime guard
 `check_bundle_order_preserved` (in `routing/invariants.py`) catches any
 regression where a line crosses over its bundle-mates.
+
+## Render-time guards
+
+`assert_render_curve_invariants` (in `routing/invariants.py`) runs a set of
+correctness checks on the final `route_edges` output every render -- the exact
+geometry the renderer is about to draw -- so a defective route aborts the
+render with a message naming the offending edge rather than being shipped.  It
+is always on, independent of `compute_layout`'s `validate` flag.
+
+Among these are the **endpoint guards**, which assert that a routed segment
+terminates at a real anchor rather than hanging in open space:
+
+* `check_merge_branches_meet_trunk` -- a merge feeder must land on its trunk's
+  channel (merge junctions only).
+* `check_no_hanging_routes` -- the general backstop: **every** route's two
+  endpoints must each lie within `2 * CURVE_RADIUS` of a station/port/junction
+  marker or of another route it joins (a bundle mate, a branch onto a trunk, a
+  peel-off).  Rail-mode endpoints are skipped (a rail stub terminates on its
+  rail).  This generalises the merge-only check to any route family; the
+  family-specific checks remain as sharper diagnostics.
 
 ## The descriptor catalogue (`WRAP_TABLE`)
 
@@ -117,7 +137,7 @@ dispatcher handles those degenerate cases directly.
 | `bundle.py` | constructive bundle-curve builders (`build_concentric_bundle`, `build_tapered_bundle`, `build_offset_bundle`); fans a centreline into per-line offset paths with concentric corners |
 | `centrelines.py` | centreline templates and bundle-gathering helpers (`gather_member_edges`, `route_along`, `route_tapered`, …) layered over `bundle.py` |
 | `postprocess.py` | post-routing passes: diagonal bundle spread and bubble-station centring |
-| `normalize.py` | channel and trunk normalization passes (`_normalize_gap_channels`, htrunk restacking, riser/port-approach alignment, …) |
+| `normalize.py` | channel and trunk normalization passes (`_materialize_gap_slots`, htrunk restacking, riser/port-approach alignment, …) |
 | `common.py` | `RoutedPath`, `Direction`, bundle/channel helpers |
 | `corners.py` | corner radii and curve smoothing |
 | `inter_section.py` | `WRAP_TABLE` descriptor catalogue (documentation reference; not used at runtime) |

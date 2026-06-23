@@ -12,8 +12,17 @@ from nf_metro.layout.constants import (
     SAME_COORD_TOLERANCE,
     STATION_ELBOW_TOLERANCE,
 )
-from nf_metro.layout.phases._common import _expand_bbox_for_y, _grid_group_section_ids
-from nf_metro.layout.phases.guards import _section_lacks_flow_aligned_port
+from nf_metro.layout.geometry import lanes_run_along_y
+from nf_metro.layout.phases._common import (
+    _expand_bbox_for_y,
+    _grid_group_section_ids,
+    _is_fold_section,
+    flow_exit_carrier_anchor,
+)
+from nf_metro.layout.phases.guards import (
+    _exit_perp_to_flow,
+    _section_lacks_flow_aligned_port,
+)
 from nf_metro.layout.phases.junctions import (
     _resolve_source_section_id,
     _resolve_source_xy,
@@ -41,16 +50,18 @@ def _set_port_x(graph: MetroGraph, port_id: str, x: float) -> None:
         port.x = x
 
 
-def _align_entry_ports(graph: MetroGraph, tb_only: bool = False) -> None:
+def _align_entry_ports(graph: MetroGraph, vertical_only: bool = False) -> None:
     """Align entry ports with their incoming connection's coordinates.
 
     LEFT/RIGHT ports: align Y for straight horizontal runs.
     TOP/BOTTOM ports: align X for vertical drops or Y for cross-column.
 
-    With ``tb_only`` set, only ports on TB/BT sections are re-aligned --
-    used by the late re-alignment pass (Stage 6.16), which targets the
-    perpendicular-entry drift that vertical settling introduces in
-    TB sections without disturbing settled LR/RL geometry.
+    With ``vertical_only`` set, only ports on vertical-flow (TB/BT) sections
+    are re-aligned -- used by the late re-alignment pass (Stage 6.16), which
+    targets the perpendicular-entry drift that the vertical-settling phases
+    introduce in vertical-flow sections.  Re-aligning the horizontal-flow
+    (LR/RL) sections there would instead drag their ports off the positions
+    those same phases deliberately settled them into.
     """
     junction_ids = graph.junction_ids
 
@@ -62,7 +73,7 @@ def _align_entry_ports(graph: MetroGraph, tb_only: bool = False) -> None:
         if not entry_section:
             continue
 
-        if tb_only and entry_section.direction not in ("TB", "BT"):
+        if vertical_only and lanes_run_along_y(entry_section.direction):
             continue
 
         if port.side in (PortSide.LEFT, PortSide.RIGHT):
@@ -116,17 +127,19 @@ def _align_lr_entry_port(
         if entry_section.grid_row != src_section.grid_row:
             break
 
-        # A perpendicular (TOP/BOTTOM) exit feeding this LEFT/RIGHT entry sits on
-        # the source section's boundary edge, not on a trunk -- aligning to it
-        # would pin the entry near the section top/bottom and force the up-and-
-        # over route to step down into the first station.  Anchor the entry on
-        # its own consumer station's Y so the route descends straight in.
+        # A source exit on a side perpendicular to its section's flow sits on a
+        # boundary edge, not on a trunk: a TOP/BOTTOM exit on a horizontal-flow
+        # section, or a LEFT/RIGHT exit on a vertical-flow (TB/BT) section whose
+        # exit structurally dips below the last station.  Aligning the entry to
+        # that boundary Y pins it off the consumer's row and forces a diagonal
+        # into the first station.  Anchor the entry on its own consumer
+        # station's Y so the route rises in the inter-section gap and enters
+        # horizontally.
         src_port = graph.ports.get(edge.source)
         if (
             src_port is not None
             and not src_port.is_entry
-            and src_port.side in (PortSide.TOP, PortSide.BOTTOM)
-            and src_section.direction in ("LR", "RL")
+            and _exit_perp_to_flow(src_port, src_section)
         ):
             consumer_y = _entry_consumer_y(graph, port_id, entry_section)
             if consumer_y is not None:
@@ -248,9 +261,18 @@ def _align_tb_entry_port(
         elif entry_section.direction in ("LR", "RL"):
             _nudge_port_from_stations(port_id, entry_section, graph)
     else:
-        # Same-column: align X with source for vertical drop
+        # Same grid column: a stacked source drops in vertically, so align X
+        # to it -- but only when that X lands within the section's own box.  A
+        # same-column neighbour whose actual X sits outside the box (a wide
+        # upstream section sharing the column) would otherwise drag the perp
+        # port off the section's columns; keep the port on its own column and
+        # let routing bridge the cross-column drop instead.
         src_x, _, _ = sources[0]
-        _set_port_x(graph, port_id, src_x)
+        if _drop_x_within_section(entry_section, src_x):
+            _set_port_x(graph, port_id, src_x)
+        elif entry_section.direction in ("LR", "RL"):
+            _nudge_port_from_stations(port_id, entry_section, graph)
+            graph._cross_column_perp_bridges.add(entry_section.id)
 
 
 def _tb_trunk_x(graph: MetroGraph, section: Section) -> float | None:
@@ -271,6 +293,20 @@ def _tb_trunk_x(graph: MetroGraph, section: Section) -> float | None:
     if not xs:
         return None
     return xs[len(xs) // 2]
+
+
+def _drop_x_within_section(section: Section, drop_x: float) -> bool:
+    """True when *drop_x* lands within the section's own grid column (bbox).
+
+    A perpendicular entry port aligns its X to a feeding source only for an
+    in-column drop -- one whose X falls inside the section's box.  A source X
+    outside the box (a wider neighbour sharing the grid column, or a producer
+    in a different column entirely) would drag the port -- and the run that
+    opens a station-elbow gap from it -- off the section's columns and past
+    its bbox; the port stays on its own column and routing bridges the
+    cross-column drop with an L-shaped inter-section lead-in instead.
+    """
+    return section.bbox_x <= drop_x <= section.bbox_x + section.bbox_w
 
 
 def _vertical_drop_source_x(
@@ -388,8 +424,8 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
         if not exit_section:
             continue
 
-        # Skip fold/TB sections (handled by _align_exit_ports)
-        if exit_section.grid_row_span > 1 or exit_section.direction == "TB":
+        # Skip fold sections (handled by _align_exit_ports)
+        if _is_fold_section(exit_section):
             continue
 
         if port.side not in (PortSide.LEFT, PortSide.RIGHT):
@@ -424,21 +460,15 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
         if exit_section.grid_row != entry_section.grid_row:
             continue
 
-        # Skip when entry port is perpendicular to its section's flow.
-        # A LEFT port on a TB section must bend, so aligning it with an
-        # internal station's Y would route the line through that station.
-        _perp = False
-        if entry_section.direction == "TB" and entry_port_obj.side in (
-            PortSide.LEFT,
-            PortSide.RIGHT,
+        # Skip when the line does not enter horizontally at its consumer's Y.
+        # A LEFT/RIGHT port on a TB section bends in, and a TOP/BOTTOM port
+        # drops in vertically (on any section); aligning the upstream exit to
+        # the consumer's internal Y there pulls the exit off the trunk and
+        # bends the lead-in.
+        if entry_port_obj.side in (PortSide.TOP, PortSide.BOTTOM) or (
+            entry_section.direction in ("TB", "BT")
+            and entry_port_obj.side in (PortSide.LEFT, PortSide.RIGHT)
         ):
-            _perp = True
-        elif entry_section.direction in ("LR", "RL") and entry_port_obj.side in (
-            PortSide.TOP,
-            PortSide.BOTTOM,
-        ):
-            _perp = True
-        if _perp:
             continue
 
         internal_ids = (
@@ -715,16 +745,27 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
 
         ds_y = _resolve_downstream_entry_y(graph, port_id, junction_ids)
 
-        # Already aligned with downstream entry: straight run is correct
-        # even if internal sources sit at a different Y.
-        if ds_y is not None and abs(port_st.y - ds_y) < 1.0:
-            continue
-
         unique_source_ys = sorted(set(source_ys))
         spread = unique_source_ys[-1] - unique_source_ys[0]
         n_unique = len(unique_source_ys)
+        single_source = n_unique == 1 or spread <= 1.0
 
-        if n_unique == 1 or spread <= 1.0:
+        # A flow-aligned exit anchors on its carriers' shared row, so the level
+        # change becomes a riser in the inter-section gap rather than a diagonal
+        # inside the section.  Anchors for a single carrying station or a
+        # parallel bundle (several carriers on one row, one line each), feeding
+        # a downstream entry directly or through a fan-out junction.  A bypass
+        # bundle, a fan-in, or a merge junction keep the downstream-aligned
+        # placement so the inter-section run stays straight (see
+        # ``flow_exit_carrier_anchor``).
+        keep_downstream_aligned = ds_y is not None and abs(port_st.y - ds_y) < 1.0
+        anchors_to_carrier = (
+            flow_exit_carrier_anchor(graph, port_id, section, junction_ids) is not None
+        )
+        if keep_downstream_aligned and not anchors_to_carrier:
+            continue
+
+        if single_source:
             target_y = source_ys[0]
         else:
             # Multi-Y sources: snap onto the source that aligns with the
@@ -786,7 +827,7 @@ def _resolve_downstream_entry_y(
 def _align_exit_ports(graph: MetroGraph) -> None:
     """Align LEFT/RIGHT exit ports on fold sections with their target's Y.
 
-    Applies to sections with grid_row_span > 1 OR TB direction (fold bridges).
+    Applies to fold sections (multi-row span or vertical flow; fold bridges).
     These have exit ports placed near the section bottom, but the target
     section's entry may be at a different Y. Aligning ensures a straight
     horizontal inter-section connection.
@@ -823,7 +864,7 @@ def _align_exit_ports(graph: MetroGraph) -> None:
             _align_perpendicular_exit_port(graph, port_id, port, exit_section)
             continue
 
-        if exit_section.grid_row_span <= 1 and exit_section.direction != "TB":
+        if not _is_fold_section(exit_section):
             continue
 
         if port.side in (PortSide.LEFT, PortSide.RIGHT):
@@ -886,6 +927,14 @@ def _align_drop_target_trunk(graph: MetroGraph, port_id: str, exit_x: float) -> 
     for tgt_section in _drop_targets(graph, port_id):
         trunk_x = _tb_trunk_x(graph, tgt_section)
         if trunk_x is None:
+            continue
+        # Only a same-column drop (the exit X lands within the target's own
+        # box) shifts the trunk to meet it.  A cross-column exit far off the
+        # box would drag the trunk -- and its stations -- out of the bbox; the
+        # trunk stays on its grid column and routing bridges the cross-column
+        # drop with an L-shaped inter-section lead-in instead.
+        if not _drop_x_within_section(tgt_section, exit_x):
+            graph._cross_column_perp_bridges.add(tgt_section.id)
             continue
         delta = exit_x - trunk_x
         if abs(delta) < SAME_COORD_TOLERANCE:
@@ -1245,7 +1294,7 @@ def _space_ports_from_termini(
         real_sids = {s for s in section.station_ids if s not in all_port_ids}
 
         # Skip exit ports on fold sections -- _align_exit_ports handles them.
-        is_fold = section.grid_row_span > 1 or section.direction == "TB"
+        is_fold = _is_fold_section(section)
 
         # Classify termini by side.  A station with no in-section
         # predecessors is an entry-side (source) terminus; one with no

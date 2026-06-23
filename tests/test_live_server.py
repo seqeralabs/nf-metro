@@ -11,8 +11,11 @@ import pytest
 from nf_metro.layout import compute_layout
 from nf_metro.live import server as server_mod
 from nf_metro.live.server import (
+    DEFAULT_OVERLAY,
+    OVERLAY_STYLES,
     MapModel,
     ProgressState,
+    _is_light_bg,
     _weblog_command,
     build_page,
     run_lifecycle,
@@ -31,12 +34,16 @@ MMD = (
 )
 
 
-def _model() -> MapModel:
+def _graph():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = parse_metro_mermaid(MMD)
     compute_layout(graph)
-    return MapModel(graph, THEMES["nfcore"])
+    return graph
+
+
+def _model() -> MapModel:
+    return MapModel(_graph(), THEMES["nfcore"])
 
 
 def _ev(event, task_id, process, status=""):
@@ -66,6 +73,34 @@ def test_state_machine_queued_running_done():
     assert trim["state"] == "done" and trim["done"] == 2 and trim["total"] == 2
 
 
+def test_completed_station_stays_done_for_rest_of_run():
+    # A station that finishes must not "un-green" as other stations progress;
+    # a successful run ends with every station that ran in the done state.
+    state = ProgressState(_model())
+    state.ingest({"event": "started", "runName": "r"})
+    state.ingest(_ev("process_submitted", 1, "TRIMGALORE", "SUBMITTED"))
+    state.ingest(_ev("process_started", 1, "TRIMGALORE", "RUNNING"))
+    state.ingest(_ev("process_completed", 1, "TRIMGALORE", "COMPLETED"))
+    assert state.snapshot()["stations"]["trim"]["state"] == "done"
+
+    # qc is submitted, runs, and completes; trim stays done throughout.
+    state.ingest(_ev("process_submitted", 2, "FASTQC", "SUBMITTED"))
+    assert state.snapshot()["stations"]["trim"]["state"] == "done"
+    state.ingest(_ev("process_started", 2, "FASTQC", "RUNNING"))
+    assert state.snapshot()["stations"]["trim"]["state"] == "done"
+    state.ingest(_ev("process_completed", 2, "FASTQC", "COMPLETED"))
+    snap = state.snapshot()["stations"]
+    assert snap["trim"]["state"] == "done" and snap["qc"]["state"] == "done"
+
+
+def test_only_a_new_run_resets_a_done_station():
+    state = ProgressState(_model())
+    state.ingest(_ev("process_completed", 1, "TRIMGALORE", "COMPLETED"))
+    assert state.snapshot()["stations"]["trim"]["state"] == "done"
+    state.ingest({"event": "started", "runName": "r2"})
+    assert state.snapshot()["stations"]["trim"]["state"] == "pending"
+
+
 def test_state_machine_failure():
     state = ProgressState(_model())
     state.ingest(_ev("process_started", 1, "TRIMGALORE", "RUNNING"))
@@ -91,6 +126,81 @@ def test_build_page_contains_halo_ids():
     page = build_page(_model())
     assert 'id="halo-trim"' in page and 'id="halo-qc"' in page
     assert 'id="halo-input"' not in page
+
+
+def test_each_halo_carries_the_shared_overlay_marks():
+    page = build_page(_model())
+    # One DOM serves every style: a ripple, a ring, and a dot per station.
+    for cls in ("ov-ripple", "ov-ring", "ov-dot"):
+        assert page.count(f'class="{cls}"') == 2  # trim + qc
+
+
+def test_overlay_marks_match_the_drawn_station_pill():
+    import re
+
+    from nf_metro.layout.routing.offsets import compute_station_offsets
+    from nf_metro.render.svg import station_marker_box
+
+    graph = _graph()
+    offsets = compute_station_offsets(graph)
+    model = MapModel(graph, THEMES["nfcore"])
+    page = build_page(model)
+    for st in model.stations:
+        cx, cy, w, h, rx = station_marker_box(
+            graph, THEMES["nfcore"], graph.stations[st["id"]], offsets
+        )
+        # The dot rect is the marker box exactly (within rounding).
+        assert st["w"] == round(w, 1) and st["h"] == round(h, 1)
+        m = re.search(
+            rf'id="halo-{st["id"]}">.*?class="ov-dot" x="([\d.-]+)" y="([\d.-]+)" '
+            rf'width="([\d.-]+)" height="([\d.-]+)"',
+            page,
+        )
+        assert m, f"no ov-dot rect for {st['id']}"
+        assert abs(float(m.group(3)) - round(w, 1)) < 0.2
+        assert abs(float(m.group(4)) - round(h, 1)) < 0.2
+
+
+def test_page_offers_every_overlay_style():
+    page = build_page(_model())
+    assert 'id="overlay-style"' in page
+    for style in OVERLAY_STYLES:
+        assert f'value="{style}"' in page
+
+
+def test_default_overlay_is_selected_and_applied():
+    page = build_page(_model())
+    assert f'data-overlay="{DEFAULT_OVERLAY}"' in page
+    assert f'<option value="{DEFAULT_OVERLAY}" selected>' in page
+
+
+def test_explicit_overlay_drives_the_initial_style():
+    page = build_page(_model(), overlay="pulse")
+    assert 'data-overlay="pulse"' in page
+    assert '<option value="pulse" selected>' in page
+    assert "pulse" != DEFAULT_OVERLAY  # exercises the non-default path
+
+
+def test_unknown_overlay_falls_back_to_default():
+    page = build_page(_model(), overlay="bogus")
+    assert f'data-overlay="{DEFAULT_OVERLAY}"' in page
+
+
+def test_dark_theme_page_uses_dark_chrome():
+    page = build_page(MapModel(_graph(), THEMES["nfcore"]))
+    assert "color-scheme: dark" in page
+
+
+def test_light_theme_page_uses_light_chrome():
+    page = build_page(MapModel(_graph(), THEMES["seqera"]))
+    assert "color-scheme: light" in page
+    assert "--bg: #f8f9fa" in page
+
+
+def test_is_light_bg_classifies_themes():
+    assert _is_light_bg("#f8f9fa") is True
+    assert _is_light_bg("none") is True
+    assert _is_light_bg("#2b2b2b") is False
 
 
 @pytest.mark.parametrize("token", [None, "sekret"])
@@ -249,7 +359,8 @@ def test_serve_cli_wires_launch_and_prints_url(monkeypatch, tmp_path):
     )
     calls = {}
 
-    def fake_serve_map(graph, theme, host=None, port=None, token=None):
+    def fake_serve_map(graph, theme, host=None, port=None, token=None, overlay=None):
+        calls["overlay"] = overlay
         return object()
 
     def fake_lifecycle(httpd, page_url, events_url, **kw):
@@ -260,14 +371,37 @@ def test_serve_cli_wires_launch_and_prints_url(monkeypatch, tmp_path):
 
     result = CliRunner().invoke(
         cli_mod.cli,
-        ["serve", str(mmd), "--port", "9999", "--open", "--", "nextflow", "run", "p"],
+        [
+            "serve",
+            str(mmd),
+            "--port",
+            "9999",
+            "--overlay",
+            "ring",
+            "--open",
+            "--",
+            "nextflow",
+            "run",
+            "p",
+        ],
     )
     assert result.exit_code == 0, result.output
     assert calls["launch_cmd"] == ("nextflow", "run", "p")
     assert calls["open_browser"] is True
+    assert calls["overlay"] == "ring"
     assert calls["page_url"] == "http://127.0.0.1:9999/"
     assert calls["events_url"] == "http://127.0.0.1:9999/events"
     assert "▶ Open: http://127.0.0.1:9999/" in result.output
+
+
+def test_serve_rejects_unknown_overlay():
+    from click.testing import CliRunner
+
+    from nf_metro import cli as cli_mod
+
+    result = CliRunner().invoke(cli_mod.cli, ["serve", "x.mmd", "--overlay", "nope"])
+    assert result.exit_code != 0
+    assert "nope" in result.output
 
 
 def test_registry_register_and_listing():

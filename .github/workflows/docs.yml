@@ -28,7 +28,17 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -e ".[docs]"
+        run: pip install -e ".[docs]" build
+
+      - name: Build playground wheel
+        run: |
+          rm -rf docs/playground/wheels
+          python -m build --wheel -o docs/playground/wheels
+          WHEEL=$(basename docs/playground/wheels/*.whl)
+          printf '{"wheel": "%s"}\n' "$WHEEL" > docs/playground/wheels/index.json
+
+      - name: Build playground example manifest
+        run: python scripts/build_playground_examples.py
 
       - name: Configure git for mike
         run: |

@@ -2,12 +2,24 @@
 
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from nf_metro.cli import cli
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 RNASEQ_MMD = EXAMPLES_DIR / "rnaseq_sections.mmd"
+INVALID_DIR = Path(__file__).resolve().parent / "fixtures" / "invalid"
+
+# Fixtures that parse and pass graph-semantic validation but trip a layout
+# invariant once the engine runs.  They exercise the boundary between the bare
+# `validate` (semantic only) and `validate --with-layout`.
+SEMANTIC_VALID_LAYOUT_BROKEN = [
+    "mixed_entry_opposing.mmd",
+    "mixed_entry_perpendicular.mmd",
+    "backward_feed_rl.mmd",
+    "merge_trunk_rightward_source.mmd",
+]
 
 
 def test_render_produces_svg(tmp_path):
@@ -47,6 +59,61 @@ def test_validate_bad_file(tmp_path):
     result = runner.invoke(cli, ["validate", str(bad)])
     # Should still succeed (no crash), but output says 0 stations
     assert result.exit_code == 0
+
+
+@pytest.mark.parametrize("fixture", SEMANTIC_VALID_LAYOUT_BROKEN)
+def test_validate_default_skips_layout(fixture):
+    """Bare `validate` is graph-semantic only: a layout-broken but
+    semantically valid file passes without running the layout engine."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["validate", str(INVALID_DIR / fixture)])
+    assert result.exit_code == 0, result.output
+    assert "Valid:" in result.output
+
+
+@pytest.mark.parametrize("fixture", SEMANTIC_VALID_LAYOUT_BROKEN)
+def test_validate_with_layout_catches_layout_invariant(fixture):
+    """`--with-layout` runs the layout engine and reports a layout failure as
+    a clean validation error (not a traceback)."""
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["validate", "--with-layout", str(INVALID_DIR / fixture)]
+    )
+    assert result.exit_code != 0
+    assert "Validation errors:" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_validate_with_layout_passes_clean_file():
+    """`--with-layout` succeeds on a file that lays out cleanly."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["validate", "--with-layout", str(RNASEQ_MMD)])
+    assert result.exit_code == 0, result.output
+    assert "Valid:" in result.output
+
+
+def _td_graph(tmp_path: Path) -> Path:
+    """A semantically valid diagram whose non-LR primary direction warns."""
+    mmd = tmp_path / "td.mmd"
+    mmd.write_text("%%metro line: x | X | #ff0000\ngraph TD\n    a[A] -->|x| b[B]\n")
+    return mmd
+
+
+def test_validate_surfaces_warnings_without_failing(tmp_path):
+    """A warning is reported but does not fail the default (non-strict) run."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["validate", str(_td_graph(tmp_path))])
+    assert result.exit_code == 0, result.output
+    assert "graph LR" in result.output
+    assert "Valid:" in result.output
+
+
+def test_validate_strict_escalates_warning_to_error(tmp_path):
+    """`--strict` turns a warning into a non-zero exit."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["validate", "--strict", str(_td_graph(tmp_path))])
+    assert result.exit_code != 0
+    assert "graph LR" in result.output
 
 
 def test_info_output():
@@ -190,17 +257,16 @@ def test_render_center_ports_cli_overrides_directive(tmp_path, monkeypatch):
     from nf_metro.parser.mermaid import parse_metro_mermaid
 
     captured: dict = {}
-    original_compute_layout = None
 
-    import nf_metro.cli as cli_mod
+    import nf_metro.api as api_mod
 
-    original_compute_layout = cli_mod.compute_layout
+    original_compute_layout = api_mod.compute_layout
 
     def spy_compute_layout(graph, **kw):
         captured["center_ports"] = graph.center_ports
         return original_compute_layout(graph, **kw)
 
-    monkeypatch.setattr(cli_mod, "compute_layout", spy_compute_layout)
+    monkeypatch.setattr(api_mod, "compute_layout", spy_compute_layout)
 
     mmd_text = "%%metro center_ports: true\n" + RNASEQ_MMD.read_text()
     mmd = tmp_path / "with_directive.mmd"

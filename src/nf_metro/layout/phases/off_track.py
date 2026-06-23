@@ -26,7 +26,14 @@ from nf_metro.layout.phases._common import (
     _grow_section_bbox_upward,
     _set_section_bbox_top,
 )
-from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import (
+    Edge,
+    MetroGraph,
+    PortSide,
+    Section,
+    Station,
+    is_bypass_v,
+)
 
 # A producer this far below the section's top trunk row is treated as
 # sitting on a downward branch, so its off-track output drops below it
@@ -369,11 +376,11 @@ def _detect_fork_join_layers(
     making a visible-vs-owner diagonal trigger a gap while a V-only off-trunk
     peer does not.
     """
-    visible_tracks = {t for sid, t in tracks.items() if not sid.startswith("__bypass_")}
+    visible_tracks = {t for sid, t in tracks.items() if not is_bypass_v(sid)}
     is_single_track = len(visible_tracks) <= 1
 
     def _has_bypass(ids: set[str]) -> bool:
-        return any(nid.startswith("__bypass_") for nid in ids)
+        return any(is_bypass_v(nid) for nid in ids)
 
     def _bypass_aware_tracks(ids: set[str], owner_sid: str) -> set[float]:
         """Visible peer tracks plus the owner's own track, V's removed."""
@@ -382,7 +389,7 @@ def _detect_fork_join_layers(
         if owner_track is not None:
             result.add(owner_track)
         for nid in ids:
-            if nid.startswith("__bypass_"):
+            if is_bypass_v(nid):
                 continue
             t = tracks.get(nid)
             if t is not None:
@@ -713,8 +720,12 @@ def _line_crossed_file_icon_sinks(graph: MetroGraph) -> set[str]:
     already sits clear is never lifted.
     """
     from nf_metro.layout.geometry import segment_intersects_bbox
-    from nf_metro.layout.routing import compute_station_offsets, route_edges
-    from nf_metro.render.svg import _icon_obstacles_by_station, apply_route_offsets
+    from nf_metro.layout.routing import (
+        apply_route_offsets,
+        compute_station_offsets,
+        route_edges,
+    )
+    from nf_metro.render.svg import _icon_obstacles_by_station
     from nf_metro.themes import THEMES
 
     offsets = compute_station_offsets(graph)

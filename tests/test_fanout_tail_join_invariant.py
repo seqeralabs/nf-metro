@@ -12,6 +12,8 @@ Covers:
   fan-out tail gaps.
 * Targeted: ``variant_calling_tuned`` ``__junction_6`` (the reported
   defect) joins continuously for both ``main`` and ``qc``.
+* Structural: the handoff join runs within ``_coincide_same_line_tracks``,
+  so all same-line track snapping lives in one stage.
 """
 
 from __future__ import annotations
@@ -19,9 +21,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from conftest import parse_and_layout
 
+from nf_metro.layout.constants import CURVE_RADIUS, DIAGONAL_RUN
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import compute_station_offsets, normalize, route_edges
+from nf_metro.layout.routing.context import _build_routing_context
 from nf_metro.layout.routing.invariants import (
     check_fanout_tail_join,
     fanout_junctions,
@@ -72,6 +77,31 @@ def test_variant_calling_tuned_junction6_joins() -> None:
     gaps = check_fanout_tail_join(routes, graph)
     j6_gaps = [g for g in gaps if g.junction_id == "__junction_6"]
     assert not j6_gaps, "\n".join(g.message() for g in j6_gaps)
+
+
+def test_handoff_join_is_driven_by_coincide_pass(monkeypatch) -> None:
+    """The fan-out handoff join is the horizontal-tail member of the
+    same-line coincidence family, so it runs within
+    ``_coincide_same_line_tracks`` and all "make one line read as one
+    stroke" snapping lives in one stage."""
+    path = EXAMPLES / "variant_calling_tuned.mmd"
+    graph = parse_and_layout(path.read_text())
+    ctx = _build_routing_context(
+        graph, DIAGONAL_RUN, CURVE_RADIUS, compute_station_offsets(graph)
+    )
+
+    calls: list[bool] = []
+    real_join = normalize._join_fanout_upstream_tails
+
+    def recording_join(routes, c):
+        calls.append(True)
+        return real_join(routes, c)
+
+    monkeypatch.setattr(normalize, "_join_fanout_upstream_tails", recording_join)
+    normalize._coincide_same_line_tracks([], ctx)
+    assert calls, (
+        "_join_fanout_upstream_tails must run within _coincide_same_line_tracks"
+    )
 
 
 def test_merge_junctions_excluded_from_fanout() -> None:

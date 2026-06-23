@@ -1,0 +1,56 @@
+name: Playground e2e
+
+on:
+  pull_request:
+    paths:
+      - "docs/playground/**"
+      - "src/nf_metro/**"
+      - ".github/workflows/playground-e2e.yml"
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build dev wheel for the playground
+        run: |
+          pip install build
+          rm -rf docs/playground/wheels
+          python -m build --wheel -o docs/playground/wheels
+          WHEEL=$(basename docs/playground/wheels/*.whl)
+          printf '{"wheel": "%s"}\n' "$WHEEL" > docs/playground/wheels/index.json
+
+      - name: Install nf-metro (the manifest generator imports build_gallery)
+        run: pip install -e .
+
+      - name: Build playground example manifest
+        run: python scripts/build_playground_examples.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Playwright and Chromium
+        working-directory: docs/playground/tests
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Run end-to-end tests
+        working-directory: docs/playground/tests
+        run: npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            docs/playground/tests/playwright-report/
+            docs/playground/tests/test-results/
+          retention-days: 7

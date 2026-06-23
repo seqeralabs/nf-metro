@@ -1,0 +1,13 @@
+%%metro title: Bundle Terminator Continuation
+%%metro style: dark
+%%metro line: qc | QC | #2dd4bf
+%%metro line: main | Main | #c792ea
+
+graph LR
+    subgraph proc [Processing]
+        fastqc[FastQC]
+        trim[Trim]
+        align[Align]
+        fastqc -->|qc,main| trim
+        trim -->|main| align
+    end

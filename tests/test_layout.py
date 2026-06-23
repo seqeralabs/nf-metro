@@ -11,6 +11,7 @@ from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
 from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.model import is_bypass_v
 
 
 def _patch_layout_helper(monkeypatch, name, replacement):
@@ -207,7 +208,7 @@ def test_compute_layout_rowspan_section_compacts_content():
     tall_content_top = min(
         graph.stations[sid].y
         for sid in tall.station_ids
-        if not graph.stations[sid].is_port and not sid.startswith("__bypass_")
+        if not graph.stations[sid].is_port and not is_bypass_v(sid)
     )
     assert tall.bbox_y == pytest.approx(tall_content_top - SECTION_Y_PADDING), (
         f"tall bbox_y={tall.bbox_y} should hug its content "
@@ -2310,12 +2311,12 @@ def test_normalization_adds_no_inter_line_crossings(fixture):
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
 
-    orig = core._normalize_gap_channels
-    core._normalize_gap_channels = lambda *a, **k: None
+    orig = core._materialize_gap_slots
+    core._materialize_gap_slots = lambda *a, **k: None
     try:
         pre = _count_inter_line_crossings(route_edges(graph))
     finally:
-        core._normalize_gap_channels = orig
+        core._materialize_gap_slots = orig
     post = _count_inter_line_crossings(route_edges(graph))
 
     assert post <= pre, (

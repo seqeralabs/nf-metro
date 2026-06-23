@@ -57,10 +57,9 @@ policy decision, not a schema error.
 Forward compatibility
 ----------------------
 Consumers MUST ignore unknown fields so the schema can grow within a major
-``version``.  The format is pre-1.0 and experimental: until it is declared
-stable it may change incompatibly without a ``version`` bump, so ``version``
-stays ``"1.0"`` (the first, not-yet-frozen schema) rather than incrementing per
-change.
+``version``.  The format is stable as of nf-metro 1.0 and covered by semantic
+versioning: incompatible schema changes bump ``version`` and the nf-metro major
+version together.  The current schema version is ``"1.0"``.
 """
 
 from __future__ import annotations

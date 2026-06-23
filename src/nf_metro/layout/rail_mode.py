@@ -28,8 +28,11 @@ __all__ = ["compute_rail_layout"]
 
 from nf_metro.layout.constants import (
     DIAGONAL_RUN,
+    INTER_ROW_EDGE_CLEARANCE,
+    INTER_ROW_HEADER_CLEARANCE,
     MIN_STRAIGHT_EDGE,
     OFFSET_STEP,
+    OFFTRACK_TERMINUS_NUB_CLEARANCE,
     RAIL_ABOVE_LABEL_TOP_PAD,
     SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
@@ -103,7 +106,7 @@ def compute_rail_layout(
     rail_y: dict[str, dict[str, float]] = {}
 
     cursor_top = y_offset
-    for section in ordered:
+    for idx, section in enumerate(ordered):
         bottom = _layout_section_rails(
             graph,
             section,
@@ -115,7 +118,13 @@ def compute_rail_layout(
             section_y_padding=section_y_padding,
             y_spacing=y_spacing,
         )
-        cursor_top = bottom + section_y_gap
+        # A multi-line inter-section connector wraps its cross leg through the
+        # gap below this section; widen the gap so the whole bundle clears both
+        # box edges (the default rail gap is tighter than the connector needs).
+        gap = section_y_gap
+        if idx + 1 < len(ordered):
+            gap = max(gap, _connector_gap(graph, rail_y, section, ordered[idx + 1]))
+        cursor_top = bottom + gap
 
     # Stash the per-section rail map so the dedicated router can resolve a
     # port's Y to its line's rail (rather than the port's stored average Y),
@@ -123,6 +132,40 @@ def compute_rail_layout(
     graph._rail_y = rail_y
 
     _position_ports_and_junctions(graph, rail_y)
+
+
+def _connector_gap(
+    graph: MetroGraph,
+    rail_y: dict[str, dict[str, float]],
+    upper: Section,
+    lower: Section,
+) -> float:
+    """Section gap below *upper* needed to seat a multi-line connector bundle.
+
+    A whole-graph rail connector from *upper* to *lower* wraps its cross leg
+    through the gap between them, spread vertically over the connector's rails.
+    The band must fit that spread between ``INTER_ROW_EDGE_CLEARANCE`` below the
+    upper box and ``INTER_ROW_HEADER_CLEARANCE`` above the lower box's header
+    badge.  Returns the gap that satisfies this, or ``0`` when fewer than two
+    lines connect the two sections (a single track needs no extra room).
+    """
+    per_line = rail_y.get(upper.id, {})
+    ys: list[float] = []
+    for e in graph.edges:
+        sp = graph.ports.get(e.source)
+        tp = graph.ports.get(e.target)
+        if sp is None or tp is None:
+            continue
+        if sp.section_id != upper.id or tp.section_id != lower.id:
+            continue
+        y = per_line.get(e.line_id)
+        if y is not None:
+            ys.append(y)
+    if len(ys) < 2:
+        return 0.0
+    spread = max(ys) - min(ys)
+    band = INTER_ROW_EDGE_CLEARANCE + spread + INTER_ROW_HEADER_CLEARANCE
+    return band - SECTION_HEADER_PROTRUSION
 
 
 def retrofit_section_rails(
@@ -370,7 +413,9 @@ def _layout_section_rails(
             feed_col = max(0.0, consumer_col - 0.5)
             st.layer = consumer_col
             st.x = _col_x(feed_col)
-            st.y = off_track_y
+            st.y = off_track_y + (
+                OFFTRACK_TERMINUS_NUB_CLEARANCE if st.is_captioned_terminus else 0.0
+            )
             st.track = 0.0
             st.rail_used_ys = []
             st.rail_top_y = None

@@ -1,0 +1,20 @@
+%%metro title: Cross-column perpendicular drop
+%%metro line: reads | Reads | #1f77b4
+
+graph LR
+    subgraph align [Alignment]
+        %%metro exit: top | reads
+        load[Load]
+        trim[Trim]
+        bwa[BWA-MEM]
+        load -->|reads| trim
+        trim -->|reads| bwa
+    end
+    subgraph qc [QC report]
+        %%metro direction: TB
+        %%metro entry: top | reads
+        collect[Collect]
+        multiqc[MultiQC]
+        collect -->|reads| multiqc
+    end
+    bwa -->|reads| collect

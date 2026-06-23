@@ -76,6 +76,8 @@ def test_cli_rejects_backward_feed(
     args = [command, str(path)]
     if command == "render":
         args += ["-o", str(tmp_path / "out.svg")]
+    elif command == "validate":
+        args += ["--with-layout"]
 
     result = CliRunner().invoke(cli, args)
 

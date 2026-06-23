@@ -7,6 +7,7 @@ assignments in compute_station_offsets().
 
 from __future__ import annotations
 
+from nf_metro.layout.routing.common import tb_right_entry_sections
 from nf_metro.parser.model import MetroGraph, Port, PortSide, Section
 
 
@@ -55,6 +56,7 @@ def detect_reversed_sections(graph: MetroGraph) -> set[str]:
     ordering stays consistent along the return row.
     """
     tb_sections = {sid for sid, s in graph.sections.items() if s.direction == "TB"}
+    tb_right_entry = tb_right_entry_sections(graph)
     reversed_secs: set[str] = set()
     junction_ids = graph.junction_ids
 
@@ -73,6 +75,7 @@ def detect_reversed_sections(graph: MetroGraph) -> set[str]:
         graph,
         reversed_secs,
         tb_sections,
+        tb_right_entry,
         junction_ids,
         sec_successors,
         horizontal_succ_pairs,
@@ -196,22 +199,39 @@ def _propagate_reversal_along_rows(
 
 
 def _is_tb_lr_exit_nonreversed(
-    port_obj: Port | None, tb_sections: set[str], reversed_secs: set[str]
+    port_obj: Port | None,
+    tb_sections: set[str],
+    tb_right_entry: set[str],
+    reversed_secs: set[str],
 ) -> bool:
-    """Check if port is an LR exit of a non-reversed TB section."""
-    return (
-        port_obj is not None
-        and not port_obj.is_entry
-        and port_obj.side in (PortSide.LEFT, PortSide.RIGHT)
-        and port_obj.section_id in tb_sections
-        and port_obj.section_id not in reversed_secs
-    )
+    """Check if a non-reversed TB LR exit reverses the bundle into its consumer.
+
+    The exit-port order matches the column (raw priority for a RIGHT-entry
+    section, its reverse otherwise) for a LEFT exit and reverses it for a RIGHT
+    exit.  The downstream section must use reversed Y only when the exit-port
+    ends up in reverse-of-priority order, i.e. when the exit side and the
+    entry side agree (RIGHT exit + RIGHT entry, or LEFT exit + non-right entry);
+    when they differ the corner lands the bundle back in priority order and the
+    consumer stays non-reversed.
+    """
+    if (
+        port_obj is None
+        or port_obj.is_entry
+        or port_obj.side not in (PortSide.LEFT, PortSide.RIGHT)
+        or port_obj.section_id in reversed_secs
+        or port_obj.section_id not in tb_sections
+    ):
+        return False
+    right_exit = port_obj.side == PortSide.RIGHT
+    right_entry = port_obj.section_id in tb_right_entry
+    return right_exit == right_entry
 
 
 def _section_fed_by_tb_lr_exit(
     graph: MetroGraph,
     section: Section,
     tb_sections: set[str],
+    tb_right_entry: set[str],
     junction_ids: set[str],
     reversed_secs: set[str],
 ) -> bool:
@@ -231,11 +251,15 @@ def _section_fed_by_tb_lr_exit(
                     if not s2 or not s2.is_port:
                         continue
                     s2_port = graph.ports.get(e2.source)
-                    if _is_tb_lr_exit_nonreversed(s2_port, tb_sections, reversed_secs):
+                    if _is_tb_lr_exit_nonreversed(
+                        s2_port, tb_sections, tb_right_entry, reversed_secs
+                    ):
                         return True
             elif src.is_port:
                 src_port = graph.ports.get(edge.source)
-                if _is_tb_lr_exit_nonreversed(src_port, tb_sections, reversed_secs):
+                if _is_tb_lr_exit_nonreversed(
+                    src_port, tb_sections, tb_right_entry, reversed_secs
+                ):
                     return True
     return False
 
@@ -244,17 +268,20 @@ def _detect_tb_lr_exit_fed(
     graph: MetroGraph,
     reversed_secs: set[str],
     tb_sections: set[str],
+    tb_right_entry: set[str],
     junction_ids: set[str],
     sec_successors: dict[str, set[str]],
     horizontal_succ_pairs: set[tuple[str, str]],
 ) -> None:
     """Phase 1b + Phase 2: mark sections fed by TB LEFT/RIGHT exits, iteratively.
 
-    The concentric corner reverses the bundle ordering ONLY when the TB
-    section uses non-reversed internal offsets.  If the TB section is itself
-    already reversed (e.g. via propagation from an earlier TB exit), its exit
-    L-shape un-reverses back to standard, so the downstream section should
-    NOT be marked reversed.
+    The concentric corner reverses the bundle ordering ONLY when the feeding TB
+    section is RIGHT-entry (its column runs in raw priority order) and is not
+    itself already reversed.  A non-right-entry TB section runs its column
+    reversed, so the exit corner flips it back to standard and the downstream
+    section stays non-reversed; if the TB section is itself already reversed
+    (e.g. via propagation from an earlier TB exit), its exit L-shape likewise
+    un-reverses, so the downstream section should NOT be marked reversed.
 
     Process one TB exit at a time: add the downstream section, propagate along
     rows (which may mark the next TB section as reversed), then re-scan.  This
@@ -268,7 +295,7 @@ def _detect_tb_lr_exit_fed(
             if sec_id in reversed_secs:
                 continue
             if _section_fed_by_tb_lr_exit(
-                graph, section, tb_sections, junction_ids, reversed_secs
+                graph, section, tb_sections, tb_right_entry, junction_ids, reversed_secs
             ):
                 reversed_secs.add(sec_id)
                 _propagate_reversal_along_rows(

@@ -113,6 +113,42 @@ so that existing `nf_metro.render.manifest` import paths keep working.
 `manifest_metadata_svg(graph)` returns the raw SVG `<metadata>` XML string
 for cases where the caller assembles the SVG element manually.
 
+## Render-geometry validation (`validate.py`)
+
+The layout guards and routing invariants validate geometry *before* the
+render-time regimes run — the per-line offsets `apply_route_offsets` applies,
+the multi-line label Y-shifts, and the wrapped-label lift. The picture the
+user sees only exists in the emitted SVG, so a class of defect (a line drawn
+through a label only after the offsets shift it) is invisible to them.
+
+`validate_render(svg)` closes that gap from the other side. It reads the
+finished artifact back into geometry — node markers from the embedded
+manifest, route polylines from the drawn `<path data-line-id>` ink (splitting
+at each `M` so a bridge-hop gap is a real break, and collapsing each smoothing
+`Q` to its corner), and label ink boxes from the drawn `<text>` ink — then
+runs render-geometry checks on what was drawn. Three checks run:
+
+- **label-strike** reuses the authoritative `segment_strikes_label` predicate
+  at the label's drawn font scale, so a finding means the rendered image is
+  wrong, not that a re-derivation diverged.
+- **marker-cross** flags a route segment through a non-consumer station's
+  marker (a line the station carries, via the manifest `groups`, is exempt).
+  Rail-interchange stations are exempt too — a line threading an interchange
+  knob is the intended rail idiom — and their ids are read back from the drawn
+  `...-rail-...` markers, since the manifest carries no rail flag.
+- **offset-collapse** flags two distinct lines drawn flush where the offset
+  regime assigned them a full `OFFSET_STEP` apart. Two lines on the same
+  assigned slot draw flush by design (a shared-trunk bundle), so the check
+  compares the drawn gap against the gap the regime *assigned*, not a constant.
+
+label-strike and marker-cross are pure artifact oracles (the SVG string is
+enough), so they run on a produced file in CI, via `validate-svg --geometry`,
+and behind `render --validate`. offset-collapse needs the engine's assigned
+offsets to tell an intended same-slot bundle from a real merge, so
+`validate_render(svg, *, graph=...)` runs it only when the laid-out graph is
+supplied — the `render --validate` path and the CI corpus test, not the
+standalone SVG path.
+
 ## Animation (`animate.py`)
 
 `render_animation(d, graph, routes, station_offsets, theme)` appends
@@ -146,6 +182,7 @@ selectable via `%%metro style: <key>` or `--style`.
 | `bridges.py` | `compute_bridges` — detects genuine non-merging crossings and returns `BridgeBreak` gap spans; drawing is in `svg.py` |
 | `html.py` | `render_html` — standalone HTML page and inline embed snippet around the SVG |
 | `manifest.py` | nf-metro adapter for the embedded-manifest standard; `build_manifest`, `manifest_metadata_svg` |
+| `validate.py` | `validate_render` — render-geometry guards that read the drawn SVG (markers, route ink, label ink) as their own oracle |
 | `animate.py` | `render_animation` — animated balls via `<animateMotion>` |
 | `style.py` | `Theme` dataclass |
 | `legend.py` | `render_legend`, `compute_legend_dimensions` |

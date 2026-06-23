@@ -15,12 +15,17 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    OffsetRegime,
+    compute_station_offsets,
+    route_edges,
+)
 from nf_metro.layout.routing.common import Direction, RoutedPath
 from nf_metro.layout.routing.invariants import (
     BundleOrderViolation,
     Side,
     check_bundle_order_preserved,
+    check_tb_exit_corner_preserves_column_order,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge
@@ -116,6 +121,120 @@ def test_cross_column_perp_entry_preserves_bundle_order(stem: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Left-entry wrap: bundle order preserved in both riser directions
+# ---------------------------------------------------------------------------
+
+_LEFT_ENTRY_WRAP = """\
+%%metro title: Left-entry wrap {direction}
+%%metro style: dark
+%%metro line: w1 | W1 | #e63946
+%%metro line: w2 | W2 | #0570b0
+%%metro grid: left_tgt | 0,{tgt_row}
+%%metro grid: right_src | 1,{src_row}
+graph LR
+    subgraph left_tgt [Left Target]
+        %%metro entry: left | w1, w2
+        lt1[Collect]
+        lt2[Output]
+        lt1 -->|w1,w2| lt2
+    end
+    subgraph right_src [Right Source]
+        rs1[Input R]
+        rs2[Hub R]
+        rs1 -->|w1,w2| rs2
+    end
+    rs2 -->|w1,w2| lt1
+"""
+
+
+@pytest.mark.parametrize(
+    ("direction", "tgt_row", "src_row"),
+    [("up", 0, 1), ("down", 1, 0)],
+)
+def test_left_entry_wrap_preserves_bundle_order(
+    direction: str, tgt_row: int, src_row: int
+) -> None:
+    """A multi-line bundle wrapping into a LEFT entry keeps one left/right
+    order around the wrap, whether the riser climbs (source below the
+    target) or descends (source above it).
+
+    Both wrap runs go rightward, so the order is fixed by the port-offset
+    stacking rather than the riser's vertical direction.
+    """
+    text = _LEFT_ENTRY_WRAP.format(
+        direction=direction, tgt_row=tgt_row, src_row=src_row
+    )
+    graph = parse_metro_mermaid(text)
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    violations = check_bundle_order_preserved(routes)
+    assert violations == [], (
+        f"left-entry {direction}-wrap: {len(violations)} bundle-order "
+        f"violation(s); first: {violations[0].message() if violations else ''}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# TB exit-corner column-order preservation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
+)
+def test_no_tb_exit_corner_column_flips_in_gallery(path: Path) -> None:
+    """No shipped fixture turns a TB section's bundle out through a LEFT/RIGHT
+    exit in an order that disagrees with its in-section vertical column.
+
+    A disagreement crosses the two lines at the feeder station marker.  A
+    regression to the exit-corner drop X, the exit-port Y order, or the
+    downstream reversal flag would surface as exactly one fixture failing here.
+    """
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    violations = check_tb_exit_corner_preserves_column_order(graph, routes, offsets)
+    assert violations == [], (
+        f"{path.name}: {len(violations)} TB exit-corner column flip(s); "
+        f"first: {violations[0].message() if violations else ''}"
+    )
+
+
+_TB_EXIT_CORNER_FIXTURES = [
+    EXAMPLES / "topologies" / "junction_entry_reversed_fold.mmd",
+    EXAMPLES / "guide" / "04_directions.mmd",
+]
+
+
+@pytest.mark.parametrize("path", _TB_EXIT_CORNER_FIXTURES, ids=lambda p: p.stem)
+def test_tb_exit_corner_continues_column_and_keeps_bundle_order(path: Path) -> None:
+    """A TB-section bundle exiting LEFT/RIGHT keeps a single order through the
+    reversal corner: it continues the in-section column (no crossing at the
+    feeder station) and stays bundle-order consistent through every turn.
+
+    Both fixtures route a multi-line bundle out of a TB section through a
+    reversal corner into a downstream section, the case where the exit-corner
+    drop X, the exit-port Y order, and the downstream reversal flag must agree.
+    """
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    corner = check_tb_exit_corner_preserves_column_order(graph, routes, offsets)
+    assert corner == [], (
+        f"{path.name}: {len(corner)} TB exit-corner column flip(s); "
+        f"first: {corner[0].message() if corner else ''}"
+    )
+    bundle = check_bundle_order_preserved(routes)
+    assert bundle == [], (
+        f"{path.name}: {len(bundle)} bundle-order violation(s); "
+        f"first: {bundle[0].message() if bundle else ''}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Route-level negative test: a synthetic flipped corner is caught
 # ---------------------------------------------------------------------------
 
@@ -133,7 +252,7 @@ def _synthetic_route(line_id: str, points: list[tuple[float, float]]) -> RoutedP
         line_id=line_id,
         points=points,
         is_inter_section=True,
-        offsets_applied=True,
+        offset_regime=OffsetRegime.BAKED,
     )
 
 

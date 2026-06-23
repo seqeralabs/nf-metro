@@ -1,0 +1,32 @@
+%%metro title: Header Rotated Onto Side
+%%metro style: dark
+%%metro line: a | A | #e63946
+
+%%metro grid: src_sec | 0,0
+%%metro grid: tgt_sec | 0,1
+%%metro grid: snk_sec | 0,2
+
+graph LR
+    subgraph src_sec [Up]
+        %%metro direction: TB
+        %%metro exit: bottom | a
+        s1[One]
+    end
+
+    subgraph tgt_sec [Align]
+        %%metro direction: TB
+        %%metro entry: top | a
+        %%metro exit: bottom | a
+        t1[Two]
+        t2[Three]
+        t1 -->|a| t2
+    end
+
+    subgraph snk_sec [Down]
+        %%metro direction: TB
+        %%metro entry: top | a
+        k1[Four]
+    end
+
+    s1 -->|a| t1
+    t2 -->|a| k1

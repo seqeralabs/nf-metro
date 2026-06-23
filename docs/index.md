@@ -89,6 +89,20 @@ Every layout/render option below also has a `%%metro` directive twin; an explici
 | `--height INTEGER` | auto | Output height in pixels |
 | `--animate / --no-animate` | off | Add animated balls traveling along lines |
 
+#### Embedding options
+
+Flags for producing an SVG to embed in another page or application. The [Embedding guide](embedding.md) explains when to use each.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--responsive / --no-responsive` | off | Emit `viewBox` only (no fixed `width`/`height`) for CSS-scalable embedding |
+| `--embed-font / --no-embed-font` | off | Inline Inter as a base64 `@font-face` so the SVG renders identically anywhere |
+| `--text-to-paths / --no-text-to-paths` | off | Convert text to vector paths (no font dependency; loses selectable text) |
+| `--bare / --no-bare` | off | Omit the title and outer padding so the canvas hugs the content (keeps the watermark) |
+| `--svg-class-prefix TEXT` | none | Prefix every SVG presentation class so multiple maps on one page don't collide |
+| `--no-dark-mode-css` | off | Suppress the `prefers-color-scheme: dark` block when the host manages its own theme |
+| `--no-chrome-css` | off | Bake concrete chrome colors instead of `--nfm-*` `var()` (needed for raster export, e.g. cairosvg) |
+
 #### Interactive HTML output
 
 `--format html` produces a self-contained `.html` file with the SVG inlined plus a small JS/CSS layer (no external dependencies, no network):
@@ -99,13 +113,17 @@ nf-metro render pipeline.mmd --format html -o pipeline.html
 
 The page supports drag-to-pan, scroll-to-zoom, station hover tooltips, and a clickable line legend. Clicking a line isolates it: stations and sections not carrying that line are hidden and the view zooms to the bounding box of what remains. Click again, hit `Esc`, or use the Reset button to restore.
 
-The **Embed&hellip;** button opens a panel with three copyable snippets:
+The **Embed&hellip;** button opens a panel with copyable inline-HTML, iframe, and static-SVG snippets. The [Embedding guide](embedding.md) explains when to reach for each, plus responsive sizing, font portability, host theming, and progress overlays.
 
-- **Inline HTML** - a self-contained `<div>` you paste into any HTML host (MkDocs, Confluence, Notion, blog templates). Keeps full interactivity, no iframe.
-- **iframe** - a one-liner pointing at the hosted `.html` file.
-- **Static SVG** - the raw `<svg>` markup for hosts that strip scripts.
+#### Validating the rendered geometry
 
-GitHub READMEs strip `<script>` tags, so embed there as a static SVG (or link out to a hosted version). Most static-site generators and internal wikis run the inline-HTML snippet as-is.
+Pass `--validate` to check the *drawn* SVG after rendering and fail (non-zero exit) if a route is drawn through a station's label or marker, or two distinct lines collapse into one stroke where they should run parallel. This reads the geometry as it ends up on the page (after the per-line offsets and label shifts the layout applies), catching defects the pre-render checks cannot see:
+
+```bash
+nf-metro render pipeline.mmd -o pipeline.svg --validate
+```
+
+To run the same geometry checks on an already-rendered SVG, use [`nf-metro validate-svg --geometry`](manifest.md#manifest-schema).
 
 ### `nf-metro convert`
 
@@ -141,6 +159,10 @@ nf-metro info INPUT_FILE
 ## Writing metro maps
 
 Read the [Guide](guide.md) to learn how to write `.mmd` files, from minimal examples to multi-section pipelines with custom grid layouts.
+
+## Embedding maps in your own page
+
+Read the [Embedding guide](embedding.md) to put a rendered map into a docs site, dashboard, or app: responsive sizing, font portability, host theming, and driving a progress overlay from a running pipeline.
 
 ## Gallery
 

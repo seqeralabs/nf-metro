@@ -32,6 +32,7 @@ def assign_tracks(
     line_gap: float = LINE_GAP,
     *,
     entry_top: bool = False,
+    continuation_nodes: frozenset[str] = frozenset(),
 ) -> dict[str, float]:
     """Assign each station a track using the track-per-line strategy.
 
@@ -41,6 +42,12 @@ def assign_tracks(
         line_gap: Fixed gap (in track units) between line base tracks.
         entry_top: When True, use asymmetric (downward) fan-out at the
             entry layer so the entry-connected station stays at the top.
+        continuation_nodes: Stations that are the clean sole continuation of
+            a line-shedding predecessor (whose only forward path is this
+            node), which must hold the predecessor's track rather than drop
+            to a line base. Computed with full-graph awareness by the caller,
+            since this graph is a section subgraph blind to a predecessor's
+            section-exit edges.
 
     Returns a dict mapping station_id -> track (float).
     """
@@ -134,6 +141,7 @@ def assign_tracks(
                     layers,
                     diamond_members=diamond_members,
                     layer_occupancy=layer_occupancy,
+                    continuation_nodes=continuation_nodes,
                 )
                 layer_occupancy[layer_idx][nodes[0]] = tracks[nodes[0]]
             else:
@@ -295,6 +303,7 @@ def _place_single_node(
     *,
     diamond_members: set[str] | None = None,
     layer_occupancy: dict[int, dict[str, float]] | None = None,
+    continuation_nodes: frozenset[str] = frozenset(),
 ) -> float:
     """Place a single node, choosing between line base track and predecessor proximity.
 
@@ -317,6 +326,19 @@ def _place_single_node(
         for p in preds:
             pred_lines.update(graph.station_lines(p))
         if len(pred_lines) > len(node_lines):
+            # Linear trunk continuation: this node carries fewer lines because
+            # some of its predecessor's lines ended at the predecessor, not
+            # because it is a branch peeling off a fork.  When the predecessor's
+            # only forward path is this node, there is no sibling branch to fan
+            # toward, so continue the predecessor's track and keep the chain
+            # flat instead of dropping onto a line base track.  Either the
+            # predecessor is itself an in-section merge (#946) or full-graph
+            # analysis flagged it as a clean sole continuation (#977); the
+            # latter is needed because this subgraph cannot see a predecessor's
+            # section-exit edge that would route a line around this node.
+            if len(preds) == 1 and list(G.successors(preds[0])) == [node]:
+                if G.in_degree(preds[0]) > 1 or node in continuation_nodes:
+                    return pred_avg
             # Check if this is a diamond (temporary fork-join)
             node_layer = layers.get(node, 0) if layers else 0
             if diamond_members is not None and node in diamond_members:

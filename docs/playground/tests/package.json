@@ -1,0 +1,13 @@
+{
+  "name": "nf-metro-playground-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "End-to-end browser tests for the nf-metro Pyodide playground.",
+  "scripts": {
+    "test": "playwright test",
+    "install-browsers": "playwright install --with-deps chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

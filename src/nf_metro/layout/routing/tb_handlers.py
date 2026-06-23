@@ -10,14 +10,18 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     MIN_STRAIGHT_EDGE,
 )
+from nf_metro.layout.geometry import (
+    diagonal_centreline,
+    single_corner_centreline,
+)
 from nf_metro.layout.routing.bundle import (
-    build_offset_bundle,
     build_tapered_bundle,
 )
 from nf_metro.layout.routing.centrelines import (
     gather_member_edges,
 )
 from nf_metro.layout.routing.common import (
+    OffsetRegime,
     RoutedPath,
 )
 from nf_metro.layout.routing.context import (
@@ -75,14 +79,15 @@ def _route_tb_internal(
 
     # Different X tracks: route with vertical runs + 45-degree diagonal
     if abs(dx) >= COORD_TOLERANCE:
-        return _route_tb_diagonal(edge, sx, sy, tx, ty, ctx)
+        direction = graph.sections[src_sec].direction
+        return _route_tb_diagonal(edge, sx, sy, tx, ty, ctx, direction)
 
     # Same track: straight vertical drop
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
         points=[(sx, sy), (tx, ty)],
-        offsets_applied=True,
+        offset_regime=OffsetRegime.BAKED,
     )
 
 
@@ -142,8 +147,15 @@ def _route_tb_diagonal(
     tx: float,
     ty: float,
     ctx: _RoutingCtx,
+    direction: str,
 ) -> RoutedPath:
-    """Route TB edges with vertical runs and a 45-degree diagonal transition."""
+    """Route TB edges with vertical runs and a 45-degree diagonal transition.
+
+    The flow-axis sibling of ``_route_diagonal``: the diagonal is placed along
+    the flow axis (Y for TB) by the shared ``_compute_diagonal_placement`` and
+    laid out by :func:`~nf_metro.layout.geometry.diagonal_centreline`, which maps
+    the flow-axis run back to vertical legs for a vertical-flow *direction*.
+    """
     diag_start_y, diag_end_y = _compute_diagonal_placement(
         sy,
         ty,
@@ -157,8 +169,10 @@ def _route_tb_diagonal(
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
-        points=[(sx, sy), (sx, diag_start_y), (tx, diag_end_y), (tx, ty)],
-        offsets_applied=True,
+        points=diagonal_centreline(
+            direction, (sx, sy), (tx, ty), diag_start_y, diag_end_y
+        ),
+        offset_regime=OffsetRegime.BAKED,
     )
 
 
@@ -212,11 +226,11 @@ def _route_tb_lr_exit(
     """Route internal station -> LEFT/RIGHT exit port in a TB section.
 
     The line drops from the station, turns once, and runs out to the port: a
-    vertical leg fanned by the station's X offset (reversed for a LEFT exit, so
-    the outermost line takes the widest arc), a horizontal leg fanned by the
-    port's own Y offset.  The port offset (not the station's reversed offset)
-    pins the horizontal Y so the inside and outside segments share the Y at
-    which the port -> junction route departs.
+    vertical leg fanned by the station's in-section column X offset (via
+    :func:`_tb_x_offset`, so the drop continues the column without crossing
+    lines at the feeder station), a horizontal leg fanned by the port's own Y
+    offset.  The exit-port Y order is the reverse of the column order, so the
+    drop -> turn corner nests concentrically.
     """
     graph = ctx.graph
     tgt_port = graph.ports.get(edge.target)
@@ -235,14 +249,11 @@ def _route_tb_lr_exit(
     assert tgt_port is not None
 
     _members, line_ids, _edge_by_line = gather_member_edges(graph, edge)
-    exit_right = tgt_port.side == PortSide.RIGHT
     td = _sign(tgt.y - src.y)
     hd = _sign(tgt.x - src.x)
-    max_src_off = _max_offset_at(ctx, edge.source)
 
     def vert_x_off(line_id: str) -> float:
-        off = _get_offset(ctx, edge.source, line_id)
-        return off if exit_right else reversed_offset(off, max_src_off)
+        return _tb_x_offset(ctx, edge.source, line_id, src.section_id)
 
     def source_offset(line_id: str) -> float:
         return -td * vert_x_off(line_id)
@@ -253,7 +264,12 @@ def _route_tb_lr_exit(
     return _route_single_corner(
         edge,
         ctx,
-        [(src.x, src.y), (src.x, tgt.y), (tgt.x, tgt.y)],
+        single_corner_centreline(
+            graph.sections[src.section_id].direction,
+            (src.x, src.y),
+            (tgt.x, tgt.y),
+            flow_first=True,
+        ),
         line_ids,
         source_offset,
         target_offset,
@@ -299,7 +315,12 @@ def _route_tb_lr_entry(
     return _route_single_corner(
         edge,
         ctx,
-        [(src.x, src.y), (tgt.x, src.y), (tgt.x, tgt.y)],
+        single_corner_centreline(
+            graph.sections[src.section_id].direction,
+            (src.x, src.y),
+            (tgt.x, tgt.y),
+            flow_first=False,
+        ),
         line_ids,
         source_offset,
         target_offset,
@@ -335,11 +356,9 @@ def _route_perp_entry(
 ) -> RoutedPath | None:
     """Route a TOP/BOTTOM entry port down to its internal target station.
 
-    Three shapes: an aligned straight drop down the trunk X (when the line
-    crosses the boundary with no lateral step), an L-shape (drop then turn into
-    the station) when an inter-section feeder pins the drop channel, and an
-    H-V-H staircase (depart the shared port, jog onto a per-line channel, drop,
-    turn in) when sibling lines must fan off one shared port marker.
+    Two shapes: an aligned straight drop down the trunk X (when the line
+    crosses the boundary with no lateral step), and an L-shape (drop then turn
+    into the station) for every other perpendicular entry.
     """
     graph = ctx.graph
     src_port = graph.ports.get(edge.source)
@@ -360,10 +379,7 @@ def _route_perp_entry(
             edge, src, tgt, ctx, corridor_feeder.side
         )
 
-    src_off = _get_offset(ctx, edge.source, edge.line_id)
     drop_delta = _perp_entry_drop_delta(edge, dx, ctx)
-    drop_x = _perp_drop_x(edge, sx, dx, ctx)
-    pinned_crossing = abs(drop_x - (sx + src_off + drop_delta)) > COORD_TOLERANCE
 
     if abs(dx) < COORD_TOLERANCE and abs(drop_delta) < COORD_TOLERANCE:
         # Aligned perpendicular entry: each line drops straight at its in-section
@@ -374,15 +390,11 @@ def _route_perp_entry(
             edge=edge,
             line_id=edge.line_id,
             points=[(x, sy), (x, tgt.y)],
-            offsets_applied=True,
+            offset_regime=OffsetRegime.BAKED,
         )
 
     _members, line_ids, edge_by_line = gather_member_edges(graph, edge)
-    if pinned_crossing or abs(drop_delta) < COORD_TOLERANCE:
-        return _route_perp_entry_l_shape(
-            edge, src, tgt, ctx, dx, line_ids, edge_by_line
-        )
-    return _route_perp_entry_staircase(edge, src, tgt, ctx, dx, line_ids, edge_by_line)
+    return _route_perp_entry_l_shape(edge, src, tgt, ctx, dx, line_ids, edge_by_line)
 
 
 def _route_perp_entry_l_shape(
@@ -398,6 +410,11 @@ def _route_perp_entry_l_shape(
 
     The centreline references the port X; each line fans by its drop channel on
     the vertical leg and by its target-station Y offset on the turn-in leg.
+
+    The drop is vertical-first because the entry port is TOP/BOTTOM, regardless
+    of the target section's flow axis -- so this is a direct V-H build, not the
+    flow-relative ``single_corner_centreline`` (which would invert the leg order
+    for a horizontal-flow target).
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
@@ -418,54 +435,6 @@ def _route_perp_entry_l_shape(
         source_offset,
         target_offset,
     )
-
-
-def _route_perp_entry_staircase(
-    edge: Edge,
-    src: Station,
-    tgt: Station,
-    ctx: _RoutingCtx,
-    dx: float,
-    line_ids: list[str],
-    edge_by_line: dict[str, Edge],
-) -> RoutedPath | None:
-    """Fan off a shared port marker (H-V-H): jog, drop, turn into the station.
-
-    Lines sharing the port depart it at one X, jog onto their per-line channel,
-    drop, then turn into the station.  The first (port-jog) and second (drop)
-    corners both round per line, so the route is fanned by explicit per-leg
-    offsets through :func:`build_offset_bundle`, anchored on this line's own path
-    (always non-degenerate, since a staggered line's jog is non-zero) with the
-    bundle declared relative to it.
-    """
-    sx, sy = src.x, src.y
-    tx, ty = tgt.x, tgt.y
-    port_x = sx + _get_offset(ctx, edge.source, edge.line_id)
-    self_drop_x = _perp_drop_x(edge, sx, dx, ctx)
-    self_corner_y = ty + _get_offset(ctx, edge.target, edge.line_id)
-    vd = _sign(self_corner_y - sy)
-    hd = _sign(tx - self_drop_x)
-
-    def leg_offsets(line_id: str) -> list[float]:
-        drop_x = _perp_drop_x(edge_by_line[line_id], sx, dx, ctx)
-        corner_y = ty + _get_offset(ctx, edge.target, line_id)
-        return [0.0, vd * (self_drop_x - drop_x), hd * (corner_y - self_corner_y)]
-
-    centerline = [
-        (port_x, sy),
-        (self_drop_x, sy),
-        (self_drop_x, self_corner_y),
-        (tx, self_corner_y),
-    ]
-    routes = build_offset_bundle(
-        [(edge, edge.line_id, leg_offsets(edge.line_id))],
-        centerline,
-        ctx.curve_radius,
-        bundle_offsets=[leg_offsets(line_id) for line_id in line_ids],
-        is_inter_section=False,
-        normalize_exempt=False,
-    )
-    return next((r for r in routes if r.line_id == edge.line_id), None)
 
 
 def _perp_corridor_feeder(

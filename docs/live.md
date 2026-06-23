@@ -1,9 +1,9 @@
 # Live progress
 
-!!! warning "Experimental"
-    Live progress is experimental: the `%%metro process:` directive, the
-    `nf-metro serve` / `nf-metro check-mapping` commands, and the event/overlay
-    formats may change without notice.
+!!! note "Stable since 1.0"
+    The `%%metro process:` directive, `nf-metro serve` / `nf-metro check-mapping`
+    commands, and the event/overlay formats are stable as of 1.0 and covered by
+    semantic versioning.
 
 nf-metro can light up a metro map in real time as a Nextflow pipeline runs.
 Stock Nextflow `-with-weblog` posts task events to `nf-metro serve`, which draws
@@ -75,6 +75,9 @@ the same standard any non-metro tool can emit. Set `%%metro manifest: false`
 (or `--no-manifest`) to emit the drawn map only, with no manifest, no
 `data-node-*` attributes, and no station-group wrapper.
 
+`serve` is one ready-made consumer of that manifest. To drive the overlay from
+your **own** application instead, see the [Embedding guide](embedding.md).
+
 ## 2. Serve the map
 
 `serve` hosts **one** map at a stable URL. Each run's `started` event resets it,
@@ -101,8 +104,32 @@ blank map.
 |--------|---------|
 | `--port` | Port to listen on (default 8080). |
 | `--host` | Interface to bind. Default `127.0.0.1` (local only); use `0.0.0.0` to accept connections from other hosts. |
-| `--theme` | Theme name (`nfcore`, `light`). |
+| `--theme` | Theme name (`nfcore`, `light`, `seqera`). The page chrome (background, text) follows the theme, so a light theme gives a light page. |
+| `--overlay` | Status-overlay style: `ring` (default), `pulse`, `dot`, or `led`. Sets the style shown until a viewer picks another. |
 | `--token` | If set, `/events` POSTs must supply `?token=...` or an `X-Metro-Token` header. |
+
+### Overlay styles
+
+The status overlay - how a station shows pending / queued / running / done /
+failed - has a few looks, picked in the page's **Style** menu (the choice is
+remembered per browser) or set as the page default with `--overlay`. Every mark
+takes the station's own marker shape: a circle for a single-line stop, a capsule
+spanning the bundle for an interchange.
+
+- **`ring`** (default) - a bold outline hugging each station, leaving the marker
+  visible underneath; the dash marches around it while running. Clean and
+  professional; the recommended look for a light page or embedding in Seqera
+  Platform.
+- **`pulse`** - a crisp status mark filling the station with a radar ripple
+  while running.
+- **`dot`** - a flat status mark that gently breathes while running, no glow.
+  The most minimal option.
+- **`led`** - glowing neon marks that pulse while running; reads best on the
+  dark `nfcore` theme.
+
+All styles are driven entirely client-side from the same status data, so
+switching style never re-renders the map. Animations respect
+`prefers-reduced-motion`.
 
 ### Endpoints
 

@@ -38,6 +38,7 @@ from nf_metro.render.constants import (
     TEXT_VCENTER_DY,
     line_style_kwargs,
 )
+from nf_metro.render.ns import ns as _ns
 from nf_metro.render.style import Theme
 
 
@@ -309,6 +310,7 @@ def render_legend(
             rx=LEGEND_BORDER_RADIUS,
             ry=LEGEND_BORDER_RADIUS,
             fill=theme.legend_background,
+            class_=_ns("nf-metro-legend-bg"),
         )
     )
 
@@ -354,6 +356,7 @@ def render_legend(
                 fill=theme.legend_text_color,
                 font_family=theme.label_font_family,
                 dy=TEXT_VCENTER_DY,
+                class_=_ns("nf-metro-legend-text"),
             )
         )
 
@@ -425,5 +428,6 @@ def _render_marker_key(
                 fill=theme.legend_text_color,
                 font_family=theme.label_font_family,
                 dy=TEXT_VCENTER_DY,
+                class_=_ns("nf-metro-legend-text"),
             )
         )

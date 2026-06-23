@@ -39,6 +39,13 @@ CLEAN_FIXTURES = [
     "right_entry_gap_above_empty_row",
     "right_entry_wrap_no_fan",
 ]
+# RIGHT entry fed from a higher row whose source sits past the target's right
+# edge: a straight drop down the outward side reaches the entry Y unobstructed,
+# so the route must turn in directly rather than loop below the box (#889).
+DROP_IN_FIXTURES = [
+    "right_entry_from_above",
+    "right_entry_from_above_far",
+]
 
 TOL = 2.0
 
@@ -128,6 +135,32 @@ def test_routes_do_not_cross_unrelated_section_interiors(stem):
                     f"{stem}: {rp.edge.source}->{rp.edge.target} crosses "
                     f"unrelated section {sid!r} interior"
                 )
+
+
+@pytest.mark.parametrize("stem", DROP_IN_FIXTURES)
+def test_right_entry_from_above_drops_in_without_diving_below(stem):
+    """A clear outward-side drop-in must not loop below the target box (#889)."""
+    graph, offsets, routes = _routed(stem)
+    checked = 0
+    for rp in routes:
+        pts = apply_route_offsets(rp, offsets)
+        if len(pts) < 2:
+            continue
+        port = _entry_port_at(graph, pts[-1][0], pts[-1][1])
+        if port is None or port.side is not PortSide.RIGHT:
+            continue
+        section = graph.sections.get(port.section_id) if port.section_id else None
+        if section is None or section.bbox_h <= 0:
+            continue
+        box_bottom = section.bbox_y + section.bbox_h
+        max_y = max(y for _, y in pts)
+        assert max_y <= box_bottom + TOL, (
+            f"{stem}: {rp.edge.source}->{rp.edge.target} dives to y={max_y:.1f}, "
+            f"below the target box bottom {box_bottom:.1f}; a direct drop-in down "
+            f"the outward side reaches the entry Y without looping under the box"
+        )
+        checked += 1
+    assert checked, f"{stem}: no RIGHT entry route found to check"
 
 
 @pytest.mark.parametrize("stem", BOUNDARY_FIXTURES)

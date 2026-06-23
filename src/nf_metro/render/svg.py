@@ -4,11 +4,12 @@ from __future__ import annotations
 
 __all__ = ["apply_route_offsets", "render_svg"]
 
-import contextvars
 import html
+import math
 import re
 import textwrap
 import warnings
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
@@ -17,8 +18,8 @@ import drawsvg as draw
 
 from nf_metro.layout.constants import (
     LABEL_LINE_HEIGHT,
+    OFFTRACK_TERMINUS_NUB_CLEARANCE,
     SAME_COORD_TOLERANCE,
-    Y_SPACING,
 )
 from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.labels import (
@@ -27,12 +28,19 @@ from nf_metro.layout.labels import (
     font_scale_context,
     place_labels,
 )
+from nf_metro.layout.phases.guards import assert_render_layout_invariants
 from nf_metro.layout.routing import (
     RoutedPath,
+    apply_route_offsets,
     compute_station_offsets,
     route_edges_centred,
 )
-from nf_metro.layout.routing.corners import curve_tangents, resolve_curve_radii
+from nf_metro.layout.routing.common import tb_right_entry_sections
+from nf_metro.layout.routing.corners import (
+    curve_tangents,
+    resolve_curve_radii,
+    reversed_offset,
+)
 from nf_metro.layout.routing.invariants import assert_render_curve_invariants
 from nf_metro.manifest import node_data_attrs
 from nf_metro.parser.model import (
@@ -45,7 +53,6 @@ from nf_metro.parser.model import (
     Interchange,
     MarkerStyle,
     MetroGraph,
-    PortSide,
     Section,
     Station,
 )
@@ -89,16 +96,15 @@ from nf_metro.render.constants import (
     RAIL_KNOB_RADIUS_RATIO,
     RAIL_LINK_HALF_WIDTH_RATIO,
     SECTION_BOX_RADIUS,
-    SECTION_LABEL_REGION_RATIO,
-    SECTION_LABEL_TEXT_OFFSET,
+    SECTION_HEADER_ROUTE_PAD,
     SECTION_NUM_CIRCLE_R_LARGE,
     SECTION_NUM_FONT_SIZE,
-    SECTION_NUM_Y_OFFSET,
     SECTION_STROKE_WIDTH,
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
     TITLE_Y_OFFSET,
+    WATERMARK_BARE_X_INSET,
     WATERMARK_FILL,
     WATERMARK_FONT_SIZE,
     WATERMARK_PADDING_RATIO,
@@ -118,51 +124,15 @@ from nf_metro.render.legend import (
     render_legend,
 )
 from nf_metro.render.manifest import build_manifest, manifest_metadata_svg
-from nf_metro.render.style import Theme
-
-# Per-render SVG class namespace.  Set by render_svg() for the duration of one
-# render call so all helper functions pick it up without extra parameters.
-_render_class_prefix: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "_render_class_prefix", default=""
+from nf_metro.render.ns import class_prefix_context
+from nf_metro.render.ns import ns as _ns
+from nf_metro.render.section_header import (
+    SectionHeaderClashError,
+    SectionHeaderPlacement,
+    check_section_headers_clear_routes,
+    resolve_all_section_headers,
 )
-
-
-def _ns(cls: str) -> str:
-    """Apply the active render namespace prefix to an SVG class name."""
-    p = _render_class_prefix.get()
-    return f"{p}-{cls}" if p else cls
-
-
-def apply_route_offsets(
-    route: RoutedPath,
-    station_offsets: dict[tuple[str, str], float],
-) -> list[tuple[float, float]]:
-    """Apply per-line Y offsets to a route's waypoints.
-
-    If the route already has offsets applied (e.g. TB section routes),
-    returns a copy of its points unchanged. Otherwise, shifts source-side
-    waypoints by the source offset and target-side waypoints by the target
-    offset, with intermediate points assigned to whichever end is closer.
-    """
-    if route.offsets_applied:
-        return list(route.points)
-
-    src_off = station_offsets.get((route.edge.source, route.line_id), 0.0)
-    tgt_off = station_offsets.get((route.edge.target, route.line_id), 0.0)
-
-    orig_sy = route.points[0][1]
-    orig_ty = route.points[-1][1]
-    pts: list[tuple[float, float]] = []
-    for i, (x, y) in enumerate(route.points):
-        if i == 0:
-            pts.append((x, y + src_off))
-        elif i == len(route.points) - 1:
-            pts.append((x, y + tgt_off))
-        elif abs(y - orig_sy) <= abs(y - orig_ty):
-            pts.append((x, y + src_off))
-        else:
-            pts.append((x, y + tgt_off))
-    return pts
+from nf_metro.render.style import Theme
 
 
 def _compute_canvas_bounds(
@@ -409,6 +379,8 @@ def render_svg(
     font_portability: Literal["embed", "paths"] | None = None,
     svg_class_prefix: str = "",
     inject_dark_mode_css: bool = True,
+    chrome_css: bool = True,
+    bare: bool = False,
 ) -> str:
     """Render a metro map graph to an SVG string.
 
@@ -439,6 +411,19 @@ def render_svg(
     ``inject_dark_mode_css``: when False, the ``prefers-color-scheme: dark``
     ``<style>`` block is omitted.  Useful when a host page manages its own
     theme and the injected media query would fight it.
+
+    ``chrome_css``: when False, the chrome ``--nfm-*`` CSS custom-property
+    ``<style>`` block is omitted.  Chrome elements carry their concrete theme
+    colors as presentation attributes regardless, so both modes render the
+    same map; what False drops is a host page's ability to recolor it live
+    with ``var()``.  Set this False for raster export (e.g. cairosvg, which
+    cannot parse ``var()``) or any consumer without CSS custom-property
+    support.
+
+    ``bare``: when True, omits the title and outer padding so the canvas
+    hugs the diagram content.  The attribution watermark is kept.  Use for
+    embedding the SVG inside a host page that supplies its own frame and
+    heading.
     """
     if not graph.stations:
         return '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
@@ -451,23 +436,21 @@ def render_svg(
         animate = graph.animate
 
     scaled_theme = _scale_theme_fonts(theme, graph.font_scale)
-    token = _render_class_prefix.set(svg_class_prefix)
-    try:
-        with font_scale_context(graph.font_scale):
-            svg = _render_svg_scaled(
-                graph,
-                scaled_theme,
-                width=width,
-                height=height,
-                padding=padding,
-                animate=animate,
-                debug=debug,
-                legend_position=legend_position,
-                responsive=responsive,
-                inject_dark_mode_css=inject_dark_mode_css,
-            )
-    finally:
-        _render_class_prefix.reset(token)
+    with class_prefix_context(svg_class_prefix), font_scale_context(graph.font_scale):
+        svg = _render_svg_scaled(
+            graph,
+            scaled_theme,
+            width=width,
+            height=height,
+            padding=padding,
+            animate=animate,
+            debug=debug,
+            legend_position=legend_position,
+            responsive=responsive,
+            inject_dark_mode_css=inject_dark_mode_css,
+            chrome_css=chrome_css,
+            bare=bare,
+        )
 
     if font_portability == "paths":
         from nf_metro.render.font_embed import text_to_paths as _text_to_paths
@@ -513,6 +496,8 @@ def _render_svg_scaled(
     legend_position: str | None,
     responsive: bool = False,
     inject_dark_mode_css: bool = True,
+    chrome_css: bool = True,
+    bare: bool = False,
 ) -> str:
     """Render body, run with ``theme`` fonts and label metrics already scaled."""
     effective_legend_position = (
@@ -522,6 +507,8 @@ def _render_svg_scaled(
     station_offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=station_offsets)
     assert_render_curve_invariants(graph, routes, station_offsets)
+    assert_render_layout_invariants(graph, routes, station_offsets, strict=graph.strict)
+    header_polylines = [apply_route_offsets(route, station_offsets) for route in routes]
 
     # Compute labels early so section bbox expansions are applied
     # before section boxes are drawn and canvas bounds are computed.
@@ -552,6 +539,13 @@ def _render_svg_scaled(
     # feed the section render and the canvas-bounds computation.
     if group_bands:
         _reserve_section_space_for_groups(graph, group_bands)
+
+    # Resolve headers against the final section bboxes (label and group
+    # reservations above can grow a box, moving where its header sits).
+    header_placements = resolve_all_section_headers(
+        graph, theme.section_label_font_size, header_polylines
+    )
+    _guard_section_headers_clear_routes(header_placements, header_polylines)
 
     max_x, max_y = _compute_canvas_bounds(graph, routes, debug)
 
@@ -598,11 +592,21 @@ def _render_svg_scaled(
         logo_y = LOGO_Y_STANDALONE
         max_x = max(max_x, logo_x + logo_w)
 
-    # Right margin: use one padding width (content origin already provides
-    # the left margin).  Bottom margin: just enough room for the watermark
-    # text below the last content element.
-    auto_width = max_x + padding
+    # Right margin: one padding width in full mode; none in bare mode so the
+    # canvas hugs the content.  Bottom margin is always just enough room for
+    # the watermark text.
+    auto_width = max_x + (0.0 if bare else padding)
     auto_height = max_y + WATERMARK_Y_INSET * 2 + WATERMARK_FONT_SIZE
+
+    # A relocated header may sit past the box; let it use the margins already
+    # added above and only stretch the canvas for the part that overflows them,
+    # so a below/side header adds no needless blank space.
+    for placement in header_placements.values():
+        if placement.mode == "above":
+            continue
+        _, _, hx1, hy1 = placement.keepout
+        auto_width = max(auto_width, hx1 + SECTION_HEADER_ROUTE_PAD)
+        auto_height = max(auto_height, hy1 + SECTION_HEADER_ROUTE_PAD)
 
     svg_width = width or int(auto_width)
     svg_height = height or int(auto_height)
@@ -623,9 +627,15 @@ def _render_svg_scaled(
         )
         d.append(draw.Raw(manifest_metadata_svg(manifest)))
 
+    # Chrome CSS: custom properties so hosts can recolor without re-rendering.
+    # Injected before the background rect so browser parsing order is correct.
+    if chrome_css:
+        _inject_chrome_css(d, theme)
+
     # Dark-mode CSS for transparent-background themes so that elements
     # rendered directly on the canvas (section labels, number badges,
     # title) remain readable when the browser provides a dark background.
+    # Must follow the chrome CSS so the media-query rule wins by source order.
     if inject_dark_mode_css and (
         not theme.background_color or theme.background_color == "none"
     ):
@@ -634,32 +644,44 @@ def _render_svg_scaled(
     # Background (skip for transparent themes)
     if theme.background_color and theme.background_color != "none":
         d.append(
-            draw.Rectangle(0, 0, svg_width, svg_height, fill=theme.background_color)
-        )
-
-    # Title / Logo (standalone logo only when not embedded in legend)
-    if show_logo and not logo_in_legend:
-        _render_logo(d, graph.logo_path, logo_x, logo_y, logo_w, logo_h)
-    elif graph.title and not logo_in_legend:
-        d.append(
-            draw.Text(
-                graph.title,
-                theme.title_font_size,
-                padding,
-                TITLE_Y_OFFSET,
-                fill=theme.title_color,
-                font_family=theme.label_font_family,
-                font_weight="bold",
-                **{"class": _ns("nf-metro-title")},
+            draw.Rectangle(
+                0,
+                0,
+                svg_width,
+                svg_height,
+                fill=theme.background_color,
+                class_=_ns("nf-metro-bg"),
             )
         )
 
+    # Title / Logo (omitted in bare mode; standalone logo only when not in legend)
+    if not bare:
+        if show_logo and not logo_in_legend:
+            _render_logo(d, graph.logo_path, logo_x, logo_y, logo_w, logo_h)
+        elif graph.title and not logo_in_legend:
+            d.append(
+                draw.Text(
+                    graph.title,
+                    theme.title_font_size,
+                    padding,
+                    TITLE_Y_OFFSET,
+                    fill=theme.title_color,
+                    font_family=theme.label_font_family,
+                    font_weight="bold",
+                    **{"class": _ns("nf-metro-title")},
+                )
+            )
+
     # Sections
     if graph.sections:
-        _render_first_class_sections(d, graph, theme)
+        _render_first_class_sections(d, graph, theme, header_placements)
 
     # Draw edges (lines) behind stations
     _render_edges(d, graph, routes, station_offsets, theme)
+
+    # Directional chevrons ride on top of the lines but behind stations.
+    if graph.directional:
+        _render_directional_markers(d, graph, routes, station_offsets, theme)
 
     # Animation (after edges, before stations so balls travel behind station markers)
     if animate:
@@ -694,11 +716,14 @@ def _render_svg_scaled(
         )
 
     # Attribution watermark
+    watermark_x_inset = (
+        WATERMARK_BARE_X_INSET if bare else padding * WATERMARK_PADDING_RATIO
+    )
     d.append(
         draw.Text(
             f"created with nf-metro {_version_string()}",
             WATERMARK_FONT_SIZE,
-            svg_width - padding * WATERMARK_PADDING_RATIO,
+            svg_width - watermark_x_inset,
             svg_height - WATERMARK_Y_INSET,
             fill=WATERMARK_FILL,
             font_family=theme.label_font_family,
@@ -711,7 +736,7 @@ def _render_svg_scaled(
             draw.Text(
                 graph.caption,
                 CAPTION_FONT_SIZE,
-                padding * WATERMARK_PADDING_RATIO,
+                watermark_x_inset,
                 svg_height - WATERMARK_Y_INSET,
                 fill=CAPTION_FILL,
                 font_family=theme.label_font_family,
@@ -841,6 +866,54 @@ def _render_logo(
     )
 
 
+def _inject_chrome_css(d: draw.Drawing, theme: Theme) -> None:
+    """Inject CSS custom properties for chrome colors.
+
+    Defines ``--nfm-*`` properties on the chrome element classes so a host
+    can recolor the map's non-semantic surfaces (background, labels, section
+    boxes, legend) by setting those properties on a wrapping element.  The
+    fallback for each property is the theme's baked value.  Line/route colors
+    carry semantic meaning and remain as baked presentation attributes.
+    """
+    tc = theme.section_label_color
+
+    def _rule(cls: str, props: str) -> str:
+        return f".{_ns(cls)} {{ {props}; }}"
+
+    lines: list[str] = []
+    if theme.background_color and theme.background_color != "none":
+        lines.append(
+            _rule("nf-metro-bg", f"fill: var(--nfm-bg, {theme.background_color})")
+        )
+    lines += [
+        _rule("nf-metro-title", f"fill: var(--nfm-title-color, {theme.title_color})"),
+        _rule(
+            "nf-metro-station-label",
+            f"fill: var(--nfm-label-color, {theme.label_color})",
+        ),
+        _rule(
+            "nf-metro-section-box",
+            f"fill: var(--nfm-section-fill, {theme.section_fill});"
+            f" stroke: var(--nfm-section-stroke, {theme.section_stroke})",
+        ),
+        _rule("nf-metro-section-label", f"fill: var(--nfm-section-label-color, {tc})"),
+        _rule("nf-metro-group-label", f"fill: var(--nfm-section-label-color, {tc})"),
+        _rule(
+            "nf-metro-group-underline",
+            f"stroke: var(--nfm-section-label-color, {tc})",
+        ),
+        _rule(
+            "nf-metro-legend-bg",
+            f"fill: var(--nfm-legend-bg, {theme.legend_background})",
+        ),
+        _rule(
+            "nf-metro-legend-text",
+            f"fill: var(--nfm-legend-text-color, {theme.legend_text_color})",
+        ),
+    ]
+    d.append(draw.Raw(f"<style>{chr(10).join(lines)}</style>"))
+
+
 def _inject_dark_mode_style(d: draw.Drawing) -> None:
     """Inject CSS for dark-mode browsers viewing a transparent-background SVG.
 
@@ -863,10 +936,21 @@ def _inject_dark_mode_style(d: draw.Drawing) -> None:
     d.append(draw.Raw(f"<style>{css}</style>"))
 
 
+def _guard_section_headers_clear_routes(
+    placements: dict[str, SectionHeaderPlacement],
+    polylines: list[list[tuple[float, float]]],
+) -> None:
+    """Fail loudly if any section header was placed over a routed line."""
+    clashes = check_section_headers_clear_routes(placements, polylines)
+    if clashes:
+        raise SectionHeaderClashError("; ".join(c.message() for c in clashes))
+
+
 def _render_first_class_sections(
     d: draw.Drawing,
     graph: MetroGraph,
     theme: Theme,
+    header_placements: dict[str, SectionHeaderPlacement],
 ) -> None:
     """Render first-class sections using pre-computed bounding boxes."""
     for section in graph.sections.values():
@@ -899,39 +983,15 @@ def _render_first_class_sections(
             )
         )
 
-        # Determine whether the label should go below the section box.
-        # When a section has a TOP entry port near the left edge (where the
-        # label sits) but no BOTTOM exit, placing the label above would
-        # overlap with incoming lines.  Only flip when the nearest top port
-        # is close enough to actually conflict with the label.
-        label_region_max_x = (
-            section.bbox_x + section.bbox_w * SECTION_LABEL_REGION_RATIO
-        )
-        has_nearby_top_entry = any(
-            graph.ports.get(pid)
-            and graph.ports[pid].side == PortSide.TOP
-            and graph.ports[pid].x <= label_region_max_x
-            for pid in section.entry_ports
-        )
-        has_bottom_exit = any(
-            graph.ports.get(pid) and graph.ports[pid].side == PortSide.BOTTOM
-            for pid in section.exit_ports
-        )
-        label_below = has_nearby_top_entry and not has_bottom_exit
-
-        # Numbered circle, left-aligned
-        circle_r = SECTION_NUM_CIRCLE_R_LARGE
-        cx = section.bbox_x + circle_r
-        if label_below:
-            cy = section.bbox_y + section.bbox_h + circle_r + SECTION_NUM_Y_OFFSET
-        else:
-            cy = section.bbox_y - circle_r - SECTION_NUM_Y_OFFSET
+        # Place the header (number badge + title) clear of any route that would
+        # otherwise cross it; the resolver never moves a route to do so.
+        placement = header_placements[section.id]
 
         d.append(
             draw.Circle(
-                cx,
-                cy,
-                circle_r,
+                placement.badge_cx,
+                placement.badge_cy,
+                SECTION_NUM_CIRCLE_R_LARGE,
                 fill=theme.station_stroke,
                 **{
                     "class": _ns("nf-metro-section-num-circle"),
@@ -943,8 +1003,8 @@ def _render_first_class_sections(
             draw.Text(
                 str(section.number),
                 SECTION_NUM_FONT_SIZE,
-                cx,
-                cy,
+                placement.badge_cx,
+                placement.badge_cy,
                 fill=theme.station_fill,
                 font_family=theme.label_font_family,
                 font_weight="bold",
@@ -954,21 +1014,26 @@ def _render_first_class_sections(
             )
         )
 
-        # Section name to the right of the circle
+        label_kwargs: dict[str, object] = {
+            "class": _ns("nf-metro-section-label"),
+            "data-section-id": section.id,
+        }
+        if placement.label_rotation:
+            label_kwargs["transform"] = (
+                f"rotate({placement.label_rotation} "
+                f"{placement.label_x} {placement.label_y})"
+            )
         d.append(
             draw.Text(
                 section.name,
                 theme.section_label_font_size,
-                cx + circle_r + SECTION_LABEL_TEXT_OFFSET,
-                cy,
+                placement.label_x,
+                placement.label_y,
                 fill=theme.section_label_color,
                 font_family=theme.label_font_family,
                 font_weight="bold",
                 dy=TEXT_VCENTER_DY,
-                **{
-                    "class": _ns("nf-metro-section-label"),
-                    "data-section-id": section.id,
-                },
+                **label_kwargs,
             )
         )
 
@@ -1053,6 +1118,121 @@ def _render_edges(
             d.append(path)
 
 
+def _render_directional_markers(
+    d: draw.Drawing,
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    station_offsets: dict[tuple[str, str], float],
+    theme: Theme,
+) -> None:
+    """Draw static chevrons along each route, pointing source to target.
+
+    The flow direction is the order of the routed point sequence, so each
+    chevron simply rides the polyline at the local segment direction. Markers
+    are spaced by arc length and kept sparse and subtle by default, in the
+    spirit of a one-way transit line's direction-of-travel arrows.
+    """
+    size = theme.directional_marker_size
+    spacing = max(theme.directional_marker_spacing, 1.0)
+    opacity = theme.directional_marker_opacity
+    # A route shorter than one chevron carries no useful direction cue.
+    min_length = 2 * size
+    stroke_width = max(theme.line_width * 0.5, 1.0)
+
+    for route in routes:
+        pts = apply_route_offsets(route, station_offsets)
+        if len(pts) < 2:
+            continue
+        line = graph.lines.get(route.line_id)
+        color = theme.directional_marker_color or (
+            line.color if line else FALLBACK_LINE_COLOR
+        )
+        class_name = _ns(f"metro-direction-{route.line_id}")
+        for point, heading in _chevron_samples(pts, spacing, min_length):
+            _draw_chevron(
+                d,
+                point,
+                heading,
+                color,
+                size,
+                stroke_width,
+                opacity,
+                class_name,
+                route.line_id,
+            )
+
+
+def _chevron_samples(
+    pts: list[tuple[float, float]], spacing: float, min_length: float
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    """Sample (point, unit-heading) pairs evenly along a polyline.
+
+    Chevrons are centred on the polyline so a route reads symmetrically. A
+    route between ``min_length`` and ``spacing`` in length carries a single
+    chevron at its midpoint.
+    """
+    segments = [
+        (a, b, length)
+        for a, b in zip(pts, pts[1:])
+        if (length := math.hypot(b[0] - a[0], b[1] - a[1])) > 0
+    ]
+    total = sum(length for _, _, length in segments)
+    if total < min_length:
+        return []
+
+    count = max(1, int(total // spacing))
+    start = (total - (count - 1) * spacing) / 2
+
+    samples: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    targets = [start + i * spacing for i in range(count)]
+    travelled = 0.0
+    ti = 0
+    for (ax, ay), (bx, by), length in segments:
+        ux, uy = (bx - ax) / length, (by - ay) / length
+        while ti < len(targets) and targets[ti] <= travelled + length:
+            offset = targets[ti] - travelled
+            samples.append(((ax + ux * offset, ay + uy * offset), (ux, uy)))
+            ti += 1
+        travelled += length
+    return samples
+
+
+def _draw_chevron(
+    d: draw.Drawing,
+    point: tuple[float, float],
+    heading: tuple[float, float],
+    color: str,
+    size: float,
+    stroke_width: float,
+    opacity: float,
+    class_name: str,
+    line_id: str,
+) -> None:
+    """Draw one open ``>`` chevron centred at *point*, apex along *heading*."""
+    px, py = point
+    ux, uy = heading
+    perp = (-uy, ux)
+    apex = (px + ux * size, py + uy * size)
+    back = (px - ux * size, py - uy * size)
+    wing1 = (back[0] + perp[0] * size, back[1] + perp[1] * size)
+    wing2 = (back[0] - perp[0] * size, back[1] - perp[1] * size)
+
+    path = draw.Path(
+        stroke=color,
+        stroke_width=stroke_width,
+        fill="none",
+        stroke_linecap="round",
+        stroke_linejoin="round",
+        opacity=opacity,
+        class_=class_name,
+        **{"data-line-id": line_id},
+    )
+    path.M(*wing1)
+    path.L(*apex)
+    path.L(*wing2)
+    d.append(path)
+
+
 def _curve_tangents(
     pts: list[tuple[float, float]], resolved: list[float]
 ) -> tuple[
@@ -1126,6 +1306,37 @@ def _render_bridged_edge(
     d.append(path)
 
 
+def _drawn_bundle_span(
+    graph: MetroGraph,
+    station: Station,
+    station_offsets: dict[tuple[str, str], float],
+    tb_right_entry: set[str],
+) -> tuple[float, float]:
+    """Min/max of a station's per-line offsets *as drawn*.
+
+    A TB section draws each line at its offset reversed against the station's
+    bundle max (matching :func:`_tb_x_offset`), except a RIGHT-entry TB section
+    whose stored offsets are already in draw order; every other axis draws the
+    stored offset directly.  Spanning the marker over the drawn offsets keeps it
+    centred on the lines that actually pass through the station -- the exact
+    transpose of the LR case, which never reverses -- so a one-line or
+    off-trunk-subset station does not leave its glyph beside its own track.
+    """
+    raw = [
+        station_offsets.get((station.id, lid), 0.0)
+        for lid in graph.station_lines(station.id)
+    ]
+    if not raw:
+        return 0.0, 0.0
+    sec = graph.sections.get(station.section_id) if station.section_id else None
+    if sec is not None and sec.direction == "TB" and sec.id not in tb_right_entry:
+        bundle_max = max(raw)
+        drawn = [reversed_offset(off, bundle_max) for off in raw]
+    else:
+        drawn = raw
+    return min(drawn), max(drawn)
+
+
 def _pill_box(
     station: Station,
     r: float,
@@ -1152,6 +1363,41 @@ def _pill_box(
         w, h = flow, span + r * 2
         cx, cy = station.x, station.y + mid
     return cx - w / 2, cy - h / 2, w, h
+
+
+def station_marker_box(
+    graph: MetroGraph,
+    theme: Theme,
+    station: Station,
+    station_offsets: dict[tuple[str, str], float] | None,
+) -> tuple[float, float, float, float, float]:
+    """The drawn marker's bounding box as ``(cx, cy, w, h, rx)``.
+
+    Mirrors the bundle-span / orientation logic of :func:`_render_station_into`
+    and defers to :func:`_pill_box` for the box itself, so an overlay can place
+    a shape that matches a station's pill (a circle for one line, a capsule
+    spanning the bundle for several) without re-running the renderer. Glyph
+    stations (rail interchanges, explicit markers) fall back to the same
+    bundle-span box, a reasonable footprint for those too.
+    """
+    r = theme.station_radius
+    is_tb_vert = bool(
+        station.section_id
+        and (sec := graph.sections.get(station.section_id))
+        and sec.direction == "TB"
+    )
+    if station.rail_top_y is not None and station.rail_bottom_y is not None:
+        used = station.rail_used_ys or [station.y]
+        min_off, max_off = min(used) - station.y, max(used) - station.y
+    elif station_offsets and not graph.station_is_rail(station.id):
+        min_off, max_off = _drawn_bundle_span(
+            graph, station, station_offsets, tb_right_entry_sections(graph)
+        )
+    else:
+        min_off = max_off = 0.0
+
+    x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb_vert)
+    return x + w / 2, y + h / 2, w, h, r
 
 
 def _append_terminus_icons(
@@ -1488,15 +1734,20 @@ def _render_stations(
     addressable element; with ``--no-manifest`` the glyphs are drawn directly
     with no wrapper. Skips port stations (is_port=True).
     """
+    tb_right_entry = tb_right_entry_sections(graph)
     for station in graph.stations.values():
         if station.is_port or station.is_hidden:
             continue
         if graph.embed_manifest:
             g = draw.Group(**_station_group_attrs(graph, theme, station))
-            _render_station_into(g, graph, theme, station, station_offsets)
+            _render_station_into(
+                g, graph, theme, station, station_offsets, tb_right_entry
+            )
             d.append(g)
         else:
-            _render_station_into(d, graph, theme, station, station_offsets)
+            _render_station_into(
+                d, graph, theme, station, station_offsets, tb_right_entry
+            )
 
 
 def _render_station_into(
@@ -1505,6 +1756,7 @@ def _render_station_into(
     theme: Theme,
     station: Station,
     station_offsets: dict[tuple[str, str], float] | None,
+    tb_right_entry: set[str],
 ) -> None:
     """Draw one station's glyph and terminus icons into a container.
 
@@ -1532,15 +1784,17 @@ def _render_station_into(
     # like any other render -- the standard unrounded nub (via _pill_box)
     # spanning the bundle, plus the file icon -- rather than a rail-specific
     # glyph.  The only difference is the span comes from the rail bundle
-    # (rail mode does not use station_offsets).  An off-track input drops in
-    # vertically (no horizontal fan), so it gets the icon only.
+    # (rail mode does not use station_offsets).  An off-track terminus parks
+    # off the rails and its lines converge onto a single vertical stub, so its
+    # nub is the bundle-centred square (zero span) seating the buffer stop
+    # where the stub meets the file icon, matching on-rail file termini.
     if graph.station_is_rail(station.id) and station.is_blank_terminus:
         if station.off_track:
-            _append_terminus_icons(d, station, graph, theme, r, 0.0, 0.0)
-            return
-        used = station.rail_used_ys or [station.y]
-        t_min = min(used) - station.y
-        t_max = max(used) - station.y
+            t_min = t_max = 0.0
+        else:
+            used = station.rail_used_ys or [station.y]
+            t_min = min(used) - station.y
+            t_max = max(used) - station.y
         _draw_blank_terminus_nub(
             d, station, r, t_min, t_max, _station_data_attrs(graph, station), theme
         )
@@ -1557,6 +1811,7 @@ def _render_station_into(
         graph.station_is_rail(station.id)
         and station.marker is None
         and not station.is_terminus
+        and not station.off_track
     ):
         _render_rail_pill(d, graph, station, theme, r)
         return
@@ -1578,15 +1833,9 @@ def _render_station_into(
     # marked single-rail station's glyph must seat on the rail rather than
     # ride the bundle's mid-offset.
     if station_offsets and not graph.station_is_rail(station.id):
-        line_offsets = [
-            station_offsets.get((station.id, lid), 0.0)
-            for lid in graph.station_lines(station.id)
-        ]
-        if line_offsets:
-            min_off = min(line_offsets)
-            max_off = max(line_offsets)
-        else:
-            min_off = max_off = 0.0
+        min_off, max_off = _drawn_bundle_span(
+            graph, station, station_offsets, tb_right_entry
+        )
     else:
         min_off = max_off = 0.0
 
@@ -1758,15 +2007,26 @@ def _render_terminus_icons(
     else:
         icon_step = caption_aware_icon_step(names, name_widths, theme.terminus_width)
 
+    is_rail = graph.station_is_rail(station.id)
+    # A captioned off-track rail terminus has its station dropped by
+    # OFFTRACK_TERMINUS_NUB_CLEARANCE (see rail_mode) so the buffer-stop nub
+    # clears the under-icon caption; lift the icon stack by the same amount so
+    # it stays put while the nub slides down.
+    offtrack_nub_lift = (
+        OFFTRACK_TERMINUS_NUB_CLEARANCE
+        if (station.off_track and is_rail and station.is_captioned_terminus)
+        else 0.0
+    )
+
     centers = _terminus_icon_centers(
         station,
         section_dir,
         is_source,
         len(station.terminus_labels),
-        icon_gap + icon_half_flow,
+        icon_gap + icon_half_flow + offtrack_nub_lift,
         icon_step,
         bundle_center,
-        is_rail=graph.station_is_rail(station.id),
+        is_rail=is_rail,
     )
 
     # Captions sitting at the same Y overlap when their estimated
@@ -2455,21 +2715,39 @@ def _compute_col_boundary_xs(
     return result
 
 
+def _row_grid_anchor_ys(graph: MetroGraph, station_ids: Iterable[str]) -> list[float]:
+    """The distinct placement-row Ys among the given stations.
+
+    A station is positioned by ``station.y`` -- the row anchor (the offset-0
+    slot, the top of the bundle), not the centre of its rendered pill, which is
+    offset downward by the bundle mid.  The debug grid marks these anchors so a
+    line shows where the engine placed a row; same-row stations share their
+    anchor and collapse to one line, while a station the engine drifted onto a
+    slightly different Y splits off its own line.  Hidden stations (bypass
+    junctions and the like) occupy real rows too, so they anchor a line; only
+    ports, which ride a neighbouring station's row, are skipped.
+    """
+    return sorted(
+        {
+            round(st.y, 1)
+            for sid in station_ids
+            if (st := graph.stations.get(sid)) and not st.is_port
+        }
+    )
+
+
 def _draw_debug_y_grid(
     d: draw.Drawing,
     *,
     x_start: float,
     x_end: float,
-    base_y: float,
-    slot_spacing: float,
-    n_slots: int,
+    row_ys: list[float],
     label: str,
     debug_font: str,
     debug_font_size: float,
 ) -> None:
-    """Draw horizontal grid-slot lines, labelling the topmost one."""
-    for i in range(n_slots):
-        y = base_y + i * slot_spacing
+    """Draw one horizontal line per row Y, labelling the topmost one."""
+    for i, y in enumerate(row_ys):
         d.append(
             draw.Line(
                 x_start,
@@ -2619,40 +2897,27 @@ def _render_debug_overlay(
                 )
             )
 
-    # Horizontal grid-slot lines. Multi-section row groups use the shared
-    # slot spacing from _align_row_y_grids; every other section falls back to
-    # the global Y pitch so single-section diagrams still show their grid.
-    grid_info = graph._row_y_grid_info
+    # Horizontal row lines at each section's placement-row anchors (the distinct
+    # station.y values, see _row_grid_anchor_ys). Multi-section row bands share
+    # one full-width set of lines; every other section draws its own.
     grouped_sec_ids: set[str] = set()
-    for row, info in grid_info.items():
-        slot_spacing = info["slot_spacing"]
-        sec_ids = info["section_ids"]
-        ref_secs = [graph.sections[sid] for sid in sec_ids if sid in graph.sections]
+    for row, info in graph._row_y_grid_info.items():
+        ref_secs = [
+            graph.sections[sid] for sid in info["section_ids"] if sid in graph.sections
+        ]
         if not ref_secs:
             continue
         grouped_sec_ids.update(s.id for s in ref_secs)
-        all_station_ys: list[float] = []
-        for sec in ref_secs:
-            for sid in sec.station_ids:
-                st = graph.stations.get(sid)
-                if st and not st.is_port:
-                    all_station_ys.append(st.y)
-        if not all_station_ys:
-            continue
-        base_y = min(all_station_ys)
-        max_y = max(all_station_ys)
-        n_slots = (
-            int(round((max_y - base_y) / slot_spacing)) + 1 if slot_spacing > 0 else 1
+        row_ys = _row_grid_anchor_ys(
+            graph, (sid for sec in ref_secs for sid in sec.station_ids)
         )
-        x_start = min(s.bbox_x for s in ref_secs) - 10
-        x_end = max(s.bbox_x + s.bbox_w for s in ref_secs) + 10
+        if not row_ys:
+            continue
         _draw_debug_y_grid(
             d,
-            x_start=x_start,
-            x_end=x_end,
-            base_y=base_y,
-            slot_spacing=slot_spacing,
-            n_slots=n_slots,
+            x_start=min(s.bbox_x for s in ref_secs) - 10,
+            x_end=max(s.bbox_x + s.bbox_w for s in ref_secs) + 10,
+            row_ys=row_ys,
             label=f"row {row} grid",
             debug_font=debug_font,
             debug_font_size=debug_font_size,
@@ -2661,24 +2926,14 @@ def _render_debug_overlay(
     for sec in sections:
         if sec.id in grouped_sec_ids:
             continue
-        sec_ys = [
-            st.y
-            for sid in sec.station_ids
-            for st in (graph.stations.get(sid),)
-            if st and not st.is_port
-        ]
-        if not sec_ys:
+        row_ys = _row_grid_anchor_ys(graph, sec.station_ids)
+        if not row_ys:
             continue
-        base_y = min(sec_ys)
-        max_y = max(sec_ys)
-        n_slots = int(round((max_y - base_y) / Y_SPACING)) + 1
         _draw_debug_y_grid(
             d,
             x_start=sec.bbox_x - 10,
             x_end=sec.bbox_x + sec.bbox_w + 10,
-            base_y=base_y,
-            slot_spacing=Y_SPACING,
-            n_slots=n_slots,
+            row_ys=row_ys,
             label=f"row {sec.grid_row} grid",
             debug_font=debug_font,
             debug_font_size=debug_font_size,

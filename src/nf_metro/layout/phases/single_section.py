@@ -9,7 +9,6 @@ from nf_metro.layout.constants import (
     DIAGONAL_LABEL_OFFSET,
     ENTRY_SHIFT_LR,
     ENTRY_SHIFT_TB,
-    ENTRY_SHIFT_TB_CROSS,
     EXIT_GAP_MULTIPLIER,
     FONT_HEIGHT,
     ICON_CAPTION_FONT_HEIGHT,
@@ -29,6 +28,7 @@ from nf_metro.layout.constants import (
     TERMINUS_ICON_CLEARANCE_V,
     TERMINUS_WIDTH,
 )
+from nf_metro.layout.geometry import Axis, AxisFrame
 from nf_metro.layout.labels import (
     _label_text_height,
     active_font_scale,
@@ -36,14 +36,17 @@ from nf_metro.layout.labels import (
 )
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
-from nf_metro.layout.phases._common import _build_section_subgraph
+from nf_metro.layout.phases._common import (
+    _build_section_subgraph,
+    iter_sole_trunk_continuations,
+)
 from nf_metro.layout.phases.off_track import (
     _align_phantom_pass_throughs,
     _compute_fork_join_gaps,
     _insert_phantom_pass_throughs,
     _space_off_track_outputs,
 )
-from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import MetroGraph, PortSide, Section, Station, is_bypass_v
 
 
 def _align_terminus_to_upstream(graph: MetroGraph) -> None:
@@ -148,7 +151,14 @@ def _layout_single_section(
         "RL",
     ) and _has_horizontal_predecessor_section(graph, section)
 
-    tracks = assign_tracks(sub, layers, entry_top=entry_top)
+    continuation_nodes = frozenset(
+        node
+        for sec_id, _pred, node in iter_sole_trunk_continuations(graph)
+        if sec_id == section.id
+    )
+    tracks = assign_tracks(
+        sub, layers, entry_top=entry_top, continuation_nodes=continuation_nodes
+    )
 
     if not layers:
         return None
@@ -202,7 +212,14 @@ def _layout_single_section(
     # Widen track spacing when multi-line labels need more vertical room
     effective_y_spacing = _multiline_track_spacing(sub, y_spacing)
 
-    # Assign local coordinates based on section direction
+    # Assign local coordinates along the section's layer (primary) and
+    # track (secondary) axes; TB transposes which screen axis each maps to.
+    frame = AxisFrame.for_direction(section.direction, x_spacing, y_spacing)
+    # Track ranks widen for multi-line labels only when the track axis is Y
+    # (the LR/RL regime); a TB section stacks lines along X at the base step.
+    rank_step = (
+        effective_y_spacing if frame.secondary.name == "y" else frame.secondary.step
+    )
     for sid, station in sub.stations.items():
         station.layer = layers.get(sid, 0)
         station.track = tracks.get(sid, 0)
@@ -217,22 +234,14 @@ def _layout_single_section(
         rank = track_rank.get(station.track, 0.0)
         output_offset = output_extra.get(sid, 0.0)
         layer_push = output_layer_push.get(station.layer, 0.0)
-        if section.direction == "TB":
-            station.x = rank * x_spacing
-            station.y = (
-                station.layer * y_spacing
-                + layer_extra.get(station.layer, 0)
-                + layer_push
-                + output_offset
-            )
-        else:
-            station.x = (
-                station.layer * x_spacing
-                + layer_extra.get(station.layer, 0)
-                + layer_push
-                + output_offset
-            )
-            station.y = rank * effective_y_spacing
+        frame.primary.set(
+            station,
+            station.layer * frame.primary.step
+            + layer_extra.get(station.layer, 0)
+            + layer_push
+            + output_offset,
+        )
+        frame.secondary.set(station, rank * rank_step)
 
     # Resolve same-cell station collisions: two stations on the same line
     # priority can land on identical (x,y) when the track allocator collapses
@@ -242,9 +251,9 @@ def _layout_single_section(
     # Normalize Y so minimum is 0 (raw tracks can be negative)
     _normalize_min(sub, axis="y")
 
-    # RL: mirror X so layer 0 is rightmost
-    if section.direction == "RL":
-        _mirror_rl(sub)
+    # RL runs the primary axis in reverse: mirror it so layer 0 is at the far end.
+    if frame.primary_sign < 0:
+        _mirror_primary(sub, frame.primary)
 
     # Normalize local X so leftmost station is at x=0
     _normalize_min(sub, axis="x")
@@ -258,12 +267,11 @@ def _layout_single_section(
     # section edge (~CURVE_RADIUS + half a station flat) - much less
     # than the full station_y_padding (which is reserved for label
     # clearance around real stations).
-    real_for_bbox = [
-        s for s in sub.stations.values() if not s.id.startswith("__bypass_")
-    ]
+    real_for_bbox = [s for s in sub.stations.values() if not is_bypass_v(s.id)]
     if not real_for_bbox:
         real_for_bbox = list(sub.stations.values())
-    bypass_v_ys = [s.y for s in sub.stations.values() if s.id.startswith("__bypass_")]
+    bypass_v_ys = [s.y for s in sub.stations.values() if is_bypass_v(s.id)]
+    bypass_v_xs = [s.x for s in sub.stations.values() if is_bypass_v(s.id)]
     xs = [s.x for s in real_for_bbox]
     ys = [s.y for s in real_for_bbox]
     extra_label_h = _multiline_label_padding(sub)
@@ -301,6 +309,20 @@ def _layout_single_section(
             bbox_top = min(bbox_top, v_min - v_curve_clearance)
         if v_max > y_max:
             bbox_bot = v_max + v_curve_clearance
+    # A TB section offsets its bypass V laterally (in X) rather than
+    # vertically, so grow the bbox along X by the same curve-only clearance
+    # when V sits beyond the real-station horizontal extent.
+    if bypass_v_xs:
+        x_left = section.bbox_x
+        x_right = section.bbox_x + section.bbox_w
+        v_xmin = min(bypass_v_xs)
+        v_xmax = max(bypass_v_xs)
+        if v_xmin - v_curve_clearance < x_left:
+            x_left = v_xmin - v_curve_clearance
+        if v_xmax + v_curve_clearance > x_right:
+            x_right = v_xmax + v_curve_clearance
+        section.bbox_x = x_left
+        section.bbox_w = x_right - x_left
     section.bbox_y = bbox_top
     section.bbox_h = bbox_bot - bbox_top
 
@@ -331,10 +353,8 @@ def _resolve_station_collisions(
     such collisions and shifts the later-defined station along the section's
     secondary axis by one spacing unit, repeating until the cell is unique.
     """
-    if section.direction == "TB":
-        primary, secondary, primary_step, step = "y", "x", y_spacing, x_spacing
-    else:
-        primary, secondary, primary_step, step = "x", "y", x_spacing, y_spacing
+    frame = AxisFrame.for_direction(section.direction, x_spacing, y_spacing)
+    primary, secondary = frame.primary, frame.secondary
 
     EPS = SAME_COORD_TOLERANCE
     # Off-track stations carry a placeholder Y here (the off-track lift in
@@ -352,10 +372,10 @@ def _resolve_station_collisions(
     # row for TB).  Use the primary-axis step size; the bucket spans a
     # half-step either side of a layer centre so off-grid layer_extra
     # offsets stay in the same bucket as their layer peers.
-    primary_step_norm = max(primary_step, 1.0)
+    primary_step_norm = max(primary.step, 1.0)
     by_primary: dict[float, list[Station]] = {}
     for s in real:
-        bucket = round(getattr(s, primary) / primary_step_norm)
+        bucket = round(primary.get(s) / primary_step_norm)
         by_primary.setdefault(bucket, []).append(s)
 
     # Stable tiebreaker so the earlier-defined station keeps its slot
@@ -365,14 +385,14 @@ def _resolve_station_collisions(
     for stations in by_primary.values():
         if len(stations) < 2:
             continue
-        stations.sort(key=lambda s: (getattr(s, secondary), order.get(s.id, 0)))
+        stations.sort(key=lambda s: (secondary.get(s), order.get(s.id, 0)))
         used: list[float] = []
         for s in stations:
-            pos = getattr(s, secondary)
-            while any(abs(pos - u) < step - EPS for u in used):
-                pos += step
-            if pos != getattr(s, secondary):
-                setattr(s, secondary, pos)
+            pos = secondary.get(s)
+            while any(abs(pos - u) < secondary.step - EPS for u in used):
+                pos += secondary.step
+            if pos != secondary.get(s):
+                secondary.set(s, pos)
             used.append(pos)
 
 
@@ -493,17 +513,17 @@ def _normalize_min(sub: MetroGraph, axis: str) -> None:
                 setattr(s, axis, getattr(s, axis) - min_val)
 
 
-def _mirror_rl(sub: MetroGraph) -> None:
-    """Mirror X coordinates for RL sections so layer 0 is rightmost.
+def _mirror_primary(sub: MetroGraph, axis: Axis) -> None:
+    """Mirror the layer (primary) axis so layer 0 sits at the far end (RL).
 
     Anchors on non-terminus stations so adding terminus layers
-    extends leftward without shifting the entry point.
+    extends outward without shifting the entry point.
     """
     non_term = [s for s in sub.stations.values() if not (s.is_blank_terminus)]
     anchor_stations = non_term if non_term else list(sub.stations.values())
-    max_x_val = max(s.x for s in anchor_stations)
+    max_val = max(axis.get(s) for s in anchor_stations)
     for s in sub.stations.values():
-        s.x = max_x_val - s.x
+        axis.set(s, max_val - axis.get(s))
 
 
 def _enforce_min_extent(
@@ -513,22 +533,13 @@ def _enforce_min_extent(
     y_spacing: float,
 ) -> None:
     """Ensure minimum inner extent so stations sit on visible track."""
-    xs = [s.x for s in sub.stations.values()]
-    ys = [s.y for s in sub.stations.values()]
-    if section.direction == "TB":
-        inner_h = max(ys) - min(ys)
-        min_inner_h = y_spacing
-        if inner_h < min_inner_h:
-            shift = (min_inner_h - inner_h) / 2
-            for station in sub.stations.values():
-                station.y += shift
-    else:
-        inner_w = max(xs) - min(xs)
-        min_inner_w = x_spacing
-        if inner_w < min_inner_w:
-            shift = (min_inner_w - inner_w) / 2
-            for station in sub.stations.values():
-                station.x += shift
+    axis = AxisFrame.for_direction(section.direction, x_spacing, y_spacing).primary
+    vals = [axis.get(s) for s in sub.stations.values()]
+    inner = max(vals) - min(vals)
+    if inner < axis.step:
+        shift = (axis.step - inner) / 2
+        for station in sub.stations.values():
+            axis.set(station, axis.get(station) + shift)
 
 
 def _adjust_tb_labels(
@@ -566,12 +577,18 @@ def _adjust_tb_entry_shifts(
     graph: MetroGraph,
     y_spacing: float,
 ) -> None:
-    """Apply TB section entry shifts for perpendicular and cross-column entries."""
+    """Shift TB section stations down to clear a perpendicular entry port.
+
+    A TB TOP/BOTTOM entry port sits on the section trunk X
+    (``_assign_entry_port_position``), so its drop onto the first station is
+    a clean vertical continuation and the cross-column lead-in turns in the
+    header corridor above the box, never inside it -- no in-section room is
+    needed for it.  Only a perpendicular (LEFT/RIGHT) entry, whose port would
+    otherwise coincide with the first station, needs the stations nudged
+    down."""
     if section.direction != "TB":
         return
 
-    # Perpendicular entry: shift stations down so first station isn't
-    # at the entry port (avoiding station-as-elbow).
     has_perp_entry = any(
         graph.ports[pid].side in (PortSide.LEFT, PortSide.RIGHT)
         for pid in section.entry_ports
@@ -579,27 +596,6 @@ def _adjust_tb_entry_shifts(
     )
     if has_perp_entry:
         entry_shift = y_spacing * ENTRY_SHIFT_TB
-        for s in sub.stations.values():
-            s.y += entry_shift
-        section.bbox_h += entry_shift
-
-    # Cross-column TOP entry: shift stations down for L-shape routing room.
-    has_cross_col_top_entry = False
-    for pid in section.entry_ports:
-        port = graph.ports.get(pid)
-        if not port or port.side != PortSide.TOP:
-            continue
-        for edge in graph.edges_to(pid):
-            src = graph.stations.get(edge.source)
-            if src and src.section_id:
-                src_sec = graph.sections.get(src.section_id)
-                if src_sec and src_sec.grid_col != section.grid_col:
-                    has_cross_col_top_entry = True
-                    break
-        if has_cross_col_top_entry:
-            break
-    if has_cross_col_top_entry:
-        entry_shift = y_spacing * ENTRY_SHIFT_TB_CROSS
         for s in sub.stations.values():
             s.y += entry_shift
         section.bbox_h += entry_shift
@@ -692,10 +688,10 @@ def _adjust_lr_exit_gap(
             if edge.source not in real_ids:
                 continue
             src_id = edge.source
-            if src_id.startswith("__bypass_"):
+            if is_bypass_v(src_id):
                 pred_y = None
                 for pe in graph.edges_to(src_id):
-                    if pe.source in real_ids and not pe.source.startswith("__bypass_"):
+                    if pe.source in real_ids and not is_bypass_v(pe.source):
                         ps = sub.stations.get(pe.source)
                         if ps is not None:
                             pred_y = ps.y
@@ -993,8 +989,6 @@ def _shift_lr_perp_entry_stations(
             continue  # gap is already sufficient
 
         # Shift internal stations away from the entry side.
-        # Stage 1.1 (_adjust_lr_entry_inset) already reserved bbox space
-        # for this shift, so no bbox expansion is needed here.
         for sid in section.station_ids:
             if sid in port_ids:
                 continue
@@ -1005,3 +999,14 @@ def _shift_lr_perp_entry_stations(
                 s.x += shift
             else:
                 s.x -= shift
+
+        # _adjust_lr_entry_inset reserves bbox width on the right to match an
+        # LR section's rightward shift; an RL run shifts left, so extend the
+        # bbox left by the same amount to keep the trailing station inside it.
+        # Guarded to a same-column drop, where the entry port sits within the
+        # run's span (nearest_x is the run's far edge here): a cross-column
+        # port would drag the run off its own columns, an unsupported shape
+        # left to fail loudly downstream.
+        if section.direction == "RL" and min(internal_xs) <= port_x <= nearest_x:
+            section.bbox_x -= shift
+            section.bbox_w += shift

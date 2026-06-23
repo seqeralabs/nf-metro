@@ -4,6 +4,16 @@ Centralizes magic numbers from engine.py, routing.py, labels.py,
 section_placement.py, and ordering.py.
 """
 
+FLOW_ALIGNED_PORT_ADVICE: str = (
+    "Give the section a flow-aligned entry/exit port "
+    "(left/right for LR/RL, top/bottom for TB/BT) or change "
+    "its '%%metro direction:'."
+)
+"""Actionable advice for a section whose ports are all perpendicular to its
+flow, or whose connection has to be bridged across grid columns.  Shared by the
+bbox-containment guard and the render-curve invariant so the two surface one
+consistent fix."""
+
 # ---------------------------------------------------------------------------
 # Font / text metrics
 # ---------------------------------------------------------------------------
@@ -439,9 +449,6 @@ TB_LINE_Y_OFFSET: float = 3.0
 ENTRY_SHIFT_TB: float = 1.0
 """Entry shift multiplier for TB sections with perpendicular entry."""
 
-ENTRY_SHIFT_TB_CROSS: float = 1.0
-"""Entry shift multiplier for TB sections with cross-column TOP entry."""
-
 ENTRY_INSET_LR: float = 0.3
 """Entry inset multiplier for LR/RL sections with perpendicular entry."""
 
@@ -616,6 +623,18 @@ The render side draws under-icon captions at ``label_font_size *
 ICON_NAME_FONT_SCALE``; using ``FONT_HEIGHT`` as an upper-bound for
 the theme label_font_size keeps the calculation theme-agnostic."""
 
+OFFTRACK_TERMINUS_NUB_CLEARANCE: float = 8.0
+"""Extra drop applied to a captioned off-track rail terminus station.
+
+A rail-mode off-track file terminus stacks its icon vertically above the line
+stub, with the buffer-stop nub seated at the stub end (``station.y``) and the
+under-icon caption hanging toward it.  Unlike an on-rail terminus -- where the
+caption sits perpendicular to the nub -- here both share the vertical axis, so
+the caption lands on the nub.  Dropping the station by this amount while the
+renderer lifts the icon by the same amount keeps the icon fixed and slides the
+nub clear below the caption.  Shared by ``rail_mode`` (the drop) and
+``render.svg`` (the matching icon lift) so the two stay in lockstep."""
+
 TERMINUS_ICON_CLEARANCE: float = 58.0
 """Minimum clearance from terminus station center to section bbox edge.
 
@@ -665,6 +684,11 @@ from untouched ones when checking column-companion consensus."""
 # ---------------------------------------------------------------------------
 GUARD_TOLERANCE: float = 5.0
 """Tolerance for stage-boundary invariant checks (port-on-boundary, etc.)."""
+
+COLLINEAR_AXIS_TOL: float = 0.5
+"""Maximum constant-axis separation for two axis-aligned legs to count as
+sharing one track.  Tight (sub-pixel) so legs on a single track register as
+collinear while neighbouring legs one slot apart in a routing channel do not."""
 
 COMPONENT_BAND_OVERLAP_TOLERANCE: float = 0.5
 """Slack permitted when checking that independently-stacked disconnected
