@@ -724,10 +724,10 @@ def find_label_anchor_violators(graph, engine) -> list[dict]:
 
     Flags middle-anchored labels on horizontal LR/RL runs whose X has
     drifted more than ``_LABEL_DRIFT_TOL`` from the station marker X. The
-    expected position is the station's own marker, not a neighbour
-    midpoint; the box is anchored on the actual rendered ``<text>`` glyph
-    (resolved in :func:`annotate_svg`) rather than the engine's logical
-    coords, so it lands on the label the reviewer sees.
+    expected position is the station's own marker; the box is anchored on
+    the actual rendered ``<text>`` glyph (resolved in :func:`annotate_svg`)
+    rather than the engine's logical coords, so it lands on the label the
+    reviewer sees.
     """
     offsets = engine["compute_station_offsets"](graph)
     routes = engine["route_edges"](graph, station_offsets=offsets)
@@ -830,12 +830,14 @@ def find_stack_x_violators(graph, engine) -> list[dict]:
                 continue
             xs = [graph.stations[s].x for s in members]
             ys = [graph.stations[s].y for s in members]
+            if max(xs) - min(xs) <= 1.0:
+                continue
             visual_stack = any(
                 0 < abs(ys[i] - ys[j]) <= stack_y_window
                 for i in range(len(members))
                 for j in range(i + 1, len(members))
             )
-            if max(xs) - min(xs) > 1.0 and visual_stack:
+            if visual_stack:
                 lo_x = min(xs) - 20
                 hi_x = max(xs) + 20
                 lo_y = min(ys) - 18
@@ -938,64 +940,26 @@ INVARIANT_FINDERS = {
 
 _SVG_OPEN_RE = re.compile(r'<svg[^>]*viewBox="([^"]+)"[^>]*>')
 
-_LABEL_CHAR_W_RATIO = 0.6  # rough glyph advance width per char, in font-size units
-
 
 def _rendered_label_box(
     svg_text: str, station_id: str
 ) -> tuple[float, float, float, float] | None:
-    """Extent ``(x, y, w, h)`` of the rendered ``<text data-station-id=...>``
-    glyph, derived from its actual SVG attributes.
+    """Extent ``(x, y, w, h)`` of the rendered label glyph for ``station_id``.
 
     The renderer applies ``text-anchor`` / ``dominant-baseline`` shifts that
     move the drawn glyph away from the engine's logical ``label.x`` / ``label.y``,
-    so reading the emitted attributes back out is what lets the overlay box land
-    on the ink the reviewer actually sees rather than floating beside it.
+    so the overlay box has to be derived from the drawn ink. This defers to the
+    authoritative artifact parser the render oracle uses, so the box matches the
+    same drawn-glyph footprint those geometry guards reason about.
     """
-    m = re.search(
-        rf'<text\b([^>]*)\bdata-station-id="{re.escape(station_id)}"([^>]*)>(.*?)</text>',
-        svg_text,
-        re.DOTALL,
-    )
-    if m is None:
-        return None
-    attrs = m.group(1) + m.group(2)
-    inner = m.group(3)
+    from nf_metro.layout.labels import label_glyph_ink_bbox
+    from nf_metro.render.validate import parse_station_labels
 
-    def attr(name: str, default: str) -> str:
-        am = re.search(rf'\b{name}="([^"]*)"', attrs)
-        return am.group(1) if am else default
-
-    try:
-        x = float(attr("x", "0"))
-        y = float(attr("y", "0"))
-        font_size = float(attr("font-size", "13"))
-    except ValueError:
-        return None
-    anchor = attr("text-anchor", "start")
-    baseline = attr("dominant-baseline", "auto")
-
-    # Inner content is plain text or a stack of <tspan> lines; the box spans
-    # the longest line horizontally and all lines vertically.
-    text_lines = [s.strip() for s in re.findall(r">([^<]+)<", ">" + inner + "<")]
-    text_lines = [s for s in text_lines if s] or [station_id]
-    width = max(len(s) for s in text_lines) * font_size * _LABEL_CHAR_W_RATIO
-    height = len(text_lines) * font_size
-
-    if anchor == "middle":
-        left = x - width / 2
-    elif anchor == "end":
-        left = x - width
-    else:
-        left = x
-
-    if baseline == "hanging":
-        top = y
-    elif baseline == "central":
-        top = y - height / 2
-    else:
-        top = y - font_size
-    return left, top, width, height
+    for lab in parse_station_labels(svg_text):
+        if lab.placement.station_id == station_id:
+            x0, y0, x1, y1 = label_glyph_ink_bbox(lab.placement)
+            return x0, y0, x1 - x0, y1 - y0
+    return None
 
 
 def annotate_svg(svg_text: str, violators: list[dict]) -> tuple[str, int]:
