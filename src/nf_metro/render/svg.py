@@ -9,6 +9,7 @@ import math
 import re
 import textwrap
 import warnings
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
@@ -19,7 +20,6 @@ from nf_metro.layout.constants import (
     LABEL_LINE_HEIGHT,
     OFFTRACK_TERMINUS_NUB_CLEARANCE,
     SAME_COORD_TOLERANCE,
-    Y_SPACING,
 )
 from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.labels import (
@@ -2715,21 +2715,39 @@ def _compute_col_boundary_xs(
     return result
 
 
+def _row_grid_anchor_ys(graph: MetroGraph, station_ids: Iterable[str]) -> list[float]:
+    """The distinct placement-row Ys among the given stations.
+
+    A station is positioned by ``station.y`` -- the row anchor (the offset-0
+    slot, the top of the bundle), not the centre of its rendered pill, which is
+    offset downward by the bundle mid.  The debug grid marks these anchors so a
+    line shows where the engine placed a row; same-row stations share their
+    anchor and collapse to one line, while a station the engine drifted onto a
+    slightly different Y splits off its own line.  Hidden stations (bypass
+    junctions and the like) occupy real rows too, so they anchor a line; only
+    ports, which ride a neighbouring station's row, are skipped.
+    """
+    return sorted(
+        {
+            round(st.y, 1)
+            for sid in station_ids
+            if (st := graph.stations.get(sid)) and not st.is_port
+        }
+    )
+
+
 def _draw_debug_y_grid(
     d: draw.Drawing,
     *,
     x_start: float,
     x_end: float,
-    base_y: float,
-    slot_spacing: float,
-    n_slots: int,
+    row_ys: list[float],
     label: str,
     debug_font: str,
     debug_font_size: float,
 ) -> None:
-    """Draw horizontal grid-slot lines, labelling the topmost one."""
-    for i in range(n_slots):
-        y = base_y + i * slot_spacing
+    """Draw one horizontal line per row Y, labelling the topmost one."""
+    for i, y in enumerate(row_ys):
         d.append(
             draw.Line(
                 x_start,
@@ -2879,40 +2897,27 @@ def _render_debug_overlay(
                 )
             )
 
-    # Horizontal grid-slot lines. Multi-section row groups use the shared
-    # slot spacing from _align_row_y_grids; every other section falls back to
-    # the global Y pitch so single-section diagrams still show their grid.
-    grid_info = graph._row_y_grid_info
+    # Horizontal row lines at each section's placement-row anchors (the distinct
+    # station.y values, see _row_grid_anchor_ys). Multi-section row bands share
+    # one full-width set of lines; every other section draws its own.
     grouped_sec_ids: set[str] = set()
-    for row, info in grid_info.items():
-        slot_spacing = info["slot_spacing"]
-        sec_ids = info["section_ids"]
-        ref_secs = [graph.sections[sid] for sid in sec_ids if sid in graph.sections]
+    for row, info in graph._row_y_grid_info.items():
+        ref_secs = [
+            graph.sections[sid] for sid in info["section_ids"] if sid in graph.sections
+        ]
         if not ref_secs:
             continue
         grouped_sec_ids.update(s.id for s in ref_secs)
-        all_station_ys: list[float] = []
-        for sec in ref_secs:
-            for sid in sec.station_ids:
-                st = graph.stations.get(sid)
-                if st and not st.is_port:
-                    all_station_ys.append(st.y)
-        if not all_station_ys:
-            continue
-        base_y = min(all_station_ys)
-        max_y = max(all_station_ys)
-        n_slots = (
-            int(round((max_y - base_y) / slot_spacing)) + 1 if slot_spacing > 0 else 1
+        row_ys = _row_grid_anchor_ys(
+            graph, (sid for sec in ref_secs for sid in sec.station_ids)
         )
-        x_start = min(s.bbox_x for s in ref_secs) - 10
-        x_end = max(s.bbox_x + s.bbox_w for s in ref_secs) + 10
+        if not row_ys:
+            continue
         _draw_debug_y_grid(
             d,
-            x_start=x_start,
-            x_end=x_end,
-            base_y=base_y,
-            slot_spacing=slot_spacing,
-            n_slots=n_slots,
+            x_start=min(s.bbox_x for s in ref_secs) - 10,
+            x_end=max(s.bbox_x + s.bbox_w for s in ref_secs) + 10,
+            row_ys=row_ys,
             label=f"row {row} grid",
             debug_font=debug_font,
             debug_font_size=debug_font_size,
@@ -2921,24 +2926,14 @@ def _render_debug_overlay(
     for sec in sections:
         if sec.id in grouped_sec_ids:
             continue
-        sec_ys = [
-            st.y
-            for sid in sec.station_ids
-            for st in (graph.stations.get(sid),)
-            if st and not st.is_port
-        ]
-        if not sec_ys:
+        row_ys = _row_grid_anchor_ys(graph, sec.station_ids)
+        if not row_ys:
             continue
-        base_y = min(sec_ys)
-        max_y = max(sec_ys)
-        n_slots = int(round((max_y - base_y) / Y_SPACING)) + 1
         _draw_debug_y_grid(
             d,
             x_start=sec.bbox_x - 10,
             x_end=sec.bbox_x + sec.bbox_w + 10,
-            base_y=base_y,
-            slot_spacing=Y_SPACING,
-            n_slots=n_slots,
+            row_ys=row_ys,
             label=f"row {sec.grid_row} grid",
             debug_font=debug_font,
             debug_font_size=debug_font_size,
