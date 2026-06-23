@@ -114,6 +114,22 @@ function initEditor() {
     getValue: () => editor.getValue(),
     setValue: (v) => editor.setValue(v),
     render: doRender,
+    setMode,
+    getMode: () => editMode,
+    select: setSelection,
+    getSelection: () => selection,
+    addStationToSection,
+    addSection,
+    connect,
+    renameStation,
+    renameSection,
+    reassignEdgeLine,
+    setSectionGrid,
+    deleteStation,
+    deleteEdge,
+    deleteSection,
+    splitEdge,
+    parseEdges,
   };
 }
 
@@ -209,6 +225,7 @@ function doRender() {
   }
   refreshLineColors();
   syncDirectiveControls();
+  reapplySelection();
 }
 
 /* ------------------------- directive controls ------------------------- */
@@ -373,6 +390,817 @@ function insertSnippet(id) {
   editor.replaceSelection(text);
   editor.focus();
   doRender();
+}
+
+/* --------------------------- graphical editing ------------------------- */
+
+// The .mmd text stays the single source of truth: every graphical action is
+// translated into a surgical text edit and the map is re-rendered. Selection is
+// re-derived by id after each render because the SVG innerHTML is replaced
+// wholesale, so element references never survive a render.
+
+let editMode = "select"; // "select" | "add-station" | "add-edge"
+let selection = null; // { kind: "station" | "section" | "line", id }
+let pendingSource = null; // source station id chosen in connect mode
+
+const ID_PART = "[A-Za-z0-9_]+";
+const ARROW = "(?:--+>|--+|==+>|-\\.->)";
+const SHAPE = "(?:\\[\\[[^\\]]*\\]\\]|\\(\\([^)]*\\)\\)|\\(\\[[^\\]]*\\]\\)|\\[[^\\]]*\\]|\\([^)]*\\)|\\{[^}]*\\})";
+const EDGE_RE = new RegExp(
+  "^(\\s*)(" + ID_PART + ")\\s*" + SHAPE + "?\\s*" + ARROW + "\\s*\\|([^|]*)\\|\\s*(" + ID_PART + ")"
+);
+const DECL_RE = new RegExp("^\\s*(" + ID_PART + ")\\s*" + SHAPE + "?\\s*$");
+const HAS_ARROW = /--+>|--+|==+>|-\.->/;
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function cssEsc(s) {
+  return window.CSS && CSS.escape ? CSS.escape(s) : s;
+}
+
+/* ----------------------------- text parsing --------------------------- */
+
+function docLines() {
+  return editor.getValue().split("\n");
+}
+
+function parseEdges() {
+  const out = [];
+  docLines().forEach((line, n) => {
+    const m = line.match(EDGE_RE);
+    if (!m) return;
+    out.push({
+      lineNo: n,
+      src: m[2],
+      tgt: m[4],
+      lines: m[3].split(",").map((s) => s.trim()).filter(Boolean),
+    });
+  });
+  return out;
+}
+
+// Depth-aware subgraph blocks: [{ id, name, start, end }] (end = the `end` line).
+function sectionBlocks() {
+  const lines = docLines();
+  const stack = [];
+  const blocks = [];
+  lines.forEach((line, n) => {
+    const open = line.match(/^\s*subgraph\s+("[^"]*"|[A-Za-z0-9_]+)\s*(?:\[(.*)\])?/);
+    if (open) {
+      const id = open[1].startsWith('"') ? open[1].slice(1, -1) : open[1];
+      stack.push({ id, name: open[2] != null ? open[2] : id, start: n });
+      return;
+    }
+    if (/^\s*end\s*$/.test(line) && stack.length) {
+      const b = stack.pop();
+      b.end = n;
+      blocks.push(b);
+    }
+  });
+  return blocks;
+}
+
+function findSectionBlock(id) {
+  return sectionBlocks().find((b) => b.id === id) || null;
+}
+
+function findStationDecl(id) {
+  const lines = docLines();
+  for (let n = 0; n < lines.length; n++) {
+    if (HAS_ARROW.test(lines[n])) continue;
+    const m = lines[n].match(DECL_RE);
+    if (m && m[1] === id) return n;
+  }
+  return -1;
+}
+
+function stationLabel(id) {
+  const n = findStationDecl(id);
+  if (n < 0) return id;
+  const m = editor.getLine(n).match(/^\s*[A-Za-z0-9_]+\s*[[({]+(.*?)[\])}]+\s*$/);
+  return m ? m[1].trim() : id;
+}
+
+function existingIds() {
+  const ids = new Set();
+  sectionBlocks().forEach((b) => ids.add(b.id));
+  parseEdges().forEach((e) => {
+    ids.add(e.src);
+    ids.add(e.tgt);
+  });
+  parseLineDefs().forEach((d) => ids.add(d.id));
+  docLines().forEach((line) => {
+    if (HAS_ARROW.test(line)) return;
+    const m = line.match(DECL_RE);
+    if (m) ids.add(m[1]);
+  });
+  return ids;
+}
+
+function uniqueId(prefix) {
+  const ids = existingIds();
+  let i = 1;
+  while (ids.has(prefix + i)) i++;
+  return prefix + i;
+}
+
+function findEdgeLineNo(src, tgt, line) {
+  const e = parseEdges().find((x) => x.src === src && x.tgt === tgt && x.lines.includes(line));
+  return e ? e.lineNo : -1;
+}
+
+// The drawn manifest exposes every station's centre; routes do not carry their
+// edge identity, so a clicked segment is mapped back to an edge by matching its
+// own endpoints to stations (works whenever both ends sit on a station, i.e.
+// every in-section edge). Inter-section legs end on invisible ports and resolve
+// to null, falling back to selecting the whole line.
+let _manifestText = "";
+let _manifestValue = null;
+function currentManifest() {
+  const node = el("preview").querySelector("#diagram-manifest");
+  const text = node ? node.textContent || "" : "";
+  if (text !== _manifestText) {
+    _manifestText = text;
+    try {
+      _manifestValue = JSON.parse(text);
+    } catch (_) {
+      _manifestValue = null;
+    }
+  }
+  return _manifestValue;
+}
+
+function elementEndpoints(elm) {
+  if (elm.tagName.toLowerCase() === "line") {
+    return [
+      [+elm.getAttribute("x1"), +elm.getAttribute("y1")],
+      [+elm.getAttribute("x2"), +elm.getAttribute("y2")],
+    ];
+  }
+  const nums = (elm.getAttribute("d") || "").match(/-?\d+(?:\.\d+)?/g);
+  if (!nums || nums.length < 4) return null;
+  return [nums.slice(0, 2).map(Number), nums.slice(-2).map(Number)];
+}
+
+function nearestStation(pt, tol) {
+  const manifest = currentManifest();
+  if (!manifest || !manifest.nodes) return null;
+  let best = null;
+  let bestSq = tol * tol;
+  for (const node of manifest.nodes) {
+    const dx = node.x - pt[0];
+    const dy = node.y - pt[1];
+    const sq = dx * dx + dy * dy;
+    if (sq <= bestSq) {
+      bestSq = sq;
+      best = node.id;
+    }
+  }
+  return best;
+}
+
+function resolveEdge(elm, lineId) {
+  const ends = elementEndpoints(elm);
+  if (!ends) return null;
+  const a = nearestStation(ends[0], 18);
+  const b = nearestStation(ends[1], 18);
+  if (!a || !b || a === b) return null;
+  const edge = parseEdges().find(
+    (e) =>
+      e.lines.includes(lineId) &&
+      ((e.src === a && e.tgt === b) || (e.src === b && e.tgt === a))
+  );
+  return edge ? { src: edge.src, tgt: edge.tgt, line: lineId } : null;
+}
+
+// Which section block (if any) references a node id, used to decide whether a
+// new edge lives inside a section or in the inter-section block.
+function sectionOf(id) {
+  const lines = docLines();
+  const re = new RegExp("\\b" + escapeRe(id) + "\\b");
+  return (
+    sectionBlocks().find((b) => {
+      for (let n = b.start; n <= b.end; n++) if (re.test(lines[n])) return true;
+      return false;
+    }) || null
+  );
+}
+
+/* ---------------------------- text mutations -------------------------- */
+
+function replaceLine(n, text) {
+  editor.replaceRange(text, { line: n, ch: 0 }, { line: n, ch: editor.getLine(n).length });
+}
+
+function insertLineAt(n, text) {
+  editor.replaceRange(text + "\n", { line: n, ch: 0 });
+}
+
+function removeLines(indices) {
+  [...new Set(indices)]
+    .sort((a, b) => b - a)
+    .forEach((n) => editor.replaceRange("", { line: n, ch: 0 }, { line: n + 1, ch: 0 }));
+}
+
+function addStationToSection(sectionId, label) {
+  const block = findSectionBlock(sectionId);
+  if (!block) return null;
+  const id = uniqueId("node");
+  insertLineAt(block.end, "        " + id + "[" + (label || "New node") + "]");
+  doRender();
+  setSelection({ kind: "station", id });
+  return id;
+}
+
+function addSection(name) {
+  const id = uniqueId("section");
+  const nodeId = uniqueId("node");
+  const lines = docLines();
+  const blocks = sectionBlocks();
+  let at;
+  if (blocks.length) {
+    at = Math.max(...blocks.map((b) => b.end)) + 1;
+  } else {
+    const g = lines.findIndex((l) => /^\s*graph\b/.test(l));
+    at = g >= 0 ? g + 1 : lines.length;
+  }
+  editor.replaceRange(
+    "    subgraph " + id + " [" + (name || "New Section") + "]\n" +
+      "        " + nodeId + "[New node]\n" +
+      "    end\n",
+    { line: at, ch: 0 }
+  );
+  doRender();
+  setSelection({ kind: "section", id });
+  return id;
+}
+
+function connect(src, tgt, line) {
+  if (!src || !tgt || !line || src === tgt) return false;
+  const bs = sectionOf(src);
+  const bt = sectionOf(tgt);
+  if (bs && bt && bs.id === bt.id) {
+    insertLineAt(bs.end, "        " + src + " -->|" + line + "| " + tgt);
+  } else {
+    const last = editor.lineCount() - 1;
+    const tail = editor.getLine(last);
+    const lead = tail.trim() === "" ? "" : "\n";
+    editor.replaceRange(lead + "    " + src + " -->|" + line + "| " + tgt + "\n", {
+      line: last,
+      ch: tail.length,
+    });
+  }
+  doRender();
+  return true;
+}
+
+function reassignEdgeLine(lineNo, newLine) {
+  const text = editor.getLine(lineNo);
+  if (text == null) return;
+  replaceLine(lineNo, text.replace(/\|([^|]*)\|/, "|" + newLine + "|"));
+  doRender();
+}
+
+function renameStation(id, label) {
+  const n = findStationDecl(id);
+  if (n < 0) return false;
+  const line = editor.getLine(n);
+  const shaped = line.match(/^(\s*[A-Za-z0-9_]+\s*)([[({]+)(.*?)([\])}]+)(\s*)$/);
+  replaceLine(
+    n,
+    shaped
+      ? shaped[1] + shaped[2] + label + shaped[4] + shaped[5]
+      : line.replace(/^(\s*[A-Za-z0-9_]+)\s*$/, "$1[" + label + "]")
+  );
+  doRender();
+  return true;
+}
+
+function renameSection(id, name) {
+  const b = findSectionBlock(id);
+  if (!b) return false;
+  const line = editor.getLine(b.start);
+  replaceLine(
+    b.start,
+    /\[.*\]\s*$/.test(line)
+      ? line.replace(/\[.*\]\s*$/, "[" + name + "]")
+      : line.replace(/(subgraph\s+(?:"[^"]*"|[A-Za-z0-9_]+))\s*$/, "$1 [" + name + "]")
+  );
+  doRender();
+  return true;
+}
+
+// col === null removes the grid directive (back to auto placement).
+function setSectionGrid(id, col, row) {
+  const lines = docLines();
+  const idx = lines.findIndex((l) =>
+    new RegExp("^\\s*%%metro\\s+grid:\\s*" + escapeRe(id) + "\\s*\\|").test(l)
+  );
+  if (col === null) {
+    if (idx >= 0) removeLines([idx]);
+  } else if (idx >= 0) {
+    replaceLine(idx, "%%metro grid: " + id + " | " + col + "," + row);
+  } else {
+    const directives = lines
+      .map((l, i) => (/^\s*%%metro\b/.test(l) ? i : -1))
+      .filter((i) => i >= 0);
+    const at = directives.length ? Math.max(...directives) + 1 : 0;
+    insertLineAt(at, "%%metro grid: " + id + " | " + col + "," + row);
+  }
+  doRender();
+}
+
+function deleteStation(id) {
+  const remove = new Set();
+  const decl = findStationDecl(id);
+  if (decl >= 0) remove.add(decl);
+  parseEdges().forEach((e) => {
+    if (e.src === id || e.tgt === id) remove.add(e.lineNo);
+  });
+  removeLines([...remove]);
+  doRender();
+  clearSelection();
+}
+
+function deleteEdge(lineNo) {
+  removeLines([lineNo]);
+  doRender();
+}
+
+function deleteSection(id) {
+  const b = findSectionBlock(id);
+  if (!b) return;
+  const lines = docLines();
+  const remove = new Set();
+  for (let n = b.start; n <= b.end; n++) remove.add(n);
+  const inside = new Set();
+  for (let n = b.start + 1; n < b.end; n++) {
+    if (HAS_ARROW.test(lines[n])) continue;
+    const m = lines[n].match(DECL_RE);
+    if (m) inside.add(m[1]);
+  }
+  parseEdges().forEach((e) => {
+    if (e.lineNo > b.start && e.lineNo < b.end) {
+      inside.add(e.src);
+      inside.add(e.tgt);
+    }
+  });
+  parseEdges().forEach((e) => {
+    if ((e.lineNo < b.start || e.lineNo > b.end) && (inside.has(e.src) || inside.has(e.tgt)))
+      remove.add(e.lineNo);
+  });
+  removeLines([...remove]);
+  doRender();
+  clearSelection();
+}
+
+// Splice a new station into an edge: src -->|L| tgt becomes src -->|L| new and
+// new -->|L| tgt. When both ends share a section the new node is declared there
+// (for a friendly label); otherwise the edge is inter-section and the node is
+// left to its edge-implied placement.
+function splitEdge(src, tgt, line) {
+  const lineNo = findEdgeLineNo(src, tgt, line);
+  if (lineNo < 0) return;
+  const text = editor.getLine(lineNo);
+  const indent = (text.match(/^\s*/) || [""])[0];
+  // Reuse the edge's full line token so a multi-line edge keeps every line.
+  const token = (text.match(/\|([^|]*)\|/) || [null, line])[1];
+  const newId = uniqueId("node");
+  const bs = sectionOf(src);
+  const bt = sectionOf(tgt);
+  replaceLine(lineNo, indent + src + " -->|" + token + "| " + newId);
+  insertLineAt(lineNo + 1, indent + newId + " -->|" + token + "| " + tgt);
+  if (bs && bt && bs.id === bt.id) {
+    const block = findSectionBlock(bs.id);
+    if (block) insertLineAt(block.start + 1, "        " + newId + "[New node]");
+  }
+  doRender();
+  setSelection({ kind: "station", id: newId });
+}
+
+/* ------------------------------ selection ----------------------------- */
+
+function selectorFor(sel) {
+  if (!sel) return null;
+  if (sel.kind === "station") return '[data-station-id="' + cssEsc(sel.id) + '"]';
+  if (sel.kind === "section") return 'rect.nf-metro-section-box[data-section-id="' + cssEsc(sel.id) + '"]';
+  if (sel.kind === "line") return '[data-line-id="' + cssEsc(sel.id) + '"]';
+  return null;
+}
+
+function setSelection(sel) {
+  selection = sel;
+  highlightSelection();
+  renderPropPanel();
+  if (sel && sel.kind === "station") jumpToStation(sel.id);
+}
+
+function clearSelection() {
+  selection = null;
+  pendingSource = null;
+  highlightSelection();
+  renderPropPanel();
+}
+
+// Drop a selection whose element no longer exists in the freshly drawn SVG
+// (after a delete, or loading a different map), so the panel never goes stale.
+function reapplySelection() {
+  if (selection) {
+    if (selection.kind === "edge") {
+      if (findEdgeLineNo(selection.src, selection.tgt, selection.line) < 0) selection = null;
+    } else {
+      const sel = selectorFor(selection);
+      if (sel && !el("preview").querySelector(sel)) selection = null;
+    }
+  }
+  highlightSelection();
+  renderPropPanel();
+}
+
+function highlightSelection() {
+  const preview = el("preview");
+  preview.querySelectorAll(".nfm-sel, .nfm-edge-src").forEach((n) =>
+    n.classList.remove("nfm-sel", "nfm-edge-src")
+  );
+  const sel = selectorFor(selection);
+  if (sel) preview.querySelectorAll(sel).forEach((n) => n.classList.add("nfm-sel"));
+  if (pendingSource) {
+    preview
+      .querySelectorAll('[data-station-id="' + cssEsc(pendingSource) + '"]')
+      .forEach((n) => n.classList.add("nfm-edge-src"));
+  }
+}
+
+function jumpToStation(id) {
+  const n = findStationDecl(id);
+  if (n < 0) return;
+  editor.setCursor({ line: n, ch: editor.getLine(n).length });
+  editor.scrollIntoView({ line: n, ch: 0 }, 60);
+}
+
+/* ---------------------------- mode + clicks --------------------------- */
+
+function setMode(mode) {
+  editMode = mode;
+  pendingSource = null;
+  closeLinePicker();
+  document.querySelectorAll(".mode-btn").forEach((b) =>
+    b.setAttribute("aria-pressed", String(b.dataset.mode === mode))
+  );
+  const preview = el("preview");
+  preview.classList.toggle("mode-add-station", mode === "add-station");
+  preview.classList.toggle("mode-add-edge", mode === "add-edge");
+  highlightSelection();
+  setEditHint(
+    mode === "add-station"
+      ? "Click a section to add a station."
+      : mode === "add-edge"
+        ? "Click a source station, then a target."
+        : "Click an element to select it."
+  );
+}
+
+function setEditHint(text) {
+  el("edit-hint").textContent = text;
+}
+
+function hitTest(target) {
+  const station = target.closest("[data-station-id]");
+  if (station) return { kind: "station", id: station.getAttribute("data-station-id") };
+  const line = target.closest("[data-line-id]");
+  if (line) return { kind: "line", id: line.getAttribute("data-line-id") };
+  const section = target.closest("[data-section-id]");
+  if (section) return { kind: "section", id: section.getAttribute("data-section-id") };
+  return null;
+}
+
+function onPreviewClick(e) {
+  const hit = hitTest(e.target);
+  if (editMode === "add-station") {
+    if (hit && hit.kind === "section") addStationToSection(hit.id);
+    else toast("Click a section to add a station.");
+    return;
+  }
+  if (editMode === "add-edge") {
+    if (!hit || hit.kind !== "station") {
+      toast("Click a station.");
+      return;
+    }
+    if (!pendingSource) {
+      pendingSource = hit.id;
+      highlightSelection();
+      setEditHint("Source: " + hit.id + ". Now click the target station.");
+      return;
+    }
+    if (hit.id === pendingSource) {
+      toast("Pick a different target station.");
+      return;
+    }
+    openLinePicker(e, pendingSource, hit.id);
+    return;
+  }
+  // Select mode: a station or section selects directly; a route resolves to a
+  // specific edge when its endpoints sit on stations, else selects the line.
+  const stationEl = e.target.closest("[data-station-id]");
+  if (stationEl) {
+    setSelection({ kind: "station", id: stationEl.getAttribute("data-station-id") });
+    return;
+  }
+  const lineEl = e.target.closest("[data-line-id]");
+  if (lineEl) {
+    const lineId = lineEl.getAttribute("data-line-id");
+    const edge = resolveEdge(lineEl, lineId);
+    if (edge) {
+      setSelection({ kind: "edge", src: edge.src, tgt: edge.tgt, line: edge.line });
+      lineEl.classList.add("nfm-sel");
+    } else {
+      setSelection({ kind: "line", id: lineId });
+    }
+    return;
+  }
+  const sectionEl = e.target.closest("[data-section-id]");
+  if (sectionEl) {
+    setSelection({ kind: "section", id: sectionEl.getAttribute("data-section-id") });
+    return;
+  }
+  clearSelection();
+}
+
+/* ----------------------------- line picker ---------------------------- */
+
+function openLinePicker(e, src, tgt) {
+  const defs = parseLineDefs();
+  if (!defs.length) {
+    toast("Define a line first with + Line.");
+    return;
+  }
+  const picker = el("line-picker");
+  picker.textContent = "";
+  const title = document.createElement("div");
+  title.className = "picker-title";
+  title.textContent = "Connect " + src + " → " + tgt + " on:";
+  picker.append(title);
+  defs.forEach((d) => {
+    const b = document.createElement("button");
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.style.background = d.color;
+    const name = document.createElement("span");
+    name.textContent = d.id;
+    b.append(dot, name);
+    b.addEventListener("click", () => {
+      connect(src, tgt, d.id);
+      closeLinePicker();
+      pendingSource = null;
+      highlightSelection();
+      setEditHint("Click a source station, then a target.");
+    });
+    picker.append(b);
+  });
+  const pane = el("preview-pane").getBoundingClientRect();
+  picker.style.left = Math.min(e.clientX - pane.left, pane.width - 160) + "px";
+  picker.style.top = Math.min(e.clientY - pane.top, pane.height - 90) + "px";
+  picker.classList.remove("hidden");
+}
+
+function closeLinePicker() {
+  el("line-picker").classList.add("hidden");
+}
+
+/* --------------------------- property panel --------------------------- */
+
+function propRow(labelText, control) {
+  const row = document.createElement("div");
+  row.className = "prop-row";
+  const label = document.createElement("label");
+  label.textContent = labelText;
+  row.append(label, control);
+  return row;
+}
+
+function textControl(value, onCommit) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = value;
+  const commit = () => onCommit(input.value);
+  input.addEventListener("change", commit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      commit();
+      input.blur();
+    }
+  });
+  return input;
+}
+
+function deleteControl(text, onClick) {
+  const button = document.createElement("button");
+  button.className = "prop-delete";
+  button.textContent = text;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function actionControl(text, onClick) {
+  const button = document.createElement("button");
+  button.className = "prop-action";
+  button.textContent = text;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function idRow(text) {
+  const row = document.createElement("div");
+  row.className = "prop-row";
+  const label = document.createElement("label");
+  label.textContent = text;
+  row.append(label);
+  return row;
+}
+
+function renderPropPanel() {
+  const panel = el("prop-panel");
+  if (!selection) {
+    panel.classList.add("hidden");
+    return;
+  }
+  panel.classList.remove("hidden");
+  el("prop-kind").textContent = selection.kind;
+  const body = el("prop-body");
+  body.textContent = "";
+  if (selection.kind === "station") renderStationProps(body, selection.id);
+  else if (selection.kind === "section") renderSectionProps(body, selection.id);
+  else if (selection.kind === "line") renderLineProps(body, selection.id);
+  else if (selection.kind === "edge") renderEdgeProps(body, selection);
+}
+
+function renderEdgeProps(body, sel) {
+  body.append(idRow(sel.src + " →|" + sel.line + "| " + sel.tgt));
+  body.append(actionControl("Add station on this edge", () => splitEdge(sel.src, sel.tgt, sel.line)));
+  body.append(
+    deleteControl("Delete edge", () => {
+      const lineNo = findEdgeLineNo(sel.src, sel.tgt, sel.line);
+      if (lineNo >= 0) deleteEdge(lineNo);
+      clearSelection();
+    })
+  );
+}
+
+function renderStationProps(body, id) {
+  body.append(idRow("id: " + id));
+  if (findStationDecl(id) >= 0) {
+    body.append(propRow("Label", textControl(stationLabel(id), (v) => renameStation(id, v.trim() || id))));
+  } else {
+    const note = document.createElement("div");
+    note.className = "prop-empty";
+    note.textContent = "Declared inline in an edge; rename it in the text.";
+    body.append(note);
+  }
+  body.append(deleteControl("Delete station", () => deleteStation(id)));
+}
+
+function renderSectionProps(body, id) {
+  const block = findSectionBlock(id);
+  body.append(idRow("id: " + id));
+  if (block) {
+    body.append(propRow("Name", textControl((block.name || "").trim(), (v) => renameSection(id, v.trim() || id))));
+    const grid = currentGrid(id);
+    const wrap = document.createElement("div");
+    wrap.className = "prop-grid";
+    const colInput = numControl(grid ? grid.col : "");
+    const rowInput = numControl(grid ? grid.row : "");
+    const commit = () => {
+      const c = colInput.value.trim();
+      const r = rowInput.value.trim();
+      if (c === "" && r === "") setSectionGrid(id, null);
+      else setSectionGrid(id, c === "" ? 0 : c, r === "" ? 0 : r);
+    };
+    colInput.addEventListener("change", commit);
+    rowInput.addEventListener("change", commit);
+    wrap.append(colInput, rowInput);
+    body.append(propRow("Grid col, row (blank = auto)", wrap));
+  }
+  body.append(deleteControl("Delete section", () => deleteSection(id)));
+}
+
+function renderLineProps(body, id) {
+  const defs = parseLineDefs();
+  const def = defs.find((d) => d.id === id);
+  body.append(idRow("line: " + id));
+  if (def) {
+    body.append(propRow("Display name", textControl(def.name, (v) => renameLine(def.line, v.trim() || id))));
+    const color = document.createElement("input");
+    color.type = "color";
+    const hex = expandHex(def.color);
+    if (hex) color.value = hex;
+    color.addEventListener("input", () => setLineColor(def.line, color.value));
+    body.append(propRow("Colour", color));
+  }
+  const heading = document.createElement("label");
+  heading.className = "prop-row";
+  heading.textContent = "Edges on this line";
+  body.append(heading);
+  const list = document.createElement("div");
+  list.className = "prop-edges";
+  const edges = parseEdges().filter((e) => e.lines.includes(id));
+  if (!edges.length) {
+    const empty = document.createElement("div");
+    empty.className = "prop-empty";
+    empty.textContent = "No edges on this line.";
+    list.append(empty);
+  }
+  edges.forEach((e) => list.append(edgeRow(e, id, defs)));
+  body.append(list);
+}
+
+function edgeRow(edge, lineId, defs) {
+  const row = document.createElement("div");
+  row.className = "prop-edge";
+  const ends = document.createElement("span");
+  ends.className = "ends";
+  ends.textContent = edge.src + " → " + edge.tgt;
+  ends.title = ends.textContent;
+  row.append(ends);
+  if (edge.lines.length === 1) {
+    const select = document.createElement("select");
+    defs.forEach((d) => {
+      const opt = document.createElement("option");
+      opt.value = d.id;
+      opt.textContent = d.id;
+      if (d.id === lineId) opt.selected = true;
+      select.append(opt);
+    });
+    select.addEventListener("change", () => reassignEdgeLine(edge.lineNo, select.value));
+    row.append(select);
+  }
+  const add = document.createElement("button");
+  add.className = "add";
+  add.textContent = "+";
+  add.title = "Add a station on this edge";
+  add.addEventListener("click", () => splitEdge(edge.src, edge.tgt, lineId));
+  row.append(add);
+  const del = document.createElement("button");
+  del.className = "del";
+  del.textContent = "×";
+  del.title = "Delete edge";
+  del.addEventListener("click", () => deleteEdge(edge.lineNo));
+  row.append(del);
+  return row;
+}
+
+function numControl(value) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "0";
+  input.step = "1";
+  input.value = value;
+  return input;
+}
+
+function currentGrid(id) {
+  const m = editor
+    .getValue()
+    .match(new RegExp("^\\s*%%metro\\s+grid:\\s*" + escapeRe(id) + "\\s*\\|\\s*(\\d+)\\s*,\\s*(\\d+)", "m"));
+  return m ? { col: m[1], row: m[2] } : null;
+}
+
+function renameLine(lineNo, name) {
+  const text = editor.getLine(lineNo);
+  if (text == null) return;
+  replaceLine(lineNo, text.replace(/^(\s*%%metro\s+line:\s*[^|]+\|\s*)([^|]+?)(\s*\|)/, "$1" + name + "$3"));
+  doRender();
+}
+
+function wireEditTools() {
+  document.querySelectorAll(".mode-btn").forEach((b) =>
+    b.addEventListener("click", () => setMode(b.dataset.mode))
+  );
+  el("btn-add-section").addEventListener("click", () => {
+    setMode("select");
+    addSection();
+  });
+  el("preview").addEventListener("click", onPreviewClick);
+  el("prop-close").addEventListener("click", clearSelection);
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (!el("line-picker").classList.contains("hidden")) {
+      closeLinePicker();
+      pendingSource = null;
+      highlightSelection();
+    } else if (editMode !== "select") {
+      setMode("select");
+    } else if (selection) {
+      clearSelection();
+    }
+  });
+  // A click outside the picker that is also outside the canvas dismisses it; a
+  // click inside the canvas is the connect flow itself, so it is left alone.
+  document.addEventListener("click", (e) => {
+    const picker = el("line-picker");
+    if (picker.classList.contains("hidden")) return;
+    if (!picker.contains(e.target) && !e.target.closest("#preview")) closeLinePicker();
+  });
 }
 
 /* -------------------------------- export ------------------------------- */
@@ -666,6 +1494,8 @@ function wireControls() {
     if (!el("report-modal").classList.contains("hidden")) closeReport();
     if (!el("convert-modal").classList.contains("hidden")) closeConvert();
   });
+
+  wireEditTools();
 }
 
 initEditor();

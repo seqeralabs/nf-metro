@@ -307,3 +307,172 @@ test("share link round-trips the editor content", async () => {
   const restored = await page.evaluate(() => window.__nfMetro.getValue());
   expect(restored).toBe(source);
 });
+
+// A two-section map used by the graphical-editing tests below.
+const EDIT_MAP =
+  "%%metro line: a | A | #f00\n" +
+  "%%metro line: b | B | #0af\n" +
+  "graph LR\n" +
+  "  subgraph s1 [One]\n" +
+  "    n1[N1]\n" +
+  "    n2[N2]\n" +
+  "    n1 -->|a| n2\n" +
+  "  end\n" +
+  "  subgraph s2 [Two]\n" +
+  "    n3[N3]\n" +
+  "  end\n" +
+  "  n2 -->|a| n3\n";
+
+const getValue = () => page.evaluate(() => window.__nfMetro.getValue());
+
+async function loadEditMap() {
+  await page.evaluate((m) => {
+    window.__nfMetro.setMode("select");
+    window.__nfMetro.setValue(m);
+  }, EDIT_MAP);
+  await expect(page.locator('#preview [data-station-id="n1"]').first()).toBeVisible();
+}
+
+test("edit-mode buttons toggle and update the hint", async () => {
+  await loadEditMap();
+  await page.locator('.mode-btn[data-mode="add-edge"]').click();
+  await expect(page.locator('.mode-btn[data-mode="add-edge"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('.mode-btn[data-mode="select"]')).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("#edit-hint")).toContainText(/source station/i);
+  await page.locator('.mode-btn[data-mode="select"]').click();
+  await expect(page.locator('.mode-btn[data-mode="add-edge"]')).toHaveAttribute("aria-pressed", "false");
+});
+
+test("clicking a station selects it and shows the property panel", async () => {
+  await loadEditMap();
+  await expect(page.locator("#prop-panel")).toBeHidden();
+  await page.locator('#preview [data-station-id="n1"]').first().click();
+  await expect(page.locator("#prop-panel")).toBeVisible();
+  await expect(page.locator("#prop-kind")).toHaveText("station");
+  await expect(page.locator("#prop-body")).toContainText("id: n1");
+  await page.locator("#prop-close").click();
+  await expect(page.locator("#prop-panel")).toBeHidden();
+});
+
+test("add-station writes a node into the chosen section", async () => {
+  await loadEditMap();
+  await page.evaluate(() => window.__nfMetro.addStationToSection("s2"));
+  expect(await getValue()).toMatch(/subgraph s2 \[Two\][\s\S]*node1\[New node\][\s\S]*end/);
+  await expect(page.locator('#preview [data-station-id="node1"]').first()).toBeVisible();
+  await expect(page.locator("#prop-body")).toContainText("id: node1");
+});
+
+test("connect inserts an edge between two stations", async () => {
+  await loadEditMap();
+  await page.evaluate(() => window.__nfMetro.connect("n1", "n3", "b"));
+  expect(await getValue()).toContain("n1 -->|b| n3");
+});
+
+test("add-section appends a new subgraph block and renders it", async () => {
+  await loadEditMap();
+  await page.locator("#btn-add-section").click();
+  expect(await getValue()).toMatch(/subgraph section1 \[New Section\]/);
+  await expect(page.locator('#preview [data-section-id="section1"]').first()).toBeVisible();
+});
+
+test("rename station rewrites its label and keeps the id", async () => {
+  await loadEditMap();
+  await page.evaluate(() => window.__nfMetro.renameStation("n1", "Renamed"));
+  expect(await getValue()).toContain("n1[Renamed]");
+});
+
+test("reassign edge line rewrites the line token", async () => {
+  await loadEditMap();
+  await page.evaluate(() => {
+    const edge = window.__nfMetro.parseEdges().find((e) => e.src === "n1" && e.tgt === "n2");
+    window.__nfMetro.reassignEdgeLine(edge.lineNo, "b");
+  });
+  expect(await getValue()).toContain("n1 -->|b| n2");
+});
+
+test("section grid directive is written then cleared", async () => {
+  await loadEditMap();
+  await page.evaluate(() => window.__nfMetro.setSectionGrid("s1", 1, 0));
+  expect(await getValue()).toContain("%%metro grid: s1 | 1,0");
+  await page.evaluate(() => window.__nfMetro.setSectionGrid("s1", null));
+  expect(await getValue()).not.toContain("grid: s1");
+});
+
+test("delete edge removes its line", async () => {
+  await loadEditMap();
+  await page.evaluate(() => {
+    const edge = window.__nfMetro.parseEdges().find((e) => e.src === "n2" && e.tgt === "n3");
+    window.__nfMetro.deleteEdge(edge.lineNo);
+  });
+  expect(await getValue()).not.toContain("n2 -->|a| n3");
+});
+
+test("delete station removes its declaration and incident edges", async () => {
+  await loadEditMap();
+  await page.evaluate(() => window.__nfMetro.deleteStation("n2"));
+  const v = await getValue();
+  expect(v).not.toContain("n2[N2]");
+  expect(v).not.toContain("-->|a| n2");
+  expect(v).not.toContain("n2 -->|a| n3");
+  await expect(page.locator("#error")).toBeHidden();
+});
+
+test("delete section removes the block and its inter-section edges", async () => {
+  await loadEditMap();
+  await page.evaluate(() => window.__nfMetro.deleteSection("s2"));
+  const v = await getValue();
+  expect(v).not.toContain("subgraph s2");
+  expect(v).not.toContain("n3[N3]");
+  expect(v).not.toContain("n2 -->|a| n3");
+});
+
+test("clicking an in-section edge selects it as an edge", async () => {
+  await loadEditMap();
+  // The first route element is the n1->n2 in-section edge, whose endpoints sit
+  // on both stations, so it resolves to a specific edge rather than the line. A
+  // positional click at the stroke centre matches a real click on a thin route
+  // (element-level .click() is flaky on near-zero-height SVG paths).
+  const box = await page.locator('#preview [data-line-id="a"]').first().boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.locator("#prop-panel")).toBeVisible();
+  await expect(page.locator("#prop-kind")).toHaveText("edge");
+  await expect(page.locator("#prop-body")).toContainText("n1");
+  await expect(page.locator("#prop-body")).toContainText("n2");
+});
+
+test("splitting an edge inserts a station between its endpoints", async () => {
+  await loadEditMap();
+  await page.evaluate(() => window.__nfMetro.splitEdge("n1", "n2", "a"));
+  const v = await getValue();
+  expect(v).toContain("n1 -->|a| node1");
+  expect(v).toContain("node1 -->|a| n2");
+  expect(v).toContain("node1[New node]");
+  expect(v).not.toContain("n1 -->|a| n2");
+  await expect(page.locator('#preview [data-station-id="node1"]').first()).toBeVisible();
+});
+
+test("splitting a multi-line edge keeps every line on both halves", async () => {
+  await page.evaluate(() =>
+    window.__nfMetro.setValue(
+      "%%metro line: a | A | #f00\n%%metro line: b | B | #0af\n" +
+        "graph LR\n  subgraph s [S]\n    x[X]\n    y[Y]\n    x -->|a,b| y\n  end\n"
+    )
+  );
+  await expect(page.locator('#preview [data-station-id="x"]').first()).toBeVisible();
+  await page.evaluate(() => window.__nfMetro.splitEdge("x", "y", "a"));
+  const v = await getValue();
+  expect(v).toContain("x -->|a,b| node1");
+  expect(v).toContain("node1 -->|a,b| y");
+});
+
+test("the line panel offers add and delete on each edge", async () => {
+  await loadEditMap();
+  // Clicking an inter-section route selects the line; its edge list carries a
+  // splice (+) and delete (x) control per edge.
+  await page.evaluate(() => window.__nfMetro.select({ kind: "line", id: "a" }));
+  await expect(page.locator("#prop-kind")).toHaveText("line");
+  await expect(page.locator(".prop-edge button.add").first()).toBeVisible();
+  await expect(page.locator(".prop-edge button.del").first()).toBeVisible();
+  await page.locator(".prop-edge button.add").first().click();
+  expect(await getValue()).toContain("node1");
+});
