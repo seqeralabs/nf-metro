@@ -48,6 +48,13 @@ nav:
   - nf-core Pipelines: pipelines/index.md
   - Gallery: gallery/index.md
   - Playground (beta): playground/index.html
+  - Releases:
+    - Overview: releases/index.md
+    - v0.7.x: releases/v0.7.md
+    - v0.6.x: releases/v0.6.md
+    - v0.5.x: releases/v0.5.md
+    - v0.4.x: releases/v0.4.md
+    - v0.1–v0.3: releases/v0.1.md
   - Internals:
     - Architecture: dev/architecture.md
     - Layout pipeline: dev/layout_pipeline.md
