@@ -98,12 +98,38 @@
         </div>
       </details>
 
+      <div class="pane-toolbar edit-toolbar">
+        <span class="group-label">Edit map</span>
+        <button class="mode-btn" data-mode="select" aria-pressed="true"
+                title="Select an element to inspect or edit it">Select</button>
+        <button class="mode-btn" data-mode="add-station" aria-pressed="false"
+                title="Click a section to add a station to it">+ Station</button>
+        <button class="mode-btn" data-mode="add-edge" aria-pressed="false"
+                title="Click a source station, then a target, to connect them">Connect</button>
+        <span class="sep"></span>
+        <button id="btn-add-section" title="Add a new section">+ Section</button>
+        <span class="sep"></span>
+        <span id="edit-hint" class="muted small">Click an element to select it.</span>
+      </div>
+
       <div id="preview"></div>
+
       <div id="zoom-controls">
         <button id="zoom-out" title="Zoom out" aria-label="Zoom out">&minus;</button>
         <button id="zoom-fit" title="Fit to view" aria-label="Fit to view">Fit</button>
         <button id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
       </div>
+
+      <aside id="prop-panel" class="prop-panel hidden" aria-label="Selected element">
+        <div class="prop-head">
+          <span id="prop-kind" class="prop-kind"></span>
+          <button id="prop-close" class="ghost" title="Deselect">×</button>
+        </div>
+        <div id="prop-body"></div>
+      </aside>
+
+      <div id="line-picker" class="line-picker hidden" role="menu" aria-label="Choose a line"></div>
+
       <div id="boot" class="overlay">
         <div class="spinner"></div>
         <p id="boot-msg">Starting Python runtime…</p>
