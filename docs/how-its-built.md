@@ -1,0 +1,99 @@
+# How nf-metro is built
+
+nf-metro is a layout engine, a rendering pipeline, and a test harness, assembled incrementally over several months. This page describes the engineering decisions behind it: why the validation layers exist, how the visual review loop works, and what the "ratchet" discipline means in practice. If you want to work on the codebase, this is the context.
+
+## What the engine actually does
+
+The task sounds simple: take a text description of a pipeline graph and produce a metro-map SVG. The hard part is that "metro map" is an aesthetic standard, not a mathematical one. A metro map isn't a graph layout in the academic sense (no force-directed placement, no crossing minimisation). It's a set of constraints that a human recognises as "right" - stations sit on straight track, not on corners; bundles of lines sweep round curves together; sections don't overlap; labels don't collide with routes. None of those constraints come for free.
+
+The engine solves this through a [sequence of ~40 numbered phases](https://github.com/pinin4fjords/nf-metro/tree/main/src/nf_metro/layout/phases), each responsible for a specific piece of the coordinate assignment problem. The phases run in strict order; each one reads the state left by the previous one and writes into it. The contracts between phases - what each phase requires to be true on entry and what it guarantees on exit - are documented in [`src/nf_metro/layout/CONTRACT.md`](https://github.com/pinin4fjords/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md).
+
+Because the phases share mutable state and everything depends on everything else (moving a station for label clearance can compress a diagonal to an ugly angle; widening a section can push a neighbouring section out of its column), correctness is only verifiable at the end of the pipeline - not from reading any single phase.
+
+## The four validation layers
+
+The codebase has four complementary validation layers. They are complementary, not redundant: each catches bugs the others cannot see. These are described in detail in the [Testing docs](testing.md#the-four-validation-layers); the short version:
+
+| Layer | What it checks | When |
+|---|---|---|
+| **Layout oracle** | Graph geometry after layout | Every topology test |
+| **Routing invariants** | Edge waypoints as each route is computed | Always-on |
+| **Phase guards** | Pre/post-conditions at each phase boundary | Always-on |
+| **Render oracle** | Finished SVG geometry | Opt-in CLI flag; corpus gate |
+
+The most important design principle across all four layers: **checks only accumulate, and the bar only moves up**. Once a check is in, it stays in. A regression is a red build, not a human noticing something looks off.
+
+A related pattern for known bugs: write the test for the correct behaviour, then mark it `xfail`. While the bug is present the build stays green. When someone fixes it, the test flips to `XPASS` and CI turns red, forcing the developer to retire the old expectation and lock in the correct behaviour. [Here is an example of that pattern in `tests/test_layout_invariants.py`](https://github.com/pinin4fjords/nf-metro/blob/main/tests/test_layout_invariants.py#L446-L456).
+
+## Making mistakes impossible to express
+
+The strongest checks don't catch a bug; they eliminate the category of mistake entirely. Two examples:
+
+**Station-as-elbow.** Metro maps don't put stations on corners; stations sit on straight track, with the curves in between. Early versions of the engine used station nodes as inflection points because it was convenient. After correcting this many times, [`check_station_as_elbow`](https://github.com/pinin4fjords/nf-metro/blob/main/tests/layout_validator.py) was added to the layout oracle. It fires as an `ERROR` on any fixture where a station is at a bend. This is the "scream" version: the mistake is still possible to write, but it fails CI immediately.
+
+**Concentric bundle corners.** For a long time, every bend in the routing had its radius computed by hand at the point where the curve was drawn - direction, sign, and magnitude all chosen locally. Get the sign wrong and the bundle fans apart or crosses itself. The better fix was to pull all of it into one place: a route now describes the [centreline it wants to follow](https://github.com/pinin4fjords/nf-metro/blob/main/src/nf_metro/layout/routing/bundle.py#L66-L109), and a single builder fans the individual lines out as parallel offsets, working out every corner from the geometry. Nobody writes a radius by hand any more. The whole class of pinching and crossing bug stopped existing because there is no code left in which it can be written.
+
+## The topology fixture library
+
+The hardest part of testing a layout engine is that most bugs only appear in specific topologies. A test that only exercises one shape of graph will pass indefinitely while the engine fails on other shapes.
+
+The response is [`examples/topologies/`](https://github.com/pinin4fjords/nf-metro/tree/main/examples/topologies): a library of ~38 `.mmd` fixtures, each isolating a specific graph topology (fan-out, fan-in, diamond, fold, mixed port sides, cross-column entries, etc.). `tests/test_topology_validation.py` parametrizes over every fixture in that directory and runs the full layout oracle against each one. Adding a `.mmd` to that directory enrolls it in the suite with no further wiring.
+
+When a new topology case is found to produce bad output, the workflow is:
+
+1. Write a minimal `.mmd` that reproduces it and drop it in `examples/topologies/`.
+2. Confirm the topology test now fails against the oracle.
+3. Fix the engine so the oracle passes.
+4. Leave the fixture in place as a regression guard.
+
+The topology library is also used by the visual review CI (see below).
+
+## Visual review via CI render diffs
+
+Automated geometry checks verify that coordinates are correct. They cannot verify that the result looks right. For that, the project uses a rendered diff in CI.
+
+Every pull request triggers `.github/workflows/pr-renders.yml`, which:
+
+1. Renders the full gallery on the PR branch.
+2. Checks out the base branch and renders the same gallery.
+3. Runs `scripts/build_render_diff.py` to build a side-by-side before/after page for every SVG that changed.
+4. Publishes the result at `https://pinin4fjords.github.io/nf-metro/_pr/<PR_NUMBER>/`.
+
+The diff page is a fast scan: scroll through the before/afters, look for anything that regressed, file an issue or iterate on the fix. Some bugs only show up this way - a layout that passes every geometric check can still look wrong to a human eye. A fan of routes that comes out lopsided, or a label that clips against a route, passes the oracle and still needs fixing. The render diff is the channel that puts that judgment back in the loop.
+
+The script exits `2` when there is no visual difference: a PR that intends to be neutral should produce a byte-identical gallery. Non-identical is expected for layout changes; byte-identical for refactors.
+
+## The guard tier system
+
+Not all phase guards are equal. The guard system has three tiers:
+
+- **Tier A (always-on)**: structural invariants that must hold in all valid graphs. A failure here is a hard bug.
+- **Tier B (defensive)**: guards that protect against known fragile transitions. Enabled but annotated.
+- **Issue-pinned**: guards that track a known defect against the corpus, marked `xfail`. When the issue is fixed, the test flips to `XPASS` and prompts removal of the pin.
+
+The full tier taxonomy and rationale is in [`docs/dev/guard_tiers.md`](guard_tiers.md).
+
+## Routing dispatch
+
+The routing module uses a [first-match dispatcher](https://github.com/pinin4fjords/nf-metro/blob/main/src/nf_metro/layout/routing/core.py) over a table of handler families. Each handler covers a specific combination of section orientation, entry/exit direction, and flow type. The dispatch table and the full handler inventory are documented in [`docs/dev/inter_section_dispatch.md`](inter_section_dispatch.md) and [`docs/dev/routing_gate_coverage.md`](routing_gate_coverage.md).
+
+When adding a new routing case, the pattern is:
+
+1. Write a topology fixture that exercises the new case.
+2. Confirm it fails with the current dispatcher.
+3. Add a handler, or extend an existing one.
+4. Add a gate coverage entry so the new arm shows up in the coverage matrix.
+
+## What the docs cover
+
+The `docs/dev/` tree covers the internals in detail:
+
+- [`architecture.md`](architecture.md) - system overview and data flow
+- [`layout_pipeline.md`](layout_pipeline.md) - the phase sequence with entry/exit contracts
+- [`routing.md`](routing.md) - edge routing mechanics and the centreline/offset model
+- [`inter_section_dispatch.md`](inter_section_dispatch.md) - the dispatch table for inter-section routes
+- [`routing_gate_coverage.md`](routing_gate_coverage.md) - which handler arms are covered by corpus tests
+- [`parser.md`](parser.md) - the Lark grammar and post-parse rewrites
+- [`testing.md`](testing.md) - test structure and validation layers in detail
+
+The `CONTRACT.md` at [`src/nf_metro/layout/CONTRACT.md`](https://github.com/pinin4fjords/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md) is the per-phase lifecycle specification: what each phase receives, modifies, and guarantees.
