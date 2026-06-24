@@ -192,7 +192,6 @@ def test_genuine_dead_arm_not_masked_as_covered(gates):
 EXPANDED_OPERAND_GATES = [
     "reversal.py::or (sec_id, succ_id) in horizontal_succ_pairs::#1",
     "inter_section_handlers.py::and src_sec is not None::#1",
-    "tb_handlers.py::and tgt_sec is not None::#1",
     "normalize.py::go is not None::#1",
     "offsets.py::sec is None::#1",
 ]

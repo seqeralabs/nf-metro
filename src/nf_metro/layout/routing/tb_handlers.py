@@ -365,18 +365,14 @@ def _perp_drop_x(edge: Edge, src_x: float, dx: float, ctx: _RoutingCtx) -> float
     calling edge (to pick the route shape) and its bundle-mates (to anchor the
     corner), so every line in the bundle reads the same channel.
     """
-    src_off = _get_offset(ctx, edge.source, edge.line_id)
-    drop_delta = _perp_entry_drop_delta(edge, dx, ctx)
     tgt = ctx.graph.stations.get(edge.target)
     tgt_sec = ctx.graph.sections.get(tgt.section_id) if tgt and tgt.section_id else None
-    if (
-        abs(drop_delta) > COORD_TOLERANCE
-        and tgt_sec is not None
-        and tgt_sec.direction not in ("TB", "BT")
-    ):
+    if tgt_sec is not None and tgt_sec.direction not in ("TB", "BT"):
         crossing_x = _perp_entry_crossing_x(ctx, edge.source, edge.line_id, src_x)
         if crossing_x is not None:
             return crossing_x
+    src_off = _get_offset(ctx, edge.source, edge.line_id)
+    drop_delta = _perp_entry_drop_delta(edge, dx, ctx)
     return src_x + src_off + drop_delta
 
 

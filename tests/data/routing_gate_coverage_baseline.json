@@ -329,9 +329,8 @@
   "seam.py::if feeder.grid_col - consumer.grid_col <= 1:::#1",
   "seam.py::if not (::#1",
   "seam.py::if not junction_preds:::#1",
-  "tb_handlers.py::and tgt_sec is not None::#1",
-  "tb_handlers.py::and tgt_sec.direction not in (\"TB\", \"BT\")::#1",
   "tb_handlers.py::if crossing_x is not None:::#1",
   "tb_handlers.py::if diag_end < diag_start:::#1",
-  "tb_handlers.py::if diag_end > diag_start:::#1"
+  "tb_handlers.py::if diag_end > diag_start:::#1",
+  "tb_handlers.py::if tgt_sec is not None and tgt_sec.direction not in (\"TB\", \"BT\"):::#1"
 ]

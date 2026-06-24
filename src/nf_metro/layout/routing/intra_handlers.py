@@ -41,6 +41,7 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import (
     _get_offset,
     _RoutingCtx,
+    _tb_x_offset,
 )
 from nf_metro.layout.routing.perp import (
     _perp_riser_lateral,
@@ -205,6 +206,31 @@ def _route_perp_exit(
     )
 
 
+def _aligned_tb_drop_target(
+    ctx: _RoutingCtx, exit_port_id: str, exit_x: float
+) -> tuple[str, str] | None:
+    """The column-aligned vertical-flow entry this perp exit drops straight into.
+
+    Returns ``(entry_port_id, section_id)`` when *exit_port_id* feeds a
+    TOP/BOTTOM entry of a vertical-flow section sharing its X, or ``None``.  The
+    descent then continues that section's lane through the port instead of the
+    reflected riser the cross-column up-and-over uses.
+    """
+    for e in ctx.graph.edges_from(exit_port_id):
+        entry_port = ctx.graph.ports.get(e.target)
+        entry_st = ctx.graph.stations.get(e.target)
+        if (
+            entry_port is not None
+            and entry_port.is_entry
+            and entry_port.side in (PortSide.TOP, PortSide.BOTTOM)
+            and entry_port.section_id in ctx.tb_sections
+            and entry_st is not None
+            and abs(entry_st.x - exit_x) <= COORD_TOLERANCE
+        ):
+            return e.target, entry_port.section_id
+    return None
+
+
 def _route_perp_exit_bundle(
     edge: Edge,
     src: Station,
@@ -237,6 +263,11 @@ def _route_perp_exit_bundle(
     # carries that leg's travel sign.
     hsign = 1.0 if tx >= sx else -1.0
 
+    # A column-aligned drop into a vertical-flow section continues that section's
+    # rotation lane straight through the port, so the leave seats on the target's
+    # lane rather than the perp riser's reflection (which the up-and-over needs).
+    tb_drop = _aligned_tb_drop_target(ctx, edge.target, tx)
+
     def source_offset(line_id: str) -> float:
         return _get_offset(ctx, edge.source, line_id) * hsign
 
@@ -244,7 +275,11 @@ def _route_perp_exit_bundle(
         # The vertical leave seats each line on the exit trunk's per-line X; the
         # right-hand normal reverses a BOTTOM (descending) leg, so the lateral is
         # negated there to cancel it back.
-        d = _perp_riser_lateral(ctx, edge.target, line_id, side, src.section_id)
+        if tb_drop is not None:
+            entry_id, tb_sec = tb_drop
+            d = _tb_x_offset(ctx, entry_id, line_id, tb_sec)
+        else:
+            d = _perp_riser_lateral(ctx, edge.target, line_id, side, src.section_id)
         return d if is_top else -d
 
     routes = build_tapered_bundle(

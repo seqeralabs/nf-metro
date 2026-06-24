@@ -900,7 +900,7 @@
     "status": "defensive"
   },
   "tb_handlers.py::if crossing_x is not None:::#1": {
-    "note": "Pair of context.py::if not indices: - the helper returns None only when no bundled feeder reaches the port, which never co-occurs with the gate that calls it (drop_delta!=0 multi-line bundle into an LR/RL section is always fed by a bundled inter-section edge).  The crossing_x-is-None fall-through is a defensive guard, never taken across the corpus.",
+    "note": "Pair of context.py::if not indices: - the helper returns None only when no bundled feeder reaches the port, but a horizontal-flow section taking a perpendicular entry is always fed by a bundled inter-section edge, so crossing_x resolves.  The crossing_x-is-None fall-through is a defensive guard, never taken across the corpus.",
     "status": "defensive"
   },
   "tb_handlers.py::if diag_end < diag_start:::#1": {
@@ -911,8 +911,8 @@
     "note": "Descending-run mirror of the ascending collapse clamp (#1 of `if diag_end < diag_start:`): fires only when |run| < 2*MIN_STRAIGHT_EDGE (20px), but connected diagonal endpoints are always >= one grid pitch (40/60px) apart on the run axis. Unreachable degenerate-geometry guard.",
     "status": "defensive"
   },
-  "tb_handlers.py::and tgt_sec is not None::#1": {
-    "note": "Perp-entry drop crossing-X override: when the drop delta exceeds tolerance the edge's target is a sectioned station, so tgt_sec always resolves and the `tgt_sec is None` short-circuit to the plain drop is never taken.",
+  "tb_handlers.py::if tgt_sec is not None and tgt_sec.direction not in (\"TB\", \"BT\"):::#1": {
+    "note": "Perp-entry drop crossing-X override: the edge's target is always a sectioned station, so tgt_sec resolves and the `tgt_sec is None` short-circuit to the plain drop is never taken; the `direction in (TB, BT)` arm (a drop continuing into a vertical-flow trunk) and the horizontal-target arm are both exercised.",
     "status": "defensive"
   },
   "inter_section_handlers.py::if sx >= (left_edge + right_edge) / 2:::#1": {

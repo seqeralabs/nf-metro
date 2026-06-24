@@ -510,6 +510,71 @@ def check_seam_approach_equals_departure(
     return mismatches
 
 
+@dataclass(frozen=True)
+class PortLaneDiscontinuity:
+    """One line whose routes meet a shared port at differing coordinates.
+
+    Every route ending or starting at ``port_id`` for ``line_id`` must deliver
+    that line to the same point: the intra-section trunk leaving an exit port,
+    the inter-section bundle continuing from it, and the next section's entry
+    drop are one stroke and must touch.  ``coords`` are the distinct endpoints
+    found; their spread is the visible gap.
+    """
+
+    port_id: str
+    line_id: str
+    coords: tuple[tuple[float, float], ...]
+
+    def message(self) -> str:
+        span_x = max(c[0] for c in self.coords) - min(c[0] for c in self.coords)
+        span_y = max(c[1] for c in self.coords) - min(c[1] for c in self.coords)
+        pts = ", ".join(f"({x:.1f},{y:.1f})" for x, y in self.coords)
+        return (
+            f"port {self.port_id!r} line {self.line_id!r}: routes meet at "
+            f"{pts}; span ({span_x:.1f},{span_y:.1f}) > {COORD_TOLERANCE:.1f}px "
+            "-- trunk and its outgoing/continuing bundle do not share the lane"
+        )
+
+
+def check_seam_segments_meet_at_port(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[PortLaneDiscontinuity]:
+    """Routes touching a shared port must deliver each line to one coordinate.
+
+    A line crossing a port -- the trunk arriving at an exit, the inter-section
+    bundle leaving it, the entry drop on the far side -- passes through one X
+    (one Y for a horizontal seam) per line.  When the section's trunk draws its
+    lane on one side of the port and the outgoing bundle on the other (the
+    rotation lane vs the reflected riser), the strokes part company at the port
+    and the output hangs disconnected.  This flags that gap at its source: the
+    per-line endpoints of every route meeting the port must agree.
+    """
+    by_port_line: dict[tuple[str, str], list[tuple[float, float]]] = defaultdict(list)
+    for route in routes:
+        points = apply_route_offsets(route, offsets)
+        if not points:
+            continue
+        for endpoint, node_id in (
+            (points[0], route.edge.source),
+            (points[-1], route.edge.target),
+        ):
+            if node_id in graph.ports:
+                by_port_line[(node_id, route.line_id)].append(endpoint)
+    discontinuities: list[PortLaneDiscontinuity] = []
+    for (port_id, line_id), coords in by_port_line.items():
+        if len(coords) < 2:
+            continue
+        span_x = max(c[0] for c in coords) - min(c[0] for c in coords)
+        span_y = max(c[1] for c in coords) - min(c[1] for c in coords)
+        if span_x > COORD_TOLERANCE or span_y > COORD_TOLERANCE:
+            discontinuities.append(
+                PortLaneDiscontinuity(port_id, line_id, tuple(coords))
+            )
+    return discontinuities
+
+
 # ---------------------------------------------------------------------------
 # Fan-out junction tail join
 # ---------------------------------------------------------------------------
@@ -3661,6 +3726,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_right_entry_drop_in_when_clear, "B"),
     # --- Tier C: test-only oracles, run from the test suite, not the runtime ---
     _check_spec(check_seam_approach_equals_departure, "C"),
+    _check_spec(check_seam_segments_meet_at_port, "C"),
 )
 
 
@@ -3710,6 +3776,8 @@ __all__ = [
     "check_perp_exit_over_leadin_clears_only_spanned_sections",
     "check_right_entry_drop_in_when_clear",
     "check_seam_approach_equals_departure",
+    "check_seam_segments_meet_at_port",
+    "PortLaneDiscontinuity",
     "bypass_horizontal_targets",
     "check_stacked_elbow_clearance",
     "check_partial_branch_offset_gaps",
