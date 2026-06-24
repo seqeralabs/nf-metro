@@ -21,6 +21,7 @@ from nf_metro.layout.routing.common import (
     merge_trunk_force_cross_row,
     resolve_section,
 )
+from nf_metro.layout.routing.reversal import detect_reversed_sections
 from nf_metro.parser.model import (
     Edge,
     MetroGraph,
@@ -78,6 +79,7 @@ class _RoutingCtx:
     join_stations: set[str]
     tb_sections: set[str]
     tb_right_entry: set[str]
+    reversed_sections: set[str]
     bundle_info: dict[_EdgeKey, tuple[int, int]]
     bypass_gap_idx: dict[_EdgeKey, tuple[int, int, int, int]]
     station_offsets: dict[tuple[str, str], float] | None
@@ -281,6 +283,8 @@ def _build_routing_context(
         ):
             tb_right_entry.add(port.section_id)
 
+    reversed_sections = detect_reversed_sections(graph)
+
     # Merge routing classification
     merge = _classify_merge_edges(graph, junction_ids, join_sources, fork_targets)
 
@@ -314,6 +318,7 @@ def _build_routing_context(
         join_stations=join_stations,
         tb_sections=tb_sections,
         tb_right_entry=tb_right_entry,
+        reversed_sections=reversed_sections,
         bundle_info=bundle_info,
         bypass_gap_idx=bypass_gap_idx,
         station_offsets=station_offsets,

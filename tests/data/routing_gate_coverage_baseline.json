@@ -41,7 +41,6 @@
   "common.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1",
   "context.py::for e in graph.edges:::#3",
   "context.py::for e in graph.edges_from(mjid):::#1",
-  "context.py::for pid in section.entry_ports:::#1",
   "context.py::for sid in section.station_ids:::#1",
   "context.py::if _has_intervening_sections(::#1",
   "context.py::if ctx.station_offsets:::#1",
@@ -322,6 +321,8 @@
   "seam.py::or _is_vertical_column_continuation(exit_port, entry_port, feeder)::#1",
   "tb_handlers.py::and tgt_sec is not None::#1",
   "tb_handlers.py::and tgt_sec.direction not in (\"TB\", \"BT\")::#1",
+  "tb_handlers.py::and tgt_section is not None::#1",
+  "tb_handlers.py::ctx.station_offsets is not None::#1",
   "tb_handlers.py::if crossing_x is not None:::#1",
   "tb_handlers.py::if diag_end < diag_start:::#1",
   "tb_handlers.py::if diag_end > diag_start:::#1"

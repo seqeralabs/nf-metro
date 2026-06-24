@@ -24,6 +24,7 @@ from nf_metro.layout.constants import (
     MERGE_ROUTE_MARGIN,
     SECTION_ROUTE_CLEARANCE,
 )
+from nf_metro.layout.geometry import AxisFrame
 from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import (
     fan_offsets,
@@ -968,7 +969,22 @@ def _route_tb_bottom_exit(
     drop / jog / drop with curved corners instead: down out of the BOTTOM
     port, across the inter-row gap, then down into the target.
     """
-    x_off = _tb_x_offset(ctx, edge.source, edge.line_id, src.section_id)
+    # The drop seats each line where the target section's own draw places it.
+    # A vertical-flow target rides the rotation lane (x - off); a horizontal-flow
+    # target receives the bundle perpendicular to its flow, where its perp-entry
+    # drop fans on the reflected lateral, so the approach must reflect to land on
+    # the same per-line X rather than reverse across the boundary.
+    tgt_sec = resolve_section(ctx.graph, tgt)
+    target_vertical = (
+        tgt_sec is not None
+        and AxisFrame.axes_for_direction(tgt_sec.direction)[0] == "y"
+    )
+    if target_vertical:
+        x_off = _tb_x_offset(ctx, edge.source, edge.line_id, src.section_id)
+    else:
+        x_off = _perp_riser_lateral(
+            ctx, edge.source, edge.line_id, PortSide.BOTTOM, src.section_id
+        )
     sx = src.x + x_off
     sy = src.y
     tx = tgt.x + x_off

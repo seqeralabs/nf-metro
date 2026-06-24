@@ -25,10 +25,12 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
 )
 from nf_metro.layout.routing.context import (
+    _entry_port_for_line,
     _get_offset,
     _max_offset_at,
     _RoutingCtx,
     _tb_x_offset,
+    lane_x,
 )
 from nf_metro.layout.routing.corners import (
     reversed_offset,
@@ -43,6 +45,52 @@ from nf_metro.parser.model import (
     PortSide,
     Station,
 )
+
+
+def _tb_trunk_endpoints(
+    ctx: _RoutingCtx,
+    edge: Edge,
+    src: Station,
+    tgt: Station,
+    section,  # noqa: ANN001
+) -> tuple[float, float]:
+    """Source and target X for an intra TB edge, holding continuations straight.
+
+    The default is the per-station rotation (``x - off``).  Two same-column
+    cases would jog a continuing line off its lane under that rotation and pick
+    a constant lane instead:
+
+    - A reversed section stores its internal offsets as the reflection of its
+      entry-port order, so the rotation draws the trunk on the opposite side of
+      the column from its inter-section approach.  It rides the entry-port lane
+      (:func:`lane_x`) so the trunk stays on the side the approach lands on.
+    - A section no line enters through a port (a source section) has no seam
+      pinning its lane, so a bundle max that grows or shrinks between stations
+      would shift the per-station rotation mid-trunk.  Reflecting the offset
+      against each station's own max holds the continuation straight, column by
+      column, with no seam to disagree with.
+    """
+    src_x = src.x + _tb_x_offset(ctx, edge.source, edge.line_id, section.id)
+    tgt_x = tgt.x + _tb_x_offset(ctx, edge.target, edge.line_id, section.id)
+    same_column = abs(src.x - tgt.x) <= COORD_TOLERANCE
+    # lane_x and reversed_offset read the offset map; with no offsets resolved
+    # every lane collapses to the column and the per-station path already
+    # equals it.
+    if same_column and ctx.station_offsets is not None:
+        if section.id in ctx.reversed_sections:
+            lane = lane_x(ctx.graph, section, edge.line_id, ctx.station_offsets)
+            return lane, lane
+        if _entry_port_for_line(ctx.graph, section, edge.line_id) is None:
+            sx = src.x + reversed_offset(
+                _get_offset(ctx, edge.source, edge.line_id),
+                _max_offset_at(ctx, edge.source),
+            )
+            tx = tgt.x + reversed_offset(
+                _get_offset(ctx, edge.target, edge.line_id),
+                _max_offset_at(ctx, edge.target),
+            )
+            return sx, tx
+    return src_x, tgt_x
 
 
 def _route_tb_internal(
@@ -68,12 +116,9 @@ def _route_tb_internal(
     ):
         return None
 
-    x_src = _tb_x_offset(ctx, edge.source, edge.line_id, src_sec)
-    x_tgt = _tb_x_offset(ctx, edge.target, edge.line_id, src_sec)
-
-    sx = src.x + x_src
+    section = graph.sections[src_sec]
+    sx, tx = _tb_trunk_endpoints(ctx, edge, src, tgt, section)
     sy = src.y
-    tx = tgt.x + x_tgt
     ty = tgt.y
     dx = tx - sx
 
@@ -400,9 +445,19 @@ def _route_perp_entry(
 
     if abs(dx) < COORD_TOLERANCE and abs(drop_delta) < COORD_TOLERANCE:
         # Aligned perpendicular entry: each line drops straight at its in-section
-        # trunk X offset, so a multi-line bundle stays parallel into the trunk
-        # instead of one line slanting across to a Y-staggered marker.
-        x = tx + _tb_x_offset(ctx, edge.target, edge.line_id, tgt.section_id)
+        # trunk lane, so a multi-line bundle stays parallel into the trunk
+        # instead of one line slanting across to a Y-staggered marker.  A
+        # reversed section's internal offset reflects its entry order, so the
+        # drop rides the entry-port lane to stay on the seam-approach side.
+        tgt_section = graph.sections.get(tgt.section_id) if tgt.section_id else None
+        if (
+            ctx.station_offsets is not None
+            and tgt_section is not None
+            and tgt_section.id in ctx.reversed_sections
+        ):
+            x = lane_x(graph, tgt_section, edge.line_id, ctx.station_offsets)
+        else:
+            x = tx + _tb_x_offset(ctx, edge.target, edge.line_id, tgt.section_id)
         return RoutedPath(
             edge=edge,
             line_id=edge.line_id,
