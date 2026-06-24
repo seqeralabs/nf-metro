@@ -37,10 +37,12 @@ Tier A is the cheap-structural set the cost audit confirms runs in single-digit
 microseconds and needs no routing pass. Tier B holds everything that either
 needs the routed geometry or is materially more expensive; the most expensive
 members (`check_no_hanging_routes` ~470 us, the collinear-distinct checks
-~100 us) are routed-geometry sweeps. **Tier C is empty on the current tree**:
-every guard and check is reachable from `compute_layout` or the render
-chokepoint, none is a pure test oracle. The de-duplication that kept it empty
-is recorded under [Consolidation](#consolidation).
+~100 us) are routed-geometry sweeps. **Tier C holds one check**,
+`check_seam_approach_equals_departure`: a seam oracle that TB/BT sections fail
+today (they draw the lane fan by reflection, not rotation), so it runs from the
+test suite rather than the runtime suite until #1041 migrates the section draw
+onto `lane_x`. Every other guard and check is reachable from `compute_layout`
+or the render chokepoint.
 
 ## Registries
 
@@ -177,6 +179,7 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 | `check_perp_entry_boundary_consistent` | B | 6.9 | via `_guard_*` wrapper |
 | `check_perp_exit_over_leadin_clears_only_spanned_sections` | B | 2.5 | via `_guard_*` wrapper |
 | `check_right_entry_drop_in_when_clear` | B | 2.1 | via `_guard_*` wrapper |
+| `check_seam_approach_equals_departure` | C | - | test suite only (`tests/test_seam_lane_x.py`) |
 
 ### Inline guards (`INLINE_GUARD_REGISTRY`)
 

@@ -414,6 +414,101 @@ def check_tb_exit_corner_preserves_column_order(
 
 
 # ---------------------------------------------------------------------------
+# Seam approach == departure
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SeamApproachDepartureMismatch:
+    """An inter-section approach that lands a line off its section lane.
+
+    At ``port_id`` (the entry port of ``section_id``) the inter-section route
+    for ``line_id`` delivers it to lane coordinate ``approach`` on the section's
+    lane axis, but the section's own lane discipline (:func:`context.lane_x`)
+    places the line at ``departure``.  When they disagree the line must jog
+    sideways at the seam, and two lines whose deliveries cross to reach their
+    lanes cross visibly.
+    """
+
+    section_id: str
+    port_id: str
+    line_id: str
+    approach: float
+    departure: float
+
+    def message(self) -> str:
+        return (
+            f"seam at {self.port_id!r} (section {self.section_id!r}): line "
+            f"{self.line_id!r} approaches lane {self.approach:.1f} but the "
+            f"section draws it at {self.departure:.1f} "
+            f"(delta {self.approach - self.departure:+.1f})"
+        )
+
+
+def check_seam_approach_equals_departure(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[SeamApproachDepartureMismatch]:
+    """Inter-section approaches that land a line off its section lane.
+
+    The governing seam property of the rotation-unification series: at every
+    inter-section seam the approach draw must place each line on the same lane
+    coordinate the section's own draw assigns it (:func:`context.lane_x`).  When
+    they agree the bundle runs through the seam without a sideways jog, so it
+    cannot cross; when they disagree the order can flip.
+
+    Checked at **continuation seams** -- where the port's edge runs along the
+    section's lane (secondary) axis, so the approach lands directly on that axis
+    at the port: a TOP/BOTTOM entry into a vertical section, a LEFT/RIGHT entry
+    into a horizontal one.  A perpendicular entry (a TOP entry into a horizontal
+    section, say) lands on the flow boundary and an intervening run-in carries
+    the line to its lane, so its endpoint is not the lane coordinate and the
+    property does not apply.
+
+    The approach coordinate is read from the inter-section route's final
+    endpoint -- the point on the section boundary the line is delivered to --
+    projected onto the lane axis.  The departure coordinate is ``lane_x`` for
+    the same line.  A horizontal section draws its lanes the same way an
+    inter-section approach lands them, so its seams agree; a vertical section
+    whose draw reflects the lane fan rather than rotating it lands its lanes on
+    the opposite side of the column, which this flags.
+    """
+    from nf_metro.layout.routing.context import lane_x
+
+    mismatches: list[SeamApproachDepartureMismatch] = []
+    for route in routes:
+        if not route.is_inter_section:
+            continue
+        port = graph.ports.get(route.edge.target)
+        if port is None or not port.is_entry:
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is None:
+            continue
+        primary_axis, _lane_axis = AxisFrame.axes_for_direction(section.direction)
+        edge_runs_lateral = port.side in (PortSide.LEFT, PortSide.RIGHT)
+        if lanes_run_along_y(section.direction) != edge_runs_lateral:
+            continue
+        points = apply_route_offsets(route, offsets)
+        if not points:
+            continue
+        approach = axis_split(primary_axis, points[-1])[1]
+        departure = lane_x(graph, section, route.line_id, offsets)
+        if abs(approach - departure) > COORD_TOLERANCE:
+            mismatches.append(
+                SeamApproachDepartureMismatch(
+                    section_id=section.id,
+                    port_id=port.id,
+                    line_id=route.line_id,
+                    approach=approach,
+                    departure=departure,
+                )
+            )
+    return mismatches
+
+
+# ---------------------------------------------------------------------------
 # Fan-out junction tail join
 # ---------------------------------------------------------------------------
 
@@ -3388,6 +3483,8 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_perp_entry_boundary_consistent, "B"),
     _check_spec(check_perp_exit_over_leadin_clears_only_spanned_sections, "B"),
     _check_spec(check_right_entry_drop_in_when_clear, "B"),
+    # --- Tier C: test-only oracles, run from the test suite, not the runtime ---
+    _check_spec(check_seam_approach_equals_departure, "C"),
 )
 
 
@@ -3412,6 +3509,7 @@ __all__ = [
     "RegimeOffsetMisapplied",
     "RightEntryNeedlessDive",
     "SameLineParallelRun",
+    "SeamApproachDepartureMismatch",
     "Side",
     "StackedElbowGraze",
     "UndeclaredGapChannel",
@@ -3435,6 +3533,7 @@ __all__ = [
     "check_perp_entry_boundary_consistent",
     "check_perp_exit_over_leadin_clears_only_spanned_sections",
     "check_right_entry_drop_in_when_clear",
+    "check_seam_approach_equals_departure",
     "bypass_horizontal_targets",
     "check_stacked_elbow_clearance",
     "check_partial_branch_offset_gaps",

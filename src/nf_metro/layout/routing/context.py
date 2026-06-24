@@ -5,6 +5,7 @@ section-geometry helpers used across the routing handlers.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from nf_metro.layout.constants import (
@@ -13,6 +14,7 @@ from nf_metro.layout.constants import (
     JUNCTION_MARGIN,
     OFFSET_STEP,
 )
+from nf_metro.layout.geometry import AxisFrame, station_lane_coord
 from nf_metro.layout.routing.common import (
     bypass_bottom_y,
     compute_bundle_info,
@@ -27,6 +29,7 @@ from nf_metro.parser.model import (
     MetroGraph,
     Port,
     PortSide,
+    Section,
     Station,
 )
 
@@ -391,6 +394,101 @@ def _max_offset_at(ctx: _RoutingCtx, station_id: str) -> float:
         for lid in ctx.graph.station_lines(station_id)
     ]
     return max(all_offs) if all_offs else 0.0
+
+
+def _section_lane_frame(graph: MetroGraph, section: Section) -> AxisFrame:
+    """The :class:`AxisFrame` for *section*'s flow.
+
+    The lane accessors read only the frame's secondary (lane) axis name and its
+    :attr:`~AxisFrame.secondary_sign`, never the axis step, so an unresolved
+    spacing falls back to a unit step rather than failing.
+    """
+    return AxisFrame.for_direction(
+        section.direction, graph.x_spacing or 1.0, graph.y_spacing or 1.0
+    )
+
+
+def port_lane_coord(
+    graph: MetroGraph,
+    port: Station,
+    line_id: str,
+    station_offsets: Mapping[tuple[str, str], float],
+) -> float:
+    """Screen coordinate of *line_id* along *port*'s edge -- the along-edge accessor.
+
+    A line's position along the edge its port sits on: an X on a TOP/BOTTOM
+    port, a Y on a LEFT/RIGHT port.  Built through :func:`station_lane_coord`,
+    so the section's lane sign (:attr:`AxisFrame.secondary_sign`) gives a
+    vertical-flow section the rotation image of a horizontal one.  Sorting a
+    port's lines by this value yields their arrival order along the edge.
+    """
+    if port.section_id is None:
+        raise ValueError(f"port {port.id!r} has no section")
+    section = graph.sections[port.section_id]
+    frame = _section_lane_frame(graph, section)
+    offset = station_offsets.get((port.id, line_id), 0.0)
+    return station_lane_coord(frame, port, offset)
+
+
+def port_arrival_order(
+    graph: MetroGraph,
+    port: Station,
+    station_offsets: Mapping[tuple[str, str], float],
+) -> list[str]:
+    """Lines at *port* in the order they cross its edge (arrival order).
+
+    Ties (two lines sharing a lane coordinate) break on line id, so the order is
+    independent of the input line listing.
+    """
+    return sorted(
+        graph.station_lines(port.id),
+        key=lambda lid: (port_lane_coord(graph, port, lid, station_offsets), lid),
+    )
+
+
+def _entry_port_for_line(
+    graph: MetroGraph, section: Section, line_id: str
+) -> Station | None:
+    """The entry port *line_id* crosses into *section* through, if any."""
+    for pid in section.entry_ports:
+        if line_id in graph.station_lines(pid):
+            return graph.stations[pid]
+    return None
+
+
+def lane_x(
+    graph: MetroGraph,
+    section: Section,
+    line_id: str,
+    station_offsets: Mapping[tuple[str, str], float],
+) -> float:
+    """The lane coordinate *line_id* draws at inside *section* (rotation-pure).
+
+    The single source of truth for where a line rides inside a section,
+    anchored at the line's **entry port** so the order lines arrive along that
+    edge is the order they ride down the column and the order they leave: lane
+    order in == lane order along the flow == lane order out, by construction.
+
+    Derived purely from the section's :class:`AxisFrame` (lane axis + sign) and
+    the offsets at the port -- no global flow-direction knowledge.  A horizontal
+    section returns ``y + offset``; a vertical one the rotation image
+    ``x - offset``, never the reflection ``x + (max - offset)``.
+
+    The seam invariant reads it as the coordinate an inter-section approach must
+    land each line on.
+    """
+    port = _entry_port_for_line(graph, section, line_id)
+    if port is not None:
+        return port_lane_coord(graph, port, line_id, station_offsets)
+    # A line that originates inside the section crosses no seam; anchor on a
+    # representative internal station so the accessor stays total.
+    frame = _section_lane_frame(graph, section)
+    for sid in section.station_ids:
+        station = graph.stations[sid]
+        if not station.is_port:
+            offset = station_offsets.get((sid, line_id), 0.0)
+            return station_lane_coord(frame, station, offset)
+    raise ValueError(f"section {section.id!r} has no anchor station for {line_id!r}")
 
 
 def _tb_x_offset(
