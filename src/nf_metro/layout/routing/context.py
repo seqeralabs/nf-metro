@@ -401,7 +401,9 @@ def _max_offset_at(ctx: _RoutingCtx, station_id: str) -> float:
     return max(all_offs) if all_offs else 0.0
 
 
-def _section_lane_frame(graph: MetroGraph, section: Section) -> AxisFrame:
+def _section_lane_frame(
+    graph: MetroGraph, section: Section, positive_fan: set[str] | None = None
+) -> AxisFrame:
     """The :class:`AxisFrame` for *section*'s flow.
 
     The lane accessors read only the frame's secondary (lane) axis name and its
@@ -411,12 +413,14 @@ def _section_lane_frame(graph: MetroGraph, section: Section) -> AxisFrame:
     A vertical-flow section whose bundle draws on the ``+x`` (feed) side
     (:func:`tb_positive_fan_sections`) carries a ``+1`` lane sign so the lane
     accessor reports the side the section actually draws on, matching
-    :func:`_tb_x_offset`.
+    :func:`_tb_x_offset`.  ``positive_fan`` lets a caller in a per-element loop
+    pass that set once rather than re-deriving its reversal fixed-point per call.
     """
     frame = AxisFrame.for_direction(
         section.direction, graph.x_spacing or 1.0, graph.y_spacing or 1.0
     )
-    if section.id in tb_positive_fan_sections(graph):
+    fan = positive_fan if positive_fan is not None else tb_positive_fan_sections(graph)
+    if section.id in fan:
         frame = replace(frame, secondary_sign=1.0)
     return frame
 
@@ -426,6 +430,7 @@ def port_lane_coord(
     port: Station,
     line_id: str,
     station_offsets: Mapping[tuple[str, str], float],
+    positive_fan: set[str] | None = None,
 ) -> float:
     """Screen coordinate of *line_id* along *port*'s edge -- the along-edge accessor.
 
@@ -438,7 +443,7 @@ def port_lane_coord(
     if port.section_id is None:
         raise ValueError(f"port {port.id!r} has no section")
     section = graph.sections[port.section_id]
-    frame = _section_lane_frame(graph, section)
+    frame = _section_lane_frame(graph, section, positive_fan)
     offset = station_offsets.get((port.id, line_id), 0.0)
     return station_lane_coord(frame, port, offset)
 
@@ -447,6 +452,7 @@ def port_arrival_order(
     graph: MetroGraph,
     port: Station,
     station_offsets: Mapping[tuple[str, str], float],
+    positive_fan: set[str] | None = None,
 ) -> list[str]:
     """Lines at *port* in the order they cross its edge (arrival order).
 
@@ -455,7 +461,10 @@ def port_arrival_order(
     """
     return sorted(
         graph.station_lines(port.id),
-        key=lambda lid: (port_lane_coord(graph, port, lid, station_offsets), lid),
+        key=lambda lid: (
+            port_lane_coord(graph, port, lid, station_offsets, positive_fan),
+            lid,
+        ),
     )
 
 
@@ -474,6 +483,7 @@ def lane_x(
     section: Section,
     line_id: str,
     station_offsets: Mapping[tuple[str, str], float],
+    positive_fan: set[str] | None = None,
 ) -> float:
     """The lane coordinate *line_id* draws at inside *section* (rotation-pure).
 
@@ -492,10 +502,10 @@ def lane_x(
     """
     port = _entry_port_for_line(graph, section, line_id)
     if port is not None:
-        return port_lane_coord(graph, port, line_id, station_offsets)
+        return port_lane_coord(graph, port, line_id, station_offsets, positive_fan)
     # A line that originates inside the section crosses no seam; anchor on a
     # representative internal station so the accessor stays total.
-    frame = _section_lane_frame(graph, section)
+    frame = _section_lane_frame(graph, section, positive_fan)
     for sid in section.station_ids:
         station = graph.stations[sid]
         if not station.is_port:

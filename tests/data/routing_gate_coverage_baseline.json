@@ -71,7 +71,7 @@
   "context.py::if sec and sec.grid_col >= 0:::#1",
   "context.py::if sec and sec.grid_row >= 0:::#1",
   "context.py::if sec is None:::#1",
-  "context.py::if section.id in tb_positive_fan_sections(graph):::#1",
+  "context.py::if section.id in fan:::#1",
   "context.py::if src_col is None or src_row is None:::#1",
   "context.py::if src_col is None:::#1",
   "context.py::if st is None:::#1",

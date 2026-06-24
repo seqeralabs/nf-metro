@@ -475,7 +475,9 @@ def check_seam_approach_equals_departure(
     the opposite side of the column, which this flags.
     """
     from nf_metro.layout.routing.context import lane_x
+    from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 
+    positive_fan = tb_positive_fan_sections(graph)
     mismatches: list[SeamApproachDepartureMismatch] = []
     for route in routes:
         if not route.is_inter_section:
@@ -494,7 +496,7 @@ def check_seam_approach_equals_departure(
         if not points:
             continue
         approach = axis_split(primary_axis, points[-1])[1]
-        departure = lane_x(graph, section, route.line_id, offsets)
+        departure = lane_x(graph, section, route.line_id, offsets, positive_fan)
         if abs(approach - departure) > COORD_TOLERANCE:
             mismatches.append(
                 SeamApproachDepartureMismatch(

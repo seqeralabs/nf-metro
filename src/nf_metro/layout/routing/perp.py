@@ -73,8 +73,8 @@ def _perp_riser_lateral(
 ) -> float:
     """Per-line lateral X continuing a perpendicular riser's convention.
 
-    A TOP riser keeps the raw per-line offset; a BOTTOM riser reverses it
-    (the lateral order flips between rising and dropping).  Both the
+    A TOP riser keeps the raw per-line offset; a BOTTOM riser reflects it via
+    ``reversed_offset`` (the lateral order flips between rising and dropping).  Both the
     up-and-over exit corridor and the matching entry drop seat their bundle
     with this lateral so the two legs stay parallel across the shared port.
     """

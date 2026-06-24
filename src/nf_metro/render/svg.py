@@ -1367,6 +1367,7 @@ def station_marker_box(
     theme: Theme,
     station: Station,
     station_offsets: dict[tuple[str, str], float] | None,
+    positive_fan: set[str] | None = None,
 ) -> tuple[float, float, float, float, float]:
     """The drawn marker's bounding box as ``(cx, cy, w, h, rx)``.
 
@@ -1376,6 +1377,9 @@ def station_marker_box(
     spanning the bundle for several) without re-running the renderer. Glyph
     stations (rail interchanges, explicit markers) fall back to the same
     bundle-span box, a reasonable footprint for those too.
+
+    ``positive_fan`` lets a caller iterating over stations pass that set once
+    rather than re-deriving its reversal fixed-point per station.
     """
     r = theme.station_radius
     is_tb_vert = bool(
@@ -1383,12 +1387,14 @@ def station_marker_box(
         and (sec := graph.sections.get(station.section_id))
         and sec.direction == "TB"
     )
+    if positive_fan is None:
+        positive_fan = tb_positive_fan_sections(graph)
     if station.rail_top_y is not None and station.rail_bottom_y is not None:
         used = station.rail_used_ys or [station.y]
         min_off, max_off = min(used) - station.y, max(used) - station.y
     elif station_offsets and not graph.station_is_rail(station.id):
         min_off, max_off = _drawn_bundle_span(
-            graph, station, station_offsets, tb_positive_fan_sections(graph)
+            graph, station, station_offsets, positive_fan
         )
     else:
         min_off = max_off = 0.0

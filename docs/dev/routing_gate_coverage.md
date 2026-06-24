@@ -102,33 +102,33 @@ Gates with an un-exercised arm:
 | 375 | `if port_st is None:` | `->L376` | **defensive** -- Ports listed in a section's entry_ports/exit_ports always have a backing station; the missing-station continue never fires. |
 | 388 | `if ctx.station_offsets:` | `->L390` | **defensive** -- compute_station_offsets returns a 0.0 entry for every (station, line) of any graph with edges, so the render path always passes a non-empty dict; the falsy-return arm guards only the route_edges(station_offsets=None) call path used by tests, which the sweep never exercises. |
 | 395 | `if not ctx.station_offsets:` | `->L396` | **defensive** -- Pairs with _get_offset's guard: compute_station_offsets is never empty on the render path, so _max_offset_at's early-return arm guards only the route_edges(station_offsets=None) call path used by tests. |
-| 419 | `if section.id in tb_positive_fan_sections(graph):` | `->L420`, `->L421` |  |
-| 438 | `if port.section_id is None:` | `->L439`, `->L440` |  |
-| 466 | `for pid in section.entry_ports:` | `->L467`, `->L469` |  |
-| 467 | `if line_id in graph.station_lines(pid):` | `->L466`, `->L468` |  |
-| 494 | `if port is not None:` | `->L495`, `->L498` |  |
-| 499 | `for sid in section.station_ids:` | `->L500`, `->L504` |  |
-| 501 | `if not station.is_port:` | `->L499`, `->L502` |  |
-| 531 | `if sec and sec.grid_col >= 0:` | `->L533` | **defensive** -- After section placement every resolved section carries a non-negative grid_col, so the None-return for an unplaced/missing column never fires. |
-| 539 | `if sec and sec.grid_row >= 0:` | `->L541` | **defensive** -- After section placement every resolved section carries a non-negative grid_row, so the None-return for an unplaced/missing row never fires. |
-| 553 | `if sec is None:` | `->L554` | **defensive** -- _resolve_section_colrow is called for ports/junctions that always resolve to a section; the None-section early-return never fires (mirrors the grid-sentinel guards at L395/L403). |
-| 592 | `if psec is None:` | `->L593` |  |
-| 604 | `if _has_intervening_sections(` | `->L594` |  |
-| 637 | `if psec is None or pst is None:` | `->L638` |  |
-| 688 | `if len(sources) != 1:` | `->L689` |  |
-| 691 | `if jst is None:` | `->L692` |  |
-| 694 | `if src_col is None or src_row is None:` | `->L695` |  |
-| 702 | `if tgt is None or not (tgt.is_port or edge.target in graph.junction_ids):` | `->L703` |  |
-| 708 | `if tcol is None or trow is None:` | `->L709` |  |
-| 718 | `if len(reach) < 2:` | `->L719` |  |
-| 726 | `if len(set(drow.values())) < 2 or len({d > 0 for d in descenders}) != 1:` | `->L727` |  |
-| 732 | `if len({d > 0 for d in drow.values()}) != 1:` | `->L733` |  |
-| 778 | `if not src or not tgt:` | `->L779` | **defensive** -- Edge endpoints are always present stations; the missing-endpoint continue never fires. |
-| 872 | `if not jst:` | `->L873` | **defensive** -- jid ranges over junction_ids, all present in graph.stations; the missing-station continue never fires. |
-| 875 | `if src_col is None:` | `->L876` | **defensive** -- A fan-out junction always resolves to a grid column; the unresolved-column continue never fires. |
-| 913 | `if not tgt or not (tgt.is_port or edge.target in junction_ids):` | `->L914` | **defensive** -- A junction's outgoing inter-section edges always target a port or another junction (junctions are synthesised only on exit-port -> entry-port chains); the skip arm for a plain-station target never fires. |
-| 916 | `if tgt_col is None:` | `->L917` | **defensive** -- A junction's port/junction target always resolves to a grid column; the unresolved-column continue never fires. |
-| 1019 | `if edge.line_id in line_pos:` | `->L1018` | **defensive** -- line_pos is built from the line IDs of the very all_outgoing list this loop iterates, so the membership test is always true: the reject/loop-back arm (L684) is an unreachable tautology and the enter-body static arc (L686) is a phantom of the real 685->687. Vestigial tautological guard. The deliberate gap is pinned by test_genuine_dead_arm_not_masked_as_covered (arc normalization must not merge the never-taken branch onto the live one). Reclassified defensive (#762). |
+| 423 | `if section.id in fan:` | `->L424`, `->L425` |  |
+| 443 | `if port.section_id is None:` | `->L444`, `->L445` |  |
+| 475 | `for pid in section.entry_ports:` | `->L476`, `->L478` |  |
+| 476 | `if line_id in graph.station_lines(pid):` | `->L475`, `->L477` |  |
+| 504 | `if port is not None:` | `->L505`, `->L508` |  |
+| 509 | `for sid in section.station_ids:` | `->L510`, `->L514` |  |
+| 511 | `if not station.is_port:` | `->L509`, `->L512` |  |
+| 541 | `if sec and sec.grid_col >= 0:` | `->L543` | **defensive** -- After section placement every resolved section carries a non-negative grid_col, so the None-return for an unplaced/missing column never fires. |
+| 549 | `if sec and sec.grid_row >= 0:` | `->L551` | **defensive** -- After section placement every resolved section carries a non-negative grid_row, so the None-return for an unplaced/missing row never fires. |
+| 563 | `if sec is None:` | `->L564` | **defensive** -- _resolve_section_colrow is called for ports/junctions that always resolve to a section; the None-section early-return never fires (mirrors the grid-sentinel guards at L395/L403). |
+| 602 | `if psec is None:` | `->L603` |  |
+| 614 | `if _has_intervening_sections(` | `->L604` |  |
+| 647 | `if psec is None or pst is None:` | `->L648` |  |
+| 698 | `if len(sources) != 1:` | `->L699` |  |
+| 701 | `if jst is None:` | `->L702` |  |
+| 704 | `if src_col is None or src_row is None:` | `->L705` |  |
+| 712 | `if tgt is None or not (tgt.is_port or edge.target in graph.junction_ids):` | `->L713` |  |
+| 718 | `if tcol is None or trow is None:` | `->L719` |  |
+| 728 | `if len(reach) < 2:` | `->L729` |  |
+| 736 | `if len(set(drow.values())) < 2 or len({d > 0 for d in descenders}) != 1:` | `->L737` |  |
+| 742 | `if len({d > 0 for d in drow.values()}) != 1:` | `->L743` |  |
+| 788 | `if not src or not tgt:` | `->L789` | **defensive** -- Edge endpoints are always present stations; the missing-endpoint continue never fires. |
+| 882 | `if not jst:` | `->L883` | **defensive** -- jid ranges over junction_ids, all present in graph.stations; the missing-station continue never fires. |
+| 885 | `if src_col is None:` | `->L886` | **defensive** -- A fan-out junction always resolves to a grid column; the unresolved-column continue never fires. |
+| 923 | `if not tgt or not (tgt.is_port or edge.target in junction_ids):` | `->L924` | **defensive** -- A junction's outgoing inter-section edges always target a port or another junction (junctions are synthesised only on exit-port -> entry-port chains); the skip arm for a plain-station target never fires. |
+| 926 | `if tgt_col is None:` | `->L927` | **defensive** -- A junction's port/junction target always resolves to a grid column; the unresolved-column continue never fires. |
+| 1029 | `if edge.line_id in line_pos:` | `->L1028` | **defensive** -- line_pos is built from the line IDs of the very all_outgoing list this loop iterates, so the membership test is always true: the reject/loop-back arm (L684) is an unreachable tautology and the enter-body static arc (L686) is a phantom of the real 685->687. Vestigial tautological guard. The deliberate gap is pinned by test_genuine_dead_arm_not_masked_as_covered (arc normalization must not merge the never-taken branch onto the live one). Reclassified defensive (#762). |
 
 ## `core.py`
 

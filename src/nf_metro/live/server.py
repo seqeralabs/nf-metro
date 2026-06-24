@@ -24,6 +24,7 @@ from typing import Any, TypedDict
 
 from nf_metro.layout import compute_layout
 from nf_metro.layout.routing.offsets import compute_station_offsets
+from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 from nf_metro.live.mapping import stations_for_process
 from nf_metro.parser import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
@@ -134,11 +135,14 @@ class MapModel:
         self.height = float(dim.group(2)) if dim else float(graph.height or 600)
 
         offsets = compute_station_offsets(graph)
+        positive_fan = tb_positive_fan_sections(graph)
         self.stations: list[StationGeom] = []
         for s in graph.stations.values():
             if s.is_port or s.id not in self.mapping:
                 continue
-            cx, cy, w, h, rx = station_marker_box(graph, theme, s, offsets)
+            cx, cy, w, h, rx = station_marker_box(
+                graph, theme, s, offsets, positive_fan
+            )
             self.stations.append(
                 {
                     "id": s.id,
