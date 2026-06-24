@@ -13,6 +13,7 @@ from nf_metro.layout.constants import (
     SAME_Y_TOLERANCE,
 )
 from nf_metro.layout.geometry import AxisFrame, axis_split
+from nf_metro.layout.routing.arranger import BoundaryConfig, BoundaryEdge, lane_order
 from nf_metro.layout.routing.common import tb_right_entry_sections
 from nf_metro.layout.routing.context import (
     _has_intervening_sections,
@@ -644,25 +645,27 @@ def _reorder_reconvergence(
         continuing = sorted(primary_lines, key=lambda lid: primary_order.get(lid, 0))
 
         sec_present = _section_present_line_set(ctx, sec_id)
-        returning = sorted(
-            sec_present - primary_lines,
-            key=lambda lid: ctx.line_priority.get(lid, 0),
-        )
 
         if _share_flat_frame(ctx, sec_id, primary_fid):
+            returning = sorted(
+                sec_present - primary_lines,
+                key=lambda lid: ctx.line_priority.get(lid, 0),
+            )
             _align_reconvergence_to_feeder(
                 ctx, sec_id, continuing, returning, primary_fid
             )
             continue
 
-        new_order = continuing + returning
-        global_ordered = sorted(
-            sec_present, key=lambda lid: ctx.line_priority.get(lid, 0)
+        config = BoundaryConfig(
+            present=tuple(sec_present),
+            determining=tuple(continuing),
+            edge=BoundaryEdge.ENTRY,
         )
-        if new_order == global_ordered:
+        new_order = lane_order(config, ctx.line_priority)
+        if new_order is None:
             continue
 
-        _apply_section_line_order(ctx, sec_id, new_order)
+        _apply_section_line_order(ctx, sec_id, list(new_order))
 
 
 def _section_exit_fanout_junction(ctx: _OffsetCtx, section: Section) -> str | None:
@@ -704,18 +707,16 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
         if peel_order is None:
             continue
 
-        sec_present = _section_present_line_set(ctx, sec_id)
-        rest = sorted(
-            sec_present - set(peel_order),
-            key=lambda lid: ctx.line_priority.get(lid, 0),
+        config = BoundaryConfig(
+            present=tuple(_section_present_line_set(ctx, sec_id)),
+            determining=tuple(peel_order),
+            edge=BoundaryEdge.EXIT,
         )
-        new_order = [lid for lid in peel_order if lid in sec_present] + rest
-        if new_order == sorted(
-            sec_present, key=lambda lid: ctx.line_priority.get(lid, 0)
-        ):
+        new_order = lane_order(config, ctx.line_priority)
+        if new_order is None:
             continue
 
-        _apply_section_line_order(ctx, sec_id, new_order)
+        _apply_section_line_order(ctx, sec_id, list(new_order))
 
 
 def _collinear_lines_at(

@@ -232,7 +232,7 @@
   "offsets.py::if max_steps <= 0:::#1",
   "offsets.py::if max_steps <= 0:::#2",
   "offsets.py::if neighbour is None:::#1",
-  "offsets.py::if new_order == global_ordered:::#1",
+  "offsets.py::if new_order is None:::#1",
   "offsets.py::if not (src and src_port and not src_port.is_entry):::#1",
   "offsets.py::if not all(lid in feeder_off for lid in continuing):::#1",
   "offsets.py::if not any(::#1",
