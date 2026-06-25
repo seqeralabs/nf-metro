@@ -982,16 +982,15 @@ def _shift_lr_perp_entry_stations(
             continue
 
         # Compute the current gap between port and nearest entry-side station
+        run_lo, run_hi = min(internal_xs), max(internal_xs)
         if section.direction == "LR":
             # Entry is LEFT: port is left of stations
-            nearest_x = min(internal_xs)
             port_x = min(perp_port_xs)
-            current_gap = nearest_x - port_x
+            current_gap = run_lo - port_x
         else:
             # RL: entry is RIGHT: port is right of stations
-            nearest_x = max(internal_xs)
             port_x = max(perp_port_xs)
-            current_gap = port_x - nearest_x
+            current_gap = port_x - run_hi
 
         shift = desired_gap - current_gap
         if shift <= 0:
@@ -1009,23 +1008,18 @@ def _shift_lr_perp_entry_stations(
             else:
                 s.x -= shift
 
-        # _adjust_lr_entry_inset reserves bbox width on the right to match an
-        # LR section's rightward shift; an RL run shifts left, so extend the
-        # bbox left by the same amount to keep the trailing station inside it.
-        # Guarded to a same-column drop, where the entry port sits within the
-        # run's span (nearest_x is the run's far edge here).
-        run_lo, run_hi = min(internal_xs), max(internal_xs)
-        port_within_run = run_lo <= port_x <= run_hi
-        if section.direction == "RL" and port_within_run:
+        # Keep the trailing station inside the bbox after the shift.
+        # _adjust_lr_entry_inset reserves a fixed inset that only covers a
+        # same-column drop (entry port within the run's span): an RL run then
+        # shifts left, so extend the bbox left to match. A cross-column drop
+        # lands beyond the span and the fixed inset under-sizes the bbox.
+        if section.direction == "RL" and run_lo <= port_x <= run_hi:
             section.bbox_x -= shift
             section.bbox_w += shift
         elif section.direction == "LR" and port_x > run_hi:
-            # Cross-column TOP/BOTTOM entry: Stage 3.2 aligned the entry port
-            # to a drop landing right of the run's natural column span, so the
-            # run is dragged rightward past the bbox _adjust_lr_entry_inset
-            # pre-sized. Re-wrap the bbox around the shifted run with the run's
-            # original padding, anchored on the entry port (the leftmost
-            # content once the run sits to its right).
+            # Re-wrap the bbox around the shifted run, keeping the run's
+            # padding and anchoring the left edge on the entry port (which
+            # sits left of the run once it shifts right of the drop).
             left_pad = run_lo - section.bbox_x
             right_pad = (section.bbox_x + section.bbox_w) - run_hi
             section.bbox_x = port_x - left_pad
