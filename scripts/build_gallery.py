@@ -380,6 +380,16 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "of being forced outboard where it kinks at the merge and crosses the "
         "collinear feeder (issue #1012).",
     ),
+    (
+        "tb_bottom_exit_fork_diamond",
+        TOPOLOGIES_DIR,
+        "A TB section's BOTTOM exit forks to two stacked TB sections in different "
+        "rows, the lower also fed by the upper (a diamond). The fork junction's "
+        "leg into the nearer TOP entry drops straight in its column rather than "
+        "jogging sideways and reversing at the boundary, and the leg continuing "
+        "to the far section rides the intervening section's own trunk for the "
+        "shared line as one stroke (issue #1058).",
+    ),
     # --- Offset and bypass ---
     (
         "bypass_fan_in_outer_slot",

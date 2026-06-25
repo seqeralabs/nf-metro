@@ -1,0 +1,36 @@
+%%metro line: alpha | Alpha | #e63946
+%%metro grid: source | 0,0
+%%metro grid: feed | 1,0
+%%metro grid: mid | 1,1
+%%metro grid: sink | 1,2
+
+graph LR
+    subgraph source [Source]
+        s1[Start]
+    end
+    subgraph feed [Feed]
+        %%metro direction: TB
+        %%metro entry: right | alpha
+        %%metro exit: bottom | alpha
+        f1[Align]
+        f2[Sort]
+        f1 -->|alpha| f2
+    end
+    subgraph mid [Mid]
+        %%metro direction: TB
+        %%metro entry: top | alpha
+        m1[Filter]
+        m2[Classify]
+        m1 -->|alpha| m2
+    end
+    subgraph sink [Sink]
+        %%metro direction: TB
+        %%metro entry: top | alpha
+        sk1[Merge]
+        sk2[Report]
+        sk1 -->|alpha| sk2
+    end
+    s1 -->|alpha| f1
+    f2 -->|alpha| m1
+    f2 -->|alpha| sk1
+    m2 -->|alpha| sk1

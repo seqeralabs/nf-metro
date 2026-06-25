@@ -263,10 +263,6 @@
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::for je in ctx.graph.edges:::#1": {
-    "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if _corridor_is_viable(ctx, src, ep):::#1": {
     "note": "Reachable only via a defective render (route skirts/crosses section boundary); see #724.",
     "status": "needs-review"
@@ -293,10 +289,6 @@
   },
   "inter_section_handlers.py::if abs(ep.y - f.sy) < ctx.curve_radius:::#1": {
     "note": "Merge entry-port Y tracks the source/junction Y, so a sub-curve_radius exit->entry gap never arises (the same-Y rule already handles dy<tol); corpus instrumentation across the fixtures (#762) confirms the arm is never taken. Defensive.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if abs(lx0 - final_x) <= ctx.curve_radius:::#1": {
-    "note": "Trunk-collapse guard for the TOP-entry staircase: when the lead-in channel coincides with the landing X the trunk leg would be zero-length, so the route drops straight and jogs into the port. The render path (offsets applied) routes a directly-below source via the perpendicular-exit / drop-pair handlers before reaching the staircase, so the corpus never drives it into this collapse.",
     "status": "defensive"
   },
   "inter_section_handlers.py::if abs(tx - sx) <= COORD_TOLERANCE:::#1": {
@@ -350,10 +342,6 @@
   "inter_section_handlers.py::if gap_right <= gap_left:::#1": {
     "note": "The column-gap enforcer keeps inter-column gaps positive, so gap_right>gap_left always holds at the target row.",
     "status": "defensive"
-  },
-  "inter_section_handlers.py::if je.target == src.id:::#1": {
-    "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
-    "status": "needs-review"
   },
   "inter_section_handlers.py::if js and js.is_port:::#1": {
     "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
@@ -904,7 +892,7 @@
     "status": "defensive"
   },
   "reversal.py::if receiver not in reversed_secs:::#1": {
-    "note": "BFS dedup guard in _detect_tb_bottom_top_entries: the False arm fires when a TB section appears as a vertical receiver via two different positive_fan paths (a diamond topology where two positive_fan TB sections both feed the same TB section via BOTTOM->TOP). Such topologies require a fork junction whose two legs target sections in different grid rows; the current routing's _guard_perp_entry_boundary_consistent fires on that fork pattern before this arm can be exercised. The guard is correct and necessary to prevent double-queueing and ensures BFS terminates on any future renderable diamond.",
+    "note": "BFS dedup guard in _detect_tb_bottom_top_entries: the False arm fires when a TB section is queued as a vertical receiver via two different positive_fan paths. The detection only registers a receiver when a BOTTOM exit PORT directly feeds a TOP entry port (edge.source is the exit port). A TB section reached by two upstream sections is fed through a fork/merge junction, so the edges into its TOP entry originate at the junction, not a port -- the detection skips them and the receiver is never queued twice. A diamond renders (examples/topologies/tb_bottom_exit_fork_diamond.mmd) but does not drive this arm. The guard is correct and necessary to prevent double-queueing and ensure BFS termination should a direct double-feed ever arise.",
     "status": "defensive"
   },
   "tb_handlers.py::if crossing_x is not None:::#1": {

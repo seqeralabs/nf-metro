@@ -2156,8 +2156,11 @@ def _route_top_entry_l_shape(
     # right-down-left-down shape), so following dx would turn the line back
     # across the source box.  Falls back to dx for sources with no horizontal
     # exit side, and to the upstream-feeder direction for near-vertical
-    # junction sources.
+    # junction sources.  A junction fed straight from directly above carries no
+    # horizontal travel, so its drop stays in the column with no lead-in: a jog
+    # there would reverse lateral direction at the entry boundary.
     exit_side = _source_exit_side(ctx.graph, src)
+    straight_drop = False
     if exit_side is not None:
         lead = exit_side
     elif abs(dx) > ctx.curve_radius:
@@ -2165,14 +2168,16 @@ def _route_top_entry_l_shape(
     else:
         lead = Direction.R
         if src.id in ctx.graph.junctions:
-            for je in ctx.graph.edges:
-                if je.target == src.id:
-                    js = ctx.graph.stations.get(je.source)
-                    if js and js.is_port:
+            for je in ctx.graph.edges_to(src.id):
+                js = ctx.graph.stations.get(je.source)
+                if js and js.is_port:
+                    if abs(js.x - src.x) <= COORD_TOLERANCE:
+                        straight_drop = True
+                    else:
                         lead = Direction.R if js.x < src.x else Direction.L
-                        break
+                    break
 
-    lx0 = sx + lead.sign * ctx.curve_radius
+    lx0 = sx if straight_drop else sx + lead.sign * ctx.curve_radius
 
     # Anchor the centreline on the bundle's reference line (source offset 0) and
     # fan every co-travelling line as a per-leg offset of it, so each corner

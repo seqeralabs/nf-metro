@@ -13,7 +13,7 @@ from nf_metro.layout.constants import (
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
 )
-from nf_metro.layout.geometry import lanes_run_along_y
+from nf_metro.layout.geometry import lanes_run_along_x, lanes_run_along_y
 from nf_metro.layout.phase_state import require_phase_field
 from nf_metro.parser.model import (
     Edge,
@@ -415,9 +415,56 @@ def routes_through_unrelated_sections(
                     (x0, y0, x1, y1),
                 )
                 for i in range(len(pts) - 1)
-            ):
+            ) and not _runs_along_section_line_trunk(graph, rp, sid, pts):
                 out.append((rp, sid))
     return out
+
+
+def _runs_along_section_line_trunk(
+    graph: MetroGraph, rp: RoutedPath, sid: str, pts: list[tuple[float, float]]
+) -> bool:
+    """Whether ``rp`` overlays section ``sid``'s own trunk for ``rp``'s line.
+
+    A line that forks and rejoins -- a fan-out junction feeding a section's
+    perpendicular entry while a sibling leg continues straight past it to a
+    section stacked below -- overlays the intervening section's trunk along its
+    own line.  That is one continuous stroke, not a foreign line plotted over a
+    section it never touches, so it is exempt from the pass-through check.
+
+    The pass is benign only when the segments crossing the box run parallel to
+    the section's trunk axis at the coordinate the line's stations there occupy:
+    a vertical-flow section's trunk is a constant X, a horizontal-flow one's a
+    constant Y.  A section that does not carry the line has no such trunk, so any
+    crossing is a real pass-through.
+    """
+    from nf_metro.layout.geometry import segment_intersects_bbox
+
+    sec = graph.sections.get(sid)
+    if sec is None:
+        return False
+    # Trunk runs along the flow axis; its constant coordinate is the lane axis.
+    cross_axis, run_axis = (0, 1) if lanes_run_along_x(sec.direction) else (1, 0)
+    trunk = [
+        (st.x, st.y)[cross_axis]
+        for stid, st in graph.stations.items()
+        if st.section_id == sid and rp.line_id in graph.station_lines(stid)
+    ]
+    if not trunk:
+        return False
+    box = (sec.bbox_x, sec.bbox_y, sec.bbox_x + sec.bbox_w, sec.bbox_y + sec.bbox_h)
+    for i in range(len(pts) - 1):
+        if not segment_intersects_bbox(
+            pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], box
+        ):
+            continue
+        run_delta = abs(pts[i + 1][run_axis] - pts[i][run_axis])
+        cross_delta = abs(pts[i + 1][cross_axis] - pts[i][cross_axis])
+        if cross_delta > SAME_COORD_TOLERANCE and run_delta > SAME_COORD_TOLERANCE:
+            return False
+        coord = pts[i][cross_axis]
+        if not any(abs(coord - t) <= SAME_COORD_TOLERANCE for t in trunk):
+            return False
+    return True
 
 
 def is_loop_side_branch_station(graph: MetroGraph, sid: str) -> bool:
