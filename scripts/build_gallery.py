@@ -214,6 +214,19 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "One section, one line. The simplest possible case.",
     ),
     (
+        "bt_chain",
+        TOPOLOGIES_DIR,
+        "A `%%metro direction: BT` (bottom-to-top) section: a three-station chain "
+        "whose flow runs up the column, the vertical mirror of a TB chain (#1044).",
+    ),
+    (
+        "bt_fork",
+        TOPOLOGIES_DIR,
+        "A symmetric fan-out inside a `%%metro direction: BT` section: the hub sits "
+        "at the bottom and both branches fan upward, the lane bundle riding the "
+        "`+x` side as the rotation image of a TB fork (#1044).",
+    ),
+    (
         "deep_linear",
         TOPOLOGIES_DIR,
         "Seven sections in a straight chain. Exercises the grid fold threshold.",

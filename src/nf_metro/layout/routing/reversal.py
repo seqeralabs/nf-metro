@@ -8,7 +8,10 @@ assignments in compute_station_offsets().
 from __future__ import annotations
 
 from nf_metro.layout.geometry import AxisFrame
-from nf_metro.layout.routing.common import tb_right_entry_sections
+from nf_metro.layout.routing.common import (
+    tb_right_entry_sections,
+    vertical_flow_sections,
+)
 from nf_metro.parser.model import MetroGraph, Port, PortSide, Section
 
 
@@ -56,7 +59,7 @@ def detect_reversed_sections(graph: MetroGraph) -> set[str]:
     on the same row, that downstream section is also reversed so bundle
     ordering stays consistent along the return row.
     """
-    tb_sections = {sid for sid, s in graph.sections.items() if s.direction == "TB"}
+    tb_sections = vertical_flow_sections(graph)
     tb_right_entry = tb_right_entry_sections(graph)
     reversed_secs: set[str] = set()
     junction_ids = graph.junction_ids

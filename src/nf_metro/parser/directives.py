@@ -514,11 +514,11 @@ def _apply_scoped_directive(
         _warn_directive(key, "must appear inside a subgraph; ignoring")
     elif key == "direction":
         direction = value.upper()
-        if direction in ("LR", "RL", "TB"):
+        if direction in ("LR", "RL", "TB", "BT"):
             graph.sections[section_id].direction = direction
             graph._explicit_directions.add(section_id)
         else:
-            _warn_malformed("direction", value, "LR/RL/TB")
+            _warn_malformed("direction", value, "LR/RL/TB/BT")
     else:
         _parse_port_hint(value, graph, section_id, is_entry=key == "entry")
 

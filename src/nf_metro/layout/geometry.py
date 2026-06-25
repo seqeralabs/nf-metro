@@ -66,7 +66,7 @@ class AxisFrame:
     ) -> AxisFrame:
         primary, secondary = cls.axes_for_direction(direction)
         step = {"x": x_spacing, "y": y_spacing}
-        sign = -1.0 if direction == "RL" else 1.0
+        sign = -1.0 if direction in ("RL", "BT") else 1.0
         # A 90-degree-CW rotation fans a vertical flow's lanes to -X; BT's +1 is
         # the inert exception reserved for true BT support.
         secondary_sign = -1.0 if secondary == "x" and direction != "BT" else 1.0

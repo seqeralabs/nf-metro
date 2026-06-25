@@ -23,6 +23,7 @@ from nf_metro.layout.routing.centrelines import (
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
+    trailing_perp_side,
 )
 from nf_metro.layout.routing.context import (
     _get_offset,
@@ -70,17 +71,18 @@ def _route_tb_internal(
     tgt_sec = tgt.section_id
 
     tgt_exit_port = graph.ports.get(edge.target)
-    tgt_is_bottom_exit = (
+    tgt_is_trailing_exit = (
         tgt_exit_port is not None
         and not tgt_exit_port.is_entry
-        and tgt_exit_port.side == PortSide.BOTTOM
+        and src_sec is not None
+        and tgt_exit_port.side == trailing_perp_side(graph.sections[src_sec].direction)
     )
     if not (
         src_sec
         and src_sec == tgt_sec
         and src_sec in ctx.tb_sections
         and not src.is_port
-        and (not tgt.is_port or tgt_is_bottom_exit)
+        and (not tgt.is_port or tgt_is_trailing_exit)
     ):
         return None
 

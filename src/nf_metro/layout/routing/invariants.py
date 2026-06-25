@@ -60,6 +60,7 @@ from nf_metro.layout.routing.common import (
     tail_on_slot,
     trunk_segments_cross,
     vertical_direction,
+    vertical_flow_sections,
 )
 from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
 
@@ -352,7 +353,7 @@ def check_tb_exit_corner_preserves_column_order(
     reversal convention than the column swaps two lines' X and crosses them at
     the feeder station marker.
     """
-    tb_sections = {sid for sid, s in graph.sections.items() if s.direction == "TB"}
+    tb_sections = vertical_flow_sections(graph)
     if not tb_sections:
         return []
 

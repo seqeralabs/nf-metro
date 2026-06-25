@@ -22,6 +22,7 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_ROUTE_CLEARANCE,
 )
+from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x
 from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
 
 
@@ -68,6 +69,29 @@ def horizontal_direction(dx: float) -> Direction:
 def vertical_direction(dy: float) -> Direction:
     """``Direction.D`` if ``dy > 0`` else ``Direction.U`` (ties resolve to U)."""
     return Direction.D if dy > 0 else Direction.U
+
+
+def vertical_flow_sections(graph: MetroGraph) -> set[str]:
+    """IDs of sections whose flow runs along Y (the vertical-flow directions).
+
+    Both TB and BT stack their layers down the column and fan lines along X, so
+    the routing handlers, offset assignment and reversal detection that key on a
+    vertical flow treat the two identically; only their flow sign and lane sign
+    (carried by :class:`~nf_metro.layout.geometry.AxisFrame`) differ.
+    """
+    return {sid for sid, s in graph.sections.items() if lanes_run_along_x(s.direction)}
+
+
+def trailing_perp_side(direction: str) -> PortSide:
+    """The TOP/BOTTOM side a vertical-flow section's trunk continues out through.
+
+    A downward (TB) flow runs its trunk to the BOTTOM edge; its upward (BT)
+    image runs it to the TOP.  Read from the frame's flow sign so the
+    leading/trailing distinction follows the rotation, not a direction literal.
+    Only meaningful for a vertical-flow (TB/BT) section.
+    """
+    frame = AxisFrame.for_direction(direction, 1.0, 1.0)
+    return PortSide.BOTTOM if frame.primary_sign > 0 else PortSide.TOP
 
 
 def tb_right_entry_sections(graph: MetroGraph) -> set[str]:

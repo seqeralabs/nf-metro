@@ -14,12 +14,13 @@ from nf_metro.layout.constants import (
     JUNCTION_MARGIN,
     OFFSET_STEP,
 )
-from nf_metro.layout.geometry import AxisFrame, station_lane_coord
+from nf_metro.layout.geometry import AxisFrame, lane_delta, station_lane_coord
 from nf_metro.layout.routing.common import (
     bypass_bottom_y,
     compute_bundle_info,
     merge_trunk_force_cross_row,
     resolve_section,
+    vertical_flow_sections,
 )
 from nf_metro.layout.routing.reversal import (
     detect_reversed_sections,
@@ -275,7 +276,7 @@ def _build_routing_context(
     fork_stations = {sid for sid, tgts in fork_targets.items() if len(tgts) > 1}
     join_stations = {sid for sid, srcs in join_sources.items() if len(srcs) > 1}
 
-    tb_sections = {sid for sid, s in graph.sections.items() if s.direction == "TB"}
+    tb_sections = vertical_flow_sections(graph)
     reversed_sections = detect_reversed_sections(graph)
     positive_fan = tb_positive_fan_sections(graph)
 
@@ -508,18 +509,23 @@ def lane_x(
 def _tb_x_offset(
     ctx: _RoutingCtx, station_id: str, line_id: str, section_id: str | None
 ) -> float:
-    """Compute the X offset for a line at a station in a TB section.
+    """Compute the X offset for a line at a station in a vertical-flow section.
 
-    A vertical-flow section is the horizontal model rotated 90 degrees: where
-    an LR line rides ``y + offset``, a TB line rides ``x + sign * offset``.  The
-    lane sign is ``-1`` (rotation, bundle left of the column) except for a
-    section in :func:`tb_positive_fan_sections`, whose bundle sits on the ``+x``
-    side.  Drawing those on the ``+x`` side keeps the seam corner a rotation
-    rather than a pinching reflection, and the whole feed chain stays on one
-    side.
+    A vertical-flow section is the horizontal model rotated 90 degrees: where an
+    LR line rides ``y + offset``, a vertical-flow line rides
+    ``x + secondary_sign * offset``.  The lane sign comes from the section's
+    :func:`_section_lane_frame`: a downward (TB) section rides ``-1`` (bundle
+    left of the column), its upward (BT) image rides ``+1``, and either flips to
+    ``+1`` for a section in :func:`tb_positive_fan_sections` whose bundle sits on
+    the ``+x`` (feed) side so the seam corner nests as a rotation, not a pinching
+    reflection.
     """
-    sign = 1.0 if section_id in ctx.positive_fan else -1.0
-    return sign * _get_offset(ctx, station_id, line_id)
+    section = ctx.graph.sections.get(section_id) if section_id else None
+    offset = _get_offset(ctx, station_id, line_id)
+    if section is None:
+        return -offset
+    frame = _section_lane_frame(ctx.graph, section, ctx.positive_fan)
+    return lane_delta(frame, offset)
 
 
 def _resolve_section_col(graph: MetroGraph, station: Station) -> int | None:

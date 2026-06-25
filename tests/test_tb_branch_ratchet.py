@@ -14,7 +14,7 @@ from pathlib import Path
 _LAYOUT_DIR = Path(__file__).resolve().parents[1] / "src/nf_metro/layout"
 
 # Lower this (never raise it) when a heuristic migrates onto AxisFrame.
-_BASELINE_TB_BRANCHES = 30
+_BASELINE_TB_BRANCHES = 26
 
 
 def _count_in_file(path: Path) -> int:

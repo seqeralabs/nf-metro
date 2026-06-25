@@ -493,8 +493,18 @@ def _resolve_sections(graph: MetroGraph) -> None:
     _assign_section_numbers(graph)
 
 
-_LEADING_SIDE = {"LR": PortSide.LEFT, "RL": PortSide.RIGHT, "TB": PortSide.TOP}
-_TRAILING_SIDE = {"LR": PortSide.RIGHT, "RL": PortSide.LEFT, "TB": PortSide.BOTTOM}
+_LEADING_SIDE = {
+    "LR": PortSide.LEFT,
+    "RL": PortSide.RIGHT,
+    "TB": PortSide.TOP,
+    "BT": PortSide.BOTTOM,
+}
+_TRAILING_SIDE = {
+    "LR": PortSide.RIGHT,
+    "RL": PortSide.LEFT,
+    "TB": PortSide.BOTTOM,
+    "BT": PortSide.TOP,
+}
 _FLIP_HORIZONTAL = {"LR": "RL", "RL": "LR"}
 
 

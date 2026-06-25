@@ -1,0 +1,14 @@
+%%metro title: BT Fork
+%%metro style: dark
+%%metro line: a | A | #e63946
+%%metro line: b | B | #0570b0
+
+graph LR
+    subgraph work [Work]
+        %%metro direction: BT
+        hub[Demux]
+        left[Lane A]
+        right[Lane B]
+        hub -->|a,b| left
+        hub -->|a,b| right
+    end

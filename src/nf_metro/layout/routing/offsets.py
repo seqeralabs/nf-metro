@@ -12,7 +12,10 @@ from nf_metro.layout.constants import (
     SAME_Y_TOLERANCE,
 )
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
-from nf_metro.layout.routing.common import tb_right_entry_sections
+from nf_metro.layout.routing.common import (
+    tb_right_entry_sections,
+    vertical_flow_sections,
+)
 from nf_metro.layout.routing.context import (
     _has_intervening_sections,
     _resolve_section_col,
@@ -79,7 +82,7 @@ def _build_offset_ctx(graph: MetroGraph, offset_step: float) -> _OffsetCtx:
             outbound[edge.source].add(edge.line_id)
 
     reversed_sections = detect_reversed_sections(graph)
-    tb_sections = {sid for sid, s in graph.sections.items() if s.direction == "TB"}
+    tb_sections = vertical_flow_sections(graph)
     lr_rl_sections = {
         sid for sid, s in graph.sections.items() if s.direction in ("LR", "RL")
     }

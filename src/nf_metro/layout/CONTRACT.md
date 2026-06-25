@@ -94,8 +94,9 @@ chirality, so a TB path written as an axis swap diverges from LR in behaviour,
 not just orientation. The cure is a true 90-degree rotation, which a transpose
 is not. `AxisFrame.secondary_sign` carries the lane fan direction: a 90-degree-CW
 rotation maps LR's screen-down lane (`+Y`) to screen-left (`-X`), so TB is `-1`;
-LR/RL are `+1` (RL reverses only the primary) and BT's `+1` is reserved for true
-BT support (inert until then). The **sanctioned offset->coordinate path** applies
+LR/RL are `+1` (RL reverses only the primary) and BT is `+1`, the flow-axis
+reflection of TB (`primary_sign = -1`, `secondary_sign = +1`) so an upward flow
+fans its lanes to the `+X` side. The **sanctioned offset->coordinate path** applies
 this sign at the *draw accessor*, never to a stored offset, which stays positive:
 
 - `geometry.station_lane_coord(frame, station, offset)` -> `station.y + offset`
