@@ -1112,6 +1112,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "rather than running straight along the section's bottom edge and out "
         "through the corner (#1052).",
     ),
+    (
+        "tb_two_line_vert_seam",
+        TOPOLOGIES_DIR,
+        "A vertical-flow section's RIGHT exit feeds another vertical-flow "
+        "section's LEFT entry with a two-line bundle. The entry sits a station "
+        "gap above the trunk head so both lines enter horizontally then drop "
+        "straight onto their trunk lanes, rather than the staggered line "
+        "slanting into the trunk for want of drop room (#1054).",
+    ),
 ]
 
 # Category headers inserted before specific entries

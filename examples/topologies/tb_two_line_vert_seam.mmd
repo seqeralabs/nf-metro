@@ -1,0 +1,21 @@
+%%metro title: TB into TB, horizontal seam
+%%metro line: a | A | #e63946
+%%metro line: b | B | #0570b0
+%%metro grid: up_sec | 0,0
+%%metro grid: down_sec | 1,0
+graph LR
+    subgraph up_sec [Left]
+        %%metro direction: TB
+        %%metro exit: right | a,b
+        u1[Collect]
+        u2[Reduce]
+        u1 -->|a,b| u2
+    end
+    subgraph down_sec [Right]
+        %%metro direction: TB
+        %%metro entry: left | a,b
+        d1[Split]
+        d2[Emit]
+        d1 -->|a,b| d2
+    end
+    u2 -->|a,b| d1

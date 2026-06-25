@@ -815,11 +815,16 @@ def _perp_fed_entry_consumer_y(
     Anchoring the entry there keeps the inter-section climb a riser in the
     column gap with a horizontal turn-in, rather than a diagonal into the
     first station (#908).  Returns ``None`` when the port is out of scope.
+
+    A vertical-flow (TB/BT) entry section is exempt: a LEFT/RIGHT entry is
+    perpendicular to its trunk, so it must sit a station gap above the trunk
+    head, not on the consumer's own row -- pinning it there leaves no drop room
+    and slants a multi-line bundle into the trunk.
     """
     if not port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
         return None
     entry_section = graph.sections.get(port.section_id)
-    if entry_section is None:
+    if entry_section is None or lanes_run_along_x(entry_section.direction):
         return None
     fed_by_perp_exit = False
     for edge in graph.edges_to(port_id):
@@ -865,6 +870,35 @@ def _guard_perp_fed_entry_anchored_to_consumer(graph: MetroGraph, phase: str) ->
                 f"consumer row y={consumer_y:.1f}; the bundle will climb into "
                 f"the consumer via a diagonal instead of a horizontal turn-in"
             )
+
+
+def _guard_perp_entry_clears_vertical_trunk_head(graph: MetroGraph, phase: str) -> None:
+    """A LEFT/RIGHT entry into a vertical-flow section clears its trunk head.
+
+    The entry is perpendicular to a TB/BT trunk, so it must sit a station gap
+    off the trunk head: the bundle enters level and drops onto each lane.  When
+    the port instead shares an internal station's Y the line routes through the
+    marker and a multi-line bundle slants in for want of drop room (#1054).
+    """
+    for pid, port in graph.ports.items():
+        if not port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is None or not lanes_run_along_x(section.direction):
+            continue
+        port_y = graph.stations[pid].y
+        section_ports = set(section.entry_ports) | set(section.exit_ports)
+        for sid in section.station_ids:
+            if sid in section_ports:
+                continue
+            st = graph.stations.get(sid)
+            if st is not None and abs(port_y - st.y) <= GUARD_TOLERANCE:
+                raise PhaseInvariantError(
+                    f"{phase}: entry port {pid!r} at y={port_y:.1f} shares Y "
+                    f"with internal station {sid!r} (y={st.y:.1f}) in "
+                    f"vertical-flow section {section.id!r}; the line routes "
+                    f"through the marker with no room for a level turn-in"
+                )
 
 
 def _guard_post_convergence_trunk_continues(graph: MetroGraph, phase: str) -> None:
@@ -4019,6 +4053,18 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
             "Y: a multi-consumer entry fans to several rows, so no single "
             "consumer Y can anchor it, and a trunk-aligned (non-perpendicular) "
             "feed already arrives on the consumer row."
+        ),
+    ),
+    GuardSpec(
+        _guard_perp_entry_clears_vertical_trunk_head,
+        "B",
+        issue_pin=("#1054",),
+        narrow_reason=(
+            "Scoped to LEFT/RIGHT entry ports on vertical-flow (TB/BT) sections, "
+            "where the entry is perpendicular to the trunk: a horizontal-flow "
+            "section's LEFT/RIGHT entry is flow-aligned and lands on a station "
+            "row by design, and TOP/BOTTOM entries continue the trunk rather "
+            "than turning into it."
         ),
     ),
     GuardSpec(
