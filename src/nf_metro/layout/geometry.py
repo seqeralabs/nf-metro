@@ -90,6 +90,17 @@ def lanes_run_along_y(direction: str) -> bool:
     return AxisFrame.axes_for_direction(direction)[1] == "y"
 
 
+def lanes_run_along_x(direction: str) -> bool:
+    """``True`` when a section stacks its lines (the secondary/lane axis) on X.
+
+    The complement of :func:`lanes_run_along_y`: a vertical flow (TB/BT) runs
+    its trunk down Y and separates lines along X, so its labels sit beside the
+    pill and its file icons march along Y.  The positive way to ask "is this a
+    vertical flow" without a bare ``direction == "TB"`` branch.
+    """
+    return AxisFrame.axes_for_direction(direction)[1] == "x"
+
+
 Point = tuple[float, float]
 
 

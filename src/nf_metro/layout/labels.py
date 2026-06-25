@@ -50,7 +50,7 @@ from nf_metro.layout.constants import (
     X_SPACING,
 )
 from nf_metro.layout.geometry import (
-    lanes_run_along_y,
+    lanes_run_along_x,
     segment_intersects_bbox,
     segment_intersects_quad,
 )
@@ -1294,14 +1294,13 @@ def _build_label_ctx(
 def _places_label_beside_pill(graph: MetroGraph, station: Station) -> bool:
     """Whether the station's label sits beside its pill (vertical-flow section).
 
-    A vertical flow (TB/BT) stacks lines along X and runs the trunk down Y, so
-    its labels go to the side rather than above/below.  Horizontal flows place
-    labels above/below and take the alternating/angled paths instead.
+    A vertical flow (TB/BT) runs its trunk down Y and stacks lines along X, so
+    its label sits to the side instead of above/below.
     """
     if not station.section_id:
         return False
     sec = graph.sections.get(station.section_id)
-    return bool(sec and not lanes_run_along_y(sec.direction))
+    return bool(sec and lanes_run_along_x(sec.direction))
 
 
 def _place_station_label(

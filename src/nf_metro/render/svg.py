@@ -21,7 +21,7 @@ from nf_metro.layout.constants import (
     OFFTRACK_TERMINUS_NUB_CLEARANCE,
     SAME_COORD_TOLERANCE,
 )
-from nf_metro.layout.geometry import lanes_run_along_y, segment_intersects_bbox
+from nf_metro.layout.geometry import lanes_run_along_x, segment_intersects_bbox
 from nf_metro.layout.labels import (
     LabelPlacement,
     _label_bbox,
@@ -1828,7 +1828,7 @@ def _render_station_into(
     is_tb_vert = False
     if station.section_id:
         sec = graph.sections.get(station.section_id)
-        if sec and not lanes_run_along_y(sec.direction):
+        if sec and lanes_run_along_x(sec.direction):
             is_tb_vert = True
 
     # A rail station is pinned to its rail Y; the parallel-line bundle
@@ -1940,7 +1940,7 @@ def _terminus_icon_centers(
     sources in the reverse; RL/BT mirror that so icons always point to
     the outside of the diagram.
     """
-    is_tb = not lanes_run_along_y(section_dir)
+    is_vertical_flow = lanes_run_along_x(section_dir)
     # A rail-mode off-track input parks above the rails and feeds straight down
     # into its consumer's rail (see routing/rail.py), so its icon sits directly
     # on the station coordinate (centred on the drop X) rather than marching
@@ -1955,7 +1955,7 @@ def _terminus_icon_centers(
     centers: list[tuple[float, float]] = []
     for i in range(n):
         flow = sign * (first_offset + i * step)
-        if is_tb:
+        if is_vertical_flow:
             centers.append((station.x + bundle_center, station.y + flow))
         else:
             centers.append((station.x + flow, station.y + bundle_center))
@@ -1983,13 +1983,13 @@ def _render_terminus_icons(
     # Detect if station is a source (no incoming edges) or sink.
     is_source = not graph.edges_to(station.id)
     section_dir = section.direction if section else "LR"
-    is_tb = not lanes_run_along_y(section_dir)
+    is_vertical_flow = lanes_run_along_x(section_dir)
     # Gap between the station pill and the first icon, plus the icon's own
     # half-extent along the flow axis (width for LR/RL, height for TB/BT).
     icon_gap = r + ICON_STATION_GAP
     icon_half_w = theme.terminus_width / 2
     icon_half_h = theme.terminus_height / 2
-    icon_half_flow = icon_half_h if is_tb else icon_half_w
+    icon_half_flow = icon_half_h if is_vertical_flow else icon_half_w
 
     bundle_center = (min_off + max_off) / 2
 
@@ -2004,7 +2004,7 @@ def _render_terminus_icons(
     # LR/RL march icons along X, so widen the step when adjacent captions
     # would overlap.  TB/BT stack icons along Y, where icon height (plus a
     # caption row, when present) sets the spacing.
-    if is_tb:
+    if is_vertical_flow:
         caption_room = caption_font_size + ICON_NAME_GAP if any(names) else 0.0
         icon_step = theme.terminus_height + ICON_INTER_GAP + caption_room
     else:
@@ -2053,11 +2053,11 @@ def _render_terminus_icons(
 
         # Clamp to stay within the section bbox, on whichever axis the
         # icons march along.
-        if section and is_tb and section.bbox_h > 0:
+        if section and is_vertical_flow and section.bbox_h > 0:
             top = section.bbox_y + icon_half_h + ICON_BBOX_MARGIN
             bottom = section.bbox_y + section.bbox_h - icon_half_h - ICON_BBOX_MARGIN
             icon_cy = max(top, min(icon_cy, bottom))
-        elif section and not is_tb and section.bbox_w > 0:
+        elif section and not is_vertical_flow and section.bbox_w > 0:
             icon_right = (
                 section.bbox_x + section.bbox_w - icon_half_w - ICON_BBOX_MARGIN
             )
@@ -2256,11 +2256,11 @@ def _station_marker_extent(
     clear the actual rendered marker, including the per-line offset spread.
     """
     r = theme.station_radius
-    is_tb = False
+    is_vertical_flow = False
     if station.section_id:
         sec = graph.sections.get(station.section_id)
-        if sec and not lanes_run_along_y(sec.direction):
-            is_tb = True
+        if sec and lanes_run_along_x(sec.direction):
+            is_vertical_flow = True
 
     line_offsets = [
         station_offsets.get((station.id, lid), 0.0)
@@ -2269,7 +2269,7 @@ def _station_marker_extent(
     min_off = min(line_offsets) if line_offsets else 0.0
     max_off = max(line_offsets) if line_offsets else 0.0
 
-    x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb)
+    x, y, w, h = _pill_box(station, r, min_off, max_off, is_vertical_flow)
     return (x, x + w, y, y + h)
 
 
@@ -2508,8 +2508,8 @@ def _reserve_rail_space_for_termini(graph: MetroGraph, theme: Theme) -> None:
         name_widths = [
             len(nm) * caption_font_size * 0.55 if nm else 0.0 for nm in names
         ]
-        is_tb = not lanes_run_along_y(sec.direction)
-        if is_tb:
+        is_vertical_flow = lanes_run_along_x(sec.direction)
+        if is_vertical_flow:
             step = theme.terminus_height + ICON_INTER_GAP
             half_flow = hh
         else:

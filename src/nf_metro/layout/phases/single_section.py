@@ -28,7 +28,12 @@ from nf_metro.layout.constants import (
     TERMINUS_ICON_CLEARANCE_V,
     TERMINUS_WIDTH,
 )
-from nf_metro.layout.geometry import Axis, AxisFrame, lanes_run_along_y
+from nf_metro.layout.geometry import (
+    Axis,
+    AxisFrame,
+    lanes_run_along_x,
+    lanes_run_along_y,
+)
 from nf_metro.layout.labels import (
     _label_text_height,
     active_font_scale,
@@ -612,7 +617,7 @@ def _adjust_lr_entry_inset(
     x_spacing: float,
 ) -> None:
     """LR/RL sections: add extra bbox width when entry has curves."""
-    if not lanes_run_along_y(section.direction):
+    if lanes_run_along_x(section.direction):
         return
 
     has_perp_entry = any(
@@ -666,7 +671,7 @@ def _adjust_lr_exit_gap(
     share the same Y, lines exit straight horizontally and no extra space
     is needed.
     """
-    if not lanes_run_along_y(section.direction):
+    if lanes_run_along_x(section.direction):
         return
 
     flow_exit_side = PortSide.RIGHT if section.direction == "LR" else PortSide.LEFT
@@ -895,7 +900,7 @@ def _adjust_terminus_icon_clearance(
     padding doesn't leave enough room, grow the bbox on the affected side.
     """
     section_dir = section.direction or "LR"
-    icons_march_on_y = not lanes_run_along_y(section_dir)
+    icons_march_on_y = lanes_run_along_x(section_dir)
 
     for station in sub.stations.values():
         if not station.is_terminus:
