@@ -1028,11 +1028,10 @@ def _route_tb_bottom_exit(
     tx = tgt.x + x_off
     ty = tgt.y
 
-    member = [(edge, edge.line_id, 0.0)]
     if abs(tx - sx) <= COORD_TOLERANCE:
         return route_along(
             edge,
-            member,
+            [(edge, edge.line_id, 0.0)],
             [(sx, sy), (tx, ty)],
             base_radius=ctx.curve_radius,
             normalize_exempt=False,
@@ -1045,15 +1044,36 @@ def _route_tb_bottom_exit(
     # jog and the bend stays orthogonal rather than collapsing into a diagonal.
     dy = ty - sy
     hy = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius)
-    # Keep the jog Y strictly between the two ports so both vertical legs
-    # have positive length for the corner curves to bite into.
+
+    # Fan the whole co-travelling bundle off one centreline at the section's
+    # trunk X (offset 0) so the builder rotates each line's lane offset around
+    # both corners: the vertical legs separate in X and the horizontal jog
+    # separates in Y.  The first leg's right-hand normal points in -X for a
+    # downward drop, so the lane offset is signed to land each riser back on its
+    # own trunk X.
+    _members, line_ids, _edge_by_line = gather_member_edges(ctx.graph, edge)
+    drop_sign = 1.0 if dy >= 0 else -1.0
+    riser_sign = -drop_sign
+
+    def lane_offset(line_id: str) -> float:
+        return riser_sign * _tb_x_offset(ctx, edge.source, line_id, src.section_id)
+
+    # The fan widens the jog channel toward the source section (the BOTTOM port
+    # sits on that near edge at sy), so push the channel a bundle width past the
+    # edge in the drop direction so even the innermost line clears it.  Then
+    # clamp the channel strictly between the two ports, keeping both vertical
+    # legs positive-length for the corner curves to bite into.
+    fan_clearance = INTER_ROW_EDGE_CLEARANCE + (len(line_ids) - 1) * ctx.offset_step
+    hy = sy + drop_sign * max((hy - sy) * drop_sign, fan_clearance)
     lo, hi = (sy, ty) if dy >= 0 else (ty, sy)
     hy = min(max(hy, lo + ctx.curve_radius), hi - ctx.curve_radius)
+
     return route_along(
         edge,
-        member,
-        [(sx, sy), (sx, hy), (tx, hy), (tx, ty)],
+        [(edge, edge.line_id, lane_offset(edge.line_id))],
+        [(src.x, sy), (src.x, hy), (tgt.x, hy), (tgt.x, ty)],
         base_radius=ctx.curve_radius,
+        bundle_offsets=[lane_offset(lid) for lid in line_ids],
     )
 
 

@@ -1105,6 +1105,19 @@ def _propagate_exit_offsets_to_hubs(
                 ctx.offsets[(hub_id, lid)] = offs[lid]
 
 
+def _tb_exit_port_offset(
+    ioff: float, max_int: float, right_entry: bool, right_exit: bool
+) -> float:
+    """The TB LEFT/RIGHT exit-port slot for a feeder's internal offset *ioff*.
+
+    A RIGHT exit (down -> east turn) reverses the column across the corner; a
+    LEFT exit keeps it.  A RIGHT-entry section already runs its column in raw
+    order, so only one of the two reversals applies.
+    """
+    column_off = ioff if right_entry else max_int - ioff
+    return max_int - column_off if right_exit else column_off
+
+
 def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
     """Compute exit port offsets for TB and LR/RL sections.
 
@@ -1142,11 +1155,22 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
             max_int = max(internal_offs.values())
             right_entry = port_obj.section_id in tb_right_entry
             right_exit = port_obj.side == PortSide.RIGHT
-            for lid, ioff in internal_offs.items():
-                column_off = ioff if right_entry else max_int - ioff
-                ctx.offsets[(port_id, lid)] = (
-                    max_int - column_off if right_exit else column_off
+            assigned = {
+                lid: _tb_exit_port_offset(ioff, max_int, right_entry, right_exit)
+                for lid, ioff in internal_offs.items()
+            }
+            # Two lines fed from different stations can carry the same internal
+            # offset (each feeder compacts its own gaps), collapsing them onto
+            # one exit slot.  Re-rank the port onto distinct slots in the same
+            # order so the converging lines stack instead of drawing on top.
+            if len(set(assigned.values())) < len(assigned):
+                order = sorted(
+                    assigned,
+                    key=lambda lid: (assigned[lid], ctx.line_priority.get(lid, 0)),
                 )
+                assigned = {lid: i * ctx.offset_step for i, lid in enumerate(order)}
+            for lid, off in assigned.items():
+                ctx.offsets[(port_id, lid)] = off
 
     # LR/RL section LEFT/RIGHT exit ports: spatial Y ordering
     for port_id, port_obj in graph.ports.items():

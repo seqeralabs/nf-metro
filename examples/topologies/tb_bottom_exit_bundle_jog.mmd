@@ -1,0 +1,27 @@
+%%metro title: TB bottom-exit jog multi-line
+%%metro line: l1 | L1 | #e6194b
+%%metro line: l2 | L2 | #3cb44b
+%%metro line: l3 | L3 | #4363d8
+%%metro line: l4 | L4 | #f58231
+%%metro grid: up | 1,0
+%%metro grid: down | 0,1
+
+graph TB
+    subgraph up [Up]
+        %%metro direction: TB
+        %%metro entry: top | l1, l2, l3, l4
+        %%metro exit: bottom | l1, l2, l3, l4
+        a[A]
+        b[B]
+        a -->|l1,l2,l3,l4| b
+    end
+    subgraph down [Down]
+        %%metro direction: RL
+        %%metro entry: top | l1, l2, l3, l4
+        cc[QC reporting node]
+        dd[D]
+        ee[E]
+        cc -->|l1,l2,l3,l4| dd
+        dd -->|l1,l2,l3,l4| ee
+    end
+    b -->|l1,l2,l3,l4| cc

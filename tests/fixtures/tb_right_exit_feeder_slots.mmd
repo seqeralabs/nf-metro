@@ -1,0 +1,34 @@
+%%metro title: TB right-exit two-feeder slot collision
+%%metro line: l1 | L1 | #e6194b
+%%metro line: l2 | L2 | #3cb44b
+%%metro line: l3 | L3 | #4363d8
+%%metro line: l4 | L4 | #f58231
+
+graph LR
+    subgraph src [Source]
+        %%metro exit: right | l1, l2, l4
+        %%metro exit: right | l3
+        s0[Start]
+        s0 -->|l1,l2,l4| sa[Main in]
+        s0 -->|l3| sb[Side in]
+    end
+    subgraph sec [Sec]
+        %%metro direction: TB
+        %%metro entry: left | l1, l2, l4
+        %%metro entry: left | l3
+        %%metro exit: right | l1, l2, l3, l4
+        main[Main]
+        sink[Sink]
+        h1[ ]
+        h2[ ]
+        main -->|l1,l2,l4| sink
+        h1 -->|l3| h2
+    end
+    subgraph dst [Dest]
+        %%metro entry: left | l1, l2, l3, l4
+        d1[End]
+    end
+    sa -->|l1,l2,l4| main
+    sb -->|l3| h1
+    sink -->|l1,l2,l4| d1
+    h2 -->|l3| d1

@@ -291,10 +291,6 @@
     "note": "Merge entry-port Y tracks the source/junction Y, so a sub-curve_radius exit->entry gap never arises (the same-Y rule already handles dy<tol); corpus instrumentation across the fixtures (#762) confirms the arm is never taken. Defensive.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if abs(tx - sx) <= COORD_TOLERANCE:::#1": {
-    "note": "Reachable only via a defective render (TB BOTTOM-exit jog collinear overlay); see #706.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if col_left <= 0.0:::#1": {
     "note": "col_left_edge's 0.0 default only fires for a column with no sections; the target's own column always holds its section.",
     "status": "defensive"
