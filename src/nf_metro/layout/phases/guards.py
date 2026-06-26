@@ -40,6 +40,7 @@ from nf_metro.layout.phases._common import (
     _restoring_layout_geometry,
     _route_crosses_section_boundary,
     _section_bundle_lines,
+    _section_lr_port_anchor_y,
     _station_marker_bbox,
     first_vertical_leg_sign,
     first_vertical_leg_x,
@@ -1254,6 +1255,82 @@ def _guard_off_track_input_column_stack(graph: MetroGraph, phase: str) -> None:
                 f"station(s) share its column and anchor -- it is stranded above "
                 f"an empty row (expected at most {n * step:.1f}px)"
             )
+
+
+# Same-column on-track stations sit at least one row pitch apart, and the
+# half-grid symfan idiom places members at half a pitch.  A sparse loop station
+# crowded below this fraction of a pitch from a column neighbour can only have
+# been shifted toward it, so the threshold sits between the half-grid offset and
+# a full row.
+_LOOP_STATION_COLUMN_CLEARANCE_FRACTION = 0.6
+
+
+def _guard_sparse_loop_station_clears_column_neighbour(
+    graph: MetroGraph, phase: str
+) -> None:
+    """A sparse single-line loop station clears its same-column neighbours by
+    at least a row pitch.
+
+    ``_shift_sparse_loop_stations_to_clear_bundle`` (Stage 6.14) shifts a
+    sparse loop station (one edge in, one edge out, both endpoints on the
+    section trunk) one row off the trunk only to clear a busier same-row
+    sibling whose inbound bundle crosses its column.  Fired without that
+    crossing, the shift pushes the station a partial pitch toward a
+    same-column neighbour, crowding the two markers and stranding the row it
+    skipped (issue #1071).  The complementary
+    :func:`_guard_no_line_crosses_non_consumer` catches the opposite error
+    of skipping a needed shift.
+    """
+    from nf_metro.layout.engine import compute_min_y_spacing
+
+    pitch = compute_min_y_spacing(graph)
+    if pitch <= 0:
+        return
+    floor = _LOOP_STATION_COLUMN_CLEARANCE_FRACTION * pitch
+    half_grid = graph.half_grid_station_ids
+    tol = 1.0
+    for section in graph.sections.values():
+        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+            continue
+        trunk_y = _section_lr_port_anchor_y(graph, section)
+        if trunk_y is None:
+            continue
+        port_ids = set(section.entry_ports) | set(section.exit_ports)
+        members = [
+            st
+            for sid in section.station_ids
+            if sid not in port_ids
+            and (st := graph.stations.get(sid)) is not None
+            and not (st.is_port or st.is_hidden or st.off_track)
+            and sid not in half_grid
+        ]
+        for st in members:
+            ins = graph.edges_to(st.id)
+            outs = graph.edges_from(st.id)
+            if len(ins) != 1 or len(outs) != 1:
+                continue
+            src = graph.stations.get(ins[0].source)
+            tgt = graph.stations.get(outs[0].target)
+            if src is None or tgt is None:
+                continue
+            if (
+                abs(src.y - trunk_y) > SAME_COORD_TOLERANCE
+                or abs(tgt.y - trunk_y) > SAME_COORD_TOLERANCE
+                or abs(st.y - trunk_y) <= SAME_COORD_TOLERANCE
+            ):
+                continue
+            for other in members:
+                if other.id == st.id or abs(other.x - st.x) > SAME_COORD_TOLERANCE:
+                    continue
+                gap = abs(other.y - st.y)
+                if tol < gap < floor:
+                    raise PhaseInvariantError(
+                        f"{phase}: sparse loop station {st.id!r} (y={st.y:.1f}, "
+                        f"x={st.x:.1f}) sits only {gap:.1f}px from same-column "
+                        f"neighbour {other.id!r} (y={other.y:.1f}), under one row "
+                        f"pitch ({pitch:.1f}) -- shifted toward it without a "
+                        f"crossing bundle to clear"
+                    )
 
 
 def _guard_off_track_consumer_on_trunk(graph: MetroGraph, phase: str) -> None:
@@ -4021,6 +4098,21 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         needs=frozenset({"offsets", "routes"}),
         bisection_safe=True,
         first_valid_stage="after Stage 6.14",
+    ),
+    # The sparse loop-station shift runs at Stage 6.14, so its crowding
+    # outcome is only observable from that checkpoint onward.
+    GuardSpec(
+        _guard_sparse_loop_station_clears_column_neighbour,
+        "A",
+        bisection_safe=True,
+        first_valid_stage="after Stage 6.14",
+        issue_pin=("#1071",),
+        narrow_reason=(
+            "Scoped to sparse single-line loop stations (one edge in, one out, "
+            "both endpoints on the section trunk) on LR/RL sections -- the only "
+            "stations Stage 6.14 shifts -- and exempts half-grid symfan members "
+            "that legitimately sit a half pitch from a column neighbour."
+        ),
     ),
     GuardSpec(_guard_station_x_column_drift, "A", bisection_safe=True),
     # --- final-only set (run only at the closing ``after final`` boundary) ---

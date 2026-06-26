@@ -5518,6 +5518,62 @@ def test_loop_recenter_only_for_pure_side_branches(fixture):
 
 
 # ---------------------------------------------------------------------------
+# A sparse loop station must not be shifted past a free grid row in its
+# own column toward a busier sibling whose bundle does not cross it
+# ---------------------------------------------------------------------------
+
+
+def test_aligner_siblings_stack_evenly_over_pinned_continuation():
+    """Three sibling aligners feeding one hub stack on consecutive grid
+    rows even when one aligner's line continues on a track pinned to the
+    section bottom by hidden continuation stations.
+
+    Regression for #1071: routing both STAR lines through the dedup hub
+    pulls the hub onto STAR's row, and HISAT2's through-track is pinned
+    low by the ``_h1``/``_h2``/``_h3`` continuation chain.  HISAT2 was
+    dragged down to crowd Bowtie2 instead of resting on the free middle
+    row, leaving the middle row empty.
+    """
+    graph = _layout("topologies/aligner_row_pinned_continuation.mmd")
+    star = graph.stations["star"].y
+    hisat2 = graph.stations["hisat2_align"].y
+    bowtie2 = graph.stations["bowtie2_align"].y
+    assert star < hisat2 < bowtie2, (
+        f"aligners out of order: star={star:.1f} hisat2={hisat2:.1f} "
+        f"bowtie2={bowtie2:.1f}"
+    )
+    gap_top = hisat2 - star
+    gap_bottom = bowtie2 - hisat2
+    assert abs(gap_top - gap_bottom) <= 1.0, (
+        f"aligners not evenly stacked: star={star:.1f} hisat2={hisat2:.1f} "
+        f"bowtie2={bowtie2:.1f} (gaps {gap_top:.1f} vs {gap_bottom:.1f})"
+    )
+
+
+def test_sparse_loop_column_clearance_guard_catches_crowding():
+    """The runtime guard fires when a sparse loop station is crowded against
+    a same-column neighbour.
+
+    Locks the guard's teeth: pulling a sparse single-line loop station to a
+    partial pitch above its same-column neighbour must make
+    ``_guard_sparse_loop_station_clears_column_neighbour`` raise rather than
+    pass.
+    """
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_sparse_loop_station_clears_column_neighbour,
+    )
+
+    graph = _layout("topologies/aligner_row_pinned_continuation.mmd")
+    _guard_sparse_loop_station_clears_column_neighbour(graph, "test")
+    bowtie2 = graph.stations["bowtie2_align"].y
+    graph.stations["hisat2_align"].y = bowtie2 - 7.0
+
+    with pytest.raises(PhaseInvariantError, match="under one row pitch"):
+        _guard_sparse_loop_station_clears_column_neighbour(graph, "test")
+
+
+# ---------------------------------------------------------------------------
 # v114: Lines never cross a non-consumer station's marker bbox
 # ---------------------------------------------------------------------------
 

@@ -1047,6 +1047,27 @@ def _shift_and_propagate_loop_stations(
     _push_lower_rows_after_bbox_grow(graph, section_y_gap)
 
 
+def _inbound_bundle_spans_x(graph: MetroGraph, consumer: Station, x: float) -> bool:
+    """Whether *consumer*'s inbound bundle traverses column *x*.
+
+    The bundle runs from the consumer's inbound sources to the consumer
+    along their shared row, so it crosses *x* only when *x* lies between
+    the extreme inbound-source X and the consumer's own X.  A busier
+    sibling whose bundle does not span *x* never crosses a sparse loop
+    station sitting at *x*, so that station needs no clearing shift.
+    """
+    src_xs = [
+        graph.stations[e.source].x
+        for e in graph.edges_to(consumer.id)
+        if e.source in graph.stations
+    ]
+    if not src_xs:
+        return False
+    lo = min(min(src_xs), consumer.x)
+    hi = max(max(src_xs), consumer.x)
+    return lo + SAME_COORD_TOLERANCE < x < hi - SAME_COORD_TOLERANCE
+
+
 def _shift_sparse_loop_stations_to_clear_bundle(
     graph: MetroGraph,
     y_spacing: float,
@@ -1087,18 +1108,7 @@ def _shift_sparse_loop_stations_to_clear_bundle(
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
         port_ids = section.port_ids
-        # Trunk Y from the LR/RL ports.
-        trunk_y: float | None = None
-        for pid in section.entry_ports + section.exit_ports:
-            port = graph.ports.get(pid)
-            ps = graph.stations.get(pid)
-            if (
-                port is not None
-                and ps is not None
-                and port.side in (PortSide.LEFT, PortSide.RIGHT)
-            ):
-                trunk_y = ps.y
-                break
+        trunk_y = _section_lr_port_anchor_y(graph, section)
         if trunk_y is None:
             continue
 
@@ -1144,7 +1154,9 @@ def _shift_sparse_loop_stations_to_clear_bundle(
                 if abs(sib.y - st.y) > SAME_COORD_TOLERANCE:
                     continue
                 sib_lines = _consumed_lines(sib_id)
-                if len(sib_lines) > len(s_lines):
+                if len(sib_lines) > len(s_lines) and _inbound_bundle_spans_x(
+                    graph, sib, st.x
+                ):
                     sibling = sib
                     break
             if sibling is None:

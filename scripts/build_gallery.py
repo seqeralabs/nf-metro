@@ -1167,6 +1167,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "straight onto their trunk lanes, rather than the staggered line "
         "slanting into the trunk for want of drop room (#1054).",
     ),
+    (
+        "aligner_row_pinned_continuation",
+        TOPOLOGIES_DIR,
+        "Three sibling aligners feed one dedup hub that lands on the lead "
+        "aligner's row, while one aligner's line continues on a track pinned "
+        "to the section bottom by hidden continuation stations. The aligners "
+        "stack on consecutive grid rows instead of the low-line aligner being "
+        "dragged down to crowd its neighbour and strand the middle row (#1071).",
+    ),
 ]
 
 # Category headers inserted before specific entries
