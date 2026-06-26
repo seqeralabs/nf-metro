@@ -85,14 +85,28 @@ so it's the mode for iterating on a single pipeline - re-run and watch the same
 page - and it's the server the plugin's managed mode spawns. For many pipelines
 or runs side by side, use the dashboard in §2b instead.
 
+### One-liner (recommended)
+
+Pass the Nextflow command after `--` and `serve` handles everything: it wires
+`-with-weblog` automatically, opens your browser, and shuts itself down when the
+run finishes.
+
 ```bash
-nf-metro serve path/to/map.mmd --port 8080
+nf-metro serve path/to/map.mmd --open --shutdown-after-complete -- \
+    nextflow run my/pipeline
 ```
 
-Then open <http://localhost:8080/> and start the pipeline with its weblog
-pointed at the server:
+### Two-shell alternative
+
+If you prefer to keep the server and the pipeline in separate terminals (useful
+when iterating across many re-runs with the server left running):
 
 ```bash
+# shell 1 - the live server
+nf-metro serve path/to/map.mmd --port 8080
+# open http://localhost:8080/
+
+# shell 2 - the pipeline
 nextflow run my/pipeline -with-weblog http://localhost:8080/events
 ```
 
@@ -106,6 +120,9 @@ blank map.
 | `--host` | Interface to bind. Default `127.0.0.1` (local only); use `0.0.0.0` to accept connections from other hosts. |
 | `--theme` | Theme name (`nfcore`, `light`, `seqera`). The page chrome (background, text) follows the theme, so a light theme gives a light page. |
 | `--overlay` | Status-overlay style: `ring` (default), `pulse`, `dot`, or `led`. Sets the style shown until a viewer picks another. |
+| `--open` | Open the live page in the default browser when the server starts. |
+| `--shutdown-after-complete` | Stop the server shortly after the run's `completed` or `error` event (or after the launched command exits). |
+| `--shutdown-grace` | Seconds to keep the map up after the run finishes before shutting down (used with `--shutdown-after-complete`; default 5). |
 | `--token` | If set, `/events` POSTs must supply `?token=...` or an `X-Metro-Token` header. |
 
 ### Overlay styles
@@ -330,4 +347,14 @@ but are not treated as failures since they may be intentional.
 The repository ships a self-contained demo under
 [`examples/live/`](https://github.com/pinin4fjords/nf-metro/tree/main/examples/live):
 a toy workflow whose processes only `sleep`, a mapped map, and a process list
-for `check-mapping`. See its `README.md` to run it end to end.
+for `check-mapping`. From the repo root:
+
+```bash
+nf-metro serve examples/live/pipeline.mmd --open --shutdown-after-complete -- \
+    nextflow run examples/live/workflow/main.nf \
+              -c examples/live/workflow/nextflow.config
+```
+
+Three coloured lines fan out after Trim Galore, run in parallel, then converge
+at MultiQC. The browser opens automatically and the server stops when the
+pipeline finishes.
