@@ -1,8 +1,5 @@
 # Live progress demo
 
-> **Experimental.** The `%%metro process:` directive and the `nf-metro serve` /
-> `check-mapping` commands may change without notice.
-
 Light up a metro map in real time as a Nextflow pipeline runs - no Seqera
 Platform, no plugin. Stock Nextflow `-with-weblog` posts task events to
 `nf-metro serve`, which draws a status overlay on top of the static map:
@@ -25,21 +22,34 @@ nextflow run --with-weblog ──HTTP──> nf-metro serve ──SSE──> bro
 
 ## Run it
 
-Two shells. The server needs nf-metro installed; the pipeline needs Nextflow.
+From the repo root (nf-metro and Nextflow both on PATH):
 
 ```bash
-# Shell 1 - the live server
+nf-metro serve examples/live/pipeline.mmd --open --shutdown-after-complete -- \
+    nextflow run examples/live/workflow/main.nf \
+              -c examples/live/workflow/nextflow.config
+```
+
+`serve` wires `-with-weblog` automatically, opens your browser, and shuts the
+server down when the pipeline finishes.
+
+Watch the map: Trim Galore fills first, the three lines fan out and run in
+parallel, then MultiQC lights up as everything converges.
+
+### Two-shell alternative
+
+If you want to keep the server alive across multiple re-runs:
+
+```bash
+# shell 1 - the live server
 nf-metro serve examples/live/pipeline.mmd --port 8080
 # open http://localhost:8080/
 
-# Shell 2 - the pipeline (no Docker; processes only sleep)
+# shell 2 - the pipeline (no Docker; processes only sleep)
 nextflow run examples/live/workflow/main.nf \
   -c examples/live/workflow/nextflow.config \
   -with-weblog http://localhost:8080/events
 ```
-
-Watch the map: Trim Galore fills first, the three lines fan out and run in
-parallel, then MultiQC lights up as everything converges.
 
 ## Check the mapping stays honest
 
