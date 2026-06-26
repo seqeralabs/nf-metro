@@ -184,3 +184,40 @@ def test_interior_wrap_raises_under_strict(name: str) -> None:
     """The same wrap raises ``LayoutInvariantError`` under ``--strict``."""
     with pytest.raises(LayoutInvariantError, match="clears_own_section_interior"):
         _render_fixture(name, strict=True)
+
+
+# A side-branch section sharing a topo column with the spine: when the fold
+# budget lands on that branch column, one branch member is a sink that defeats
+# the straight-drop, so a downstream section is placed behind its producer and
+# the inter-section bundle wraps back through a section interior.  Auto-layout
+# restricts fold points to spine links that can drop forward (#1080/#1081), so
+# the producer leads its consumer and the wrap guard stays silent.
+RESOLVED_WRAP_FIXTURES = [
+    "rnaseq_branch_fold_wrap.mmd",
+]
+
+
+@pytest.mark.parametrize("name", RESOLVED_WRAP_FIXTURES)
+def test_branch_fold_repro_lays_out_forward(name: str) -> None:
+    """The producer section is placed ahead of (or level with) its consumer in
+    grid columns, so no inter-section bundle reads backward against the flow."""
+    graph = parse_metro_mermaid((FIXTURES / name).read_text())
+    compute_layout(graph)
+    genome = graph.sections["genome_align"]
+    post = graph.sections["postprocessing"]
+    assert genome.grid_col <= post.grid_col, (
+        f"genome_align (col {genome.grid_col}) must not sit ahead of its "
+        f"consumer postprocessing (col {post.grid_col})"
+    )
+
+
+@pytest.mark.parametrize("name", RESOLVED_WRAP_FIXTURES)
+def test_branch_fold_repro_renders_without_wrap(name: str) -> None:
+    """The forward placement leaves the render path's wrap guards silent."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _render_fixture(name)
+    tier_a = [w for w in caught if "Tier-A invariants" in str(w.message)]
+    assert not tier_a, (
+        f"unexpected Tier-A warning(s): {[str(w.message) for w in tier_a]}"
+    )

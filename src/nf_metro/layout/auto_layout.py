@@ -541,6 +541,22 @@ def _pack_topo_columns(
             and cumulative_width + w > max_station_columns
         )
 
+        # A branch column (several sections sharing one topo column) folds into
+        # a TB bridge per member, but the post-fold return row flows backward:
+        # a member whose successor is not seated straight below the bridge ends
+        # up placed behind its producer, so the inter-section bundle wraps. Only
+        # fold a branch column when every member's single successor drops
+        # straight below it; otherwise defer the fold to the next spine column,
+        # accepting a wider row to keep inter-section flow forward.
+        if need_fold and stack_size > 1:
+            next_sids = (
+                col_groups[sorted_cols[topo_idx + 1]]
+                if topo_idx + 1 < len(sorted_cols)
+                else []
+            )
+            if not _below_fold_drop_applies(sids, successors, next_sids):
+                need_fold = False
+
         if need_fold:
             fold_col = current_grid_col
             # This column is the fold point: place at right edge as TB bridge
@@ -582,6 +598,26 @@ def _pack_topo_columns(
     return folded, fold_sections, below_fold_sections
 
 
+def _below_fold_drop_applies(
+    sids: list[str],
+    successors: dict[str, set[str]],
+    next_sids: list[str],
+) -> bool:
+    """True when a fold's sections can drop their successors straight below it.
+
+    Every fold section must have exactly one successor and those successors
+    together must be exactly the next topo column, so they seat in the fold
+    column under the bridge rather than on a backward-flowing return row.
+    """
+    fold_succs: set[str] = set()
+    for fs in sids:
+        fs_succs = successors.get(fs, set())
+        if len(fs_succs) != 1:
+            return False
+        fold_succs.update(fs_succs)
+    return bool(next_sids) and fold_succs == set(next_sids)
+
+
 def _maybe_place_below_fold(
     col_groups: dict[int, list[str]],
     successors: dict[str, set[str]],
@@ -606,15 +642,7 @@ def _maybe_place_below_fold(
         return
     next_topo = sorted_cols[topo_idx + 1]
     next_sids = col_groups[next_topo]
-    fold_succs: set[str] = set()
-    all_single = True
-    for fs in sids:
-        fs_succs = successors.get(fs, set())
-        if len(fs_succs) != 1:
-            all_single = False
-            break
-        fold_succs.update(fs_succs)
-    if all_single and fold_succs == set(next_sids):
+    if _below_fold_drop_applies(sids, successors, next_sids):
         for j, ns in enumerate(next_sids):
             folded[ns] = (fold_col, band_start_row + j)
             below_fold_sections.add(ns)
