@@ -445,6 +445,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "to the far section rides the intervening section's own trunk for the "
         "shared line as one stroke (issue #1058).",
     ),
+    (
+        "tb_bottom_exit_bundle_jog",
+        TOPOLOGIES_DIR,
+        "A four-line bundle leaves a TB section's BOTTOM exit and jogs down into "
+        "the TOP entry of an RL section placed in the row below and one column "
+        "to the left. The four lines keep distinct channels through the jog "
+        "instead of collapsing onto one (issue #1074).",
+    ),
     # --- Offset and bypass ---
     (
         "bypass_fan_in_outer_slot",
