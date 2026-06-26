@@ -298,6 +298,15 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "holds its own track instead of collapsing the shorter ones together.",
     ),
     (
+        "symmetric_diamond_beside_wide_fan",
+        TOPOLOGIES_DIR,
+        "A `diamond_style: symmetric` 2-way fork-join sharing a section with a "
+        "wider 3-way fan. The 2-way diamond straddles its trunk evenly, but at "
+        "full pitch -- as tall as the 3-way fan, with an empty trunk row "
+        "between its branches -- because the half-pitch compaction is a "
+        "per-section decision the mixed-fan section cannot qualify for (#1076).",
+    ),
+    (
         "terminal_symmetric_fan",
         TOPOLOGIES_DIR,
         "A terminal section whose entry fans into equal-rank sinks; the "

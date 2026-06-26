@@ -1,0 +1,32 @@
+%%metro title: Symmetric diamond beside a wider fan
+%%metro diamond_style: symmetric
+%%metro line: l1 | Route 1 | #0570b0
+%%metro line: l2 | Route 2 | #2db572
+%%metro line: l3 | Route 3 | #f5c542
+%%metro line: l4 | Route 4 | #ff8c00
+%%metro line: l5 | Route 5 | #e63946
+%%metro line: l6 | Route 6 | #7b2d3b
+
+graph LR
+    subgraph prep [Pre-processing]
+        extract[Extract]
+        toolA[Tool A]
+        toolB[Tool B]
+        qc[QC]
+        splitA[Split A]
+        splitB[Split B]
+        splitC[Split C]
+        qc2[QC]
+
+        extract -->|l1,l2,l3,l4,l5,l6| toolA
+        extract -->|l1,l2,l3,l4,l5,l6| toolB
+        toolA -->|l1,l2,l3,l4,l5,l6| qc
+        toolB -->|l1,l2,l3,l4,l5,l6| qc
+
+        qc -->|l1,l2,l3,l4,l5,l6| splitA
+        qc -->|l1,l2,l3,l4,l5,l6| splitB
+        qc -->|l1,l2,l3,l4,l5,l6| splitC
+        splitA -->|l1,l2,l3,l4,l5,l6| qc2
+        splitB -->|l1,l2,l3,l4,l5,l6| qc2
+        splitC -->|l1,l2,l3,l4,l5,l6| qc2
+    end
