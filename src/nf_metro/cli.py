@@ -116,7 +116,15 @@ def _echo_issues(
     "--theme",
     type=click.Choice(list(THEMES.keys())),
     default=None,
-    help="Visual theme (default: from the %%metro style: directive, else nfcore).",
+    help="Visual theme brand "
+    "(default: from the %%metro style: directive, else nfcore).",
+)
+@click.option(
+    "--mode",
+    type=click.Choice(["light", "dark"]),
+    default=None,
+    help="Light/dark mode, independent of the theme brand "
+    "(default: from the %%metro mode: directive, else the theme's built-in default).",
 )
 @click.option(
     "--debug/--no-debug",
@@ -236,6 +244,7 @@ def render(
     output: Path | None,
     format_: str,
     theme: str | None,
+    mode: str | None,
     debug: bool,
     logo: Path | None,
     line_spread: str | None,
@@ -274,7 +283,7 @@ def render(
     ) as e:
         raise click.ClickException(str(e))
 
-    theme_obj = resolve_theme(theme, graph)
+    theme_obj = resolve_theme(theme, graph, mode=mode)
 
     if output is None:
         output = input_file.with_suffix(f".{format_}")
@@ -572,7 +581,15 @@ def explain(
     help="Interface to bind. Default 127.0.0.1 (local only); "
     "use 0.0.0.0 to accept connections from other hosts.",
 )
-@click.option("--theme", type=str, default=None, help="Theme name (nfcore, light).")
+@click.option(
+    "--theme", type=str, default=None, help="Theme brand name (nfcore, seqera)."
+)
+@click.option(
+    "--mode",
+    type=click.Choice(["light", "dark"]),
+    default=None,
+    help="Light/dark mode, independent of the theme brand.",
+)
 @click.option(
     "--overlay",
     type=click.Choice(OVERLAY_STYLES),
@@ -607,6 +624,7 @@ def serve(
     port: int,
     host: str,
     theme: str | None,
+    mode: str | None,
     overlay: str,
     token: str | None,
     open_browser: bool,
@@ -654,7 +672,7 @@ def serve(
         except (ValueError, PhaseInvariantError) as e:
             raise click.ClickException(str(e))
 
-        theme_obj = resolve_theme(theme, graph)
+        theme_obj = resolve_theme(theme, graph, mode=mode)
         mapped = sorted(graph.process_mapping)
         if not mapped:
             click.echo(

@@ -347,6 +347,7 @@ class MetroGraph:
     title: str = ""
     caption: str = ""
     style: str = "dark"
+    mode: str = ""
     lines: dict[str, MetroLine] = field(default_factory=dict)
     stations: dict[str, Station] = field(default_factory=dict)
     edges: list[Edge] = field(default_factory=list)

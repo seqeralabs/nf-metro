@@ -25,7 +25,7 @@ from nf_metro.parser.model import LineSpread, MetroGraph
 from nf_metro.render import render_svg
 from nf_metro.render.html import render_html
 from nf_metro.render.style import Theme
-from nf_metro.themes import THEMES
+from nf_metro.themes import THEME_FAMILIES, THEMES
 
 # `style: dark` predates theme names; alias it onto the nfcore theme.
 _STYLE_THEME_ALIASES = {"dark": "nfcore"}
@@ -45,12 +45,35 @@ def apply_layout_overrides(graph: MetroGraph, opts: Mapping[str, object]) -> Non
             setattr(graph, opt.target_attr, value)
 
 
-def resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
-    """Pick the theme: an explicit name wins over the ``style:`` directive."""
-    if theme is not None:
-        return THEMES[theme]
-    name = graph.style.strip().lower()
-    return THEMES.get(_STYLE_THEME_ALIASES.get(name, name), THEMES["nfcore"])
+def resolve_theme(
+    theme: str | None, graph: MetroGraph, mode: str | None = None
+) -> Theme:
+    """Resolve the final theme from brand and mode axes independently.
+
+    Resolution order for the brand (palette/identity):
+      1. Explicit ``theme`` argument (``--theme`` CLI flag).
+      2. ``%%metro style:`` directive on the graph (or ``dark`` alias → ``nfcore``).
+
+    Resolution order for the mode (light/dark):
+      1. Explicit ``mode`` argument (``--mode`` CLI flag).
+      2. ``%%metro mode:`` directive on the graph.
+
+    When a mode is explicitly set and the brand belongs to a theme family
+    (``THEME_FAMILIES``), the family variant for that mode is returned so that
+    brand and mode are fully independent axes. When no mode is set, the brand
+    name is looked up directly in ``THEMES`` (preserving all existing defaults).
+    """
+    brand = theme or _STYLE_THEME_ALIASES.get(
+        graph.style.strip().lower(), graph.style.strip().lower()
+    )
+    resolved_mode = (mode or graph.mode).strip().lower() or None
+
+    if resolved_mode and brand in THEME_FAMILIES:
+        family = THEME_FAMILIES[brand]
+        if resolved_mode in family:
+            return family[resolved_mode]
+
+    return THEMES.get(brand, THEMES["nfcore"])
 
 
 def prepare_graph(
@@ -108,6 +131,7 @@ def render_string(
     text: str,
     *,
     theme: str | None = None,
+    mode: str | None = None,
     output_format: Literal["svg", "html"] = "svg",
     from_nextflow: bool = False,
     title: str | None = None,
@@ -140,7 +164,7 @@ def render_string(
         legend=legend,
         layout_options=layout_options,
     )
-    theme_obj = resolve_theme(theme, graph)
+    theme_obj = resolve_theme(theme, graph, mode=mode)
     font_portability: Literal["embed", "paths"] | None = (
         "paths" if text_to_paths else "embed" if embed_font else None
     )

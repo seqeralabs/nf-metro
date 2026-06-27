@@ -60,6 +60,17 @@ def _dir_style(value: str, graph: MetroGraph) -> None:
     graph.style = value
 
 
+_VALID_MODES = {"light", "dark"}
+
+
+def _dir_mode(value: str, graph: MetroGraph) -> None:
+    normalised = value.strip().lower()
+    if normalised not in _VALID_MODES:
+        _warn_malformed("mode", value, "/".join(sorted(_VALID_MODES)))
+        return
+    graph.mode = normalised
+
+
 def _dir_logo(value: str, graph: MetroGraph) -> None:
     graph.logo_path = value
 
@@ -483,6 +494,7 @@ _GLOBAL_DIRECTIVE_HANDLERS.update(
     {
         "title": _dir_title,
         "style": _dir_style,
+        "mode": _dir_mode,
         "logo": _dir_logo,
         "line": _dir_line,
         "off_track": _dir_off_track,
