@@ -33,7 +33,9 @@ import heroMap from "../content/docs/assets/renders/rnaseq_auto.svg";
         Generate transit-style SVG diagrams from Mermaid graph definitions with <code
           >%%metro</code
         > directives. Each analysis route becomes a colored metro line — built for
-        visualizing nf-core and Nextflow workflows.
+        visualizing nf-core and Nextflow workflows. Like real transit maps, the
+        layout isn't geographic: every position is an intentional choice that
+        conveys the workflow clearly.
       </p>
       <div class="cta-row">
         <a class="btn btn-primary" href={`${base}gallery/`}
@@ -51,11 +53,6 @@ import heroMap from "../content/docs/assets/renders/rnaseq_auto.svg";
           height={heroMap.height}
           alt="nf-core/rnaseq rendered as an nf-metro map"
         />
-        <figcaption>
-          Like the transit maps they borrow from, nf-metro diagrams aren't drawn
-          to geographic scale. Every position and angle is an intentional choice
-          about conveying the workflow clearly, not a literal layout.
-        </figcaption>
       </figure>
     </section>
 
@@ -197,15 +194,6 @@ import heroMap from "../content/docs/assets/renders/rnaseq_auto.svg";
      auto-generated page title (the hero renders its own wordmark). */
   .content-panel h1#_top {
     display: none;
-  }
-  .hero-map figcaption {
-    margin-top: 0.9rem;
-    max-width: 56ch;
-    margin-inline: auto;
-    font-size: 0.9rem;
-    line-height: 1.5;
-    text-align: center;
-    color: var(--sl-color-gray-3);
   }
 </style>
 
