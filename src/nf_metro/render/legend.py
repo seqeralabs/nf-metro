@@ -438,6 +438,7 @@ def _render_marker_key(
     swatch_cx = left_x + LEGEND_SWATCH_WIDTH / 2
     r = LEGEND_MARKER_RADIUS
     stroke = marker_stroke_color(theme)
+    stroke_cls = _ns("nf-metro-marker-stroke")
     for i, entry in enumerate(graph.marker_legend):
         entry_y = top_y + i * line_height + line_height / 2
         fill = marker_fill_color(entry.style.fill, theme)
@@ -450,6 +451,7 @@ def _render_marker_key(
                     fill=fill,
                     stroke=stroke,
                     stroke_width=theme.station_stroke_width,
+                    class_=stroke_cls,
                 )
             )
         else:
@@ -470,6 +472,7 @@ def _render_marker_key(
                     fill=fill,
                     stroke=stroke,
                     stroke_width=theme.station_stroke_width,
+                    class_=stroke_cls,
                 )
             )
         d.append(

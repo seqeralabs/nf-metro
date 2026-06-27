@@ -1040,12 +1040,11 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme) -> None:
     pair = mode_pair(theme)
     light, dark = pair if pair is not None else (theme, theme)
 
+    def _adapt(light_val: str, dark_val: str) -> str:
+        return light_val if light is dark else f"light-dark({light_val}, {dark_val})"
+
     def _prop(var: str, attr: str) -> str:
-        light_val, dark_val = getattr(light, attr), getattr(dark, attr)
-        fallback = (
-            light_val if light is dark else f"light-dark({light_val}, {dark_val})"
-        )
-        return f"var({var}, {fallback})"
+        return f"var({var}, {_adapt(getattr(light, attr), getattr(dark, attr))})"
 
     def _rule(cls: str, props: str) -> str:
         return f".{_ns(cls)} {{ {props}; }}"
@@ -1090,13 +1089,22 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme) -> None:
             f"fill: {_prop('--nfm-map-legend-text-color', 'legend_text_color')}",
         ),
     ]
+    _ms_adapt = _adapt(
+        light.marker_stroke or light.station_stroke,
+        dark.marker_stroke or dark.station_stroke,
+    )
+    lines.append(
+        _rule(
+            "nf-metro-marker-stroke",
+            f"stroke: var(--nfm-map-marker-stroke, {_ms_adapt})",
+        )
+    )
     # The label halo is a knockout of the background, so it tracks --nfm-map-bg
     # and must flip with the mode too; otherwise a dark-baked halo blots out
     # labels in light mode. Disabled-halo themes draw no halo, so emit nothing.
     halo_light, halo_dark = _label_halo_color(light), _label_halo_color(dark)
     if halo_light is not None and halo_dark is not None:
-        halo = halo_light if light is dark else f"light-dark({halo_light}, {halo_dark})"
-        halo_val = f"var(--nfm-map-bg, {halo})"
+        halo_val = f"var(--nfm-map-bg, {_adapt(halo_light, halo_dark)})"
         lines.append(
             _rule("nf-metro-label-halo", f"fill: {halo_val}; stroke: {halo_val}")
         )
@@ -1631,6 +1639,10 @@ def _render_marker_station(
     )
     x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb_vert, flow_len=flow_len)
     rx = marker_corner_radius(marker.shape, r)
+    marker_data = {
+        **station_data,
+        "class_": f"{station_data['class_']} {_ns('nf-metro-marker-stroke')}",
+    }
     d.append(
         draw.Rectangle(
             x,
@@ -1642,7 +1654,7 @@ def _render_marker_station(
             fill=marker_fill_color(marker.fill, theme),
             stroke=marker_stroke_color(theme),
             stroke_width=theme.station_stroke_width,
-            **station_data,
+            **marker_data,
         )
     )
 

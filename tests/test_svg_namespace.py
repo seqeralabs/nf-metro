@@ -70,6 +70,7 @@ _ALL_KNOWN_CLASSES = {
     "nf-metro-station",
     "nf-metro-station-group",
     "nf-metro-station-label",
+    "nf-metro-marker-stroke",
     "nf-metro-group-underline",
     "nf-metro-group-label",
     "nf-metro-rail-connector",

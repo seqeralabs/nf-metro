@@ -58,6 +58,7 @@ def _make_graph():
         "--nfm-map-section-label-color",
         "--nfm-map-legend-bg",
         "--nfm-map-legend-text-color",
+        "--nfm-map-marker-stroke",
     ],
 )
 def test_svg_declares_chrome_property(prop):
@@ -201,3 +202,69 @@ def test_chrome_css_false_rasterizes_with_cairosvg():
     svg = render_svg(_make_graph(), NFCORE_THEME, chrome_css=False)
     png = cairosvg.svg2png(bytestring=svg.encode())
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+# ---------------------------------------------------------------------------
+# Marker stroke CSS custom property
+# ---------------------------------------------------------------------------
+
+_MARKER_MMD = (
+    "%%metro title: Marker test\n"
+    "%%metro line: main | Main | #ff0000\n"
+    "%%metro marker: a | square, solid\n"
+    "%%metro marker: b | circle, open\n"
+    "%%metro marker_legend: square, solid | Mandatory\n"
+    "%%metro marker_legend: circle, open | Optional\n"
+    "graph LR\n"
+    "    subgraph s1 [Section]\n"
+    "        a[Node A]\n"
+    "        b[Node B]\n"
+    "        a -->|main| b\n"
+    "    end\n"
+)
+
+
+def _make_marker_graph():
+    g = parse_metro_mermaid(_MARKER_MMD)
+    compute_layout(g)
+    return g
+
+
+def test_marker_stroke_css_property_declared():
+    """``--nfm-map-marker-stroke`` must appear in the chrome CSS block."""
+    svg = render_svg(_make_marker_graph(), NFCORE_THEME)
+    assert "--nfm-map-marker-stroke" in svg
+
+
+def test_marker_stroke_class_on_marker_elements():
+    """Marker glyphs carry the ``nf-metro-marker-stroke`` class so the CSS var applies.
+
+    The baked hex remains as a presentation-attribute fallback for cairosvg; the CSS
+    class rule overrides it in-browser (CSS stylesheet > presentation attributes).
+    """
+    svg = render_svg(_make_marker_graph(), NFCORE_THEME)
+    assert "nf-metro-marker-stroke" in svg
+    assert "var(--nfm-map-marker-stroke" in svg
+
+
+def test_marker_stroke_fallback_is_light_dark_of_both_palettes():
+    """The --nfm-map-marker-stroke fallback pairs light and dark values."""
+    svg = render_svg(_make_marker_graph(), NFCORE_THEME)
+    light_val = NFCORE_LIGHT_THEME.marker_stroke or NFCORE_LIGHT_THEME.station_stroke
+    dark_val = NFCORE_DARK_THEME.marker_stroke or NFCORE_DARK_THEME.station_stroke
+    assert f"--nfm-map-marker-stroke, light-dark({light_val}, {dark_val})" in svg
+
+
+def test_marker_stroke_class_in_legend_swatches():
+    """Legend marker swatches carry the ``nf-metro-marker-stroke`` class too."""
+    svg = render_svg(_make_marker_graph(), NFCORE_THEME)
+    # CSS rule + at least one station marker + at least one legend swatch
+    count = svg.count("nf-metro-marker-stroke")
+    assert count >= 3, f"Expected ≥3 occurrences (rule + station + swatch), got {count}"
+
+
+def test_chrome_css_false_marker_stroke_is_concrete():
+    """chrome_css=False keeps the baked marker stroke for cairosvg rasterisation."""
+    svg = render_svg(_make_marker_graph(), NFCORE_THEME, chrome_css=False)
+    assert "var(--nfm-map-marker-stroke" not in svg
+    assert 'stroke="' in svg

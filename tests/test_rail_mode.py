@@ -1458,7 +1458,7 @@ def test_single_rail_marker_glyph_seats_on_its_rail():
 
     glyph_cy = None
     for el in root.iter():
-        if el.attrib.get("class") != "nf-metro-station":
+        if "nf-metro-station" not in (el.attrib.get("class") or ""):
             continue
         if el.attrib.get("data-station-id") != "haplo":
             continue
