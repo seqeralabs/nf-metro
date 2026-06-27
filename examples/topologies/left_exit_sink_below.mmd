@@ -1,0 +1,29 @@
+%%metro title: LEFT exit feeds a LEFT-entry sink one row below and to the left
+%%metro line: main | Main | #e64980
+%%metro grid: pre | 0,0
+%%metro grid: align | 1,0
+%%metro grid: bridge | 2,0
+%%metro grid: sink | 1,1
+
+graph LR
+    subgraph pre [Pre]
+        p1[P1] -->|main| p2[P2]
+    end
+    subgraph align [Align]
+        a1[A1] -->|main| a2[A2]
+    end
+    subgraph bridge [Bridge]
+        %%metro direction: TB
+        %%metro entry: top | main
+        %%metro exit: left | main
+        b1[B1] -->|main| b2[B2]
+        b2 -->|main| b3[B3]
+        b3 -->|main| b4[B4]
+    end
+    subgraph sink [Sink]
+        %%metro entry: left | main
+        s1[S1] -->|main| s2[S2]
+    end
+    p2 -->|main| a1
+    a2 -->|main| b1
+    b4 -->|main| s1

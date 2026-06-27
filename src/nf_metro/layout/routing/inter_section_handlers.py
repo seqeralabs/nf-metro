@@ -206,17 +206,20 @@ class _InterFacts:
         )
 
     @property
-    def is_tb_perp_exit_to_side(self) -> bool:
-        """A trailing perp exit on a vertical-flow section feeding a side entry
-        the flow-direction drop can't reach.
+    def is_tb_perp_exit_against_flow(self) -> bool:
+        """A trailing perp exit on a vertical-flow section feeding an entry the
+        flow-direction drop can't reach.
 
         The exit port sits on the section's trailing edge (BOTTOM for a downward
         TB flow, TOP for its upward BT image), so the line leaves along the flow.
-        A side (LEFT/RIGHT) entry sitting *against* the flow from the port -- at
-        or above a downward exit, at or below an upward one -- cannot be reached
-        by that drop: a straight or shallow run grazes the trailing edge and
-        exits through the corner.  Such an edge takes the up/down-and-over
-        corridor route instead (see _route_perp_exit_over), mirroring how
+        Any entry sitting *against* the flow from the port -- at or above a
+        downward exit, at or below an upward one -- cannot be reached by that
+        drop: a straight or shallow run grazes the trailing edge and exits
+        through the corner, and a side or perpendicular entry on the far side of
+        the target would be reached only by clawing back up through the box.
+        Such an edge takes the up/down-and-over corridor route instead (see
+        _route_perp_exit_over, whose ``crosses_box`` branch crosses to the
+        inter-column gap and approaches the port from outside), mirroring how
         :attr:`is_perp_exit` intercepts horizontal-flow perpendicular exits
         before the same-Y shortcut.
         """
@@ -224,7 +227,7 @@ class _InterFacts:
             self.src_port is not None
             and not self.src_port.is_entry
             and self.src.section_id in self.ctx.tb_sections
-            and self.entry_side in (PortSide.LEFT, PortSide.RIGHT)
+            and self.entry_side is not None
         ):
             return False
         section = self.graph.sections.get(self.src.section_id)
@@ -749,6 +752,12 @@ def _route_left_entry_family(f: _InterFacts) -> RoutedPath | None:
     if one exists, else loop around below the target.
     """
     edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
+    # A LEFT-side exit already faces outward toward the LEFT entry: lead it out
+    # leftward and drop straight down a channel clear of both boxes, never the
+    # rightward-lead-out wrap, whose leftward channel run would claw back across
+    # a tall source box (a folded TB bridge feeding a sink below and to the left).
+    if f.is_left_exit:
+        return _route_left_exit_left_entry_drop(edge, src, tgt, ctx)
     wrap_hy = inter_row_channel_y(graph, src, tgt, f.sy, f.ty, f.dy, ctx.curve_radius)
     exclude = {src.section_id} if src.section_id else set[str]()
     if _h_segment_crosses_other_section(graph, f.sx, f.tx, wrap_hy, exclude):
@@ -859,12 +868,15 @@ _INTER_SECTION_RULES: list[_Rule] = [
         lambda f: f.is_perp_exit,
         lambda f: _route_perp_exit(f.edge, f.src, f.tgt, f.src_col, f.tgt_col, f.ctx),
     ),
-    # A TB/BT perpendicular exit feeding a side entry at the same Y grazes the
-    # section's own exit edge on a straight run, so it takes the same up/down-
-    # and-over corridor shape before the same-Y shortcut below claims it.
+    # A TB/BT trailing perp exit feeding an entry against the flow (a side entry
+    # at/above a downward exit, or a perpendicular entry on the target's far
+    # side) cannot be reached by the flow-direction drop without grazing the
+    # exit edge or clawing back through the box, so it takes the up/down-and-over
+    # corridor shape before the same-Y shortcut and the TB bottom-exit drop below
+    # claim it.
     _Rule(
         "TB perp-exit over",
-        lambda f: f.is_tb_perp_exit_to_side,
+        lambda f: f.is_tb_perp_exit_against_flow,
         lambda f: _route_perp_exit_over(f.edge, f.src, f.tgt, f.ctx),
     ),
     # Same Y, no obstacle, not a right-entry plough: a straight horizontal run.
@@ -2284,24 +2296,35 @@ def _route_top_entry_l_shape(
 def _route_left_exit_left_entry_drop(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> RoutedPath | None:
-    """Drop a LEFT exit into a LEFT entry stacked directly below.
+    """Drop a LEFT exit into a LEFT entry below it (same column or to the left).
 
-    Both ports sit on the left edge of one grid column.  Run a short lead
-    out to the left of the column, drop vertically in that channel, then
-    come back in to the target's left entry port::
+    Both ports sit on a left edge and both face outward to the left, so the
+    line leads out leftward, drops vertically in a channel clear of every box,
+    then comes back in to the target's left entry port::
 
         (sx,sy) -> (vx,sy) -> (vx,ty) -> (tx,ty)
 
-    The channel ``vx`` is placed just left of the column's leftmost edge so
-    the connector never re-enters either section's bbox.
+    The channel ``vx`` is placed just left of the leftmost of the two columns'
+    left edges, so the connector never re-enters either section's bbox -- in
+    particular it never claws back across the source box to reach a target that
+    sits below and to the left (a folded TB bridge feeding a convergence sink).
     """
     src_col = _resolve_section_col(ctx.graph, src)
-    left_edge = col_left_edge(ctx.graph, src_col, default=min(src.x, tgt.x))
+    tgt_col = _resolve_section_col(ctx.graph, tgt)
+    left_edge = min(
+        col_left_edge(ctx.graph, src_col, default=src.x),
+        col_left_edge(ctx.graph, tgt_col, default=tgt.x),
+    )
     channel_x = min(left_edge, src.x, tgt.x) - ctx.curve_radius - ctx.offset_step
 
-    return route_hvh_tapered(
+    route = route_hvh_tapered(
         ctx, edge, src, tgt, channel_x, base_radius=ctx.curve_radius
     )
+    # When the target sits one or more columns to the left, the descent runs in
+    # an inter-column gap and must declare its slot; a same-column drop hugs the
+    # column's left edge (in no gap), where this declares nothing.
+    _declare_channel(route, ctx, channel_x, vertical_direction(tgt.y - src.y))
+    return route
 
 
 def _left_entry_descent_x(

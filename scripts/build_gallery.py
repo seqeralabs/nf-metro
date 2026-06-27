@@ -427,6 +427,14 @@ GALLERY_ENTRIES: list[tuple[str, Path, str]] = [
         "(issue #1007).",
     ),
     (
+        "left_exit_sink_below",
+        TOPOLOGIES_DIR,
+        "A TB bridge's LEFT exit feeds a LEFT-entry sink one row below and to the "
+        "left: the bundle leads out left and drops straight down a channel clear "
+        "of both boxes, routing around the bridge rather than clawing back "
+        "through its interior (issue #1083).",
+    ),
+    (
         "tb_passthrough_continuation",
         TOPOLOGIES_DIR,
         "A TB convergence that is not a sink: a diagonal feeder continues straight "

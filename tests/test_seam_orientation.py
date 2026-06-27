@@ -102,6 +102,11 @@ EXPECTED_RESIDUALS = frozenset(
         # the same +x side as the drop, but the classifier sees a vertical→vertical
         # continuation and correctly says PRESERVE (no bundle-order flip).
         ("tb_right_entry_stack", "upper", "lower", "B->T"),
+        # left_exit_sink_below: a TB bridge's LEFT exit drops into a LEFT-entry
+        # sink below and to the left.  The section-absolute flag marks the sink
+        # reversed, but the seam is a single-line L->L drop with no bundle order
+        # to flip, so the classifier preserves it.
+        ("left_exit_sink_below", "bridge", "sink", "L->L"),
         ("fold_double", "annotation", "interpretation", "L->R"),
         ("fold_double", "hard_filter", "annotation", "L->R"),
         ("fold_double", "interpretation", "integration", "L->R"),

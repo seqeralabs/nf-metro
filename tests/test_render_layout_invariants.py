@@ -20,13 +20,16 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.phases._common import routes_through_own_section_interior
 from nf_metro.layout.phases.guards import (
     LayoutInvariantError,
     PhaseInvariantError,
+    _guard_inter_section_route_clears_own_section_interior,
     assert_render_layout_invariants,
     render_layout_invariant_specs,
 )
 from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render import render_svg
@@ -142,17 +145,9 @@ BACKTRACK_RENDER_GUARDS = [
     "_guard_inter_section_route_clears_own_section_interior",
 ]
 
-# Forced-grid fixtures placing a consumer section so its producer's exit side
-# faces away from it: the inter-section bundle wraps and claws back through a
-# section interior (the #1078 / #1074 shape reduced to a stable repro).
-WRAP_DEFECT_FIXTURES = [
-    "away_exit_wrap_interior_left.mmd",
-    "away_exit_wrap_interior_right.mmd",
-]
-
-# Kept under ``regressions/`` (not the auto-discovered corpus root): a defect
-# fixture raises under ``validate=True``, so the corpus-wide idempotence and
-# manifest tests must not pick it up.
+# Kept under ``regressions/`` (not the auto-discovered corpus root): some
+# fixtures here raise under ``validate=True``, so the corpus-wide idempotence
+# and manifest tests must not pick them up.
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "regressions"
 
 
@@ -171,19 +166,88 @@ def _render_fixture(name: str, *, strict: bool = False) -> None:
     render_svg(graph, THEMES["nfcore"])
 
 
-@pytest.mark.parametrize("name", WRAP_DEFECT_FIXTURES)
-def test_interior_wrap_warns_by_default(name: str) -> None:
-    """A bundle that wraps back through its own section interior warns on the
-    default render path (it would render a silently-broken map otherwise)."""
-    with pytest.warns(UserWarning, match="Tier-A invariants"):
-        _render_fixture(name)
+# An inter-section route whose exit side faces away from its consumer must leave
+# the box and route *around* it, never claw back through a section interior
+# (#1083).  The repros exercise both away-facing-exit mechanisms:
+#   - the away_exit pair: forced-grid TB BOTTOM exits feeding a TOP entry that
+#     sits above them (the #1078 / #1074 shape reduced to a stable repro);
+#   - variant_calling_tuned at fold 8: a real pipeline where the compact fold
+#     makes ``variant_calling`` a tall TB bridge whose LEFT exit feeds the
+#     ``reporting`` convergence sink one row below and one column left.
+# ``(fixture_dir, name, fold)`` -- ``fold`` is the parse-time column budget
+# (``None`` keeps the fixture's own threshold).
+ROUTE_AROUND_REPROS = [
+    ("regressions", "away_exit_wrap_interior_left.mmd", None),
+    ("regressions", "away_exit_wrap_interior_right.mmd", None),
+    ("examples", "variant_calling_tuned.mmd", 8),
+]
 
 
-@pytest.mark.parametrize("name", WRAP_DEFECT_FIXTURES)
-def test_interior_wrap_raises_under_strict(name: str) -> None:
-    """The same wrap raises ``LayoutInvariantError`` under ``--strict``."""
-    with pytest.raises(LayoutInvariantError, match="clears_own_section_interior"):
-        _render_fixture(name, strict=True)
+def _laid_out_repro(fixture_dir: str, name: str, fold: int | None) -> MetroGraph:
+    base = FIXTURES if fixture_dir == "regressions" else EXAMPLES
+    graph = parse_metro_mermaid((base / name).read_text(), max_station_columns=fold)
+    compute_layout(graph)
+    return graph
+
+
+@pytest.mark.parametrize("fixture_dir,name,fold", ROUTE_AROUND_REPROS)
+def test_away_facing_exit_routes_around_own_section(
+    fixture_dir: str, name: str, fold: int | None
+) -> None:
+    """No inter-section route runs back through its own source/target interior:
+    the away-facing exit leaves the box and goes around it (#1083)."""
+    graph = _laid_out_repro(fixture_dir, name, fold)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    offenders = routes_through_own_section_interior(
+        graph, routes=routes, offsets=offsets
+    )
+    assert not offenders, (
+        f"{name}: inter-section route(s) claw back through their own section "
+        f"interior instead of routing around it: "
+        f"{[(rp.edge.source, rp.edge.target, sid) for rp, sid in offenders]}"
+    )
+
+
+@pytest.mark.parametrize("fixture_dir,name,fold", ROUTE_AROUND_REPROS)
+def test_away_facing_exit_renders_without_wrap_warning(
+    fixture_dir: str, name: str, fold: int | None
+) -> None:
+    """The around-the-box route leaves every render-path Tier-A wrap guard
+    silent (the route is correct, not merely tolerated)."""
+    graph = _laid_out_repro(fixture_dir, name, fold)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        render_svg(graph, THEMES["nfcore"])
+    tier_a = [w for w in caught if "Tier-A invariants" in str(w.message)]
+    assert not tier_a, (
+        f"{name}: unexpected Tier-A wrap warning(s): {[str(w.message) for w in tier_a]}"
+    )
+
+
+def test_interior_wrap_guard_fires_on_an_injected_crossing() -> None:
+    """The interior-clearance guard raises when a route *does* run through its
+    own target box -- the backstop that proves the around-the-box guarantee."""
+    graph = parse_metro_mermaid(
+        (FIXTURES / "away_exit_wrap_interior_left.mmd").read_text()
+    )
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    inter = next(rp for rp in routes if rp.is_inter_section)
+    tgt_sec = graph.sections[graph.section_for_station(inter.edge.target)]
+    cx = tgt_sec.bbox_x + tgt_sec.bbox_w / 2
+    cy = tgt_sec.bbox_y + tgt_sec.bbox_h / 2
+    crossing = RoutedPath(
+        edge=inter.edge,
+        line_id=inter.line_id,
+        points=[(cx - 200, cy), (cx + 200, cy)],
+        is_inter_section=True,
+    )
+    with pytest.raises(PhaseInvariantError, match="instead of routing around it"):
+        _guard_inter_section_route_clears_own_section_interior(
+            graph, "after final", routes=[crossing], offsets=offsets
+        )
 
 
 # A side-branch section sharing a topo column with the spine: when the fold
