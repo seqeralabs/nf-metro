@@ -132,5 +132,5 @@ jobs:
             echo "No changes to publish."
           else
             git commit -m "docs: deploy ${VERSION} (${GITHUB_SHA::8})"
-            git push origin gh-pages
+            git push origin HEAD:gh-pages
           fi
