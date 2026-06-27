@@ -1448,56 +1448,28 @@ def mdx_page(
     ]
 
 
-def render_guide_examples() -> None:
-    """Render all guide examples to docs/assets/renders/."""
+def render_debug_overlay() -> None:
+    """Render rnaseq_auto with the debug overlay for the guide's debug-mode section."""
     RENDERS_DIR.mkdir(parents=True, exist_ok=True)
     section = "Guide Examples"
-    print("Guide examples:")
-    for mmd_path in sorted(GUIDE_DIR.glob("*.mmd")):
-        svg_path = RENDERS_DIR / f"{mmd_path.stem}.svg"
-        try:
-            render_mmd(mmd_path, svg_path)
-            _manifest[svg_path.name] = section
-            print(f"  {mmd_path.stem}: OK")
-        except Exception as e:
-            print(f"  {mmd_path.stem}: FAIL - {e}")
-
-    # Top-level examples referenced directly from the guide
-    for stem in (
-        "rnaseq_auto",
-        "variantbenchmarking",
-        "variantbenchmarking_auto",
-        "marker_styles",
-    ):
-        mmd_path = EXAMPLES_DIR / f"{stem}.mmd"
-        if not mmd_path.exists():
-            continue
-        svg_path = RENDERS_DIR / f"{stem}.svg"
-        try:
-            render_mmd(mmd_path, svg_path)
-            _manifest[svg_path.name] = section
-            print(f"  {stem}: OK")
-        except Exception as e:
-            print(f"  {stem}: FAIL - {e}")
-
-    # Debug overlay render for the guide
     debug_src = EXAMPLES_DIR / "rnaseq_auto.mmd"
     debug_svg = RENDERS_DIR / "rnaseq_auto_debug.svg"
-    if debug_src.exists():
-        try:
-            text = debug_src.read_text()
-            graph = parse_metro_mermaid(text)
-            compute_layout(graph)
-            theme_name = graph.style if graph.style in THEMES else "nfcore"
-            theme = THEMES[theme_name]
-            svg_str = render_drawn_svg(graph, theme, debug=True)
-            debug_svg.write_text(svg_str)
-            _record_metrics(graph, debug_svg.name, svg_str)
-            _manifest[debug_svg.name] = section
-            print("  rnaseq_auto_debug: OK")
-        except Exception as e:
-            print(f"  rnaseq_auto_debug: FAIL - {e}")
-
+    if not debug_src.exists():
+        return
+    print("Guide examples:")
+    try:
+        text = debug_src.read_text()
+        graph = parse_metro_mermaid(text)
+        compute_layout(graph)
+        theme_name = graph.style if graph.style in THEMES else "nfcore"
+        theme = THEMES[theme_name]
+        svg_str = render_drawn_svg(graph, theme, debug=True)
+        debug_svg.write_text(svg_str)
+        _record_metrics(graph, debug_svg.name, svg_str)
+        _manifest[debug_svg.name] = section
+        print("  rnaseq_auto_debug: OK")
+    except Exception as e:
+        print(f"  rnaseq_auto_debug: FAIL - {e}")
     print()
 
 
@@ -1735,7 +1707,7 @@ if __name__ == "__main__":
     if RENDERS_DIR.exists():
         for old_svg in RENDERS_DIR.glob("*.svg"):
             old_svg.unlink()
-    render_guide_examples()
+    render_debug_overlay()
     render_nextflow_examples()
     build_pipelines_page()
     render_test_fixtures()

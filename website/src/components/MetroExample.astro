@@ -1,0 +1,16 @@
+---
+import { Code } from "@astrojs/starlight/components";
+import { renderMetro } from "../plugins/metro.mjs";
+
+interface Props {
+  src: string;
+  title?: string;
+  showCode?: boolean;
+}
+
+const { src, title, showCode = true } = Astro.props;
+const svg = renderMetro(src);
+---
+
+{showCode && <Code code={src} lang="metro" title={title} />}
+<Fragment set:html={svg} />

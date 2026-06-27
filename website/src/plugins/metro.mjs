@@ -31,7 +31,7 @@ mkdirSync(CACHE_DIR, { recursive: true });
 /** drawsvg emits an XML prolog; strip it before inlining into HTML. */
 const XML_PROLOG_RE = /^<\?xml.*?>\s*/;
 
-function renderMetro(content) {
+export function renderMetro(content) {
   const hash = createHash('sha256').update(content).digest('hex').slice(0, 16);
   const cacheFile = join(CACHE_DIR, `${hash}.svg`);
 

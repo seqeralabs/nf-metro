@@ -2,15 +2,21 @@
 title: "Writing metro maps"
 ---
 
-import { Code } from "@astrojs/starlight/components";
+import MetroExample from "../../components/MetroExample.astro";
 import minimalMmd from "@examples/guide/01_minimal.mmd?raw";
 import sectionsMmd from "@examples/guide/02_sections.mmd?raw";
 import fanOutMmd from "@examples/guide/03_fan_out.mmd?raw";
 import fanInMergeMmd from "@examples/guide/03b_fan_in_merge.mmd?raw";
 import directionsMmd from "@examples/guide/04_directions.mmd?raw";
 import fileIconsMmd from "@examples/guide/05_file_icons.mmd?raw";
+import filesIconMmd from "@examples/guide/05c_files_icon.mmd?raw";
+import folderIconMmd from "@examples/guide/05d_folder_icon.mmd?raw";
+import bannerLabelsMmd from "@examples/guide/05f_banner_labels.mmd?raw";
 import markerStylesMmd from "@examples/marker_styles.mmd?raw";
 import withoutHiddenMmd from "@examples/guide/06a_without_hidden.mmd?raw";
+import withHiddenMmd from "@examples/guide/06b_with_hidden.mmd?raw";
+import rnaseqAutoMmd from "@examples/rnaseq_auto.mmd?raw";
+import variantbenchmarkingAutoMmd from "@examples/variantbenchmarking_auto.mmd?raw";
 
 nf-metro turns text descriptions of pipelines into metro-map-style diagrams. Input files use a subset of [Mermaid](https://mermaid.js.org/) `graph LR` syntax, extended with `%%metro` directives for colors, sections, and layout control.
 
@@ -20,30 +26,7 @@ This guide builds up the format step by step, starting from a flat list of stati
 
 The simplest metro map needs three things: **lines** (colored routes), **stations** (pipeline steps), and **edges** (connections that carry lines between stations).
 
-<Code code={minimalMmd} lang="metro" title="examples/guide/01_minimal.mmd" />
-
-```mermaid
-%%metro title: Simple Pipeline
-%%metro style: dark
-%%metro line: main | Main | #4CAF50
-%%metro line: qc | Quality Control | #2196F3 | dashed
-
-graph LR
-    input[Input]
-    fastqc[FastQC]
-    trim[Trimming]
-    align[Alignment]
-    quant[Quantification]
-    multiqc[MultiQC]
-
-    input -->|main| trim
-    trim -->|main| align
-    align -->|main| quant
-    input -->|qc| fastqc
-    trim -->|qc| fastqc
-    quant -->|qc| multiqc
-    fastqc -->|qc| multiqc
-```
+<MetroExample src={minimalMmd} title="examples/guide/01_minimal.mmd" />
 
 A few things to notice:
 
@@ -62,9 +45,7 @@ Without sections, all stations sit on a single track. That works for simple pipe
 
 Sections wrap related stations in visual boxes using Mermaid `subgraph` blocks. This makes the diagram easier to read and lets the layout engine route lines between groups automatically.
 
-<Code code={sectionsMmd} lang="metro" title="examples/guide/02_sections.mmd" />
-
-![Sectioned example](assets/renders/02_sections.svg)
+<MetroExample src={sectionsMmd} title="examples/guide/02_sections.mmd" />
 
 There is one important rule: **edges between stations in different sections must go outside all `subgraph`/`end` blocks.** The three inter-section edges at the bottom of the file connect Pre-processing to Analysis and Reporting.
 
@@ -74,9 +55,7 @@ nf-metro places sections on a grid automatically based on their dependencies. It
 
 When lines diverge from a shared section into separate analysis paths and then reconverge, nf-metro stacks the target sections vertically and routes each line to its destination:
 
-<Code code={fanOutMmd} lang="metro" title="examples/guide/03_fan_out.mmd" />
-
-![Fan-out example](assets/renders/03_fan_out.svg)
+<MetroExample src={fanOutMmd} title="examples/guide/03_fan_out.mmd" />
 
 Each line takes a different route through its own analysis section, then all three reconverge at annotation. The layout engine handles junction creation, vertical stacking, and routing automatically. You don't need to specify any positions or port sides.
 
@@ -84,13 +63,7 @@ Each line takes a different route through its own analysis section, then all thr
 
 When optional processing steps mean the **same line** can reach a destination from multiple sources, nf-metro consolidates the overlapping routes. One bypass carries the full path (the "trunk"), and closer sources drop down to join it:
 
-<Code
-  code={fanInMergeMmd}
-  lang="metro"
-  title="examples/guide/03b_fan_in_merge.mmd"
-/>
-
-![Fan-in merge example](assets/renders/03b_fan_in_merge.svg)
+<MetroExample src={fanInMergeMmd} title="examples/guide/03b_fan_in_merge.mmd" />
 
 The key pattern: every section sends `main` not just to the next step, but to **all** subsequent sections. This creates convergent same-line edges at the sink's entry port. The layout engine detects this and routes a single trunk bypass from the farthest source, with branches dropping down to join it from intermediate sections.
 
@@ -100,13 +73,7 @@ By default every section flows left-to-right (`LR`). You can change a section's 
 
 This example adds a top-to-bottom (`TB`) section that acts as a vertical connector between the fan-out analysis paths and the final reporting section:
 
-<Code
-  code={directionsMmd}
-  lang="metro"
-  title="examples/guide/04_directions.mmd"
-/>
-
-![Directions example](assets/renders/04_directions.svg)
+<MetroExample src={directionsMmd} title="examples/guide/04_directions.mmd" />
 
 The Post-processing section flows top-to-bottom, collecting the RNA and DNA lines from the sections above and below, then handing them off horizontally to Reporting. The only change from a normal section is the single `%%metro direction: TB` directive.
 
@@ -137,13 +104,7 @@ Two things are needed:
 
 The blank label tells nf-metro to render the document icon (with the label from the directive) instead of a pill-shaped station. Connect it to the pipeline with normal edges like any other station.
 
-<Code
-  code={fileIconsMmd}
-  lang="metro"
-  title="examples/guide/05_file_icons.mmd"
-/>
-
-![File icons example](assets/renders/05_file_icons.svg)
+<MetroExample src={fileIconsMmd} title="examples/guide/05_file_icons.mmd" />
 
 The FASTQ icon at the start of the Analysis section shows the pipeline input. The HTML icon at the end of Reporting shows where the QC report is written. Common labels include FASTQ, BAM, VCF, HTML, and CSV, but you can use any short string.
 
@@ -157,7 +118,7 @@ When a station represents paired input files (e.g. paired-end FASTQ reads), use 
 %%metro files: reads_in | FASTQ
 ```
 
-![Paired file icons example](assets/renders/05c_files_icon.svg)
+<MetroExample src={filesIconMmd} showCode={false} />
 
 ### Folder icons
 
@@ -167,7 +128,7 @@ For stations that represent a directory of output files rather than a single fil
 %%metro dir: results_out | Results
 ```
 
-![Folder icons example](assets/renders/05d_folder_icon.svg)
+<MetroExample src={folderIconMmd} showCode={false} />
 
 All three directives (`file:`, `files:`, `dir:`) work the same way: pair a station ID with a label, give the station a blank label (`[ ]`), and connect it with normal edges. The only difference is the rendered icon shape.
 
@@ -190,7 +151,7 @@ To make a format stand out, add `banner` as a fourth field to a `file:` or `file
 %%metro files: aln_out | BAM | Alignments | banner
 ```
 
-![Banner labels example](assets/renders/05f_banner_labels.svg)
+<MetroExample src={bannerLabelsMmd} showCode={false} />
 
 Any `name` caption (third field) still renders below the icon, so `| <name> | banner` keeps the caption and `| | banner` applies the strip with no caption. `banner` is not supported on `dir:` (folder) icons.
 
@@ -215,9 +176,7 @@ To explain the markers, add a key below the line legend with `%%metro marker_leg
 
 Here a two-line variant-calling pipeline uses square (mandatory), open-circle (optional), pill (expanded elsewhere) and coloured-square (hardware-accelerated) markers, with a matching key:
 
-<Code code={markerStylesMmd} lang="metro" title="examples/marker_styles.mmd" />
-
-![Per-station markers](assets/renders/marker_styles.svg)
+<MetroExample src={markerStylesMmd} title="examples/marker_styles.mmd" />
 
 Stations with no `%%metro marker:` keep the default pill, so the feature is entirely opt-in.
 
@@ -229,13 +188,7 @@ Sometimes you need a branching or merging point in the graph that doesn't repres
 
 Here is a pipeline with a visible `branch` station that serves only as a fork point:
 
-<Code
-  code={withoutHiddenMmd}
-  lang="metro"
-  title="examples/guide/06a_without_hidden.mmd"
-/>
-
-![Visible branch point](assets/renders/06a_without_hidden.svg)
+<MetroExample src={withoutHiddenMmd} title="examples/guide/06a_without_hidden.mmd" />
 
 The "Branch" station is real in the graph but meaningless in the pipeline. Renaming it to `_branch` hides it:
 
@@ -251,7 +204,7 @@ The "Branch" station is real in the graph but meaningless in the pipeline. Renam
     validate -->|dna,rna,prot| _branch
 ```
 
-![Hidden branch point](assets/renders/06b_with_hidden.svg)
+<MetroExample src={withHiddenMmd} showCode={false} />
 
 The lines still fork at the same point, but there is no marker or label. This gives you fine control over where splits happen without adding a fake step to the diagram.
 
@@ -261,13 +214,13 @@ Use `--debug` to see hidden stations as dashed circles: `nf-metro render --debug
 
 The nf-core/rnaseq example at [`examples/rnaseq_auto.mmd`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/rnaseq_auto.mmd) combines all of these patterns in a real-world pipeline:
 
-![nf-core/rnaseq](assets/renders/rnaseq_auto.svg)
+<MetroExample src={rnaseqAutoMmd} showCode={false} />
 
 Five analysis routes share preprocessing, fan out to different aligners, reconverge at post-processing (a `TB` section), and fold back through QC (an `RL` section that creates a serpentine return path). The layout engine infers section directions, grid positions, and port sides automatically from the graph topology.
 
 The nf-core/variantbenchmarking example at [`examples/variantbenchmarking_auto.mmd`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/variantbenchmarking_auto.mmd) shows a different topology pattern - seven lines converging at a benchmarking section, with the layout engine automatically splitting into two rows:
 
-![nf-core/variantbenchmarking](assets/renders/variantbenchmarking_auto.svg)
+<MetroExample src={variantbenchmarkingAutoMmd} showCode={false} />
 
 See the [Gallery](/nf-metro/gallery/) for more rendered examples.
 
