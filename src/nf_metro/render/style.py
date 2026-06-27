@@ -18,6 +18,13 @@ class Theme:
     """Visual theme for a metro map."""
 
     name: str
+    # Brand identity (``nfcore``, ``seqera``) and display mode (``light`` /
+    # ``dark``) are orthogonal axes. ``brand`` ties a resolved theme back to its
+    # light/dark family so the renderer can emit both palettes; ``mode`` records
+    # which one is baked as the concrete default. ``brand=""`` opts a theme out
+    # of family pairing (single-palette render).
+    brand: str = ""
+    mode: str = "dark"
     background_color: str
     station_fill: str
     station_stroke: str

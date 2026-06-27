@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg: #0b0e14;
   --panel: #11161f;
   --panel-2: #161c27;
@@ -11,8 +12,40 @@
   --danger-bg: #2a1414;
 }
 
+/* Light mode mirrors the docs site. `color-scheme` is also what the inlined
+   preview SVG inherits, so its light-dark() chrome follows the toggle. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --panel-2: #eceef1;
+  --border: #d8dde4;
+  --text: #1f2530;
+  --muted: #5a6472;
+  --accent: #0d9488;
+  --accent-press: #0f766e;
+  --danger: #c0392b;
+  --danger-bg: #fdeaea;
+}
+
 * {
   box-sizing: border-box;
+}
+
+.theme-toggle {
+  margin-left: auto;
+  width: 32px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.theme-toggle:hover {
+  border-color: var(--accent);
 }
 
 html,
@@ -258,6 +291,12 @@ button:disabled {
 .CodeMirror-line > span::selection {
   background: #31507a;
 }
+:root[data-theme="light"] .CodeMirror-selected {
+  background: #d5dbe6 !important;
+}
+:root[data-theme="light"] .CodeMirror-focused .CodeMirror-selected {
+  background: #b9cdf0 !important;
+}
 .cm-s-default .cm-comment {
   color: #5c6b7a;
 }
@@ -288,7 +327,7 @@ button:disabled {
 }
 
 #preview-pane {
-  background: #0e1219;
+  background: var(--bg);
 }
 #preview {
   flex: 1;

@@ -60,6 +60,14 @@ def _dir_style(value: str, graph: MetroGraph) -> None:
     graph.style = value
 
 
+def _dir_mode(value: str, graph: MetroGraph) -> None:
+    mode = value.strip().lower()
+    if mode not in ("light", "dark"):
+        _warn_malformed("mode", value, "light/dark")
+        return
+    graph.mode = mode
+
+
 def _dir_logo(value: str, graph: MetroGraph) -> None:
     graph.logo_path = value
 
@@ -483,6 +491,7 @@ _GLOBAL_DIRECTIVE_HANDLERS.update(
     {
         "title": _dir_title,
         "style": _dir_style,
+        "mode": _dir_mode,
         "logo": _dir_logo,
         "line": _dir_line,
         "off_track": _dir_off_track,

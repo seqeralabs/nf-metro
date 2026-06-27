@@ -15,7 +15,12 @@ from nf_metro.render.svg import (
     _terminus_icon_centers,
     render_svg,
 )
-from nf_metro.themes import LIGHT_THEME, NFCORE_THEME, SEQERA_THEME
+from nf_metro.themes import (
+    LIGHT_THEME,
+    NFCORE_THEME,
+    SEQERA_DARK_THEME,
+    SEQERA_LIGHT_THEME,
+)
 
 
 def _render_simple():
@@ -118,9 +123,10 @@ def test_render_seqera_theme():
         "    a -->|main| b\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, SEQERA_THEME)
-    assert SEQERA_THEME.background_color in svg  # #f8f9fa present
-    assert SEQERA_THEME.title_color in svg  # #160F26 brand dark present
+    for theme in (SEQERA_LIGHT_THEME, SEQERA_DARK_THEME):
+        svg = render_svg(graph, theme, chrome_css=False)
+        assert f'fill="{theme.background_color}"' in svg
+        assert theme.title_color in svg
 
 
 def test_render_dashed_line_has_dasharray():

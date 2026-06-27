@@ -23,6 +23,13 @@
       >
         Report a bug
       </button>
+      <button
+        id="btn-theme"
+        class="theme-toggle"
+        type="button"
+        title="Toggle light/dark"
+        aria-label="Toggle light/dark"
+      ></button>
     </header>
 
     <main id="split">
@@ -59,9 +66,16 @@
       <section id="preview-pane">
         <div class="pane-toolbar">
           <label
-            >Theme
+            >Brand
             <select id="opt-theme">
-              <option value="nfcore">nfcore (dark)</option>
+              <option value="nfcore">nf-core</option>
+              <option value="seqera">Seqera</option>
+            </select>
+          </label>
+          <label
+            >Mode
+            <select id="opt-mode">
+              <option value="dark">dark</option>
               <option value="light">light</option>
             </select>
           </label>

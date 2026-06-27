@@ -25,9 +25,9 @@ from nf_metro.parser.model import LineSpread, MetroGraph
 from nf_metro.render import render_svg
 from nf_metro.render.html import render_html
 from nf_metro.render.style import Theme
-from nf_metro.themes import THEMES
+from nf_metro.themes import DEFAULT_MODE, THEME_MODES, THEMES
 
-# `style: dark` predates theme names; alias it onto the nfcore theme.
+# `style: dark` predates theme names; alias it onto the nfcore brand.
 _STYLE_THEME_ALIASES = {"dark": "nfcore"}
 
 
@@ -45,12 +45,29 @@ def apply_layout_overrides(graph: MetroGraph, opts: Mapping[str, object]) -> Non
             setattr(graph, opt.target_attr, value)
 
 
-def resolve_theme(theme: str | None, graph: MetroGraph) -> Theme:
-    """Pick the theme: an explicit name wins over the ``style:`` directive."""
+def resolve_theme(
+    theme: str | None, graph: MetroGraph, mode: str | None = None
+) -> Theme:
+    """Resolve a concrete theme from independent brand and mode axes.
+
+    Brand comes from the explicit ``theme`` name (``--theme``) or the
+    ``%%metro style:`` directive (``dark`` aliases to ``nfcore``). Mode comes
+    from the explicit ``mode`` argument (``--mode``), then the ``%%metro mode:``
+    directive, then ``DEFAULT_MODE``. No brand carries its own mode: a known
+    brand always resolves through its light/dark family for the chosen mode.
+    """
     if theme is not None:
-        return THEMES[theme]
-    name = graph.style.strip().lower()
-    return THEMES.get(_STYLE_THEME_ALIASES.get(name, name), THEMES["nfcore"])
+        brand = theme
+    else:
+        name = graph.style.strip().lower()
+        brand = _STYLE_THEME_ALIASES.get(name, name)
+
+    resolved_mode = (mode or graph.mode).strip().lower() or DEFAULT_MODE
+    family = THEME_MODES.get(brand)
+    if family and resolved_mode in family:
+        return family[resolved_mode]
+
+    return THEMES.get(brand, THEMES["nfcore"])
 
 
 def prepare_graph(
@@ -108,6 +125,7 @@ def render_string(
     text: str,
     *,
     theme: str | None = None,
+    mode: str | None = None,
     output_format: Literal["svg", "html"] = "svg",
     from_nextflow: bool = False,
     title: str | None = None,
@@ -140,7 +158,7 @@ def render_string(
         legend=legend,
         layout_options=layout_options,
     )
-    theme_obj = resolve_theme(theme, graph)
+    theme_obj = resolve_theme(theme, graph, mode=mode)
     font_portability: Literal["embed", "paths"] | None = (
         "paths" if text_to_paths else "embed" if embed_font else None
     )

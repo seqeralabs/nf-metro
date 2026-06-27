@@ -119,6 +119,16 @@ def _echo_issues(
     help="Visual theme (default: from the %%metro style: directive, else nfcore).",
 )
 @click.option(
+    "--mode",
+    type=click.Choice(["light", "dark"]),
+    default=None,
+    help=(
+        "Display mode, independent of the brand theme (default: from the "
+        "%%metro mode: directive, else the brand's own default mode). Bakes the "
+        "chosen mode's palette - use for light/dark PNG export."
+    ),
+)
+@click.option(
     "--debug/--no-debug",
     default=False,
     help="Show debug overlay (ports, hidden stations, edge waypoints)",
@@ -236,6 +246,7 @@ def render(
     output: Path | None,
     format_: str,
     theme: str | None,
+    mode: str | None,
     debug: bool,
     logo: Path | None,
     line_spread: str | None,
@@ -274,7 +285,7 @@ def render(
     ) as e:
         raise click.ClickException(str(e))
 
-    theme_obj = resolve_theme(theme, graph)
+    theme_obj = resolve_theme(theme, graph, mode=mode)
 
     if output is None:
         output = input_file.with_suffix(f".{format_}")

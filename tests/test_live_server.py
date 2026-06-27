@@ -192,7 +192,7 @@ def test_dark_theme_page_uses_dark_chrome():
 
 
 def test_light_theme_page_uses_light_chrome():
-    page = build_page(MapModel(_graph(), THEMES["seqera"]))
+    page = build_page(MapModel(_graph(), THEMES["seqera-light"]))
     assert "color-scheme: light" in page
     assert "--bg: #f8f9fa" in page
 

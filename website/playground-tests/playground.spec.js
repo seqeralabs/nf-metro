@@ -88,7 +88,7 @@ test("directional toggle adds chevron markers", async () => {
   await page.locator("#opt-directional").uncheck();
 });
 
-test("theme dropdown writes the %%metro style directive and re-renders", async () => {
+test("brand dropdown writes the %%metro style directive and re-renders", async () => {
   await page.evaluate(() =>
     window.__nfMetro.setValue(
       "%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n",
@@ -96,10 +96,10 @@ test("theme dropdown writes the %%metro style directive and re-renders", async (
   );
   const before = await page.locator("#preview").innerHTML();
 
-  await page.locator("#opt-theme").selectOption("light");
+  await page.locator("#opt-theme").selectOption("seqera");
   await expect
     .poll(async () => page.evaluate(() => window.__nfMetro.getValue()))
-    .toContain("%%metro style: light");
+    .toContain("%%metro style: seqera");
   await expect
     .poll(async () => page.locator("#preview").innerHTML())
     .not.toBe(before);
@@ -107,16 +107,53 @@ test("theme dropdown writes the %%metro style directive and re-renders", async (
   await page.locator("#opt-theme").selectOption("nfcore");
   await expect
     .poll(async () => page.evaluate(() => window.__nfMetro.getValue()))
-    .toContain("%%metro style: dark");
+    .toContain("%%metro style: nfcore");
 });
 
-test("theme dropdown syncs from the source style directive", async () => {
+test("brand dropdown syncs from the source style directive", async () => {
   await page.evaluate(() =>
     window.__nfMetro.setValue(
-      "%%metro style: light\n%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n",
+      "%%metro style: seqera\n%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n",
     ),
   );
-  await expect(page.locator("#opt-theme")).toHaveValue("light");
+  await expect(page.locator("#opt-theme")).toHaveValue("seqera");
+
+  await page.evaluate(() =>
+    window.__nfMetro.setValue(
+      "%%metro style: dark\n%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n",
+    ),
+  );
+  await expect(page.locator("#opt-theme")).toHaveValue("nfcore");
+});
+
+test("mode dropdown writes the %%metro mode directive and re-renders", async () => {
+  await page.evaluate(() =>
+    window.__nfMetro.setValue(
+      "%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n",
+    ),
+  );
+  const before = await page.locator("#preview").innerHTML();
+
+  // Pick the mode the page is not already showing (the default tracks the UI
+  // theme), so the render genuinely changes.
+  const start = await page.locator("#opt-mode").inputValue();
+  const other = start === "dark" ? "light" : "dark";
+  await page.locator("#opt-mode").selectOption(other);
+  await expect
+    .poll(async () => page.evaluate(() => window.__nfMetro.getValue()))
+    .toContain(`%%metro mode: ${other}`);
+  await expect
+    .poll(async () => page.locator("#preview").innerHTML())
+    .not.toBe(before);
+});
+
+test("mode dropdown syncs from the source mode directive", async () => {
+  await page.evaluate(() =>
+    window.__nfMetro.setValue(
+      "%%metro mode: light\n%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n",
+    ),
+  );
+  await expect(page.locator("#opt-mode")).toHaveValue("light");
 });
 
 test("debug toggle adds the debug overlay", async () => {

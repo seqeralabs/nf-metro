@@ -65,6 +65,17 @@
   --nfm-glow: rgba(49, 201, 172, 0.07);
 }
 
+/* Drive `color-scheme` from the active theme so inlined metro-map SVGs - which
+   colour their chrome with `light-dark()` - follow the light/dark toggle. The
+   SVGs declare no `color-scheme` of their own, so they inherit this one. */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
 /* ---- Drive Starlight tokens from the brand ---- */
 :root,
 :root[data-theme="light"] {

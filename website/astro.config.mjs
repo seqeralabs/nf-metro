@@ -21,6 +21,12 @@ const base = process.env.DOCS_BASE ?? "/nf-metro/";
 // of truth, no copy-paste drift. `@examples` aliases that dir; `fs.allow` opens
 // it to the dev server (which otherwise restricts /@fs/ to the project root).
 const examplesDir = fileURLToPath(new URL("../examples", import.meta.url));
+// Generated metro-map SVGs (build_gallery.py). Imported `?raw` and inlined into
+// the gallery/pipelines pages so their `light-dark()` chrome follows the page's
+// color-scheme (an <img>-referenced SVG ignores the page's scheme in WebKit).
+const rendersDir = fileURLToPath(
+  new URL("../docs/assets/renders", import.meta.url),
+);
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 // Compare two dotted version strings (e.g. "0.7.2", "0.1") so the larger sorts
@@ -75,7 +81,7 @@ export default defineConfig({
   base,
   vite: {
     resolve: {
-      alias: { "@examples": examplesDir },
+      alias: { "@examples": examplesDir, "@renders": rendersDir },
       // docs/ is symlinked into src/content/docs, so guide.mdx's real path sits
       // outside this project. Keep the symlinked path during resolution so its
       // bare imports (@astrojs/starlight/components) find website/node_modules.

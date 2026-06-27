@@ -379,6 +379,7 @@ def render_svg(
     svg_class_prefix: str = "",
     inject_dark_mode_css: bool = True,
     chrome_css: bool = True,
+    self_color_scheme: bool = True,
     bare: bool = False,
 ) -> str:
     """Render a metro map graph to an SVG string.
@@ -411,13 +412,20 @@ def render_svg(
     ``<style>`` block is omitted.  Useful when a host page manages its own
     theme and the injected media query would fight it.
 
-    ``chrome_css``: when False, the chrome ``--nfm-*`` CSS custom-property
-    ``<style>`` block is omitted.  Chrome elements carry their concrete theme
-    colors as presentation attributes regardless, so both modes render the
-    same map; what False drops is a host page's ability to recolor it live
-    with ``var()``.  Set this False for raster export (e.g. cairosvg, which
-    cannot parse ``var()``) or any consumer without CSS custom-property
-    support.
+    ``chrome_css``: when False, the chrome ``--nfm-map-*`` CSS custom-property
+    ``<style>`` block is omitted.  Chrome elements carry the resolved mode's
+    concrete colors as presentation attributes regardless, so the map still
+    renders; what False drops is the live ``var()`` recolor hook and the
+    ``light-dark()`` mode adaptation.  Set this False for raster export (e.g.
+    cairosvg, which cannot parse ``var()``/``light-dark()``) or any consumer
+    without CSS custom-property support - pick the concrete mode via the theme.
+
+    ``self_color_scheme``: when True the root ``<svg>`` declares
+    ``color-scheme: light dark`` so a standalone file (opened directly or via
+    ``<img>``) resolves ``light-dark()`` against the viewer's OS preference.
+    Set False when inlining into a page that owns the theme (the docs site,
+    the playground): the SVG then inherits the page's ``color-scheme`` so a
+    manual light/dark toggle drives it. No effect for single-palette themes.
 
     ``bare``: when True, omits the title and outer padding so the canvas
     hugs the diagram content.  The attribution watermark is kept.  Use for
@@ -448,6 +456,7 @@ def render_svg(
             responsive=responsive,
             inject_dark_mode_css=inject_dark_mode_css,
             chrome_css=chrome_css,
+            self_color_scheme=self_color_scheme,
             bare=bare,
         )
 
@@ -496,6 +505,7 @@ def _render_svg_scaled(
     responsive: bool = False,
     inject_dark_mode_css: bool = True,
     chrome_css: bool = True,
+    self_color_scheme: bool = True,
     bare: bool = False,
 ) -> str:
     """Render body, run with ``theme`` fonts and label metrics already scaled."""
@@ -610,10 +620,16 @@ def _render_svg_scaled(
     svg_width = width or int(auto_width)
     svg_height = height or int(auto_height)
 
+    # Local import: themes imports render.style, so a module-level import here
+    # would close a render <-> themes cycle depending on first-import order.
+    from nf_metro.themes import mode_pair
+
+    root_attrs: dict[str, str] = {}
     if responsive:
-        d = draw.Drawing(svg_width, svg_height, preserveAspectRatio="xMinYMin meet")
-    else:
-        d = draw.Drawing(svg_width, svg_height)
+        root_attrs["preserveAspectRatio"] = "xMinYMin meet"
+    if self_color_scheme and mode_pair(theme) is not None:
+        root_attrs["style"] = "color-scheme: light dark"
+    d = draw.Drawing(svg_width, svg_height, **root_attrs)
 
     positive_fan = tb_positive_fan_sections(graph)
 
@@ -879,48 +895,80 @@ def _render_logo(
 def _inject_chrome_css(d: draw.Drawing, theme: Theme) -> None:
     """Inject CSS custom properties for chrome colors.
 
-    Defines ``--nfm-*`` properties on the chrome element classes so a host
+    Defines ``--nfm-map-*`` properties on the chrome element classes so a host
     can recolor the map's non-semantic surfaces (background, labels, section
     boxes, legend) by setting those properties on a wrapping element.  The
-    fallback for each property is the theme's baked value.  Line/route colors
-    carry semantic meaning and remain as baked presentation attributes.
+    fallback for each property is the mode-adaptive ``light-dark()`` of the
+    theme's light and dark palettes (or the theme's single baked value when it
+    has no light/dark family), so the map follows the viewer's ``color-scheme``
+    with no host intervention.  Line/route colors carry semantic meaning and
+    remain as baked presentation attributes.
     """
-    tc = theme.section_label_color
+    from nf_metro.themes import mode_pair
+
+    pair = mode_pair(theme)
+    light, dark = pair if pair is not None else (theme, theme)
+
+    def _prop(var: str, attr: str) -> str:
+        light_val, dark_val = getattr(light, attr), getattr(dark, attr)
+        fallback = (
+            light_val if light is dark else f"light-dark({light_val}, {dark_val})"
+        )
+        return f"var({var}, {fallback})"
 
     def _rule(cls: str, props: str) -> str:
         return f".{_ns(cls)} {{ {props}; }}"
 
+    section_label = "--nfm-map-section-label-color"
     lines: list[str] = []
     if theme.background_color and theme.background_color != "none":
         lines.append(
-            _rule("nf-metro-bg", f"fill: var(--nfm-bg, {theme.background_color})")
+            _rule("nf-metro-bg", f"fill: {_prop('--nfm-map-bg', 'background_color')}")
         )
     lines += [
-        _rule("nf-metro-title", f"fill: var(--nfm-title-color, {theme.title_color})"),
+        _rule(
+            "nf-metro-title", f"fill: {_prop('--nfm-map-title-color', 'title_color')}"
+        ),
         _rule(
             "nf-metro-station-label",
-            f"fill: var(--nfm-label-color, {theme.label_color})",
+            f"fill: {_prop('--nfm-map-label-color', 'label_color')}",
         ),
         _rule(
             "nf-metro-section-box",
-            f"fill: var(--nfm-section-fill, {theme.section_fill});"
-            f" stroke: var(--nfm-section-stroke, {theme.section_stroke})",
+            f"fill: {_prop('--nfm-map-section-fill', 'section_fill')};"
+            f" stroke: {_prop('--nfm-map-section-stroke', 'section_stroke')}",
         ),
-        _rule("nf-metro-section-label", f"fill: var(--nfm-section-label-color, {tc})"),
-        _rule("nf-metro-group-label", f"fill: var(--nfm-section-label-color, {tc})"),
+        _rule(
+            "nf-metro-section-label",
+            f"fill: {_prop(section_label, 'section_label_color')}",
+        ),
+        _rule(
+            "nf-metro-group-label",
+            f"fill: {_prop(section_label, 'section_label_color')}",
+        ),
         _rule(
             "nf-metro-group-underline",
-            f"stroke: var(--nfm-section-label-color, {tc})",
+            f"stroke: {_prop(section_label, 'section_label_color')}",
         ),
         _rule(
             "nf-metro-legend-bg",
-            f"fill: var(--nfm-legend-bg, {theme.legend_background})",
+            f"fill: {_prop('--nfm-map-legend-bg', 'legend_background')}",
         ),
         _rule(
             "nf-metro-legend-text",
-            f"fill: var(--nfm-legend-text-color, {theme.legend_text_color})",
+            f"fill: {_prop('--nfm-map-legend-text-color', 'legend_text_color')}",
         ),
     ]
+    # The label halo is a knockout of the background, so it tracks --nfm-map-bg
+    # and must flip with the mode too; otherwise a dark-baked halo blots out
+    # labels in light mode. Disabled-halo themes draw no halo, so emit nothing.
+    halo_light, halo_dark = _label_halo_color(light), _label_halo_color(dark)
+    if halo_light is not None and halo_dark is not None:
+        halo = halo_light if light is dark else f"light-dark({halo_light}, {halo_dark})"
+        halo_val = f"var(--nfm-map-bg, {halo})"
+        lines.append(
+            _rule("nf-metro-label-halo", f"fill: {halo_val}; stroke: {halo_val}")
+        )
     d.append(draw.Raw(f"<style>{chr(10).join(lines)}</style>"))
 
 
@@ -2206,6 +2254,7 @@ def _render_labels(
                     font_weight=theme.label_font_weight,
                     line_height=LABEL_LINE_HEIGHT,
                     aria_hidden="true",
+                    class_=_ns("nf-metro-label-halo"),
                     **style,
                 )
             )

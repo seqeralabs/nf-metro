@@ -1,6 +1,6 @@
-"""Seqera Platform light theme.
+"""Seqera Platform brand theme, in light and dark modes.
 
-Colors sourced from the Seqera Platform design system
+Light-mode colors are sourced from the Seqera Platform design system
 (tower-web/src/styles/_variables.scss):
 
   $app-brand-seqera: #160F26   - Seqera brand dark navy (title color)
@@ -13,16 +13,23 @@ Colors sourced from the Seqera Platform design system
   $app-grey-neutral-black: #242424 - Platform primary text
   $app-text-muted:   #6c757d   - Platform muted/secondary text
 
-Font: Inter Variable - tower-web/src/styles/foundations/_typography.scss.
+The dark variant keeps the Inter type and the brand station/line identity,
+swapping only the chrome palette: it steps down from the same brand navy
+(#160F26) into deep purple-greys.
 """
+
+from dataclasses import replace
 
 from nf_metro.render.style import Theme
 
-SEQERA_THEME = Theme(
-    name="seqera",
+SEQERA_LIGHT_THEME = Theme(
+    name="seqera-light",
+    brand="seqera",
+    mode="light",
     background_color="#f8f9fa",
     station_fill="#ffffff",
     station_stroke="#2D273C",
+    marker_stroke="#2D273C",
     station_stroke_width=2.0,
     line_width=4.0,
     label_color="#242424",
@@ -44,3 +51,20 @@ SEQERA_THEME = Theme(
     animation_ball_stroke="#2D273C",
     animation_ball_stroke_width=1.5,
 )
+
+SEQERA_DARK_THEME = replace(
+    SEQERA_LIGHT_THEME,
+    name="seqera-dark",
+    mode="dark",
+    background_color="#1a1625",
+    marker_stroke="#7b6ea6",
+    label_color="#e0d9f7",
+    title_color="#f0ecff",
+    section_fill="#231e30",
+    section_stroke="#3d3650",
+    section_label_color="#9d94b8",
+    legend_background="rgba(0, 0, 0, 0.4)",
+    legend_text_color="#e0d9f7",
+)
+
+SEQERA_THEME = SEQERA_DARK_THEME

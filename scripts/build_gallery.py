@@ -41,10 +41,6 @@ RENDERS_DIR = project_root / "docs" / "assets" / "renders"
 
 # Base-absolute URL prefix for generated *page* links (matches astro.config `base`).
 SITE_BASE = "/nf-metro/"
-# Relative path from a generated page (docs/<dir>/index.mdx) up to docs/assets/renders.
-# gallery/ + pipelines/ are one dir deep, so one `../` reaches docs/. Astro bundles and
-# base-prefixes these (via the content symlink), so URLs render correctly and on GitHub.
-RENDERS_REL = "../assets/renders"
 
 # Ordered list of examples. Each entry is (filename_stem, source_dir, description).
 # Main examples first, then topologies grouped by category.
@@ -1331,21 +1327,45 @@ def _record_metrics(graph, svg_name: str, svg_str: str) -> None:
         print(f"    metrics FAIL for {svg_name}: {e}")
 
 
-def render_mmd(mmd_path: Path, svg_path: Path, *, debug: bool = DEBUG_RENDERS) -> None:
-    """Parse, layout, and render a .mmd file to SVG."""
+def render_mmd(
+    mmd_path: Path,
+    svg_path: Path,
+    *,
+    debug: bool = DEBUG_RENDERS,
+    self_color_scheme: bool = True,
+) -> str:
+    """Parse, layout, and render a .mmd file to SVG; write it and return it.
+
+    ``self_color_scheme`` is forwarded to the renderer: pages that inline the SVG
+    (gallery, pipelines) pass False so the map inherits the page's color-scheme
+    and follows the light/dark toggle.
+    """
     text = mmd_path.read_text()
     graph = parse_metro_mermaid(text)
     compute_layout(graph)
     theme_name = graph.style if graph.style in THEMES else "nfcore"
     theme = THEMES[theme_name]
-    svg_str = render_drawn_svg(graph, theme, debug=debug)
+    svg_str = render_drawn_svg(
+        graph, theme, debug=debug, self_color_scheme=self_color_scheme
+    )
     svg_path.write_text(svg_str)
     _record_metrics(graph, svg_path.name, svg_str)
+    return svg_str
 
 
 def clean_name(stem: str) -> str:
     """Convert filename stem to a display-friendly heading."""
     return stem.replace("_", " ").title()
+
+
+def _raw_import(prefix: str, ident_key: str, alias: str, path: str) -> tuple[str, str]:
+    """Return ``(identifier, import_statement)`` for a Vite ``?raw`` MDX import.
+
+    The identifier slugifies *ident_key* into a valid JS name; the statement
+    pulls *path* in as a raw string through the *alias* import alias.
+    """
+    identifier = prefix + re.sub(r"\W", "_", ident_key)
+    return identifier, f'import {identifier} from "@{alias}/{path}?raw";'
 
 
 def mmd_import(stem: str, source_dir: Path) -> tuple[str, str, str]:
@@ -1363,10 +1383,33 @@ def mmd_import(stem: str, source_dir: Path) -> tuple[str, str, str]:
     else:
         rel = stem
         prefix = "mmd_"
-    identifier = prefix + re.sub(r"\W", "_", stem)
-    import_statement = f'import {identifier} from "@examples/{rel}.mmd?raw";'
+    identifier, import_statement = _raw_import(prefix, stem, "examples", f"{rel}.mmd")
     source_label = f"examples/{rel}.mmd"
     return identifier, import_statement, source_label
+
+
+def svg_import(svg_stem: str) -> tuple[str, str]:
+    """Describe how to inline a rendered SVG into an ``.mdx`` page.
+
+    Returns ``(identifier, import_statement)``. The SVG is pulled in as a raw
+    string (via the ``@renders`` alias) and injected with ``set:html`` so the
+    real SVG markup lands in the page DOM. Inlining (rather than ``<img>``) is
+    what lets the map's ``light-dark()`` chrome inherit the page's color-scheme
+    and follow the light/dark toggle - an ``<img>``-referenced SVG ignores the
+    embedding page's scheme in WebKit.
+    """
+    return _raw_import("svg_", svg_stem, "renders", f"{svg_stem}.svg")
+
+
+def _inline_svg(identifier: str) -> list[str]:
+    """MDX lines that inline an imported raw SVG string into the page DOM.
+
+    The XML prolog is stripped (it renders as a stray bogus comment in an HTML
+    body), and blank lines around the element keep MDX parsing it as a child
+    expression rather than literal text.
+    """
+    expr = f'{identifier}.replace(/^<\\?xml.*?\\?>\\s*/, "")'
+    return ["", f"<Fragment set:html={{{expr}}} />", ""]
 
 
 def _details_code(identifier: str, source_label: str) -> list[str]:
@@ -1484,7 +1527,7 @@ def build_gallery() -> None:
 
         # Render SVG
         try:
-            render_mmd(mmd_path, svg_path)
+            render_mmd(mmd_path, svg_path, self_color_scheme=False)
             status = "OK"
         except Exception as e:
             status = f"FAIL: {e}"
@@ -1497,6 +1540,8 @@ def build_gallery() -> None:
         heading = clean_name(stem)
         identifier, import_statement, source_label = mmd_import(stem, source_dir)
         imports.append(import_statement)
+        svg_id, svg_import_stmt = svg_import(stem)
+        imports.append(svg_import_stmt)
 
         lines.append(f"### {heading}\n")
         lines.append(f"{description}\n")
@@ -1504,7 +1549,7 @@ def build_gallery() -> None:
         lines.append(f"```bash\nnf-metro render {source_label} -o {stem}.svg\n```\n")
         lines.extend(_details_code(identifier, source_label))
         lines.append("**Rendered output:**\n")
-        lines.append(f"![{heading}]({RENDERS_REL}/{stem}.svg)\n")
+        lines.extend(_inline_svg(svg_id))
 
     gallery_md = "\n".join(mdx_page("Gallery", imports, lines))
     gallery_path = GALLERY_DIR / "index.mdx"
@@ -1587,7 +1632,7 @@ def build_pipelines_page() -> None:
             continue
 
         try:
-            render_mmd(mmd_path, svg_path, debug=True)
+            render_mmd(mmd_path, svg_path, debug=True, self_color_scheme=False)
             status = "OK"
         except Exception as e:
             status = f"FAIL: {e}"
@@ -1599,10 +1644,12 @@ def build_pipelines_page() -> None:
 
         identifier, import_statement, source_label = mmd_import(stem, EXAMPLES_DIR)
         imports.append(import_statement)
+        svg_id, svg_import_stmt = svg_import(f"pipeline_{stem}")
+        imports.append(svg_import_stmt)
 
         lines.append(f"## [{display_name}]({repo_url})\n")
         lines.append(f"{description}\n")
-        lines.append(f"![{display_name}]({RENDERS_REL}/pipeline_{stem}.svg)\n")
+        lines.extend(_inline_svg(svg_id))
         lines.extend(_details_code(identifier, source_label))
 
     pipelines_md = "\n".join(mdx_page("nf-core pipelines", imports, lines))

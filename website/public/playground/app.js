@@ -50,11 +50,11 @@ const SAMPLE_NEXTFLOW_DAG = `flowchart TB
 // error surfaces as data rather than a thrown PythonError to unwind in JS.
 //
 // Layout cache: parse+compute_layout is expensive (~200-500ms). We cache the
-// settled MetroGraph keyed on (normalised mmd + geometry options). Theme,
+// settled MetroGraph keyed on (normalised mmd + geometry options). Brand, mode,
 // debug, animate, and directional are render-only - they don't affect station
 // coordinates, so changing them skips layout and only re-runs render_svg.
-// The style: directive is stripped before hashing so toggling theme (which
-// writes %%metro style: into the editor) doesn't bust the geometry cache.
+// The style: and mode: directives are stripped before hashing so toggling brand
+// or render mode doesn't bust the geometry cache.
 const PY_GLUE = `
 import hashlib
 import json
@@ -66,7 +66,7 @@ from nf_metro.render import render_svg
 _cached_graph = None
 _cached_key = None
 _RENDER_ONLY = frozenset({"animate", "directional"})
-_STYLE_RE = _re.compile(r"^\\s*%%metro\\s+style:.*$", _re.MULTILINE)
+_STYLE_RE = _re.compile(r"^\\s*%%metro\\s+(?:style|mode):.*$", _re.MULTILINE)
 
 def nfm_render(mmd, opts_json):
     global _cached_graph, _cached_key
@@ -90,13 +90,14 @@ def nfm_render(mmd, opts_json):
         for k, v in render_only.items():
             setattr(graph, k, bool(v))
 
-        theme_obj = resolve_theme(opts.get("theme") or None, graph)
+        theme_obj = resolve_theme(opts.get("theme") or None, graph, mode=opts.get("mode") or None)
         svg = render_svg(
             graph,
             theme_obj,
             debug=bool(opts.get("debug")),
             responsive=True,
             font_portability="embed",
+            self_color_scheme=False,
         )
         return json.dumps({"ok": True, "svg": svg})
     except Exception as e:
@@ -219,6 +220,7 @@ function currentOptions() {
   // preview-overlay toggles are passed as render overrides here.
   return {
     theme: themeKeyFromSource(),
+    mode: modeFromSource(),
     debug: el("opt-debug").checked,
     layout_options: {
       animate: el("opt-animate").checked,
@@ -329,9 +331,10 @@ function zoomFit() {
 // it, so the change is saved with the map and travels with export/share. (The
 // animate/chevrons/debug toggles are preview overlays handled separately.)
 
-// directive key for the theme; values are friendly aliases (dark == nfcore).
-const THEME_KEYS = ["nfcore", "light"];
-const THEME_STYLE_TOKEN = { nfcore: "dark", light: "light" };
+// The selector picks the brand (palette identity); light/dark is the separate
+// Mode control, so brand and mode stay independent. Legacy sources may still
+// carry `%%metro style: dark`, which reads back as the nfcore brand.
+const THEME_KEYS = ["nfcore", "seqera"];
 const STYLE_ALIASES = { dark: "nfcore" };
 
 // [control id, directive key, kind]
@@ -402,7 +405,29 @@ function themeKeyFromSource() {
 }
 
 function setThemeDirective(themeKey) {
-  setDirective("style", THEME_STYLE_TOKEN[themeKey] || themeKey);
+  setDirective("style", themeKey);
+  doRender();
+}
+
+// Render mode (light/dark) is a property of the produced map, distinct from the
+// playground UI theme. It defaults to the UI theme but is set independently via
+// the Mode control, persisted as %%metro mode: so it travels with the map.
+function modeFromSource() {
+  const value = (readDirective("mode") || "").toLowerCase();
+  if (value === "light" || value === "dark") return value;
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+// The preview SVG inherits the preview container's color-scheme (it carries no
+// scheme of its own), so its light-dark() chrome shows the chosen render mode
+// regardless of the surrounding UI theme.
+function applyPreviewMode(mode) {
+  el("preview").style.colorScheme = mode;
+}
+
+function setModeDirective(mode) {
+  setDirective("mode", mode);
+  applyPreviewMode(mode);
   doRender();
 }
 
@@ -410,6 +435,9 @@ const _TRUE = new Set(["true", "yes", "1"]);
 
 function syncDirectiveControls() {
   el("opt-theme").value = themeKeyFromSource();
+  const mode = modeFromSource();
+  el("opt-mode").value = mode;
+  applyPreviewMode(mode);
   for (const [id, key, kind] of DIRECTIVE_CONTROLS) {
     const value = readDirective(key);
     if (kind === "bool")
@@ -1423,9 +1451,18 @@ function downloadBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// The preview SVG carries no color-scheme (it inherits the preview pane's), so a
+// standalone export needs the chosen render mode baked onto the root for
+// light-dark() to resolve to it wherever the file is opened or rasterized.
+function pinColorScheme(svg, mode) {
+  if (/<svg[^>]*\bcolor-scheme/.test(svg)) return svg;
+  return svg.replace(/<svg\s/, `<svg style="color-scheme: ${mode}" `);
+}
+
 function exportSvg() {
   if (!lastSvg) return;
-  downloadBlob(new Blob([lastSvg], { type: "image/svg+xml" }), "metro_map.svg");
+  const svg = pinColorScheme(lastSvg, modeFromSource());
+  downloadBlob(new Blob([svg], { type: "image/svg+xml" }), "metro_map.svg");
 }
 
 function svgWithIntrinsicSize(svg) {
@@ -1443,7 +1480,8 @@ function svgWithIntrinsicSize(svg) {
 async function exportPng() {
   if (!lastSvg) return;
   const scale = 2;
-  const { svg, w, h } = svgWithIntrinsicSize(lastSvg);
+  const pinned = pinColorScheme(lastSvg, modeFromSource());
+  const { svg, w, h } = svgWithIntrinsicSize(pinned);
   const url = URL.createObjectURL(
     new Blob([svg], { type: "image/svg+xml;charset=utf-8" }),
   );
@@ -1676,6 +1714,9 @@ function wireControls() {
   el("opt-theme").addEventListener("change", (e) =>
     setThemeDirective(e.target.value),
   );
+  el("opt-mode").addEventListener("change", (e) =>
+    setModeDirective(e.target.value),
+  );
   DIRECTIVE_CONTROLS.forEach(([id, key, kind]) =>
     el(id).addEventListener("change", () =>
       applyDirectiveControl(id, key, kind),
@@ -1721,6 +1762,39 @@ function wireControls() {
   wireEditTools();
 }
 
+/* --------------------------- light / dark theme ----------------------- */
+// Follow the docs site's preference (shared via the `starlight-theme`
+// localStorage key) and stay independently toggleable. The page's color-scheme
+// drives the inlined preview SVG's light-dark() chrome, so the map tracks the
+// UI with no re-render.
+function wireTheme() {
+  const KEY = "starlight-theme";
+  let stored = null;
+  try {
+    stored = localStorage.getItem(KEY);
+  } catch {}
+  const apply = (theme) => {
+    document.documentElement.dataset.theme = theme;
+    el("btn-theme").textContent = theme === "dark" ? "☀️" : "☾";
+  };
+  apply(
+    stored === "light" || stored === "dark"
+      ? stored
+      : matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light",
+  );
+  el("btn-theme").addEventListener("click", () => {
+    const next =
+      document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    try {
+      localStorage.setItem(KEY, next);
+    } catch {}
+    apply(next);
+  });
+}
+
+wireTheme();
 initEditor();
 wireControls();
 loadExamples();

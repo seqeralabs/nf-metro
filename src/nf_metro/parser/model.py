@@ -347,6 +347,9 @@ class MetroGraph:
     title: str = ""
     caption: str = ""
     style: str = "dark"
+    # Display mode (``light`` / ``dark``), orthogonal to the brand in ``style``.
+    # Empty means unset: the brand's own default mode applies.
+    mode: str = ""
     lines: dict[str, MetroLine] = field(default_factory=dict)
     stations: dict[str, Station] = field(default_factory=dict)
     edges: list[Edge] = field(default_factory=list)
