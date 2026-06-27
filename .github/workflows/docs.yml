@@ -125,6 +125,14 @@ jobs:
           </html>
           HTML
 
+          # Copy shared static assets that live.md references with a
+          # version-independent /nf-metro/assets/ URL. They are built into
+          # dist/assets/ (from website/public/assets/) but deployed there only
+          # under the versioned directory; copying them here makes the stable
+          # root URL work across all versions.
+          mkdir -p gh-pages/assets
+          cp website/dist/assets/live_demo.mp4 gh-pages/assets/ 2>/dev/null || true
+
           touch gh-pages/.nojekyll
           cd gh-pages
           git add -A
