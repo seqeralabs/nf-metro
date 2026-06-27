@@ -1,0 +1,163 @@
+---
+// Wraps an inline SVG slot with a click-to-expand lightbox using a native <dialog>.
+// SVGs must stay inline (not <img>) for light-dark() CSS theming to work in WebKit,
+// so standard lightbox plugins that target <img> cannot be used here.
+---
+
+<div class="zoomable-svg" data-zoomable>
+  <slot />
+  <button class="zoom-btn" aria-label="View full size" title="View full size">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+    </svg>
+  </button>
+</div>
+
+<script>
+  // Astro deduplicates this script tag - it runs once per page even when
+  // ZoomableSVG is used many times.
+
+  const DIALOG_ID = "nfm-svg-zoom";
+
+  function getOrCreateDialog(): HTMLDialogElement {
+    const existing = document.getElementById(DIALOG_ID);
+    if (existing) return existing as HTMLDialogElement;
+
+    const dlg = document.createElement("dialog");
+    dlg.id = DIALOG_ID;
+    dlg.setAttribute("aria-modal", "true");
+    dlg.setAttribute("aria-label", "Diagram viewer");
+    dlg.innerHTML = `
+      <button id="nfm-svg-zoom-close" aria-label="Close diagram">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+      <div id="nfm-svg-zoom-body"></div>
+    `;
+    document.body.appendChild(dlg);
+
+    dlg.querySelector("#nfm-svg-zoom-close")!.addEventListener("click", () => dlg.close());
+    // Close on backdrop click (target is the dialog element itself, not its content)
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+
+    return dlg;
+  }
+
+  function openZoom(wrap: Element) {
+    const svg = wrap.querySelector("svg");
+    if (!svg) return;
+    const dlg = getOrCreateDialog();
+    const body = dlg.querySelector<HTMLElement>("#nfm-svg-zoom-body")!;
+    body.innerHTML = "";
+    body.appendChild(svg.cloneNode(true));
+    dlg.showModal();
+  }
+
+  document.querySelectorAll<HTMLElement>("[data-zoomable]").forEach((wrap) => {
+    const btn = wrap.querySelector<HTMLButtonElement>(".zoom-btn");
+    if (!btn) return;
+    btn.addEventListener("click", (e) => { e.stopPropagation(); openZoom(wrap); });
+    wrap.addEventListener("click", () => openZoom(wrap));
+  });
+</script>
+
+<style>
+  .zoomable-svg {
+    position: relative;
+    cursor: zoom-in;
+    display: block;
+  }
+
+  .zoom-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid var(--sl-color-hairline-light);
+    border-radius: 4px;
+    background: var(--sl-color-bg);
+    color: var(--sl-color-text-accent);
+    opacity: 0;
+    transition: opacity 0.15s ease, background 0.15s ease;
+    cursor: zoom-in;
+    z-index: 1;
+  }
+
+  .zoomable-svg:hover .zoom-btn,
+  .zoom-btn:focus-visible {
+    opacity: 1;
+  }
+
+  .zoom-btn:hover {
+    background: var(--nfm-accent-soft);
+    color: var(--nfm-accent-text);
+    border-color: var(--nfm-accent);
+  }
+
+  /* Dialog and its contents are appended to <body> dynamically, so styles
+     must escape the component scope. */
+  :global(#nfm-svg-zoom) {
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: var(--sl-color-bg);
+    color: var(--sl-color-text);
+    max-width: min(90vw, 1400px);
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+  }
+
+  :global(#nfm-svg-zoom::backdrop) {
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(2px);
+  }
+
+  :global(#nfm-svg-zoom-close) {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid var(--sl-color-hairline-light);
+    border-radius: 4px;
+    background: var(--sl-color-bg);
+    color: var(--sl-color-text);
+    cursor: pointer;
+    z-index: 1;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+
+  :global(#nfm-svg-zoom-close:hover) {
+    background: var(--nfm-accent-soft);
+    color: var(--nfm-accent-text);
+    border-color: var(--nfm-accent);
+  }
+
+  :global(#nfm-svg-zoom-body) {
+    overflow: auto;
+    padding: 2rem;
+    flex: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  :global(#nfm-svg-zoom-body svg) {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+</style>

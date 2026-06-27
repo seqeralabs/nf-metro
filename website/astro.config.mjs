@@ -27,6 +27,7 @@ const examplesDir = fileURLToPath(new URL("../examples", import.meta.url));
 const rendersDir = fileURLToPath(
   new URL("../docs/assets/renders", import.meta.url),
 );
+const componentsDir = fileURLToPath(new URL("./src/components", import.meta.url));
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 // Compare two dotted version strings (e.g. "0.7.2", "0.1") so the larger sorts
@@ -81,7 +82,7 @@ export default defineConfig({
   base,
   vite: {
     resolve: {
-      alias: { "@examples": examplesDir, "@renders": rendersDir },
+      alias: { "@examples": examplesDir, "@renders": rendersDir, "@components": componentsDir },
       // docs/ is symlinked into src/content/docs, so guide.mdx's real path sits
       // outside this project. Keep the symlinked path during resolution so its
       // bare imports (@astrojs/starlight/components) find website/node_modules.

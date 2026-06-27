@@ -1406,10 +1406,17 @@ def _inline_svg(identifier: str) -> list[str]:
 
     The XML prolog is stripped (it renders as a stray bogus comment in an HTML
     body), and blank lines around the element keep MDX parsing it as a child
-    expression rather than literal text.
+    expression rather than literal text. The SVG is wrapped in ZoomableSVG so
+    users can click to expand in a dialog lightbox.
     """
     expr = f'{identifier}.replace(/^<\\?xml.*?\\?>\\s*/, "")'
-    return ["", f"<Fragment set:html={{{expr}}} />", ""]
+    return [
+        "",
+        "<ZoomableSVG>",
+        f"<Fragment set:html={{{expr}}} />",
+        "</ZoomableSVG>",
+        "",
+    ]
 
 
 def _details_code(identifier: str, source_label: str) -> list[str]:
@@ -1442,6 +1449,7 @@ def mdx_page(
         "---",
         "",
         'import { Code } from "@astrojs/starlight/components";',
+        'import ZoomableSVG from "@components/ZoomableSVG.astro";',
         *dict.fromkeys(imports),
         "",
         *body,
