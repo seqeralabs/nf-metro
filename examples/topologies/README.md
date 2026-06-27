@@ -412,9 +412,9 @@ python scripts/list_topology_fixtures.py
 
 ### TB section routing variants
 
-| Fixture                    | What it tests                                                                                                                          |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `tb_passthrough_trunk.mmd` | TB section acting as a pass-through trunk (no internal fork) - tests that a TB section with a straight trunk routes cleanly end to end |
-| `tb_right_entry_stack.mmd` | TB section with a stacked RIGHT-entry - multiple lines entering a TB section from the right in a stacked configuration |
-| `tb_trunk_through_fan.mmd` | TB section with an internal fan-out where the trunk continues through - tests the TB analogue of `trunk_through_fan` |
+| Fixture                    | What it tests                                                                                                                                                                                                                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tb_passthrough_trunk.mmd` | TB section acting as a pass-through trunk (no internal fork) - tests that a TB section with a straight trunk routes cleanly end to end                                                                                                          |
+| `tb_right_entry_stack.mmd` | TB section with a stacked RIGHT-entry - multiple lines entering a TB section from the right in a stacked configuration                                                                                                                          |
+| `tb_trunk_through_fan.mmd` | TB section with an internal fan-out where the trunk continues through - tests the TB analogue of `trunk_through_fan`                                                                                                                            |
 | `left_exit_sink_below.mmd` | A TB bridge's LEFT exit feeds a LEFT-entry sink one row below and to the left - the bundle leads out left and drops straight down a channel clear of both boxes, routing around the bridge instead of clawing back through its interior (#1083) |

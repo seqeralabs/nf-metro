@@ -1,11 +1,22 @@
 // @ts-check
 import { readFileSync } from "node:fs";
-import { defineEcConfig, definePlugin } from "@astrojs/starlight/expressive-code";
+import {
+  defineEcConfig,
+  definePlugin,
+} from "@astrojs/starlight/expressive-code";
 import { pluginColorChips } from "expressive-code-color-chips";
 
 // expressive-code-color-chips v≥0.2 supports a `languages` option so we can
 // include metro/mmd fences alongside the default CSS dialects.
-const COLOR_CHIP_LANGS = ["css", "scss", "sass", "less", "stylus", "metro", "mmd"];
+const COLOR_CHIP_LANGS = [
+  "css",
+  "scss",
+  "sass",
+  "less",
+  "stylus",
+  "metro",
+  "mmd",
+];
 
 // The official plugin hardcodes `vertical-align: text-bottom`, which sits the
 // chip too low against the line text. This plugin, loaded after
@@ -49,7 +60,10 @@ export default defineEcConfig({
   // Render a color swatch next to hex/rgb values — handy for the `#hex` line
   // colors in %%metro directives. Square-ish chips (15%) rather than the
   // plugin's default circle (50%).
-  plugins: [pluginColorChips({ languages: COLOR_CHIP_LANGS }), pluginChipVerticalAlign()],
+  plugins: [
+    pluginColorChips({ languages: COLOR_CHIP_LANGS }),
+    pluginChipVerticalAlign(),
+  ],
   styleOverrides: {
     colorChips: {
       borderRadius: "15%",
