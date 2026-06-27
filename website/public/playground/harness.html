@@ -335,5 +335,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/mode/simple.min.js"></script>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.27.2/full/pyodide.js"></script>
     <script src="app.js"></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("sw.js").catch(() => {});
+      }
+    </script>
   </body>
 </html>

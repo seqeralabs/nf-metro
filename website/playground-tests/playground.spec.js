@@ -29,6 +29,19 @@ test.afterAll(async () => {
   await page.close();
 });
 
+test("service worker precaches pyodide.js during install", async () => {
+  // By the time Pyodide has fully booted, the SW install has long since completed.
+  const cached = await page.evaluate(async () => {
+    const keys = await caches.keys();
+    const name = keys.find((k) => k.startsWith("nfm-playground-"));
+    if (!name) return false;
+    const cache = await caches.open(name);
+    const entries = await cache.keys();
+    return entries.some((req) => req.url.includes("pyodide.js"));
+  });
+  expect(cached).toBe(true);
+});
+
 test("boots and renders the seed map", async () => {
   await expect(page.locator("#preview svg")).toHaveCount(1);
   expect(await page.locator("#preview [data-line-id]").count()).toBeGreaterThan(

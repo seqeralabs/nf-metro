@@ -353,6 +353,11 @@ import { base } from "../site";
     the page URL (/playground/) just as they did with the old index.html.
   -->
   <script is:inline src={`${base}playground/app.js`}></script>
+  <script is:inline define:vars={{ swUrl: `${base}playground/sw.js` }}>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register(swUrl).catch(() => {});
+    }
+  </script>
 </StarlightPage>
 
 <style is:global>
