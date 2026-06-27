@@ -38,6 +38,12 @@ explicitly):
 |---|---|
 | [`render-topologies`](render-topologies/SKILL.md) | Local pixel-diff of all gallery renders between the current branch and `origin/main`. Only needed for pre-push confidence; the CI render preview on the PR is the authoritative review. |
 
+### Docs site
+
+| Skill | When to use |
+|---|---|
+| [`serve-docs`](serve-docs/SKILL.md) | Spin up the Astro / Starlight docs site locally for live preview. Wraps `scripts/serve_docs.sh`, which generates the git-ignored gallery / pipelines / playground content and then starts the dev server. |
+
 ## How the skills relate
 
 - `pipeline-metro-diagram`'s "is it mmd or nf-metro?" triage in Step 5

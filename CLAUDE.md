@@ -43,6 +43,24 @@ Content and tooling are separated:
   `website/src/styles/custom.css`, nav + config in `website/astro.config.mjs`.
   It loads the Markdown via a symlink: `website/src/content/docs -> ../../docs`.
 
+The fastest way to preview the site locally is the convenience script, which
+generates the git-ignored dynamic content and then starts the dev server in one
+step (serves at http://localhost:4321/nf-metro/):
+
+```bash
+scripts/serve_docs.sh              # generate content if missing, then dev server
+scripts/serve_docs.sh --branch X   # serve branch X: worktree + its nf_metro + renders
+scripts/serve_docs.sh --rebuild    # force-refresh gallery + playground content
+scripts/serve_docs.sh --skip-content  # fastest; assumes content already generated
+scripts/serve_docs.sh --preview    # production build + preview instead of dev
+scripts/serve_docs.sh --help       # all flags; `-- <args>` pass through to astro
+```
+
+It needs the `nf_metro` package importable (e.g. `source ~/.local/bin/mm-activate nf-metro`)
+to build the gallery; without it the server still starts but those pages are empty.
+
+The underlying npm commands, if you prefer to drive Astro directly:
+
 ```bash
 cd website
 npm install
