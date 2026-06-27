@@ -1358,6 +1358,16 @@ def clean_name(stem: str) -> str:
     return stem.replace("_", " ").title()
 
 
+def _raw_import(prefix: str, ident_key: str, alias: str, path: str) -> tuple[str, str]:
+    """Return ``(identifier, import_statement)`` for a Vite ``?raw`` MDX import.
+
+    The identifier slugifies *ident_key* into a valid JS name; the statement
+    pulls *path* in as a raw string through the *alias* import alias.
+    """
+    identifier = prefix + re.sub(r"\W", "_", ident_key)
+    return identifier, f'import {identifier} from "@{alias}/{path}?raw";'
+
+
 def mmd_import(stem: str, source_dir: Path) -> tuple[str, str, str]:
     """Describe how to embed a committed ``.mmd`` as imported source in an ``.mdx``
     page. Returns ``(identifier, import_statement, source_label)``.
@@ -1373,8 +1383,7 @@ def mmd_import(stem: str, source_dir: Path) -> tuple[str, str, str]:
     else:
         rel = stem
         prefix = "mmd_"
-    identifier = prefix + re.sub(r"\W", "_", stem)
-    import_statement = f'import {identifier} from "@examples/{rel}.mmd?raw";'
+    identifier, import_statement = _raw_import(prefix, stem, "examples", f"{rel}.mmd")
     source_label = f"examples/{rel}.mmd"
     return identifier, import_statement, source_label
 
@@ -1389,8 +1398,7 @@ def svg_import(svg_stem: str) -> tuple[str, str]:
     and follow the light/dark toggle - an ``<img>``-referenced SVG ignores the
     embedding page's scheme in WebKit.
     """
-    identifier = "svg_" + re.sub(r"\W", "_", svg_stem)
-    return identifier, f'import {identifier} from "@renders/{svg_stem}.svg?raw";'
+    return _raw_import("svg_", svg_stem, "renders", f"{svg_stem}.svg")
 
 
 def _inline_svg(identifier: str) -> list[str]:

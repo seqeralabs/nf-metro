@@ -332,10 +332,9 @@ function zoomFit() {
 // animate/chevrons/debug toggles are preview overlays handled separately.)
 
 // The selector picks the brand (palette identity); light/dark is the separate
-// page-level toggle, so brand and mode stay independent. `dark` is the legacy
-// style token for the nfcore brand.
+// Mode control, so brand and mode stay independent. Legacy sources may still
+// carry `%%metro style: dark`, which reads back as the nfcore brand.
 const THEME_KEYS = ["nfcore", "seqera"];
-const THEME_STYLE_TOKEN = { nfcore: "nfcore", seqera: "seqera" };
 const STYLE_ALIASES = { dark: "nfcore" };
 
 // [control id, directive key, kind]
@@ -406,7 +405,7 @@ function themeKeyFromSource() {
 }
 
 function setThemeDirective(themeKey) {
-  setDirective("style", THEME_STYLE_TOKEN[themeKey] || themeKey);
+  setDirective("style", themeKey);
   doRender();
 }
 
@@ -1462,7 +1461,7 @@ function pinColorScheme(svg, mode) {
 
 function exportSvg() {
   if (!lastSvg) return;
-  const svg = pinColorScheme(lastSvg, el("opt-mode").value || "dark");
+  const svg = pinColorScheme(lastSvg, modeFromSource());
   downloadBlob(new Blob([svg], { type: "image/svg+xml" }), "metro_map.svg");
 }
 
@@ -1481,7 +1480,7 @@ function svgWithIntrinsicSize(svg) {
 async function exportPng() {
   if (!lastSvg) return;
   const scale = 2;
-  const pinned = pinColorScheme(lastSvg, el("opt-mode").value || "dark");
+  const pinned = pinColorScheme(lastSvg, modeFromSource());
   const { svg, w, h } = svgWithIntrinsicSize(pinned);
   const url = URL.createObjectURL(
     new Blob([svg], { type: "image/svg+xml;charset=utf-8" }),
