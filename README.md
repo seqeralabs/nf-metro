@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-**[Documentation](https://pinin4fjords.github.io/nf-metro/latest/)** | **[Playground](https://pinin4fjords.github.io/nf-metro/latest/playground/)** | **[Gallery](https://pinin4fjords.github.io/nf-metro/latest/gallery/)**
+**[Documentation](https://pinin4fjords.github.io/nf-metro/dev/)** | **[Playground](https://pinin4fjords.github.io/nf-metro/dev/playground/)** | **[Gallery](https://pinin4fjords.github.io/nf-metro/dev/gallery/)**
 
 Generate metro-map-style SVG diagrams from Mermaid graph definitions with `%%metro` directives. Designed for visualizing bioinformatics pipeline workflows (e.g., nf-core pipelines) as transit-style maps where each analysis route is a colored "metro line."
 
@@ -15,7 +15,7 @@ Generate metro-map-style SVG diagrams from Mermaid graph definitions with `%%met
   <img alt="nf-core/rnaseq metro map" src="https://raw.githubusercontent.com/pinin4fjords/nf-metro/main/examples/rnaseq_auto_dark.png">
 </picture>
 
-**Try it without installing:** the [nf-metro playground](https://pinin4fjords.github.io/nf-metro/latest/playground/) runs the full layout engine in your browser. Edit a `.mmd` file, preview the result live, import a Nextflow `-with-dag` diagram directly, and tweak layout options - no Python, no CLI needed.
+**Try it without installing:** the [nf-metro playground](https://pinin4fjords.github.io/nf-metro/dev/playground/) runs the full layout engine in your browser. Edit a `.mmd` file, preview the result live, import a Nextflow `-with-dag` diagram directly, and tweak layout options - no Python, no CLI needed.
 
 ## What nf-metro does
 
@@ -76,7 +76,7 @@ Inspect structure (sections, lines, stations):
 nf-metro info examples/simple_pipeline.mmd
 ```
 
-See the [Guide](https://pinin4fjords.github.io/nf-metro/latest/guide/) for a step-by-step walkthrough of writing `.mmd` files.
+See the [Guide](https://pinin4fjords.github.io/nf-metro/dev/guide/) for a step-by-step walkthrough of writing `.mmd` files.
 
 ## CLI reference
 
@@ -125,7 +125,7 @@ Every layout/render option below also has a `%%metro` directive equivalent in th
 #### Embedding options
 
 Flags for producing an SVG to embed in another page or application. See the
-[embedding guide](https://pinin4fjords.github.io/nf-metro/latest/embedding/) for when to use each.
+[embedding guide](https://pinin4fjords.github.io/nf-metro/dev/embedding/) for when to use each.
 
 | Option                                 | Default | Description                                                                                        |
 | -------------------------------------- | ------- | -------------------------------------------------------------------------------------------------- |
@@ -168,7 +168,7 @@ GitHub READMEs strip `<script>` tags, so embed there as a static SVG (or link ou
 
 Every rendered SVG carries a machine-readable manifest so the committed file is a self-contained artifact - a downstream tool can position overlays, restyle nodes, or look up which processes a node represents without re-running the layout engine. The data is carried as a JSON block in a `<metadata id="diagram-manifest">` element and as `data-node-*` attributes on each station's `<g>` element.
 
-Set `%%metro manifest: false` (or `--no-manifest`) to emit the drawn map without a manifest. See the [Data manifest](https://pinin4fjords.github.io/nf-metro/latest/manifest/) docs for the full schema and how to consume it.
+Set `%%metro manifest: false` (or `--no-manifest`) to emit the drawn map without a manifest. See the [Data manifest](https://pinin4fjords.github.io/nf-metro/dev/manifest/) docs for the full schema and how to consume it.
 
 ### `nf-metro validate`
 
@@ -216,7 +216,7 @@ nf-metro convert [OPTIONS] INPUT_FILE
 | `-o`, `--output PATH` | stdout  | Output `.mmd` file path                 |
 | `--title TEXT`        | auto    | Pipeline title for the converted output |
 
-To convert and render in one step, use the `--from-nextflow` flag on `render` instead. See [Importing from Nextflow](https://pinin4fjords.github.io/nf-metro/latest/nextflow/) for details.
+To convert and render in one step, use the `--from-nextflow` flag on `render` instead. See [Importing from Nextflow](https://pinin4fjords.github.io/nf-metro/dev/nextflow/) for details.
 
 ### `nf-metro serve`
 
@@ -236,7 +236,7 @@ nextflow run my/pipeline -with-weblog http://localhost:8080/events
 | `--overlay` | `ring`      | Status overlay style: `ring`, `pulse`, `dot`, `led`        |
 | `--token`   | none        | Require `?token=` or `X-Metro-Token` header on `/events`   |
 
-Stations must be mapped to Nextflow process names with `%%metro process:` directives (see the [directive reference](#directive-reference) and the [live progress guide](https://pinin4fjords.github.io/nf-metro/latest/live/)).
+Stations must be mapped to Nextflow process names with `%%metro process:` directives (see the [directive reference](#directive-reference) and the [live progress guide](https://pinin4fjords.github.io/nf-metro/dev/live/)).
 
 ### `nf-metro serve-multi`
 
@@ -251,7 +251,7 @@ curl -s --data-binary @map.mmd "http://localhost:8080/maps?name=myrun"
 nextflow run my/pipeline -with-weblog "http://localhost:8080/r/<id>/events"
 ```
 
-See the [live progress guide](https://pinin4fjords.github.io/nf-metro/latest/live/) for the full dashboard workflow and the optional Nextflow plugin that handles registration automatically.
+See the [live progress guide](https://pinin4fjords.github.io/nf-metro/dev/live/) for the full dashboard workflow and the optional Nextflow plugin that handles registration automatically.
 
 ### `nf-metro check-mapping`
 
@@ -280,7 +280,7 @@ The [`examples/`](examples/) directory contains ready-to-render `.mmd` files:
 
 ### Topology gallery
 
-The [`examples/topologies/`](examples/topologies/) directory has 38 examples covering a range of layout patterns. See the [topology README](examples/topologies/README.md) for descriptions and rendered previews, or browse the [online gallery](https://pinin4fjords.github.io/nf-metro/latest/gallery/).
+The [`examples/topologies/`](examples/topologies/) directory has 38 examples covering a range of layout patterns. See the [topology README](examples/topologies/README.md) for descriptions and rendered previews, or browse the [online gallery](https://pinin4fjords.github.io/nf-metro/dev/gallery/).
 
 A few highlights:
 
@@ -295,7 +295,7 @@ A few highlights:
 
 Input files use a subset of Mermaid `graph LR` syntax extended with `%%metro` directives. The format has three layers: **global directives** that configure the overall map, **section directives** inside `subgraph` blocks that control section layout, and **edges** that define connections between stations.
 
-The [Guide](https://pinin4fjords.github.io/nf-metro/latest/guide/) walks through the format step by step, from a minimal flat pipeline to a multi-section map with custom grid layout. The walkthrough below covers the key ideas.
+The [Guide](https://pinin4fjords.github.io/nf-metro/dev/guide/) walks through the format step by step, from a minimal flat pipeline to a multi-section map with custom grid layout. The walkthrough below covers the key ideas.
 
 ### Walkthrough: nf-core/rnaseq
 
@@ -388,7 +388,7 @@ Edges between stations in different sections go outside all `subgraph`/`end` blo
 | `%%metro style: <name>`                                          | Global           | Theme: `dark`, `light`                                                                                                                                                                             |
 | `%%metro line: <id> \| <name> \| <color> [\| <style>]`           | Global           | Define a metro line. Optional style: `solid` (default), `dashed`, `dotted`                                                                                                                         |
 | `%%metro grid: <section> \| <col>,<row>[,<rowspan>[,<colspan>]]` | Global           | Pin section to grid position                                                                                                                                                                       |
-| `%%metro legend: <position>`                                     | Global           | Legend position: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, `none` (append `\| canvas`, `\| <dx>,<dy>`, or use `<x>,<y>` - see the [guide](https://pinin4fjords.github.io/nf-metro/latest/guide/)) |
+| `%%metro legend: <position>`                                     | Global           | Legend position: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, `none` (append `\| canvas`, `\| <dx>,<dy>`, or use `<x>,<y>` - see the [guide](https://pinin4fjords.github.io/nf-metro/dev/guide/)) |
 | `%%metro line_order: <strategy>`                                 | Global           | Line ordering: `definition` (default) or `span`                                                                                                                                                    |
 | `%%metro file: <station> \| <label> [\| <name>] [\| banner]`     | Global           | Mark a station as a file terminus with a document icon                                                                                                                                             |
 | `%%metro files: <station> \| <label> [\| <name>] [\| banner]`    | Global           | Mark a station with a stacked-documents icon (e.g. paired files)                                                                                                                                   |
@@ -417,7 +417,7 @@ nextflow run my/pipeline -with-weblog http://localhost:8080/events
 
 Stations transition from pending to running to done as tasks are submitted and complete. The layout is computed once; the overlay is drawn on top, so the map never re-flows during a run.
 
-For multi-pipeline dashboards, persistent history, and the optional Nextflow plugin that handles wiring automatically, see the [live progress guide](https://pinin4fjords.github.io/nf-metro/latest/live/).
+For multi-pipeline dashboards, persistent history, and the optional Nextflow plugin that handles wiring automatically, see the [live progress guide](https://pinin4fjords.github.io/nf-metro/dev/live/).
 
 ## Python API
 
@@ -428,7 +428,7 @@ CLI (or `python -m nf_metro`) for stable behaviour.
 
 ## Contributing
 
-See the [Contributing guide](https://pinin4fjords.github.io/nf-metro/latest/contributing/) for setup, testing, how to add topology fixtures, working with layout invariants, and the visual review process.
+See the [Contributing guide](https://pinin4fjords.github.io/nf-metro/dev/contributing/) for setup, testing, how to add topology fixtures, working with layout invariants, and the visual review process.
 
 ## License
 
