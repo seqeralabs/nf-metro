@@ -1428,12 +1428,17 @@ def _details_code(identifier: str, source_label: str) -> list[str]:
     ]
 
 
-def mdx_page(title: str, imports: list[str], body: list[str]) -> list[str]:
+def mdx_page(
+    title: str, imports: list[str], body: list[str], description: str = ""
+) -> list[str]:
     """Assemble an .mdx page: frontmatter, the <Code> import + per-example raw
     imports (deduped, order-preserved), then the body lines."""
+    fm: list[str] = [f"title: {title}"]
+    if description:
+        fm.append(f"description: {description}")
     return [
         "---",
-        f"title: {title}",
+        *fm,
         "---",
         "",
         'import { Code } from "@astrojs/starlight/components";',
@@ -1551,7 +1556,17 @@ def build_gallery() -> None:
         lines.append("**Rendered output:**\n")
         lines.extend(_inline_svg(svg_id))
 
-    gallery_md = "\n".join(mdx_page("Gallery", imports, lines))
+    gallery_md = "\n".join(
+        mdx_page(
+            "Gallery",
+            imports,
+            lines,
+            description=(
+                "Rendered examples covering fan-outs, folds, diamonds, and realistic "
+                "bioinformatics workflows - each with CLI command and Mermaid source."
+            ),
+        )
+    )
     gallery_path = GALLERY_DIR / "index.mdx"
     gallery_path.write_text(gallery_md)
     print(f"\nGallery written to {gallery_path}")
@@ -1652,7 +1667,17 @@ def build_pipelines_page() -> None:
         lines.extend(_inline_svg(svg_id))
         lines.extend(_details_code(identifier, source_label))
 
-    pipelines_md = "\n".join(mdx_page("nf-core pipelines", imports, lines))
+    pipelines_md = "\n".join(
+        mdx_page(
+            "nf-core pipelines",
+            imports,
+            lines,
+            description=(
+                "Real-world nf-core pipelines rendered as metro-style SVG diagrams "
+                "using nf-metro, maintained alongside their source."
+            ),
+        )
+    )
     pipelines_path = PIPELINES_DIR / "index.mdx"
     pipelines_path.write_text(pipelines_md)
     print(f"\nPipelines page written to {pipelines_path}")
