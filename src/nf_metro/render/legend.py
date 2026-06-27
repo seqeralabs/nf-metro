@@ -38,6 +38,7 @@ from nf_metro.render.constants import (
     TEXT_VCENTER_DY,
     line_style_kwargs,
 )
+from nf_metro.render.ns import adaptive_logo_mask_ids as _adaptive_logo_mask_ids
 from nf_metro.render.ns import ns as _ns
 from nf_metro.render.style import Theme
 
@@ -272,13 +273,21 @@ def render_legend(
     x: float,
     y: float,
     logo_path: str | None = None,
+    logo_path_light: str | None = None,
+    logo_path_dark: str | None = None,
     logo_size: tuple[float, float] | None = None,
 ) -> None:
     """Render a legend showing all metro lines and their colors.
 
-    Positioned at (x, y), rendering downward. If logo_path and logo_size are
+    Positioned at (x, y), rendering downward. If a logo path and logo_size are
     provided, the logo is embedded inside the legend box to the left of the
     line entries.
+
+    ``logo_path`` is the always-shown single-path logo (backwards compatible).
+    ``logo_path_light`` and ``logo_path_dark`` select adaptive rendering via
+    SVG masks: each variant is shown only in its respective color-scheme mode.
+    Either variant may be omitted to produce a single-mode adaptive logo
+    (e.g. light-only or dark-only).
     """
     if not graph.lines:
         return
@@ -316,19 +325,63 @@ def render_legend(
 
     # Logo (left side, vertically centered in content area)
     logo_offset = 0.0
-    if logo_path and logo_size:
+    has_adaptive = bool(logo_path_light) or bool(logo_path_dark)
+    active_logo = logo_path_dark or logo_path_light or logo_path
+    if active_logo and logo_size:
         logo_x = x + padding
         logo_y = y + padding + (content_height - scaled_h) / 2
-        d.append(
-            draw.Image(
-                logo_x,
-                logo_y,
-                scaled_w,
-                scaled_h,
-                path=logo_path,
-                embed=True,
+        if has_adaptive:
+            key_path = logo_path_dark or logo_path_light or ""
+            dark_mask_id, light_mask_id = _adaptive_logo_mask_ids(key_path)
+            defs_parts = []
+            if logo_path_dark:
+                defs_parts.append(
+                    f'<mask id="{dark_mask_id}" maskContentUnits="objectBoundingBox">'
+                    f'<rect width="1" height="1" fill="light-dark(#000,#fff)"/>'
+                    f"</mask>"
+                )
+            if logo_path_light:
+                defs_parts.append(
+                    f'<mask id="{light_mask_id}" maskContentUnits="objectBoundingBox">'
+                    f'<rect width="1" height="1" fill="light-dark(#fff,#000)"/>'
+                    f"</mask>"
+                )
+            d.append(draw.Raw(f"<defs>{''.join(defs_parts)}</defs>"))
+            if logo_path_dark:
+                d.append(
+                    draw.Image(
+                        logo_x,
+                        logo_y,
+                        scaled_w,
+                        scaled_h,
+                        path=logo_path_dark,
+                        embed=True,
+                        mask=f"url(#{dark_mask_id})",
+                    )
+                )
+            if logo_path_light:
+                d.append(
+                    draw.Image(
+                        logo_x,
+                        logo_y,
+                        scaled_w,
+                        scaled_h,
+                        path=logo_path_light,
+                        embed=True,
+                        mask=f"url(#{light_mask_id})",
+                    )
+                )
+        else:
+            d.append(
+                draw.Image(
+                    logo_x,
+                    logo_y,
+                    scaled_w,
+                    scaled_h,
+                    path=logo_path,
+                    embed=True,
+                )
             )
-        )
         logo_offset = scaled_w + _logo_gap(graph)
 
     # Line entries, vertically centred within the content area (which can be

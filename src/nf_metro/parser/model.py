@@ -424,6 +424,8 @@ class MetroGraph:
     legend_offset: tuple[float, float] | None = None  # nudge applied to anchor
     legend_at: tuple[float, float] | None = None  # absolute top-left override
     logo_path: str = ""
+    logo_path_light: str = ""
+    logo_path_dark: str = ""
     logo_scale: float = 1.0  # multiplies the logo size within the legend block
     legend_logo_gap: float | None = None  # px gap between logo and legend entries
     # Multiplies every text size for the render (station labels, title,

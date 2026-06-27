@@ -69,7 +69,12 @@ def _dir_mode(value: str, graph: MetroGraph) -> None:
 
 
 def _dir_logo(value: str, graph: MetroGraph) -> None:
-    graph.logo_path = value
+    if "|" in value:
+        parts = _split_fields(value)
+        graph.logo_path_light = parts[0]
+        graph.logo_path_dark = parts[1] if len(parts) > 1 else ""
+    else:
+        graph.logo_path = value
 
 
 def _dir_off_track(value: str, graph: MetroGraph) -> None:

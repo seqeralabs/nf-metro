@@ -962,6 +962,49 @@ def test_parse_legend_unknown_qualifier_warns():
     assert graph.legend_offset is None
 
 
+def test_parse_logo_single_path():
+    graph = parse_metro_mermaid("%%metro logo: my_logo.png\ngraph LR\n")
+    assert graph.logo_path == "my_logo.png"
+    assert graph.logo_path_light == ""
+    assert graph.logo_path_dark == ""
+
+
+def test_parse_logo_pipe_syntax():
+    graph = parse_metro_mermaid(
+        "%%metro logo: light_logo.png | dark_logo.png\ngraph LR\n"
+    )
+    assert graph.logo_path == ""
+    assert graph.logo_path_light == "light_logo.png"
+    assert graph.logo_path_dark == "dark_logo.png"
+
+
+def test_parse_logo_pipe_syntax_strips_whitespace():
+    graph = parse_metro_mermaid("%%metro logo:  light.png |  dark.png \ngraph LR\n")
+    assert graph.logo_path_light == "light.png"
+    assert graph.logo_path_dark == "dark.png"
+
+
+def test_parse_logo_trailing_pipe_light_only():
+    graph = parse_metro_mermaid("%%metro logo: light.png |\ngraph LR\n")
+    assert graph.logo_path == ""
+    assert graph.logo_path_light == "light.png"
+    assert graph.logo_path_dark == ""
+
+
+def test_parse_logo_leading_pipe_dark_only():
+    graph = parse_metro_mermaid("%%metro logo: | dark.png\ngraph LR\n")
+    assert graph.logo_path == ""
+    assert graph.logo_path_light == ""
+    assert graph.logo_path_dark == "dark.png"
+
+
+def test_parse_logo_defaults():
+    graph = parse_metro_mermaid("graph LR\n")
+    assert graph.logo_path == ""
+    assert graph.logo_path_light == ""
+    assert graph.logo_path_dark == ""
+
+
 def test_parse_logo_scale():
     graph = parse_metro_mermaid("%%metro logo_scale: 1.5\ngraph LR\n")
     assert graph.logo_scale == 1.5
