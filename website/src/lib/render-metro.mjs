@@ -14,12 +14,23 @@
  * website/.metro-cache/ (git-ignored), so re-builds only shell out on the first
  * encounter of each unique map.
  *
+ * At the start of a production build the plugin pre-warms the cache by invoking
+ * `nf-metro render-many` once with all corpus maps, amortising Python startup
+ * across the full set rather than spawning one process per map.
+ *
  * Requires `nf-metro` on PATH (activate the nf-core micromamba env).
  */
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +63,131 @@ try {
 const XML_PROLOG_RE = /^<\?xml.*?\?>\s*/;
 
 /**
+ * Recursively collect .mmd files under `dir`.
+ * @param {string} dir
+ * @param {boolean} recursive  When false, only top-level files are returned.
+ * @returns {string[]} Absolute paths.
+ */
+function findMmdFiles(dir, recursive = true) {
+  const results = [];
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return results;
+  }
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.endsWith(".mmd")) {
+      results.push(join(dir, entry.name));
+    } else if (recursive && entry.isDirectory()) {
+      results.push(...findMmdFiles(join(dir, entry.name), true));
+    }
+  }
+  return results;
+}
+
+/**
+ * Compute the cache key for a given (mode, source) pair.
+ * Must stay in sync with the hash in renderMetroFile.
+ * @param {string} source  Raw .mmd source text.
+ * @param {string} mode    Render mode string: "", "d", "n".
+ * @returns {string} 16-character hex hash.
+ */
+function cacheHash(source, mode) {
+  return createHash("sha256")
+    .update(`${NF_METRO_VERSION}\n${mode}\n${source}`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/**
+ * Pre-warm the .metro-cache by rendering all corpus maps in a single
+ * `nf-metro render-many` call.  Maps whose cache entry already exists are
+ * skipped.  Called once at the start of each production build; individual
+ * load() calls then hit the warm cache without spawning a new process.
+ *
+ * Mirror of Metro.astro's import.meta.glob patterns:
+ *   examples/**\/*.mmd          → plain mode
+ *   examples/*.mmd              → also debug mode
+ *   tests/fixtures/*.mmd        → plain mode (top-level only)
+ *   tests/fixtures/nextflow/**  → nextflow mode
+ */
+function prewarmMetroCache() {
+  if (NF_METRO_VERSION === "unknown") {
+    console.warn(
+      "nf-metro: not on PATH; skipping build-time cache pre-warm. " +
+        "Individual renders will still run on demand.",
+    );
+    return;
+  }
+
+  /** @type {Array<{input:string, output:string, debug:boolean, from_nextflow:boolean, no_self_color_scheme:boolean, no_manifest:boolean}>} */
+  const jobs = [];
+
+  function addJob(file, mode) {
+    const source = readFileSync(file, "utf-8");
+    const hash = cacheHash(source, mode);
+    const cacheFile = join(CACHE_DIR, `${hash}.svg`);
+    if (!existsSync(cacheFile)) {
+      jobs.push({
+        input: file,
+        output: cacheFile,
+        debug: mode === "d",
+        from_nextflow: mode === "n",
+        no_self_color_scheme: true,
+        layout_options: { manifest: false },
+      });
+    }
+  }
+
+  // examples/**/*.mmd → plain; examples/*.mmd → also debug
+  const examplesDir = join(REPO_ROOT, "examples");
+  for (const file of findMmdFiles(examplesDir, true)) {
+    addJob(file, "");
+    if (dirname(file) === examplesDir) {
+      addJob(file, "d");
+    }
+  }
+
+  // tests/fixtures/*.mmd (top-level only) → plain
+  const fixturesDir = join(REPO_ROOT, "tests", "fixtures");
+  for (const file of findMmdFiles(fixturesDir, false)) {
+    addJob(file, "");
+  }
+
+  // tests/fixtures/nextflow/**/*.mmd → nextflow
+  for (const file of findMmdFiles(join(fixturesDir, "nextflow"), true)) {
+    addJob(file, "n");
+  }
+
+  if (jobs.length === 0) {
+    console.log("nf-metro: cache already warm, skipping pre-warm.");
+    return;
+  }
+
+  console.log(`nf-metro: pre-warming cache — rendering ${jobs.length} map(s)...`);
+  const manifestPath = join(tmpdir(), "metro-batch.json");
+  writeFileSync(manifestPath, JSON.stringify(jobs), "utf-8");
+  try {
+    execFileSync("nf-metro", ["render-many", manifestPath], {
+      cwd: REPO_ROOT,
+      stdio: "inherit",
+    });
+  } catch (err) {
+    console.warn(
+      "nf-metro render-many failed; individual renders will fall back " +
+        `to per-file mode.\n${err.message}`,
+    );
+  } finally {
+    try {
+      unlinkSync(manifestPath);
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
+/**
  * Render a committed `.mmd` file to inline SVG markup.
  * @param {string} file  Absolute path to the source `.mmd`.
  * @param {{ debug?: boolean, fromNextflow?: boolean }} [opts]
@@ -60,14 +196,11 @@ const XML_PROLOG_RE = /^<\?xml.*?\?>\s*/;
 export function renderMetroFile(file, { debug = false, fromNextflow = false } = {}) {
   const source = readFileSync(file, "utf-8");
   const mode = `${debug ? "d" : ""}${fromNextflow ? "n" : ""}`;
-  const hash = createHash("sha256")
-    .update(`${NF_METRO_VERSION}\n${mode}\n${source}`)
-    .digest("hex")
-    .slice(0, 16);
+  const hash = cacheHash(source, mode);
   const cacheFile = join(CACHE_DIR, `${hash}.svg`);
 
   try {
-    return readFileSync(cacheFile, "utf-8");
+    return readFileSync(cacheFile, "utf-8").replace(XML_PROLOG_RE, "");
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
@@ -113,6 +246,9 @@ export function renderMetroFile(file, { debug = false, fromNextflow = false } = 
 export function metroVitePlugin() {
   return {
     name: "nf-metro-svg",
+    buildStart() {
+      prewarmMetroCache();
+    },
     load(id) {
       const [file, query = ""] = id.split("?");
       if (!file.endsWith(".mmd")) return;

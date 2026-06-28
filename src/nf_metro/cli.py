@@ -377,6 +377,168 @@ def render(
     )
 
 
+@cli.command(name="render-many")
+@click.argument("manifest_file", type=click.Path(exists=True, path_type=Path))
+def render_many(manifest_file: Path) -> None:
+    """Render multiple metro maps from a JSON manifest in one process.
+
+    MANIFEST_FILE is a JSON array of render jobs.  Each job is an object
+    with ``input`` and ``output`` (required) plus any subset of the options
+    accepted by ``nf-metro render``, expressed as JSON keys:
+
+    \b
+      input                 Path to the source .mmd file (required).
+      output                Path for the output file (required).
+      format                "svg" (default) or "html".
+      theme                 Theme name (nfcore, light, seqera, …).
+      mode                  "light" or "dark" — bakes a concrete palette.
+      debug                 Show debug overlay (default: false).
+      logo                  Logo image path (overrides %%metro logo:).
+      line_spread           "bundle", "centered", or "rails".
+      legend                Legend position keyword or coordinate.
+      from_nextflow         Convert from Nextflow DAG first (default: false).
+      title                 Pipeline title override.
+      responsive            Emit viewBox-only SVG (default: false).
+      embed_font            Inline Inter @font-face subset (default: false).
+      text_to_paths         Convert text to vector paths (default: false).
+      svg_class_prefix      Prefix for SVG presentation classes.
+      no_self_color_scheme  Omit color-scheme on root <svg> (default: false).
+      no_dark_mode_css      Suppress prefers-color-scheme block (default: false).
+      no_chrome_css         Omit chrome CSS custom-properties (default: false).
+      bare                  Omit title and outer padding (default: false).
+      validate              Run render-geometry guards (default: false).
+      layout_options        Object of layout overrides, e.g.
+                            {"manifest": false, "x_spacing": 60}.
+
+    All maps are rendered within the same Python process, amortising
+    interpreter and import startup across the whole corpus.  Output
+    directories are created as needed.  On partial failure, successful
+    outputs are kept and a non-zero exit is returned.
+    """
+    import json
+
+    try:
+        jobs: list[dict[str, object]] = json.loads(manifest_file.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        raise click.ClickException(f"cannot read manifest: {e}")
+
+    if not isinstance(jobs, list):
+        raise click.ClickException("manifest must be a JSON array")
+
+    total = len(jobs)
+    if total == 0:
+        click.echo("render-many: empty manifest, nothing to do")
+        return
+
+    failures: list[str] = []
+    for idx, job in enumerate(jobs, 1):
+        if not isinstance(job, dict):
+            failures.append(f"job {idx}: not an object")
+            click.echo(f"[{idx}/{total}] SKIP  (not an object)", err=True)
+            continue
+
+        raw_input = job.get("input")
+        raw_output = job.get("output")
+        if not isinstance(raw_input, str) or not isinstance(raw_output, str):
+            failures.append(f"job {idx}: missing or non-string 'input'/'output'")
+            click.echo(f"[{idx}/{total}] SKIP  (bad input/output)", err=True)
+            continue
+
+        in_path = Path(raw_input)
+        out_path = Path(raw_output)
+
+        def _str_or_none(key: str) -> str | None:
+            v = job.get(key)
+            return str(v) if v else None
+
+        format_ = str(job.get("format", "svg"))
+        theme = _str_or_none("theme")
+        mode = _str_or_none("mode")
+        debug_flag = bool(job.get("debug", False))
+        logo_raw = job.get("logo")
+        logo = Path(str(logo_raw)) if logo_raw else None
+        line_spread = _str_or_none("line_spread")
+        legend = _str_or_none("legend")
+        from_nextflow_flag = bool(job.get("from_nextflow", False))
+        title = _str_or_none("title")
+        responsive = bool(job.get("responsive", False))
+        embed_font = bool(job.get("embed_font", False))
+        text_to_paths = bool(job.get("text_to_paths", False))
+        svg_class_prefix = str(job.get("svg_class_prefix", ""))
+        no_self_cs = bool(job.get("no_self_color_scheme", False))
+        no_dark_mode_css = bool(job.get("no_dark_mode_css", False))
+        no_chrome_css = bool(job.get("no_chrome_css", False))
+        bare = bool(job.get("bare", False))
+        validate_geometry = bool(job.get("validate", False))
+        lo_raw = job.get("layout_options")
+        layout_opts: dict[str, object] = (
+            dict(lo_raw) if isinstance(lo_raw, dict) else {}
+        )
+
+        try:
+            text = in_path.read_text()
+            graph = prepare_graph(
+                text,
+                from_nextflow=from_nextflow_flag,
+                title=title,
+                line_spread=str(line_spread) if line_spread is not None else None,
+                logo=str(logo) if logo is not None else None,
+                legend=str(legend) if legend is not None else None,
+                layout_options=layout_opts if layout_opts else None,
+            )
+            theme_obj = resolve_theme(theme, graph, mode=mode)
+
+            font_portability: Literal["embed", "paths"] | None = (
+                "paths" if text_to_paths else "embed" if embed_font else None
+            )
+
+            if format_ == "html":
+                content = render_html(
+                    graph,
+                    theme_obj,
+                    debug=debug_flag,
+                    embed_basename=out_path.name,
+                    font_portability=font_portability,
+                    inject_dark_mode_css=not no_dark_mode_css,
+                )
+            else:
+                content = render_svg(
+                    graph,
+                    theme_obj,
+                    debug=debug_flag,
+                    responsive=responsive,
+                    font_portability=font_portability,
+                    svg_class_prefix=svg_class_prefix,
+                    self_color_scheme=not no_self_cs,
+                    inject_dark_mode_css=not no_dark_mode_css,
+                    chrome_css=not no_chrome_css,
+                    bare=bare,
+                )
+
+            if validate_geometry:
+                if format_ == "html":
+                    raise ValueError("validate applies to format svg only")
+                findings = validate_render(content, graph=graph)
+                if findings:
+                    detail = "; ".join(f.message for f in findings)
+                    raise ValueError(
+                        f"render-geometry: {len(findings)} defect(s): {detail}"
+                    )
+
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(content if content.endswith("\n") else content + "\n")
+            click.echo(f"[{idx}/{total}] OK    {in_path.name}")
+        except Exception as e:
+            failures.append(f"{in_path}: {e}")
+            click.echo(f"[{idx}/{total}] FAIL  {in_path.name}: {e}", err=True)
+
+    if failures:
+        raise click.ClickException(
+            f"{len(failures)}/{total} render(s) failed; "
+            "see stderr output above for details"
+        )
+
+
 @cli.command()
 @click.argument("input_file", type=click.Path(exists=True, path_type=Path))
 @click.option(
