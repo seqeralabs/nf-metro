@@ -321,6 +321,15 @@ gallery:
     description:
       "Serpentine-fold reconvergence: a multi-modal pipeline fanning out to stacked
       analysis sections and reconverging onto a reversed return row."
+  - id: convergence_sink_fold
+    source_dir: examples/topologies
+    category: Fold Topologies
+    description:
+      "Convergence sink folded below its branches: a `fold_threshold` stacks the
+      parallel branches in one column and drops the shared sink onto a lower row,
+      fed through a TOP entry. Each upper branch's bottom-exit feeder routes around
+      the intervening branch boxes through the clear left-side gap rather than
+      ploughing straight down through them."
   - id: stacked_lr_serpentine
     source_dir: examples/topologies
     category: Fold Topologies

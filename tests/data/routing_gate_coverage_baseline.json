@@ -197,7 +197,6 @@
   "normalize.py::if s.bbox_w <= 0:::#1",
   "normalize.py::if s.bbox_w <= 0:::#2",
   "normalize.py::if s.bbox_w <= 0:::#3",
-  "normalize.py::if s.bbox_x - margin <= x <= s.bbox_x + s.bbox_w + margin:::#1",
   "normalize.py::if sg[0].sign_x != t.sign_x:::#1",
   "normalize.py::if trunk_ch is None:::#1",
   "normalize.py::if trunk_rp is None or trunk_src_st is None:::#1",

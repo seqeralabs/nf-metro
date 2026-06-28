@@ -1,0 +1,37 @@
+%%metro title: Convergence Sink Fold
+%%metro style: dark
+%%metro fold_threshold: 3
+%%metro line: main | Main | #0570b0
+
+graph LR
+    subgraph src [Source]
+        s1[Input]
+        s2[Prepare]
+        s1 -->|main| s2
+    end
+    subgraph branch_a [Branch A]
+        a1[Step A1]
+        a2[Step A2]
+        a1 -->|main| a2
+    end
+    subgraph branch_b [Branch B]
+        b1[Step B1]
+        b2[Step B2]
+        b1 -->|main| b2
+    end
+    subgraph branch_c [Branch C]
+        c1[Step C1]
+        c2[Step C2]
+        c1 -->|main| c2
+    end
+    subgraph sink [Sink]
+        m1[Merge]
+        m2[Report]
+        m1 -->|main| m2
+    end
+    s2 -->|main| a1
+    s2 -->|main| b1
+    s2 -->|main| c1
+    a2 -->|main| m1
+    b2 -->|main| m1
+    c2 -->|main| m1

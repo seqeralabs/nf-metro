@@ -551,10 +551,6 @@
     "note": "Degenerate-bbox guard in _v_segment_crosses_other_section: mirror of the _h_segment_crosses_other_section guard; sections always have positive width.",
     "status": "defensive"
   },
-  "normalize.py::if s.bbox_x - margin <= x <= s.bbox_x + s.bbox_w + margin:::#1": {
-    "note": "X-band test in _v_segment_crosses_other_section: a RIGHT-entry drop-in descent runs in the clear inter-column gap just right of the source, so no non-excluded section's X band contains it; the crossing arm is never taken on the corpus.",
-    "status": "defensive"
-  },
   "normalize.py::if sg[0].sign_x != t.sign_x:::#1": {
     "note": "Both callers of _coincident_trunk_slots pre-filter input to a single traversal direction (band = [t for t in grp if t.sign_x == sign]), so within the function sg[0].sign_x != t.sign_x is always False; the opposing-direction continue is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
