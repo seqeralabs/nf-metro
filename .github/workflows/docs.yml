@@ -27,7 +27,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install nf-metro (gallery generator + wheel build)
-        run: pip install -e "." build
+        run: pip install -e ".[docs]" build
 
       # --- Generate dynamic content into the Astro project ---
       - name: Build playground wheel
