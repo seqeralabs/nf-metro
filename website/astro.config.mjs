@@ -8,6 +8,7 @@ import sitemap from "@astrojs/sitemap";
 import mermaid from "astro-mermaid";
 import { metroVitePlugin } from "./src/lib/render-metro.mjs";
 import { starlightGitFix } from "./src/lib/starlight-git-fix.mjs";
+import { remarkRebaseLinks } from "./src/lib/rebase-links.mjs";
 import { GITHUB_URL, PAGES_ORIGIN } from "./src/repo";
 
 // Expressive Code options (custom grammars + the color-chips plugin) live in
@@ -80,6 +81,9 @@ function buildReleasesSidebar() {
 export default defineConfig({
   site,
   base,
+  markdown: {
+    remarkPlugins: [[remarkRebaseLinks, { base }]],
+  },
   vite: {
     // Renders `<path>.mmd?metro` imports to inline SVG via the nf-metro CLI.
     plugins: [starlightGitFix(), metroVitePlugin()],
@@ -128,21 +132,18 @@ export default defineConfig({
     starlight({
       plugins: [
         starlightLinksValidator({
-          // Docs use /nf-metro/ (production-base) absolute links. Versioned
-          // builds (dev, releases) use a different base, so those same pages
-          // sit under a different prefix and the validator cannot find them.
-          // Skipping cross-base links here is safe: the release/production
-          // build (base="/nf-metro/") validates them normally.
-          // gallery/ and pipelines/ are custom Astro routes (not Starlight
-          // content entries) so the validator can never resolve them.
-          // releases/ are frozen versioned deploys on gh-pages; not present
-          // in the current Astro build.
-          // live_demo.mp4 is a public/ static asset, not a navigable page.
+          // Docs author internal links with the production `/nf-metro/` base;
+          // remarkRebaseLinks rewrites that prefix to the active build base
+          // before this validator runs, so cross-references validate against
+          // real pages on every base. Only links the validator structurally
+          // cannot resolve are excluded:
+          // - gallery/ and pipelines/ are custom Astro routes, not Starlight
+          //   content entries, so the validator can only see them as opaque
+          //   custom pages.
+          // - live_demo.mp4 is a public/ static asset, not a navigable page.
           exclude: ({ link }) =>
-            (link.startsWith("/nf-metro/") && !link.startsWith(base)) ||
-            link.startsWith("/nf-metro/gallery") ||
-            link.startsWith("/nf-metro/pipelines") ||
-            link.startsWith("/nf-metro/releases") ||
+            link.startsWith(`${base}gallery`) ||
+            link.startsWith(`${base}pipelines`) ||
             link === "../assets/live_demo.mp4",
         }),
       ],

@@ -1,0 +1,48 @@
+name: Docs link check
+
+# Builds the Astro site on pull requests so starlight-links-validator runs and
+# fails the PR on a broken internal link, rather than only surfacing it when the
+# post-merge deploy (docs.yml) builds and fails.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "website/**"
+      - "examples/**"
+      - "scripts/build_gallery.py"
+      - "scripts/gallery.yaml"
+      - ".github/workflows/docs-links.yml"
+
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install nf-metro (gallery generator + render CLI)
+        run: pip install -e ".[docs]"
+
+      - name: Build gallery + pipelines content
+        run: python scripts/build_gallery.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install npm dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Build site (runs starlight-links-validator)
+        working-directory: website
+        run: npm run build
