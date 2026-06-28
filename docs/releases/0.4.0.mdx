@@ -3,6 +3,8 @@ title: "v0.4.0"
 slug: releases/0.4.0
 ---
 
+import Metro from "@components/Metro.astro";
+
 _2026-02-19_ · [GitHub release](https://github.com/pinin4fjords/nf-metro/releases/tag/0.4.0) · [Diff](https://github.com/pinin4fjords/nf-metro/compare/0.3.0...0.4.0)
 
 ## Nextflow DAG import
@@ -16,15 +18,23 @@ nf-metro render dag.mmd -o pipeline.svg
 
 Nextflow DAG files use a flat graph (no subgraphs), so the auto-layout engine places sections automatically.
 
-![Variant calling pipeline from Nextflow DAG](../assets/renders/nf_variant_calling.svg)
+<Metro
+  src="tests/fixtures/nextflow/variant_calling.mmd"
+  fromNextflow
+  code={false}
+/>
 
-![Pipeline with subworkflows from Nextflow DAG](../assets/renders/nf_with_subworkflows.svg)
+<Metro
+  src="tests/fixtures/nextflow/with_subworkflows.mmd"
+  fromNextflow
+  code={false}
+/>
 
 ## Bypass routing below intervening sections
 
 Lines that skip over one or more sections now route _below_ those sections rather than diagonally through them, keeping bypasses visually separate from the section content they skip.
 
-![Bypass routing around sections](../assets/renders/around_section_below.svg)
+<Metro src="examples/topologies/around_section_below.mmd" code={false} />
 
 ## Span-based line ordering
 

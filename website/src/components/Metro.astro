@@ -1,0 +1,105 @@
+---
+import { Code } from "@astrojs/starlight/components";
+import ZoomableSVG from "@components/ZoomableSVG.astro";
+
+// One primitive for every nf-metro map in the docs: it reads a committed source
+// file by repo-relative path, optionally shows the highlighted source, and
+// renders the map at build time (no pre-generated SVG assets). `code` and
+// `render` pick which halves appear; both default on.
+//
+// The rendered SVG arrives through the `?metro` Vite plugin as an imported
+// module string. Importing it (rather than rendering to a runtime string and
+// using set:html) is what lets its `light-dark()` chrome follow the page theme
+// and keeps its embedded `<image>` logo through the production HTML build.
+interface Props {
+  // Repo-relative path to the source, e.g. "examples/guide/01_minimal.mmd".
+  src: string;
+  // Show the highlighted source block.
+  code?: boolean;
+  // Show the rendered SVG.
+  render?: boolean;
+  // Wrap the source block in a collapsed <details> (used by the dense gallery).
+  collapsed?: boolean;
+  // Render with the --debug layout overlay.
+  debug?: boolean;
+  // Treat the source as a Nextflow DAG and convert it (--from-nextflow).
+  fromNextflow?: boolean;
+  // <Code> title; defaults to the src path.
+  title?: string;
+}
+
+const {
+  src,
+  code = true,
+  render = true,
+  collapsed = false,
+  debug = false,
+  fromNextflow = false,
+  title,
+} = Astro.props;
+
+// Committed source files live one level above the Astro project. Each glob is
+// scoped to what its render mode can consume, so the build only shells out to
+// nf-metro for maps a page can actually request:
+//   - raw source: any committed .mmd (cheap, just text).
+//   - plain render: metro maps under examples/ and the top-level test fixtures
+//     (NOT tests/fixtures/nextflow, whose DAGs are not valid metro).
+//   - debug overlay: only the top-level examples that the guide demonstrates it on.
+//   - Nextflow conversion: only the DAG fixtures.
+const rawSources = {
+  ...import.meta.glob("../../../examples/**/*.mmd", { query: "?raw", import: "default" }),
+  ...import.meta.glob("../../../tests/fixtures/**/*.mmd", { query: "?raw", import: "default" }),
+};
+const svgSources = {
+  ...import.meta.glob("../../../examples/**/*.mmd", { query: "?metro", import: "default" }),
+  ...import.meta.glob("../../../tests/fixtures/*.mmd", { query: "?metro", import: "default" }),
+};
+const svgDebugSources = import.meta.glob("../../../examples/*.mmd", {
+  query: "?metro&debug",
+  import: "default",
+});
+const svgNextflowSources = import.meta.glob(
+  "../../../tests/fixtures/nextflow/**/*.mmd",
+  { query: "?metro&nextflow", import: "default" },
+);
+
+const key = `../../../${src}`;
+
+function resolve(mods: Record<string, () => Promise<unknown>>, what: string) {
+  const loader = mods[key];
+  if (!loader) {
+    throw new Error(
+      `<Metro src="${src}">: no ${what} available for that path.`,
+    );
+  }
+  return loader();
+}
+
+const source = code ? ((await resolve(rawSources, "source")) as string) : null;
+const svg = render
+  ? ((await resolve(
+      fromNextflow ? svgNextflowSources : debug ? svgDebugSources : svgSources,
+      "render",
+    )) as string)
+  : null;
+const codeTitle = title ?? src;
+---
+
+{
+  code &&
+    (collapsed ? (
+      <details>
+        <summary>Mermaid source</summary>
+        <Code code={source} lang="metro" title={codeTitle} />
+      </details>
+    ) : (
+      <Code code={source} lang="metro" title={codeTitle} />
+    ))
+}
+{
+  render && (
+    <ZoomableSVG>
+      <Fragment set:html={svg} />
+    </ZoomableSVG>
+  )
+}

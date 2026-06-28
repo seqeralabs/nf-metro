@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, fontProviders } from "astro/config";
 import starlight from "@astrojs/starlight";
 import mermaid from "astro-mermaid";
-import { metroPlugin } from "./src/plugins/metro.mjs";
+import { metroVitePlugin } from "./src/lib/render-metro.mjs";
 import { GITHUB_URL, PAGES_ORIGIN } from "./src/repo";
 
 // Expressive Code options (custom grammars + the color-chips plugin) live in
@@ -22,12 +22,6 @@ const base = process.env.DOCS_BASE ?? "/nf-metro/";
 // of truth, no copy-paste drift. `@examples` aliases that dir; `fs.allow` opens
 // it to the dev server (which otherwise restricts /@fs/ to the project root).
 const examplesDir = fileURLToPath(new URL("../examples", import.meta.url));
-// Generated metro-map SVGs (build_gallery.py). Imported `?raw` and inlined into
-// the gallery/pipelines pages so their `light-dark()` chrome follows the page's
-// color-scheme (an <img>-referenced SVG ignores the page's scheme in WebKit).
-const rendersDir = fileURLToPath(
-  new URL("../docs/assets/renders", import.meta.url),
-);
 const componentsDir = fileURLToPath(
   new URL("./src/components", import.meta.url),
 );
@@ -52,8 +46,8 @@ function compareVersionsDesc(a, b) {
 function buildReleasesSidebar() {
   const dir = new URL("./src/content/docs/releases", import.meta.url);
   const versions = readdirSync(dir)
-    .filter((file) => file.endsWith(".md") && file !== "index.md")
-    .map((file) => file.replace(/\.md$/, ""))
+    .filter((file) => /\.mdx?$/.test(file) && !/^index\.mdx?$/.test(file))
+    .map((file) => file.replace(/\.mdx?$/, ""))
     .sort(compareVersionsDesc);
 
   /** @type {Map<string, string[]>} */
@@ -84,10 +78,11 @@ export default defineConfig({
   site,
   base,
   vite: {
+    // Renders `<path>.mmd?metro` imports to inline SVG via the nf-metro CLI.
+    plugins: [metroVitePlugin()],
     resolve: {
       alias: {
         "@examples": examplesDir,
-        "@renders": rendersDir,
         "@components": componentsDir,
       },
       // docs/ is symlinked into src/content/docs, so guide.mdx's real path sits
@@ -118,7 +113,6 @@ export default defineConfig({
     },
   ],
   integrations: [
-    metroPlugin(),
     // Renders ```mermaid fences as diagrams. Must come BEFORE starlight so its
     // transform runs before Expressive Code claims the code block. autoTheme
     // follows Starlight's `data-theme` toggle (dark <-> light/neutral).

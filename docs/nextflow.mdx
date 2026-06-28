@@ -2,9 +2,7 @@
 title: "Importing from Nextflow"
 ---
 
-import { Code } from "@astrojs/starlight/components";
-import variantCallingMmd from "@examples/variant_calling.mmd?raw";
-import variantCallingTunedMmd from "@examples/variant_calling_tuned.mmd?raw";
+import Metro from "@components/Metro.astro";
 
 nf-metro can convert Nextflow's built-in DAG output into a metro map. This works best for simple pipelines with a handful of subworkflows. For complex pipelines like those in nf-core, direct conversion is unlikely to produce a good diagram -- you will need to hand-write or heavily edit the `.mmd` file. Improving this is an active area of development.
 
@@ -44,7 +42,11 @@ nextflow run flat_pipeline.nf -preview -with-dag dag.mmd
 nf-metro render dag.mmd -o pipeline.svg --from-nextflow
 ```
 
-![Flat pipeline - direct render](assets/renders/nf_flat_pipeline.svg)
+<Metro
+  src="tests/fixtures/nextflow/flat_pipeline.mmd"
+  fromNextflow
+  code={false}
+/>
 
 With no subworkflows everything lands in a single section. The converter assigns one "main" line following the longest path. This is about as clean as it gets.
 
@@ -97,7 +99,11 @@ nextflow run with_subworkflows.nf -preview -with-dag dag.mmd
 nf-metro render dag.mmd -o pipeline.svg --from-nextflow
 ```
 
-![Pipeline with subworkflows - direct render](assets/renders/nf_with_subworkflows.svg)
+<Metro
+  src="tests/fixtures/nextflow/with_subworkflows.mmd"
+  fromNextflow
+  code={false}
+/>
 
 The converter maps each subworkflow to a section and auto-creates a "Reporting" section for the standalone MultiQC. It detects bypass lines (edges skipping sections, like QC metrics going from Preprocess directly to Reporting) and spur lines (dead-end processes like Samtools Index).
 
@@ -130,7 +136,11 @@ nextflow run variant_calling.nf -preview -with-dag dag.mmd
 nf-metro render dag.mmd -o pipeline.svg --from-nextflow
 ```
 
-![Variant calling - direct render](assets/renders/nf_variant_calling.svg)
+<Metro
+  src="tests/fixtures/nextflow/variant_calling.mmd"
+  fromNextflow
+  code={false}
+/>
 
 The diamond fan-out/fan-in in the Variant Calling section renders cleanly.
 
@@ -195,13 +205,7 @@ graph LR
 
 After editing -- cleaning up labels, renaming the bypass line, and adding a proper title -- the `.mmd` becomes:
 
-<Code
-  code={variantCallingMmd}
-  lang="metro"
-  title="examples/variant_calling.mmd"
-/>
-
-![Variant calling - hand-tuned](assets/renders/nf_variant_calling_tuned.svg)
+<Metro src="examples/variant_calling.mmd" />
 
 The changes are small but the diagram reads better: proper casing on labels (BWA-MEM, SAMtools, GATK HaplotypeCaller), a meaningful line name ("QC Reporting" instead of "Preprocess - Reporting"), and a cleaner title. See the [Guide](/nf-metro/guide/) for the full `.mmd` format reference.
 
@@ -234,13 +238,7 @@ Starting from the hand-tuned variant calling example above, here is what changes
 
 Here is the full `.mmd` with file icons added:
 
-<Code
-  code={variantCallingTunedMmd}
-  lang="metro"
-  title="examples/variant_calling_tuned.mmd"
-/>
-
-![Variant calling - with file icons](assets/renders/nf_variant_calling_tuned_icons.svg)
+<Metro src="examples/variant_calling_tuned.mmd" />
 
 The FASTQ icon at the start of Pre-processing and the FASTA icon at the start of Alignment show where data enters the pipeline. The VCF icon at the end of Variant Calling and the HTML icon in Reporting show where results are written. This makes the diagram immediately readable to someone unfamiliar with the pipeline.
 

@@ -3,6 +3,8 @@ title: "v0.1"
 slug: releases/0.1
 ---
 
+import Metro from "@components/Metro.astro";
+
 _2026-02-16_ · [GitHub release](https://github.com/pinin4fjords/nf-metro/releases/tag/0.1)
 
 The initial public release of nf-metro, establishing the core pipeline: parse a Mermaid `.mmd` file with `%%metro` directives, compute a metro-map layout, render to SVG.
@@ -11,7 +13,7 @@ The initial public release of nf-metro, establishing the core pipeline: parse a 
 
 The layout engine infers section positions from the graph topology - for most pipelines, no `%%metro grid:` directives are needed.
 
-![Auto-layout: nf-core/rnaseq](../assets/renders/pipeline_rnaseq_auto.svg)
+<Metro src="examples/rnaseq_auto.mmd" code={false} />
 
 For cases where the inferred layout doesn't match your intent, explicit grid positions override the inference:
 
@@ -37,7 +39,7 @@ Stations representing file inputs or outputs carry a small file icon:
 node[Output BAM]:::file
 ```
 
-![File terminus icons](../assets/renders/05_file_icons.svg)
+<Metro src="examples/guide/05_file_icons.mmd" code={false} />
 
 ## Transparent background for light theme
 
@@ -45,11 +47,11 @@ node[Output BAM]:::file
 
 ## Building blocks
 
-![Minimal pipeline](../assets/renders/01_minimal.svg)
+<Metro src="examples/guide/01_minimal.mmd" code={false} />
 
-![Two-section pipeline](../assets/renders/02_sections.svg)
+<Metro src="examples/guide/02_sections.mmd" code={false} />
 
-![Fan-out routing](../assets/renders/03_fan_out.svg)
+<Metro src="examples/guide/03_fan_out.mmd" code={false} />
 
 ## CI/CD and PyPI publishing
 
