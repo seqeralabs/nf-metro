@@ -5,7 +5,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar, cast
 
 import click
 
@@ -255,7 +255,7 @@ def _echo_issues(
 def render(
     input_file: Path,
     output: Path | None,
-    format_: str,
+    format_: Literal["svg", "html"],
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -441,7 +441,7 @@ def render_many(manifest_file: Path) -> None:
             v = job.get(key)
             return str(v) if v else None
 
-        format_ = str(job.get("format", "svg"))
+        format_ = cast(Literal["svg", "html"], str(job.get("format", "svg")))
         theme = _str_or_none("theme")
         mode = _str_or_none("mode")
         debug_flag = bool(job.get("debug", False))
