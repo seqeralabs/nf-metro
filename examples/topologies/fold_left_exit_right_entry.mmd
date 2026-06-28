@@ -1,0 +1,52 @@
+%%metro title: Fold Left Exit Right Entry
+%%metro style: dark
+%%metro line: a | Line A | #2db572
+%%metro line: b | Line B | #e6550d
+%%metro line: c | Line C | #756bb1
+%%metro fold_threshold: 4
+
+graph LR
+    subgraph inputs [Inputs]
+        A_IN[ ]
+        a1([A Step 1])
+        a2([A Step 2])
+        a3([A Step 3])
+        B_IN[ ]
+        C_IN[ ]
+        A_IN -->|a| a1
+        a1 -->|a| a2
+        a2 -->|a| a3
+    end
+
+    subgraph middle [Middle]
+        split([Split])
+        prepare([Prepare])
+        pred_x([Predict X])
+        pred_y([Predict Y])
+        pred_z([Predict Z])
+        merge([Merge])
+        split -->|a,b,c| prepare
+        prepare -->|a,b,c| pred_x
+        prepare -->|a,b,c| pred_y
+        prepare -->|a,b,c| pred_z
+        pred_x -->|a,b,c| merge
+        pred_y -->|a,b,c| merge
+        pred_z -->|a,b,c| merge
+    end
+
+    subgraph report [Report]
+        summarize([Summarize])
+        tsv_pad[ ]
+        format([Format])
+        TSV_OUT[ ]
+        HTML_OUT[ ]
+        summarize -->|a,b,c| tsv_pad
+        summarize -->|a,b,c| format
+        tsv_pad -->|a,b,c| TSV_OUT
+        format -->|a,b,c| HTML_OUT
+    end
+
+    a3 -->|a| split
+    B_IN -->|b| split
+    C_IN -->|c| split
+    merge -->|a,b,c| summarize

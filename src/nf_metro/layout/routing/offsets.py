@@ -709,6 +709,17 @@ def _reorder_reconvergence(
             feeder_off = _section_line_offsets(ctx, primary_fid)
             if not all(lid in feeder_off for lid in primary_lines):
                 continue
+            # ``_section_line_offsets`` reports each line's offset from the first
+            # feeder station carrying it.  When the feeder's lines originate at
+            # separate single-line producers that never share a station, those
+            # offsets are each a local slot 0, not a unified bundle order, so two
+            # lines can collide on one offset.  The delivered order is then
+            # ambiguous (it resolves only at the feeder's exit port): leave the
+            # section on its priority order rather than on an arbitrary tie-break.
+            if len(
+                distinct_offset_levels(feeder_off[lid] for lid in primary_lines)
+            ) < len(primary_lines):
+                continue
             delivered = sorted(primary_lines, key=lambda lid: feeder_off[lid])
             if reverse:
                 delivered = list(reversed(delivered))

@@ -347,6 +347,16 @@ gallery:
       each line continuing to its own separate sink (a fan, not a merge). The
       distinct-line drops stay collapsed onto the column trunk, since they part to
       different stations rather than bundling along a shared run."
+  - id: fold_left_exit_right_entry
+    source_dir: examples/topologies
+    category: Fold Topologies
+    description:
+      "A reconvergence section fed by three separately-originating inputs, folded
+      so it exits LEFT into a relocated section's RIGHT entry one row below: the
+      bundle steps west-down-west as a staircase. The exit and entry ports stack
+      the bundle in the same order, so the lines keep their feed order through the
+      two opposite-handed corners and each corner is sized as one concentric fan
+      (issue #1143)."
   - id: stacked_lr_serpentine
     source_dir: examples/topologies
     category: Fold Topologies

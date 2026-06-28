@@ -553,19 +553,20 @@ def _route_right_entry_drop_in(
 
 def _left_exit_step_offsets(
     graph: MetroGraph, edge: Edge, src: Station, ctx: _RoutingCtx
-) -> tuple[list[str], dict[str, float], dict[str, float], float]:
+) -> tuple[list[str], dict[str, float], dict[str, float], float, dict[str, Edge]]:
     """Shared geometry of a LEFT-exit -> RIGHT-entry staircase.
 
     Returns the bundle's line ids, each line's source and target station offset,
-    and the descent channel X.  Each line drops at ``cx + exit_off`` -- the same
-    scalar that orders the port fan -- so the westmost leg carries the topmost
-    line and the eastmost leg lands ``curve_radius`` clear of the source port.
+    the descent channel X, and the ``line_id -> edge`` map.  Each line drops at
+    ``cx + exit_off`` -- the same scalar that orders the port fan -- so the
+    westmost leg carries the topmost line and the eastmost leg lands
+    ``curve_radius`` clear of the source port.
     """
-    _members, line_ids, _edge_by_line = gather_member_edges(graph, edge)
+    _members, line_ids, edge_by_line = gather_member_edges(graph, edge)
     exit_offs = {lid: _get_offset(ctx, edge.source, lid) for lid in line_ids}
     entry_offs = {lid: _get_offset(ctx, edge.target, lid) for lid in line_ids}
     cx = src.x - ctx.curve_radius - max(exit_offs.values())
-    return line_ids, exit_offs, entry_offs, cx
+    return line_ids, exit_offs, entry_offs, cx, edge_by_line
 
 
 def _left_exit_right_entry_step_is_clear(
@@ -578,7 +579,7 @@ def _left_exit_right_entry_step_is_clear(
     target section's right edge), so a blocked descent defers to the wrap /
     around-below fallbacks instead.
     """
-    line_ids, exit_offs, _entry_offs, cx = _left_exit_step_offsets(
+    line_ids, exit_offs, _entry_offs, cx, _edge_by_line = _left_exit_step_offsets(
         graph, edge, src, ctx
     )
     exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
@@ -609,24 +610,45 @@ def _route_left_exit_right_entry_step(
         (cx + so, sy + so)  ; turn down
         (cx + so, ey + to)  -> V down the fanned channel
         (ex, ey + to)  -> H into the RIGHT port from its outward side
+
+    When the descent is long enough for the two turns to be independent corners
+    the per-leg fan keeps each line on its own offset through both.  When it is
+    too short for two corners to fit (``2 * radius > descent``) the turns merge
+    into one bend that the per-leg fan sizes per line, pinching the bundle; a
+    bundle that rides one rigid offset (same order at both ports) takes the
+    concentric builder there so the merged bend is sized wholesale.
     """
     sx, sy = src.x, src.y
     ex, ey = tgt.x, tgt.y
-    line_ids, exit_offs, entry_offs, cx = _left_exit_step_offsets(
+    line_ids, exit_offs, entry_offs, cx, edge_by_line = _left_exit_step_offsets(
         ctx.graph, edge, src, ctx
     )
-
-    def leg_offsets(line_id: str) -> list[float]:
-        return [-exit_offs[line_id], -exit_offs[line_id], -entry_offs[line_id]]
-
     centerline = [(sx, sy), (cx, sy), (cx, ey), (ex, ey)]
-    route = route_offset(
-        edge,
-        [(edge, edge.line_id, leg_offsets(edge.line_id))],
-        centerline,
-        base_radius=ctx.curve_radius,
-        bundle_offsets=[leg_offsets(lid) for lid in line_ids],
+
+    descent = abs(ey - sy)
+    rigid = all(
+        abs(exit_offs[lid] - entry_offs[lid]) <= COORD_TOLERANCE for lid in line_ids
     )
+    if rigid and 0 < descent < 2 * ctx.curve_radius:
+        route = route_along(
+            edge,
+            [(edge_by_line[lid], lid, -exit_offs[lid]) for lid in line_ids],
+            centerline,
+            base_radius=ctx.curve_radius,
+            normalize_exempt=False,
+        )
+    else:
+
+        def leg_offsets(line_id: str) -> list[float]:
+            return [-exit_offs[line_id], -exit_offs[line_id], -entry_offs[line_id]]
+
+        route = route_offset(
+            edge,
+            [(edge, edge.line_id, leg_offsets(edge.line_id))],
+            centerline,
+            base_radius=ctx.curve_radius,
+            bundle_offsets=[leg_offsets(lid) for lid in line_ids],
+        )
     if route is not None:
         _declare_channel(route, ctx, cx, vertical_direction(ey - sy))
     return route
