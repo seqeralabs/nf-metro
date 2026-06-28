@@ -3,6 +3,7 @@ import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, fontProviders } from "astro/config";
 import starlight from "@astrojs/starlight";
+import sitemap from "@astrojs/sitemap";
 import mermaid from "astro-mermaid";
 import { metroVitePlugin } from "./src/lib/render-metro.mjs";
 import { GITHUB_URL, PAGES_ORIGIN } from "./src/repo";
@@ -113,6 +114,7 @@ export default defineConfig({
     },
   ],
   integrations: [
+    sitemap(),
     // Renders ```mermaid fences as diagrams. Must come BEFORE starlight so its
     // transform runs before Expressive Code claims the code block. autoTheme
     // follows Starlight's `data-theme` toggle (dark <-> light/neutral).
@@ -126,6 +128,7 @@ export default defineConfig({
       description:
         "Metro-map-style SVG diagrams from Mermaid graph definitions with %%metro directives - for visualizing bioinformatics pipeline workflows.",
       favicon: "/favicon.svg",
+      lastUpdated: true,
       // Expressive Code options (grammars + color-chips plugin) are in ec.config.mjs.
       social: [
         {
