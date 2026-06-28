@@ -7,6 +7,7 @@ from __future__ import annotations
 
 __all__ = [
     "BackwardFlowError",
+    "FoldThresholdError",
     "MixedEntryDirectionError",
     "PhaseInvariantError",
     "compute_layout",
@@ -113,6 +114,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _FLOW_ALIGNED_SIDES,
     _PASS_C_BISECTION_ORDER,
     BackwardFlowError,
+    FoldThresholdError,
     MixedEntryDirectionError,
     PhaseInvariantError,
     _bbox_guarded_stations,

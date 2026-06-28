@@ -126,6 +126,22 @@ class MixedEntryDirectionError(ValueError):
     """
 
 
+class FoldThresholdError(ValueError):
+    """Raised when a ``fold_threshold`` the user set is too small for the map.
+
+    A ``--fold-threshold`` / ``%%metro fold_threshold`` below a map's natural
+    width folds its sections into a tighter grid.  Past a point the compacted
+    geometry leaves the router no room to separate parallel bundles, size
+    concentric bundle corners, or seat a section header clear of a route, and
+    the render-path self-checks (:class:`CurveInvariantError`,
+    :class:`SectionHeaderClashError`) fire.  Those are engine self-checks, not
+    something the author can act on directly; when the abort is attributable to
+    a user-set threshold compressing the section grid, the render chokepoint
+    reframes it as this authoring error (a ``ValueError`` the CLI surfaces as
+    invalid input, cf. :class:`BackwardFlowError`) naming the directive.
+    """
+
+
 def _port_anchor_snapshot(graph: MetroGraph) -> dict[str, tuple[float, float]]:
     """``(x, y)`` of every port station -- the inter-section anchors that
     content placement positions content around.

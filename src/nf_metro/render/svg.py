@@ -28,7 +28,10 @@ from nf_metro.layout.labels import (
     font_scale_context,
     place_labels,
 )
-from nf_metro.layout.phases.guards import assert_render_layout_invariants
+from nf_metro.layout.phases.guards import (
+    FoldThresholdError,
+    assert_render_layout_invariants,
+)
 from nf_metro.layout.routing import (
     RoutedPath,
     apply_route_offsets,
@@ -39,7 +42,10 @@ from nf_metro.layout.routing.corners import (
     curve_tangents,
     resolve_curve_radii,
 )
-from nf_metro.layout.routing.invariants import assert_render_curve_invariants
+from nf_metro.layout.routing.invariants import (
+    CurveInvariantError,
+    assert_render_curve_invariants,
+)
 from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 from nf_metro.manifest import node_data_attrs
 from nf_metro.parser.model import (
@@ -445,21 +451,27 @@ def render_svg(
 
     scaled_theme = _scale_theme_fonts(theme, graph.font_scale)
     with class_prefix_context(svg_class_prefix), font_scale_context(graph.font_scale):
-        svg = _render_svg_scaled(
-            graph,
-            scaled_theme,
-            width=width,
-            height=height,
-            padding=padding,
-            animate=animate,
-            debug=debug,
-            legend_position=legend_position,
-            responsive=responsive,
-            inject_dark_mode_css=inject_dark_mode_css,
-            chrome_css=chrome_css,
-            self_color_scheme=self_color_scheme,
-            bare=bare,
-        )
+        try:
+            svg = _render_svg_scaled(
+                graph,
+                scaled_theme,
+                width=width,
+                height=height,
+                padding=padding,
+                animate=animate,
+                debug=debug,
+                legend_position=legend_position,
+                responsive=responsive,
+                inject_dark_mode_css=inject_dark_mode_css,
+                chrome_css=chrome_css,
+                self_color_scheme=self_color_scheme,
+                bare=bare,
+            )
+        except (CurveInvariantError, SectionHeaderClashError) as exc:
+            reframed = _fold_threshold_error(graph)
+            if reframed is not None:
+                raise reframed from exc
+            raise
 
     if font_portability == "paths":
         from nf_metro.render.font_embed import text_to_paths as _text_to_paths
@@ -472,6 +484,28 @@ def render_svg(
         return _embed_font(svg)
 
     return svg
+
+
+def _fold_threshold_error(graph: MetroGraph) -> FoldThresholdError | None:
+    """Reframe a fold-induced routing abort as an authoring error.
+
+    Returns ``None`` when the section grid was not compressed by a user-set
+    fold threshold, so the original internal invariant propagates (it is a
+    genuine engine self-check at the map's natural width).  Otherwise the
+    compacted geometry is what the router could not resolve, so return a
+    :class:`FoldThresholdError` naming the directive and the fix.
+    """
+    relocated = graph._fold_compressed_sections
+    if not relocated:
+        return None
+    sections = ", ".join(sorted(relocated))
+    return FoldThresholdError(
+        f"fold_threshold={graph._fold_threshold_effective} is too small for "
+        f"this map: it folds section(s) {sections} into a tighter grid than "
+        f"their natural layout, leaving the router no room to separate the "
+        f"bundle curves. Raise --fold-threshold (or the %%metro fold_threshold "
+        f"directive), or remove it to render at the default width."
+    )
 
 
 def _scale_theme_fonts(theme: Theme, scale: float) -> Theme:

@@ -14,9 +14,11 @@ Sections are defined as Mermaid subgraphs with %%metro entry/exit directives.
 
 from __future__ import annotations
 
+import copy
 import re
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 
 from nf_metro.parser.directives import _apply_directive
 from nf_metro.parser.grammar import (
@@ -41,6 +43,29 @@ from nf_metro.parser.resolve import (
     _remove_empty_sections,
     _resolve_sections,
 )
+
+# A row-wrap width no real map reaches, so section packing never folds: the
+# layout it yields is the unbounded baseline a user-set threshold is judged
+# against for fold-induced compression.
+_UNBOUNDED_FOLD = 1_000_000
+
+
+def _unbounded_section_grid(
+    graph: MetroGraph, infer_section_layout: Callable[..., None]
+) -> dict[str, tuple[int, int]] | None:
+    """Section ``(grid_col, grid_row)`` map for the no-fold baseline layout.
+
+    A deep copy is inferred at a width no map folds at, so the result is the
+    layout a user-set ``fold_threshold`` is compared against to find which
+    sections it relocated.  Returns ``None`` if the probe raises: detection is
+    best-effort, never breaking a render that would otherwise succeed.
+    """
+    try:
+        probe = copy.deepcopy(graph)
+        infer_section_layout(probe, max_station_columns=_UNBOUNDED_FOLD)
+    except Exception:
+        return None
+    return {sid: (s.grid_col, s.grid_row) for sid, s in probe.sections.items()}
 
 
 def _line_hint(line: int | None) -> str:
@@ -240,11 +265,29 @@ def _finalize_graph(
         # keeps a long horizontal trunk of sections on a single row.
         if max_station_columns is not None:
             eff_cols = max_station_columns
+            author_set_fold = True
         elif graph.fold_threshold is not None:
             eff_cols = graph.fold_threshold
+            author_set_fold = True
         else:
             eff_cols = 15
+            author_set_fold = False
+
+        unbounded_grid = (
+            _unbounded_section_grid(graph, infer_section_layout)
+            if author_set_fold
+            else None
+        )
         infer_section_layout(graph, max_station_columns=eff_cols)
+        if unbounded_grid is not None:
+            relocated = {
+                sid
+                for sid, s in graph.sections.items()
+                if (s.grid_col, s.grid_row) != unbounded_grid.get(sid)
+            }
+            if relocated:
+                graph._fold_threshold_effective = eff_cols
+                graph._fold_compressed_sections = relocated
         _insert_terminus_convergence_stations(graph)
         _resolve_sections(graph)
         _insert_bypass_stations(graph)

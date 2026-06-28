@@ -2,6 +2,7 @@
 
 from nf_metro.layout.engine import (
     BackwardFlowError,
+    FoldThresholdError,
     MixedEntryDirectionError,
     PhaseInvariantError,
     compute_layout,
@@ -10,6 +11,7 @@ from nf_metro.layout.engine import (
 
 __all__ = [
     "BackwardFlowError",
+    "FoldThresholdError",
     "MixedEntryDirectionError",
     "PhaseInvariantError",
     "compute_layout",

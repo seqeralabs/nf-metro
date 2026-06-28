@@ -458,6 +458,13 @@ class MetroGraph:
     # render-curve invariants, so their presence relaxes that check to a
     # warning instead of a hard render abort.
     _cross_column_perp_bridges: set[str] = field(default_factory=set)
+    # Effective row-wrap width when the author set one (--fold-threshold or
+    # %%metro fold_threshold), plus the auto-laid sections whose grid cell that
+    # width shifted versus the unbounded layout.  A non-empty set means the
+    # user-chosen threshold compressed the section grid; the render chokepoint
+    # uses it to reframe a fold-induced routing abort as FoldThresholdError.
+    _fold_threshold_effective: int | None = None
+    _fold_compressed_sections: set[str] = field(default_factory=set)
     # Pending terminus designations: station_id ->
     # list of (label, icon_type, name, banner)
     _pending_terminus: dict[str, list[tuple[str, str, str, bool]]] = field(
