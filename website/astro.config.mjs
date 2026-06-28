@@ -177,8 +177,9 @@ export default defineConfig({
             { label: "Gallery", link: "/gallery/" },
             { label: "nf-core pipelines", link: "/pipelines/" },
             {
-              label: "Playground (beta)",
+              label: "Playground",
               link: "/playground/",
+              badge: { text: "beta", variant: "caution" },
               // data-astro-reload forces a full navigation so the CDN scripts
               // (CodeMirror, Pyodide) and app.js re-initialise from scratch
               // instead of being skipped by Astro's ClientRouter.
