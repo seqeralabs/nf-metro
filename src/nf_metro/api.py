@@ -14,8 +14,9 @@ string.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 from nf_metro.layout import compute_layout
@@ -51,7 +52,7 @@ class RenderConfig:
     chrome_css: bool = True
     self_color_scheme: bool = True
     bare: bool = False
-    embed_basename: str = field(default="metro_map.html")
+    embed_basename: str = "metro_map.html"
 
 
 def apply_layout_overrides(graph: MetroGraph, opts: Mapping[str, object]) -> None:
@@ -93,8 +94,13 @@ def resolve_theme(
     return THEMES.get(brand, THEMES["nfcore"])
 
 
-def _render_graph(graph: MetroGraph, theme_obj: Theme, cfg: RenderConfig) -> str:
-    """Route a settled graph to the appropriate renderer using *cfg*."""
+def render_graph(graph: MetroGraph, theme_obj: Theme, cfg: RenderConfig) -> str:
+    """Route a settled graph to the appropriate renderer using *cfg*.
+
+    Use this when you already hold a laid-out graph (e.g. from
+    :func:`prepare_graph`) and want the render half of :func:`render_string`
+    without re-parsing.
+    """
     font_portability: Literal["embed", "paths"] | None = (
         "paths" if cfg.text_to_paths else "embed" if cfg.embed_font else None
     )
@@ -198,16 +204,18 @@ def render_string(
 ) -> str:
     """Render *text* to an SVG (default) or interactive HTML string.
 
-    A one-call wrapper over :func:`prepare_graph` plus the renderer. Callers
-    that also need the graph (e.g. to run :func:`nf_metro.render.validate_render`
-    on the output) should call :func:`prepare_graph` and the renderer directly.
+    A one-call wrapper over :func:`prepare_graph` plus :func:`render_graph`.
+    Callers that also need the graph (e.g. to run
+    :func:`nf_metro.render.validate_render` on the output) should call
+    :func:`prepare_graph` and :func:`render_graph` directly.
 
     *config* groups all render-side options into a :class:`RenderConfig` bundle.
     When supplied, the individual render-side keyword arguments (``output_format``,
     ``debug``, ``responsive``, ``embed_font``, ``text_to_paths``,
     ``svg_class_prefix``, ``inject_dark_mode_css``, ``chrome_css``,
     ``self_color_scheme``, ``bare``, ``embed_basename``) are ignored in favour of
-    *config*. Pass one or the other, not both.
+    *config*, and passing any of them with a non-default value alongside
+    *config* warns. Pass one or the other, not both.
 
     *self_color_scheme* — when ``True`` (default) the root ``<svg>`` element
     declares ``color-scheme: light dark`` so ``light-dark()`` custom properties
@@ -225,7 +233,7 @@ def render_string(
         layout_options=layout_options,
     )
     theme_obj = resolve_theme(theme, graph, mode=mode)
-    cfg = config or RenderConfig(
+    flat = RenderConfig(
         output_format=output_format,
         debug=debug,
         responsive=responsive,
@@ -238,4 +246,17 @@ def render_string(
         bare=bare,
         embed_basename=embed_basename,
     )
-    return _render_graph(graph, theme_obj, cfg)
+    if config is not None:
+        defaults = RenderConfig()
+        shadowed = sorted(
+            name
+            for name, value in vars(flat).items()
+            if value != getattr(defaults, name)
+        )
+        if shadowed:
+            warnings.warn(
+                f"render_string: config= supersedes the flat render kwargs; "
+                f"ignoring {shadowed}",
+                stacklevel=2,
+            )
+    return render_graph(graph, theme_obj, config or flat)

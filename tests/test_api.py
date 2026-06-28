@@ -7,6 +7,7 @@ a map looks different in the editor than on the command line.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import pytest
@@ -116,3 +117,19 @@ def test_render_string_accepts_render_config() -> None:
     via_config = render_string(src, config=RenderConfig(responsive=True))
     via_kwargs = render_string(src, responsive=True)
     assert via_config == via_kwargs
+
+
+def test_render_string_warns_when_config_shadows_flat_kwargs() -> None:
+    src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
+    with pytest.warns(UserWarning, match="responsive"):
+        out = render_string(src, config=RenderConfig(), responsive=True)
+    # config wins: the flat responsive=True is ignored.
+    assert out == render_string(src)
+
+
+def test_render_string_no_shadow_warning_when_only_config() -> None:
+    src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        render_string(src, config=RenderConfig(responsive=True))
+    assert not [w for w in caught if "supersedes" in str(w.message)]

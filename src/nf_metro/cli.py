@@ -10,7 +10,7 @@ from typing import Any, Literal, TypeVar, cast
 import click
 
 from nf_metro import __version__
-from nf_metro.api import RenderConfig, _render_graph, prepare_graph, resolve_theme
+from nf_metro.api import RenderConfig, prepare_graph, render_graph, resolve_theme
 from nf_metro.explain import build_explain, format_explain_json, format_explain_text
 from nf_metro.introspect import build_info, format_info_json, format_info_text
 from nf_metro.layout import (
@@ -328,7 +328,7 @@ def render(
     # under --strict (LayoutInvariantError is a PhaseInvariantError); without
     # --strict they are warnings the default handler prints to stderr.
     try:
-        content = _render_graph(
+        content = render_graph(
             graph,
             theme_obj,
             RenderConfig(
@@ -478,7 +478,7 @@ def render_many(manifest_file: Path) -> None:
             )
             theme_obj = resolve_theme(theme, graph, mode=mode)
 
-            content = _render_graph(
+            content = render_graph(
                 graph,
                 theme_obj,
                 RenderConfig(
