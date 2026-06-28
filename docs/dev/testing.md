@@ -23,9 +23,9 @@ pipelines live in `examples/`, and the topology stress fixtures in
 `examples/topologies/` (inventory and known issues in
 [`examples/topologies/README.md`](https://github.com/pinin4fjords/nf-metro/blob/main/examples/topologies/README.md)).
 
-Many tests auto-discover fixtures by globbing these directories, so
-**adding a `.mmd` file under the right directory enrolls it in the
-relevant parametrized suites automatically**.
+:::tip[Auto-discovery]
+Many tests auto-discover fixtures by globbing these directories — adding a `.mmd` file under the right directory enrolls it in the relevant parametrised suites automatically.
+:::
 
 ## Adding a topology test
 

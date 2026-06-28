@@ -2,6 +2,8 @@
 title: "Live progress"
 ---
 
+import { Steps } from "@astrojs/starlight/components";
+
 :::note[Stable since 1.0]
 The `%%metro process:` directive, `nf-metro serve` / `nf-metro check-mapping`
 commands, and the event/overlay formats are stable as of 1.0 and covered by
@@ -27,11 +29,17 @@ flowchart TD
 The layout is computed once and the overlay is drawn on top, so the map never
 re-flows as state changes.
 
-<video controls autoplay loop muted playsinline
-       style="width: 100%; max-width: 760px; border-radius: 6px"
-       src="../assets/live_demo.mp4">
-Your browser can't play the embedded video -
-<a href="../assets/live_demo.mp4">download it here</a>.
+<video
+  controls
+  autoplay
+  loop
+  muted
+  playsinline
+  style="width: 100%; max-width: 760px; border-radius: 6px"
+  src="../assets/live_demo.mp4"
+>
+  Your browser can't play the embedded video -
+  <a href="../assets/live_demo.mp4">download it here</a>.
 </video>
 
 _A pipeline run lighting up the map in real time._
@@ -162,10 +170,11 @@ or runs side by side, use the dashboard in §2b instead.
   version change. The `--theme` option has no effect in this mode (the SVG is
   already drawn).
 
-!!! tip "SVG must carry a manifest"
+:::tip[SVG must carry a manifest]
 The SVG path requires the manifest embedded in the file. `nf-metro render`
 embeds it by default. If you opted out with `--no-manifest`, re-render
 without that flag before serving.
+:::
 
 ### One-liner (recommended)
 
@@ -267,25 +276,31 @@ map. Endpoints mirror the single-map server under a `/r/<id>/` prefix
 
 ### Demo: a shared dashboard
 
-Start one persistent server:
+<Steps>
 
-```bash
-nf-metro serve-multi --port 8080            # dashboard at http://localhost:8080/
-```
+1. Start the dashboard server:
 
-Register each pipeline's map, capture the run id, then point Nextflow at the
-run's own events endpoint:
+   ```bash
+   nf-metro serve-multi --port 8080            # dashboard at http://localhost:8080/
+   ```
 
-```bash
-# register the map (prints JSON with "id" and "events" fields)
-RUN=$(curl -s --data-binary @assets/metro_map.mmd \
-      "http://localhost:8080/maps?name=myrun")
-RUN_ID=$(echo "$RUN" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+2. Register each pipeline's map and capture the run id:
 
-# start the pipeline pointing at that run's events endpoint
-nextflow run my/pipeline \
-  -with-weblog "http://localhost:8080/r/${RUN_ID}/events"
-```
+   ```bash
+   # register the map (prints JSON with "id" and "events" fields)
+   RUN=$(curl -s --data-binary @assets/metro_map.mmd \
+         "http://localhost:8080/maps?name=myrun")
+   RUN_ID=$(echo "$RUN" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+   ```
+
+3. Start Nextflow pointing at that run's events endpoint:
+
+   ```bash
+   nextflow run my/pipeline \
+     -with-weblog "http://localhost:8080/r/${RUN_ID}/events"
+   ```
+
+</Steps>
 
 Repeat for as many pipelines as you like. Open `http://localhost:8080/` to
 watch every run light up on one page; the server stays up across runs.

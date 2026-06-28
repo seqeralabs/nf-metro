@@ -2,6 +2,8 @@
 title: "How nf-metro is built"
 ---
 
+import { Steps } from "@astrojs/starlight/components";
+
 nf-metro is a layout engine, a rendering pipeline, and a test harness, assembled incrementally over several months. This page describes the engineering decisions behind it: why the validation layers exist, how the visual review loop works, and what the "ratchet" discipline means in practice. If you want to work on the codebase, this is the context.
 
 ## What the engine actually does
@@ -43,10 +45,14 @@ The response is [`examples/topologies/`](https://github.com/pinin4fjords/nf-metr
 
 When a new topology case is found to produce bad output, the workflow is:
 
+<Steps>
+
 1. Write a minimal `.mmd` that reproduces it and drop it in `examples/topologies/`.
 2. Confirm the topology test now fails against the oracle.
 3. Fix the engine so the oracle passes.
 4. Leave the fixture in place as a regression guard.
+
+</Steps>
 
 The topology library is also used by the visual review CI (see below).
 
@@ -56,10 +62,14 @@ Automated geometry checks verify that coordinates are correct. They cannot verif
 
 Every pull request triggers `.github/workflows/pr-renders.yml`, which:
 
+<Steps>
+
 1. Renders the full gallery on the PR branch.
 2. Checks out the base branch and renders the same gallery.
 3. Runs `scripts/build_render_diff.py` to build a side-by-side before/after page for every SVG that changed.
 4. Publishes the result at `https://pinin4fjords.github.io/nf-metro/_pr/<PR_NUMBER>/`.
+
+</Steps>
 
 The diff page is a fast scan: scroll through the before/afters, look for anything that regressed, file an issue or iterate on the fix. Some bugs only show up this way - a layout that passes every geometric check can still look wrong to a human eye. A fan of routes that comes out lopsided, or a label that clips against a route, passes the oracle and still needs fixing. The render diff is the channel that puts that judgment back in the loop.
 
@@ -81,10 +91,14 @@ The routing module uses a [first-match dispatcher](https://github.com/pinin4fjor
 
 When adding a new routing case, the pattern is:
 
+<Steps>
+
 1. Write a topology fixture that exercises the new case.
 2. Confirm it fails with the current dispatcher.
 3. Add a handler, or extend an existing one.
 4. Add a gate coverage entry so the new arm shows up in the coverage matrix.
+
+</Steps>
 
 ## What the docs cover
 

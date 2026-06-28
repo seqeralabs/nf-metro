@@ -16,9 +16,9 @@ You do not need to read `src/` to follow it. It covers how to produce an
 embed-friendly file, how to size and theme it from the host page, and how to
 drive it from live state (lighting up nodes as a job runs).
 
-If you only want a picture in a README, skip to
-[Static embed](#a-static-embed). If you want a panel that reacts to a running
-pipeline, read on to [Interactive and progress embeds](#interactive-and-progress-embeds).
+:::tip[Just want a picture?]
+Skip straight to [Static embed](#a-static-embed). If you want a panel that reacts to a running pipeline, read on to [Interactive and progress embeds](#interactive-and-progress-embeds).
+:::
 
 ## Choosing an output
 
@@ -281,9 +281,6 @@ specific nf-metro release only if you depend on the exact bytes of the output.
 
 ## Attribution
 
-Rendered maps carry a small `created with nf-metro` watermark in the corner. It
-stays by default, **including in `--bare` mode**. Please keep it on embedded
-maps - it is a quiet credit that helps people find the project, and keeping it
-is the easiest way to support nf-metro. There is no convenience flag to remove
-it; removal is reserved for specific functionality rather than offered as a
-toggle. This is a friendly ask, not a license restriction.
+:::note[Please keep the watermark]
+Rendered maps carry a small `created with nf-metro` watermark in the corner — including in `--bare` mode. It is a quiet credit that helps people find the project, and keeping it is the easiest way to support nf-metro. There is no convenience flag to remove it; removal is reserved for specific functionality rather than offered as a toggle. This is a friendly ask, not a license restriction.
+:::

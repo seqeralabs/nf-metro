@@ -402,13 +402,15 @@ two lines genuinely share an endpoint. If they should converge, connect them
 with a shared station; if the crossing is unavoidable layout-wise, the bridge
 glyph is the correct rendering.
 
-## Tips
+:::tip[Tips]
 
 - **Start without sections.** Get your stations and line routing right first, then wrap groups in `subgraph` blocks.
 - **Omit entry/exit hints.** The auto-layout engine infers them correctly in most cases. Only add hints when you need multi-side exits or want to override the default.
 - **Use `--debug`** to see the layout internals (see below).
 - **Use `nf-metro validate`** to catch errors before rendering.
 - **Use `nf-metro info`** to inspect the parsed structure (sections, lines, stations, edges).
+
+:::
 
 ## Debug mode
 

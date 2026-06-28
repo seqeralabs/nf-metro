@@ -4,7 +4,11 @@ title: "Importing from Nextflow"
 
 import Metro from "@components/Metro.astro";
 
-nf-metro can convert Nextflow's built-in DAG output into a metro map. This works best for simple pipelines with a handful of subworkflows. For complex pipelines like those in nf-core, direct conversion is unlikely to produce a good diagram -- you will need to hand-write or heavily edit the `.mmd` file. Improving this is an active area of development.
+nf-metro can convert Nextflow's built-in DAG output into a metro map.
+
+:::caution[Complex pipelines need hand-editing]
+Direct conversion works well for simple pipelines with a handful of subworkflows. For complex pipelines like those in nf-core, direct conversion is unlikely to produce a good diagram — you will need to hand-write or heavily edit the `.mmd` file. Improving this is an active area of development.
+:::
 
 ## Generating a Nextflow DAG
 
