@@ -9,8 +9,6 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-import networkx as nx
-
 from nf_metro.layout.constants import (
     COLLINEAR_AXIS_TOL,
     COMPONENT_BAND_OVERLAP_TOLERANCE,
@@ -563,34 +561,77 @@ def _guard_symmetric_diamond_branches_straddle_trunk(
     """
     if graph.diamond_style != "symmetric":
         return
-    g: nx.DiGraph[str] = nx.DiGraph()
-    for edge in graph.edges:
-        if edge.source in graph.stations and edge.target in graph.stations:
-            g.add_edge(edge.source, edge.target)
+    from nf_metro.layout.phases.fan_bundles import _iter_fork_join_diamonds
+
     tol = SAME_COORD_TOLERANCE
-    for fork in g:
-        branches = list(g.successors(fork))
-        if len(branches) != 2 or graph.stations[fork].is_port:
-            continue
-        b1, b2 = branches
-        if list(g.predecessors(b1)) != [fork] or list(g.predecessors(b2)) != [fork]:
-            continue
-        joins = list(g.successors(b1))
-        if len(joins) != 1 or joins != list(g.successors(b2)):
-            continue
-        join = joins[0]
-        if graph.stations[join].is_port:
-            continue
-        trunk_y = graph.stations[fork].y
-        if abs(graph.stations[join].y - trunk_y) > tol:
-            continue
+    for fork, b1, b2, join in _iter_fork_join_diamonds(graph):
+        trunk_y = fork.y
         for b in (b1, b2):
-            if abs(graph.stations[b].y - trunk_y) <= tol:
+            if abs(b.y - trunk_y) <= tol:
                 raise PhaseInvariantError(
-                    f"{phase}: symmetric diamond branch {b!r} sits on the trunk "
-                    f"row y={trunk_y:.1f} (fork {fork!r} -> {join!r}); the diamond "
-                    f"collapsed instead of straddling"
+                    f"{phase}: symmetric diamond branch {b.id!r} sits on the trunk "
+                    f"row y={trunk_y:.1f} (fork {fork.id!r} -> {join.id!r}); the "
+                    f"diamond collapsed instead of straddling"
                 )
+
+
+def _guard_symmetric_diamond_branches_half_pitch(graph: MetroGraph, phase: str) -> None:
+    """Final: in ``diamond_style='symmetric'`` a clean 2-way diamond straddles
+    its trunk symmetrically at half pitch, so its bubble is one grid unit tall.
+
+    Stage 6.17 compacts each symmetric fork-join diamond onto
+    ``trunk_y +/- 0.5 * pitch``.  Two failure modes this catches:
+
+    - asymmetry: the two branches sit at unequal distances from the trunk
+      (a later pass pulled one branch but not the other), and
+    - re-inflation: a branch back at full pitch (``trunk_y +/- 1`` slot),
+      meaning the compaction was dropped, so the diamond reads as tall as a
+      3-way fan with an empty trunk row between its branches.
+
+    Full pitch is read from the nearest off-trunk on-grid sibling in the
+    section, so the magnitude check needs no ``y_spacing`` and is skipped
+    for a solo diamond with no sibling fan (only symmetry is checked there).
+    """
+    if graph.diamond_style != "symmetric":
+        return
+    from nf_metro.layout.phases.fan_bundles import _iter_symmetric_diamonds
+
+    tol = SAME_COORD_TOLERANCE
+    half_grid = graph.half_grid_station_ids
+    for fork, lo, hi, _join in _iter_symmetric_diamonds(graph):
+        trunk_y = fork.y
+        d_lo = trunk_y - lo.y
+        d_hi = hi.y - trunk_y
+        if abs(d_lo - d_hi) > 1.0:
+            raise PhaseInvariantError(
+                f"{phase}: symmetric diamond branches {lo.id!r}/{hi.id!r} "
+                f"straddle trunk y={trunk_y:.1f} asymmetrically "
+                f"(above={d_lo:.1f}, below={d_hi:.1f})"
+            )
+        section = graph.sections.get(fork.section_id) if fork.section_id else None
+        if section is None:
+            continue
+        sibling_dists = [
+            abs(st.y - trunk_y)
+            for sid in section.station_ids
+            if sid not in half_grid
+            and (st := graph.stations.get(sid)) is not None
+            and not (st.is_port or st.is_hidden or st.off_track)
+            and abs(st.y - trunk_y) > tol
+        ]
+        if not sibling_dists:
+            continue
+        full_pitch = min(sibling_dists)
+        # Compacted branches sit at 0.5 * full_pitch; the 0.75 midpoint
+        # between half and full pitch separates a compacted branch from an
+        # uncompacted one at full pitch.
+        if d_hi > 0.75 * full_pitch:
+            raise PhaseInvariantError(
+                f"{phase}: symmetric diamond branches {lo.id!r}/{hi.id!r} sit "
+                f"{d_hi:.1f}px from trunk y={trunk_y:.1f}, not the half pitch "
+                f"{0.5 * full_pitch:.1f} expected beside a full-pitch "
+                f"{full_pitch:.1f} fan; the diamond was not compacted"
+            )
 
 
 def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
@@ -4549,6 +4590,7 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         ),
     ),
     GuardSpec(_guard_symmetric_diamond_branches_straddle_trunk, "B"),
+    GuardSpec(_guard_symmetric_diamond_branches_half_pitch, "B"),
     GuardSpec(_guard_tall_anchor_stack_well_formed, "B"),
     GuardSpec(_guard_tb_top_entry_drop_hugs_top, "B"),
 )

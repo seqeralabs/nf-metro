@@ -246,8 +246,11 @@ pass:
 - `graph._row_y_grid_info` - written by Stage 1.2 (`_align_row_y_grids`); read
   by the grid-group port snap (Stage 4.2-4.4), fan re-centre (6.3/6.7), and
   grid snap (6.4).
-- `graph.half_grid_station_ids` - written by Stage 6.3 (`center_ports` only);
-  read by the Stage 6.4 grid snap, which must skip these half-pitch stations.
+- `graph.half_grid_station_ids` - written by Stage 6.3 (`center_ports` only)
+  and Stage 6.17 (`diamond_style='symmetric'`); read by the Stage 6.4 grid
+  snap, which must skip these half-pitch stations. Stage 6.17 runs after the
+  last snap, so its writes mark branches for the invariant tests / straddle
+  guard rather than feeding a later snap.
 - `graph._consumers_grid_snapped` - set right after the Stage 6.4 snap; the
   Stage 6.6 off-track reanchor carries its own always-on guard on it.
 
@@ -1036,6 +1039,33 @@ in pipeline order.
   -14px). The companion `_position_junctions` is not TB-specific at all - it
   re-anchors stale junctions (any direction) after the settling phases (17
   across the corpus, some by hundreds of px).
+
+### Stage 6.17: symmetric diamond half-pitch compaction (engine.py)
+- **Purpose**: Under `diamond_style='symmetric'`, compact each clean
+  2-way fork-join diamond (`_iter_symmetric_diamonds`) onto half-pitch
+  offsets `trunk_y +/- 0.5 * y_spacing`, so the diamond reads as a tight
+  one-grid-unit bubble rather than straddling the trunk at full pitch
+  (as tall as a 3-way fan with an empty trunk row between its branches).
+  Per-diamond, so a diamond compacts even when it shares a section with a
+  wider fan (which keeps its full-pitch slots) and regardless of
+  `center_ports`. Records the branches on
+  `MetroGraph.half_grid_station_ids`. Runs last, after every
+  trunk-settling pass, so the branches straddle the section trunk's final
+  Y exactly; the compaction only moves them inward toward the trunk, so it
+  never breaks bbox containment.
+- **Helper**: `_apply_half_grid_symmetric_diamonds`.
+- **Precondition**: Trunk Ys settled (post-6.16); `diamond_style`
+  is `symmetric`.
+- **Postcondition**: Each symmetric diamond's branches sit at
+  `trunk_y +/- 0.5 * y_spacing`; their IDs are in
+  `graph.half_grid_station_ids`.
+- **Invariants preserved**: Trunk station Y, ports, bbox containment,
+  the wider fan's full-pitch slots.
+- **Related tests**: `test_symmetric_diamond_compacts_to_half_pitch`,
+  `test_symmetric_diamond_both_branches_deviate`,
+  `_guard_symmetric_diamond_branches_straddle_trunk`.
+- **Lifecycle:** invariant - symmetric diamond branches keep their
+  half-pitch offsets at the final boundary (no later Y mutation).
 
 ## Unclear / structural-debt signals
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterator
 
 from nf_metro.layout.constants import (
     SAME_COORD_TOLERANCE,
@@ -379,6 +380,117 @@ def _section_symfan_uses_half_grid(graph: MetroGraph, section: Section) -> bool:
     # column this is implicit, but the check is cheap and future-proofs
     # the trigger when terminus filtering changes.
     return all(count <= 2 for count in by_col.values())
+
+
+def _iter_fork_join_diamonds(
+    graph: MetroGraph,
+) -> Iterator[tuple[Station, Station, Station, Station]]:
+    """Yield ``(fork, branch, branch, join)`` for each 2-way fork-join
+    diamond whose trunk runs straight through.
+
+    A diamond is a fork F with exactly two successors B1, B2 that share F
+    as their only predecessor and rejoin at a single common successor J,
+    with neither F nor J a port and the trunk running straight through F
+    and J on a single row.  The two branches are yielded in id order, not
+    ordered by Y, and may be ports / hidden / off-track / column-mismatched;
+    callers add whatever further filtering they need.
+
+    The shared structural primitive behind both
+    ``_guard_symmetric_diamond_branches_straddle_trunk`` (which guards every
+    such diamond against collapse onto the trunk) and
+    ``_iter_symmetric_diamonds`` (which narrows to clean column-aligned
+    diamonds for the half-pitch compaction).
+    """
+    succ: dict[str, set[str]] = defaultdict(set)
+    pred: dict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges:
+        if edge.source in graph.stations and edge.target in graph.stations:
+            succ[edge.source].add(edge.target)
+            pred[edge.target].add(edge.source)
+    tol = SAME_COORD_TOLERANCE
+    for fork, branch_ids in succ.items():
+        if len(branch_ids) != 2:
+            continue
+        fork_st = graph.stations[fork]
+        if fork_st.is_port:
+            continue
+        b1, b2 = sorted(branch_ids)
+        if pred[b1] != {fork} or pred[b2] != {fork}:
+            continue
+        joins = succ.get(b1, set())
+        if len(joins) != 1 or joins != succ.get(b2, set()):
+            continue
+        join = next(iter(joins))
+        join_st = graph.stations[join]
+        if join_st.is_port:
+            continue
+        if abs(join_st.y - fork_st.y) > tol:
+            continue
+        yield fork_st, graph.stations[b1], graph.stations[b2], join_st
+
+
+def _iter_symmetric_diamonds(
+    graph: MetroGraph,
+) -> Iterator[tuple[Station, Station, Station, Station]]:
+    """Yield ``(fork, branch_lo, branch_hi, join)`` for each clean 2-way
+    symmetric fork-join diamond confined to one section.
+
+    Narrows :func:`_iter_fork_join_diamonds` to diamonds where B1, B2 are
+    real (non-port, non-hidden, on-track) stations sharing one section with
+    F and J and sharing an X column.  ``branch_lo`` and ``branch_hi`` are
+    the two branches ordered by Y.
+
+    Shared by the half-pitch compaction phase
+    (``_apply_half_grid_symmetric_diamonds``) and the grid-snap invariant
+    test so both agree on which branches are legitimately half-pitch.
+    """
+    tol = SAME_COORD_TOLERANCE
+    for fork_st, s1, s2, join_st in _iter_fork_join_diamonds(graph):
+        if any(s.is_port or s.is_hidden or s.off_track for s in (s1, s2)):
+            continue
+        # Confine the diamond to one section so the trunk anchor (the fork
+        # Y) belongs to the same trunk the branches straddle.
+        sec_id = fork_st.section_id
+        if sec_id is None or any(st.section_id != sec_id for st in (s1, s2, join_st)):
+            continue
+        # A clean horizontal diamond: the branches share an X column.
+        if abs(s1.x - s2.x) >= tol:
+            continue
+        lo, hi = (s1, s2) if s1.y <= s2.y else (s2, s1)
+        yield fork_st, lo, hi, join_st
+
+
+def _apply_half_grid_symmetric_diamonds(graph: MetroGraph, y_spacing: float) -> None:
+    """Compact each symmetric 2-way fork-join diamond onto half-pitch offsets.
+
+    Under ``diamond_style='symmetric'`` a clean horizontal 2-way diamond
+    (see :func:`_iter_symmetric_diamonds`) otherwise straddles the trunk
+    at full pitch (``trunk_y +/- y_spacing``), making the diamond's bubble
+    as tall as a 3-way fan with an empty trunk row between its branches.
+    This places the two branches at ``trunk_y +/- 0.5 * y_spacing`` so the
+    diamond reads as a tight bubble.
+
+    Unlike ``_apply_half_grid_2branch_symfan`` (which fires only when the
+    diamond is the section's sole fan and ``center_ports`` is on), the
+    decision here is per-diamond: a diamond compacts even when it shares a
+    section with a wider fan - which keeps its own full-pitch slots, so the
+    section height stays bounded by that fan - and regardless of
+    ``center_ports``.  The branch X column and the section bbox are left
+    untouched; only the two branch Ys move inward.
+
+    Branches are marked in ``graph.half_grid_station_ids`` so the
+    subsequent grid snap leaves their half-pitch offsets intact.
+    Placement is idempotent (it re-derives both branch Ys from the fork
+    trunk each pass), so re-running over a diamond the ``center_ports``
+    section pass already compacted re-affirms the same half-pitch offsets.
+    """
+    if y_spacing <= 0 or graph.diamond_style != "symmetric":
+        return
+    for fork_st, lo, hi, _join in _iter_symmetric_diamonds(graph):
+        trunk_y = fork_st.y
+        lo.y = trunk_y - 0.5 * y_spacing
+        hi.y = trunk_y + 0.5 * y_spacing
+        graph.half_grid_station_ids.update((lo.id, hi.id))
 
 
 def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
