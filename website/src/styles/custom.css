@@ -404,7 +404,11 @@ nav.sidebar a[aria-current="page"]:hover {
   background: var(--nfm-surface);
   box-shadow: 0 25px 50px -22px rgba(32, 22, 55, 0.25);
 }
-.home .hero-map img {
+.home .hero-map .zoomable-svg {
+  display: block;
+  line-height: 0;
+}
+.home .hero-map svg {
   display: block;
   width: 100%;
   height: auto;

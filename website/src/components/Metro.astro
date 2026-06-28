@@ -11,6 +11,10 @@ import ZoomableSVG from "@components/ZoomableSVG.astro";
 // section state is "open" (shown, expanded), "collapsed" (shown, folded), or
 // false (hidden).
 //
+// `clean` bypasses all sections and outputs just the inline SVG wrapped in
+// ZoomableSVG - for embedding directly in a hero or other contexts that need
+// the map without any <details> chrome. Ignores purpose/mmd/command/render.
+//
 // The rendered SVG arrives through the `?metro` Vite plugin as an imported
 // module string. Importing it (rather than rendering to a runtime string and
 // using set:html) is what lets its `light-dark()` chrome follow the page theme
@@ -36,6 +40,9 @@ interface Props {
   fromNextflow?: boolean;
   // <Code> title for the source block; defaults to the src path.
   title?: string;
+  // Output only the inline SVG (in a ZoomableSVG); no <details> chrome.
+  // Ignores purpose/mmd/command/render. For hero and embed contexts.
+  clean?: boolean;
 }
 
 const PURPOSES: Record<
@@ -56,12 +63,13 @@ const {
   debug = false,
   fromNextflow = false,
   title,
+  clean = false,
 } = Astro.props;
 
 const preset = PURPOSES[purpose];
-const mmdState = mmd ?? preset.mmd;
-const commandState = command ?? preset.command;
-const renderState = render ?? preset.render;
+const mmdState = clean ? false : (mmd ?? preset.mmd);
+const commandState = clean ? false : (command ?? preset.command);
+const renderState = clean ? "open" : (render ?? preset.render);
 
 if (fromNextflow && debug) {
   // No combined `?metro&nextflow&debug` glob exists; fail loudly rather than
@@ -144,34 +152,42 @@ const cliCommand =
 const codeTitle = title ?? src;
 ---
 
-<div class="metro">
-  {
-    mmdState !== false && (
-      <details class="metro-part" open={mmdState === "open"}>
-        <summary>Mermaid source</summary>
-        <Code code={source} lang="metro" title={codeTitle} />
-      </details>
-    )
-  }
-  {
-    commandState !== false && (
-      <details class="metro-part" open={commandState === "open"}>
-        <summary>CLI command</summary>
-        <Code code={cliCommand} lang="bash" />
-      </details>
-    )
-  }
-  {
-    renderState !== false && (
-      <details class="metro-part metro-render" open={renderState === "open"}>
-        <summary>Rendered map</summary>
-        <ZoomableSVG>
-          <Fragment set:html={svg} />
-        </ZoomableSVG>
-      </details>
-    )
-  }
-</div>
+{
+  clean ? (
+    <ZoomableSVG>
+      <Fragment set:html={svg} />
+    </ZoomableSVG>
+  ) : (
+    <div class="metro">
+      {
+        mmdState !== false && (
+          <details class="metro-part" open={mmdState === "open"}>
+            <summary>Mermaid source</summary>
+            <Code code={source} lang="metro" title={codeTitle} />
+          </details>
+        )
+      }
+      {
+        commandState !== false && (
+          <details class="metro-part" open={commandState === "open"}>
+            <summary>CLI command</summary>
+            <Code code={cliCommand} lang="bash" />
+          </details>
+        )
+      }
+      {
+        renderState !== false && (
+          <details class="metro-part metro-render" open={renderState === "open"}>
+            <summary>Rendered map</summary>
+            <ZoomableSVG>
+              <Fragment set:html={svg} />
+            </ZoomableSVG>
+          </details>
+        )
+      }
+    </div>
+  )
+}
 
 <style>
   /* The three sections inherit Starlight's native <details> styling (the

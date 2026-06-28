@@ -8,9 +8,7 @@ import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import { Icon } from "@astrojs/starlight/components";
 import Logo from "../assets/logo.svg";
 import { base, GITHUB_URL } from "../site";
-// Generated render (scripts/build_gallery.py); lives in docs/assets/renders/ and
-// is reached via the content symlink (src/content/docs -> ../../docs). Astro bundles it.
-import heroMap from "../content/docs/assets/renders/rnaseq_auto.svg";
+import Metro from "../components/Metro.astro";
 ---
 
 <StarlightPage
@@ -47,12 +45,7 @@ import heroMap from "../content/docs/assets/renders/rnaseq_auto.svg";
         </a>
       </div>
       <figure class="hero-map">
-        <img
-          src={heroMap.src}
-          width={heroMap.width}
-          height={heroMap.height}
-          alt="nf-core/rnaseq rendered as an nf-metro map"
-        />
+        <Metro src="examples/rnaseq_auto.mmd" clean />
       </figure>
     </section>
 
