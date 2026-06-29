@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import DIAGONAL_SLOPE_RATIO, MIN_STATION_FLAT_LENGTH
+from nf_metro.layout.geometry import lanes_run_along_x, lanes_run_along_y
 from nf_metro.layout.phases._common import _restoring_layout_geometry
 from nf_metro.parser.model import MetroGraph, is_bypass_v
 
@@ -252,7 +253,7 @@ def _bypass_v_flat_gaps_from(
         if (
             v is None
             or sec is None
-            or sec.direction not in ("LR", "RL")
+            or not lanes_run_along_y(sec.direction)
             or graph.is_rail_section(sec.id)
         ):
             continue
@@ -266,13 +267,60 @@ def _bypass_v_flat_gaps_from(
     return gaps
 
 
+def _vertical_bypass_v_short_runouts(
+    graph: MetroGraph, routes: list[RoutedPath]
+) -> set[tuple[str, int]]:
+    """Vertical-flow (TB/BT) bypass V's whose run-out flat is too short.
+
+    A vertical bypass peels around the bypassed station diagonally, so only its
+    run-out side carries a full flat; the peel-in side need only clear the corner
+    curve.  The run is measured on the section's flow axis (Y).  Each incident
+    route is attributed to its bypass-V endpoint -- the segment leaving a V to
+    its source endpoint, the segment landing at a V to its target endpoint -- so
+    a V chained to a sibling V (the connecting route carries two V's) feeds the
+    run on each side.  A V is flagged when its longer (run-out) side is shorter
+    than ``MIN_STATION_FLAT_LENGTH``, leaving it on a bare curve apex.  Unlike
+    the horizontal :func:`_bypass_v_flat_gaps_from` gaps, these are not restored
+    by the grid-column strike-clearance loop (the exit-corridor gap owns the
+    run-out flat), so this feeds the runtime guard only.  Returns
+    ``(section_id, layer)``.
+    """
+    run_out: dict[str, float] = {}
+    sec_of: dict[str, str] = {}
+
+    def _note(vid: str, flat: float) -> None:
+        v = graph.stations.get(vid)
+        sec = graph.sections.get(v.section_id) if v and v.section_id else None
+        if (
+            v is None
+            or sec is None
+            or not lanes_run_along_x(sec.direction)
+            or graph.is_rail_section(sec.id)
+        ):
+            return
+        run_out[vid] = max(run_out.get(vid, 0.0), flat)
+        sec_of[vid] = sec.id
+
+    for r in routes:
+        if is_bypass_v(r.edge.source):
+            _note(r.edge.source, abs(r.points[1][1] - r.points[0][1]))
+        if is_bypass_v(r.edge.target):
+            _note(r.edge.target, abs(r.points[-1][1] - r.points[-2][1]))
+    return {
+        (sec_of[vid], graph.stations[vid].layer)
+        for vid, run in run_out.items()
+        if run < MIN_STATION_FLAT_LENGTH - 0.5
+    }
+
+
 def _bypass_v_collapsed_flat_gaps(graph: MetroGraph) -> set[tuple[str, int]]:
     """Standalone bypass-V flat probe for the runtime guard.
 
     Free (no route+place) for a graph with no bypass V.  Otherwise routes
     through :func:`_probe_label_placements`, which restores the in-place
-    geometry mutations, so this never perturbs the live layout.  See
-    :func:`_bypass_v_flat_gaps_from`.
+    geometry mutations, so this never perturbs the live layout.  Covers both the
+    horizontal grid-column gaps (:func:`_bypass_v_flat_gaps_from`) and the
+    vertical-flow short run-outs (:func:`_vertical_bypass_v_short_runouts`).
     """
     if not any(is_bypass_v(e.source) or is_bypass_v(e.target) for e in graph.edges):
         return set()
@@ -280,7 +328,9 @@ def _bypass_v_collapsed_flat_gaps(graph: MetroGraph) -> set[tuple[str, int]]:
     if probe is None:
         return set()
     _offsets, routes, _placements = probe
-    return _bypass_v_flat_gaps_from(graph, routes)
+    return _bypass_v_flat_gaps_from(graph, routes) | _vertical_bypass_v_short_runouts(
+        graph, routes
+    )
 
 
 def _label_clearance_issues(

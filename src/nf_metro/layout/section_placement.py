@@ -23,6 +23,7 @@ from nf_metro.layout.constants import (
     MIN_INTER_SECTION_GAP,
     MIN_INTER_SECTION_ROW_GAP,
     MIN_PORT_STATION_GAP,
+    MIN_STATION_FLAT_LENGTH,
     OFFSET_STEP,
     PLACEMENT_X_GAP,
     PLACEMENT_Y_GAP,
@@ -509,6 +510,7 @@ def place_sections(
     # left-aligned to that edge and stacked below.
     origin_left = 0.0
     stack_y = 0.0
+    next_grid_row = 0
     for idx, comp in enumerate(ordered):
         _place_section_group(graph, section_edges, section_x_gap, section_y_gap, comp)
         # Sort members so the translation never depends on set hash order.
@@ -523,6 +525,16 @@ def place_sections(
             s.offset_y += dy
             s.offset_x += dx
         stack_y += (bottom - top) + section_y_gap
+
+        # The inter-row cascade reasons by ``grid_row`` and assumes it rises
+        # monotonically (and contiguously) with Y.  Per-component placement
+        # leaves rows in disjoint local numberings that can collide, so
+        # renormalise each component onto a contiguous global band matching
+        # the physical stack order.
+        row_shift = next_grid_row - min(s.grid_row for s in comp_secs)
+        for s in comp_secs:
+            s.grid_row += row_shift
+        next_grid_row = max(s.grid_row + s.grid_row_span - 1 for s in comp_secs) + 1
     _reserve_over_top_headroom(graph)
 
 
@@ -1120,7 +1132,19 @@ def position_ports(section: Section, graph: MetroGraph) -> None:
             box_bot = section.bbox_y + section.bbox_h
             trailing_y = box_bot if flow > 0 else box_top
             leading_y = box_top if flow > 0 else box_bot
-        exit_target_y = trailing_y + flow * MIN_PORT_STATION_GAP
+        # A bypass V peeling around the trailing station seats on its row, so
+        # its run-out flat is exactly the trailing-station-to-exit gap.  That
+        # gap must reach a full station flat, or the V collapses onto the exit
+        # corner's curve apex instead of sitting on a visible flat run.
+        exit_gap = MIN_PORT_STATION_GAP
+        if any(
+            is_bypass_v(sid)
+            and abs(graph.stations[sid].y - trailing_y) <= SAME_COORD_TOLERANCE
+            for sid in internal_ids
+            if sid in graph.stations
+        ):
+            exit_gap = max(exit_gap, MIN_STATION_FLAT_LENGTH)
+        exit_target_y = trailing_y + flow * exit_gap
         entry_target_y = leading_y - flow * MIN_PORT_STATION_GAP
         for pid in exit_set:
             port = graph.ports.get(pid)
