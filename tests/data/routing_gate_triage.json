@@ -415,6 +415,10 @@
     "note": "_route_culdesac_entry only lifts an entry leg whose consumer sits on the trunk row; a trailing-side entry to an off-trunk consumer already separates the tracks via a diagonal, so the off-trunk reject arm is correct but unexercised (no corpus fixture pairs a trailing-side RL/LR entry with an off-trunk first consumer).",
     "status": "defensive"
   },
+  "intra_handlers.py::if st is None or st.is_port:::#1": {
+    "note": "_route_culdesac_entry's interior-station scan: the preceding `sid in port_ids` filter already excludes every port and section.station_ids only holds registered stations, so the skip arm (missing/port station) is never taken. Defensive double-guard, mirroring the same idiom in _route_entry_runway's intervening-station scan.",
+    "status": "defensive"
+  },
   "normalize.py::elif above_ok:::#1": {
     "note": "Distinct-line dogleg move-up/skip branch: unreachable because the below branch is always taken (t.y == hit.y, below_ok true); covers both the move-up and the gap-too-tight continue.",
     "status": "defensive"

@@ -36,24 +36,22 @@ def _layout(path: str, *, validate: bool, fold: int | None = None):
 
 
 def test_same_side_culdesac_validates() -> None:
-    """The minimal cul-de-sac map lays out without the opposing-overlap guard
-    firing.  On the pre-fix engine the flat entry leg folds the line back over
-    the trunk and ``compute_layout(validate=True)`` raises ``PhaseInvariantError``.
+    """The minimal cul-de-sac map lays out without raising.
+
+    A flat entry leg would cover a stretch of the trunk in opposing directions
+    and ``compute_layout(validate=True)`` would raise ``PhaseInvariantError`` on
+    the opposing-overlap guard; this end-to-end check pins that it does not.
     """
     _layout(CULDESAC, validate=True)
 
 
-def _entry_port_leg(graph):
-    """The routed entry-port -> first-consumer leg of the cul-de-sac line."""
+def _mid_entry_leg(graph):
+    """The routed leg from the ``mid`` section's entry port to its consumer."""
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
     for r in routes:
         port = graph.ports.get(r.edge.source)
-        if (
-            port is not None
-            and port.is_entry
-            and not graph.stations[r.edge.target].is_port
-        ):
+        if port is not None and port.is_entry and port.section_id == "mid":
             return apply_route_offsets(r, offsets)
     return None
 
@@ -61,11 +59,11 @@ def _entry_port_leg(graph):
 def test_same_side_culdesac_entry_leg_lifts_off_trunk() -> None:
     """The entry leg leaves the trunk row before reaching its interior consumer.
 
-    A flat (single-Y) entry leg is exactly the folded shape; the fix routes it
-    through an off-trunk track, so the leg spans more than one Y.
+    A single-Y entry leg is the folded shape; the lifted leg spans more than one
+    Y, riding an off-trunk track to drop perpendicular onto the consumer.
     """
     graph = _layout(CULDESAC, validate=False)
-    pts = _entry_port_leg(graph)
+    pts = _mid_entry_leg(graph)
     assert pts is not None
     ys = {round(y, 1) for _, y in pts}
     assert len(ys) > 1, f"entry leg stayed flat on the trunk: {pts}"

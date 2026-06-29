@@ -93,6 +93,17 @@ def trailing_perp_side(direction: str) -> PortSide:
     return PortSide.BOTTOM if AxisFrame.flow_sign(direction) > 0 else PortSide.TOP
 
 
+def flow_exit_side(direction: str) -> PortSide:
+    """The LEFT/RIGHT side a horizontal-flow section's trunk flows out through.
+
+    A rightward (LR) flow leaves on the RIGHT; its reversed (RL) image leaves on
+    the LEFT.  Read from the frame's flow sign so the side follows the rotation,
+    not a direction literal.  Only meaningful for a horizontal-flow (LR/RL)
+    section.
+    """
+    return PortSide.RIGHT if AxisFrame.flow_sign(direction) > 0 else PortSide.LEFT
+
+
 def needs_perp_approach_fan(graph: MetroGraph, port_id: str) -> bool:
     """Whether *port_id* needs its distinct lines fanned onto parallel channels.
 

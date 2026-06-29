@@ -38,6 +38,7 @@ from nf_metro.layout.routing.centrelines import (
 )
 from nf_metro.layout.routing.common import (
     RoutedPath,
+    flow_exit_side,
 )
 from nf_metro.layout.routing.context import (
     _get_offset,
@@ -167,35 +168,37 @@ def _route_culdesac_entry(
     section = graph.sections.get(tgt.section_id or "")
     if not section or section.direction not in ("LR", "RL"):
         return None
-    # Only the flow-trailing entry side folds; the leading side is the runway.
-    trailing = PortSide.LEFT if section.direction == "RL" else PortSide.RIGHT
-    if port.side != trailing:
+    # The entry folds only when it arrives on the side the section flows out of;
+    # an entry on the leading side reaches its consumer via _route_entry_runway.
+    if port.side != flow_exit_side(section.direction):
         return None
 
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
-    # The consumer must sit on the trunk row; an off-trunk target already
-    # separates the tracks via a diagonal.
+    # An off-trunk consumer already separates the tracks via a diagonal.
     if abs(sy - ty) >= COORD_TOLERANCE_FINE:
         return None
 
-    # Interior consumer: a real trunk station sits between the port and target.
     port_ids = section.port_ids
     lo, hi = min(sx, tx), max(sx, tx)
-    has_intervening = any(
-        lo + COORD_TOLERANCE < st.x < hi - COORD_TOLERANCE
-        and abs(st.y - ty) < COORD_TOLERANCE
-        for sid in section.station_ids
-        if sid not in (edge.source, edge.target) and sid not in port_ids
-        for st in (graph.stations.get(sid),)
-        if st is not None and not st.is_port
-    )
-    if not has_intervening:
+    interior = False
+    for sid in section.station_ids:
+        if sid == edge.target or sid in port_ids:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.is_port:
+            continue
+        if lo + COORD_TOLERANCE < st.x < hi - COORD_TOLERANCE and (
+            abs(st.y - ty) < COORD_TOLERANCE
+        ):
+            interior = True
+            break
+    if not interior:
         return None
 
-    # Lift the in-leg above the trunk, clear of the intervening marker, and
-    # drop perpendicular onto the consumer.  The lift also seats the corners
-    # (>= 2 * curve_radius), so the up/over/down arcs stay separable.
+    # Lift the entry leg onto a separate track and drop perpendicular onto the
+    # consumer.  INTER_ROW_EDGE_CLEARANCE exceeds 2 * curve_radius, so the
+    # up/over/down corners arc cleanly without overlapping.
     upper_y = ty - INTER_ROW_EDGE_CLEARANCE
     return RoutedPath(
         edge=edge,

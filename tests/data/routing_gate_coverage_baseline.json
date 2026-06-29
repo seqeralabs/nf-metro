@@ -151,6 +151,7 @@
   "intra_handlers.py::if not st or st.is_port:::#1",
   "intra_handlers.py::if room < src_min + ctx.diagonal_run:::#1",
   "intra_handlers.py::if section.direction not in (\"LR\", \"RL\"):::#1",
+  "intra_handlers.py::if st is None or st.is_port:::#1",
   "normalize.py::and gt is not None::#1",
   "normalize.py::elif above_ok:::#1",
   "normalize.py::elif below_ok and (not above_ok or prefer_below):::#1",
