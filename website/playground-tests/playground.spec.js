@@ -401,8 +401,9 @@ test("share link round-trips the editor content", async () => {
     return v;
   });
   await page.locator("#btn-share").click();
+  await page.waitForFunction(() => location.hash.includes("mmd-gz="));
   const url = await page.evaluate(() => location.href);
-  expect(url).toContain("#mmd=");
+  expect(url).toContain("#mmd-gz=");
 
   await page.goto(url);
   await waitReady(page);

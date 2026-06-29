@@ -141,6 +141,9 @@ function initEditor() {
     theme: "default",
   });
   editor.setValue(loadFromHash() || SEED);
+  loadFromHashGz().then((src) => {
+    if (src != null) editor.setValue(src);
+  });
   editor.on("change", debounce(doRender, 300));
 
   // CodeMirror measures gutter and line geometry once at creation and never
@@ -1519,43 +1522,104 @@ async function exportPng() {
 
 /* ------------------------------- sharing ------------------------------- */
 
-function b64urlEncode(str) {
-  const bytes = new TextEncoder().encode(str);
+function _bytesToB64url(arr) {
   let bin = "";
-  bytes.forEach((b) => (bin += String.fromCharCode(b)));
+  arr.forEach((b) => (bin += String.fromCharCode(b)));
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function b64urlDecode(b64) {
+function _b64urlToBytes(b64) {
   const pad = b64.length % 4 ? "=".repeat(4 - (b64.length % 4)) : "";
   const bin = atob(b64.replace(/-/g, "+").replace(/_/g, "/") + pad);
-  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+function b64urlEncode(str) {
+  return _bytesToB64url(new TextEncoder().encode(str));
+}
+
+function b64urlDecode(b64) {
+  return new TextDecoder().decode(_b64urlToBytes(b64));
+}
+
+async function b64urlEncodeGz(str) {
+  const cs = new CompressionStream("gzip");
+  const writer = cs.writable.getWriter();
+  writer.write(new TextEncoder().encode(str));
+  writer.close();
+  return _bytesToB64url(
+    new Uint8Array(await new Response(cs.readable).arrayBuffer()),
+  );
+}
+
+async function b64urlDecodeGz(b64) {
+  const ds = new DecompressionStream("gzip");
+  const writer = ds.writable.getWriter();
+  writer.write(_b64urlToBytes(b64));
+  writer.close();
+  return new TextDecoder().decode(
+    await new Response(ds.readable).arrayBuffer(),
+  );
+}
+
+function _hashParam(key) {
+  const m = location.hash.match(new RegExp("[#&]" + key + "=([^&]+)"));
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 function loadFromHash() {
-  const m = location.hash.match(/[#&]mmd=([^&]+)/);
-  if (!m) return null;
+  const raw = _hashParam("mmd");
+  if (!raw) return null;
   try {
-    return b64urlDecode(decodeURIComponent(m[1]));
+    return b64urlDecode(raw);
   } catch (_) {
     return null;
   }
 }
 
-function shareUrl() {
-  const hash = "#mmd=" + encodeURIComponent(b64urlEncode(editor.getValue()));
+async function loadFromHashGz() {
+  const raw = _hashParam("mmd-gz");
+  if (!raw) return null;
+  try {
+    return await b64urlDecodeGz(raw);
+  } catch (_) {
+    return null;
+  }
+}
+
+function _pageUrl(hash) {
   return location.origin + location.pathname + location.search + hash;
 }
 
+function shareUrl() {
+  return _pageUrl(
+    "#mmd=" + encodeURIComponent(b64urlEncode(editor.getValue())),
+  );
+}
+
+async function compressedShareUrl() {
+  return _pageUrl(
+    "#mmd-gz=" + encodeURIComponent(await b64urlEncodeGz(editor.getValue())),
+  );
+}
+
 async function shareLink() {
-  const url = shareUrl();
+  const url = await compressedShareUrl();
   history.replaceState(null, "", url);
   try {
     await navigator.clipboard.writeText(url);
     toast("Share link copied to clipboard");
   } catch (_) {
     toast("Share link is in the address bar");
+  }
+}
+
+async function copySource() {
+  try {
+    await navigator.clipboard.writeText(editor.getValue());
+    toast("Source copied to clipboard");
+  } catch (_) {
+    toast("Copy failed — select all in the editor and copy manually");
   }
 }
 
@@ -1738,6 +1802,7 @@ function wireControls() {
   el("btn-svg").addEventListener("click", exportSvg);
   el("btn-png").addEventListener("click", exportPng);
   el("btn-share").addEventListener("click", shareLink);
+  el("btn-copy-source").addEventListener("click", copySource);
 
   el("zoom-in").addEventListener("click", () => zoomBy(ZOOM_STEP));
   el("zoom-out").addEventListener("click", () => zoomBy(1 / ZOOM_STEP));
