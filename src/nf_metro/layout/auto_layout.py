@@ -798,17 +798,24 @@ def _detect_convergence_split(
     if not convergence_sid:
         return None
 
-    # Return set: convergence + transitive successors. Migration below tests
-    # membership against this frozen base, never the set it is growing, so a
-    # section's inclusion never depends on the order a companion happened to be
-    # visited in -- the migration loops are fed from ``col_assign``, whose key
-    # order in the engine derives from a BFS over set-valued successor maps and
-    # so varies with ``PYTHONHASHSEED``.  Order-dependent membership made the
-    # whole grid placement non-deterministic across hash seeds.
+    # Migration below tests membership against this frozen base, never the set
+    # it is growing: ``col_assign``'s key order derives from a BFS over
+    # set-valued successor maps and so varies with ``PYTHONHASHSEED``, so an
+    # order-dependent inclusion would make grid placement hash-seed dependent.
     base_return_set = frozenset(
         {convergence_sid} | _transitive_successors(convergence_sid, successors)
     )
     return_set = set(base_return_set)
+
+    # Both migrations only ever pull in a section that feeds ONLY into the base
+    # return set; they differ in the second test they then apply.
+    candidates = [
+        sid
+        for sid in sorted(col_assign)
+        if sid not in base_return_set
+        and successors.get(sid, set())
+        and successors[sid].issubset(base_return_set)
+    ]
 
     # Companion migration: sections that feed ONLY into the return set
     # AND share a direct predecessor with the convergence section.
@@ -818,15 +825,8 @@ def _detect_convergence_split(
     # bypass A->D, sec_c feeds sec_d but sec_c's predecessor sec_b does
     # NOT directly feed sec_d).
     convergence_preds = predecessors.get(convergence_sid, set())
-    for sid in sorted(col_assign):
-        if sid in base_return_set:
-            continue
-        sid_succs = successors.get(sid, set())
-        if not sid_succs or not sid_succs.issubset(base_return_set):
-            continue
-        # Check: does this section share a predecessor with the convergence?
-        sid_preds = predecessors.get(sid, set())
-        if sid_preds & convergence_preds:
+    for sid in candidates:
+        if predecessors.get(sid, set()) & convergence_preds:
             return_set.add(sid)
 
     # Stacked-sibling migration: a section that feeds ONLY into the return
@@ -835,12 +835,7 @@ def _detect_convergence_split(
     # pulled onto the return row. Leaving it stacked forces an extra spine
     # row occupied by a single small section, with a large empty band beside
     # it (issue #484: tr_calling stacked under small_variants).
-    for sid in sorted(col_assign):
-        if sid in base_return_set:
-            continue
-        sid_succs = successors.get(sid, set())
-        if not sid_succs or not sid_succs.issubset(base_return_set):
-            continue
+    for sid in candidates:
         topo_col = col_assign[sid]
         has_spine_sibling = any(
             other != sid

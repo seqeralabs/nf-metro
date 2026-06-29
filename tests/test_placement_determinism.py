@@ -62,9 +62,28 @@ def _col_groups(col: dict[str, int]) -> dict[int, list[str]]:
 _SECTIONS = sorted(_CASCADE_COL)
 
 
-@pytest.mark.parametrize(
-    "order", [list(p) for p in itertools.permutations(_SECTIONS)][:24]
-)
+_PERMUTATIONS = list(itertools.islice(itertools.permutations(_SECTIONS), 24))
+
+
+def test_convergence_split_excludes_cascade_only_companion():
+    """A companion reachable only via another companion stays off the return row.
+
+    ``Q`` feeds only into ``P`` (itself only a companion), so it qualifies for
+    the return row solely by cascading off ``P``'s inclusion -- the membership
+    test must read the frozen base, where ``P`` is absent, and leave ``Q`` out.
+    """
+    result = _detect_convergence_split(
+        _CASCADE_COL,
+        _col_groups(_CASCADE_COL),
+        _CASCADE_SUCC,
+        _predecessors(_CASCADE_SUCC),
+    )
+    assert result is not None
+    assert "Q" not in result
+    assert {"C", "G", "P"} <= result
+
+
+@pytest.mark.parametrize("order", _PERMUTATIONS)
 def test_convergence_split_is_order_independent(order):
     """``_detect_convergence_split`` returns the same set under any key order."""
     pred = _predecessors(_CASCADE_SUCC)
