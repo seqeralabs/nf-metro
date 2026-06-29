@@ -73,6 +73,45 @@ def iter_sole_trunk_continuations(
                 yield (section.id, pred, sid)
 
 
+def iter_corridor_fed_solo_entries(
+    graph: MetroGraph, tol: float
+) -> Iterator[tuple[str, str, str]]:
+    """Yield ``(section_id, entry_port_id, line_id)`` for corridor-fed solos.
+
+    A LEFT/RIGHT entry port of an LR/RL section (lanes spread along Y) that
+    carries a single present line, where every feeder reaches the port on a
+    base Y more than ``tol`` away -- a vertical corridor.  Such a section has no
+    bundle to keep ordered, so its lone consumer must ride offset 0 rather than
+    the lane the line held in the upstream multi-line section: the corridor's
+    vertical leg absorbs the lane step with no sloped segment.  A flat (same-Y)
+    seam is excluded, since re-basing there would slope the straight-through run
+    into an almost-horizontal segment.
+    """
+    present: dict[str, set[str]] = defaultdict(set)
+    for sid, st in graph.stations.items():
+        if not st.is_port and st.section_id is not None:
+            present[st.section_id].update(graph.station_lines(sid))
+    for sec_id, sec in graph.sections.items():
+        if not lanes_run_along_y(sec.direction):
+            continue
+        lines = present.get(sec_id, set())
+        if len(lines) != 1:
+            continue
+        line_id = next(iter(lines))
+        for pid in sec.entry_ports:
+            port = graph.ports.get(pid)
+            if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                continue
+            port_y = graph.stations[pid].y
+            feeders = [
+                graph.stations[e.source]
+                for e in graph.edges_to(pid)
+                if e.source in graph.stations
+            ]
+            if feeders and all(abs(f.y - port_y) > tol for f in feeders):
+                yield sec_id, pid, line_id
+
+
 def _is_fold_section(section: Section) -> bool:
     """``True`` for a section the row-fold logic produced.
 

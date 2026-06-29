@@ -46,6 +46,7 @@ from nf_metro.layout.phases._common import (
     first_vertical_leg_x,
     flow_exit_carrier_anchor,
     is_loop_side_branch_station,
+    iter_corridor_fed_solo_entries,
     iter_fold_lr_exits_short_of_target,
     iter_sole_trunk_continuations,
     marker_cross_exempt,
@@ -993,6 +994,46 @@ def _guard_perp_fed_entry_anchored_to_consumer(graph: MetroGraph, phase: str) ->
                 f"consumer row y={consumer_y:.1f}; the bundle will climb into "
                 f"the consumer via a diagonal instead of a horizontal turn-in"
             )
+
+
+def _guard_corridor_fed_solo_rides_trunk(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """A corridor-fed single-line section anchors its entry + consumer on the trunk.
+
+    With one present line there is no bundle to keep ordered, so the lane the
+    line held in the upstream multi-line section only drags the lone consumer
+    off the section trunk -- the box then reserves empty space for lines that
+    never enter it.  The vertical corridor absorbs the lane step, so both the
+    LEFT/RIGHT entry port and the consumer it feeds must ride offset 0.  Scope
+    is exactly :func:`iter_corridor_fed_solo_entries`.
+    """
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+    for sec_id, pid, line_id in iter_corridor_fed_solo_entries(graph, COORD_TOLERANCE):
+        port_off = offsets.get((pid, line_id), 0.0)
+        if abs(port_off) > COORD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: section {sec_id!r} entry port {pid!r} sits at offset "
+                f"{port_off:.1f} for sole line {line_id!r}; a corridor-fed "
+                "single-line section must anchor its entry on the trunk"
+            )
+        for sid in graph.sections[sec_id].station_ids:
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or line_id not in graph.station_lines(sid):
+                continue
+            st_off = offsets.get((sid, line_id), 0.0)
+            if abs(st_off) > COORD_TOLERANCE:
+                raise PhaseInvariantError(
+                    f"{phase}: section {sec_id!r} station {sid!r} sits at offset "
+                    f"{st_off:.1f} for sole line {line_id!r}; the lone consumer "
+                    "must ride the section trunk, not the upstream bundle lane"
+                )
 
 
 def _guard_perp_entry_clears_vertical_trunk_head(graph: MetroGraph, phase: str) -> None:
@@ -4305,6 +4346,19 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
             "Y: a multi-consumer entry fans to several rows, so no single "
             "consumer Y can anchor it, and a trunk-aligned (non-perpendicular) "
             "feed already arrives on the consumer row."
+        ),
+    ),
+    GuardSpec(
+        _guard_corridor_fed_solo_rides_trunk,
+        "B",
+        needs=frozenset({"offsets"}),
+        issue_pin=("#1173",),
+        narrow_reason=(
+            "Scoped to LEFT/RIGHT entries of an LR/RL section carrying a single "
+            "present line, fed only over a vertical corridor (every feeder on a "
+            "different base Y): a multi-line section keeps its bundle lanes, and "
+            "a flat same-Y seam must hold the upstream lane or the "
+            "straight-through run would slope into an almost-horizontal segment."
         ),
     ),
     GuardSpec(
