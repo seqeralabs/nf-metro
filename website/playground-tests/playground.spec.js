@@ -386,7 +386,7 @@ test("bug report builds a prefilled GitHub issue with the map and explanation", 
   const issueUrl = await page.evaluate(() => window.__nfMetroLastIssueUrl);
   const u = new URL(issueUrl);
   expect(u.host).toBe("github.com");
-  expect(u.pathname).toBe("/pinin4fjords/nf-metro/issues/new");
+  expect(u.pathname).toBe("/seqeralabs/nf-metro/issues/new");
   expect(u.searchParams.get("labels")).toBe("playground");
   const body = u.searchParams.get("body");
   expect(body).toContain("Edge renders backwards from uniquenode");

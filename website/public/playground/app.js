@@ -3,7 +3,7 @@
 // Pinned so the install path is reproducible; bump deliberately.
 const PYODIDE_VERSION = "v0.27.2";
 
-const REPO = "pinin4fjords/nf-metro";
+const REPO = "seqeralabs/nf-metro";
 
 const SEED = `%%metro title: Example Pipeline
 %%metro line: qc | QC | #2dd4bf
