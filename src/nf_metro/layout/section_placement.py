@@ -541,12 +541,13 @@ def place_sections(
 def _reserve_over_top_headroom(graph: MetroGraph) -> None:
     """Shift rows down to clear the canvas title for an over-the-top loop.
 
-    A RIGHT-entry TB section fed by a same-row, lower-column source is reached
-    by a loop over the section's top (see ``_route_right_entry_over_top``).
-    When no section sits above that section's row, the loop's horizontal would
-    climb into the canvas-top title band.  Reserve a header-clearance band above
-    the topmost such row -- pushing it and every lower row down -- so the loop
-    runs between the title and the section's header badge.
+    A RIGHT-entry section fed by a same-row, lower-column source is reached by
+    a loop over the section's top (see ``_route_right_entry_over_top``), whether
+    the entry is a vertical-flow section's cross-axis port or a reversed (RL)
+    section's leading port.  When no section sits above that section's row, the
+    loop's horizontal would climb into the canvas-top title band.  Reserve a
+    header-clearance band above the topmost such row -- pushing it and every
+    lower row down -- so the loop runs between the title and the header badge.
     """
     headroom = INTER_ROW_HEADER_CLEARANCE + CURVE_RADIUS
     target_rows: set[int] = set()
@@ -554,7 +555,7 @@ def _reserve_over_top_headroom(graph: MetroGraph) -> None:
         if not (port.is_entry and port.side == PortSide.RIGHT):
             continue
         psec = graph.sections.get(port.section_id)
-        if psec is None or psec.direction != "TB":
+        if psec is None:
             continue
         for edge in graph.edges_to(port.id):
             src_port = graph.ports.get(edge.source)
