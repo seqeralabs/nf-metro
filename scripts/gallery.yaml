@@ -1,11 +1,26 @@
 gallery:
+  # ── Getting Started ────────────────────────────────────────────────────────
   - id: simple_pipeline
     source_dir: examples
-    category: Main Examples
+    category: Getting Started
     description: Minimal two-line pipeline with no sections.
+  - id: rnaseq_auto
+    source_dir: examples
+    category: Getting Started
+    description:
+      "Demonstrates fully auto-inferred layout: no `%%metro grid:` directives needed.
+      See [nf-core Pipelines](/nf-metro/pipelines/) for the full gallery."
+  - id: rnaseq_sections
+    source_dir: examples
+    category: Getting Started
+    description:
+      Same pipeline with manual `%%metro grid:` overrides and file markers, showing
+      how explicit directives can fine-tune placement.
+
+  # ── Feature Showcase ───────────────────────────────────────────────────────
   - id: directional_flow
     source_dir: examples
-    category: Main Examples
+    category: Feature Showcase
     description:
       "Opt-in static flow chevrons via `%%metro directional: true` (CLI: `--directional`):
       periodic open chevrons ride each route pointing source to target. A three-line bundled
@@ -14,7 +29,7 @@ gallery:
       spacing, opacity, and colour are `Theme` knobs."
   - id: line_spread
     source_dir: examples
-    category: Main Examples
+    category: Feature Showcase
     description:
       "Demonstrates the `%%metro line_spread:` axis with one per-section override
       per section: `bundle` (default) merges shared lines onto one trunk that cascades downward,
@@ -22,198 +37,158 @@ gallery:
       rail with shared stations as interchanges."
   - id: cross_track_interchange
     source_dir: examples
-    category: Main Examples
+    category: Feature Showcase
     description:
       "Demonstrates `%%metro interchange:`: parallel tumour/normal lanes share one
       MarkDuplicates step without merging, drawn as a cross-track interchange so each lane stays
       straight on its own track instead of pinching together to a point. Auto-layout infers
       the same interchange for fully-parallel lanes even without the directive."
-  - id: rnaseq_auto
-    source_dir: examples
-    category: Main Examples
-    description:
-      "Demonstrates fully auto-inferred layout: no `%%metro grid:` directives needed.
-      See [nf-core Pipelines](/nf-metro/pipelines/) for the full gallery."
-  - id: rnaseq_sections
-    source_dir: examples
-    category: Main Examples
-    description:
-      Same pipeline with manual `%%metro grid:` overrides and file markers, showing
-      how explicit directives can fine-tune placement.
-  - id: genomic_pipeline
-    source_dir: examples
-    category: Main Examples
-    description:
-      "Multi-section genomic variant-calling pipeline: same-direction sections stacked
-      in one column (serpentine carriage-return) plus a multi-row QC collector fan-in descending
-      a shared inter-column corridor."
   - id: marker_styles
     source_dir: examples
-    category: Main Examples
+    category: Feature Showcase
     description:
       Per-station marker shapes & fills encoding tool attributes (mandatory/optional/accelerated/expanded-elsewhere)
       with a marker key alongside the line legend. Demonstrates `%%metro marker:` and `%%metro
       marker_legend:`.
   - id: diagonal_labels
     source_dir: examples
-    category: Main Examples
+    category: Feature Showcase
     description:
       "Opt-in diagonal station labels via `%%metro label_angle: 45`: a dense pre-processing
       trunk whose tilted names pack tighter than horizontal labels would, feeding a variant-calling
       section in the row below that fans out to three callers and back in -- the reserved vertical
       room keeps the hanging labels clear of the row beneath."
-  - id: longread_variant_calling
+  - id: file_icons
     source_dir: examples
-    category: Main Examples
+    category: Feature Showcase
     description:
-      "Dense long-read variant-calling pipeline (six lines, nine sections): exercises
-      inter-section routing around non-connecting section boxes, cross-row feeds via the inter-row
-      gap, same-line bundle coincidence, and a same-colour crossover bridge."
-  - id: differentialabundance
-    source_dir: examples
-    category: Main Examples
-    description:
-      "nf-core/differentialabundance with four input lines, off-track gene-set inputs,
-      and a bypass-heavy reporting row. Uses `%%metro center_ports: true`."
-  - id: differentialabundance_default
-    source_dir: examples
-    category: Main Examples
-    description:
-      Same nf-core/differentialabundance map at default (uncentered) layout — useful
-      for spotting regressions that only show with default port placement.
-  - id: off_track_outputs
-    source_dir: examples
-    category: Main Examples
-    description:
-      "Off-track file artefacts hung above a pre-processing trunk at the step that
-      writes each one: `%%metro off_track:` on a producer-fed sink anchors it to its producer
-      (not the section top), mirroring the off-track input mechanism for outputs. Each output
-      gets its own column clear of the next station, and a step writing several files (MarkDup
-      here) stacks them above it."
+      "Terminus icon variants: single-sheet `%%metro file:`, stacked `%%metro files:`
+      for multiplicity, the `%%metro dir:` folder, and the optional `| banner` format strip."
   - id: legend_logo_placement
     source_dir: examples
-    category: Main Examples
+    category: Feature Showcase
     description:
       "Demonstrates positioning the bundled legend+logo block: `%%metro legend: br
       | canvas` pins it to the empty lower-right canvas corner and `%%metro logo_scale:` enlarges
       the embedded logo. The directive also supports `| dx,dy` offsets and absolute `x,y` placement;
       the block auto-avoids sections and routes. The QC line shows a downward cross-column feeder
       dropping straight into its consumer section."
-  - id: file_icons
-    source_dir: examples
-    category: Main Examples
-    description:
-      "Terminus icon variants: single-sheet `%%metro file:`, stacked `%%metro files:`
-      for multiplicity, the `%%metro dir:` folder, and the optional `| banner` format strip."
   - id: legend_combo
     source_dir: examples
-    category: Main Examples
+    category: Feature Showcase
     description:
       "Demonstrates `%%metro legend_combo:`: a normal (blue) and tumor (red) line
       travel together as a tumor-normal pair. The combo renders one legend row with a striped
       red+blue swatch. Normal travels only within the bundle so its individual row is suppressed,
       while tumor breaks away alone to Annotate and keeps its own row; the QC line is unaffected."
-  - id: tb_file_termini
-    source_dir: examples
-    category: Main Examples
-    description:
-      "A `%%metro direction: TB` reporting section whose file outputs are line termini.
-      Regression fixture: terminus file icons orient to a vertical flow, with the connector
-      entering from the top."
-  - id: genomeassembly_staggered
-    source_dir: examples
-    category: Main Examples
-    description:
-      "sanger-tol/genomeassembly with explicit `%%metro grid:` directives stacking
-      each section in its own grid row. Regression fixture: cross-column junction routes were
-      going backward in X."
   - id: group_labels
     source_dir: examples
-    category: Main Examples
+    category: Feature Showcase
     description:
       Annotative `%%metro group:` band captions labelling sarek-style sub-families
       of callers (SNPs & Indels / SV & CNV / MSI) within a single section, without splitting
       them apart.
-  - id: sarek_metro
+  - id: off_track_outputs
     source_dir: examples
-    category: Main Examples
+    category: Feature Showcase
     description:
-      "Integration showcase: a sarek-style variant-calling pipeline drawn with diagonal
-      (45-degree) labels for tight column packing, an off-track FASTQ input, file termini, marker
-      styles, and a `%%metro line_spread: rails` panel where each caller keeps its own rail
-      and shared stations render as interchanges."
+      "Off-track file artefacts hung above a pre-processing trunk at the step that
+      writes each one: `%%metro off_track:` on a producer-fed sink anchors it to its producer
+      (not the section top), mirroring the off-track input mechanism for outputs. Each output
+      gets its own column clear of the next station, and a step writing several files (MarkDup
+      here) stacks them above it."
+  - id: tb_file_termini
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "A `%%metro direction: TB` reporting section whose file outputs are line termini.
+      Regression fixture: terminus file icons orient to a vertical flow, with the connector
+      entering from the top."
   - id: disconnected_components
     source_dir: examples
-    category: Main Examples
+    category: Feature Showcase
     description:
       A connected three-section trunk plus a separate, wide disconnected section.
       Each weakly-connected component of the section graph is placed in its own local column
       grid and the components are stacked vertically, so the wide panel never inflates the trunk's
       columns or flings its later sections to the right.
+
+  # ── Realistic Pipelines ────────────────────────────────────────────────────
+  - id: genomic_pipeline
+    source_dir: examples
+    category: Realistic Pipelines
+    description:
+      "Multi-section genomic variant-calling pipeline: same-direction sections stacked
+      in one column (serpentine carriage-return) plus a multi-row QC collector fan-in descending
+      a shared inter-column corridor."
+  - id: longread_variant_calling
+    source_dir: examples
+    category: Realistic Pipelines
+    description:
+      "Dense long-read variant-calling pipeline (six lines, nine sections): exercises
+      inter-section routing around non-connecting section boxes, cross-row feeds via the inter-row
+      gap, same-line bundle coincidence, and a same-colour crossover bridge."
+  - id: sarek_metro
+    source_dir: examples
+    category: Realistic Pipelines
+    description:
+      "Integration showcase: a sarek-style variant-calling pipeline drawn with diagonal
+      (45-degree) labels for tight column packing, an off-track FASTQ input, file termini, marker
+      styles, and a `%%metro line_spread: rails` panel where each caller keeps its own rail
+      and shared stations render as interchanges."
+  - id: differentialabundance
+    source_dir: examples
+    category: Realistic Pipelines
+    description:
+      "nf-core/differentialabundance with four input lines, off-track gene-set inputs,
+      and a bypass-heavy reporting row. Uses `%%metro center_ports: true`."
+  - id: differentialabundance_default
+    source_dir: examples
+    category: Realistic Pipelines
+    description:
+      Same nf-core/differentialabundance map at default (uncentered) layout — useful
+      for spotting regressions that only show with default port placement.
+  - id: genomeassembly_staggered
+    source_dir: examples
+    category: Realistic Pipelines
+    description:
+      "sanger-tol/genomeassembly with explicit `%%metro grid:` directives stacking
+      each section in its own grid row. Regression fixture: cross-column junction routes were
+      going backward in X."
+  - id: rnaseq_lite
+    source_dir: examples/topologies
+    category: Realistic Pipelines
+    description: Simplified RNA-seq pipeline with three analysis routes.
+  - id: variant_calling
+    source_dir: examples/topologies
+    category: Realistic Pipelines
+    description: Variant calling pipeline with four lines sharing alignment.
+
+  # ── Basic Topologies ───────────────────────────────────────────────────────
   - id: single_section
     source_dir: examples/topologies
-    category: Simple Topologies
+    category: Basic Topologies
     description: One section, one line. The simplest possible case.
-  - id: bt_chain
-    source_dir: examples/topologies
-    category: Simple Topologies
-    description:
-      "A `%%metro direction: BT` (bottom-to-top) section: a three-station chain whose
-      flow runs up the column, the vertical mirror of a TB chain (#1044)."
-  - id: bt_fork
-    source_dir: examples/topologies
-    category: Simple Topologies
-    description:
-      "A symmetric fan-out inside a `%%metro direction: BT` section: the hub sits
-      at the bottom and both branches fan upward, the lane bundle riding the `+x` side as the
-      rotation image of a TB fork (#1044)."
-  - id: bt_perp_entry_below
-    source_dir: examples/topologies
-    category: Simple Topologies
-    description:
-      "A BT section fed from below: a lower BT section's trailing TOP exit continues
-      up the shared lane into an upper BT section's BOTTOM entry, a two-line bundle riding
-      one column across the seam (#1044)."
-  - id: bt_exit_top_above
-    source_dir: examples/topologies
-    category: Simple Topologies
-    description:
-      A BT section's trailing TOP exit dropping up into the BOTTOM entry of an LR
-      section stacked above it (#1044).
-  - id: bt_exit_top_above_2line
-    source_dir: examples/topologies
-    category: Simple Topologies
-    description:
-      "The two-line form of the BT TOP-exit drop into an LR BOTTOM entry: the bundle
-      keeps its lane across the perpendicular boundary, the BT feeder fanning +x rather than
-      the downward-TB -x (#1066)."
-  - id: bt_to_lr
-    source_dir: examples/topologies
-    category: Simple Topologies
-    description:
-      A BT section's trailing TOP (perpendicular) exit taking the up-and-over corridor
-      into the LEFT entry of a neighbouring LR section, a two-line bundle staying parallel across
-      the seam (#1044).
-  - id: bt_to_tb
-    source_dir: examples/topologies
-    category: Simple Topologies
-    description:
-      "A BT section's RIGHT exit feeding a TB section's LEFT entry: an upward flow
-      handing off to a downward one across the column seam (#1044)."
   - id: deep_linear
     source_dir: examples/topologies
-    category: Simple Topologies
+    category: Basic Topologies
     description: Seven sections in a straight chain. Exercises the grid fold threshold.
-  - id: inrow_skip_breeze
-    source_dir: examples/topologies
-    category: Simple Topologies
-    description:
-      An express line skips a station three collinear stations share; the geometric
-      bypass pass bows it around the skipped marker (#990).
   - id: parallel_independent
     source_dir: examples/topologies
-    category: Simple Topologies
+    category: Basic Topologies
     description: Two disconnected pipelines stacked vertically.
+  - id: mismatched_tracks
+    source_dir: examples/topologies
+    category: Basic Topologies
+    description: Lines with mismatched track counts at shared stations.
+  - id: self_crossing_bridge
+    source_dir: examples/topologies
+    category: Basic Topologies
+    description:
+      One colour whose vertical bus crosses its own independent horizontal connector
+      earns a bridge gap (same-colour crossover, not a fan).
+
+  # ── Fan-out and Fan-in ─────────────────────────────────────────────────────
   - id: wide_fan_out
     source_dir: examples/topologies
     category: Fan-out and Fan-in
@@ -272,6 +247,8 @@ gallery:
       "A profiling section whose stacked tools share a fan-in/fan-out: a line the
       'FMH FunProfiler' station does not carry would rake its wide below-station label, so
       the label flips to its clear side and the diagonal no longer strikes the glyphs."
+
+  # ── Branching and Multipath ────────────────────────────────────────────────
   - id: asymmetric_tree
     source_dir: examples/topologies
     category: Branching and Multipath
@@ -287,6 +264,8 @@ gallery:
       "Two lanes share one step while a third lane is declared between them. Auto-layout
       reorders the interleaving lane to an outer track so the two members become adjacent and
       infer a clean interchange, instead of abstaining (issue #779)."
+
+  # ── Multi-line Bundles ─────────────────────────────────────────────────────
   - id: multi_line_bundle
     source_dir: examples/topologies
     category: Multi-line Bundles
@@ -295,106 +274,159 @@ gallery:
     source_dir: examples/topologies
     category: Multi-line Bundles
     description: A section with both RIGHT and BOTTOM exits.
-  - id: rnaseq_lite
+  - id: compact_hidden_passthrough
     source_dir: examples/topologies
-    category: Realistic Pipelines
-    description: Simplified RNA-seq pipeline with three analysis routes.
-  - id: variant_calling
-    source_dir: examples/topologies
-    category: Realistic Pipelines
-    description: Variant calling pipeline with four lines sharing alignment.
-  - id: fold_fan_across
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description: Three lines diverge, converge at a fold, then continue on the return row.
-  - id: fold_double
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description: Ten-section linear pipeline with two fold points (serpentine layout).
-  - id: fold_stacked_branch
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description: Stacked analysis sections feeding through a fold into branching targets.
-  - id: reconverge_reversed_fold
-    source_dir: examples/topologies
-    category: Fold Topologies
+    category: Multi-line Bundles
     description:
-      "Serpentine-fold reconvergence: a multi-modal pipeline fanning out to stacked
-      analysis sections and reconverging onto a reversed return row."
-  - id: convergence_sink_fold
+      Compact mode keeps a hidden single-line pass-through station on its bundle
+      slot so the two lines weave consistently through the section.
+  - id: compact_gap_peer_conflict
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Multi-line Bundles
     description:
-      "Convergence sink folded below its branches: a `fold_threshold` stacks the
-      parallel branches in one column and drops the shared sink onto a lower row,
-      fed through a TOP entry. Each upper branch's bottom-exit feeder routes around
-      the intervening branch boxes through the clear left-side gap rather than
-      ploughing straight down through them."
-  - id: convergence_fold_diamond
+      A fork-join whose hub carries non-consecutive offset slots safely abandons
+      gap-compaction when a visible same-layer peer carries the intervening line, rather than
+      cascading the reorder.
+  - id: bundle_terminator_continuation
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Multi-line Bundles
     description:
-      "Two distinct lines converging into a sink folded below its branches: a
-      `fold_threshold` stacks both branches in one column and drops the shared sink
-      onto a lower row, fed through a TOP entry. The two feeders, and the run through
-      the merge, ride parallel approach channels rather than collapsing onto one
-      vertical channel."
-  - id: fold_split_targets
+      A two-line bundle enters a station where one line terminates while the other
+      continues to a single successor. The successor holds the trunk row rather than dropping
+      to its own line base, so the chain runs flat instead of dipping into a V-kink before the
+      section exit.
+
+  # ── TB / BT Sections ───────────────────────────────────────────────────────
+  - id: bt_chain
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: TB / BT Sections
     description:
-      "Two folded branches dropping into one section through a shared TOP entry,
-      each line continuing to its own separate sink (a fan, not a merge). The
-      distinct-line drops stay collapsed onto the column trunk, since they part to
-      different stations rather than bundling along a shared run."
-  - id: fold_left_exit_right_entry
+      "A `%%metro direction: BT` (bottom-to-top) section: a three-station chain whose
+      flow runs up the column, the vertical mirror of a TB chain (#1044)."
+  - id: bt_fork
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: TB / BT Sections
     description:
-      "A reconvergence section fed by three separately-originating inputs, folded
-      so it exits LEFT into a relocated section's RIGHT entry one row below: the
-      bundle steps west-down-west as a staircase. The exit and entry ports stack
-      the bundle in the same order, so the lines keep their feed order through the
-      two opposite-handed corners and each corner is sized as one concentric fan
-      (issue #1143)."
-  - id: stacked_lr_serpentine
+      "A symmetric fan-out inside a `%%metro direction: BT` section: the hub sits
+      at the bottom and both branches fan upward, the lane bundle riding the `+x` side as the
+      rotation image of a TB fork (#1044)."
+  - id: bt_perp_entry_below
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: TB / BT Sections
     description:
-      Same-direction sections stacked in one grid column, chained via short vertical
-      drops on alternating sides (serpentine), no wrap-around.
-  - id: tb_left_exit_step
+      "A BT section fed from below: a lower BT section's trailing TOP exit continues
+      up the shared lane into an upper BT section's BOTTOM entry, a two-line bundle riding
+      one column across the seam (#1044)."
+  - id: bt_exit_top_above
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: TB / BT Sections
     description:
-      "A TB alignment section exits LEFT into a lower right-entry section with a
-      blocker directly below: the exit bundle steps west-down-west, routed as a parallel staircase
-      that keeps the feed order (issue #671)."
-  - id: tb_convergence_straight_drop
+      A BT section's trailing TOP exit dropping up into the BOTTOM entry of an LR
+      section stacked above it (#1044).
+  - id: bt_exit_top_above_2line
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: TB / BT Sections
     description:
-      "Two lines converge at a TB section's terminal merge; the feeder whose source
-      is collinear with the merge drops dead straight while the sibling arrives diagonally,
-      instead of the straight feeder kinking off its lane (issue #1007)."
-  - id: left_exit_sink_below
+      "The two-line form of the BT TOP-exit drop into an LR BOTTOM entry: the bundle
+      keeps its lane across the perpendicular boundary, the BT feeder fanning +x rather than
+      the downward-TB -x (#1066)."
+  - id: bt_to_lr
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: TB / BT Sections
     description:
-      "A TB bridge's LEFT exit feeds a LEFT-entry sink one row below and to the
-      left: the bundle leads out left and drops straight down a channel clear of both boxes,
-      routing around the bridge rather than clawing back through its interior (issue #1083)."
+      A BT section's trailing TOP (perpendicular) exit taking the up-and-over corridor
+      into the LEFT entry of a neighbouring LR section, a two-line bundle staying parallel across
+      the seam (#1044).
+  - id: bt_to_tb
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A BT section's RIGHT exit feeding a TB section's LEFT entry: an upward flow
+      handing off to a downward one across the column seam (#1044)."
+  - id: tb_passthrough_trunk
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A three-line bundle running straight down a linear chain of stations in a
+      `%%metro direction: TB` section. The trunk passes through each station as a clean vertical
+      column: every line holds one offset, so no station reads as an elbow."
+  - id: tb_internal_diagonal
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A symmetric fan-out inside a `%%metro direction: TB` section: the hub centres
+      over its two branch stations, which sit on X tracks either side of it, so both internal
+      edges route as 45-degree diagonals (the `_route_tb_internal` diagonal arm) (#917)."
+  - id: tb_trunk_through_fan
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "An asymmetric fan-out inside a `%%metro direction: TB` section: one line continues
+      straight down the trunk column to its child while a sibling peels off to another column.  The
+      continuation is slotted onto the trunk so it drops straight instead of jogging one offset
+      step (#929)."
   - id: tb_passthrough_continuation
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: TB / BT Sections
     description:
       "A TB convergence that is not a sink: a diagonal feeder continues straight
       down to a station directly below the merge while a collinear feeder peels off. The continuation
       rides the trunk slot so it drops straight, instead of being forced outboard where it kinks
       at the merge and crosses the collinear feeder (issue #1012)."
+  - id: tb_column_continuation_two_lines
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A TB section with a two-line BOTTOM exit continuing straight down into the
+      TB section below. The exit port seats close to the last station with normal section padding
+      rather than the doubled gap the fold-span extension would add (issue #1062)."
+  - id: tb_right_entry_stack
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A two-line bundle into a stacked TB section's RIGHT entry from a same-row
+      left source: it loops over the section top and descends into the port, the U-turn transposing
+      the bundle, with concentric corners built via `build_concentric_bundle` (#707)."
+  - id: tb_bottom_entry_flow_start
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A `%%metro direction: TB` section given `%%metro entry: bottom` whose consumer
+      is the flow-start (top) station. The bottom entry is re-anchored to the top so the line
+      enters beside its consumer and flows down, rather than running up through MultiQC to reach
+      Collect and folding back (#885)."
+  - id: tb_left_exit_step
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A TB alignment section exits LEFT into a lower right-entry section with a
+      blocker directly below: the exit bundle steps west-down-west, routed as a parallel staircase
+      that keeps the feed order (issue #671)."
+  - id: tb_lr_exit_left
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A `%%metro direction: TB` section dropping in through its TOP entry and leaving
+      through a LEFT exit into a section below-left (the `_route_tb_lr_exit` LEFT arm): the
+      station drops, turns once, and runs out of the box's left side, the vertical leg fanned
+      by the reversed station offset so the outermost line takes the widest arc (#917)."
+  - id: tb_lr_exit_right
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A `%%metro direction: TB` section dropping in through its TOP entry and leaving
+      through a RIGHT exit into the next forward section (the `_route_tb_lr_exit` RIGHT arm):
+      the mirror of the LEFT exit, fanned by the exit port's own offset (#917)."
+  - id: tb_convergence_straight_drop
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "Two lines converge at a TB section's terminal merge; the feeder whose source
+      is collinear with the merge drops dead straight while the sibling arrives diagonally,
+      instead of the straight feeder kinking off its lane (issue #1007)."
   - id: tb_bottom_exit_fork_diamond
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: TB / BT Sections
     description:
       "A TB section's BOTTOM exit forks to two stacked TB sections in different
       rows, the lower also fed by the upper (a diamond). The fork junction's leg into the nearer
@@ -403,14 +435,140 @@ gallery:
       trunk for the shared line as one stroke (issue #1058)."
   - id: tb_bottom_exit_bundle_jog
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: TB / BT Sections
     description:
       "A four-line bundle leaves a TB section's BOTTOM exit and jogs down into the
       TOP entry of an RL section placed in the row below and one column to the left. The four
       lines keep distinct channels through the jog instead of collapsing onto one (issue #1074)."
+  - id: tb_perp_exit_side_neighbour
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      A vertical-flow section's BOTTOM exit feeds a side LR neighbour sharing the
+      exit's Y. The connector leaves the port down into the inter-row corridor clear of the
+      box, runs across, then turns up into the entry, rather than running straight along the
+      section's bottom edge and out through the corner (#1052).
+  - id: tb_two_line_vert_seam
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      A vertical-flow section's RIGHT exit feeds another vertical-flow section's
+      LEFT entry with a two-line bundle. The entry sits a station gap above the trunk head so
+      both lines enter horizontally then drop straight onto their trunk lanes, rather than the
+      staggered line slanting into the trunk for want of drop room (#1054).
+  - id: top_entry_header_clash
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      A TB section's title is long enough to reach under the trunk that drops into
+      its TOP entry. Rather than route the line around the title, the header relocates below
+      the box so the drop enters cleanly.
+  - id: header_side_rotated
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      A TB section whose trunk drops through the top edge and exits the bottom edge
+      blocks the header on both horizontal edges. The title rotates and runs down the clear
+      left edge instead of crossing the line.
+  - id: header_nudge
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A title too long to fit a rotated side, on a section blocked top and bottom
+      by its trunk: the header shifts right past the trunk as a last resort, the canvas growing
+      to keep it visible."
+  - id: lr_to_tb_top_drop
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "An LR section feeds the TOP entry of a TB section stacked directly below.
+      With no explicit exit side the engine infers a BOTTOM exit: the line curves out of the
+      trunk after the last station and drops straight onto the target trunk, which is aligned
+      under the exit."
+  - id: lr_to_tb_top_drop_two_lines
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      Two co-travelling lines drop out of an LR section's explicit BOTTOM exit into
+      a TB section's shared TOP entry below, staying parallel through the corner and down to
+      the trunk without crossing.
+  - id: lr_to_tb_top_near_vertical
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      A RIGHT-exit LR section feeds the TOP entry of a TB section stacked directly
+      below. The explicit right exit leaves on the right, clears the source box, and doubles
+      back over the inter-row gap to drop straight onto the target trunk rather than elbowing
+      in through the top-right corner.
+  - id: lr_to_tb_top_cross_col
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      A junction source feeds both a same-row RIGHT-entry consumer and a TB section's
+      TOP entry two rows below. The downward branch drops onto the target trunk without crossing
+      the section boundary off-port.
+  - id: lr_to_tb_top_two_lines
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      Two co-travelling lines from a RIGHT-exit LR section double back into a TB
+      section's shared TOP entry below, landing on their trunk X offsets so the bundle stays
+      parallel through the boundary without pinching or crossing.
+
+  # ── Serpentine Layout ──────────────────────────────────────────────────────
+  - id: fold_fan_across
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description: Three lines diverge, converge at a fold, then continue on the return row.
+  - id: fold_double
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description: Ten-section linear pipeline with two fold points (serpentine layout).
+  - id: fold_stacked_branch
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description: Stacked analysis sections feeding through a fold into branching targets.
+  - id: reconverge_reversed_fold
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "Serpentine-fold reconvergence: a multi-modal pipeline fanning out to stacked
+      analysis sections and reconverging onto a reversed return row."
+  - id: convergence_sink_fold
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "Convergence sink folded below its branches: a `fold_threshold` stacks the
+      parallel branches in one column and drops the shared sink onto a lower row,
+      fed through a TOP entry. Each upper branch's bottom-exit feeder routes around
+      the intervening branch boxes through the clear left-side gap rather than
+      ploughing straight down through them."
+  - id: convergence_fold_diamond
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "Two distinct lines converging into a sink folded below its branches: a
+      `fold_threshold` stacks both branches in one column and drops the shared sink
+      onto a lower row, fed through a TOP entry. The two feeders, and the run through
+      the merge, ride parallel approach channels rather than collapsing onto one
+      vertical channel."
+  - id: fold_split_targets
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "Two folded branches dropping into one section through a shared TOP entry,
+      each line continuing to its own separate sink (a fan, not a merge). The
+      distinct-line drops stay collapsed onto the column trunk, since they part to
+      different stations rather than bundling along a shared run."
+  - id: stacked_lr_serpentine
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      Same-direction sections stacked in one grid column, chained via short vertical
+      drops on alternating sides (serpentine), no wrap-around.
   - id: branch_fold_forward
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Serpentine Layout
     description:
       "A side branch (Aux) shares a topo column with the spine (Genome). At a low
       fold threshold the serpentine packer skips that branch column as a fold point - folding
@@ -418,44 +576,48 @@ gallery:
       every inter-section edge flows forward and Genome's exit faces Post (issue #1080)."
   - id: branch_fold_stability
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Serpentine Layout
     description:
       "A wide side branch (Survey) shares a topo column with the spine and sits one
       station below its fold threshold. Adding a station inside Survey must not re-grid the
       downstream Report onto a backward return row: inter-section placement is a function of
       the DAG, not of intra-section size (issue #1082)."
+
+  # ── Bypass Routing ─────────────────────────────────────────────────────────
+  - id: inrow_skip_breeze
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      An express line skips a station three collinear stations share; the geometric
+      bypass pass bows it around the skipped marker (#990).
   - id: bypass_fan_in_outer_slot
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       "A bypass line (QC) skips hub and alignment to reach a deeper station (MultiQC
       Report) in the Integration section, while dna/meth/rna/atac converge at a fan-in entry
       port. The bypass line claims the outer slot so no empty interior gaps appear (issue #655)."
-  - id: mismatched_tracks
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description: Lines with mismatched track counts at shared stations.
   - id: upward_bypass
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description: Tall section bypass where the trunk is above the source (upward gap1).
   - id: bypass_label_rake
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       A foreign line dips below a station to bypass its marker, then climbs back
       to the trunk past the wide 'Quantification' label. The router lengthens the dip's flat
       run so the climb seats clear of the glyphs (`_clear_bypass_v_label_strikes`).
   - id: bypass_label_rake_left
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       "Mirror of the bypass-label rake: the dip's descending leg, not its climb,
       crosses the wide 'Quantification Step' label, so its V corner lands in the label's
       left half and the router seats it clear of the left edge (`_clear_bypass_v_label_strikes`)."
   - id: bypass_label_rake_wide
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       "An extra-wide bypassed-station label the router cannot seat the V's flat-run
       corner clear of: the strike-clearance loop pushes the bypassed node out by whole grid
@@ -463,7 +625,7 @@ gallery:
       partial corner-seating (issue #700)."
   - id: bypass_v_tight
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       "An intra-section bypass V at a tight column pitch: without room for a lead-in
       the descent would diverge on the 'Process A' marker and rake its label. The engine pushes
@@ -471,7 +633,7 @@ gallery:
       a visible flat run through its X (issue #688)."
   - id: fan_bypass_nesting
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       "A junction fans to a straight continuation, three down-turns into stacked
       rows, and one far-column bypass. The bypass joins the same concentric corner as the down-turns
@@ -479,14 +641,14 @@ gallery:
       than grazing the down-turn corners near the junction (issue #652)."
   - id: divergent_fanout_split
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       "One line fans out from a single source to a near and a far target in the row
       below. The two descents stay fused as one trunk until the near branch turns off, so the
       farther branch never peels onto the inside of the nearer one and crosses it (issue #702)."
   - id: disjoint_sameline_trunks
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       "Two lines diving into one below-row channel to bypass a section ride a tight
       concentric bundle until a member peels up at its turn column, rather than being split
@@ -494,129 +656,35 @@ gallery:
       #702)."
   - id: dogleg_exempt_distinct
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       "A bypass line cleared off a different line's exempt wrap trunk in the inter-row
       gap runs parallel above it as a tight bundle, rather than doglegging onto the crossing
       side where its riser would pierce the wrap run twice (issue #702)."
   - id: dogleg_exempt_sameline
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       "Two opposing flows of one line fused in the inter-row gap are pulled apart
       into a dogleg; the down-moved trunk stops short of the next row's section header badge,
       keeping the required clearance rather than crowding it (issue #698)."
   - id: dogleg_twoline_fanout
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       "Two distinct lines leave one section through a shared exit junction to different
       sections in the row below. They descend as one concentric bundle and split only where
       the near line peels into its target while the far line continues over it, rather than
       diverging at the junction and crossing (issue #719)."
-  - id: merge_offrow_continuation
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A perpendicular feeder re-slots at a multi-feeder merge port, and the single
-      re-joined line leaves the merge row before reaching its consumer one row up, so the bundle-offset
-      walk stops at the off-row exit rather than carrying the slot off the row.
-  - id: right_entry_gap_above_empty_row
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A right-entry feed from a source two rows above its target, where the target
-      flows right-to-left so its flow-start consumer sits at the entry edge: the feed loops
-      around below into the port beside the consumer rather than crossing the box and folding
-      back (#885)."
-  - id: corridor_narrow_gap_fallback
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A left-entry feed crosses two rows past a wider intervening section whose
-      inter-row gap is too narrow for the corridor's clearance band, so it falls back to the
-      around-below loop clear of that section while the adjacent feeder takes the corridor (issue
-      #722)."
-  - id: off_track_convergence
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      Multiple off-track file inputs converging on a single consumer. The trunk stays
-      horizontal while the inputs stack above the consumer column.
-  - id: off_track_convergence_multiline
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A multi-line bundle enters a section and converges on a deep first station
-      that also consumes off-track file inputs. The consumer stays on the section trunk, level
-      with its continuation, rather than being dragged to the section floor (issue #650)."
-  - id: off_track_input_above_consumer
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A section whose mid-trunk station consumes an off-track input while a neighbouring
-      station feeds an off-track output. The input hugs one row above its consumer instead of
-      towering an extra slot up because it shares an anchor with the differently-columned output
-      (issue #651)."
-  - id: around_section_below
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      Cross-row route to a LEFT-entry target where the natural inter-row channel
-      would cut through an intervening section's bbox. Exercises `_route_around_section_below`
-      (collector-fan-in geometry).
-  - id: inter_row_wrap_clearance
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A right-exit bundle wrapping down to a left-entry in the row below. The horizontal
-      run sits centred in the inter-row gap, clear of both the section above and the next row's
-      header.
-  - id: junction_entry_reversed_fold
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A two-line bundle exits a TB section's RIGHT side, wraps into a Source section,
-      then fans out at a junction into two same-row destinations. The bundle order is carried
-      concentrically through the reversal corners so the lines never cross at a station, and
-      the fan-out peels off cleanly (issue #760)."
-  - id: cross_col_top_entry
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A cross-column feed from a RIGHT-exit producer into a TOP-entry consumer:
-      the entry port is placed on the section boundary rather than floating above the canvas
-      (issue #740)."
-  - id: lr_top_entry_cross_column
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A TB section dropping from its BOTTOM exit into the TOP entry of an LR section
-      whose run sits left of the drop column: the LR run is shifted right under the drop and
-      the section bbox follows it so the trailing station stays contained (issue #1057)."
-  - id: lr_top_entry_cross_column_two_line
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "Two lines dropping together from a TB BOTTOM exit into the TOP entry of an
-      LR section: the in-section line order follows the arrival order so the entry corner nests
-      concentrically and the bundle neither pinches nor crosses through the bend (issue #1061)."
-  - id: tb_column_continuation_two_lines
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A TB section with a two-line BOTTOM exit continuing straight down into the
-      TB section below. The exit port seats close to the last station with normal section padding
-      rather than the doubled gap the fold-span extension would add (issue #1062)."
   - id: bypass_gap2_rightward_overflow
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       A seven-line rightward bypass whose gap-2 bundle right edge overflows the inter-column
       gap limit and is clamped, keeping the bundle inside the gap.
   - id: bypass_leftward_overflow
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       "A seven-line reverse-flow (right-to-left) bypass: the trunk leads out leftward,
       the mirror of every other bypass. The concentric order and corner radii follow the trunk's
@@ -624,94 +692,260 @@ gallery:
       (issue #723)."
   - id: bypass_leftward_far_side_entry
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Bypass Routing
     description:
       "A seven-line reverse-flow bypass into a far-side LEFT entry: the source exits
       its left edge and the target's entry port is on its own far (left) edge, so the bundle
       wraps around below into the port from its outward side. The half-turn transposes the bundle,
       so the target section's line order is reversed to match and no line crosses a mate (issue
       #974)."
+  - id: exit_corner_offset_dogleg
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      A passing line runs through a section on a per-line bundle offset, then exits
+      and bypasses a higher row to climb to a far target. The onward run keeps the line's offset
+      over the row-level traverse so it leaves the exit port straight, with the single level
+      change a clean riser at the far gap rather than a one-offset-step jog at the exit corner.
+  - id: convergent_offrow_exit_climb
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      A single-row long-read variant-calling map. The annotation section carries
+      only snv and sv (the two highest-priority lines), reached through a bypass whose source
+      re-based them onto low slots. Its two-line bundle anchors on its own trunk rather than
+      inheriting the high global slots, so its markers sit on their rows and the run into reports
+      stays level.
+
+  # ── Merge & Convergence ────────────────────────────────────────────────────
+  - id: merge_offrow_continuation
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      A perpendicular feeder re-slots at a multi-feeder merge port, and the single
+      re-joined line leaves the merge row before reaching its consumer one row up, so the bundle-offset
+      walk stops at the off-row exit rather than carrying the slot off the row.
+  - id: junction_entry_reversed_fold
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "A two-line bundle exits a TB section's RIGHT side, wraps into a Source section,
+      then fans out at a junction into two same-row destinations. The bundle order is carried
+      concentrically through the reversal corners so the lines never cross at a station, and
+      the fan-out peels off cleanly (issue #760)."
+  - id: convergence_stacked_sink
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      A leaf sink that would otherwise sit alone in the spine band migrates into
+      the convergence return row (no grid-cell collision).
+  - id: terminus_join
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      Two lines converge on a single file-icon terminus in a sectionless flat graph,
+      so the join lands directly on the terminus rather than a synthesised convergence junction.
+  - id: merge_port_above_approach
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "A line descending into a multi-feeder merge port from a section above keeps
+      the above-trunk slot all the way to the output, so its riser joins the bundle without
+      crossing the trunk on the outgoing run (issue #704)."
+  - id: junction_entry_collision
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "A three-line fan-out where one line continues straight to its own destination
+      while the other two branch away: the straight line keeps a constant bundle slot across
+      the source exit so its trunk stays horizontal (issue #704)."
+  - id: junction_entry_align
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "A two-line bundle whose order is preserved across the junction-to-entry-port
+      boundary, so the straight-through line stays horizontal instead of slanting to swap slots
+      (issue #704)."
+  - id: merge_trunk_out_of_range_section
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      Two same-row sources merge into one sink past an intervening section while
+      another row's section sits outside the merge column range, so the merge trunk keeps its
+      same-row bypass channel rather than crossing below the out-of-range section.
+  - id: merge_trunk_over_low_section
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      A same-row merge trunk bypasses past a tall intervening section while a lower-row
+      section sits within the merge column range. The inter-row gap clears the lower section's
+      header, so the trunk (and its branches) route through that gap rather than diving below
+      the whole canvas.
+  - id: merge_bottom_row_bypass
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "A merge whose entry sits in the bottommost grid row: the trunk's inter-row
+      bypass routes in the cramped gap above that row. Placement reserves the gap so the channel
+      clears the upper row's section boxes instead of grazing them."
+  - id: merge_pullaway
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      One line converges on a merge from two stacked rows of the same column; the
+      cross-row feeder drops onto the trunk's pull-away bypass channel and the two travel as
+      a single stroke into the entry.
+  - id: merge_right_entry
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "One line converges on a RIGHT entry whose consumer is the sink's flow-start
+      station: the sink flows right-to-left so the merge arrives beside its consumer, and the
+      trunk loops under the sink onto that channel rather than slicing across the box to the
+      far station (#885)."
+  - id: peeloff_riser_respace
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "Four lines from two sources ride one shared bypass trunk and rise into a common
+      destination entry port, where the trunk-Y order and the entry-port slot order disagree.
+      Each source bundle keeps its declaration order at the peel-off corner instead of inverting
+      (issue #695)."
+  - id: peeloff_extra_line_consumer
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "Same peel-off topology as peeloff_riser_respace but the destination section
+      also carries an extra internal branch (l5). The riser reorder must still fire and keep
+      the bundle crossing-free at the shared entry port regardless of extra lines in the consumer
+      section (issue #751)."
+  - id: merge_leftmost_sink_branch
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "A leftward merge whose trunk reaches a leftmost-column sink's LEFT entry:
+      the trunk wraps to rise on the box's far (left) side, with the branch feeders converging
+      on its shared channel, rather than crossing the sink interior to the far-side port."
+  - id: merge_around_below_leftmost
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "Two sources merging into a leftmost-column LEFT entry: the trunk routes around
+      the target's left side to enter from outside while the second merge target is reached
+      in-row."
+  - id: post_convergence_trunk
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      Two stacked inputs converge on a station inside one LR section. The merge station's
+      single linear successor continues flat on the merge row rather than dropping back onto
+      one of the incoming branch rows, so the post-merge trunk runs straight instead of zigzagging.
+  - id: junction_fanout_convergence
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "Three lines converge into one joint-calling entry port: two bypass the intervening
+      sections and climb risers into the port while the third joins flat from the adjacent column.
+      The flat shallow feeder takes the port-near slot on top of the climbing pair so the bundle
+      turns into the port concentrically, instead of the flat line weaving across the risers
+      at the corner."
+  - id: aligner_row_pinned_continuation
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      Three sibling aligners feed one dedup hub that lands on the lead aligner's
+      row, while one aligner's line continues on a track pinned to the section bottom by hidden
+      continuation stations. The aligners stack on consecutive grid rows instead of the low-line
+      aligner being dragged down to crowd its neighbour and strand the middle row (#1071).
+
+  # ── Inter-section Routing ──────────────────────────────────────────────────
+  - id: left_exit_sink_below
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A TB bridge's LEFT exit feeds a LEFT-entry sink one row below and to the
+      left: the bundle leads out left and drops straight down a channel clear of both boxes,
+      routing around the bridge rather than clawing back through its interior (issue #1083)."
+  - id: right_entry_gap_above_empty_row
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A right-entry feed from a source two rows above its target, where the target
+      flows right-to-left so its flow-start consumer sits at the entry edge: the feed loops
+      around below into the port beside the consumer rather than crossing the box and folding
+      back (#885)."
+  - id: corridor_narrow_gap_fallback
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A left-entry feed crosses two rows past a wider intervening section whose
+      inter-row gap is too narrow for the corridor's clearance band, so it falls back to the
+      around-below loop clear of that section while the adjacent feeder takes the corridor (issue
+      #722)."
+  - id: around_section_below
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      Cross-row route to a LEFT-entry target where the natural inter-row channel
+      would cut through an intervening section's bbox. Exercises `_route_around_section_below`
+      (collector-fan-in geometry).
+  - id: inter_row_wrap_clearance
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      A right-exit bundle wrapping down to a left-entry in the row below. The horizontal
+      run sits centred in the inter-row gap, clear of both the section above and the next row's
+      header.
+  - id: cross_col_top_entry
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A cross-column feed from a RIGHT-exit producer into a TOP-entry consumer:
+      the entry port is placed on the section boundary rather than floating above the canvas
+      (issue #740)."
+  - id: lr_top_entry_cross_column
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A TB section dropping from its BOTTOM exit into the TOP entry of an LR section
+      whose run sits left of the drop column: the LR run is shifted right under the drop and
+      the section bbox follows it so the trailing station stays contained (issue #1057)."
+  - id: lr_top_entry_cross_column_two_line
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "Two lines dropping together from a TB BOTTOM exit into the TOP entry of an
+      LR section: the in-section line order follows the arrival order so the entry corner nests
+      concentrically and the bundle neither pinches nor crosses through the bend (issue #1061)."
   - id: right_entry_wrap_no_fan
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       A single line wrapping from an LR exit into a cross-row RL section's RIGHT
       entry, with no junction siblings (the solo `_route_right_entry_wrap` lead-in).
   - id: left_entry_up_wrap
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       A two-line bundle wrapping up-and-left from a source below-and-right into a
       cross-row section's LEFT entry (the `_route_left_entry_wrap` up-riser path); the bundle
       order is preserved concentrically around the wrap.
-  - id: tb_right_entry_stack
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A two-line bundle into a stacked TB section's RIGHT entry from a same-row
-      left source: it loops over the section top and descends into the port, the U-turn transposing
-      the bundle, with concentric corners built via `build_concentric_bundle` (#707)."
-  - id: tb_passthrough_trunk
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A three-line bundle running straight down a linear chain of stations in a
-      `%%metro direction: TB` section. The trunk passes through each station as a clean vertical
-      column: every line holds one offset, so no station reads as an elbow."
-  - id: tb_bottom_entry_flow_start
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A `%%metro direction: TB` section given `%%metro entry: bottom` whose consumer
-      is the flow-start (top) station. The bottom entry is re-anchored to the top so the line
-      enters beside its consumer and flows down, rather than running up through MultiQC to reach
-      Collect and folding back (#885)."
-  - id: tb_lr_exit_left
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A `%%metro direction: TB` section dropping in through its TOP entry and leaving
-      through a LEFT exit into a section below-left (the `_route_tb_lr_exit` LEFT arm): the
-      station drops, turns once, and runs out of the box's left side, the vertical leg fanned
-      by the reversed station offset so the outermost line takes the widest arc (#917)."
-  - id: tb_lr_exit_right
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A `%%metro direction: TB` section dropping in through its TOP entry and leaving
-      through a RIGHT exit into the next forward section (the `_route_tb_lr_exit` RIGHT arm):
-      the mirror of the LEFT exit, fanned by the exit port's own offset (#917)."
-  - id: tb_internal_diagonal
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A symmetric fan-out inside a `%%metro direction: TB` section: the hub centres
-      over its two branch stations, which sit on X tracks either side of it, so both internal
-      edges route as 45-degree diagonals (the `_route_tb_internal` diagonal arm) (#917)."
-  - id: tb_trunk_through_fan
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "An asymmetric fan-out inside a `%%metro direction: TB` section: one line continues
-      straight down the trunk column to its child while a sibling peels off to another column.  The
-      continuation is slotted onto the trunk so it drops straight instead of jogging one offset
-      step (#929)."
   - id: around_below_ep_col_gt0
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       A two-line bundle looping around below the canvas into a non-zero-column LEFT-entry
       target, past an intervening middle-row section that blocks the direct wrap.
   - id: stacked_left_exit_drop
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       "A LEFT exit feeding a LEFT entry stacked directly below it: the connector
       leads out into a clean channel left of the column and drops, rather than dropping straight
       down the shared edge through the source box."
   - id: right_entry_from_above
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       "A RIGHT entry whose consumer is the section's flow-start station: the section
       flows right-to-left so the consumer sits at the entry edge and the feed enters beside
@@ -720,210 +954,33 @@ gallery:
       side to the entry Y rather than looping below the box (#889)."
   - id: right_entry_from_above_far
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       "A RIGHT entry fed from two rows up, past the target's right edge: the line
       drops straight down its outward side across the empty intervening row to the entry Y and
       turns in, rather than diving below the box and climbing back up (#889)."
-  - id: merge_leftmost_sink_branch
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A leftward merge whose trunk reaches a leftmost-column sink's LEFT entry:
-      the trunk wraps to rise on the box's far (left) side, with the branch feeders converging
-      on its shared channel, rather than crossing the sink interior to the far-side port."
-  - id: merge_around_below_leftmost
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "Two sources merging into a leftmost-column LEFT entry: the trunk routes around
-      the target's left side to enter from outside while the second merge target is reached
-      in-row."
   - id: route_around_intervening
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       "A line skips a middle section: it routes around the intervening section's
       bbox rather than slicing through it."
-  - id: self_crossing_bridge
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      One colour whose vertical bus crosses its own independent horizontal connector
-      earns a bridge gap (same-colour crossover, not a fan).
-  - id: convergence_stacked_sink
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A leaf sink that would otherwise sit alone in the spine band migrates into
-      the convergence return row (no grid-cell collision).
   - id: cross_row_gap_wrap
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       A cross-row feed runs its horizontal in the inter-row gap and drops straight
       in, rather than diving under the return row counter to its flow.
   - id: rl_entry_runway
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       "A source section feeding a left-hand target via `%%metro exit: left`: it flows
       right-to-left so its producers sit at the left exit edge and the runway leaves beside
       them, rather than the producers exiting left back through the start station (#885)."
-  - id: terminus_join
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      Two lines converge on a single file-icon terminus in a sectionless flat graph,
-      so the join lands directly on the terminus rather than a synthesised convergence junction.
-  - id: compact_hidden_passthrough
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      Compact mode keeps a hidden single-line pass-through station on its bundle
-      slot so the two lines weave consistently through the section.
-  - id: compact_gap_peer_conflict
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A fork-join whose hub carries non-consecutive offset slots safely abandons
-      gap-compaction when a visible same-layer peer carries the intervening line, rather than
-      cascading the reorder.
-  - id: merge_port_above_approach
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A line descending into a multi-feeder merge port from a section above keeps
-      the above-trunk slot all the way to the output, so its riser joins the bundle without
-      crossing the trunk on the outgoing run (issue #704)."
-  - id: junction_entry_collision
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A three-line fan-out where one line continues straight to its own destination
-      while the other two branch away: the straight line keeps a constant bundle slot across
-      the source exit so its trunk stays horizontal (issue #704)."
-  - id: junction_entry_align
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A two-line bundle whose order is preserved across the junction-to-entry-port
-      boundary, so the straight-through line stays horizontal instead of slanting to swap slots
-      (issue #704)."
-  - id: merge_trunk_out_of_range_section
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      Two same-row sources merge into one sink past an intervening section while
-      another row's section sits outside the merge column range, so the merge trunk keeps its
-      same-row bypass channel rather than crossing below the out-of-range section.
-  - id: merge_trunk_over_low_section
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A same-row merge trunk bypasses past a tall intervening section while a lower-row
-      section sits within the merge column range. The inter-row gap clears the lower section's
-      header, so the trunk (and its branches) route through that gap rather than diving below
-      the whole canvas.
-  - id: merge_bottom_row_bypass
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A merge whose entry sits in the bottommost grid row: the trunk's inter-row
-      bypass routes in the cramped gap above that row. Placement reserves the gap so the channel
-      clears the upper row's section boxes instead of grazing them."
-  - id: merge_pullaway
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      One line converges on a merge from two stacked rows of the same column; the
-      cross-row feeder drops onto the trunk's pull-away bypass channel and the two travel as
-      a single stroke into the entry.
-  - id: merge_right_entry
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "One line converges on a RIGHT entry whose consumer is the sink's flow-start
-      station: the sink flows right-to-left so the merge arrives beside its consumer, and the
-      trunk loops under the sink onto that channel rather than slicing across the box to the
-      far station (#885)."
-  - id: peeloff_riser_respace
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "Four lines from two sources ride one shared bypass trunk and rise into a common
-      destination entry port, where the trunk-Y order and the entry-port slot order disagree.
-      Each source bundle keeps its declaration order at the peel-off corner instead of inverting
-      (issue #695)."
-  - id: peeloff_extra_line_consumer
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "Same peel-off topology as peeloff_riser_respace but the destination section
-      also carries an extra internal branch (l5). The riser reorder must still fire and keep
-      the bundle crossing-free at the shared entry port regardless of extra lines in the consumer
-      section (issue #751)."
-  - id: lr_to_tb_top_drop
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "An LR section feeds the TOP entry of a TB section stacked directly below.
-      With no explicit exit side the engine infers a BOTTOM exit: the line curves out of the
-      trunk after the last station and drops straight onto the target trunk, which is aligned
-      under the exit."
-  - id: lr_to_tb_top_drop_two_lines
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      Two co-travelling lines drop out of an LR section's explicit BOTTOM exit into
-      a TB section's shared TOP entry below, staying parallel through the corner and down to
-      the trunk without crossing.
-  - id: lr_to_tb_top_near_vertical
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A RIGHT-exit LR section feeds the TOP entry of a TB section stacked directly
-      below. The explicit right exit leaves on the right, clears the source box, and doubles
-      back over the inter-row gap to drop straight onto the target trunk rather than elbowing
-      in through the top-right corner.
-  - id: lr_to_tb_top_cross_col
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A junction source feeds both a same-row RIGHT-entry consumer and a TB section's
-      TOP entry two rows below. The downward branch drops onto the target trunk without crossing
-      the section boundary off-port.
-  - id: lr_to_tb_top_two_lines
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      Two co-travelling lines from a RIGHT-exit LR section double back into a TB
-      section's shared TOP entry below, landing on their trunk X offsets so the bundle stays
-      parallel through the boundary without pinching or crossing.
-  - id: top_entry_header_clash
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A TB section's title is long enough to reach under the trunk that drops into
-      its TOP entry. Rather than route the line around the title, the header relocates below
-      the box so the drop enters cleanly.
-  - id: header_side_rotated
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A TB section whose trunk drops through the top edge and exits the bottom edge
-      blocks the header on both horizontal edges. The title rotates and runs down the clear
-      left edge instead of crossing the line.
-  - id: header_nudge
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A title too long to fit a rotated side, on a section blocked top and bottom
-      by its trunk: the header shifts right past the trunk as a last resort, the canvas growing
-      to keep it visible."
   - id: lr_perp_top_exit_side_entry
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       Two co-travelling lines leave an LR section through an explicit TOP exit and
       feed the LEFT entry of a same-row neighbour. The exit port sits past the last station,
@@ -931,14 +988,14 @@ gallery:
       row to enter straight, staying parallel through every concentric corner.
   - id: lr_perp_bottom_exit_side_entry
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       "The BOTTOM-exit mirror of lr_perp_top_exit_side_entry: the bundle drops below
       the source section, runs across the under-row band, and rises back to the consumer's
       row to enter straight."
   - id: lr_perp_top_exit_perp_entry
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       Two co-travelling lines leave an LR section through a TOP exit and feed the
       TOP entry of a same-row neighbour in another column. The bundle rises over the header
@@ -946,21 +1003,21 @@ gallery:
       entry port so it stays parallel without crossing at the drop.
   - id: lr_perp_bottom_exit_perp_entry
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       "The BOTTOM-exit mirror of lr_perp_top_exit_perp_entry: the bundle drops under
       the row, runs across, and rises into the consumer's BOTTOM entry, staying parallel through
       the corridor."
   - id: lr_perp_top_exit_perp_entry_diverging
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       A TOP-exit bundle taken over the corridor into a TOP entry where the two lines
       split to different downstream stations. Consistent corridor ordering routes each line
       to its target without a convergence jog at the entry.
   - id: cross_column_perp_drop
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       "A `%%metro direction: TB` section fed by a perpendicular drop from a section
       in a different grid column. The vertical trunk stays on the QC section's own column and
@@ -968,15 +1025,72 @@ gallery:
       trunk being dragged out toward the off-column source."
   - id: cross_column_perp_drop_far_exit
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Inter-section Routing
     description:
       The cross-column perpendicular drop where the source's exit side faces away
       from the target's entry side (a BOTTOM exit feeding a TOP entry). The lead-in crosses
       to the inter-column gap and reaches the TOP entry from above the box, rather than rising
       up the trunk through the section's stations.
+  - id: bottom_row_climb_clear_corridor
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      A section in the bottommost grid row sends a line up and across to a higher-row
+      target several columns away. The columns it spans hold no same-row section, so the line
+      runs along its own row level and climbs at the end rather than diving below the source
+      row to the canvas floor and looping back up.
+  - id: multicarrier_offrow_exit_climb
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      A section's exit port carries two lines from two stations that share a trunk
+      row off the port row, then fans out through a junction to several rows. The parallel bundle
+      anchors on the shared carrier row so it runs flat inside the section and the fan-out risers
+      fall in the inter-section gap, rather than both lines climbing a diagonal up to the port
+      inside the section.
+  - id: clear_channel_target_aware_push
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      A hub fans one line down into a wide section stacked directly below and another
+      down-and-right to a target. The fan descent for the rightward line grazes the wide block,
+      so the graze correction pushes it toward the target's side of the block rather than the
+      nearer edge, keeping the line heading to its target instead of detouring across the canvas.
+  - id: near_vertical_junction_hook
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A fan-out junction overhanging a same-column RIGHT entry one row below. The
+      two-line bundle drops straight down the junction's own column and turns once into the
+      port, rather than leading out to a centred gap channel and hooking back: a hook's opposite-handed
+      corners cannot nest a multi-line bundle. The destination section carries the matching
+      line order so the bundle arrives in the order the section lays it out (#1018)."
+
+  # ── Off-track & Rails ──────────────────────────────────────────────────────
+  - id: off_track_convergence
+    source_dir: examples/topologies
+    category: Off-track & Rails
+    description:
+      Multiple off-track file inputs converging on a single consumer. The trunk stays
+      horizontal while the inputs stack above the consumer column.
+  - id: off_track_convergence_multiline
+    source_dir: examples/topologies
+    category: Off-track & Rails
+    description:
+      "A multi-line bundle enters a section and converges on a deep first station
+      that also consumes off-track file inputs. The consumer stays on the section trunk, level
+      with its continuation, rather than being dragged to the section floor (issue #650)."
+  - id: off_track_input_above_consumer
+    source_dir: examples/topologies
+    category: Off-track & Rails
+    description:
+      "A section whose mid-trunk station consumes an off-track input while a neighbouring
+      station feeds an off-track output. The input hugs one row above its consumer instead of
+      towering an extra slot up because it shares an anchor with the differently-columned output
+      (issue #651)."
   - id: rail_inter_section
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Off-track & Rails
     description:
       "Two `%%metro line_spread: rails` sections joined by an inter-section edge.
       The connector wraps cleanly from the upstream right exit port, down the right margin,
@@ -984,7 +1098,7 @@ gallery:
       port - no dangling port stubs and no avoidable crossings between co-travelling lines."
   - id: rail_offtrack_io
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Off-track & Rails
     description:
       "A `%%metro line_spread: rails` section with off-track `%%metro file:` input
       and output. Each off-track file terminus carries a buffer-stop nub at the rail-side end
@@ -992,111 +1106,13 @@ gallery:
       caption, rather than the line ending bare at the icon."
   - id: rail_offtrack_plain_io
     source_dir: examples/topologies
-    category: Fold Topologies
+    category: Off-track & Rails
     description:
       "A `%%metro line_spread: rails` section with plain (non-file) off-track input
       and output. Each plain off-track node renders a station marker at its line end rather
       than a bare stub, and the input's label sits above the node clear of its drop and the
       adjacent station's label."
-  - id: bottom_row_climb_clear_corridor
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A section in the bottommost grid row sends a line up and across to a higher-row
-      target several columns away. The columns it spans hold no same-row section, so the line
-      runs along its own row level and climbs at the end rather than diving below the source
-      row to the canvas floor and looping back up.
-  - id: exit_corner_offset_dogleg
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A passing line runs through a section on a per-line bundle offset, then exits
-      and bypasses a higher row to climb to a far target. The onward run keeps the line's offset
-      over the row-level traverse so it leaves the exit port straight, with the single level
-      change a clean riser at the far gap rather than a one-offset-step jog at the exit corner.
-  - id: multicarrier_offrow_exit_climb
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A section's exit port carries two lines from two stations that share a trunk
-      row off the port row, then fans out through a junction to several rows. The parallel bundle
-      anchors on the shared carrier row so it runs flat inside the section and the fan-out risers
-      fall in the inter-section gap, rather than both lines climbing a diagonal up to the port
-      inside the section.
-  - id: post_convergence_trunk
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      Two stacked inputs converge on a station inside one LR section. The merge station's
-      single linear successor continues flat on the merge row rather than dropping back onto
-      one of the incoming branch rows, so the post-merge trunk runs straight instead of zigzagging.
-  - id: bundle_terminator_continuation
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A two-line bundle enters a station where one line terminates while the other
-      continues to a single successor. The successor holds the trunk row rather than dropping
-      to its own line base, so the chain runs flat instead of dipping into a V-kink before the
-      section exit.
-  - id: clear_channel_target_aware_push
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A hub fans one line down into a wide section stacked directly below and another
-      down-and-right to a target. The fan descent for the rightward line grazes the wide block,
-      so the graze correction pushes it toward the target's side of the block rather than the
-      nearer edge, keeping the line heading to its target instead of detouring across the canvas.
-  - id: junction_fanout_convergence
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "Three lines converge into one joint-calling entry port: two bypass the intervening
-      sections and climb risers into the port while the third joins flat from the adjacent column.
-      The flat shallow feeder takes the port-near slot on top of the climbing pair so the bundle
-      turns into the port concentrically, instead of the flat line weaving across the risers
-      at the corner."
-  - id: convergent_offrow_exit_climb
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A single-row long-read variant-calling map. The annotation section carries
-      only snv and sv (the two highest-priority lines), reached through a bypass whose source
-      re-based them onto low slots. Its two-line bundle anchors on its own trunk rather than
-      inheriting the high global slots, so its markers sit on their rows and the run into reports
-      stays level.
-  - id: near_vertical_junction_hook
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      "A fan-out junction overhanging a same-column RIGHT entry one row below. The
-      two-line bundle drops straight down the junction's own column and turns once into the
-      port, rather than leading out to a centred gap channel and hooking back: a hook's opposite-handed
-      corners cannot nest a multi-line bundle. The destination section carries the matching
-      line order so the bundle arrives in the order the section lays it out (#1018)."
-  - id: tb_perp_exit_side_neighbour
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A vertical-flow section's BOTTOM exit feeds a side LR neighbour sharing the
-      exit's Y. The connector leaves the port down into the inter-row corridor clear of the
-      box, runs across, then turns up into the entry, rather than running straight along the
-      section's bottom edge and out through the corner (#1052).
-  - id: tb_two_line_vert_seam
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      A vertical-flow section's RIGHT exit feeds another vertical-flow section's
-      LEFT entry with a two-line bundle. The entry sits a station gap above the trunk head so
-      both lines enter horizontally then drop straight onto their trunk lanes, rather than the
-      staggered line slanting into the trunk for want of drop room (#1054).
-  - id: aligner_row_pinned_continuation
-    source_dir: examples/topologies
-    category: Fold Topologies
-    description:
-      Three sibling aligners feed one dedup hub that lands on the lead aligner's
-      row, while one aligner's line continues on a track pinned to the section bottom by hidden
-      continuation stations. The aligners stack on consecutive grid rows instead of the low-line
-      aligner being dragged down to crowd its neighbour and strand the middle row (#1071).
+
 pipelines:
   - id: rnaseq_auto
     title: nf-core/rnaseq
