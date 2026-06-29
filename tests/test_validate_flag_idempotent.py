@@ -86,6 +86,33 @@ def test_shared_column_survives_validate(name):
     ), f"{name}: gatk/deepvariant must share their column under validate=True"
 
 
+def test_fold_bypass_kept_fix_settles_before_shipping():
+    """A kept geometric-bypass fix must settle to its fixed point in both modes.
+
+    Pins the fold + bypass-V + downstream-section shape (#1171) behind a focused
+    guard: the two ``validate`` modes agree, and re-running ``compute_layout`` on
+    its own output does not move the downstream section.
+    """
+    path = (
+        Path(__file__).resolve().parent.parent
+        / "examples"
+        / "topologies"
+        / "fold_bypass_creep.mmd"
+    )
+    unvalidated = _layout(path, False, validate=False)
+    validated = _layout(path, False, validate=True)
+    assert unvalidated.stations["mqc"].y == pytest.approx(
+        validated.stations["mqc"].y
+    ), "validate flag changed the downstream section's Y in the fold-bypass case"
+
+    settled = unvalidated.stations["mqc"].y
+    compute_layout(unvalidated, validate=False)
+    assert unvalidated.stations["mqc"].y == pytest.approx(settled), (
+        "compute_layout is not a fixed point on its own output: the fold-bypass "
+        "downstream section moved on a second pass"
+    )
+
+
 @pytest.mark.parametrize("fixture", CORPUS, ids=[fid for fid, _, _ in CORPUS])
 def test_render_layout_chokepoint_is_observational(fixture):
     """``assert_render_layout_invariants`` must not perturb station geometry.

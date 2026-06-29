@@ -1,0 +1,30 @@
+%%metro title: Fold Bypass Creep
+%%metro fold_threshold: 4
+%%metro file: vcf_out | VCF
+%%metro line: main | Main | #2db572
+%%metro line: qc | QC | #0570b0
+
+graph LR
+    subgraph prep [Prep]
+        in0[ ]
+        align[Align]
+        in0 -->|main,qc| align
+    end
+    subgraph calling [Calling]
+        caller1[Caller A]
+        caller2[Caller B]
+        stats[Stats]
+        collate[ ]
+        vcf_out[ ]
+        caller1 -->|main| stats
+        caller2 -->|main| stats
+        stats -->|main| collate
+        collate -->|main| vcf_out
+    end
+    subgraph report [Report]
+        mqc[MultiQC]
+    end
+    align -->|main| caller1
+    align -->|main| caller2
+    stats -->|qc| mqc
+    align -->|qc| mqc

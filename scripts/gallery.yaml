@@ -725,6 +725,15 @@ gallery:
       re-based them onto low slots. Its two-line bundle anchors on its own trunk rather than
       inheriting the high global slots, so its markers sit on their rows and the run into reports
       stays level.
+  - id: fold_bypass_creep
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      A fold turns the calling section into a vertical bridge and a qc line forks
+      around its file terminus into a separate downstream report section. Keeping the bypass
+      feeds the bridge's height into the downstream section's placement, which settles one pass
+      later, so the report section seats at its converged Y in both validated and unvalidated
+      renders.
 
   # ── Merge & Convergence ────────────────────────────────────────────────────
   - id: merge_offrow_continuation
