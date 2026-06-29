@@ -177,6 +177,13 @@ gallery:
     source_dir: examples/topologies
     category: Basic Topologies
     description: Two disconnected pipelines stacked vertically.
+  - id: disconnected_components_fold
+    source_dir: examples/topologies
+    category: Basic Topologies
+    description:
+      "A folded disconnected-component layout (`%%metro fold_threshold: 3`). The main trunk
+      folds into a serpentine while a wide standalone section stacks below it. Regression
+      fixture for full clearance between the wide section and the folded trunk's bottom row."
   - id: mismatched_tracks
     source_dir: examples/topologies
     category: Basic Topologies

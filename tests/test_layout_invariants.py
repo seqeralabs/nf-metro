@@ -4994,6 +4994,43 @@ def test_row_gap_between_adjacent_rows(fixture):
 
 
 # ---------------------------------------------------------------------------
+# Disconnected components are placed in separate local grids then stacked
+# vertically; their grid rows must be renormalised so grid_row increases
+# monotonically with Y, or the inter-row cascade interleaves them
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fold", [1, 2, 3, 5, 7])
+def test_disconnected_component_grid_rows_match_stack_order(fold):
+    """A folded disconnected-component layout keeps ``grid_row`` monotone
+    with vertical position.
+
+    Each weakly-connected component lays out in its own local grid, so two
+    components can share a ``grid_row`` value even though they are stacked
+    into disjoint vertical bands.  The inter-row cascade (Stage 6.13/6.14)
+    assumes ``grid_row`` rises with Y; when a folded component spans several
+    rows, an un-renormalised peer component sharing one of those rows gets
+    shuffled into the band and collides with the section above it.
+    """
+    graph = parse_metro_mermaid(
+        (EXAMPLES / "disconnected_components.mmd").read_text(),
+        max_station_columns=fold,
+    )
+    compute_layout(graph, validate=True)
+
+    placed = [s for s in graph.sections.values() if s.bbox_h > 0]
+    prev_bottom = float("-inf")
+    for section in sorted(placed, key=lambda s: s.grid_row):
+        assert section.bbox_y >= prev_bottom - 0.5, (
+            f"grid rows not monotone with Y at fold={fold}: section "
+            f"{section.id!r} (row {section.grid_row}) starts at "
+            f"y={section.bbox_y:.1f}, above an earlier-row section's "
+            f"bottom y={prev_bottom:.1f}"
+        )
+        prev_bottom = max(prev_bottom, section.bbox_y)
+
+
+# ---------------------------------------------------------------------------
 # Sections with empty above-trunk bands but multiple movable siblings below
 # should auto-balance so the top band shrinks to one y_spacing
 # ---------------------------------------------------------------------------
