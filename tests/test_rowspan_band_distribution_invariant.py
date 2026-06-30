@@ -27,7 +27,7 @@ SHOWCASE_DIR = EXAMPLES_DIR / "showcase"
 
 # Fixtures with a single-row section stack beside a rowspan neighbour.
 FIXTURES = [
-    "single_row_rowspan_neighbor",
+    "seqinspector",
 ]
 
 
@@ -61,7 +61,7 @@ def test_stacked_rows_fill_rowspan_band(stem: str) -> None:
 @pytest.mark.parametrize(
     "rel_path",
     [
-        "showcase/single_row_rowspan_neighbor.mmd",
+        "showcase/seqinspector.mmd",
         "topologies/internal_source_equal_sibling_2fan.mmd",
     ],
 )

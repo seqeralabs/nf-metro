@@ -181,7 +181,7 @@ gallery:
       level along the row, the other turns down to a lower loop. Regression fixture
       for the peel-off lane crossover at the exit -- the reversal must follow the
       continuing line through the peel-off junction so it stays level."
-  - id: single_row_rowspan_neighbor
+  - id: seqinspector
     source_dir: examples/showcase
     category: Realistic Pipelines
     description:
@@ -1288,7 +1288,7 @@ pipelines:
     description:
       Genome assembly from long reads and Hi-C data through purging, polishing, scaffolding,
       and QC.
-  - id: single_row_rowspan_neighbor
+  - id: seqinspector
     title: nf-core/seqinspector
     repo_url: https://github.com/nf-core/seqinspector
     description:

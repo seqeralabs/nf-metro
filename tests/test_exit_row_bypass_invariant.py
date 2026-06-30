@@ -10,7 +10,7 @@ Covers:
 
 * Happy-path: every gallery example, showcase fixture, and topology fixture
   routes without an exit-row bypass stepping up over a clear corridor.
-* Regression: the reported ``single_row_rowspan_neighbor`` map routes the
+* Regression: the reported ``seqinspector`` map routes the
   FASTQ-Files line to MultiQC straight along its exit row.
 * Meaningfulness: the checker fires on the reported up-step geometry and stays
   silent on the straight-run geometry.
@@ -37,7 +37,7 @@ SHOWCASE = EXAMPLES / "showcase"
 EXAMPLE_TOPOLOGIES = EXAMPLES / "topologies"
 FIXTURE_TOPOLOGIES = REPO_ROOT / "tests" / "fixtures" / "topologies"
 
-REPORTED_FIXTURE = SHOWCASE / "single_row_rowspan_neighbor.mmd"
+REPORTED_FIXTURE = SHOWCASE / "seqinspector.mmd"
 
 
 def _gather_fixtures() -> list[Path]:
