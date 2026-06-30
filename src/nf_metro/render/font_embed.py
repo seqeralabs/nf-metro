@@ -24,11 +24,26 @@ import re
 from collections import namedtuple
 from pathlib import Path
 
-__all__ = ["embed_font", "text_to_paths", "EMBEDDED_FONT_FAMILY"]
+__all__ = [
+    "embed_font",
+    "text_to_paths",
+    "EMBEDDED_FONT_FAMILY",
+    "EMBEDDED_FONT_STACK",
+]
 
 _FONTS_DIR = Path(__file__).parent.parent / "fonts"
 
+# Face name declared by the injected @font-face rule.
 EMBEDDED_FONT_FAMILY = "Inter"
+
+# font-family value written onto text elements: the embedded face first, a
+# generic sans-serif fallback last.  Where the @font-face is honoured Inter
+# wins; where the <style> is stripped (e.g. GitHub's SVG sanitiser) the value
+# degrades to sans-serif instead of the browser's serif default for an
+# unknown family.
+EMBEDDED_FONT_STACK = (
+    f"{EMBEDDED_FONT_FAMILY}, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+)
 
 # Attributes to drop from text elements when converting to paths
 # (they become meaningless once text is gone).
@@ -111,7 +126,7 @@ def _parse_dy(dy_str: str, font_size: float) -> float:
 
 
 def embed_font(svg: str) -> str:
-    """Inject an Inter @font-face block and update font-family to 'Inter'.
+    """Inject an Inter @font-face block and update font-family to the embedded stack.
 
     The bundled WOFF2 files cover Latin Basic and Latin-1 Supplement
     (U+0020-U+00FF), which is sufficient for typical nf-metro pipeline names.
@@ -144,10 +159,11 @@ def embed_font(svg: str) -> str:
             # Fallback: insert right after the opening <svg …> tag.
             svg = re.sub(r"(<svg\b[^>]*>)", r"\1" + style_block, svg, count=1)
 
-    # Replace all font-family attributes on text elements with Inter.
+    # Replace all font-family attributes on text elements with the embedded
+    # stack (Inter first, generic sans-serif fallback last).
     svg = re.sub(
         r'(font-family=")[^"]*(")',
-        rf"\g<1>{EMBEDDED_FONT_FAMILY}\g<2>",
+        rf"\g<1>{EMBEDDED_FONT_STACK}\g<2>",
         svg,
     )
     return svg
