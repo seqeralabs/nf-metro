@@ -1,0 +1,134 @@
+%%metro title: Packed-cell non-consumer bypass
+%%metro style: nfcore
+%%metro fold_threshold: 15
+%%metro file: fastq_in | FASTQ
+%%metro file: report_out | HTML
+%%metro line: dna | DNA (Tumor + Normal) | #4a90d9
+%%metro line: rna | RNA (Tumor) | #e63946
+%%metro line: realignment | Realignment (RNA) | #f5c542
+%%metro line_order: definition
+%%metro legend: bl
+%%metro grid: preprocessing | 0,0
+%%metro grid: gatk_preproc | 1,0
+%%metro grid: variant_calling | 2,0
+%%metro grid: normalization | 3,0
+%%metro grid: consensus | 3,1
+%%metro grid: realign, reporting | 1,1
+
+graph LR
+    subgraph preprocessing [Pre-processing & Alignment]
+        fastq_in[ ]
+        fastqc[FastQC]
+        fastp[fastp]
+        bwa_mem[BWA-mem/BWA-mem2]
+        star[STAR]
+        samtools_merge[SAMtools Merge]
+
+        fastq_in -->|dna,rna| fastqc
+        fastqc -->|dna,rna| fastp
+        fastp -->|dna| bwa_mem
+        fastp -->|rna| star
+        bwa_mem -->|dna| samtools_merge
+        star -->|rna| samtools_merge
+    end
+
+    subgraph gatk_preproc [GATK Preprocessing]
+        markduplicates[MarkDuplicates]
+        splitncigar[SplitNCigarReads]
+        baserecalibrator[BaseRecalibrator]
+        applybqsr[ApplyBQSR]
+        samtools_stats[SAMtools Stats]
+        mosdepth[Mosdepth]
+
+        markduplicates -->|dna| baserecalibrator
+        markduplicates -->|rna| splitncigar
+        splitncigar -->|rna| baserecalibrator
+        baserecalibrator -->|dna,rna| applybqsr
+        applybqsr -->|dna,rna| samtools_stats
+        samtools_stats -->|dna,rna| mosdepth
+    end
+
+    subgraph variant_calling [Variant Calling (parallel)]
+        vc_fork[ ]
+        mutect2[Mutect2]
+        strelka[Strelka2]
+        sage[SAGE]
+        vc_join[ ]
+
+        vc_fork -->|dna,rna| mutect2
+        vc_fork -->|dna,rna| strelka
+        vc_fork -->|dna,rna| sage
+        mutect2 -->|dna,rna| vc_join
+        strelka -->|dna,rna| vc_join
+        sage -->|dna,rna| vc_join
+    end
+
+    subgraph normalization [Normalization & Annotation]
+        %%metro exit: bottom | dna, rna
+        vt_decompose[VT Decompose]
+        vt_normalize[VT Normalize]
+        ensemblvep[Ensembl VEP]
+
+        vt_decompose -->|dna,rna| vt_normalize
+        vt_normalize -->|dna,rna| ensemblvep
+    end
+
+    subgraph consensus [Consensus & Filtering]
+        %%metro direction: RL
+        %%metro entry: top | dna, rna
+        %%metro exit: left | rna, realignment
+        vcf2maf[vcf2MAF]
+        run_consensus[Consensus]
+        maf_filtering[MAF Filtering]
+
+        vcf2maf -->|dna,rna| run_consensus
+        run_consensus -->|dna,rna| maf_filtering
+    end
+
+    subgraph realign [Realignment (RNA)]
+        %%metro direction: RL
+        %%metro entry: right | realignment
+        %%metro exit: left | realignment
+        maf2bed[MAF2BED]
+        extract_reads[Extract Reads]
+        hisat2[HISAT2]
+        markdup_re[MarkDuplicates]
+        splitncigar_re[SplitNCigarReads]
+        bqsr_re[BQSR]
+        varcall_re[Variant Calling]
+        norm_re[Normalization]
+        annotate_re[Annotation]
+        consensus_re[Consensus]
+        filter_re[MAF Filtering]
+
+        maf2bed -->|realignment| extract_reads
+        extract_reads -->|realignment| hisat2
+        hisat2 -->|realignment| markdup_re
+        markdup_re -->|realignment| splitncigar_re
+        splitncigar_re -->|realignment| bqsr_re
+        bqsr_re -->|realignment| varcall_re
+        varcall_re -->|realignment| norm_re
+        norm_re -->|realignment| annotate_re
+        annotate_re -->|realignment| consensus_re
+        consensus_re -->|realignment| filter_re
+    end
+
+    subgraph reporting [Reporting]
+        %%metro direction: RL
+        %%metro entry: right | rna, realignment
+        rna_filter[RNA MAF Filtering]
+        rna_filter -->|rna,realignment| multiqc
+        multiqc[MultiQC]
+        report_out[ ]
+
+        multiqc -->|rna,realignment| report_out
+    end
+
+    %% Inter-section edges
+    maf_filtering -->|realignment| maf2bed
+    samtools_merge -->|dna,rna| markduplicates
+    mosdepth -->|dna,rna| vc_fork
+    vc_join -->|dna,rna| vt_decompose
+    ensemblvep -->|dna,rna| vcf2maf
+    filter_re -->|realignment| rna_filter
+    maf_filtering -->|rna| rna_filter

@@ -150,6 +150,11 @@ EXPECTED_RESIDUALS = frozenset(
         # preserves while the machinery reverses them.
         ("manual_rl_row_nonconsumer_bypass", "normalization", "consensus", "B->T"),
         ("manual_rl_row_nonconsumer_bypass", "realign", "reporting", "L->R"),
+        # Same return-row reversal as manual_rl_row_nonconsumer_bypass, but
+        # realign and reporting are packed into a single grid cell rather than
+        # each owning its own.
+        ("packed_cell_cellmate_bypass", "normalization", "consensus", "B->T"),
+        ("packed_cell_cellmate_bypass", "realign", "reporting", "L->R"),
     }
 )
 

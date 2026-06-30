@@ -176,43 +176,6 @@ def test_breeze_through_guards_on_render_path(guard_name: str) -> None:
     assert guard_name in names
 
 
-def _pack_into_one_cell(text: str) -> str:
-    """Repoint the manual-grid bypass fixture's ``realign``/``reporting`` rows
-    from two separate cells onto one shared cell, so the non-consumer line
-    must cross a packed cell-mate rather than a standalone intervening
-    section."""
-    return text.replace(
-        "%%metro grid: realign | 1,1,2,1\n%%metro grid: reporting | 0,1\n",
-        "%%metro grid: realign, reporting | 1,1\n",
-        1,
-    )
-
-
-def _render_packed_cell_breeze(*, strict: bool = False) -> None:
-    text = _pack_into_one_cell(
-        (EXAMPLES / "topologies" / "manual_rl_row_nonconsumer_bypass.mmd").read_text()
-    )
-    graph = parse_metro_mermaid(text)
-    graph.strict = strict
-    compute_layout(graph)
-    render_svg(graph, THEMES["nfcore"])
-
-
-def test_packed_cell_breeze_through_warns_by_default() -> None:
-    """A line routed straight through a non-consumer section it shares a
-    packed grid cell with warns on the default render path instead of
-    shipping silently."""
-    with pytest.warns(UserWarning, match="Tier-A invariants"):
-        _render_packed_cell_breeze()
-
-
-def test_packed_cell_breeze_through_raises_under_strict() -> None:
-    """The same packed-cell breeze-through raises ``LayoutInvariantError``
-    under ``--strict`` rather than rendering a silently-broken map."""
-    with pytest.raises(LayoutInvariantError, match="Tier-A invariants"):
-        _render_packed_cell_breeze(strict=True)
-
-
 def _render_fixture(name: str, *, strict: bool = False) -> None:
     graph = parse_metro_mermaid((FIXTURES / name).read_text())
     graph.strict = strict

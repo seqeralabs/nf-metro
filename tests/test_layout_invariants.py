@@ -7189,6 +7189,12 @@ _XFAIL_LABEL_AT_STATION_X: dict[str, str] = {
         "row, unrelated to the manual RL-row bypass this fixture locks); revisit "
         "when the engine collision-clearance is tuned"
     ),
+    "topologies/packed_cell_cellmate_bypass.mmd": (
+        "issue #348: samtools_stats label nudged 17.1px to clear an adjacent "
+        "label collision in the dense GATK Preprocessing section (forward top "
+        "row, unrelated to the packed-cell bypass this fixture locks); revisit "
+        "when the engine collision-clearance is tuned"
+    ),
 }
 
 

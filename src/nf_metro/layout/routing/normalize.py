@@ -31,6 +31,7 @@ from nf_metro.layout.routing.common import (
     iter_inter_row_gaps,
     iter_port_peeloff_bundles,
     iter_vertical_segments,
+    packed_cell_neighbor_edges,
     peeloff_target_slots,
     seat_peeloff_port_y,
     symmetric_bundle_midpoint,
@@ -1619,6 +1620,8 @@ def _gap_channel_base(
     row: int | None,
     n: int,
     offset_step: float,
+    anchor_section_id: str | None = None,
+    anchor_side: PortSide | None = None,
 ) -> float:
     """Centred midline x for a bundle of *n* lines in gap ``(lo, lo+1)``.
 
@@ -1626,8 +1629,17 @@ def _gap_channel_base(
     :func:`_materialize_gap_slots` pass re-stacks every inter-section
     channel into its final centred / B-separated position, so the value
     here just needs to land the channel in the right gap.
+
+    When *anchor_section_id* and *anchor_side* are given, a packed cell-mate
+    of that section on *anchor_side* (see :func:`packed_cell_neighbor_edges`)
+    takes priority over the column-level gap: the column edge can sit on the
+    far side of a cell-mate, well past the section the channel is meant to
+    hug.
     """
-    gap_left, gap_right = column_gap_edges(graph, lo, lo + 1, row=row)
+    edges = None
+    if anchor_section_id is not None and anchor_side is not None:
+        edges = packed_cell_neighbor_edges(graph, anchor_section_id, anchor_side)
+    gap_left, gap_right = edges or column_gap_edges(graph, lo, lo + 1, row=row)
     return symmetric_bundle_midpoint(
         gap_left, gap_right, [max(0, n - 1) * offset_step], 0
     )

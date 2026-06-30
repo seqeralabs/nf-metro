@@ -344,6 +344,30 @@ class _InterFacts:
         )
 
 
+def _packed_cell_mate_obstructs(
+    graph: MetroGraph,
+    src: Station,
+    tgt: Station,
+    src_row: int | None,
+    tgt_row: int | None,
+) -> bool:
+    """Whether a same-row section other than *src*'s/*tgt*'s own sits on the
+    straight path between them.
+
+    ``_has_intervening_sections`` only sees columns strictly between the
+    endpoints' grid columns. A packed cell (``%%metro grid: a, b | col,row``)
+    can place more than one section in a boundary column itself, so a
+    cell-mate of the route's own endpoint can sit geometrically between the
+    two ports without ever showing up as an "intervening" column.
+    """
+    if src_row is None or tgt_row is None or src_row != tgt_row:
+        return False
+    src_sec = resolve_section(graph, src, prefer_upstream=False)
+    tgt_sec = resolve_section(graph, tgt, prefer_upstream=False)
+    exclude = {sec.id for sec in (src_sec, tgt_sec) if sec is not None}
+    return _h_segment_crosses_other_section(graph, src.x, tgt.x, src.y, exclude)
+
+
 def _build_inter_facts(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> _InterFacts:
@@ -353,7 +377,9 @@ def _build_inter_facts(
     # A multi-column hop needs a bypass when an intervening section blocks the
     # source row, or - for a cross-row L-shape, whose horizontal leg runs at the
     # target entry Y - the TARGET row, plowed through even when the source row
-    # is clear.
+    # is clear. A packed cell-mate of either endpoint can also block the path
+    # without registering as an intervening column (see
+    # _packed_cell_mate_obstructs).
     needs_bypass = (
         src_col is not None
         and tgt_col is not None
@@ -366,6 +392,7 @@ def _build_inter_facts(
                 and tgt_row != src_row
                 and _has_intervening_sections(graph, src_col, tgt_col, tgt_row)
             )
+            or _packed_cell_mate_obstructs(graph, src, tgt, src_row, tgt_row)
         )
     )
     ep_id = ctx.merge.entry_port_for.get(edge.target)
@@ -1574,6 +1601,10 @@ def _route_bypass(
     dx = tx - sx
     horizontal = horizontal_direction(dx)
     graph = ctx.graph
+    src_sec = resolve_section(graph, src, prefer_upstream=False)
+    tgt_sec = resolve_section(graph, tgt, prefer_upstream=False)
+    src_sec_id = src_sec.id if src_sec is not None else None
+    tgt_sec_id = tgt_sec.id if tgt_sec is not None else None
 
     ekey = (edge.source, edge.target, edge.line_id)
     g1_j, g1_n, g2_j, g2_n = ctx.bypass_gap_idx.get(ekey, (0, 1, 0, 1))
@@ -1690,7 +1721,13 @@ def _route_bypass(
             gap1_x = fan_mid_x + fan_delta
         else:
             gap1_base = _gap_channel_base(
-                graph, src_col, src_row, g1_n, ctx.offset_step
+                graph,
+                src_col,
+                src_row,
+                g1_n,
+                ctx.offset_step,
+                anchor_section_id=src_sec_id,
+                anchor_side=PortSide.RIGHT,
             )
             gap1_limit = sx + ctx.curve_radius
             if gap1_base - (g1_n - 1) * ctx.offset_step < gap1_limit:
@@ -1701,7 +1738,13 @@ def _route_bypass(
             gap1_x = gap1_mid + delta1
 
         gap2_base = _gap_channel_base(
-            graph, tgt_col - 1, tgt_row, g2_n, ctx.offset_step
+            graph,
+            tgt_col - 1,
+            tgt_row,
+            g2_n,
+            ctx.offset_step,
+            anchor_section_id=tgt_sec_id,
+            anchor_side=PortSide.LEFT,
         )
         gap2_limit = effective_tx - ctx.curve_radius
         if gap2_base + (g2_n - 1) * ctx.offset_step > gap2_limit:
@@ -1768,7 +1811,13 @@ def _route_bypass(
             gap1_x = fan_mid_x + fan_delta
         else:
             gap1_base = _gap_channel_base(
-                graph, src_col - 1, src_row, g1_n, ctx.offset_step
+                graph,
+                src_col - 1,
+                src_row,
+                g1_n,
+                ctx.offset_step,
+                anchor_section_id=src_sec_id,
+                anchor_side=PortSide.LEFT,
             )
             gap1_limit = sx - ctx.curve_radius
             if gap1_base + (g1_n - 1) * ctx.offset_step > gap1_limit:
@@ -1778,7 +1827,15 @@ def _route_bypass(
             off1 = delta1
             gap1_x = gap1_mid + delta1
 
-        gap2_base = _gap_channel_base(graph, tgt_col, tgt_row, g2_n, ctx.offset_step)
+        gap2_base = _gap_channel_base(
+            graph,
+            tgt_col,
+            tgt_row,
+            g2_n,
+            ctx.offset_step,
+            anchor_section_id=tgt_sec_id,
+            anchor_side=PortSide.RIGHT,
+        )
         gap2_limit = effective_tx + ctx.curve_radius
         if gap2_base - (g2_n - 1) * ctx.offset_step < gap2_limit:
             gap2_mid = gap2_limit + half_g2

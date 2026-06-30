@@ -677,6 +677,14 @@ gallery:
       around that section rather than route through its interior. The descent
       column lands in the clear gap beside the intervening box and the line
       loops below the whole row into its target (issue #1211)."
+  - id: packed_cell_cellmate_bypass
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "The same non-consumer bypass as manual_rl_row_nonconsumer_bypass, but
+      the intervening section is packed into the same grid cell as the target
+      rather than given its own cell. The bypass must still loop around the
+      cell-mate's box instead of cutting straight through it (issue #1228)."
   - id: branch_fold_forward
     source_dir: examples/topologies
     category: Serpentine Layout

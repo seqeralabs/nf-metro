@@ -348,6 +348,42 @@ def column_gap_edges(
     return right, left
 
 
+def packed_cell_neighbor_edges(
+    graph: MetroGraph, section_id: str, side: PortSide
+) -> tuple[float, float] | None:
+    """Gap edges between *section_id* and its nearest packed cell-mate on *side*.
+
+    A packed cell (``%%metro grid: a, b | col,row``) can place a cell-mate
+    directly between a section and the rest of its grid column, so the
+    column-level gap (:func:`column_gap_edges`) reaches past that cell-mate
+    instead of stopping at it. Returns ``None`` when *section_id* has no
+    cell-mate on that side, so the caller falls back to the column-edge gap.
+    """
+    sec = graph.sections[section_id]
+    members = graph.cell_packs.get((sec.grid_col, sec.grid_row))
+    if not members or len(members) < 2:
+        return None
+    sign = 1 if side is PortSide.RIGHT else -1
+    own_edge = sec.bbox_x + sec.bbox_w if side is PortSide.RIGHT else sec.bbox_x
+
+    def facing_edge(m: Section) -> float:
+        return m.bbox_x if side is PortSide.RIGHT else m.bbox_x + m.bbox_w
+
+    facing = [
+        m
+        for mid in members
+        if mid != section_id
+        for m in [graph.sections[mid]]
+        if m.bbox_w > 0 and sign * (facing_edge(m) - own_edge) >= -COORD_TOLERANCE
+    ]
+    if not facing:
+        return None
+    nearest_edge = facing_edge(min(facing, key=lambda m: sign * facing_edge(m)))
+    return (
+        (own_edge, nearest_edge) if side is PortSide.RIGHT else (nearest_edge, own_edge)
+    )
+
+
 def _grid_row_bands(graph: MetroGraph) -> dict[int, tuple[float, float]]:
     """Per grid-row vertical band ``(top, bottom)`` spanned by its sections."""
     bands: dict[int, tuple[float, float]] = {}
