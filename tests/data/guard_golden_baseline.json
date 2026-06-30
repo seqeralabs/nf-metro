@@ -5118,6 +5118,29 @@
       "_guard_symmetric_diamond_branches_half_pitch|final"
     ]
   },
+  "examples/guide/07_track_gap.mmd": {
+    "raised": null,
+    "trace": [
+      "_guard_no_label_overlap|final",
+      "_guard_no_diagonal_strikes_horizontal_label|final",
+      "_guard_no_line_strikes_label|final",
+      "_guard_bypass_v_flat_visible|final",
+      "_guard_no_wrapped_label_trunk_strike|final",
+      "_guard_file_icon_no_name_label|final",
+      "_guard_no_line_crosses_file_icon|final",
+      "_guard_centered_line_spread_balanced|final",
+      "_guard_rail_above_label_band|final",
+      "_guard_rail_stations_seat_on_rails|final",
+      "_guard_rail_one_station_per_column|final",
+      "_guard_single_trunk_off_track_step|final",
+      "_guard_off_track_consumer_on_trunk|final",
+      "_guard_off_track_input_column_stack|final",
+      "_guard_interchange_bar_clears_non_members|final",
+      "_guard_tb_top_entry_drop_hugs_top|final",
+      "_guard_symmetric_diamond_branches_straddle_trunk|final",
+      "_guard_symmetric_diamond_branches_half_pitch|final"
+    ]
+  },
   "examples/hlatyping.mmd": {
     "raised": null,
     "trace": [
