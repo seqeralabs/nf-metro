@@ -160,6 +160,8 @@ def _compute_section_offsets(
     untouched and never inflate this component's column widths.
     """
     scoped = {sid: graph.sections[sid] for sid in col_assign if sid in graph.sections}
+    packs = _scoped_cell_packs(graph, scoped)
+    packed_members = {m for members in packs.values() for m in members}
 
     min_col = min(col_assign.values()) if col_assign else 0
     max_col = max(col_assign.values()) if col_assign else 0
@@ -170,7 +172,7 @@ def _compute_section_offsets(
         max_col = max(max_col, col + cspan - 1)
 
     col_widths = _compute_col_widths(
-        scoped, col_assign, min_col, max_col, section_x_gap
+        scoped, col_assign, min_col, max_col, section_x_gap, packs
     )
 
     # Cumulative x offsets
@@ -205,12 +207,16 @@ def _compute_section_offsets(
         if section.direction in ("RL", "TB") and section.grid_col_span == 1:
             right_align_cols.add(col_assign.get(sid, 0))
 
-    # Set section offsets and adjust for spanning
+    # Set section offsets and adjust for spanning.  Packed members keep their
+    # row offset here but defer their column offset to ``_pack_cells``, which
+    # lays them side-by-side within the shared cell.
     for sid, section in scoped.items():
         section.grid_col = col_assign.get(sid, 0)
         section.grid_row = row_assign.get(sid, 0)
-        section.offset_x = col_offsets.get(section.grid_col, 0)
         section.offset_y = row_offsets.get(section.grid_row, 0)
+        if sid in packed_members:
+            continue
+        section.offset_x = col_offsets.get(section.grid_col, 0)
 
         if section.grid_col_span == 1 and (
             section.direction in ("RL", "TB") or section.grid_col in right_align_cols
@@ -218,6 +224,8 @@ def _compute_section_offsets(
             col_w = col_widths.get(section.grid_col, 0)
             if col_w > section.bbox_w:
                 section.offset_x += col_w - section.bbox_w
+
+    _pack_cells(scoped, packs, col_offsets, col_widths, right_align_cols, section_x_gap)
 
     _finalize_spanning_sections(
         scoped, col_widths, row_heights, section_x_gap, section_y_gap
@@ -236,19 +244,92 @@ def _effective_section_width(section: Section) -> float:
     return section.bbox_x + section.bbox_w + SECTION_X_PADDING
 
 
+def _scoped_cell_packs(
+    graph: MetroGraph,
+    scoped: dict[str, Section],
+) -> dict[tuple[int, int], list[str]]:
+    """Multi-section cells whose members all fall within ``scoped``.
+
+    A cell with only one in-scope member needs no packing and is dropped, so
+    every returned list has at least two members laid out as a unit.
+    """
+    packs: dict[tuple[int, int], list[str]] = {}
+    for cell, members in graph.cell_packs.items():
+        present = [m for m in members if m in scoped]
+        if len(present) > 1:
+            packs[cell] = present
+    return packs
+
+
+def _packed_content_width(members: list[Section], section_x_gap: float) -> float:
+    """Total width a packed cell occupies: members' effective widths plus the
+    inter-section gaps between them.
+
+    The packer (:func:`_pack_cells`) and the column-width reservation
+    (:func:`_compute_col_widths`) must agree on this, or the pack overruns the
+    width its column reserved and the overlap guard fires.
+    """
+    return (
+        sum(_effective_section_width(s) for s in members)
+        + (len(members) - 1) * section_x_gap
+    )
+
+
+def _pack_cells(
+    scoped: dict[str, Section],
+    packs: dict[tuple[int, int], list[str]],
+    col_offsets: dict[int, float],
+    col_widths: dict[int, float],
+    right_align_cols: set[int],
+    section_x_gap: float,
+) -> None:
+    """Lay each multi-section cell's members side-by-side along the flow axis.
+
+    Members advance with the same cumulative-offset rule as columns do (each
+    reserves its effective width plus the inter-section gap).  A pack in a
+    right-aligned column hugs that column's right edge; otherwise it
+    left-aligns.  A cell whose flow runs leftward (``RL``) reverses its members
+    so the flow-leading one ends up rightmost.
+    """
+    for (col, _row), member_ids in packs.items():
+        members = [scoped[m] for m in member_ids]
+        content_w = _packed_content_width(members, section_x_gap)
+        cell_left = col_offsets.get(col, 0.0)
+        col_w = col_widths.get(col, content_w)
+        start_x = cell_left + (col_w - content_w if col in right_align_cols else 0.0)
+        lead = members[0].direction
+        flows_leftward = lanes_run_along_y(lead) and AxisFrame.flow_sign(lead) < 0
+        visual = list(reversed(members)) if flows_leftward else members
+        x = start_x
+        for section in visual:
+            section.offset_x = x
+            x += _effective_section_width(section) + section_x_gap
+
+
 def _compute_col_widths(
     scoped: dict[str, Section],
     col_assign: dict[str, int],
     min_col: int,
     max_col: int,
     section_x_gap: float,
+    packs: dict[tuple[int, int], list[str]],
 ) -> dict[int, float]:
-    """Per-column width: widest single-span section, expanded for spans."""
+    """Per-column width: widest single-span cell, expanded for spans.
+
+    A single-section cell contributes its own effective width; a multi-section
+    cell contributes the combined width of its members plus the inter-section
+    gaps between them.
+    """
     col_widths: dict[int, float] = defaultdict(float)
+    packed_members = {m for members in packs.values() for m in members}
     for sid, section in scoped.items():
-        if section.grid_col_span == 1:
+        if section.grid_col_span == 1 and sid not in packed_members:
             col = col_assign.get(sid, 0)
             col_widths[col] = max(col_widths[col], _effective_section_width(section))
+
+    for (col, _row), member_ids in packs.items():
+        combined = _packed_content_width([scoped[m] for m in member_ids], section_x_gap)
+        col_widths[col] = max(col_widths[col], combined)
 
     for c in range(min_col, max_col + 1):
         if c not in col_widths:

@@ -150,6 +150,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_interchange_bar_clears_non_members,
     _guard_merge_port_approach_side,
     _guard_merge_port_outgoing_side_preserved,
+    _guard_multi_section_cell_packed,
     _guard_no_artefactual_counter_flow,
     _guard_no_coincident_station_coords,
     _guard_no_diagonal_strikes_horizontal_label,
@@ -1253,6 +1254,7 @@ def _compute_section_layout(
     _snap(graph, "1.3")
     if validate:
         _guard_independent_components_disjoint(graph, "after Stage 1.3")
+        _guard_multi_section_cell_packed(graph, "after Stage 1.3")
 
     # Stage 1.4: Renumber sections by visual reading order (row, col)
     _renumber_sections_by_grid(graph)

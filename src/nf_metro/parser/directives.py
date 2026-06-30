@@ -189,14 +189,21 @@ def _parse_port_hint(
 
 
 def _parse_grid_directive(value: str, graph: MetroGraph) -> None:
-    """Parse %%metro grid: section_id | col,row[,rowspan[,colspan]] directive."""
+    """Parse %%metro grid: section_ids | col,row[,rowspan[,colspan]] directive.
+
+    The first field may name several comma-separated sections; they share one
+    cell and pack side-by-side along the flow axis (see ``cell_packs``).
+    """
     parts = _split_fields(value)
     coords = parts[1].split(",") if len(parts) >= 2 else []
     if len(parts) < 2 or len(coords) < 2:
-        _warn_malformed("grid", value, "'section_id | col,row[,rowspan[,colspan]]'")
+        _warn_malformed("grid", value, "'section_ids | col,row[,rowspan[,colspan]]'")
         return
 
-    section_id = parts[0]
+    member_ids = _split_csv(parts[0])
+    if not member_ids:
+        _warn_malformed("grid", value, "'section_ids | col,row[,rowspan[,colspan]]'")
+        return
     try:
         col = int(coords[0].strip())
         row = int(coords[1].strip())
@@ -205,8 +212,11 @@ def _parse_grid_directive(value: str, graph: MetroGraph) -> None:
     except ValueError:
         _warn_malformed("grid", value, "integer col,row[,rowspan[,colspan]]")
         return
-    graph.grid_overrides[section_id] = (col, row, rowspan, colspan)
-    graph._explicit_grid.add(section_id)
+    for section_id in member_ids:
+        graph.grid_overrides[section_id] = (col, row, rowspan, colspan)
+        graph._explicit_grid.add(section_id)
+    if len(member_ids) > 1:
+        graph.cell_packs[col, row] = member_ids
 
 
 _LEGEND_KEYWORDS = ("bl", "br", "tl", "tr", "bottom", "right", "none")

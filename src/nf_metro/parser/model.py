@@ -363,6 +363,11 @@ class MetroGraph:
     # filling in the placement).  Used to gate alignment polish passes
     # that would distort auto-layout pipelines.
     _explicit_grid: set[str] = field(default_factory=set)
+    # Multi-section grid cells: a ``%%metro grid:`` directive may name several
+    # comma-separated sections that share one cell.  Keyed by (col, row); each
+    # value is the listed-order member ids, which pack side-by-side along the
+    # cell's flow axis.  Single-section cells are not recorded here.
+    cell_packs: dict[tuple[int, int], list[str]] = field(default_factory=dict)
     line_order: str = "definition"  # "definition" or "span"
     diamond_style: str = "straight"  # "straight" or "symmetric"
     compact_offsets: bool = False

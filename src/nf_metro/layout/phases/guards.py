@@ -735,6 +735,42 @@ def _guard_independent_components_disjoint(graph: MetroGraph, phase: str) -> Non
             )
 
 
+def _guard_multi_section_cell_packed(graph: MetroGraph, phase: str) -> None:
+    """After Stage 1.3: a multi-section cell's members pack without overlap.
+
+    A ``%%metro grid:`` directive naming several sections shares one grid cell
+    among them (:attr:`MetroGraph.cell_packs`); :func:`_pack_cells` lays them
+    side-by-side along the flow axis.  This guard fails loudly if any pair's
+    bounding boxes overlap horizontally, or if a member did not land in its
+    declared cell -- either would mean the packer left two sections sitting on
+    top of one another.
+    """
+    if not graph.cell_packs:
+        return
+
+    def footprint(section: Section) -> tuple[float, float]:
+        left = section.offset_x + section.bbox_x
+        return left, left + section.bbox_w
+
+    for (col, row), member_ids in graph.cell_packs.items():
+        members = [graph.sections[m] for m in member_ids if m in graph.sections]
+        for section in members:
+            if (section.grid_col, section.grid_row) != (col, row):
+                raise PhaseInvariantError(
+                    f"{phase}: section {section.id!r} was declared in packed cell "
+                    f"({col},{row}) but placed at "
+                    f"({section.grid_col},{section.grid_row})"
+                )
+        ordered = sorted(members, key=lambda s: footprint(s)[0])
+        for upstream, downstream in zip(ordered, ordered[1:]):
+            if footprint(upstream)[1] > footprint(downstream)[0] + SAME_COORD_TOLERANCE:
+                raise PhaseInvariantError(
+                    f"{phase}: packed sections in cell ({col},{row}) overlap: "
+                    f"{upstream.id!r} right={footprint(upstream)[1]:.1f} > "
+                    f"{downstream.id!r} left={footprint(downstream)[0]:.1f}"
+                )
+
+
 def _guard_explicit_grid_directions(graph: MetroGraph, phase: str) -> None:
     """Explicit-grid sections keep the LR default unless they carry an
     explicit %%metro direction.
@@ -4767,6 +4803,7 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     GuardSpec(_guard_explicit_grid_directions, "A"),
     GuardSpec(_guard_no_mixed_entry_directions, "A"),
     GuardSpec(_guard_independent_components_disjoint, "A"),
+    GuardSpec(_guard_multi_section_cell_packed, "A"),
     GuardSpec(_guard_no_same_row_backward_feed, "A"),
     GuardSpec(_guard_anchors_frozen_during_placement, "B"),
     GuardSpec(_guard_bypass_v_flat_visible, "B"),

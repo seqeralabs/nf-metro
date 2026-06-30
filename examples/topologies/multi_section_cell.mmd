@@ -1,0 +1,44 @@
+%%metro title: Multi-section cell packing
+%%metro line: main | Main | #4477aa | solid
+
+%%metro grid: pre | 0,0
+%%metro grid: short_a, long_a | 1,0
+%%metro grid: norm | 2,0
+%%metro grid: long_b, short_b | 1,1
+%%metro grid: cons | 2,1
+
+graph LR
+    subgraph pre [Preprocessing]
+        p1[Input] -->|main| p2[Trim]
+    end
+    subgraph short_a [GATK]
+        a1[Call] -->|main| a2[Filter]
+    end
+    subgraph long_a [Variant Calling]
+        b1[Pileup] -->|main| b2[Genotype]
+        b2 -->|main| b3[Phase]
+        b3 -->|main| b4[Recal]
+        b4 -->|main| b5[Score]
+        b5 -->|main| b6[Emit]
+    end
+    subgraph norm [Normalize]
+        n1[Norm] -->|main| n2[Annotate]
+    end
+    subgraph long_b [Realignment]
+        c1[Index] -->|main| c2[Realign]
+        c2 -->|main| c3[Dedup]
+        c3 -->|main| c4[BQSR]
+        c4 -->|main| c5[Merge]
+        c5 -->|main| c6[Sort]
+    end
+    subgraph short_b [Reporting]
+        d1[Report] -->|main| d2[Summary]
+    end
+    subgraph cons [Consensus]
+        e1[Consensus] -->|main| e2[Final]
+    end
+    p2 -->|main| a1
+    a2 -->|main| b1
+    b6 -->|main| n1
+    c6 -->|main| d1
+    d2 -->|main| e1

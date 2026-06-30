@@ -112,6 +112,15 @@ gallery:
       Each weakly-connected component of the section graph is placed in its own local column
       grid and the components are stacked vertically, so the wide panel never inflates the trunk's
       columns or flings its later sections to the right.
+  - id: multi_section_cell
+    source_dir: examples/topologies
+    category: Feature Showcase
+    description:
+      "Multiple sections packed into one grid cell: a `%%metro grid:` directive
+      names two comma-separated sections that share a cell and pack side-by-side
+      along the flow axis. A short+long pair in one row aligns top-to-bottom with
+      a long+short pair packed into the same column below it, freeing the
+      bottom-left for the legend."
 
   # ── Realistic Pipelines ────────────────────────────────────────────────────
   - id: genomic_pipeline
