@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "Generate metro-map-style SVG diagrams from Mermaid graph definitions"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "Jonathan Manning", email = "jonathan.manning@seqera.io" }]
 maintainers = [{ name = "Jonathan Manning", email = "jonathan.manning@seqera.io" }]
 keywords = [
@@ -28,7 +28,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -83,7 +82,7 @@ xfail_strict = true
 addopts = "-rxX -n auto"
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "ANN", "C901"]
@@ -107,7 +106,7 @@ max-complexity = 30
 files = ["src"]
 mypy_path = "src"
 explicit_package_bases = true
-python_version = "3.10"
+python_version = "3.11"
 ignore_missing_imports = false
 strict_optional = true
 disallow_any_generics = true
