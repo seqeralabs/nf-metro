@@ -255,6 +255,14 @@ gallery:
     description:
       A terminal section whose entry fans into equal-rank sinks; the fan stays symmetric
       about the entry port (regression lock for top-anchored terminal fans).
+  - id: internal_source_equal_sibling_2fan
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "An internal source station feeds exactly two equal-sibling branches (same line,
+      same downstream join). The source is centred between its two consumers, which
+      straddle it symmetrically, rather than staying collinear with one branch while the
+      other peels off (#1223)."
   - id: trunk_through_fan
     source_dir: examples/topologies
     category: Fan-out and Fan-in

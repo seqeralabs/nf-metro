@@ -1,0 +1,16 @@
+%%metro title: Internal-source equal-sibling 2-fan
+%%metro center_ports: true
+
+graph LR
+    subgraph run_folder [Run Folder]
+        rundir_in[ ]
+        checkqc[CheckQC]
+        rundirparser[Rundirparser]
+        rundir_in -->|run_folder| checkqc
+        rundir_in -->|run_folder| rundirparser
+    end
+    subgraph sink [Aggregate]
+        out[MultiQC]
+        checkqc -->|run_folder| out
+        rundirparser -->|run_folder| out
+    end

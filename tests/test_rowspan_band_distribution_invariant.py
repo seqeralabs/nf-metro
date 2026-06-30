@@ -22,7 +22,8 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.phases._common import iter_stacked_rows_in_rowspan_band
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
-SHOWCASE_DIR = Path(__file__).parent.parent / "examples" / "showcase"
+EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
+SHOWCASE_DIR = EXAMPLES_DIR / "showcase"
 
 # Fixtures with a single-row section stack beside a rowspan neighbour.
 FIXTURES = [
@@ -57,28 +58,37 @@ def test_stacked_rows_fill_rowspan_band(stem: str) -> None:
         )
 
 
-def test_symfan_source_hub_collinear_with_trunk_continuation() -> None:
-    """A fan-out source hub sits on the same lane as its trunk continuation (#1206).
+@pytest.mark.parametrize(
+    "rel_path",
+    [
+        "showcase/single_row_rowspan_neighbor.mmd",
+        "topologies/internal_source_equal_sibling_2fan.mmd",
+    ],
+)
+def test_internal_source_2fan_source_centred(rel_path: str) -> None:
+    """An internal source feeding two equal-sibling branches is centred (#1223).
 
-    In ``single_row_rowspan_neighbor`` the run_folder line's source icon
-    ``rundir_in`` fans to ``checkqc`` (upward branch) and ``rundirparser`` (the
-    straight trunk continuation).  ``rundir_in`` and ``rundirparser`` therefore
-    share one horizontal lane, while ``checkqc`` branches off it.  The fan
-    branches are protected half-grid symfan stations; the source hub must share
-    that local frame rather than snapping to the row group's fractional grid
-    origin (which the rowspan FASTQ neighbour's 13-way fan contaminates).
+    In both fixtures the run_folder line's source icon ``rundir_in`` fans to
+    ``checkqc`` and ``rundirparser``: two equal-sibling branches carrying the
+    same single line into the same downstream join.  Neither branch is a
+    designated trunk continuation, so the source sits centred between the two
+    consumers (collinear with the centred trunk and the symmetric exit bundle)
+    rather than on one branch's lane while the other peels off.  The centred
+    trunk Y is the half-grid symfan frame the source shares; it is also clean
+    (an integer grid multiple), keeping the source off the rowspan neighbour's
+    fractional grid origin.
     """
-    graph = parse_metro_mermaid(
-        (SHOWCASE_DIR / "single_row_rowspan_neighbor.mmd").read_text()
-    )
+    graph = parse_metro_mermaid((EXAMPLES_DIR / rel_path).read_text())
     compute_layout(graph, validate=True)
 
     hub = graph.stations["rundir_in"]
-    trunk = graph.stations["rundirparser"]
-    assert abs(hub.y - trunk.y) <= SAME_COORD_TOLERANCE, (
-        f"source hub 'rundir_in' (y={hub.y:.3f}) is not collinear with its trunk "
-        f"continuation 'rundirparser' (y={trunk.y:.3f}); off by "
-        f"{abs(hub.y - trunk.y):.3f}px"
+    lo = graph.stations["checkqc"]
+    hi = graph.stations["rundirparser"]
+    midpoint = (lo.y + hi.y) / 2.0
+    assert abs(hub.y - midpoint) <= SAME_COORD_TOLERANCE, (
+        f"{rel_path}: source hub 'rundir_in' (y={hub.y:.3f}) is not centred "
+        f"between 'checkqc' (y={lo.y:.3f}) and 'rundirparser' (y={hi.y:.3f}); "
+        f"midpoint={midpoint:.3f}, off by {abs(hub.y - midpoint):.3f}px"
     )
 
 

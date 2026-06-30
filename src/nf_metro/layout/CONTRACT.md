@@ -734,19 +734,29 @@ in pipeline order.
 ### Stage 6.3: 2-branch symfan half-grid compaction (engine.py)
 - **Purpose**: Sections containing exactly a 2-branch symmetric fan
   (no off-track / constraining content) collapse onto half-pitch
-  offsets so the section is 1 grid-unit tall instead of 2. Records
-  the placed stations on the public `MetroGraph.half_grid_station_ids`
-  field so Stage 6.4 leaves them alone -- this is the only cross-
-  phase channel for half-grid placement. The fan's remaining on-track
-  stations (its source/trunk) are recorded on
-  `MetroGraph.symfan_trunk_station_ids` so Stage 6.4 keeps them on the
-  same local frame. Gated on `center_ports`.
-- **Helper**: `_apply_half_grid_2branch_symfan`.
+  offsets so the section is 1 grid-unit tall instead of 2. The two
+  branches may be fed from upstream (entry port or a terminus source
+  icon) or from a single in-section non-terminus source whose two
+  consumers are equal siblings (identical line sets); that source is
+  the fan hub and is excluded from the branch count. Records the placed
+  branches on the public `MetroGraph.half_grid_station_ids` field so
+  Stage 6.4 leaves them alone -- this is the only cross-phase channel
+  for half-grid placement. The fan's remaining on-track stations (its
+  source/trunk) are recorded on `MetroGraph.symfan_trunk_station_ids`
+  so Stage 6.4 keeps them on the same local frame; a single in-section
+  equal-sibling source hub is additionally moved to the trunk Y so the
+  fork is a balanced Y-split rather than collinear with one branch.
+  Gated on `center_ports`.
+- **Helper**: `_apply_half_grid_2branch_symfan`
+  (classification via `_symfan_branches_hub` /
+  `_section_symfan_uses_half_grid`).
 - **Precondition**: Stages 6.1 / 6.2 done; symfan classification stable
   (`_section_symfan_uses_half_grid`).
 - **Postcondition**: Eligible symfan pairs share half-pitch offsets
-  from the trunk Y. `graph.half_grid_station_ids` contains their IDs;
-  `graph.symfan_trunk_station_ids` contains the fan's source/trunk IDs.
+  from the trunk Y; an in-section equal-sibling source hub sits on the
+  trunk Y, centred between them. `graph.half_grid_station_ids` contains
+  the branch IDs; `graph.symfan_trunk_station_ids` contains the fan's
+  source/trunk IDs.
 - **Invariants preserved**: Trunk station Y. Other sections.
 - **Related tests**: `test_symfan_pairs_share_y`.
 - **Lifecycle:** invariant - 2-branch symfan pairs keep their half-pitch

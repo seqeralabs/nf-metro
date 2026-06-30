@@ -244,6 +244,94 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
                 graph.stations[sid].y = trunk_y + sign * k * y_spacing
 
 
+def _symfan_branches_hub(
+    graph: MetroGraph, section: Section
+) -> tuple[list[Station], Station | None] | None:
+    """Identify a section's 2-branch symmetric fan, if it has one.
+
+    Returns ``(branches, hub)`` where ``branches`` are the two on-track
+    branch stations sharing one X column and ``hub`` is the single in-section
+    on-track source feeding both (or ``None`` for a fan with no in-section
+    source, e.g. fed directly from the entry port).  Returns ``None`` when the
+    section is not a clean 2-branch symfan.
+
+    Two shapes qualify:
+
+    - Exactly two non-terminus branch stations sharing a column, with no
+      in-section non-terminus source among them.  The fan source is upstream
+      (an entry port, or an in-section terminus source icon excluded from the
+      branch count).
+    - An in-section non-terminus source feeding exactly two equal-sibling
+      branches (identical line sets): the source is excluded from the branch
+      count as the hub.  The equal-sibling requirement keeps genuine
+      trunk-continuation fans (one branch carrying the onward bundle, the other
+      a strict subset) out of this path.
+
+    ``hub`` is reported only when a single in-section on-track source feeds
+    both equal-sibling branches, so callers can centre it between them.
+    """
+    port_ids = section.port_ids
+    nonterm: list[Station] = []
+    has_off_track = False
+    by_col: dict[float, int] = defaultdict(int)
+    for sid in section.station_ids:
+        if sid in port_ids:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or st.is_hidden:
+            continue
+        if st.off_track:
+            has_off_track = True
+            continue
+        if st.is_terminus:
+            # Terminus icons (file outputs / source icons) are not branch
+            # participants; a source icon is recovered as the hub below.
+            continue
+        nonterm.append(st)
+        by_col[round(st.x, 3)] += 1
+    if has_off_track:
+        return None
+
+    hub: Station | None = None
+    branches = nonterm
+    if len(nonterm) == 3:
+        for cand in nonterm:
+            others = [s for s in nonterm if s is not cand]
+            if all(_real_predecessors(graph, {o.id}) == {cand.id} for o in others):
+                hub = cand
+                branches = others
+                break
+        if hub is None:
+            return None
+
+    if len(branches) != 2:
+        return None
+    if abs(branches[0].x - branches[1].x) >= SAME_COORD_TOLERANCE:
+        return None
+    if not all(count <= 2 for count in by_col.values()):
+        return None
+
+    lines_equal = set(graph.station_lines(branches[0].id)) == set(
+        graph.station_lines(branches[1].id)
+    )
+    if hub is not None and not lines_equal:
+        return None
+    if hub is None and lines_equal:
+        preds = _real_predecessors(graph, {branches[0].id})
+        if len(preds) == 1 and preds == _real_predecessors(graph, {branches[1].id}):
+            src = graph.stations.get(next(iter(preds)))
+            if (
+                src is not None
+                and not src.is_port
+                and not src.is_hidden
+                and not src.off_track
+                and src.section_id == section.id
+            ):
+                hub = src
+
+    return branches, hub
+
+
 def _apply_half_grid_2branch_symfan(
     graph: MetroGraph, y_spacing: float, section_y_padding: float = SECTION_Y_PADDING
 ) -> None:
@@ -277,26 +365,10 @@ def _apply_half_grid_2branch_symfan(
     for section in graph.sections.values():
         if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
             continue
-        if not _section_symfan_uses_half_grid(graph, section):
+        result = _symfan_branches_hub(graph, section)
+        if result is None:
             continue
-
-        port_ids = section.port_ids
-        branches: list[Station] = []
-        for sid in section.station_ids:
-            if sid in port_ids:
-                continue
-            st = graph.stations.get(sid)
-            if (
-                st is None
-                or st.is_port
-                or st.is_hidden
-                or st.off_track
-                or st.is_terminus
-            ):
-                continue
-            branches.append(st)
-        if len(branches) != 2:
-            continue
+        branches, hub = result
 
         # Trunk Y from LR/RL ports (preferred) or the branches' midpoint.
         trunk_y: float | None = None
@@ -348,6 +420,12 @@ def _apply_half_grid_2branch_symfan(
                 continue
             graph.symfan_trunk_station_ids.add(src_id)
 
+        # A single in-section source feeding both equal-sibling branches is
+        # centred between them, so the fork is a balanced Y-split rather than
+        # collinear with one branch while the other peels off.
+        if hub is not None:
+            hub.y = trunk_y
+
         # Half-grid branches consume half a y_spacing above and below
         # the trunk instead of a full slot.  Shrink the bbox top to match
         # the new compact extent.  All real (non-port) content sits
@@ -370,55 +448,19 @@ def _apply_half_grid_2branch_symfan(
 def _section_symfan_uses_half_grid(graph: MetroGraph, section: Section) -> bool:
     """Return True when a section's symfan should use half-pitch offsets.
 
-    Trigger conditions (must all hold):
-      - Section has exactly two real "branch" stations: on-track,
-        non-port, non-hidden, non-terminus internal stations sharing
-        a single X column.  Terminus icons (file outputs) and hidden
-        convergence stations are excluded - they're downstream join
-        points that don't constrain symfan spacing.
-      - No off-track stations exist in the section (no input rows
-        sitting in the participants' Y band).
-      - The section has no other columns with multiple branch stations
-        (this is the only fan, so the section height is bounded by
-        these two stations).
+    True when :func:`_symfan_branches_hub` identifies a 2-branch symmetric fan:
+    two on-track branch stations sharing one X column, no off-track stations,
+    no other multi-branch column, fed either from upstream (entry port or
+    terminus source icon) or from a single in-section equal-sibling source.
 
     When the trigger fires the two branch stations are placed at
     ``trunk_y +/- 0.5 * y_spacing`` instead of the default
-    ``trunk_y +/- 1 * y_spacing``, so the section needs only one
-    vertical grid unit instead of two.
-
-    Trunk Y itself is unchanged.  The branches sit at half-pitch
-    relative to the row grid; ``_snap_all_y_to_grid`` skips them via
+    ``trunk_y +/- 1 * y_spacing``, so the section needs only one vertical grid
+    unit instead of two.  The branches sit at half-pitch relative to the row
+    grid; ``_snap_all_y_to_grid`` skips them via
     ``graph.half_grid_station_ids``.
     """
-    port_ids = section.port_ids
-    branches: list[Station] = []
-    has_off_track = False
-    by_col: dict[float, int] = defaultdict(int)
-    for sid in section.station_ids:
-        if sid in port_ids:
-            continue
-        st = graph.stations.get(sid)
-        if st is None or st.is_port or st.is_hidden:
-            continue
-        if st.off_track:
-            has_off_track = True
-            continue
-        if st.is_terminus:
-            # Terminus icons (file outputs) sit downstream of the fan
-            # and are not symfan participants.
-            continue
-        branches.append(st)
-        by_col[round(st.x, 3)] += 1
-    if has_off_track or len(branches) != 2:
-        return False
-    if abs(branches[0].x - branches[1].x) >= SAME_COORD_TOLERANCE:
-        return False
-    # No other column may have a multi-branch population (would force
-    # full-grid height anyway).  With exactly two branches sharing one
-    # column this is implicit, but the check is cheap and future-proofs
-    # the trigger when terminus filtering changes.
-    return all(count <= 2 for count in by_col.values())
+    return _symfan_branches_hub(graph, section) is not None
 
 
 def _iter_fork_join_diamonds(
