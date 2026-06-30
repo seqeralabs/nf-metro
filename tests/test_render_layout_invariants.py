@@ -159,6 +159,60 @@ def test_backtrack_guards_on_render_path(guard_name: str) -> None:
     assert guard_name in names
 
 
+# A line that breezes through a section it never connects to is at least as
+# visibly broken as the backtrack/wrap guards above, so it gets the same
+# always-on treatment: warn by default, raise under --strict.
+BREEZE_THROUGH_RENDER_GUARDS = [
+    "_guard_no_route_through_section",
+    "_guard_no_line_crosses_non_consumer",
+]
+
+
+@pytest.mark.parametrize("guard_name", BREEZE_THROUGH_RENDER_GUARDS)
+def test_breeze_through_guards_on_render_path(guard_name: str) -> None:
+    """The non-consumer-section breeze-through guards are part of the
+    always-on render chokepoint set (Tier A), not the validate-only set."""
+    names = {spec.name for spec in render_layout_invariant_specs()}
+    assert guard_name in names
+
+
+def _pack_into_one_cell(text: str) -> str:
+    """Repoint the manual-grid bypass fixture's ``realign``/``reporting`` rows
+    from two separate cells onto one shared cell, so the non-consumer line
+    must cross a packed cell-mate rather than a standalone intervening
+    section."""
+    return text.replace(
+        "%%metro grid: realign | 1,1,2,1\n%%metro grid: reporting | 0,1\n",
+        "%%metro grid: realign, reporting | 1,1\n",
+        1,
+    )
+
+
+def _render_packed_cell_breeze(*, strict: bool = False) -> None:
+    text = _pack_into_one_cell(
+        (EXAMPLES / "topologies" / "manual_rl_row_nonconsumer_bypass.mmd").read_text()
+    )
+    graph = parse_metro_mermaid(text)
+    graph.strict = strict
+    compute_layout(graph)
+    render_svg(graph, THEMES["nfcore"])
+
+
+def test_packed_cell_breeze_through_warns_by_default() -> None:
+    """A line routed straight through a non-consumer section it shares a
+    packed grid cell with warns on the default render path instead of
+    shipping silently."""
+    with pytest.warns(UserWarning, match="Tier-A invariants"):
+        _render_packed_cell_breeze()
+
+
+def test_packed_cell_breeze_through_raises_under_strict() -> None:
+    """The same packed-cell breeze-through raises ``LayoutInvariantError``
+    under ``--strict`` rather than rendering a silently-broken map."""
+    with pytest.raises(LayoutInvariantError, match="Tier-A invariants"):
+        _render_packed_cell_breeze(strict=True)
+
+
 def _render_fixture(name: str, *, strict: bool = False) -> None:
     graph = parse_metro_mermaid((FIXTURES / name).read_text())
     graph.strict = strict

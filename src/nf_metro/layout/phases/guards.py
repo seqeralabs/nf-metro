@@ -4483,7 +4483,7 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     # before that the sibling bundle's route passes through its marker bbox.
     GuardSpec(
         _guard_no_line_crosses_non_consumer,
-        "B",
+        "A",
         needs=frozenset({"offsets", "routes"}),
         bisection_safe=True,
         first_valid_stage="after Stage 6.14",
@@ -4749,7 +4749,7 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     ),
     GuardSpec(
         _guard_no_route_through_section,
-        "B",
+        "A",
         needs=frozenset({"routes", "offsets"}),
         issue_pin=("#484",),
         narrow_reason=(

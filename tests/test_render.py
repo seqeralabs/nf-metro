@@ -363,9 +363,12 @@ def test_render_file_size():
         "%%metro line: main | Main | #ff0000\n"
         "%%metro line: alt | Alt | #0000ff\n"
         "graph LR\n"
-        "    a[A]\n    b[B]\n    c[C]\n    d[D]\n    e[E]\n"
-        "    a -->|main| b\n    b -->|main| c\n    c -->|main| d\n    d -->|main| e\n"
-        "    a -->|alt| c\n    c -->|alt| e\n"
+        "    subgraph sec [Section]\n"
+        "        a[A]\n    b[B]\n    c[C]\n    d[D]\n    e[E]\n"
+        "        a -->|main| b\n    b -->|main| c\n    c -->|main| d\n"
+        "        d -->|main| e\n"
+        "        a -->|alt| c\n    c -->|alt| e\n"
+        "    end\n"
     )
     compute_layout(graph)
     svg = render_svg(graph, NFCORE_THEME)

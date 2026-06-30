@@ -29,20 +29,27 @@ Tier A is the always-on render-path set; Tier B is the `validate=True` set.
 
 ## Tiers
 
-| Tier  | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Promotion intent                                                                 |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| **A** | Cheap, observational structural checks: placement (finite coords, bbox containment with marker overhang, station overlap, ports on boundaries) **plus** `_guard_stations_within_bbox`, the inter-section backtrack/wrap guards (`_guard_inter_section_route_no_backtrack`, `_guard_inter_section_route_no_full_width_backtrack`, `_guard_serpentine_no_backtrack`, `_guard_inter_section_route_clears_own_section_interior`), and the routing `check_*` invariants already always-on via the render chokepoint. | Run on the default render path, warning by default with a `--strict` escalation. |
-| **B** | The remaining `validate=True` set: route-shape, bundle-order, label, rail, and merge-port geometry. Correct but either costlier or dependent on a mid-pipeline reroute (they consume `route_edges` output), so not cheap-always-on.                                                                                                                                                                                                                                                                             | Stay behind `validate=True` / `--strict`.                                        |
-| **C** | Test-only oracles: too slow, too fixture-specific, or non-observational.                                                                                                                                                                                                                                                                                                                                                                                                                                        | Live in the test suite, not the runtime suite.                                   |
+| Tier  | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Promotion intent                                                                 |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| **A** | Cheap, observational structural checks: placement (finite coords, bbox containment with marker overhang, station overlap, ports on boundaries) **plus** `_guard_stations_within_bbox`, the inter-section backtrack/wrap guards (`_guard_inter_section_route_no_backtrack`, `_guard_inter_section_route_no_full_width_backtrack`, `_guard_serpentine_no_backtrack`, `_guard_inter_section_route_clears_own_section_interior`), the non-consumer-section breeze-through guards (`_guard_no_route_through_section`, `_guard_no_line_crosses_non_consumer`), and the routing `check_*` invariants already always-on via the render chokepoint. | Run on the default render path, warning by default with a `--strict` escalation. |
+| **B** | The remaining `validate=True` set: route-shape, bundle-order, label, rail, and merge-port geometry. Correct but either costlier or dependent on a mid-pipeline reroute (they consume `route_edges` output), so not cheap-always-on.                                                                                                                                                                                                                                                                                                                                                                                                        | Stay behind `validate=True` / `--strict`.                                        |
+| **C** | Test-only oracles: too slow, too fixture-specific, or non-observational.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Live in the test suite, not the runtime suite.                                   |
 
-Tier A is the cheap-observational set the cost audit confirms runs in low tens
-of microseconds. Most members are placement-only structural checks needing no
-routing pass; the render path already pays for `routes`/`offsets`, so the
-inter-section backtrack/wrap guards (which read the routed geometry but are
-cheap sweeps, the dearest ~11 us) join it too. Tier B holds everything that is
-materially more expensive; the most expensive members
-(`check_no_hanging_routes` ~470 us, `_guard_no_route_through_section` ~93 us,
-the collinear-distinct checks ~100 us) are routed-geometry sweeps. **Tier C**
+Tier A is mostly the cheap-observational set the cost audit confirms runs in
+low tens of microseconds, with a handful of routed-geometry sweeps in the
+~10-90 us range whose visibility matters more than their cost: the
+inter-section backtrack/wrap guards (the dearest ~11 us) and the
+non-consumer-section breeze-through guards (`_guard_no_route_through_section`
+~86 us, `_guard_no_line_crosses_non_consumer` ~75 us) — a line plotted over a
+section or station it never touches is at least as visibly broken as a
+backtracking bundle, so it stays on the always-on path despite the cost. Tier
+B holds everything else that is materially more expensive or depends on a
+mid-pipeline reroute; its most expensive members
+(`_guard_no_opposing_line_overlap` ~86 us, `_guard_trunk_bands_crossing_optimal`
+~57 us) are routed-geometry sweeps. The always-on `check_*` routing invariants
+(`routing/invariants.py`) run through a separate chokepoint and include
+members up to `check_no_hanging_routes` at ~470 us; cost alone does not gate
+Tier-A membership in either family, visibility of the defect does. **Tier C**
 holds the two seam oracle checks - `check_seam_approach_equals_departure` and
 `check_seam_segments_meet_at_port` - which verify the rotation-unification
 property: at every inter-section seam the approach must place each line on the
@@ -115,7 +122,7 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 | `_guard_ports_on_boundaries`                             | A    |     1.3 | bisection (first valid: start)            |
 | `_guard_no_station_overlap`                              | A    |    13.5 | bisection (first valid: after Stage 6.4)  |
 | `_guard_no_coincident_station_coords`                    | A    |     3.3 | bisection (first valid: after Stage 6.4)  |
-| `_guard_no_line_crosses_non_consumer`                    | B    |    76.5 | bisection (first valid: after Stage 6.14) |
+| `_guard_no_line_crosses_non_consumer`                    | A    |    74.7 | bisection (first valid: after Stage 6.14) |
 | `_guard_station_x_column_drift`                          | A    |     6.0 | bisection (first valid: start)            |
 | `_guard_row_trunk_cy_consistent`                         | B    |    12.1 | final-only                                |
 | `_guard_off_track_clear_of_anchor`                       | B    |     3.5 | final-only                                |
@@ -147,7 +154,7 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 | `_guard_inter_section_route_no_backtrack`                | A    |     4.7 | final-only                                |
 | `_guard_inter_section_route_no_full_width_backtrack`     | A    |     5.3 | final-only                                |
 | `_guard_routes_enter_sections_at_ports`                  | B    |    61.9 | final-only                                |
-| `_guard_no_route_through_section`                        | B    |    92.9 | final-only                                |
+| `_guard_no_route_through_section`                        | A    |    85.7 | final-only                                |
 | `_guard_inter_section_route_clears_own_section_interior` | A    |    11.3 | final-only                                |
 | `_guard_feeder_exits_section_through_side`               | B    |     8.2 | final-only                                |
 | `_guard_entry_approach_from_port_side`                   | B    |     5.3 | final-only                                |
