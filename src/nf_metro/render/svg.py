@@ -958,6 +958,20 @@ def _has_adaptive_logos(graph: MetroGraph) -> bool:
     )
 
 
+def _resolve_logo_file(raw: str, source_dir: str) -> str:
+    """Return an absolute path to *raw* if it resolves, else empty string.
+
+    Tries *raw* as-is first, then relative to *source_dir*.
+    """
+    if Path(raw).is_file():
+        return raw
+    if source_dir:
+        candidate = Path(source_dir) / raw
+        if candidate.is_file():
+            return str(candidate)
+    return ""
+
+
 def _resolve_logo(graph: MetroGraph, adaptive: bool) -> tuple[bool, float, float, str]:
     """Return (show_logo, logo_w, logo_h, effective_logo_path).
 
@@ -966,16 +980,34 @@ def _resolve_logo(graph: MetroGraph, adaptive: bool) -> tuple[bool, float, float
     In single-path mode ``effective_logo`` is the path to render.
     """
     if adaptive:
-        candidates = (graph.logo_path_dark, graph.logo_path_light)
-        dim_path = next((p for p in candidates if p and Path(p).is_file()), "")
+        raw_candidates = (graph.logo_path_dark, graph.logo_path_light)
+        dim_path = next(
+            (_resolve_logo_file(p, graph.source_dir) for p in raw_candidates if p),
+            "",
+        )
         if dim_path:
             w, h = compute_logo_dimensions(dim_path)
             return True, w, h, ""
+        set_paths = [p for p in raw_candidates if p]
+        if set_paths:
+            warnings.warn(
+                f"%%metro logo: path(s) {set_paths} not found; logo will be omitted",
+                UserWarning,
+                stacklevel=2,
+            )
         return False, 0.0, 0.0, ""
     effective = _effective_logo_path(graph)
-    if effective and Path(effective).is_file():
-        w, h = compute_logo_dimensions(effective)
-        return True, w, h, effective
+    if not effective:
+        return False, 0.0, 0.0, ""
+    resolved = _resolve_logo_file(effective, graph.source_dir)
+    if resolved:
+        w, h = compute_logo_dimensions(resolved)
+        return True, w, h, resolved
+    warnings.warn(
+        f"%%metro logo: path {effective!r} not found; logo will be omitted",
+        UserWarning,
+        stacklevel=2,
+    )
     return False, 0.0, 0.0, effective
 
 

@@ -136,6 +136,7 @@ def prepare_graph(
     logo: str | None = None,
     legend: str | None = None,
     layout_options: Mapping[str, object] | None = None,
+    source_dir: str | None = None,
 ) -> MetroGraph:
     """Parse *text*, apply option overrides, and compute the layout in place.
 
@@ -165,6 +166,8 @@ def prepare_graph(
 
     apply_layout_overrides(graph, opts)
 
+    if source_dir is not None:
+        graph.source_dir = source_dir
     if line_spread is not None:
         graph.line_spread = LineSpread(line_spread)
     if logo is not None:

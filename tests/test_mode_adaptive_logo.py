@@ -1,11 +1,18 @@
 """Tests for mode-adaptive logo path selection."""
 
+import io
+import warnings
+
+import pytest
+from PIL import Image as PILImage
+
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.ns import adaptive_logo_mask_ids as _adaptive_logo_mask_ids
 from nf_metro.render.svg import (
     _effective_logo_path,
     _has_adaptive_logos,
     _is_adaptive_mode,
+    _resolve_logo,
 )
 
 
@@ -131,3 +138,84 @@ def test_is_adaptive_mode_false_for_single_path():
 def test_is_adaptive_mode_false_when_no_logo():
     g = _graph_with_logo()
     assert not _is_adaptive_mode(g)
+
+
+def _write_png(path: "Path") -> None:  # type: ignore[name-defined]  # noqa: F821
+    img = PILImage.new("RGB", (100, 50), color=(255, 0, 0))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    path.write_bytes(buf.getvalue())
+
+
+def test_resolve_logo_warns_on_missing_single_path():
+    """A set logo_path that doesn't exist on disk should emit a warning."""
+    g = MetroGraph()
+    g.logo_path = "does/not/exist.png"
+    with pytest.warns(UserWarning, match="does/not/exist.png"):
+        show, _, _, _ = _resolve_logo(g, adaptive=False)
+    assert not show
+
+
+def test_resolve_logo_no_warning_when_no_path_set():
+    """Empty logo_path emits no warning."""
+    g = MetroGraph()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        show, _, _, _ = _resolve_logo(g, adaptive=False)
+    assert not show
+
+
+def test_resolve_logo_resolves_relative_to_source_dir(tmp_path):
+    """A logo_path relative to source_dir resolves correctly."""
+    logo_file = tmp_path / "mylogo.png"
+    _write_png(logo_file)
+
+    g = MetroGraph()
+    g.logo_path = "mylogo.png"
+    g.source_dir = str(tmp_path)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        show, w, h, effective = _resolve_logo(g, adaptive=False)
+    assert show
+    assert effective == str(logo_file)
+    assert w > 0
+
+
+def test_resolve_logo_warns_when_source_dir_set_but_still_missing(tmp_path):
+    """A logo_path that doesn't exist relative to source_dir emits a warning."""
+    g = MetroGraph()
+    g.logo_path = "nonexistent.png"
+    g.source_dir = str(tmp_path)
+    with pytest.warns(UserWarning, match="nonexistent.png"):
+        show, _, _, _ = _resolve_logo(g, adaptive=False)
+    assert not show
+
+
+def test_resolve_adaptive_logo_warns_on_missing_paths():
+    """In adaptive mode, missing both variants should emit a warning."""
+    g = MetroGraph()
+    g.logo_path_light = "missing_light.png"
+    g.logo_path_dark = "missing_dark.png"
+    with pytest.warns(UserWarning, match="missing_light.png|missing_dark.png"):
+        show, _, _, _ = _resolve_logo(g, adaptive=True)
+    assert not show
+
+
+def test_resolve_adaptive_logo_resolves_relative_to_source_dir(tmp_path):
+    """Adaptive logo paths resolve relative to source_dir."""
+    light_file = tmp_path / "light.png"
+    dark_file = tmp_path / "dark.png"
+    _write_png(light_file)
+    _write_png(dark_file)
+
+    g = MetroGraph()
+    g.logo_path_light = "light.png"
+    g.logo_path_dark = "dark.png"
+    g.source_dir = str(tmp_path)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        show, w, h, _ = _resolve_logo(g, adaptive=True)
+    assert show
+    assert w > 0
