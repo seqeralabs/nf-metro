@@ -1,0 +1,96 @@
+%%metro title: nf-core/seqinspector
+%%metro style: dark
+
+%%metro line: run_folder | Run Folder | #1f77b4
+%%metro line: fastq_files | FASTQ Files | #ff7f0e
+%%metro line: bam_files | BAM Files | #24B064
+
+%%metro file: fastq_in | FASTQ | | banner
+%%metro dir: rundir_in | RUNDIR
+%%metro file: multiqc | HTML | | banner
+%%metro center_ports: true
+%%metro compact_offsets: true
+%%metro legend: br
+%%metro grid: fastq_files | 0,0,2
+%%metro grid: run_folder | 1,0
+%%metro grid: bam_files | 1,1
+%%metro grid: multiqc | 2,0,2
+
+graph LR
+    subgraph fastq_files [FASTQ Files]
+        fastq_in[ ]
+
+        bbmap[BBMap Clumpify]
+        fastp[FastP]
+        fastqc[FASTQC]
+        fastqe[FASTQE]
+        fastqscreen[FastQ Screen]
+        fq_lint[FQ Lint]
+        kraken2[Kraken2]
+        krona[Krona]
+        seqfu[SeqFu Stats]
+        seqkit[SeqKit Stats]
+        seqtk[Seqtk sample]
+        sequali[Sequali]
+        toulligqc[ToulligQC]
+
+        fastq_in -->|fastq_files| seqtk
+
+        seqtk -->|fastq_files| kraken2
+        kraken2 -->|fastq_files| krona
+
+        subgraph bam_files [BAM Files]
+            bwamem2[BWAmem2]
+
+            picardhs[Picard collecthsmetrics]
+            picardmultiple[Picard collectmultiplemetrics]
+            riker[Riker multi]
+
+            bwamem2 -->|bam_files| picardhs
+            bwamem2 -->|bam_files| picardmultiple
+            bwamem2 -->|bam_files| riker
+        end
+
+        seqtk -->|fastq_files| bbmap
+        seqtk -->|fastq_files| bwamem2
+        seqtk -->|fastq_files| fastp
+        seqtk -->|fastq_files| fastqc
+        seqtk -->|fastq_files| fastqe
+        seqtk -->|fastq_files| fastqscreen
+        seqtk -->|fastq_files| fq_lint
+        seqtk -->|fastq_files| seqfu
+        seqtk -->|fastq_files| seqkit
+        seqtk -->|fastq_files| sequali
+        seqtk -->|fastq_files| toulligqc
+    end
+
+    subgraph run_folder [Run Folder]
+        rundir_in[ ]
+
+        checkqc[CheckQC]
+        rundirparser[Rundirparser]
+
+        rundir_in -->|run_folder| checkqc
+        rundir_in -->|run_folder| rundirparser
+    end
+
+    subgraph multiqc [MultiQC]
+        multiqc[MultiQC]
+
+        bbmap -->|fastq_files| multiqc
+        checkqc -->|run_folder| multiqc
+        fastp -->|fastq_files| multiqc
+        fastqc -->|fastq_files| multiqc
+        fastqe -->|fastq_files| multiqc
+        fastqscreen -->|fastq_files| multiqc
+        fq_lint -->|fastq_files| multiqc
+        krona -->|fastq_files| multiqc
+        picardhs -->|bam_files| multiqc
+        picardmultiple -->|bam_files| multiqc
+        riker -->|bam_files| multiqc
+        rundirparser -->|run_folder| multiqc
+        seqfu -->|fastq_files| multiqc
+        seqkit -->|fastq_files| multiqc
+        sequali -->|fastq_files| multiqc
+        toulligqc -->|fastq_files| multiqc
+    end

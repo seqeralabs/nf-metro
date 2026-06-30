@@ -244,6 +244,59 @@ def iter_fold_lr_exit_straight_runs(
             yield port_id, tgt
 
 
+def iter_stacked_rows_in_rowspan_band(
+    graph: MetroGraph, tolerance: float
+) -> Iterator[tuple[list[Section], float, float]]:
+    """Yield ``(stack, band_top, band_bot)`` for single-row stacks beside a rowspan.
+
+    A ``stack`` is the single-row sections of one column, ordered by grid row,
+    that cover one-per-row the full row range an *adjacent* ``grid_row_span > 1``
+    section spans.  ``band_top``/``band_bot`` are that neighbour's bbox extent.
+    Only stacks whose band has slack beyond their combined height (by more than
+    ``tolerance``) are yielded, so a stack already filling its band is skipped.
+
+    The single source of "which stack must fill which rowspan band" shared by the
+    pass that distributes it (:func:`_distribute_stacked_rows_in_rowspan_band`),
+    the guard that flags a stack that does not
+    (``_guard_stacked_rows_fill_rowspan_band``), and the layout invariant test --
+    so the three cannot drift on scope or predicate.
+    """
+    rowspans = [
+        s
+        for s in graph.sections.values()
+        if s.grid_row_span > 1 and s.bbox_h > 0 and s.grid_row >= 0
+    ]
+    if not rowspans:
+        return
+
+    by_col: dict[int, list[Section]] = defaultdict(list)
+    for section in graph.sections.values():
+        if section.grid_row_span == 1 and section.bbox_h > 0 and section.grid_row >= 0:
+            by_col[section.grid_col].append(section)
+
+    for col, stack in by_col.items():
+        stack.sort(key=lambda s: s.grid_row)
+        band = [
+            r
+            for r in rowspans
+            if abs(r.grid_col - col) == 1
+            and r.grid_row <= stack[0].grid_row
+            and r.grid_row + r.grid_row_span - 1 >= stack[-1].grid_row
+        ]
+        if not band:
+            continue
+        band_top_row = min(r.grid_row for r in band)
+        band_bot_row = max(r.grid_row + r.grid_row_span - 1 for r in band)
+        if sorted(s.grid_row for s in stack) != list(
+            range(band_top_row, band_bot_row + 1)
+        ):
+            continue
+        band_top = min(r.bbox_y for r in band)
+        band_bot = max(r.bbox_y + r.bbox_h for r in band)
+        if (band_bot - band_top) - sum(s.bbox_h for s in stack) > tolerance:
+            yield stack, band_top, band_bot
+
+
 @contextmanager
 def _scoped_sections(graph: MetroGraph, section_ids: list[str]) -> Iterator[None]:
     """Temporarily restrict ``graph.sections`` to ``section_ids``.

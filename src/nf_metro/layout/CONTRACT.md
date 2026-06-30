@@ -996,6 +996,27 @@ in pipeline order.
   sections), the final top-sizing pass. Row-top flush alignment is not a
   maintained property; it is transient scaffolding superseded here.
 
+### Stage 6.15b: distribute stacked rows across a rowspan band
+- **Purpose**: When a column holds single-row sections stacked one per grid
+  row beside an adjacent `grid_row_span > 1` section spanning those rows,
+  distribute them across that section's vertical band so the topmost's bbox
+  top meets the band top and the bottommost's bbox bottom meets the band
+  bottom. Otherwise a `center_ports` fan in the top section spreads above the
+  band into the title space, and the bottom section floats high with slack
+  beneath it.
+- **Helper**: `_distribute_stacked_rows_in_rowspan_band` (`phases/row_align.py`),
+  after the Stage 6.15a fit and before `_shift_graph_into_canvas`.
+- **Precondition**: Bbox tops content-fitted (post-fit), bboxes final-sized.
+- **Postcondition**: For a qualifying stack (one section per band row, with
+  band slack), the topmost top equals the band top and the bottommost bottom
+  equals the band bottom; sections shift without resizing.
+- **Invariants preserved**: Bbox heights; intra-section station geometry
+  (each section's stations and ports shift together).
+- **Related tests**: `test_stacked_rows_fill_rowspan_band`; runtime guard
+  `_guard_stacked_rows_fill_rowspan_band`. Resolves #1207, #1209.
+- **Lifecycle:** invariant - a qualifying stack fills its rowspan band at the
+  final boundary.
+
 ### Stage 6.15: snap canvas to the y-grid
 - **Purpose**: After all settling, restore canvas-wide grid alignment.
   Stage 6.4 snaps to a per-row grid, but later helpers (notably

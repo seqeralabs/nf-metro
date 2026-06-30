@@ -259,6 +259,7 @@ from nf_metro.layout.phases.row_align import (  # noqa: F401
     _align_row_trunk_ys,
     _align_row_y_grids,
     _compact_row_content_to_bbox_top,
+    _distribute_stacked_rows_in_rowspan_band,
     _recompute_grid_group_bboxes,
     _top_align_row_bboxes_only,
     _top_align_row_sections,
@@ -1788,6 +1789,7 @@ def _finalize_layout(
     # re-fit's non-grid shift is then cleaned up by the Stage 6.15
     # canvas snap below.
     _fit_bboxes_to_content_top(graph, section_y_padding, section_y_gap)
+    _distribute_stacked_rows_in_rowspan_band(graph)
     _shift_graph_into_canvas(graph, section_y_padding)
     # Must precede the structural snapshot: the extent counts the exit port and
     # the next relay's inter-row cascade reads it, so both need the lowered Y.

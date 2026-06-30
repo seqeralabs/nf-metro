@@ -21,6 +21,7 @@ from nf_metro.layout.phases._common import (
     _row_contiguous_column_groups,
     _section_bundle_lines,
     _section_trunk_y,
+    iter_stacked_rows_in_rowspan_band,
 )
 from nf_metro.layout.phases.ports import _set_port_y
 from nf_metro.layout.phases.single_section import _multiline_label_padding
@@ -514,6 +515,48 @@ def _top_align_row_sections(graph: MetroGraph) -> None:
                     if station:
                         station.y -= delta
                 section.bbox_y -= delta
+
+
+def _shift_section_y(graph: MetroGraph, section: Section, delta: float) -> None:
+    """Shift a section's stations, ports and bbox top by ``delta`` (no resize)."""
+    for sid in section.station_ids:
+        station = graph.stations.get(sid)
+        if station is not None:
+            station.y += delta
+        port = graph.ports.get(sid)
+        if port is not None:
+            port.y += delta
+    section.bbox_y += delta
+
+
+def _distribute_stacked_rows_in_rowspan_band(graph: MetroGraph) -> None:
+    """Distribute single-row sections stacked in a column across the band a
+    neighbouring rowspan section fills.
+
+    A column can hold several single-row sections stacked one per grid row,
+    beside a taller ``grid_row_span > 1`` section that spans those same rows.
+    Each single-row section is otherwise positioned on its own row line, so the
+    topmost can poke above the band top -- a fan centred on its row line spreads
+    upward into the title band -- and the bottommost can stop short of the band
+    bottom, leaving slack beneath it.
+
+    When the stack holds exactly one section per band row, distribute the
+    sections evenly across the band: the topmost's bbox top meets the band top,
+    the bottommost's bbox bottom meets the band bottom, and any middle sections
+    sit on equal gaps between.  Only acts when the band has slack to give, so a
+    stack already filling its band is left untouched.
+    """
+    for stack, band_top, band_bot in iter_stacked_rows_in_rowspan_band(
+        graph, SAME_COORD_TOLERANCE
+    ):
+        slack = (band_bot - band_top) - sum(s.bbox_h for s in stack)
+        gap = slack / (len(stack) - 1) if len(stack) > 1 else 0.0
+        cursor = band_top
+        for section in stack:
+            delta = cursor - section.bbox_y
+            if abs(delta) > SAME_COORD_TOLERANCE:
+                _shift_section_y(graph, section, delta)
+            cursor += section.bbox_h + gap
 
 
 def _top_align_row_bboxes_only(graph: MetroGraph) -> None:

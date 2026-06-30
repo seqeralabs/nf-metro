@@ -172,6 +172,15 @@ gallery:
       level along the row, the other turns down to a lower loop. Regression fixture
       for the peel-off lane crossover at the exit -- the reversal must follow the
       continuing line through the peel-off junction so it stays level."
+  - id: single_row_rowspan_neighbor
+    source_dir: examples/showcase
+    category: Realistic Pipelines
+    description:
+      "nf-core/seqinspector with an explicit `%%metro grid:` stacking two single-row
+      sections (Run Folder, BAM Files) in the column beside a rowspan-2 FASTQ section.
+      Regression fixture: the stacked sections must fill the rowspan band -- the top one's
+      box top meets the band top (instead of a fan poking into the title) and the bottom
+      one's box bottom meets the band bottom (instead of floating high with slack below)."
 
   # ── Basic Topologies ───────────────────────────────────────────────────────
   - id: single_section
