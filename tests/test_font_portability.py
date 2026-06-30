@@ -7,6 +7,7 @@ Invariants:
   and leaves no <text> elements in the output.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -47,11 +48,18 @@ def test_embed_font_contains_base64_data_uri() -> None:
 
 
 @pytest.mark.skipif(FIXTURE_FILE is None, reason="no example fixtures found")
-def test_embed_font_replaces_font_family_with_inter() -> None:
-    """All font-family attributes must be updated to 'Inter' when embedding."""
-    svg = _render(FIXTURE_FILE, "embed")
-    assert "Helvetica" not in svg, "Helvetica family should be replaced by Inter"
-    assert 'font-family="Inter"' in svg or "font-family: Inter" in svg
+@pytest.mark.parametrize("fixture", EXAMPLES, ids=lambda p: p.name)
+def test_embed_font_family_has_generic_fallback(fixture: Path) -> None:
+    """Every embedded font-family must end in a generic family so a stripped
+    @font-face degrades to sans-serif (not the browser serif default)."""
+    svg = _render(fixture, "embed")
+    families = re.findall(r'font-family="([^"]*)"', svg)
+    assert families, "expected font-family attributes in embedded SVG"
+    for family in set(families):
+        assert family.startswith("Inter"), f"Inter must lead the stack: {family!r}"
+        assert family.rstrip().endswith("sans-serif"), (
+            f"embedded font-family lacks a generic fallback: {family!r}"
+        )
 
 
 @pytest.mark.skipif(FIXTURE_FILE is None, reason="no example fixtures found")
