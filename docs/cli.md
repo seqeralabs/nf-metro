@@ -22,7 +22,7 @@ Every layout/render option below also has a `%%metro` directive twin; an explici
 | `--theme [nfcore\|light]`                  | from `style:`, else `nfcore` | Visual theme                                                                      |
 | `--debug / --no-debug`                     | off                          | Show debug overlay                                                                |
 | `--from-nextflow`                          | off                          | Convert Nextflow `-with-dag` input before rendering                               |
-| `--logo PATH`                              | none                         | Logo image path                                                                   |
+| `--logo PATH`                              | none                         | Logo image path (must exist; errors on a bad path, same as `%%metro logo:`)       |
 | `--title TEXT`                             | none                         | Pipeline title                                                                    |
 | `--legend TEXT`                            | auto                         | Legend+logo position (keyword, `keyword \| canvas`, `keyword \| dx,dy`, or `x,y`) |
 | `--line-spread [bundle\|centered\|rails]`  | `bundle`                     | How shared lines relate vertically                                                |

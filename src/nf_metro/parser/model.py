@@ -426,6 +426,7 @@ class MetroGraph:
     logo_path: str = ""
     logo_path_light: str = ""
     logo_path_dark: str = ""
+    source_dir: str = ""
     logo_scale: float = 1.0  # multiplies the logo size within the legend block
     legend_logo_gap: float | None = None  # px gap between logo and legend entries
     # Multiplies every text size for the render (station labels, title,

@@ -17,6 +17,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from nf_metro.layout import compute_layout
@@ -136,6 +137,7 @@ def prepare_graph(
     logo: str | None = None,
     legend: str | None = None,
     layout_options: Mapping[str, object] | None = None,
+    source_dir: str = "",
 ) -> MetroGraph:
     """Parse *text*, apply option overrides, and compute the layout in place.
 
@@ -165,6 +167,14 @@ def prepare_graph(
 
     apply_layout_overrides(graph, opts)
 
+    if source_dir:
+        graph.source_dir = source_dir
+        for attr in ("logo_path", "logo_path_light", "logo_path_dark"):
+            raw: str = getattr(graph, attr)
+            if raw and not Path(raw).is_file():
+                candidate = Path(source_dir) / raw
+                if candidate.is_file():
+                    setattr(graph, attr, str(candidate))
     if line_spread is not None:
         graph.line_spread = LineSpread(line_spread)
     if logo is not None:
@@ -173,6 +183,11 @@ def prepare_graph(
         apply_legend_directive(legend, graph)
     if title is not None:
         graph.title = title
+
+    for _attr in ("logo_path", "logo_path_light", "logo_path_dark"):
+        _raw: str = getattr(graph, _attr)
+        if _raw and not Path(_raw).is_file():
+            raise ValueError(f"%%metro logo: path {_raw!r} not found")
 
     compute_layout(graph)
     return graph
