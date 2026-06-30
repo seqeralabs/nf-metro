@@ -251,6 +251,10 @@ pass:
   snap, which must skip these half-pitch stations. Stage 6.17 runs after the
   last snap, so its writes mark branches for the invariant tests / straddle
   guard rather than feeding a later snap.
+- `graph.symfan_trunk_station_ids` - written by Stage 6.3 (`center_ports` only);
+  read by the Stage 6.4 grid snap, which must skip these source/trunk stations
+  so they stay on the symfan's local frame instead of snapping to a rowspan
+  neighbour's fractional row-grid origin.
 - `graph._consumers_grid_snapped` - set right after the Stage 6.4 snap; the
   Stage 6.6 off-track reanchor carries its own always-on guard on it.
 
@@ -733,12 +737,16 @@ in pipeline order.
   offsets so the section is 1 grid-unit tall instead of 2. Records
   the placed stations on the public `MetroGraph.half_grid_station_ids`
   field so Stage 6.4 leaves them alone -- this is the only cross-
-  phase channel for half-grid placement. Gated on `center_ports`.
+  phase channel for half-grid placement. The fan's remaining on-track
+  stations (its source/trunk) are recorded on
+  `MetroGraph.symfan_trunk_station_ids` so Stage 6.4 keeps them on the
+  same local frame. Gated on `center_ports`.
 - **Helper**: `_apply_half_grid_2branch_symfan`.
 - **Precondition**: Stages 6.1 / 6.2 done; symfan classification stable
   (`_section_symfan_uses_half_grid`).
 - **Postcondition**: Eligible symfan pairs share half-pitch offsets
-  from the trunk Y. `graph.half_grid_station_ids` contains their IDs.
+  from the trunk Y. `graph.half_grid_station_ids` contains their IDs;
+  `graph.symfan_trunk_station_ids` contains the fan's source/trunk IDs.
 - **Invariants preserved**: Trunk station Y. Other sections.
 - **Related tests**: `test_symfan_pairs_share_y`.
 - **Lifecycle:** invariant - 2-branch symfan pairs keep their half-pitch

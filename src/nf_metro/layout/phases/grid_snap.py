@@ -103,6 +103,8 @@ def _group_grid_origin(
     per_section_ports: dict[str, set[str]] = {}
     require_phase_field(graph, "half_grid_station_ids")
     half_grid_ids = graph.half_grid_station_ids
+    require_phase_field(graph, "symfan_trunk_station_ids")
+    symfan_trunk_ids = graph.symfan_trunk_station_ids
     for sec_id in sec_ids:
         section = graph.sections.get(sec_id)
         if section is None or section.bbox_h <= 0:
@@ -112,9 +114,9 @@ def _group_grid_origin(
         for sid in section.station_ids:
             if sid in port_ids:
                 continue
-            # Half-grid stations sit at origin + 0.5 * pitch by design; don't
-            # let them shift the row's grid origin.
-            if sid in half_grid_ids:
+            # Half-grid branches and the symfan source/trunk stations they share
+            # a frame with carry the section's own local Y, not the row origin.
+            if sid in half_grid_ids or sid in symfan_trunk_ids:
                 continue
             st = graph.stations.get(sid)
             if st is None or st.off_track:
@@ -142,6 +144,8 @@ def _snap_group_to_grid(
     origin_r, per_section_ports = origin_info
     require_phase_field(graph, "half_grid_station_ids")
     half_grid_ids = graph.half_grid_station_ids
+    require_phase_field(graph, "symfan_trunk_station_ids")
+    symfan_trunk_ids = graph.symfan_trunk_station_ids
 
     # Independent snapping can round two same-column stations onto one slot;
     # the later one keeps its pre-snap Y rather than collapsing.
@@ -153,7 +157,7 @@ def _snap_group_to_grid(
             continue
         vertical_flow = not lanes_run_along_y(section.direction)
         for sid in section.station_ids:
-            if sid in port_ids or sid in half_grid_ids:
+            if sid in port_ids or sid in half_grid_ids or sid in symfan_trunk_ids:
                 continue
             st = graph.stations.get(sid)
             if st is None or sid in convergence_sources:

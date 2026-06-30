@@ -137,6 +137,13 @@ EXPECTED_RESIDUALS = frozenset(
         # exit peel-off junction).  The realign->reporting seam is a plain L->R
         # continuation the classifier preserves while the machinery reverses it.
         ("foldback_exit_peeloff", "realign", "reporting", "L->R"),
+        # Manual-grid LR bottom-exit dropping into a direction: RL top entry
+        # stacked below it: the fold reverses consensus (the B->T drop receiver)
+        # and propagates along the return row to reporting (reached through the
+        # exit peel-off junction).  Both seams are continuations the classifier
+        # preserves while the machinery reverses them.
+        ("lr_bottom_exit_rl_top_entry_jog", "normalization", "consensus", "B->T"),
+        ("lr_bottom_exit_rl_top_entry_jog", "realign", "reporting", "L->R"),
     }
 )
 

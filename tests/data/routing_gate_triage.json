@@ -759,6 +759,14 @@
     "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
     "status": "needs-review"
   },
+  "perp.py::if entry_port is None or not entry_port.is_entry:::#1": {
+    "note": "_aligned_horizontal_drop_entry only fires for a TOP/BOTTOM exit on a horizontal-flow section (the rest of _perp_riser_lateral's callers are caught earlier).  The return-None arm is taken when such an exit feeds a junction or several targets rather than one entry port; corpus instrumentation across every examples/ fixture finds no horizontal-flow perp exit feeding a non-single-entry, so the arm is never taken and the riser falls back to the perp reflection.",
+    "status": "defensive"
+  },
+  "perp.py::if needs_perp_approach_fan(graph, entry_port.id):::#1": {
+    "note": "_aligned_horizontal_drop_entry exempts a distinct-line approach fan, whose intra drop fans onto per-line channels (_perp_approach_fan_x) rather than the entry's single per-line offset.  Reaching it needs a horizontal-flow perp exit dropping straight into a single approach-fan entry; corpus instrumentation finds none, so the arm is never taken and the riser keeps the perp reflection.",
+    "status": "defensive"
+  },
   "perp.py::if not feeders:::#1": {
     "note": "No-feeder guard in _perp_entry_crossing_x: the helper is called only from _route_perp_entry when a multi-line bundle shares the port with a per-line stagger, and a TOP/BOTTOM entry port in that case is always reached by a bundled inter-section feeder (dy!=0, so compute_bundle_info indexes it).  The empty-feeders return-None arm is a contract guard, never taken across the corpus.",
     "status": "defensive"

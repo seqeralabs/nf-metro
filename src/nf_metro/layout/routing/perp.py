@@ -32,6 +32,7 @@ by bundle index, since those feeders share one column trunk.
 
 from __future__ import annotations
 
+from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.geometry import lanes_run_along_x, lanes_run_along_y
 from nf_metro.layout.routing.common import needs_perp_approach_fan
 from nf_metro.layout.routing.context import (
@@ -134,6 +135,38 @@ def _perp_entry_crossing_x(
     return port_x - max_index * ctx.offset_step
 
 
+def _aligned_horizontal_drop_entry(ctx: _RoutingCtx, exit_port_id: str) -> str | None:
+    """The TOP/BOTTOM entry port a perp exit drops straight into, if aligned.
+
+    A TOP/BOTTOM exit whose only edge feeds one column-aligned perpendicular
+    entry on a horizontal-flow (LR/RL) section: the line leaves vertically and
+    drops straight onto that entry without an up-and-over corridor.  Returns the
+    entry port id for that case, else ``None`` (a cross-column drop, a fan to
+    several entries, a distinct-line approach fan, or a vertical-flow target all
+    keep the perp reflection).
+    """
+    graph = ctx.graph
+    exit_port = graph.ports.get(exit_port_id)
+    if exit_port is None or exit_port.is_entry:
+        return None
+    targets = {edge.target for edge in graph.edges_from(exit_port_id)}
+    entry_port = graph.ports.get(next(iter(targets))) if len(targets) == 1 else None
+    if entry_port is None or not entry_port.is_entry:
+        return None
+    if entry_port.side not in (PortSide.TOP, PortSide.BOTTOM):
+        return None
+    entry_section = graph.sections.get(entry_port.section_id)
+    if entry_section is None or not lanes_run_along_y(entry_section.direction):
+        return None
+    if needs_perp_approach_fan(graph, entry_port.id):
+        return None
+    exit_st = graph.stations[exit_port_id]
+    entry_st = graph.stations[entry_port.id]
+    if abs(exit_st.x - entry_st.x) > COORD_TOLERANCE:
+        return None
+    return entry_port.id
+
+
 def _perp_riser_lateral(
     ctx: _RoutingCtx,
     station_id: str,
@@ -147,7 +180,17 @@ def _perp_riser_lateral(
     ``reversed_offset`` (the lateral order flips between rising and dropping).  Both the
     up-and-over exit corridor and the matching entry drop seat their bundle
     with this lateral so the two legs stay parallel across the shared port.
+
+    A perpendicular exit dropping straight into a horizontal-flow section's
+    aligned entry is the exception: the exit carries only the lines shared across
+    the seam, but the receiving section anchors them against its full bundle
+    (reserving slots for lines that peel off inside it), so the exit must inherit
+    the entry's per-line offset to stay co-aligned through the boundary -- the
+    same per-line X the entry's intra drop departs from.
     """
+    entry_port_id = _aligned_horizontal_drop_entry(ctx, station_id)
+    if entry_port_id is not None:
+        return _get_offset(ctx, entry_port_id, line_id)
     if side == PortSide.TOP:
         return _get_offset(ctx, station_id, line_id)
     off = _get_offset(ctx, station_id, line_id)

@@ -1,0 +1,60 @@
+%%metro title: LR bottom-exit RL top-entry
+%%metro style: dark
+%%metro line: dna | DNA | #4a90d9
+%%metro line: rna | RNA | #e63946
+%%metro line: extra | Extra | #f5c542
+%%metro grid: preprocessing | 0,0
+%%metro grid: gatk | 1,0
+%%metro grid: normalization | 2,0
+%%metro grid: consensus | 2,1
+%%metro grid: realign | 1,1
+%%metro grid: reporting | 0,1
+
+graph LR
+    subgraph preprocessing [Pre-processing]
+        pp1[Trim]
+        pp2[Align]
+        pp1 -->|dna,rna| pp2
+    end
+    subgraph gatk [GATK]
+        gk1[BQSR]
+        gk2[Apply]
+        gk1 -->|dna,rna| gk2
+    end
+    subgraph normalization [Normalization]
+        %%metro exit: bottom | dna, rna
+        nz1[Decompose]
+        nz2[Norm]
+        nz3[Annot]
+        nz1 -->|dna,rna| nz2
+        nz2 -->|dna,rna| nz3
+    end
+    subgraph consensus [Consensus]
+        %%metro direction: RL
+        %%metro entry: top | dna, rna
+        cs1[vcf2MAF]
+        cs2[Consensus]
+        cs3[MAFFilter]
+        cs1 -->|dna,rna| cs2
+        cs2 -->|dna,rna| cs3
+    end
+    subgraph realign [Realignment]
+        %%metro direction: RL
+        re1[MAF2BED]
+        re2[Extract]
+        re3[Recall]
+        re1 -->|extra| re2
+        re2 -->|extra| re3
+    end
+    subgraph reporting [Reporting]
+        %%metro direction: RL
+        rp1[RNAFilter]
+        rp2[MultiQC]
+        rp1 -->|rna,extra| rp2
+    end
+    pp2 -->|dna,rna| gk1
+    gk2 -->|dna,rna| nz1
+    nz3 -->|dna,rna| cs1
+    cs3 -->|extra| re1
+    cs3 -->|rna| rp1
+    re3 -->|extra| rp1

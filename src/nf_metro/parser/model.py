@@ -507,6 +507,13 @@ class MetroGraph:
     # Stage 6.4 (``_snap_all_y_to_grid``) reads this set and skips those
     # stations so they keep their intentional half-grid Y.
     half_grid_station_ids: set[str] = field(default_factory=set, repr=False)
+    # Cross-phase channel: on-track non-branch station IDs (the source/trunk
+    # stations) of a 2-branch symfan section, recorded by Stage 6.3
+    # (``_apply_half_grid_2branch_symfan``).  They sit on the section's local
+    # symfan frame (the branch midpoint / inter-section port lane), so Stage 6.4
+    # (``_snap_all_y_to_grid``) skips them rather than dragging them onto the row
+    # group's grid origin, which a rowspan neighbour can leave fractional.
+    symfan_trunk_station_ids: set[str] = field(default_factory=set, repr=False)
     # Precondition flag for the off-track reanchor: set True right after the
     # Stage 6.4 grid snap so on-track consumer Ys are final.  The reanchor
     # (``_reanchor_off_track_to_consumer``) refuses to run while False,

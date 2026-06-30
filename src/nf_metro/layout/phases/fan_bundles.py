@@ -121,6 +121,26 @@ def _divergence_target_ys(graph: MetroGraph) -> set[str]:
     return anchors
 
 
+def _real_predecessors(graph: MetroGraph, target_ids: set[str]) -> set[str]:
+    """Real-station predecessors of ``target_ids``, seen through junctions.
+
+    A junction between a producer and the target is transparent: the producer
+    one step further back is returned in its place, so a fan fed through a single
+    bundle junction resolves to its source station.
+    """
+    junction_ids = graph.junction_ids
+    preds: set[str] = set()
+    for tid in target_ids:
+        for edge in graph.edges_to(tid):
+            src_id = edge.source
+            if src_id in junction_ids:
+                for e2 in graph.edges_to(src_id):
+                    preds.add(e2.source)
+            else:
+                preds.add(src_id)
+    return preds
+
+
 def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
     """Symmetrically distribute fan-out siblings around a trunk junction.
 
@@ -308,6 +328,25 @@ def _apply_half_grid_2branch_symfan(
         branches[0].y = trunk_y - 0.5 * y_spacing
         branches[1].y = trunk_y + 0.5 * y_spacing
         graph.half_grid_station_ids.update(b.id for b in branches)
+
+        # The fan's source hub (the station feeding both branches) sits on this
+        # same local frame, so the row-grid snap must leave it there too rather
+        # than dragging it onto a foreign row origin.  Restrict to in-section
+        # branch predecessors: downstream terminus icons (file outputs) are off
+        # the frame and snap normally.
+        branch_ids = {b.id for b in branches}
+        for src_id in _real_predecessors(graph, branch_ids):
+            src = graph.stations.get(src_id)
+            if (
+                src is None
+                or src.is_port
+                or src.is_hidden
+                or src.off_track
+                or src.section_id != section.id
+                or src_id in branch_ids
+            ):
+                continue
+            graph.symfan_trunk_station_ids.add(src_id)
 
         # Half-grid branches consume half a y_spacing above and below
         # the trunk instead of a full slot.  Shrink the bbox top to match

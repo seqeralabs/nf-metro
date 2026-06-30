@@ -279,6 +279,8 @@
   "offsets.py::sec is None::#1",
   "offsets.py::while cur is not None and cur not in seen:::#1",
   "offsets.py::while stack:::#1",
+  "perp.py::if entry_port is None or not entry_port.is_entry:::#1",
+  "perp.py::if needs_perp_approach_fan(graph, entry_port.id):::#1",
   "perp.py::if not feeders:::#1",
   "postprocess.py::if abs(dx_diag) <= COORD_TOLERANCE_FINE:::#1",
   "postprocess.py::if abs(other.y - station.y) > 1:::#1",

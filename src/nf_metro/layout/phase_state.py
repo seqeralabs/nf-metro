@@ -110,6 +110,18 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
         ),
         run_condition_attr="center_ports",
     ),
+    "symfan_trunk_station_ids": PhaseFieldSpec(
+        name="symfan_trunk_station_ids",
+        writer_stage="6.3",
+        reader_stages=("6.4",),
+        enforcement=FieldEnforcement.REQUIRE_WRITER,
+        why=(
+            "source/trunk stations of a 2-branch symfan Stage 6.3 leaves on the "
+            "section's local frame; Stage 6.4's grid snap must skip them or it "
+            "drags them onto a rowspan neighbour's fractional row-grid origin"
+        ),
+        run_condition_attr="center_ports",
+    ),
     "_consumers_grid_snapped": PhaseFieldSpec(
         name="_consumers_grid_snapped",
         writer_stage="6.4",

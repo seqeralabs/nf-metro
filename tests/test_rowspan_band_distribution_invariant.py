@@ -57,6 +57,31 @@ def test_stacked_rows_fill_rowspan_band(stem: str) -> None:
         )
 
 
+def test_symfan_source_hub_collinear_with_trunk_continuation() -> None:
+    """A fan-out source hub sits on the same lane as its trunk continuation (#1206).
+
+    In ``single_row_rowspan_neighbor`` the run_folder line's source icon
+    ``rundir_in`` fans to ``checkqc`` (upward branch) and ``rundirparser`` (the
+    straight trunk continuation).  ``rundir_in`` and ``rundirparser`` therefore
+    share one horizontal lane, while ``checkqc`` branches off it.  The fan
+    branches are protected half-grid symfan stations; the source hub must share
+    that local frame rather than snapping to the row group's fractional grid
+    origin (which the rowspan FASTQ neighbour's 13-way fan contaminates).
+    """
+    graph = parse_metro_mermaid(
+        (SHOWCASE_DIR / "single_row_rowspan_neighbor.mmd").read_text()
+    )
+    compute_layout(graph, validate=True)
+
+    hub = graph.stations["rundir_in"]
+    trunk = graph.stations["rundirparser"]
+    assert abs(hub.y - trunk.y) <= SAME_COORD_TOLERANCE, (
+        f"source hub 'rundir_in' (y={hub.y:.3f}) is not collinear with its trunk "
+        f"continuation 'rundirparser' (y={trunk.y:.3f}); off by "
+        f"{abs(hub.y - trunk.y):.3f}px"
+    )
+
+
 @pytest.mark.parametrize("stem", FIXTURES)
 def test_showcase_fixture_has_no_layout_errors(stem: str) -> None:
     """The relocated fixture skips the auto-globbed topology corpus, so run the

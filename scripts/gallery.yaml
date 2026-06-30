@@ -650,6 +650,15 @@ gallery:
       left via direction: RL. The bundle stays on the outside of the fold the whole
       way round (top, right, then bottom) with no crossover, and the descent column
       aligns under the exit so the drop is a clean U."
+  - id: lr_bottom_exit_rl_top_entry_jog
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "An LR section's bottom exit drops straight into the top entry of the
+      direction: RL section stacked directly below it. The receiving RL section
+      reserves an offset slot for a line that peels off inside it, so the descent
+      inherits that wider anchoring and lands square on the entry port with no
+      sideways jog at the boundary (issue #1212)."
   - id: branch_fold_forward
     source_dir: examples/topologies
     category: Serpentine Layout
