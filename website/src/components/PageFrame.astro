@@ -118,6 +118,11 @@ const seqeraSvg = seqeraSvgRaw.replace(
     }
 
     .main-frame {
+      /* Sticky-footer pattern: on a page shorter than the viewport, this
+         grows to push the footer down to the viewport bottom instead of
+         leaving a gap where the fixed sidebar's border-inline-end (which
+         always spans the full viewport height) shows through underneath. */
+      flex: 1 0 auto;
       padding-top: calc(var(--sl-nav-height) + var(--sl-mobile-toc-height));
       padding-inline-start: var(--sl-content-inline-start);
     }

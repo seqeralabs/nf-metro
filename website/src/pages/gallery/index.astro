@@ -3,6 +3,8 @@ import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import { getCollection } from "astro:content";
 import Metro from "@components/Metro.astro";
 import { base } from "../../site";
+import { ogImageHead } from "../../lib/og-head";
+import { GALLERY_PAGE } from "../../lib/page-meta";
 
 const allEntries = await getCollection("gallery");
 const entries = allEntries.sort((a, b) => a.data.order - b.data.order);
@@ -28,14 +30,14 @@ const headings = Array.from(byCategory.keys()).map((cat) => ({
 
 <StarlightPage
   frontmatter={{
-    title: "Gallery",
-    description:
-      "Rendered examples covering fan-outs, folds, diamonds, and realistic bioinformatics workflows.",
+    title: GALLERY_PAGE.title,
+    description: GALLERY_PAGE.description,
     template: "doc",
     tableOfContents: true,
     pagefind: true,
     prev: false,
     next: false,
+    head: ogImageHead("og/gallery.png"),
   }}
   headings={headings}
 >

@@ -3,6 +3,8 @@ import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import { getCollection } from "astro:content";
 import Metro from "@components/Metro.astro";
 import { base } from "../../site";
+import { ogImageHead } from "../../lib/og-head";
+import { PIPELINES_PAGE } from "../../lib/page-meta";
 
 const entries = await getCollection("pipelines");
 
@@ -19,14 +21,14 @@ const headings = entries.map((entry) => ({
 
 <StarlightPage
   frontmatter={{
-    title: "nf-core pipelines",
-    description:
-      "Real-world nf-core pipelines rendered as metro-style SVG diagrams using nf-metro.",
+    title: PIPELINES_PAGE.title,
+    description: PIPELINES_PAGE.description,
     template: "doc",
     tableOfContents: true,
     pagefind: true,
     prev: false,
     next: false,
+    head: ogImageHead("og/pipelines.png"),
   }}
   headings={headings}
 >

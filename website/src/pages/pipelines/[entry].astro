@@ -3,6 +3,7 @@ import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import { getCollection } from "astro:content";
 import Metro from "@components/Metro.astro";
 import { base } from "../../site";
+import { ogImageHead } from "../../lib/og-head";
 
 export async function getStaticPaths() {
   const entries = await getCollection("pipelines");
@@ -25,6 +26,7 @@ const { title, src, description, repo_url } = entry.data;
     pagefind: true,
     prev: false,
     next: false,
+    head: ogImageHead(`og/pipelines/${entry.id}.png`),
   }}
 >
   <p class="nfm-entry-meta">
