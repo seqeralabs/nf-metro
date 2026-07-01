@@ -489,6 +489,58 @@ def _guard_interchange_bar_clears_non_members(graph: MetroGraph, phase: str) -> 
                 )
 
 
+def _guard_interchange_label_clears_connector(graph: MetroGraph, phase: str) -> None:
+    """An interchange's own label must clear its connector bridge.
+
+    A cross-track interchange draws a vertical connector spanning its members'
+    Y range at the anchor column; the anchor carries the label.  Label placement
+    treats the interchange as one long station and pushes that label to the
+    outer edge (above the top member or below the bottom one).  This verifies
+    the settled label never lands on the bridge it spans.
+
+    Rail-mode interchanges are exempt: their spanning pills keep the rail-panel
+    alternation idiom (the label rides beside the pill, not across a bridge).
+    """
+    from nf_metro.layout.labels import label_glyph_ink_bbox, segment_strikes_label
+    from nf_metro.layout.phases.spacing import _probe_label_placements
+
+    spanning = [
+        ic
+        for ic in graph.interchanges
+        if len([m for m in ic.member_ids if m in graph.stations]) >= 2
+        and (anchor := graph.stations.get(ic.node_id)) is not None
+        and not graph.is_rail_section(anchor.section_id)
+    ]
+    if not spanning:
+        return
+
+    probe = _probe_label_placements(graph, allow_hyphenation=True)
+    if probe is None:
+        return
+    offsets, _routes, placements = probe
+    placement_by_sid = {p.station_id: p for p in placements}
+    for ic in spanning:
+        p = placement_by_sid.get(ic.node_id)
+        if p is None or not p.text.strip():
+            continue
+        members = [graph.stations[m] for m in ic.member_ids if m in graph.stations]
+        x = members[0].x
+        ys = [
+            m.y + offsets.get((m.id, lid), 0.0)
+            for m in members
+            for lid in graph.station_lines(m.id)
+        ]
+        top, bot = min(ys), max(ys)
+        if segment_strikes_label(x, top, x, bot, p):
+            bbox = label_glyph_ink_bbox(p)
+            raise PhaseInvariantError(
+                f"{phase}: interchange {ic.node_id!r} label {p.text!r} "
+                f"(glyph-ink bbox {bbox[0]:.1f},{bbox[1]:.1f}-"
+                f"{bbox[2]:.1f},{bbox[3]:.1f}) lands on its connector bridge "
+                f"(x={x:.1f}, y {top:.1f}..{bot:.1f})"
+            )
+
+
 def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
     """After Stage 3.1+: ports must sit on their section's bounding box edge."""
     tolerance = GUARD_TOLERANCE
@@ -4855,6 +4907,7 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     GuardSpec(_guard_file_icon_no_name_label, "B"),
     GuardSpec(_guard_fold_relocated_flow_ports_face_connections, "B"),
     GuardSpec(_guard_interchange_bar_clears_non_members, "B"),
+    GuardSpec(_guard_interchange_label_clears_connector, "B"),
     GuardSpec(_guard_no_diagonal_strikes_horizontal_label, "B"),
     GuardSpec(_guard_no_label_overlap, "B"),
     GuardSpec(_guard_no_line_crosses_file_icon, "B"),

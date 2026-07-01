@@ -195,6 +195,28 @@ def test_inrow_express_skip_bows_around_skipped_marker():
     )
 
 
+def test_sectionless_skip_line_detours_around_skipped_marker():
+    """A skip-line on a graph with no declared section detours around the stops
+    it skips rather than running through their markers.
+
+    ``a -> b -> c -> d -> e`` (line ``main``) with ``a -> c -> e`` (line
+    ``alt``) skipping ``b`` and ``d``: with no ``subgraph`` the graph would
+    otherwise stay flat and draw ``alt`` straight along the trunk through the
+    skipped markers.  Interchange inference detects ``c`` as a parallel-lane hub
+    and gives the loose stations an implicit section so the detour has a home
+    (#1229).
+    """
+    path = (
+        Path(__file__).resolve().parent.parent
+        / "examples"
+        / "topologies"
+        / "sectionless_skip_breeze.mmd"
+    )
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+    assert not _nonconsumer_crossings(graph), _nonconsumer_crossings(graph)
+
+
 def test_folded_genome_align_express_clears_skipped_marker():
     """A folded multi-trunk column must not draw a line through a skipped marker.
 

@@ -635,7 +635,9 @@ def _render_svg_scaled(
 
     # Compute legend and logo dimensions
     adaptive_logo = chrome_css and _is_adaptive_mode(graph)
-    show_logo, logo_w, logo_h, effective_logo = _resolve_logo(graph, adaptive_logo)
+    show_logo, logo_w, logo_h, effective_logo = _resolve_logo(
+        graph, adaptive_logo, theme.mode
+    )
     resolved_logo_light = (
         resolve_logo_file(graph.logo_path_light, graph.source_dir)
         if graph.logo_path_light
@@ -954,15 +956,18 @@ def _version_string() -> str:
     return f"v{__version__}"
 
 
-def _effective_logo_path(graph: MetroGraph) -> str:
-    """Return the logo path appropriate for the graph's style.
+def _effective_logo_path(graph: MetroGraph, mode: str) -> str:
+    """Return the logo path appropriate for the resolved display *mode*.
 
     Used for non-adaptive (static) rendering such as PNG export.  When the
     directive was ``%%metro logo: light.png | dark.png``, the light variant is
-    returned for ``style: light`` and the dark variant otherwise.  Falls back
-    to the single-path ``logo_path`` for backwards compatibility.
+    returned for a light *mode* and the dark variant otherwise. *mode* is the
+    resolved light/dark display mode - an axis independent of the brand style
+    (``%%metro style:``) - so callers should pass a theme's resolved
+    ``theme.mode`` rather than ``graph.style``. Falls back to the single-path
+    ``logo_path`` for backwards compatibility.
     """
-    is_light = graph.style.strip().lower() == "light"
+    is_light = mode.strip().lower() == "light"
     if is_light and graph.logo_path_light:
         return graph.logo_path_light
     if not is_light and graph.logo_path_dark:
@@ -982,12 +987,15 @@ def _has_adaptive_logos(graph: MetroGraph) -> bool:
     )
 
 
-def _resolve_logo(graph: MetroGraph, adaptive: bool) -> tuple[bool, float, float, str]:
+def _resolve_logo(
+    graph: MetroGraph, adaptive: bool, mode: str
+) -> tuple[bool, float, float, str]:
     """Return (show_logo, logo_w, logo_h, effective_logo_path).
 
     ``adaptive`` is True when the %%metro logo: directive used pipe syntax.
     In adaptive mode the dimensions come from whichever variant file exists.
-    In single-path mode ``effective_logo`` is the path to render.
+    In single-path mode ``effective_logo`` is the path to render, chosen for
+    the resolved display *mode* (see :func:`_effective_logo_path`).
     """
     if adaptive:
         raw_candidates = (graph.logo_path_dark, graph.logo_path_light)
@@ -1003,7 +1011,7 @@ def _resolve_logo(graph: MetroGraph, adaptive: bool) -> tuple[bool, float, float
                 f"%%metro logo: path(s) {[p for p in raw_candidates if p]} not found"
             )
         return False, 0.0, 0.0, ""
-    effective = _effective_logo_path(graph)
+    effective = _effective_logo_path(graph, mode)
     if not effective:
         return False, 0.0, 0.0, ""
     resolved = resolve_logo_file(effective, graph.source_dir)

@@ -148,6 +148,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_inter_section_route_no_full_width_backtrack,
     _guard_inter_section_routes_in_row_band,
     _guard_interchange_bar_clears_non_members,
+    _guard_interchange_label_clears_connector,
     _guard_merge_port_approach_side,
     _guard_merge_port_outgoing_side_preserved,
     _guard_multi_section_cell_packed,
@@ -711,6 +712,7 @@ def _compute_layout_scaled(
         _guard_off_track_consumer_on_trunk(graph, "final")
         _guard_off_track_input_column_stack(graph, "final")
         _guard_interchange_bar_clears_non_members(graph, "final")
+        _guard_interchange_label_clears_connector(graph, "final")
         _guard_tb_top_entry_drop_hugs_top(graph, "final")
         _guard_symmetric_diamond_branches_straddle_trunk(graph, "final")
         _guard_symmetric_diamond_branches_half_pitch(graph, "final")

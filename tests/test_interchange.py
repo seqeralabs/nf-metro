@@ -15,6 +15,7 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.phases.guards import (
     PhaseInvariantError,
     _guard_interchange_bar_clears_non_members,
+    _guard_interchange_label_clears_connector,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import render_svg
@@ -267,6 +268,76 @@ def test_interchange_bar_never_spans_a_non_member_station(fixture):
     g = parse_metro_mermaid(fixture.read_text())
     compute_layout(g)
     _guard_interchange_bar_clears_non_members(g, fixture.name)
+
+
+# The issue's in-section repro: `c` is inferred as a two-member interchange and
+# `B`/`D` label above, so plain layer alternation would drop `C` below its own
+# marker -- onto the downward connector bridge.
+_SKIP_INTERCHANGE = (
+    "%%metro line: main | Main | #e63946\n"
+    "%%metro line: alt | Alt | #1d4e89\n"
+    "graph LR\n"
+    "    subgraph sec [Section]\n"
+    "        a[A]\n        b[B]\n        c[C]\n        d[D]\n        e[E]\n"
+    "        a -->|main| b\n        b -->|main| c\n        c -->|main| d\n"
+    "        d -->|main| e\n"
+    "        a -->|alt| c\n        c -->|alt| e\n"
+    "    end\n"
+)
+
+
+def _interchange_label_on_bridge(g):
+    """Return ids of interchange anchors whose label lands on their bridge."""
+    from nf_metro.layout.labels import place_labels, segment_strikes_label
+
+    placements = {p.station_id: p for p in place_labels(g, station_offsets=None)}
+    struck = []
+    for ic in g.interchanges:
+        members = [g.stations[m] for m in ic.member_ids if m in g.stations]
+        if len(members) < 2:
+            continue
+        p = placements.get(ic.node_id)
+        if p is None or not p.text.strip():
+            continue
+        x = members[0].x
+        ys = [m.y for m in members]
+        if segment_strikes_label(x, min(ys), x, max(ys), p):
+            struck.append(ic.node_id)
+    return struck
+
+
+def test_inferred_interchange_label_clears_the_connector_bridge():
+    """A spanning interchange's label sits outside its connector span, not on it.
+
+    Layer alternation would otherwise drop the anchor's label just below its own
+    marker, landing it on the downward bridge; the span-clearing offsets push it
+    past the whole interchange instead."""
+    g = _layout(_SKIP_INTERCHANGE)
+    assert _interchange_label_on_bridge(g) == []
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES, ids=lambda p: p.name)
+def test_interchange_label_never_lands_on_its_connector(fixture):
+    """No cross-track interchange's label overlaps the connector bridge it spans,
+    across the whole corpus -- the always-on guard's contract, exercised
+    directly."""
+    g = parse_metro_mermaid(fixture.read_text())
+    compute_layout(g)
+    _guard_interchange_label_clears_connector(g, fixture.name)
+
+
+def test_runtime_guard_flags_an_interchange_label_on_its_connector(monkeypatch):
+    """The always-on guard raises when the anchor label lands on its bridge.
+
+    Neutralising the span-clearing offset lets alternation drop the label back
+    onto the connector; the guard must catch that geometry."""
+    import nf_metro.layout.labels as lbl
+
+    monkeypatch.setattr(lbl, "_interchange_span_extents", lambda graph: {})
+    g = parse_metro_mermaid(_SKIP_INTERCHANGE)
+    compute_layout(g, validate=False)
+    with pytest.raises(PhaseInvariantError, match="lands on its connector bridge"):
+        _guard_interchange_label_clears_connector(g, "final")
 
 
 def test_runtime_guard_flags_an_interchange_bar_over_a_non_member(monkeypatch):

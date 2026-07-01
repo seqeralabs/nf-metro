@@ -246,17 +246,24 @@ def _finalize_graph(
     if graph.sections:
         _remove_empty_sections(graph)
 
+    # Re-check: _remove_empty_sections may have emptied graph.sections.
     if graph.sections:
         _create_implicit_section(graph)
 
-        from nf_metro.layout.auto_layout import (
-            infer_interchanges,
-            infer_section_layout,
-        )
+    from nf_metro.layout.auto_layout import (
+        infer_interchanges,
+        infer_section_layout,
+    )
 
-        # Inference must populate graph.interchanges before expansion so
-        # auto-detected and author-written interchanges share the expansion path.
-        infer_interchanges(graph)
+    # Populate graph.interchanges before expansion so auto-detected and
+    # author-written interchanges share the expansion path. Sectionless graphs
+    # run it too; a hub found there needs an implicit section to host the detour
+    # its skip-lines would otherwise draw straight through the skipped markers.
+    infer_interchanges(graph)
+    if not graph.sections and graph.interchanges:
+        _create_implicit_section(graph)
+
+    if graph.sections:
         _expand_interchanges(graph)
 
         # Row-wrap width precedence: an explicit caller value (the

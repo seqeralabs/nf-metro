@@ -268,6 +268,7 @@
   "offsets.py::if slot is None:::#1",
   "offsets.py::if src and not src.is_port and src.section_id == sec_id:::#1",
   "offsets.py::if src is None:::#1",
+  "offsets.py::if src is None:::#2",
   "offsets.py::if src_port and not src_port.is_entry:::#2",
   "offsets.py::if src_st and not src_st.is_port:::#1",
   "offsets.py::if src_st and not src_st.is_port:::#2",

@@ -6,6 +6,7 @@ Release notes for nf-metro, newest first.
 
 | Version                             | Date       | Highlights                                                                                                                                                                                  |
 | ----------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [v1.1.0](/nf-metro/releases/1.1.0/) | 2026-07-01 | `track_gap` option, packing sections into a shared grid cell, playground logo upload, long tail of fold/bypass/convergence routing fixes                                                    |
 | [v1.0.0](/nf-metro/releases/1.0.0/) | 2026-06-30 | Routing engine rebuilt onto a single centreline builder, all four flow directions (BT/RL added), light/dark as an orthogonal axis, stable render API, embedded data manifest, new docs site |
 | [v0.7.2](/nf-metro/releases/0.7.2/) | 2026-05-18 | Rowspan bbox shrink fix                                                                                                                                                                     |
 | [v0.7.1](/nf-metro/releases/0.7.1/) | 2026-05-17 | Bypass row-gap fix                                                                                                                                                                          |

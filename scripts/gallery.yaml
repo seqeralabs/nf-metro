@@ -718,6 +718,22 @@ gallery:
     description:
       An express line skips a station three collinear stations share; the geometric
       bypass pass bows it around the skipped marker (#990).
+  - id: sectionless_skip_breeze
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      A skip-line jumps between two stops on a graph with no declared section,
+      skipping the stops between them. Interchange inference detects the
+      parallel-lane hub and the detour routes around the skipped markers
+      instead of through them (#1229).
+  - id: interchange_label_clears_bridge
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      An in-section skip infers a two-member interchange at C, drawn with a
+      vertical connector bridge between its rails. C's label clears the whole
+      bridge (below the far track) instead of landing on it, where plain layer
+      alternation would drop it (#1239).
   - id: bypass_fan_in_outer_slot
     source_dir: examples/topologies
     category: Bypass Routing
@@ -884,6 +900,15 @@ gallery:
     description:
       A leaf sink that would otherwise sit alone in the spine band migrates into
       the convergence return row (no grid-cell collision).
+  - id: convergence_sink_above
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      An input section sits above the shared sink it feeds, while its line is
+      declared last. The sink's entry bundle is slotted by feeder approach (the
+      feeder whose source sits highest takes the topmost lane) rather than by
+      declaration order, so the line runs straight into the port instead of
+      dropping down across its bundle-mate.
   - id: terminus_join
     source_dir: examples/topologies
     category: Merge & Convergence
