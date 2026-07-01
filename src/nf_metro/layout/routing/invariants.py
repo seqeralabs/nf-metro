@@ -1069,6 +1069,10 @@ class ExitBundleOrderViolation:
     exit_order: tuple[str, ...] | None = None
     gap: float | None = None
 
+    def __post_init__(self) -> None:
+        if (self.exit_order is None) == (self.gap is None):
+            raise ValueError("exactly one of exit_order or gap must be set")
+
     def message(self) -> str:
         if self.gap is not None:
             return (
@@ -1138,19 +1142,15 @@ def check_exit_inherits_entry_bundle_order(
         levels = distinct_offset_levels(
             offsets.get((port_id, lid), 0.0) for lid in exit_lines
         )
-        gaps = [
-            levels[i + 1] - levels[i]
-            for i in range(len(levels) - 1)
-            if levels[i + 1] - levels[i] > OFFSET_STEP + COORD_TOLERANCE_FINE
-        ]
-        if gaps:
+        gap = max_interior_offset_gap(levels)
+        if gap is not None:
             violations.append(
                 ExitBundleOrderViolation(
                     section_id=section.id,
                     entry_port=entry_id,
                     exit_port=port_id,
                     entry_order=entry_order,
-                    gap=max(gaps),
+                    gap=gap,
                 )
             )
     return violations
@@ -1172,6 +1172,24 @@ def distinct_offset_levels(values: Iterable[float]) -> list[float]:
         if not levels or v - levels[-1] > COORD_TOLERANCE_FINE:
             levels.append(v)
     return levels
+
+
+def max_interior_offset_gap(
+    levels: Sequence[float], offset_step: float = OFFSET_STEP
+) -> float | None:
+    """Return the widest gap between adjacent *levels* over one bundle slot.
+
+    Distinct occupied levels are expected one ``offset_step`` apart; a wider
+    gap means a slot is reserved for a line that carries no station there
+    (e.g. one absent from a partial branch, or terminating before a shared
+    exit port). Returns ``None`` when every gap is at most one slot wide.
+    """
+    gaps = [
+        levels[i + 1] - levels[i]
+        for i in range(len(levels) - 1)
+        if levels[i + 1] - levels[i] > offset_step + COORD_TOLERANCE_FINE
+    ]
+    return max(gaps) if gaps else None
 
 
 def is_independent_fan_branch(graph: MetroGraph, station_id: str) -> bool:
@@ -1636,14 +1654,7 @@ def check_partial_branch_offset_gaps(
             (offsets.get((sid, lid), 0.0), lid) for lid in graph.station_lines(sid)
         )
         levels = distinct_offset_levels(off for off, _ in sorted_offs)
-        # A reserved absent-line slot is an interior gap between two
-        # distinct occupied levels wider than one step.  Lines that share
-        # a level (coincident) collapse to one level and never trip this.
-        has_gap = any(
-            levels[i + 1] - levels[i] > offset_step + COORD_TOLERANCE_FINE
-            for i in range(len(levels) - 1)
-        )
-        if has_gap:
+        if max_interior_offset_gap(levels, offset_step) is not None:
             violations.append(
                 PartialBranchGapViolation(
                     station_id=sid,

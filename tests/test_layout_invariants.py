@@ -929,10 +929,9 @@ _LEVEL_BOUNDARY_RUNS = [
     # two ports (#1199).
     ("topologies/foldback_exit_peeloff.mmd", "consensus", "realign", "realignment"),
     # A sibling line (bowtie2_salmon) terminates inside the source section and
-    # never reaches its exit port. The exit port inherits its single entry
-    # port's per-line offsets, which reserve a lane for that non-exiting
-    # sibling; the inherited offset must close that gap instead of copying it
-    # through, or the surviving line's exit/entry offsets disagree.
+    # never reaches its exit port. Its entry-side lane must not leave a gap
+    # at the exit port that the surviving line's offset falls into, or the
+    # exit/entry offsets for that surviving line disagree.
     (
         "topologies/aligner_row_terminator_lane_gap.mmd",
         "genome_align",
