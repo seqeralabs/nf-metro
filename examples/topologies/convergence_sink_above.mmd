@@ -1,0 +1,27 @@
+%%metro title: Convergence Sink Above
+%%metro style: dark
+%%metro compact_offsets: true
+%%metro line: lower | Lower | #e63946
+%%metro line: upper | Upper | #0570b0
+%%metro grid: up_in | 0,0
+%%metro grid: low_in | 0,1
+%%metro grid: sink | 1,1
+
+graph LR
+    subgraph up_in [Upper Input]
+        u1[Load]
+        u2[Prep]
+        u1 -->|upper| u2
+    end
+    subgraph low_in [Lower Input]
+        d1[Load]
+        d2[Prep]
+        d1 -->|lower| d2
+    end
+    subgraph sink [Merge]
+        s1[Collect]
+        s2[Report]
+        s1 -->|lower,upper| s2
+    end
+    d2 -->|lower| s1
+    u2 -->|upper| s1

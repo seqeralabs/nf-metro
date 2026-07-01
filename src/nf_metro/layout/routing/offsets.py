@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, deque
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 
 from nf_metro.layout.constants import (
@@ -2121,6 +2121,26 @@ def _bypass_convergence_feeders(
     return {lid: col for lid, col, _ in feeders}
 
 
+def _left_entry_lr_ports(ctx: _OffsetCtx) -> Iterator[tuple[str, Port]]:
+    """Yield each LEFT entry port on a forward (non-reversed) LR section.
+
+    A bundle re-slotted at such a port runs straight in along the section's
+    flow, so the convergence-ordering passes share this guard.
+    """
+    graph = ctx.graph
+    for port_id, port in graph.ports.items():
+        if not (port.is_entry and port.side is PortSide.LEFT):
+            continue
+        sec = graph.sections.get(port.section_id)
+        if (
+            sec is None
+            or sec.direction != "LR"
+            or port.section_id in ctx.reversed_sections
+        ):
+            continue
+        yield port_id, port
+
+
 def _order_convergence_entry_ports(ctx: _OffsetCtx) -> None:
     """Slot a LEFT entry port's bypass-convergence bundle by approach order.
 
@@ -2140,16 +2160,7 @@ def _order_convergence_entry_ports(ctx: _OffsetCtx) -> None:
     if ctx.compact:
         return
     graph = ctx.graph
-    for port_id, port in graph.ports.items():
-        if not (port.is_entry and port.side is PortSide.LEFT):
-            continue
-        sec = graph.sections.get(port.section_id)
-        if (
-            sec is None
-            or sec.direction != "LR"
-            or port.section_id in ctx.reversed_sections
-        ):
-            continue
+    for port_id, port in _left_entry_lr_ports(ctx):
         feeders = _convergence_feeders(graph, port_id)
         if feeders is None:
             continue
@@ -2167,6 +2178,56 @@ def _order_convergence_entry_ports(ctx: _OffsetCtx) -> None:
         for lid, _col, is_bypass in feeders:
             if not is_bypass:
                 _apply_offset_upstream_on_row(ctx, port_id, lid, new_offs[lid])
+
+
+def _order_convergence_by_approach(ctx: _OffsetCtx) -> None:
+    """Slot a LEFT entry port's multi-section bundle by feeder approach Y.
+
+    Lines from sections at different grid rows converge into one shared LEFT
+    entry port.  The base offsets slot them by line-declaration order, so a
+    feeder whose source sits high but whose line is declared last lands on the
+    bottom lane: its line then runs down past its bundle-mates to reach that
+    lane, crossing them and -- in compact mode, where the lanes pack into the
+    inter-column gap -- producing a counter-direction leg that aborts the
+    render.  Order the lanes by source Y instead, so the feeder approaching
+    from highest takes the topmost lane and every riser turns in without
+    crossing.  Carry the new order along the consumer section so the bundle
+    holds it from the port to its first station.
+
+    The non-compact bundle order emerges crossing-free from its own pipeline
+    (:func:`_order_convergence_entry_ports`), so this targets compact mode.
+    """
+    if not ctx.compact:
+        return
+    graph = ctx.graph
+    for port_id, port in _left_entry_lr_ports(ctx):
+        source_y: dict[str, float] = {}
+        upstream_secs: set[str] = set()
+        for edge in graph.edges_to(port_id):
+            src = graph.stations.get(edge.source)
+            if src is None:
+                continue
+            lid = edge.line_id
+            source_y[lid] = min(source_y.get(lid, src.y), src.y)
+            if src.section_id is not None and src.section_id != port.section_id:
+                upstream_secs.add(src.section_id)
+        if len(source_y) < 2 or len(upstream_secs) < 2:
+            continue
+        ordered = sorted(
+            source_y, key=lambda lid: (source_y[lid], ctx.line_priority.get(lid, 0))
+        )
+        cur = {lid: ctx.offsets.get((port_id, lid), 0.0) for lid in ordered}
+        base = min(cur.values())
+        new_offs = {
+            lid: base + rank * ctx.offset_step for rank, lid in enumerate(ordered)
+        }
+        if not any(
+            abs(new_offs[lid] - cur[lid]) > _OFFSET_EQ_TOLERANCE for lid in new_offs
+        ):
+            continue
+        _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
+        for lid in ordered:
+            _apply_offset_upstream_on_row(ctx, port_id, lid, new_offs[lid])
 
 
 def _recenter_partial_fan_branches(ctx: _OffsetCtx) -> None:
@@ -2318,6 +2379,11 @@ def compute_station_offsets(
        a bypass trunk from two or more source columns, slots the bundle
        by approach depth (nearer source on the port-near slot) so its
        risers turn in concentrically (non-compact only).
+    7d. **Convergence approach-Y ordering** - at a LEFT entry port fed
+       from two or more sections at different rows, slots the bundle by
+       feeder source Y (highest source on the topmost lane) so a feeder
+       above the sink is not forced to run down across its mates into a
+       bottom lane (compact only).
     8. **Horizontal reconciliation** - snaps mismatched offsets on
        same-Y edges to eliminate almost-horizontal slopes.
     8b. **Flat TB-exit/entry alignment** - on an auto-folded return row,
@@ -2359,6 +2425,7 @@ def compute_station_offsets(
     _align_junction_to_entry_port(ctx)
     _allocate_merge_ports_by_approach(ctx)
     _order_convergence_entry_ports(ctx)
+    _order_convergence_by_approach(ctx)
     _reconcile_horizontal_offsets(ctx)
     _align_flat_tb_exit_to_entry(ctx)
     _recenter_partial_fan_branches(ctx)
