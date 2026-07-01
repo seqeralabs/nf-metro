@@ -489,13 +489,7 @@ def _guard_interchange_bar_clears_non_members(graph: MetroGraph, phase: str) -> 
                 )
 
 
-def _guard_interchange_label_clears_connector(
-    graph: MetroGraph,
-    phase: str,
-    *,
-    offsets: dict[tuple[str, str], float] | None = None,
-    routes: list[RoutedPath] | None = None,
-) -> None:
+def _guard_interchange_label_clears_connector(graph: MetroGraph, phase: str) -> None:
     """An interchange's own label must clear its connector bridge.
 
     A cross-track interchange draws a vertical connector spanning its members'
@@ -507,13 +501,8 @@ def _guard_interchange_label_clears_connector(
     Rail-mode interchanges are exempt: their spanning pills keep the rail-panel
     alternation idiom (the label rides beside the pill, not across a bridge).
     """
-    from nf_metro.layout.labels import (
-        label_glyph_ink_bbox,
-        place_labels,
-        segment_strikes_label,
-    )
-    from nf_metro.render.svg import _compute_icon_obstacles
-    from nf_metro.themes import THEMES
+    from nf_metro.layout.labels import label_glyph_ink_bbox, segment_strikes_label
+    from nf_metro.layout.phases.spacing import _probe_label_placements
 
     spanning = [
         ic
@@ -525,51 +514,31 @@ def _guard_interchange_label_clears_connector(
     if not spanning:
         return
 
-    if offsets is None:
-        from nf_metro.layout.routing import compute_station_offsets
-
-        offsets = compute_station_offsets(graph)
-
-    with _restoring_layout_geometry(graph):
-        if routes is None:
-            from nf_metro.layout.routing import route_edges_centred
-
-            try:
-                routes = route_edges_centred(graph, station_offsets=offsets)
-            except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
-                return
-        placements = {
-            p.station_id: p
-            for p in place_labels(
-                graph,
-                station_offsets=offsets,
-                icon_obstacles=_compute_icon_obstacles(
-                    graph, THEMES["nfcore"], offsets
-                ),
-                routes=routes,
-                label_angle=graph.label_angle or 0.0,
+    probe = _probe_label_placements(graph, allow_hyphenation=True)
+    if probe is None:
+        return
+    offsets, _routes, placements = probe
+    placement_by_sid = {p.station_id: p for p in placements}
+    for ic in spanning:
+        p = placement_by_sid.get(ic.node_id)
+        if p is None or not p.text.strip():
+            continue
+        members = [graph.stations[m] for m in ic.member_ids if m in graph.stations]
+        x = members[0].x
+        ys = [
+            m.y + offsets.get((m.id, lid), 0.0)
+            for m in members
+            for lid in graph.station_lines(m.id)
+        ]
+        top, bot = min(ys), max(ys)
+        if segment_strikes_label(x, top, x, bot, p):
+            bbox = label_glyph_ink_bbox(p)
+            raise PhaseInvariantError(
+                f"{phase}: interchange {ic.node_id!r} label {p.text!r} "
+                f"(glyph-ink bbox {bbox[0]:.1f},{bbox[1]:.1f}-"
+                f"{bbox[2]:.1f},{bbox[3]:.1f}) lands on its connector bridge "
+                f"(x={x:.1f}, y {top:.1f}..{bot:.1f})"
             )
-        }
-        for ic in spanning:
-            p = placements.get(ic.node_id)
-            if p is None or not p.text.strip():
-                continue
-            members = [graph.stations[m] for m in ic.member_ids if m in graph.stations]
-            x = members[0].x
-            ys = [
-                m.y + offsets.get((m.id, lid), 0.0)
-                for m in members
-                for lid in graph.station_lines(m.id)
-            ]
-            top, bot = min(ys), max(ys)
-            if segment_strikes_label(x, top, x, bot, p):
-                bbox = label_glyph_ink_bbox(p)
-                raise PhaseInvariantError(
-                    f"{phase}: interchange {ic.node_id!r} label {p.text!r} "
-                    f"(glyph-ink bbox {bbox[0]:.1f},{bbox[1]:.1f}-"
-                    f"{bbox[2]:.1f},{bbox[3]:.1f}) lands on its connector bridge "
-                    f"(x={x:.1f}, y {top:.1f}..{bot:.1f})"
-                )
 
 
 def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
