@@ -6,6 +6,9 @@ Theme-dependent values remain in style.py.
 
 from nf_metro.layout.constants import CURVE_RADIUS, ICON_CAPTION_GAP
 from nf_metro.layout.constants import ICON_INTER_GAP as ICON_INTER_GAP  # re-export
+from nf_metro.layout.constants import (
+    RAIL_KNOB_RADIUS_RATIO as RAIL_KNOB_RADIUS_RATIO,  # re-export
+)
 from nf_metro.layout.constants import TERMINUS_WIDTH as TERMINUS_WIDTH  # re-export
 
 # ---------------------------------------------------------------------------
@@ -68,8 +71,8 @@ LEGEND_MARKER_PILL_RATIO: float = 1.7
 MARKER_PILL_LENGTH_RATIO: float = 4.0
 """Length of a ``pill`` marker along the line, as a multiple of the station radius."""
 
-RAIL_KNOB_RADIUS_RATIO: float = 1.35
-"""Rail-interchange knob circle radius, as a multiple of the station radius."""
+# RAIL_KNOB_RADIUS_RATIO is re-exported from layout.constants (see top imports):
+# label placement and the renderer share one knob-radius ratio.
 
 RAIL_LINK_HALF_WIDTH_RATIO: float = 0.7
 """Rail-interchange connector bar half-width, as a multiple of the station radius."""

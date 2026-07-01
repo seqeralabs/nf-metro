@@ -43,7 +43,9 @@ from nf_metro.layout.constants import (
     LABEL_OVERLAP_TOL,
     LABEL_WRAP_MIN_LINE_CHARS,
     PORT_LABEL_MAX_DX,
+    RAIL_KNOB_RADIUS_RATIO,
     SAME_COORD_TOLERANCE,
+    STATION_RADIUS_APPROX,
     TB_LABEL_H_SPACING,
     TB_LINE_Y_OFFSET,
     TB_PILL_EDGE_OFFSET,
@@ -144,8 +146,6 @@ def diagonal_label_pitch(
     pitch; ``None`` scopes the whole graph.  Returns *fallback* when no label
     angle is set or no qualifying label exists in scope.
     """
-    from nf_metro.layout.constants import STATION_RADIUS_APPROX
-
     angle = graph.label_angle or 0.0
     if not angle:
         return fallback
@@ -336,16 +336,18 @@ def _interchange_span_label_offsets(
 
     An interchange is one long station, so its anchor's label must clear the
     connector bridge rather than land on it: an above label clears the topmost
-    member and a below label the bottommost.  Returns offsets measured from
-    ``station.y`` to the span's top/bottom member (so ``_try_place`` lands the
-    label outside the bridge), or None when the station is not an interchange
-    anchor with a spanning bridge.
+    member and a below label the bottommost.  The end members render as knobs
+    enlarged by :data:`RAIL_KNOB_RADIUS_RATIO`, so the offsets reach the
+    knob edge (not just the member centre) and ``_try_place`` seats the label
+    the same gap past the knob as a normal label sits past its marker.  Returns
+    None when the station is not an interchange anchor with a spanning bridge.
     """
     extent = span_extents.get(station.id)
     if extent is None:
         return None
     top_y, bot_y = extent
-    return (top_y - station.y, bot_y - station.y)
+    knob_clearance = STATION_RADIUS_APPROX * (RAIL_KNOB_RADIUS_RATIO - 1.0)
+    return (top_y - knob_clearance - station.y, bot_y + knob_clearance - station.y)
 
 
 def _label_bbox(

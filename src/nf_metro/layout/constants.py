@@ -190,6 +190,15 @@ the radius, but the layout uses this approximation for spacing math so it
 stays decoupled from the theme layer.
 """
 
+RAIL_KNOB_RADIUS_RATIO: float = 1.35
+"""Interchange knob circle radius, as a multiple of the station radius.
+
+A spanning interchange draws each rail's knob larger than a bare marker.  The
+renderer re-exports this ratio for the glyph, and label placement uses it to
+clear a spanning-interchange label off the enlarged end knob rather than only
+off the member centre.
+"""
+
 SECTION_GAP: float = 3.0
 """Spacing between stations within a section."""
 
