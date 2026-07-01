@@ -1107,7 +1107,40 @@ def _bbox_hits_diagonal(
     )
 
 
+def _nearest_same_column_gap(
+    graph: MetroGraph,
+    station: Station,
+    exclude_ids: set[str],
+    *,
+    above: bool,
+) -> float | None:
+    """Y-distance to the nearest other labelled station roughly sharing
+    *station*'s column on the given side, or ``None`` if there is none.
+    """
+    best: float | None = None
+    for other in graph.stations.values():
+        if (
+            other.id in exclude_ids
+            or other.is_port
+            or other.is_hidden
+            or not other.label.strip()
+            or other.section_id != station.section_id
+        ):
+            continue
+        if abs(other.x - station.x) > X_SPACING * 0.5:
+            continue
+        if above and other.y >= station.y:
+            continue
+        if not above and other.y <= station.y:
+            continue
+        dist = abs(other.y - station.y)
+        if best is None or dist < best:
+            best = dist
+    return best
+
+
 def _apply_diamond_interior_override(
+    graph: MetroGraph,
     station: Station,
     start_above: bool,
     section_y_range: dict[str, tuple[float, float]],
@@ -1119,16 +1152,20 @@ def _apply_diamond_interior_override(
     min_off: float = 0.0,
     max_off: float = 0.0,
 ) -> bool:
-    """Point a diamond branch label at its sibling when not a section edge.
+    """Point a diamond branch label at its sibling when its own exterior is
+    at least as crowded as the diamond's interior.
 
     Skipped whenever the section-edge outward override
     (:func:`_apply_edge_override`) already applies to this station -- a
     diamond that is a section's *only* content already gets pushed outward
     correctly by that override, since nothing crowds it on that side.  Also
-    skipped when the sibling-facing side would cross the diamond's own
+    skipped when nothing else shares the branch's column on its exterior
+    side (e.g. a diamond sitting beside an unrelated, differently-columned
+    fan) -- there the column-parity default already reads fine, and
+    pointing inward would just squeeze into the diamond's own bundle for no
+    reason -- or when the sibling-facing side would cross the diamond's own
     fork/join transition diagonal, which a wide label can reach back into
-    near the fork end -- pointing inward there would trade a crowded
-    neighbour for a struck-through label.
+    near the fork end.
     """
     sibling = diamond_siblings.get(station.id)
     if sibling is None:
@@ -1149,6 +1186,24 @@ def _apply_diamond_interior_override(
             return start_above
 
     interior_above = sibling.y < station.y
+    exterior_above = not interior_above
+    interior_gap = abs(sibling.y - station.y)
+    exterior_gap = _nearest_same_column_gap(
+        graph, station, {station.id, sibling.id}, above=exterior_above
+    )
+    sec = graph.sections.get(station.section_id)
+    if sec is not None and sec.bbox_h > 0:
+        boundary_gap = (
+            station.y - sec.bbox_y
+            if exterior_above
+            else (sec.bbox_y + sec.bbox_h) - station.y
+        )
+        exterior_gap = (
+            boundary_gap if exterior_gap is None else min(exterior_gap, boundary_gap)
+        )
+    if exterior_gap is None or exterior_gap > interior_gap:
+        return start_above
+
     if diagonal_segments:
         candidate = _try_place(
             station, label_offset, interior_above, [], min_off, max_off
@@ -1255,6 +1310,7 @@ def _trial_cost(
 
         if diamond_siblings:
             start_above = _apply_diamond_interior_override(
+                graph,
                 station,
                 start_above,
                 section_y_range,
@@ -1636,6 +1692,7 @@ def _initial_label_side(
     )
     # A fork/join diamond branch not at a section edge points at its sibling.
     start_above = _apply_diamond_interior_override(
+        ctx.graph,
         station,
         start_above,
         ctx.section_y_range,
