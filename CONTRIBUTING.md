@@ -2,6 +2,8 @@
 
 nf-metro accepts contributions via pull requests against `main`. The project relies on a tight feedback loop between code changes and rendered output, so a few conventions exist to keep that loop honest.
 
+A plain clone also fetches `gh-pages`, an orphan branch carrying the built docs site and every open PR's render preview - work only ever happens on `main`, so if you don't need that history, clone single-branch: `git clone --single-branch --branch main https://github.com/seqeralabs/nf-metro`. See [`docs/contributing.mdx`](docs/contributing.mdx#repository-size-gh-pages) for why that branch's history exists and how it's kept in check.
+
 ## Visual review is the contract
 
 For any change that touches `src/nf_metro/layout/`, `src/nf_metro/render/`, or routing, the authoritative review is the visual diff produced by `.github/workflows/pr-renders.yml`. The workflow renders the gallery on both the PR branch and `main`, and posts a link to a before/after preview site at `https://seqeralabs.github.io/nf-metro/_pr/<PR_NUMBER>/`. Open the link and look at every changed render before requesting human review. If you cannot defend a delta as an improvement or a neutral consequence, narrow the change.
