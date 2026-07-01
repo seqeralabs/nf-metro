@@ -1052,20 +1052,32 @@ def check_merge_port_outgoing_side_preserved(
 
 @dataclass(frozen=True)
 class ExitBundleOrderViolation:
-    """An LR/RL exit port that re-orders a bundle relative to the single
-    entry bundle feeding the section, kinking a straight-through line.
+    """An LR/RL exit port whose bundle disagrees with the single entry
+    bundle feeding the section, kinking a straight-through line.
 
     ``entry_order`` / ``exit_order`` are the shared lines sorted by their
-    per-line offset at each port.
+    per-line offset at each port. ``gap`` is set instead of ``exit_order``
+    when the shared lines keep the entry's relative order but the exit port
+    reserves an offset slot for a line that terminates inside the section
+    without reaching this port.
     """
 
     section_id: str
     entry_port: str
     exit_port: str
     entry_order: tuple[str, ...]
-    exit_order: tuple[str, ...]
+    exit_order: tuple[str, ...] | None = None
+    gap: float | None = None
 
     def message(self) -> str:
+        if self.gap is not None:
+            return (
+                f"section {self.section_id!r}: exit port {self.exit_port!r} "
+                f"leaves a {self.gap:.1f}px gap in its bundle inherited from "
+                f"entry {self.entry_port!r} (order {self.entry_order}); a "
+                "line that terminates inside the section reserves a slot at "
+                "the exit it never reaches"
+            )
         return (
             f"section {self.section_id!r}: exit port {self.exit_port!r} "
             f"re-orders the bundle from its single entry {self.entry_port!r} "
@@ -1078,13 +1090,15 @@ def check_exit_inherits_entry_bundle_order(
     graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
     offsets: dict[tuple[str, str], float],
 ) -> list[ExitBundleOrderViolation]:
-    """Return LR/RL exit ports that re-order a single incoming bundle.
+    """Return LR/RL exit ports that re-order or gap a single incoming bundle.
 
     When a left/right section has exactly one entry port whose lines are a
     superset of an exit port's lines, that entry bundle establishes the
     order; the exit port must keep the shared lines in the same relative
-    vertical order, so a line travelling straight through keeps its slot.
-    TB sections are exempt: their exit reverses offsets for concentric arcs.
+    vertical order, on contiguous offset slots, so a line travelling
+    straight through keeps its slot and no slot is left reserved for a line
+    that terminates inside the section without reaching this port. TB
+    sections are exempt: their exit reverses offsets for concentric arcs.
     """
 
     def _order(port_id: str, lines: set[str]) -> tuple[str, ...]:
@@ -1118,6 +1132,25 @@ def check_exit_inherits_entry_bundle_order(
                     exit_port=port_id,
                     entry_order=entry_order,
                     exit_order=exit_order,
+                )
+            )
+            continue
+        levels = distinct_offset_levels(
+            offsets.get((port_id, lid), 0.0) for lid in exit_lines
+        )
+        gaps = [
+            levels[i + 1] - levels[i]
+            for i in range(len(levels) - 1)
+            if levels[i + 1] - levels[i] > OFFSET_STEP + COORD_TOLERANCE_FINE
+        ]
+        if gaps:
+            violations.append(
+                ExitBundleOrderViolation(
+                    section_id=section.id,
+                    entry_port=entry_id,
+                    exit_port=port_id,
+                    entry_order=entry_order,
+                    gap=max(gaps),
                 )
             )
     return violations

@@ -1215,9 +1215,27 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         if len(entry_ports) == 1 and port_lines.issubset(
             graph.station_lines(entry_ports[0])
         ):
-            inherited = {
-                lid: ctx.offsets.get((entry_ports[0], lid), 0.0) for lid in port_lines
-            }
+            entry_id = entry_ports[0]
+            entry_lines = graph.station_lines(entry_id)
+            if len(entry_lines) == len(port_lines):
+                inherited = {
+                    lid: ctx.offsets.get((entry_id, lid), 0.0) for lid in port_lines
+                }
+            else:
+                # The entry also carries lines that terminate inside the
+                # section and never reach this exit. Re-rank the survivors
+                # onto contiguous slots instead of copying the entry's raw
+                # offsets, so the lane reserved for a non-exiting line doesn't
+                # leave a gap here that the far side's entry port doesn't
+                # share.
+                order = sorted(
+                    port_lines,
+                    key=lambda lid: (
+                        ctx.offsets.get((entry_id, lid), 0.0),
+                        ctx.line_priority.get(lid, 0),
+                    ),
+                )
+                inherited = {lid: i * ctx.offset_step for i, lid in enumerate(order)}
             for lid, off in inherited.items():
                 ctx.offsets[(port_id, lid)] = off
             _propagate_exit_offsets_to_hubs(ctx, port_id, inherited)
