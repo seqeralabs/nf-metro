@@ -1144,7 +1144,6 @@ def _trial_cost(
     port_pref: dict[str, bool] | None = None,
     panel_extents: dict[str, tuple[float, float]] | None = None,
     interchange_spans: dict[str, tuple[float, float]] | None = None,
-    diamond_siblings: dict[str, Station] | None = None,
 ) -> float:
     """Count label collision cost for a section using the given alternation.
 
@@ -1201,11 +1200,6 @@ def _trial_cost(
             sections_with_multiline,
             solo,
         )
-
-        if diamond_siblings:
-            outward = _apply_diamond_outward_override(station, diamond_siblings)
-            if outward is not None:
-                start_above = outward
 
         if port_pref and station.id in port_pref:
             start_above = port_pref[station.id]
@@ -1362,7 +1356,6 @@ def _build_label_ctx(
             port_pref=port_pref,
             panel_extents=panel_extents,
             interchange_spans=interchange_spans,
-            diamond_siblings=diamond_siblings,
         )
         cost_flipped = _trial_cost(
             *args,
@@ -1371,7 +1364,6 @@ def _build_label_ctx(
             port_pref=port_pref,
             panel_extents=panel_extents,
             interchange_spans=interchange_spans,
-            diamond_siblings=diamond_siblings,
         )
         if cost_flipped < cost_default:
             section_flip[sec_id] = True
