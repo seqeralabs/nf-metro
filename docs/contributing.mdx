@@ -17,6 +17,12 @@ pip install -e ".[dev]"
 
 Required Python: 3.10+. Dependencies: `click`, `drawsvg`, `networkx`, `pillow`. Dev extras add `pytest`, `ruff`, `mypy`.
 
+A plain clone also fetches the `gh-pages` branch, an orphan branch carrying the built docs site and every open PR's render preview - work only ever happens on `main`, so if you don't need that history, clone single-branch:
+
+```bash frame="terminal"
+git clone --single-branch --branch main https://github.com/seqeralabs/nf-metro
+```
+
 ## Running checks
 
 ```bash frame="terminal"
@@ -144,3 +150,9 @@ When you trip over a bug mid-task, file a detailed issue rather than trying to f
 The engine assigns coordinates through a sequence of ~40 ordered phases and then routes the edges, so a change in one place often has effects elsewhere. Before modifying it, read the relevant Internals page - [Architecture](/nf-metro/dev/architecture/), [Layout pipeline](/nf-metro/dev/layout_pipeline/), [Routing](/nf-metro/dev/routing/) - and the per-phase contracts in [`CONTRACT.md`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md).
 
 Invariants are enforced in two places, and new ones should go there rather than as one-off assertions: **phase guards** (`src/nf_metro/layout/phases/guards.py`, which name the failing phase so a regression localises immediately) and the **layout oracle** (the `check_*` functions in `tests/layout_validator.py`). Some are hard rules the oracle will not let you break - for example, a station must never sit on the corner of a curve. Don't work around a failing check by relaxing it; fix the cause.
+
+## Repository size (`gh-pages`)
+
+Every docs deploy (`dev/`, `latest/`, versioned releases, and each open PR's render-diff preview under `_pr/<N>/`) commits the full built page to the `gh-pages` branch, gallery SVGs and all, inlined directly into the HTML. That inlining isn't incidental: `<Metro>` and `ZoomableSVG.astro` inline the SVG rather than reference it as an `<img>` because that's what keeps the map's `light-dark()` theming and the zoom/pan lightbox working - see the comments in those two components before "fixing" this by switching to external file references.
+
+Because most of a gallery page is unchanged between any two deploys but git's delta compression across a multi-MB blob is inconsistent, `gh-pages` history grew to ~1,450 commits (~82 MB) before being squashed to a single commit as a one-time cleanup ([#1240](https://github.com/seqeralabs/nf-metro/issues/1240)). This was a manual, one-off squash, not automation - continuously squashing on every deploy would need the PR-preview publish job to combine a history-discarding push with preserving every other open PR's preview directory, and that combination isn't reliably documented for the `gh-pages` deploy action in use. Given how central PR previews are to day-to-day layout work, that risk wasn't worth taking. If the branch balloons again, repeat the manual squash (see #1240 for the procedure) rather than wiring up continuous squashing without testing it in isolation first.
