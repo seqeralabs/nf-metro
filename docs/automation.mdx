@@ -32,3 +32,32 @@ Inputs (all optional): `input` (default `assets/metro_map.mmd`), `output`
 `embed-font` (default `true`), `version` (nf-metro version to install), and
 `extra-args` for any other `nf-metro render` flag (e.g.
 `extra-args: "--fold-threshold 20"`).
+
+## Reusable workflow
+
+The turn-key option. It wraps the action and keeps the committed SVG in sync:
+commit the re-render on pushes, warn on pull requests — no shell glue in your
+repo.
+
+```yaml
+# .github/workflows/metro-map.yml
+name: Metro map
+on:
+  push:
+    paths: ["assets/metro_map.mmd"]
+  pull_request:
+    paths: ["assets/metro_map.mmd"]
+
+jobs:
+  metro:
+    uses: seqeralabs/nf-metro/.github/workflows/render-metro-map.yml@1.1.0
+```
+
+Behaviour:
+
+- **push** — if the SVG changed, it is committed with `chore: re-render metro map [skip ci]` and pushed.
+- **pull_request** — if the SVG is out of date, a single warning comment is posted (and refreshed on re-runs); nothing is committed.
+
+Inputs mirror the action (`input`, `output`, `theme`, `mode`, `embed-font`,
+`version`), plus `nf-metro-ref` — the ref of `seqeralabs/nf-metro` whose action
+runs (default `1.1.0`).

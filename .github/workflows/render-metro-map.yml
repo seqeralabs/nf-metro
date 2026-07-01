@@ -1,0 +1,118 @@
+name: Render metro map
+
+# Reusable workflow for consumer pipeline repos. Renders a metro-map SVG from
+# its .mmd source and keeps the committed SVG in sync:
+#   - on push:         commit the re-rendered SVG (with [skip ci])
+#   - on pull_request:  post a warning comment; never commit
+#
+# Caller example (in the consumer repo):
+#
+#   on:
+#     push:         { paths: ['assets/metro_map.mmd'] }
+#     pull_request: { paths: ['assets/metro_map.mmd'] }
+#   jobs:
+#     metro:
+#       uses: seqeralabs/nf-metro/.github/workflows/render-metro-map.yml@1.1.0
+
+on:
+  workflow_call:
+    inputs:
+      input:
+        description: Path to the Mermaid .mmd source to render.
+        type: string
+        required: false
+        default: assets/metro_map.mmd
+      output:
+        description: Path for the rendered SVG (empty = sibling .svg of the input).
+        type: string
+        required: false
+        default: ""
+      theme:
+        description: "Visual theme (nfcore, seqera, ...)."
+        type: string
+        required: false
+        default: nfcore
+      mode:
+        description: Display mode to bake (light or dark; empty = adaptive).
+        type: string
+        required: false
+        default: ""
+      embed-font:
+        description: Inline the label font into the SVG.
+        type: string
+        required: false
+        default: "true"
+      version:
+        description: nf-metro version to install (empty = latest release).
+        type: string
+        required: false
+        default: ""
+      nf-metro-ref:
+        description: Git ref of seqeralabs/nf-metro whose action.yml runs.
+        type: string
+        required: false
+        default: "1.1.0"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Render metro map
+        id: render
+        uses: seqeralabs/nf-metro@${{ inputs.nf-metro-ref }}
+        with:
+          input: ${{ inputs.input }}
+          output: ${{ inputs.output }}
+          theme: ${{ inputs.theme }}
+          mode: ${{ inputs.mode }}
+          embed-font: ${{ inputs.embed-font }}
+          version: ${{ inputs.version }}
+
+      - name: Commit re-rendered SVG
+        if: >-
+          github.event_name == 'push' && steps.render.outputs.changed == 'true'
+        env:
+          OUTPUT_PATH: ${{ steps.render.outputs.output-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$OUTPUT_PATH"
+          git commit -m "chore: re-render metro map [skip ci]"
+          git push
+
+      - name: Warn on stale SVG
+        if: >-
+          github.event_name == 'pull_request' && steps.render.outputs.changed == 'true'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          INPUT_PATH: ${{ inputs.input }}
+          OUTPUT_PATH: ${{ steps.render.outputs.output-path }}
+        with:
+          script: |
+            const marker = '<!-- nf-metro -->';
+            const { INPUT_PATH, OUTPUT_PATH } = process.env;
+            const body = `${marker}\n:warning: **\`${OUTPUT_PATH}\` is out of date with \`${INPUT_PATH}\`.**\n\n`
+              + 'It will be re-rendered automatically when this PR is merged, '
+              + 'or you can regenerate it locally with `nf-metro render`.';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
