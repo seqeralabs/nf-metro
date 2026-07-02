@@ -1,0 +1,23 @@
+%%metro title: Fork-join interior label
+%%metro line: star_rsem | STAR / RSEM | #0570b0
+%%metro line: star_salmon | STAR / Salmon | #2db572
+%%metro line: hisat2 | HISAT2 | #f5c542
+%%metro line: bowtie2_salmon | Bowtie2 / Salmon | #ff8c00
+%%metro line: pseudo_salmon | Salmon | #e63946
+%%metro line: pseudo_kallisto | Kallisto | #7b2d3b
+
+graph LR
+    subgraph rrna [rRNA removal]
+        bbsplit[BBSplit]
+        sortmerna[SortMeRNA]
+        ribodetector[RiboDetector]
+        bowtie2_rrna[Bowtie2]
+        fastqc[FastQC]
+
+        bbsplit -->|star_rsem,star_salmon,hisat2,bowtie2_salmon,pseudo_salmon,pseudo_kallisto| sortmerna
+        bbsplit -->|star_rsem,star_salmon,hisat2,bowtie2_salmon,pseudo_salmon,pseudo_kallisto| ribodetector
+        bbsplit -->|star_rsem,star_salmon,hisat2,bowtie2_salmon,pseudo_salmon,pseudo_kallisto| bowtie2_rrna
+        sortmerna -->|star_rsem,star_salmon,hisat2,bowtie2_salmon,pseudo_salmon,pseudo_kallisto| fastqc
+        ribodetector -->|star_rsem,star_salmon,hisat2,bowtie2_salmon,pseudo_salmon,pseudo_kallisto| fastqc
+        bowtie2_rrna -->|star_rsem,star_salmon,hisat2,bowtie2_salmon,pseudo_salmon,pseudo_kallisto| fastqc
+    end

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from nf_metro.layout.constants import (
     DIAGONAL_RUN,
@@ -446,6 +446,14 @@ def _fj_label_metrics(
     return fj_label_half, fj_tracks
 
 
+def _loop_widening_for_label_half(label_half: float, x_spacing: float) -> float:
+    """Extra loop room so a label of ``label_half`` half-width clears the fan's
+    transition diagonals.  A whole pitch already sits between columns, so it is
+    subtracted; the residual is scaled by an empirical ``1.5`` because the
+    widening is applied to both the fork- and join-side gaps."""
+    return max(0.0, (label_half * 2 + DIAGONAL_RUN - x_spacing) / 1.5)
+
+
 def _wide_fan_bubble_extra(
     layer: int,
     fork_layers: set[int],
@@ -505,7 +513,75 @@ def _wide_fan_bubble_extra(
                         bubble_label_half, label_text_width(station.label) / 2
                     )
 
-    return max(0.0, (bubble_label_half * 2 + DIAGONAL_RUN - x_spacing) / 1.5)
+    return _loop_widening_for_label_half(bubble_label_half, x_spacing)
+
+
+def _interior_branch_loop_floor(
+    layer: int,
+    fork_layers: set[int],
+    join_layers: set[int],
+    out_targets: dict[str, set[str]],
+    in_sources: dict[str, set[str]],
+    layers: dict[str, int],
+    tracks: dict[str, float],
+    sub: MetroGraph,
+    x_spacing: float,
+) -> float:
+    """Per-side loop gap so every interior branch label clears its diagonals.
+
+    An interior branch has a fan sibling on a higher track and one on a lower
+    track, so its label sits inside the loop with a diagonal on each side.  The
+    loop must open wide enough for that label to clear those diagonals; the
+    interior branch's own width - not the fork/join station's - sets how wide.
+    Applied symmetrically as a floor on both the fork-side and join-side gap so
+    the interior branch (which sits on the trunk and is not loop-recentred) stays
+    centred - equal divergence and reconvergence runs.
+
+    A thin (single-line) sibling bundle reconverges/diverges as one diagonal
+    placed near the fork/join, so it never intrudes on the interior label; only a
+    thick multi-line bundle starts its diagonal early and grazes it.  Each
+    interior branch is sized independently and the widest requirement wins, so a
+    narrow label fed by a thick bundle is not shadowed by a wide label fed by a
+    thin one.
+    """
+    floor = 0.0
+
+    def consider(
+        hub: str, branch_ids: set[str], branch_layer: int, diverge: bool
+    ) -> None:
+        nonlocal floor
+        btracks = {
+            b: tracks[b]
+            for b in branch_ids
+            if b in tracks and layers.get(b) == branch_layer
+        }
+        if len(btracks) < 3:
+            return
+        top, bottom = min(btracks.values()), max(btracks.values())
+        hub_edges = sub.edges_from(hub) if diverge else sub.edges_to(hub)
+        sibling_lines = Counter((e.target if diverge else e.source) for e in hub_edges)
+        for bid, bt in btracks.items():
+            interior = top + SAME_COORD_TOLERANCE < bt < bottom - SAME_COORD_TOLERANCE
+            station = sub.stations.get(bid)
+            if not (interior and station and station.label.strip()):
+                continue
+            lines = max(
+                (sibling_lines[sib] for sib in btracks if sib != bid), default=0
+            )
+            if lines < 2:
+                continue
+            half = label_text_width(station.label) / 2
+            floor = max(floor, _loop_widening_for_label_half(half, x_spacing))
+
+    if layer in fork_layers:
+        for fsid, ftgts in out_targets.items():
+            if layers.get(fsid) == layer:
+                consider(fsid, ftgts, layer + 1, diverge=True)
+    if layer in join_layers:
+        for jsid, jsrcs in in_sources.items():
+            if layers.get(jsid) == layer:
+                consider(jsid, jsrcs, layer - 1, diverge=False)
+    return floor
 
 
 def _has_interior_branch(
@@ -635,10 +711,26 @@ def _layer_gap_for(
                 ),
             )
 
+    interior_floor = 0.0
+    if not label_angle:
+        interior_floor = _interior_branch_loop_floor(
+            layer,
+            fork_layers,
+            join_layers,
+            out_targets,
+            in_sources,
+            layers,
+            tracks,
+            sub,
+            x_spacing,
+        )
+
     routing_clearance = (
         fj_label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE - x_spacing + 1.0
     )
-    return max(base_gap, fj_label_half + bubble_extra, routing_clearance)
+    return max(
+        base_gap, fj_label_half + bubble_extra, routing_clearance, interior_floor
+    )
 
 
 def _compute_fork_join_gaps(

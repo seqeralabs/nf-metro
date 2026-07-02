@@ -223,6 +223,13 @@ gallery:
       earns a bridge gap (same-colour crossover, not a fan).
 
   # ── Fan-out and Fan-in ─────────────────────────────────────────────────────
+  - id: fork_join_interior_label
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A three-way fork-join whose wide middle-branch label sits inside the loop.
+      The loop widens symmetrically so the interior label clears the diverging and
+      reconverging bundles on both sides, keeping the branch centred.
   - id: wide_fan_out
     source_dir: examples/topologies
     category: Fan-out and Fan-in
