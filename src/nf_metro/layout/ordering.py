@@ -11,6 +11,7 @@ from __future__ import annotations
 __all__ = ["assign_tracks"]
 
 from collections import defaultdict
+from statistics import median_low
 
 import networkx as nx
 
@@ -406,6 +407,18 @@ def _place_single_node(
             pred_line_sets = [set(graph.station_lines(p)) for p in preds]
             max_pred_lines = max(len(pls) for pls in pred_line_sets)
             if len(node_lines) > max_pred_lines:
+                # Genuine multi-track convergence: no single predecessor
+                # carries the full bundle.  The base track is the first-
+                # declared line's, often an extreme of the feeder spread, so
+                # snapping there forces every other feeder into a longer
+                # detour.  In symmetric mode anchor on the median feeder track,
+                # minimising total feeder bend; median_low returns an actual
+                # feeder track so the merge stays on-grid even for an even
+                # feeder count (a mean would land on a half-track).
+                if graph.diamond_style == "symmetric":
+                    pred_tracks = [tracks[p] for p in preds if p in tracks]
+                    if pred_tracks:
+                        return median_low(pred_tracks)
                 return base
 
             # Trunk junction: at least one predecessor already carries the

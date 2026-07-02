@@ -274,6 +274,14 @@ gallery:
       3-way fan. The 2-way diamond straddles its trunk evenly, but at full pitch -- as tall
       as the 3-way fan, with an empty trunk row between its branches -- because the half-pitch
       compaction is a per-section decision the mixed-fan section cannot qualify for (#1076)."
+  - id: symmetric_multiline_merge_median
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "Three metro lines on distinct tracks converging on one shared station under
+      `diamond_style: symmetric`. The merge anchors on the median feeder track (the
+      middle line) rather than the first-declared line's extreme track, so each feeder
+      bends toward it by the least amount (#1277)."
   - id: terminal_symmetric_fan
     source_dir: examples/topologies
     category: Fan-out and Fan-in
