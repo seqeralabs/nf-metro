@@ -38,12 +38,11 @@ from nf_metro.layout.geometry import (
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _canvas_width,
-    _is_side_entered_vertical_section,
     _restoring_layout_geometry,
     _route_crosses_section_boundary,
-    _row_contiguous_column_groups,
     _section_bundle_lines,
     _section_lr_port_anchor_y,
+    _side_entered_vertical_feeder_pairs,
     _station_marker_bbox,
     first_vertical_leg_sign,
     first_vertical_leg_x,
@@ -632,21 +631,14 @@ def _guard_side_entered_vertical_top_not_below_feeder(
     beneath the rest of its grid row).
     """
     tol = SAME_COORD_TOLERANCE
-    for group in _row_contiguous_column_groups(graph):
-        for section in group:
-            if not _is_side_entered_vertical_section(graph, section):
-                continue
-            left = [s for s in group if s.grid_col < section.grid_col]
-            if not left:
-                continue
-            neighbour = max(left, key=lambda s: s.grid_col)
-            if section.bbox_y - neighbour.bbox_y > tol:
-                raise PhaseInvariantError(
-                    f"{phase}: side-entered vertical section {section.id!r} "
-                    f"bbox top y={section.bbox_y:.1f} drops "
-                    f"{section.bbox_y - neighbour.bbox_y:.1f}px below its feeder "
-                    f"row-mate {neighbour.id!r} (top y={neighbour.bbox_y:.1f})"
-                )
+    for section, neighbour in _side_entered_vertical_feeder_pairs(graph):
+        if section.bbox_y - neighbour.bbox_y > tol:
+            raise PhaseInvariantError(
+                f"{phase}: side-entered vertical section {section.id!r} "
+                f"bbox top y={section.bbox_y:.1f} drops "
+                f"{section.bbox_y - neighbour.bbox_y:.1f}px below its feeder "
+                f"row-mate {neighbour.id!r} (top y={neighbour.bbox_y:.1f})"
+            )
 
 
 def _guard_symmetric_diamond_branches_straddle_trunk(
