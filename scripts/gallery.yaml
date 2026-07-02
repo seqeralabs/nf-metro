@@ -337,6 +337,15 @@ gallery:
       continues to a single successor. The successor holds the trunk row rather than dropping
       to its own line base, so the chain runs flat instead of dipping into a V-kink before the
       section exit.
+  - id: aligner_row_terminator_lane_gap
+    source_dir: examples/topologies
+    category: Multi-line Bundles
+    description:
+      "Four aligner lines enter a section together, but one (Bowtie2/Salmon) peels
+      off to MultiQC and terminates inside the section instead of reaching its shared exit port.
+      HISAT2, which does exit, sits on a contiguous offset there rather than inheriting a gap
+      reserved for the terminated line, so its connector into the next section runs level
+      instead of kinking into a short diagonal (issue #1263)."
 
   # ── TB / BT Sections ───────────────────────────────────────────────────────
   - id: bt_chain
