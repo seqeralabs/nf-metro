@@ -27,6 +27,7 @@ from nf_metro.layout.constants import (
     SECTION_Y_GAP,
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
+    TITLE_BAND_OVERLAP_FLOOR,
     X_SPACING,
 )
 from nf_metro.layout.geometry import (
@@ -57,7 +58,7 @@ from nf_metro.layout.phases._common import (
     routes_through_own_section_interior,
     routes_through_unrelated_sections,
 )
-from nf_metro.layout.phases.bbox import _section_fit_top
+from nf_metro.layout.phases.bbox import _min_drawn_section_bbox_top, _section_fit_top
 from nf_metro.layout.phases.off_track import (
     _is_single_trunk_lr_section,
     _off_track_anchor_of,
@@ -2694,6 +2695,31 @@ def _guard_topmost_row_top_entry_hugs_section(
             )
 
 
+def _guard_title_band_clearance(
+    graph: MetroGraph, phase: str, *, section_y_padding: float
+) -> None:
+    """A titled map's topmost drawn section must not overlap the title band.
+
+    The title is drawn in the canvas-top padding at a fixed baseline; the
+    section header badge protrudes ``SECTION_HEADER_PROTRUSION`` above its box
+    top.  A drawn box top above ``TITLE_BAND_OVERLAP_FLOOR`` sits its badge
+    level with the title.  Untitled maps, and implicit holders (which draw no
+    badge), are exempt.
+    """
+    if not graph.title:
+        return
+    min_top = _min_drawn_section_bbox_top(graph)
+    if min_top is None:
+        return
+    limit = max(section_y_padding, TITLE_BAND_OVERLAP_FLOOR) - GUARD_TOLERANCE
+    if min_top < limit:
+        raise PhaseInvariantError(
+            f"{phase}: titled map's topmost section box top y={min_top:.1f} "
+            f"sits above the title-band floor {limit:.1f}; the header badge "
+            f"would rise level with the map title"
+        )
+
+
 def _ensure_routes(
     graph: MetroGraph, routes: list[RoutedPath] | None
 ) -> list[RoutedPath]:
@@ -4721,6 +4747,16 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         _guard_topmost_row_top_entry_hugs_section,
         "B",
         needs=frozenset({"offsets", "routes"}),
+    ),
+    GuardSpec(
+        _guard_title_band_clearance,
+        "B",
+        needs=frozenset({"section_y_padding"}),
+        issue_pin=("#1273",),
+        narrow_reason=(
+            "Scoped to titled maps, whose canvas-top title band the header "
+            "must clear; untitled maps keep the tighter section_y_padding top."
+        ),
     ),
     GuardSpec(
         _guard_off_track_output_clears_non_producer,

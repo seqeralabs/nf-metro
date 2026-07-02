@@ -998,7 +998,10 @@ in pipeline order.
   row-top flush left an empty band above content with nothing in it (no port
   or bypass helper); a band holding a port or bypass helper is left intact.
   The upward grow can breach the canvas top margin, so
-  `_shift_graph_into_canvas` runs immediately after.
+  `_shift_graph_into_canvas` runs immediately after. That shift keeps every
+  section `section_y_padding` below the canvas top and, on a titled map, keeps
+  every *drawn* section `TITLE_BAND_CLEARANCE` below it so the header badge
+  clears the title band (issue #1273).
 - **Helper**: `_fit_bboxes_to_content_top` (`phases/bbox.py`), then
   `_shift_graph_into_canvas`.
 - **Precondition**: All content Ys final (post-6.14).
@@ -1045,7 +1048,9 @@ in pipeline order.
 - **Precondition**: All other Y phases done.
 - **Postcondition**: Real stations sharing a single non-zero residue are
   shifted onto integer `y_spacing` multiples; mixed-residue (multi-row)
-  layouts and half-grid / convergence stations are left untouched.
+  layouts and half-grid / convergence stations are left untouched. A
+  candidate grid shift is rejected if it would pull the top above the
+  canvas margin or (on a titled map) a drawn section into the title band.
 - **Invariants preserved**: Relative station/section/port Ys (the whole
   canvas moves by one delta).
 - **Related tests**: `test_auto_y_spacing_fits_content`.

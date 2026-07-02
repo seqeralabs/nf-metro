@@ -36,6 +36,8 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_Y_GAP,
     SECTION_Y_PADDING,
+    TITLE_BAND_BOTTOM,
+    TITLE_BAND_OVERLAP_FLOOR,
     X_SPACING,
     resolve_offset_step,
 )
@@ -64,6 +66,7 @@ from nf_metro.layout.phases._common import (
     iter_fold_lr_exits_short_of_target,
 )
 from nf_metro.layout.phases.bbox import (
+    _min_drawn_section_bbox_top,
     _section_band_is_empty,
     _section_content_hug_top,
     _section_fit_top,
@@ -1420,6 +1423,68 @@ def test_diagonal_overlay_check_detects_collapse():
         _diag("a", "c", "blue", [(0.0, 0.0), (45.0, 300.0)]),
     ]
     assert not check_no_collinear_distinct_diagonals(graph, diverging, {})
+
+
+_TITLED_FIXTURES = _fixtures_with(lambda t: "%%metro title:" in t)
+
+
+@pytest.mark.parametrize("fixture", _TITLED_FIXTURES)
+def test_titled_map_header_does_not_overlap_title(fixture):
+    """A titled map's topmost drawn header must not overlap the title band.
+
+    The map title is drawn in the canvas-top padding; the section header badge
+    protrudes ``SECTION_HEADER_PROTRUSION`` above its box top.  The header top
+    must therefore land at or below the title's lowest glyph
+    (``TITLE_BAND_BOTTOM``) rather than level with the title.
+    """
+    graph = _layout(fixture)
+    top = _min_drawn_section_bbox_top(graph)
+    if top is None:
+        pytest.skip("no drawn sections")
+    header_top = top - SECTION_HEADER_PROTRUSION
+    assert header_top >= TITLE_BAND_BOTTOM - GUARD_TOLERANCE, (
+        f"{fixture}: header top y={header_top:.1f} rises above the title band "
+        f"bottom {TITLE_BAND_BOTTOM:.1f}; box top y={top:.1f}"
+    )
+
+
+_TITLE_TOGGLE_FIXTURES = [
+    "topologies/rowmate_tb_side_entry_top_align.mmd",
+    "rnaseq_sections.mmd",
+    "rnaseq_auto.mmd",
+    "topologies/tb_bottom_exit_fork_diamond.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _TITLE_TOGGLE_FIXTURES)
+def test_title_only_moves_a_map_whose_header_would_overlap(fixture):
+    """A title moves the top only when the header would otherwise overlap it.
+
+    Laying the same graph out with and without a title: the title never lifts
+    the top upward, only clears an overlap.  A layout already clearing the
+    title band (untitled top at or below ``TITLE_BAND_OVERLAP_FLOOR``) is left
+    byte-for-byte where it was; one that would overlap is pushed down clear.
+    """
+    text = _fixture_text(fixture)
+
+    titled = parse_metro_mermaid(text)
+    if not titled.title:
+        pytest.skip("fixture declares no title")
+    compute_layout(titled)
+    titled_top = _min_drawn_section_bbox_top(titled)
+
+    untitled = parse_metro_mermaid(text)
+    untitled.title = ""
+    compute_layout(untitled)
+    untitled_top = _min_drawn_section_bbox_top(untitled)
+
+    assert titled_top is not None and untitled_top is not None
+    assert titled_top >= untitled_top - GUARD_TOLERANCE
+    assert titled_top >= TITLE_BAND_OVERLAP_FLOOR - GUARD_TOLERANCE
+    if untitled_top >= TITLE_BAND_OVERLAP_FLOOR - GUARD_TOLERANCE:
+        assert titled_top == pytest.approx(untitled_top, abs=GUARD_TOLERANCE)
+    else:
+        assert titled_top > untitled_top + GUARD_TOLERANCE
 
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)

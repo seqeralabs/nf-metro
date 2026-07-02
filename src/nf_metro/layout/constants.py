@@ -259,6 +259,34 @@ Applied after accounting for SECTION_HEADER_PROTRUSION, so the actual
 bbox-to-bbox distance will be MIN_INTER_SECTION_ROW_GAP + protrusion.
 """
 
+TITLE_BAND_BOTTOM: float = 36.0
+"""Lowest y a map title's glyphs reach, measured from the canvas top.
+
+The title baseline sits at render's ``TITLE_Y_OFFSET`` (30) and the largest
+title font across themes is ~26px, whose descenders drop ~6px below the
+baseline.  Mirrors render geometry the way ``SECTION_HEADER_PROTRUSION``
+does; layout has no theme, so it reserves against the tallest title.
+"""
+
+TITLE_BAND_OVERLAP_FLOOR: float = TITLE_BAND_BOTTOM + SECTION_HEADER_PROTRUSION
+"""``bbox_y`` at which a drawn section's header badge stops overlapping the title.
+
+The badge protrudes ``SECTION_HEADER_PROTRUSION`` above the box top, so a top
+below this sits its badge above the title's lowest glyph -- the defect.  This
+is the hard floor a titled map must never breach; a map already at or below it
+(box top above it) is left alone so the fix never over-pads a map that was
+already clear.
+"""
+
+TITLE_BAND_CLEARANCE: float = TITLE_BAND_OVERLAP_FLOOR + 8.0
+"""``bbox_y`` a titled map's topmost drawn section is lifted to when it overlaps.
+
+Only a map whose header actually overlaps the title (top above
+``TITLE_BAND_OVERLAP_FLOOR``) is moved, and it lands here -- a small band above
+the floor so the badge sits a visible gap below the title rather than flush
+against it.  Untitled maps keep the tighter ``SECTION_Y_PADDING`` top.
+"""
+
 # ---------------------------------------------------------------------------
 # Routing
 # ---------------------------------------------------------------------------

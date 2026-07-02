@@ -775,3 +775,15 @@ def _min_section_bbox_top(graph: MetroGraph, default: float) -> float:
         (s.bbox_y for s in graph.sections.values() if s.bbox_h > 0),
         default=default,
     )
+
+
+def _min_drawn_section_bbox_top(graph: MetroGraph) -> float | None:
+    """Smallest ``bbox_y`` among sections that draw a visible box, or ``None``.
+
+    Excludes implicit holders, which draw neither a box nor a header badge and
+    so cannot crowd the map title.
+    """
+    return min(
+        (s.bbox_y for s in graph.real_sections.values() if s.bbox_h > 0),
+        default=None,
+    )

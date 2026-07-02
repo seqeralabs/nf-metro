@@ -9,8 +9,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.phase_state import require_phase_field
-from nf_metro.layout.phases.bbox import _min_section_bbox_top
-from nf_metro.layout.phases.canvas import _translate_graph_y
+from nf_metro.layout.phases.canvas import _canvas_top_preserved, _translate_graph_y
 from nf_metro.layout.phases.fan_bundles import _convergence_source_ys
 from nf_metro.layout.phases.junctions import _position_junctions
 from nf_metro.parser.model import MetroGraph, PortSide
@@ -256,13 +255,12 @@ def _snap_canvas_y_to_grid(
     # Two candidate shifts: down by `-mode_residue`, or up by
     # `y_spacing - mode_residue`.  Prefer the one that preserves the
     # top margin; among equal choices prefer the smaller absolute shift.
-    min_top = _min_section_bbox_top(graph, section_y_padding)
     shift_down = -mode_residue
     shift_up = y_spacing - mode_residue
     candidates: list[float] = []
-    if min_top + shift_down >= section_y_padding - 1e-6:
+    if _canvas_top_preserved(graph, section_y_padding, shift_down):
         candidates.append(shift_down)
-    if min_top + shift_up >= section_y_padding - 1e-6:
+    if _canvas_top_preserved(graph, section_y_padding, shift_up):
         candidates.append(shift_up)
     if not candidates:
         # Neither preserves the margin; pick the up-shift since
