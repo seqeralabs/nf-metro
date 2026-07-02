@@ -31,11 +31,13 @@ from nf_metro.layout.constants import (
     INTER_ROW_EDGE_CLEARANCE,
     MIN_STATION_FLAT_LENGTH,
     ROW_BAND_SLACK,
+    SAME_COORD_TOLERANCE,
     SAME_Y_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
     SECTION_Y_GAP,
     SECTION_Y_PADDING,
     X_SPACING,
+    resolve_offset_step,
 )
 from nf_metro.layout.engine import (
     PhaseInvariantError,
@@ -47,6 +49,7 @@ from nf_metro.layout.geometry import lanes_run_along_y, segment_intersects_bbox
 from nf_metro.layout.labels import (
     _label_bbox,
     find_wrapped_label_trunk_strikes,
+    font_scale_context,
     place_labels,
     segment_strikes_label,
 )
@@ -8660,4 +8663,132 @@ def test_lr_to_tb_bottom_drop_no_boundary_crossover(fixture):
         assert abs(x - trunk_x[line_id]) < 1.0, (
             f"{fixture}: line {line_id} drops at x={x} but its trunk runs at "
             f"x={trunk_x[line_id]} -- the bundle swaps sides at the boundary"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Interior fork-join branch labels must clear the loop diagonals (#1259)
+# ---------------------------------------------------------------------------
+
+
+def _layout_diamond(fixture: str, style: str) -> MetroGraph:
+    """Lay out ``fixture`` under a given ``diamond_style`` (a graph field, not a
+    ``compute_layout`` argument)."""
+    graph = parse_metro_mermaid(_resolve_fixture(fixture).read_text())
+    graph.diamond_style = style
+    compute_layout(graph)
+    return graph
+
+
+def _interior_fan_branches(graph: MetroGraph) -> list[tuple[str, str, str]]:
+    """``(fork, branch, join)`` for each interior fork-join branch.
+
+    An interior branch reconverges (and diverges) with a fan sibling on a
+    higher track and one on a lower track, so its label sits inside the loop
+    with a diagonal on each side.
+    """
+    outs: dict[str, set[str]] = defaultdict(set)
+    ins: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        if e.source in graph.stations and e.target in graph.stations:
+            outs[e.source].add(e.target)
+            ins[e.target].add(e.source)
+    triples: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for fork, tgts in outs.items():
+        for branch in tgts:
+            for join in outs.get(branch, set()):
+                sibs = [s for s in ins.get(join, set()) if s in tgts and s != branch]
+                by = graph.stations[branch].y
+                above = any(
+                    graph.stations[s].y < by - SAME_COORD_TOLERANCE for s in sibs
+                )
+                below = any(
+                    graph.stations[s].y > by + SAME_COORD_TOLERANCE for s in sibs
+                )
+                key = (fork, branch, join)
+                if above and below and key not in seen:
+                    seen.add(key)
+                    triples.append(key)
+    return triples
+
+
+def _interior_branch_label_struck(graph: MetroGraph, branch: str) -> bool:
+    """Whether any non-incident bundle segment strikes ``branch``'s label ink.
+
+    Unlike :func:`iter_line_label_strikes`, a segment carrying a line the branch
+    also carries is *not* exempted here: the loop's reconverging/diverging bundle
+    is exactly those same-line diagonals, and grazing the interior label with
+    them is the defect #1259 addresses.
+    """
+    with font_scale_context(graph.font_scale):
+        offsets = compute_station_offsets(
+            graph, offset_step=resolve_offset_step(graph.track_gap, 3.0)
+        )
+        routes = route_edges_centred(graph, station_offsets=offsets)
+        placements = place_labels(
+            graph,
+            station_offsets=offsets,
+            icon_obstacles=[],
+            routes=routes,
+            label_angle=graph.label_angle or 0.0,
+        )
+    lab = next((p for p in placements if p.station_id == branch), None)
+    assert lab is not None, f"no label placement for {branch!r}"
+    for r in routes:
+        if branch in (r.edge.source, r.edge.target):
+            continue
+        pts = apply_route_offsets(r, offsets)
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            if segment_strikes_label(x0, y0, x1, y1, lab):
+                return True
+    return False
+
+
+_INTERIOR_LABEL_FIXTURES = [
+    "topologies/fork_join_interior_label.mmd",
+    "rnaseq_sections.mmd",
+    "regressions/rnaseq_branch_fold_wrap.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _INTERIOR_LABEL_FIXTURES)
+@pytest.mark.parametrize("style", ["symmetric", "straight"])
+def test_interior_branch_label_clears_loop_diagonals(fixture, style):
+    """An interior fork-join branch label clears its loop's diagonals (#1259).
+
+    A wide interior branch label (e.g. rnaseq's RiboDetector) must not be raked
+    by the reconverging/diverging bundle on either side of its loop; the loop
+    widens to accommodate it in both ``straight`` and ``symmetric`` styles.
+    """
+    graph = _layout_diamond(fixture, style)
+    interiors = _interior_fan_branches(graph)
+    checked = 0
+    for _fork, branch, _join in interiors:
+        if not graph.stations[branch].label.strip():
+            continue
+        assert not _interior_branch_label_struck(graph, branch), (
+            f"{fixture} [{style}]: interior branch {branch!r} "
+            f"({graph.stations[branch].label!r}) label is struck by its loop's "
+            f"reconverging/diverging bundle"
+        )
+        checked += 1
+    assert checked, f"{fixture}: no interior fork-join branch found to check"
+
+
+@pytest.mark.parametrize("style", ["symmetric", "straight"])
+def test_interior_branch_stays_centred_on_loop(style):
+    """An interior branch stays centred: equal divergence and reconvergence runs.
+
+    Widening the loop for an interior label (#1259) must open both sides
+    symmetrically, so the branch's X remains the midpoint of its fork and join.
+    """
+    fixture = "topologies/fork_join_interior_label.mmd"
+    graph = _layout_diamond(fixture, style)
+    for fork, branch, join in _interior_fan_branches(graph):
+        div = graph.stations[branch].x - graph.stations[fork].x
+        recon = graph.stations[join].x - graph.stations[branch].x
+        assert abs(div - recon) <= 1.0, (
+            f"{fixture} [{style}]: branch {branch!r} off-centre -- "
+            f"divergence run {div:.1f} != reconvergence run {recon:.1f}"
         )
