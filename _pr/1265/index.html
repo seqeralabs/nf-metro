@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Render diff - PR #1265</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(#f5f5f7, #1e1e2e);
+    --surface: light-dark(#eaeaef, #2a2a3c);
+    --border: light-dark(#c9c9d4, #3a3a4c);
+    --text: light-dark(#1e1e2e, #e0e0e0);
+    --muted: light-dark(#666, #888);
+    --accent: light-dark(#1a8575, #4ec9b0);
+    --added: light-dark(rgba(46,160,67,.25), rgba(46,160,67,.44));
+    --removed: light-dark(rgba(218,54,52,.25), rgba(218,54,52,.44));
+  }
+  [data-scheme="dark"] { color-scheme: dark; }
+  [data-scheme="light"] { color-scheme: light; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem;
+    line-height: 1.5;
+  }
+  .page-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+  h1 {
+    font-size: 1.5rem;
+    color: var(--accent);
+  }
+  .scheme-btn {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 0.35rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .scheme-btn:hover { background: var(--border); }
+  .summary {
+    color: var(--muted);
+    margin-bottom: 2rem;
+    font-size: 0.95rem;
+  }
+  .toc {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .toc h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+  }
+  .toc h3 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    margin-bottom: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .toc ul {
+    list-style: none;
+    columns: 2;
+    column-gap: 2rem;
+  }
+  .toc li {
+    margin-bottom: 0.25rem;
+  }
+  .toc a {
+    color: var(--text);
+    text-decoration: none;
+  }
+  .toc a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+  }
+  .badge-changed { background: var(--border); }
+  .badge-added { background: var(--added); }
+  .badge-removed { background: var(--removed); }
+  .section-header {
+    font-size: 1.3rem;
+    color: var(--accent);
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+  .diff-entry {
+    margin-bottom: 3rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .diff-entry h3 {
+    font-size: 1.1rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .side {
+    padding: 1rem;
+    overflow-x: auto;
+  }
+  .side:first-child {
+    border-right: 1px solid var(--border);
+  }
+  .side h4 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .svg-wrapper { overflow-x: auto; }
+  .svg-wrapper svg, .side img, .side-only img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 4px;
+  }
+  .side-only {
+    padding: 1rem;
+  }
+  .empty {
+    color: var(--muted);
+    font-style: italic;
+    padding: 2rem;
+    text-align: center;
+  }
+  .toggle-bar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .toggle-bar button {
+    background: var(--border);
+    color: var(--text);
+    border: none;
+    padding: 0.3rem 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .toggle-bar button.active {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  .intro {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+  .intro summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .intro p {
+    margin-top: 0.75rem;
+  }
+  .intro ul {
+    margin-top: 0.5rem;
+    padding-left: 1.5rem;
+  }
+  .intro li {
+    margin-bottom: 0.25rem;
+  }
+  .intro code {
+    background: var(--border);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  .intro a {
+    color: var(--accent);
+  }
+  .metrics {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .metrics h2 {
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+    color: var(--accent);
+  }
+  .metrics .caption {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 0.75rem;
+  }
+  .metrics table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.82rem;
+  }
+  .metrics th, .metrics td {
+    padding: 0.3rem 0.6rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .metrics th:first-child, .metrics td:first-child {
+    text-align: left;
+  }
+  .metrics th {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+  }
+  .metrics td a { color: var(--text); text-decoration: none; }
+  .metrics td a:hover { color: var(--accent); }
+  .m-flat { color: var(--muted); }
+  .m-better { color: light-dark(#1a8575, #4ec9b0); font-weight: 600; }
+  .m-worse { color: light-dark(#c0392b, #f38ba8); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page-header">
+  <h1>Render diff - PR #1265</h1>
+  <button id="scheme-toggle" class="scheme-btn">System</button>
+</div>
+<p class="summary">1 added out of 214 total renders. Generated 2026-07-02 14:10 UTC.</p>
+<details class="intro">
+<summary>What is this page?</summary>
+<p>
+<a href="https://github.com/pinin4fjords/nf-metro">nf-metro</a>
+generates metro-map-style SVG diagrams from Mermaid graph definitions.
+This page is automatically generated for every pull request and shows
+<strong>only the renders that changed</strong> compared to the
+<code>main</code> branch.
+</p>
+<p>
+Use it to check that code changes produce the intended visual result
+without unexpected side-effects on other diagrams. Each entry shows
+the <strong>base</strong> (main) render on the left and the
+<strong>PR</strong> render on the right. Use the toggle buttons to
+switch between side-by-side, base-only, and PR-only views.
+</p>
+<p><strong>What to look for:</strong></p>
+<ul>
+<li>Intended improvements in the PR column</li>
+<li>Unintended regressions (overlapping lines, shifted labels,
+    broken routing) in diagrams you did not mean to change</li>
+<li>New renders (green <em>added</em> badge) or removed renders
+    (red <em>removed</em> badge)</li>
+</ul>
+</details>
+<div class="metrics">
+<h2>Layout-quality metrics</h2>
+<p class="caption">Advisory only &mdash; nothing gates on these. Lower is better; <span class="m-better">green</span> improved, <span class="m-worse">red</span> regressed.</p>
+<table>
+<tr><th>Render</th><th>Crossings</th><th>Near-horiz.</th><th>Lone diag.</th><th>Label strikes</th><th>Excess gaps</th><th>Wasted canvas</th></tr>
+<tr><td><a href="#fork_join_interior_label">fork_join_interior_label</a></td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;70%</td></tr>
+</table>
+</div>
+<div class="toc">
+<h2>Changed renders</h2>
+<h3><a href="#section-fan-out-and-fan-in">Fan-out and Fan-in</a></h3>
+<ul>
+<li><a href="#fork_join_interior_label">fork_join_interior_label</a><span class="badge badge-added">added</span></li>
+</ul>
+</div>
+<h2 class="section-header" id="section-fan-out-and-fan-in">Fan-out and Fan-in</h2>
+
+<div class="diff-entry" id="fork_join_interior_label">
+<h3>Fork Join Interior Label <span class="badge badge-added">added</span></h3>
+<div class="side-only"><h4>New in PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="414" height="472" viewBox="0 0 414 472">
+<defs>
+</defs>
+<style>.nf-metro-bg { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="414" height="472" fill="#2b2b2b" class="nf-metro-bg" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title">Fork-join interior label</text>
+<rect x="30.0" y="70.0" width="324.0" height="180.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="rrna" data-section-lines="bowtie2_salmon,hisat2,pseudo_kallisto,pseudo_salmon,star_rsem,star_salmon" />
+<circle cx="41.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="rrna" />
+<text x="41.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="rrna">1</text>
+<text x="57.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="rrna">rRNA removal</text>
+<path d="M80.0,140.0 L192.0,140.0" stroke="#7b2d3b" stroke-width="3.0" stroke-linecap="round" class="metro-line-pseudo_kallisto" data-line-id="pseudo_kallisto" />
+<path d="M80.0,140.0 L96.5,140.0 Q106.5,140.0,112.5,148.0 L130.5,172.0 Q136.5,180.0,146.5,180.0 L192.0,180.0" stroke="#7b2d3b" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-pseudo_kallisto" data-line-id="pseudo_kallisto" />
+<path d="M80.0,140.0 L96.5,140.0 Q106.5,140.0,110.01123441588392,149.36329177569044 L132.9887655841161,210.63670822430956 Q136.5,220.0,146.5,220.0 L192.0,220.0" stroke="#7b2d3b" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-pseudo_kallisto" data-line-id="pseudo_kallisto" />
+<path d="M192.0,140.0 L304.0,140.0" stroke="#7b2d3b" stroke-width="3.0" stroke-linecap="round" class="metro-line-pseudo_kallisto" data-line-id="pseudo_kallisto" />
+<path d="M192.0,180.0 L242.0,180.0 Q252.0,180.0,258.0,172.0 L276.0,148.0 Q282.0,140.0,292.0,140.0 L304.0,140.0" stroke="#7b2d3b" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-pseudo_kallisto" data-line-id="pseudo_kallisto" />
+<path d="M192.0,220.0 L242.0,220.0 Q252.0,220.0,255.5112344158839,210.63670822430956 L278.4887655841161,149.36329177569044 Q282.0,140.0,292.0,140.0 L304.0,140.0" stroke="#7b2d3b" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-pseudo_kallisto" data-line-id="pseudo_kallisto" />
+<path d="M80.0,136.0 L192.0,136.0" stroke="#e63946" stroke-width="3.0" stroke-linecap="round" class="metro-line-pseudo_salmon" data-line-id="pseudo_salmon" />
+<path d="M80.0,136.0 L98.5,136.0 Q108.5,136.0,114.5,144.0 L132.5,168.0 Q138.5,176.0,148.5,176.0 L192.0,176.0" stroke="#e63946" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-pseudo_salmon" data-line-id="pseudo_salmon" />
+<path d="M80.0,136.0 L98.5,136.0 Q108.5,136.0,112.01123441588392,145.36329177569044 L134.9887655841161,206.63670822430956 Q138.5,216.0,148.5,216.0 L192.0,216.0" stroke="#e63946" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-pseudo_salmon" data-line-id="pseudo_salmon" />
+<path d="M192.0,136.0 L304.0,136.0" stroke="#e63946" stroke-width="3.0" stroke-linecap="round" class="metro-line-pseudo_salmon" data-line-id="pseudo_salmon" />
+<path d="M192.0,176.0 L240.0,176.0 Q250.0,176.0,256.0,168.0 L274.0,144.0 Q280.0,136.0,290.0,136.0 L304.0,136.0" stroke="#e63946" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-pseudo_salmon" data-line-id="pseudo_salmon" />
+<path d="M192.0,216.0 L240.0,216.0 Q250.0,216.0,253.5112344158839,206.63670822430956 L276.4887655841161,145.36329177569044 Q280.0,136.0,290.0,136.0 L304.0,136.0" stroke="#e63946" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-pseudo_salmon" data-line-id="pseudo_salmon" />
+<path d="M80.0,132.0 L192.0,132.0" stroke="#ff8c00" stroke-width="3.0" stroke-linecap="round" class="metro-line-bowtie2_salmon" data-line-id="bowtie2_salmon" />
+<path d="M80.0,132.0 L100.5,132.0 Q110.5,132.0,116.5,140.0 L134.5,164.0 Q140.5,172.0,150.5,172.0 L192.0,172.0" stroke="#ff8c00" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-bowtie2_salmon" data-line-id="bowtie2_salmon" />
+<path d="M80.0,132.0 L100.5,132.0 Q110.5,132.0,114.01123441588392,141.36329177569044 L136.9887655841161,202.63670822430956 Q140.5,212.0,150.5,212.0 L192.0,212.0" stroke="#ff8c00" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-bowtie2_salmon" data-line-id="bowtie2_salmon" />
+<path d="M192.0,132.0 L304.0,132.0" stroke="#ff8c00" stroke-width="3.0" stroke-linecap="round" class="metro-line-bowtie2_salmon" data-line-id="bowtie2_salmon" />
+<path d="M192.0,172.0 L238.0,172.0 Q248.0,172.0,254.0,164.0 L272.0,140.0 Q278.0,132.0,288.0,132.0 L304.0,132.0" stroke="#ff8c00" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-bowtie2_salmon" data-line-id="bowtie2_salmon" />
+<path d="M192.0,212.0 L238.0,212.0 Q248.0,212.0,251.5112344158839,202.63670822430956 L274.4887655841161,141.36329177569044 Q278.0,132.0,288.0,132.0 L304.0,132.0" stroke="#ff8c00" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-bowtie2_salmon" data-line-id="bowtie2_salmon" />
+<path d="M80.0,128.0 L192.0,128.0" stroke="#f5c542" stroke-width="3.0" stroke-linecap="round" class="metro-line-hisat2" data-line-id="hisat2" />
+<path d="M80.0,128.0 L102.5,128.0 Q112.5,128.0,118.5,136.0 L136.5,160.0 Q142.5,168.0,152.5,168.0 L192.0,168.0" stroke="#f5c542" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-hisat2" data-line-id="hisat2" />
+<path d="M80.0,128.0 L102.5,128.0 Q112.5,128.0,116.01123441588392,137.36329177569044 L138.9887655841161,198.63670822430956 Q142.5,208.0,152.5,208.0 L192.0,208.0" stroke="#f5c542" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-hisat2" data-line-id="hisat2" />
+<path d="M192.0,128.0 L304.0,128.0" stroke="#f5c542" stroke-width="3.0" stroke-linecap="round" class="metro-line-hisat2" data-line-id="hisat2" />
+<path d="M192.0,168.0 L236.0,168.0 Q246.0,168.0,252.0,160.0 L270.0,136.0 Q276.0,128.0,286.0,128.0 L304.0,128.0" stroke="#f5c542" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-hisat2" data-line-id="hisat2" />
+<path d="M192.0,208.0 L236.0,208.0 Q246.0,208.0,249.5112344158839,198.63670822430956 L272.4887655841161,137.36329177569044 Q276.0,128.0,286.0,128.0 L304.0,128.0" stroke="#f5c542" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-hisat2" data-line-id="hisat2" />
+<path d="M80.0,124.0 L192.0,124.0" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-star_salmon" data-line-id="star_salmon" />
+<path d="M80.0,124.0 L104.5,124.0 Q114.5,124.0,120.5,132.0 L138.5,156.0 Q144.5,164.0,154.5,164.0 L192.0,164.0" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-star_salmon" data-line-id="star_salmon" />
+<path d="M80.0,124.0 L104.5,124.0 Q114.5,124.0,118.01123441588392,133.36329177569044 L140.9887655841161,194.63670822430956 Q144.5,204.0,154.5,204.0 L192.0,204.0" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-star_salmon" data-line-id="star_salmon" />
+<path d="M192.0,124.0 L304.0,124.0" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-star_salmon" data-line-id="star_salmon" />
+<path d="M192.0,164.0 L234.0,164.0 Q244.0,164.0,250.0,156.0 L268.0,132.0 Q274.0,124.0,284.0,124.0 L304.0,124.0" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-star_salmon" data-line-id="star_salmon" />
+<path d="M192.0,204.0 L234.0,204.0 Q244.0,204.0,247.5112344158839,194.63670822430956 L270.4887655841161,133.36329177569044 Q274.0,124.0,284.0,124.0 L304.0,124.0" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-star_salmon" data-line-id="star_salmon" />
+<path d="M80.0,120.0 L192.0,120.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-star_rsem" data-line-id="star_rsem" />
+<path d="M80.0,120.0 L106.5,120.0 Q116.5,120.0,122.5,128.0 L140.5,152.0 Q146.5,160.0,156.5,160.0 L192.0,160.0" stroke="#0570b0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-star_rsem" data-line-id="star_rsem" />
+<path d="M80.0,120.0 L106.5,120.0 Q116.5,120.0,120.01123441588392,129.36329177569044 L142.9887655841161,190.63670822430956 Q146.5,200.0,156.5,200.0 L192.0,200.0" stroke="#0570b0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-star_rsem" data-line-id="star_rsem" />
+<path d="M192.0,120.0 L304.0,120.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-star_rsem" data-line-id="star_rsem" />
+<path d="M192.0,160.0 L232.0,160.0 Q242.0,160.0,248.0,152.0 L266.0,128.0 Q272.0,120.0,282.0,120.0 L304.0,120.0" stroke="#0570b0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-star_rsem" data-line-id="star_rsem" />
+<path d="M192.0,200.0 L232.0,200.0 Q242.0,200.0,245.5112344158839,190.63670822430956 L268.4887655841161,129.36329177569044 Q272.0,120.0,282.0,120.0 L304.0,120.0" stroke="#0570b0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-star_rsem" data-line-id="star_rsem" />
+<rect x="75.0" y="115.0" width="10.0" height="30.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="bbsplit" data-station-lines="bowtie2_salmon,hisat2,pseudo_kallisto,pseudo_salmon,star_rsem,star_salmon" data-station-label="BBSplit" data-section-id="rrna" data-section-name="rRNA removal" />
+<rect x="187.0" y="115.0" width="10.0" height="30.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="sortmerna" data-station-lines="bowtie2_salmon,hisat2,pseudo_kallisto,pseudo_salmon,star_rsem,star_salmon" data-station-label="SortMeRNA" data-section-id="rrna" data-section-name="rRNA removal" />
+<rect x="187.0" y="155.0" width="10.0" height="30.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="ribodetector" data-station-lines="bowtie2_salmon,hisat2,pseudo_kallisto,pseudo_salmon,star_rsem,star_salmon" data-station-label="RiboDetector" data-section-id="rrna" data-section-name="rRNA removal" />
+<rect x="187.0" y="195.0" width="10.0" height="30.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="bowtie2_rrna" data-station-lines="bowtie2_salmon,hisat2,pseudo_kallisto,pseudo_salmon,star_rsem,star_salmon" data-station-label="Bowtie2" data-section-id="rrna" data-section-name="rRNA removal" />
+<rect x="299.0" y="115.0" width="10.0" height="30.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="fastqc" data-station-lines="bowtie2_salmon,hisat2,pseudo_kallisto,pseudo_salmon,star_rsem,star_salmon" data-station-label="FastQC" data-section-id="rrna" data-section-name="rRNA removal" />
+<text x="80.0" y="106.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">BBSplit</text>
+<text x="80.0" y="106.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="bbsplit" class="nf-metro-station-label">BBSplit</text>
+<text x="192.0" y="142.4" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">SortMeRNA</text>
+<text x="192.0" y="142.4" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="sortmerna" class="nf-metro-station-label">SortMeRNA</text>
+<text x="192.0" y="182.4" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">RiboDetector</text>
+<text x="192.0" y="182.4" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="ribodetector" class="nf-metro-station-label">RiboDetector</text>
+<text x="192.0" y="231.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Bowtie2</text>
+<text x="192.0" y="231.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="bowtie2_rrna" class="nf-metro-station-label">Bowtie2</text>
+<text x="304.0" y="106.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">FastQC</text>
+<text x="304.0" y="106.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="fastqc" class="nf-metro-station-label">FastQC</text>
+<circle cx="116.5" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="146.5" cy="160.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="114.5" cy="124.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="144.5" cy="164.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="112.5" cy="128.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="142.5" cy="168.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="110.5" cy="132.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="140.5" cy="172.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="108.5" cy="136.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="138.5" cy="176.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="106.5" cy="140.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="136.5" cy="180.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="116.5" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="146.5" cy="200.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="114.5" cy="124.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="144.5" cy="204.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="112.5" cy="128.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="142.5" cy="208.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="110.5" cy="132.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="140.5" cy="212.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="108.5" cy="136.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="138.5" cy="216.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="106.5" cy="140.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="136.5" cy="220.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="242.0" cy="160.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="272.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="244.0" cy="164.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="274.0" cy="124.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="246.0" cy="168.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="276.0" cy="128.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="248.0" cy="172.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="278.0" cy="132.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="250.0" cy="176.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="280.0" cy="136.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="252.0" cy="180.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="282.0" cy="140.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="242.0" cy="200.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="272.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="244.0" cy="204.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="274.0" cy="124.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="246.0" cy="208.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="276.0" cy="128.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="248.0" cy="212.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="278.0" cy="132.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="250.0" cy="216.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="280.0" cy="136.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="252.0" cy="220.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="282.0" cy="140.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M20.0,120.0 L364.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="16.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M20.0,160.0 L364.0,160.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M20.0,200.0 L364.0,200.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<rect x="30.0" y="280.0" width="183.20000000000002" height="168.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg" />
+<path d="M42.0,304.0 L66.0,304.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="304.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">STAR / RSEM</text>
+<path d="M42.0,328.0 L66.0,328.0" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="328.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">STAR / Salmon</text>
+<path d="M42.0,352.0 L66.0,352.0" stroke="#f5c542" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="352.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">HISAT2</text>
+<path d="M42.0,376.0 L66.0,376.0" stroke="#ff8c00" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="376.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">Bowtie2 / Salmon</text>
+<path d="M42.0,400.0 L66.0,400.0" stroke="#e63946" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="400.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">Salmon</text>
+<path d="M42.0,424.0 L66.0,424.0" stroke="#7b2d3b" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="424.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">Kallisto</text>
+<text x="384.0" y="464.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v1.1.0+dev</text>
+</svg></div></div>
+</div>
+<script>
+(function() {
+  const root = document.documentElement;
+  const btn = document.getElementById('scheme-toggle');
+  const schemes = ['auto', 'dark', 'light'];
+  const labels = {'auto': 'System', 'dark': 'Dark', 'light': 'Light'};
+  let idx = 0;
+  function apply() {
+    const s = schemes[idx];
+    if (s === 'auto') {
+      root.removeAttribute('data-scheme');
+    } else {
+      root.setAttribute('data-scheme', s);
+    }
+    btn.textContent = labels[s];
+  }
+  apply();
+  btn.addEventListener('click', function() {
+    idx = (idx + 1) % schemes.length;
+    apply();
+  });
+})();
+document.querySelectorAll('.toggle-bar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const entry = btn.closest('.diff-entry');
+    const mode = btn.dataset.mode;
+    const buttons = entry.querySelectorAll('.toggle-bar button');
+    buttons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const comp = entry.querySelector('.comparison');
+    const sideBase = comp.querySelector('.side-base');
+    const sidePr = comp.querySelector('.side-pr');
+    if (mode === 'side-by-side') {
+      comp.style.gridTemplateColumns = '1fr 1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = '';
+    } else if (mode === 'base') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = 'none';
+    } else if (mode === 'pr') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = 'none';
+      sidePr.style.display = '';
+    }
+  });
+});
+</script>
+</body>
+</html>
