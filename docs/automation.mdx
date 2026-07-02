@@ -32,3 +32,25 @@ Inputs (all optional): `input` (default `assets/metro_map.mmd`), `output`
 `embed-font` (default `true`), `version` (nf-metro version to install), and
 `extra-args` for any other `nf-metro render` flag (e.g.
 `extra-args: "--fold-threshold 20"`).
+
+## Pre-commit hook
+
+Re-render the SVG locally on every commit, so it never drifts from the source.
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/seqeralabs/nf-metro
+    rev: 1.1.0
+    hooks:
+      - id: nf-metro
+```
+
+The hook matches `*.mmd` and writes the sibling `.svg`
+(`assets/metro_map.mmd` → `assets/metro_map.svg`). Override the render flags per
+repo:
+
+```yaml
+- id: nf-metro
+  args: [--theme, nfcore, --embed-font, --mode, light]
+```
