@@ -1089,26 +1089,6 @@ def _compute_diamond_branch_siblings(graph: MetroGraph) -> dict[str, Station]:
     return siblings
 
 
-def _apply_diamond_outward_override(
-    station: Station,
-    diamond_siblings: dict[str, Station],
-) -> bool | None:
-    """Point a 2-way diamond branch label away from its sibling branch.
-
-    Column-parity alternation picks a side by column index alone, so it can
-    coincidentally put a diamond branch's label on the side facing its
-    sibling -- squeezed inside the bubble between the two branches, where
-    nothing but the diamond's own converging routes ever needs to be.  The
-    outside of a two-way bubble is always the better default, so this is a
-    hard, unconditional preference with no further collision reasoning.
-    Returns ``None`` for a station that isn't a diamond branch.
-    """
-    sibling = diamond_siblings.get(station.id)
-    if sibling is None:
-        return None
-    return sibling.y > station.y
-
-
 def _make_obstacle_placements(
     obstacles: list[tuple[float, float, float, float]] | None,
 ) -> list[LabelPlacement]:
@@ -1273,7 +1253,6 @@ class _LabelCtx:
     panel_extents: dict[str, tuple[float, float]]
     interchange_spans: dict[str, tuple[float, float]]
     tb_positive_fan: set[str]
-    diamond_siblings: dict[str, Station]
 
 
 def _build_label_ctx(
@@ -1330,7 +1309,6 @@ def _build_label_ctx(
     port_pref = _compute_port_label_preference(graph, max_dx=PORT_LABEL_MAX_DX)
     panel_extents = _rail_panel_extents(graph)
     interchange_spans = _interchange_span_extents(graph)
-    diamond_siblings = _compute_diamond_branch_siblings(graph)
 
     # Trial both alternation patterns per section, pick the better one.
     section_flip: dict[str, bool] = {}
@@ -1390,7 +1368,6 @@ def _build_label_ctx(
         panel_extents=panel_extents,
         interchange_spans=interchange_spans,
         tb_positive_fan=tb_positive_fan,
-        diamond_siblings=diamond_siblings,
     )
     return ctx, sorted_stations
 
@@ -1554,10 +1531,6 @@ def _initial_label_side(
         ctx.sections_with_multiline,
         ctx.solo,
     )
-    # A fork/join diamond branch always points away from its sibling.
-    outward = _apply_diamond_outward_override(station, ctx.diamond_siblings)
-    if outward is not None:
-        start_above = outward
     # Override when a port route would clash with the label.
     if station.id in ctx.port_pref:
         start_above = ctx.port_pref[station.id]
@@ -1761,6 +1734,12 @@ def place_labels(
     placements: list[LabelPlacement] = _make_obstacle_placements(icon_obstacles)
     for station in sorted_stations:
         placements.append(_place_station_label(ctx, station, placements))
+
+    diamond_siblings = _compute_diamond_branch_siblings(graph)
+    if diamond_siblings:
+        _prefer_diamond_labels_outward(
+            placements, graph, diamond_siblings, station_offsets, label_offset
+        )
 
     if routes:
         _avoid_diagonal_routes(placements, graph, routes, station_offsets)
@@ -2026,6 +2005,56 @@ def _route_endpoints_with_offsets(
         shifted = apply_route_offsets(route, station_offsets)
         pts[0], pts[-1] = shifted[0], shifted[-1]
     return pts
+
+
+def _prefer_diamond_labels_outward(
+    placements: list[LabelPlacement],
+    graph: MetroGraph,
+    diamond_siblings: dict[str, Station],
+    station_offsets: dict[tuple[str, str], float] | None,
+    label_offset: float,
+) -> None:
+    """Flip a 2-way fork/join diamond branch's label outward -- away from
+    its sibling branch -- when that side is free of collisions with every
+    other already-placed label.
+
+    Column-parity alternation picks a side by column index alone, so it can
+    coincidentally place a diamond branch's label facing its sibling,
+    squeezed inside the bubble where nothing but the diamond's own
+    converging routes ever needs to be.  The outside of the bubble reads
+    better, but only when nothing else already sits there: an on-trunk
+    branch's outward side is the same row as its neighbouring trunk
+    stations, so unconditionally forcing it outward can shove a
+    neighbour's label aside.  Running this once every label has settled
+    lets each branch check its outward candidate against the *whole*
+    placement list, not just whichever labels happened to be placed
+    earlier in layer order.
+    """
+    by_id = {p.station_id: p for p in placements}
+    for station_id, sibling in diamond_siblings.items():
+        placement = by_id.get(station_id)
+        station = graph.stations.get(station_id)
+        if placement is None or station is None:
+            continue
+        if placement.dominant_baseline or placement.angle:
+            continue
+        if placement.text_anchor != "middle":
+            continue
+        outward_above = sibling.y > station.y
+        if placement.above == outward_above:
+            continue
+        min_off, max_off = _pill_offsets(graph, station, station_offsets)
+        candidate = _try_place(
+            station, label_offset, outward_above, [], min_off, max_off
+        )
+        others = [p for p in placements if p is not placement]
+        if _has_collision(candidate, others):
+            continue
+        placement.x, placement.y, placement.above = (
+            candidate.x,
+            candidate.y,
+            candidate.above,
+        )
 
 
 def _avoid_diagonal_routes(

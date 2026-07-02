@@ -7201,16 +7201,6 @@ _XFAIL_LABEL_AT_STATION_X: dict[str, str] = {
         "row, unrelated to the packed-cell bypass this fixture locks); revisit "
         "when the engine collision-clearance is tuned"
     ),
-    "rnaseq_sections.mmd": (
-        "issue #348: multiqc_final label nudged 14.7px to clear the "
-        "outward-facing Kraken2/Bracken label's wider footprint; revisit "
-        "when the engine collision-clearance is tuned"
-    ),
-    "rnaseq_sections_manual.mmd": (
-        "issue #348: multiqc_final label nudged 14.7px to clear the "
-        "outward-facing Kraken2/Bracken label's wider footprint; revisit "
-        "when the engine collision-clearance is tuned"
-    ),
 }
 
 
