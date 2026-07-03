@@ -129,6 +129,13 @@ SECTION_LABEL_LINE_HEIGHT_RATIO: float = 1.2
 
 Mirrors the layout side's ``LABEL_LINE_HEIGHT`` for station labels."""
 
+STATION_LABEL_CLEARANCE: float = 26.0
+"""Vertical room a station's own label typically needs above its marker.
+
+Bounds how far a wrapped section header can grow toward the section's top
+content: the header's extra lines must stop clear of the topmost station's
+own label, not just its marker, or the two draw on top of each other."""
+
 TEXT_VCENTER_DY: str = "0.3em"
 """Downward dy shift applied to text that must be visually centered on
 a companion graphic (badge circles, legend swatches).  Using dy instead

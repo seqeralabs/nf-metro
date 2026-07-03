@@ -31,6 +31,7 @@ from nf_metro.render.constants import (
     SECTION_LABEL_TEXT_OFFSET,
     SECTION_NUM_CIRCLE_R_LARGE,
     SECTION_NUM_Y_OFFSET,
+    STATION_LABEL_CLEARANCE,
 )
 
 Rect = tuple[float, float, float, float]
@@ -48,7 +49,12 @@ class SectionHeaderPlacement:
     split onto separate lines when it would otherwise overhang the section box
     (a rotated header is never split), stacked from ``label_y`` at
     :func:`header_line_height` spacing.  ``keepout`` is the union bbox of badge
-    and title (all lines) used by the render-time guard.
+    and title (all lines) used by the render-time guard.  ``height_capped`` is
+    True when the wrap wanted more lines than fit above the section's own
+    content and was forced onto fewer, wider lines instead (see
+    :func:`_wrapped_header_geometry`); such a header is exempt from
+    :func:`check_section_headers_fit_box_width`, since a bounded width
+    overhang is preferable to colliding with the section's content.
     """
 
     mode: HeaderMode
@@ -59,6 +65,7 @@ class SectionHeaderPlacement:
     label_rotation: float
     label_lines: tuple[str, ...]
     keepout: Rect
+    height_capped: bool = False
 
 
 def estimate_section_label_width(name: str, font_size: float) -> float:
@@ -117,7 +124,7 @@ def _hyphenate_balanced(word: str, budget: int) -> list[str]:
     return [p + "-" for p in pieces[:-1]] + [pieces[-1]]
 
 
-def _wrap_header_lines(name: str, font_size: float, max_width: float) -> list[str]:
+def _pack_lines(name: str, font_size: float, max_width: float) -> list[str]:
     """Word-wrap ``name`` so each line's estimated width fits ``max_width``.
 
     Greedily packs whitespace/hyphen-delimited tokens (see
@@ -150,27 +157,95 @@ def _wrap_header_lines(name: str, font_size: float, max_width: float) -> list[st
     return wrapped
 
 
+def _wrap_header_lines(
+    name: str, font_size: float, max_width: float, max_lines: int
+) -> tuple[list[str], bool]:
+    """Pack ``name`` onto lines fitting ``max_width``, capped at ``max_lines``.
+
+    Widens the packing width in steps until the result fits within
+    ``max_lines`` when the natural wrap needs more (trading line width for
+    line count).  Returns ``(lines, was_widened)``; a widened result may
+    overhang ``max_width``, which is why the caller marks it ``height_capped``
+    rather than letting :func:`check_section_headers_fit_box_width` treat it
+    as an authoring mistake.
+    """
+    lines = _pack_lines(name, font_size, max_width)
+    if len(lines) <= max_lines:
+        return lines, False
+
+    # A single line at the title's own full width never needs a break, so this
+    # loop is bounded: doubling the step whenever an attempt fails to shrink
+    # the line count guarantees it reaches ``full_width`` (1 line) eventually.
+    full_width = estimate_section_label_width(name, font_size)
+    width = max_width
+    step = max(font_size, 8.0)
+    while len(lines) > max_lines and width < full_width:
+        width += step
+        candidate = _pack_lines(name, font_size, width)
+        if len(candidate) < len(lines):
+            lines = candidate
+        else:
+            step *= 2
+    return lines, True
+
+
+def _content_clear_height(graph: MetroGraph, section: Section) -> float | None:
+    """Vertical room between ``section.bbox_y`` and its topmost station's own
+    label, or ``None`` when the section has no real station to bound against
+    (grow unrestricted)."""
+    tops = [
+        st.y
+        for sid in section.station_ids
+        if (st := graph.stations.get(sid)) is not None
+        and not st.is_port
+        and not st.is_hidden
+    ]
+    if not tops:
+        return None
+    return min(tops) - section.bbox_y - STATION_LABEL_CLEARANCE
+
+
+_UNBOUNDED_WRAP_LINES = 1_000_000
+"""Sentinel returned by :func:`_max_wrap_lines` for a section with no station
+to bound against - larger than any real title could ever wrap onto."""
+
+
+def _max_wrap_lines(clear_height: float | None, font_size: float) -> int:
+    """Most lines a wrapped header can grow to without reaching section content."""
+    if clear_height is None:
+        return _UNBOUNDED_WRAP_LINES
+    if clear_height <= 0:
+        return 1
+    return 1 + int(clear_height / header_line_height(font_size))
+
+
 def _wrapped_header_geometry(
     name: str,
     font_size: float,
     bbox_w: float,
     single_line_length: float,
-) -> tuple[list[str], float, float]:
-    """Header lines, horizontal length, and extra block height beyond one line.
+    max_lines: int,
+) -> tuple[list[str], float, float, bool]:
+    """Header lines, horizontal length, extra block height, and height-capped flag.
 
     Wraps the title onto additional lines only when the single-line header
     would overhang ``bbox_w``; an unwrapped header returns one line with no
     added height.  The horizontal length shrinks to whatever the widest
-    wrapped line actually measures.
+    wrapped line actually measures, except when the wrap is capped at
+    ``max_lines`` (see :func:`_wrap_header_lines`): a capped wrap can overhang
+    ``bbox_w`` when the title needs more lines than the section's content
+    leaves room for.
     """
     if not name or single_line_length <= bbox_w:
-        return [name], single_line_length, 0.0
+        return [name], single_line_length, 0.0, False
     badge_span = _badge_span()
     available_width = max(bbox_w - badge_span, 1.0)
-    lines = _wrap_header_lines(name, font_size, available_width)
+    lines, height_capped = _wrap_header_lines(
+        name, font_size, available_width, max_lines
+    )
     text_width = max(estimate_section_label_width(line, font_size) for line in lines)
     extra_height = (len(lines) - 1) * header_line_height(font_size)
-    return lines, badge_span + text_width, extra_height
+    return lines, badge_span + text_width, extra_height, height_capped
 
 
 def resolve_section_header_placement(
@@ -198,13 +273,17 @@ def resolve_section_header_placement(
 
     # A rotated side header runs down the box height and is never wrapped; a
     # horizontal (above/below/nudge) header wraps onto extra lines instead of
-    # overhanging bbox_w.
+    # overhanging bbox_w, capped at however many lines fit above the
+    # section's own content.
     side_length = _header_length(section.name, label_font_size)
-    lines, length, extra_height = _wrapped_header_geometry(
-        section.name, label_font_size, section.bbox_w, side_length
+    max_lines = _max_wrap_lines(_content_clear_height(graph, section), label_font_size)
+    lines, length, extra_height, height_capped = _wrapped_header_geometry(
+        section.name, label_font_size, section.bbox_w, side_length, max_lines
     )
 
-    above = _above(x0, y0, circle_r, num_y, length, half_text, lines, extra_height)
+    above = _above(
+        x0, y0, circle_r, num_y, length, half_text, lines, extra_height, height_capped
+    )
     if polylines is None:
         return above
 
@@ -212,7 +291,17 @@ def resolve_section_header_placement(
     side_fits = side_length <= section.bbox_h
     candidates = [
         above,
-        _below(x0, box_bottom, circle_r, num_y, length, half_text, lines, extra_height),
+        _below(
+            x0,
+            box_bottom,
+            circle_r,
+            num_y,
+            length,
+            half_text,
+            lines,
+            extra_height,
+            height_capped,
+        ),
     ]
     if side_fits and x0 - gap - 2.0 * circle_r >= 0.0:
         candidates.append(_left(x0, y0, circle_r, gap, side_length, section.name))
@@ -233,6 +322,7 @@ def resolve_section_header_placement(
         half_text,
         lines,
         extra_height,
+        height_capped,
         above,
         polylines,
     )
@@ -275,6 +365,7 @@ def _above(
     half_text: float,
     lines: list[str],
     extra_height: float,
+    height_capped: bool,
 ) -> SectionHeaderPlacement:
     cx = x0 + circle_r
     cy = y0 - circle_r - num_y
@@ -287,6 +378,7 @@ def _above(
         label_rotation=0.0,
         label_lines=tuple(lines),
         keepout=(x0, cy - half_text, x0 + length, y0 + extra_height),
+        height_capped=height_capped,
     )
 
 
@@ -299,6 +391,7 @@ def _below(
     half_text: float,
     lines: list[str],
     extra_height: float,
+    height_capped: bool,
 ) -> SectionHeaderPlacement:
     cx = x0 + circle_r
     cy = box_bottom + circle_r + num_y
@@ -311,6 +404,7 @@ def _below(
         label_rotation=0.0,
         label_lines=tuple(lines),
         keepout=(x0, box_bottom, x0 + length, cy + half_text + extra_height),
+        height_capped=height_capped,
     )
 
 
@@ -367,6 +461,7 @@ def _nudge(
     half_text: float,
     lines: list[str],
     extra_height: float,
+    height_capped: bool,
     above: SectionHeaderPlacement,
     polylines: list[Polyline],
 ) -> SectionHeaderPlacement:
@@ -393,6 +488,7 @@ def _nudge(
         label_rotation=0.0,
         label_lines=tuple(lines),
         keepout=(start, cy - half_text, start + length, y0 + extra_height),
+        height_capped=height_capped,
     )
 
 
@@ -514,11 +610,15 @@ def check_section_headers_fit_box_width(
     A ``nudge`` header is exempt: it deliberately overhangs the box to clear a
     route ahead of it (see :func:`_nudge`).  A rotated (``left``/``right``)
     header reads down the box height rather than across its width, so it is
-    exempt too.
+    exempt too.  A ``height_capped`` header is exempt as well: it traded extra
+    width for fewer lines specifically to stay clear of the section's own
+    content (see :func:`_wrapped_header_geometry`).
     """
     overflowing: list[str] = []
     for section_id, placement in placements.items():
         if placement.label_rotation or placement.mode == "nudge":
+            continue
+        if placement.height_capped:
             continue
         section = graph.sections.get(section_id)
         if section is None:
