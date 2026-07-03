@@ -46,9 +46,9 @@ class SectionHeaderPlacement:
     ``label_rotation`` is 0 for the horizontal positions and 90 for the rotated
     side positions (title reads top-to-bottom).  ``label_lines`` is the title
     split onto separate lines when it would otherwise overhang the section box
-    (a rotated header is never split); each line renders at ``label_y`` plus
-    its index times :func:`header_line_height`.  ``keepout`` is the union bbox
-    of badge and title (all lines) used by the render-time guard.
+    (a rotated header is never split), stacked from ``label_y`` at
+    :func:`header_line_height` spacing.  ``keepout`` is the union bbox of badge
+    and title (all lines) used by the render-time guard.
     """
 
     mode: HeaderMode
@@ -66,16 +66,16 @@ def estimate_section_label_width(name: str, font_size: float) -> float:
     return len(name) * font_size * SECTION_LABEL_CHAR_WIDTH_RATIO
 
 
+def _badge_span() -> float:
+    """Horizontal room the number badge and its text gap occupy."""
+    return 2.0 * SECTION_NUM_CIRCLE_R_LARGE + SECTION_LABEL_TEXT_OFFSET
+
+
 def _header_length(name: str, font_size: float) -> float:
     """Length of the header (badge + gap + title) along its reading axis."""
-    circle_r = SECTION_NUM_CIRCLE_R_LARGE
     if not name:
-        return 2.0 * circle_r
-    return (
-        2.0 * circle_r
-        + SECTION_LABEL_TEXT_OFFSET
-        + estimate_section_label_width(name, font_size)
-    )
+        return 2.0 * SECTION_NUM_CIRCLE_R_LARGE
+    return _badge_span() + estimate_section_label_width(name, font_size)
 
 
 def header_line_height(font_size: float) -> float:
@@ -106,15 +106,13 @@ def _wrapped_header_geometry(
     """Header lines, horizontal length, and extra block height beyond one line.
 
     Wraps the title onto additional lines only when the single-line header
-    would overhang ``bbox_w``, so a header that already fits keeps its exact
-    prior geometry (one line, no extra height).  The horizontal length shrinks
-    to whatever the widest wrapped line actually measures; the extra height is
-    ``(n - 1) * header_line_height(font_size)`` for the ``n`` lines produced.
+    would overhang ``bbox_w``; an unwrapped header returns one line with no
+    added height.  The horizontal length shrinks to whatever the widest
+    wrapped line actually measures.
     """
     if not name or single_line_length <= bbox_w:
         return [name], single_line_length, 0.0
-    circle_r = SECTION_NUM_CIRCLE_R_LARGE
-    badge_span = 2.0 * circle_r + SECTION_LABEL_TEXT_OFFSET
+    badge_span = _badge_span()
     available_width = max(bbox_w - badge_span, 1.0)
     lines = _wrap_header_lines(name, font_size, available_width)
     text_width = max(estimate_section_label_width(line, font_size) for line in lines)
@@ -461,9 +459,9 @@ def check_section_headers_fit_box_width(
     """Report every section whose horizontal header overhangs its box width.
 
     A ``nudge`` header is exempt: it deliberately overhangs the box to clear a
-    route ahead of it (see :func:`_nudge`), a pre-existing, unrelated trade-off.
-    A rotated (``left``/``right``) header reads down the box height rather than
-    across its width, so it is exempt too.
+    route ahead of it (see :func:`_nudge`).  A rotated (``left``/``right``)
+    header reads down the box height rather than across its width, so it is
+    exempt too.
     """
     overflowing: list[str] = []
     for section_id, placement in placements.items():

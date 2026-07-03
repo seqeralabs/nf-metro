@@ -107,6 +107,7 @@ from nf_metro.render.constants import (
     RAIL_LINK_HALF_WIDTH_RATIO,
     SECTION_BOX_RADIUS,
     SECTION_HEADER_ROUTE_PAD,
+    SECTION_LABEL_LINE_HEIGHT_RATIO,
     SECTION_NUM_CIRCLE_R_LARGE,
     SECTION_NUM_FONT_SIZE,
     SECTION_STROKE_WIDTH,
@@ -146,7 +147,6 @@ from nf_metro.render.section_header import (
     SectionHeaderPlacement,
     check_section_headers_clear_routes,
     check_section_headers_fit_box_width,
-    header_line_height,
     resolve_all_section_headers,
 )
 from nf_metro.render.style import Theme
@@ -1323,21 +1323,20 @@ def _render_first_class_sections(
                 f"rotate({placement.label_rotation} "
                 f"{placement.label_x} {placement.label_y})"
             )
-        line_height = header_line_height(theme.section_label_font_size)
-        for i, line in enumerate(placement.label_lines):
-            d.append(
-                draw.Text(
-                    line,
-                    theme.section_label_font_size,
-                    placement.label_x,
-                    placement.label_y + i * line_height,
-                    fill=theme.section_label_color,
-                    font_family=theme.label_font_family,
-                    font_weight="bold",
-                    dy=TEXT_VCENTER_DY,
-                    **label_kwargs,
-                )
+        d.append(
+            draw.Text(
+                "\n".join(placement.label_lines),
+                theme.section_label_font_size,
+                placement.label_x,
+                placement.label_y,
+                fill=theme.section_label_color,
+                font_family=theme.label_font_family,
+                font_weight="bold",
+                dy=TEXT_VCENTER_DY,
+                line_height=SECTION_LABEL_LINE_HEIGHT_RATIO,
+                **label_kwargs,
             )
+        )
 
 
 def _render_edges(
