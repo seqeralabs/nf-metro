@@ -744,7 +744,7 @@ def _render_svg_scaled(
     if inject_dark_mode_css and (
         not theme.background_color or theme.background_color == "none"
     ):
-        _inject_dark_mode_style(d)
+        _inject_dark_mode_style(d, theme)
 
     # Background (skip for transparent themes)
     if theme.background_color and theme.background_color != "none":
@@ -1197,7 +1197,7 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme) -> None:
     d.append(draw.Raw(f"<style>{chr(10).join(lines)}</style>"))
 
 
-def _inject_dark_mode_style(d: draw.Drawing) -> None:
+def _inject_dark_mode_style(d: draw.Drawing, theme: Theme) -> None:
     """Inject CSS for dark-mode browsers viewing a transparent-background SVG.
 
     When the SVG has no opaque background, elements rendered directly on the
@@ -1205,15 +1205,23 @@ def _inject_dark_mode_style(d: draw.Drawing) -> None:
     browser supplies a dark page background.  A ``prefers-color-scheme: dark``
     media query adjusts those elements so they remain readable.  CSS rules
     override SVG presentation attributes, so we only need class selectors.
+
+    The label halo is a knockout of the (absent) background, so its light-mode
+    fallback of white would otherwise sit as a bright box on a dark host page;
+    give it a dark fallback here too, unless haloing is disabled.
     """
     sl = _ns("nf-metro-section-label")
     sc = _ns("nf-metro-section-num-circle")
     ti = _ns("nf-metro-title")
+    halo_rule = ""
+    if _label_halo_color(theme) is not None:
+        lh = _ns("nf-metro-label-halo")
+        halo_rule = f"\n            .{lh} {{ fill: #2b2b2b; stroke: #2b2b2b; }}"
     css = textwrap.dedent(f"""\
         @media (prefers-color-scheme: dark) {{
             .{sl} {{ fill: #d0d0d0; }}
             .{sc} {{ fill: #777777; }}
-            .{ti} {{ fill: #ffffff; }}
+            .{ti} {{ fill: #ffffff; }}{halo_rule}
         }}
     """)
     d.append(draw.Raw(f"<style>{css}</style>"))

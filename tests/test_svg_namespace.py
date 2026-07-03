@@ -1,6 +1,7 @@
 """Tests for SVG class namespacing and dark-mode CSS opt-out."""
 
 import re
+from dataclasses import replace
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -55,6 +56,40 @@ def test_inject_dark_mode_css_true_matches_default():
     svg_default = render_svg(_make_graph(), LIGHT_THEME)
     svg_explicit = render_svg(_make_graph(), LIGHT_THEME, inject_dark_mode_css=True)
     assert svg_default == svg_explicit
+
+
+def _media_query_block(svg: str) -> str:
+    pattern = r"@media \(prefers-color-scheme: dark\) \{(.*?)\}\s*\}"
+    match = re.search(pattern, svg, re.DOTALL)
+    assert match is not None, "expected a prefers-color-scheme media query block"
+    return match.group(1)
+
+
+def test_dark_mode_css_gives_the_label_halo_a_dark_fallback():
+    """The knockout halo would otherwise stay hardcoded white on a dark host page."""
+    svg = render_svg(_make_graph(), LIGHT_THEME)
+    media = _media_query_block(svg)
+    halo_rule = r"\.nf-metro-label-halo\s*\{\s*fill:\s*#2b2b2b;\s*stroke:\s*#2b2b2b;"
+    assert re.search(halo_rule, media)
+
+
+def test_dark_mode_css_omits_label_halo_rule_when_halo_disabled():
+    """No halo class is drawn when haloing is disabled, so the override is skipped."""
+    theme = replace(LIGHT_THEME, label_halo_width=0.0)
+    svg = render_svg(_make_graph(), theme)
+    media = _media_query_block(svg)
+    assert "nf-metro-label-halo" not in media
+    # The rest of the dark-mode block is unaffected.
+    assert "nf-metro-title" in media
+
+
+def test_svg_class_prefix_applied_to_dark_mode_halo_selector():
+    """The halo override in the media query is namespaced like every other selector."""
+    prefix = "ns2"
+    svg = render_svg(_make_graph(), LIGHT_THEME, svg_class_prefix=prefix)
+    media = _media_query_block(svg)
+    assert f".{prefix}-nf-metro-label-halo" in media
+    assert ".nf-metro-label-halo" not in media
 
 
 # ---------------------------------------------------------------------------
