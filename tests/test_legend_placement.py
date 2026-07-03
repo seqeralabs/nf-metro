@@ -12,12 +12,15 @@ from pathlib import Path
 
 import pytest
 
+from nf_metro.api import resolve_theme
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import svg as S
+from nf_metro.render.section_header import resolve_all_section_headers
 from nf_metro.themes import NFCORE_THEME
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
+EXAMPLE_TOPOLOGIES = EXAMPLES / "topologies"
 
 # rnaseq_sections has content filling its lower-right (so a content `br`
 # overlaps a section and historically relocates); differentialabundance has a
@@ -66,6 +69,7 @@ def _place(text: str):
         logo_h,
         pos,
         routes,
+        {},
     )
     content_left = min(
         (s.bbox_x for s in graph.sections.values() if s.bbox_w > 0),
@@ -132,6 +136,41 @@ def test_bare_corner_keeps_overlap_fallback():
     assert show
     assert lx == pytest.approx(content_left)
     assert ly > max_y - lh
+
+
+def test_default_bottom_legend_clears_a_wrapped_header():
+    """The default `bottom` legend must not land under a wrapped header.
+
+    top_entry_header_clash's second section wraps its title onto two lines in
+    ``below`` mode, reaching past its own section box; the legend's default
+    bottom placement must account for that reach, not just the section boxes.
+    """
+    fixture = EXAMPLE_TOPOLOGIES / "top_entry_header_clash.mmd"
+    graph = parse_metro_mermaid(fixture.read_text())
+    compute_layout(graph)
+    offsets = S.compute_station_offsets(graph)
+    routes = S.route_edges_centred(graph, station_offsets=offsets)
+    polylines = [S.apply_route_offsets(route, offsets) for route in routes]
+    theme = resolve_theme(None, graph)
+    header_placements = resolve_all_section_headers(
+        graph, theme.section_label_font_size, polylines, theme.title_font_size
+    )
+    max_x, max_y = S._compute_canvas_bounds(graph, routes, False, header_placements)
+    lx, ly, lw, lh, show = S._position_legend(
+        graph,
+        theme,
+        max_x,
+        max_y,
+        S.CANVAS_PADDING,
+        False,
+        0.0,
+        0.0,
+        graph.legend_position,
+        routes,
+        header_placements,
+    )
+    assert show
+    assert not S._legend_overlaps_headers(lx, ly, lw, lh, header_placements)
 
 
 def test_keyword_legend_never_overlaps_routes():

@@ -156,8 +156,9 @@ def _compute_canvas_bounds(
     graph: MetroGraph,
     routes: list[RoutedPath],
     debug: bool = False,
+    header_placements: dict[str, SectionHeaderPlacement] | None = None,
 ) -> tuple[float, float]:
-    """Compute max X/Y from stations, section boxes, and route waypoints."""
+    """Compute max X/Y from stations, section boxes, route waypoints, and headers."""
     if debug:
         visible_stations = list(graph.stations.values())
     else:
@@ -183,6 +184,11 @@ def _compute_canvas_bounds(
             if py > max_y:
                 max_y = py
 
+    if header_placements:
+        for placement in header_placements.values():
+            max_x = max(max_x, placement.keepout[2])
+            max_y = max(max_y, placement.keepout[3])
+
     return max_x, max_y
 
 
@@ -197,6 +203,7 @@ def _position_legend(
     logo_h: float,
     legend_position: str,
     routes: list[RoutedPath],
+    header_placements: dict[str, SectionHeaderPlacement],
 ) -> tuple[float, float, float, float, bool]:
     """Compute legend position and dimensions.
 
@@ -225,7 +232,7 @@ def _position_legend(
     if graph.legend_at is not None:
         legend_x, legend_y = graph.legend_at
         if _legend_overlaps_content(
-            legend_x, legend_y, legend_w, legend_h, graph, routes
+            legend_x, legend_y, legend_w, legend_h, graph, routes, header_placements
         ):
             warnings.warn(
                 f"legend placed at {graph.legend_at} overlaps a section or route.",
@@ -283,14 +290,14 @@ def _position_legend(
 
     if explicit_pin:
         if _legend_overlaps_content(
-            legend_x, legend_y, legend_w, legend_h, graph, routes
+            legend_x, legend_y, legend_w, legend_h, graph, routes, header_placements
         ):
             warnings.warn(
                 f"legend pinned at '{pos}' overlaps a section or route.",
                 stacklevel=2,
             )
     elif pos not in ("bottom", "right") and _legend_overlaps_content(
-        legend_x, legend_y, legend_w, legend_h, graph, routes
+        legend_x, legend_y, legend_w, legend_h, graph, routes, header_placements
     ):
         legend_x = content_left
         legend_y = max_y + gap
@@ -628,7 +635,7 @@ def _render_svg_scaled(
     _guard_section_headers_clear_routes(header_placements, header_polylines)
     _guard_section_headers_fit_box_width(graph, header_placements)
 
-    max_x, max_y = _compute_canvas_bounds(graph, routes, debug)
+    max_x, max_y = _compute_canvas_bounds(graph, routes, debug, header_placements)
 
     # Group captions can extend below/right of the content; grow the canvas
     # so they are not clipped.
@@ -667,6 +674,7 @@ def _render_svg_scaled(
         logo_h,
         effective_legend_position,
         routes,
+        header_placements,
     )
 
     if show_legend:
@@ -923,6 +931,26 @@ def _legend_overlaps_routes(
     return False
 
 
+def _legend_overlaps_headers(
+    lx: float,
+    ly: float,
+    lw: float,
+    lh: float,
+    header_placements: dict[str, SectionHeaderPlacement],
+) -> bool:
+    """Check if a legend rectangle overlaps a resolved section header's keepout.
+
+    A wrapped header can extend below its own section's box (``below`` mode)
+    or above it (``above``/``nudge``), reaching outside the section bbox that
+    :func:`_legend_overlaps_sections` checks.
+    """
+    for placement in header_placements.values():
+        kx0, ky0, kx1, ky1 = placement.keepout
+        if lx < kx1 and lx + lw > kx0 and ly < ky1 and ly + lh > ky0:
+            return True
+    return False
+
+
 def _legend_overlaps_content(
     lx: float,
     ly: float,
@@ -930,10 +958,13 @@ def _legend_overlaps_content(
     lh: float,
     graph: MetroGraph,
     routes: list[RoutedPath],
+    header_placements: dict[str, SectionHeaderPlacement],
 ) -> bool:
-    """Whether the legend rect overlaps a section box or a routed line."""
-    return _legend_overlaps_sections(lx, ly, lw, lh, graph) or _legend_overlaps_routes(
-        lx, ly, lw, lh, routes, LEGEND_ROUTE_CLEARANCE
+    """Whether the legend rect overlaps a section box, a header, or a routed line."""
+    return (
+        _legend_overlaps_sections(lx, ly, lw, lh, graph)
+        or _legend_overlaps_headers(lx, ly, lw, lh, header_placements)
+        or _legend_overlaps_routes(lx, ly, lw, lh, routes, LEGEND_ROUTE_CLEARANCE)
     )
 
 
