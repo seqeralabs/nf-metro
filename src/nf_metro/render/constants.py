@@ -201,7 +201,7 @@ WATERMARK_FONT_SIZE: int = 8
 WATERMARK_PADDING_RATIO: float = 0.5
 """Fraction of canvas padding used for watermark X inset from right edge."""
 
-WATERMARK_Y_INSET: float = 10.0
+WATERMARK_Y_INSET: float = 12.0
 """Y distance from bottom edge for watermark text."""
 
 WATERMARK_BARE_X_INSET: float = 8.0
