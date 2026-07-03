@@ -16,11 +16,11 @@ clear of routes, never moving a route to do so, following the priority chain:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Literal
 
 from nf_metro.layout.constants import LABEL_WRAP_MIN_LINE_CHARS
-from nf_metro.layout.labels import _wrap_text_to_chars
 from nf_metro.parser.model import MetroGraph, Section
 from nf_metro.render.constants import (
     SECTION_HEADER_ROUTE_PAD,
@@ -83,18 +83,71 @@ def header_line_height(font_size: float) -> float:
     return font_size * SECTION_LABEL_LINE_HEIGHT_RATIO
 
 
+_HEADER_HYPHEN_BREAK_RE = re.compile(r"(?<=-)(?!$)")
+
+
+def _header_wrap_tokens(name: str) -> list[tuple[str, bool]]:
+    """Split ``name`` into ``(text, needs_space_before)`` pairs for line-wrapping.
+
+    A run of whitespace is a break with a leading space on the next piece; an
+    existing hyphen is a break with no leading space, since the hyphen itself
+    already joins the two halves visually - splitting "Pre-processing" at its
+    own hyphen rather than mid-syllable.
+    """
+    tokens: list[tuple[str, bool]] = []
+    for i, word in enumerate(name.split()):
+        pieces = [p for p in _HEADER_HYPHEN_BREAK_RE.split(word) if p]
+        for j, piece in enumerate(pieces):
+            tokens.append((piece, j == 0 and i > 0))
+    return tokens
+
+
+def _hyphenate_balanced(word: str, budget: int) -> list[str]:
+    """Split ``word`` into evenly-sized, hyphenated pieces of at most ``budget`` chars.
+
+    Balancing the piece length - rather than greedily filling each piece to
+    the budget - avoids a short orphan trailing piece, e.g. "Quantif-" /
+    "ication" rather than "Quantificati-" / "on".
+    """
+    if len(word) <= budget:
+        return [word]
+    n_pieces = -(-len(word) // budget)
+    piece_len = max(LABEL_WRAP_MIN_LINE_CHARS, -(-len(word) // n_pieces))
+    pieces = [word[i : i + piece_len] for i in range(0, len(word), piece_len)]
+    return [p + "-" for p in pieces[:-1]] + [pieces[-1]]
+
+
 def _wrap_header_lines(name: str, font_size: float, max_width: float) -> list[str]:
     """Word-wrap ``name`` so each line's estimated width fits ``max_width``.
 
-    Converts ``max_width`` to a character budget using the same per-character
-    ratio as :func:`estimate_section_label_width`, so a wrapped line never
-    measures wider than what triggered the wrap.  Reuses the station-label
-    wrapper (word-boundary breaks, hyphenating an over-long word as a last
-    resort down to ``LABEL_WRAP_MIN_LINE_CHARS``).
+    Greedily packs whitespace/hyphen-delimited tokens (see
+    :func:`_header_wrap_tokens`) onto lines; a single token too wide to fit on
+    its own falls back to :func:`_hyphenate_balanced`.
     """
     char_width = font_size * SECTION_LABEL_CHAR_WIDTH_RATIO
     budget = max(LABEL_WRAP_MIN_LINE_CHARS, int(max_width / char_width))
-    return _wrap_text_to_chars(name, budget).split("\n")
+
+    lines: list[str] = []
+    current = ""
+    for text, needs_space in _header_wrap_tokens(name):
+        sep = " " if needs_space and current else ""
+        candidate = f"{current}{sep}{text}"
+        if current and estimate_section_label_width(candidate, font_size) > max_width:
+            lines.append(current)
+            current = text
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+
+    wrapped: list[str] = []
+    for line in lines:
+        fits = estimate_section_label_width(line, font_size) <= max_width
+        if " " in line or fits:
+            wrapped.append(line)
+        else:
+            wrapped.extend(_hyphenate_balanced(line, budget))
+    return wrapped
 
 
 def _wrapped_header_geometry(
