@@ -391,6 +391,8 @@ def _render_one(
             legend=legend,
             layout_options=layout_opts,
             source_dir=str(input_file.resolve().parent),
+            bare=bare,
+            output_format=format_,
         )
     except (
         ValueError,

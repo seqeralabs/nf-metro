@@ -388,6 +388,14 @@ class MetroGraph:
     directional: bool = False
     strict: bool = False
     embed_manifest: bool = True
+    # Whether a render will actually draw a title/logo band at the canvas
+    # top for a titled map. Set by prepare_graph (from --bare, %%metro
+    # legend:, and whether a logo is configured) before compute_layout runs,
+    # mirroring render.svg's own drawing decision so the title-band
+    # clearance in layout/phases/canvas.py doesn't reserve space for a
+    # header nothing will occupy. Defaults to True (always reserve) for
+    # callers that build a graph directly and skip prepare_graph.
+    reserve_title_band: bool = True
     # When set, every real station with no explicit %%metro process: directive
     # gets its own id as a default process pattern, so a map whose station ids
     # already name their processes lights up live with no per-station mapping.

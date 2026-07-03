@@ -23,6 +23,7 @@ import pytest
 from conftest import CONTENT_PLACEMENT_PHASES
 from layout_validator import check_route_segment_crossings, check_station_as_elbow
 
+from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
     DIAGONAL_SLOPE_RATIO,
@@ -1456,6 +1457,14 @@ _TITLE_TOGGLE_FIXTURES = [
 ]
 
 
+def _untitled_bbox_top(text: str) -> float | None:
+    """Lay out *text* with its title stripped and return the drawn top."""
+    untitled = parse_metro_mermaid(text)
+    untitled.title = ""
+    compute_layout(untitled)
+    return _min_drawn_section_bbox_top(untitled)
+
+
 @pytest.mark.parametrize("fixture", _TITLE_TOGGLE_FIXTURES)
 def test_title_only_moves_a_map_whose_header_would_overlap(fixture):
     """A title moves the top only when the header would otherwise overlap it.
@@ -1473,10 +1482,7 @@ def test_title_only_moves_a_map_whose_header_would_overlap(fixture):
     compute_layout(titled)
     titled_top = _min_drawn_section_bbox_top(titled)
 
-    untitled = parse_metro_mermaid(text)
-    untitled.title = ""
-    compute_layout(untitled)
-    untitled_top = _min_drawn_section_bbox_top(untitled)
+    untitled_top = _untitled_bbox_top(text)
 
     assert titled_top is not None and untitled_top is not None
     assert titled_top >= untitled_top - GUARD_TOLERANCE
@@ -1485,6 +1491,54 @@ def test_title_only_moves_a_map_whose_header_would_overlap(fixture):
         assert titled_top == pytest.approx(untitled_top, abs=GUARD_TOLERANCE)
     else:
         assert titled_top > untitled_top + GUARD_TOLERANCE
+
+
+# Fixtures whose header would overlap the title band (untitled top below
+# TITLE_BAND_OVERLAP_FLOOR), so the lift this test targets actually fires.
+_TITLE_BAND_OVERLAP_FIXTURES = [
+    "topologies/rowmate_tb_side_entry_top_align.mmd",
+    "sarek_metro.mmd",
+    "variantbenchmarking.mmd",
+    "topologies/off_track_input_above_consumer.mmd",
+]
+_PLACEHOLDER_LOGO = str(EXAMPLES / "placeholder_logo.png")
+
+
+@pytest.mark.parametrize("fixture", _TITLE_BAND_OVERLAP_FIXTURES)
+def test_title_band_not_reserved_when_nothing_drawn_there(fixture):
+    """A titled map reserves no title-band lift when render draws nothing there.
+
+    ``--bare`` omits the title outright, and a configured logo folded into
+    the legend (``%%metro legend:`` with a logo set) means neither the logo
+    nor the title text renders standalone at the canvas top (render.svg's
+    ``logo_in_legend`` branch beats both). Both cases must land exactly
+    where an untitled map would, even when the header would otherwise
+    overlap the title band.
+    """
+    text = _fixture_text(fixture)
+
+    untitled_top = _untitled_bbox_top(text)
+    assert untitled_top is not None
+    if untitled_top >= TITLE_BAND_OVERLAP_FLOOR - GUARD_TOLERANCE:
+        pytest.skip("fixture's header does not overlap the title band")
+
+    bare_graph = prepare_graph(text, bare=True)
+    bare_top = _min_drawn_section_bbox_top(bare_graph)
+    assert bare_top == pytest.approx(untitled_top, abs=GUARD_TOLERANCE), (
+        f"{fixture}: --bare top y={bare_top:.1f} reserves title-band space "
+        f"above the untitled baseline {untitled_top:.1f} despite drawing no "
+        f"title"
+    )
+
+    logo_in_legend_graph = prepare_graph(
+        text, logo=_PLACEHOLDER_LOGO, legend="bl", source_dir=str(EXAMPLES)
+    )
+    logo_in_legend_top = _min_drawn_section_bbox_top(logo_in_legend_graph)
+    assert logo_in_legend_top == pytest.approx(untitled_top, abs=GUARD_TOLERANCE), (
+        f"{fixture}: logo-in-legend top y={logo_in_legend_top:.1f} reserves "
+        f"title-band space above the untitled baseline {untitled_top:.1f} "
+        f"despite drawing neither a title nor a standalone logo"
+    )
 
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)

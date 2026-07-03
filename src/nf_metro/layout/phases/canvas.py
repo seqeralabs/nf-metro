@@ -122,14 +122,17 @@ def _canvas_top_shortfall(graph: MetroGraph, section_y_padding: float) -> float:
     """Downward shift needed so the graph clears both top floors (0 if none).
 
     Containment: every section must sit ``section_y_padding`` below the canvas
-    top.  Title: when the map is titled, a *drawn* section whose header badge
-    overlaps the title band (box top above ``TITLE_BAND_OVERLAP_FLOOR``) is
-    lifted clear to ``TITLE_BAND_CLEARANCE`` -- a map already clearing the
-    title, and implicit holders (which draw no badge), are left untouched.
+    top.  Title: when the map is titled *and* ``graph.reserve_title_band`` (set
+    by :func:`~nf_metro.api.prepare_graph` -- false for ``--bare`` or a logo
+    folded into the legend, cases where render draws nothing up there), a
+    *drawn* section whose header badge overlaps the title band (box top above
+    ``TITLE_BAND_OVERLAP_FLOOR``) is lifted clear to ``TITLE_BAND_CLEARANCE``
+    -- a map already clearing the title, and implicit holders (which draw no
+    badge), are left untouched.
     """
     min_all = _min_section_bbox_top(graph, section_y_padding)
     shortfall = max(0.0, section_y_padding - min_all)
-    if graph.title:
+    if graph.title and graph.reserve_title_band:
         min_drawn = _min_drawn_section_bbox_top(graph)
         if min_drawn is not None and min_drawn < TITLE_BAND_OVERLAP_FLOOR:
             shortfall = max(shortfall, TITLE_BAND_CLEARANCE - min_drawn)
@@ -143,13 +146,14 @@ def _canvas_top_preserved(
 
     The containment floor (``section_y_padding``) bounds all sections; the
     no-overlap floor (``TITLE_BAND_OVERLAP_FLOOR``) bounds drawn sections on a
-    titled map.  Lets the grid snap reject a candidate that would lift the top
-    above a floor.
+    titled map whose title band will actually be drawn (see
+    ``graph.reserve_title_band``).  Lets the grid snap reject a candidate that
+    would lift the top above a floor.
     """
     min_all = _min_section_bbox_top(graph, section_y_padding)
     if min_all + shift < section_y_padding - 1e-6:
         return False
-    if graph.title:
+    if graph.title and graph.reserve_title_band:
         min_drawn = _min_drawn_section_bbox_top(graph)
         if (
             min_drawn is not None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 __all__ = [
     "compute_legend_dimensions",
+    "logo_certainly_shows",
     "logo_image_kwargs",
     "logo_is_resolvable",
     "marker_corner_radius",
@@ -62,6 +63,20 @@ def logo_is_resolvable(path: str) -> bool:
     browser-based playground) or a path to an existing file.
     """
     return path.startswith("data:") or Path(path).is_file()
+
+
+def logo_certainly_shows(graph: MetroGraph) -> bool:
+    """True when a logo will render for sure, independent of display mode.
+
+    A single ``logo_path`` renders regardless of mode; a light+dark pair
+    covers whichever mode is resolved. A lone light-only or dark-only
+    variant's fate depends on the resolved display mode and whether adaptive
+    mode is active (``_is_adaptive_mode`` in ``render.svg``, disabled by
+    ``--no-chrome-css``) -- neither of which a caller resolving this before
+    theming (e.g. :func:`~nf_metro.api.prepare_graph`) can know -- so that
+    case is treated as unconfigured rather than risking a false positive.
+    """
+    return bool(graph.logo_path) or bool(graph.logo_path_light and graph.logo_path_dark)
 
 
 def resolve_logo_file(raw: str, source_dir: str) -> str:

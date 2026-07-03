@@ -26,7 +26,11 @@ from nf_metro.parser.directives import apply_legend_directive
 from nf_metro.parser.model import LineSpread, MetroGraph
 from nf_metro.render import render_svg
 from nf_metro.render.html import render_html
-from nf_metro.render.legend import logo_is_resolvable, resolve_logo_file
+from nf_metro.render.legend import (
+    logo_certainly_shows,
+    logo_is_resolvable,
+    resolve_logo_file,
+)
 from nf_metro.render.style import Theme
 from nf_metro.themes import DEFAULT_MODE, THEME_MODES, THEMES
 
@@ -141,8 +145,18 @@ def prepare_graph(
     legend: str | None = None,
     layout_options: Mapping[str, object] | None = None,
     source_dir: str = "",
+    bare: bool = False,
+    output_format: Literal["svg", "html"] = "svg",
 ) -> MetroGraph:
     """Parse *text*, apply option overrides, and compute the layout in place.
+
+    ``bare`` and ``output_format`` mirror the eventual render call (the CLI's
+    ``--bare``/``--format`` flags): used here only to resolve
+    ``graph.reserve_title_band`` before layout runs, so the title-band
+    clearance in ``layout/phases/canvas.py`` doesn't reserve space for a
+    header the render won't actually draw. HTML output always draws its own
+    title/logo band regardless of ``bare``/``%%metro legend:`` (its embedded
+    SVG forces the legend off and ignores ``bare``), so it always reserves.
 
     Returns the settled graph. Propagates the pipeline's typed errors:
     :class:`ValueError` (parse), and the layout errors
@@ -190,6 +204,11 @@ def prepare_graph(
         _raw: str = getattr(graph, _attr)
         if _raw and not logo_is_resolvable(_raw):
             raise ValueError(f"%%metro logo: path {_raw!r} not found")
+
+    logo_in_legend = logo_certainly_shows(graph) and graph.legend_position != "none"
+    graph.reserve_title_band = output_format == "html" or (
+        not bare and not logo_in_legend
+    )
 
     compute_layout(graph)
     return graph
@@ -248,6 +267,8 @@ def render_string(
         logo=logo,
         legend=legend,
         layout_options=layout_options,
+        bare=bare if config is None else config.bare,
+        output_format=output_format if config is None else config.output_format,
     )
     theme_obj = resolve_theme(theme, graph, mode=mode)
     flat = RenderConfig(
