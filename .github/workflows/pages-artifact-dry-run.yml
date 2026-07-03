@@ -1,0 +1,30 @@
+name: Pages artifact dry run
+
+# Validates that the committed gh-pages branch packages cleanly through
+# actions/upload-pages-artifact - the same step an Actions-based Pages
+# deployment would use - without calling actions/deploy-pages. It never
+# touches the live Pages site or its Settings > Pages > Source, so it is
+# safe to run against the real gh-pages branch as a pre-migration check.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: gh-pages
+
+      - name: Report branch stats
+        run: |
+          echo "Files: $(find . -type f | wc -l)"
+          echo "Size: $(du -sh . | cut -f1)"
+          test -f .nojekyll && echo ".nojekyll present" || echo "WARNING: .nojekyll missing"
+
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: .
