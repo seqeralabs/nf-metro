@@ -129,12 +129,11 @@ SECTION_LABEL_LINE_HEIGHT_RATIO: float = 1.2
 
 Mirrors the layout side's ``LABEL_LINE_HEIGHT`` for station labels."""
 
-STATION_LABEL_CLEARANCE: float = 26.0
-"""Vertical room a station's own label typically needs above its marker.
-
-Bounds how far a wrapped section header can grow toward the section's top
-content: the header's extra lines must stop clear of the topmost station's
-own label, not just its marker, or the two draw on top of each other."""
+HEADER_WRAP_CLEARANCE: float = 8.0
+"""Minimum visible gap a wrapped header's extra lines leave before whatever
+is nearest in their growth direction (the map title, another section's box,
+or the canvas edge).  Matches the buffer ``TITLE_BAND_CLEARANCE`` adds on the
+layout side for the same single-line-header clearance."""
 
 TEXT_VCENTER_DY: str = "0.3em"
 """Downward dy shift applied to text that must be visually centered on

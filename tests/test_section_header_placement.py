@@ -57,8 +57,8 @@ def _polylines_and_font(path: Path):
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
     polylines = [apply_route_offsets(route, offsets) for route in routes]
-    font_size = resolve_theme(None, graph).section_label_font_size
-    return graph, polylines, font_size
+    theme = resolve_theme(None, graph)
+    return graph, polylines, theme.section_label_font_size, theme.title_font_size
 
 
 @pytest.mark.parametrize(
@@ -66,8 +66,10 @@ def _polylines_and_font(path: Path):
 )
 def test_no_section_header_route_clashes_in_gallery(path: Path) -> None:
     """Every section header clears every route across the shipped corpus."""
-    graph, polylines, font_size = _polylines_and_font(path)
-    placements = resolve_all_section_headers(graph, font_size, polylines)
+    graph, polylines, font_size, title_font_size = _polylines_and_font(path)
+    placements = resolve_all_section_headers(
+        graph, font_size, polylines, title_font_size
+    )
     clashes = check_section_headers_clear_routes(placements, polylines)
     assert not clashes, "\n".join(c.message() for c in clashes)
 
@@ -79,8 +81,10 @@ def test_default_above_placement_would_clash(
     """Pinning every header to its default above-left position reintroduces the
     clash on the relocation fixtures, so the chain is doing real work."""
     monkeypatch.setattr(section_header, "_placement_clear", lambda *a, **k: True)
-    graph, polylines, font_size = _polylines_and_font(path)
-    placements = resolve_all_section_headers(graph, font_size, polylines)
+    graph, polylines, font_size, title_font_size = _polylines_and_font(path)
+    placements = resolve_all_section_headers(
+        graph, font_size, polylines, title_font_size
+    )
     clashes = check_section_headers_clear_routes(placements, polylines)
     assert clashes, "expected an above-left header to clash with the route"
 
@@ -93,17 +97,46 @@ def test_section_header_fits_box_width_in_gallery(path: Path) -> None:
 
     A title wider than its box must wrap onto extra lines rather than
     overhang the box's right edge."""
-    graph, polylines, font_size = _polylines_and_font(path)
-    placements = resolve_all_section_headers(graph, font_size, polylines)
+    graph, polylines, font_size, title_font_size = _polylines_and_font(path)
+    placements = resolve_all_section_headers(
+        graph, font_size, polylines, title_font_size
+    )
     overflowing = check_section_headers_fit_box_width(graph, placements)
     assert not overflowing, f"headers overhanging their box: {overflowing}"
+
+
+@pytest.mark.parametrize(
+    "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
+)
+def test_section_header_never_crosses_box_border_in_gallery(path: Path) -> None:
+    """A horizontal header's extra wrapped lines never draw across its own
+    section box's border - they grow away from the box, not into it."""
+    graph, polylines, font_size, title_font_size = _polylines_and_font(path)
+    placements = resolve_all_section_headers(
+        graph, font_size, polylines, title_font_size
+    )
+    crossings = []
+    for section_id, placement in placements.items():
+        section = graph.sections.get(section_id)
+        if section is None or placement.label_rotation:
+            continue
+        if placement.mode in ("above", "nudge"):
+            if placement.keepout[3] > section.bbox_y + 0.01:
+                crossings.append(section_id)
+        elif placement.mode == "below":
+            box_bottom = section.bbox_y + section.bbox_h
+            if placement.keepout[1] < box_bottom - 0.01:
+                crossings.append(section_id)
+    assert not crossings, f"headers crossing their box border: {crossings}"
 
 
 def test_narrow_section_header_wraps_onto_multiple_lines() -> None:
     """A title wider than its box splits onto multiple lines."""
     path = EXAMPLE_TOPOLOGIES / "narrow_section_header_wrap.mmd"
-    graph, polylines, font_size = _polylines_and_font(path)
-    placements = resolve_all_section_headers(graph, font_size, polylines)
+    graph, polylines, font_size, title_font_size = _polylines_and_font(path)
+    placements = resolve_all_section_headers(
+        graph, font_size, polylines, title_font_size
+    )
     placement = placements["wide_name"]
     assert len(placement.label_lines) > 1
     for line in placement.label_lines:
