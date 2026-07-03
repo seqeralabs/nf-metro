@@ -1,13 +1,8 @@
 name: Deploy Pages (Actions)
 
 # Publishes the gh-pages branch via GitHub's Actions-based Pages deployment.
-# Takes effect only once Settings > Pages > Source is set to "GitHub
-# Actions"; until then a run here fails harmlessly with Pages rejecting the
-# deployment.
-#
-# docs.yml / pr-renders.yml / pr-cleanup.yml still own writing content INTO
-# the gh-pages branch; this workflow's only job is publishing that branch's
-# current content whenever it changes.
+# docs.yml / pr-renders.yml / pr-cleanup.yml own writing content into the
+# gh-pages branch; this workflow only publishes whatever's currently there.
 on:
   push:
     branches: [gh-pages]
