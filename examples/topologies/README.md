@@ -358,11 +358,12 @@ python scripts/list_topology_fixtures.py
 
 ### Section-header placement
 
-| Fixture                      | What it tests                                                                                                                                  |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `header_nudge.mmd`           | Header nudged past a trunk route - tests the nudge-right fallback when the default above-section placement clashes with a route (#774)         |
-| `header_side_rotated.mmd`    | Header rotated to a side face - tests the rotated-side placement arm of the header-placement chain (#774)                                      |
-| `top_entry_header_clash.mmd` | TOP-entry route clips the section header in its default position - tests that header placement relocates the badge clear of the incoming route |
+| Fixture                          | What it tests                                                                                                                                  |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `header_nudge.mmd`               | Header nudged past a trunk route - tests the nudge-right fallback when the default above-section placement clashes with a route (#774)         |
+| `header_side_rotated.mmd`        | Header rotated to a side face - tests the rotated-side placement arm of the header-placement chain (#774)                                      |
+| `top_entry_header_clash.mmd`     | TOP-entry route clips the section header in its default position - tests that header placement relocates the badge clear of the incoming route |
+| `narrow_section_header_wrap.mmd` | A section title wider than its narrow box - tests that the header wraps onto extra lines instead of overhanging the box (#1310)                |
 
 ### Junction entry
 

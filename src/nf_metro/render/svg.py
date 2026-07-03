@@ -142,8 +142,11 @@ from nf_metro.render.ns import class_prefix_context
 from nf_metro.render.ns import ns as _ns
 from nf_metro.render.section_header import (
     SectionHeaderClashError,
+    SectionHeaderOverflowError,
     SectionHeaderPlacement,
     check_section_headers_clear_routes,
+    check_section_headers_fit_box_width,
+    header_line_height,
     resolve_all_section_headers,
 )
 from nf_metro.render.style import Theme
@@ -623,6 +626,7 @@ def _render_svg_scaled(
         graph, theme.section_label_font_size, header_polylines
     )
     _guard_section_headers_clear_routes(header_placements, header_polylines)
+    _guard_section_headers_fit_box_width(graph, header_placements)
 
     max_x, max_y = _compute_canvas_bounds(graph, routes, debug)
 
@@ -1229,6 +1233,19 @@ def _guard_section_headers_clear_routes(
         raise SectionHeaderClashError("; ".join(c.message() for c in clashes))
 
 
+def _guard_section_headers_fit_box_width(
+    graph: MetroGraph,
+    placements: dict[str, SectionHeaderPlacement],
+) -> None:
+    """Fail loudly if a header's wrapped title overhangs its box width."""
+    overflowing = check_section_headers_fit_box_width(graph, placements)
+    if overflowing:
+        raise SectionHeaderOverflowError(
+            "section header(s) overhang their box width after wrapping: "
+            + ", ".join(sorted(overflowing))
+        )
+
+
 def _render_first_class_sections(
     d: draw.Drawing,
     graph: MetroGraph,
@@ -1306,19 +1323,21 @@ def _render_first_class_sections(
                 f"rotate({placement.label_rotation} "
                 f"{placement.label_x} {placement.label_y})"
             )
-        d.append(
-            draw.Text(
-                section.name,
-                theme.section_label_font_size,
-                placement.label_x,
-                placement.label_y,
-                fill=theme.section_label_color,
-                font_family=theme.label_font_family,
-                font_weight="bold",
-                dy=TEXT_VCENTER_DY,
-                **label_kwargs,
+        line_height = header_line_height(theme.section_label_font_size)
+        for i, line in enumerate(placement.label_lines):
+            d.append(
+                draw.Text(
+                    line,
+                    theme.section_label_font_size,
+                    placement.label_x,
+                    placement.label_y + i * line_height,
+                    fill=theme.section_label_color,
+                    font_family=theme.label_font_family,
+                    font_weight="bold",
+                    dy=TEXT_VCENTER_DY,
+                    **label_kwargs,
+                )
             )
-        )
 
 
 def _render_edges(

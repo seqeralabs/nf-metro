@@ -26,6 +26,7 @@ from nf_metro.layout.routing import compute_station_offsets, route_edges_centred
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.section_header import (
     check_section_headers_clear_routes,
+    check_section_headers_fit_box_width,
     resolve_all_section_headers,
 )
 from nf_metro.render.svg import apply_route_offsets
@@ -82,3 +83,30 @@ def test_default_above_placement_would_clash(
     placements = resolve_all_section_headers(graph, font_size, polylines)
     clashes = check_section_headers_clear_routes(placements, polylines)
     assert clashes, "expected an above-left header to clash with the route"
+
+
+@pytest.mark.parametrize(
+    "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
+)
+def test_section_header_fits_box_width_in_gallery(path: Path) -> None:
+    """Every horizontal section header stays within its box width.
+
+    A title wider than its box must wrap onto extra lines rather than
+    overhang the box's right edge."""
+    graph, polylines, font_size = _polylines_and_font(path)
+    placements = resolve_all_section_headers(graph, font_size, polylines)
+    overflowing = check_section_headers_fit_box_width(graph, placements)
+    assert not overflowing, f"headers overhanging their box: {overflowing}"
+
+
+def test_narrow_section_header_wraps_onto_multiple_lines() -> None:
+    """A title wider than its box splits onto multiple lines."""
+    path = EXAMPLE_TOPOLOGIES / "narrow_section_header_wrap.mmd"
+    graph, polylines, font_size = _polylines_and_font(path)
+    placements = resolve_all_section_headers(graph, font_size, polylines)
+    placement = placements["wide_name"]
+    assert len(placement.label_lines) > 1
+    for line in placement.label_lines:
+        assert section_header.estimate_section_label_width(line, font_size) <= (
+            graph.sections["wide_name"].bbox_w
+        )

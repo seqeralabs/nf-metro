@@ -1,0 +1,19 @@
+%%metro title: Narrow Section Header Wrap
+%%metro style: dark
+%%metro line: a | A | #e6007e
+
+%%metro grid: wide_name | 0,0
+%%metro grid: nxt | 1,0
+
+graph LR
+    subgraph wide_name [Alignment & deduplication]
+        %%metro exit: right | a
+        s1[STAR]
+        s2[Dedup]
+        s1 -->|a| s2
+    end
+    subgraph nxt [Next]
+        %%metro entry: left | a
+        n1[N1]
+    end
+    s2 -->|a| n1
