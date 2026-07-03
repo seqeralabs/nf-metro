@@ -185,9 +185,15 @@ def _compute_canvas_bounds(
                 max_y = py
 
     if header_placements:
+        # Scoped to wrapped (multi-line) headers only: a single-line header
+        # that overhangs its section bbox is a separate, pre-existing
+        # condition, and folding it into the canvas size here would shift
+        # everything anchored to it (watermark, legend) for every such
+        # section, not just the ones a wrapped title actually reaches past.
         for placement in header_placements.values():
-            max_x = max(max_x, placement.keepout[2])
-            max_y = max(max_y, placement.keepout[3])
+            if len(placement.label_lines) > 1:
+                max_x = max(max_x, placement.keepout[2])
+                max_y = max(max_y, placement.keepout[3])
 
     return max_x, max_y
 
@@ -938,13 +944,17 @@ def _legend_overlaps_headers(
     lh: float,
     header_placements: dict[str, SectionHeaderPlacement],
 ) -> bool:
-    """Check if a legend rectangle overlaps a resolved section header's keepout.
+    """Check if a legend rectangle overlaps a wrapped section header's keepout.
 
-    A wrapped header can extend below its own section's box (``below`` mode)
-    or above it (``above``/``nudge``), reaching outside the section bbox that
-    :func:`_legend_overlaps_sections` checks.
+    A wrapped (multi-line) header can extend below its own section's box
+    (``below`` mode) or above it (``above``/``nudge``), reaching outside the
+    section bbox that :func:`_legend_overlaps_sections` checks.  A single-line
+    header is excluded: its own overhang is a separate, pre-existing
+    condition unrelated to wrapping (see :func:`_compute_canvas_bounds`).
     """
     for placement in header_placements.values():
+        if len(placement.label_lines) <= 1:
+            continue
         kx0, ky0, kx1, ky1 = placement.keepout
         if lx < kx1 and lx + lw > kx0 and ly < ky1 and ly + lh > ky0:
             return True
