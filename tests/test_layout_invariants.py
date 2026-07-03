@@ -30,6 +30,7 @@ from nf_metro.layout.constants import (
     EDGE_TO_BUNDLE_CLEARANCE,
     GUARD_TOLERANCE,
     INTER_ROW_EDGE_CLEARANCE,
+    LABEL_MARGIN,
     MIN_STATION_FLAT_LENGTH,
     ROW_BAND_SLACK,
     SAME_COORD_TOLERANCE,
@@ -60,6 +61,7 @@ from nf_metro.layout.phases._common import (
     _grow_section_bbox_upward,
     _is_side_entered_vertical_section,
     _row_contiguous_column_groups,
+    _station_marker_bbox,
     flow_axis_exit_ports,
     flow_exit_carrier_anchor,
     iter_corridor_fed_solo_entries,
@@ -77,6 +79,8 @@ from nf_metro.layout.phases.guards import (
     _tb_top_entry_drop_overshoot,
 )
 from nf_metro.layout.phases.off_track import (
+    _column_grouped_branch_rows,
+    _fork_join_adjacency,
     _is_single_trunk_lr_section,
     _off_track_anchor_of,
     _off_track_fit_top,
@@ -8950,3 +8954,79 @@ def test_interior_branch_stays_centred_on_loop(style):
             f"{fixture} [{style}]: branch {branch!r} off-centre -- "
             f"divergence run {div:.1f} != reconvergence run {recon:.1f}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Wide fan branch labels must clear the next row's marker (#1266)
+# ---------------------------------------------------------------------------
+
+
+def _wide_fan_branch_row_pairs(graph: MetroGraph) -> list[tuple[str, str]]:
+    """Adjacent ``(upper, lower)`` branch stations in every 3+-way fork/join fan.
+
+    Layer-column alternation picks a label's side once per layer, so a 3+-way
+    fan stacks every branch label on the same side; each upper branch's label
+    then lands in the gap toward the next branch row.
+    """
+    out_targets, in_sources = _fork_join_adjacency(graph, None, None)
+    pairs: set[tuple[str, str]] = set()
+    for group in _column_grouped_branch_rows(graph, out_targets, in_sources):
+        for upper, lower in zip(group, group[1:]):
+            pairs.add((upper, lower))
+    return sorted(pairs)
+
+
+_WIDE_FAN_FIXTURES = [
+    "topologies/fork_join_interior_label.mmd",
+    "rnaseq_sections.mmd",
+    "regressions/rnaseq_branch_fold_wrap.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _WIDE_FAN_FIXTURES)
+@pytest.mark.parametrize("style", ["symmetric", "straight"])
+def test_wide_fan_branch_label_clears_next_row_marker(fixture, style):
+    """A wide fork/join fan's branch label clears the next row's marker (#1266).
+
+    Layer-column alternation stacks every branch label of a 3+-way fan on the
+    same side, so the row pitch -- not alternation -- is what must open
+    enough for a single-line label to clear the next row's marker.
+    """
+    graph = _layout_diamond(fixture, style)
+    pairs = _wide_fan_branch_row_pairs(graph)
+    assert pairs, f"{fixture}: no 3+-way fork/join fan found to check"
+
+    with font_scale_context(graph.font_scale):
+        offsets = compute_station_offsets(
+            graph, offset_step=resolve_offset_step(graph.track_gap, 3.0)
+        )
+        routes = route_edges_centred(graph, station_offsets=offsets)
+        placements = place_labels(
+            graph,
+            station_offsets=offsets,
+            icon_obstacles=[],
+            routes=routes,
+            label_angle=graph.label_angle or 0.0,
+        )
+    by_id = {p.station_id: p for p in placements}
+
+    checked = 0
+    for upper, lower in pairs:
+        label = graph.stations[upper].label
+        if not label.strip() or "\n" in label:
+            continue
+        placement = by_id.get(upper)
+        if placement is None:
+            continue
+        marker = _station_marker_bbox(graph, lower, offsets=offsets)
+        if marker is None:
+            continue
+        label_bottom = _label_bbox(placement)[3]
+        marker_top = marker[1]
+        assert marker_top - label_bottom >= LABEL_MARGIN, (
+            f"{fixture} [{style}]: {upper!r} label bottom={label_bottom:.1f} "
+            f"comes within {marker_top - label_bottom:.1f}px of {lower!r}'s "
+            f"marker (top={marker_top:.1f}), short of the {LABEL_MARGIN}px margin"
+        )
+        checked += 1
+    assert checked, f"{fixture} [{style}]: no branch label found to check"

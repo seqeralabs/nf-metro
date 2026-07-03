@@ -25,8 +25,10 @@ from nf_metro.layout.constants import (
     ICON_CAPTION_GAP,
     ICON_HALF_HEIGHT,
     ICON_STACK_LABEL_CLEARANCE,
+    LABEL_MARGIN,
     LABEL_OFFSET,
     MIN_Y_SPACING_FLOOR,
+    OFFSET_STEP,
     ROW_GAP,
     SECTION_GAP,
     SECTION_ROUTE_CLEARANCE,
@@ -34,6 +36,7 @@ from nf_metro.layout.constants import (
     SECTION_X_PADDING,
     SECTION_Y_GAP,
     SECTION_Y_PADDING,
+    STATION_RADIUS_APPROX,
     X_OFFSET,
     X_SPACING,
     Y_OFFSET,
@@ -206,6 +209,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_topmost_row_top_entry_hugs_section,
     _guard_trunk_bands_crossing_optimal,
     _guard_trunk_continuation_drops_straight,
+    _guard_wide_fan_branch_label_clears_next_row,
     _inter_section_backtrack_legs,
     _port_anchor_snapshot,
     _route_exit_side,
@@ -228,6 +232,7 @@ from nf_metro.layout.phases.off_track import (  # noqa: F401
     _align_phantom_pass_throughs,
     _bump_off_track_clear_of_trunks,
     _compute_fork_join_gaps,
+    _fork_join_adjacency,
     _insert_phantom_pass_throughs,
     _lift_off_track_stations,
     _line_crossed_file_icon_sinks,
@@ -396,7 +401,61 @@ def compute_min_y_spacing(
             required = max(required, pitch_icon_icon)
         if captioned >= 1 and labeled >= 1:
             required = max(required, pitch_icon_over_label)
+        required = max(required, _wide_fan_branch_label_pitch(graph, section, scale))
 
+    return required
+
+
+def _wide_fan_branch_label_pitch(
+    graph: MetroGraph, section: Section, scale: float
+) -> float:
+    """Row pitch a straight-style 3+-way fork/join fan's branch labels need.
+
+    Layer-column alternation (see ``labels.py``) picks a label's side once
+    per column, so a 3+-way fan under ``diamond_style: straight`` stacks
+    every branch label on the same side instead of alternating clear of
+    each other.  A station's line-priority offsets are re-indexed to start
+    at 0 within its own bundle (``routing/offsets.py``), so a station's
+    marker sits flush with its own Y on top (``STATION_RADIUS_APPROX``) but
+    extends ``(n_lines - 1) * OFFSET_STEP`` further past it on the bottom;
+    a below-placed label then starts near that bottom edge (``labels.py``'s
+    ``_compute_safe_offsets``), so a thick bundle's branch needs a wider
+    pitch to keep its label off the next branch row's marker.
+    ``diamond_style: symmetric`` routes the loop to the side instead of
+    stacking rows, so this returns 0 there.
+
+    Runs before layout assigns station coordinates, so unlike the matching
+    ``_guard_wide_fan_branch_label_clears_next_row`` this cannot narrow a wide
+    hub's targets/sources to the ones that will end up sharing a column; it
+    treats every 3+-way hub as a potential stack, which only widens the
+    (global) pitch floor and never narrows a layout the guard would accept.
+    """
+    if graph.diamond_style != "straight":
+        return 0.0
+
+    out_targets, in_sources = _fork_join_adjacency(
+        graph, graph, set(section.station_ids)
+    )
+
+    required = 0.0
+    for group in (*out_targets.values(), *in_sources.values()):
+        if len(group) < 3:
+            continue
+        labeled_bottom_reaches = [
+            max(0, len(graph.station_lines(sid)) - 1) * OFFSET_STEP
+            for sid in group
+            if graph.stations[sid].label.strip()
+            and "\n" not in graph.stations[sid].label
+        ]
+        if not labeled_bottom_reaches:
+            continue
+        bottom_reach = max(labeled_bottom_reaches) + STATION_RADIUS_APPROX
+        if bottom_reach <= STATION_RADIUS_APPROX:
+            continue  # thin bundle: the default pitch already clears it
+        required = max(
+            required,
+            bottom_reach + FONT_HEIGHT * scale + LABEL_MARGIN + STATION_RADIUS_APPROX,
+        )
     return required
 
 
@@ -719,6 +778,7 @@ def _compute_layout_scaled(
         _guard_side_entered_vertical_top_not_below_feeder(graph, "final")
         _guard_symmetric_diamond_branches_straddle_trunk(graph, "final")
         _guard_symmetric_diamond_branches_half_pitch(graph, "final")
+        _guard_wide_fan_branch_label_clears_next_row(graph, "final")
 
 
 def _bypass_label_rakes(graph: MetroGraph) -> set[str]:

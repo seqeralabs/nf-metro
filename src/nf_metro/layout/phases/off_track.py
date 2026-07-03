@@ -427,6 +427,36 @@ def _detect_fork_join_layers(
     return fork_layers, join_layers
 
 
+def _column_grouped_branch_rows(
+    graph: MetroGraph,
+    out_targets: dict[str, set[str]],
+    in_sources: dict[str, set[str]],
+) -> list[list[str]]:
+    """Narrow fork/join hub groups to genuinely stacked (same-column) branch rows.
+
+    A wide broadcast hub can fan to targets/sources scattered across several
+    columns (e.g. a 9-way fan-out feeding entirely different downstream
+    stages), so raw hub degree alone doesn't identify a visual branch stack;
+    only members sharing a column do.  Requires final coordinates, so callers
+    running before layout (station X/Y not yet assigned) cannot use this.
+
+    Returns each qualifying group of 3+ same-column stations, sorted
+    top-to-bottom by Y.
+    """
+    groups: list[list[str]] = []
+    for branch_ids in (*out_targets.values(), *in_sources.values()):
+        by_x: dict[float, list[str]] = defaultdict(list)
+        for sid in branch_ids:
+            st = graph.stations.get(sid)
+            if st is None or st.is_port or st.off_track:
+                continue
+            by_x[round(st.x, 1)].append(sid)
+        for same_col in by_x.values():
+            if len(same_col) >= 3:
+                groups.append(sorted(same_col, key=lambda sid: graph.stations[sid].y))
+    return groups
+
+
 def _fj_label_metrics(
     layer: int,
     layers: dict[str, int],

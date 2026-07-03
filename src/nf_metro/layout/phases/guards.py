@@ -20,6 +20,7 @@ from nf_metro.layout.constants import (
     GUARD_TOLERANCE,
     ICON_HALF_HEIGHT,
     INTER_ROW_EDGE_CLEARANCE,
+    LABEL_MARGIN,
     OFFSET_STEP,
     ROW_BAND_SLACK,
     SAME_COORD_TOLERANCE,
@@ -60,6 +61,8 @@ from nf_metro.layout.phases._common import (
 )
 from nf_metro.layout.phases.bbox import _min_drawn_section_bbox_top, _section_fit_top
 from nf_metro.layout.phases.off_track import (
+    _column_grouped_branch_rows,
+    _fork_join_adjacency,
     _is_single_trunk_lr_section,
     _off_track_anchor_of,
     _off_track_lift_step,
@@ -730,6 +733,59 @@ def _guard_symmetric_diamond_branches_half_pitch(graph: MetroGraph, phase: str) 
                 f"{0.5 * full_pitch:.1f} expected beside a full-pitch "
                 f"{full_pitch:.1f} fan; the diamond was not compacted"
             )
+
+
+def _guard_wide_fan_branch_label_clears_next_row(graph: MetroGraph, phase: str) -> None:
+    """Final: a straight-style 3+-way fan's branch label clears the next row's marker.
+
+    Layer-column alternation stacks every branch label of a wide fork/join
+    fan on the same side, so a branch's label lands in the gap toward the
+    next branch row rather than alternating clear of it; the row pitch must
+    stay wide enough that the label doesn't bleed into that row's marker.
+    ``diamond_style: symmetric`` routes the loop to the side instead of
+    stacking rows, so this is skipped there.
+    """
+    if graph.diamond_style != "straight":
+        return
+    from nf_metro.layout.labels import _label_bbox
+    from nf_metro.layout.phases.spacing import _probe_label_placements
+
+    groups: list[list[str]] = []
+    for section in graph.sections.values():
+        if section.direction not in ("LR", "RL"):
+            continue
+        out_targets, in_sources = _fork_join_adjacency(
+            graph, graph, set(section.station_ids)
+        )
+        groups.extend(_column_grouped_branch_rows(graph, out_targets, in_sources))
+
+    if not groups:
+        return
+
+    probe = _probe_label_placements(graph, allow_hyphenation=True)
+    if probe is None:
+        return
+    offsets, _routes, placements = probe
+    placement_by_sid = {p.station_id: p for p in placements}
+
+    for group in groups:
+        for upper, lower in zip(group, group[1:]):
+            placement = placement_by_sid.get(upper)
+            label = graph.stations[upper].label
+            if placement is None or not label.strip() or "\n" in label:
+                continue
+            marker = _station_marker_bbox(graph, lower, offsets=offsets)
+            if marker is None:
+                continue
+            label_bottom = _label_bbox(placement)[3]
+            marker_top = marker[1]
+            gap = marker_top - label_bottom
+            if gap < LABEL_MARGIN:
+                raise PhaseInvariantError(
+                    f"{phase}: {upper!r} label bottom={label_bottom:.1f} comes "
+                    f"within {gap:.1f}px of {lower!r}'s marker (top={marker_top:.1f}), "
+                    f"short of the {LABEL_MARGIN}px margin"
+                )
 
 
 def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
@@ -5010,6 +5066,7 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     GuardSpec(_guard_symmetric_diamond_branches_half_pitch, "B"),
     GuardSpec(_guard_tall_anchor_stack_well_formed, "B"),
     GuardSpec(_guard_tb_top_entry_drop_hugs_top, "B"),
+    GuardSpec(_guard_wide_fan_branch_label_clears_next_row, "B"),
 )
 
 
