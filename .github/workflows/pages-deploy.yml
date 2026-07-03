@@ -1,0 +1,45 @@
+name: Deploy Pages (Actions)
+
+# Publishes the already-built gh-pages branch via GitHub's Actions-based Pages
+# deployment, replacing the legacy branch-build Pages publisher (which has
+# been flaking - see the stalled/errored builds around PR #1281). This
+# workflow only takes effect once Settings > Pages > Source is set to
+# "GitHub Actions"; until then a run here fails harmlessly with Pages
+# rejecting the deployment, and the legacy builder keeps serving the site.
+#
+# docs.yml / pr-renders.yml / pr-cleanup.yml still own writing content INTO
+# the gh-pages branch; this workflow's only job is publishing that branch's
+# current content whenever it changes.
+on:
+  push:
+    branches: [gh-pages]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: gh-pages
+
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: .
+
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
