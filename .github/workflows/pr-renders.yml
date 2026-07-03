@@ -86,7 +86,8 @@ jobs:
           set +e
           python scripts/build_render_diff.py \
             /tmp/base_renders /tmp/pr_renders /tmp/diff_site \
-            --pr ${{ github.event.number }}
+            --pr ${{ github.event.number }} \
+            --marker ${{ github.run_id }}
           EXIT_CODE=$?
           set -e
           if [ $EXIT_CODE -eq 0 ]; then

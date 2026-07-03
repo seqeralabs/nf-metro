@@ -39,6 +39,7 @@ HTML_TEMPLATE = """\
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="nf-metro-render-run" content="{marker}">
 <title>Render diff{title_suffix}</title>
 <style>
   :root {{
@@ -473,7 +474,11 @@ def _build_metrics_html(
 
 
 def build_diff(
-    base_dir: Path, pr_dir: Path, output_dir: Path, pr_number: str | None = None
+    base_dir: Path,
+    pr_dir: Path,
+    output_dir: Path,
+    pr_number: str | None = None,
+    marker: str = "",
 ) -> bool:
     """Compare renders and generate diff page. Returns True if changes found."""
     base_svgs = {p.name for p in base_dir.glob("*.svg")} if base_dir.exists() else set()
@@ -614,6 +619,7 @@ def build_diff(
         metrics=metrics_html,
         toc=toc,
         entries="\n\n".join(entries_html),
+        marker=marker,
     )
     (output_dir / "index.html").write_text(html)
     return True
@@ -625,9 +631,17 @@ def main() -> None:
     parser.add_argument("pr_dir", type=Path, help="PR branch render directory")
     parser.add_argument("output_dir", type=Path, help="Output directory for diff site")
     parser.add_argument("--pr", default=None, help="PR number for title")
+    parser.add_argument(
+        "--marker",
+        default="",
+        help="Opaque build id embedded in the page so a publisher can confirm "
+        "this exact render is the one being served.",
+    )
     args = parser.parse_args()
 
-    has_changes = build_diff(args.base_dir, args.pr_dir, args.output_dir, args.pr)
+    has_changes = build_diff(
+        args.base_dir, args.pr_dir, args.output_dir, args.pr, args.marker
+    )
     if has_changes:
         print(f"Diff page written to {args.output_dir}/index.html")
         sys.exit(0)

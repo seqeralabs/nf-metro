@@ -71,19 +71,23 @@ jobs:
           keep_files: true
 
       # A push to gh-pages only updates the branch; GitHub Pages then builds and
-      # publishes it asynchronously. Wait for the URL to actually serve before
-      # announcing it, so the link in the comment is never a 404.
+      # publishes it asynchronously. Poll until the URL serves the page carrying
+      # THIS render run's marker, so an existing preview's stale content can't be
+      # mistaken for the new one and the announced link is never stale or a 404.
       - name: Wait for preview to be published
         id: wait
         if: steps.meta.outputs.has_changes == 'true'
         env:
           URL: https://${{ github.repository_owner }}.github.io/nf-metro/_pr/${{ steps.meta.outputs.pr }}/index.html
+          MARKER: ${{ github.event.workflow_run.id }}
         run: |
           live=false
           for i in $(seq 1 20); do
-            code=$(curl -sS -o /dev/null -w "%{http_code}" "${URL}?cb=${{ github.run_id }}-${i}" || echo 000)
-            echo "attempt ${i}: HTTP ${code}"
-            if [ "${code}" = "200" ]; then live=true; break; fi
+            body=$(curl -sS "${URL}?cb=${{ github.run_id }}-${i}" 2>/dev/null || true)
+            if printf '%s' "$body" | grep -qF "nf-metro-render-run\" content=\"${MARKER}\""; then
+              live=true; break
+            fi
+            echo "attempt ${i}: marker ${MARKER} not live yet"
             sleep 15
           done
           echo "live=${live}" >> "$GITHUB_OUTPUT"
