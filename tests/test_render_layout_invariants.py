@@ -302,3 +302,35 @@ def test_branch_fold_repro_renders_without_wrap(name: str) -> None:
     assert not tier_a, (
         f"unexpected Tier-A warning(s): {[str(w.message) for w in tier_a]}"
     )
+
+
+# A flow-side entry port whose target sits on the section trunk while an earlier
+# non-consumer station shares that trunk row: the entry runway must keep its flat
+# run on the entry (source) row and descend into the target only past the
+# bypassed station, rather than running the runway along the target trunk Y
+# straight through the non-consumer's marker (#1293).  The fixture is a folded
+# multi-line pipeline that also trips other validate-time guards, so it lives
+# under regressions/ (out of the validate=True corpus) and is exercised here
+# only for the crossing invariant on the always-on render path.
+ENTRY_RUNWAY_BYPASS_FIXTURES = [
+    "target_entry_runway_bypass.mmd",
+]
+
+
+@pytest.mark.parametrize("name", ENTRY_RUNWAY_BYPASS_FIXTURES)
+def test_entry_runway_clears_trunk_row_non_consumer(name: str) -> None:
+    """The entry runway to a trunk-row target does not rake a non-consumer
+    station sharing that trunk row (#1293)."""
+    graph = parse_metro_mermaid((FIXTURES / name).read_text())
+    compute_layout(graph)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        render_svg(graph, THEMES["nfcore"])
+    crossings = [
+        str(w.message)
+        for w in caught
+        if "_guard_no_line_crosses_non_consumer" in str(w.message)
+    ]
+    assert not crossings, (
+        f"{name}: entry route rakes a non-consumer marker: {crossings}"
+    )
