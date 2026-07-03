@@ -395,14 +395,6 @@
     "note": "_route_entry_runway only runs on an entry-port -> internal-station edge; the target of such an edge always carries a section_id that resolves, so the guard's return-None arm protects against a malformed graph rather than a topology.",
     "status": "defensive"
   },
-  "intra_handlers.py::if not st or st.is_port:::#1": {
-    "note": "The loop already skips edge.target and every id in section.port_ids, so a surviving id resolves to a non-port internal station; the not-st / is_port re-check is belt-and-suspenders against a port absent from port_ids.",
-    "status": "defensive"
-  },
-  "intra_handlers.py::if room < src_min + ctx.diagonal_run:::#1": {
-    "note": "The entry-runway 'too tight' return cannot fire: room = |first_x - entry_port_x| is floored at SECTION_X_PADDING (50px, the entry port sits at section.bbox_x = min(internal_station_x) - SECTION_X_PADDING), while the threshold src_min + diagonal_run = CURVE_RADIUS(10) + MIN_STRAIGHT_PORT(5) + DIAGONAL_RUN(30) = 45px. Since 50 >= 45 the guard is always False; SECTION_X_PADDING is not exposed as a directive. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
-    "status": "defensive"
-  },
   "intra_handlers.py::if section.direction not in (\"LR\", \"RL\"):::#1": {
     "note": "No TB/BT entry reaches _route_entry_runway: TB LEFT/RIGHT entries are consumed by _route_tb_lr_entry and TB/BT TOP/BOTTOM entries by _route_perp_entry (both earlier in the dispatch chain), and a BT section is never produced (the direction directive accepts only LR/RL/TB; 0/391 corpus sections are BT). Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
@@ -648,7 +640,7 @@
     "status": "defensive"
   },
   "offsets.py::if lid not in seen:::#1": {
-    "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable — the dedup happens at set construction, making the `seen` guard dead code. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+    "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable \u2014 the dedup happens at set construction, making the `seen` guard dead code. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
   "offsets.py::if max_steps <= 0:::#1": {
@@ -732,7 +724,7 @@
     "status": "defensive"
   },
   "offsets.py::if src_st and not src_st.is_port:::#1": {
-    "note": "In `_rewrite_edges_with_junctions` (resolve.py L594), edges to exit ports are always created as `Edge(source=edge.source, target=exit_port_id)` where `edge.source` is the original inter-section edge's source — an internal section station, not a port. So `src_st` is never None and `src_st.is_port` is always False. The false arm cannot be taken by any valid parsed graph.",
+    "note": "In `_rewrite_edges_with_junctions` (resolve.py L594), edges to exit ports are always created as `Edge(source=edge.source, target=exit_port_id)` where `edge.source` is the original inter-section edge's source \u2014 an internal section station, not a port. So `src_st` is never None and `src_st.is_port` is always False. The false arm cannot be taken by any valid parsed graph.",
     "status": "defensive"
   },
   "offsets.py::if src_st and not src_st.is_port:::#2": {
@@ -977,6 +969,26 @@
   },
   "postprocess.py::if abs(dx_diag) <= COORD_TOLERANCE_FINE:::#1": {
     "note": "Defensive guard: a near-vertical baked diagonal (dx_diag ~ 0) already separates near-fully along the baked X axis, so it needs no Y spread and the divide-by-dx_diag is skipped. No corpus fixture bakes a near-vertical diagonal, so the guard arm is never taken.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::if not ty_blocker_xs:::#1": {
+    "note": "Entry-runway trunk-row non-consumer bypass (#1293). False arm (a non-consumer of the entering line sits on the target trunk row) drives the target-compressed runway. Exercised by tests/fixtures/regressions/target_entry_runway_bypass.mmd, which is kept out of the validate=True corpus (it also trips other validate guards) and out of the gate-coverage corpus, so no clean corpus fixture takes this arm.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::if abs(st.y - ty) < COORD_TOLERANCE_FINE:::#1": {
+    "note": "Entry-runway trunk-row non-consumer bypass (#1293). True arm classifies a bypassed non-consumer as sitting on the target row. Exercised by tests/fixtures/regressions/target_entry_runway_bypass.mmd, which is kept out of the validate=True corpus (it also trips other validate guards) and out of the gate-coverage corpus, so no clean corpus fixture takes this arm.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::elif sy_blocked:::#1": {
+    "note": "Entry-runway trunk-row non-consumer bypass (#1293). Both-rows-blocked fall-through: a non-consumer sits on BOTH the entry row and the target trunk row, leaving no clear runway row. No corpus fixture has a doubly-blocked flow-side entry; defensive.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::if abs(diag_start_x - sx) <= abs(last_blocker - sx):::#1": {
+    "note": "Entry-runway trunk-row non-consumer bypass (#1293). Descent-clips-blocker fall-through: the join-biased diagonal cannot start past the furthest target-row non-consumer (a blocker within diagonal_run+tgt_min of the target). Corpus blockers sit far enough forward; defensive.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::if abs(nearest_src - sx) < src_min + ctx.diagonal_run:::#1": {
+    "note": "Entry-runway 'too tight' return cannot fire: |nearest_src - entry_port_x| is floored at SECTION_X_PADDING (50px, the entry port sits at section.bbox_x = min(internal_station_x) - SECTION_X_PADDING), while src_min + diagonal_run = CURVE_RADIUS(10) + MIN_STRAIGHT_PORT(5) + DIAGONAL_RUN(30) = 45px. Since 50 >= 45 the guard is always False.",
     "status": "defensive"
   }
 }
