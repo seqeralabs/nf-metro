@@ -21,9 +21,11 @@ from nf_metro.layout.constants import (
     MIN_STATION_FLAT_LENGTH,
     MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
+    STATION_RADIUS_APPROX,
 )
 from nf_metro.layout.geometry import (
     diagonal_centreline,
+    segment_intersects_bbox,
     single_corner_centreline,
 )
 from nf_metro.layout.labels import (
@@ -52,6 +54,7 @@ from nf_metro.layout.routing.tb_handlers import (
 from nf_metro.parser.model import (
     Edge,
     PortSide,
+    Section,
     Station,
     is_bypass_v,
 )
@@ -89,48 +92,71 @@ def _route_entry_runway(
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
 
-    # Same Y means target is on the trunk track -- no runway needed.
+    # Same Y means target is on the trunk track: a plain straight run suffices,
+    # unless a same-row non-consumer sits between the port and the target, which
+    # the straight run would rake.  Bow over such a blocker instead.
     if abs(sy - ty) < COORD_TOLERANCE_FINE:
-        return None
+        return _route_entry_bow(edge, src, tgt, ctx, section)
 
-    # Find the earliest internal station between entry port and target.
+    # Gather the internal stations bypassed between the entry port and the
+    # target.  The runway runs flat along one of the two rows (source Y or
+    # target Y) and diagonals across to the other, so a bypassed station this
+    # line does not carry sitting on the flat-run row would be raked through
+    # its marker.  Record which rows carry such a non-consumer.  Flow direction
+    # (LR/RL) only sets which end of the x-span is the source, so ordering is
+    # kept in terms of distance from the source rather than a direction literal.
+    line = edge.line_id
     port_ids = section.port_ids
-    first_x: float | None = None
+    lo, hi = min(sx, tx), max(sx, tx)
+    between_xs: list[float] = []
+    ty_blocker_xs: list[float] = []
+    sy_blocked = False
     for sid in section.station_ids:
         if sid == edge.target or sid in port_ids:
             continue
         st = graph.stations.get(sid)
-        if not st or st.is_port:
+        if not st or st.is_port or not (lo < st.x < hi):
             continue
-        if section.direction == "LR" and sx < st.x < tx:
-            if first_x is None or st.x < first_x:
-                first_x = st.x
-        elif section.direction == "RL" and tx < st.x < sx:
-            if first_x is None or st.x > first_x:
-                first_x = st.x
+        between_xs.append(st.x)
+        if line not in graph.station_lines(sid):
+            if abs(st.y - ty) < COORD_TOLERANCE_FINE:
+                ty_blocker_xs.append(st.x)
+            elif abs(st.y - sy) < COORD_TOLERANCE_FINE:
+                sy_blocked = True
 
-    if first_x is None:
+    if not between_xs:
         return None  # No intervening stations -- normal routing is fine.
 
-    # Compute diagonal within the entry-to-first-station region.
-    # The source side needs a normal straight run; the runway side
-    # needs no clearance since the horizontal run continues past it.
-    src_min = ctx.curve_radius + MIN_STRAIGHT_PORT
-    tgt_min = 0.0
-
-    room = abs(first_x - sx)
-    if room < src_min + ctx.diagonal_run:
-        return None  # Too tight -- fall through to default handler.
-
-    diag_start_x, diag_end_x = _compute_diagonal_placement(
-        sx,
-        first_x,
-        ctx.diagonal_run,
-        src_min,
-        tgt_min,
-        edge.source in ctx.fork_stations,
-        False,
-    )
+    if not ty_blocker_xs:
+        # Target row is clear: compress the diagonal in the entry region and
+        # run the flat runway along the target Y past the bypassed stations.
+        nearest_src = min(between_xs, key=lambda x: abs(x - sx))
+        src_min = ctx.curve_radius + MIN_STRAIGHT_PORT
+        if abs(nearest_src - sx) < src_min + ctx.diagonal_run:
+            return None  # Too tight -- fall through to default handler.
+        diag_start_x, diag_end_x = _compute_diagonal_placement(
+            sx,
+            nearest_src,
+            ctx.diagonal_run,
+            src_min,
+            0.0,
+            is_fork=edge.source in ctx.fork_stations,
+            is_join=False,
+        )
+    elif sy_blocked:
+        return None  # Both rows carry a non-consumer -- no safe runway.
+    else:
+        # Target row carries a non-consumer but the source (entry) row is
+        # clear: keep the flat run on the source Y and drop into the target
+        # only after the last bypassed station, so the descent clears its
+        # marker.
+        tgt_min = ctx.curve_radius + MIN_STRAIGHT_PORT
+        diag_start_x, diag_end_x = _compute_diagonal_placement(
+            sx, tx, ctx.diagonal_run, 0.0, tgt_min, is_fork=False, is_join=True
+        )
+        last_blocker = max(ty_blocker_xs, key=lambda x: abs(x - sx))
+        if abs(diag_start_x - sx) <= abs(last_blocker - sx):
+            return None  # Descent would clip a blocker -- let the guard warn.
 
     return RoutedPath(
         edge=edge,
@@ -139,6 +165,128 @@ def _route_entry_runway(
             section.direction, (sx, sy), (tx, ty), diag_start_x, diag_end_x
         ),
     )
+
+
+def _marker_bbox(st: Station) -> tuple[float, float, float, float]:
+    """Conservative axis-aligned marker footprint centred on the station."""
+    r = STATION_RADIUS_APPROX
+    return (st.x - r, st.y - r, st.x + r, st.y + r)
+
+
+def _bow_clears_markers(
+    points: list[tuple[float, float]],
+    section_stations: list[Station],
+) -> bool:
+    """Whether every bow segment stays clear of each station marker.
+
+    Verifies the arced-over blockers (which the apex must pass outside of) and
+    every other real station in the bow's x-span, so the detour trades one
+    crossing for none.
+    """
+    footprints = [_marker_bbox(st) for st in section_stations]
+    for k in range(len(points) - 1):
+        x1, y1 = points[k]
+        x2, y2 = points[k + 1]
+        for bbox in footprints:
+            if segment_intersects_bbox(x1, y1, x2, y2, bbox):
+                return False
+    return True
+
+
+def _route_entry_bow(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx, section: Section
+) -> RoutedPath | None:
+    """Bow a trunk-row entry run over a same-row non-consumer station.
+
+    The entry port lands on the target's trunk track, so a straight run would
+    pass through any non-carrying station seated on that row between them.  When
+    one or more such blockers exist, arc the line off the trunk (up or down,
+    whichever side stays clear), run flat past the blockers, and drop back onto
+    the trunk before the target.  Returns ``None`` when there is no blocker or
+    no side leaves a verifiable clear detour, so routing falls back to the plain
+    straight run and the crossing guard warns if it truly cannot be avoided.
+    """
+    graph = ctx.graph
+    line = edge.line_id
+    sx, sy = src.x, src.y
+    tx, ty = tgt.x, tgt.y
+    lo, hi = min(sx, tx), max(sx, tx)
+
+    port_ids = section.port_ids
+    section_stations: list[Station] = []
+    blockers: list[Station] = []
+    for sid in section.station_ids:
+        if sid == edge.target or sid in port_ids:
+            continue
+        st = graph.stations.get(sid)
+        if not st or st.is_port:
+            continue
+        section_stations.append(st)
+        if (
+            lo < st.x < hi
+            and abs(st.y - sy) < COORD_TOLERANCE_FINE
+            and line not in graph.station_lines(sid)
+        ):
+            blockers.append(st)
+    if not blockers:
+        return None
+
+    clearance = STATION_RADIUS_APPROX + CURVE_RADIUS
+    over_start = min(st.x for st in blockers) - clearance
+    over_end = max(st.x for st in blockers) + clearance
+    height = STATION_RADIUS_APPROX + CURVE_RADIUS
+    min_straight = ctx.curve_radius + MIN_STRAIGHT_PORT
+
+    lead_end = over_start - height
+    tail_start = over_end + height
+    if lead_end - sx < min_straight or tx - tail_start < min_straight:
+        return None
+    if over_end - over_start < 2 * ctx.curve_radius:
+        return None
+
+    for sign in _bow_side_order(section_stations, blockers, sy, over_start, over_end):
+        apex = sy + sign * height
+        points = [
+            (sx, sy),
+            (lead_end, sy),
+            (over_start, apex),
+            (over_end, apex),
+            (tail_start, sy),
+            (tx, ty),
+        ]
+        if _bow_clears_markers(points, section_stations):
+            return RoutedPath(edge=edge, line_id=edge.line_id, points=points)
+    return None
+
+
+def _bow_side_order(
+    section_stations: list[Station],
+    blockers: list[Station],
+    trunk_y: float,
+    over_start: float,
+    over_end: float,
+) -> list[int]:
+    """Order the bow's two candidate sides, roomier one first.
+
+    Returns bow-direction signs (``-1`` up, ``+1`` down) sorted by how far the
+    nearest off-trunk marker in the arc's x-span sits from the trunk, so the
+    detour prefers the side with more vertical headroom.
+    """
+    blocker_ids = {st.id for st in blockers}
+    up_gap = down_gap = float("inf")
+    for st in section_stations:
+        if st.id in blocker_ids:
+            continue
+        if not (
+            over_start - STATION_RADIUS_APPROX < st.x < over_end + STATION_RADIUS_APPROX
+        ):
+            continue
+        dy = st.y - trunk_y
+        if dy < -COORD_TOLERANCE_FINE:
+            up_gap = min(up_gap, -dy)
+        elif dy > COORD_TOLERANCE_FINE:
+            down_gap = min(down_gap, dy)
+    return [-1, 1] if up_gap >= down_gap else [1, -1]
 
 
 def _route_fold_edge(

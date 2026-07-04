@@ -40,9 +40,10 @@ ROUTING_PATHS = [
     )
 ]
 
-# corners.py entry points that legitimately *produce* (or clamp) a corner
-# radius.  ``reference_anchored_radius`` is the single underlying formula; the
-# others delegate to it.  ``corner_outside_sign``/``reversed_offset`` return a
+# corners.py entry points that legitimately *produce*, *clamp*, or *select* a
+# corner radius.  ``reference_anchored_radius`` is the single underlying formula
+# most delegate to; ``widest_coincident_radius`` selects among radii the family
+# already produced.  ``corner_outside_sign``/``reversed_offset`` return a
 # sign/offset (an *input* to a radius), not a radius, so are intentionally out.
 APPROVED_RADIUS_HELPERS = frozenset(
     {
@@ -52,6 +53,7 @@ APPROVED_RADIUS_HELPERS = frozenset(
         "concentric_corner_radius_at",
         "reference_anchored_radius",
         "resolve_curve_radii",
+        "widest_coincident_radius",
     }
 )
 

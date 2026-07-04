@@ -54,6 +54,7 @@ from nf_metro.layout.routing.common import (
     gap_lo_for_x,
     horizontal_direction,
     initial_fanout_descent_span,
+    is_orthogonal_turn,
     iter_horizontal_trunks,
     iter_port_peeloff_bundles,
     iter_vertical_segments,
@@ -2646,6 +2647,86 @@ def _pair_corner_violation(
 
 
 @dataclass(frozen=True)
+class CoincidentCornerRadiusViolation:
+    """Two same-line routes turning at one vertex with unequal corner radii.
+
+    Same-line legs that :func:`_coincide_same_line_tracks` has fused onto one
+    channel share the turn vertex ``corner_xy`` and continue as a single stroke,
+    yet each carries its own resolved corner radius (``radius_a`` vs
+    ``radius_b``).  Drawn independently the two arcs nest concentrically a few
+    pixels apart -- a doubled corner where one clean turn should be.  This is the
+    coincident-corner case :func:`check_concentric_bundle_corners` skips (it
+    tests *offset* bundle-mates, which nest by design; two legs sharing the exact
+    vertex carry no offset to nest).
+    """
+
+    line_id: str
+    corner_xy: tuple[float, float]
+    edge_a: tuple[str, str]
+    edge_b: tuple[str, str]
+    radius_a: float
+    radius_b: float
+
+    def message(self) -> str:
+        return (
+            f"line {self.line_id}: coincident turn at "
+            f"({self.corner_xy[0]:.1f}, {self.corner_xy[1]:.1f}) draws radius "
+            f"{self.radius_a:.1f} ({self.edge_a[0]}->{self.edge_a[1]}) and "
+            f"{self.radius_b:.1f} ({self.edge_b[0]}->{self.edge_b[1]}) - a fused "
+            f"same-line stroke doubles at the corner"
+        )
+
+
+def check_coincident_corner_radii(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[CoincidentCornerRadiusViolation]:
+    """Return same-line turns shared by two routes that resolve to unequal radii.
+
+    Classifies every axis-aligned turn on the *final* offset-applied geometry
+    and buckets it by ``(line, vertex)``.  Concentrically nested bundle-mates sit
+    ``OFFSET_STEP`` apart in separate buckets; only legs sharing the vertex
+    within a pixel land together, and those are one stroke, so their resolved
+    (segment-clamped) radii must match.  A disagreement is a doubled corner.
+    """
+    buckets: dict[
+        tuple[str, int, int], list[tuple[RoutedPath, tuple[float, float], float]]
+    ] = defaultdict(list)
+    for r in routes:
+        pts = apply_route_offsets(r, offsets)
+        if len(pts) < 3:
+            continue
+        radii = _resolved_corner_radii(r, pts)
+        for k in range(1, len(pts) - 1):
+            if k - 1 >= len(radii) or not is_orthogonal_turn(
+                pts[k - 1], pts[k], pts[k + 1]
+            ):
+                continue
+            key = (r.line_id, round(pts[k][0]), round(pts[k][1]))
+            buckets[key].append((r, pts[k], radii[k - 1]))
+
+    violations: list[CoincidentCornerRadiusViolation] = []
+    for members in buckets.values():
+        if len(members) < 2:
+            continue
+        lo = min(members, key=lambda m: m[2])
+        hi = max(members, key=lambda m: m[2])
+        if hi[2] - lo[2] > COORD_TOLERANCE:
+            violations.append(
+                CoincidentCornerRadiusViolation(
+                    line_id=lo[0].line_id,
+                    corner_xy=lo[1],
+                    edge_a=(lo[0].edge.source, lo[0].edge.target),
+                    edge_b=(hi[0].edge.source, hi[0].edge.target),
+                    radius_a=lo[2],
+                    radius_b=hi[2],
+                )
+            )
+    return violations
+
+
+@dataclass(frozen=True)
 class PerpEntryBoundaryViolation:
     """A line that reverses lateral direction crossing a perpendicular port.
 
@@ -3820,6 +3901,10 @@ def assert_render_curve_invariants(
             check_concentric_bundle_corners(graph, routes, offsets),
         ),
         (
+            "doubled coincident corner (same-line legs disagree on radius)",
+            check_coincident_corner_radii(graph, routes, offsets),
+        ),
+        (
             "collinear distinct lines",
             check_no_collinear_distinct_lines(graph, routes, offsets),
         ),
@@ -3946,6 +4031,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     # --- Tier A: the always-on render chokepoint set (in chokepoint order) ---
     _check_spec(check_bundle_order_preserved, "A"),
     _check_spec(check_concentric_bundle_corners, "A"),
+    _check_spec(check_coincident_corner_radii, "A"),
     _check_spec(check_no_collinear_distinct_lines, "A"),
     _check_spec(check_intra_section_collinear_distinct_lines, "A"),
     _check_spec(check_no_collinear_distinct_diagonals, "A"),
@@ -3999,6 +4085,7 @@ __all__ = [
     "BottomRowClimbOffTrack",
     "ExitRowEarlyUpStep",
     "BundleOrderViolation",
+    "CoincidentCornerRadiusViolation",
     "CollinearOverlapViolation",
     "DiagonalOverlapViolation",
     "CurveInvariantError",
@@ -4026,6 +4113,7 @@ __all__ = [
     "check_gap_channels_materialized",
     "check_trunks_declared",
     "check_concentric_bundle_corners",
+    "check_coincident_corner_radii",
     "check_deferred_offsets_apply_laterally",
     "check_fanout_tail_join",
     "check_no_distinct_line_fanout_crossing",

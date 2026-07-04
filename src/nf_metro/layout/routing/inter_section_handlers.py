@@ -284,6 +284,38 @@ class _InterFacts:
         return self.entry_side is PortSide.LEFT and self.sx > self.tx + COORD_TOLERANCE
 
     @property
+    def is_perp_exit_farside_entry_wrap(self) -> bool:
+        """A trailing perp (BOTTOM/TOP) exit feeding a LEFT/RIGHT entry on the
+        target's *far* side, reached by wrapping through the inter-row gap.
+
+        The trunk leaves a vertical-flow section along the flow, out its trailing
+        TOP/BOTTOM edge; the consumer is a LEFT/RIGHT entry whose port faces away
+        from the source (:attr:`left_entry_from_right` / its right-side mirror).
+        The flow-direction drop (:func:`_route_tb_bottom_exit`) would run down the
+        target's own border to reach the far-edge port, and the LEFT/RIGHT-entry
+        wrap family's sideways lead-out would claw back across the source box; the
+        clean shape leaves the port along the flow into the gap, then wraps around
+        the target to approach the port horizontally.
+
+        Unlike :attr:`is_tb_bottom_exit` this is offset-independent, so the
+        validate and render routing paths dispatch it identically.
+        """
+        if not (
+            self.src_port is not None
+            and not self.src_port.is_entry
+            and self.src.section_id in self.ctx.tb_sections
+        ):
+            return False
+        section = self.graph.sections.get(self.src.section_id)
+        if section is None or self.src_port.side != trailing_perp_side(
+            section.direction
+        ):
+            return False
+        return self.cross_row and (
+            self.left_entry_from_right or self.right_entry_from_left
+        )
+
+    @property
     def is_merge_trunk(self) -> bool:
         """Source carries the full bypass trunk of its merge junction."""
         return self.ctx.merge.trunk_source.get(self.edge.target) == self.edge.source
@@ -740,6 +772,7 @@ def _route_left_exit_around_below_left_entry(
 
     src_col, src_row = _resolve_section_colrow(graph, src)
     tgt_col = _resolve_section_col(graph, tgt)
+    tgt_row = _resolve_section_row(graph, tgt)
     bw = bundle_width(n, ctx.offset_step)
 
     # Descent channel in the inter-column gap just LEFT of the source.  The exit
@@ -751,17 +784,34 @@ def _route_left_exit_around_below_left_entry(
     if src_col is not None and src_col > 0:
         gap_left, gap_right = column_gap_edges(graph, src_col - 1, src_col, row=src_row)
         cx = symmetric_bundle_midpoint(gap_left, gap_right, [bw], 0) - max_exit / 2
+        # An empty column left of the source balloons the gap to the canvas edge,
+        # dragging the midpoint into a wide same-row section that occupies that
+        # space; keep the descent hugging the source's own left edge so it stays
+        # clear of that box.
+        hug = gap_right - ctx.curve_radius - ctx.offset_step - max_exit
+        cx = max(cx, hug)
     else:
         cx = _left_entry_descent_x(ctx, _section_left_edge(graph, src) - max_exit, n)
 
-    # Under-run Y below every section in the column range.
+    # Under-run Y below the sections the loop passes.  A cross-row wrap clears
+    # every box in the column range; a same-row wrap only needs to dip below the
+    # target box it loops around, so diving below the whole row (and any trunk
+    # running along the canvas bottom) is a gratuitous, colliding detour.  The
+    # descent hugs the source's own left edge, so the under-run spans the target
+    # out to just left of the source -- never the source's column, which sits to
+    # the descent's right and so is not passed under.
+    cross_row = src_row is not None and tgt_row is not None and src_row != tgt_row
+    tgt_c = tgt_col if tgt_col is not None else (src_col if src_col is not None else 0)
+    src_c = src_col if src_col is not None else 0
+    under_hi_col = src_c if cross_row else max(src_c - 1, tgt_c)
     by = bypass_bottom_y(
         graph,
-        src_col if src_col is not None else 0,
-        tgt_col if tgt_col is not None else (src_col if src_col is not None else 0),
+        under_hi_col,
+        tgt_c,
         BYPASS_CLEARANCE,
         src_row=src_row,
-        cross_row=True,
+        cross_row=cross_row,
+        tgt_row=tgt_row,
     )
 
     # Ascent channel left of the target box.  The entry taper fans the lines on
@@ -829,11 +879,11 @@ def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
         return _route_right_entry_drop_in(
             edge, src, tgt, ctx, pos_n=pos_n, delta=delta, corner_x=corner_x
         )
-    if f.src_row is not None and _right_entry_gap_above_is_clear(
-        graph, src, tgt, tgt, f.src_row
+    if f.tgt_row is not None and _right_entry_gap_above_is_clear(
+        graph, src, tgt, tgt, f.tgt_row
     ):
         return _route_right_entry_via_gap_above(
-            edge, src, tgt, tgt, f.i, f.n, ctx, f.src_row
+            edge, src, tgt, tgt, f.i, f.n, ctx, f.tgt_row
         )
     return _route_right_entry_around_below(edge, src, tgt, tgt, f.i, f.n, ctx)
 
@@ -980,6 +1030,18 @@ _INTER_SECTION_RULES: list[_Rule] = [
         lambda f: f.same_y and not f.needs_bypass and not f.right_entry_from_left,
         _route_straight_connector,
     ),
+    # A trailing perp (TOP/BOTTOM) exit feeding a LEFT/RIGHT entry on the
+    # target's far side wraps through the inter-row gap and around the target
+    # box, approaching the port horizontally from its outward side.  Offset-
+    # independent, so it claims this class in both the validate and render
+    # routing paths (unlike the offset-gated TB bottom-exit drop below); placed
+    # before that drop and the LEFT/RIGHT-entry wrap families, whose flow-
+    # direction drop / sideways lead-out mis-route this shape.
+    _Rule(
+        "perp-exit -> far-side entry wrap",
+        lambda f: f.is_perp_exit_farside_entry_wrap,
+        lambda f: _route_perp_exit_farside_entry_wrap(f),
+    ),
     # A TB bottom-exit drop whose column has sections stacked between the source
     # and the (folded-below) target diverts around them through a clear gap; the
     # plain straight drop below would plough those boxes.  Checked first so only
@@ -1046,6 +1108,17 @@ _INTER_SECTION_RULES: list[_Rule] = [
         "serpentine LEFT exit -> LEFT entry",
         lambda f: f.is_serpentine_left_exit_left_entry,
         lambda f: _route_left_exit_left_entry_drop(f.edge, f.src, f.tgt, f.ctx),
+    ),
+    # A LEFT exit reaching a far-side LEFT entry to its left with no intervening
+    # section to hop (adjacent or same-row columns, so ``needs_bypass`` is False
+    # and the bypass family never claims it): a straight L-shape ploughs the
+    # target box to reach its far-edge port.  Wrap around below into the port's
+    # own outward side, the same shape the bypass family uses for the multi-hop
+    # case.
+    _Rule(
+        "LEFT exit -> far-side LEFT entry wrap",
+        lambda f: f.left_entry_from_right and f.is_left_exit,
+        lambda f: _route_left_exit_around_below_left_entry(f.edge, f.src, f.tgt, f.ctx),
     ),
     _Rule(
         "merge entry family",
@@ -2714,6 +2787,7 @@ def _route_entry_wrap(
     descent_x: float,
     entry_side: PortSide,
     normalize_exempt: bool = True,
+    source_leads_down: bool = False,
 ) -> RoutedPath:
     """Fan a single-member entry-wrap loop along its centreline.
 
@@ -2738,20 +2812,35 @@ def _route_entry_wrap(
     the member's normal-projected stagger so the line lands on its station
     offset there: ``+delta`` at the source lead-in (runs rightward) and at a LEFT
     entry (runs rightward in), ``-delta`` at a RIGHT entry (runs leftward in).
+
+    A trailing perp (TOP/BOTTOM) exit leaves along the flow, not sideways, so
+    *source_leads_down* drops the horizontal lead-in: the loop starts with the
+    vertical run down the exit column (*corner_x*), collapsing the 6-point loop
+    to a 5-point D-H-?-H shape.  The source stagger then rides the drop's normal
+    (X) rather than the lead-in's (Y).
     """
     sx, sy = src.x, src.y
     ex, ey = entry_port.x, entry_port.y
     entry_delta = delta if entry_side is PortSide.LEFT else -delta
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-    centerline = [
-        (sx, sy + src_off + delta),
-        (corner_x, sy + src_off + delta),
-        (corner_x, channel_y),
-        (descent_x, channel_y),
-        (descent_x, ey + tgt_off + entry_delta),
-        (ex, ey + tgt_off + entry_delta),
-    ]
+    if source_leads_down:
+        centerline = [
+            (corner_x + src_off + delta, sy),
+            (corner_x + src_off + delta, channel_y),
+            (descent_x, channel_y),
+            (descent_x, ey + tgt_off + entry_delta),
+            (ex, ey + tgt_off + entry_delta),
+        ]
+    else:
+        centerline = [
+            (sx, sy + src_off + delta),
+            (corner_x, sy + src_off + delta),
+            (corner_x, channel_y),
+            (descent_x, channel_y),
+            (descent_x, ey + tgt_off + entry_delta),
+            (ex, ey + tgt_off + entry_delta),
+        ]
     route = route_along(
         edge,
         [(edge, edge.line_id, -delta)],
@@ -2825,6 +2914,57 @@ def _route_left_entry_wrap(
         channel_y=hy,
         descent_x=vx,
         entry_side=PortSide.LEFT,
+    )
+    _declare_channel(route, ctx, vx, vertical_direction(ty - hy))
+    return route
+
+
+def _route_perp_exit_farside_entry_wrap(f: _InterFacts) -> RoutedPath | None:
+    """Wrap a trailing perp (BOTTOM/TOP) exit into a far-side LEFT/RIGHT entry.
+
+    Mirrors :func:`_route_left_entry_wrap` / :func:`_route_right_entry_wrap` but
+    leaves the source straight along the flow (``source_leads_down``): the perp
+    exit sits on the section's trailing edge, so the loop opens with the vertical
+    drop down the exit column into the inter-row gap, then wraps across to a
+    channel clear of the target box and approaches the port horizontally from its
+    own outward side.
+    """
+    edge, src, tgt, ctx = f.edge, f.src, f.tgt, f.ctx
+    entry_side = f.entry_side
+    assert entry_side in (PortSide.LEFT, PortSide.RIGHT)
+    sy, ty = src.y, tgt.y
+    dy = ty - sy
+    _fan, pos_n, delta, _corner_x = _wrap_fan_geometry(
+        ctx, edge, src, f.i, f.n, vertical_direction(dy)
+    )
+    # The perp exit leaves along the flow, so the source-side corner sits on the
+    # exit column rather than a lead-out right of the source box.
+    corner_x = src.x
+    hy = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius, delta)
+    hy -= delta
+    # The channel leaves the source's trailing edge, so hold it a clear band off
+    # that edge (a multi-row midpoint can land closer than the inter-row edge
+    # clearance), then keep both vertical legs long enough for the corner curves.
+    drop_sign = 1.0 if dy >= 0 else -1.0
+    hy = sy + drop_sign * max((hy - sy) * drop_sign, INTER_ROW_EDGE_CLEARANCE)
+    lo, hi = (sy, ty) if dy >= 0 else (ty, sy)
+    hy = min(max(hy, lo + ctx.curve_radius), hi - ctx.curve_radius)
+    if entry_side is PortSide.LEFT:
+        vx = _left_entry_descent_x(ctx, tgt.x, pos_n)
+    else:
+        vx = _right_entry_descent_x(ctx, tgt.x, pos_n)
+    route = _route_entry_wrap(
+        edge,
+        src,
+        tgt,
+        ctx,
+        pos_n=pos_n,
+        delta=delta,
+        corner_x=corner_x,
+        channel_y=hy,
+        descent_x=vx,
+        entry_side=entry_side,
+        source_leads_down=True,
     )
     _declare_channel(route, ctx, vx, vertical_direction(ty - hy))
     return route
@@ -3289,6 +3429,36 @@ def _route_right_entry_over_top(
     return route
 
 
+def _leadout_self_meets_sibling_descent(
+    ctx: _RoutingCtx,
+    edge: Edge,
+    corner_x: float,
+    y_lo: float,
+    y_hi: float,
+    gap_right: float,
+) -> bool:
+    """Whether a same-line descent already sits in this wrap's lead-out band.
+
+    The wrap turns down at ``corner_x`` into the gap between the source column
+    and the next.  A descent of the SAME line from a DIFFERENT source, already
+    routed down that same gap (``corner_x <= x <= gap_right``) across the drop's
+    Y span, would render as one merged corner with this lead-out.  When one is
+    there the caller carries the horizontal on and turns down clear to its right.
+    """
+    lo, hi = (y_lo, y_hi) if y_lo <= y_hi else (y_hi, y_lo)
+    for route in ctx.built_routes:
+        if not route.is_inter_section or route.line_id != edge.line_id:
+            continue
+        if route.edge.source == edge.source:
+            continue
+        for _k, x, seg_lo, seg_hi, _down in iter_vertical_segments(route):
+            if not (corner_x - COORD_TOLERANCE <= x <= gap_right + COORD_TOLERANCE):
+                continue
+            if min(hi, seg_hi) - max(lo, seg_lo) > COORD_TOLERANCE:
+                return True
+    return False
+
+
 def _route_right_entry_wrap(
     edge: Edge, src: Station, tgt: Station, i: int, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -3344,6 +3514,16 @@ def _route_right_entry_wrap(
     # Horizontal channel Y centre, below the source row's sections.
     hy = bypass_bottom_y(ctx.graph, src_col, tgt_col, BYPASS_CLEARANCE, src_row=src_row)
 
+    # A same-line descent from another source already in the lead-out gap would
+    # merge with a source-hugging turn-down into one corner.  Carry the
+    # horizontal on and turn down clear to its right (bounded at the target row
+    # so the drop misses the descent but never reaches a right-column section).
+    _gap_left, gap_right = column_gap_edges(
+        ctx.graph, src_col, src_col + 1, row=tgt_row
+    )
+    if _leadout_self_meets_sibling_descent(ctx, edge, corner_x, sy, hy, gap_right):
+        corner_x = max(corner_x, gap_right - ctx.curve_radius - ctx.offset_step)
+
     # V2 descent channel centre, just past the entry port in the gap to the
     # right of the target column.
     vx = _right_entry_descent_x(ctx, tx, pos_n)
@@ -3383,16 +3563,22 @@ def _route_right_entry_wrap(
 
 
 def _right_entry_gap_above_target_y(
-    graph: MetroGraph, src_row: int
+    graph: MetroGraph, tgt_row: int
 ) -> tuple[float, float]:
-    """Return ``(gap_top, gap_bottom)`` of the inter-row band below *src_row*.
+    """Return ``(gap_top, gap_bottom)`` of the inter-row band ABOVE *tgt_row*.
 
-    The band sits between the source row's bottom edge and the next row's
-    top edge.  Computed over all columns (not column-restricted) so the
-    long rightward traverse stays clear of every section in the span.
+    The band sits between the row above the target's bottom edge and the
+    target row's top edge -- the same band the counter-flow guard checks, so
+    the route runs its rightward traverse just above the target row then drops
+    into the RIGHT port.  For a source exactly one row up this is the band just
+    below the source row; for a source further up it is the wider band the
+    intervening rows leave abutting the target, which is what admits the
+    with-flow approach when the source-adjacent band is too narrow.  Computed
+    over all columns (not column-restricted) so the traverse stays clear of
+    every section in the span.
     """
-    gap_top = row_bottom_edge(graph, src_row)
-    gap_bottom = row_top_edge(graph, src_row + 1, default=gap_top)
+    gap_top = row_bottom_edge(graph, tgt_row - 1)
+    gap_bottom = row_top_edge(graph, tgt_row, default=gap_top)
     return gap_top, gap_bottom
 
 
@@ -3401,19 +3587,19 @@ def _right_entry_gap_above_is_clear(
     src: Station,
     tgt: Station,
     entry_port: Station,
-    src_row: int,
+    tgt_row: int,
 ) -> bool:
     """Whether a RIGHT-entry feed from above can use the inter-row gap.
 
-    The route runs its long horizontal in the band just below the source
+    The route runs its long horizontal in the band just above the target
     row, then drops straight down the RIGHT side of the target column into
-    the port.  Viable only when that band genuinely exists (the next row's
-    top is below the source row's bottom), is wide enough for the traverse to
-    clear both the source row's bottom edge and the lower row's header badge,
-    and the horizontal at the band's centre crosses no section interior
-    between the source and the target's right edge.
+    the port.  Viable only when that band genuinely exists (the row above the
+    target's bottom is above the target row's top), is wide enough for the
+    traverse to clear both the upper row's bottom edge and the target row's
+    header badge, and the horizontal at the band's centre crosses no section
+    interior between the source and the target's right edge.
     """
-    gap_top, gap_bottom = _right_entry_gap_above_target_y(graph, src_row)
+    gap_top, gap_bottom = _right_entry_gap_above_target_y(graph, tgt_row)
     if gap_bottom <= gap_top:
         return False
     # A band too narrow for both clearances makes the centred run graze the
@@ -3516,14 +3702,14 @@ def _route_right_entry_via_gap_above(
     i: int,
     n: int,
     ctx: _RoutingCtx,
-    src_row: int,
+    tgt_row: int,
 ) -> RoutedPath:
     """Route to a RIGHT entry port via the inter-row gap ABOVE the target row.
 
     Used when the source sits in a row ABOVE the target's row.  Going UNDER
     the whole target row (:func:`_route_right_entry_around_below`) would run
     the long rightward horizontal counter to the target row's flow.  Instead
-    run that horizontal in the clear inter-row band just below the source
+    run that horizontal in the clear inter-row band just above the target
     row, then drop straight down the RIGHT side of the target column into the
     RIGHT entry port::
 
@@ -3537,7 +3723,7 @@ def _route_right_entry_via_gap_above(
     outward side), and the horizontal never crosses a section interior
     (guaranteed by :func:`_right_entry_gap_above_is_clear` at the call site).
     """
-    gap_top, gap_bottom = _right_entry_gap_above_target_y(ctx.graph, src_row)
+    gap_top, gap_bottom = _right_entry_gap_above_target_y(ctx.graph, tgt_row)
     channel_y_base = _center_inter_row_channel(gap_top, gap_bottom)
     # When two or more distinct lines converge into this one RIGHT entry port,
     # each independently picks the same descent X just right of the target

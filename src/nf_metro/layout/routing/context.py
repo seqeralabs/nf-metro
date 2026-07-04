@@ -16,6 +16,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import AxisFrame, lane_delta, station_lane_coord
 from nf_metro.layout.routing.common import (
+    RoutedPath,
     bypass_bottom_y,
     compute_bundle_info,
     merge_trunk_force_cross_row,
@@ -90,6 +91,7 @@ class _RoutingCtx:
     diagonal_run: float
     curve_radius: float
     skip_edges: set[_EdgeKey] = field(default_factory=set)
+    built_routes: list[RoutedPath] = field(default_factory=list)
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
     section_trunk_y: dict[str, float] = field(default_factory=dict)
     merge: _MergeRouting = field(

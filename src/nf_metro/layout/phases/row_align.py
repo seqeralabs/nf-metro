@@ -12,7 +12,7 @@ from nf_metro.layout.constants import (
     STATION_RADIUS_APPROX,
     resolve_offset_step,
 )
-from nf_metro.layout.geometry import lanes_run_along_y
+from nf_metro.layout.geometry import lanes_run_along_x, lanes_run_along_y
 from nf_metro.layout.labels import active_font_scale
 from nf_metro.layout.phases._common import (
     _classify_multi_station_ys,
@@ -762,6 +762,17 @@ def _compact_row_content_to_bbox_top(
                     continue
                 content_min = min(content_ys)
                 shift = content_min - section.bbox_y - section_y_padding
+                # A vertical-flow section's LEFT/RIGHT ports run perpendicular
+                # to the flow; a cross-row entry sits lifted above the top
+                # station.  Pulling content to bbox_y+padding would shift that
+                # port above the shrunk top edge, sending its L-shaped entry
+                # across the boundary.  Cap the shift so each such port stays
+                # inside the box (its own row is the reserved input band).
+                if lanes_run_along_x(section.direction):
+                    for pid in (*section.entry_ports, *section.exit_ports):
+                        p = graph.ports.get(pid)
+                        if p is not None and p.side in (PortSide.LEFT, PortSide.RIGHT):
+                            shift = min(shift, p.y - section.bbox_y)
                 allowed_shifts.append(max(0.0, shift))
             delta = min(allowed_shifts) if allowed_shifts else 0.0
 

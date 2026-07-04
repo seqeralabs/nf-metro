@@ -278,6 +278,29 @@ def test_issue484_same_colour_crossover_is_bridged():
     )
 
 
+def test_issue1322_forked_arms_recross_far_from_fork_is_bridged():
+    """issue #1322: two l1 arms fork at a junction and re-cross perpendicular
+    ~400px away, between Branch B and Feeder L1.  A third line (l2) corners
+    through the same point, making the crossing cluster non-bipartite.  A
+    bridge must still fire on the l1 crossover: the shared fork explains a
+    meeting only at the junction, not a re-cross in open space, and the
+    distinct-colour l2 corner reads apart by colour so must not veto it."""
+    path = Path(__file__).parent / "fixtures" / "target_entry_runway_bypass.mmd"
+    _, routes, _, bridges = _bridges(path)
+    by_id = {id(r): r for r in routes}
+    l1_breaks = [
+        bk
+        for rid, breaks in bridges.items()
+        for bk in breaks
+        if by_id[rid].line_id == "l1"
+    ]
+    assert any(
+        abs((bk.cut_a[0] + bk.cut_b[0]) / 2 - 1432) < 30
+        and abs((bk.cut_a[1] + bk.cut_b[1]) / 2 - 468) < 30
+        for bk in l1_breaks
+    ), "expected an l1 crossover bridge at the Branch B / Feeder L1 crossroads"
+
+
 def _motion_paths(svg: str) -> list[str]:
     import re
 

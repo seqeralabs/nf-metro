@@ -1,0 +1,164 @@
+%%metro file: in0 | OUT
+%%metro file: fa_out | OUT
+%%metro file: fb_out | OUT
+%%metro file: ff1 | OUT
+%%metro file: ff0 | OUT
+%%metro file: ff2 | OUT
+%%metro file: ff3 | OUT
+%%metro off_track: fa_out, fb_out
+%%metro line: l1 | Line 1 | #e6007e
+%%metro line: l2 | Line 2 | #2db572
+%%metro line: l3 | Line 3 | #2b6cb0
+%%metro fold_threshold: 4
+%%metro directional: true
+
+graph LR
+    subgraph prep [Pre-processing]
+        %%metro exit: right | l1, l2, l3
+        in0[IN0]
+        pp1[PP1]
+        pp2[PP2]
+        pp3[PP3]
+        pp4[PP4]
+        pp5[PP5]
+        pp6[PP6]
+        pp7[PP7]
+        pp8[PP8]
+        pp9[PP9]
+        pp10[PP10]
+        pp11[PP11]
+        pp12[PP12]
+
+        in0 -->|l1,l2,l3| pp1
+        pp1 -->|l1,l2,l3| pp2
+        pp2 -->|l1,l2,l3| pp3
+        pp3 -->|l1,l2,l3| pp4
+        pp3 -->|l1,l2,l3| pp5
+        pp4 -->|l1,l2,l3| pp6
+        pp5 -->|l1,l2,l3| pp6
+        pp6 -->|l1,l2,l3| pp7
+        pp7 -->|l1,l2,l3| pp8
+        pp7 -->|l1,l2,l3| pp9
+        pp7 -->|l1,l2,l3| pp10
+        pp8 -->|l1,l2,l3| pp11
+        pp9 -->|l1,l2,l3| pp11
+        pp10 -->|l1,l2,l3| pp11
+        pp11 -->|l1,l2,l3| pp12
+    end
+
+    subgraph align [Alignment]
+        %%metro entry: left | l1, l2, l3
+        %%metro exit: right | l1, l2, l3
+        al0[AL0]
+        al1[AL1]
+
+        al0 -->|l1,l2,l3| al1
+    end
+
+    subgraph branch_a [Branch A]
+        %%metro entry: left | l2
+        ba0[BA0]
+        ba1[BA1]
+        ba2[BA2]
+
+        ba0 -->|l2| ba1
+        ba1 -->|l2| ba2
+        ba2 -->|l2| fa_out
+    end
+
+    subgraph branch_b [Branch B]
+        %%metro entry: left | l1
+        bb0[BB0]
+        bb1[BB1]
+        bb2[BB2]
+        bb3[BB3]
+        bb4[BB4]
+        bb5[BB5]
+        bb6[BB6]
+        bb7[BB7]
+
+        bb0 -->|l1| bb1
+        bb1 -->|l1| bb3
+        bb2 -->|l1| bb7
+        bb3 -->|l1| bb7
+        bb4 -->|l1| bb7
+        bb5 -->|l1| bb7
+        bb6 -->|l1| bb7
+        bb7 -->|l1| fb_out
+    end
+
+    subgraph feeder_l1 [Feeder L1]
+        %%metro entry: left | l1
+        fl0[FL0]
+        fl1[FL1]
+        fl2[FL2]
+        fl3[FL3]
+
+        fl0 -->|l1| ff0
+        fl1 -->|l1| fl2
+        fb_out -->|l1| fl3
+        fl2 -->|l1| fl3
+    end
+
+    subgraph feeder_l2 [Feeder L2]
+        %%metro entry: left | l1, l2, l3
+        %%metro exit: right | l1, l2, l3
+        fm0[FM0]
+        fm1[FM1]
+        fm2[FM2]
+
+        fm0 -->|l1,l2,l3| fm1
+        fm1 -->|l1,l2,l3| ff1
+    end
+
+    subgraph target [Target]
+        %%metro entry: left | l1, l2
+        sa[Station A]
+        sb[Station B]
+        sc[Station C]
+        t0[T0]
+        t1[T1]
+        t2[T2]
+        t3[T3]
+        t4[T4]
+
+        sa -->|l1| sb
+        sb -->|l1,l2| t0
+        sb -->|l1,l2| t1
+        t0 -->|l1,l2| ff2
+        t1 -->|l1,l2| ff2
+        sc -->|l1,l2| t2
+        sc -->|l1,l2| t3
+        sc -->|l1,l2| t4
+        t2 -->|l1,l2| ff2
+        t3 -->|l1,l2| ff2
+        t4 -->|l1,l2| ff2
+    end
+
+    subgraph report [Reporting]
+        %%metro entry: left | l1, l2, l3
+        rp0[RP0]
+
+        rp0 -->|l1,l2,l3| ff3
+    end
+
+    pp12 -->|l1,l2,l3| al0
+    al1 -->|l2| ba0
+    al1 -->|l1| bb0
+    al1 -->|l1| bb2
+    al1 -->|l1| bb4
+    al1 -->|l1| bb5
+    al1 -->|l1| bb6
+    fa_out -->|l1| bb2
+    fa_out -->|l1| bb4
+    fa_out -->|l1| bb5
+    fa_out -->|l1| bb0
+    al1 -->|l1| fl0
+    al1 -->|l1| fl1
+    al1 -->|l1,l2,l3| fm0
+    al1 -->|l1,l2,l3| fm2
+    fl2 -->|l1| sa
+    fm2 -->|l2| sb
+    fl3 -->|l1| sc
+    fm2 -->|l2| sc
+    fm2 -->|l1,l2,l3| rp0

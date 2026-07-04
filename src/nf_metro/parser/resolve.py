@@ -509,6 +509,26 @@ _TRAILING_SIDE = {
 _FLIP_HORIZONTAL = {"LR": "RL", "RL": "LR"}
 
 
+def _connecting_flow_side(near: Section, far: Section) -> PortSide | None:
+    """The flow-axis side ``far`` sits on relative to ``near``.
+
+    ``LEFT``/``RIGHT`` for a horizontal ``near`` (by grid column), ``TOP``/
+    ``BOTTOM`` for a vertical one (by grid row); ``None`` when the two share the
+    axis coordinate, so neither side is implied.
+    """
+    if near.direction in _FLIP_HORIZONTAL:
+        low, high = PortSide.LEFT, PortSide.RIGHT
+        near_pos, far_pos = near.grid_col, far.grid_col
+    else:
+        low, high = PortSide.TOP, PortSide.BOTTOM
+        near_pos, far_pos = near.grid_row, far.grid_row
+    if far_pos < near_pos:
+        return low
+    if far_pos > near_pos:
+        return high
+    return None
+
+
 def _section_flow_ranks(section: Section) -> dict[str, int]:
     """Longest-path rank of each station along a section's internal flow.
 
@@ -652,13 +672,31 @@ def _reanchor_flow_axis_ports(
     """
     consumers: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     producers: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    # The flow-axis side each endpoint's connecting section sits on, so a port's
+    # fold decision can ignore a fold-in feed arriving from the far side.
+    consumer_sides: dict[str, dict[str, dict[str, set[PortSide | None]]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(set))
+    )
+    producer_sides: dict[str, dict[str, dict[str, set[PortSide | None]]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(set))
+    )
     for e in inter_section_edges:
         tgt_sec = graph.section_for_station(e.target)
+        src_sec = graph.section_for_station(e.source)
         if tgt_sec:
             consumers[tgt_sec][e.line_id].add(e.target)
-        src_sec = graph.section_for_station(e.source)
+            if src_sec:
+                side = _connecting_flow_side(
+                    graph.sections[tgt_sec], graph.sections[src_sec]
+                )
+                consumer_sides[tgt_sec][e.line_id][e.target].add(side)
         if src_sec:
             producers[src_sec][e.line_id].add(e.source)
+            if tgt_sec:
+                side = _connecting_flow_side(
+                    graph.sections[src_sec], graph.sections[tgt_sec]
+                )
+                producer_sides[src_sec][e.line_id][e.source].add(side)
 
     for sec_id, section in graph.sections.items():
         leading = _LEADING_SIDE.get(section.direction)
@@ -671,16 +709,36 @@ def _reanchor_flow_axis_ports(
 
         flow_ports: list[tuple[list[tuple[PortSide, list[str]]], int]] = []
         folds: list[tuple[list[tuple[PortSide, list[str]]], int, PortSide]] = []
-        for hints, ep_map, is_entry in (
-            (section.entry_hints, consumers.get(sec_id, {}), True),
-            (section.exit_hints, producers.get(sec_id, {}), False),
+        for hints, ep_map, side_map, is_entry in (
+            (section.entry_hints, consumers.get(sec_id, {}), consumer_sides, True),
+            (section.exit_hints, producers.get(sec_id, {}), producer_sides, False),
         ):
+            sides_for_sec = side_map.get(sec_id, {})
             for idx, (side, lines) in enumerate(hints):
                 if side not in (leading, trailing):
                     continue
                 eps = {s for lid in lines for s in ep_map.get(lid, set()) if s in ranks}
                 if not eps:
                     continue
+                # A port on the flow axis carries only feeds arriving from its own
+                # side; a same-line feed folding in from the far side must not mask
+                # the fold of the feeds this port actually rakes.  Scope to the
+                # port's own-side (or axis-aligned) feeds, unless every feed comes
+                # from the far side -- then the whole port faces the wrong way and
+                # the unscoped set drives the re-orient/re-anchor below.
+                opposite = leading if side == trailing else trailing
+                own_side = {
+                    s
+                    for s in eps
+                    if {
+                        d
+                        for lid in lines
+                        for d in sides_for_sec.get(lid, {}).get(s, set())
+                    }
+                    != {opposite}
+                }
+                if own_side:
+                    eps = own_side
                 flow_ports.append((hints, idx))
                 target = _port_fold_target(
                     side, eps, ranks, leading, trailing, is_entry=is_entry

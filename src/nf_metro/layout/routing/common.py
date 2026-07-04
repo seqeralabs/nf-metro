@@ -71,6 +71,27 @@ def vertical_direction(dy: float) -> Direction:
     return Direction.D if dy > 0 else Direction.U
 
 
+def is_orthogonal_turn(
+    p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float]
+) -> bool:
+    """True when the legs meeting at *p1* are one horizontal and one vertical.
+
+    A 90-degree bend carries a rounded corner; a straight pass-through (both
+    legs on the same axis) or a diagonal leg does not.
+    """
+
+    def axis(a: tuple[float, float], b: tuple[float, float]) -> str | None:
+        dx, dy = abs(b[0] - a[0]), abs(b[1] - a[1])
+        if dy <= COORD_TOLERANCE and dx > COORD_TOLERANCE:
+            return "h"
+        if dx <= COORD_TOLERANCE and dy > COORD_TOLERANCE:
+            return "v"
+        return None
+
+    axis_in, axis_out = axis(p0, p1), axis(p1, p2)
+    return axis_in is not None and axis_out is not None and axis_in != axis_out
+
+
 def vertical_flow_sections(graph: MetroGraph) -> set[str]:
     """IDs of sections whose flow runs along Y (the vertical-flow directions).
 

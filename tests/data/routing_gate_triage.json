@@ -87,10 +87,6 @@
     "note": "Empty-bundle guard: all callers (normalize.py 291/1648, inter_section_handlers.py 783/796/2132) derive bundle_widths from a non-empty bundle line count, so n is always >=1; the empty-list arm is never taken.",
     "status": "defensive"
   },
-  "common.py::if not secs:::#2": {
-    "note": "row_bottom_edge empty-result guard: every caller passes a grid row (optionally col-filtered) that contains the routed source/target section after layout, so the section list is never empty; the default-return arm is a guard valid layouts never take.",
-    "status": "defensive"
-  },
   "common.py::if not src or not tgt:::#1": {
     "note": "Null-endpoint guard: the parser creates a Station for every edge endpoint, so graph.stations.get() never returns None for a real edge; the continue arm only guards a malformed graph.",
     "status": "defensive"
@@ -101,6 +97,10 @@
   },
   "common.py::if other and other.section_id:::#2": {
     "note": "prefer_upstream=False neighbour guard: a junction's neighbours are always sectioned ports, so the False (continue) arm only guards a junction-to-junction edge valid construction never produces.",
+    "status": "defensive"
+  },
+  "common.py::if s.bbox_h <= 0:::#1": {
+    "note": "Degenerate-bbox guard in _grid_row_bands: a laid-out section always has bbox_h > 0, so the skip arm only protects against a zero/negative-height section that the layout never produces.",
     "status": "defensive"
   },
   "common.py::if sec.bbox_w <= 0:::#1": {
@@ -137,6 +137,10 @@
   },
   "common.py::if t < -0.01 or t > 1.01:::#1": {
     "note": "point_on_polyline parameter-range branch, reached only via the --animate renderer; the render-path coverage sweep doesn't animate. Exercised by test_animation.py / test_routing.py.",
+    "status": "defensive"
+  },
+  "common.py::if top is None or bottom is None:::#1": {
+    "note": "Defensive in iter_inter_row_gaps (consumed by inter_row_gap_upper_row and _inter_row_gap_band): adjacent rows in the sorted section-row set both contain sections, so row_bottom_edge / row_top_edge resolve; the None skip arm guards a row with no sections that the iteration never yields.",
     "status": "defensive"
   },
   "common.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
@@ -259,6 +263,22 @@
     "note": "Handedness-change counter inside TurnSequence.parity. Off the render path for the same reason (inter_section.py never loaded during rendering); both arms are exercised by test_inter_section_descriptor.py's parity-contract tests.",
     "status": "defensive"
   },
+  "inter_section_handlers.py::and f.src_row is not None::#1": {
+    "note": "LEFT-entry inter-row L-shape guard. Every LEFT-entry inter-section edge reaching this condition has a resolved source grid row (f.src_col/f.tgt_col are asserted non-None just above and the row resolves alongside), so the `f.src_row is None` short-circuit out of the L-shape branch is never taken.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::and f.tgt_row is not None::#1": {
+    "note": "Companion guard to f.src_row in the same LEFT-entry inter-row L-shape condition: the target grid row is likewise always resolved here, so the `f.tgt_row is None` short-circuit out of the branch is never taken.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::and src_sec is not None::#1": {
+    "note": "Inter-row exit mid-Y clearance bump (the n>1 multi-line branch). When more than one line shares the exit the source section always resolves, so the `src_sec is None` short-circuit past the clearance bump is never taken.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::and tgt_sec is not None::#1": {
+    "note": "Companion to src_sec in the same n>1 mid-Y clearance branch: the target section always resolves there, so the `tgt_sec is None` short-circuit past the bump is never taken.",
+    "status": "defensive"
+  },
   "inter_section_handlers.py::elif gap_bottom > gap_top:::#1": {
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
@@ -271,20 +291,12 @@
     "note": "Reachable only via a defective render (inter-row corridor grazes the source section); see #722.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if _would_route_around_section_below(other, ctx):::#1": {
-    "note": "Competing-sibling detection in _has_around_section_sibling, routed through the dispatch table (#813). A non-bypass sibling feeding the same merge junction sits in an adjacent column or a gap with no same-row intervening section, so it dispatches to an L-shape, not the around-below loop; corpus instrumentation across the fixtures confirms the arm is never taken. Defensive.",
-    "status": "defensive"
-  },
   "inter_section_handlers.py::if _v_segment_crosses_other_section(graph, corner_x, src.y, ey, exclude):::#1": {
     "note": "Drop-in viability test in _right_entry_drop_in_is_clear (#889). The cross-row RIGHT-entry rule fires only when the earlier bypass / plough rules ceded the edge, i.e. no section sits between source and port, so the outward-side descent runs clear; the not-clear arm covers only an exotic descent blocked by a wide same-column sibling no corpus fixture builds. Defensive.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if not _inter_row_band_fits(gap_top, gap_bottom):::#1": {
-    "note": "Band-fit test in _right_entry_gap_above_is_clear (#889), reached only when the cross-row RIGHT-entry drop-in is not clear (the exotic blocked-descent case above). The corpus always takes the drop-in, so neither arm of the gap-above fallback is exercised. Defensive.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if src is None or tgt is None:::#1": {
-    "note": "Endpoint lookup guard in _would_route_around_section_below; every edge endpoint is a registered station after parse+resolve, so graph.stations.get never returns None here. Defensive.",
+  "inter_section_handlers.py::if _would_route_around_section_below(other, ctx):::#1": {
+    "note": "Competing-sibling detection in _has_around_section_sibling, routed through the dispatch table (#813). A non-bypass sibling feeding the same merge junction sits in an adjacent column or a gap with no same-row intervening section, so it dispatches to an L-shape, not the around-below loop; corpus instrumentation across the fixtures confirms the arm is never taken. Defensive.",
     "status": "defensive"
   },
   "inter_section_handlers.py::if abs(ep.y - f.sy) < ctx.curve_radius:::#1": {
@@ -335,6 +347,10 @@
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },
+  "inter_section_handlers.py::if gap_bottom <= gap_top:::#1": {
+    "note": "The row-gap enforcer keeps stacked rows separated, so the inter-row band above a target row (row_bottom_edge(tgt_row-1) up to row_top_edge(tgt_row)) has positive height whenever a RIGHT entry is fed from a higher row; the degenerate-band arm guards an abutting-rows layout placement never produces.",
+    "status": "defensive"
+  },
   "inter_section_handlers.py::if gap_right <= gap_left:::#1": {
     "note": "The column-gap enforcer keeps inter-column gaps positive, so gap_right>gap_left always holds at the target row.",
     "status": "defensive"
@@ -343,8 +359,20 @@
     "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
     "status": "needs-review"
   },
+  "inter_section_handlers.py::if not _inter_row_band_fits(gap_top, gap_bottom):::#1": {
+    "note": "Band-fit test in _right_entry_gap_above_is_clear (#889), reached only when the cross-row RIGHT-entry drop-in is not clear (the exotic blocked-descent case above). The corpus always takes the drop-in, so neither arm of the gap-above fallback is exercised. Defensive.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::if route is None:::#2": {
+    "note": "Defensive in _declare_trunk: _route_inter_section only reaches the declaration after a matched rule (or the L-shape fall-through) produced a route, so the None guard never fires on the corpus; it mirrors _declare_channel's same guard for a handler that returns None.",
+    "status": "defensive"
+  },
   "inter_section_handlers.py::if shared_vx is not None:::#1": {
     "note": "_fan_left_entry_descent_x returns None only when col_left<=0; col_left_edge for the target's own column is always >0.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::if src is None or tgt is None:::#1": {
+    "note": "Endpoint lookup guard in _would_route_around_section_below; every edge endpoint is a registered station after parse+resolve, so graph.stations.get never returns None here. Defensive.",
     "status": "defensive"
   },
   "inter_section_handlers.py::if src.id in ctx.graph.junctions:::#1": {
@@ -357,6 +385,10 @@
   },
   "inter_section_handlers.py::if src_sec is not None and src_sec.bbox_w > 0:::#1": {
     "note": "A bypass source section always resolves and has bbox_w>0 (the parser never emits an empty section); the None/zero-width arm never fires.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::if sx >= (left_edge + right_edge) / 2:::#1": {
+    "note": "Defensive symmetry: a merge feeder junction sits in the inter-column gap downstream of its fork, i.e. right of its source section's centre, so the exit-right arm always fires in the corpus. The exit-left arm mirrors it for a junction sitting left of centre; no fixture places a merge feeder there.",
     "status": "defensive"
   },
   "inter_section_handlers.py::if tgt is None:::#1": {
@@ -379,32 +411,88 @@
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },
+  "intra_handlers.py::and line not in graph.station_lines(sid)::#1": {
+    "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::elif sy_blocked:::#1": {
+    "note": "Entry-runway trunk-row non-consumer bypass (#1293). Both-rows-blocked fall-through: a non-consumer sits on BOTH the entry row and the target trunk row, leaving no clear runway row. No corpus fixture has a doubly-blocked flow-side entry; defensive.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::for bbox in footprints:::#1": {
+    "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::for k in range(len(points) - 1):::#1": {
+    "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::for sign in _bow_side_order(section_stations, blockers, sy, over_start, over_end):::#1": {
+    "note": "Trunk-row entry bow (#1315). Loop-exhausted fall-through (both sides fail the clearance check): every corpus bow clears on its first (roomier) side, so the exit past the loop that returns a plain straight run is defensive.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::for st in section_stations:::#1": {
+    "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::if _bow_clears_markers(points, section_stations):::#1": {
+    "note": "Trunk-row entry bow (#1315). Retry arm (the roomier side's bow rakes a marker, so the other side is tried): _bow_side_order puts the side with the farthest off-trunk marker first, and the fixed bump height clears it, so no corpus fixture falls to the second side; defensive.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::if abs(diag_start_x - sx) <= abs(last_blocker - sx):::#1": {
+    "note": "Entry-runway trunk-row non-consumer bypass (#1293). Descent-clips-blocker fall-through: the join-biased diagonal cannot start past the furthest target-row non-consumer (a blocker within diagonal_run+tgt_min of the target). Corpus blockers sit far enough forward; defensive.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::if abs(nearest_src - sx) < src_min + ctx.diagonal_run:::#1": {
+    "note": "Entry-runway 'too tight' return cannot fire: |nearest_src - entry_port_x| is floored at SECTION_X_PADDING (50px, the entry port sits at section.bbox_x = min(internal_station_x) - SECTION_X_PADDING), while src_min + diagonal_run = CURVE_RADIUS(10) + MIN_STRAIGHT_PORT(5) + DIAGONAL_RUN(30) = 45px. Since 50 >= 45 the guard is always False.",
+    "status": "defensive"
+  },
   "intra_handlers.py::if abs(tgt.x - src.x) >= COORD_TOLERANCE:::#1": {
     "note": "_route_near_zero_gap_straight: a same-section, non-TB intra edge with |tgt.x - src.x| < COORD_TOLERANCE (1px) and non-zero dy is not constructible, so the straight-return (False) arm is never taken: layering assigns increasing X along edges so the minimum |dx| at _route_intra_section across the corpus is 50px (port spacing / off-track output lead). TB same-track edges that could reach |dx|=0 are intercepted by _route_tb_internal before this handler. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
-  "intra_handlers.py::if not (tgt.x - src.x <= 0 and abs(dy) > CROSS_ROW_THRESHOLD and not same_section):::#1": {
-    "note": "_route_fold_edge: the not-same_section precondition is never satisfied at the intra-section handlers, so the fold (False) arm is never taken: cross-section edges are consumed by _route_inter_section upstream (0/391 corpus fixtures reach this branch with differing sections), and a sectionless flat graph's serpentine fold is routed before this handler too (verified: a flat fold over the threshold does not reach the arm). The cross-row fold branch is shadowed. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+  "intra_handlers.py::if dy < -COORD_TOLERANCE_FINE:::#1": {
+    "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::if lead_end - sx < min_straight or tx - tail_start < min_straight:::#1": {
+    "note": "Trunk-row entry bow (#1315). No-room return: the flat lead-in before the rise, or the flat tail after the drop, is shorter than a port's minimum straight. A corpus blocker sits far enough from both the port and the target to leave room, so the fall-through to a plain straight run is defensive.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::if not (::#1": {
+    "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
     "status": "defensive"
   },
   "intra_handlers.py::if not (same_sec or is_exit_port):::#1": {
     "note": "_is_side_branch_ascent reaches this classification (44/391 corpus fixtures) but no fixture takes the reject arm: a target sitting within offset_step*2 of the source section's trunk Y is always a same-section internal station or that section's exit port. The arm needs a target at the source's trunk Y that belongs to a different section or is a non-exit port, which the trunk-alignment geometry does not produce. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
+  "intra_handlers.py::if not (tgt.x - src.x <= 0 and abs(dy) > CROSS_ROW_THRESHOLD and not same_section):::#1": {
+    "note": "_route_fold_edge: the not-same_section precondition is never satisfied at the intra-section handlers, so the fold (False) arm is never taken: cross-section edges are consumed by _route_inter_section upstream (0/391 corpus fixtures reach this branch with differing sections), and a sectionless flat graph's serpentine fold is routed before this handler too (verified: a flat fold over the threshold does not reach the arm). The cross-row fold branch is shadowed. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::if not blockers:::#1": {
+    "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
+    "status": "defensive"
+  },
   "intra_handlers.py::if not section:::#1": {
     "note": "_route_entry_runway only runs on an entry-port -> internal-station edge; the target of such an edge always carries a section_id that resolves, so the guard's return-None arm protects against a malformed graph rather than a topology.",
     "status": "defensive"
   },
-  "intra_handlers.py::if not st or st.is_port:::#1": {
-    "note": "The loop already skips edge.target and every id in section.port_ids, so a surviving id resolves to a non-port internal station; the not-st / is_port re-check is belt-and-suspenders against a port absent from port_ids.",
-    "status": "defensive"
-  },
-  "intra_handlers.py::if room < src_min + ctx.diagonal_run:::#1": {
-    "note": "The entry-runway 'too tight' return cannot fire: room = |first_x - entry_port_x| is floored at SECTION_X_PADDING (50px, the entry port sits at section.bbox_x = min(internal_station_x) - SECTION_X_PADDING), while the threshold src_min + diagonal_run = CURVE_RADIUS(10) + MIN_STRAIGHT_PORT(5) + DIAGONAL_RUN(30) = 45px. Since 50 >= 45 the guard is always False; SECTION_X_PADDING is not exposed as a directive. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+  "intra_handlers.py::if over_end - over_start < 2 * ctx.curve_radius:::#1": {
+    "note": "Trunk-row entry bow (#1315). No-room return: the flat run over the blocker(s) is shorter than two corner radii, so the bump's corners would overlap. The blocker-span-plus-clearance always exceeds 2*CURVE_RADIUS for corpus fixtures; defensive.",
     "status": "defensive"
   },
   "intra_handlers.py::if section.direction not in (\"LR\", \"RL\"):::#1": {
     "note": "No TB/BT entry reaches _route_entry_runway: TB LEFT/RIGHT entries are consumed by _route_tb_lr_entry and TB/BT TOP/BOTTOM entries by _route_perp_entry (both earlier in the dispatch chain), and a BT section is never produced (the direction directive accepts only LR/RL/TB; 0/391 corpus sections are BT). Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::if segment_intersects_bbox(x1, y1, x2, y2, bbox):::#1": {
+    "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
+    "status": "defensive"
+  },
+  "intra_handlers.py::if st.id in blocker_ids:::#1": {
+    "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
     "status": "defensive"
   },
   "normalize.py::elif above_ok:::#1": {
@@ -479,6 +567,10 @@
     "note": "_suboptimal_trunk_bands crossing-comparison: validate-only, not on the render path.",
     "status": "defensive"
   },
+  "normalize.py::if col is None:::#1": {
+    "note": "Defensive guard in _convergence_line_order: a peel-off riser channel always resolves to a source-section column, so the unresolved-column early return is never taken on the corpus.",
+    "status": "defensive"
+  },
   "normalize.py::if down is None or len(up.points) < 2:::#1": {
     "note": "Every line entering a fan-out junction also exits it to an entry port, so _fanout_route_maps always pairs a downstream route for each (jid, line_id) upstream; all handlers emit >=2-point routes. The skip arm in _join_fanout_upstream_tails is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
@@ -519,6 +611,10 @@
     "note": "The routing system assigns distinct x offsets to every line sharing a column gap, so two distinct lines in one gap-bundle corridor never share a representative x; the equal-rep_x tiebreak fall-through in _distinct_line_order is unreachable (exhaustive corpus scan confirms). Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
+  "normalize.py::if rp is None:::#1": {
+    "note": "Defensive guard: every merge feeder edge is routed, so the by-key lookup in _merge_feeder_groups always resolves; the skip arm is never taken.",
+    "status": "defensive"
+  },
   "normalize.py::if rp.curve_radii is None:::#1": {
     "note": "curve_radii is always a concrete list for inter-section routes (every inter-section handler sets it); the None arm in _set_vchannel_x is a belt-and-suspenders guard.",
     "status": "defensive"
@@ -529,10 +625,6 @@
   },
   "normalize.py::if rp.curve_radii is None:::#3": {
     "note": "curve_radii is always set for inter-section routes; the None arm in _restack_channel is a defensive guard.",
-    "status": "defensive"
-  },
-  "common.py::if s.bbox_h <= 0:::#1": {
-    "note": "Degenerate-bbox guard in _grid_row_bands: a laid-out section always has bbox_h > 0, so the skip arm only protects against a zero/negative-height section that the layout never produces.",
     "status": "defensive"
   },
   "normalize.py::if s.bbox_w <= 0:::#1": {
@@ -551,12 +643,12 @@
     "note": "Both callers of _coincident_trunk_slots pre-filter input to a single traversal direction (band = [t for t in grp if t.sign_x == sign]), so within the function sg[0].sign_x != t.sign_x is always False; the opposing-direction continue is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
-  "common.py::if top is None or bottom is None:::#1": {
-    "note": "Defensive in iter_inter_row_gaps (consumed by inter_row_gap_upper_row and _inter_row_gap_band): adjacent rows in the sorted section-row set both contain sections, so row_bottom_edge / row_top_edge resolve; the None skip arm guards a row with no sections that the iteration never yields.",
+  "normalize.py::if trunk_ch is None:::#1": {
+    "note": "Defensive guard: the merge trunk route opens horizontal-then-vertical (lead into the gap, then descend), so its initial fan-out descent is always found; the skip arm is never taken.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if route is None:::#2": {
-    "note": "Defensive in _declare_trunk: _route_inter_section only reaches the declaration after a matched rule (or the L-shape fall-through) produced a route, so the None guard never fires on the corpus; it mirrors _declare_channel's same guard for a handler that returns None.",
+  "normalize.py::if trunk_rp is None or trunk_src_st is None:::#1": {
+    "note": "Defensive guard in _merge_feeder_groups: a merge with a trunk_source always has a routed trunk edge and a resolvable trunk station, so the skip arm is never taken.",
     "status": "defensive"
   },
   "offsets.py::elif feeding_exit != edge.source:::#1": {
@@ -611,6 +703,10 @@
     "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. The already-aligned arm (->1190) is exercised by the corpus; the body arm (->1192) is the reachable-but-defective one.",
     "status": "defensive"
   },
+  "offsets.py::if col is None:::#1": {
+    "note": "Defensive guard in _convergence_feeders: every edge feeding a LEFT entry port has a source whose section resolves to a grid column after placement, so the unresolved-source-column early return is never taken.",
+    "status": "defensive"
+  },
   "offsets.py::if cur in seen:::#1": {
     "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
     "status": "needs-review"
@@ -625,6 +721,10 @@
   },
   "offsets.py::if entry.side not in (PortSide.LEFT, PortSide.RIGHT):::#1": {
     "note": "In _align_flat_tb_exit_to_entry: scopes the flat-seam exit/entry reconciliation to horizontal (LEFT/RIGHT) entry ports, whose per-line offsets are Y like the TB exit's. A TOP/BOTTOM entry stores X-offsets, so copying across would be a category error. No corpus fixture routes a TB LEFT/RIGHT exit directly into a TOP/BOTTOM entry at the same Y, so the skip arm is never taken; defensive against that cross-axis seam.",
+    "status": "defensive"
+  },
+  "offsets.py::if entry_section is None:::#1": {
+    "note": "Defensive null guard: every port in graph.ports is created by the resolver with a valid section_id, so graph.sections.get(port_obj.section_id) is never None at routing time. The continue branch is a safety net against a malformed port that no valid graph produces.",
     "status": "defensive"
   },
   "offsets.py::if exit_lines == set(j_lines):::#1": {
@@ -648,7 +748,7 @@
     "status": "defensive"
   },
   "offsets.py::if lid not in seen:::#1": {
-    "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable — the dedup happens at set construction, making the `seen` guard dead code. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+    "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable \u2014 the dedup happens at set construction, making the `seen` guard dead code. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
   "offsets.py::if max_steps <= 0:::#1": {
@@ -727,12 +827,16 @@
     "note": "The false arm fires when an edge source is an internal station (not a port) whose section_id differs from sec_id. After _resolve_sections(), all inter-section edges run through port stations; no direct edge from an internal station of section A to an internal station of section B exists. DFS back-walk via edges_to() from within a section can only reach: (a) entry ports (return True), (b) same-section internal stations (pushed), or (c) other-section ports (is_port=True, skipped by `port and port.is_entry` check). Cross-section internal stations are structurally unreachable via direct edges after resolution.",
     "status": "defensive"
   },
+  "offsets.py::if src is None:::#1": {
+    "note": "Defensive guard in _convergence_feeders: every edge feeding an entry port has a source station, so the missing-source early return is never taken.",
+    "status": "defensive"
+  },
   "offsets.py::if src_port and not src_port.is_entry:::#2": {
     "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its else arm (->1203) is additionally defensive: the sole feeder of a >=2-line fan-out junction is its exit port, a non-entry port.",
     "status": "defensive"
   },
   "offsets.py::if src_st and not src_st.is_port:::#1": {
-    "note": "In `_rewrite_edges_with_junctions` (resolve.py L594), edges to exit ports are always created as `Edge(source=edge.source, target=exit_port_id)` where `edge.source` is the original inter-section edge's source — an internal section station, not a port. So `src_st` is never None and `src_st.is_port` is always False. The false arm cannot be taken by any valid parsed graph.",
+    "note": "In `_rewrite_edges_with_junctions` (resolve.py L594), edges to exit ports are always created as `Edge(source=edge.source, target=exit_port_id)` where `edge.source` is the original inter-section edge's source \u2014 an internal section station, not a port. So `src_st` is never None and `src_st.is_port` is always False. The false arm cannot be taken by any valid parsed graph.",
     "status": "defensive"
   },
   "offsets.py::if src_st and not src_st.is_port:::#2": {
@@ -743,12 +847,20 @@
     "note": "In _reorder_one_exit_line, swap_lid is None only if the loop over `lines` exhausts without a match, but desired_off (min or max of all_offs) is always held by another line, so the early-return guard never fires (0/128). Defensive. Reclassified defensive (#762).",
     "status": "defensive"
   },
+  "offsets.py::if tgt_col is None:::#1": {
+    "note": "Defensive guard in _convergence_feeders: a LEFT entry port section always has a grid column after placement, so the unresolved-target-column early return is never taken.",
+    "status": "defensive"
+  },
   "offsets.py::if tgt_st and not tgt_st.is_port:::#1": {
     "note": "edges_from(port_id) for an entry port yields edges to internal section stations. In the resolved graph, entry ports are connected directly to internal (non-port) stations; there are no entry-port-to-entry-port or entry-port-to-exit-port edges. So tgt_st is always a valid non-port station, and the loop-back arm (799->797) where tgt_st is None or is_port is unreachable for any valid resolved graph.",
     "status": "defensive"
   },
   "offsets.py::if trunk_feeder_id is not None:::#2": {
     "note": "len(unique_ys) < 2 means every port line's feeder stations average to a single Y. Under track-per-line layout, distinct lines occupy distinct tracks, so a shared Y across >=2 lines implies one trunk feeder carrying all of them (trunk_feeder_id set); the no-trunk arm is therefore not reached by a track-separated topology.",
+    "status": "defensive"
+  },
+  "offsets.py::sec is None::#1": {
+    "note": "Bypass-convergence LEFT-entry feeder scan: the loop only inspects existing LEFT entry ports, whose section always resolves, so the leading `sec is None` short-circuit that skips the port is never taken.",
     "status": "defensive"
   },
   "offsets.py::while stack:::#1": {
@@ -765,6 +877,10 @@
   },
   "perp.py::if not feeders:::#1": {
     "note": "No-feeder guard in _perp_entry_crossing_x: the helper is called only from _route_perp_entry when a multi-line bundle shares the port with a per-line stagger, and a TOP/BOTTOM entry port in that case is always reached by a bundled inter-section feeder (dy!=0, so compute_bundle_info indexes it).  The empty-feeders return-None arm is a contract guard, never taken across the corpus.",
+    "status": "defensive"
+  },
+  "postprocess.py::if abs(dx_diag) <= COORD_TOLERANCE_FINE:::#1": {
+    "note": "Defensive guard: a near-vertical baked diagonal (dx_diag ~ 0) already separates near-fully along the baked X axis, so it needs no Y spread and the divide-by-dx_diag is skipped. No corpus fixture bakes a near-vertical diagonal, so the guard arm is never taken.",
     "status": "defensive"
   },
   "postprocess.py::if abs(other.y - station.y) > 1:::#1": {
@@ -891,10 +1007,6 @@
     "note": "succ_id comes from sec_successors, built only from real tgt.section_id values, so graph.sections.get(succ_id) is never None and the continue (->187) is a defensive null guard. The fall-through static arm (->188) is phantom: control falls into the following multi-line `if (`, whose first operand line carries the real arc L186->189.",
     "status": "defensive"
   },
-  "offsets.py::if entry_section is None:::#1": {
-    "note": "Defensive null guard: every port in graph.ports is created by the resolver with a valid section_id, so graph.sections.get(port_obj.section_id) is never None at routing time. The continue branch is a safety net against a malformed port that no valid graph produces.",
-    "status": "defensive"
-  },
   "reversal.py::if port and port.is_entry:::#1": {
     "note": "_entry_ports_through_junctions collects the entry ports a peel-off junction fan lands on. Each junction out-edge targets either another junction (consumed by the prior `edge.target in junction_ids` continue) or an entry port; no junction fans directly to a station or exit port across the corpus. The non-entry arm is therefore a structural-contract guard never reached.",
     "status": "defensive"
@@ -917,66 +1029,6 @@
   },
   "tb_handlers.py::if tgt_sec is not None and tgt_sec.direction not in (\"TB\", \"BT\"):::#1": {
     "note": "Perp-entry drop crossing-X override: the edge's target is always a sectioned station, so tgt_sec resolves and the `tgt_sec is None` short-circuit to the plain drop is never taken; the `direction in (TB, BT)` arm (a drop continuing into a vertical-flow trunk) and the horizontal-target arm are both exercised.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if sx >= (left_edge + right_edge) / 2:::#1": {
-    "note": "Defensive symmetry: a merge feeder junction sits in the inter-column gap downstream of its fork, i.e. right of its source section's centre, so the exit-right arm always fires in the corpus. The exit-left arm mirrors it for a junction sitting left of centre; no fixture places a merge feeder there.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::and f.src_row is not None::#1": {
-    "note": "LEFT-entry inter-row L-shape guard. Every LEFT-entry inter-section edge reaching this condition has a resolved source grid row (f.src_col/f.tgt_col are asserted non-None just above and the row resolves alongside), so the `f.src_row is None` short-circuit out of the L-shape branch is never taken.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::and f.tgt_row is not None::#1": {
-    "note": "Companion guard to f.src_row in the same LEFT-entry inter-row L-shape condition: the target grid row is likewise always resolved here, so the `f.tgt_row is None` short-circuit out of the branch is never taken.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::and src_sec is not None::#1": {
-    "note": "Inter-row exit mid-Y clearance bump (the n>1 multi-line branch). When more than one line shares the exit the source section always resolves, so the `src_sec is None` short-circuit past the clearance bump is never taken.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::and tgt_sec is not None::#1": {
-    "note": "Companion to src_sec in the same n>1 mid-Y clearance branch: the target section always resolves there, so the `tgt_sec is None` short-circuit past the bump is never taken.",
-    "status": "defensive"
-  },
-  "normalize.py::if trunk_rp is None or trunk_src_st is None:::#1": {
-    "note": "Defensive guard in _merge_feeder_groups: a merge with a trunk_source always has a routed trunk edge and a resolvable trunk station, so the skip arm is never taken.",
-    "status": "defensive"
-  },
-  "normalize.py::if trunk_ch is None:::#1": {
-    "note": "Defensive guard: the merge trunk route opens horizontal-then-vertical (lead into the gap, then descend), so its initial fan-out descent is always found; the skip arm is never taken.",
-    "status": "defensive"
-  },
-  "normalize.py::if rp is None:::#1": {
-    "note": "Defensive guard: every merge feeder edge is routed, so the by-key lookup in _merge_feeder_groups always resolves; the skip arm is never taken.",
-    "status": "defensive"
-  },
-  "normalize.py::if ch is None:::#3": {
-    "note": "Defensive guard: a merge branch route opens horizontal-then-vertical (lead, then descent onto the trunk channel), so its initial fan-out descent is always found; the skip arm is never taken.",
-    "status": "defensive"
-  },
-  "normalize.py::if col is None:::#1": {
-    "note": "Defensive guard in _convergence_line_order: a peel-off riser channel always resolves to a source-section column, so the unresolved-column early return is never taken on the corpus.",
-    "status": "defensive"
-  },
-  "offsets.py::if src is None:::#1": {
-    "note": "Defensive guard in _convergence_feeders: every edge feeding an entry port has a source station, so the missing-source early return is never taken.",
-    "status": "defensive"
-  },
-  "offsets.py::if col is None:::#1": {
-    "note": "Defensive guard in _convergence_feeders: every edge feeding a LEFT entry port has a source whose section resolves to a grid column after placement, so the unresolved-source-column early return is never taken.",
-    "status": "defensive"
-  },
-  "offsets.py::if tgt_col is None:::#1": {
-    "note": "Defensive guard in _convergence_feeders: a LEFT entry port section always has a grid column after placement, so the unresolved-target-column early return is never taken.",
-    "status": "defensive"
-  },
-  "offsets.py::sec is None::#1": {
-    "note": "Bypass-convergence LEFT-entry feeder scan: the loop only inspects existing LEFT entry ports, whose section always resolves, so the leading `sec is None` short-circuit that skips the port is never taken.",
-    "status": "defensive"
-  },
-  "postprocess.py::if abs(dx_diag) <= COORD_TOLERANCE_FINE:::#1": {
-    "note": "Defensive guard: a near-vertical baked diagonal (dx_diag ~ 0) already separates near-fully along the baked X axis, so it needs no Y spread and the divide-by-dx_diag is skipped. No corpus fixture bakes a near-vertical diagonal, so the guard arm is never taken.",
     "status": "defensive"
   }
 }

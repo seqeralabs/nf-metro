@@ -1,0 +1,41 @@
+%%metro line: l1 | Line 1 | #e6007e
+%%metro line: l2 | Line 2 | #2db572
+%%metro grid: src1 | 0,0
+%%metro grid: src2 | 1,0
+%%metro grid: tgt | 0,1
+
+graph LR
+    subgraph src1 [Source 1]
+        %%metro exit: right | l1
+        a_src[A src]
+    end
+    subgraph src2 [Source 2]
+        %%metro exit: right | l1, l2
+        b_src[B src]
+    end
+    subgraph tgt [Target]
+        %%metro entry: left | l1, l2
+        sa[Station A]
+        sb[Station B]
+        sc[Station C]
+        d1[D1]
+        d2[D2]
+        d3[D3]
+        e1[E1]
+        e2[E2]
+        sink[Sink]
+        sa -->|l1| sb
+        sb -->|l1,l2| d1
+        sb -->|l1,l2| d2
+        sb -->|l1,l2| d3
+        d1 -->|l1,l2| sink
+        d2 -->|l1,l2| sink
+        d3 -->|l1,l2| sink
+        sc -->|l1,l2| e1
+        sc -->|l1,l2| e2
+        e1 -->|l1,l2| sink
+        e2 -->|l1,l2| sink
+    end
+    a_src -->|l1| sa
+    b_src -->|l2| sb
+    b_src -->|l1,l2| sc

@@ -22,6 +22,7 @@ from nf_metro.layout.phases._common import (
     _content_station_ys,
     _grow_section_bbox_upward,
     _is_side_entered_vertical_section,
+    _pull_section_ports_to_edge,
     _ref_y,
     _set_section_bbox_top,
     _side_entered_vertical_feeder_pairs,
@@ -32,7 +33,7 @@ from nf_metro.layout.phases.single_section import (
     _terminus_y_overhang,
     angled_label_reach,
 )
-from nf_metro.parser.model import MetroGraph, Section, Station, is_bypass_v
+from nf_metro.parser.model import MetroGraph, PortSide, Section, Station, is_bypass_v
 
 
 def _predicted_bypass_bottom_in_row(
@@ -562,6 +563,9 @@ def _shrink_bboxes_to_content_bottom(
         current_bot = section.bbox_y + section.bbox_h
         if content_bot > current_bot + SAME_COORD_TOLERANCE:
             section.bbox_h = content_bot - section.bbox_y
+            _pull_section_ports_to_edge(
+                graph, section, PortSide.BOTTOM, section.bbox_y + section.bbox_h
+            )
             continue
         desired_bot = content_bot
         mate_bots = _row_mate_bottoms(section)
@@ -570,6 +574,9 @@ def _shrink_bboxes_to_content_bottom(
         new_h = desired_bot - section.bbox_y
         if new_h < section.bbox_h - SAME_COORD_TOLERANCE:
             section.bbox_h = max(0.0, new_h)
+            _pull_section_ports_to_edge(
+                graph, section, PortSide.BOTTOM, section.bbox_y + section.bbox_h
+            )
 
 
 def _section_fit_top(
@@ -863,6 +870,13 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
                 st = graph.stations.get(stid)
                 if st is not None:
                     st.y -= slack
+                # Ports carry a separate coordinate that routing reads; keep it
+                # in step so a shifted section's entry/exit ports do not strand
+                # below the moved box (the fold-back connector would then wrap
+                # off-port into the target).
+                port = graph.ports.get(stid)
+                if port is not None:
+                    port.y -= slack
 
 
 def _min_section_bbox_top(graph: MetroGraph, default: float) -> float:

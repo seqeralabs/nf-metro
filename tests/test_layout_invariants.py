@@ -65,6 +65,7 @@ from nf_metro.layout.phases._common import (
     iter_corridor_fed_solo_entries,
     iter_fold_lr_exit_straight_runs,
     iter_fold_lr_exits_short_of_target,
+    wrap_exit_carrier_anchor,
 )
 from nf_metro.layout.phases.bbox import (
     _min_drawn_section_bbox_top,
@@ -1147,6 +1148,45 @@ def test_flow_exit_port_anchors_to_carrying_station(fixture):
             f"{fixture}: exit port {pid} y={port_y:.1f} is off its carrier "
             f"row y={carrier_y:.1f} (carriers {sorted(carrier_ids)}); the "
             f"boundary run will read as a diagonal instead of a clean riser"
+        )
+
+
+@lru_cache(maxsize=None)
+def _declared_center_ports(fixture: str) -> bool:
+    """The ``center_ports`` value the shipping render uses for *fixture*.
+
+    ``_layout`` forces ``center_ports=True`` for legacy ``tests/fixtures/``
+    files, which diverges from the gallery render (default ``False`` unless the
+    file declares the directive).  This invariant reads the geometry the map
+    actually ships, so it mirrors the render config rather than the legacy one.
+    """
+    return parse_metro_mermaid(_resolve_fixture(fixture).read_text()).center_ports
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_wrap_exit_port_stays_on_carrier_row(fixture):
+    """An exit that wraps to a same-side entry leaves at its carrier row (#1323).
+
+    Pulling such an exit onto the downstream consumer's row buys no straight
+    inter-section run (the line wraps regardless) and leaves the in-section link
+    a diagonal from the carrying station into the box corner.
+    """
+    graph = _layout(fixture, center_ports=_declared_center_ports(fixture))
+    junction_ids = graph.junction_ids
+    for pid, port in graph.ports.items():
+        sec = graph.sections.get(port.section_id)
+        if sec is None:
+            continue
+        anchor = wrap_exit_carrier_anchor(graph, pid, sec, junction_ids)
+        if anchor is None:
+            continue
+        carrier_y, carrier_ids = anchor
+        port_y = graph.stations[pid].y
+        assert abs(port_y - carrier_y) <= _Y_TOL, (
+            f"{fixture}: wrap exit port {pid} y={port_y:.1f} is off its carrier "
+            f"row y={carrier_y:.1f} (carriers {sorted(carrier_ids)}); the "
+            f"in-section link reads as a diagonal into the box corner instead of "
+            f"a clean horizontal to the port"
         )
 
 

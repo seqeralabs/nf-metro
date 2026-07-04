@@ -6,12 +6,13 @@ a list of Violation objects describing any problems found.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 
 from nf_metro.layout.constants import Y_SPACING
 from nf_metro.layout.routing import compute_station_offsets, route_edges
-from nf_metro.layout.routing.common import RoutedPath
+from nf_metro.layout.routing.common import RoutedPath, is_orthogonal_turn
 from nf_metro.parser.model import MetroGraph, PortSide
 from nf_metro.render.svg import apply_route_offsets
 
@@ -27,6 +28,23 @@ class Violation:
     severity: Severity
     message: str
     context: dict = field(default_factory=dict)
+
+
+def shared_same_line_turn_vertices(
+    routes: list[RoutedPath],
+) -> set[tuple[str, int, int]]:
+    """``(line, x, y)`` turn vertices where two or more same-line legs coincide.
+
+    Mirrors the bucketing of ``_unify_coincident_corner_radii``: these are the
+    corners a fused same-line stroke shares, where every leg must draw one radius.
+    """
+    counts: dict[tuple[str, int, int], int] = defaultdict(int)
+    for rp in routes:
+        pts = rp.points
+        for i in range(1, len(pts) - 1):
+            if is_orthogonal_turn(pts[i - 1], pts[i], pts[i + 1]):
+                counts[(rp.line_id, round(pts[i][0]), round(pts[i][1]))] += 1
+    return {key for key, n in counts.items() if n >= 2}
 
 
 def _compute_routes(

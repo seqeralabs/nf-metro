@@ -21,6 +21,7 @@ from nf_metro.layout.phases._common import (
     _grid_group_section_ids,
     _is_fold_section,
     _lr_exit_aligned_target,
+    exit_entry_ports_face,
     flow_exit_carrier_anchor,
     iter_fold_lr_exits_short_of_target,
 )
@@ -564,6 +565,12 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
             entry_section.direction in ("TB", "BT")
             and entry_port_obj.side in (PortSide.LEFT, PortSide.RIGHT)
         ):
+            continue
+
+        # A wrapped connection (ports on the same side) gains no straight run
+        # from aligning the exit to the downstream row, so leave it on its
+        # carrier row.
+        if not exit_entry_ports_face(port, entry_port_obj, exit_section, entry_section):
             continue
 
         internal_ids = (

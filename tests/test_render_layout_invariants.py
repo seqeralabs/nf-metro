@@ -28,8 +28,16 @@ from nf_metro.layout.phases.guards import (
     assert_render_layout_invariants,
     render_layout_invariant_specs,
 )
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import (
+    compute_station_offsets,
+    route_edges,
+    route_edges_centred,
+)
 from nf_metro.layout.routing.common import RoutedPath
+from nf_metro.layout.routing.invariants import (
+    _first_axis_crossing,
+    _route_axis_segments,
+)
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render import render_svg
@@ -149,6 +157,7 @@ BACKTRACK_RENDER_GUARDS = [
 # fixtures here raise under ``validate=True``, so the corpus-wide idempotence
 # and manifest tests must not pick them up.
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "regressions"
+TOP_FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 @pytest.mark.parametrize("guard_name", BACKTRACK_RENDER_GUARDS)
@@ -302,3 +311,197 @@ def test_branch_fold_repro_renders_without_wrap(name: str) -> None:
     assert not tier_a, (
         f"unexpected Tier-A warning(s): {[str(w.message) for w in tier_a]}"
     )
+
+
+# A flow-side entry port whose target sits on the section trunk while an earlier
+# non-consumer station shares that trunk row: the entry runway must keep its flat
+# run on the entry (source) row and descend into the target only past the
+# bypassed station, rather than running the runway along the target trunk Y
+# straight through the non-consumer's marker (#1293).
+ENTRY_RUNWAY_BYPASS_FIXTURES = [
+    "target_entry_runway_bypass.mmd",
+]
+
+
+@pytest.mark.parametrize("name", ENTRY_RUNWAY_BYPASS_FIXTURES)
+def test_entry_runway_clears_trunk_row_non_consumer(name: str) -> None:
+    """The entry runway to a trunk-row target does not rake a non-consumer
+    station sharing that trunk row (#1293)."""
+    graph = parse_metro_mermaid((TOP_FIXTURES / name).read_text())
+    compute_layout(graph)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        render_svg(graph, THEMES["nfcore"])
+    crossings = [
+        str(w.message)
+        for w in caught
+        if "_guard_no_line_crosses_non_consumer" in str(w.message)
+    ]
+    assert not crossings, (
+        f"{name}: entry route rakes a non-consumer marker: {crossings}"
+    )
+
+
+# The folded fixture feeds a far-side LEFT entry from a LEFT exit in an adjacent
+# same-row column, and a RIGHT entry two rows below its source.  A far-side feed
+# must wrap around the target box rather than plough its interior, and a descent
+# from above must run its traverse in the with-flow band just above the target
+# row rather than dive under the whole row counter to that row's flow (#1317).
+FAR_SIDE_WRAP_GUARDS = [
+    "_guard_routes_enter_sections_at_ports",
+    "_guard_entry_approach_from_port_side",
+    "_guard_no_artefactual_counter_flow",
+    "_guard_no_dogleg_crosses_exempt_trunk",
+]
+
+
+@pytest.mark.parametrize("guard_name", FAR_SIDE_WRAP_GUARDS)
+def test_far_side_entry_wraps_without_plough_or_counterflow(guard_name: str) -> None:
+    """A far-side entry fed from the opposite side wraps around its target box
+    (never ploughing the interior or the wrong band) for the folded riboseq
+    fixture (#1317)."""
+    from nf_metro.layout.phases import guards as guards_module
+
+    graph = parse_metro_mermaid(
+        (TOP_FIXTURES / "target_entry_runway_bypass.mmd").read_text()
+    )
+    compute_layout(graph)
+    routes = route_edges(graph)
+    guard = getattr(guards_module, guard_name)
+    guard(graph, guard_name, routes=routes)
+
+
+def test_same_side_culdesac_entry_reanchors_to_leading_edge() -> None:
+    """A same-side-I/O cul-de-sac section that also takes an opposite-side
+    fold-in feed re-anchors its flow-axis entry to the leading edge, keeping the
+    entry beside its own-side consumers rather than raking the section's full
+    width against its internal trunk (#1293/#1317; same-side idiom #1182).
+
+    `feeder_l1` in `target_entry_runway_bypass` enters `l1` from the left
+    (`al1 -> fl0, fl1`), exits `l1` to the left (`fl2/fl3 -> target`), and folds
+    a third feed in from the right (`fb_out -> fl3`).  The right-side fold-in
+    must not mask the left entry's fold: the entry belongs beside its own-side
+    consumers `fl0/fl1`, which sit at the RL leading (right) edge."""
+    from nf_metro.layout.phases.guards import iter_opposing_line_overlaps
+    from nf_metro.parser.model import PortSide
+
+    graph = parse_metro_mermaid(
+        (TOP_FIXTURES / "target_entry_runway_bypass.mmd").read_text()
+    )
+    entry_sides = [side for side, lines in graph.sections["feeder_l1"].entry_hints]
+    assert entry_sides == [PortSide.RIGHT], (
+        "feeder_l1's left entry should re-anchor to the RL leading (right) edge "
+        f"beside its own-side consumers, got {entry_sides}"
+    )
+
+    compute_layout(graph, validate=True)
+    overlaps = [
+        ov
+        for ov in iter_opposing_line_overlaps(graph)
+        if ov.line_id == "l1"
+        and "feeder_l1" in (ov.tgt_a + ov.tgt_b + ov.src_a + ov.src_b)
+    ]
+    assert not overlaps, f"feeder_l1 l1 still folds back over itself: {overlaps}"
+
+
+# A flow-side entry port that lands ON the target's trunk row while a
+# non-consumer station shares that row between the port and the target: the
+# straight run would pass through the blocker's marker, so the entry route must
+# bow off the trunk, past the blocker, and drop back on before the target
+# (#1315).
+ENTRY_TRUNK_ROW_BOW_FIXTURES = [
+    "entry_trunk_row_bow.mmd",
+]
+
+
+@pytest.mark.parametrize("name", ENTRY_TRUNK_ROW_BOW_FIXTURES)
+def test_entry_trunk_row_bow_clears_non_consumer(name: str) -> None:
+    """A trunk-row entry run bows over a same-row non-consumer station rather
+    than raking its marker (#1315)."""
+    graph = parse_metro_mermaid((FIXTURES / name).read_text())
+    compute_layout(graph)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        render_svg(graph, THEMES["nfcore"])
+    crossings = [
+        str(w.message)
+        for w in caught
+        if "_guard_no_line_crosses_non_consumer" in str(w.message)
+    ]
+    assert not crossings, (
+        f"{name}: trunk-row entry route rakes a non-consumer marker: {crossings}"
+    )
+
+
+# A vertical-flow (TB) section whose bottom-most internal station sits above the
+# flow-perpendicular exit port: the late bbox-bottom fit must keep the BOTTOM
+# exit port on the section boundary rather than leaving it stranded inside the
+# grown box (#1294).
+TB_EXIT_BOUNDARY_FIXTURES = [
+    "tb_exit_terminal_on_carrier.mmd",
+]
+
+
+@pytest.mark.parametrize("name", TB_EXIT_BOUNDARY_FIXTURES)
+def test_tb_exit_port_stays_on_bbox_boundary(name: str) -> None:
+    """A vertical-flow section's flow-perpendicular exit port sits on the
+    section bbox boundary after the late bbox settling (#1294)."""
+    graph = parse_metro_mermaid((TOP_FIXTURES / name).read_text())
+    compute_layout(graph)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        render_svg(graph, THEMES["nfcore"])
+    off_boundary = [
+        str(w.message) for w in caught if "_guard_ports_on_boundaries" in str(w.message)
+    ]
+    assert not off_boundary, (
+        f"{name}: an exit port drifted off its section boundary: {off_boundary}"
+    )
+
+
+def test_tb_exit_terminal_on_carrier_validates_strict() -> None:
+    """The fixture lays out clean under ``validate=True``: a BOTTOM exit feeding
+    a far-side LEFT entry wraps around the target box and approaches the port
+    horizontally from its own outward side (#1317)."""
+    graph = parse_metro_mermaid(
+        (TOP_FIXTURES / "tb_exit_terminal_on_carrier.mmd").read_text()
+    )
+    compute_layout(graph, validate=True)
+
+
+CONVERGENT_ENTRY_FIXTURES = [
+    "tb_exit_terminal_on_carrier.mmd",
+]
+
+
+@pytest.mark.parametrize("name", CONVERGENT_ENTRY_FIXTURES)
+def test_convergent_entry_feeders_do_not_cross(name: str) -> None:
+    """Distinct-line feeders converging on one entry port nest without crossing.
+
+    Feeders forced down the single gap left of a wide row-span target are
+    staggered into parallel channels; if the channel order does not account for
+    each feeder's turn-down height, the feeder that turns down higher is placed
+    to the port side and its long descent is raked by the other's horizontal
+    traverse (#1326).  No two feeders sharing a target port may cross before it.
+    """
+    graph = parse_metro_mermaid((TOP_FIXTURES / name).read_text())
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges_centred(graph, station_offsets=offsets)
+    by_target: dict[str, list[RoutedPath]] = {}
+    for rp in routes:
+        if rp.is_inter_section:
+            by_target.setdefault(rp.edge.target, []).append(rp)
+    crossings: list[str] = []
+    for target, feeders in by_target.items():
+        for i in range(len(feeders)):
+            for j in range(i + 1, len(feeders)):
+                va, ha = _route_axis_segments(feeders[i])
+                vb, hb = _route_axis_segments(feeders[j])
+                hit = _first_axis_crossing(va, hb) or _first_axis_crossing(vb, ha)
+                if hit is not None:
+                    crossings.append(
+                        f"{feeders[i].line_id} x {feeders[j].line_id} "
+                        f"into {target} at {hit}"
+                    )
+    assert not crossings, f"{name}: converging feeders cross: {crossings}"

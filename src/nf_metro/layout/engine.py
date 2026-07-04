@@ -207,6 +207,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_topmost_row_top_entry_hugs_section,
     _guard_trunk_bands_crossing_optimal,
     _guard_trunk_continuation_drops_straight,
+    _guard_wrap_exit_anchored_to_carrier,
     _inter_section_backtrack_legs,
     _port_anchor_snapshot,
     _route_exit_side,

@@ -90,7 +90,9 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _restack_htrunk,
     _restack_trunk_band,
     _set_vchannel_x,
+    _stagger_convergent_distinct_lines,
     _suboptimal_trunk_bands,
+    _unify_coincident_corner_radii,
     _VChannel,
 )
 from nf_metro.layout.routing.postprocess import (  # noqa: F401
@@ -165,7 +167,11 @@ def _route_edges(
         rail_routes = route_rail_edges(graph, rail_edges)
 
     ctx = _build_routing_context(graph, diagonal_run, curve_radius, station_offsets)
-    routes: list[RoutedPath] = list(rail_routes)
+    # Route into the context's own list so handlers can read the routes settled
+    # so far (a wrap clearing an already-placed sibling channel); it grows as
+    # edges route and is what every post-loop pass consumes.
+    routes: list[RoutedPath] = ctx.built_routes
+    routes.extend(rail_routes)
 
     for edge in graph.edges:
         if (edge.source, edge.target, edge.line_id) in ctx.skip_edges:
@@ -203,7 +209,14 @@ def _route_edges(
     # port-side track, the source-side track, the merge trunk's descent, and
     # the fan-out junction handoff tail), so a single line reads as one stroke.
     _coincide_same_line_tracks(routes, ctx)
+    # Distinct-line counterpart: spread any two different lines whose final port
+    # descents were forced onto one channel (a shared gap left of a wide target).
+    _stagger_convergent_distinct_lines(routes, ctx)
     _clear_bypass_v_label_strikes(routes, ctx)
+    # Same-line legs a coincidence pass fused onto one channel each kept their
+    # handler's corner radius; unify every turn they share so the fused stroke
+    # draws one arc rather than concentric duplicates.
+    _unify_coincident_corner_radii(routes)
 
     return routes, moves
 

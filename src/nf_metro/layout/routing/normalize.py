@@ -27,6 +27,7 @@ from nf_metro.layout.routing.common import (
     _grid_row_bands,
     column_gap_edges,
     initial_fanout_descent_span,
+    is_orthogonal_turn,
     iter_horizontal_trunks,
     iter_inter_row_gaps,
     iter_port_peeloff_bundles,
@@ -47,8 +48,9 @@ from nf_metro.layout.routing.corners import (
     concentric_corner_radius_at,
     corner_radius,
     l_shape_radii,
+    widest_coincident_radius,
 )
-from nf_metro.parser.model import MetroGraph, PortSide
+from nf_metro.parser.model import MetroGraph, Port, PortSide
 
 
 @dataclass
@@ -193,6 +195,33 @@ def _locate_slot_channel(
     return None
 
 
+def _fused_sibling_spans(
+    routes: list[RoutedPath], chans: list[_VChannel]
+) -> list[tuple[float, float]]:
+    """Vertical spans of descents that will fuse onto this gap's channels.
+
+    :func:`_coincide_same_line_tracks` later snaps every same-source, same-line
+    opening descent onto one shared channel -- including a deep wrap the
+    materialization pass never sees, because its handler owns it
+    (``normalize_exempt``).  A shallow gap bundle centred for its own extent can
+    then be fused-onto by such a sibling whose descent runs on through a section
+    below, plotting the shared stroke over it.  Report those siblings' spans so
+    the gap can be narrowed against the rows they cross too.
+    """
+    keys = {(c.route.edge.source, c.route.line_id, c.down) for c in chans}
+    have = {id(c.route) for c in chans}
+    spans: list[tuple[float, float]] = []
+    for rp in routes:
+        if id(rp) in have or not rp.is_inter_section:
+            continue
+        ch = _initial_fanout_descent(rp)
+        if ch is None:
+            continue
+        if (rp.edge.source, rp.line_id, ch.down) in keys:
+            spans.append((ch.y_lo, ch.y_hi))
+    return spans
+
+
 def _materialize_gap_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
     """Resolve every declared :class:`GapSlot` to a concentric channel X.
 
@@ -231,9 +260,15 @@ def _materialize_gap_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
         # narrow the gap to the intersection of every crossed row's edges -- else
         # a leg climbing through a row whose section edge sits further out than a
         # sibling row's would centre in the wider gap and step back behind its
-        # source edge.
+        # source edge.  The spans include any deeper same-source, same-line
+        # descent that the coincidence pass will fuse onto this channel, so the
+        # shared stroke clears the rows that sibling crosses as well.
+        crossed_spans = [(c.y_lo, c.y_hi) for c in chans]
+        crossed_spans += _fused_sibling_spans(routes, chans)
         for r, band in bands.items():
-            if not any(c.y_lo < band[1] and band[0] < c.y_hi for c in chans):
+            if not any(
+                y_lo < band[1] and band[0] < y_hi for y_lo, y_hi in crossed_spans
+            ):
                 continue
             r_left, r_right = column_gap_edges(graph, lo, lo + 1, row=r)
             if r_right > r_left:
@@ -462,6 +497,44 @@ def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> No
     _join_fanout_upstream_tails(routes, ctx)
 
 
+def _unify_coincident_corner_radii(routes: list[RoutedPath]) -> None:
+    """Give same-line turns shared by several legs one radius.
+
+    Fusing same-line legs onto one channel leaves each with the flanking radius
+    its handler assigned -- a solo leg the base radius, a leg that is the outer
+    member of a concentric multi-line bundle a wider one.  Where fused legs share
+    a turn vertex the two arcs draw concentrically a few pixels apart: the
+    doubled corner :func:`check_coincident_corner_radii` forbids.  Snap each
+    shared turn to the widest coincident radius, the one that nests outside any
+    bundle sharing the vertex, so the fused stroke reads as one clean arc.
+
+    Bundle-mates of different lines sit ``OFFSET_STEP`` apart and never share a
+    vertex, so their concentric nesting is untouched; only truly coincident
+    same-line turns collapse.
+    """
+    buckets: dict[tuple[str, int, int], list[tuple[list[float], int]]] = defaultdict(
+        list
+    )
+    for rp in routes:
+        radii = rp.curve_radii
+        if radii is None:
+            continue
+        pts = rp.points
+        for k in range(1, len(pts) - 1):
+            if k - 1 >= len(radii) or not is_orthogonal_turn(
+                pts[k - 1], pts[k], pts[k + 1]
+            ):
+                continue
+            key = (rp.line_id, round(pts[k][0]), round(pts[k][1]))
+            buckets[key].append((radii, k - 1))
+    for members in buckets.values():
+        if len(members) < 2:
+            continue
+        widest = widest_coincident_radius(radii[i] for radii, i in members)
+        for radii, i in members:
+            radii[i] = widest
+
+
 def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
     """Re-stack peel-off risers onto the slot their settled trunk depth earns.
 
@@ -497,6 +570,90 @@ def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -
                 ch, slot.peel_x, slot.rank, n, step, ctx.curve_radius, ch.down
             )
             seat_peeloff_port_y(rp, slot.port_y)
+
+
+def _stagger_convergent_distinct_lines(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Spread distinct-line final port descents that collapsed onto one channel.
+
+    The distinct-line counterpart to :func:`_coincide_same_line_tracks`: two
+    feeders of DIFFERENT lines converging on one entry port can be forced down
+    the same vertical channel -- the only inter-column gap left of a wide
+    row-span target admits just one -- drawing one stroke on top of the other,
+    the overlay ``check_no_collinear_distinct_lines`` forbids.  Both feeds are
+    self-contained concentric loops (``normalize_exempt``), so neither the
+    gap-slot pass nor the same-line coincidence pass separates them.
+
+    Re-stack each coincident distinct-line cluster ``OFFSET_STEP`` apart, ordered
+    so the descent-X sequence follows the per-line entry-Y order at the port --
+    the concentric order the port-approach corner needs (a LEFT entry runs its
+    approach rightward, so a lower entry Y descends further right; a RIGHT entry
+    mirrors it).  All routes of one line share a descent X, so the same-line
+    tracks the coincidence pass already fused stay fused.  Only fires on
+    genuinely coincident distinct-line descents, so a render whose port
+    approaches are already staggered is untouched.
+    """
+    entry_port_for = ctx.merge.entry_port_for
+    by_port: dict[tuple[str, bool], list[tuple[RoutedPath, _VChannel]]] = defaultdict(
+        list
+    )
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        ch = _final_port_approach(rp)
+        if ch is None:
+            continue
+        target = entry_port_for.get(rp.edge.target, rp.edge.target)
+        by_port[(target, ch.down)].append((rp, ch))
+
+    for (port_id, _down), entries in by_port.items():
+        port = ctx.graph.ports.get(port_id)
+        if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        entries.sort(key=lambda e: e[1].x)
+        cluster: list[tuple[RoutedPath, _VChannel]] = []
+        for rp, ch in entries:
+            if cluster and abs(ch.x - cluster[-1][1].x) > COORD_TOLERANCE + 1.0:
+                _stack_distinct_port_descents(cluster, port, ctx)
+                cluster = []
+            cluster.append((rp, ch))
+        _stack_distinct_port_descents(cluster, port, ctx)
+
+
+def _stack_distinct_port_descents(
+    cluster: list[tuple[RoutedPath, _VChannel]], port: Port, ctx: _RoutingCtx
+) -> None:
+    """Re-seat one coincident cluster of distinct-line port descents.
+
+    Lines are placed one ``OFFSET_STEP`` apart from the cluster's outer edge
+    inward, ordered longest-descent-first so the feeder that turns down furthest
+    from the port nests outermost.  Each feeder reaches its channel by a
+    horizontal traverse at its turn-down Y before dropping in; seating the
+    longest descent (whose turn spans the widest Y range) on the outer lane
+    keeps every traverse clear of the other feeders' descents, so the
+    convergent lanes stay parallel rather than crossing (#1326).  A cluster of
+    a single line, or already-separate descents, is left alone.
+    """
+    by_line: dict[str, list[_VChannel]] = defaultdict(list)
+    for rp, ch in cluster:
+        by_line[rp.line_id].append(ch)
+    if len(by_line) < 2:
+        return
+    offs = ctx.station_offsets or {}
+    span = {lid: max(ch.y_hi - ch.y_lo for ch in chs) for lid, chs in by_line.items()}
+    ordered = sorted(
+        by_line, key=lambda lid: (-span[lid], offs.get((port.id, lid), 0.0))
+    )
+    xs = [ch.x for _rp, ch in cluster]
+    step = ctx.offset_step
+    left = port.side is PortSide.LEFT
+    base = min(xs) if left else max(xs)
+    for rank, lid in enumerate(ordered):
+        x = base + rank * step if left else base - rank * step
+        for ch in by_line[lid]:
+            if abs(ch.x - x) > COORD_TOLERANCE:
+                _set_vchannel_x(ch, x)
 
 
 def _band_clusters(chans: list[_VChannel], band: float) -> list[list[_VChannel]]:

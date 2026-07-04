@@ -9,20 +9,23 @@ concentric radius for its *final* waypoints -- derived through the central
 
 The bundle-corner concentricity guard (``check_concentric_bundle_corners``)
 covers every multi-line bundle corner on the final paths.  This coincide
-corner is the one place that guard does not reach, and a corpus-wide runtime
-guard cannot cover it: shipping fixtures legitimately route two same-line
-tracks through a coincident corner with *unequal* (concentrically nested)
-radii -- e.g. ``longread_variant_calling`` -- so an "equal radii at a
-coincident corner" invariant would red on ``main``.  The regression is
-locked at the source instead: every corner the coincide pass touches must
-match the central zero-offset derivation for the route's final geometry.
+corner is one place that guard does not reach: it re-derives each fused leg's
+own flanking corners to the zero-offset base radius.
+
+A separate turn a fused leg *shares* with a bundle-outer sibling is handled
+downstream by :func:`_unify_coincident_corner_radii` (checked by
+``check_coincident_corner_radii``), which snaps it to the widest coincident
+radius so the shared stroke reads as one arc.  Those shared corners are
+therefore excluded here; this file locks the per-leg source re-derivation:
+every non-shared corner the coincide pass touches must match the central
+zero-offset derivation for the route's final geometry.
 
 Covers:
 
 * Unit: :func:`_set_vchannel_x` re-derives both flanking corners from the
   moved waypoints via the central helper.
-* Corpus: across every shipped fixture, each corner the coincide pass snaps
-  matches the central derivation.
+* Corpus: across every shipped fixture, each non-shared corner the coincide
+  pass snaps matches the central derivation.
 * Meaningfulness: a hand-set radius (instead of re-deriving) makes the corpus
   check fire, so it is not vacuous.
 """
@@ -32,6 +35,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from layout_validator import shared_same_line_turn_vertices
 
 import nf_metro.layout.routing.normalize as normalize
 from nf_metro.layout.constants import CURVE_RADIUS
@@ -100,7 +104,8 @@ def _touched_corner_mismatches(
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
-    route_edges(graph, station_offsets=offsets)
+    routes = route_edges(graph, station_offsets=offsets)
+    shared = shared_same_line_turn_vertices(routes)
 
     mismatches: list[tuple[str, int, float, float]] = []
     for rp, k in touched:
@@ -111,6 +116,9 @@ def _touched_corner_mismatches(
         for radius_idx in (k - 1, k):
             if not 0 <= radius_idx < len(radii):
                 continue
+            vertex = pts[radius_idx + 1]
+            if (rp.line_id, round(vertex[0]), round(vertex[1])) in shared:
+                continue  # owned by the coincident-corner unification pass
             expected = concentric_corner_radius_at(
                 pts[radius_idx], pts[radius_idx + 1], pts[radius_idx + 2], 0.0
             )
@@ -188,7 +196,7 @@ def test_named_coincide_fixtures_snap_at_least_one_corner(
 
 
 @pytest.mark.parametrize(
-    "fixture", ["variantbenchmarking.mmd", "topologies/merge_right_entry.mmd"]
+    "fixture", ["variantbenchmarking.mmd", "topologies/divergent_fanout_split.mmd"]
 )
 def test_reintroduced_hand_clobber_is_detected(
     fixture: str, monkeypatch: pytest.MonkeyPatch

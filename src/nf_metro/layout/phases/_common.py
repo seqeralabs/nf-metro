@@ -1285,6 +1285,40 @@ def _exit_anchorable_downstream(
     return saw_target
 
 
+def exit_entry_ports_face(
+    exit_port: Port,
+    entry_port: Port,
+    exit_section: Section,
+    entry_section: Section,
+) -> bool:
+    """Whether a LEFT/RIGHT exit and its target entry port open toward each other.
+
+    They face when the exit is on the RIGHT edge and the entry on the LEFT of a
+    section further right (or the mirror): the inter-section link is then a
+    straight horizontal hop across the column gap.  When both ports sit on the
+    same horizontal side, the line must wrap vertically around one section to
+    reach the other, so aligning the exit to the downstream row only drags it
+    off its own carrier row without straightening the (wrapped) connection.
+    """
+    if exit_port.side is PortSide.RIGHT and entry_port.side is PortSide.LEFT:
+        return exit_section.bbox_x < entry_section.bbox_x
+    if exit_port.side is PortSide.LEFT and entry_port.side is PortSide.RIGHT:
+        return exit_section.bbox_x > entry_section.bbox_x
+    return False
+
+
+def _in_section_exit_carriers(
+    graph: MetroGraph, exit_port_id: str, section: Section
+) -> dict[str, float]:
+    """Y of each non-port station inside *section* that feeds *exit_port_id*."""
+    carriers: dict[str, float] = {}
+    for e in graph.edges_to(exit_port_id):
+        s = graph.stations.get(e.source)
+        if s is not None and not s.is_port and s.section_id == section.id:
+            carriers[e.source] = s.y
+    return carriers
+
+
 def flow_exit_carrier_anchor(
     graph: MetroGraph,
     exit_port_id: str,
@@ -1312,22 +1346,59 @@ def flow_exit_carrier_anchor(
         return None
     if not _exit_anchorable_downstream(graph, exit_port_id, junction_ids):
         return None
-    carrier_ys: dict[str, float] = {}
-    exit_lines: set[str] = set()
-    for e in graph.edges_to(exit_port_id):
-        s = graph.stations.get(e.source)
-        if s is not None and not s.is_port and s.section_id == section.id:
-            carrier_ys[e.source] = s.y
-            exit_lines.add(e.line_id)
-    if not carrier_ys:
+    carriers = _in_section_exit_carriers(graph, exit_port_id, section)
+    if not carriers:
         return None
-    ys = list(carrier_ys.values())
-    if len(carrier_ys) > 1:
+    ys = list(carriers.values())
+    if len(carriers) > 1:
+        exit_lines = {
+            e.line_id for e in graph.edges_to(exit_port_id) if e.source in carriers
+        }
         share_row = max(ys) - min(ys) <= SAME_COORD_TOLERANCE
-        one_line_per_carrier = len(carrier_ys) == len(exit_lines)
+        one_line_per_carrier = len(carriers) == len(exit_lines)
         if not (share_row and one_line_per_carrier):
             return None
-    carrier_ids = list(carrier_ys)
+    carrier_ids = list(carriers)
     if not exit_run_corridor_clear(graph, exit_port_id, section, carrier_ids):
         return None
     return min(ys), carrier_ids
+
+
+def wrap_exit_carrier_anchor(
+    graph: MetroGraph,
+    exit_port_id: str,
+    section: Section,
+    junction_ids: set[str],
+) -> tuple[float, list[str]] | None:
+    """Carrier row a *wrapping* flow-aligned exit should anchor to.
+
+    A LEFT/RIGHT exit on a non-fold LR/RL section whose sole downstream target
+    is an entry port on the *same* horizontal side must wrap vertically around
+    the target to reach it -- the ports do not face across the column gap (see
+    :func:`exit_entry_ports_face`).  It leaves at its carrying station's row:
+    the level change belongs to a riser in the inter-section corridor, not a
+    diagonal off the carrier row into the box corner.  Returns
+    ``(carrier_y, carrier_ids)`` when the carriers share one row (so the anchor
+    is unambiguous); ``None`` otherwise -- including the facing case that
+    :func:`flow_exit_carrier_anchor` already covers, and fan-out junctions whose
+    row follows the exit.
+    """
+    port = graph.ports.get(exit_port_id)
+    if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+        return None
+    if _is_fold_section(section) or section.direction not in ("LR", "RL"):
+        return None
+    targets = [e.target for e in graph.edges_from(exit_port_id)]
+    if len(targets) != 1 or targets[0] in junction_ids:
+        return None
+    entry_port = graph.ports.get(targets[0])
+    entry_section = graph.sections.get(entry_port.section_id) if entry_port else None
+    if entry_port is None or not entry_port.is_entry or entry_section is None:
+        return None
+    if exit_entry_ports_face(port, entry_port, section, entry_section):
+        return None
+    carriers = _in_section_exit_carriers(graph, exit_port_id, section)
+    ys = list(carriers.values())
+    if not ys or max(ys) - min(ys) > SAME_COORD_TOLERANCE:
+        return None
+    return min(ys), list(carriers)

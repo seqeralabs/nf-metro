@@ -23,6 +23,7 @@ is NEVER variable beyond the line's position within the bundle.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from typing import NamedTuple
 
 from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
@@ -332,6 +333,19 @@ def concentric_corner_radius_at(
     return concentric_corner_radius(
         turn_in, turn_out, dx, base_radius, min_radius=min_radius
     )
+
+
+def widest_coincident_radius(radii: Iterable[float]) -> float:
+    """The outermost of several corner radii meeting at one shared vertex.
+
+    Same-line legs a coincidence pass fuses onto one channel each arrive with
+    the radius their own handler produced; where they share a turn vertex the
+    fused stroke must draw the widest so it nests outside any concentric bundle
+    sharing that corner.  Selecting among radii the helper family already
+    produced keeps corner sizing centralised in this module rather than
+    scattered as inline arithmetic at the fusion site.
+    """
+    return max(radii)
 
 
 def reference_anchored_radius(

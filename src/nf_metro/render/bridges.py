@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -220,7 +221,8 @@ def compute_bridges(
     offset-applied geometry actually drawn for ``routes[i]``.  Returns a map
     from ``id(route)`` of each under-route to the gaps to break on it.
     """
-    node_xy = [(s.x, s.y) for s in graph.stations.values()]
+    node_pos = {s.id: (s.x, s.y) for s in graph.stations.values()}
+    node_xy = list(node_pos.values())
     station_xy = {
         s.id: (s.x, s.y)
         for s in graph.stations.values()
@@ -229,7 +231,7 @@ def compute_bridges(
     line_succ = _line_adj(graph)
     line_pred = _line_pred_from_succ(line_succ)
     crossings = _find_crossings(
-        routes, polylines, node_xy, station_xy, line_succ, line_pred
+        routes, polylines, node_pos, station_xy, line_succ, line_pred
     )
     clusters = _cluster_crossings(crossings)
 
@@ -307,7 +309,7 @@ def _guard_bridges(
 def _find_crossings(
     routes: list[RoutedPath],
     polylines: list[list[Point]],
-    node_xy: list[Point],
+    node_pos: dict[str, Point],
     station_xy: dict[str, Point],
     line_succ: dict[str, dict[str, set[str]]],
     line_pred: dict[str, dict[str, set[str]]],
@@ -319,18 +321,27 @@ def _find_crossings(
     routes are independent legs heading to separate destinations (a genuine
     crossover); same-line crossings that are a fan-out/fan-in/loop reordering
     are skipped (``_same_line_is_fan``) since their legs belong to one fork and
-    rejoin rather than cross."""
+    rejoin rather than cross.  The one exception: legs that share the fork/join
+    node yet re-cross far from it, which a shared endpoint cannot explain and so
+    reads as a genuine crossover (``_fan_recrosses_far_from_node``)."""
+    node_xy = list(node_pos.values())
     out: list[_Crossing] = []
     for a in range(len(routes)):
         ra, pa = routes[a], polylines[a]
         for b in range(a + 1, len(routes)):
             rb, pb = routes[b], polylines[b]
-            if _shares_endpoint(ra.edge, rb.edge):
+            same_line = ra.line_id == rb.line_id
+            shares = _shares_endpoint(ra.edge, rb.edge)
+            if shares and not same_line:
                 continue
-            if ra.line_id == rb.line_id and _same_line_is_fan(
+            is_fan = same_line and _same_line_is_fan(
                 ra.edge, rb.edge, line_succ, line_pred=line_pred
-            ):
-                continue
+            )
+            shared_nodes = (
+                {ra.edge.source, ra.edge.target} & {rb.edge.source, rb.edge.target}
+                if is_fan
+                else set()
+            )
             endpoints = (ra.edge.source, ra.edge.target, rb.edge.source, rb.edge.target)
             for i in range(len(pa) - 1):
                 for j in range(len(pb) - 1):
@@ -338,6 +349,10 @@ def _find_crossings(
                     if pt is None or _near_node(pt, node_xy):
                         continue
                     if _near_join(pt, endpoints, station_xy):
+                        continue
+                    if is_fan and not _fan_recrosses_far_from_node(
+                        pt, shared_nodes, node_pos
+                    ):
                         continue
                     ang = _angle_between(
                         _segment_angle_deg(pa[i], pa[i + 1]),
@@ -349,19 +364,35 @@ def _find_crossings(
     return out
 
 
+def _fan_recrosses_far_from_node(
+    pt: Point, shared_nodes: set[str], node_pos: dict[str, Point]
+) -> bool:
+    """True when a fan's crossing is a genuine crossover to bridge, not the
+    fork/join itself.
+
+    A shared endpoint accounts for the two legs meeting only in the
+    neighbourhood of that node; a re-cross far from it, in open space, is a
+    real crossover.  Legs that fork/join without a shared node (reconvergence
+    only) have nothing to re-cross far from, so their crossing is never a
+    crossover."""
+    return bool(shared_nodes) and not _near_any(pt, shared_nodes, node_pos)
+
+
+def _near_any(pt: Point, node_ids: Iterable[str], positions: dict[str, Point]) -> bool:
+    """True if ``pt`` is within ``BRIDGE_JOIN_TOLERANCE`` of any named node."""
+    return any(
+        (nxy := positions.get(nid)) is not None
+        and math.hypot(pt[0] - nxy[0], pt[1] - nxy[1]) < BRIDGE_JOIN_TOLERANCE
+        for nid in node_ids
+    )
+
+
 def _near_join(
     pt: Point, endpoints: tuple[str, ...], station_xy: dict[str, Point]
 ) -> bool:
     """True if the crossing is the approach to a real station where one of the
     crossing lines joins/branches - a join, not a crossover."""
-    for nid in endpoints:
-        nxy = station_xy.get(nid)
-        if (
-            nxy is not None
-            and math.hypot(pt[0] - nxy[0], pt[1] - nxy[1]) < BRIDGE_JOIN_TOLERANCE
-        ):
-            return True
-    return False
+    return _near_any(pt, endpoints, station_xy)
 
 
 def _cluster_crossings(crossings: list[_Crossing]) -> list[list[_Crossing]]:
@@ -387,6 +418,31 @@ def _cluster_crossings(crossings: list[_Crossing]) -> list[list[_Crossing]]:
     for i, c in enumerate(crossings):
         groups[find(i)].append(c)
     return list(groups.values())
+
+
+def _crossing_graph(
+    cluster: list[_Crossing],
+    routes: list[RoutedPath],
+    *,
+    same_line_only: bool = False,
+) -> tuple[set[int], dict[int, set[int]], dict[int, int]]:
+    """Build a cluster's crossing graph as ``(nodes, adj, seg_of)``.
+
+    With ``same_line_only`` the distinct-line crossings are dropped: they never
+    bridge, and a third line cornering through a same-line crossover can only
+    skew the over/under colouring."""
+    adj: dict[int, set[int]] = defaultdict(set)
+    nodes: set[int] = set()
+    seg_of: dict[int, int] = {}
+    for c in cluster:
+        if same_line_only and routes[c.a].line_id != routes[c.b].line_id:
+            continue
+        adj[c.a].add(c.b)
+        adj[c.b].add(c.a)
+        nodes |= {c.a, c.b}
+        seg_of[c.a] = c.seg_a
+        seg_of[c.b] = c.seg_b
+    return nodes, adj, seg_of
 
 
 def _two_colour(nodes: set[int], adj: dict[int, set[int]]) -> dict[int, int] | None:
@@ -422,22 +478,21 @@ def _cluster_gaps(
     the under bundle.  The gap is the same span (in the shared crossing
     direction) for all parallel under-lines, so the bundle breaks with one
     aligned, uniform-width gap rather than ragged per-line gaps."""
-    adj: dict[int, set[int]] = defaultdict(set)
-    nodes: set[int] = set()
-    seg_of: dict[int, int] = {}
-    for c in cluster:
-        adj[c.a].add(c.b)
-        adj[c.b].add(c.a)
-        nodes |= {c.a, c.b}
-        seg_of[c.a] = c.seg_a
-        seg_of[c.b] = c.seg_b
+    nodes, adj, seg_of = _crossing_graph(cluster, routes)
 
     colour = _two_colour(nodes, adj)
     if colour is None:
-        # A non-bipartite tangle (3+ mutually-crossing lines) has no clean
-        # over/under split; such crossings are between distinct colours and
-        # are not bridged.
-        return []
+        # A distinct-line crossing (a third line cornering through a same-line
+        # crossover) can form an odd cycle with it, leaving the full graph
+        # non-bipartite.  Distinct-line crossings never bridge - colour reads
+        # them apart - so recolour on the same-line crossings alone; the
+        # spectator lines drop out of the over/under split.
+        nodes, adj, seg_of = _crossing_graph(cluster, routes, same_line_only=True)
+        colour = _two_colour(nodes, adj)
+        if not nodes or colour is None:
+            # No same-line crossing, or 3+ same-line arms mutually crossing:
+            # no clean over/under split.
+            return []
 
     group = {
         0: [n for n in nodes if colour[n] == 0],
