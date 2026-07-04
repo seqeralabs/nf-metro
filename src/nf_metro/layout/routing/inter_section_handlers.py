@@ -284,6 +284,38 @@ class _InterFacts:
         return self.entry_side is PortSide.LEFT and self.sx > self.tx + COORD_TOLERANCE
 
     @property
+    def is_perp_exit_farside_entry_wrap(self) -> bool:
+        """A trailing perp (BOTTOM/TOP) exit feeding a LEFT/RIGHT entry on the
+        target's *far* side, reached by wrapping through the inter-row gap.
+
+        The trunk leaves a vertical-flow section along the flow, out its trailing
+        TOP/BOTTOM edge; the consumer is a LEFT/RIGHT entry whose port faces away
+        from the source (:attr:`left_entry_from_right` / its right-side mirror).
+        The flow-direction drop (:func:`_route_tb_bottom_exit`) would run down the
+        target's own border to reach the far-edge port, and the LEFT/RIGHT-entry
+        wrap family's sideways lead-out would claw back across the source box; the
+        clean shape leaves the port along the flow into the gap, then wraps around
+        the target to approach the port horizontally.
+
+        Unlike :attr:`is_tb_bottom_exit` this is offset-independent, so the
+        validate and render routing paths dispatch it identically.
+        """
+        if not (
+            self.src_port is not None
+            and not self.src_port.is_entry
+            and self.src.section_id in self.ctx.tb_sections
+        ):
+            return False
+        section = self.graph.sections.get(self.src.section_id)
+        if section is None or self.src_port.side != trailing_perp_side(
+            section.direction
+        ):
+            return False
+        return self.cross_row and (
+            self.left_entry_from_right or self.right_entry_from_left
+        )
+
+    @property
     def is_merge_trunk(self) -> bool:
         """Source carries the full bypass trunk of its merge junction."""
         return self.ctx.merge.trunk_source.get(self.edge.target) == self.edge.source
@@ -997,6 +1029,18 @@ _INTER_SECTION_RULES: list[_Rule] = [
         "same-Y straight",
         lambda f: f.same_y and not f.needs_bypass and not f.right_entry_from_left,
         _route_straight_connector,
+    ),
+    # A trailing perp (TOP/BOTTOM) exit feeding a LEFT/RIGHT entry on the
+    # target's far side wraps through the inter-row gap and around the target
+    # box, approaching the port horizontally from its outward side.  Offset-
+    # independent, so it claims this class in both the validate and render
+    # routing paths (unlike the offset-gated TB bottom-exit drop below); placed
+    # before that drop and the LEFT/RIGHT-entry wrap families, whose flow-
+    # direction drop / sideways lead-out mis-route this shape.
+    _Rule(
+        "perp-exit -> far-side entry wrap",
+        lambda f: f.is_perp_exit_farside_entry_wrap,
+        lambda f: _route_perp_exit_farside_entry_wrap(f),
     ),
     # A TB bottom-exit drop whose column has sections stacked between the source
     # and the (folded-below) target diverts around them through a clear gap; the
@@ -2743,6 +2787,7 @@ def _route_entry_wrap(
     descent_x: float,
     entry_side: PortSide,
     normalize_exempt: bool = True,
+    source_leads_down: bool = False,
 ) -> RoutedPath:
     """Fan a single-member entry-wrap loop along its centreline.
 
@@ -2767,20 +2812,35 @@ def _route_entry_wrap(
     the member's normal-projected stagger so the line lands on its station
     offset there: ``+delta`` at the source lead-in (runs rightward) and at a LEFT
     entry (runs rightward in), ``-delta`` at a RIGHT entry (runs leftward in).
+
+    A trailing perp (TOP/BOTTOM) exit leaves along the flow, not sideways, so
+    *source_leads_down* drops the horizontal lead-in: the loop starts with the
+    vertical run down the exit column (*corner_x*), collapsing the 6-point loop
+    to a 5-point D-H-?-H shape.  The source stagger then rides the drop's normal
+    (X) rather than the lead-in's (Y).
     """
     sx, sy = src.x, src.y
     ex, ey = entry_port.x, entry_port.y
     entry_delta = delta if entry_side is PortSide.LEFT else -delta
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
-    centerline = [
-        (sx, sy + src_off + delta),
-        (corner_x, sy + src_off + delta),
-        (corner_x, channel_y),
-        (descent_x, channel_y),
-        (descent_x, ey + tgt_off + entry_delta),
-        (ex, ey + tgt_off + entry_delta),
-    ]
+    if source_leads_down:
+        centerline = [
+            (corner_x + src_off + delta, sy),
+            (corner_x + src_off + delta, channel_y),
+            (descent_x, channel_y),
+            (descent_x, ey + tgt_off + entry_delta),
+            (ex, ey + tgt_off + entry_delta),
+        ]
+    else:
+        centerline = [
+            (sx, sy + src_off + delta),
+            (corner_x, sy + src_off + delta),
+            (corner_x, channel_y),
+            (descent_x, channel_y),
+            (descent_x, ey + tgt_off + entry_delta),
+            (ex, ey + tgt_off + entry_delta),
+        ]
     route = route_along(
         edge,
         [(edge, edge.line_id, -delta)],
@@ -2854,6 +2914,57 @@ def _route_left_entry_wrap(
         channel_y=hy,
         descent_x=vx,
         entry_side=PortSide.LEFT,
+    )
+    _declare_channel(route, ctx, vx, vertical_direction(ty - hy))
+    return route
+
+
+def _route_perp_exit_farside_entry_wrap(f: _InterFacts) -> RoutedPath | None:
+    """Wrap a trailing perp (BOTTOM/TOP) exit into a far-side LEFT/RIGHT entry.
+
+    Mirrors :func:`_route_left_entry_wrap` / :func:`_route_right_entry_wrap` but
+    leaves the source straight along the flow (``source_leads_down``): the perp
+    exit sits on the section's trailing edge, so the loop opens with the vertical
+    drop down the exit column into the inter-row gap, then wraps across to a
+    channel clear of the target box and approaches the port horizontally from its
+    own outward side.
+    """
+    edge, src, tgt, ctx = f.edge, f.src, f.tgt, f.ctx
+    entry_side = f.entry_side
+    assert entry_side in (PortSide.LEFT, PortSide.RIGHT)
+    sy, ty = src.y, tgt.y
+    dy = ty - sy
+    _fan, pos_n, delta, _corner_x = _wrap_fan_geometry(
+        ctx, edge, src, f.i, f.n, vertical_direction(dy)
+    )
+    # The perp exit leaves along the flow, so the source-side corner sits on the
+    # exit column rather than a lead-out right of the source box.
+    corner_x = src.x
+    hy = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius, delta)
+    hy -= delta
+    # The channel leaves the source's trailing edge, so hold it a clear band off
+    # that edge (a multi-row midpoint can land closer than the inter-row edge
+    # clearance), then keep both vertical legs long enough for the corner curves.
+    drop_sign = 1.0 if dy >= 0 else -1.0
+    hy = sy + drop_sign * max((hy - sy) * drop_sign, INTER_ROW_EDGE_CLEARANCE)
+    lo, hi = (sy, ty) if dy >= 0 else (ty, sy)
+    hy = min(max(hy, lo + ctx.curve_radius), hi - ctx.curve_radius)
+    if entry_side is PortSide.LEFT:
+        vx = _left_entry_descent_x(ctx, tgt.x, pos_n)
+    else:
+        vx = _right_entry_descent_x(ctx, tgt.x, pos_n)
+    route = _route_entry_wrap(
+        edge,
+        src,
+        tgt,
+        ctx,
+        pos_n=pos_n,
+        delta=delta,
+        corner_x=corner_x,
+        channel_y=hy,
+        descent_x=vx,
+        entry_side=entry_side,
+        source_leads_down=True,
     )
     _declare_channel(route, ctx, vx, vertical_direction(ty - hy))
     return route

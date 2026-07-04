@@ -438,7 +438,7 @@ TB_EXIT_BOUNDARY_FIXTURES = [
 def test_tb_exit_port_stays_on_bbox_boundary(name: str) -> None:
     """A vertical-flow section's flow-perpendicular exit port sits on the
     section bbox boundary after the late bbox settling (#1294)."""
-    graph = parse_metro_mermaid((FIXTURES / name).read_text())
+    graph = parse_metro_mermaid((TOP_FIXTURES / name).read_text())
     compute_layout(graph)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -451,21 +451,11 @@ def test_tb_exit_port_stays_on_bbox_boundary(name: str) -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "#1317 far-side-wrap tail: psite_id's BOTTOM exit feeds te's far-side "
-        "LEFT entry, and no handler wraps it cleanly -- the validator path "
-        "(routing without station_offsets) leads the bundle out rightward past "
-        "psite_id's own corner. Placement defects 1 & 2 are fixed; this last "
-        "crossing is the deferred fold-back routing redesign. When that lands, "
-        "this xpasses -> graduate the fixture out of regressions/.",
-    ),
-)
 def test_tb_exit_terminal_on_carrier_validates_strict() -> None:
-    """The fixture lays out clean under ``validate=True`` once the far-side
-    LEFT-entry wrap from a BOTTOM exit is routed correctly (#1317)."""
+    """The fixture lays out clean under ``validate=True``: a BOTTOM exit feeding
+    a far-side LEFT entry wraps around the target box and approaches the port
+    horizontally from its own outward side (#1317)."""
     graph = parse_metro_mermaid(
-        (FIXTURES / "tb_exit_terminal_on_carrier.mmd").read_text()
+        (TOP_FIXTURES / "tb_exit_terminal_on_carrier.mmd").read_text()
     )
     compute_layout(graph, validate=True)

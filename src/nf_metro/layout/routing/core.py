@@ -90,6 +90,7 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _restack_htrunk,
     _restack_trunk_band,
     _set_vchannel_x,
+    _stagger_convergent_distinct_lines,
     _suboptimal_trunk_bands,
     _VChannel,
 )
@@ -203,6 +204,9 @@ def _route_edges(
     # port-side track, the source-side track, the merge trunk's descent, and
     # the fan-out junction handoff tail), so a single line reads as one stroke.
     _coincide_same_line_tracks(routes, ctx)
+    # Distinct-line counterpart: spread any two different lines whose final port
+    # descents were forced onto one channel (a shared gap left of a wide target).
+    _stagger_convergent_distinct_lines(routes, ctx)
     _clear_bypass_v_label_strikes(routes, ctx)
 
     return routes, moves

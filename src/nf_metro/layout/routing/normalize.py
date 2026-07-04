@@ -48,7 +48,7 @@ from nf_metro.layout.routing.corners import (
     corner_radius,
     l_shape_radii,
 )
-from nf_metro.parser.model import MetroGraph, PortSide
+from nf_metro.parser.model import MetroGraph, Port, PortSide
 
 
 @dataclass
@@ -530,6 +530,83 @@ def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -
                 ch, slot.peel_x, slot.rank, n, step, ctx.curve_radius, ch.down
             )
             seat_peeloff_port_y(rp, slot.port_y)
+
+
+def _stagger_convergent_distinct_lines(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Spread distinct-line final port descents that collapsed onto one channel.
+
+    The distinct-line counterpart to :func:`_coincide_same_line_tracks`: two
+    feeders of DIFFERENT lines converging on one entry port can be forced down
+    the same vertical channel -- the only inter-column gap left of a wide
+    row-span target admits just one -- drawing one stroke on top of the other,
+    the overlay ``check_no_collinear_distinct_lines`` forbids.  Both feeds are
+    self-contained concentric loops (``normalize_exempt``), so neither the
+    gap-slot pass nor the same-line coincidence pass separates them.
+
+    Re-stack each coincident distinct-line cluster ``OFFSET_STEP`` apart, ordered
+    so the descent-X sequence follows the per-line entry-Y order at the port --
+    the concentric order the port-approach corner needs (a LEFT entry runs its
+    approach rightward, so a lower entry Y descends further right; a RIGHT entry
+    mirrors it).  All routes of one line share a descent X, so the same-line
+    tracks the coincidence pass already fused stay fused.  Only fires on
+    genuinely coincident distinct-line descents, so a render whose port
+    approaches are already staggered is untouched.
+    """
+    entry_port_for = ctx.merge.entry_port_for
+    by_port: dict[tuple[str, bool], list[tuple[RoutedPath, _VChannel]]] = defaultdict(
+        list
+    )
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        ch = _final_port_approach(rp)
+        if ch is None:
+            continue
+        target = entry_port_for.get(rp.edge.target, rp.edge.target)
+        by_port[(target, ch.down)].append((rp, ch))
+
+    for (port_id, _down), entries in by_port.items():
+        port = ctx.graph.ports.get(port_id)
+        if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        entries.sort(key=lambda e: e[1].x)
+        cluster: list[tuple[RoutedPath, _VChannel]] = []
+        for rp, ch in entries:
+            if cluster and abs(ch.x - cluster[-1][1].x) > COORD_TOLERANCE + 1.0:
+                _stack_distinct_port_descents(cluster, port, ctx)
+                cluster = []
+            cluster.append((rp, ch))
+        _stack_distinct_port_descents(cluster, port, ctx)
+
+
+def _stack_distinct_port_descents(
+    cluster: list[tuple[RoutedPath, _VChannel]], port: Port, ctx: _RoutingCtx
+) -> None:
+    """Re-seat one coincident cluster of distinct-line port descents.
+
+    Lines are ordered by their per-line entry offset at the port and placed one
+    ``OFFSET_STEP`` apart from the cluster's outer edge inward, so the descent-X
+    order matches the entry-Y order (concentric into the port).  A cluster of a
+    single line, or already-separate descents, is left alone.
+    """
+    by_line: dict[str, list[_VChannel]] = defaultdict(list)
+    for rp, ch in cluster:
+        by_line[rp.line_id].append(ch)
+    if len(by_line) < 2:
+        return
+    offs = ctx.station_offsets or {}
+    ordered = sorted(by_line, key=lambda lid: offs.get((port.id, lid), 0.0))
+    xs = [ch.x for _rp, ch in cluster]
+    step = ctx.offset_step
+    left = port.side is PortSide.LEFT
+    base = min(xs) if left else max(xs)
+    for rank, lid in enumerate(ordered):
+        x = base + rank * step if left else base - rank * step
+        for ch in by_line[lid]:
+            if abs(ch.x - x) > COORD_TOLERANCE:
+                _set_vchannel_x(ch, x)
 
 
 def _band_clusters(chans: list[_VChannel], band: float) -> list[list[_VChannel]]:

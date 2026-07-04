@@ -1408,3 +1408,4 @@ render_only:
     - rnaseq_simple
     - genomeassembly_organellar
     - target_entry_runway_bypass
+    - tb_exit_terminal_on_carrier
