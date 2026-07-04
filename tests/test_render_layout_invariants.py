@@ -149,6 +149,7 @@ BACKTRACK_RENDER_GUARDS = [
 # fixtures here raise under ``validate=True``, so the corpus-wide idempotence
 # and manifest tests must not pick them up.
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "regressions"
+TOP_FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 @pytest.mark.parametrize("guard_name", BACKTRACK_RENDER_GUARDS)
@@ -308,10 +309,7 @@ def test_branch_fold_repro_renders_without_wrap(name: str) -> None:
 # non-consumer station shares that trunk row: the entry runway must keep its flat
 # run on the entry (source) row and descend into the target only past the
 # bypassed station, rather than running the runway along the target trunk Y
-# straight through the non-consumer's marker (#1293).  The fixture is a folded
-# multi-line pipeline that also trips other validate-time guards, so it lives
-# under regressions/ (out of the validate=True corpus) and is exercised here
-# only for the crossing invariant on the always-on render path.
+# straight through the non-consumer's marker (#1293).
 ENTRY_RUNWAY_BYPASS_FIXTURES = [
     "target_entry_runway_bypass.mmd",
 ]
@@ -321,7 +319,7 @@ ENTRY_RUNWAY_BYPASS_FIXTURES = [
 def test_entry_runway_clears_trunk_row_non_consumer(name: str) -> None:
     """The entry runway to a trunk-row target does not rake a non-consumer
     station sharing that trunk row (#1293)."""
-    graph = parse_metro_mermaid((FIXTURES / name).read_text())
+    graph = parse_metro_mermaid((TOP_FIXTURES / name).read_text())
     compute_layout(graph)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -341,9 +339,6 @@ def test_entry_runway_clears_trunk_row_non_consumer(name: str) -> None:
 # must wrap around the target box rather than plough its interior, and a descent
 # from above must run its traverse in the with-flow band just above the target
 # row rather than dive under the whole row counter to that row's flow (#1317).
-# The `feeder_l1` cul-de-sac (l1 entering and exiting on the same side) trips the
-# opposing-overlap guard, which keeps the map under regressions/; these guards
-# cover everything else the graduation depends on.
 FAR_SIDE_WRAP_GUARDS = [
     "_guard_routes_enter_sections_at_ports",
     "_guard_entry_approach_from_port_side",
@@ -360,7 +355,7 @@ def test_far_side_entry_wraps_without_plough_or_counterflow(guard_name: str) -> 
     from nf_metro.layout.phases import guards as guards_module
 
     graph = parse_metro_mermaid(
-        (FIXTURES / "target_entry_runway_bypass.mmd").read_text()
+        (TOP_FIXTURES / "target_entry_runway_bypass.mmd").read_text()
     )
     compute_layout(graph)
     routes = route_edges(graph)
@@ -368,30 +363,37 @@ def test_far_side_entry_wraps_without_plough_or_counterflow(guard_name: str) -> 
     guard(graph, guard_name, routes=routes)
 
 
-def test_feeder_l1_cul_de_sac_blocks_validate() -> None:
-    """`target_entry_runway_bypass` trips the opposing-overlap guard on its
-    same-side-I/O `feeder_l1` cul-de-sac (l1 enters and exits on the same side),
-    which keeps the map under regressions/ (#1317; hairpin layout is #1182).
+def test_same_side_culdesac_entry_reanchors_to_leading_edge() -> None:
+    """A same-side-I/O cul-de-sac section that also takes an opposite-side
+    fold-in feed re-anchors its flow-axis entry to the leading edge, keeping the
+    entry beside its own-side consumers rather than raking the section's full
+    width against its internal trunk (#1293/#1317; same-side idiom #1182).
 
-    A pass here means the cul-de-sac fold is gone: graduate the fixture to
-    tests/fixtures/ + render_only and drop this guard."""
+    `feeder_l1` in `target_entry_runway_bypass` enters `l1` from the left
+    (`al1 -> fl0, fl1`), exits `l1` to the left (`fl2/fl3 -> target`), and folds
+    a third feed in from the right (`fb_out -> fl3`).  The right-side fold-in
+    must not mask the left entry's fold: the entry belongs beside its own-side
+    consumers `fl0/fl1`, which sit at the RL leading (right) edge."""
     from nf_metro.layout.phases.guards import iter_opposing_line_overlaps
+    from nf_metro.parser.model import PortSide
 
     graph = parse_metro_mermaid(
-        (FIXTURES / "target_entry_runway_bypass.mmd").read_text()
+        (TOP_FIXTURES / "target_entry_runway_bypass.mmd").read_text()
     )
-    compute_layout(graph)
+    entry_sides = [side for side, lines in graph.sections["feeder_l1"].entry_hints]
+    assert entry_sides == [PortSide.RIGHT], (
+        "feeder_l1's left entry should re-anchor to the RL leading (right) edge "
+        f"beside its own-side consumers, got {entry_sides}"
+    )
+
+    compute_layout(graph, validate=True)
     overlaps = [
         ov
         for ov in iter_opposing_line_overlaps(graph)
         if ov.line_id == "l1"
         and "feeder_l1" in (ov.tgt_a + ov.tgt_b + ov.src_a + ov.src_b)
     ]
-    assert overlaps, (
-        "feeder_l1 cul-de-sac folds l1 back over itself no more -- graduate "
-        "target_entry_runway_bypass to tests/fixtures/ + render_only and drop "
-        "this reminder (#1317, #1182)"
-    )
+    assert not overlaps, f"feeder_l1 l1 still folds back over itself: {overlaps}"
 
 
 # A flow-side entry port that lands ON the target's trunk row while a

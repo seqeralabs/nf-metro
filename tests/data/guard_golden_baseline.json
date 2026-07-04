@@ -53287,6 +53287,37 @@
       "_guard_symmetric_diamond_branches_half_pitch|final"
     ]
   },
+  "tests/fixtures/target_entry_runway_bypass.mmd": {
+    "raised": [
+      "PhaseInvariantError",
+      "after Stage 5.3: station 'fl1' marker bbox (x=1358.0, y=660.4..670.4, half_h=5.0) outside section 'feeder_l1' bbox (1080.0, 524.0, w=328.0, h=140.0)"
+    ],
+    "trace": [
+      "_guard_no_same_row_backward_feed|None",
+      "_guard_no_mixed_entry_directions|None",
+      "_guard_section_bboxes_positive|after Stage 1.1",
+      "_guard_no_negative_grid_columns|after Stage 1.1",
+      "_guard_explicit_grid_directions|after Stage 1.1",
+      "_guard_fold_relocated_flow_ports_face_connections|after Stage 1.1",
+      "_guard_tall_anchor_stack_well_formed|after Stage 1.1",
+      "_guard_independent_components_disjoint|after Stage 1.3",
+      "_guard_multi_section_cell_packed|after Stage 1.3",
+      "_guard_coordinates_finite|after Stage 2.1",
+      "_guard_stations_in_sections|after Stage 2.1",
+      "_guard_section_bboxes_positive|after Stage 2.1",
+      "_guard_ports_on_boundaries|after Stage 3.1",
+      "_guard_ports_on_boundaries|after top-align",
+      "_guard_anchors_frozen_during_placement|Stage 4.9 _redistribute_fanout_siblings",
+      "_guard_anchors_frozen_during_placement|Stage 4.10 _redistribute_full_bundle_columns",
+      "_guard_coordinates_finite|after Stage 5.2",
+      "_guard_section_bboxes_positive|after Stage 5.2",
+      "_guard_ports_on_boundaries|after Stage 5.2",
+      "_guard_station_x_column_drift|after Stage 5.2",
+      "_guard_coordinates_finite|after Stage 5.3",
+      "_guard_section_bboxes_positive|after Stage 5.3",
+      "_guard_stations_in_sections|after Stage 5.3"
+    ]
+  },
   "tests/fixtures/tb_right_exit_feeder_slots.mmd": {
     "raised": null,
     "trace": [

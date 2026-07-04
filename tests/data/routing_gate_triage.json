@@ -411,10 +411,6 @@
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },
-  "intra_handlers.py::and abs(st.y - sy) < COORD_TOLERANCE_FINE::#1": {
-    "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
-    "status": "defensive"
-  },
   "intra_handlers.py::and line not in graph.station_lines(sid)::#1": {
     "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
     "status": "defensive"
@@ -451,10 +447,6 @@
     "note": "Entry-runway 'too tight' return cannot fire: |nearest_src - entry_port_x| is floored at SECTION_X_PADDING (50px, the entry port sits at section.bbox_x = min(internal_station_x) - SECTION_X_PADDING), while src_min + diagonal_run = CURVE_RADIUS(10) + MIN_STRAIGHT_PORT(5) + DIAGONAL_RUN(30) = 45px. Since 50 >= 45 the guard is always False.",
     "status": "defensive"
   },
-  "intra_handlers.py::if abs(st.y - ty) < COORD_TOLERANCE_FINE:::#1": {
-    "note": "Entry-runway trunk-row non-consumer bypass (#1293). True arm classifies a bypassed non-consumer as sitting on the target row. Exercised by tests/fixtures/regressions/target_entry_runway_bypass.mmd, which is kept out of the validate=True corpus (it also trips other validate guards) and out of the gate-coverage corpus, so no clean corpus fixture takes this arm.",
-    "status": "defensive"
-  },
   "intra_handlers.py::if abs(tgt.x - src.x) >= COORD_TOLERANCE:::#1": {
     "note": "_route_near_zero_gap_straight: a same-section, non-TB intra edge with |tgt.x - src.x| < COORD_TOLERANCE (1px) and non-zero dy is not constructible, so the straight-return (False) arm is never taken: layering assigns increasing X along edges so the minimum |dx| at _route_intra_section across the corpus is 50px (port spacing / off-track output lead). TB same-track edges that could reach |dx|=0 are intercepted by _route_tb_internal before this handler. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
@@ -485,10 +477,6 @@
   },
   "intra_handlers.py::if not section:::#1": {
     "note": "_route_entry_runway only runs on an entry-port -> internal-station edge; the target of such an edge always carries a section_id that resolves, so the guard's return-None arm protects against a malformed graph rather than a topology.",
-    "status": "defensive"
-  },
-  "intra_handlers.py::if not ty_blocker_xs:::#1": {
-    "note": "Entry-runway trunk-row non-consumer bypass (#1293). False arm (a non-consumer of the entering line sits on the target trunk row) drives the target-compressed runway. Exercised by tests/fixtures/regressions/target_entry_runway_bypass.mmd, which is kept out of the validate=True corpus (it also trips other validate guards) and out of the gate-coverage corpus, so no clean corpus fixture takes this arm.",
     "status": "defensive"
   },
   "intra_handlers.py::if over_end - over_start < 2 * ctx.curve_radius:::#1": {

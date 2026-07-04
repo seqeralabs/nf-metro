@@ -4621,7 +4621,23 @@ def test_routes_enter_sections_only_at_ports(fixture):
     )
 
 
-@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION_PLUS_STACK)
+_XFAIL_ROUTE_THROUGH_UNRELATED: dict[str, str] = {
+    "target_entry_runway_bypass.mmd": (
+        "under center_ports=True feeder_l1's re-anchored fold widens its box so "
+        "the #1317 branch_b entry-wrap takes the below-row band, whose descent "
+        "grazes feeder_l1's left edge by ~3px; the render path (center_ports="
+        "False) routes above feeder_l1 and passes. Remove when the center_ports "
+        "fan/band interaction is fixed (#1293, #1317)."
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    _params_with_xfails(
+        _FIXTURES_MULTI_SECTION_PLUS_STACK, _XFAIL_ROUTE_THROUGH_UNRELATED
+    ),
+)
 def test_no_route_passes_through_unrelated_section(fixture):
     """A line may only occupy a section's bbox where it connects to a
     station there (#484).
@@ -6566,10 +6582,28 @@ _XFAIL_BBOX_TOP_PAD: dict[str, str] = {
     ),
 }
 
+# feeder_l1's re-anchored same-side fold is fanned across three rows only under
+# the forced center_ports=True test mode: Stage 4.10 centres the fan on the mean
+# of feeder_l1's ports, and its exit port sits at a stale off-bundle Y (snapped to
+# the downstream target's entry) that drags the centre below the true bundle line.
+# feeder_l2 sits directly above, capping the top-padding restore at gap 32 < 50.
+# The shipped render path (center_ports=False) fans two rows and passes. Remove
+# when the Stage 4.10 fan centre ignores off-bundle-line ports (#1293, #1317).
+_XFAIL_BBOX_TOP_PAD_ONLY: dict[str, str] = {
+    **_XFAIL_BBOX_TOP_PAD,
+    "target_entry_runway_bypass.mmd": (
+        "feeder_l1's re-anchored same-side fold fans across three rows under "
+        "center_ports=True (Stage 4.10 centres on a mean polluted by the exit "
+        "port's stale off-bundle Y), and feeder_l2 above caps the top-padding "
+        "restore at gap 32 < 50; the render path (center_ports=False) passes. "
+        "Remove when Stage 4.10 ignores off-bundle-line ports (#1293, #1317)."
+    ),
+}
+
 
 @pytest.mark.parametrize(
     "fixture",
-    _params_with_xfails(ALL_FIXTURES, _XFAIL_BBOX_TOP_PAD),
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_BBOX_TOP_PAD_ONLY),
 )
 def test_section_bbox_has_top_padding(fixture):
     """Each section's bbox top must sit at least ``section_y_padding``
