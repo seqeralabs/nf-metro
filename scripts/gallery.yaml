@@ -1286,6 +1286,14 @@ gallery:
       port, rather than leading out to a centred gap channel and hooking back: a hook's opposite-handed
       corners cannot nest a multi-line bundle. The destination section carries the matching
       line order so the bundle arrives in the order the section lays it out (#1018)."
+  - id: near_edge_exit_corner
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A station one column short of its section's right edge whose exit port sits on
+      that edge, one lane below it. Equalising the station's flat runs must not push the exit's
+      approach corner past the port: the corner stays inside the box so the line turns down through
+      the port cleanly rather than bulging outside the section and doubling back (issue #1314)."
 
   # ── Off-track & Rails ──────────────────────────────────────────────────────
   - id: off_track_convergence

@@ -477,6 +477,67 @@ def _flat_connects_to_internal_chain(
     return False
 
 
+def _far_stub_floor(graph: MetroGraph, node_id: str) -> float:
+    """Minimum flat a diagonal's endpoint stub needs before its corner.
+
+    A stub landing on a port needs room for the turn corner and the port's own
+    straight approach; an ordinary edge endpoint needs only the edge floor.
+    """
+    st = graph.stations.get(node_id)
+    if st is not None and st.is_port:
+        return CURVE_RADIUS + MIN_STRAIGHT_PORT
+    return MIN_STRAIGHT_EDGE
+
+
+def _clamp_centering_shift(
+    graph: MetroGraph,
+    shift: float,
+    in_routes: list[RoutedPath],
+    out_routes: list[RoutedPath],
+) -> float:
+    """Clamp an equalising shift so no diagonal's stub into a port inverts.
+
+    The shift slides each diagonal's two corners by ``shift`` in X.  That
+    shortens the outgoing diagonals' stubs to their targets and the incoming
+    diagonals' stubs from their sources (or lengthens them, for the opposite
+    sign).  A port sits on the section boundary, so a shift that drives a
+    corner past a port endpoint bulges the stroke outside the bbox and doubles
+    it back (issue #1314).  Only port endpoints are bounded: an interior
+    endpoint has no boundary to overshoot, and the near-station flats are
+    already guarded by the caller.  The pre-shift geometry clears every port's
+    :func:`_far_stub_floor`, so zero is always feasible and the clamp only ever
+    shrinks the magnitude.
+    """
+    lo, hi = -math.inf, math.inf
+
+    def _bound_stub(moving_x: float, fixed_x: float, floor: float) -> None:
+        nonlocal lo, hi
+        v = fixed_x - moving_x
+        if abs(v) < COORD_TOLERANCE_FINE:
+            return
+        room = abs(v) - floor
+        if v > 0:
+            hi = min(hi, room)
+        else:
+            lo = max(lo, -room)
+
+    for rp in out_routes:
+        port = graph.ports.get(rp.edge.target)
+        if port is not None:
+            _bound_stub(
+                rp.points[-2][0],
+                rp.points[-1][0],
+                _far_stub_floor(graph, rp.edge.target),
+            )
+    for rp in in_routes:
+        port = graph.ports.get(rp.edge.source)
+        if port is not None:
+            _bound_stub(
+                rp.points[1][0], rp.points[0][0], _far_stub_floor(graph, rp.edge.source)
+            )
+    return max(lo, min(hi, shift))
+
+
 def _centering_candidate(
     graph: MetroGraph, ctx: _BubbleCtx, sid: str, station: Station
 ) -> _StationMoveCandidate | None:
@@ -566,6 +627,10 @@ def _centering_candidate(
             return None
         if in_rp and len(ctx.diag_out_targets.get(in_rp.edge.source, set())) > 1:
             return None
+
+    shift = _clamp_centering_shift(graph, shift, in_routes, out_routes)
+    if abs(shift) < COORD_TOLERANCE_FINE:
+        return None
 
     for rp in in_routes:
         rp.points[1] = (rp.points[1][0] + shift, rp.points[1][1])
@@ -820,12 +885,7 @@ def _clear_bypass_v_label_strikes(routes: list[RoutedPath], ctx: _RoutingCtx) ->
             # climbs to the leg's other endpoint.
             v_idx, far_idx = (1, 2) if r.edge.source == vid else (2, 1)
             far_node = r.edge.target if v_idx == 1 else r.edge.source
-            far_st = ctx.graph.stations.get(far_node)
-            far_min = (
-                CURVE_RADIUS + MIN_STRAIGHT_PORT
-                if far_st is not None and far_st.is_port
-                else MIN_STRAIGHT_EDGE
-            )
+            far_min = _far_stub_floor(ctx.graph, far_node)
             # Push the corner toward whichever label edge it overruns: the V
             # corner sits on the overrun side, so the half of the box it lies in
             # picks the direction.

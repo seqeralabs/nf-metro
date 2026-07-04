@@ -300,6 +300,7 @@
   "postprocess.py::if abs(other.y - station.y) > 1:::#1",
   "postprocess.py::if abs(rp.points[-1][0] - old_x) < STATION_MOVE_TOLERANCE:::#1",
   "postprocess.py::if abs(rp.points[0][0] - old_x) < STATION_MOVE_TOLERANCE:::#1",
+  "postprocess.py::if abs(v) < COORD_TOLERANCE_FINE:::#1",
   "postprocess.py::if any(_is_chain_predecessor(graph, ctx, r.edge.source) for r in flat_in):::#1",
   "postprocess.py::if any(_is_internal_station(graph, r.edge.target) for r in flat_out):::#1",
   "postprocess.py::if ctx.station_offsets is None:::#1",

@@ -3844,6 +3844,84 @@ def check_peeloff_concentric(
     return out
 
 
+@dataclass(frozen=True)
+class PortCornerOvershoot:
+    """A route's approach corner overshoots its LEFT/RIGHT port past the box.
+
+    The interior segment reaching a LEFT/RIGHT port turns into the port from
+    inside the section.  Its corner (the waypoint before the port) must sit on
+    the interior side of the port; when it lands on the *outward* side, the
+    stroke bulges past the section boundary and doubles back to the port -- the
+    near-edge exit corner defect (issue #1314).
+    """
+
+    source: str
+    target: str
+    line_id: str
+    port_id: str
+    port_x: float
+    corner_x: float
+    overshoot: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"route {self.source!r}->{self.target!r} on {self.line_id!r}: "
+            f"approach corner x={self.corner_x:.1f} overshoots port "
+            f"{self.port_id!r} (x={self.port_x:.1f}) by {self.overshoot:.1f}px, "
+            f"bulging outside the section and doubling back"
+        )
+
+
+def check_port_corner_within_bbox(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+) -> list[PortCornerOvershoot]:
+    """Return routes whose interior approach corner overshoots a LEFT/RIGHT port.
+
+    A route reaching a LEFT/RIGHT port from inside its section (the intra-section
+    leg ending at an exit port, or starting at an entry port) turns into the port
+    with a corner one segment before it.  That corner must lie on the interior
+    side of the port; if it lands past the port on the outward side, the route
+    leaves the section bbox and doubles back -- the near-edge exit corner defect
+    (issue #1314).  The exterior leg of each port (an inter-section route
+    departing an exit port or arriving at an entry port) legitimately runs
+    outward, so only the interior side is checked.
+
+    The comparison is in X only, and per-line offsets shift endpoints in Y, so
+    the raw route points suffice -- no offset application is needed.
+    """
+    out: list[PortCornerOvershoot] = []
+    for r in routes:
+        pts = r.points
+        if len(pts) < 2:
+            continue
+        for node, at_end in ((r.edge.target, True), (r.edge.source, False)):
+            port = graph.ports.get(node)
+            if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                continue
+            interior = at_end != port.is_entry
+            if not interior:
+                continue
+            port_pt = pts[-1] if at_end else pts[0]
+            corner = pts[-2] if at_end else pts[1]
+            outward = 1.0 if port.side is PortSide.RIGHT else -1.0
+            overshoot = outward * (corner[0] - port_pt[0])
+            if overshoot > COORD_TOLERANCE:
+                out.append(
+                    PortCornerOvershoot(
+                        source=r.edge.source,
+                        target=r.edge.target,
+                        line_id=r.line_id,
+                        port_id=node,
+                        port_x=port_pt[0],
+                        corner_x=corner[0],
+                        overshoot=overshoot,
+                    )
+                )
+    return out
+
+
 class CurveInvariantError(RuntimeError):
     """A rendered route contains a bundle-curve defect.
 
@@ -3956,6 +4034,10 @@ def assert_render_curve_invariants(
             "peel-off bundle braids into port",
             check_peeloff_concentric(graph, routes),
         ),
+        (
+            "port approach corner overshoots the section boundary",
+            check_port_corner_within_bbox(graph, routes),
+        ),
     ]
     messages: list[str] = []
     for label, violations in named_checks:
@@ -4045,6 +4127,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_gap_channels_materialized, "A"),
     _check_spec(check_trunks_declared, "A"),
     _check_spec(check_peeloff_concentric, "A"),
+    _check_spec(check_port_corner_within_bbox, "A"),
     # --- Tier B: invoked only by a validate-path ``_guard_*`` wrapper ---
     _check_spec(check_tb_exit_corner_preserves_column_order, "B"),
     _check_spec(check_fan_merge_no_partition_crossing, "B"),
@@ -4096,6 +4179,7 @@ __all__ = [
     "NonConcentricCornerViolation",
     "PartialBranchGapViolation",
     "PeeloffBundleCrossing",
+    "PortCornerOvershoot",
     "PerpEntryBoundaryViolation",
     "PerpExitLeadInOverdip",
     "RegimeOffsetMisapplied",
@@ -4124,6 +4208,7 @@ __all__ = [
     "check_no_collinear_distinct_diagonals",
     "check_no_same_line_parallel_descents",
     "check_peeloff_concentric",
+    "check_port_corner_within_bbox",
     "check_perp_entry_boundary_consistent",
     "check_perp_exit_over_leadin_clears_only_spanned_sections",
     "check_right_entry_drop_in_when_clear",
