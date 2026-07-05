@@ -2516,6 +2516,40 @@ def _route_perp_exit_over(
     return route
 
 
+def _top_entry_side_fan_traverse_clears(
+    edge: Edge, src: Station, tgt: Station, final_x: float, ctx: _RoutingCtx
+) -> bool:
+    """Whether a below-side fan branch can traverse at the source Y then drop.
+
+    When a junction fans one line to two TOP entries -- one directly below it,
+    one below-and-to-the-side -- a drop-first route into the side entry descends
+    in a fan lane beside the aligned sibling's straight drop: two same-line
+    verticals a bundle-width apart, which trips the parallel-descent guard.
+    Traversing at the source Y to the port column and dropping straight in
+    removes the shared descent, provided both legs clear every other section.
+    """
+    graph = ctx.graph
+    if edge.source not in graph.junction_ids:
+        return False
+    if abs(tgt.x - src.x) <= ctx.curve_radius:
+        return False  # this branch is itself the aligned drop
+    aligned_sibling = any(
+        sib.line_id == edge.line_id
+        and sib.target != edge.target
+        and (sib_port := graph.ports.get(sib.target)) is not None
+        and sib_port.side in (PortSide.TOP, PortSide.BOTTOM)
+        and (sib_tgt := graph.stations.get(sib.target)) is not None
+        and abs(sib_tgt.x - src.x) <= ctx.curve_radius
+        for sib in graph.edges_from(edge.source)
+    )
+    if not aligned_sibling:
+        return False
+    exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
+    if _h_segment_crosses_other_section(graph, src.x, final_x, src.y, exclude):
+        return False
+    return not _v_segment_crosses_other_section(graph, final_x, src.y, tgt.y, exclude)
+
+
 def _route_top_entry_l_shape(
     edge: Edge, src: Station, tgt: Station, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -2643,9 +2677,16 @@ def _route_top_entry_l_shape(
             for lid in line_ids
         ]
 
+    # A below-side fan branch that shares a junction with an aligned straight
+    # drop traverses at the source Y to the port column, then drops straight in
+    # -- so its descent sits at the port X, clear of the sibling's descent,
+    # rather than paralleling it in a fan lane.
+    if _top_entry_side_fan_traverse_clears(edge, src, tgt, final_x, ctx):
+        centerline = [(sx, sy), (final_x, sy), (final_x, ty)]
+        transition_leg = 1
     # When the lead-in already sits at the landing X the trunk leg collapses;
     # drop straight from the lead-in and jog into the port instead.
-    if abs(lx0 - final_x) <= ctx.curve_radius:
+    elif abs(lx0 - final_x) <= ctx.curve_radius:
         centerline = [(sx, sy), (lx0, sy), (lx0, ty), (final_x, ty)]
         transition_leg = 2
     else:
