@@ -1,0 +1,61 @@
+%%metro title: Folded Corridor Distinct Lanes
+%%metro style: dark
+%%metro line: dna | DNA | #4a90d9
+%%metro line: rna | RNA | #e63946
+%%metro grid: preprocessing | 0,0
+%%metro grid: gatk | 1,0
+%%metro grid: variant_calling | 2,0
+%%metro grid: normalization | 2,1
+%%metro grid: consensus | 1,1
+%%metro grid: realignment | 0,1
+
+graph LR
+    subgraph preprocessing [Pre-processing]
+        %%metro exit: right | dna, rna
+        pp1[Trim]
+        pp2[Align]
+        pp1 -->|dna,rna| pp2
+    end
+    subgraph gatk [GATK]
+        %%metro entry: left | dna, rna
+        %%metro exit: right | dna, rna
+        gk1[BQSR]
+        gk2[Apply]
+        gk1 -->|dna,rna| gk2
+    end
+    subgraph variant_calling [Variant Calling]
+        %%metro entry: left | dna, rna
+        %%metro exit: bottom | dna, rna
+        vc1[Call]
+        vc2[Filter]
+        vc1 -->|dna,rna| vc2
+    end
+    subgraph normalization [Normalization]
+        %%metro direction: RL
+        %%metro entry: top | dna, rna
+        %%metro exit: left | dna, rna
+        nz1[Decompose]
+        nz2[Norm]
+        nz1 -->|dna,rna| nz2
+    end
+    subgraph consensus [Consensus]
+        %%metro direction: RL
+        %%metro entry: right | dna
+        %%metro exit: left | dna
+        cs1[Merge]
+        cs2[Vote]
+        cs1 -->|dna| cs2
+    end
+    subgraph realignment [Realignment]
+        %%metro direction: RL
+        %%metro entry: right | dna, rna
+        rl1[Realign]
+        rl2[Recall]
+        rl1 -->|dna,rna| rl2
+    end
+    pp2 -->|dna,rna| gk1
+    gk2 -->|dna,rna| vc1
+    vc2 -->|dna,rna| nz1
+    nz2 -->|dna| cs1
+    nz2 -->|rna| rl1
+    cs2 -->|dna| rl1

@@ -215,6 +215,12 @@ Three stacked analysis sections (RNA, ATAC, Protein) feed into a fold section (I
 
 Long linear pipeline whose main line wraps via a fold into a return row, with a secondary line joining mid-trunk and exiting before the end. Tests fold rowspan transitions while a partial-coverage line shares the trunk only across a sub-range of sections.
 
+### Folded Corridor Distinct Lanes
+
+Two lines (DNA, RNA) co-travel a trunk and its RL fold drop as adjacent lanes, diverge where RNA bypasses the Consensus section that DNA routes through, and reconverge at Realignment. Tests that distinct lines crowded into one folded return corridor stay an `OFFSET_STEP` apart on every shared channel rather than collapsing into a single stroke (issue #1345).
+
+![Folded Corridor Distinct Lanes](folded_corridor_distinct_lanes.png)
+
 ---
 
 ## Structural Stress Tests
