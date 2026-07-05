@@ -888,8 +888,10 @@ def _build_entry_side_mapping(
         hint_sides = {s for s, _ in section.entry_hints}
         if len(hint_sides) == 1:
             hinted_side = next(iter(hint_sides))
-        else:
+        elif hint_sides:
             hinted_side = dominant or _natural_entry_side(section.direction)
+        else:
+            hinted_side = None
 
         for lid in incoming:
             side = hinted_side if lid in hinted_lines else dominant

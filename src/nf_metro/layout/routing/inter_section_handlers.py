@@ -2659,6 +2659,14 @@ def _route_top_entry_l_shape(
 
     lx0 = sx if straight_drop else sx + lead.sign * ctx.curve_radius
 
+    # A same-row horizontal exit whose minimal lead-in would seat the vertical
+    # trunk hard against the source box's exit edge runs the riser up that edge.
+    # Seat the riser midway in the clear inter-column corridor instead.
+    if exit_side is not None and not straight_drop:
+        corridor_x = _corridor_riser_x(ctx.graph, src_sec, tgt_sec)
+        if corridor_x is not None:
+            lx0 = corridor_x
+
     # Anchor the centreline on the bundle's reference line (source offset 0) and
     # fan every co-travelling line as a per-leg offset of it, so each corner
     # radius is derived from the turn geometry rather than hand-signed.  The
@@ -2695,14 +2703,6 @@ def _route_top_entry_l_shape(
             (edge_by_line[lid], lid, src_offset(lid), src_offset(lid))
             for lid in line_ids
         ]
-
-    # A same-row horizontal exit whose minimal lead-in would seat the vertical
-    # trunk hard against the source box's exit edge runs the riser up that edge.
-    # Seat the riser midway in the clear inter-column corridor instead.
-    if exit_side is not None and not straight_drop:
-        corridor_x = _corridor_riser_x(ctx.graph, src_sec, tgt_sec)
-        if corridor_x is not None:
-            lx0 = corridor_x
 
     # Traverse at the source Y to the port column, then drop straight in.
     if _top_entry_side_fan_traverse_is_clear(edge, src, tgt, final_x, ctx):

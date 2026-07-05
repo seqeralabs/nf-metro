@@ -33,7 +33,12 @@ from nf_metro.layout.constants import (
     SECTION_X_PADDING,
     resolve_offset_step,
 )
-from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x, lanes_run_along_y
+from nf_metro.layout.geometry import (
+    AxisFrame,
+    lanes_run_along_x,
+    lanes_run_along_y,
+    shift_section,
+)
 from nf_metro.layout.routing.common import (
     inter_row_wrap_band,
     max_grid_row_with_content,
@@ -1059,23 +1064,6 @@ def _enforce_min_column_gaps(
                 s.offset_x += deficit
 
 
-def _shift_section_x(graph: MetroGraph, section: Section, delta: float) -> None:
-    """Shift a section's stations, ports and bbox left edge by ``delta``.
-
-    Moves the whole section rigidly (the global-coordinate, X-axis counterpart
-    of ``row_align._shift_section_y``), so internal geometry -- port-to-station
-    gaps, the perp-entry runway -- is preserved.
-    """
-    for sid in section.station_ids:
-        station = graph.stations.get(sid)
-        if station is not None:
-            station.x += delta
-        port = graph.ports.get(sid)
-        if port is not None:
-            port.x += delta
-    section.bbox_x += delta
-
-
 def reenforce_column_gaps(graph: MetroGraph) -> None:
     """Restore inter-column section gaps after the Stage 3.3 perp-entry shift.
 
@@ -1127,7 +1115,7 @@ def reenforce_column_gaps(graph: MetroGraph) -> None:
         deficit = effective_min - worst_gap
         for shift_col in range(col + 1, max_col + 1):
             for s in col_sections.get(shift_col, []):
-                _shift_section_x(graph, s, deficit)
+                shift_section(graph, s, dx=deficit)
 
 
 def _cols_overlap(a: Section, b: Section) -> bool:

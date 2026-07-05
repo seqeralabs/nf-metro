@@ -1845,7 +1845,7 @@ def check_no_same_line_parallel_descents(
 _MIN_RISER_EDGE_CLEARANCE = CURVE_RADIUS + COORD_TOLERANCE
 
 
-@dataclass
+@dataclass(frozen=True)
 class RiserHugsSectionEdge:
     """An inter-section vertical riser hugging one wall of an inter-column gap.
 

@@ -32,6 +32,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import (
     BBoxXIndex,
+    iter_section_overlaps,
     lanes_run_along_x,
     lanes_run_along_y,
     segment_intersects_bbox,
@@ -863,26 +864,17 @@ def _guard_no_section_overlap(graph: MetroGraph, phase: str) -> None:
     negative tolerance lets flush (touching) boxes pass but flags any genuine
     overlap.
     """
-    tolerance = -1.0
-    boxed = [
-        (sid, s) for sid, s in graph.sections.items() if s.bbox_w > 0 and s.bbox_h > 0
-    ]
-    for i in range(len(boxed)):
-        sid_a, a = boxed[i]
-        ax1, ay1 = a.bbox_x, a.bbox_y
-        ax2, ay2 = ax1 + a.bbox_w, ay1 + a.bbox_h
-        for j in range(i + 1, len(boxed)):
-            sid_b, b = boxed[j]
-            bx1, by1 = b.bbox_x, b.bbox_y
-            bx2, by2 = bx1 + b.bbox_w, by1 + b.bbox_h
-            overlap_x = ax2 - tolerance > bx1 and bx2 - tolerance > ax1
-            overlap_y = ay2 - tolerance > by1 and by2 - tolerance > ay1
-            if overlap_x and overlap_y:
-                raise PhaseInvariantError(
-                    f"{phase}: sections {sid_a!r} and {sid_b!r} overlap: "
-                    f"A=({ax1:.0f},{ay1:.0f},{ax2:.0f},{ay2:.0f}) "
-                    f"B=({bx1:.0f},{by1:.0f},{bx2:.0f},{by2:.0f})"
-                )
+    for (
+        sid_a,
+        sid_b,
+        (ax1, ay1, ax2, ay2),
+        (bx1, by1, bx2, by2),
+    ) in iter_section_overlaps(graph):
+        raise PhaseInvariantError(
+            f"{phase}: sections {sid_a!r} and {sid_b!r} overlap: "
+            f"A=({ax1:.0f},{ay1:.0f},{ax2:.0f},{ay2:.0f}) "
+            f"B=({bx1:.0f},{by1:.0f},{bx2:.0f},{by2:.0f})"
+        )
 
 
 def _guard_explicit_grid_directions(graph: MetroGraph, phase: str) -> None:
