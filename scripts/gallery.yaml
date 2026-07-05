@@ -130,6 +130,15 @@ gallery:
       same junction. The branch bundle keeps its concentric fan order, each
       spur's descent fuses onto the bundle rather than crossing it, and the
       single-line spur sections ride their own trunks."
+  - id: folded_corridor_distinct_lanes
+    source_dir: examples/topologies
+    category: Feature Showcase
+    description:
+      "Two distinct lines share a folded RL return corridor: they co-travel the
+      trunk and fold drop as adjacent lanes, diverge where one line bypasses a
+      section while the other routes through it, and reconverge at the final
+      section. Every shared channel keeps the two lines an OFFSET_STEP apart
+      rather than collapsing one stroke onto the other."
 
   # ── Realistic Pipelines ────────────────────────────────────────────────────
   - id: genomic_pipeline
