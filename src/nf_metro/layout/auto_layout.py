@@ -1485,6 +1485,46 @@ def _infer_port_sides(
                         section.entry_hints.append((side, sorted(lines)))
 
 
+def _neighbour_side_votes(
+    graph: MetroGraph,
+    sec_id: str,
+    neighbours: AbstractSet[str],
+    edge_lines: dict[tuple[str, str], set[str]],
+    *,
+    edge_key: Callable[[str], tuple[str, str]],
+    skip_unplaced: bool = False,
+) -> dict[PortSide, int]:
+    """Tally which side of ``sec_id`` each neighbour faces, weighted by lines.
+
+    Each neighbour votes for the :func:`_relative_side` its grid cell falls on
+    relative to ``sec_id``, weighted by the number of lines on the connecting
+    edge (``edge_lines[edge_key(neighbour)]``).  ``edge_key`` orients the lookup
+    for either feed direction: ``(neighbour, sec_id)`` for predecessors,
+    ``(sec_id, neighbour)`` for successors.
+
+    Neighbours absent from ``graph.sections`` are skipped.  ``skip_unplaced``
+    additionally drops neighbours whose effective grid column is ``-1`` (an
+    unassigned position during the parser phase), leaving the post-tally
+    selection policy to each caller.
+    """
+    my_col, my_row, _my_row_span, my_col_span = _effective_grid_pos(graph, sec_id)
+
+    votes: dict[PortSide, int] = defaultdict(int)
+    for other in neighbours:
+        if other not in graph.sections:
+            continue
+        other_col, other_row, _other_row_span, other_col_span = _effective_grid_pos(
+            graph, other
+        )
+        if skip_unplaced and other_col < 0:
+            continue
+        side = _relative_side(
+            my_col, my_row, other_col, other_row, my_col_span, other_col_span
+        )
+        votes[side] += len(edge_lines.get(edge_key(other), set()))
+    return votes
+
+
 def _compute_fold_exit_side(
     graph: MetroGraph,
     sec_id: str,
@@ -1497,24 +1537,15 @@ def _compute_fold_exit_side(
     exit is LEFT. For multi-row spans where all successors are below,
     uses BOTTOM so lines continue their vertical flow.
     """
-    my_col, my_row, my_row_span, my_col_span = _effective_grid_pos(graph, sec_id)
+    _my_col, my_row, my_row_span, _my_col_span = _effective_grid_pos(graph, sec_id)
 
-    side_votes: dict[PortSide, int] = defaultdict(int)
-    for tgt in successors.get(sec_id, set()):
-        tgt_sec = graph.sections.get(tgt)
-        if not tgt_sec:
-            continue
-        tgt_col, tgt_row, _tgt_row_span, tgt_col_span = _effective_grid_pos(graph, tgt)
-        lines = edge_lines.get((sec_id, tgt), set())
-        side = _relative_side(
-            my_col,
-            my_row,
-            tgt_col,
-            tgt_row,
-            my_col_span,
-            tgt_col_span,
-        )
-        side_votes[side] += len(lines)
+    side_votes = _neighbour_side_votes(
+        graph,
+        sec_id,
+        successors.get(sec_id, set()),
+        edge_lines,
+        edge_key=lambda tgt: (sec_id, tgt),
+    )
 
     if not side_votes:
         return PortSide.BOTTOM
