@@ -36805,7 +36805,7 @@
   "examples/topologies/riboseq_fold_two_dir_entry.mmd": {
     "raised": [
       "PhaseInvariantError",
-      "after final: exit port 'orf_calling__exit_left_3' at y=338.0 is off its carrier row y=298.0 (carriers ['o0']); the boundary run will render as a diagonal instead of a riser"
+      "after final: route 'o0'->'orf_calling__exit_left_3' line 'ribo' crosses section 'psite_id' boundary at (640.0, 298.0) away from any declared port"
     ],
     "trace": [
       "_guard_no_same_row_backward_feed|None",
@@ -36951,7 +36951,45 @@
       "_guard_fanout_junction_shares_exit_port_y|after final",
       "_guard_fanout_junction_resolves_upstream|after final",
       "_guard_entry_port_fed_only_by_ports|after final",
-      "_guard_flow_exit_anchored_to_carrier|after final"
+      "_guard_flow_exit_anchored_to_carrier|after final",
+      "_guard_wrap_exit_anchored_to_carrier|after final",
+      "_guard_fold_lr_exit_follows_target|after final",
+      "_guard_fold_lr_exit_sections_share_bbox_bottom|after final",
+      "_guard_stacked_rows_fill_rowspan_band|after final",
+      "_guard_perp_fed_entry_anchored_to_consumer|after final",
+      "_guard_corridor_fed_solo_rides_trunk|after final",
+      "_guard_perp_entry_clears_vertical_trunk_head|after final",
+      "_guard_post_convergence_trunk_continues|after final",
+      "_guard_perp_entry_feed_not_collinear|after final",
+      "_guard_merge_port_approach_side|after final",
+      "_guard_convergence_shallow_feeder_concentric|after final",
+      "_guard_merge_port_outgoing_side_preserved|after final",
+      "_guard_exit_inherits_entry_bundle_order|after final",
+      "_guard_bypass_port_no_slot_gaps|after final",
+      "_guard_partial_branch_offset_gaps|after final",
+      "_guard_row_gaps|after final",
+      "_guard_section_top_padding|after final",
+      "_guard_section_bottom_padding|after final",
+      "_guard_terminus_icons_within_bbox|after final",
+      "_guard_inter_section_routes_in_row_band|after final",
+      "_guard_topmost_row_top_entry_hugs_section|after final",
+      "_guard_title_band_clearance|after final",
+      "_guard_off_track_output_clears_non_producer|after final",
+      "_guard_tb_exit_corner_column_order|after final",
+      "_guard_no_split_same_line_fanout_descents|after final",
+      "_guard_no_distinct_line_fanout_crossing|after final",
+      "_guard_fan_merge_no_partition_crossing|after final",
+      "_guard_trunk_continuation_drops_straight|after final",
+      "_guard_no_dogleg_crosses_exempt_trunk|after final",
+      "_guard_no_stacked_elbow_graze|after final",
+      "_guard_fanout_tail_join|after final",
+      "_guard_perp_entry_boundary_consistent|after final",
+      "_guard_perp_exit_over_leadin_no_overdip|after final",
+      "_guard_right_entry_drop_in_when_clear|after final",
+      "_guard_right_entry_corridor_descent_no_jog|after final",
+      "_guard_inter_section_route_no_backtrack|after final",
+      "_guard_inter_section_route_no_full_width_backtrack|after final",
+      "_guard_routes_enter_sections_at_ports|after final"
     ]
   },
   "examples/topologies/riboseq_fold_two_dir_entry_hintless.mmd": {

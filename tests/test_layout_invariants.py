@@ -9198,3 +9198,28 @@ def test_interior_branch_stays_centred_on_loop(style):
             f"{fixture} [{style}]: branch {branch!r} off-centre -- "
             f"divergence run {div:.1f} != reconvergence run {recon:.1f}"
         )
+
+
+def test_explicit_fold_corner_drops_in_from_above():
+    """A return-row fold corner fed from the row above enters via a TOP drop.
+
+    ``orf_calling`` in ``riboseq_fold_two_dir_entry.mmd`` sits on an
+    explicit-grid return row (col3,row1), fed by ``quantification`` a row
+    above (col2,row0), and exits LEFT toward ``psite_id``.  A flow-aligned
+    LEFT entry would collide with that LEFT exit, forcing the feed to jog
+    down-and-left into a leading-edge port and then reverse rightward to the
+    station.  The inferred entry must instead be TOP so the drop lands
+    straight in, and must not share the exit's side (#1347).
+    """
+    graph = _layout("topologies/riboseq_fold_two_dir_entry.mmd")
+    section = graph.sections["orf_calling"]
+    entry_sides = {graph.ports[p].side for p in section.entry_ports}
+    exit_sides = {graph.ports[p].side for p in section.exit_ports}
+    assert entry_sides == {PortSide.TOP}, (
+        f"orf_calling entry should be TOP (vertical drop from the row above), "
+        f"got {[s.name for s in entry_sides]}"
+    )
+    assert not (entry_sides & exit_sides), (
+        f"orf_calling entry {[s.name for s in entry_sides]} collides with "
+        f"exit {[s.name for s in exit_sides]} -- leading-edge cul-de-sac"
+    )
