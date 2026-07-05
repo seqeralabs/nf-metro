@@ -26,6 +26,7 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
     _grid_row_bands,
     column_gap_edges,
+    drop_coincident_points,
     initial_fanout_descent_span,
     is_orthogonal_turn,
     iter_horizontal_trunks,
@@ -1517,7 +1518,7 @@ def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> N
     if not fanouts:
         return
 
-    upstream, downstream = _fanout_route_maps(routes, fanouts)
+    upstream, downstream = _fanout_route_maps(routes, fanouts, ctx.graph)
     for (jid, line_id), up in upstream.items():
         down = downstream.get((jid, line_id))
         if down is None or len(up.points) < 2:
@@ -1528,6 +1529,81 @@ def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> N
         # approach into the bend stays horizontal.
         if abs(p_prev[1] - p_last[1]) <= COORD_TOLERANCE_FINE:
             up.points[-1] = (down.points[0][0], p_last[1])
+
+
+def _round_junction_perp_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Round a perpendicular branch that peels off a horizontal junction trunk.
+
+    A fan-out junction whose trunk runs horizontally (a feed arriving along one
+    side, a sibling branch continuing along the other) can fan one line to a
+    TOP/BOTTOM entry port directly below/above it.  That branch drops straight
+    off the junction, so the horizontal-to-vertical turn falls exactly on the
+    junction where the incoming trunk and this drop are two separate routes:
+    neither owns the corner, so it renders as a hard 90 degrees while every
+    other direction change curves.
+
+    Prepend a short horizontal lead-in toward the feed side so the drop owns a
+    horizontal segment into the turn -- the corner is then a standard within-
+    path curve, landing straight down the port column.  The lead-in overlays
+    the incoming trunk (same line, same Y), so it never draws in open space; it
+    is clamped to the feeder's own length so it cannot overshoot into the
+    source section.
+
+    Runs after :func:`_coincide_same_line_tracks` because the drop's column is
+    the port X that convergence fusion settles, not a routing-time coordinate.
+    """
+    from nf_metro.layout.routing.invariants import fanout_junctions
+
+    fanouts = fanout_junctions(ctx.graph)
+    if not fanouts:
+        return
+    graph = ctx.graph
+    radius = ctx.curve_radius
+    for rp in routes:
+        if not rp.is_inter_section or rp.edge.source not in fanouts:
+            continue
+        junction = graph.stations.get(rp.edge.source)
+        if junction is None:
+            continue
+        pts = drop_coincident_points(rp.points)
+        if len(pts) < 2:
+            continue
+        # The drop must open as a bare vertical off the junction coordinate.
+        (x0, y0), (x1, y1) = pts[0], pts[1]
+        if abs(x0 - junction.x) > COORD_TOLERANCE:
+            continue
+        if abs(x1 - x0) > COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:
+            continue
+        # A feed arriving horizontally into the junction (the trunk the drop
+        # peels off), taking the nearest such feeder as the lead-in side.
+        feeder = min(
+            (
+                fs
+                for e in graph.edges_to(junction.id)
+                if (fs := graph.stations.get(e.source)) is not None
+                and abs(fs.y - junction.y) <= COORD_TOLERANCE
+                and abs(fs.x - junction.x) > COORD_TOLERANCE
+            ),
+            key=lambda fs: abs(fs.x - junction.x),
+            default=None,
+        )
+        if feeder is None:
+            continue
+        # A sibling branch continuing along the trunk axis -- a genuine fork,
+        # not a lone corner, so the drop truly peels off a through-line.
+        if not any(
+            other is not rp
+            and other.edge.source == junction.id
+            and len(op := drop_coincident_points(other.points)) >= 2
+            and abs(op[1][1] - op[0][1]) <= COORD_TOLERANCE
+            and abs(op[1][0] - op[0][0]) > COORD_TOLERANCE
+            for other in routes
+        ):
+            continue
+        side = -1.0 if feeder.x < junction.x else 1.0
+        lead_len = min(radius, abs(feeder.x - junction.x))
+        rp.points = [(x0 + side * lead_len, y0), *pts]
+        rp.curve_radii = None
 
 
 def _convergence_line_order(

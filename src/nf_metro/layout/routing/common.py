@@ -93,6 +93,25 @@ def is_orthogonal_turn(
     return axis_in is not None and axis_out is not None and axis_in != axis_out
 
 
+def drop_coincident_points(
+    points: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    """Collapse consecutive within-tolerance-identical waypoints.
+
+    A same-line coincidence fusion that snaps a lead-in onto its port column
+    leaves duplicated waypoints (a zero-length leg); reading the route's true
+    shape means seeing the geometry those duplicates hide.
+    """
+    out = [points[0]]
+    for p in points[1:]:
+        if (
+            abs(p[0] - out[-1][0]) > COORD_TOLERANCE
+            or abs(p[1] - out[-1][1]) > COORD_TOLERANCE
+        ):
+            out.append(p)
+    return out
+
+
 def vertical_flow_sections(graph: MetroGraph) -> set[str]:
     """IDs of sections whose flow runs along Y (the vertical-flow directions).
 
