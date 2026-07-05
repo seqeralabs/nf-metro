@@ -6,7 +6,62 @@ import bisect
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from nf_metro.parser.model import MetroGraph, Section
+
+_Box = tuple[float, float, float, float]
+
+
+def shift_section(
+    graph: MetroGraph, section: Section, *, dx: float = 0.0, dy: float = 0.0
+) -> None:
+    """Rigidly translate a section's stations, ports and bbox by ``(dx, dy)``.
+
+    Internal geometry (port-to-station gaps, runways) is preserved; only the
+    bbox origin moves, not its size.
+    """
+    for sid in section.station_ids:
+        station = graph.stations.get(sid)
+        if station is not None:
+            station.x += dx
+            station.y += dy
+        port = graph.ports.get(sid)
+        if port is not None:
+            port.x += dx
+            port.y += dy
+    section.bbox_x += dx
+    section.bbox_y += dy
+
+
+def iter_section_overlaps(
+    graph: MetroGraph, tolerance: float = -1.0
+) -> Iterator[tuple[str, str, _Box, _Box]]:
+    """Yield ``(sid_a, sid_b, box_a, box_b)`` for every overlapping section pair.
+
+    Each box is ``(x1, y1, x2, y2)``.  A small negative ``tolerance`` lets flush
+    (touching) boxes pass but flags any genuine overlap; a positive tolerance
+    would require a gap.  Zero-area sections are skipped.  Shared by the runtime
+    guard and the offline validator so the two cannot drift.
+    """
+    boxed = [
+        (sid, s) for sid, s in graph.sections.items() if s.bbox_w > 0 and s.bbox_h > 0
+    ]
+    for i in range(len(boxed)):
+        sid_a, a = boxed[i]
+        box_a = (a.bbox_x, a.bbox_y, a.bbox_x + a.bbox_w, a.bbox_y + a.bbox_h)
+        for j in range(i + 1, len(boxed)):
+            sid_b, b = boxed[j]
+            box_b = (b.bbox_x, b.bbox_y, b.bbox_x + b.bbox_w, b.bbox_y + b.bbox_h)
+            overlap_x = (
+                box_a[2] - tolerance > box_b[0] and box_b[2] - tolerance > box_a[0]
+            )
+            overlap_y = (
+                box_a[3] - tolerance > box_b[1] and box_b[3] - tolerance > box_a[1]
+            )
+            if overlap_x and overlap_y:
+                yield sid_a, sid_b, box_a, box_b
 
 
 class _HasXY(Protocol):

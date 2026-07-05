@@ -32,6 +32,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import (
     BBoxXIndex,
+    iter_section_overlaps,
     lanes_run_along_x,
     lanes_run_along_y,
     segment_intersects_bbox,
@@ -851,6 +852,29 @@ def _guard_multi_section_cell_packed(graph: MetroGraph, phase: str) -> None:
                     f"{upstream.id!r} right={footprint(upstream)[1]:.1f} > "
                     f"{downstream.id!r} left={footprint(downstream)[0]:.1f}"
                 )
+
+
+def _guard_no_section_overlap(graph: MetroGraph, phase: str) -> None:
+    """Section bounding boxes must not overlap.
+
+    An all-pairs AABB test over the settled section bboxes -- the runtime
+    counterpart of ``check_section_overlap`` in the offline validator.  Two
+    overlapping boxes tangle their interiors and let a route cut through a
+    section it does not belong to, so the layout must never emit them.  A small
+    negative tolerance lets flush (touching) boxes pass but flags any genuine
+    overlap.
+    """
+    for (
+        sid_a,
+        sid_b,
+        (ax1, ay1, ax2, ay2),
+        (bx1, by1, bx2, by2),
+    ) in iter_section_overlaps(graph):
+        raise PhaseInvariantError(
+            f"{phase}: sections {sid_a!r} and {sid_b!r} overlap: "
+            f"A=({ax1:.0f},{ay1:.0f},{ax2:.0f},{ay2:.0f}) "
+            f"B=({bx1:.0f},{by1:.0f},{bx2:.0f},{by2:.0f})"
+        )
 
 
 def _guard_explicit_grid_directions(graph: MetroGraph, phase: str) -> None:
@@ -3544,14 +3568,23 @@ def _guard_no_artefactual_counter_flow(
 
 
 def _is_side_entry_turn_in(graph: MetroGraph, rp: RoutedPath) -> bool:
-    """Whether *rp* is the turn-in from a LEFT/RIGHT entry port into the trunk.
+    """Whether *rp* is the turn-in leg from an entry port perpendicular to flow.
 
-    Such a route runs one leg perpendicular to a TB section's flow to reach the
-    trunk from the side port; that traverse is the entry, not a fold-back, so
-    serpentine-backtrack accounting excludes it.
+    An entry port on the axis perpendicular to its section's flow (LEFT/RIGHT on
+    a vertical-flow TB/BT section, TOP/BOTTOM on a horizontal-flow LR/RL one)
+    reaches the trunk via one traverse perpendicular to that flow.  That leg is
+    the entry, bounded by the section width, not a serpentine fold-back, so
+    backtrack accounting excludes it.
     """
     port = graph.ports.get(rp.edge.source)
-    return bool(port and port.is_entry and port.side in (PortSide.LEFT, PortSide.RIGHT))
+    if not port or not port.is_entry:
+        return False
+    section = graph.sections.get(port.section_id)
+    if section is None:
+        return False
+    if lanes_run_along_y(section.direction):
+        return port.side in (PortSide.TOP, PortSide.BOTTOM)
+    return port.side in (PortSide.LEFT, PortSide.RIGHT)
 
 
 def _guard_serpentine_no_backtrack(
@@ -4724,6 +4757,7 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     ),
     GuardSpec(_guard_station_x_column_drift, "A", bisection_safe=True),
     # --- final-only set (run only at the closing ``after final`` boundary) ---
+    GuardSpec(_guard_no_section_overlap, "B"),
     # The row trunk Y is only finalised once Stage 6.7 has re-centred
     # ``center_ports`` graphs, so this cannot bisect.
     GuardSpec(_guard_row_trunk_cy_consistent, "B", needs=frozenset({"offsets"})),

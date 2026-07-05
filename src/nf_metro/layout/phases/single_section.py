@@ -46,6 +46,7 @@ from nf_metro.layout.ordering import assign_tracks
 from nf_metro.layout.phases._common import (
     _build_section_subgraph,
     iter_sole_trunk_continuations,
+    perp_entry_lands_left,
     section_exit_lines,
 )
 from nf_metro.layout.phases.off_track import (
@@ -1041,7 +1042,7 @@ def _adjust_terminus_icon_clearance(
 def _shift_lr_perp_entry_stations(
     graph: MetroGraph,
     x_spacing: float,
-) -> None:
+) -> bool:
     """Shift internal stations in LR/RL sections with perpendicular entry.
 
     Mirrors ``_adjust_tb_entry_shifts`` for horizontal-flow sections.
@@ -1055,8 +1056,12 @@ def _shift_lr_perp_entry_stations(
     port and the nearest entry-side internal station is smaller than the
     desired gap.  Sections where the gap is already sufficient are left
     untouched.
+
+    Returns whether any section's bbox grew: only a grow changes a section's
+    footprint, so it is the sole trigger for re-checking inter-column gaps.
     """
     desired_gap = x_spacing * ENTRY_SHIFT_LR
+    any_grew = False
 
     for section in graph.sections.values():
         if section.direction not in ("LR", "RL"):
@@ -1083,14 +1088,15 @@ def _shift_lr_perp_entry_stations(
         if not internal_xs:
             continue
 
-        # Compute the current gap between port and nearest entry-side station
+        # Compute the current gap between port and nearest entry-side station.
+        # The perp entry drops on the side of the trunk opposite the flow-axis
+        # exit; internal stations then shift away from that side.
         run_lo, run_hi = min(internal_xs), max(internal_xs)
-        if section.direction == "LR":
-            # Entry is LEFT: port is left of stations
+        entry_on_left = perp_entry_lands_left(section, graph)
+        if entry_on_left:
             port_x = min(perp_port_xs)
             current_gap = run_lo - port_x
         else:
-            # RL: entry is RIGHT: port is right of stations
             port_x = max(perp_port_xs)
             current_gap = port_x - run_hi
 
@@ -1105,20 +1111,22 @@ def _shift_lr_perp_entry_stations(
             s = graph.stations.get(sid)
             if not s or s.is_port:
                 continue
-            if section.direction == "LR":
+            if entry_on_left:
                 s.x += shift
             else:
                 s.x -= shift
 
         # Keep the trailing station inside the bbox after the shift.
         # _adjust_lr_entry_inset reserves a fixed inset that only covers a
-        # same-column drop (entry port within the run's span): an RL run then
-        # shifts left, so extend the bbox left to match. A cross-column drop
+        # same-column drop (entry port within the run's span): a right-entry run
+        # then shifts left, so extend the bbox left to match. A cross-column drop
         # lands beyond the span and the fixed inset under-sizes the bbox.
-        if section.direction == "RL" and run_lo <= port_x <= run_hi:
+        grew_right_entry = not entry_on_left and run_lo <= port_x <= run_hi
+        grew_left_entry = entry_on_left and port_x > run_hi
+        if grew_right_entry:
             section.bbox_x -= shift
             section.bbox_w += shift
-        elif section.direction == "LR" and port_x > run_hi:
+        elif grew_left_entry:
             # Re-wrap the bbox around the shifted run, keeping the run's
             # padding and anchoring the left edge on the entry port (which
             # sits left of the run once it shifts right of the drop).
@@ -1126,3 +1134,34 @@ def _shift_lr_perp_entry_stations(
             right_pad = (section.bbox_x + section.bbox_w) - run_hi
             section.bbox_x = port_x - left_pad
             section.bbox_w = (run_hi + shift + right_pad) - section.bbox_x
+
+        if grew_right_entry or grew_left_entry:
+            _repin_flow_axis_exit_ports(section, graph)
+            any_grew = True
+
+    return any_grew
+
+
+def _repin_flow_axis_exit_ports(section: Section, graph: MetroGraph) -> None:
+    """Snap an LR/RL section's flow-axis exit ports back onto their bbox edge.
+
+    A LEFT/RIGHT exit port's X is fixed on the section edge in Stage 3.1, but
+    the Stage 3.3 runway grow moves that edge; without re-pinning the port
+    stays on the old edge and its exit leg doubles back over the run.  Only the
+    flow-axis X moves -- the port keeps its carrying-station Y, so the
+    station-as-elbow constraint is untouched -- and perpendicular (TOP/BOTTOM)
+    ports are left alone.
+    """
+    right_x = section.bbox_x + section.bbox_w
+    for pid in section.exit_ports:
+        port = graph.ports.get(pid)
+        station = graph.stations.get(pid)
+        if not port or not station:
+            continue
+        if port.side == PortSide.LEFT:
+            station.x = section.bbox_x
+        elif port.side == PortSide.RIGHT:
+            station.x = right_x
+        else:
+            continue
+        port.x = station.x

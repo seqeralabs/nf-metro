@@ -12,7 +12,11 @@ from nf_metro.layout.constants import (
     STATION_RADIUS_APPROX,
     resolve_offset_step,
 )
-from nf_metro.layout.geometry import lanes_run_along_x, lanes_run_along_y
+from nf_metro.layout.geometry import (
+    lanes_run_along_x,
+    lanes_run_along_y,
+    shift_section,
+)
 from nf_metro.layout.labels import active_font_scale
 from nf_metro.layout.phases._common import (
     _classify_multi_station_ys,
@@ -517,18 +521,6 @@ def _top_align_row_sections(graph: MetroGraph) -> None:
                 section.bbox_y -= delta
 
 
-def _shift_section_y(graph: MetroGraph, section: Section, delta: float) -> None:
-    """Shift a section's stations, ports and bbox top by ``delta`` (no resize)."""
-    for sid in section.station_ids:
-        station = graph.stations.get(sid)
-        if station is not None:
-            station.y += delta
-        port = graph.ports.get(sid)
-        if port is not None:
-            port.y += delta
-    section.bbox_y += delta
-
-
 def _distribute_stacked_rows_in_rowspan_band(graph: MetroGraph) -> None:
     """Distribute single-row sections stacked in a column across the band a
     neighbouring rowspan section fills.
@@ -555,7 +547,7 @@ def _distribute_stacked_rows_in_rowspan_band(graph: MetroGraph) -> None:
         for section in stack:
             delta = cursor - section.bbox_y
             if abs(delta) > SAME_COORD_TOLERANCE:
-                _shift_section_y(graph, section, delta)
+                shift_section(graph, section, dy=delta)
             cursor += section.bbox_h + gap
 
 

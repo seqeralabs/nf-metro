@@ -494,6 +494,30 @@ def test_section_layout_sections_dont_overlap(two_section_graph):
             )
 
 
+def test_guard_no_section_overlap_passes_when_disjoint(two_section_graph):
+    """The runtime overlap guard accepts a normally-placed layout."""
+    from nf_metro.layout.phases.guards import _guard_no_section_overlap
+
+    _guard_no_section_overlap(two_section_graph, "test")
+
+
+def test_guard_no_section_overlap_raises_on_overlap(two_section_graph):
+    """The runtime overlap guard fires when two section bboxes overlap."""
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_no_section_overlap,
+    )
+
+    sec2 = two_section_graph.sections["sec2"]
+    sec1 = two_section_graph.sections["sec1"]
+    # Slide sec2 left so its box overlaps sec1's.
+    sec2.bbox_x = sec1.bbox_x + sec1.bbox_w / 2
+    sec2.bbox_y = sec1.bbox_y
+
+    with pytest.raises(PhaseInvariantError, match="overlap"):
+        _guard_no_section_overlap(two_section_graph, "test")
+
+
 def test_section_layout_preserves_edge_order(two_section_graph):
     """Within a section, layering should preserve edge direction (a before b)."""
     assert two_section_graph.stations["a"].x < two_section_graph.stations["b"].x

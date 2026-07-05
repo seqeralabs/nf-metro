@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from nf_metro.layout.constants import Y_SPACING
+from nf_metro.layout.geometry import iter_section_overlaps
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import RoutedPath, is_orthogonal_turn
 from nf_metro.parser.model import MetroGraph, PortSide
@@ -109,36 +110,24 @@ def check_section_overlap(
     but not overlapping. Positive tolerance would require a gap.
     """
     violations: list[Violation] = []
-    sections = [
-        (sid, s) for sid, s in graph.sections.items() if s.bbox_w > 0 and s.bbox_h > 0
-    ]
-
-    for i in range(len(sections)):
-        sid_a, a = sections[i]
-        ax1, ay1 = a.bbox_x, a.bbox_y
-        ax2, ay2 = ax1 + a.bbox_w, ay1 + a.bbox_h
-
-        for j in range(i + 1, len(sections)):
-            sid_b, b = sections[j]
-            bx1, by1 = b.bbox_x, b.bbox_y
-            bx2, by2 = bx1 + b.bbox_w, by1 + b.bbox_h
-
-            # AABB overlap test with tolerance
-            overlap_x = ax2 - tolerance > bx1 and bx2 - tolerance > ax1
-            overlap_y = ay2 - tolerance > by1 and by2 - tolerance > ay1
-            if overlap_x and overlap_y:
-                violations.append(
-                    Violation(
-                        check="section_overlap",
-                        severity=Severity.ERROR,
-                        message=(
-                            f"Sections '{sid_a}' and '{sid_b}' overlap: "
-                            f"A=({ax1:.0f},{ay1:.0f},{ax2:.0f},{ay2:.0f}) "
-                            f"B=({bx1:.0f},{by1:.0f},{bx2:.0f},{by2:.0f})"
-                        ),
-                        context={"section_a": sid_a, "section_b": sid_b},
-                    )
-                )
+    for sid_a, sid_b, (ax1, ay1, ax2, ay2), (
+        bx1,
+        by1,
+        bx2,
+        by2,
+    ) in iter_section_overlaps(graph, tolerance):
+        violations.append(
+            Violation(
+                check="section_overlap",
+                severity=Severity.ERROR,
+                message=(
+                    f"Sections '{sid_a}' and '{sid_b}' overlap: "
+                    f"A=({ax1:.0f},{ay1:.0f},{ax2:.0f},{ay2:.0f}) "
+                    f"B=({bx1:.0f},{by1:.0f},{bx2:.0f},{by2:.0f})"
+                ),
+                context={"section_a": sid_a, "section_b": sid_b},
+            )
+        )
 
     return violations
 
@@ -1628,6 +1617,18 @@ def check_exit_port_feeder_alignment(
     return violations
 
 
+def _entry_perpendicular_to_flow(port, section) -> bool:
+    """Whether an entry port sits on the axis perpendicular to its flow.
+
+    LEFT/RIGHT on a vertical-flow (TB/BT) section, TOP/BOTTOM on a
+    horizontal-flow (LR/RL) one.  Such a port's turn-in leg is the entry,
+    perpendicular to flow, not a serpentine fold-back.
+    """
+    if section.direction in ("LR", "RL"):
+        return port.side in (PortSide.TOP, PortSide.BOTTOM)
+    return port.side in (PortSide.LEFT, PortSide.RIGHT)
+
+
 def check_serpentine_no_backtrack(
     graph: MetroGraph,
     backtrack_frac: float = 0.5,
@@ -1675,11 +1676,11 @@ def check_serpentine_no_backtrack(
         if src_sec != tgt_sec or src_sec not in serpentine_sections:
             continue
         port = graph.ports.get(route.edge.source)
-        if port and port.is_entry and port.side in (PortSide.LEFT, PortSide.RIGHT):
-            # A LEFT/RIGHT entry port's turn-in to the trunk is the entry, one
-            # leg perpendicular to flow, not a serpentine fold-back.
-            continue
         section = graph.sections[src_sec]
+        if port and port.is_entry and _entry_perpendicular_to_flow(port, section):
+            # An entry port's turn-in to the trunk is the entry, one leg
+            # perpendicular to flow, not a serpentine fold-back.
+            continue
         forward = 1.0 if section.direction != "RL" else -1.0
         pts = apply_route_offsets(route, offsets)
         for k in range(len(pts) - 1):

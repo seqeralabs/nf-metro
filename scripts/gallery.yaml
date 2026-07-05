@@ -662,6 +662,24 @@ gallery:
       over the trunk to reach it, the entry re-anchors to the section's leading
       edge; the producer then reaches it by wrapping over the section top, so the
       line reads as a clean loop and the consumer is a straight pass-through."
+  - id: riboseq_fold_two_dir_entry_hintless
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A folded Ribo-seq excerpt with no `%%metro grid:`/`entry:`/`exit:` hints:
+      P-site identification sits on the RL return row, fed from the quantification
+      section directly above it and the ORF-calling section to its right. Entry-side
+      inference picks a single sensible side (the flow-natural RIGHT, which a feed
+      reaches) from the feed geometry, so the map lays out cleanly hint-free."
+  - id: riboseq_fold_two_dir_entry
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "The same folded Ribo-seq excerpt pinned with explicit grid cells and the
+      hand-tuned `entry: top` incantation. Regression fixture for #1341's route-around
+      and overlap goals: the top-declared entry drags the right-arriving feed and
+      the P-site box overlaps its ORF neighbour. Compare the hint-free variant, which
+      lays out cleanly."
   - id: convergence_fold_diamond
     source_dir: examples/topologies
     category: Serpentine Layout

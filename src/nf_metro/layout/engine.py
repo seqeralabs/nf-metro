@@ -1211,7 +1211,11 @@ def _compute_section_layout(
     stage's start; ``# Stage X.Y:`` comments above each helper call
     name the sub-stage.
     """
-    from nf_metro.layout.section_placement import place_sections, position_ports
+    from nf_metro.layout.section_placement import (
+        place_sections,
+        position_ports,
+        reenforce_column_gaps,
+    )
 
     # On-track consumers are not yet grid-snapped; the off-track reanchor
     # (Stage 6.6 / 6.8) refuses to run until Stage 6.4 sets this True.
@@ -1355,9 +1359,14 @@ def _compute_section_layout(
 
     # Stage 3.3: Shift internal stations in LR/RL sections with
     # perpendicular (TOP/BOTTOM) entry away from the port.  Needs the
-    # aligned port X from Stage 3.2; only moves internal station X, not
-    # ports or bboxes.
-    _shift_lr_perp_entry_stations(graph, x_spacing)
+    # aligned port X from Stage 3.2.  Moves internal station X; where the
+    # runway shift outgrows the section padding it also grows the bbox and
+    # re-pins the flow-axis exit port to the shifted edge.
+    # A runway grow can widen a section's bbox into its column neighbour;
+    # re-enforce inter-column gaps so the shift never leaves sections
+    # overlapping (Stage 1.3's enforcement ran before the grow).
+    if _shift_lr_perp_entry_stations(graph, x_spacing):
+        reenforce_column_gaps(graph)
     _snap(graph, "3.3")
 
     # Stage 3.4: Align LEFT/RIGHT exit ports on row-spanning (fold)

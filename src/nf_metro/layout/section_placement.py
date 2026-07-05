@@ -33,7 +33,12 @@ from nf_metro.layout.constants import (
     SECTION_X_PADDING,
     resolve_offset_step,
 )
-from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x, lanes_run_along_y
+from nf_metro.layout.geometry import (
+    AxisFrame,
+    lanes_run_along_x,
+    lanes_run_along_y,
+    shift_section,
+)
 from nf_metro.layout.routing.common import (
     inter_row_wrap_band,
     max_grid_row_with_content,
@@ -963,6 +968,35 @@ def _has_merge_routing_in_gap(
     return False
 
 
+def _column_pair_min_gap(
+    graph: MetroGraph,
+    col_assign: dict[str, int],
+    col: int,
+    min_gap: float = MIN_INTER_SECTION_GAP,
+) -> tuple[float, list[int]]:
+    """Minimum inter-section gap needed between columns ``col`` and ``col+1``.
+
+    The effective minimum is the larger of the static floor ``min_gap``, the
+    width the traversing routing bundles occupy, and any merge-junction
+    minimum.  Also returns the per-bundle line counts that drove the bundle
+    width so callers can report why a gap was widened.
+
+    Principled bundle width: A + Σ bundle_widths + (count-1)*B + A.  For a
+    single bundle of one line this collapses to 2*A; with the default A=16 px
+    that's 32 px, smaller than the static MIN_INTER_SECTION_GAP=40 px so
+    single-line gaps are NOT widened past the standard layout column gap.
+    Multi-line or multi-bundle corridors deterministically claim only the
+    horizontal space their visual width actually occupies.
+    """
+    bundles = _bundles_in_gap(graph, col_assign, col, col + 1)
+    offset_step = resolve_offset_step(graph.track_gap)
+    bundle_min = _min_gap_for_bundles(bundles, offset_step=offset_step)
+    effective_min = max(min_gap, bundle_min)
+    if _has_merge_routing_in_gap(graph, col_assign, col, col + 1):
+        effective_min = max(effective_min, MERGE_GAP_MIN)
+    return effective_min, bundles
+
+
 def _enforce_min_column_gaps(
     graph: MetroGraph,
     col_assign: dict[str, int],
@@ -994,21 +1028,7 @@ def _enforce_min_column_gaps(
         if not left_secs or not right_secs:
             continue
 
-        # Principled gap width: A + Σ bundle_widths + (count-1)*B + A.
-        # For a single bundle of one line this collapses to 2*A; with
-        # the default A=16 px that's 32 px, smaller than the static
-        # MIN_INTER_SECTION_GAP=40 px so single-line gaps are NOT widened
-        # past the standard layout column gap.  Multi-line or multi-bundle
-        # corridors deterministically claim only the horizontal space
-        # their visual width actually occupies.
-        bundles = _bundles_in_gap(graph, col_assign, col, col + 1)
-        offset_step = resolve_offset_step(graph.track_gap)
-        bundle_min = _min_gap_for_bundles(bundles, offset_step=offset_step)
-        effective_min = max(min_gap, bundle_min)
-
-        # Widen further for gaps with merge junction routing
-        if _has_merge_routing_in_gap(graph, col_assign, col, col + 1):
-            effective_min = max(effective_min, MERGE_GAP_MIN)
+        effective_min, bundles = _column_pair_min_gap(graph, col_assign, col, min_gap)
 
         # Find the tightest gap among row-overlapping section pairs
         worst_gap: float | None = None
@@ -1042,6 +1062,60 @@ def _enforce_min_column_gaps(
         for shift_col in range(col + 1, max_col + 1):
             for s in col_sections.get(shift_col, []):
                 s.offset_x += deficit
+
+
+def reenforce_column_gaps(graph: MetroGraph) -> None:
+    """Restore inter-column section gaps after the Stage 3.3 perp-entry shift.
+
+    ``_shift_lr_perp_entry_stations`` can grow a section's bbox into its column
+    neighbour, an overlap the Stage 1.3 :func:`_enforce_min_column_gaps` (which
+    runs before the shift) never re-checks.  Re-run the same column-gap logic on
+    the settled global coordinates: translate each column's sections rightward
+    by any remaining gap deficit, keeping the routing gap every adjacent column
+    needs.  A no-op where the shift left the gaps intact, so sections that never
+    grew are untouched.
+
+    Unlike the Stage 1.3 pass this operates in global coordinates (past Stage
+    2.1, ``bbox_x`` and station/port ``x`` are absolute and ``offset_x`` is
+    inert), so it shifts the section contents rather than ``offset_x``.
+    """
+    if not graph.sections:
+        return
+
+    col_assign = {sid: s.grid_col for sid, s in graph.sections.items()}
+    col_sections: dict[int, list[Section]] = defaultdict(list)
+    for sid, section in graph.sections.items():
+        col_sections[col_assign[sid]].append(section)
+
+    min_col = min(col_assign.values())
+    max_col = max(
+        col + graph.sections[sid].grid_col_span - 1 for sid, col in col_assign.items()
+    )
+
+    for col in range(min_col, max_col):
+        left_secs = col_sections.get(col, [])
+        right_secs = col_sections.get(col + 1, [])
+        if not left_secs or not right_secs:
+            continue
+
+        effective_min, _ = _column_pair_min_gap(graph, col_assign, col)
+
+        worst_gap: float | None = None
+        for ls in left_secs:
+            for rs in right_secs:
+                if not _rows_overlap(ls, rs):
+                    continue
+                gap = rs.bbox_x - (ls.bbox_x + ls.bbox_w)
+                if worst_gap is None or gap < worst_gap:
+                    worst_gap = gap
+
+        if worst_gap is None or worst_gap >= effective_min:
+            continue
+
+        deficit = effective_min - worst_gap
+        for shift_col in range(col + 1, max_col + 1):
+            for s in col_sections.get(shift_col, []):
+                shift_section(graph, s, dx=deficit)
 
 
 def _cols_overlap(a: Section, b: Section) -> bool:

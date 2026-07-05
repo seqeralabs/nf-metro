@@ -59,6 +59,7 @@ from nf_metro.layout.routing.common import (
     iter_port_peeloff_bundles,
     iter_vertical_segments,
     peeloff_target_slots,
+    perp_peeloff_off_horizontal_junction,
     resolve_section,
     tail_on_slot,
     trunk_segments_cross,
@@ -647,14 +648,22 @@ def fanout_junctions(graph) -> dict[str, str]:  # noqa: ANN001 - MetroGraph (avo
 def _fanout_route_maps(
     routes: list[RoutedPath],
     fanouts: dict[str, str],
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
 ) -> tuple[dict[tuple[str, str], RoutedPath], dict[tuple[str, str], RoutedPath]]:
     """Index fan-out-incident routes by ``(junction_id, line_id)``.
 
     Returns ``(upstream, downstream)``: ``upstream`` holds each
-    ``port -> junction`` route, ``downstream`` the first
-    ``junction -> target`` route for that line.  Both the apex-gap check
-    and the routing pass that closes it consume these maps, so the keying
-    is defined once.
+    ``port -> junction`` route, ``downstream`` the ``junction -> target``
+    route whose start sits at the junction.  Both the apex-gap check and
+    the routing pass that closes it consume these maps, so the keying is
+    defined once.
+
+    The handoff representative must be a branch that leaves *at* the
+    junction, not one whose lead-in is back-extended along the trunk to
+    round a departure (a perpendicular drop rounded by
+    :func:`_round_junction_perp_peeloff` starts a lead-in to the feed
+    side).  A back-extended start would read as an along-trunk gap the
+    apex check falsely flags, so the downstream nearest the junction wins.
     """
     upstream: dict[tuple[str, str], RoutedPath] = {}
     downstream: dict[tuple[str, str], RoutedPath] = {}
@@ -664,8 +673,21 @@ def _fanout_route_maps(
         if r.edge.target in fanouts:
             upstream[(r.edge.target, r.line_id)] = r
         if r.edge.source in fanouts:
-            downstream.setdefault((r.edge.source, r.line_id), r)
+            key = (r.edge.source, r.line_id)
+            junction = graph.stations.get(r.edge.source)
+            incumbent = downstream.get(key)
+            if incumbent is None or (
+                junction is not None
+                and _start_dist(r, junction) < _start_dist(incumbent, junction)
+            ):
+                downstream[key] = r
     return upstream, downstream
+
+
+def _start_dist(route: RoutedPath, station) -> float:  # noqa: ANN001 - Station
+    """Distance from a route's first waypoint to a station's position."""
+    x, y = route.points[0]
+    return abs(x - station.x) + abs(y - station.y)
 
 
 def check_fanout_tail_join(
@@ -689,7 +711,7 @@ def check_fanout_tail_join(
     if not fanouts:
         return []
 
-    upstream, downstream = _fanout_route_maps(routes, fanouts)
+    upstream, downstream = _fanout_route_maps(routes, fanouts, graph)
 
     gaps: list[FanoutTailGap] = []
     for (jid, line_id), up in upstream.items():
@@ -720,6 +742,70 @@ def check_fanout_tail_join(
                 )
             )
     return gaps
+
+
+@dataclass(frozen=True)
+class JunctionPeeloffCorner:
+    """A perpendicular branch peeling off a horizontal junction trunk unrounded.
+
+    ``junction_id`` fans ``line_id`` from a horizontally-run trunk; the branch
+    to ``downstream_target`` drops perpendicular directly off the junction with
+    a bare vertical first segment (no lead-in), so its departure renders as a
+    hard 90 degrees instead of the standard corner curve.
+    """
+
+    junction_id: str
+    line_id: str
+    downstream_target: str
+    corner: tuple[float, float]
+
+    def message(self) -> str:
+        cx, cy = self.corner
+        return (
+            f"fan-out junction {self.junction_id!r} line {self.line_id!r}: branch "
+            f"to {self.downstream_target!r} peels off the horizontal trunk at "
+            f"({cx:.1f},{cy:.1f}) as a bare vertical drop -- a hard 90 degrees, "
+            f"not a rounded corner. Give the departure a horizontal lead-in."
+        )
+
+
+def check_junction_peeloff_rounded(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+) -> list[JunctionPeeloffCorner]:
+    """Flag perpendicular fan-out branches that leave a horizontal trunk at 90.
+
+    A fan-out junction whose trunk runs horizontally (a feed arriving along one
+    side and a sibling branch continuing along the other) may drop one line into
+    a TOP/BOTTOM entry directly below/above it.  When that drop opens as a bare
+    vertical off the junction, the horizontal-to-vertical turn sits on the
+    junction where the incoming trunk and the drop are two separate routes: it
+    owns no within-path corner, so it draws as a hard right angle.
+
+    This is the junction-peel-off corner the per-route curve checks are blind
+    to (they only see corners *within* one path).  A rounded departure opens
+    with a horizontal lead-in into the turn, which this permits.
+    """
+    fanouts = fanout_junctions(graph)
+    if not fanouts:
+        return []
+    violations: list[JunctionPeeloffCorner] = []
+    for rp in routes:
+        if not rp.is_inter_section or rp.edge.source not in fanouts:
+            continue
+        peeloff = perp_peeloff_off_horizontal_junction(graph, routes, rp)
+        if peeloff is None:
+            continue
+        junction, _feeder, pts = peeloff
+        violations.append(
+            JunctionPeeloffCorner(
+                junction_id=junction.id,
+                line_id=rp.line_id,
+                downstream_target=rp.edge.target,
+                corner=pts[0],
+            )
+        )
+    return violations
 
 
 # ---------------------------------------------------------------------------
@@ -1753,6 +1839,136 @@ def check_no_same_line_parallel_descents(
     return violations
 
 
+# A vertical riser this close outside a section edge reads as climbing the box;
+# a minimal side-exit lead-in (one curve radius off the port) lands exactly
+# here, whereas a deliberate descent channel is seated a further offset step out.
+_MIN_RISER_EDGE_CLEARANCE = CURVE_RADIUS + COORD_TOLERANCE
+
+
+@dataclass(frozen=True)
+class RiserHugsSectionEdge:
+    """An inter-section vertical riser hugging one wall of an inter-column gap.
+
+    The riser rises in the corridor between two sections that flank it on both
+    sides, yet holds an X a hair off one wall while its Y-span overlaps that
+    section, so it renders as a line climbing the outside of the box rather than
+    rising down the middle of the clear gap.  A minimal lead-in off a side exit
+    port produces exactly this when the target is a TOP entry reached over the
+    top: the riser sits one curve radius past the source box edge and climbs it.
+    """
+
+    line_id: str
+    edge: tuple[str, str]
+    x: float
+    section_id: str
+    edge_x: float
+    span: float
+
+    @property
+    def clearance(self) -> float:
+        """Lateral gap between the riser and the wall it hugs."""
+        return abs(self.x - self.edge_x)
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"riser hugs section edge: line {self.line_id!r} "
+            f"({self.edge[0]}->{self.edge[1]}) climbs vertically at x={self.x:.1f}, "
+            f"{self.clearance:.1f}px off wall section {self.section_id!r} "
+            f"(edge x={self.edge_x:.1f}) of its inter-column gap over "
+            f"{self.span:.1f}px of the wall's height"
+        )
+
+
+_Flank = tuple[Section, float, float]
+
+
+def _flanking_walls(
+    sections: list[Section], x: float, lo: float, hi: float
+) -> tuple[_Flank | None, _Flank | None]:
+    """Nearest section walls flanking a riser at *x* over ``[lo, hi]``.
+
+    Returns ``(left, right)``; each is ``(section, facing_edge_x, y_overlap)`` for
+    the nearest section whose right edge sits at/left of *x* (left flank) and
+    whose left edge sits at/right of *x* (right flank).  Only sections whose
+    Y-extent overlaps the riser by more than a curve radius count, so a box
+    stacked above or below the gap is not mistaken for a flank.  Either side is
+    ``None`` when open.
+    """
+    left: _Flank | None = None
+    right: _Flank | None = None
+    for sec in sections:
+        overlap = min(hi, sec.bbox_y + sec.bbox_h) - max(lo, sec.bbox_y)
+        if overlap <= CURVE_RADIUS:
+            continue
+        right_edge = sec.bbox_x + sec.bbox_w
+        if right_edge <= x + COORD_TOLERANCE and (left is None or right_edge > left[1]):
+            left = (sec, right_edge, overlap)
+        left_edge = sec.bbox_x
+        if left_edge >= x - COORD_TOLERANCE and (right is None or left_edge < right[1]):
+            right = (sec, left_edge, overlap)
+    return left, right
+
+
+def check_no_riser_hugs_section_edge(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[RiserHugsSectionEdge]:
+    """Return inter-section vertical risers hugging one wall of their gap.
+
+    A vertical inter-section leg flanked by a section on *both* sides -- rising
+    in an inter-column gap -- must clear both walls by ``_MIN_RISER_EDGE_CLEARANCE``.
+    One that instead sits within that band of a wall climbs the outside of the
+    box rather than the middle of the gap.
+
+    Only two-sided gaps are checked: a fan-out trunk descending in an open
+    column (a section on one side, open on the other) legitimately sits a curve
+    radius off its feeder, and a drop into a TOP/BOTTOM port rides the target
+    trunk X *inside* the box span, so neither is flanked on both sides.
+
+    Scoped to routes into a TOP entry: that lead-in rises through the gap over
+    the target's top and is the shape the corridor-centred riser owns.  A riser
+    reaching a LEFT/RIGHT entry is a separate class routed by other handlers and
+    is not covered here.
+    """
+    sections = [s for s in graph.sections.values() if s.bbox_w > 0 and s.bbox_h > 0]
+    violations: list[RiserHugsSectionEdge] = []
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        tgt_port = graph.ports.get(rp.edge.target)
+        if tgt_port is None or tgt_port.side is not PortSide.TOP:
+            continue
+        pts = apply_route_offsets(rp, offsets)
+        edge = (rp.edge.source, rp.edge.target)
+        for p1, p2 in zip(pts, pts[1:]):
+            if abs(p1[0] - p2[0]) > COORD_TOLERANCE:
+                continue
+            if abs(p1[1] - p2[1]) <= COORD_TOLERANCE:
+                continue
+            x = p1[0]
+            lo, hi = sorted((p1[1], p2[1]))
+            left, right = _flanking_walls(sections, x, lo, hi)
+            if left is None or right is None:
+                continue
+            near = left if (x - left[1]) <= (right[1] - x) else right
+            near_sec, near_edge, span = near
+            if abs(x - near_edge) >= _MIN_RISER_EDGE_CLEARANCE:
+                continue
+            violations.append(
+                RiserHugsSectionEdge(
+                    line_id=rp.line_id,
+                    edge=edge,
+                    x=x,
+                    section_id=near_sec.id,
+                    edge_x=near_edge,
+                    span=span,
+                )
+            )
+    return violations
+
+
 @dataclass
 class SplitFanoutDescent:
     """Two same-line fan-out descents that overlap in Y at distinct Xs.
@@ -1806,6 +2022,12 @@ def check_no_split_same_line_fanout_descents(
         if span is None:
             continue
         x, y_lo, y_hi, down = span
+        # A descent in the source's own column is the fused trunk dropping
+        # straight through the fork (a rounded aligned peel-off), not a branch
+        # that split into its own lane; it never crosses a sibling.
+        source_station = graph.stations.get(rp.edge.source)
+        if source_station is not None and abs(x - source_station.x) <= COORD_TOLERANCE:
+            continue
         by_source[(rp.edge.source, rp.line_id, down)].append((x, y_lo, y_hi))
 
     violations: list[SplitFanoutDescent] = []
@@ -3999,6 +4221,10 @@ def assert_render_curve_invariants(
             check_no_same_line_parallel_descents(graph, routes, offsets),
         ),
         (
+            "riser hugs section edge",
+            check_no_riser_hugs_section_edge(graph, routes, offsets),
+        ),
+        (
             "merge branch hanging in open space",
             check_merge_branches_meet_trunk(graph, routes, offsets),
         ),
@@ -4033,6 +4259,10 @@ def assert_render_curve_invariants(
         (
             "peel-off bundle braids into port",
             check_peeloff_concentric(graph, routes),
+        ),
+        (
+            "junction peel-off leaves horizontal trunk at a hard 90",
+            check_junction_peeloff_rounded(graph, routes),
         ),
         (
             "port approach corner overshoots the section boundary",
@@ -4118,6 +4348,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_intra_section_collinear_distinct_lines, "A"),
     _check_spec(check_no_collinear_distinct_diagonals, "A"),
     _check_spec(check_no_same_line_parallel_descents, "A"),
+    _check_spec(check_no_riser_hugs_section_edge, "A"),
     _check_spec(check_merge_branches_meet_trunk, "A"),
     _check_spec(check_no_hanging_routes, "A"),
     _check_spec(check_deferred_offsets_apply_laterally, "A"),
@@ -4127,6 +4358,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_gap_channels_materialized, "A"),
     _check_spec(check_trunks_declared, "A"),
     _check_spec(check_peeloff_concentric, "A"),
+    _check_spec(check_junction_peeloff_rounded, "A"),
     _check_spec(check_port_corner_within_bbox, "A"),
     # --- Tier B: invoked only by a validate-path ``_guard_*`` wrapper ---
     _check_spec(check_tb_exit_corner_preserves_column_order, "B"),
@@ -4174,6 +4406,7 @@ __all__ = [
     "CurveInvariantError",
     "FanoutTailGap",
     "HangingRoute",
+    "JunctionPeeloffCorner",
     "MergeBranchHang",
     "MergePortApproachViolation",
     "NonConcentricCornerViolation",
@@ -4207,6 +4440,8 @@ __all__ = [
     "check_no_collinear_distinct_lines",
     "check_no_collinear_distinct_diagonals",
     "check_no_same_line_parallel_descents",
+    "check_no_riser_hugs_section_edge",
+    "check_junction_peeloff_rounded",
     "check_peeloff_concentric",
     "check_port_corner_within_bbox",
     "check_perp_entry_boundary_consistent",
