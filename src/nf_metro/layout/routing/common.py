@@ -112,6 +112,59 @@ def drop_coincident_points(
     return out
 
 
+def perp_peeloff_off_horizontal_junction(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    rp: RoutedPath,
+) -> tuple[Station, Station, list[tuple[float, float]]] | None:
+    """``(junction, feeder, deduped_points)`` for a perpendicular junction drop.
+
+    ``rp`` qualifies when it drops bare-vertical off its source junction's own
+    column, that junction takes a horizontal feed (the trunk the drop peels
+    off, returned nearest-first as the lead-in reference), and a sibling branch
+    of ``routes`` continues along the trunk axis -- a through-line the branch
+    peels off, not a lone corner.  Returns ``None`` when any condition fails.
+
+    The caller gates on ``rp.is_inter_section`` and fan-out-junction membership
+    first; this settles the geometry both the rounding pass and its runtime
+    guard read, so the two never drift.
+    """
+    junction = graph.stations.get(rp.edge.source)
+    if junction is None:
+        return None
+    pts = drop_coincident_points(rp.points)
+    if len(pts) < 2:
+        return None
+    (x0, y0), (x1, y1) = pts[0], pts[1]
+    if abs(x0 - junction.x) > COORD_TOLERANCE:
+        return None
+    if abs(x1 - x0) > COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:
+        return None
+    feeder = min(
+        (
+            fs
+            for e in graph.edges_to(junction.id)
+            if (fs := graph.stations.get(e.source)) is not None
+            and abs(fs.y - junction.y) <= COORD_TOLERANCE
+            and abs(fs.x - junction.x) > COORD_TOLERANCE
+        ),
+        key=lambda fs: abs(fs.x - junction.x),
+        default=None,
+    )
+    if feeder is None:
+        return None
+    if not any(
+        other is not rp
+        and other.edge.source == junction.id
+        and len(op := drop_coincident_points(other.points)) >= 2
+        and abs(op[1][1] - op[0][1]) <= COORD_TOLERANCE
+        and abs(op[1][0] - op[0][0]) > COORD_TOLERANCE
+        for other in routes
+    ):
+        return None
+    return junction, feeder, pts
+
+
 def vertical_flow_sections(graph: MetroGraph) -> set[str]:
     """IDs of sections whose flow runs along Y (the vertical-flow directions).
 

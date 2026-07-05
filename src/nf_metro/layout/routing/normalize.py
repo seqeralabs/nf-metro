@@ -26,7 +26,6 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
     _grid_row_bands,
     column_gap_edges,
-    drop_coincident_points,
     initial_fanout_descent_span,
     is_orthogonal_turn,
     iter_horizontal_trunks,
@@ -35,6 +34,7 @@ from nf_metro.layout.routing.common import (
     iter_vertical_segments,
     packed_cell_neighbor_edges,
     peeloff_target_slots,
+    perp_peeloff_off_horizontal_junction,
     seat_peeloff_port_y,
     symmetric_bundle_midpoint,
     tail_on_slot,
@@ -1562,44 +1562,11 @@ def _round_junction_perp_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> 
     for rp in routes:
         if not rp.is_inter_section or rp.edge.source not in fanouts:
             continue
-        junction = graph.stations.get(rp.edge.source)
-        if junction is None:
+        peeloff = perp_peeloff_off_horizontal_junction(graph, routes, rp)
+        if peeloff is None:
             continue
-        pts = drop_coincident_points(rp.points)
-        if len(pts) < 2:
-            continue
-        # The drop must open as a bare vertical off the junction coordinate.
-        (x0, y0), (x1, y1) = pts[0], pts[1]
-        if abs(x0 - junction.x) > COORD_TOLERANCE:
-            continue
-        if abs(x1 - x0) > COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:
-            continue
-        # A feed arriving horizontally into the junction (the trunk the drop
-        # peels off), taking the nearest such feeder as the lead-in side.
-        feeder = min(
-            (
-                fs
-                for e in graph.edges_to(junction.id)
-                if (fs := graph.stations.get(e.source)) is not None
-                and abs(fs.y - junction.y) <= COORD_TOLERANCE
-                and abs(fs.x - junction.x) > COORD_TOLERANCE
-            ),
-            key=lambda fs: abs(fs.x - junction.x),
-            default=None,
-        )
-        if feeder is None:
-            continue
-        # A sibling branch continuing along the trunk axis -- a genuine fork,
-        # not a lone corner, so the drop truly peels off a through-line.
-        if not any(
-            other is not rp
-            and other.edge.source == junction.id
-            and len(op := drop_coincident_points(other.points)) >= 2
-            and abs(op[1][1] - op[0][1]) <= COORD_TOLERANCE
-            and abs(op[1][0] - op[0][0]) > COORD_TOLERANCE
-            for other in routes
-        ):
-            continue
+        junction, feeder, pts = peeloff
+        x0, y0 = pts[0]
         side = -1.0 if feeder.x < junction.x else 1.0
         lead_len = min(radius, abs(feeder.x - junction.x))
         rp.points = [(x0 + side * lead_len, y0), *pts]

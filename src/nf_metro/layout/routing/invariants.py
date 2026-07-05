@@ -51,7 +51,6 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
     _vert_horiz_cross,
     apply_route_offsets,
-    drop_coincident_points,
     gap_lo_for_x,
     horizontal_direction,
     initial_fanout_descent_span,
@@ -60,6 +59,7 @@ from nf_metro.layout.routing.common import (
     iter_port_peeloff_bundles,
     iter_vertical_segments,
     peeloff_target_slots,
+    perp_peeloff_off_horizontal_junction,
     resolve_section,
     tail_on_slot,
     trunk_segments_cross,
@@ -765,8 +765,7 @@ class JunctionPeeloffCorner:
             f"fan-out junction {self.junction_id!r} line {self.line_id!r}: branch "
             f"to {self.downstream_target!r} peels off the horizontal trunk at "
             f"({cx:.1f},{cy:.1f}) as a bare vertical drop -- a hard 90 degrees, "
-            f"not a rounded corner. Give the departure a horizontal lead-in "
-            f"(see _round_junction_perp_peeloff)."
+            f"not a rounded corner. Give the departure a horizontal lead-in."
         )
 
 
@@ -784,8 +783,8 @@ def check_junction_peeloff_rounded(
     owns no within-path corner, so it draws as a hard right angle.
 
     This is the junction-peel-off corner the per-route curve checks are blind
-    to (they only see corners *within* one path).  A rounded departure carries a
-    horizontal lead-in into the turn, which this permits.
+    to (they only see corners *within* one path).  A rounded departure opens
+    with a horizontal lead-in into the turn, which this permits.
     """
     fanouts = fanout_junctions(graph)
     if not fanouts:
@@ -794,40 +793,16 @@ def check_junction_peeloff_rounded(
     for rp in routes:
         if not rp.is_inter_section or rp.edge.source not in fanouts:
             continue
-        junction = graph.stations.get(rp.edge.source)
-        if junction is None or len(rp.points) < 2:
+        peeloff = perp_peeloff_off_horizontal_junction(graph, routes, rp)
+        if peeloff is None:
             continue
-        pts = drop_coincident_points(rp.points)
-        (x0, y0), (x1, y1) = pts[0], pts[1]
-        # Opens as a bare vertical off the junction coordinate.
-        if abs(x0 - junction.x) > COORD_TOLERANCE:
-            continue
-        if abs(x1 - x0) > COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:
-            continue
-        # The junction trunk runs horizontally: a feed arrives along it.
-        if not any(
-            (fs := graph.stations.get(e.source)) is not None
-            and abs(fs.y - junction.y) <= COORD_TOLERANCE
-            and abs(fs.x - junction.x) > COORD_TOLERANCE
-            for e in graph.edges_to(junction.id)
-        ):
-            continue
-        # A sibling branch continues along that trunk (a genuine peel-off).
-        if not any(
-            other is not rp
-            and other.edge.source == junction.id
-            and len(op := drop_coincident_points(other.points)) >= 2
-            and abs(op[1][1] - op[0][1]) <= COORD_TOLERANCE
-            and abs(op[1][0] - op[0][0]) > COORD_TOLERANCE
-            for other in routes
-        ):
-            continue
+        junction, _feeder, pts = peeloff
         violations.append(
             JunctionPeeloffCorner(
                 junction_id=junction.id,
                 line_id=rp.line_id,
                 downstream_target=rp.edge.target,
-                corner=(x0, y0),
+                corner=pts[0],
             )
         )
     return violations

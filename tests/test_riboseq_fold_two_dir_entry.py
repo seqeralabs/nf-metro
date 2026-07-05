@@ -21,6 +21,7 @@ from pathlib import Path
 from nf_metro.api import prepare_graph, render_string
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.routing.common import drop_coincident_points
 from nf_metro.layout.routing.core import route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, PortSide
@@ -126,17 +127,6 @@ def test_hinted_side_fan_branch_traverses_before_dropping() -> None:
         )
 
 
-def _dedupe(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    out = [points[0]]
-    for p in points[1:]:
-        if (
-            abs(p[0] - out[-1][0]) > COORD_TOLERANCE
-            or abs(p[1] - out[-1][1]) > COORD_TOLERANCE
-        ):
-            out.append(p)
-    return out
-
-
 def test_hinted_aligned_drop_departs_with_a_curve() -> None:
     """The aligned fan-out drop peels off the trunk with a rounded corner.
 
@@ -161,7 +151,7 @@ def test_hinted_aligned_drop_departs_with_a_curve() -> None:
         if r.edge.target == "psite_id__entry_top_8"
         and r.edge.source in graph.junction_ids
     )
-    pts = _dedupe(psite_feed.points)
+    pts = drop_coincident_points(psite_feed.points)
 
     assert len(pts) >= 3, (
         f"psite fan-out drop is a bare peel-off {pts}; it leaves the junction "
