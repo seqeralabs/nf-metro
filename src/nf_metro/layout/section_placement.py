@@ -12,6 +12,7 @@ __all__ = ["place_sections", "position_ports"]
 
 import warnings
 from collections import defaultdict, deque
+from collections.abc import Callable
 from typing import TypeGuard
 
 from nf_metro.layout.constants import (
@@ -997,6 +998,72 @@ def _column_pair_min_gap(
     return effective_min, bundles
 
 
+def _apply_column_gap_deficits(
+    graph: MetroGraph,
+    col_assign: dict[str, int],
+    min_col: int,
+    max_col: int,
+    *,
+    min_gap: float,
+    right_extent: Callable[[Section], float],
+    left_extent: Callable[[Section], float],
+    shift: Callable[[Section, float], None],
+    requested_gap: float | None = None,
+) -> None:
+    """Widen each adjacent column pair to its minimum inter-section gap.
+
+    For every column ``col`` in ``[min_col, max_col)``, take the tightest gap
+    among row-overlapping section pairs (measured from ``right_extent`` of a
+    left-column section to ``left_extent`` of a right-column section) and, if
+    it falls short of the pair's :func:`_column_pair_min_gap`, ``shift`` all
+    sections in columns ``> col`` rightward by the deficit.
+
+    The extent readers and ``shift`` abstract over the coordinate space:
+    ``offset_x``-relative before Stage 2.1, absolute global coordinates after.
+    ``requested_gap`` (offset-space callers only) triggers a ``UserWarning``
+    whenever a bundle forces the gap wider than the user asked for.
+    """
+    col_sections: dict[int, list[Section]] = defaultdict(list)
+    for sid, section in graph.sections.items():
+        col_sections[col_assign.get(sid, 0)].append(section)
+
+    for col in range(min_col, max_col):
+        left_secs = col_sections.get(col, [])
+        right_secs = col_sections.get(col + 1, [])
+        if not left_secs or not right_secs:
+            continue
+
+        effective_min, bundles = _column_pair_min_gap(graph, col_assign, col, min_gap)
+
+        worst_gap: float | None = None
+        for ls in left_secs:
+            for rs in right_secs:
+                if not _rows_overlap(ls, rs):
+                    continue
+                gap = left_extent(rs) - right_extent(ls)
+                if worst_gap is None or gap < worst_gap:
+                    worst_gap = gap
+
+        if worst_gap is None or worst_gap >= effective_min:
+            continue
+
+        if requested_gap is not None and effective_min > requested_gap:
+            n_bundles = len(bundles)
+            total_lines = sum(bundles)
+            warnings.warn(
+                f"Section gap between columns {col} and {col + 1} "
+                f"widened from {requested_gap:.0f}px to {effective_min:.0f}px "
+                f"to accommodate {n_bundles} bundle(s) / "
+                f"{total_lines} routing line(s)",
+                stacklevel=3,
+            )
+
+        deficit = effective_min - worst_gap
+        for shift_col in range(col + 1, max_col + 1):
+            for s in col_sections.get(shift_col, []):
+                shift(s, deficit)
+
+
 def _enforce_min_column_gaps(
     graph: MetroGraph,
     col_assign: dict[str, int],
@@ -1012,56 +1079,27 @@ def _enforce_min_column_gaps(
     floor (MIN_INTER_SECTION_GAP).  If the physical gap is too narrow,
     columns are shifted rightward.  Warns when the gap had to be widened
     beyond the user's requested value.
+
+    Operates in ``offset_x`` space (Stage 1.3, before global coordinates
+    settle), so extents include ``offset_x`` and the shift adds to it.
     """
     if max_col <= min_col:
         return
 
-    # Group sections by their assigned column
-    col_sections: dict[int, list[Section]] = defaultdict(list)
-    for sid, section in graph.sections.items():
-        col = col_assign.get(sid, 0)
-        col_sections[col].append(section)
+    def _shift(s: Section, dx: float) -> None:
+        s.offset_x += dx
 
-    for col in range(min_col, max_col):
-        left_secs = col_sections.get(col, [])
-        right_secs = col_sections.get(col + 1, [])
-        if not left_secs or not right_secs:
-            continue
-
-        effective_min, bundles = _column_pair_min_gap(graph, col_assign, col, min_gap)
-
-        # Find the tightest gap among row-overlapping section pairs
-        worst_gap: float | None = None
-        for ls in left_secs:
-            for rs in right_secs:
-                if not _rows_overlap(ls, rs):
-                    continue
-                left_edge = ls.offset_x + ls.bbox_x + ls.bbox_w
-                right_edge = rs.offset_x + rs.bbox_x
-                gap = right_edge - left_edge
-                if worst_gap is None or gap < worst_gap:
-                    worst_gap = gap
-
-        if worst_gap is None or worst_gap >= effective_min:
-            continue
-
-        # Warn if we're overriding the user's requested gap
-        if requested_gap is not None and effective_min > requested_gap:
-            n_bundles = len(bundles)
-            total_lines = sum(bundles)
-            warnings.warn(
-                f"Section gap between columns {col} and {col + 1} "
-                f"widened from {requested_gap:.0f}px to {effective_min:.0f}px "
-                f"to accommodate {n_bundles} bundle(s) / "
-                f"{total_lines} routing line(s)",
-                stacklevel=2,
-            )
-
-        deficit = effective_min - worst_gap
-        # Shift all sections in columns > col rightward
-        for shift_col in range(col + 1, max_col + 1):
-            for s in col_sections.get(shift_col, []):
-                s.offset_x += deficit
+    _apply_column_gap_deficits(
+        graph,
+        col_assign,
+        min_col,
+        max_col,
+        min_gap=min_gap,
+        right_extent=lambda s: s.offset_x + s.bbox_x + s.bbox_w,
+        left_extent=lambda s: s.offset_x + s.bbox_x,
+        shift=_shift,
+        requested_gap=requested_gap,
+    )
 
 
 def reenforce_column_gaps(graph: MetroGraph) -> None:
@@ -1083,39 +1121,21 @@ def reenforce_column_gaps(graph: MetroGraph) -> None:
         return
 
     col_assign = {sid: s.grid_col for sid, s in graph.sections.items()}
-    col_sections: dict[int, list[Section]] = defaultdict(list)
-    for sid, section in graph.sections.items():
-        col_sections[col_assign[sid]].append(section)
-
     min_col = min(col_assign.values())
     max_col = max(
         col + graph.sections[sid].grid_col_span - 1 for sid, col in col_assign.items()
     )
 
-    for col in range(min_col, max_col):
-        left_secs = col_sections.get(col, [])
-        right_secs = col_sections.get(col + 1, [])
-        if not left_secs or not right_secs:
-            continue
-
-        effective_min, _ = _column_pair_min_gap(graph, col_assign, col)
-
-        worst_gap: float | None = None
-        for ls in left_secs:
-            for rs in right_secs:
-                if not _rows_overlap(ls, rs):
-                    continue
-                gap = rs.bbox_x - (ls.bbox_x + ls.bbox_w)
-                if worst_gap is None or gap < worst_gap:
-                    worst_gap = gap
-
-        if worst_gap is None or worst_gap >= effective_min:
-            continue
-
-        deficit = effective_min - worst_gap
-        for shift_col in range(col + 1, max_col + 1):
-            for s in col_sections.get(shift_col, []):
-                shift_section(graph, s, dx=deficit)
+    _apply_column_gap_deficits(
+        graph,
+        col_assign,
+        min_col,
+        max_col,
+        min_gap=MIN_INTER_SECTION_GAP,
+        right_extent=lambda s: s.bbox_x + s.bbox_w,
+        left_extent=lambda s: s.bbox_x,
+        shift=lambda s, dx: shift_section(graph, s, dx=dx),
+    )
 
 
 def _cols_overlap(a: Section, b: Section) -> bool:

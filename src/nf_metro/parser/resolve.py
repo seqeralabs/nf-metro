@@ -823,23 +823,22 @@ def _dominant_entry_side(graph: MetroGraph, sec_id: str) -> PortSide | None:
     by ``_priority_side``.  Returns ``None`` when no predecessor with known grid
     geometry feeds the section, leaving the caller to fall back.
     """
-    from nf_metro.layout.auto_layout import _effective_grid_pos, _relative_side
+    from nf_metro.layout.auto_layout import _effective_grid_pos, _neighbour_side_votes
 
     dag = graph.section_dag
     if dag is None:
         return None
-    my_col, my_row, _row_span, my_col_span = _effective_grid_pos(graph, sec_id)
+    my_col, _my_row, _row_span, _my_col_span = _effective_grid_pos(graph, sec_id)
     if my_col < 0:
         return None
-    votes: dict[PortSide, int] = {}
-    for src in dag.predecessors.get(sec_id, set()):
-        src_col, src_row, _src_row_span, src_col_span = _effective_grid_pos(graph, src)
-        if src_col < 0:
-            continue
-        side = _relative_side(
-            my_col, my_row, src_col, src_row, my_col_span, src_col_span
-        )
-        votes[side] = votes.get(side, 0) + len(dag.edge_lines.get((src, sec_id), set()))
+    votes = _neighbour_side_votes(
+        graph,
+        sec_id,
+        dag.predecessors.get(sec_id, set()),
+        dag.edge_lines,
+        edge_key=lambda src: (src, sec_id),
+        skip_unplaced=True,
+    )
     if not votes:
         return None
     natural = _natural_entry_side(graph.sections[sec_id].direction)
