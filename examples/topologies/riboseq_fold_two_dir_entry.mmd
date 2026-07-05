@@ -1,0 +1,38 @@
+%%metro title: Riboseq Fold Two-Direction Entry
+%%metro line: ribo | Ribo-seq | #2db572
+%%metro grid: prep | 0,0
+%%metro grid: align | 1,0
+%%metro grid: quantification | 2,0
+%%metro grid: orf_calling | 3,1
+%%metro grid: psite_id | 2,1
+%%metro grid: te | 1,1
+
+graph LR
+    subgraph prep [Prep]
+        p0[Trim]
+    end
+    subgraph align [Align]
+        a0[Align]
+    end
+    subgraph quantification [Quant]
+        q0[Quantify]
+    end
+    subgraph orf_calling [ORF]
+        %%metro exit: left | ribo
+        o0[Call ORFs]
+    end
+    subgraph psite_id [P-site]
+        %%metro entry: top | ribo
+        %%metro exit: left | ribo
+        ps0[P-sites]
+    end
+    subgraph te [TE]
+        %%metro entry: right | ribo
+        t0[TE]
+    end
+    p0 -->|ribo| a0
+    a0 -->|ribo| q0
+    q0 -->|ribo| o0
+    q0 -->|ribo| ps0
+    o0 -->|ribo| ps0
+    ps0 -->|ribo| t0

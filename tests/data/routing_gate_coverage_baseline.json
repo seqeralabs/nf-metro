@@ -120,7 +120,6 @@
   "inter_section_handlers.py::if min(drop_xs) < _section_right_edge(graph, tgt) - COORD_TOLERANCE:::#1",
   "inter_section_handlers.py::if not _inter_row_band_fits(gap_top, gap_bottom):::#1",
   "inter_section_handlers.py::if not normalize_exempt:::#1",
-  "inter_section_handlers.py::if port.side == PortSide.LEFT:::#1",
   "inter_section_handlers.py::if route is None:::#1",
   "inter_section_handlers.py::if route is None:::#2",
   "inter_section_handlers.py::if route is not None:::#1",

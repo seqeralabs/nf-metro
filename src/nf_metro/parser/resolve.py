@@ -801,33 +801,100 @@ def _natural_entry_side(direction: str) -> PortSide:
     return PortSide.LEFT  # LR default
 
 
+_SIDE_PRIORITY = (PortSide.LEFT, PortSide.RIGHT, PortSide.TOP, PortSide.BOTTOM)
+
+
+def _priority_side(sides: set[PortSide]) -> PortSide:
+    """Pick a single side from a set by a fixed priority (LEFT > RIGHT > ...)."""
+    for side in _SIDE_PRIORITY:
+        if side in sides:
+            return side
+    return PortSide.LEFT
+
+
+def _dominant_entry_side(graph: MetroGraph, sec_id: str) -> PortSide | None:
+    """Single entry side for a section, chosen from predecessor feed geometry.
+
+    Each predecessor votes for the side of ``sec_id`` that faces it
+    (``_relative_side`` on their grid cells).  The flow-natural side wins
+    whenever it receives a feed -- a left-to-right section keeps a left entry
+    unless nothing arrives there -- so internal flow enters at its source and
+    off-side feeds route around.  Otherwise the most-fed side wins, ties broken
+    by ``_priority_side``.  Returns ``None`` when no predecessor with known grid
+    geometry feeds the section, leaving the caller to fall back.
+    """
+    from nf_metro.layout.auto_layout import _effective_grid_pos, _relative_side
+
+    dag = graph.section_dag
+    if dag is None:
+        return None
+    my_col, my_row, _row_span, my_col_span = _effective_grid_pos(graph, sec_id)
+    if my_col < 0:
+        return None
+    votes: dict[PortSide, int] = {}
+    for src in dag.predecessors.get(sec_id, set()):
+        src_col, src_row, _src_row_span, src_col_span = _effective_grid_pos(graph, src)
+        if src_col < 0:
+            continue
+        side = _relative_side(
+            my_col, my_row, src_col, src_row, my_col_span, src_col_span
+        )
+        votes[side] = votes.get(side, 0) + len(dag.edge_lines.get((src, sec_id), set()))
+    if not votes:
+        return None
+    natural = _natural_entry_side(graph.sections[sec_id].direction)
+    if natural in votes:
+        return natural
+    best = max(votes.values())
+    return _priority_side({s for s, count in votes.items() if count == best})
+
+
 def _build_entry_side_mapping(
     graph: MetroGraph,
 ) -> dict[tuple[str, str], PortSide]:
-    """Build per-line entry side lookup from explicit entry hints.
+    """Build a per-line entry side lookup from hints and feed geometry.
 
-    Each section gets a single entry side.  When all hints agree on one
-    side, that side is used.  When hints specify multiple sides, they
-    are collapsed to the natural entry for the section's flow direction
-    (LEFT for LR, RIGHT for RL, TOP for TB) so all lines share one
-    entry port.
+    A line resolves to one entry side:
 
-    Returns dict mapping (section_id, line_id) -> PortSide.
+    - a line named on the section's entry hints uses the hint side.  When the
+      hints agree on one side that side is used (this keeps carriage-return
+      wraps on their leading edge); when they name several sides they collapse
+      to one approach -- the flow-natural side when a feed reaches it, else the
+      dominant feed direction -- so the section reads unambiguously;
+    - a line with no hint takes its side from where its feeds arrive
+      (``_dominant_entry_side``), falling back to the LEFT default at lookup
+      (left unmapped here) when no predecessor geometry is available.
+
+    Different lines may resolve to different sides; a section fed from more than
+    one approach direction is caught downstream by
+    ``_guard_no_mixed_entry_directions``.  Returns dict mapping
+    (section_id, line_id) -> PortSide.
     """
+    dag = graph.section_dag
     entry_side_for_line: dict[tuple[str, str], PortSide] = {}
     for sec_id, section in graph.sections.items():
-        if not section.entry_hints:
-            continue
-        unique_sides = {s for s, _ in section.entry_hints}
-        if len(unique_sides) == 1:
-            side = unique_sides.pop()
-        else:
-            side = _natural_entry_side(section.direction)
-        all_lines: set[str] = set()
+        incoming: set[str] = set()
+        if dag is not None:
+            for src in dag.predecessors.get(sec_id, set()):
+                incoming.update(dag.edge_lines.get((src, sec_id), set()))
+        hinted_lines: set[str] = set()
         for _hint_side, line_ids in section.entry_hints:
-            all_lines.update(line_ids)
-        for lid in all_lines:
-            entry_side_for_line[(sec_id, lid)] = side
+            hinted_lines.update(line_ids)
+        incoming |= hinted_lines
+        if not incoming:
+            continue
+
+        dominant = _dominant_entry_side(graph, sec_id)
+        hint_sides = {s for s, _ in section.entry_hints}
+        if len(hint_sides) == 1:
+            hinted_side = next(iter(hint_sides))
+        else:
+            hinted_side = dominant or _natural_entry_side(section.direction)
+
+        for lid in incoming:
+            side = hinted_side if lid in hinted_lines else dominant
+            if side is not None:
+                entry_side_for_line[(sec_id, lid)] = side
     return entry_side_for_line
 
 
