@@ -1776,8 +1776,12 @@ class RiserHugsSectionEdge:
     x: float
     section_id: str
     edge_x: float
-    clearance: float
     span: float
+
+    @property
+    def clearance(self) -> float:
+        """Lateral gap between the riser and the wall it hugs."""
+        return abs(self.x - self.edge_x)
 
     def message(self) -> str:
         """Human-readable summary suitable for the engine error message."""
@@ -1790,35 +1794,34 @@ class RiserHugsSectionEdge:
         )
 
 
-def _nearest_wall(
-    sections: list[Section],
-    x: float,
-    lo: float,
-    hi: float,
-    *,
-    on_left: bool,
-) -> tuple[Section, float] | None:
-    """Nearest section wall flanking a riser at *x* over ``[lo, hi]``.
+_Flank = tuple[Section, float, float]
 
-    ``on_left`` selects the wall to the riser's left (a section whose right edge
-    sits at or left of *x*) or right (left edge at or right of *x*).  Only walls
-    whose Y-extent overlaps the riser by more than a curve radius count, so a box
-    stacked above or below the gap is not mistaken for a flank.  Returns the wall
-    section and its facing-edge X, or ``None`` when that side is open.
+
+def _flanking_walls(
+    sections: list[Section], x: float, lo: float, hi: float
+) -> tuple[_Flank | None, _Flank | None]:
+    """Nearest section walls flanking a riser at *x* over ``[lo, hi]``.
+
+    Returns ``(left, right)``; each is ``(section, facing_edge_x, y_overlap)`` for
+    the nearest section whose right edge sits at/left of *x* (left flank) and
+    whose left edge sits at/right of *x* (right flank).  Only sections whose
+    Y-extent overlaps the riser by more than a curve radius count, so a box
+    stacked above or below the gap is not mistaken for a flank.  Either side is
+    ``None`` when open.
     """
-    best: tuple[Section, float] | None = None
+    left: _Flank | None = None
+    right: _Flank | None = None
     for sec in sections:
         overlap = min(hi, sec.bbox_y + sec.bbox_h) - max(lo, sec.bbox_y)
         if overlap <= CURVE_RADIUS:
             continue
-        edge_x = sec.bbox_x + sec.bbox_w if on_left else sec.bbox_x
-        if on_left and edge_x <= x + COORD_TOLERANCE:
-            if best is None or edge_x > best[1]:
-                best = (sec, edge_x)
-        elif not on_left and edge_x >= x - COORD_TOLERANCE:
-            if best is None or edge_x < best[1]:
-                best = (sec, edge_x)
-    return best
+        right_edge = sec.bbox_x + sec.bbox_w
+        if right_edge <= x + COORD_TOLERANCE and (left is None or right_edge > left[1]):
+            left = (sec, right_edge, overlap)
+        left_edge = sec.bbox_x
+        if left_edge >= x - COORD_TOLERANCE and (right is None or left_edge < right[1]):
+            right = (sec, left_edge, overlap)
+    return left, right
 
 
 def check_no_riser_hugs_section_edge(
@@ -1860,21 +1863,13 @@ def check_no_riser_hugs_section_edge(
                 continue
             x = p1[0]
             lo, hi = sorted((p1[1], p2[1]))
-            left = _nearest_wall(sections, x, lo, hi, on_left=True)
-            right = _nearest_wall(sections, x, lo, hi, on_left=False)
+            left, right = _flanking_walls(sections, x, lo, hi)
             if left is None or right is None:
                 continue
-            left_sec, left_edge = left
-            right_sec, right_edge = right
-            clear_left = x - left_edge
-            clear_right = right_edge - x
-            if clear_left <= clear_right:
-                near_sec, near_edge, clearance = left_sec, left_edge, clear_left
-            else:
-                near_sec, near_edge, clearance = right_sec, right_edge, clear_right
-            if clearance >= _MIN_RISER_EDGE_CLEARANCE:
+            near = left if (x - left[1]) <= (right[1] - x) else right
+            near_sec, near_edge, span = near
+            if abs(x - near_edge) >= _MIN_RISER_EDGE_CLEARANCE:
                 continue
-            span = min(hi, near_sec.bbox_y + near_sec.bbox_h) - max(lo, near_sec.bbox_y)
             violations.append(
                 RiserHugsSectionEdge(
                     line_id=rp.line_id,
@@ -1882,7 +1877,6 @@ def check_no_riser_hugs_section_edge(
                     x=x,
                     section_id=near_sec.id,
                     edge_x=near_edge,
-                    clearance=clearance,
                     span=span,
                 )
             )

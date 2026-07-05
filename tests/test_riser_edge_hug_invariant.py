@@ -25,7 +25,10 @@ import pytest
 import nf_metro.layout.routing.inter_section_handlers as ish
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
-from nf_metro.layout.routing.invariants import check_no_riser_hugs_section_edge
+from nf_metro.layout.routing.invariants import (
+    _MIN_RISER_EDGE_CLEARANCE,
+    check_no_riser_hugs_section_edge,
+)
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -74,9 +77,10 @@ def test_riboseq_back_connection_rises_mid_corridor() -> None:
     riser_xs = [x for x in xs if gap_lo < x < gap_hi]
     assert riser_xs, "expected a riser in the psite/orf corridor"
     for x in riser_xs:
-        assert x - gap_lo > 10.0 and gap_hi - x > 10.0, (
-            f"riser at x={x} hugs a wall of gap [{gap_lo}, {gap_hi}]"
-        )
+        assert (
+            x - gap_lo >= _MIN_RISER_EDGE_CLEARANCE
+            and gap_hi - x >= _MIN_RISER_EDGE_CLEARANCE
+        ), f"riser at x={x} hugs a wall of gap [{gap_lo}, {gap_hi}]"
 
 
 def test_checker_fires_without_corridor_centring(

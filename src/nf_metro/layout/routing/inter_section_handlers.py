@@ -2552,7 +2552,7 @@ def _top_entry_side_fan_traverse_is_clear(
 
 
 def _corridor_riser_x(
-    exit_side: Direction, src_sec: Section | None, tgt_sec: Section | None
+    graph: MetroGraph, src_sec: Section | None, tgt_sec: Section | None
 ) -> float | None:
     """X mid-way in the clear inter-column gap between two same-row sections.
 
@@ -2564,9 +2564,9 @@ def _corridor_riser_x(
     """
     if src_sec is None or tgt_sec is None or src_sec.grid_row != tgt_sec.grid_row:
         return None
-    if exit_side is Direction.L:
-        return (tgt_sec.bbox_x + tgt_sec.bbox_w + src_sec.bbox_x) / 2.0
-    return (src_sec.bbox_x + src_sec.bbox_w + tgt_sec.bbox_x) / 2.0
+    return column_gap_midpoint(
+        graph, src_sec.grid_col, tgt_sec.grid_col, row=src_sec.grid_row
+    )
 
 
 def _route_top_entry_l_shape(
@@ -2700,7 +2700,7 @@ def _route_top_entry_l_shape(
     # trunk hard against the source box's exit edge runs the riser up that edge.
     # Seat the riser midway in the clear inter-column corridor instead.
     if exit_side is not None and not straight_drop:
-        corridor_x = _corridor_riser_x(exit_side, src_sec, tgt_sec)
+        corridor_x = _corridor_riser_x(ctx.graph, src_sec, tgt_sec)
         if corridor_x is not None:
             lx0 = corridor_x
 
