@@ -19,6 +19,7 @@ import warnings
 from pathlib import Path
 
 from nf_metro.api import prepare_graph, render_string
+from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing.core import route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -105,8 +106,8 @@ def test_hinted_side_fan_branch_traverses_before_dropping() -> None:
         return [
             pts[i][0]
             for i in range(len(pts) - 1)
-            if abs(pts[i][0] - pts[i + 1][0]) < 1.0
-            and abs(pts[i][1] - pts[i + 1][1]) > 1.0
+            if abs(pts[i][0] - pts[i + 1][0]) < COORD_TOLERANCE
+            and abs(pts[i][1] - pts[i + 1][1]) > COORD_TOLERANCE
         ]
 
     orf_descents = _vertical_xs(orf_feed)
@@ -116,10 +117,10 @@ def test_hinted_side_fan_branch_traverses_before_dropping() -> None:
     # Every vertical descent of the orf feed sits at its own port X, clear of the
     # psite descent one column to the left.
     for x in orf_descents:
-        assert abs(x - orf_port.x) < 1.0, (
+        assert abs(x - orf_port.x) < COORD_TOLERANCE, (
             f"orf feed descends at x={x:.0f}, not at its port x={orf_port.x:.0f}"
         )
-        assert abs(x - psite_descent) > 1.0, (
+        assert abs(x - psite_descent) > COORD_TOLERANCE, (
             f"orf feed descends at x={x:.0f}, parallel to the psite descent "
             f"x={psite_descent:.0f}"
         )

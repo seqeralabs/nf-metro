@@ -2516,7 +2516,7 @@ def _route_perp_exit_over(
     return route
 
 
-def _top_entry_side_fan_traverse_clears(
+def _top_entry_side_fan_traverse_is_clear(
     edge: Edge, src: Station, tgt: Station, final_x: float, ctx: _RoutingCtx
 ) -> bool:
     """Whether a below-side fan branch can traverse at the source Y then drop.
@@ -2677,11 +2677,8 @@ def _route_top_entry_l_shape(
             for lid in line_ids
         ]
 
-    # A below-side fan branch that shares a junction with an aligned straight
-    # drop traverses at the source Y to the port column, then drops straight in
-    # -- so its descent sits at the port X, clear of the sibling's descent,
-    # rather than paralleling it in a fan lane.
-    if _top_entry_side_fan_traverse_clears(edge, src, tgt, final_x, ctx):
+    # Traverse at the source Y to the port column, then drop straight in.
+    if _top_entry_side_fan_traverse_is_clear(edge, src, tgt, final_x, ctx):
         centerline = [(sx, sy), (final_x, sy), (final_x, ty)]
         transition_leg = 1
     # When the lead-in already sits at the landing X the trunk leg collapses;
