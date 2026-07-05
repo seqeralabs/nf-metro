@@ -1839,6 +1839,136 @@ def check_no_same_line_parallel_descents(
     return violations
 
 
+# A vertical riser this close outside a section edge reads as climbing the box;
+# a minimal side-exit lead-in (one curve radius off the port) lands exactly
+# here, whereas a deliberate descent channel is seated a further offset step out.
+_MIN_RISER_EDGE_CLEARANCE = CURVE_RADIUS + COORD_TOLERANCE
+
+
+@dataclass
+class RiserHugsSectionEdge:
+    """An inter-section vertical riser hugging one wall of an inter-column gap.
+
+    The riser rises in the corridor between two sections that flank it on both
+    sides, yet holds an X a hair off one wall while its Y-span overlaps that
+    section, so it renders as a line climbing the outside of the box rather than
+    rising down the middle of the clear gap.  A minimal lead-in off a side exit
+    port produces exactly this when the target is a TOP entry reached over the
+    top: the riser sits one curve radius past the source box edge and climbs it.
+    """
+
+    line_id: str
+    edge: tuple[str, str]
+    x: float
+    section_id: str
+    edge_x: float
+    span: float
+
+    @property
+    def clearance(self) -> float:
+        """Lateral gap between the riser and the wall it hugs."""
+        return abs(self.x - self.edge_x)
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"riser hugs section edge: line {self.line_id!r} "
+            f"({self.edge[0]}->{self.edge[1]}) climbs vertically at x={self.x:.1f}, "
+            f"{self.clearance:.1f}px off wall section {self.section_id!r} "
+            f"(edge x={self.edge_x:.1f}) of its inter-column gap over "
+            f"{self.span:.1f}px of the wall's height"
+        )
+
+
+_Flank = tuple[Section, float, float]
+
+
+def _flanking_walls(
+    sections: list[Section], x: float, lo: float, hi: float
+) -> tuple[_Flank | None, _Flank | None]:
+    """Nearest section walls flanking a riser at *x* over ``[lo, hi]``.
+
+    Returns ``(left, right)``; each is ``(section, facing_edge_x, y_overlap)`` for
+    the nearest section whose right edge sits at/left of *x* (left flank) and
+    whose left edge sits at/right of *x* (right flank).  Only sections whose
+    Y-extent overlaps the riser by more than a curve radius count, so a box
+    stacked above or below the gap is not mistaken for a flank.  Either side is
+    ``None`` when open.
+    """
+    left: _Flank | None = None
+    right: _Flank | None = None
+    for sec in sections:
+        overlap = min(hi, sec.bbox_y + sec.bbox_h) - max(lo, sec.bbox_y)
+        if overlap <= CURVE_RADIUS:
+            continue
+        right_edge = sec.bbox_x + sec.bbox_w
+        if right_edge <= x + COORD_TOLERANCE and (left is None or right_edge > left[1]):
+            left = (sec, right_edge, overlap)
+        left_edge = sec.bbox_x
+        if left_edge >= x - COORD_TOLERANCE and (right is None or left_edge < right[1]):
+            right = (sec, left_edge, overlap)
+    return left, right
+
+
+def check_no_riser_hugs_section_edge(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[RiserHugsSectionEdge]:
+    """Return inter-section vertical risers hugging one wall of their gap.
+
+    A vertical inter-section leg flanked by a section on *both* sides -- rising
+    in an inter-column gap -- must clear both walls by ``_MIN_RISER_EDGE_CLEARANCE``.
+    One that instead sits within that band of a wall climbs the outside of the
+    box rather than the middle of the gap.
+
+    Only two-sided gaps are checked: a fan-out trunk descending in an open
+    column (a section on one side, open on the other) legitimately sits a curve
+    radius off its feeder, and a drop into a TOP/BOTTOM port rides the target
+    trunk X *inside* the box span, so neither is flanked on both sides.
+
+    Scoped to routes into a TOP entry: that lead-in rises through the gap over
+    the target's top and is the shape the corridor-centred riser owns.  A riser
+    reaching a LEFT/RIGHT entry is a separate class routed by other handlers and
+    is not covered here.
+    """
+    sections = [s for s in graph.sections.values() if s.bbox_w > 0 and s.bbox_h > 0]
+    violations: list[RiserHugsSectionEdge] = []
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        tgt_port = graph.ports.get(rp.edge.target)
+        if tgt_port is None or tgt_port.side is not PortSide.TOP:
+            continue
+        pts = apply_route_offsets(rp, offsets)
+        edge = (rp.edge.source, rp.edge.target)
+        for p1, p2 in zip(pts, pts[1:]):
+            if abs(p1[0] - p2[0]) > COORD_TOLERANCE:
+                continue
+            if abs(p1[1] - p2[1]) <= COORD_TOLERANCE:
+                continue
+            x = p1[0]
+            lo, hi = sorted((p1[1], p2[1]))
+            left, right = _flanking_walls(sections, x, lo, hi)
+            if left is None or right is None:
+                continue
+            near = left if (x - left[1]) <= (right[1] - x) else right
+            near_sec, near_edge, span = near
+            if abs(x - near_edge) >= _MIN_RISER_EDGE_CLEARANCE:
+                continue
+            violations.append(
+                RiserHugsSectionEdge(
+                    line_id=rp.line_id,
+                    edge=edge,
+                    x=x,
+                    section_id=near_sec.id,
+                    edge_x=near_edge,
+                    span=span,
+                )
+            )
+    return violations
+
+
 @dataclass
 class SplitFanoutDescent:
     """Two same-line fan-out descents that overlap in Y at distinct Xs.
@@ -4091,6 +4221,10 @@ def assert_render_curve_invariants(
             check_no_same_line_parallel_descents(graph, routes, offsets),
         ),
         (
+            "riser hugs section edge",
+            check_no_riser_hugs_section_edge(graph, routes, offsets),
+        ),
+        (
             "merge branch hanging in open space",
             check_merge_branches_meet_trunk(graph, routes, offsets),
         ),
@@ -4214,6 +4348,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_intra_section_collinear_distinct_lines, "A"),
     _check_spec(check_no_collinear_distinct_diagonals, "A"),
     _check_spec(check_no_same_line_parallel_descents, "A"),
+    _check_spec(check_no_riser_hugs_section_edge, "A"),
     _check_spec(check_merge_branches_meet_trunk, "A"),
     _check_spec(check_no_hanging_routes, "A"),
     _check_spec(check_deferred_offsets_apply_laterally, "A"),
@@ -4305,6 +4440,7 @@ __all__ = [
     "check_no_collinear_distinct_lines",
     "check_no_collinear_distinct_diagonals",
     "check_no_same_line_parallel_descents",
+    "check_no_riser_hugs_section_edge",
     "check_junction_peeloff_rounded",
     "check_peeloff_concentric",
     "check_port_corner_within_bbox",

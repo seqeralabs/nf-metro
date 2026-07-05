@@ -98,6 +98,7 @@ from nf_metro.parser.model import (
     MetroGraph,
     Port,
     PortSide,
+    Section,
     Station,
 )
 
@@ -2550,6 +2551,24 @@ def _top_entry_side_fan_traverse_is_clear(
     return not _v_segment_crosses_other_section(graph, final_x, src.y, tgt.y, exclude)
 
 
+def _corridor_riser_x(
+    graph: MetroGraph, src_sec: Section | None, tgt_sec: Section | None
+) -> float | None:
+    """X mid-way in the clear inter-column gap between two same-row sections.
+
+    A TOP-entry lead-in from a same-row horizontal exit rises through the gap
+    between the source and target boxes.  The minimal lead-in (one curve radius
+    off the exit port) seats that riser hard against the source box's exit edge;
+    centring it in the gap keeps it clear of both walls.  Returns ``None`` when
+    the two sections are not a same-row pair, so the caller keeps the lead-in.
+    """
+    if src_sec is None or tgt_sec is None or src_sec.grid_row != tgt_sec.grid_row:
+        return None
+    return column_gap_midpoint(
+        graph, src_sec.grid_col, tgt_sec.grid_col, row=src_sec.grid_row
+    )
+
+
 def _route_top_entry_l_shape(
     edge: Edge, src: Station, tgt: Station, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -2676,6 +2695,14 @@ def _route_top_entry_l_shape(
             (edge_by_line[lid], lid, src_offset(lid), src_offset(lid))
             for lid in line_ids
         ]
+
+    # A same-row horizontal exit whose minimal lead-in would seat the vertical
+    # trunk hard against the source box's exit edge runs the riser up that edge.
+    # Seat the riser midway in the clear inter-column corridor instead.
+    if exit_side is not None and not straight_drop:
+        corridor_x = _corridor_riser_x(ctx.graph, src_sec, tgt_sec)
+        if corridor_x is not None:
+            lx0 = corridor_x
 
     # Traverse at the source Y to the port column, then drop straight in.
     if _top_entry_side_fan_traverse_is_clear(edge, src, tgt, final_x, ctx):
