@@ -12,10 +12,17 @@ from __future__ import annotations
 __all__ = ["infer_section_layout", "infer_interchanges", "detect_serpentine_runs"]
 
 from collections import defaultdict, deque
+from collections.abc import Callable
 from collections.abc import Set as AbstractSet
 
 from nf_metro.layout.layers import assign_layers
-from nf_metro.parser.model import Interchange, MetroGraph, PortSide, SectionDAG
+from nf_metro.parser.model import (
+    Interchange,
+    MetroGraph,
+    PortSide,
+    Section,
+    SectionDAG,
+)
 
 
 def infer_interchanges(graph: MetroGraph) -> None:
@@ -1300,6 +1307,30 @@ def _flow_aligned_sides(direction: str) -> tuple[PortSide, PortSide]:
     return PortSide.LEFT, PortSide.RIGHT
 
 
+def _has_predecessor_above(
+    graph: MetroGraph,
+    sec_id: str,
+    my_row: int,
+    predecessors: dict[str, set[str]],
+    predicate: Callable[[str, Section], bool] | None = None,
+) -> bool:
+    """True when a predecessor's bottom row sits above ``my_row``.
+
+    ``predicate`` optionally restricts the test to predecessors it accepts,
+    receiving each ``(src_id, src_section)`` pair.
+    """
+    for src in predecessors.get(sec_id, set()):
+        src_sec = graph.sections.get(src)
+        if not src_sec:
+            continue
+        _src_col, src_row, src_row_span, _src_col_span = _effective_grid_pos(graph, src)
+        if (src_row + src_row_span - 1) < my_row and (
+            predicate is None or predicate(src, src_sec)
+        ):
+            return True
+    return False
+
+
 def _feeds_from_vertical_drop_above(
     graph: MetroGraph,
     sec_id: str,
@@ -1315,15 +1346,38 @@ def _feeds_from_vertical_drop_above(
     predecessors instead exit sideways and wrap to a flow-aligned entry
     (a carriage-return chain or an around-section wrap), so they don't block it.
     """
-    for src in predecessors.get(sec_id, set()):
-        src_sec = graph.sections.get(src)
-        if not src_sec:
-            continue
-        _src_col, src_row, src_row_span, _src_col_span = _effective_grid_pos(graph, src)
-        is_vertical = src_sec.direction == "TB" or src in fold_sections
-        if is_vertical and (src_row + src_row_span - 1) < my_row:
-            return True
-    return False
+    return _has_predecessor_above(
+        graph,
+        sec_id,
+        my_row,
+        predecessors,
+        lambda src, src_sec: src_sec.direction == "TB" or src in fold_sections,
+    )
+
+
+def _is_foldback_drop_corner(
+    graph: MetroGraph,
+    sec_id: str,
+    my_row: int,
+    predecessors: dict[str, set[str]],
+) -> bool:
+    """True for a horizontal fold corner whose flow-aligned entry hits its exit.
+
+    On an explicit-grid fold the return-row section keeps its flow-aligned
+    orientation, so its leading-edge entry lands on the same side as its
+    backward exit: the feed jogs into that port and immediately folds back out
+    to reach the station.  When the section is fed from the row above, a
+    straight vertical drop onto its TOP edge reads cleaner than the jog.  A
+    genuine carriage-return wrap continues the flow (its exit is on the trailing
+    edge), so its flow-aligned entry never collides and it is left untouched.
+
+    The caller gates this on the section being horizontal (LR/RL, non-fold).
+    """
+    section = graph.sections[sec_id]
+    entry_aligned, _exit_aligned = _flow_aligned_sides(section.direction)
+    if not any(side == entry_aligned for side, _lines in section.exit_hints):
+        return False
+    return _has_predecessor_above(graph, sec_id, my_row, predecessors)
 
 
 def _infer_port_sides(
@@ -1390,7 +1444,13 @@ def _infer_port_sides(
             for src in predecessors[sec_id]:
                 all_entry_lines.update(edge_lines.get((src, sec_id), set()))
 
-            if flow_aligned_entry:
+            foldback_corner = horizontal and _is_foldback_drop_corner(
+                graph, sec_id, my_row, predecessors
+            )
+            if foldback_corner:
+                if all_entry_lines:
+                    section.entry_hints.append((PortSide.TOP, sorted(all_entry_lines)))
+            elif flow_aligned_entry:
                 if all_entry_lines:
                     section.entry_hints.append((entry_aligned, sorted(all_entry_lines)))
             else:
