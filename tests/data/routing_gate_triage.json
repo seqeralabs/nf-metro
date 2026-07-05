@@ -295,6 +295,10 @@
     "note": "Reachable only via a defective render (inter-row corridor grazes the source section); see #722.",
     "status": "needs-review"
   },
+  "inter_section_handlers.py::if _h_segment_crosses_other_section(graph, src.x, final_x, src.y, exclude):::#1": {
+    "note": "Traverse-first clearance test in _top_entry_side_fan_traverse_clears (#1349). The below-side fan branch only reaches this gate when its junction also feeds an aligned straight drop; the corpus fan sits a clear row above its target, so the source-Y traverse never crosses another section and the fall-back-to-staircase arm is not exercised. Defensive.",
+    "status": "defensive"
+  },
   "inter_section_handlers.py::if _v_segment_crosses_other_section(graph, corner_x, src.y, ey, exclude):::#1": {
     "note": "Drop-in viability test in _right_entry_drop_in_is_clear (#889). The cross-row RIGHT-entry rule fires only when the earlier bypass / plough rules ceded the edge, i.e. no section sits between source and port, so the outward-side descent runs clear; the not-clear arm covers only an exotic descent blocked by a wide same-column sibling no corpus fixture builds. Defensive.",
     "status": "defensive"

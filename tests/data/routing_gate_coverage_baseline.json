@@ -96,6 +96,7 @@
   "inter_section_handlers.py::if (::#2",
   "inter_section_handlers.py::if _corridor_is_viable(ctx, src, ep):::#1",
   "inter_section_handlers.py::if _corridor_is_viable(ctx, src, tgt):::#1",
+  "inter_section_handlers.py::if _h_segment_crosses_other_section(graph, src.x, final_x, src.y, exclude):::#1",
   "inter_section_handlers.py::if _v_segment_crosses_other_section(graph, corner_x, src.y, ey, exclude):::#1",
   "inter_section_handlers.py::if _v_segment_crosses_other_section(graph, dx, src.y, tgt.y, exclude):::#1",
   "inter_section_handlers.py::if _would_route_around_section_below(other, ctx):::#1",
