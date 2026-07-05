@@ -2569,6 +2569,29 @@ def _corridor_riser_x(
     )
 
 
+def _deepest_section_bottom_crossed_by_run(
+    graph: MetroGraph, x1: float, x2: float, y: float, exclude: set[str]
+) -> float | None:
+    """Lowest bbox bottom among sections a horizontal run at *y* penetrates.
+
+    Scans the sections whose bbox interior the segment ``[min(x1,x2),
+    max(x1,x2)]`` at height *y* enters (excluding *exclude*), returning the
+    maximum of their bottom edges, or ``None`` when the run crosses no
+    section.  A caller drops the run below that edge so it clears the box
+    body instead of skimming its interior.
+    """
+    lo_x, hi_x = (x1, x2) if x1 <= x2 else (x2, x1)
+    deepest = float("-inf")
+    for s in graph.sections.values():
+        if s.bbox_w <= 0 or s.id in exclude:
+            continue
+        if hi_x <= s.bbox_x or lo_x >= s.bbox_x + s.bbox_w:
+            continue
+        if s.bbox_y <= y <= s.bbox_y + s.bbox_h:
+            deepest = max(deepest, s.bbox_y + s.bbox_h)
+    return deepest if deepest > float("-inf") else None
+
+
 def _route_top_entry_l_shape(
     edge: Edge, src: Station, tgt: Station, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -2703,6 +2726,19 @@ def _route_top_entry_l_shape(
             (edge_by_line[lid], lid, src_offset(lid), src_offset(lid))
             for lid in line_ids
         ]
+
+    # The trunk leg runs horizontally at ``mid_y`` from the lead-in to the
+    # landing column.  When a squeezed inter-row gap seats it inside an
+    # intervening section (a tall upstream box protruding into the gap the run
+    # doubles back across), drop it below that box's bottom edge so it routes
+    # in the gap rather than skimming the section interior (#1312).  Clamp
+    # above the target's top so the leg still descends into the TOP port.
+    exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
+    crossed_bottom = _deepest_section_bottom_crossed_by_run(
+        ctx.graph, lx0, final_x, mid_y, exclude
+    )
+    if crossed_bottom is not None:
+        mid_y = min(crossed_bottom + INTER_ROW_EDGE_CLEARANCE, ty - ctx.curve_radius)
 
     # Traverse at the source Y to the port column, then drop straight in.
     if _top_entry_side_fan_traverse_is_clear(edge, src, tgt, final_x, ctx):
