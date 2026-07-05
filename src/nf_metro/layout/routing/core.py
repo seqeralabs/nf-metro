@@ -89,6 +89,7 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _restack_channel,
     _restack_htrunk,
     _restack_trunk_band,
+    _round_junction_perp_peeloff,
     _set_vchannel_x,
     _stagger_convergent_distinct_lines,
     _suboptimal_trunk_bands,
@@ -209,6 +210,10 @@ def _route_edges(
     # port-side track, the source-side track, the merge trunk's descent, and
     # the fan-out junction handoff tail), so a single line reads as one stroke.
     _coincide_same_line_tracks(routes, ctx)
+    # A perpendicular branch dropped directly off a horizontal fan-out junction
+    # trunk peels off at a hard 90; give its departure a lead-in so the corner
+    # curves. Runs after coincidence settles the drop's port column.
+    _round_junction_perp_peeloff(routes, ctx)
     # Distinct-line counterpart: spread any two different lines whose final port
     # descents were forced onto one channel (a shared gap left of a wide target).
     _stagger_convergent_distinct_lines(routes, ctx)

@@ -21,6 +21,7 @@ from pathlib import Path
 from nf_metro.api import prepare_graph, render_string
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.routing.common import drop_coincident_points
 from nf_metro.layout.routing.core import route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, PortSide
@@ -124,3 +125,46 @@ def test_hinted_side_fan_branch_traverses_before_dropping() -> None:
             f"orf feed descends at x={x:.0f}, parallel to the psite descent "
             f"x={psite_descent:.0f}"
         )
+
+
+def test_hinted_aligned_drop_departs_with_a_curve() -> None:
+    """The aligned fan-out drop peels off the trunk with a rounded corner.
+
+    ``quantification`` fans ``ribo`` from a junction whose trunk runs
+    horizontally (the feed arrives from the left; the ``orf_calling`` branch
+    continues to the right).  The ``psite_id`` branch drops straight into the
+    TOP port directly below the junction.  That drop must leave the trunk via a
+    standard corner curve -- a horizontal lead-in, then the vertical descent --
+    not peel off at a hard 90 degrees.  A bare vertical first segment starting
+    at the junction is the un-rounded departure this guards against.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(open(HINTED).read())
+    compute_layout(graph)
+    routes = route_edges(graph)
+
+    junction = graph.stations["__junction_10"]
+    psite_feed = next(
+        r
+        for r in routes
+        if r.edge.target == "psite_id__entry_top_8"
+        and r.edge.source in graph.junction_ids
+    )
+    pts = drop_coincident_points(psite_feed.points)
+
+    assert len(pts) >= 3, (
+        f"psite fan-out drop is a bare peel-off {pts}; it leaves the junction "
+        "with no lead-in, so its departure renders as a hard 90 degrees"
+    )
+    lead_in, corner, drop = pts[0], pts[1], pts[2]
+    assert abs(corner[0] - junction.x) < COORD_TOLERANCE, (
+        f"departure corner at x={corner[0]:.0f} is not at the junction "
+        f"x={junction.x:.0f}"
+    )
+    assert abs(lead_in[1] - corner[1]) < COORD_TOLERANCE, (
+        "first segment into the departure corner is not horizontal"
+    )
+    assert abs(drop[0] - corner[0]) < COORD_TOLERANCE, (
+        "segment out of the departure corner is not the vertical drop"
+    )
