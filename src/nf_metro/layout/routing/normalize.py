@@ -34,6 +34,7 @@ from nf_metro.layout.routing.common import (
     iter_vertical_segments,
     packed_cell_neighbor_edges,
     peeloff_target_slots,
+    perp_peeloff_off_horizontal_junction,
     seat_peeloff_port_y,
     symmetric_bundle_midpoint,
     tail_on_slot,
@@ -1517,7 +1518,7 @@ def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> N
     if not fanouts:
         return
 
-    upstream, downstream = _fanout_route_maps(routes, fanouts)
+    upstream, downstream = _fanout_route_maps(routes, fanouts, ctx.graph)
     for (jid, line_id), up in upstream.items():
         down = downstream.get((jid, line_id))
         if down is None or len(up.points) < 2:
@@ -1528,6 +1529,48 @@ def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> N
         # approach into the bend stays horizontal.
         if abs(p_prev[1] - p_last[1]) <= COORD_TOLERANCE_FINE:
             up.points[-1] = (down.points[0][0], p_last[1])
+
+
+def _round_junction_perp_peeloff(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Round a perpendicular branch that peels off a horizontal junction trunk.
+
+    A fan-out junction whose trunk runs horizontally (a feed arriving along one
+    side, a sibling branch continuing along the other) can fan one line to a
+    TOP/BOTTOM entry port directly below/above it.  That branch drops straight
+    off the junction, so the horizontal-to-vertical turn falls exactly on the
+    junction where the incoming trunk and this drop are two separate routes:
+    neither owns the corner, so it renders as a hard 90 degrees while every
+    other direction change curves.
+
+    Prepend a short horizontal lead-in toward the feed side so the drop owns a
+    horizontal segment into the turn -- the corner is then a standard within-
+    path curve, landing straight down the port column.  The lead-in overlays
+    the incoming trunk (same line, same Y), so it never draws in open space; it
+    is clamped to the feeder's own length so it cannot overshoot into the
+    source section.
+
+    Runs after :func:`_coincide_same_line_tracks` because the drop's column is
+    the port X that convergence fusion settles, not a routing-time coordinate.
+    """
+    from nf_metro.layout.routing.invariants import fanout_junctions
+
+    fanouts = fanout_junctions(ctx.graph)
+    if not fanouts:
+        return
+    graph = ctx.graph
+    radius = ctx.curve_radius
+    for rp in routes:
+        if not rp.is_inter_section or rp.edge.source not in fanouts:
+            continue
+        peeloff = perp_peeloff_off_horizontal_junction(graph, routes, rp)
+        if peeloff is None:
+            continue
+        junction, feeder, pts = peeloff
+        x0, y0 = pts[0]
+        side = -1.0 if feeder.x < junction.x else 1.0
+        lead_len = min(radius, abs(feeder.x - junction.x))
+        rp.points = [(x0 + side * lead_len, y0), *pts]
+        rp.curve_radii = None
 
 
 def _convergence_line_order(
