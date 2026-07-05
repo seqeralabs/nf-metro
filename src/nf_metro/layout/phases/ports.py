@@ -24,6 +24,7 @@ from nf_metro.layout.phases._common import (
     exit_entry_ports_face,
     flow_exit_carrier_anchor,
     iter_fold_lr_exits_short_of_target,
+    perp_entry_lands_left,
 )
 from nf_metro.layout.phases.bbox import _predict_section_content_bottom
 from nf_metro.layout.phases.guards import (
@@ -482,17 +483,14 @@ def _nudge_port_from_stations(
     if not any(abs(station.x - ix) < tolerance for ix in internal_xs):
         return
 
-    # Move port toward the entry side of the section
-    # For LR: entry is left, so move port left (toward bbox_x)
-    # For RL: entry is right, so move port right (toward bbox_x + bbox_w)
-    if section.direction == "RL":
-        new_x = max(internal_xs) + tolerance
-        # Clamp within bbox
-        new_x = min(new_x, section.bbox_x + section.bbox_w - tolerance)
+    # Move the port to the side of the trunk opposite the flow-axis exit, so
+    # the drop-in leg and the exit leg do not fold back over each other.
+    if perp_entry_lands_left(section, graph):
+        new_x = max(min(internal_xs) - tolerance, section.bbox_x + tolerance)
     else:
-        new_x = min(internal_xs) - tolerance
-        # Clamp within bbox
-        new_x = max(new_x, section.bbox_x + tolerance)
+        new_x = min(
+            max(internal_xs) + tolerance, section.bbox_x + section.bbox_w - tolerance
+        )
 
     station.x = new_x
     port.x = new_x

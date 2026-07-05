@@ -1628,6 +1628,18 @@ def check_exit_port_feeder_alignment(
     return violations
 
 
+def _entry_perpendicular_to_flow(port, section) -> bool:
+    """Whether an entry port sits on the axis perpendicular to its flow.
+
+    LEFT/RIGHT on a vertical-flow (TB/BT) section, TOP/BOTTOM on a
+    horizontal-flow (LR/RL) one.  Such a port's turn-in leg is the entry,
+    perpendicular to flow, not a serpentine fold-back.
+    """
+    if section.direction in ("LR", "RL"):
+        return port.side in (PortSide.TOP, PortSide.BOTTOM)
+    return port.side in (PortSide.LEFT, PortSide.RIGHT)
+
+
 def check_serpentine_no_backtrack(
     graph: MetroGraph,
     backtrack_frac: float = 0.5,
@@ -1675,11 +1687,11 @@ def check_serpentine_no_backtrack(
         if src_sec != tgt_sec or src_sec not in serpentine_sections:
             continue
         port = graph.ports.get(route.edge.source)
-        if port and port.is_entry and port.side in (PortSide.LEFT, PortSide.RIGHT):
-            # A LEFT/RIGHT entry port's turn-in to the trunk is the entry, one
-            # leg perpendicular to flow, not a serpentine fold-back.
-            continue
         section = graph.sections[src_sec]
+        if port and port.is_entry and _entry_perpendicular_to_flow(port, section):
+            # An entry port's turn-in to the trunk is the entry, one leg
+            # perpendicular to flow, not a serpentine fold-back.
+            continue
         forward = 1.0 if section.direction != "RL" else -1.0
         pts = apply_route_offsets(route, offsets)
         for k in range(len(pts) - 1):

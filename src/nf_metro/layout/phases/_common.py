@@ -29,6 +29,28 @@ if TYPE_CHECKING:
     from nf_metro.layout.routing.common import RoutedPath
 
 
+def perp_entry_lands_left(section: Section, graph: MetroGraph) -> bool:
+    """Which side of the internal trunk a perpendicular entry drop lands on.
+
+    A TOP/BOTTOM entry into an LR/RL section drops in beside the trunk, then
+    runs horizontally to the trunk and out the flow-axis exit.  If the drop
+    lands on the *same* side as the exit, that run and the exit leg cover the
+    same track in opposing directions -- the line folds back over itself.  So
+    the drop must land on the side opposite the flow-axis exit: LEFT-exit ->
+    drop on the right, RIGHT-exit -> drop on the left.
+
+    With no single LEFT/RIGHT exit to key off, falls back to the flow-natural
+    side (LR enters left, RL enters right); an exit on that natural side then
+    also resolves to the natural side.
+    """
+    exit_sides = {graph.ports[pid].side for pid in flow_axis_exit_ports(section, graph)}
+    if exit_sides == {PortSide.LEFT}:
+        return False
+    if exit_sides == {PortSide.RIGHT}:
+        return True
+    return section.direction == "LR"
+
+
 def iter_sole_trunk_continuations(
     graph: MetroGraph,
 ) -> Iterator[tuple[str, str, str]]:
