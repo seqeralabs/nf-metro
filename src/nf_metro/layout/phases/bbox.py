@@ -390,6 +390,29 @@ def _bundle_edge_padding(
     )
 
 
+def _rail_above_label_ids(graph: MetroGraph, section: Section) -> set[str]:
+    """Rail stations whose label hangs above the top rail rather than below.
+
+    Empty for non-rail sections and for rail sections whose per-line rail map is
+    not yet populated.  Mirrors the classification
+    :func:`_guard_rail_above_label_band` uses so the content-bottom prediction
+    and the guard agree on which stations reach up.
+    """
+    if not graph.is_rail_section(section.id):
+        return set()
+    per_line = graph._rail_y.get(section.id) or {}
+    if not per_line:
+        return set()
+    from nf_metro.layout.rail_mode import _rail_above_label_stations
+
+    real_ids = [
+        sid
+        for sid in section.station_ids
+        if (st := graph.stations.get(sid)) is not None and not st.is_port
+    ]
+    return _rail_above_label_stations(graph, real_ids, per_line)
+
+
 def _predict_section_content_bottom(
     graph: MetroGraph,
     section: Section,
@@ -424,6 +447,12 @@ def _predict_section_content_bottom(
     label_angle = graph.label_angle or 0.0 if section_dir in ("LR", "RL") else 0.0
     is_horizontal = section_dir in ("LR", "RL")
     fan_ids = _trunk_symmetric_fan_ids(graph, section) if is_horizontal else ()
+    # In a rail panel a single-rail station on the top rail labels *above* the
+    # bundle (:func:`labels._rail_label_side`), so its angled label hangs up
+    # rather than down and adds no downward reach; only the below-hanging labels
+    # anchor the bottom.  :func:`_guard_rail_above_label_band` covers the upward
+    # footprint of these stations.
+    rail_above_ids = _rail_above_label_ids(graph, section) if label_angle else set()
     if is_horizontal and offsets is None:
         from nf_metro.layout.routing import compute_station_offsets
 
@@ -445,7 +474,10 @@ def _predict_section_content_bottom(
                     sid in fan_ids,
                 ),
                 _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1],
-                angled_label_reach(graph.stations[sid], label_angle),
+                angled_label_reach(
+                    graph.stations[sid],
+                    0.0 if sid in rail_above_ids else label_angle,
+                ),
             )
             for sid in _content_station_ids(graph, section)
         ]
