@@ -111,6 +111,11 @@ EXPECTED_RESIDUALS = frozenset(
         ("fold_double", "hard_filter", "annotation", "L->R"),
         ("fold_double", "interpretation", "integration", "L->R"),
         ("fold_fan_across", "stat_analysis", "reporting", "L->R"),
+        # Serpentine fold rows reverse the flow the classifier preserves: the
+        # returning row's exit/entry sides are marked reversed, but the seam is
+        # a single continuation with no bundle order to flip.
+        ("folded_corridor_distinct_lanes", "consensus", "realignment", "L->R"),
+        ("folded_corridor_distinct_lanes", "variant_calling", "normalization", "B->T"),
         ("fold_stacked_branch", "bio_interp", "final_report", "L->R"),
         ("longread_variant_calling", "annotation", "reports", "L->R"),
         ("longread_variant_calling", "cnv_calling", "reports", "L->R"),
