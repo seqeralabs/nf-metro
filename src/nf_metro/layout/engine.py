@@ -503,23 +503,31 @@ def compute_layout(
         # Topology-blind bypass insertion (parse time) can miss a line drawn
         # through a marker it doesn't consume; the geometric pass re-lays out
         # with bypass helpers for any such crossing it can cleanly fix.  The
-        # first pass defers the breeze-through guard so the crossing is
-        # collected rather than aborting; the final state is validated below.
+        # pre-bypass passes defer the final-geometry guards (the breeze-through
+        # guard and the closing "after final" checkpoint), so a crossing the
+        # re-lay would move clear of is collected rather than aborting on a
+        # transient layout state; the settled geometry is validated below, so a
+        # validate=True render asserts the exact geometry it draws.
         from nf_metro.layout.geometric_bypass import apply_geometric_bypass
 
-        graph._defer_breeze_guard = True
+        graph._defer_final_guards = True
+        graph._after_final_deferred = False
         _layout_pass(validate)
-        changed, residual_breeze = apply_geometric_bypass(graph, _layout_pass)
-        graph._defer_breeze_guard = False
+        changed = apply_geometric_bypass(graph, _layout_pass)
+        graph._defer_final_guards = False
 
         # Bypass helpers re-feed the bypassed section's height into downstream
         # placement, which lags by one pass, so a kept fix needs one more settling
-        # pass to reach its fixed point.  The active guard surfaces a residual
-        # crossing the bypass idiom could not express.
+        # pass to reach its fixed point; that pass runs the deferred "after final"
+        # checkpoint on the settled geometry.  When the bypass changed nothing the
+        # first pass already holds the final geometry, so the deferred checkpoint
+        # runs against it directly -- but only when the first pass actually
+        # reached it (``_after_final_deferred``), so layout paths that never
+        # reach the checkpoint (rail, flat) are exempt.
         if changed:
             _layout_pass(validate)
-        elif validate and residual_breeze:
-            _guard_no_line_crosses_non_consumer(graph, "after final")
+        elif validate and graph._after_final_deferred:
+            _run_after_final_checkpoint(graph, section_y_gap, section_y_padding)
 
 
 def _compute_layout_scaled(
@@ -1865,10 +1873,25 @@ def _finalize_layout(
         _snap(graph, "6.17")
 
     if validate:
-        run_validate_guards(
-            graph,
-            "after final",
-            include_final=True,
-            section_y_gap=section_y_gap,
-            section_y_padding=section_y_padding,
-        )
+        if graph._defer_final_guards:
+            graph._after_final_deferred = True
+        else:
+            _run_after_final_checkpoint(graph, section_y_gap, section_y_padding)
+
+
+def _run_after_final_checkpoint(
+    graph: MetroGraph, section_y_gap: float, section_y_padding: float
+) -> None:
+    """Run the closing ``after final`` validate checkpoint on the settled graph.
+
+    The single call site for the checkpoint's guard set: ``_finalize_layout``
+    runs it directly, and ``compute_layout`` re-runs it here once the
+    geometric-bypass cycle has settled the geometry a deferred pass skipped.
+    """
+    run_validate_guards(
+        graph,
+        "after final",
+        include_final=True,
+        section_y_gap=section_y_gap,
+        section_y_padding=section_y_padding,
+    )

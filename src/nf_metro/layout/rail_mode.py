@@ -582,6 +582,27 @@ def _rail_above_label_stations(
     return above
 
 
+def rail_above_label_ids(graph: MetroGraph, section: Section) -> set[str]:
+    """Section-level :func:`_rail_above_label_stations`: above-label station ids.
+
+    Resolves the section's real (non-port) stations and per-line rail map before
+    classifying, so callers that only have a ``Section`` need not repeat the
+    prep.  Empty for non-rail sections and for rail sections whose rail map is
+    not yet populated.
+    """
+    if not graph.is_rail_section(section.id):
+        return set()
+    per_line_y = graph._rail_y.get(section.id) or {}
+    if not per_line_y:
+        return set()
+    real_ids = [
+        sid
+        for sid in section.station_ids
+        if (st := graph.stations.get(sid)) is not None and not st.is_port
+    ]
+    return _rail_above_label_stations(graph, real_ids, per_line_y)
+
+
 def _label_aware_x_spacing(
     graph: MetroGraph,
     real_ids: list[str],

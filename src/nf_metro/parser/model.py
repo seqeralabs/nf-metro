@@ -544,9 +544,16 @@ class MetroGraph:
     # compute_layout from the NF_METRO_PHASE_SNAPSHOTS env var; read by the
     # _snap hook after each phase.  Off by default (pure observation).
     _phase_snapshots_enabled: bool = field(default=False, repr=False)
-    # Set for the first of compute_layout's two passes so the breeze-through
-    # guard defers while the geometric bypass pass collects crossings to fix.
-    _defer_breeze_guard: bool = field(default=False, repr=False)
+    # Set while compute_layout runs the pre-bypass passes so the final-geometry
+    # guards (breeze-through and the closing "after final" checkpoint) defer:
+    # the geometric bypass pass may re-lay the graph, so those guards must only
+    # assert the settled geometry the renderer draws, not a transient state.
+    _defer_final_guards: bool = field(default=False, repr=False)
+    # Set by the "after final" checkpoint when it is reached but deferred, so
+    # compute_layout runs it once on the settled post-bypass geometry.  Stays
+    # false for layout paths (rail, flat) that never reach that checkpoint, so
+    # the deferred run mirrors exactly which graphs the pipeline validates.
+    _after_final_deferred: bool = field(default=False, repr=False)
     # Per-section rail-Y map (section_id -> {line_id: rail_y}), set by the
     # rail-mode layout so the dedicated router can resolve a port's per-line
     # rail Y.  Empty when rail mode is off.

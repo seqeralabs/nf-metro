@@ -1564,26 +1564,16 @@ def _guard_rail_above_label_band(graph: MetroGraph, phase: str) -> None:
     if not graph.has_rail_sections:
         return
     # Function-local: a module-level import would close a layout import cycle.
-    from nf_metro.layout.rail_mode import (
-        _rail_above_label_stations,
-        _rail_label_band,
-    )
+    from nf_metro.layout.rail_mode import _rail_label_band, rail_above_label_ids
 
     tol = 1.0
     for section in graph.sections.values():
         if section.bbox_h <= 0 or not graph.is_rail_section(section.id):
             continue
-        per_line = graph._rail_y.get(section.id) or {}
-        if not per_line:
-            continue
-        real_ids = [
-            sid
-            for sid in section.station_ids
-            if (st := graph.stations.get(sid)) is not None and not st.is_port
-        ]
-        above_ids = _rail_above_label_stations(graph, real_ids, per_line)
+        above_ids = rail_above_label_ids(graph, section)
         if not above_ids:
             continue
+        per_line = graph._rail_y.get(section.id) or {}
         needed = _rail_label_band(graph, above_ids)
         reserved = min(per_line.values()) - section.bbox_y
         if reserved + tol < needed:
@@ -2045,10 +2035,10 @@ def _guard_no_line_crosses_non_consumer(
                 if src == sid or tgt == sid:
                     continue
                 if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
-                    # The first of two layout passes defers this guard so the
-                    # geometric bypass pass can fix the crossing; the re-laid-
-                    # out second pass runs it for real.
-                    if graph._defer_breeze_guard:
+                    # The pre-bypass passes defer this guard so the geometric
+                    # bypass pass can fix the crossing; the settled geometry is
+                    # validated once the bypass cycle completes.
+                    if graph._defer_final_guards:
                         return
                     raise PhaseInvariantError(
                         f"{phase}: line {line_id!r} on edge "
@@ -2109,10 +2099,10 @@ def _guard_no_line_crosses_file_icon(
                 if src == sid or tgt == sid:
                     continue
                 if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
-                    # The first of two layout passes defers this guard so the
-                    # geometric bypass pass can bow the crossing line clear; the
-                    # re-laid-out second pass runs it against the final geometry.
-                    if graph._defer_breeze_guard:
+                    # The pre-bypass passes defer this guard so the geometric
+                    # bypass pass can bow the crossing line clear; the settled
+                    # geometry is validated once the bypass cycle completes.
+                    if graph._defer_final_guards:
                         return
                     raise PhaseInvariantError(
                         f"{phase}: line {line_id!r} on edge {src!r} -> {tgt!r} "
