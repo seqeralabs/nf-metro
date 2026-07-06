@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import warnings
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -314,6 +315,10 @@ def render(
     to their own sibling <input>.<format>; every file is attempted even if an
     earlier one fails, successful outputs are kept, and a non-zero exit is
     returned if any failed.
+
+    Any exception not already recognised as a pipeline error surfaces as a
+    plain error message rather than a traceback; set NF_METRO_DEBUG=1 to
+    re-raise it instead.
     """
     if len(input_files) > 1 and output is not None:
         raise click.UsageError("-o/--output can only be used with a single INPUT_FILE.")
@@ -355,6 +360,64 @@ def render(
 
 
 def _render_one(
+    input_file: Path,
+    output: Path,
+    *,
+    format_: Literal["svg", "html"],
+    theme: str | None,
+    mode: str | None,
+    debug: bool,
+    logo: Path | None,
+    line_spread: str | None,
+    legend: str | None,
+    from_nextflow: bool,
+    title: str | None,
+    responsive: bool,
+    embed_font: bool,
+    text_to_paths: bool,
+    svg_class_prefix: str,
+    no_self_color_scheme: bool,
+    no_dark_mode_css: bool,
+    no_chrome_css: bool,
+    bare: bool,
+    validate_geometry: bool,
+    layout_opts: dict[str, object],
+    quiet: bool,
+) -> None:
+    try:
+        _render_one_unsafe(
+            input_file,
+            output,
+            format_=format_,
+            theme=theme,
+            mode=mode,
+            debug=debug,
+            logo=logo,
+            line_spread=line_spread,
+            legend=legend,
+            from_nextflow=from_nextflow,
+            title=title,
+            responsive=responsive,
+            embed_font=embed_font,
+            text_to_paths=text_to_paths,
+            svg_class_prefix=svg_class_prefix,
+            no_self_color_scheme=no_self_color_scheme,
+            no_dark_mode_css=no_dark_mode_css,
+            no_chrome_css=no_chrome_css,
+            bare=bare,
+            validate_geometry=validate_geometry,
+            layout_opts=layout_opts,
+            quiet=quiet,
+        )
+    except click.ClickException:
+        raise
+    except Exception as e:
+        if os.environ.get("NF_METRO_DEBUG") == "1":
+            raise
+        raise click.ClickException(f"{input_file}: unexpected error: {e}")
+
+
+def _render_one_unsafe(
     input_file: Path,
     output: Path,
     *,

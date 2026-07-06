@@ -29,11 +29,12 @@ sys.path.insert(0, str(project_root / "tests"))
 
 from layout_metrics import compute_metrics  # noqa: E402
 
-from nf_metro.convert import convert_nextflow_dag  # noqa: E402
-from nf_metro.layout.engine import compute_layout  # noqa: E402
-from nf_metro.parser.mermaid import parse_metro_mermaid  # noqa: E402
-from nf_metro.render.svg import render_svg  # noqa: E402
-from nf_metro.themes import THEMES  # noqa: E402
+from nf_metro.api import (  # noqa: E402
+    RenderConfig,
+    prepare_graph,
+    render_graph,
+    resolve_theme,
+)
 
 DEBUG_RENDERS = "--debug" in sys.argv
 
@@ -125,17 +126,6 @@ def _seed_from_base() -> None:
             target.update(json.loads(path.read_text()))
 
 
-def render_drawn_svg(graph, theme, **kwargs) -> str:
-    """Render the drawn map only, with the embedded data manifest disabled.
-
-    The gallery is the visual-regression surface: the render diff compares
-    these SVGs byte-for-byte, and the data manifest carries no visual content.
-    Disabling it keeps the diff a true picture of what changed on screen.
-    """
-    graph.embed_manifest = False
-    return render_svg(graph, theme, **kwargs)
-
-
 def _record_metrics(graph, svg_name: str, svg_str: str) -> None:
     """Compute the layout-quality scorecard for a freshly rendered graph.
 
@@ -156,20 +146,26 @@ def render_mmd(
     *,
     debug: bool = DEBUG_RENDERS,
     self_color_scheme: bool = True,
+    from_nextflow: bool = False,
 ) -> str:
     """Parse, layout, and render a .mmd file to SVG; write it and return it.
 
+    Goes through :func:`nf_metro.api.prepare_graph`/:func:`~nf_metro.api.render_graph`
+    so this script resolves the option cascade the same way the CLI does.
+
     ``self_color_scheme`` is forwarded to the renderer: pages that inline the SVG
     (gallery, pipelines) pass False so the map inherits the page's color-scheme
-    and follows the light/dark toggle.
+    and follows the light/dark toggle. The embedded data manifest carries no
+    visual content, so it is disabled for every render here: the gallery is the
+    visual-regression surface and the render diff compares these SVGs
+    byte-for-byte.
     """
     text = mmd_path.read_text()
-    graph = parse_metro_mermaid(text)
-    compute_layout(graph)
-    theme_name = graph.style if graph.style in THEMES else "nfcore"
-    theme = THEMES[theme_name]
-    svg_str = render_drawn_svg(
-        graph, theme, debug=debug, self_color_scheme=self_color_scheme
+    graph = prepare_graph(text, from_nextflow=from_nextflow)
+    graph.embed_manifest = False
+    theme = resolve_theme(None, graph)
+    svg_str = render_graph(
+        graph, theme, RenderConfig(debug=debug, self_color_scheme=self_color_scheme)
     )
     svg_path.write_text(svg_str)
     _record_metrics(graph, svg_path.name, svg_str)
@@ -286,14 +282,7 @@ def render_guide_examples() -> None:
         _manifest[debug_svg.name] = section
     elif debug_src.exists():
         try:
-            text = debug_src.read_text()
-            graph = parse_metro_mermaid(text)
-            compute_layout(graph)
-            theme_name = graph.style if graph.style in THEMES else "nfcore"
-            theme = THEMES[theme_name]
-            svg_str = render_drawn_svg(graph, theme, debug=True)
-            debug_svg.write_text(svg_str)
-            _record_metrics(graph, debug_svg.name, svg_str)
+            render_mmd(debug_src, debug_svg, debug=True)
             _manifest[debug_svg.name] = section
             print("  rnaseq_auto_debug: OK")
         except Exception as e:
@@ -342,14 +331,7 @@ def render_nextflow_examples() -> None:
             _manifest[svg_path.name] = section
             continue
         try:
-            text = mmd_path.read_text()
-            converted = convert_nextflow_dag(text)
-            graph = parse_metro_mermaid(converted)
-            compute_layout(graph)
-            theme = THEMES[graph.style if graph.style in THEMES else "nfcore"]
-            svg_str = render_drawn_svg(graph, theme, debug=DEBUG_RENDERS)
-            svg_path.write_text(svg_str)
-            _record_metrics(graph, svg_path.name, svg_str)
+            render_mmd(mmd_path, svg_path, from_nextflow=True)
             _manifest[svg_path.name] = section
             print(f"  nf_{mmd_path.stem}: OK")
         except Exception as e:

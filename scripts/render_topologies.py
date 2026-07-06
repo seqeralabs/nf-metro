@@ -18,13 +18,31 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-from nf_metro.convert import convert_nextflow_dag  # noqa: E402
-from nf_metro.layout.engine import compute_layout  # noqa: E402
-from nf_metro.parser.mermaid import parse_metro_mermaid  # noqa: E402
-from nf_metro.render.svg import render_svg  # noqa: E402
-from nf_metro.themes import THEMES  # noqa: E402
+from nf_metro.api import (  # noqa: E402
+    RenderConfig,
+    prepare_graph,
+    render_graph,
+    resolve_theme,
+)
+from nf_metro.layout import (  # noqa: E402
+    BackwardFlowError,
+    FoldThresholdError,
+    MixedEntryDirectionError,
+    PhaseInvariantError,
+)
+from nf_metro.parser import CyclicGraphError  # noqa: E402
 
 NEXTFLOW_DIR = project_root / "tests" / "fixtures" / "nextflow"
+
+# Errors from the layout stage of prepare_graph, distinguished from parse
+# errors so the batch summary keeps reporting which stage failed.
+_LAYOUT_ERRORS = (
+    BackwardFlowError,
+    CyclicGraphError,
+    FoldThresholdError,
+    MixedEntryDirectionError,
+    PhaseInvariantError,
+)
 
 
 def _collect_mmd_files() -> list[Path]:
@@ -64,29 +82,25 @@ def render_file(
     is_nextflow = NEXTFLOW_DIR in mmd_path.parents or mmd_path.parent == NEXTFLOW_DIR
     issues: list[str] = []
 
+    layout_options = {"diamond_style": "straight"} if straight_diamonds else None
     try:
         text = mmd_path.read_text()
-        if is_nextflow:
-            text = convert_nextflow_dag(text)
-        graph = parse_metro_mermaid(text)
+        graph = prepare_graph(
+            text, from_nextflow=is_nextflow, layout_options=layout_options
+        )
+    except _LAYOUT_ERRORS as e:
+        return name, [f"LAYOUT ERROR: {e}"]
     except Exception as e:
         return name, [f"PARSE ERROR: {e}"]
 
-    if straight_diamonds:
-        graph.diamond_style = "straight"
-
-    try:
-        compute_layout(graph)
-    except Exception as e:
-        return name, [f"LAYOUT ERROR: {e}"]
-
-    theme_name = graph.style if graph.style in THEMES else "nfcore"
-    theme = THEMES[theme_name]
+    theme = resolve_theme(None, graph)
 
     try:
         # chrome_css=False bakes concrete colors so the cairosvg PNG step below
         # works (cairosvg cannot parse the var() chrome custom properties).
-        svg_str = render_svg(graph, theme, debug=debug, chrome_css=False)
+        svg_str = render_graph(
+            graph, theme, RenderConfig(debug=debug, chrome_css=False)
+        )
     except Exception as e:
         return name, [f"RENDER ERROR: {e}"]
 

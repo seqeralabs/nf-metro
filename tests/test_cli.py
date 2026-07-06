@@ -242,6 +242,38 @@ def test_render_nonexistent_file():
     assert result.exit_code != 0
 
 
+def test_render_unexpected_exception_becomes_click_exception(tmp_path, monkeypatch):
+    """An exception type outside the pipeline's known errors becomes a clean error."""
+
+    def _boom(*args, **kwargs):
+        raise KeyError("boom")
+
+    monkeypatch.delenv("NF_METRO_DEBUG", raising=False)
+    monkeypatch.setattr("nf_metro.cli.render_graph", _boom)
+    src = tmp_path / "a.mmd"
+    src.write_text(RNASEQ_MMD.read_text())
+    runner = CliRunner()
+    result = runner.invoke(cli, ["render", str(src), "-o", str(tmp_path / "out.svg")])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit)
+    assert "unexpected error" in result.output
+
+
+def test_render_unexpected_exception_reraises_under_debug_env(tmp_path, monkeypatch):
+    """NF_METRO_DEBUG=1 re-raises the original exception instead of wrapping it."""
+
+    def _boom(*args, **kwargs):
+        raise KeyError("boom")
+
+    monkeypatch.setenv("NF_METRO_DEBUG", "1")
+    monkeypatch.setattr("nf_metro.cli.render_graph", _boom)
+    src = tmp_path / "a.mmd"
+    src.write_text(RNASEQ_MMD.read_text())
+    runner = CliRunner()
+    result = runner.invoke(cli, ["render", str(src), "-o", str(tmp_path / "out.svg")])
+    assert isinstance(result.exception, KeyError)
+
+
 def test_render_multiple_files(tmp_path):
     """render accepts more than one INPUT_FILE, each to its own sibling output."""
     a = tmp_path / "a.mmd"
