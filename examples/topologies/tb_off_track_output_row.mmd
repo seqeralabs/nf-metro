@@ -1,0 +1,33 @@
+%%metro title: TB off-track output row
+%% Regression for #1384: in a `direction: TB` section an off-track output
+%% (producer-fed sink) must sit beside its own producer -- sharing the
+%% producer's flow-axis row, offset on the cross axis to the side opposite the
+%% beside-trunk labels -- not drop a row down the trunk into a neighbouring
+%% station's label lane.  The trunk descent along the flow axis must not be read
+%% as a downward branch.
+%%metro line: core | Core | #2db572
+
+%%metro file: trimmed_out | FASTQ
+%%metro file: recal_out | CRAM
+%%metro off_track: trimmed_out
+%%metro off_track: recal_out
+
+graph LR
+    subgraph pre [Pre-processing]
+        %%metro direction: TB
+        fastp[fastp]
+        align[align]
+        markdup[markduplicates]
+        recal[recalibrate]
+        collect[collect metrics]
+        trimmed_out[ ]
+        recal_out[ ]
+
+        fastp -->|core| align
+        align -->|core| markdup
+        markdup -->|core| recal
+        recal -->|core| collect
+
+        fastp -->|core| trimmed_out
+        recal -->|core| recal_out
+    end

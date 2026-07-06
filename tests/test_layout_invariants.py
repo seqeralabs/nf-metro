@@ -48,7 +48,11 @@ from nf_metro.layout.engine import (
     compute_min_y_spacing,
     is_loop_side_branch_station,
 )
-from nf_metro.layout.geometry import lanes_run_along_y, segment_intersects_bbox
+from nf_metro.layout.geometry import (
+    lanes_run_along_x,
+    lanes_run_along_y,
+    segment_intersects_bbox,
+)
 from nf_metro.layout.labels import (
     _label_bbox,
     find_wrapped_label_trunk_strikes,
@@ -64,6 +68,7 @@ from nf_metro.layout.phases._common import (
     iter_corridor_fed_solo_entries,
     iter_fold_lr_exit_straight_runs,
     iter_fold_lr_exits_short_of_target,
+    section_axes,
     section_cross_axis,
     wrap_exit_carrier_anchor,
 )
@@ -396,6 +401,27 @@ def _fixtures_with_above_output() -> list[str]:
 
 
 _FIXTURES_WITH_ABOVE_OUTPUT = _fixtures_with_above_output()
+
+
+def _fixtures_with_vertical_output() -> list[str]:
+    """Off-track-output fixtures with at least one output in a vertical (TB/BT)
+    section (its producer's section stacks lines along X).
+    """
+    out: list[str] = []
+    for name in _FIXTURES_WITH_OFF_TRACK_OUTPUT:
+        try:
+            g = _layout(name)
+        except Exception:
+            continue
+        for off_id in _off_track_output_sinks(g):
+            section = g.sections.get(g.stations[off_id].section_id)
+            if section is not None and lanes_run_along_x(section.direction):
+                out.append(name)
+                break
+    return out
+
+
+_FIXTURES_WITH_VERTICAL_OUTPUT = _fixtures_with_vertical_output()
 
 
 def _off_track_input_consumer_map(
@@ -2575,44 +2601,85 @@ def test_off_track_input_column_stack_guard_catches_over_lift():
 
 
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_ABOVE_OUTPUT)
-def test_off_track_outputs_above_and_adjacent_to_producer(fixture):
+def test_off_track_outputs_on_lift_side_and_adjacent_to_producer(fixture):
     """Off-track *output* stations (producer-fed sinks, declared via
-    ``%%metro off_track:``) must hang clear of the trunk and adjacent to
-    their producer: above it (smaller Y) and lifted by only a bounded
-    number of ``y_spacing`` slots.
+    ``%%metro off_track:``) must hang clear of the trunk and adjacent to their
+    producer on the section's cross axis: on the lift side of it (above an LR
+    trunk, beside a TB one) and offset by only a bounded number of slots.
 
-    A correctly-anchored sink sits one pitch above its producer (more if a
-    crowded column bumps it clear of a trunk band), so a gap above two
-    pitches means it was misanchored to the section's topmost on-track
-    station and stranded far from the step that writes it (issue #573).
-    Mirror of ``test_off_track_inputs_above_consumer``.
+    A correctly-anchored sink sits one pitch off its producer on the cross axis
+    (:func:`section_cross_axis`; more if a crowded column bumps it clear of a
+    trunk band), so an offset past two pitches means it was misanchored to the
+    section's baseline on-track station and stranded far from the step that
+    writes it (issue #573).  Mirror of ``test_off_track_inputs_above_consumer``.
     """
     graph = _layout(fixture)
     y_spacing = compute_min_y_spacing(graph)
+    junction_ids = set(graph.junctions)
     producer_of = _off_track_output_sinks(graph)
     below = _off_track_output_below(graph)
 
     assert producer_of, f"{fixture}: no off-track output sinks found"
 
-    above_producers = {
+    lift_producers = {
         off_id: prod_id
         for off_id, prod_id in producer_of.items()
         if off_id not in below
     }
 
-    for off_id, prod_id in above_producers.items():
+    for off_id, prod_id in lift_producers.items():
         off_st = graph.stations[off_id]
         prod_st = graph.stations[prod_id]
-        gap = prod_st.y - off_st.y
+        section = graph.sections[off_st.section_id]
+        cross = section_cross_axis(section)
+        lift_sign = _off_track_lift_sign(section)
+        step = _off_track_lift_step(graph, section, junction_ids, y_spacing)
+        off_c = getattr(off_st, cross)
+        prod_c = getattr(prod_st, cross)
+        gap = lift_sign * (off_c - prod_c)
         assert gap > _Y_TOL, (
-            f"{fixture}: off-track output {off_id} y={off_st.y} not above "
-            f"producer {prod_id} y={prod_st.y}"
+            f"{fixture}: off-track output {off_id} {cross}={off_c:.1f} not on the "
+            f"lift side of producer {prod_id} {cross}={prod_c:.1f}"
         )
-        assert gap <= 2 * y_spacing + _Y_TOL, (
-            f"{fixture}: off-track output {off_id} lifted {gap:.0f}px above "
-            f"producer {prod_id} (more than 2 slots) - likely misanchored to "
-            f"the section's topmost station instead of its producer"
+        assert gap <= 2 * step + _Y_TOL, (
+            f"{fixture}: off-track output {off_id} offset {gap:.0f}px from "
+            f"producer {prod_id} on the {cross} axis (more than 2 slots) - "
+            f"likely misanchored to the section's baseline station instead of "
+            f"its producer"
         )
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_VERTICAL_OUTPUT)
+def test_vertical_off_track_output_shares_producer_row(fixture):
+    """In a vertical (TB/BT) section an off-track output shares its producer's
+    flow-axis row, offset only on the cross axis (#1384).
+
+    The trunk runs down the flow axis, so an output that inherits a downstream
+    flow layer drops a row into a neighbouring station's label lane.  It must
+    instead sit at its producer's flow coordinate -- beside it -- so the output
+    reads against its own step, not the next one.
+    """
+    graph = _layout(fixture)
+    producer_of = _off_track_output_sinks(graph)
+    checked = 0
+    for off_id, prod_id in producer_of.items():
+        off_st = graph.stations[off_id]
+        prod_st = graph.stations[prod_id]
+        section = graph.sections.get(off_st.section_id)
+        if section is None or not lanes_run_along_x(section.direction):
+            continue
+        flow, _ = section_axes(section)
+        checked += 1
+        assert getattr(off_st, flow) == pytest.approx(
+            getattr(prod_st, flow), abs=_Y_TOL
+        ), (
+            f"{fixture}: vertical off-track output {off_id} "
+            f"{flow}={getattr(off_st, flow):.1f} not on producer {prod_id}'s row "
+            f"{flow}={getattr(prod_st, flow):.1f}; it dropped into a "
+            f"neighbouring station's lane"
+        )
+    if not checked:
+        pytest.skip(f"{fixture}: no vertical off-track output to check")
 
 
 def test_off_track_noop_on_hub_station():

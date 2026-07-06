@@ -1031,10 +1031,6 @@
     "note": "Degenerate-collapse clamp for an ascending diagonal: fires only when the run is shorter than 2*MIN_STRAIGHT_EDGE (20px). Every caller feeds grid-placed station coordinates whose run-axis separation is at least one grid pitch (Y_SPACING=40 / X_SPACING=60); _route_entry_runway additionally pre-guards with `room < src_min + diagonal_run`. The 20px collapse threshold is never reached.",
     "status": "defensive"
   },
-  "tb_handlers.py::if diag_end > diag_start:::#1": {
-    "note": "Descending-run mirror of the ascending collapse clamp (#1 of `if diag_end < diag_start:`): fires only when |run| < 2*MIN_STRAIGHT_EDGE (20px), but connected diagonal endpoints are always >= one grid pitch (40/60px) apart on the run axis. Unreachable degenerate-geometry guard.",
-    "status": "defensive"
-  },
   "tb_handlers.py::if tgt_sec is not None and tgt_sec.direction not in (\"TB\", \"BT\"):::#1": {
     "note": "Perp-entry drop crossing-X override: the edge's target is always a sectioned station, so tgt_sec resolves and the `tgt_sec is None` short-circuit to the plain drop is never taken; the `direction in (TB, BT)` arm (a drop continuing into a vertical-flow trunk) and the horizontal-target arm are both exercised.",
     "status": "defensive"
