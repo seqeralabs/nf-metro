@@ -1,0 +1,248 @@
+%%metro title: Example analysis pathways
+%% Regression fixture for #1373: sarek pathways with an author `direction: TB`
+%% override on the `preprocessing` section, the section grid inferred rather
+%% than pinned, and the subgraphs declared out of flow order. This arrangement
+%% stresses section placement, which must keep every station inside its own
+%% section bbox -- in particular the off-track `out` output within `calling`.
+%%metro fold_threshold: 12
+%%metro caption: Adapted from: Fellows Yates, James A., et al. PeerJ 9 (2021)
+%%metro style: dark
+%%metro logo: examples/nf-core-sarek_logo_dark.png
+%%metro logo_scale: 1.0
+%%metro font_scale: 1.3
+%%metro legend_logo_gap: 40
+%%metro legend: br
+%%metro label_angle: 45
+%%metro line_spread: rails | calling
+
+%%metro line: core | Core workflow | #2db572
+%%metro line: germline | Germline | #0570b0
+%%metro line: tumor_only | Tumor only | #d62728
+%%metro line: pair_n | Tumor-normal (normal) | #0570b0
+%%metro line: pair_t | Tumor-normal (tumor) | #d62728
+
+%% Tumor-normal pair is the normal + tumor lines bundled together; give the
+%% combination a single legend entry instead of two separate rows.
+%%metro legend_combo: pair_n, pair_t | Tumor-normal pair
+
+%%metro files: ubam_in | uBAM
+%%metro files: spring_in | spring
+%%metro files: fastq_in | FASTQ
+%%metro file: vcf_ann | VCF
+%%metro file: vcf_vc | VCF
+%%metro files: cram_call | CRAM
+%%metro file: out | VCF
+%%metro file: out | TXT
+%%metro files: out | ...
+
+%% Intermediate alignment artefacts written off the trunk at the step that
+%% produces them (mapping, samtools, recalibration prep, applybqsr).
+%%metro files: mapped_out | BAM/CRAM
+%%metro files: samtools_out | CRAM
+%%metro files: recalprep_out | CRAM
+%%metro files: recal_out | CRAM
+
+%% ubam and spring need conversion, so they feed convert; fastq is already in
+%% the right format and joins the trunk at FastQC, past convert.  spring and
+%% fastq lift off the trunk as off-track inputs with an S-curve.  The bam/cram
+%% outputs hang off their producer the same way (off_track anchors a sink to
+%% its source).
+%%metro off_track: fastq_in
+%%metro off_track: spring_in
+%%metro off_track: mapped_out
+%%metro off_track: samtools_out
+%%metro off_track: recalprep_out
+%%metro off_track: recal_out
+%%metro off_track: vcf_vc
+
+%% Marker key. Optional steps use the standard station pill (undistinguished);
+%% only mandatory / accelerated steps get a marker shape. Acceleration is shown
+%% by fill colour: Parabricks (green), Sentieon (navy), or both (teal) on
+%% whatever shape the step already carries.
+%%metro marker_legend: square, solid | Mandatory
+%%metro marker_legend: square, #4CAF50 | Parabricks accelerated
+%%metro marker_legend: square, #1b3a6b | Sentieon accelerated
+%%metro marker_legend: square, #2f7f74 | Parabricks & Sentieon accelerated
+%%metro marker_legend: pill, open | Expanded in pathways panel
+
+%% Caller families along the pathways trunk.
+%%metro group: SNPs & Indels | deepvariant, freebayes, haplotypecaller, haplotyper, dnascope, tnscope, lofreq, muse, mpileup, mutect2, strelka2
+%%metro group: SV & CNV | indexcov, manta, tiddit, ascat, controlfreec, cnvkit
+%%metro group: MSI | msisensor2, msisensorpro
+
+%% --- markers: mandatory steps get a square; acceleration is the fill colour.
+%% mapping and markduplicates are accelerable by both Parabricks and Sentieon
+%% (teal); the BQSR steps are Parabricks-only (green); the Sentieon callers in
+%% the pathways panel are Sentieon-only (navy).
+%%metro marker: convert | square, solid
+%%metro marker: bam_convert | square, solid
+%%metro marker: mapping | square, #2f7f74
+%%metro marker: markduplicates | square, #2f7f74
+%%metro marker: prepare_recal | circle, #4CAF50
+%%metro marker: applybqsr | circle, #4CAF50
+%%metro marker: vc_anchor | pill, open
+
+%% Sentieon-accelerated callers in the pathways panel (navy circles).  Single-rail
+%% callers (haplotyper, dnascope) show the marker; tnscope spans two rails and
+%% renders as a plain interchange (a marker on a spanning rail station is drawn
+%% as the interchange bar, not the glyph).
+%%metro marker: haplotyper | circle, #1b3a6b
+%%metro marker: dnascope | circle, #1b3a6b
+%%metro marker: tnscope | circle, #1b3a6b
+
+
+graph LR
+    subgraph calling [Example analysis pathways]
+        cram_call[ ]
+        deepvariant[DeepVariant]
+        freebayes[FreeBayes]
+        haplotypecaller[HaplotypeCaller]
+        haplotyper[Sentieon Haplotyper]
+        dnascope[Sentieon DNAscope]
+        tnscope[Sentieon TNscope]
+        lofreq[LoFreq]
+        muse[MuSE]
+        mpileup[mpileup]
+        mutect2[Mutect2]
+        strelka2[Strelka2]
+        indexcov[indexcov]
+        manta[Manta]
+        tiddit[TIDDIT]
+        ascat[ASCAT]
+        controlfreec[Control-FREEC]
+        cnvkit[CNVkit]
+        msisensor2[MSIsensor2]
+        msisensorpro[MSIsensor-pro]
+        out[ ]
+
+        %% Germline route (top rail): deepvariant, haplotypecaller, haplotyper,
+        %% dnascope are germline-only; freebayes/mpileup/strelka2/manta/tiddit/
+        %% cnvkit/indexcov are shared.
+        cram_call -->|germline| deepvariant
+        deepvariant -->|germline| freebayes
+        freebayes -->|germline| haplotypecaller
+        haplotypecaller -->|germline| haplotyper
+        haplotyper -->|germline| dnascope
+        dnascope -->|germline| mpileup
+        mpileup -->|germline| strelka2
+        strelka2 -->|germline| indexcov
+        indexcov -->|germline| manta
+        manta -->|germline| tiddit
+        tiddit -->|germline| cnvkit
+        cnvkit -->|germline| out
+
+        %% Tumour-only route (middle rail): tnscope, lofreq, mutect2, msisensor2
+        %% join here; mpileup/indexcov run tumour but not the combined pair.
+        cram_call -->|tumor_only| freebayes
+        freebayes -->|tumor_only| tnscope
+        tnscope -->|tumor_only| lofreq
+        lofreq -->|tumor_only| mpileup
+        mpileup -->|tumor_only| mutect2
+        mutect2 -->|tumor_only| indexcov
+        indexcov -->|tumor_only| manta
+        manta -->|tumor_only| tiddit
+        tiddit -->|tumor_only| controlfreec
+        controlfreec -->|tumor_only| cnvkit
+        cnvkit -->|tumor_only| msisensor2
+        msisensor2 -->|tumor_only| out
+
+        %% Tumour-normal pair route (bottom rail): muse, ascat, msisensorpro are
+        %% combined-only; strelka2 runs germline + combined (not tumour-only).
+        cram_call -->|pair_n,pair_t| freebayes
+        freebayes -->|pair_n,pair_t| tnscope
+        tnscope -->|pair_n,pair_t| muse
+        muse -->|pair_n,pair_t| mutect2
+        mutect2 -->|pair_n,pair_t| strelka2
+        strelka2 -->|pair_n,pair_t| manta
+        manta -->|pair_n,pair_t| tiddit
+        tiddit -->|pair_n,pair_t| ascat
+        ascat -->|pair_n,pair_t| controlfreec
+        controlfreec -->|pair_n,pair_t| cnvkit
+        cnvkit -->|pair_n,pair_t| msisensorpro
+        msisensorpro -->|pair_n,pair_t| out
+    end
+    subgraph annotation [Annotation]
+        snpeff[snpEff]
+        ensemblvep[ensemblVEP]
+        bcftools_annotate[bcftools annotate]
+        multiqc[MultiQC]
+        vcf_ann[ ]
+
+        snpeff -->|core| ensemblvep
+        ensemblvep -->|core| bcftools_annotate
+        bcftools_annotate -->|core| multiqc
+        multiqc -->|core| vcf_ann
+    end
+    subgraph variantcalling [Variant calling]
+        vc_anchor[variant calling]
+        bcftools[bcftools]
+        samtools_vc[samtools]
+        varlociraptor[Varlociraptor]
+        finalise[finalise]
+        normalise[normalise]
+        consensus[consensus]
+        _vc_merge[ ]
+        vcf_vc[ ]
+
+        vc_anchor -->|core| bcftools
+        bcftools -->|core| samtools_vc
+        samtools_vc -->|core| varlociraptor
+        samtools_vc -->|core| finalise
+        finalise -->|core| normalise
+        normalise -->|core| consensus
+        varlociraptor -->|core| _vc_merge
+        consensus -->|core| _vc_merge
+        _vc_merge -->|core| vcf_vc
+    end
+    subgraph preprocessing [Pre-processing]
+        %%metro direction: TB
+        ubam_in[ ]
+        spring_in[ ]
+        fastq_in[ ]
+        convert[convert]
+        fastqc[FastQC]
+        umi[UMI]
+        fastp[FastP]
+        bbsplit[BBsplit]
+        mapping[mapping]
+        bam_convert[convert]
+        markduplicates[markduplicates]
+        mosdepth[mosdepth, samtools]
+        prepare_recal[prepare recalibration]
+        applybqsr[applybqsr]
+        mosdepth_qc[mosdepth, samtools]
+        ngscheckmate[NGSCheckmate]
+        mapped_out[ ]
+        samtools_out[ ]
+        recalprep_out[ ]
+        recal_out[ ]
+
+        ubam_in -->|core| convert
+        spring_in -->|core| convert
+        fastq_in -->|core| fastqc
+        convert -->|core| fastqc
+        fastqc -->|core| umi
+        umi -->|core| fastp
+        fastp -->|core| bbsplit
+        bbsplit -->|core| mapping
+        mapping -->|core| bam_convert
+        mapping -->|core| markduplicates
+        bam_convert -->|core| mosdepth
+        markduplicates -->|core| mosdepth
+        mosdepth -->|core| prepare_recal
+        prepare_recal -->|core| applybqsr
+        applybqsr -->|core| mosdepth_qc
+        mosdepth_qc -->|core| ngscheckmate
+
+        mapping -->|core| mapped_out
+        mosdepth -->|core| samtools_out
+        prepare_recal -->|core| recalprep_out
+        applybqsr -->|core| recal_out
+    end
+
+
+
+
+    %% Inter-section: core workflow flows through the top three sections.
+    ngscheckmate -->|core| vc_anchor
+    _vc_merge -->|core| snpeff

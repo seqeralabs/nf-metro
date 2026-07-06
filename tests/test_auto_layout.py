@@ -23,6 +23,7 @@ from nf_metro.parser.model import (
 )
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _make_graph_with_sections(
@@ -699,25 +700,13 @@ def _strip_grid_and_direction(text: str) -> str:
     )
 
 
-@pytest.mark.parametrize("fixture", ["sarek_metro.mmd", "rnaseq_auto.mmd"])
-def test_perp_entry_run_stays_in_section_bbox(fixture):
-    """A perpendicular-entry shift keeps the run inside its section bbox (#875).
+def _assert_station_centres_within_bbox(graph, label, *, check_y):
+    """Assert every non-port station centre lies within its section bbox.
 
-    Auto-layout can place a horizontal (LR/RL) section as a run fed by a
-    same-column vertical drop, so its only port is a perpendicular TOP entry.
-    Opening the station-elbow gap shifts the run away from that port; the bbox
-    must follow on the shift side.  Stripping ``sarek_metro``'s explicit
-    ``grid:`` directives drives its ``annotation`` section into exactly this
-    state -- before the fix the leftmost station spilled past ``bbox_x`` and
-    the always-on bbox-containment guard aborted the render.  ``rnaseq_auto``
-    is a clean auto-layout that must keep passing.
+    ``check_y`` also constrains the vertical axis; callers that only care about
+    the horizontal spread pass ``check_y=False``.
     """
     from nf_metro.layout.constants import GUARD_TOLERANCE
-    from nf_metro.layout.engine import compute_layout
-
-    text = _strip_grid_and_direction((EXAMPLES / fixture).read_text())
-    graph = parse_metro_mermaid(text)
-    compute_layout(graph)
 
     tol = GUARD_TOLERANCE
     junction_ids = graph.junction_ids
@@ -727,10 +716,55 @@ def test_perp_entry_run_stays_in_section_bbox(fixture):
         sec = graph.sections.get(station.section_id or "")
         if sec is None or sec.bbox_w == 0:
             continue
-        left = sec.bbox_x - tol
-        right = sec.bbox_x + sec.bbox_w + tol
-        assert left <= station.x <= right, (
-            f"{fixture}: station {sid!r} x={station.x:.1f} outside section "
-            f"{station.section_id!r} bbox x-range "
-            f"[{sec.bbox_x:.1f}, {sec.bbox_x + sec.bbox_w:.1f}]"
+        inside_x = sec.bbox_x - tol <= station.x <= sec.bbox_x + sec.bbox_w + tol
+        inside_y = not check_y or (
+            sec.bbox_y - tol <= station.y <= sec.bbox_y + sec.bbox_h + tol
         )
+        assert inside_x and inside_y, (
+            f"{label}: station {sid!r} centre ({station.x:.1f}, {station.y:.1f}) "
+            f"outside section {station.section_id!r} bbox "
+            f"({sec.bbox_x:.1f}, {sec.bbox_y:.1f}, "
+            f"w={sec.bbox_w:.1f}, h={sec.bbox_h:.1f})"
+        )
+
+
+@pytest.mark.parametrize("fixture", ["sarek_metro.mmd", "rnaseq_auto.mmd"])
+def test_perp_entry_run_stays_in_section_bbox(fixture):
+    """A perpendicular-entry shift keeps the run inside its section bbox (#875).
+
+    Auto-layout can place a horizontal (LR/RL) section as a run fed by a
+    same-column vertical drop, so its only port is a perpendicular TOP entry.
+    Opening the station-elbow gap shifts the run away from that port; the bbox
+    must follow on the shift side.  Stripping ``sarek_metro``'s explicit
+    ``grid:`` directives drives its ``annotation`` section into exactly this
+    state, where the leftmost station can spill past ``bbox_x`` and trip the
+    always-on bbox-containment guard.  ``rnaseq_auto`` is a clean auto-layout
+    that must keep passing.
+    """
+    from nf_metro.layout.engine import compute_layout
+
+    text = _strip_grid_and_direction((EXAMPLES / fixture).read_text())
+    graph = parse_metro_mermaid(text)
+    compute_layout(graph)
+
+    _assert_station_centres_within_bbox(graph, fixture, check_y=False)
+
+
+@pytest.mark.parametrize("fixture", ["regress_1373/sarek_tb_preprocessing.mmd"])
+def test_tb_override_run_stays_in_section_bbox(fixture):
+    """An author ``direction: TB`` override keeps every station inside its
+    section bbox (#1373).
+
+    The fixture forces ``%%metro direction: TB`` on the sarek ``preprocessing``
+    section with the section grid inferred rather than pinned and the subgraphs
+    declared out of flow order.  That combination stresses the placement pass,
+    which must keep every non-port station centre within its section bbox on
+    both axes; a station laid out past its own box trips the always-on
+    bbox-containment guard and aborts the render with a ``PhaseInvariantError``.
+    """
+    from nf_metro.layout.engine import compute_layout
+
+    graph = parse_metro_mermaid((FIXTURES / fixture).read_text())
+    compute_layout(graph)
+
+    _assert_station_centres_within_bbox(graph, fixture, check_y=True)
