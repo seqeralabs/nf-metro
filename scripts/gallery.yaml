@@ -1377,10 +1377,10 @@ gallery:
     source_dir: examples/topologies
     category: Off-track & Rails
     description:
-      "A `direction: TB` section whose trunk stations feed off-track outputs. Each output sits
-      beside its own producer -- sharing the producer's flow-axis row, offset on the cross axis to
-      the side opposite the beside-trunk labels -- rather than dropping a row down the trunk into a
-      neighbouring station's label lane (issue #1384)."
+      "A `direction: TB` section whose trunk stations feed off-track outputs. Each output hangs off
+      its producer via an S -- a flow-axis lead down the trunk, a diagonal, then a flat tail into the
+      icon -- on the side opposite the beside-trunk labels, the rotation of the LR off-track idiom,
+      rather than leaving perpendicular or dropping onto the label side (issue #1384)."
   - id: rail_inter_section
     source_dir: examples/topologies
     category: Off-track & Rails

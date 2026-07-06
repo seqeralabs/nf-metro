@@ -48,11 +48,7 @@ from nf_metro.layout.engine import (
     compute_min_y_spacing,
     is_loop_side_branch_station,
 )
-from nf_metro.layout.geometry import (
-    lanes_run_along_x,
-    lanes_run_along_y,
-    segment_intersects_bbox,
-)
+from nf_metro.layout.geometry import lanes_run_along_y, segment_intersects_bbox
 from nf_metro.layout.labels import (
     _label_bbox,
     find_wrapped_label_trunk_strikes,
@@ -401,27 +397,6 @@ def _fixtures_with_above_output() -> list[str]:
 
 
 _FIXTURES_WITH_ABOVE_OUTPUT = _fixtures_with_above_output()
-
-
-def _fixtures_with_vertical_output() -> list[str]:
-    """Off-track-output fixtures with at least one output in a vertical (TB/BT)
-    section (its producer's section stacks lines along X).
-    """
-    out: list[str] = []
-    for name in _FIXTURES_WITH_OFF_TRACK_OUTPUT:
-        try:
-            g = _layout(name)
-        except Exception:
-            continue
-        for off_id in _off_track_output_sinks(g):
-            section = g.sections.get(g.stations[off_id].section_id)
-            if section is not None and lanes_run_along_x(section.direction):
-                out.append(name)
-                break
-    return out
-
-
-_FIXTURES_WITH_VERTICAL_OUTPUT = _fixtures_with_vertical_output()
 
 
 def _off_track_input_consumer_map(
@@ -2649,37 +2624,32 @@ def test_off_track_outputs_on_lift_side_and_adjacent_to_producer(fixture):
         )
 
 
-@pytest.mark.parametrize("fixture", _FIXTURES_WITH_VERTICAL_OUTPUT)
-def test_vertical_off_track_output_shares_producer_row(fixture):
-    """In a vertical (TB/BT) section an off-track output shares its producer's
-    flow-axis row, offset only on the cross axis (#1384).
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK)
+def test_off_track_connector_hangs_via_s_not_perpendicular(fixture):
+    """An off-track station keeps a flow-axis lead off its anchor (#1384).
 
-    The trunk runs down the flow axis, so an output that inherits a downstream
-    flow layer drops a row into a neighbouring station's label lane.  It must
-    instead sit at its producer's flow coordinate -- beside it -- so the output
-    reads against its own step, not the next one.
+    An off-track hangs off its anchor trunk station via an S -- a flow-axis lead,
+    a diagonal, then a flat tail into the icon -- whatever the section's flow
+    direction (:func:`section_axes`).  Sharing the anchor's flow coordinate
+    collapses the S to a straight perpendicular stub leaving the marker sideways:
+    the off-track rotation of a perpendicular port sitting at a station
+    coordinate.  So the off-track must differ from its anchor on the flow axis.
     """
     graph = _layout(fixture)
-    producer_of = _off_track_output_sinks(graph)
-    checked = 0
-    for off_id, prod_id in producer_of.items():
+    anchor_of = _off_track_anchor_of(graph)
+    if not anchor_of:
+        pytest.skip(f"{fixture}: off_track directive resolved to no off-track station")
+    for off_id, anchor_id in anchor_of.items():
         off_st = graph.stations[off_id]
-        prod_st = graph.stations[prod_id]
-        section = graph.sections.get(off_st.section_id)
-        if section is None or not lanes_run_along_x(section.direction):
-            continue
-        flow, _ = section_axes(section)
-        checked += 1
-        assert getattr(off_st, flow) == pytest.approx(
-            getattr(prod_st, flow), abs=_Y_TOL
-        ), (
-            f"{fixture}: vertical off-track output {off_id} "
-            f"{flow}={getattr(off_st, flow):.1f} not on producer {prod_id}'s row "
-            f"{flow}={getattr(prod_st, flow):.1f}; it dropped into a "
-            f"neighbouring station's lane"
+        anchor_st = graph.stations[anchor_id]
+        section = graph.sections.get(off_st.section_id or "")
+        flow, _cross = section_axes(section)
+        lead = abs(getattr(off_st, flow) - getattr(anchor_st, flow))
+        assert lead > _Y_TOL, (
+            f"{fixture}: off-track {off_id} shares anchor {anchor_id} "
+            f"{flow}={getattr(anchor_st, flow):.1f}; its connector leaves the "
+            f"station perpendicular to flow instead of hanging via an S"
         )
-    if not checked:
-        pytest.skip(f"{fixture}: no vertical off-track output to check")
 
 
 def test_off_track_noop_on_hub_station():

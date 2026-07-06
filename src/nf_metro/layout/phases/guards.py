@@ -4382,7 +4382,7 @@ def _guard_off_track_clear_of_anchor(graph: MetroGraph, phase: str) -> None:
         if off_st is None or anchor_st is None:
             continue
         section = graph.sections.get(off_st.section_id or "")
-        _flow, cross = section_axes(section)
+        flow, cross = section_axes(section)
         # The expected offset direction: the lift side, flipped for a branch
         # output that runs out the far side of the trunk.
         want_sign = _off_track_lift_sign(section)
@@ -4395,6 +4395,14 @@ def _guard_off_track_clear_of_anchor(graph: MetroGraph, phase: str) -> None:
                 f"{phase}: off-track {off_id!r} {cross}={getattr(off_st, cross):.1f} "
                 f"not clear {side} anchor {anchor_id!r} "
                 f"{cross}={getattr(anchor_st, cross):.1f}"
+            )
+        # The connector must hang via an S, not leave the anchor perpendicular to
+        # flow: the off-track keeps a flow-axis lead off its anchor.
+        if abs(getattr(off_st, flow) - getattr(anchor_st, flow)) <= GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: off-track {off_id!r} shares anchor {anchor_id!r} "
+                f"{flow}={getattr(anchor_st, flow):.1f} - its connector leaves the "
+                f"station perpendicular to flow instead of hanging via an S"
             )
 
 

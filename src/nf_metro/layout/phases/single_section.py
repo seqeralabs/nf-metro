@@ -245,13 +245,6 @@ def _layout_single_section(
     rank_step = (
         effective_y_spacing if frame.secondary.name == "y" else frame.secondary.step
     )
-    # The off-track output run (``output_extra``) and its trunk-widening push are
-    # a horizontal S-curve that seats the icon along the flow axis; that only
-    # makes sense when the flow axis is X.  On a vertical (TB/BT) section the
-    # output keeps its producer's flow-axis layer and the Stage 5.2 lift offsets
-    # it on the cross axis instead, so applying the run here would drop it down
-    # the trunk into a neighbour's row.
-    apply_output_run = not lanes_run_along_x(section.direction)
     for sid, station in sub.stations.items():
         station.layer = layers.get(sid, 0)
         station.track = tracks.get(sid, 0)
@@ -264,10 +257,8 @@ def _layout_single_section(
                 f"missing from rank map {sorted(track_rank)}"
             )
         rank = track_rank.get(station.track, 0.0)
-        output_offset = output_extra.get(sid, 0.0) if apply_output_run else 0.0
-        layer_push = (
-            output_layer_push.get(station.layer, 0.0) if apply_output_run else 0.0
-        )
+        output_offset = output_extra.get(sid, 0.0)
+        layer_push = output_layer_push.get(station.layer, 0.0)
         frame.primary.set(
             station,
             station.layer * frame.primary.step
