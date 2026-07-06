@@ -1361,6 +1361,40 @@ def test_diagonal_rail_above_labels_share_a_common_baseline():
     assert below_seen, "fixture must also have a label below the bundle"
 
 
+def test_rail_above_label_reach_excluded_from_content_bottom():
+    """A rail section's content-bottom prediction must exclude the *downward*
+    angled-label reach of top-rail stations whose labels hang *above* the
+    bundle.  A wide above-label name would otherwise inflate the target far
+    below the settled bbox, so ``compute_layout(validate=True)`` (which runs
+    ``_guard_section_bottom_padding`` on the drawn geometry) rejects a render
+    the engine draws with a correctly padded bottom (issue #1361)."""
+    from nf_metro.layout.phases.bbox import _predict_section_content_bottom
+    from nf_metro.layout.rail_mode import rail_above_label_ids
+    from nf_metro.layout.routing import compute_station_offsets
+
+    graph = parse_metro_mermaid(_STACKED_RAIL_MMD)
+    # Must not raise: the settled bbox bottom clears the below-hanging labels.
+    compute_layout(graph, validate=True)
+
+    section = graph.sections["calling"]
+    per_line = graph._rail_y.get("calling") or {}
+    above_ids = rail_above_label_ids(graph, section)
+    assert above_ids, "fixture must have >=1 above-label (top-rail) station"
+
+    target = _predict_section_content_bottom(
+        graph, section, 20.0, compute_station_offsets(graph)
+    )
+    bbox_bottom = section.bbox_y + section.bbox_h
+    assert target is not None
+    assert target <= bbox_bottom + 1.0, (
+        f"content-bottom target {target:.1f} exceeds the drawn bbox bottom "
+        f"{bbox_bottom:.1f}; an above-label station's downward reach leaked in"
+    )
+    # The target sits below the top rail because the below-hanging labels
+    # (e.g. 'Tumor Tool') genuinely anchor it, so it is not merely zeroed out.
+    assert target > min(per_line.values())
+
+
 def test_above_rail_label_bottom_right_corner_seats_at_station():
     """An above-bundle diagonal rail label anchors its bottom-right corner at
     its station marker, so the name rises up-and-to-the-left out of the stop."""
