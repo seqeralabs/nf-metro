@@ -755,6 +755,10 @@
         "mmd": "%%metro title: Off-track Terminal Has Nothing to Protect\n%%metro style: dark\n%%metro line: a | Line A | #2db572\n\n%%metro file: out1 | GTF | Output\n%%metro off_track: out1\n\ngraph LR\n    subgraph s1 [S1]\n        %%metro exit: right | a\n        n1[N1]\n        n2[N2]\n        n1 -->|a| n2\n        n2 -->|a| out1\n    end\n\n    subgraph s2 [S2]\n        %%metro entry: left | a\n        m1[M1]\n        out1 -->|a| m1\n    end\n"
       },
       {
+        "name": "tb_off_track_output_row",
+        "mmd": "%%metro title: TB off-track output row\n%% Regression for #1384: in a `direction: TB` section an off-track output\n%% (producer-fed sink) hangs off its producer via an S -- a flow-axis lead down\n%% the trunk, a diagonal, then a flat tail into the icon -- on the side opposite\n%% the beside-trunk labels, the rotation of the LR off-track idiom.  The trunk\n%% descent along the flow axis must not be read as a downward branch (which\n%% would flip the output onto the label side).\n%%metro line: core | Core | #2db572\n\n%%metro file: trimmed_out | FASTQ\n%%metro file: recal_out | CRAM\n%%metro off_track: trimmed_out\n%%metro off_track: recal_out\n\ngraph LR\n    subgraph pre [Pre-processing]\n        %%metro direction: TB\n        fastp[fastp]\n        align[align]\n        markdup[markduplicates]\n        recal[recalibrate]\n        collect[collect metrics]\n        trimmed_out[ ]\n        recal_out[ ]\n\n        fastp -->|core| align\n        align -->|core| markdup\n        markdup -->|core| recal\n        recal -->|core| collect\n\n        fastp -->|core| trimmed_out\n        recal -->|core| recal_out\n    end\n"
+      },
+      {
         "name": "rail_inter_section",
         "mmd": "%%metro title: Rail inter-section connector\n%%metro style: dark\n%%metro line_spread: rails\n%%metro line: a | A | #2db572\n%%metro line: b | B | #f4a300\n\ngraph LR\n    subgraph one [Section one]\n        s1[Start]\n        s2[Middle]\n        s1 -->|a,b| s2\n    end\n    subgraph two [Section two]\n        t1[Next]\n        t2[End]\n        t1 -->|a,b| t2\n    end\n    s2 -->|a,b| t1\n"
       },
