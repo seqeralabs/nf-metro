@@ -378,9 +378,39 @@ _SVG_ROOT_RE = re.compile(r"(<svg)(\s[^>]*)(>)", re.DOTALL)
 _SELF_SCHEME_RE = re.compile(r'\s+style="color-scheme:\s*light\s+dark"')
 _WIDTH_RE = re.compile(r'\bwidth="(\d+)"')
 _HEIGHT_RE = re.compile(r'\bheight="(\d+)"')
+_ID_ATTR_RE = re.compile(r'\bid="([^"]+)"')
+_URL_REF_RE = re.compile(r"url\(#([^)]+)\)")
 
 
-def _inline_svg(path: Path) -> str:
+def _namespace_referenced_ids(content: str, namespace: str) -> str:
+    """Suffix ids that are the target of a url(#...) reference, plus the references.
+
+    Multiple copies of the same source SVG end up inlined together on one page
+    (e.g. a base and a PR render of the same pipeline). Their element ids are
+    then identical. A toggle that sets one copy's wrapper to display:none
+    leaves that copy's ids as the first same-id match in document order, so a
+    visible copy's url(#id) reference (e.g. a <mask>) resolves into the hidden
+    subtree and stops applying - the referencing element renders unmasked.
+    Suffixing every url(#...)-referenced id per inlined copy keeps each copy's
+    references pointing at its own, always-rendered elements.
+    """
+    referenced_ids = set(_URL_REF_RE.findall(content))
+    if not referenced_ids:
+        return content
+
+    def repl_id(m: re.Match[str]) -> str:
+        old = m.group(1)
+        return f'id="{old}--{namespace}"' if old in referenced_ids else m.group(0)
+
+    def repl_ref(m: re.Match[str]) -> str:
+        old = m.group(1)
+        return f"url(#{old}--{namespace})" if old in referenced_ids else m.group(0)
+
+    content = _ID_ATTR_RE.sub(repl_id, content)
+    return _URL_REF_RE.sub(repl_ref, content)
+
+
+def _inline_svg(path: Path, namespace: str) -> str:
     """Read SVG; strip self-declared color-scheme and add viewBox for CSS scaling.
 
     SVGs rendered with self_color_scheme=True carry style="color-scheme: light dark"
@@ -390,8 +420,12 @@ def _inline_svg(path: Path) -> str:
     toggle controls the renders.
 
     Adding viewBox (when absent) enables proportional CSS scaling via max-width/height.
+
+    *namespace* must be unique per inlined copy on the page (e.g. combining the
+    render's stem with "base"/"pr") - see :func:`_namespace_referenced_ids`.
     """
     content = path.read_text()
+    content = _namespace_referenced_ids(content, namespace)
     m = _SVG_ROOT_RE.search(content)
     if not m:
         return content
@@ -571,8 +605,8 @@ def build_diff(
             div_open = f'<div class="diff-entry" id="{stem}">'
 
             if kind == "changed":
-                base_svg = _inline_svg(base_dir / name)
-                pr_svg = _inline_svg(pr_dir / name)
+                base_svg = _inline_svg(base_dir / name, f"{stem}-base")
+                pr_svg = _inline_svg(pr_dir / name, f"{stem}-pr")
                 toggle = (
                     '<div class="toggle-bar">'
                     '<button class="active" data-mode="side-by-side">'
@@ -591,7 +625,7 @@ def build_diff(
                     f"</div>\n</div>"
                 )
             elif kind == "added":
-                pr_svg = _inline_svg(pr_dir / name)
+                pr_svg = _inline_svg(pr_dir / name, f"{stem}-pr")
                 entry = (
                     f"{div_open}\n{h3}\n"
                     f'<div class="side-only"><h4>New in PR</h4>'
@@ -599,7 +633,7 @@ def build_diff(
                     f"</div>"
                 )
             else:  # removed
-                base_svg = _inline_svg(base_dir / name)
+                base_svg = _inline_svg(base_dir / name, f"{stem}-base")
                 entry = (
                     f"{div_open}\n{h3}\n"
                     f'<div class="side-only"><h4>Removed (was in base)</h4>'
