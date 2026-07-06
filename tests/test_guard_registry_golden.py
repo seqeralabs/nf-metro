@@ -13,6 +13,16 @@ sequence independent of the dispatch mechanism.  The sequence is deterministic
 across ``PYTHONHASHSEED``, and the raise messages are built from the final,
 seed-independent coordinates.
 
+The baseline is one JSON file per fixture under ``tests/data/guard_golden/``,
+mirroring the fixture's own repo-relative path (e.g. the trace for
+``examples/topologies/foo.mmd`` lives at
+``tests/data/guard_golden/examples/topologies/foo.json``). This means a PR
+touching one fixture's layout only ever diffs that fixture's file, so
+unrelated concurrent PRs stop colliding on a single monolithic blob. If git
+reports a conflict on one of these files, don't hand-merge the JSON:
+resolve the code conflict, then regenerate and let the equivalence test
+confirm the regenerated trace is correct.
+
 Regenerate the committed baseline (only legitimate when the guard call order
 *intentionally* changes) with::
 
@@ -22,6 +32,14 @@ Regenerate the committed baseline (only legitimate when the guard call order
 or directly::
 
     python tests/test_guard_registry_golden.py
+
+CI regenerates and checks this baseline on ``ubuntu-latest`` (x86_64). A
+handful of guards sit right at a floating-point threshold and fire
+differently on arm64 (e.g. the symmetric-diamond half-pitch check excluded
+from this corpus in commit ``feb2ed23``) -- regenerating locally on Apple
+Silicon risks committing an arch-specific trace that then fails in CI. If a
+regen changes more fixtures than your fix touched, suspect this before
+assuming the extra diffs are real.
 """
 
 from __future__ import annotations
@@ -41,7 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_engine_guards_perf import _discover_fixtures, _layout  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-BASELINE_PATH = Path(__file__).resolve().parent / "data" / "guard_golden_baseline.json"
+GUARD_GOLDEN_DIR = Path(__file__).resolve().parent / "data" / "guard_golden"
 
 ALL_FIXTURES = _discover_fixtures()
 
@@ -49,6 +67,11 @@ ALL_FIXTURES = _discover_fixtures()
 def _rel(fixture: str) -> str:
     """Repo-relative POSIX key for a fixture (basenames collide across roots)."""
     return Path(fixture).resolve().relative_to(REPO_ROOT).as_posix()
+
+
+def _baseline_path(fixture: str) -> Path:
+    """Per-fixture baseline file, mirroring the fixture's own repo layout."""
+    return GUARD_GOLDEN_DIR / Path(_rel(fixture)).with_suffix(".json")
 
 
 def collect_guard_trace(fixture: str) -> dict[str, Any]:
@@ -85,20 +108,30 @@ def collect_guard_trace(fixture: str) -> dict[str, Any]:
     return {"trace": trace, "raised": raised}
 
 
-def _load_baseline() -> dict[str, Any]:
-    return json.loads(BASELINE_PATH.read_text())
+def _discover_baseline_files() -> set[Path]:
+    if not GUARD_GOLDEN_DIR.exists():
+        return set()
+    return set(GUARD_GOLDEN_DIR.rglob("*.json"))
 
 
-def _regenerate() -> dict[str, Any]:
-    baseline: dict[str, Any] = {}
+def _regenerate() -> None:
+    keep: set[Path] = set()
     for fixture in ALL_FIXTURES:
-        baseline[_rel(fixture)] = collect_guard_trace(fixture)
-    BASELINE_PATH.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n")
-    return baseline
+        path = _baseline_path(fixture)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        trace = collect_guard_trace(fixture)
+        path.write_text(json.dumps(trace, indent=2, sort_keys=True) + "\n")
+        keep.add(path)
+
+    for stale in _discover_baseline_files() - keep:
+        stale.unlink()
+    for directory in sorted(GUARD_GOLDEN_DIR.rglob("*"), reverse=True):
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
 
 
 @pytest.mark.skipif(
-    not BASELINE_PATH.exists(),
+    not GUARD_GOLDEN_DIR.exists(),
     reason="guard golden baseline not yet generated",
 )
 @pytest.mark.parametrize("fixture", ALL_FIXTURES, ids=_rel)
@@ -109,14 +142,14 @@ def test_guard_trace_matches_golden_baseline(fixture: str) -> None:
     or what it says -- changes ``collect_guard_trace`` for some fixture and
     reds this test.  That is the registry-refactor equivalence signal.
     """
-    baseline = _load_baseline()
     key = _rel(fixture)
-    assert key in baseline, (
+    path = _baseline_path(fixture)
+    assert path.exists(), (
         f"{key} absent from the golden baseline; regenerate with "
         f"NF_METRO_REGEN_GUARD_GOLDEN=1"
     )
     live = collect_guard_trace(fixture)
-    expected = baseline[key]
+    expected = json.loads(path.read_text())
 
     assert live["raised"] == expected["raised"], (
         f"{key}: terminal raise changed\n  expected: {expected['raised']}\n"
@@ -129,18 +162,18 @@ def test_guard_trace_matches_golden_baseline(fixture: str) -> None:
 
 
 def test_baseline_covers_every_fixture() -> None:
-    """The committed baseline must name exactly the discovered corpus, so a
-    new fixture cannot silently escape the oracle."""
-    baseline = _load_baseline()
-    discovered = {_rel(f) for f in ALL_FIXTURES}
-    assert set(baseline) == discovered, (
+    """The committed per-fixture baseline files must name exactly the
+    discovered corpus, so a new fixture cannot silently escape the oracle."""
+    discovered = {_baseline_path(f) for f in ALL_FIXTURES}
+    existing = _discover_baseline_files()
+    assert existing == discovered, (
         "guard golden baseline is out of sync with the fixture corpus; "
         "regenerate with NF_METRO_REGEN_GUARD_GOLDEN=1\n"
-        f"  missing from baseline: {sorted(discovered - set(baseline))}\n"
-        f"  stale in baseline:     {sorted(set(baseline) - discovered)}"
+        f"  missing from baseline: {sorted(str(p) for p in discovered - existing)}\n"
+        f"  stale in baseline:     {sorted(str(p) for p in existing - discovered)}"
     )
 
 
 if __name__ == "__main__" or os.environ.get("NF_METRO_REGEN_GUARD_GOLDEN"):
     _regenerate()
-    print(f"wrote {BASELINE_PATH} ({len(ALL_FIXTURES)} fixtures)")
+    print(f"wrote {GUARD_GOLDEN_DIR} ({len(ALL_FIXTURES)} fixtures)")
