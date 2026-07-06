@@ -106,11 +106,25 @@ def _touched_corner_mismatches(
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
     shared = shared_same_line_turn_vertices(routes)
+    # A coincide pass can run on route objects from an earlier layout phase that
+    # a later phase supersedes (e.g. a section bbox grows and the routes are
+    # recomputed).  Corners snapped on a superseded object never reach the
+    # render, so only check corners on routes matching the final geometry.
+    final_geometry = {
+        (rp.line_id, rp.edge.source, rp.edge.target, tuple(rp.points)) for rp in routes
+    }
 
     mismatches: list[tuple[str, int, float, float]] = []
     for rp, k in touched:
         radii = rp.curve_radii
         if radii is None:
+            continue
+        if (
+            rp.line_id,
+            rp.edge.source,
+            rp.edge.target,
+            tuple(rp.points),
+        ) not in final_geometry:
             continue
         pts = rp.points
         for radius_idx in (k - 1, k):

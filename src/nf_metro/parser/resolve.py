@@ -812,6 +812,25 @@ def _priority_side(sides: set[PortSide]) -> PortSide:
     return PortSide.LEFT
 
 
+def _collapse_within(
+    sides: set[PortSide], dominant: PortSide | None, natural: PortSide
+) -> PortSide:
+    """Collapse a set of candidate entry sides to one, never leaving the set.
+
+    Used when a single line is hinted on several sides (the author offered
+    alternatives): the dominant feed side wins when it is one of the offered
+    sides, else the flow-natural side when offered, else the priority side.
+    Keeping the choice inside ``sides`` stops an off-hint feed direction from
+    pulling the entry onto a side the author never named, which would fold the
+    connector back across the section's internal flow.
+    """
+    if dominant in sides:
+        return dominant
+    if natural in sides:
+        return natural
+    return _priority_side(sides)
+
+
 def _dominant_entry_side(graph: MetroGraph, sec_id: str) -> PortSide | None:
     """Single entry side for a section, chosen from predecessor feed geometry.
 
@@ -855,11 +874,14 @@ def _build_entry_side_mapping(
 
     A line resolves to one entry side:
 
-    - a line named on the section's entry hints uses the hint side.  When the
-      hints agree on one side that side is used (this keeps carriage-return
-      wraps on their leading edge); when they name several sides they collapse
-      to one approach -- the flow-natural side when a feed reaches it, else the
-      dominant feed direction -- so the section reads unambiguously;
+    - a line named on a single hint side uses that side.  A line named on
+      *several* sides (the author offered alternatives) collapses to one of
+      *its own* named sides via ``_collapse_within``, so an off-hint feed
+      direction can never pull that line's entry onto a side it was not hinted
+      for (which folds the connector back across the section's internal flow).
+      When the section's hint sides differ only across lines (each line named
+      on one side) the shared side is the dominant feed side, else flow-natural,
+      keeping the section's entry unambiguous;
     - a line with no hint takes its side from where its feeds arrive
       (``_dominant_entry_side``), falling back to the LEFT default at lookup
       (left unmapped here) when no predecessor geometry is available.
@@ -872,28 +894,38 @@ def _build_entry_side_mapping(
     dag = graph.section_dag
     entry_side_for_line: dict[tuple[str, str], PortSide] = {}
     for sec_id, section in graph.sections.items():
-        incoming: set[str] = set()
+        line_hint_sides: dict[str, set[PortSide]] = defaultdict(set)
+        for hside, line_ids in section.entry_hints:
+            for lid in line_ids:
+                line_hint_sides[lid].add(hside)
+        hinted_lines = set(line_hint_sides)
+
+        incoming: set[str] = set(hinted_lines)
         if dag is not None:
             for src in dag.predecessors.get(sec_id, set()):
                 incoming.update(dag.edge_lines.get((src, sec_id), set()))
-        hinted_lines: set[str] = set()
-        for _hint_side, line_ids in section.entry_hints:
-            hinted_lines.update(line_ids)
-        incoming |= hinted_lines
         if not incoming:
             continue
 
         dominant = _dominant_entry_side(graph, sec_id)
+        natural = _natural_entry_side(section.direction)
         hint_sides = {s for s, _ in section.entry_hints}
         if len(hint_sides) == 1:
-            hinted_side = next(iter(hint_sides))
+            hinted_side: PortSide | None = next(iter(hint_sides))
         elif hint_sides:
-            hinted_side = dominant or _natural_entry_side(section.direction)
+            hinted_side = dominant or natural
         else:
             hinted_side = None
 
         for lid in incoming:
-            side = hinted_side if lid in hinted_lines else dominant
+            own_sides = line_hint_sides.get(lid)
+            side: PortSide | None
+            if own_sides and len(own_sides) >= 2:
+                side = _collapse_within(own_sides, dominant, natural)
+            elif lid in hinted_lines:
+                side = hinted_side
+            else:
+                side = dominant
             if side is not None:
                 entry_side_for_line[(sec_id, lid)] = side
     return entry_side_for_line

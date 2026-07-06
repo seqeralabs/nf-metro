@@ -71,6 +71,36 @@ def test_dominant_deviates_when_natural_side_is_unfed() -> None:
     assert side in (PortSide.LEFT, PortSide.RIGHT)
 
 
+def test_collapse_within_never_leaves_the_offered_sides() -> None:
+    """Collapsing a line's own hinted sides never picks an unhinted side."""
+    offered = {PortSide.TOP, PortSide.LEFT}
+    assert (
+        resolve._collapse_within(offered, PortSide.TOP, PortSide.LEFT) is PortSide.TOP
+    )
+    assert (
+        resolve._collapse_within(offered, PortSide.RIGHT, PortSide.LEFT)
+        is PortSide.LEFT
+    )
+    assert (
+        resolve._collapse_within(offered, PortSide.RIGHT, PortSide.BOTTOM)
+        is PortSide.LEFT
+    )
+
+
+def test_multi_side_line_hint_resolves_to_a_hinted_side() -> None:
+    """A single line hinted on several sides resolves within them (#1363).
+
+    ``sec_d`` in the packed serpentine grid hints ``l1`` on both TOP and LEFT
+    while its feeds arrive from the RIGHT.  The unhinted RIGHT would sit
+    opposite the left-column stations ``l1`` feeds, so the connector must cross
+    the section and fold back over the internal left-to-right flow; the offered
+    sides bound the choice to keep the entry on the fed edge.
+    """
+    graph = _parse("examples/topologies/packed_multiline_serpentine_grid.mmd")
+    mapping = resolve._build_entry_side_mapping(graph)
+    assert mapping[("sec_d", "l1")] is PortSide.LEFT
+
+
 def test_build_mapping_shares_one_side_across_a_sections_lines() -> None:
     """Every line entering a section resolves to the same single side."""
     graph = _parse("examples/topologies/riboseq_fold_two_dir_entry_hintless.mmd")
