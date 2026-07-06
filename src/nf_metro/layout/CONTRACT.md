@@ -263,8 +263,10 @@ fall back to live geometry or a `None`/empty default), so they are documented in
 the registry but carry no runtime check: `graph._struct_height_below_top`
 (snapshotted after 6.15a, read by the 6.13 cascade), `graph._placement_ref_y` /
 `graph._placement_ref_bbox_top` (frozen before 6.1/6.11, read via `_ref_y` /
-`_ref_bbox_top`), and `graph._base_y_spacing` (recorded before the spread loop
-when `y_spacing` is auto-resolved).
+`_ref_bbox_top`), `graph._base_y_spacing` (recorded before the spread loop
+when `y_spacing` is auto-resolved), and `graph._resolved_x_spacing` (the
+resolved column pitch recorded before layout, read as the cross-axis off-track
+step for vertical-flow sections).
 
 ## Stage overview
 
@@ -625,21 +627,23 @@ in pipeline order.
   after every later port move).
 
 ### Stage 5.2: lift off-track stations (engine.py)
-- **Purpose**: Lift off-track file artefacts to the row above their
-  anchor, stacking when several share one anchor. An input's anchor is
-  its consumer; a producer-fed sink's anchor is its producer (see
-  `_off_track_anchor_of`). Grow bbox upward; nudge same-section TOP
-  ports back to new edge.
+- **Purpose**: Offset off-track file artefacts one step clear of their
+  anchor along the section's cross axis (Y for an LR/RL trunk, X for a
+  TB/BT one; `section_cross_axis`), stacking when several share one
+  anchor. An input's anchor is its consumer; a producer-fed sink's anchor
+  is its producer (see `_off_track_anchor_of`). Grow bbox along the cross
+  axis to fit the band and along the flow axis to fit the icon extent;
+  nudge same-side ports back to the new edges.
 - **Helper**: `_lift_off_track_stations`.
 - **Precondition**: Stage 5.1 complete; all on-track Ys final.
 - **Postcondition**: Each off-track station sits at
-  `anchor.y - n*step` (n = stack rank). The lift `step` is `y_spacing`
-  for multi-track sections; a single-trunk LR/RL section (one distinct
-  on-track Y) uses the base content pitch `graph._base_y_spacing`
-  instead, so the diagonal-label widening of `y_spacing` doesn't strand
-  the icon far above the trunk (issue #580, helper
-  `_off_track_lift_step`). Section bbox extends upward to fit.  May leave
-  the topmost section above the canvas margin --
+  `anchor_cross +/- n*step` (n = stack rank) on the cross axis, keeping
+  its own flow-axis (layer) coordinate. The `step` is the cross pitch:
+  `y_spacing` for a horizontal section (base content pitch
+  `graph._base_y_spacing` on a single-trunk section, so the diagonal-label
+  widening doesn't strand the icon, issue #580), or the resolved column
+  pitch for a vertical section (`_off_track_lift_step`). Section bbox
+  extends to fit.  May leave the topmost section above the canvas margin --
   ``_shift_graph_into_canvas`` runs immediately afterwards to restore the
   margin (called explicitly by the caller, not by the helper).
 - **Invariants preserved**: On-track station Y. Other sections' Ys
@@ -647,10 +651,10 @@ in pipeline order.
 - **Related tests**: `test_off_track_inputs_above_consumer`,
   `test_off_track_outputs_above_and_adjacent_to_producer`,
   `test_off_track_icons_ordered_by_consumer_y`.
-- **Lifecycle:** invariant - off-track stations sit a pitch above their
-  anchor at the final boundary. *liftable:* only behind a "consumers
-  final" precondition - the anchor uses the consumer/producer's final Y
-  and is re-applied by Stages 6.6 / 6.8 (#463).
+- **Lifecycle:** invariant - off-track stations sit a step clear of their
+  anchor on the cross axis at the final boundary. *liftable:* only behind
+  a "consumers final" precondition - the anchor uses the consumer/producer's
+  final Y and is re-applied by Stages 6.6 / 6.8 (#463).
 
 ### Stage 5.3: re-align row bbox tops only
 - **Purpose**: After Stage 5.2 grew some bboxes upward, grow other
@@ -800,29 +804,30 @@ in pipeline order.
   downstream LR/RL target at the final boundary.
 
 ### Stage 6.6: reanchor off-track to consumer (engine.py)
-- **Purpose**: Re-pin each off-track station at `anchor.y - n*y_spacing`
-  using the anchor's final snapped Y (Stage 5.2 used pre-snap Ys); the
-  anchor is the consumer for an input, the producer for a sink.
-  Recompute the section top to fit the band (grow **or** shrink).
+- **Purpose**: Re-pin each off-track station `n*step` clear of its anchor
+  on the cross axis using the anchor's final snapped coordinate (Stage 5.2
+  used pre-snap ones); the anchor is the consumer for an input, the
+  producer for a sink. Recompute the lift-side bbox edge to fit the band
+  (grow **or** shrink); grow the opposite and flow edges as needed.
 - **Helper**: `_reanchor_off_track_to_consumer`.
 - **Precondition**: Stage 6.4 snapped consumers to grid. Enforced
   explicitly via `graph._consumers_grid_snapped` (set right after the
   Stage 6.4 snap); the helper raises `PhaseInvariantError` if it runs
   while unset, so the dependence on snapped consumers is no longer
   implicit in call position (#463).
-- **Postcondition**: Off-track stations sit `n * y_spacing` above their
-  anchor's final Y. The section top hugs the off-track band with one
-  `section_y_padding` band (recompute-to-fit, so re-running is
-  order-independent). May leave the topmost section above the canvas
-  margin -- ``_shift_graph_into_canvas`` runs immediately afterwards
-  (called explicitly by the caller, not by the helper).
+- **Postcondition**: Off-track stations sit `n * step` clear of their
+  anchor's final cross coordinate. The lift-side bbox edge hugs the band
+  (recompute-to-fit, so re-running is order-independent). May leave the
+  topmost section above the canvas margin -- ``_shift_graph_into_canvas``
+  runs immediately afterwards (called explicitly by the caller, not by the
+  helper).
 - **Invariants preserved**: On-track station Y.
 - **Related tests**: `test_off_track_inputs_above_consumer`,
   `test_off_track_outputs_above_and_adjacent_to_producer`,
   `test_reanchor_off_track_requires_snapped_consumers`,
   `test_reanchor_off_track_bbox_fit_is_reversible`.
-- **Lifecycle:** invariant - off-track stations sit a pitch above their
-  anchor's final Y. *liftable:* as a **precondition-gated** invariant
+- **Lifecycle:** invariant - off-track stations sit a step clear of their
+  anchor's final cross coordinate. *liftable:* as a **precondition-gated** invariant
   (#463): the bbox fit is now reversible, but the helper *raises* when
   `_consumers_grid_snapped` is unset, so a run-anytime `maintain()` pass
   must check that flag and skip while consumers are pre-snap rather than

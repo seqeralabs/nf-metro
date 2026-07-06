@@ -393,7 +393,7 @@ def _content_station_ids(graph: MetroGraph, section: Section) -> list[str]:
     phantoms are kept.  The single definition of the content set the
     top-fit helpers (:func:`...bbox._section_content_hug_top`,
     :func:`...bbox._section_fit_top`,
-    :func:`...off_track._off_track_fit_top`) anchor on, so the set cannot
+    :func:`...off_track._off_track_fit_edge`) anchor on, so the set cannot
     drift between them -- e.g. a switch to ``is_hidden``, a superset that
     would drop the phantoms.
     """
@@ -1177,17 +1177,105 @@ def _build_section_subgraph(graph: MetroGraph, section: Section) -> MetroGraph:
 
 
 def _pull_section_ports_to_edge(
-    graph: MetroGraph, section: Section, side: PortSide, edge_y: float
+    graph: MetroGraph, section: Section, side: PortSide, edge: float
 ) -> None:
-    """Move every port on *side* of *section* to *edge_y*."""
+    """Move every port on *side* of *section* to the bbox edge at *edge*.
+
+    A TOP/BOTTOM port lives on the section's Y edge; a LEFT/RIGHT port on
+    its X edge.  The coordinate the port is pinned to follows from the side,
+    so one helper serves both axes.
+    """
+    axis = "x" if side in (PortSide.LEFT, PortSide.RIGHT) else "y"
     for pid in section.entry_ports + section.exit_ports:
         port = graph.ports.get(pid)
         port_st = graph.stations.get(pid)
         if not port or not port_st:
             continue
         if port.side == side:
-            port_st.y = edge_y
-            port.y = edge_y
+            setattr(port_st, axis, edge)
+            setattr(port, axis, edge)
+
+
+def section_axes(section: Section | None) -> tuple[str, str]:
+    """A section's ``(flow_axis, cross_axis)`` names.
+
+    The flow (primary) axis runs along the section's layers; the cross
+    (secondary) axis is the one it stacks its lines / off-track band along.
+    LR/RL flow along X and stack on Y; TB/BT transpose the two.  A missing
+    section defaults to LR.  The single question the off-track and bbox-padding
+    machinery asks to stay orientation-agnostic.
+    """
+    return AxisFrame.axes_for_direction(section.direction or "LR" if section else "LR")
+
+
+def section_cross_axis(section: Section) -> str:
+    """Cross axis (``"x"`` or ``"y"``) a section stacks its lines along.
+
+    The secondary of :func:`section_axes`.
+    """
+    return section_axes(section)[1]
+
+
+# (origin, size) bbox-field names for each cross axis; the cross-min edge is
+# the origin (bbox_y / bbox_x) and the cross-max edge is origin + size.
+_CROSS_BBOX_FIELDS = {"y": ("bbox_y", "bbox_h"), "x": ("bbox_x", "bbox_w")}
+
+
+def move_section_bbox_min_edge(
+    graph: MetroGraph, section: Section, axis: str, new_min: float
+) -> None:
+    """Move a section's cross-min bbox edge to *new_min* (grow or shrink).
+
+    The cross-min edge is the top (Y axis) or left (X axis) of the box; the
+    opposite (cross-max) edge stays put, so the box's size absorbs the move.
+    The ports on that edge (TOP for Y, LEFT for X) follow.  Bidirectional
+    primitive; grow-only callers use :func:`grow_section_bbox_min_edge`.
+    """
+    origin_attr, size_attr = _CROSS_BBOX_FIELDS[axis]
+    origin = getattr(section, origin_attr)
+    setattr(section, size_attr, getattr(section, size_attr) + origin - new_min)
+    setattr(section, origin_attr, new_min)
+    side = PortSide.TOP if axis == "y" else PortSide.LEFT
+    _pull_section_ports_to_edge(graph, section, side, new_min)
+
+
+def grow_section_bbox_min_edge(
+    graph: MetroGraph, section: Section, axis: str, new_min: float
+) -> None:
+    """Extend a section's cross-min edge to *new_min*, never contracting it."""
+    origin_attr, _ = _CROSS_BBOX_FIELDS[axis]
+    if new_min < getattr(section, origin_attr):
+        move_section_bbox_min_edge(graph, section, axis, new_min)
+
+
+def move_section_bbox_max_edge(
+    graph: MetroGraph, section: Section, axis: str, new_max: float
+) -> None:
+    """Move a section's cross-max bbox edge (bottom / right) to *new_max*.
+
+    Bidirectional: the cross-min edge stays put, so the box's size absorbs
+    the move in either direction.  The ports on that edge (BOTTOM for Y,
+    RIGHT for X) follow.  Grow-only callers use
+    :func:`grow_section_bbox_max_edge`.
+    """
+    origin_attr, size_attr = _CROSS_BBOX_FIELDS[axis]
+    setattr(section, size_attr, new_max - getattr(section, origin_attr))
+    side = PortSide.BOTTOM if axis == "y" else PortSide.RIGHT
+    _pull_section_ports_to_edge(graph, section, side, new_max)
+
+
+def grow_section_bbox_max_edge(
+    graph: MetroGraph, section: Section, axis: str, new_max: float
+) -> None:
+    """Extend a section's cross-max bbox edge (bottom / right) to *new_max*.
+
+    Grow-only: a *new_max* at or inside the current edge is a no-op.  The
+    ports on that edge (BOTTOM for Y, RIGHT for X) follow.
+    """
+    origin_attr, size_attr = _CROSS_BBOX_FIELDS[axis]
+    if new_max <= getattr(section, origin_attr) + getattr(section, size_attr):
+        return
+    move_section_bbox_max_edge(graph, section, axis, new_max)
 
 
 def _set_section_bbox_top(
@@ -1197,11 +1285,10 @@ def _set_section_bbox_top(
 
     Works in both directions: a smaller *new_bbox_top* grows the box
     upward, a larger one shrinks it.  BOTTOM ports stay put because only
-    the top edge moves.
+    the top edge moves.  The Y-axis case of
+    :func:`move_section_bbox_min_edge`.
     """
-    section.bbox_h += section.bbox_y - new_bbox_top
-    section.bbox_y = new_bbox_top
-    _pull_section_ports_to_edge(graph, section, PortSide.TOP, section.bbox_y)
+    move_section_bbox_min_edge(graph, section, "y", new_bbox_top)
 
 
 def _grow_section_bbox_upward(
@@ -1209,11 +1296,10 @@ def _grow_section_bbox_upward(
 ) -> None:
     """Expand a section's bbox upward to *new_bbox_top* and pull TOP ports.
 
-    Grow-only convenience wrapper: callers guard on ``new_bbox_top <
-    section.bbox_y`` so the top is never lowered.  See
-    :func:`_set_section_bbox_top` for the bidirectional primitive.
+    The Y-axis case of :func:`grow_section_bbox_min_edge`: grow-only, so a
+    *new_bbox_top* at or below the current top is a no-op.
     """
-    _set_section_bbox_top(graph, section, new_bbox_top)
+    grow_section_bbox_min_edge(graph, section, "y", new_bbox_top)
 
 
 def _grow_section_bbox_downward(
@@ -1221,14 +1307,10 @@ def _grow_section_bbox_downward(
 ) -> None:
     """Expand a section's bbox downward to *new_bbox_bottom* and pull BOTTOM
     ports along.  Grow-only: a *new_bbox_bottom* at or above the current
-    bottom edge is a no-op, so the box is never raised.
+    bottom edge is a no-op, so the box is never raised.  The Y-axis case of
+    :func:`grow_section_bbox_max_edge`.
     """
-    if new_bbox_bottom <= section.bbox_y + section.bbox_h:
-        return
-    section.bbox_h = new_bbox_bottom - section.bbox_y
-    _pull_section_ports_to_edge(
-        graph, section, PortSide.BOTTOM, section.bbox_y + section.bbox_h
-    )
+    grow_section_bbox_max_edge(graph, section, "y", new_bbox_bottom)
 
 
 def exit_run_corridor_clear(

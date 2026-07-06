@@ -28,7 +28,10 @@ from nf_metro.layout.phases._common import (
     iter_stacked_rows_in_rowspan_band,
 )
 from nf_metro.layout.phases.ports import _set_port_y
-from nf_metro.layout.phases.single_section import _multiline_label_padding
+from nf_metro.layout.phases.single_section import (
+    _multiline_label_padding,
+    _terminus_y_overhang,
+)
 from nf_metro.parser.model import MetroGraph, PortSide, RowGridInfo, Section
 
 
@@ -743,16 +746,21 @@ def _compact_row_content_to_bbox_top(
             for section in group:
                 # Use all real (non-port) stations as the top reference so
                 # off-track inputs lifted above their consumers also stay
-                # inside the bbox padding zone.  Off-track stations now
-                # move together with on-track during compaction.
-                content_ys = [
+                # inside the bbox padding zone.  Off-track stations move
+                # together with on-track during compaction.  A vertical-flow
+                # terminus's file icon reaches above its marker (the section's
+                # top-entering source icons), so the reference is the icon's
+                # top edge, not the marker centre.
+                sec_dir = section.direction or "LR"
+                content_tops = [
                     graph.stations[sid].y
+                    - _terminus_y_overhang(graph.stations[sid], sec_dir, graph)[0]
                     for sid in section.station_ids
                     if sid in graph.stations and not graph.stations[sid].is_port
                 ]
-                if not content_ys:
+                if not content_tops:
                     continue
-                content_min = min(content_ys)
+                content_min = min(content_tops)
                 shift = content_min - section.bbox_y - section_y_padding
                 # A vertical-flow section's LEFT/RIGHT ports run perpendicular
                 # to the flow; a cross-row entry sits lifted above the top
@@ -791,13 +799,21 @@ def _compact_row_content_to_bbox_top(
                     section.bbox_h = max(0.0, section.bbox_h - delta)
 
             for section in group:
-                on_track_ys, off_track_ys, port_ys = _classify_section_station_ys(
-                    graph, section
-                )
-                content_ys = on_track_ys + off_track_ys
-                if not content_ys:
+                port_ys = _classify_section_station_ys(graph, section)[2]
+                sec_dir = section.direction or "LR"
+                # A vertical-flow terminus's file icon reaches below its marker
+                # (a bottom sink icon), so the bottom reference is the icon's
+                # bottom edge, not the marker centre.  Both on-track and
+                # off-track content count.
+                content_bots = [
+                    graph.stations[sid].y
+                    + _terminus_y_overhang(graph.stations[sid], sec_dir, graph)[1]
+                    for sid in section.station_ids
+                    if sid in graph.stations and not graph.stations[sid].is_port
+                ]
+                if not content_bots:
                     continue
-                desired_bot = max(content_ys) + section_y_padding
+                desired_bot = max(content_bots) + section_y_padding
                 if port_ys:
                     desired_bot = max(desired_bot, max(port_ys))
                 new_h = desired_bot - section.bbox_y

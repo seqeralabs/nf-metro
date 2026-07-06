@@ -125,21 +125,28 @@ class AxisFrame:
         """
         return -1.0 if direction in ("RL", "BT") else 1.0
 
+    @staticmethod
+    def secondary_sign_for(direction: str) -> float:
+        """The lane-fan sign (:attr:`secondary_sign`) for *direction*, spacing-free.
+
+        ``-1`` for TB (a 90-degree-CW rotation fans a downward flow's lanes to
+        -X), ``+1`` otherwise.  Exposed so a pass can read the sign without
+        building a frame with dummy spacings.
+        """
+        secondary = AxisFrame.axes_for_direction(direction)[1]
+        return -1.0 if secondary == "x" and direction != "BT" else 1.0
+
     @classmethod
     def for_direction(
         cls, direction: str, x_spacing: float, y_spacing: float
     ) -> AxisFrame:
         primary, secondary = cls.axes_for_direction(direction)
         step = {"x": x_spacing, "y": y_spacing}
-        sign = cls.flow_sign(direction)
-        # A 90-degree-CW rotation fans a downward (TB) flow's lanes to -X; its
-        # upward (BT) image reflects that to +X.
-        secondary_sign = -1.0 if secondary == "x" and direction != "BT" else 1.0
         return cls(
             Axis(primary, step[primary]),
             Axis(secondary, step[secondary]),
-            sign,
-            secondary_sign,
+            cls.flow_sign(direction),
+            cls.secondary_sign_for(direction),
         )
 
 

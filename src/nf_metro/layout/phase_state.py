@@ -177,6 +177,17 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "rail layout read it with a None/getattr fallback when it is unset"
         ),
     ),
+    "_resolved_x_spacing": PhaseFieldSpec(
+        name="_resolved_x_spacing",
+        writer_stage=PRE_LAYOUT,
+        reader_stages=("5.2", "6.6"),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "resolved column pitch recorded before layout; a vertical-flow (TB/BT) "
+            "section's off-track band is offset by this cross-axis pitch, read with "
+            "a None/getattr fallback to X_SPACING when it is unset"
+        ),
+    ),
 }
 
 

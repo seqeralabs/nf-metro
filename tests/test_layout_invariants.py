@@ -57,7 +57,6 @@ from nf_metro.layout.labels import (
     segment_strikes_label,
 )
 from nf_metro.layout.phases._common import (
-    _grow_section_bbox_upward,
     _is_side_entered_vertical_section,
     _row_contiguous_column_groups,
     flow_axis_exit_ports,
@@ -65,6 +64,7 @@ from nf_metro.layout.phases._common import (
     iter_corridor_fed_solo_entries,
     iter_fold_lr_exit_straight_runs,
     iter_fold_lr_exits_short_of_target,
+    section_cross_axis,
     wrap_exit_carrier_anchor,
 )
 from nf_metro.layout.phases.bbox import (
@@ -78,14 +78,16 @@ from nf_metro.layout.phases.guards import (
     _tb_top_entry_drop_overshoot,
 )
 from nf_metro.layout.phases.off_track import (
-    _is_single_trunk_lr_section,
+    _cross_bbox_edges,
+    _is_single_trunk_section,
     _off_track_anchor_of,
-    _off_track_fit_top,
+    _off_track_fit_edge,
     _off_track_groups,
+    _off_track_lift_sign,
     _off_track_lift_step,
     _off_track_output_below,
     _reanchor_off_track_to_consumer,
-    _section_distinct_trunk_ys,
+    _section_distinct_trunk_cross_coords,
 )
 from nf_metro.layout.routing import (
     OffsetRegime,
@@ -2444,7 +2446,7 @@ def test_off_track_inputs_above_consumer(fixture):
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_LINEAR_OFF_TRACK_CONSUMER)
 def test_off_track_consumer_on_section_trunk(fixture):
     """An off-track input's consumer that continues straight into the
-    section trunk must share that successor's Y.
+    section trunk must share that successor's cross coordinate.
 
     When several lines enter a section through an entry port and converge
     on one deep first station (the off-track-input consumer), that station
@@ -2452,6 +2454,9 @@ def test_off_track_consumer_on_section_trunk(fixture):
     continuation, not be dragged to the section floor -- otherwise the
     onward edge climbs near-vertically and the multi-line bundle merges
     into a single stroke (issue #650).
+
+    "Level" means sharing the trunk's cross coordinate: a shared Y for an
+    LR/RL trunk, a shared X for a TB/BT one.
 
     Restricted to consumers with exactly one on-track in-section successor
     (a linear trunk continuation): a genuine on-track fork legitimately
@@ -2468,10 +2473,12 @@ def test_off_track_consumer_on_section_trunk(fixture):
         checked += 1
         cons_st = graph.stations[cons_id]
         succ_st = graph.stations[succs[0]]
-        assert abs(cons_st.y - succ_st.y) <= _Y_TOL, (
-            f"{fixture}: off-track consumer {cons_id} y={cons_st.y} dragged "
+        cross = section_cross_axis(graph.sections.get(cons_st.section_id or ""))
+        cons_c, succ_c = getattr(cons_st, cross), getattr(succ_st, cross)
+        assert abs(cons_c - succ_c) <= _Y_TOL, (
+            f"{fixture}: off-track consumer {cons_id} {cross}={cons_c} dragged "
             f"off the section trunk; its continuation {succs[0]} sits at "
-            f"y={succ_st.y} ({abs(cons_st.y - succ_st.y):.0f}px climb)"
+            f"{cross}={succ_c} ({abs(cons_c - succ_c):.0f}px climb)"
         )
     assert checked, f"{fixture}: no linear off-track consumer to check"
 
@@ -2507,7 +2514,7 @@ def _single_trunk_off_track_input_lifts(graph: MetroGraph):
         off_st = graph.stations[off_id]
         cons_st = graph.stations[anc]
         section = graph.sections.get(off_st.section_id)
-        if section is None or not _is_single_trunk_lr_section(
+        if section is None or not _is_single_trunk_section(
             graph, section, junction_ids
         ):
             continue
@@ -2558,7 +2565,7 @@ def test_off_track_input_column_stack_guard_catches_over_lift():
     y_spacing = compute_min_y_spacing(graph)
     graph.stations["cpg_bed"].y -= y_spacing
 
-    with pytest.raises(PhaseInvariantError, match="stranded above an empty row"):
+    with pytest.raises(PhaseInvariantError, match="stranded past an empty slot"):
         _guard_off_track_input_column_stack(graph, "test")
 
 
@@ -2655,7 +2662,9 @@ def test_single_trunk_off_track_step_not_inflated_by_diagonal_band():
         off_st = graph.stations[off_id]
         prod_st = graph.stations[prod_id]
         section = graph.sections[off_st.section_id]
-        distinct_trunk_ys = _section_distinct_trunk_ys(graph, section, junction_ids)
+        distinct_trunk_ys = _section_distinct_trunk_cross_coords(
+            graph, section, junction_ids
+        )
         assert len(distinct_trunk_ys) == 1, (
             f"{fixture}: section {section.id} is not single-trunk "
             f"(trunk Ys {sorted(distinct_trunk_ys)})"
@@ -3599,17 +3608,33 @@ def test_reanchor_off_track_requires_snapped_consumers(fixture):
         _reanchor_off_track_to_consumer(graph, y_spacing)
 
 
+def _bake_bbox_edge(section, axis: str, *, is_min: bool, delta: float) -> None:
+    """Push a section's bbox edge out by *delta*, absorbing it into the size."""
+    if axis == "y":
+        if is_min:
+            section.bbox_y += delta
+            section.bbox_h -= delta
+        else:
+            section.bbox_h += delta
+    elif is_min:
+        section.bbox_x += delta
+        section.bbox_w -= delta
+    else:
+        section.bbox_w += delta
+
+
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK_ANY)
 def test_reanchor_off_track_bbox_fit_is_reversible(fixture):
     """Re-running the reanchor is order-independent: it recomputes the
-    section top to fit, growing **or** shrinking.
+    section's lift-side edge to fit, growing **or** shrinking.
 
-    ``_grow_section_bbox_upward`` only ever lowers the top, so a stale or
-    premature run that grew the box too tall bakes in excess slack that
-    is never reclaimed (issue #463 bug (b)).  Bake in a too-tall top as a
-    premature grow-only run would, re-run the reanchor, and assert the
-    bbox top hugs the off-track band with exactly one ``SECTION_Y_PADDING``
-    band and no excess slack.
+    A grow-only edge move never contracts, so a stale or premature run that
+    grew the box too far bakes in excess slack that is never reclaimed (issue
+    #463 bug (b)).  Bake in a too-large lift-side edge as a premature grow-only
+    run would, re-run the reanchor, and assert the lift-side edge hugs the
+    off-track band with no excess slack.  The lift side is the cross-min edge
+    (top) for an LR/RL section and the cross-max edge (right) for a TB one, so
+    the check is orientation-agnostic.
     """
     graph = _layout(fixture)
     y_spacing = compute_min_y_spacing(graph)
@@ -3619,35 +3644,44 @@ def test_reanchor_off_track_bbox_fit_is_reversible(fixture):
 
     for sec_id in groups:
         section = graph.sections[sec_id]
-        # Bake in a stale, too-tall top as a premature grow-only run would.
-        _grow_section_bbox_upward(graph, section, section.bbox_y - 2 * y_spacing)
+        axis = section_cross_axis(section)
+        step = _off_track_lift_step(graph, section, set(graph.junctions), y_spacing)
+        # Bake a stale, too-large lift-side edge as a premature grow-only run
+        # would: push the lift-side edge two steps further from the content.
+        if _off_track_lift_sign(section) < 0:
+            _bake_bbox_edge(section, axis, is_min=True, delta=-2 * step)
+        else:
+            _bake_bbox_edge(section, axis, is_min=False, delta=2 * step)
 
     _reanchor_off_track_to_consumer(graph, y_spacing)
 
     for sec_id, (_fallback, by_consumer) in groups.items():
         section = graph.sections[sec_id]
-        # The top fit is driven only by the up-direction (above-anchor)
-        # band; sections whose off-track all drop downward do not touch the
-        # top, so there is nothing to reclaim.
-        up_ys = [
-            graph.stations[st.id].y
+        axis = section_cross_axis(section)
+        toward_min = _off_track_lift_sign(section) < 0
+        # The lift-side fit is driven only by the stations on the lift side
+        # (not in ``below``); sections whose off-track all fall opposite do not
+        # touch the lift edge, so there is nothing to reclaim.
+        lift_coords = [
+            getattr(graph.stations[st.id], axis)
             for stations in by_consumer.values()
             for st in stations
             if st.id not in below
         ]
-        if not up_ys:
+        if not lift_coords:
             continue
-        highest = min(up_ys)
-        # The fit hugs the off-track band but clamps up to any on-track
-        # content (or non-TOP port) sitting higher than the band, so the
-        # ideal is the fit-top contract itself, not a bare band-minus-pad.
-        # For input fixtures the band is the topmost content and the two
-        # coincide; an output sink can sit below higher on-track branches.
-        ideal_top = _off_track_fit_top(graph, section, highest, SECTION_Y_PADDING)
-        assert section.bbox_y == pytest.approx(ideal_top, abs=_Y_TOL), (
-            f"{fixture}/{sec_id}: bbox top {section.bbox_y:.1f} does not hug "
-            f"the off-track band (expected {ideal_top:.1f}); grow-only left "
-            f"{section.bbox_y - ideal_top:.1f}px of slack"
+        extreme = min(lift_coords) if toward_min else max(lift_coords)
+        # The fit hugs the off-track band but clamps to any on-track content
+        # (or off-side port) sitting past the band, so the ideal is the fit
+        # contract itself, not a bare band-minus-pad.
+        ideal = _off_track_fit_edge(
+            graph, section, axis, extreme, SECTION_Y_PADDING, toward_min=toward_min
+        )
+        edge = _cross_bbox_edges(section, axis)[0 if toward_min else 1]
+        assert edge == pytest.approx(ideal, abs=_Y_TOL), (
+            f"{fixture}/{sec_id}: bbox lift edge {edge:.1f} does not hug "
+            f"the off-track band (expected {ideal:.1f}); grow-only left "
+            f"{abs(edge - ideal):.1f}px of slack"
         )
 
 
@@ -3676,7 +3710,9 @@ def test_off_track_fit_top_clamps_to_content_above_band():
     )
     graph.stations[on_id].y = highest - 30.0  # above the off-track band
 
-    top = _off_track_fit_top(graph, section, highest, SECTION_Y_PADDING)
+    top = _off_track_fit_edge(
+        graph, section, "y", highest, SECTION_Y_PADDING, toward_min=True
+    )
 
     assert top == pytest.approx(graph.stations[on_id].y - SECTION_Y_PADDING, abs=_Y_TOL)
     # Grew past the off-track-only fit rather than clipping the station.
@@ -3707,7 +3743,9 @@ def test_off_track_fit_top_clamps_to_non_top_port():
     graph.stations[pid].y = above
     graph.ports[pid].y = above
 
-    top = _off_track_fit_top(graph, section, highest, SECTION_Y_PADDING)
+    top = _off_track_fit_edge(
+        graph, section, "y", highest, SECTION_Y_PADDING, toward_min=True
+    )
 
     assert top == pytest.approx(above, abs=_Y_TOL)
 
@@ -6816,22 +6854,19 @@ def test_section_bbox_top_hugs_content(fixture):
         # content-hug, so a band is reserved for the header badge.
         if fit is None or hug is None or fit > hug + tol:
             continue
-        content_top = min(
-            graph.stations[sid].y
-            for sid in sec.station_ids
-            if not graph.stations[sid].is_port and not is_bypass_v(sid)
-        )
-        gap = content_top - sec.bbox_y
-        if abs(gap - SECTION_Y_PADDING) > tol:
+        # The bbox top must sit exactly at the content-hug: a padding band
+        # above the topmost marker for an LR/RL section, or hugging the icon
+        # overhang of a TB/BT top-entering terminus.  ``_section_content_hug_top``
+        # is the orientation-agnostic target, so compare against it directly.
+        if abs(sec.bbox_y - hug) > tol:
             offenders.append(
-                f"section {sec.id!r}: gap={gap:.1f} != "
-                f"section_y_padding={SECTION_Y_PADDING} "
-                f"(leftover band {gap - SECTION_Y_PADDING:.1f})"
+                f"section {sec.id!r}: bbox top {sec.bbox_y:.1f} != content-hug "
+                f"{hug:.1f} (leftover band {sec.bbox_y - hug:.1f})"
             )
 
     assert not offenders, (
-        f"{fixture}: section tops with an empty band must hug content to "
-        f"section_y_padding with no leftover space: " + "; ".join(offenders)
+        f"{fixture}: section tops with an empty band must hug content with no "
+        f"leftover space: " + "; ".join(offenders)
     )
 
 

@@ -614,6 +614,7 @@ def _compute_layout_scaled(
             )
     if x_spacing is None:
         x_spacing = default_x_spacing
+    graph._resolved_x_spacing = x_spacing
 
     # Optionally reorder lines by section span before layout.
     # Must happen here (on the full graph) before section subgraphs are
