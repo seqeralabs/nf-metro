@@ -2045,10 +2045,10 @@ def _guard_no_line_crosses_non_consumer(
                 if src == sid or tgt == sid:
                     continue
                 if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
-                    # The first of two layout passes defers this guard so the
-                    # geometric bypass pass can fix the crossing; the re-laid-
-                    # out second pass runs it for real.
-                    if graph._defer_breeze_guard:
+                    # The pre-bypass passes defer this guard so the geometric
+                    # bypass pass can fix the crossing; the settled geometry is
+                    # validated once the bypass cycle completes.
+                    if graph._defer_final_guards:
                         return
                     raise PhaseInvariantError(
                         f"{phase}: line {line_id!r} on edge "
@@ -2109,10 +2109,10 @@ def _guard_no_line_crosses_file_icon(
                 if src == sid or tgt == sid:
                     continue
                 if segment_intersects_bbox(p1[0], p1[1], p2[0], p2[1], bbox):
-                    # The first of two layout passes defers this guard so the
-                    # geometric bypass pass can bow the crossing line clear; the
-                    # re-laid-out second pass runs it against the final geometry.
-                    if graph._defer_breeze_guard:
+                    # The pre-bypass passes defer this guard so the geometric
+                    # bypass pass can bow the crossing line clear; the settled
+                    # geometry is validated once the bypass cycle completes.
+                    if graph._defer_final_guards:
                         return
                     raise PhaseInvariantError(
                         f"{phase}: line {line_id!r} on edge {src!r} -> {tgt!r} "

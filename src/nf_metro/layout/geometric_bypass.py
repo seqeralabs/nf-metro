@@ -271,19 +271,17 @@ def _remove_helpers(
 
 def apply_geometric_bypass(
     graph: MetroGraph, layout_pass: Callable[[bool], None]
-) -> tuple[bool, int]:
+) -> bool:
     """Bow any drawn non-consumer marker crossing the idiom can cleanly fix.
 
     ``layout_pass(validate)`` re-runs the layout body on ``graph``.  Returns
-    ``(changed, residual_breeze)``: ``changed`` is True when helpers were
-    inserted and kept (the graph is left in the re-laid-out state), and
-    ``residual_breeze`` is the count of non-consumer crossings remaining in
-    the final state - non-zero when a crossing exists that the idiom could not
-    express or whose bypass was reverted as no improvement.
+    True when helpers were inserted and kept (the graph is left in the
+    re-laid-out state); False when there was nothing to fix or the bypass was
+    reverted as no improvement.
     """
     before = _evaluate(graph, with_quality=False)
     if not before.crossings:
-        return False, before.breeze_total
+        return False
 
     before = _evaluate(graph)
     saved_edges = list(graph.edges)
@@ -291,8 +289,8 @@ def apply_geometric_bypass(
     layout_pass(False)
     after = _evaluate(graph)
     if _is_improvement(before, after):
-        return True, after.breeze_total
+        return True
 
     _remove_helpers(graph, helper_ids, saved_edges)
     layout_pass(False)
-    return False, before.breeze_total
+    return False

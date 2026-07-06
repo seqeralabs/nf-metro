@@ -42,14 +42,14 @@ CONTRACT = LAYOUT_DIR / "CONTRACT.md"
 # Cross-phase ``graph._*`` channels that are deliberately NOT part of the
 # inter-phase positioning protocol, so they are not in PHASE_FIELD_REGISTRY:
 #   - _stages_completed / _validate_active: the enforcement mechanism itself.
-#   - _defer_breeze_guard: a pass-control flag toggled by compute_layout.
+#   - _defer_final_guards: a pass-control flag toggled by compute_layout.
 #   - _explicit_directions: parse/auto-layout metadata, read by a guard.
 #   - _rail_y: rail-mode router metadata, not section positioning.
 #   - _cross_column_perp_bridges: a routing-invariant relaxation flag.
 _NON_PROTOCOL_CROSS_PHASE = {
     "_stages_completed",
     "_validate_active",
-    "_defer_breeze_guard",
+    "_defer_final_guards",
     "_explicit_directions",
     "_rail_y",
     "_cross_column_perp_bridges",
