@@ -1,0 +1,32 @@
+%%metro title: TB off-track inputs and outputs
+%% Regression for #1381: a `direction: TB` section with off-track file inputs
+%% and outputs.  The vertical trunk runs down one column; off-track inputs must
+%% sit beside the trunk (offset on X, the cross axis) rather than stacking on it
+%% and colliding with the on-track stations.  Off-track placement is
+%% orientation-agnostic, so this is the TB rotation of the LR off-track idiom.
+%%metro line: core | Core | #2db572
+
+%%metro files: ubam_in | uBAM
+%%metro files: spring_in | spring
+%%metro file: aligned_out | BAM
+
+%%metro off_track: ubam_in
+%%metro off_track: spring_in
+%%metro off_track: aligned_out
+
+graph LR
+    subgraph pre [Pre-processing]
+        %%metro direction: TB
+        ubam_in[ ]
+        spring_in[ ]
+        convert[convert]
+        align[align]
+        markdup[markduplicates]
+        aligned_out[ ]
+
+        ubam_in -->|core| convert
+        spring_in -->|core| convert
+        convert -->|core| align
+        align -->|core| markdup
+        align -->|core| aligned_out
+    end

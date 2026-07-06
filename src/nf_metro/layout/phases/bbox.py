@@ -674,14 +674,20 @@ def _section_content_hug_top(
         offsets = compute_station_offsets(graph)
     content_min_ys = [
         graph.stations[sid].y
-        - _bundle_edge_padding(
-            section_y_padding,
-            (
-                max(0.0, -_station_bundle_offset_span(graph, sid, offsets)[0])
-                if is_horizontal and offsets is not None
-                else 0.0
+        - max(
+            _bundle_edge_padding(
+                section_y_padding,
+                (
+                    max(0.0, -_station_bundle_offset_span(graph, sid, offsets)[0])
+                    if is_horizontal and offsets is not None
+                    else 0.0
+                ),
+                sid in fan_ids,
             ),
-            sid in fan_ids,
+            # A vertical-flow terminus's file icon reaches above its marker
+            # (a top-entering source), so the box must clear the icon, not just
+            # a padding band above the marker.
+            _terminus_y_overhang(graph.stations[sid], section_dir, graph)[0],
         )
         for sid in content_ids
     ]

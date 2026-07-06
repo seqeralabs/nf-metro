@@ -58,6 +58,8 @@ from nf_metro.layout.phases._common import (
     marker_cross_exempt,
     routes_through_own_section_interior,
     routes_through_unrelated_sections,
+    section_axes,
+    section_cross_axis,
     wrap_exit_carrier_anchor,
 )
 from nf_metro.layout.phases.bbox import (
@@ -66,7 +68,7 @@ from nf_metro.layout.phases.bbox import (
     _section_fit_top,
 )
 from nf_metro.layout.phases.off_track import (
-    _is_single_trunk_lr_section,
+    _is_single_trunk_section,
     _off_track_anchor_of,
     _off_track_lift_step,
     _off_track_output_below,
@@ -1662,6 +1664,11 @@ def _guard_single_trunk_off_track_step(graph: MetroGraph, phase: str) -> None:
     off-track station in such a section must sit an integer number of base
     steps above its anchor, never at a wider pitch that would strand the icon
     far above the trunk.
+
+    The base-pitch widening is a Y-axis (diagonal-label) concern, so this
+    applies only to horizontal-flow (LR/RL) sections, whose off-track band is
+    offset along Y; a vertical-flow section offsets along X by the column pitch,
+    which is never widened.
     """
     base = graph._base_y_spacing
     if base is None or base <= 0:
@@ -1675,8 +1682,10 @@ def _guard_single_trunk_off_track_step(graph: MetroGraph, phase: str) -> None:
         if off_st is None or anchor is None:
             continue
         section = graph.sections.get(off_st.section_id or "")
-        if section is None or not _is_single_trunk_lr_section(
-            graph, section, junction_ids
+        if (
+            section is None
+            or not lanes_run_along_y(section.direction or "LR")
+            or not _is_single_trunk_section(graph, section, junction_ids)
         ):
             continue
         gap = anchor.y - off_st.y
@@ -1701,8 +1710,11 @@ def _guard_off_track_input_column_stack(graph: MetroGraph, phase: str) -> None:
     column.  Counting the whole anchor group instead strands a lone-in-its-column
     input an extra slot up over an empty row above an earlier trunk station
     (issue #651).  Restricted to single-trunk sections, whose lift pitch carries
-    no stacked horizontal line bands that could legitimately bump an input past
-    its slot.
+    no stacked line bands that could legitimately bump an input past its slot.
+
+    A "column" is a shared flow-axis coordinate and the gap is measured on the
+    cross axis (:func:`section_cross_axis`), so the check holds for an LR/RL
+    trunk (columns along X, band stacked on Y) and a TB/BT one alike.
     """
     from nf_metro.layout.engine import compute_min_y_spacing
 
@@ -1711,11 +1723,15 @@ def _guard_off_track_input_column_stack(graph: MetroGraph, phase: str) -> None:
     anchor_of = _off_track_anchor_of(graph)
     tol = 1.0
 
+    def _flow_coord(st: Station) -> float:
+        flow, _cross = section_axes(graph.sections.get(st.section_id or ""))
+        return round(getattr(st, flow), 1)
+
     col_group: dict[tuple[str | None, float, str], int] = defaultdict(int)
     for off_id, anchor_id in anchor_of.items():
         st = graph.stations.get(off_id)
         if st is not None:
-            col_group[(st.section_id, round(st.x, 1), anchor_id)] += 1
+            col_group[(st.section_id, _flow_coord(st), anchor_id)] += 1
 
     for off_id, anchor_id in anchor_of.items():
         off_st = graph.stations.get(off_id)
@@ -1725,20 +1741,21 @@ def _guard_off_track_input_column_stack(graph: MetroGraph, phase: str) -> None:
         if not any(e.target == anchor_id for e in graph.edges_from(off_id)):
             continue  # producer-fed sink, not an input
         section = graph.sections.get(off_st.section_id or "")
-        if section is None or not _is_single_trunk_lr_section(
+        if section is None or not _is_single_trunk_section(
             graph, section, junction_ids
         ):
             continue
         step = _off_track_lift_step(graph, section, junction_ids, y_spacing)
-        n = col_group[(off_st.section_id, round(off_st.x, 1), anchor_id)]
-        gap = anchor.y - off_st.y
+        n = col_group[(off_st.section_id, _flow_coord(off_st), anchor_id)]
+        cross = section_cross_axis(section)
+        gap = abs(getattr(anchor, cross) - getattr(off_st, cross))
         if gap > n * step + tol:
             raise PhaseInvariantError(
                 f"{phase}: off-track input {off_id!r} sits {gap:.1f}px "
-                f"({gap / step:.1f} slots) above consumer {anchor_id!r} on "
+                f"({gap / step:.1f} slots) from consumer {anchor_id!r} on "
                 f"single-trunk section {section.id!r}, but only {n} off-track "
-                f"station(s) share its column and anchor -- it is stranded above "
-                f"an empty row (expected at most {n * step:.1f}px)"
+                f"station(s) share its column and anchor -- it is stranded past "
+                f"an empty slot (expected at most {n * step:.1f}px)"
             )
 
 
@@ -1828,6 +1845,10 @@ def _guard_off_track_consumer_on_trunk(graph: MetroGraph, phase: str) -> None:
     onward edge a near-vertical climb whose lines merge into one stroke.
     Restricted to consumers with exactly one on-track in-section successor
     so a genuine on-track fork's off-row branches don't trip it.
+
+    "On the trunk" means sharing the successor's cross coordinate
+    (:func:`section_cross_axis`): a shared Y for an LR/RL trunk, a shared X
+    for a TB/BT one.
     """
     junction_ids = graph.junction_ids
     tol = 1.0
@@ -1853,12 +1874,15 @@ def _guard_off_track_consumer_on_trunk(graph: MetroGraph, phase: str) -> None:
         if len(distinct) != 1:
             continue
         succ = succs[0]
-        if abs(cons.y - succ.y) > tol:
+        section = graph.sections.get(cons.section_id or "")
+        cross = section_cross_axis(section) if section is not None else "y"
+        cons_c, succ_c = getattr(cons, cross), getattr(succ, cross)
+        if abs(cons_c - succ_c) > tol:
             raise PhaseInvariantError(
-                f"{phase}: off-track consumer {cons_id!r} y={cons.y:.1f} "
+                f"{phase}: off-track consumer {cons_id!r} {cross}={cons_c:.1f} "
                 f"dragged off the section trunk; its continuation "
-                f"{succ.id!r} sits at y={succ.y:.1f} "
-                f"({abs(cons.y - succ.y):.0f}px climb)"
+                f"{succ.id!r} sits at {cross}={succ_c:.1f} "
+                f"({abs(cons_c - succ_c):.0f}px climb)"
             )
 
 

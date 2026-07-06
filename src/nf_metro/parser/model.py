@@ -563,6 +563,12 @@ class MetroGraph:
     # step uses this base pitch so a widened pitch doesn't strand the icon far
     # above the trunk.  None until compute_layout records it.
     _base_y_spacing: float | None = field(default=None, repr=False)
+    # Resolved column pitch (the x_spacing the engine actually laid out with,
+    # after auto-resolution).  A vertical-flow (TB/BT) section stacks its lines
+    # along X, so its off-track band is offset by this cross-axis pitch just as
+    # a horizontal section's is offset by y_spacing.  None until compute_layout
+    # records it.
+    _resolved_x_spacing: float | None = field(default=None, repr=False)
     # Ordered ids of the layout stages that have completed in the current
     # positioning pass (appended by the engine's per-stage ``_snap`` hook,
     # reset at the start of each pass).  Backs the inter-phase write-before-read

@@ -19,13 +19,17 @@ from nf_metro.layout.constants import (
     X_SPACING,
     resolve_offset_step,
 )
+from nf_metro.layout.geometry import AxisFrame
 from nf_metro.layout.labels import _label_text_height, label_text_width
 from nf_metro.layout.phases._common import (
-    _content_station_ys,
-    _grow_section_bbox_downward,
-    _grow_section_bbox_upward,
-    _set_section_bbox_top,
+    _content_station_ids,
     flow_axis_exit_ports,
+    grow_section_bbox_max_edge,
+    grow_section_bbox_min_edge,
+    move_section_bbox_max_edge,
+    move_section_bbox_min_edge,
+    section_axes,
+    section_cross_axis,
 )
 from nf_metro.parser.model import (
     Edge,
@@ -1018,19 +1022,22 @@ def _off_track_groups(
     return result
 
 
-def _section_distinct_trunk_ys(
+def _section_distinct_trunk_cross_coords(
     graph: MetroGraph,
     section: Section,
     junction_ids: set[str],
 ) -> set[float]:
-    """Distinct Y values of a section's on-track (trunk) stations.
+    """Distinct cross-axis coords of a section's on-track (trunk) stations.
 
-    On-track means a real, visible station: not a port, hidden phantom,
-    junction, or off-track artefact.  Used to detect single-trunk sections
-    (one distinct Y), which carry no parallel tracks.
+    The cross axis is the one lines stack along: Y for an LR/RL section, X
+    for a TB/BT one (:func:`section_cross_axis`).  On-track means a real,
+    visible station: not a port, hidden phantom, junction, or off-track
+    artefact.  Used to detect single-trunk sections (one distinct cross
+    coord), which carry no parallel tracks.
     """
+    axis = section_cross_axis(section)
     return {
-        round(st.y, 1)
+        round(getattr(st, axis), 1)
         for sid in section.station_ids
         if (st := graph.stations.get(sid)) is not None
         and not st.is_port
@@ -1040,16 +1047,15 @@ def _section_distinct_trunk_ys(
     }
 
 
-def _is_single_trunk_lr_section(
+def _is_single_trunk_section(
     graph: MetroGraph,
     section: Section | None,
     junction_ids: set[str],
 ) -> bool:
-    """An LR/RL section laid out as one horizontal trunk (no parallel tracks)."""
+    """A section laid out as one trunk line (no parallel tracks), any flow."""
     return (
         section is not None
-        and section.direction in ("LR", "RL")
-        and len(_section_distinct_trunk_ys(graph, section, junction_ids)) == 1
+        and len(_section_distinct_trunk_cross_coords(graph, section, junction_ids)) == 1
     )
 
 
@@ -1059,38 +1065,64 @@ def _off_track_lift_step(
     junction_ids: set[str],
     y_spacing: float,
 ) -> float:
-    """Per-section vertical step for lifting off-track stations.
+    """Per-section cross-axis step for offsetting off-track stations.
 
-    A section that is a single horizontal trunk has no parallel tracks, so the
-    diagonal-label band that widened the graph-wide ``y_spacing`` is wasted
-    vertical room here: it would strand the off-track icon far above the trunk.
-    Such a section lifts by the base content pitch (``graph._base_y_spacing``)
-    instead.
+    An off-track icon is offset from its anchor along the section's cross axis
+    (:func:`section_cross_axis`): Y for an LR/RL trunk, X for a TB/BT one.
 
-    Multi-track sections, and any section with no recorded base pitch, keep the
-    passed-in ``y_spacing``.  The base only applies when strictly smaller, so an
-    explicit ``y_spacing`` below the base is never widened by this path.
+    A vertical-flow (TB/BT) section offsets along X by the resolved column
+    pitch; a TB section suppresses diagonal labels, so that pitch is never
+    widened and needs no base-pitch reduction.
+
+    A horizontal-flow section offsets along Y by ``y_spacing``.  When it is a
+    single horizontal trunk (no parallel tracks) the diagonal-label band that
+    widened the graph-wide ``y_spacing`` is wasted vertical room that would
+    strand the icon far above the trunk, so it lifts by the base content pitch
+    (``graph._base_y_spacing``) instead.  Multi-track sections, and any section
+    with no recorded base pitch, keep ``y_spacing``.  The base only applies when
+    strictly smaller, so an explicit ``y_spacing`` below the base is never
+    widened by this path.
     """
+    if section is not None and section_cross_axis(section) == "x":
+        return graph._resolved_x_spacing or X_SPACING
     base = graph._base_y_spacing
     if base is None or base >= y_spacing:
         return y_spacing
-    if not _is_single_trunk_lr_section(graph, section, junction_ids):
+    if not _is_single_trunk_section(graph, section, junction_ids):
         return y_spacing
     return base
 
 
-def _per_column_stack_steps(innermost_first: list[Station]) -> dict[str, int]:
+def _off_track_lift_sign(section: Section | None) -> float:
+    """Cross-axis direction an off-track input is offset from its anchor.
+
+    An LR/RL input lifts *above* the trunk (toward smaller Y); a TB input sits
+    *beside* it.  The offset runs opposite the lane-fan direction
+    (:attr:`AxisFrame.secondary_sign`) -- lanes fan down (+Y) on LR so inputs
+    lift up (-Y); lanes fan left (-X) on TB so inputs sit right (+X).  A
+    producer-fed sink on a downward branch is offset the other way (see
+    :func:`_off_track_output_below`).
+    """
+    direction = section.direction if section is not None else "LR"
+    return -AxisFrame.secondary_sign_for(direction or "LR")
+
+
+def _per_column_stack_steps(
+    innermost_first: list[Station], flow_axis: str
+) -> dict[str, int]:
     """Stack rank (1 = innermost, nearest the anchor) keyed per column.
 
     ``innermost_first`` lists the off-track stations sharing one anchor in
-    order of increasing distance from it.  Each column counts its own stack
-    independently, so two stations sharing an anchor but sitting in different
-    columns each start at rank 1 rather than towering one above the other.
+    order of increasing distance from it.  A "column" is a shared flow-axis
+    coordinate (X for an LR/RL trunk, Y for a TB/BT one); each column counts
+    its own stack independently, so two stations sharing an anchor but sitting
+    in different columns each start at rank 1 rather than towering one above
+    the other.
     """
     steps: dict[str, int] = {}
     per_col: dict[float, int] = defaultdict(int)
     for st in innermost_first:
-        col = round(st.x, 1)
+        col = round(getattr(st, flow_axis), 1)
         per_col[col] += 1
         steps[st.id] = per_col[col]
     return steps
@@ -1104,150 +1136,151 @@ def _place_off_track_relative_to_anchors(
     by_consumer: dict[str, list[Station]],
     below: set[str] | None = None,
 ) -> tuple[float | None, float | None]:
-    """Place each off-track station ``n*y_spacing`` from its anchor.
+    """Offset each off-track station ``n`` steps from its anchor on the cross axis.
 
-    Stations not in ``below`` lift *above* their anchor (smaller Y);
-    those in ``below`` -- producer-fed outputs on a downward branch --
-    drop *below* it (larger Y) so they run straight down instead of
-    crossing back over the trunk.
+    The cross axis is the one the section stacks lines along
+    (:func:`section_cross_axis`): Y for an LR/RL trunk, X for a TB/BT one.  The
+    off-track station keeps its own flow-axis coordinate (its layer) and only
+    its cross coordinate is set here, so an input sits beside where its data is
+    read whatever the section's flow direction.
 
-    Multiple stations sharing an anchor stack in ``y_spacing`` steps away
-    from it.  When the natural slot would put the icon on top of another
-    trunk station's line band in the same column (e.g. ``net_in`` at the
-    gsea-trunk Y when decoupler sits one slot below gsea at non-savepoint
-    params), the slot is bumped further from the anchor by additional
-    ``y_spacing`` steps until the icon's vertical bbox clears every
-    line-bearing track in its column and every sibling off-track already
-    placed in the same column.
+    Stations not in ``below`` are offset toward the lift side
+    (:func:`_off_track_lift_sign`) -- *above* an LR trunk, *beside* a TB one;
+    those in ``below`` -- producer-fed outputs on a downward branch -- are
+    offset the opposite way so they run straight out instead of crossing back
+    over the trunk.
 
-    Returns ``(highest_y, lowest_y)`` -- the topmost above-anchor Y and
-    the bottommost below-anchor Y -- with ``None`` for a direction that
-    placed no stations.
+    Multiple stations sharing an anchor stack in ``step`` increments away from
+    it.  When the natural slot would put the icon on top of another trunk
+    station's line band in the same column, the slot is bumped further from the
+    anchor by additional ``step`` increments until the icon clears every
+    line-bearing track in its column and every sibling off-track already placed
+    in the same column.
+
+    Returns ``(lift_extreme, opp_extreme)`` -- the cross coordinate of the
+    station placed furthest toward the lift side, and furthest opposite it --
+    with ``None`` for a side that placed no stations.
     """
     section = graph.sections.get(section_id)
-    sec_dir = section.direction if section is not None else "LR"
     junction_ids = graph.junction_ids
     below = below or set()
 
+    flow_axis, cross_axis = section_axes(section)
+    lift_sign = _off_track_lift_sign(section)
     step = _off_track_lift_step(graph, section, junction_ids, y_spacing)
 
-    # Track already-placed off-track Ys per column so a bumped icon
-    # doesn't crash into a sibling off-track already at the desired Y.
-    used_ys_per_col: dict[float, list[float]] = defaultdict(list)
+    # Track already-placed off-track cross coords per column so a bumped icon
+    # doesn't crash into a sibling off-track already at the desired slot.
+    used_cross_per_col: dict[float, list[float]] = defaultdict(list)
 
-    # Iterate consumers bottom-up (largest consumer Y first).  The
-    # bumping mechanism only pushes upward, so placing the bottommost
-    # consumer's icon first lets subsequent (higher-consumer) icons
-    # stack above it.  The resulting visual order matches the consumer
-    # Y order: an upper consumer gets an upper icon, a lower consumer
-    # gets a lower icon, regardless of edge declaration order in the mmd.
-    def _consumer_anchor_y(item: tuple[str, list[Station]]) -> float:
+    # Iterate consumers from the side furthest opposite the lift first.  The
+    # bumping mechanism only pushes toward the lift side, so placing the
+    # furthest-opposite consumer's icon first lets subsequent icons stack past
+    # it.  The resulting visual order matches the consumer order regardless of
+    # edge declaration order in the mmd.
+    def _consumer_anchor_cross(item: tuple[str, list[Station]]) -> float:
         cid = item[0] if item[0] else fallback_consumer_id
         a = graph.stations.get(cid)
-        return a.y if a is not None else 0.0
+        return lift_sign * getattr(a, cross_axis) if a is not None else 0.0
 
-    ordered_consumers = sorted(
-        by_consumer.items(), key=_consumer_anchor_y, reverse=True
-    )
+    ordered_consumers = sorted(by_consumer.items(), key=_consumer_anchor_cross)
 
-    highest_y: float | None = None
-    lowest_y: float | None = None
+    lift_extreme: float | None = None
+    opp_extreme: float | None = None
+
+    def _place(st: Station, candidate: float, bump_dir: float) -> None:
+        nonlocal lift_extreme, opp_extreme
+        if section is not None:
+            candidate = _bump_off_track_clear_of_trunks(
+                graph,
+                st,
+                candidate,
+                step,
+                section,
+                junction_ids,
+                sibling_cross=used_cross_per_col[round(getattr(st, flow_axis), 1)],
+                direction=bump_dir,
+            )
+        setattr(st, cross_axis, candidate)
+        used_cross_per_col[round(getattr(st, flow_axis), 1)].append(candidate)
+        signed = lift_sign * candidate
+        if bump_dir == lift_sign:
+            if lift_extreme is None or signed > lift_sign * lift_extreme:
+                lift_extreme = candidate
+        elif opp_extreme is None or signed < lift_sign * opp_extreme:
+            opp_extreme = candidate
+
     for consumer_id, stations in ordered_consumers:
         anchor_id = consumer_id if consumer_id else fallback_consumer_id
         anchor = graph.stations.get(anchor_id)
         if anchor is None:
             continue
-        consumer_y = anchor.y
-        # Preserve original Y order: station closest to the trunk stays
-        # innermost in the stack.
-        stations.sort(key=lambda s: s.y)
+        anchor_cross = getattr(anchor, cross_axis)
+        # Preserve original order: station closest to the trunk stays innermost
+        # in the stack.
+        stations.sort(key=lambda s: (getattr(s, cross_axis), s.id))
         up_stations = [s for s in stations if s.id not in below]
         down_stations = [s for s in stations if s.id in below]
 
-        up_steps = _per_column_stack_steps(list(reversed(up_stations)))
-        down_steps = _per_column_stack_steps(down_stations)
+        up_steps = _per_column_stack_steps(list(reversed(up_stations)), flow_axis)
+        down_steps = _per_column_stack_steps(down_stations, flow_axis)
         for st in up_stations:
-            base_step = up_steps[st.id]
-            candidate_y = consumer_y - base_step * step
-            if section is not None and sec_dir in ("LR", "RL"):
-                candidate_y = _bump_off_track_clear_of_trunks(
-                    graph,
-                    st,
-                    candidate_y,
-                    step,
-                    section,
-                    junction_ids,
-                    sibling_ys=used_ys_per_col[round(st.x, 1)],
-                    direction=-1,
-                )
-            st.y = candidate_y
-            used_ys_per_col[round(st.x, 1)].append(st.y)
-            if highest_y is None or st.y < highest_y:
-                highest_y = st.y
-
+            candidate = anchor_cross + lift_sign * up_steps[st.id] * step
+            _place(st, candidate, lift_sign)
         for st in down_stations:
-            base_step = down_steps[st.id]
-            candidate_y = consumer_y + base_step * step
-            if section is not None and sec_dir in ("LR", "RL"):
-                candidate_y = _bump_off_track_clear_of_trunks(
-                    graph,
-                    st,
-                    candidate_y,
-                    step,
-                    section,
-                    junction_ids,
-                    sibling_ys=used_ys_per_col[round(st.x, 1)],
-                    direction=1,
-                )
-            st.y = candidate_y
-            used_ys_per_col[round(st.x, 1)].append(st.y)
-            if lowest_y is None or st.y > lowest_y:
-                lowest_y = st.y
-    return highest_y, lowest_y
+            candidate = anchor_cross - lift_sign * down_steps[st.id] * step
+            _place(st, candidate, -lift_sign)
+    return lift_extreme, opp_extreme
 
 
 def _bump_off_track_clear_of_trunks(
     graph: MetroGraph,
     off_st: Station,
-    candidate_y: float,
+    candidate: float,
     step: float,
     section: Section,
     junction_ids: set[str],
-    sibling_ys: list[float] | None = None,
-    direction: int = -1,
+    sibling_cross: list[float] | None = None,
+    direction: float = -1.0,
 ) -> float:
-    """Return ``candidate_y`` shifted so the off-track icon clears any
-    trunk line track passing through the icon's X column.
+    """Return *candidate* shifted so the off-track icon clears any trunk line
+    track passing through the icon's column.
 
-    The renderer places an off-track icon at the station's Y with file-
-    icon half-height ~16 px; a trunk station's line tracks run at
-    ``trunk.y + offset(line)`` for each line on the trunk.  When a
-    trunk station downstream of the icon (LR: higher X; RL: lower X)
-    has tracks at Y values inside ``[candidate_y - icon_half,
-    candidate_y + icon_half]``, the segment from the section's entry
-    port to that trunk crosses the icon.  Bump away from the anchor
-    (``direction`` -1 = up, +1 = down) by ``step`` increments until the
-    band clears.
+    The icon is offset from its anchor along the section's cross axis
+    (:func:`section_cross_axis`).  A trunk station downstream of the icon in
+    flow carries a band of line tracks spread across the cross axis; when that
+    band overlaps the icon's cross extent, the run into that trunk crosses the
+    icon.  Bump away from the anchor (``direction`` = the signed cross-step
+    that offsets the icon toward *candidate*) by ``step`` increments until it
+    clears.
 
-    ``sibling_ys`` is a list of Ys already taken by other off-track
-    inputs in the same column - the bump must also clear those (within
-    one ``step`` slot) so two icons don't end up in the same row.
+    ``sibling_cross`` lists cross coords already taken by other off-track icons
+    in the same column - the bump must also clear those (within one ``step``
+    slot) so two icons don't end up in the same slot.
 
-    Capped at six steps to avoid runaway lifts.
+    Capped at six steps to avoid runaway offsets.
     """
     if step <= 0:
-        return candidate_y
+        return candidate
 
-    # Match the renderer's terminus icon height and add a small margin
-    # so the icon's stroke doesn't touch a track.
+    flow_axis, cross_axis = section_axes(section)
+    flow_sign = AxisFrame.flow_sign(section.direction or "LR")
+    off_flow = getattr(off_st, flow_axis)
+    # The icon's half-extent along the cross axis: file-icon half-height on Y,
+    # half-width on X.
+    icon_half = ICON_HALF_HEIGHT if cross_axis == "y" else TERMINUS_WIDTH / 2
+
+    # A small margin so the icon's stroke doesn't touch a track.
     MARGIN = 2.0
-    # Limit lift attempts so a pathological column doesn't pull the
-    # icon off-canvas.
+    # Limit attempts so a pathological column doesn't pull the icon off-canvas.
     MAX_STEPS = 6
 
-    # Find trunk stations in the same section whose row-bundle crosses
-    # the icon's X column.
-    trunk_offsets_at_x: list[float] = []
+    offset_step = resolve_offset_step(graph.track_gap)
+
+    # Find trunk stations in the same section whose line bundle crosses the
+    # icon's column (they lie downstream of the icon in flow, so the run
+    # feeding them passes the icon's flow coordinate).
+    trunk_bands: list[float] = []
     for sid in section.station_ids:
         st2 = graph.stations.get(sid)
         if st2 is None or st2.is_port or st2.is_hidden:
@@ -1256,61 +1289,52 @@ def _bump_off_track_clear_of_trunks(
             continue
         if st2.off_track or st2.is_terminus:
             continue
-        # Only stations on the OTHER side of the icon (i.e. the trunk
-        # the entry port feeds) have tracks crossing the icon's column.
-        if section.direction == "LR" and st2.x <= off_st.x + SAME_COORD_TOLERANCE:
+        if flow_sign * (getattr(st2, flow_axis) - off_flow) <= SAME_COORD_TOLERANCE:
             continue
-        if section.direction == "RL" and st2.x >= off_st.x - SAME_COORD_TOLERANCE:
-            continue
-        # Collect the line-track band Y range at the icon's column.
-        # Tracks run horizontally so each line's Y here equals
-        # st2.y + offset(line); offsets aren't computed at this phase
-        # but they're bounded by ``(n_lines - 1) * OFFSET_STEP`` total
-        # spread (centred on st2.y).  Use line-track extents only - no
-        # marker radius - because the icon is at a different X from st2
-        # so st2's pill doesn't intersect the icon's column.
-        lines = graph.station_lines(sid)
-        n_lines = len(lines)
+        # The line-track band spread across the cross axis at this trunk
+        # station: each line sits at ``st2_cross + offset(line)``, bounded by
+        # ``(n_lines - 1) * OFFSET_STEP`` centred on the station's cross coord.
+        n_lines = len(graph.station_lines(sid))
         if n_lines == 0:
             continue
-        offset_step = resolve_offset_step(graph.track_gap)
         half_span = (n_lines - 1) * offset_step / 2
-        trunk_offsets_at_x.append(st2.y - half_span)
-        trunk_offsets_at_x.append(st2.y + half_span)
+        st2_cross = getattr(st2, cross_axis)
+        trunk_bands.append(st2_cross - half_span)
+        trunk_bands.append(st2_cross + half_span)
 
-    sib_ys = list(sibling_ys or [])
+    sibs = list(sibling_cross or [])
 
-    if not trunk_offsets_at_x and not sib_ys:
-        return candidate_y
+    if not trunk_bands and not sibs:
+        return candidate
 
-    # A captioned icon's drawn box reaches below its centre by the caption
-    # gap plus a caption line; a same-column sibling must clear that reach,
-    # not just the bare icon half-heights, or the upper icon's caption
-    # crashes into the lower icon.
+    # A captioned icon's drawn box reaches past its centre along the flow axis
+    # (the caption hangs beneath the icon), so it eats into a same-column
+    # sibling's clearance only when the sibling stacks along that same axis --
+    # i.e. on a horizontal (cross=Y) section.  On a vertical section the icons
+    # stack along X while captions grow along Y, so the caption never encroaches.
     caption_reach = (
         ICON_CAPTION_GAP + ICON_CAPTION_FONT_HEIGHT
-        if (off_st.terminus_names and any(off_st.terminus_names))
+        if cross_axis == "y" and off_st.terminus_names and any(off_st.terminus_names)
         else 0.0
     )
-    sibling_clearance = 2 * ICON_HALF_HEIGHT + caption_reach + MARGIN
+    sibling_clearance = 2 * icon_half + caption_reach + MARGIN
 
-    def _overlaps(y: float) -> bool:
-        top = y - ICON_HALF_HEIGHT - MARGIN
-        bot = y + ICON_HALF_HEIGHT + MARGIN
-        for tl_y_lo, tl_y_hi in zip(trunk_offsets_at_x[::2], trunk_offsets_at_x[1::2]):
-            if not (bot < tl_y_lo or tl_y_hi < top):
+    def _overlaps(c: float) -> bool:
+        lo = c - icon_half - MARGIN
+        hi = c + icon_half + MARGIN
+        for band_lo, band_hi in zip(trunk_bands[::2], trunk_bands[1::2]):
+            if not (hi < band_lo or band_hi < lo):
                 return True
-        for sy in sib_ys:
-            if abs(sy - y) < sibling_clearance:
+        for sc in sibs:
+            if abs(sc - c) < sibling_clearance:
                 return True
         return False
 
-    y = candidate_y
     steps = 0
-    while _overlaps(y) and steps < MAX_STEPS:
-        y += direction * step
+    while _overlaps(candidate) and steps < MAX_STEPS:
+        candidate += direction * step
         steps += 1
-    return y
+    return candidate
 
 
 def _lift_off_track_stations(
@@ -1318,24 +1342,23 @@ def _lift_off_track_stations(
     y_spacing: float,
     section_y_padding: float,
 ) -> None:
-    """Lift off_track stations to the row above their consumer station.
+    """Offset off_track stations clear of their consumer's trunk slot.
 
-    Off-track stations are file-input nodes that should not consume a
-    line-track Y slot.  Each marked station is placed one ``y_spacing``
-    row above its consumer (the on-track station it feeds), so the
-    input sits adjacent to where its data is read rather than at a
-    uniform top-of-section band.  When several off-track inputs feed
-    the same consumer, they stack upward in ``y_spacing`` steps.
+    Off-track stations are file-input/output nodes that should not consume a
+    line-track slot.  Each marked station is offset one step along its
+    section's cross axis from its consumer (the on-track station it feeds) --
+    above an LR/RL trunk, beside a TB/BT one -- so the input sits adjacent to
+    where its data is read rather than at a uniform section band.  When several
+    off-track inputs feed the same consumer, they stack in ``step`` increments.
 
-    If an off-track station has no on-track consumer in the same
-    section, it falls back to the section's topmost on-track station
-    as its anchor.  After placement, the section bbox grows upward to
-    fit the highest lifted input, and same-section TOP ports are
-    nudged back to the new top edge.
+    If an off-track station has no on-track consumer in the same section, it
+    falls back to the section's topmost on-track station as its anchor.  After
+    placement, the section bbox grows along the cross axis to fit the band, and
+    same-side ports are nudged back to the new edge.
 
     Caller is responsible for invoking ``_shift_graph_into_canvas``
-    afterwards: the upward bbox growth here can push the topmost
-    section above the canvas top margin set by Stage 1.5.
+    afterwards: the bbox growth here can push the topmost section above the
+    canvas top margin set by Stage 1.5.
     """
     groups = _off_track_groups(graph)
     if not groups:
@@ -1346,46 +1369,141 @@ def _lift_off_track_stations(
         section = graph.sections.get(sec_id)
         if section is None:
             continue
-        highest_y, lowest_y = _place_off_track_relative_to_anchors(
+        lift_extreme, opp_extreme = _place_off_track_relative_to_anchors(
             graph, y_spacing, sec_id, fallback_id, by_consumer, below
         )
-        if highest_y is not None:
-            new_bbox_top = highest_y - section_y_padding
-            if new_bbox_top < section.bbox_y:
-                _grow_section_bbox_upward(graph, section, new_bbox_top)
-        if lowest_y is not None:
-            _grow_section_bbox_downward(graph, section, lowest_y + section_y_padding)
+        _grow_off_track_band_edges(
+            graph,
+            section,
+            lift_extreme,
+            opp_extreme,
+            section_y_padding,
+            fit_lift_edge=False,
+        )
 
 
-def _off_track_fit_top(
+def _cross_bbox_edges(section: Section, axis: str) -> tuple[float, float]:
+    """The section's ``(cross_min, cross_max)`` bbox edges on *axis*."""
+    if axis == "x":
+        return section.bbox_x, section.bbox_x + section.bbox_w
+    return section.bbox_y, section.bbox_y + section.bbox_h
+
+
+def _off_track_fit_edge(
     graph: MetroGraph,
     section: Section,
-    highest_off_track_y: float,
-    section_y_padding: float,
+    axis: str,
+    extreme: float,
+    padding: float,
+    *,
+    toward_min: bool,
 ) -> float:
-    """Bbox top that gives the off-track band one full padding band.
+    """Cross-axis bbox edge giving the off-track band one full padding band.
 
-    Returns ``highest_off_track_y - section_y_padding`` clamped so the
-    refit never clips other content sitting above the band, nor strands
-    a non-TOP port above the new top (TOP ports follow the edge, so they
-    impose no bound).  Used by the reversible off-track reanchor: unlike
-    the grow-only :func:`_grow_section_bbox_upward`, the caller applies
-    this in both directions so a stale too-tall box is reclaimed.
+    Returns ``extreme -/+ padding`` (minus toward the cross-min edge, plus
+    toward the cross-max edge) clamped so the refit never clips other content
+    sitting past the band, nor strands a port on the far side of the new edge.
+    Ports on the edge being moved follow it and impose no bound.  Used by the
+    reversible off-track reanchor: unlike the grow-only edge helpers, the
+    caller applies this in both directions so a stale too-large box is
+    reclaimed.
     """
-    target = highest_off_track_y - section_y_padding
-    for y in _content_station_ys(graph, section):
-        target = min(target, y - section_y_padding)
-    # Non-TOP ports bound the fit so they aren't stranded above the new
-    # top; TOP ports follow the edge and impose no bound.  This port clamp
-    # is deliberately narrower than the bbox helpers' all-port clamp, so
-    # only the content set is shared, not the port handling.
+    sign = -1.0 if toward_min else 1.0
+    combine = min if toward_min else max
+    target = extreme + sign * padding
+    for cid in _content_station_ids(graph, section):
+        target = combine(target, getattr(graph.stations[cid], axis) + sign * padding)
+    moved_side = (
+        (PortSide.TOP if axis == "y" else PortSide.LEFT)
+        if toward_min
+        else (PortSide.BOTTOM if axis == "y" else PortSide.RIGHT)
+    )
+    # Ports off the moved edge bound the fit so they aren't stranded past the
+    # new edge; ports on that edge follow it.  This port clamp is deliberately
+    # narrower than the bbox helpers' all-port clamp, so only the content set
+    # is shared, not the port handling.
     for pid in section.entry_ports + section.exit_ports:
         port = graph.ports.get(pid)
         port_st = graph.stations.get(pid)
-        if not port or not port_st or port.side == PortSide.TOP:
+        if not port or not port_st or port.side == moved_side:
             continue
-        target = min(target, port_st.y)
+        target = combine(target, getattr(port_st, axis))
     return target
+
+
+def _grow_off_track_band_edges(
+    graph: MetroGraph,
+    section: Section,
+    lift_extreme: float | None,
+    opp_extreme: float | None,
+    padding: float,
+    *,
+    fit_lift_edge: bool,
+) -> None:
+    """Extend a section's bbox to fit its placed off-track band on the cross axis.
+
+    ``lift_extreme`` / ``opp_extreme`` are the extreme cross coordinates from
+    :func:`_place_off_track_relative_to_anchors`.  The lift side is the cross-min
+    edge when inputs lift toward smaller coords (LR/RL up) or the cross-max edge
+    when they sit toward larger coords (TB right); the opposite side is the other
+    edge.  ``fit_lift_edge`` makes the lift-side edge reversible (grow **or**
+    shrink to hug the band, for the reanchor passes); the opposite edge always
+    grows only.
+    """
+    axis = section_cross_axis(section)
+    lift_toward_min = _off_track_lift_sign(section) < 0
+
+    def _fit_edge(coord: float | None, toward_min: bool, reversible: bool) -> None:
+        if coord is None:
+            return
+        if not reversible:
+            grow = (
+                grow_section_bbox_min_edge if toward_min else grow_section_bbox_max_edge
+            )
+            grow(
+                graph, section, axis, coord - padding if toward_min else coord + padding
+            )
+            return
+        target = _off_track_fit_edge(
+            graph, section, axis, coord, padding, toward_min=toward_min
+        )
+        edge = _cross_bbox_edges(section, axis)[0 if toward_min else 1]
+        if abs(target - edge) > SAME_COORD_TOLERANCE:
+            move = (
+                move_section_bbox_min_edge if toward_min else move_section_bbox_max_edge
+            )
+            move(graph, section, axis, target)
+
+    _fit_edge(lift_extreme, lift_toward_min, fit_lift_edge)
+    _fit_edge(opp_extreme, not lift_toward_min, reversible=False)
+    _grow_flow_edges_for_off_track_icons(graph, section)
+
+
+def _grow_flow_edges_for_off_track_icons(graph: MetroGraph, section: Section) -> None:
+    """Grow the flow-axis bbox edges to contain each off-track icon's extent.
+
+    An off-track input sits a layer *back* along the flow axis from its
+    consumer (the section's data enters before its first processing step), so
+    its file icon can reach past the flow-back bbox edge -- the top of a TB
+    section, whose inputs stack above the first station.  A horizontal section
+    already reserves this flow-back room in its entry column, so the grow-only
+    edges are a no-op there.
+    """
+    from nf_metro.layout.phases.single_section import _terminus_y_overhang
+
+    flow, _cross = section_axes(section)
+    junction_ids = graph.junction_ids
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is None or not st.off_track or st.is_port or sid in junction_ids:
+            continue
+        coord = getattr(st, flow)
+        if flow == "y":
+            above, below = _terminus_y_overhang(st, section.direction or "LR", graph)
+        else:
+            above = below = TERMINUS_WIDTH / 2
+        grow_section_bbox_min_edge(graph, section, flow, coord - above)
+        grow_section_bbox_max_edge(graph, section, flow, coord + below)
 
 
 def _reanchor_off_track_to_consumer(
@@ -1435,17 +1553,17 @@ def _reanchor_off_track_to_consumer(
 
     below = _off_track_output_below(graph)
     for sec_id, (fallback_id, by_consumer) in groups.items():
-        highest_y, lowest_y = _place_off_track_relative_to_anchors(
+        lift_extreme, opp_extreme = _place_off_track_relative_to_anchors(
             graph, y_spacing, sec_id, fallback_id, by_consumer, below
         )
         section = graph.sections.get(sec_id)
         if section is None:
             continue
-        if highest_y is not None:
-            desired_top = _off_track_fit_top(
-                graph, section, highest_y, section_y_padding
-            )
-            if abs(desired_top - section.bbox_y) > SAME_COORD_TOLERANCE:
-                _set_section_bbox_top(graph, section, desired_top)
-        if lowest_y is not None:
-            _grow_section_bbox_downward(graph, section, lowest_y + section_y_padding)
+        _grow_off_track_band_edges(
+            graph,
+            section,
+            lift_extreme,
+            opp_extreme,
+            section_y_padding,
+            fit_lift_edge=True,
+        )
