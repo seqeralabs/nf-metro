@@ -410,6 +410,14 @@ def _namespace_referenced_ids(content: str, namespace: str) -> str:
     return _URL_REF_RE.sub(repl_ref, content)
 
 
+def _panel_namespace(stem: str, side: str) -> str:
+    """Build the per-panel namespace passed to :func:`_inline_svg`.
+
+    *side* must be "base" or "pr" - the two panels a diff entry ever inlines.
+    """
+    return f"{stem}-{side}"
+
+
 def _inline_svg(path: Path, namespace: str) -> str:
     """Read SVG; strip self-declared color-scheme and add viewBox for CSS scaling.
 
@@ -605,8 +613,8 @@ def build_diff(
             div_open = f'<div class="diff-entry" id="{stem}">'
 
             if kind == "changed":
-                base_svg = _inline_svg(base_dir / name, f"{stem}-base")
-                pr_svg = _inline_svg(pr_dir / name, f"{stem}-pr")
+                base_svg = _inline_svg(base_dir / name, _panel_namespace(stem, "base"))
+                pr_svg = _inline_svg(pr_dir / name, _panel_namespace(stem, "pr"))
                 toggle = (
                     '<div class="toggle-bar">'
                     '<button class="active" data-mode="side-by-side">'
@@ -625,7 +633,7 @@ def build_diff(
                     f"</div>\n</div>"
                 )
             elif kind == "added":
-                pr_svg = _inline_svg(pr_dir / name, f"{stem}-pr")
+                pr_svg = _inline_svg(pr_dir / name, _panel_namespace(stem, "pr"))
                 entry = (
                     f"{div_open}\n{h3}\n"
                     f'<div class="side-only"><h4>New in PR</h4>'
@@ -633,7 +641,7 @@ def build_diff(
                     f"</div>"
                 )
             else:  # removed
-                base_svg = _inline_svg(base_dir / name, f"{stem}-base")
+                base_svg = _inline_svg(base_dir / name, _panel_namespace(stem, "base"))
                 entry = (
                     f"{div_open}\n{h3}\n"
                     f'<div class="side-only"><h4>Removed (was in base)</h4>'

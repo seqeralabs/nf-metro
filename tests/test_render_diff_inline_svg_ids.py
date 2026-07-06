@@ -12,19 +12,16 @@ and dark logo variants render unmasked on top of each other.
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 
 from nf_metro.api import render_string
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from build_render_diff import _inline_svg  # noqa: E402
+from build_render_diff import _ID_ATTR_RE as _ID_RE  # noqa: E402
+from build_render_diff import _URL_REF_RE, _inline_svg, build_diff  # noqa: E402
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
-
-_ID_RE = re.compile(r'\bid="([^"]+)"')
-_URL_REF_RE = re.compile(r"url\(#([^)]+)\)")
 
 
 def _render_adaptive_logo_svg() -> str:
@@ -72,4 +69,29 @@ def test_each_panel_still_resolves_its_own_references(tmp_path):
     for ref in _URL_REF_RE.findall(inlined):
         assert ref in defined_ids, (
             f"url(#{ref}) no longer resolves within its own panel"
+        )
+
+
+def test_build_diff_output_has_no_id_collisions(tmp_path):
+    """End-to-end: the generated diff page itself must not collide any panel's ids."""
+    svg_text = _render_adaptive_logo_svg()
+    base_dir = tmp_path / "base"
+    pr_dir = tmp_path / "pr"
+    base_dir.mkdir()
+    pr_dir.mkdir()
+    (base_dir / "sarek_metro.svg").write_text(svg_text)
+    # A trivial byte difference is enough to classify this as a "changed" render,
+    # matching the case that renders both panels onto the page together.
+    (pr_dir / "sarek_metro.svg").write_text(svg_text + "<!-- pr -->")
+
+    output_dir = tmp_path / "out"
+    assert build_diff(base_dir, pr_dir, output_dir)
+
+    page = (output_dir / "index.html").read_text()
+    referenced_ids = _URL_REF_RE.findall(page)
+    assert referenced_ids
+    defined_ids = _ID_RE.findall(page)
+    for ref in referenced_ids:
+        assert defined_ids.count(ref) == 1, (
+            f"id {ref!r} referenced by url(#{ref}) collides in the generated page"
         )
