@@ -19,8 +19,8 @@ from nf_metro.layout.routing.inter_section_handlers import (
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
-REGRESSIONS = Path(__file__).resolve().parent / "fixtures" / "regressions"
-RIBOSEQ = REGRESSIONS / "riboseq_top_entry_descent.mmd"
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+PACKED_GRID = EXAMPLES / "topologies" / "packed_multiline_serpentine_grid.mmd"
 
 
 def _section(sid: str, x: float, y: float, w: float, h: float) -> SimpleNamespace:
@@ -56,8 +56,8 @@ def test_helper_reports_deepest_penetrated_section() -> None:
     )
 
 
-def test_riboseq_top_entry_descent_clears_upstream_section() -> None:
-    graph = parse_metro_mermaid(RIBOSEQ.read_text())
+def test_top_entry_descent_clears_upstream_section() -> None:
+    graph = parse_metro_mermaid(PACKED_GRID.read_text())
     compute_layout(graph, validate=False)
     offenders = routes_through_unrelated_sections(graph)
     top_entry_offenders = [
