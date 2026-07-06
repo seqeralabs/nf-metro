@@ -159,6 +159,12 @@ EXPECTED_RESIDUALS = frozenset(
         # the column adjacent to the packed cell (no gap column).
         ("packed_cell_cellmate_bypass_adjacent", "normalization", "consensus", "B->T"),
         ("packed_cell_cellmate_bypass_adjacent", "realign", "reporting", "L->R"),
+        # Folded corridor whose return row carries each line on its own lane: the
+        # fold reverses the B->T drop receiver (normalization) and propagates
+        # along the return row to realignment.  Both are continuations the
+        # classifier preserves while the machinery reverses them.
+        ("folded_corridor_distinct_lanes", "variant_calling", "normalization", "B->T"),
+        ("folded_corridor_distinct_lanes", "consensus", "realignment", "L->R"),
     }
 )
 
