@@ -70,6 +70,7 @@ from nf_metro.layout.phases.bbox import (
 from nf_metro.layout.phases.off_track import (
     _is_single_trunk_section,
     _off_track_anchor_of,
+    _off_track_lift_sign,
     _off_track_lift_step,
     _off_track_output_below,
 )
@@ -4362,15 +4363,17 @@ def _guard_right_entry_corridor_descent_no_jog(
 
 def _guard_off_track_clear_of_anchor(graph: MetroGraph, phase: str) -> None:
     """At final: every off-track station must sit at least ``GUARD_TOLERANCE``
-    clear of its anchor on the expected side.
+    clear of its anchor on the expected side of the section's cross axis.
 
     An input's anchor is its consumer, a producer-fed sink's anchor is its
-    producer; :func:`_off_track_anchor_of` resolves which, so the same Y
-    relationship is enforced for both roles.  Outputs are normally lifted
-    above (smaller Y) their producer, but an output whose producer sits on a
-    downward branch is dropped below it (:func:`_off_track_output_below`); such
-    outputs are required to sit below (larger Y) so a downward-branch output
-    does not cross back over the trunk.
+    producer; :func:`_off_track_anchor_of` resolves which, so the same
+    relationship is enforced for both roles.  The offset is on the cross axis
+    (:func:`section_cross_axis`): Y for an LR/RL trunk, X for a TB/BT one, so an
+    off-track sits beside where its data is read whatever the flow direction.
+    It is normally on the lift side of its anchor (:func:`_off_track_lift_sign`
+    -- above an LR trunk, beside a TB one); an output whose producer sits on a
+    branch column (:func:`_off_track_output_below`) is offset the other way so
+    it does not cross back over the trunk.
     """
     below = _off_track_output_below(graph)
     for off_id, anchor_id in _off_track_anchor_of(graph).items():
@@ -4378,17 +4381,28 @@ def _guard_off_track_clear_of_anchor(graph: MetroGraph, phase: str) -> None:
         anchor_st = graph.stations.get(anchor_id)
         if off_st is None or anchor_st is None:
             continue
+        section = graph.sections.get(off_st.section_id or "")
+        flow, cross = section_axes(section)
+        # The expected offset direction: the lift side, flipped for a branch
+        # output that runs out the far side of the trunk.
+        want_sign = _off_track_lift_sign(section)
         if off_id in below:
-            if not (off_st.y > anchor_st.y + GUARD_TOLERANCE):
-                raise PhaseInvariantError(
-                    f"{phase}: downward off-track output {off_id!r} "
-                    f"y={off_st.y:.1f} not below anchor {anchor_id!r} "
-                    f"y={anchor_st.y:.1f}"
-                )
-        elif not (off_st.y < anchor_st.y - GUARD_TOLERANCE):
+            want_sign = -want_sign
+        signed = want_sign * (getattr(off_st, cross) - getattr(anchor_st, cross))
+        if not (signed > GUARD_TOLERANCE):
+            side = "beside" if cross == "x" else ("below" if want_sign > 0 else "above")
             raise PhaseInvariantError(
-                f"{phase}: off-track {off_id!r} y={off_st.y:.1f} "
-                f"not above anchor {anchor_id!r} y={anchor_st.y:.1f}"
+                f"{phase}: off-track {off_id!r} {cross}={getattr(off_st, cross):.1f} "
+                f"not clear {side} anchor {anchor_id!r} "
+                f"{cross}={getattr(anchor_st, cross):.1f}"
+            )
+        # The connector must hang via an S, not leave the anchor perpendicular to
+        # flow: the off-track keeps a flow-axis lead off its anchor.
+        if abs(getattr(off_st, flow) - getattr(anchor_st, flow)) <= GUARD_TOLERANCE:
+            raise PhaseInvariantError(
+                f"{phase}: off-track {off_id!r} shares anchor {anchor_id!r} "
+                f"{flow}={getattr(anchor_st, flow):.1f} - its connector leaves the "
+                f"station perpendicular to flow instead of hanging via an S"
             )
 
 

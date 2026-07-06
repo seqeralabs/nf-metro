@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
+from collections.abc import Iterator
 
 from nf_metro.layout.constants import (
     DIAGONAL_RUN,
@@ -40,11 +41,11 @@ from nf_metro.parser.model import (
     is_bypass_v,
 )
 
-# A producer this far below the section's top trunk row is treated as
-# sitting on a downward branch, so its off-track output drops below it
-# rather than lifting back across the trunk.  Sized below a full Y slot so
-# it ignores offset/rounding noise on a flat trunk yet fires on any genuine
-# one-slot downward branch.
+# A producer this far off the trunk's baseline (on the fan side of the cross
+# axis) is treated as sitting on a downward branch, so its off-track output is
+# offset away from the trunk rather than lifting back across it.  Sized below a
+# full slot so it ignores offset/rounding noise on a straight trunk yet fires on
+# any genuine one-slot branch column.
 _DOWNWARD_BRANCH_SLOP: float = ICON_HALF_HEIGHT
 
 # Flat run reserved on the output icon's side after the diagonal, before the
@@ -922,40 +923,63 @@ def _off_track_anchor_of(graph: MetroGraph) -> dict[str, str]:
     return anchor_of
 
 
+def _iter_trunk_stations(
+    graph: MetroGraph, section: Section, junction_ids: set[str]
+) -> Iterator[Station]:
+    """Yield a section's real on-track (trunk) stations.
+
+    Skips ports, hidden phantoms, junctions, and off-track artefacts, leaving
+    the visible stations that define the trunk.
+    """
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if (
+            st is not None
+            and not st.is_port
+            and not st.off_track
+            and not st.is_hidden
+            and sid not in junction_ids
+        ):
+            yield st
+
+
 def _off_track_output_below(graph: MetroGraph) -> set[str]:
-    """Off-track outputs whose producer sits on a downward branch.
+    """Off-track outputs whose producer sits on a branch off the trunk.
 
-    An off-track output (a producer-fed sink) is normally lifted *above*
-    its producer.  When the producer sits below the section's top trunk
-    row -- i.e. it is on a downward branch off the trunk -- lifting the
-    output up forces it back across the trunk to sit above it.  Such an
-    output is instead dropped *below* its producer so a downward-branch
-    output runs straight down.
+    An off-track output (a producer-fed sink) is normally offset to the *lift*
+    side of its producer (:func:`_off_track_lift_sign`) -- above an LR trunk,
+    beside a TB one.  When the producer sits off the trunk's baseline on the
+    *fan* side of the cross axis -- i.e. it is on a branch column -- offsetting
+    the output to the lift side forces it back across the trunk.  Such an output
+    is instead offset the other way so it runs straight out.
 
-    The trunk row is taken to be the topmost on-track station Y in the
-    section (the same fallback anchor :func:`_off_track_groups` uses).  A
-    producer more than one ``y_spacing``-equivalent slot below that row is
-    treated as a downward branch; the slot floor keeps a flat trunk (every
-    on-track station at one Y) inferring no downward outputs.
+    The comparison is on the section's cross axis (:func:`section_cross_axis`):
+    Y for an LR/RL trunk, X for a TB/BT one.  The baseline is the trunk's cross
+    coordinate furthest toward the lift side (the topmost row on LR, the trunk
+    column on a single-column TB); a producer more than one slot onto the fan
+    side of it is a branch.  The slot floor keeps a straight trunk -- every
+    on-track station on one cross coordinate -- inferring no branch outputs, so
+    a TB trunk's normal descent along the flow axis is not misread as one.
 
-    Only outputs (sinks) are considered; off-track inputs always lift above
-    their consumer.
+    Only outputs (sinks) are considered; off-track inputs always lift toward
+    their consumer's lift side.
     """
     junction_ids = graph.junction_ids
     anchor_of = _off_track_anchor_of(graph)
 
-    section_top_y: dict[str, float] = {}
+    # Per section: the cross axis, its fan sign, and the trunk baseline as a
+    # signed coordinate (``fan_sign * cross``) minimised over the trunk, i.e.
+    # the coordinate furthest toward the lift side.
+    section_baseline: dict[str, tuple[str, float, float]] = {}
     for section in graph.sections.values():
-        ys = [
-            graph.stations[sid].y
-            for sid in section.station_ids
-            if sid in graph.stations
-            and not graph.stations[sid].is_port
-            and not graph.stations[sid].off_track
-            and sid not in junction_ids
+        cross = section_cross_axis(section)
+        fan_sign = AxisFrame.secondary_sign_for(section.direction or "LR")
+        signed = [
+            fan_sign * getattr(st, cross)
+            for st in _iter_trunk_stations(graph, section, junction_ids)
         ]
-        if ys:
-            section_top_y[section.id] = min(ys)
+        if signed:
+            section_baseline[section.id] = (cross, fan_sign, min(signed))
 
     below: set[str] = set()
     for off_id, anchor_id in anchor_of.items():
@@ -966,10 +990,14 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
         # Inputs feed their anchor; only producer-fed sinks may drop down.
         if any(e.target == anchor_id for e in graph.edges_from(off_id)):
             continue
-        top_y = section_top_y.get(off_st.section_id)
-        if top_y is None:
+        baseline = section_baseline.get(off_st.section_id)
+        if baseline is None:
             continue
-        if anchor_st.y > top_y + _DOWNWARD_BRANCH_SLOP:
+        cross, fan_sign, baseline_signed = baseline
+        if (
+            fan_sign * getattr(anchor_st, cross) - baseline_signed
+            > _DOWNWARD_BRANCH_SLOP
+        ):
             below.add(off_id)
     return below
 
@@ -1005,12 +1033,7 @@ def _off_track_groups(
         if not section:
             continue
         anchor_pairs = [
-            (graph.stations[sid].y, sid)
-            for sid in section.station_ids
-            if sid in graph.stations
-            and not graph.stations[sid].is_port
-            and not graph.stations[sid].off_track
-            and sid not in junction_ids
+            (st.y, st.id) for st in _iter_trunk_stations(graph, section, junction_ids)
         ]
         if not anchor_pairs:
             continue
@@ -1038,12 +1061,7 @@ def _section_distinct_trunk_cross_coords(
     axis = section_cross_axis(section)
     return {
         round(getattr(st, axis), 1)
-        for sid in section.station_ids
-        if (st := graph.stations.get(sid)) is not None
-        and not st.is_port
-        and not st.is_hidden
-        and not st.off_track
-        and sid not in junction_ids
+        for st in _iter_trunk_stations(graph, section, junction_ids)
     }
 
 

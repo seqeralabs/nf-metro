@@ -1373,6 +1373,14 @@ gallery:
       "A station marked off_track whose only continuation is an inter-section edge to the
       next section, with no in-section successor. It renders inline on the trunk rather than
       lifting into a bump that immediately drops back down to reach the exit port (issue #1295)."
+  - id: tb_off_track_output_row
+    source_dir: examples/topologies
+    category: Off-track & Rails
+    description:
+      "A `direction: TB` section whose trunk stations feed off-track outputs. Each output hangs off
+      its producer via an S -- a flow-axis lead down the trunk, a diagonal, then a flat tail into the
+      icon -- on the side opposite the beside-trunk labels, the rotation of the LR off-track idiom,
+      rather than leaving perpendicular or dropping onto the label side (issue #1384)."
   - id: rail_inter_section
     source_dir: examples/topologies
     category: Off-track & Rails
