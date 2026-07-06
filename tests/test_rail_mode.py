@@ -1369,7 +1369,7 @@ def test_rail_above_label_reach_excluded_from_content_bottom():
     ``_guard_section_bottom_padding`` on the drawn geometry) rejects a render
     the engine draws with a correctly padded bottom (issue #1361)."""
     from nf_metro.layout.phases.bbox import _predict_section_content_bottom
-    from nf_metro.layout.rail_mode import _rail_above_label_stations
+    from nf_metro.layout.rail_mode import rail_above_label_ids
     from nf_metro.layout.routing import compute_station_offsets
 
     graph = parse_metro_mermaid(_STACKED_RAIL_MMD)
@@ -1378,12 +1378,7 @@ def test_rail_above_label_reach_excluded_from_content_bottom():
 
     section = graph.sections["calling"]
     per_line = graph._rail_y.get("calling") or {}
-    real_ids = [
-        sid
-        for sid in section.station_ids
-        if (st := graph.stations.get(sid)) is not None and not st.is_port
-    ]
-    above_ids = _rail_above_label_stations(graph, real_ids, per_line)
+    above_ids = rail_above_label_ids(graph, section)
     assert above_ids, "fixture must have >=1 above-label (top-rail) station"
 
     target = _predict_section_content_bottom(
