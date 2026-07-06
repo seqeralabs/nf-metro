@@ -12,6 +12,8 @@ from enum import Enum
 
 from nf_metro.layout.constants import Y_SPACING
 from nf_metro.layout.geometry import iter_section_overlaps
+from nf_metro.layout.phases._common import section_axes
+from nf_metro.layout.phases.off_track import _off_track_anchor_of
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import RoutedPath, is_orthogonal_turn
 from nf_metro.parser.model import MetroGraph, PortSide
@@ -885,6 +887,44 @@ def check_station_as_elbow(
                             },
                         )
                     )
+
+    # An off-track station hangs off an anchor trunk station via an S -- a
+    # flow-axis lead off the anchor, a diagonal, then a flat tail into the icon.
+    # If it shares its anchor's flow-axis coordinate the connector collapses to a
+    # straight perpendicular stub leaving the anchor marker sideways: the
+    # off-track rotation of a perpendicular port sitting at a station coordinate.
+    anchor_of = _off_track_anchor_of(graph)
+    for off_id, anchor_id in anchor_of.items():
+        off_st = graph.stations.get(off_id)
+        anchor_st = graph.stations.get(anchor_id)
+        if off_st is None or anchor_st is None or off_st.section_id is None:
+            continue
+        section = graph.sections.get(off_st.section_id)
+        if section is None:
+            continue
+        flow, _cross = section_axes(section)
+        if abs(getattr(off_st, flow) - getattr(anchor_st, flow)) <= tolerance:
+            violations.append(
+                Violation(
+                    check="station_as_elbow",
+                    severity=Severity.ERROR,
+                    message=(
+                        f"Off-track '{off_id}' ({flow}={getattr(off_st, flow):.1f}) "
+                        f"shares anchor '{anchor_id}' {flow}="
+                        f"{getattr(anchor_st, flow):.1f} in section "
+                        f"'{off_st.section_id}' - its connector leaves the station "
+                        f"perpendicular to flow instead of hanging via an S"
+                    ),
+                    context={
+                        "off_track": off_id,
+                        "anchor": anchor_id,
+                        "section": off_st.section_id,
+                        "axis": flow,
+                        "off_coord": getattr(off_st, flow),
+                        "anchor_coord": getattr(anchor_st, flow),
+                    },
+                )
+            )
 
     return violations
 

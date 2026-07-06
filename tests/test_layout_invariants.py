@@ -64,6 +64,7 @@ from nf_metro.layout.phases._common import (
     iter_corridor_fed_solo_entries,
     iter_fold_lr_exit_straight_runs,
     iter_fold_lr_exits_short_of_target,
+    section_axes,
     section_cross_axis,
     wrap_exit_carrier_anchor,
 )
@@ -2575,43 +2576,79 @@ def test_off_track_input_column_stack_guard_catches_over_lift():
 
 
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_ABOVE_OUTPUT)
-def test_off_track_outputs_above_and_adjacent_to_producer(fixture):
+def test_off_track_outputs_on_lift_side_and_adjacent_to_producer(fixture):
     """Off-track *output* stations (producer-fed sinks, declared via
-    ``%%metro off_track:``) must hang clear of the trunk and adjacent to
-    their producer: above it (smaller Y) and lifted by only a bounded
-    number of ``y_spacing`` slots.
+    ``%%metro off_track:``) must hang clear of the trunk and adjacent to their
+    producer on the section's cross axis: on the lift side of it (above an LR
+    trunk, beside a TB one) and offset by only a bounded number of slots.
 
-    A correctly-anchored sink sits one pitch above its producer (more if a
-    crowded column bumps it clear of a trunk band), so a gap above two
-    pitches means it was misanchored to the section's topmost on-track
-    station and stranded far from the step that writes it (issue #573).
-    Mirror of ``test_off_track_inputs_above_consumer``.
+    A correctly-anchored sink sits one pitch off its producer on the cross axis
+    (:func:`section_cross_axis`; more if a crowded column bumps it clear of a
+    trunk band), so an offset past two pitches means it was misanchored to the
+    section's baseline on-track station and stranded far from the step that
+    writes it (issue #573).  Mirror of ``test_off_track_inputs_above_consumer``.
     """
     graph = _layout(fixture)
     y_spacing = compute_min_y_spacing(graph)
+    junction_ids = set(graph.junctions)
     producer_of = _off_track_output_sinks(graph)
     below = _off_track_output_below(graph)
 
     assert producer_of, f"{fixture}: no off-track output sinks found"
 
-    above_producers = {
+    lift_producers = {
         off_id: prod_id
         for off_id, prod_id in producer_of.items()
         if off_id not in below
     }
 
-    for off_id, prod_id in above_producers.items():
+    for off_id, prod_id in lift_producers.items():
         off_st = graph.stations[off_id]
         prod_st = graph.stations[prod_id]
-        gap = prod_st.y - off_st.y
+        section = graph.sections[off_st.section_id]
+        cross = section_cross_axis(section)
+        lift_sign = _off_track_lift_sign(section)
+        step = _off_track_lift_step(graph, section, junction_ids, y_spacing)
+        off_c = getattr(off_st, cross)
+        prod_c = getattr(prod_st, cross)
+        gap = lift_sign * (off_c - prod_c)
         assert gap > _Y_TOL, (
-            f"{fixture}: off-track output {off_id} y={off_st.y} not above "
-            f"producer {prod_id} y={prod_st.y}"
+            f"{fixture}: off-track output {off_id} {cross}={off_c:.1f} not on the "
+            f"lift side of producer {prod_id} {cross}={prod_c:.1f}"
         )
-        assert gap <= 2 * y_spacing + _Y_TOL, (
-            f"{fixture}: off-track output {off_id} lifted {gap:.0f}px above "
-            f"producer {prod_id} (more than 2 slots) - likely misanchored to "
-            f"the section's topmost station instead of its producer"
+        assert gap <= 2 * step + _Y_TOL, (
+            f"{fixture}: off-track output {off_id} offset {gap:.0f}px from "
+            f"producer {prod_id} on the {cross} axis (more than 2 slots) - "
+            f"likely misanchored to the section's baseline station instead of "
+            f"its producer"
+        )
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK)
+def test_off_track_connector_hangs_via_s_not_perpendicular(fixture):
+    """An off-track station keeps a flow-axis lead off its anchor (#1384).
+
+    An off-track hangs off its anchor trunk station via an S -- a flow-axis lead,
+    a diagonal, then a flat tail into the icon -- whatever the section's flow
+    direction (:func:`section_axes`).  Sharing the anchor's flow coordinate
+    collapses the S to a straight perpendicular stub leaving the marker sideways:
+    the off-track rotation of a perpendicular port sitting at a station
+    coordinate.  So the off-track must differ from its anchor on the flow axis.
+    """
+    graph = _layout(fixture)
+    anchor_of = _off_track_anchor_of(graph)
+    if not anchor_of:
+        pytest.skip(f"{fixture}: off_track directive resolved to no off-track station")
+    for off_id, anchor_id in anchor_of.items():
+        off_st = graph.stations[off_id]
+        anchor_st = graph.stations[anchor_id]
+        section = graph.sections.get(off_st.section_id or "")
+        flow, _cross = section_axes(section)
+        lead = abs(getattr(off_st, flow) - getattr(anchor_st, flow))
+        assert lead > _Y_TOL, (
+            f"{fixture}: off-track {off_id} shares anchor {anchor_id} "
+            f"{flow}={getattr(anchor_st, flow):.1f}; its connector leaves the "
+            f"station perpendicular to flow instead of hanging via an S"
         )
 
 
