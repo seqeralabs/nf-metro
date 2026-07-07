@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from collections.abc import Iterator
+from collections import Counter, defaultdict
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -27,6 +27,17 @@ from nf_metro.parser.model import (
 
 if TYPE_CHECKING:
     from nf_metro.layout.routing.common import RoutedPath
+
+
+def dominant_value(values: Iterable[float]) -> float:
+    """The value the most items share, ties broken toward the smallest.
+
+    Returns the modal value; when two values tie on count the smaller wins.
+    Callers that need a tolerance (coordinates that should cluster within a
+    pitch) pre-round the values before passing them.
+    """
+    counts = Counter(values)
+    return min(counts, key=lambda v: (-counts[v], v))
 
 
 def perp_entry_lands_left(section: Section, graph: MetroGraph) -> bool:

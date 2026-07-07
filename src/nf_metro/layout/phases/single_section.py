@@ -217,8 +217,15 @@ def _layout_single_section(
     # Detect fork/join layers and add extra spacing so stations
     # aren't too close to divergence/convergence points.
     section_sids = set(section.station_ids)
+    flow_spacing = x_spacing if section.direction in ("LR", "RL") else y_spacing
     layer_extra = _compute_fork_join_gaps(
-        sub, layers, tracks, x_spacing, graph, section_sids
+        sub,
+        layers,
+        tracks,
+        flow_spacing,
+        graph,
+        section_sids,
+        direction=section.direction,
     )
 
     # Label-strike clearance: a gap declared before layer ``L`` pushes ``L`` and

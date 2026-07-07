@@ -17,7 +17,7 @@ from nf_metro.layout.constants import (
     MIN_STRAIGHT_PORT,
     STATION_MOVE_TOLERANCE,
 )
-from nf_metro.layout.geometry import segment_intersects_bbox
+from nf_metro.layout.geometry import lanes_run_along_x, segment_intersects_bbox
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
@@ -546,7 +546,18 @@ def _centering_candidate(
     Simple single-diagonal-per-side cases shift both diagonals to equalise the
     flat runs and return None.  Complex cases (shared bundles, flat+diagonal
     mixes) return a station-move candidate for the second pass.
+
+    The flat runs are measured along X, the flow axis of an LR/RL section.  A
+    vertical-flow (TB/BT) section runs its flow down Y and separates lines along
+    X, so X is its cross axis: equalising X-flats there would read a bubble
+    line's lateral offset as an asymmetry and shift its diagonal onto the lane
+    centre, dropping the offset.  A vertical bubble is instead centred on the
+    flow (Y) axis by its layer placement, so this pass skips it.
     """
+    sec = graph.sections.get(station.section_id) if station.section_id else None
+    if sec is not None and lanes_run_along_x(sec.direction or "LR"):
+        return None
+
     in_routes = ctx.incoming.get(sid, [])
     out_routes = ctx.outgoing.get(sid, [])
     flat_in = ctx.flat_incoming.get(sid, [])

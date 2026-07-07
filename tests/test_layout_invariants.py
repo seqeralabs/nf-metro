@@ -2627,6 +2627,28 @@ def test_off_track_outputs_on_lift_side_and_adjacent_to_producer(fixture):
         )
 
 
+def test_off_track_output_baseline_ignores_lift_side_fork_branch():
+    """A fork branch overshooting the trunk toward the lift side must not
+    become the off-track baseline (#1388).
+
+    :func:`_off_track_output_below` derives the trunk baseline on the section
+    cross axis to decide whether a producer sits on a branch (which flips its
+    output to the far side).  Taking the lift-most on-track station let an
+    asymmetric fork branch that overshoots the trunk toward the lift side become
+    the baseline, so every real main-trunk producer downstream read as a branch
+    and its off-track output flipped onto the beside-trunk label side, colliding
+    with a neighbour's label.  The baseline must anchor to the trunk column the
+    through-line runs on: here both producers are on the trunk, so neither
+    output is classified below.
+    """
+    graph = _layout("topologies/tb_offtrack_fork_baseline.mmd")
+    below = _off_track_output_below(graph)
+    assert below == set(), (
+        "main-trunk off-track outputs misclassified as branch outputs by a "
+        f"lift-side fork branch hijacking the baseline: {sorted(below)}"
+    )
+
+
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_OFF_TRACK)
 def test_off_track_connector_hangs_via_s_not_perpendicular(fixture):
     """An off-track station keeps a flow-axis lead off its anchor (#1384).
