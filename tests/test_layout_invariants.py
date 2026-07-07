@@ -50,6 +50,9 @@ from nf_metro.layout.engine import (
 )
 from nf_metro.layout.geometry import lanes_run_along_y, segment_intersects_bbox
 from nf_metro.layout.labels import (
+    LabelOverlap,
+    LabelPlacement,
+    _choose_wrap_offender,
     _label_bbox,
     find_wrapped_label_trunk_strikes,
     font_scale_context,
@@ -9316,4 +9319,54 @@ def test_explicit_fold_corner_drops_in_from_above():
     assert not (entry_sides & exit_sides), (
         f"orf_calling entry {[s.name for s in entry_sides]} collides with "
         f"exit {[s.name for s in exit_sides]} -- leading-edge cul-de-sac"
+    )
+
+
+def test_wrap_offender_skips_tb_beside_pill_label_overlap():
+    """The wrap loop must not narrow a TB label to relieve a label/label
+    overlap with its trunk neighbour (#1383).
+
+    A TB label sits beside its pill, stacked vertically against its trunk
+    neighbours, so narrowing its width (wrapping onto more lines) grows it
+    taller instead -- the wrong trade for an overlap that is fundamentally
+    about vertical spacing.  The same station stays eligible for a
+    label/marker overlap, where narrowing width does relieve a horizontal
+    intrusion.
+    """
+    text = """%%metro line: core | Core | #2db572
+
+graph LR
+    subgraph tb_sec [Vertical]
+        %%metro direction: TB
+        ta[alpha station]
+        tb[beta station]
+        ta -->|core| tb
+    end
+"""
+    graph = parse_metro_mermaid(text)
+    graph.stations["ta"].x = 100.0
+    graph.stations["ta"].y = 100.0
+    graph.stations["tb"].x = 100.0
+    graph.stations["tb"].y = 140.0
+
+    by_id = {
+        sid: LabelPlacement(
+            station_id=sid,
+            text=graph.stations[sid].label,
+            x=graph.stations[sid].x,
+            y=graph.stations[sid].y,
+            above=True,
+        )
+        for sid in ("ta", "tb")
+    }
+    wrappable = {"ta", "tb"}
+
+    label_overlap = LabelOverlap(kind="label", a="ta", b="tb", ox=10.0, oy=10.0)
+    assert _choose_wrap_offender([label_overlap], by_id, wrappable, graph) is None, (
+        "a TB label must never be narrowed to relieve a trunk-neighbour overlap"
+    )
+
+    marker_overlap = LabelOverlap(kind="marker", a="ta", b="tb", ox=10.0, oy=10.0)
+    assert _choose_wrap_offender([marker_overlap], by_id, wrappable, graph) == "ta", (
+        "a TB label stays eligible for narrowing when it overlaps a marker"
     )

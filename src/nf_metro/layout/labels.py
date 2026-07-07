@@ -1905,7 +1905,7 @@ def _wrap_overlapping_labels(
 
     for _ in range(_WRAP_MAX_ROUNDS):
         overlaps = find_label_overlaps(graph, placements, station_offsets)
-        offender = _choose_wrap_offender(overlaps, by_id, wrappable)
+        offender = _choose_wrap_offender(overlaps, by_id, wrappable, graph)
         if offender is None:
             break
         new_budget = budgets[offender] - 1
@@ -1922,12 +1922,21 @@ def _choose_wrap_offender(
     overlaps: list[LabelOverlap],
     by_id: dict[str, LabelPlacement],
     wrappable: set[str],
+    graph: MetroGraph,
 ) -> str | None:
     """Pick the widest still-wrappable label involved in any overlap.
 
     For ``"marker"`` overlaps only the label owner can be narrowed; for
     ``"label"`` overlaps either side is a candidate.  Narrowing the wider
     label first does the most to clear the collision with the least wrapping.
+
+    A TB/BT label sits beside its pill, stacked vertically against its trunk
+    neighbours (:func:`_places_label_beside_pill`), so a ``"label"`` overlap
+    there is a height problem: narrowing its width only grows it taller,
+    worsening the very collision it's meant to clear.  Such a station is
+    skipped as a ``"label"``-kind offender, but remains eligible for
+    ``"marker"`` overlaps, where narrowing width relieves a horizontal
+    intrusion without that trade-off.
     """
     best: str | None = None
     best_w = -1.0
@@ -1936,6 +1945,10 @@ def _choose_wrap_offender(
         for sid in candidates:
             if sid not in wrappable:
                 continue
+            if ov.kind == "label":
+                station = graph.stations.get(sid)
+                if station is not None and _places_label_beside_pill(graph, station):
+                    continue
             w = label_text_width(by_id[sid].text)
             if w > best_w:
                 best_w = w
