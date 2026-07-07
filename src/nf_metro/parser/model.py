@@ -131,6 +131,20 @@ def is_bypass_v(station_id: str) -> bool:
     return station_id.startswith(BYPASS_V_PREFIX)
 
 
+CONVERGE_PREFIX = "__converge_"
+
+
+def is_converge_junction(station_id: str) -> bool:
+    """True if *station_id* names a hidden terminus-convergence junction.
+
+    Convergence junctions are the hidden nodes inserted by
+    :mod:`nf_metro.parser.resolve` to merge a multi-source terminus's feeders
+    before its icon.  Their ids are built with :data:`CONVERGE_PREFIX`; this is
+    the one place the prefix is interpreted.
+    """
+    return station_id.startswith(CONVERGE_PREFIX)
+
+
 @dataclass
 class Station:
     """A node/station in the metro map."""

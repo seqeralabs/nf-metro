@@ -16,6 +16,7 @@ import networkx as nx
 
 from nf_metro.parser.model import (
     BYPASS_V_PREFIX,
+    CONVERGE_PREFIX,
     Edge,
     MetroGraph,
     Port,
@@ -140,6 +141,14 @@ def _expand_interchanges(graph: MetroGraph) -> None:
     )
 
 
+# Cascade a fan-in when the lone-junction merge would leave a sibling group
+# running more columns parallel than the guard tolerates (mirrors
+# ``guards._MAX_SIBLING_MERGE_SLACK``): the single junction sits at
+# ``max_local + 1``, so its slack for a group at ``layer`` is
+# ``(max_local + 1) - layer``.
+_MAX_FANIN_MERGE_SLACK = 2
+
+
 def _section_local_layers(graph: MetroGraph, section_id: str | None) -> dict[str, int]:
     """Longest-path layers over one section's internal edges.
 
@@ -150,16 +159,7 @@ def _section_local_layers(graph: MetroGraph, section_id: str | None) -> dict[str
     in the same grid column at layout time.
     """
     members = {sid for sid, s in graph.stations.items() if s.section_id == section_id}
-    g: nx.DiGraph[str] = nx.DiGraph()
-    g.add_nodes_from(members)
-    for edge in graph.edges:
-        if edge.source in members and edge.target in members:
-            g.add_edge(edge.source, edge.target)
-    layers: dict[str, int] = {}
-    for node in nx.topological_sort(g):
-        preds = list(g.predecessors(node))
-        layers[node] = max((layers[p] for p in preds), default=-1) + 1
-    return layers
+    return _section_topo_layers(graph, members)
 
 
 def _insert_terminus_convergence_stations(graph: MetroGraph) -> None:
@@ -238,38 +238,35 @@ def _insert_terminus_convergence_stations(graph: MetroGraph) -> None:
                 cross_section.append(src)
 
         # Only cascade when it earns the extra junction: a sibling group of 2+
-        # would otherwise run 2+ columns parallel to the deepest source's merge
-        # column.  A group that merges one column late is a modest bulge left as
-        # a single junction, so dense maps aren't perturbed for a marginal gain.
+        # would otherwise run more than the tolerated columns parallel to the
+        # deepest source's merge column.  A group that merges one column late is
+        # a modest bulge left as a single junction, so dense maps aren't
+        # perturbed for a marginal gain.
         max_local = max(by_layer, default=-1)
         should_cascade = any(
-            len(srcs) >= 2 and layer <= max_local - 2
+            len(srcs) >= 2 and (max_local + 1) - layer > _MAX_FANIN_MERGE_SLACK
             for layer, srcs in by_layer.items()
         )
 
         if should_cascade:
-            groups = [
-                [(src, source_lines[src]) for src in by_layer[layer]]
-                for layer in sorted(by_layer)
-            ]
+            groups = [by_layer[layer] for layer in sorted(by_layer)]
             if cross_section:
-                groups.append([(src, source_lines[src]) for src in cross_section])
+                groups.append(cross_section)
         else:
-            groups = [[(src, source_lines[src]) for src in source_lines]]
+            groups = [list(source_lines)]
 
         # ``carry`` is the node feeding onward with the lines gathered so far.
-        carry_id: str | None = None
-        carry_lines: set[str] = set()
+        carry: tuple[str, set[str]] | None = None
         for group in groups:
-            members = list(group)
-            if carry_id is not None:
-                members.append((carry_id, carry_lines))
+            members = [(src, source_lines[src]) for src in group]
+            if carry is not None:
+                members.append(carry)
             if len(members) == 1:
-                carry_id, carry_lines = members[0]
+                carry = members[0]
                 continue
 
             converge_count += 1
-            converge_id = f"__converge_{terminus_id}_{converge_count}"
+            converge_id = f"{CONVERGE_PREFIX}{terminus_id}_{converge_count}"
             new_stations.append(
                 Station(
                     id=converge_id,
@@ -285,9 +282,10 @@ def _insert_terminus_convergence_stations(graph: MetroGraph) -> None:
                     new_edges.append(
                         Edge(source=member_id, target=converge_id, line_id=line_id)
                     )
-            carry_id, carry_lines = converge_id, merged_lines
+            carry = (converge_id, merged_lines)
 
-        assert carry_id is not None
+        assert carry is not None
+        carry_id, carry_lines = carry
         for line_id in sorted(carry_lines):
             new_edges.append(Edge(source=carry_id, target=terminus_id, line_id=line_id))
 

@@ -1,18 +1,17 @@
 """Tests for the local-merge invariant on fan-in to a distant terminus.
 
-When several sibling stations sharing a layer all feed one terminus (a
-file/dir/report icon), the convergence junction inserted before the terminus
-must sit one layer downstream of the siblings, so they meet promptly.  If a
-longer parallel path pushes the terminus far to the right, the short-path
-siblings would otherwise run parallel all the way to it, bowing the fan out to
-fill the whole gap (issue #1296).
+When 2+ sibling stations sharing a layer feed one terminus (a file/dir/report
+icon), the convergence junction inserted before the terminus must sit close to
+the siblings, so they meet promptly.  If a longer parallel path pushes the
+terminus far to the right, the short-path siblings would otherwise run parallel
+all the way to it, bowing the fan out to fill the whole gap (issue #1296).
 
 Covers:
 
 * Happy-path: every gallery example and topology fixture keeps same-layer
-  fan-in siblings merging one layer downstream (no distant-terminus bow).
-* The reported fixture ``fanin_distant_terminus`` -- three siblings feed a
-  report pushed far right by a parallel ORF chain -- merges locally.
+  fan-in siblings merging within the tolerated span (no distant-terminus bow).
+* The reported fixture ``fanin_distant_terminus`` -- two methods feed a report
+  pushed far right by a third method's parallel ORF chain -- merges locally.
 * Meaningfulness: routing every source through one terminus junction (the
   pre-fix behaviour) makes the checker fire on the reported fixture.
 """
@@ -26,6 +25,7 @@ import pytest
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.phases.guards import _converge_sibling_merge_violations
 from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.model import Edge
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = REPO_ROOT / "examples"
@@ -120,9 +120,14 @@ graph LR
     j = graph.stations.pop("j")
     j.id = "__converge_report_9"
     graph.stations["__converge_report_9"] = j
-    for e in graph.edges:
-        if e.source == "j":
-            e.source = "__converge_report_9"
-        if e.target == "j":
-            e.target = "__converge_report_9"
+    graph.replace_edges(
+        [
+            Edge(
+                source="__converge_report_9" if e.source == "j" else e.source,
+                target="__converge_report_9" if e.target == "j" else e.target,
+                line_id=e.line_id,
+            )
+            for e in graph.edges
+        ]
+    )
     assert list(_converge_sibling_merge_violations(graph))

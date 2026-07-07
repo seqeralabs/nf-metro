@@ -86,6 +86,7 @@ from nf_metro.parser.model import (
     PortSide,
     Section,
     Station,
+    is_converge_junction,
 )
 from nf_metro.parser.resolve import _expected_flow_side
 
@@ -747,9 +748,16 @@ def _guard_symmetric_diamond_branches_half_pitch(graph: MetroGraph, phase: str) 
 _MAX_SIBLING_MERGE_SLACK = 2
 
 
+class _LateSiblingMerge(NamedTuple):
+    junction: str
+    junction_layer: int
+    sibling_layer: int
+    sibling_count: int
+
+
 def _converge_sibling_merge_violations(
     graph: MetroGraph,
-) -> Iterator[tuple[str, int, int, int]]:
+) -> Iterator[_LateSiblingMerge]:
     """Yield convergence junctions whose same-layer siblings merge far downstream.
 
     A convergence junction inserted before a multi-source terminus should merge
@@ -757,22 +765,20 @@ def _converge_sibling_merge_violations(
     never bow out and run parallel across the gap to a distant terminus.  For
     every source layer shared by 2+ of a junction's in-section direct sources
     that sits more than ``_MAX_SIBLING_MERGE_SLACK`` columns upstream of the
-    junction, yields ``(junction_id, junction_layer, shared_layer, count)``.
+    junction, yields the offending group.
     """
     for sid, st in graph.stations.items():
-        if not sid.startswith("__converge_"):
+        if not is_converge_junction(sid):
             continue
         srcs_by_layer: dict[int, set[str]] = defaultdict(set)
-        for edge in graph.edges:
-            if edge.target != sid:
-                continue
+        for edge in graph.edges_to(sid):
             src = graph.stations.get(edge.source)
             if src is None or src.section_id != st.section_id:
                 continue
             srcs_by_layer[src.layer].add(edge.source)
         for layer, srcs in srcs_by_layer.items():
             if len(srcs) >= 2 and st.layer - layer > _MAX_SIBLING_MERGE_SLACK:
-                yield sid, st.layer, layer, len(srcs)
+                yield _LateSiblingMerge(sid, st.layer, layer, len(srcs))
 
 
 def _guard_converge_siblings_merge_locally(graph: MetroGraph, phase: str) -> None:
