@@ -1,0 +1,44 @@
+%%metro title: TB off-track fork baseline
+%% Regression for #1388: in a `direction: TB` section an asymmetric fork sends
+%% one branch (markduplicates) further toward the lift side than the trunk.
+%% The off-track "downward branch" test derives the trunk baseline on the cross
+%% axis; taking the lift-most on-track station let that fork branch become the
+%% baseline, so every main-trunk producer downstream (mosdepth, applybqsr) read
+%% as a branch and its off-track output flipped onto the beside-trunk label
+%% side, colliding with a neighbour label.  The baseline must anchor to the
+%% trunk column the through-line runs on, not the lift-most extreme.
+%%metro font_scale: 1.34
+%%metro line: core | Core | #2db572
+%%metro line: alt | Alt | #d62728
+%%metro file: samtools_out | CRAM
+%%metro file: recal_out | CRAM
+%%metro off_track: samtools_out
+%%metro off_track: recal_out
+
+graph LR
+    subgraph prep [Pre-processing]
+        %%metro direction: TB
+        a[convert]
+        b[FastQC]
+        c[mapping]
+        d1[bam convert]
+        d2[markduplicates]
+        h[mosdepth, samtools]
+        i[prepare recalibration]
+        j[applybqsr]
+        k[mosdepth, samtools]
+        l[NGSCheckmate]
+
+        a -->|core| b
+        b -->|core| c
+        c -->|core| d1
+        c -->|alt| d2
+        d1 -->|core| h
+        d2 -->|alt| h
+        h -->|core| samtools_out
+        h -->|core| i
+        i -->|core| j
+        j -->|core| recal_out
+        j -->|core| k
+        k -->|core| l
+    end

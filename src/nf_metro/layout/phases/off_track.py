@@ -20,10 +20,11 @@ from nf_metro.layout.constants import (
     X_SPACING,
     resolve_offset_step,
 )
-from nf_metro.layout.geometry import AxisFrame
+from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x
 from nf_metro.layout.labels import _label_text_height, label_text_width
 from nf_metro.layout.phases._common import (
     _content_station_ids,
+    dominant_value,
     flow_axis_exit_ports,
     grow_section_bbox_max_edge,
     grow_section_bbox_min_edge,
@@ -432,20 +433,37 @@ def _detect_fork_join_layers(
     return fork_layers, join_layers
 
 
+def _flow_axis_label_half(label: str, direction: str) -> float:
+    """Half a label's extent along the section's flow axis.
+
+    The fork/join gap reserves flow-axis room so the branch diagonal clears the
+    fork/join station's label.  On an LR/RL trunk the label sits centred on the
+    marker, so its width runs along the flow (X) axis.  On a TB/BT trunk the
+    label sits beside the marker on the cross (X) axis -- opposite the branch
+    diagonal -- so only its height falls on the flow (Y) axis.
+    """
+    if lanes_run_along_x(direction):
+        return _label_text_height(label) / 2
+    return label_text_width(label) / 2
+
+
 def _fj_label_metrics(
     layer: int,
     layers: dict[str, int],
     tracks: dict[str, float],
     sub: MetroGraph,
+    direction: str,
 ) -> tuple[float, set[float]]:
-    """Widest half-label and the set of occupied tracks on ``layer``."""
+    """Widest half-label (along the flow axis) and occupied tracks on ``layer``."""
     fj_label_half = 0.0
     fj_tracks: set[float] = set()
     for sid, lyr in layers.items():
         if lyr == layer:
             station = sub.stations.get(sid)
             if station and station.label.strip():
-                fj_label_half = max(fj_label_half, label_text_width(station.label) / 2)
+                fj_label_half = max(
+                    fj_label_half, _flow_axis_label_half(station.label, direction)
+                )
             if sid in tracks:
                 fj_tracks.add(tracks[sid])
     return fj_label_half, fj_tracks
@@ -470,6 +488,7 @@ def _wide_fan_bubble_extra(
     sub: MetroGraph,
     x_spacing: float,
     fj_tracks: set[float],
+    direction: str,
 ) -> float:
     """Extra bubble room for a wide (3+ branch) fan's off-track middle labels.
 
@@ -507,7 +526,8 @@ def _wide_fan_bubble_extra(
                 station = sub.stations.get(sid)
                 if station and station.label.strip():
                     bubble_label_half = max(
-                        bubble_label_half, label_text_width(station.label) / 2
+                        bubble_label_half,
+                        _flow_axis_label_half(station.label, direction),
                     )
     if is_wide_join:
         for sid, lyr in layers.items():
@@ -515,7 +535,8 @@ def _wide_fan_bubble_extra(
                 station = sub.stations.get(sid)
                 if station and station.label.strip():
                     bubble_label_half = max(
-                        bubble_label_half, label_text_width(station.label) / 2
+                        bubble_label_half,
+                        _flow_axis_label_half(station.label, direction),
                     )
 
     return _loop_widening_for_label_half(bubble_label_half, x_spacing)
@@ -531,6 +552,7 @@ def _interior_branch_loop_floor(
     tracks: dict[str, float],
     sub: MetroGraph,
     x_spacing: float,
+    direction: str,
 ) -> float:
     """Per-side loop gap so every interior branch label clears its diagonals.
 
@@ -575,7 +597,7 @@ def _interior_branch_loop_floor(
             )
             if lines < 2:
                 continue
-            half = label_text_width(station.label) / 2
+            half = _flow_axis_label_half(station.label, direction)
             floor = max(floor, _loop_widening_for_label_half(half, x_spacing))
 
     if layer in fork_layers:
@@ -661,19 +683,20 @@ def _layer_gap_for(
     x_spacing: float,
     base_gap: float,
     label_angle: float,
+    direction: str,
 ) -> float:
     """Column gap reserved at one fork/join layer.
 
     The gap must be large enough that the diagonal transition starts past the
     (possibly tilted) fork/join label and still has room for the transition.
-    The router reserves the fork/join label half-width as straight run but
-    abandons it when the column gap can't also fit the diagonal run plus the
-    branch-side minimum straight; the ``routing_clearance`` term reserves a gap
-    sized to preserve that clearance.  A whole pitch already sits between
+    The router reserves the fork/join label's flow-axis half-extent as straight
+    run but abandons it when the column gap can't also fit the diagonal run plus
+    the branch-side minimum straight; the ``routing_clearance`` term reserves a
+    gap sized to preserve that clearance.  A whole pitch already sits between
     columns, so it is subtracted; the 1px cushion absorbs float rounding in the
     router's drop test.
     """
-    fj_label_half, fj_tracks = _fj_label_metrics(layer, layers, tracks, sub)
+    fj_label_half, fj_tracks = _fj_label_metrics(layer, layers, tracks, sub, direction)
     bubble_extra = _wide_fan_bubble_extra(
         layer,
         fork_layers,
@@ -685,6 +708,7 @@ def _layer_gap_for(
         sub,
         x_spacing,
         fj_tracks,
+        direction,
     )
     if label_angle:
         if _has_interior_branch(
@@ -728,6 +752,7 @@ def _layer_gap_for(
             tracks,
             sub,
             x_spacing,
+            direction,
         )
 
     routing_clearance = (
@@ -745,12 +770,14 @@ def _compute_fork_join_gaps(
     x_spacing: float,
     full_graph: MetroGraph | None = None,
     section_station_ids: set[str] | None = None,
+    direction: str = "LR",
 ) -> dict[int, float]:
-    """Compute extra X offset per layer at fork/join points.
+    """Compute extra flow-axis offset per layer at fork/join points.
 
     Adds a fractional gap after fork layers (where tracks diverge) and
     before join layers (where tracks converge) so labels aren't obscured
-    by diagonal crossings.
+    by diagonal crossings.  ``x_spacing`` is the flow-axis pitch and
+    ``direction`` selects the flow axis; both default to the LR regime.
 
     When full_graph and section_station_ids are provided, fork/join
     detection uses all edges within the section (including port-touching
@@ -787,9 +814,20 @@ def _compute_fork_join_gaps(
             x_spacing,
             base_gap,
             label_angle,
+            direction,
         )
         for layer in fork_layers | join_layers
     }
+
+    # A vertical (TB/BT) section is snapped to a whole-row grid, so a fractional
+    # fork/join gap rounds unevenly across the diamond and tilts it.  Quantise
+    # each gap to a whole flow-pitch row so equal fork- and join-side gaps stay
+    # equal after the snap and the branch peels and reconverges symmetrically.
+    if lanes_run_along_x(direction) and x_spacing > 0:
+        layer_gap = {
+            layer: round(gap / x_spacing) * x_spacing
+            for layer, gap in layer_gap.items()
+        }
 
     cumulative = 0.0
     layer_extra: dict[int, float] = {}
@@ -817,7 +855,7 @@ def _line_crossed_file_icon_sinks(graph: MetroGraph) -> set[str]:
     icon no line crosses is left alone, so an end-of-chain terminus that
     already sits clear is never lifted.
     """
-    from nf_metro.layout.geometry import lanes_run_along_x, segment_intersects_bbox
+    from nf_metro.layout.geometry import segment_intersects_bbox
     from nf_metro.layout.routing import (
         apply_route_offsets,
         compute_station_offsets,
@@ -954,12 +992,14 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
     is instead offset the other way so it runs straight out.
 
     The comparison is on the section's cross axis (:func:`section_cross_axis`):
-    Y for an LR/RL trunk, X for a TB/BT one.  The baseline is the trunk's cross
-    coordinate furthest toward the lift side (the topmost row on LR, the trunk
-    column on a single-column TB); a producer more than one slot onto the fan
-    side of it is a branch.  The slot floor keeps a straight trunk -- every
-    on-track station on one cross coordinate -- inferring no branch outputs, so
-    a TB trunk's normal descent along the flow axis is not misread as one.
+    Y for an LR/RL trunk, X for a TB/BT one.  The baseline is the cross
+    coordinate the through-trunk runs on -- the column shared by the most
+    on-track stations (:func:`dominant_value`), not the lift-most extreme, which
+    an asymmetric fork branch overshooting the trunk toward the lift side would
+    hijack.  A producer more than one slot onto the fan side of the baseline is a
+    branch.  The slot floor keeps a straight trunk -- every on-track station on
+    one cross coordinate -- inferring no branch outputs, so a TB trunk's normal
+    descent along the flow axis is not misread as one.
 
     Only outputs (sinks) are considered; off-track inputs always lift toward
     their consumer's lift side.
@@ -968,8 +1008,7 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
     anchor_of = _off_track_anchor_of(graph)
 
     # Per section: the cross axis, its fan sign, and the trunk baseline as a
-    # signed coordinate (``fan_sign * cross``) minimised over the trunk, i.e.
-    # the coordinate furthest toward the lift side.
+    # signed coordinate (``fan_sign * cross``) anchored to the trunk column.
     section_baseline: dict[str, tuple[str, float, float]] = {}
     for section in graph.sections.values():
         cross = section_cross_axis(section)
@@ -979,7 +1018,8 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
             for st in _iter_trunk_stations(graph, section, junction_ids)
         ]
         if signed:
-            section_baseline[section.id] = (cross, fan_sign, min(signed))
+            baseline_signed = dominant_value(round(v, 1) for v in signed)
+            section_baseline[section.id] = (cross, fan_sign, baseline_signed)
 
     below: set[str] = set()
     for off_id, anchor_id in anchor_of.items():

@@ -1381,6 +1381,15 @@ gallery:
       its producer via an S -- a flow-axis lead down the trunk, a diagonal, then a flat tail into the
       icon -- on the side opposite the beside-trunk labels, the rotation of the LR off-track idiom,
       rather than leaving perpendicular or dropping onto the label side (issue #1384)."
+  - id: tb_offtrack_fork_baseline
+    source_dir: examples/topologies
+    category: Off-track & Rails
+    description:
+      "A `direction: TB` section with an asymmetric fork whose branch (markduplicates) overshoots
+      the trunk toward the lift side. The off-track downward-branch test anchors its trunk baseline
+      to the through-trunk column rather than the lift-most station, so main-trunk producers
+      downstream of the fork keep their off-track outputs on the lift side instead of flipping them
+      onto the beside-trunk label side (issue #1388)."
   - id: rail_inter_section
     source_dir: examples/topologies
     category: Off-track & Rails
