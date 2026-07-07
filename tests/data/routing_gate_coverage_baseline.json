@@ -301,6 +301,7 @@
   "perp.py::if needs_perp_approach_fan(graph, entry_port.id):::#1",
   "perp.py::if not feeders:::#1",
   "postprocess.py::if abs(dx_diag) <= COORD_TOLERANCE_FINE:::#1",
+  "postprocess.py::if abs(in_flat) < 1 or abs(out_flat) < 1:::#1",
   "postprocess.py::if abs(other.y - station.y) > 1:::#1",
   "postprocess.py::if abs(rp.points[-1][0] - old_x) < STATION_MOVE_TOLERANCE:::#1",
   "postprocess.py::if abs(rp.points[0][0] - old_x) < STATION_MOVE_TOLERANCE:::#1",
