@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Iterator
 
 from nf_metro.layout.constants import (
@@ -21,6 +20,7 @@ from nf_metro.layout.phases._common import (
     _grid_group_section_ids,
     _is_fold_section,
     _lr_exit_aligned_target,
+    dominant_value,
     exit_entry_ports_face,
     flow_exit_carrier_anchor,
     iter_fold_lr_exits_short_of_target,
@@ -586,8 +586,7 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
         if graph.diamond_style == "straight":
             # Snap to the Y that the most lines target, so the majority
             # of lines flow straight.  Ties broken by topmost (smallest Y).
-            y_counts: Counter[float] = Counter(downstream_ys)
-            target_y = min(y_counts, key=lambda y: (-y_counts[y], y))
+            target_y = dominant_value(downstream_ys)
         else:
             target_y = sum(downstream_ys) / len(downstream_ys)
 

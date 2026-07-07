@@ -24,6 +24,7 @@ from nf_metro.layout.geometry import AxisFrame
 from nf_metro.layout.labels import _label_text_height, label_text_width
 from nf_metro.layout.phases._common import (
     _content_station_ids,
+    dominant_value,
     flow_axis_exit_ports,
     grow_section_bbox_max_edge,
     grow_section_bbox_min_edge,
@@ -943,23 +944,6 @@ def _iter_trunk_stations(
             yield st
 
 
-def _trunk_baseline_signed(signed: list[float]) -> float:
-    """The trunk's signed cross coordinate: the column the through-line runs on.
-
-    ``signed`` is each on-track station's ``fan_sign * cross`` coordinate.  The
-    baseline is the value shared by the most stations (the through-trunk
-    column), ties broken toward the lift side (the minimum).  An asymmetric fork
-    branch that overshoots the trunk toward the lift side must not become the
-    baseline -- taking the plain minimum lets it, which then reads every real
-    trunk station as a fan-side branch.  The tie-break reduces to the lift-most
-    coordinate when no column dominates (a staircase trunk, where every station
-    is its own count), and to the sole coordinate of a straight single-row trunk.
-    """
-    counts = Counter(round(v, 1) for v in signed)
-    most = max(counts.values())
-    return min(v for v, c in counts.items() if c == most)
-
-
 def _off_track_output_below(graph: MetroGraph) -> set[str]:
     """Off-track outputs whose producer sits on a branch off the trunk.
 
@@ -973,11 +957,12 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
     The comparison is on the section's cross axis (:func:`section_cross_axis`):
     Y for an LR/RL trunk, X for a TB/BT one.  The baseline is the cross
     coordinate the through-trunk runs on -- the column shared by the most
-    on-track stations (see :func:`_trunk_baseline_signed`); a producer more than
-    one slot onto the fan side of it is a branch.  The slot floor keeps a
-    straight trunk -- every on-track station on one cross coordinate --
-    inferring no branch outputs, so a TB trunk's normal descent along the flow
-    axis is not misread as one.
+    on-track stations (:func:`dominant_value`), not the lift-most extreme, which
+    an asymmetric fork branch overshooting the trunk toward the lift side would
+    hijack.  A producer more than one slot onto the fan side of the baseline is a
+    branch.  The slot floor keeps a straight trunk -- every on-track station on
+    one cross coordinate -- inferring no branch outputs, so a TB trunk's normal
+    descent along the flow axis is not misread as one.
 
     Only outputs (sinks) are considered; off-track inputs always lift toward
     their consumer's lift side.
@@ -996,11 +981,8 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
             for st in _iter_trunk_stations(graph, section, junction_ids)
         ]
         if signed:
-            section_baseline[section.id] = (
-                cross,
-                fan_sign,
-                _trunk_baseline_signed(signed),
-            )
+            baseline_signed = dominant_value(round(v, 1) for v in signed)
+            section_baseline[section.id] = (cross, fan_sign, baseline_signed)
 
     below: set[str] = set()
     for off_id, anchor_id in anchor_of.items():
