@@ -86,6 +86,7 @@ from nf_metro.parser.model import (
     PortSide,
     Section,
     Station,
+    is_converge_junction,
 )
 from nf_metro.parser.resolve import _expected_flow_side
 
@@ -739,6 +740,64 @@ def _guard_symmetric_diamond_branches_half_pitch(graph: MetroGraph, phase: str) 
                 f"{0.5 * full_pitch:.1f} expected beside a full-pitch "
                 f"{full_pitch:.1f} fan; the diamond was not compacted"
             )
+
+
+# A same-layer sibling group may sit at most this many columns upstream of the
+# junction that merges it before the parallel run reads as a distant-terminus
+# bow: one column is the immediate merge, a second is a modest bulge left alone.
+_MAX_SIBLING_MERGE_SLACK = 2
+
+
+class _LateSiblingMerge(NamedTuple):
+    junction: str
+    junction_layer: int
+    sibling_layer: int
+    sibling_count: int
+
+
+def _converge_sibling_merge_violations(
+    graph: MetroGraph,
+) -> Iterator[_LateSiblingMerge]:
+    """Yield convergence junctions whose same-layer siblings merge far downstream.
+
+    A convergence junction inserted before a multi-source terminus should merge
+    each group of same-layer sibling sources close to them, so the siblings
+    never bow out and run parallel across the gap to a distant terminus.  For
+    every source layer shared by 2+ of a junction's in-section direct sources
+    that sits more than ``_MAX_SIBLING_MERGE_SLACK`` columns upstream of the
+    junction, yields the offending group.
+    """
+    for sid, st in graph.stations.items():
+        if not is_converge_junction(sid):
+            continue
+        srcs_by_layer: dict[int, set[str]] = defaultdict(set)
+        for edge in graph.edges_to(sid):
+            src = graph.stations.get(edge.source)
+            if src is None or src.section_id != st.section_id:
+                continue
+            srcs_by_layer[src.layer].add(edge.source)
+        for layer, srcs in srcs_by_layer.items():
+            if len(srcs) >= 2 and st.layer - layer > _MAX_SIBLING_MERGE_SLACK:
+                yield _LateSiblingMerge(sid, st.layer, layer, len(srcs))
+
+
+def _guard_converge_siblings_merge_locally(graph: MetroGraph, phase: str) -> None:
+    """Final: same-layer fan-in siblings merge near their column, not far downstream.
+
+    When 2+ sibling sources share a layer and feed a common terminus, the
+    convergence junction must sit within a column or two of them so they meet
+    promptly.  If a longer parallel path pushes the terminus (and its lone
+    junction) far to the right, the short-path siblings would otherwise run
+    parallel all the way there, bowing the fan out to fill the gap (issue
+    #1296).
+    """
+    for jid, jlayer, shared, count in _converge_sibling_merge_violations(graph):
+        raise PhaseInvariantError(
+            f"{phase}: convergence junction {jid!r} (layer {jlayer}) merges "
+            f"{count} same-layer sibling sources at layer {shared}; they run "
+            f"parallel to a distant terminus instead of merging locally at "
+            f"layer {shared + 1}"
+        )
 
 
 def _guard_section_bboxes_positive(graph: MetroGraph, phase: str) -> None:
@@ -5207,6 +5266,17 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         ),
     ),
     GuardSpec(_guard_side_entered_vertical_top_not_below_feeder, "B"),
+    GuardSpec(
+        _guard_converge_siblings_merge_locally,
+        "B",
+        issue_pin=("#1296",),
+        narrow_reason=(
+            "Restricted to same-layer sibling groups of 2+ that merge more than "
+            "_MAX_SIBLING_MERGE_SLACK columns downstream: a lone source or a "
+            "one-column-late merge is a legitimate staircase or modest bulge, "
+            "not the distant-terminus bow."
+        ),
+    ),
     GuardSpec(_guard_symmetric_diamond_branches_straddle_trunk, "B"),
     GuardSpec(_guard_symmetric_diamond_branches_half_pitch, "B"),
     GuardSpec(_guard_tall_anchor_stack_well_formed, "B"),

@@ -1113,6 +1113,15 @@ gallery:
       row, while one aligner's line continues on a track pinned to the section bottom by hidden
       continuation stations. The aligners stack on consecutive grid rows instead of the low-line
       aligner being dragged down to crowd its neighbour and strand the middle row (#1071).
+  - id: fanin_distant_terminus
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "Two sibling methods feed one report icon while a third continues through a
+      longer ORF chain that pushes the report to the far end of the section. The siblings
+      converge at a local junction one column on and a single trunk carries the merged line to
+      the report, instead of the two legs bowing out and running parallel the whole way to the
+      distant merge (issue #1296)."
 
   # ── Inter-section Routing ──────────────────────────────────────────────────
   - id: left_exit_sink_below

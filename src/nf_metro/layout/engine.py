@@ -127,6 +127,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_bypass_port_no_slot_gaps,
     _guard_bypass_v_flat_visible,
     _guard_centered_line_spread_balanced,
+    _guard_converge_siblings_merge_locally,
     _guard_convergence_shallow_feeder_concentric,
     _guard_coordinates_finite,
     _guard_entry_approach_from_port_side,
@@ -731,6 +732,7 @@ def _compute_layout_scaled(
         _guard_side_entered_vertical_top_not_below_feeder(graph, "final")
         _guard_symmetric_diamond_branches_straddle_trunk(graph, "final")
         _guard_symmetric_diamond_branches_half_pitch(graph, "final")
+        _guard_converge_siblings_merge_locally(graph, "final")
 
 
 def _bypass_label_rakes(graph: MetroGraph) -> set[str]:
