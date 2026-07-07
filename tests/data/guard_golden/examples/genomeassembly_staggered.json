@@ -163,6 +163,7 @@
     "_guard_side_entered_vertical_top_not_below_feeder|final",
     "_guard_symmetric_diamond_branches_straddle_trunk|final",
     "_guard_symmetric_diamond_branches_half_pitch|final",
+    "_guard_converge_siblings_merge_locally|final",
     "_guard_coordinates_finite|after final",
     "_guard_section_bboxes_positive|after final",
     "_guard_stations_in_sections|after final",

@@ -140,6 +140,28 @@ def _expand_interchanges(graph: MetroGraph) -> None:
     )
 
 
+def _section_local_layers(graph: MetroGraph, section_id: str | None) -> dict[str, int]:
+    """Longest-path layers over one section's internal edges.
+
+    Cross-section edges are ignored, so a station fed only from outside the
+    section is a local root (layer 0), matching how the layout engine columns a
+    section from its own entry.  This is the grouping metric for
+    :func:`_insert_terminus_convergence_stations`: same-layer siblings here land
+    in the same grid column at layout time.
+    """
+    members = {sid for sid, s in graph.stations.items() if s.section_id == section_id}
+    g: nx.DiGraph[str] = nx.DiGraph()
+    g.add_nodes_from(members)
+    for edge in graph.edges:
+        if edge.source in members and edge.target in members:
+            g.add_edge(edge.source, edge.target)
+    layers: dict[str, int] = {}
+    for node in nx.topological_sort(g):
+        preds = list(g.predecessors(node))
+        layers[node] = max((layers[p] for p in preds), default=-1) + 1
+    return layers
+
+
 def _insert_terminus_convergence_stations(graph: MetroGraph) -> None:
     """Insert virtual convergence stations before multi-source termini.
 
@@ -157,56 +179,117 @@ def _insert_terminus_convergence_stations(graph: MetroGraph) -> None:
     For each inbound edge ``source -> terminus`` carrying line ``L``,
     the edge is replaced with ``source -> converge`` followed by a
     single ``converge -> terminus`` edge per distinct line.
+
+    When the sources sit at different layers -- a short fan and a longer
+    parallel path both feeding the terminus -- routing them all through one
+    junction placed at the deepest source's column makes the short fan run
+    parallel the whole way there, bowing it out to fill the gap.  Instead the
+    sources merge in a cascade by ascending layer: same-layer siblings meet at
+    a junction one layer downstream, and each running trunk folds in the next,
+    deeper source group, so a fan merges locally and the remaining distance is
+    a single-line run (issue #1296).
     """
     pending_terminus = graph._pending_terminus
     if not pending_terminus:
         return
 
+    local_layers: dict[str | None, dict[str, int]] = {}
     new_stations: list[Station] = []
     new_edges: list[Edge] = []
     edges_to_remove: set[int] = set()
     converge_count = 0
 
     for terminus_id in list(pending_terminus.keys()):
-        # Find direct inbound edges and their sources.
-        inbound: list[tuple[int, Edge]] = []
+        # Find direct inbound edges and the lines each source carries.
+        inbound: list[int] = []
+        source_lines: dict[str, set[str]] = {}
         for i, edge in enumerate(graph.edges):
-            if edge.target == terminus_id:
-                inbound.append((i, edge))
-        if not inbound:
-            continue
-        sources = {e.source for _, e in inbound}
-        if len(sources) < 2:
+            if edge.target != terminus_id:
+                continue
+            inbound.append(i)
+            source_lines.setdefault(edge.source, set()).add(edge.line_id)
+        if len(source_lines) < 2:
             continue
 
         terminus = graph.stations.get(terminus_id)
         if terminus is None:
             continue
+        edges_to_remove.update(inbound)
 
-        converge_count += 1
-        converge_id = f"__converge_{terminus_id}_{converge_count}"
-        new_stations.append(
-            Station(
-                id=converge_id,
-                label="",
-                section_id=terminus.section_id,
-                is_hidden=True,
-            )
+        layers = local_layers.get(terminus.section_id)
+        if layers is None:
+            layers = _section_local_layers(graph, terminus.section_id)
+            local_layers[terminus.section_id] = layers
+
+        # Cascade the sources into the terminus low-to-high.  In-section
+        # sources are grouped by layer so same-layer siblings converge at a
+        # junction one layer on, then the running trunk folds in each deeper
+        # group -- a fan merges locally and the remaining distance is a
+        # single-line run.  Out-of-section sources arrive through the section's
+        # entry port at the terminus's own column, so they share one final
+        # group rather than a per-layer cascade over unrelated columns.
+        by_layer: dict[int, list[str]] = defaultdict(list)
+        cross_section: list[str] = []
+        for src in source_lines:
+            st = graph.stations.get(src)
+            if st is not None and st.section_id == terminus.section_id:
+                by_layer[layers.get(src, 0)].append(src)
+            else:
+                cross_section.append(src)
+
+        # Only cascade when it earns the extra junction: a sibling group of 2+
+        # would otherwise run 2+ columns parallel to the deepest source's merge
+        # column.  A group that merges one column late is a modest bulge left as
+        # a single junction, so dense maps aren't perturbed for a marginal gain.
+        max_local = max(by_layer, default=-1)
+        should_cascade = any(
+            len(srcs) >= 2 and layer <= max_local - 2
+            for layer, srcs in by_layer.items()
         )
 
-        # Replace each ``src -> terminus (line)`` with
-        # ``src -> converge (line)`` and add ``converge -> terminus (line)``.
-        seen_lines: set[str] = set()
-        for idx, edge in inbound:
-            edges_to_remove.add(idx)
-            new_edges.append(
-                Edge(source=edge.source, target=converge_id, line_id=edge.line_id)
-            )
-            if edge.line_id not in seen_lines:
-                seen_lines.add(edge.line_id)
-                new_edges.append(
-                    Edge(source=converge_id, target=terminus_id, line_id=edge.line_id)
+        if should_cascade:
+            groups = [
+                [(src, source_lines[src]) for src in by_layer[layer]]
+                for layer in sorted(by_layer)
+            ]
+            if cross_section:
+                groups.append([(src, source_lines[src]) for src in cross_section])
+        else:
+            groups = [[(src, source_lines[src]) for src in source_lines]]
+
+        # ``carry`` is the node feeding onward with the lines gathered so far.
+        carry_id: str | None = None
+        carry_lines: set[str] = set()
+        for group in groups:
+            members = list(group)
+            if carry_id is not None:
+                members.append((carry_id, carry_lines))
+            if len(members) == 1:
+                carry_id, carry_lines = members[0]
+                continue
+
+            converge_count += 1
+            converge_id = f"__converge_{terminus_id}_{converge_count}"
+            new_stations.append(
+                Station(
+                    id=converge_id,
+                    label="",
+                    section_id=terminus.section_id,
+                    is_hidden=True,
                 )
+            )
+            merged_lines: set[str] = set()
+            for member_id, member_lines in members:
+                merged_lines |= member_lines
+                for line_id in sorted(member_lines):
+                    new_edges.append(
+                        Edge(source=member_id, target=converge_id, line_id=line_id)
+                    )
+            carry_id, carry_lines = converge_id, merged_lines
+
+        assert carry_id is not None
+        for line_id in sorted(carry_lines):
+            new_edges.append(Edge(source=carry_id, target=terminus_id, line_id=line_id))
 
     if not new_stations:
         return

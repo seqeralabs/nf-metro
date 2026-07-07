@@ -1,0 +1,21 @@
+%%metro title: Fan-in to a distant terminus
+%%metro file: report | HTML | Report
+%%metro line: a | Line A | #e6007e
+
+graph LR
+    subgraph s1 [Translational efficiency]
+        prep[Prep]
+        anota[anota2seq]
+        delta[deltaTE]
+        dotseq[DOTSeq]
+        orf_quant[ORFquant]
+        orf_test[ORFtest]
+        prep -->|a| anota
+        prep -->|a| delta
+        prep -->|a| dotseq
+        dotseq -->|a| orf_quant
+        orf_quant -->|a| orf_test
+        anota -->|a| report
+        delta -->|a| report
+        orf_test -->|a| report
+    end
