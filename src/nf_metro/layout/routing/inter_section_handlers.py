@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+from typing import NamedTuple
 
 from nf_metro.layout.constants import (
     BYPASS_CLEARANCE,
@@ -3919,18 +3920,61 @@ def _source_is_boxed_fanout_junction(f: _InterFacts) -> bool:
     return src_section is not None and graph.is_packed_section(src_section.id)
 
 
-def _band_hop_geometry(
-    f: _InterFacts,
-) -> tuple[float, float, float, float, int, float] | None:
-    """Resolve a LEFT-entry band-hop's two channels, descent column, and fan.
+def _exit_side_pack_gap_midpoint(f: _InterFacts) -> float | None:
+    """Midpoint of the gap between the source section and its exit-side cell-mate.
 
-    Returns ``(band0_y, band1_y, corner_x, vx, pos_n, delta)`` -- the Y of the
-    band just below the source row, the Y of the band just above the target
-    row, the X of a descent column clear through every row between them, the
-    target-side descent X, and the source fan's bundle size and this line's
-    lateral offset -- or ``None`` when either band is missing/too narrow, the
-    two bands are not separated by an intervening row, or no clear descent
-    column exists left of the source within the trap.
+    The band-hop leads horizontally out of the junction into this gap before
+    turning down, so the departure curves in the clear inter-cell gap rather
+    than kinking at a right angle against the source section's edge.  Returns
+    ``None`` when the source section or its exit-side cell-mate is unresolvable.
+    """
+    graph, src = f.graph, f.src
+    source = resolve_section(graph, src)
+    if source is None or source.bbox_w <= 0:
+        return None
+    source_right = source.bbox_x + source.bbox_w
+    cellmate_left: float | None = None
+    for members in graph.cell_packs.values():
+        if source.id not in members:
+            continue
+        for other_id in members:
+            other = graph.sections.get(other_id)
+            if other is None or other.bbox_w <= 0 or other.id == source.id:
+                continue
+            if other.bbox_x <= source_right + COORD_TOLERANCE:
+                continue  # cell-mate is not on the exit (right) side
+            if cellmate_left is None or other.bbox_x < cellmate_left:
+                cellmate_left = other.bbox_x
+    if cellmate_left is None:
+        return None
+    return (source_right + cellmate_left) / 2
+
+
+class _BandHopGeometry(NamedTuple):
+    """A LEFT-entry band-hop's two channel Ys, three column Xs, and fan stagger.
+
+    ``band0_y``/``band1_y`` are the bands just below the source row and just
+    above the target row; ``lead_x`` is where the branch turns down into band0
+    after leading out of the junction; ``corner_x`` is the descent column clear
+    through the rows between the bands; ``vx`` is the target-side descent X;
+    ``pos_n``/``delta`` are the source fan's bundle size and this line's offset.
+    """
+
+    band0_y: float
+    band1_y: float
+    lead_x: float
+    corner_x: float
+    vx: float
+    pos_n: int
+    delta: float
+
+
+def _band_hop_geometry(f: _InterFacts) -> _BandHopGeometry | None:
+    """Resolve a LEFT-entry band-hop's channels, columns, and fan.
+
+    Returns ``None`` when either band is missing/too narrow, the two bands are
+    not separated by an intervening row, or no clear descent column exists left
+    of the source within the trap.
     """
     graph, src, tgt, ctx = f.graph, f.src, f.tgt, f.ctx
     assert f.src_row is not None and f.tgt_row is not None
@@ -3961,7 +4005,12 @@ def _band_hop_geometry(
         ctx, f.edge, src, f.i, f.n, Direction.D
     )
     vx = _left_entry_descent_x(ctx, tgt.x, pos_n)
-    return band0_y, band1_y, corner_x, vx, pos_n, delta
+    # Lead out into the inter-cell gap (right of the junction) so the turn down
+    # curves clear of the source section edge; fall back to dropping at the
+    # junction column when no cell-mate gap resolves.
+    gap_mid = _exit_side_pack_gap_midpoint(f)
+    lead_x = gap_mid if gap_mid is not None and gap_mid > src.x else src.x
+    return _BandHopGeometry(band0_y, band1_y, lead_x, corner_x, vx, pos_n, delta)
 
 
 def _left_entry_band_hop_is_clear(f: _InterFacts) -> bool:
@@ -3987,16 +4036,23 @@ def _left_entry_band_hop_is_clear(f: _InterFacts) -> bool:
     geom = _band_hop_geometry(f)
     if geom is None:
         return False
-    band0_y, band1_y, corner_x, vx, _pos_n, _delta = geom
     graph, src, tgt = f.graph, f.src, f.tgt
     exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
-    if _v_segment_crosses_other_section(graph, src.x, src.y, band0_y, exclude):
+    if _v_segment_crosses_other_section(
+        graph, geom.lead_x, src.y, geom.band0_y, exclude
+    ):
         return False
-    if _h_segment_crosses_other_section(graph, src.x, corner_x, band0_y, exclude):
+    if _h_segment_crosses_other_section(
+        graph, geom.lead_x, geom.corner_x, geom.band0_y, exclude
+    ):
         return False
-    if _h_segment_crosses_other_section(graph, corner_x, vx, band1_y, exclude):
+    if _h_segment_crosses_other_section(
+        graph, geom.corner_x, geom.vx, geom.band1_y, exclude
+    ):
         return False
-    return not _v_segment_crosses_other_section(graph, vx, band1_y, tgt.y, exclude)
+    return not _v_segment_crosses_other_section(
+        graph, geom.vx, geom.band1_y, tgt.y, exclude
+    )
 
 
 def _route_left_entry_via_band_hop(f: _InterFacts) -> RoutedPath:
@@ -4010,8 +4066,9 @@ def _route_left_entry_via_band_hop(f: _InterFacts) -> RoutedPath:
     into the port -- the "leave on the left" peel-off the around-below dive
     (:func:`_route_around_section_below`) can't take::
 
-        (sx, sy)        ; V down into the band below the source row
-        (sx, b0)        -> H left to the clear descent column
+        (sx, sy)        -> H right into the inter-cell gap
+        (lx, sy)        ; turn down (curve clear of the source edge)
+        (lx, b0)        -> H left to the clear descent column
         (cx, b0)        ; V down through the intervening rows
         (cx, b1)        -> H left past the target's left edge
         (vx, b1)        ; V down to the entry Y
@@ -4025,21 +4082,22 @@ def _route_left_entry_via_band_hop(f: _InterFacts) -> RoutedPath:
     edge, src, tgt, ctx = f.edge, f.src, f.tgt, f.ctx
     geom = _band_hop_geometry(f)
     assert geom is not None
-    band0_y, band1_y, corner_x, vx, pos_n, delta = geom
+    delta = geom.delta
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
     ex, ey = tgt.x, tgt.y
     entry_delta = delta  # a LEFT entry runs rightward in, like the target drop
-    # Start at the junction join point (Y-staggered, matching the upstream feed's
-    # end) then turn straight down its own column into the band below the source
-    # row, so the fan-out tail meets without an apex notch.
+    # Lead out of the junction (Y-staggered, matching the upstream feed's end)
+    # into the inter-cell gap, then turn down so the departure curves clear of
+    # the source section edge instead of kinking against it.
     centerline = [
         (src.x, src.y + src_off + delta),
-        (src.x, band0_y),
-        (corner_x, band0_y),
-        (corner_x, band1_y),
-        (vx, band1_y),
-        (vx, ey + tgt_off + entry_delta),
+        (geom.lead_x, src.y + src_off + delta),
+        (geom.lead_x, geom.band0_y),
+        (geom.corner_x, geom.band0_y),
+        (geom.corner_x, geom.band1_y),
+        (geom.vx, geom.band1_y),
+        (geom.vx, ey + tgt_off + entry_delta),
         (ex, ey + tgt_off + entry_delta),
     ]
     route = route_along(
@@ -4047,11 +4105,11 @@ def _route_left_entry_via_band_hop(f: _InterFacts) -> RoutedPath:
         [(edge, edge.line_id, -delta)],
         centerline,
         base_radius=ctx.curve_radius,
-        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+        bundle_offsets=fan_offsets(geom.pos_n, ctx.offset_step),
     )
     assert route is not None
-    _declare_channel(route, ctx, corner_x, Direction.D)
-    _declare_channel(route, ctx, vx, vertical_direction(ey - band1_y))
+    _declare_channel(route, ctx, geom.corner_x, Direction.D)
+    _declare_channel(route, ctx, geom.vx, vertical_direction(ey - geom.band1_y))
     return route
 
 
