@@ -13,6 +13,7 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
     EDGE_TO_BUNDLE_CLEARANCE,
+    INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MIN_CORRIDOR_Y_OVERLAP,
     NEXT_ROW_HEADER_BADGE_CLEARANCE,
@@ -100,9 +101,22 @@ def _split_corridors(chans: list[_VChannel]) -> list[list[_VChannel]]:
     return groups
 
 
-def _section_intrudes(graph: MetroGraph, x: float, y_lo: float, y_hi: float) -> bool:
-    """True if a re-stacked channel at ``x`` would land inside any section bbox."""
+def _section_intrudes(
+    graph: MetroGraph,
+    x: float,
+    y_lo: float,
+    y_hi: float,
+    *,
+    exclude: frozenset[str | None] = frozenset(),
+) -> bool:
+    """True if a channel at ``x`` over ``[y_lo, y_hi]`` lands inside a section bbox.
+
+    Sections in ``exclude`` are skipped, for a channel that legitimately meets
+    its own endpoints' sections.
+    """
     for s in graph.sections.values():
+        if s.id in exclude:
+            continue
         if s.bbox_w <= 0:
             continue
         sx_l = s.bbox_x
@@ -657,6 +671,102 @@ def _stack_distinct_port_descents(
                 _set_vchannel_x(ch, x)
 
 
+def _nest_bypass_above_over_top_wrap(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Lift a cross-row inter-row bypass above a same-row over-top wrap it crosses.
+
+    A line reaching the RIGHT-side entry port of a same-row neighbour must loop
+    over that neighbour's top -- an over-top *wrap* whose peak is pinned deep in
+    the inter-row gap by the neighbour's header clearance.  A longer-haul bypass
+    crossing the same gap between two rows centres its channel lower (nearer the
+    row), so its horizontal traverse runs *below* the wrap's peak and the wrap's
+    riser crosses it.  The through bypass logically belongs further up the gap:
+    lift its traverse (and the risers feeding it) above the wrap's peak so the
+    local wrap nests beneath the through route rather than crossing it.
+
+    A wrap is an inter-section route with both endpoints below the gap (same
+    row) and a horizontal leg inside it; a through route crosses the gap (one
+    endpoint above, one below).  The whole crossing through-bundle is lifted by
+    one delta so its per-line stagger is preserved.
+    """
+    for _upper, gap_top, gap_bottom in iter_inter_row_gaps(ctx.graph):
+        wrap_peaks: list[tuple[float, float, float]] = []
+        through_legs: list[tuple[RoutedPath, int, float, float, float]] = []
+        for r in routes:
+            span = _route_gap_span(ctx.graph, r, gap_top, gap_bottom)
+            if span is None:
+                continue
+            is_wrap, is_through = span
+            for k in range(len(r.points) - 1):
+                (x1, y1), (x2, y2) = r.points[k], r.points[k + 1]
+                if abs(y1 - y2) > COORD_TOLERANCE:
+                    continue
+                if not gap_top - COORD_TOLERANCE <= y1 <= gap_bottom + COORD_TOLERANCE:
+                    continue
+                lo, hi = min(x1, x2), max(x1, x2)
+                if is_wrap:
+                    wrap_peaks.append((y1, lo, hi))
+                elif is_through:
+                    through_legs.append((r, k, y1, lo, hi))
+        if not wrap_peaks or not through_legs:
+            continue
+        crossing: list[tuple[RoutedPath, int, float]] = []
+        for r, k, y, lo, hi in through_legs:
+            if any(
+                wlo < hi and lo < whi and wy <= y + COORD_TOLERANCE
+                for wy, wlo, whi in wrap_peaks
+            ):
+                crossing.append((r, k, y))
+        if not crossing:
+            continue
+        # Lift the whole crossing bundle by one delta so its stagger survives:
+        # seat its deepest (largest-Y) leg the edge clearance below the upper
+        # row, the deepest lane clear of that row.  Placement reserves a gap
+        # wide enough (see ``_inter_row_routing_minimums``) that this lane sits
+        # above the wrap's peak, so the local wrap nests beneath the bundle.
+        target = gap_top + INTER_ROW_EDGE_CLEARANCE
+        max_leg_y = max(y for _r, _k, y in crossing)
+        delta = min(target - max_leg_y, 0.0)
+        if abs(delta) <= COORD_TOLERANCE:
+            continue
+        # Translating both endpoints of the horizontal leg by one delta keeps its
+        # flanking corners at 90 degrees, so their radii are unchanged -- no need
+        # for the corner re-derivation ``_set_vchannel_x`` does for an X move.
+        for r, k, _y in crossing:
+            r.points = [
+                (x, y + delta) if i in (k, k + 1) else (x, y)
+                for i, (x, y) in enumerate(r.points)
+            ]
+
+
+def _route_gap_span(
+    graph: MetroGraph, r: RoutedPath, gap_top: float, gap_bottom: float
+) -> tuple[bool, bool] | None:
+    """Classify *r* relative to an inter-row gap: ``(is_wrap, is_through)``.
+
+    A wrap has both port endpoints below the gap (a same-row over-top loop); a
+    through route has one endpoint above and one below (it crosses the gap).
+    Returns ``None`` for non-inter-section routes or ones that touch neither
+    side, so the caller skips them.
+    """
+    if not r.is_inter_section:
+        return None
+    src = graph.stations.get(r.edge.source)
+    tgt = graph.stations.get(r.edge.target)
+    if src is None or tgt is None:
+        return None
+    src_below = src.y > gap_bottom - COORD_TOLERANCE
+    tgt_below = tgt.y > gap_bottom - COORD_TOLERANCE
+    src_above = src.y < gap_top + COORD_TOLERANCE
+    tgt_above = tgt.y < gap_top + COORD_TOLERANCE
+    is_wrap = src_below and tgt_below
+    is_through = (src_above and tgt_below) or (src_below and tgt_above)
+    if not (is_wrap or is_through):
+        return None
+    return is_wrap, is_through
+
+
 def _band_clusters(chans: list[_VChannel], band: float) -> list[list[_VChannel]]:
     """Group X-sorted channels, breaking wherever a left-neighbour gap exceeds *band*.
 
@@ -811,6 +921,86 @@ def _divergent_source_groups(routes: list[RoutedPath]) -> list[_Coincidence]:
         ref_x = min(candidates, key=lambda c: abs(c.x - sx)).x
         groups.append(_Coincidence(chans, ref_x))
     return groups
+
+
+def _fanout_descent_order_key(ch: _VChannel) -> tuple[int, float]:
+    """Left-to-right seat order for a fan-out descent, by the side it turns to.
+
+    A branch is placed on the side it later turns toward so peeling off never
+    crosses a sibling still descending: left-turners (and straight drops) rank
+    by turn-Y ascending so the earliest turn sits outermost-left; right-turners
+    mirror it.  ``direction`` is the sign of the leg leaving the descent's foot.
+    """
+    pts = ch.route.points
+    j = ch.idx + 1
+    dx = pts[j + 1][0] - pts[j][0] if j + 1 < len(pts) else 0.0
+    direction = -1 if dx < -COORD_TOLERANCE else (1 if dx > COORD_TOLERANCE else 0)
+    turn_y = pts[j][1]
+    return (direction, turn_y if direction <= 0 else -turn_y)
+
+
+def _bundle_divergent_distinct_descents(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Bundle distinct-line opening descents leaving one source until they fork.
+
+    The distinct-line counterpart to the divergent group in
+    :func:`_coincide_same_line_tracks`: several lines fanning out from one
+    source leave the section together and read as one bundle, so they should
+    descend on adjacent tracks and split only where each turns off.  Handlers
+    route each branch independently, so distinct lines open on their own
+    channels several px apart -- reading as separate strokes from the junction.
+
+    Re-seat each such group one ``OFFSET_STEP`` apart on the corridor nearest
+    the source, ordered so a branch sits on the side it later turns toward (a
+    left-turning branch to the left, ordered outermost by the earliest turn), so
+    a branch peeling off never crosses a sibling still descending.  Only groups
+    already spread wider than a tight bundle move; same-line groups are handled
+    by the coincidence pass and skipped here.
+    """
+    by_source: dict[tuple[str, bool], list[_VChannel]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        ch = _initial_fanout_descent(rp)
+        if ch is not None:
+            by_source[(rp.edge.source, ch.down)].append(ch)
+
+    step = ctx.offset_step
+    for chans in by_source.values():
+        if len({c.route.line_id for c in chans}) < 2:
+            continue
+        xs = [c.x for c in chans]
+        if max(xs) - min(xs) <= step * (len(chans) - 1) + COORD_TOLERANCE:
+            continue
+
+        base = min(xs)
+        moves = [
+            (ch, base + rank * step)
+            for rank, ch in enumerate(sorted(chans, key=_fanout_descent_order_key))
+        ]
+        # Never re-seat a descent into a section it does not belong to; leave the
+        # whole group on its handler channels if any target column is obstructed.
+        if any(
+            _descent_crosses_section(ctx.graph, ch, target_x) for ch, target_x in moves
+        ):
+            continue
+        for ch, target_x in moves:
+            if abs(ch.x - target_x) > COORD_TOLERANCE:
+                _set_vchannel_x(ch, target_x)
+
+
+def _descent_crosses_section(graph: MetroGraph, ch: _VChannel, x: float) -> bool:
+    """Whether *ch*'s vertical span at *x* would cross a foreign section box.
+
+    Sections at either end of the channel's route are exempt (the descent
+    legitimately meets its own endpoints).
+    """
+    own = frozenset(
+        graph.section_for_station(ep)
+        for ep in (ch.route.edge.source, ch.route.edge.target)
+    )
+    return _section_intrudes(graph, x, ch.y_lo, ch.y_hi, exclude=own)
 
 
 def _merge_feeder_groups(

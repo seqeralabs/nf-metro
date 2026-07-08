@@ -772,6 +772,15 @@ gallery:
       column to descend through. The bypass must still loop below the cell-mate's
       box rather than collapse back to a straight run through its interior
       (issue #1233)."
+  - id: packed_cell_consumer_drop_in
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A consumer feed into the far member of a packed cell, arriving from the
+      row above and to the right. The member hints top/left entry, but the feed
+      comes from the right; geometry-aware entry-side inference resolves its
+      entry to the right edge so the feed drops straight in rather than wrapping
+      below every section to reach a left port (issue #1311)."
   - id: branch_fold_forward
     source_dir: examples/topologies
     category: Serpentine Layout

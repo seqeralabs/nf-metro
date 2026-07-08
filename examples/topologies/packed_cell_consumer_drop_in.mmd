@@ -1,0 +1,50 @@
+%%metro title: Packed-cell consumer drop-in
+%%metro style: nfcore
+%%metro line: main | Main | #e6007e
+%%metro line: alt | Alt (optional) | #2db572
+%%metro grid: pre | 0,0
+%%metro grid: feeder | 1,0
+%%metro grid: leftmem, rightmem | 0,1
+
+graph LR
+    subgraph pre [Pre-processing]
+        %%metro exit: right | main, alt
+        p_in[ ]
+        p_prep[Prep]
+
+        p_in -->|main,alt| p_prep
+    end
+
+    subgraph feeder [Alignment]
+        %%metro entry: left | main, alt
+        %%metro exit: right | main, alt
+        f_align[Align]
+        f_dedup[Dedup]
+
+        f_align -->|main,alt| f_dedup
+    end
+
+    subgraph leftmem [Assembly]
+        %%metro entry: top | alt
+        %%metro exit: right | main
+        l_assemble[Assemble]
+        l_merge[Merge]
+
+        l_assemble -->|alt| l_merge
+    end
+
+    subgraph rightmem [Calling]
+        %%metro entry: top | main
+        %%metro entry: left | main
+        r_call_a[Call A]
+        r_call_b[Call B]
+        r_call_c[Call C]
+    end
+
+    %% Inter-section edges
+    p_prep -->|main,alt| f_align
+    f_dedup -->|alt| l_assemble
+    f_dedup -->|main| r_call_a
+    f_dedup -->|main| r_call_b
+    f_dedup -->|main| r_call_c
+    l_merge -->|main| r_call_a

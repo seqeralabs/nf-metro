@@ -12,8 +12,7 @@ __all__ = ["place_sections", "position_ports"]
 
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Callable
-from typing import TypeGuard
+from collections.abc import Callable, Iterator
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -46,7 +45,15 @@ from nf_metro.layout.routing.common import (
     resolve_section,
     section_exists_above_row,
 )
-from nf_metro.parser.model import MetroGraph, PortSide, Section, Station, is_bypass_v
+from nf_metro.parser.model import (
+    Edge,
+    MetroGraph,
+    Port,
+    PortSide,
+    Section,
+    Station,
+    is_bypass_v,
+)
 
 
 def _assign_grid_layout(
@@ -650,7 +657,7 @@ def _reserve_over_top_headroom(graph: MetroGraph) -> None:
             ssec = graph.sections.get(src_port.section_id) if src_port else None
             if ssec is None:
                 continue
-            if ssec.grid_row == psec.grid_row and ssec.grid_col < psec.grid_col:
+            if ssec.grid_row == psec.grid_row and _section_precedes(graph, ssec, psec):
                 if not section_exists_above_row(graph, psec.grid_row):
                     target_rows.add(psec.grid_row)
                 break
@@ -710,35 +717,18 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     placement) is fine -- only its top edge bounds the gap, so the
     adjacent ``(src_row, tgt_row)`` reservation still applies.
     """
-
-    def _is_flow_section(sec: Section | None) -> TypeGuard[Section]:
-        return sec is not None and sec.grid_row_span == 1
-
     # (upper_row, lower_row) -> entry_port_id -> set of line ids
     per_gap: dict[tuple[int, int], dict[str, set[str]]] = defaultdict(
         lambda: defaultdict(set)
     )
-    for edge in graph.edges:
-        port = graph.ports.get(edge.target)
-        if port is None or not port.is_entry:
-            continue
-        # LEFT/RIGHT entries wrap; TOP entries drop in via a horizontal
-        # lead-in.  Both place a horizontal run in the inter-row gap (via
-        # ``inter_row_channel_y``) that must clear the next-row header.
-        if port.side not in (PortSide.LEFT, PortSide.RIGHT, PortSide.TOP):
-            continue
-        # Only the target's top edge (its grid_row) bounds the gap, so a
-        # multi-row-span target still reserves it; its span is irrelevant.
+    # LEFT/RIGHT entries wrap; TOP entries drop in via a horizontal lead-in.
+    # Both place a horizontal run in the inter-row gap (``inter_row_channel_y``)
+    # that must clear the next-row header.
+    sides = (PortSide.LEFT, PortSide.RIGHT, PortSide.TOP)
+    for edge, port, src_sec, tgt_sec in _entry_wrap_edges(graph, sides):
         # The source must be single-row: its bottom edge is the gap's upper
         # bound, and a multi-row source routes via reversal handling.
-        tgt_sec = graph.sections.get(port.section_id)
-        if tgt_sec is None:
-            continue
-        src = graph.stations.get(edge.source)
-        if src is None:
-            continue
-        src_sec = resolve_section(graph, src)
-        if not _is_flow_section(src_sec):
+        if src_sec.grid_row_span != 1:
             continue
         # A horizontal-side entry only WRAPS (placing a flush run in the
         # inter-row gap) when the source is on the far side of the target
@@ -746,9 +736,9 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
         # a righthand column wraps; one reached from the left is a plain
         # L-shape drop and needs no widening (e.g. preprocessing -> a
         # column-1 section below it).  Mirror for RIGHT.
-        if port.side == PortSide.LEFT and src_sec.grid_col < tgt_sec.grid_col:
+        if port.side == PortSide.LEFT and _section_precedes(graph, src_sec, tgt_sec):
             continue
-        if port.side == PortSide.RIGHT and src_sec.grid_col > tgt_sec.grid_col:
+        if port.side == PortSide.RIGHT and _section_precedes(graph, tgt_sec, src_sec):
             continue
         src_row, tgt_row = src_sec.grid_row, tgt_sec.grid_row
         # Only adjacent-row wraps centre in this gap; a multi-row crossing
@@ -760,11 +750,43 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
         per_gap[gap][edge.target].add(edge.line_id)
 
     offset_step = resolve_offset_step(graph.track_gap)
-    minimums: dict[tuple[int, int], float] = {}
-    for gap, ports in per_gap.items():
-        widest = max(len(lines) for lines in ports.values())
-        minimums[gap] = inter_row_wrap_band(widest, offset_step)
-    return minimums
+    return {
+        gap: inter_row_wrap_band(widest, offset_step)
+        for gap, widest in _widest_lines_per_gap(per_gap).items()
+    }
+
+
+def _entry_wrap_edges(
+    graph: MetroGraph, sides: tuple[PortSide, ...]
+) -> Iterator[tuple[Edge, Port, Section, Section]]:
+    """Yield ``(edge, port, src_sec, tgt_sec)`` for entry-port edges on *sides*.
+
+    Shared preamble of the inter-row-gap reservation passes: an edge into an
+    entry port whose side is in *sides*, with both its target section and its
+    source's section resolvable.
+    """
+    for edge in graph.edges:
+        port = graph.ports.get(edge.target)
+        if port is None or not port.is_entry or port.side not in sides:
+            continue
+        tgt_sec = graph.sections.get(port.section_id)
+        src = graph.stations.get(edge.source)
+        if tgt_sec is None or src is None:
+            continue
+        src_sec = resolve_section(graph, src)
+        if src_sec is None:
+            continue
+        yield edge, port, src_sec, tgt_sec
+
+
+def _widest_lines_per_gap(
+    per_gap: dict[tuple[int, int], dict[str, set[str]]],
+) -> dict[tuple[int, int], int]:
+    """Reduce a ``gap -> port -> line ids`` map to the widest line count per gap."""
+    return {
+        gap: max(len(lines) for lines in ports.values())
+        for gap, ports in per_gap.items()
+    }
 
 
 def _merge_trunk_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]:
@@ -823,10 +845,75 @@ def _inter_row_routing_minimums(graph: MetroGraph) -> dict[tuple[int, int], floa
     Both place a flush horizontal run in the gap; a pair claimed by both takes
     the wider reservation.
     """
-    minimums = dict(_wrap_bundle_row_minimums(graph))
+    wrap = _wrap_bundle_row_minimums(graph)
+    minimums = dict(wrap)
     for gap, band in _merge_trunk_row_minimums(graph).items():
         minimums[gap] = max(minimums.get(gap, 0.0), band)
+    # A same-row over-top wrap (a feed from a section to a horizontal-side entry
+    # of a same-row neighbour, looping over the neighbour's top) shares the gap
+    # above its row with any longer-haul through bundle already reserved there.
+    # The two must stack -- the wrap pinned near the row by its header clearance,
+    # the through bundle lifted above it -- so reserve their summed band.
+    offset_step = resolve_offset_step(graph.track_gap)
+    for gap, over_top_lines in _over_top_wrap_row_minimums(graph).items():
+        through_band = wrap.get(gap)
+        if through_band is None:
+            continue
+        # Stack the over-top wrap beneath the through bundle already reserved for
+        # the gap: add an inter-bundle separation, the wrap's own span, and a
+        # curve radius for the wrap's turn down into its port.
+        stacked = (
+            through_band
+            + BUNDLE_TO_BUNDLE_CLEARANCE
+            + max(over_top_lines - 1, 0) * offset_step
+            + CURVE_RADIUS
+        )
+        minimums[gap] = max(minimums.get(gap, 0.0), stacked)
     return minimums
+
+
+def _over_top_wrap_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], int]:
+    """Per gap-above-a-row, the widest same-row over-top wrap bundle it hosts.
+
+    A feed reaching a RIGHT entry from a same-row source to its left (or a LEFT
+    entry from a same-row source to its right) loops over the target's top,
+    placing a horizontal run in the gap *above* the target's row.  Returns, per
+    ``(row-1, row)`` gap, the line count of the widest such wrap, so the gap can
+    reserve room for it to stack above any through bundle.
+    """
+    per_gap: dict[tuple[int, int], dict[str, set[str]]] = defaultdict(
+        lambda: defaultdict(set)
+    )
+    for edge, port, src_sec, tgt_sec in _entry_wrap_edges(
+        graph, (PortSide.LEFT, PortSide.RIGHT)
+    ):
+        if src_sec.grid_row != tgt_sec.grid_row:
+            continue
+        src_left = _section_precedes(graph, src_sec, tgt_sec)
+        if port.side is PortSide.RIGHT and not src_left:
+            continue
+        if port.side is PortSide.LEFT and src_left:
+            continue
+        row = tgt_sec.grid_row
+        if row <= 0:
+            continue
+        per_gap[(row - 1, row)][edge.target].add(edge.line_id)
+    return _widest_lines_per_gap(per_gap)
+
+
+def _section_precedes(graph: MetroGraph, a: Section, b: Section) -> bool:
+    """Whether section *a* sits to the left of *b* along the flow axis.
+
+    Grid column orders sections in different cells; two sections packed into one
+    cell (:attr:`MetroGraph.cell_packs`) share a column, so their directive order
+    (earlier = left) breaks the tie.
+    """
+    if a.grid_col != b.grid_col:
+        return a.grid_col < b.grid_col
+    members = graph.cell_packs.get((a.grid_col, a.grid_row))
+    if members and a.id in members and b.id in members:
+        return members.index(a.id) < members.index(b.id)
+    return False
 
 
 def _bundles_in_gap(
