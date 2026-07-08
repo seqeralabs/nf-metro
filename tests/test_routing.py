@@ -432,9 +432,8 @@ def test_left_entry_from_above_avoids_canvas_bottom_dive(fixture):
 
     Its inter-section feed must never descend below the target section's own
     bottom edge -- the mirror of the RIGHT ``_route_right_entry_via_gap_above``
-    path.  Before the gap-above handler these feeds looped around below the
-    whole stack (:func:`_route_around_section_below`), dropping past the lowest
-    section to run the full width back.
+    path -- rather than looping around below the whole stack and running the
+    full width back into the port.
     """
     from nf_metro.parser.model import PortSide
 
