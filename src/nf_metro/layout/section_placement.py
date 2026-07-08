@@ -657,7 +657,7 @@ def _reserve_over_top_headroom(graph: MetroGraph) -> None:
             ssec = graph.sections.get(src_port.section_id) if src_port else None
             if ssec is None:
                 continue
-            if ssec.grid_row == psec.grid_row and ssec.grid_col < psec.grid_col:
+            if ssec.grid_row == psec.grid_row and _section_precedes(graph, ssec, psec):
                 if not section_exists_above_row(graph, psec.grid_row):
                     target_rows.add(psec.grid_row)
                 break
@@ -736,9 +736,9 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
         # a righthand column wraps; one reached from the left is a plain
         # L-shape drop and needs no widening (e.g. preprocessing -> a
         # column-1 section below it).  Mirror for RIGHT.
-        if port.side == PortSide.LEFT and src_sec.grid_col < tgt_sec.grid_col:
+        if port.side == PortSide.LEFT and _section_precedes(graph, src_sec, tgt_sec):
             continue
-        if port.side == PortSide.RIGHT and src_sec.grid_col > tgt_sec.grid_col:
+        if port.side == PortSide.RIGHT and _section_precedes(graph, tgt_sec, src_sec):
             continue
         src_row, tgt_row = src_sec.grid_row, tgt_sec.grid_row
         # Only adjacent-row wraps centre in this gap; a multi-row crossing
