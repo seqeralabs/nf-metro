@@ -1,0 +1,29 @@
+%%metro title: Left Entry From Above (Far Drop)
+%%metro style: nfcore
+%%metro line: a | A | #e63946
+%%metro grid: src | 2,0
+%%metro grid: mid | 1,1
+%%metro grid: tgt | 0,2
+
+graph LR
+    subgraph src [Source]
+        s1[Step 1]
+        s2[Step 2]
+        s1 -->|a| s2
+    end
+
+    subgraph mid [Middle Row]
+        m1[Process]
+        m2[Output]
+        m1 -->|a| m2
+    end
+
+    subgraph tgt [Target]
+        %%metro entry: left | a
+        t1[Process]
+        t2[Output]
+        t1 -->|a| t2
+    end
+
+    s2 -->|a| m1
+    s2 -->|a| t1

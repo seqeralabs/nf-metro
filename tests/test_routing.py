@@ -326,18 +326,18 @@ def test_l_shape_route_quadrant_symmetry():
 
 def test_around_section_below_dispatched_for_cross_row_left_entry():
     """The around-section-below handler must fire for a LEFT entry port
-    reached from the opposite-row source when the natural inter-row
-    channel would cut through an intervening section's bbox.
+    reached from an opposite-row source when the short band-above-target
+    approach is unusable because its descent would cut through a section.
 
-    Mirrors a row-0 source to lower-row LEFT-entry geometry: 3-row
-    layout with target in the bottom row, source in the top row to the
-    right of target, and an intervening section in the middle row whose
-    bbox falls in the inter-row channel's Y range.
+    A source stacked above a *wider* neighbour cannot drop into the band
+    abutting the target (the lead-out channel lands in the neighbour's
+    bbox), so ``_left_entry_gap_above_is_clear`` defers and the feed loops
+    around below the whole stack instead.
     """
     import nf_metro.layout.routing.inter_section_handlers as ish
 
     fixture = Path(__file__).parent.parent / "examples" / "topologies"
-    fixture = fixture / "around_section_below.mmd"
+    fixture = fixture / "corridor_narrow_gap_fallback.mmd"
     graph = parse_metro_mermaid(fixture.read_text())
     compute_layout(graph)
 
@@ -370,16 +370,16 @@ def test_around_section_below_dispatched_for_cross_row_left_entry():
 @pytest.mark.parametrize(
     ("fixture", "handler"),
     [
-        ("around_section_below.mmd", "_route_around_section_below"),
-        ("around_below_ep_col_gt0.mmd", "_route_around_section_below"),
+        ("around_section_below.mmd", "_route_left_entry_via_gap_above"),
+        ("around_below_ep_col_gt0.mmd", "_route_left_entry_via_gap_above"),
+        ("self_crossing_bridge.mmd", "_route_left_entry_via_gap_above"),
         ("corridor_narrow_gap_fallback.mmd", "_route_around_section_below"),
-        ("self_crossing_bridge.mmd", "_route_around_section_below"),
         ("genomic_pipeline.mmd", "_route_inter_row_gap_corridor"),
     ],
 )
 def test_around_and_corridor_routes_built_from_centreline(fixture, handler):
-    """The around-below and inter-row-corridor handlers route via the
-    centreline builder, so each is a 6-point loop with concentric, derived
+    """The gap-above, around-below and inter-row-corridor handlers route via
+    the centreline builder, so each is a 6-point loop with concentric, derived
     corner radii (never hand-rolled) and route_edges' always-on curve
     invariants stay green.
     """
@@ -415,3 +415,48 @@ def test_around_and_corridor_routes_built_from_centreline(fixture, handler):
         )
         assert all(c > 0 for c in r.curve_radii)
         assert r.offset_regime is OffsetRegime.BAKED
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "left_entry_from_above_far.mmd",
+        "around_section_below.mmd",
+        "around_below_ep_col_gt0.mmd",
+        "self_crossing_bridge.mmd",
+    ],
+)
+def test_left_entry_from_above_avoids_canvas_bottom_dive(fixture):
+    """A LEFT/far-side entry reached from a row above with a clear band above
+    the target takes the short inter-row approach, not a canvas-bottom wrap.
+
+    Its inter-section feed must never descend below the target section's own
+    bottom edge -- the mirror of the RIGHT ``_route_right_entry_via_gap_above``
+    path -- rather than looping around below the whole stack and running the
+    full width back into the port.
+    """
+    from nf_metro.parser.model import PortSide
+
+    path = Path(__file__).parent.parent / "examples" / "topologies" / fixture
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+    routes = route_edges(graph)
+
+    checked = 0
+    for r in routes:
+        port = graph.ports.get(r.edge.target)
+        if port is None or not port.is_entry or port.side is not PortSide.LEFT:
+            continue
+        src = graph.stations.get(r.edge.source)
+        tgt_sec = graph.sections.get(port.section_id)
+        if src is None or tgt_sec is None or src.y >= tgt_sec.bbox_y:
+            continue
+        bottom = tgt_sec.bbox_y + tgt_sec.bbox_h
+        max_y = max(p[1] for p in r.points)
+        assert max_y <= bottom + 1.0, (
+            f"{fixture}: feed {r.edge.source}->{r.edge.target} descends to "
+            f"y={max_y:.0f}, below target '{tgt_sec.id}' bottom {bottom:.0f} "
+            f"(canvas-bottom dive instead of the band-above approach)"
+        )
+        checked += 1
+    assert checked, f"{fixture}: no LEFT-entry-from-above feed exercised"

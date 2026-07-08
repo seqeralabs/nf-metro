@@ -741,12 +741,20 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
         if port.side == PortSide.RIGHT and _section_precedes(graph, tgt_sec, src_sec):
             continue
         src_row, tgt_row = src_sec.grid_row, tgt_sec.grid_row
-        # Only adjacent-row wraps centre in this gap; a multi-row crossing
-        # routes around intervening sections (``_route_around_section_below``)
-        # and is sized by that path, not by widening this gap.
-        if abs(src_row - tgt_row) != 1:
+        if abs(src_row - tgt_row) == 1:
+            # Adjacent-row wrap: the run centres in the gap this pair separates.
+            gap = (src_row, tgt_row) if tgt_row > src_row else (tgt_row, src_row)
+        elif port.side == PortSide.LEFT and src_row < tgt_row:
+            # A multi-row LEFT entry reached from a source ABOVE runs its long
+            # horizontal in the band abutting the target row
+            # (``_route_left_entry_via_gap_above``) when that band is clear;
+            # reserve room there so the band fits, else the feed falls to the
+            # canvas-bottom dive for want of a channel.
+            gap = (tgt_row - 1, tgt_row)
+        else:
+            # A multi-row crossing routed around below the stack
+            # (``_route_around_section_below``) is sized by that path.
             continue
-        gap = (src_row, tgt_row) if tgt_row > src_row else (tgt_row, src_row)
         per_gap[gap][edge.target].add(edge.line_id)
 
     offset_step = resolve_offset_step(graph.track_gap)

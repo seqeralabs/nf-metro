@@ -1160,9 +1160,10 @@ gallery:
     source_dir: examples/topologies
     category: Inter-section Routing
     description:
-      Cross-row route to a LEFT-entry target where the natural inter-row channel
-      would cut through an intervening section's bbox. Exercises `_route_around_section_below`
-      (collector-fan-in geometry).
+      "Cross-row route to a LEFT-entry target past an intervening section: the feed
+      runs its horizontal in the clear band abutting the target row and drops into the
+      LEFT port, rather than diving below the whole stack. Exercises
+      `_route_left_entry_via_gap_above` (collector-fan-in geometry)."
   - id: inter_row_wrap_clearance
     source_dir: examples/topologies
     category: Inter-section Routing
@@ -1222,8 +1223,9 @@ gallery:
     source_dir: examples/topologies
     category: Inter-section Routing
     description:
-      A two-line bundle looping around below the canvas into a non-zero-column LEFT-entry
-      target, past an intervening middle-row section that blocks the direct wrap.
+      "A two-line bundle reaching a non-zero-column LEFT-entry target past an intervening
+      middle-row section: it runs the band above the target row and drops into the LEFT
+      port from its outward side rather than looping below the canvas."
   - id: stacked_left_exit_drop
     source_dir: examples/topologies
     category: Inter-section Routing
@@ -1247,6 +1249,14 @@ gallery:
       "A RIGHT entry fed from two rows up, past the target's right edge: the line
       drops straight down its outward side across the empty intervening row to the entry Y and
       turns in, rather than diving below the box and climbing back up (#889)."
+  - id: left_entry_from_above_far
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A LEFT/far-side entry fed from a row above, past an intervening middle-row
+      section: the mirror of the RIGHT gap-above path. The feed runs its horizontal in the
+      clear band abutting the target row and drops down the target's LEFT side into the port,
+      rather than diving to the canvas bottom and running the full width back (#1394)."
   - id: route_around_intervening
     source_dir: examples/topologies
     category: Inter-section Routing

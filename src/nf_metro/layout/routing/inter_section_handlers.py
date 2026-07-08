@@ -909,6 +909,19 @@ def _route_left_entry_family(f: _InterFacts) -> RoutedPath | None:
     if _h_segment_crosses_other_section(graph, f.sx, f.tx, wrap_hy, exclude):
         if _corridor_is_viable(ctx, src, tgt):
             return _route_inter_row_gap_corridor(edge, src, tgt, tgt, f.i, f.n, ctx)
+        # A source a row (or more) ABOVE the target reaches its LEFT port via the
+        # clear band abutting the target row -- a short left-approach mirroring
+        # the RIGHT-entry gap-above path -- rather than diving to the canvas
+        # bottom and running the full width back.
+        if (
+            f.src_row is not None
+            and f.tgt_row is not None
+            and f.src_row < f.tgt_row
+            and _left_entry_gap_above_is_clear(f)
+        ):
+            return _route_left_entry_via_gap_above(
+                edge, src, tgt, f.i, f.n, ctx, f.tgt_row
+            )
         return _route_around_section_below(edge, src, tgt, tgt, f.i, f.n, ctx)
     return _route_left_entry_wrap(edge, src, tgt, f.i, f.n, ctx)
 
@@ -3627,9 +3640,7 @@ def _route_right_entry_wrap(
     return route
 
 
-def _right_entry_gap_above_target_y(
-    graph: MetroGraph, tgt_row: int
-) -> tuple[float, float]:
+def _gap_above_target_y(graph: MetroGraph, tgt_row: int) -> tuple[float, float]:
     """Return ``(gap_top, gap_bottom)`` of the inter-row band ABOVE *tgt_row*.
 
     The band sits between the row above the target's bottom edge and the
@@ -3664,7 +3675,7 @@ def _right_entry_gap_above_is_clear(
     header badge, and the horizontal at the band's centre crosses no section
     interior between the source and the target's right edge.
     """
-    gap_top, gap_bottom = _right_entry_gap_above_target_y(graph, tgt_row)
+    gap_top, gap_bottom = _gap_above_target_y(graph, tgt_row)
     if gap_bottom <= gap_top:
         return False
     # A band too narrow for both clearances makes the centred run graze the
@@ -3788,7 +3799,7 @@ def _route_right_entry_via_gap_above(
     outward side), and the horizontal never crosses a section interior
     (guaranteed by :func:`_right_entry_gap_above_is_clear` at the call site).
     """
-    gap_top, gap_bottom = _right_entry_gap_above_target_y(ctx.graph, tgt_row)
+    gap_top, gap_bottom = _gap_above_target_y(ctx.graph, tgt_row)
     channel_y_base = _center_inter_row_channel(gap_top, gap_bottom)
     # When two or more distinct lines converge into this one RIGHT entry port,
     # each independently picks the same descent X just right of the target
@@ -3807,6 +3818,89 @@ def _route_right_entry_via_gap_above(
         channel_y_base,
         normalize_exempt=not converging,
     )
+
+
+def _left_entry_gap_above_is_clear(f: _InterFacts) -> bool:
+    """Whether a LEFT-entry feed from above can use the inter-row gap.
+
+    The mirror of :func:`_right_entry_gap_above_is_clear`.  The route leads out
+    right of the source, drops into the band just above the target row, runs
+    LEFTWARD along it, then drops down the LEFT (outward) side of the target
+    column into the port.  Viable only when that band genuinely exists, is wide
+    enough to clear both the upper row's bottom edge and the target row's header
+    badge, and none of the three moving legs crosses another section interior:
+    the source-side descent (a source stacked above a *wider* neighbour would
+    drop into it), the band traverse, and the target-side descent.
+    """
+    graph, src, tgt, ctx = f.graph, f.src, f.tgt, f.ctx
+    assert f.tgt_row is not None
+    gap_top, gap_bottom = _gap_above_target_y(graph, f.tgt_row)
+    if gap_bottom <= gap_top:
+        return False
+    if not _inter_row_band_fits(gap_top, gap_bottom):
+        return False
+    gy = _center_inter_row_channel(gap_top, gap_bottom)
+    _fan, pos_n, _delta, corner_x = _wrap_fan_geometry(
+        ctx, f.edge, src, f.i, f.n, Direction.D
+    )
+    vx = _left_entry_descent_x(ctx, tgt.x, pos_n)
+    exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
+    if _v_segment_crosses_other_section(graph, corner_x, src.y, gy, exclude):
+        return False
+    if _v_segment_crosses_other_section(graph, vx, gy, tgt.y, exclude):
+        return False
+    return not _h_segment_crosses_other_section(graph, vx, src.x, gy, exclude)
+
+
+def _route_left_entry_via_gap_above(
+    edge: Edge,
+    src: Station,
+    tgt: Station,
+    i: int,
+    n: int,
+    ctx: _RoutingCtx,
+    tgt_row: int,
+) -> RoutedPath:
+    """Route to a LEFT entry port via the inter-row gap ABOVE the target row.
+
+    The mirror of :func:`_route_right_entry_via_gap_above`.  Used when the
+    source sits in a row ABOVE the target and an intervening row blocks the
+    source-adjacent wrap band: going AROUND BELOW the whole stack
+    (:func:`_route_around_section_below`) dives to the canvas bottom and runs
+    the full width back.  Instead run the long horizontal LEFTWARD in the clear
+    band abutting the target row, then drop down the LEFT side of the target
+    column into the LEFT entry port from its own outward side::
+
+        (sx, sy)        -> H lead-in right out of the source
+        (corner_x, sy)  ; turn down
+        (corner_x, gy)  -> V down into the inter-row gap above the target
+        (vx, gy)        -> H left past the target's left edge
+        (vx, ey)        -> V down to the entry Y
+        (ex, ey)        -> H right into the LEFT entry port
+
+    The R-D-L-D-R loop is the same shape as :func:`_route_left_entry_wrap`; only
+    the horizontal channel Y differs (the band above the target row rather than
+    the band below the source).  The horizontal never crosses a section interior
+    (guaranteed by :func:`_left_entry_gap_above_is_clear` at the call site).
+    """
+    gap_top, gap_bottom = _gap_above_target_y(ctx.graph, tgt_row)
+    channel_y_base = _center_inter_row_channel(gap_top, gap_bottom)
+    _fan, pos_n, delta, corner_x = _wrap_fan_geometry(ctx, edge, src, i, n, Direction.D)
+    vx = _left_entry_descent_x(ctx, tgt.x, pos_n)
+    route = _route_entry_wrap(
+        edge,
+        src,
+        tgt,
+        ctx,
+        pos_n=pos_n,
+        delta=delta,
+        corner_x=corner_x,
+        channel_y=channel_y_base,
+        descent_x=vx,
+        entry_side=PortSide.LEFT,
+    )
+    _declare_channel(route, ctx, vx, vertical_direction(tgt.y - channel_y_base))
+    return route
 
 
 def _route_right_entry_around_below(
