@@ -709,6 +709,12 @@ class MetroGraph:
         """
         return bool(self.edges_to(station_id)) and bool(self.edges_from(station_id))
 
+    def is_fanout_junction(self, station_id: str) -> bool:
+        """A junction that diverges to more than one downstream target."""
+        if station_id not in self.junction_ids:
+            return False
+        return len({e.target for e in self.edges_from(station_id)}) > 1
+
     def line_stations(self, line_id: str) -> list[str]:
         """Return station IDs on a line, in edge order."""
         stations = []

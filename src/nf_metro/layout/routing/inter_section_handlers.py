@@ -923,7 +923,7 @@ def _route_left_entry_family(f: _InterFacts) -> RoutedPath | None:
             # descent column between the two bands rather than diving to the
             # canvas bottom.
             if _left_entry_band_hop_is_clear(f):
-                return _route_left_entry_via_band_hop(edge, src, tgt, f.i, f.n, ctx, f)
+                return _route_left_entry_via_band_hop(f)
         return _route_around_section_below(edge, src, tgt, tgt, f.i, f.n, ctx)
     return _route_left_entry_wrap(edge, src, tgt, f.i, f.n, ctx)
 
@@ -3905,29 +3905,18 @@ def _route_left_entry_via_gap_above(
     return route
 
 
-def _source_is_fanout_junction(f: _InterFacts) -> bool:
-    """Whether the edge's source is a junction that fans out to >1 target.
-
-    The band-hop only rescues the divergent branch of a straddling fan-out; a
-    plain cross-row feed (source is an exit port) keeps the around-below dive.
-    """
-    src_id = f.edge.source
-    if src_id not in f.graph.junctions:
-        return False
-    return len({e.target for e in f.graph.edges_from(src_id)}) > 1
-
-
 def _band_hop_geometry(
     f: _InterFacts,
-) -> tuple[float, float, float, float] | None:
-    """Resolve a LEFT-entry band-hop's two channels and clear descent column.
+) -> tuple[float, float, float, float, int, float] | None:
+    """Resolve a LEFT-entry band-hop's two channels, descent column, and fan.
 
-    Returns ``(band0_y, band1_y, corner_x, vx)`` -- the Y of the band just
-    below the source row, the Y of the band just above the target row, the X of
-    a descent column clear through every row between them, and the target-side
-    descent X -- or ``None`` when either band is missing/too narrow, the two
-    bands are not separated by an intervening row, or no clear descent column
-    exists left of the source within the trap.
+    Returns ``(band0_y, band1_y, corner_x, vx, pos_n, delta)`` -- the Y of the
+    band just below the source row, the Y of the band just above the target
+    row, the X of a descent column clear through every row between them, the
+    target-side descent X, and the source fan's bundle size and this line's
+    lateral offset -- or ``None`` when either band is missing/too narrow, the
+    two bands are not separated by an intervening row, or no clear descent
+    column exists left of the source within the trap.
     """
     graph, src, tgt, ctx = f.graph, f.src, f.tgt, f.ctx
     assert f.src_row is not None and f.tgt_row is not None
@@ -3954,11 +3943,11 @@ def _band_hop_geometry(
     )
     if _v_segment_crosses_other_section(graph, corner_x, band0_y, band1_y, exclude):
         return None
-    _fan, pos_n, _delta, _cx = _wrap_fan_geometry(
+    _fan, pos_n, delta, _cx = _wrap_fan_geometry(
         ctx, f.edge, src, f.i, f.n, Direction.D
     )
     vx = _left_entry_descent_x(ctx, tgt.x, pos_n)
-    return band0_y, band1_y, corner_x, vx
+    return band0_y, band1_y, corner_x, vx, pos_n, delta
 
 
 def _left_entry_band_hop_is_clear(f: _InterFacts) -> bool:
@@ -3978,12 +3967,12 @@ def _left_entry_band_hop_is_clear(f: _InterFacts) -> bool:
     band0 traverse, the clear-column descent, the band1 traverse, the
     target-side descent -- crosses a section.
     """
-    if not _source_is_fanout_junction(f):
+    if not f.graph.is_fanout_junction(f.edge.source):
         return False
     geom = _band_hop_geometry(f)
     if geom is None:
         return False
-    band0_y, band1_y, corner_x, vx = geom
+    band0_y, band1_y, corner_x, vx, _pos_n, _delta = geom
     graph, src, tgt = f.graph, f.src, f.tgt
     exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
     if _v_segment_crosses_other_section(graph, src.x, src.y, band0_y, exclude):
@@ -3995,15 +3984,7 @@ def _left_entry_band_hop_is_clear(f: _InterFacts) -> bool:
     return not _v_segment_crosses_other_section(graph, vx, band1_y, tgt.y, exclude)
 
 
-def _route_left_entry_via_band_hop(
-    edge: Edge,
-    src: Station,
-    tgt: Station,
-    i: int,
-    n: int,
-    ctx: _RoutingCtx,
-    f: _InterFacts,
-) -> RoutedPath:
+def _route_left_entry_via_band_hop(f: _InterFacts) -> RoutedPath:
     """Route a boxed-in fan branch to a LEFT entry by hopping two inter-row bands.
 
     The divergent branch of a straddling fan-out cannot descend at the trapped
@@ -4026,10 +4007,10 @@ def _route_left_entry_via_band_hop(
     :func:`_band_hop_geometry` (guaranteed non-None by
     :func:`_left_entry_band_hop_is_clear` at the call site).
     """
+    edge, src, tgt, ctx = f.edge, f.src, f.tgt, f.ctx
     geom = _band_hop_geometry(f)
     assert geom is not None
-    band0_y, band1_y, corner_x, vx = geom
-    _fan, pos_n, delta, _cx = _wrap_fan_geometry(ctx, edge, src, i, n, Direction.D)
+    band0_y, band1_y, corner_x, vx, pos_n, delta = geom
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
     ex, ey = tgt.x, tgt.y
