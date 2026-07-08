@@ -826,7 +826,83 @@ def _inter_row_routing_minimums(graph: MetroGraph) -> dict[tuple[int, int], floa
     minimums = dict(_wrap_bundle_row_minimums(graph))
     for gap, band in _merge_trunk_row_minimums(graph).items():
         minimums[gap] = max(minimums.get(gap, 0.0), band)
+    # A same-row over-top wrap (a feed from a section to a horizontal-side entry
+    # of a same-row neighbour, looping over the neighbour's top) shares the gap
+    # above its row with any longer-haul through bundle already reserved there.
+    # The two must stack -- the wrap pinned near the row by its header clearance,
+    # the through bundle lifted above it -- so reserve their summed band.
+    offset_step = resolve_offset_step(graph.track_gap)
+    through = _wrap_bundle_row_minimums(graph)
+    for gap, over_top_lines in _over_top_wrap_row_minimums(graph).items():
+        through_band = through.get(gap)
+        if through_band is None:
+            continue
+        # Stack the over-top wrap beneath the through bundle already reserved for
+        # the gap: add an inter-bundle separation, the wrap's own span, and a
+        # curve radius for the wrap's turn down into its port.
+        stacked = (
+            through_band
+            + BUNDLE_TO_BUNDLE_CLEARANCE
+            + max(over_top_lines - 1, 0) * offset_step
+            + CURVE_RADIUS
+        )
+        minimums[gap] = max(minimums.get(gap, 0.0), stacked)
     return minimums
+
+
+def _over_top_wrap_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], int]:
+    """Per gap-above-a-row, the widest same-row over-top wrap bundle it hosts.
+
+    A feed reaching a RIGHT entry from a same-row source to its left (or a LEFT
+    entry from a same-row source to its right) loops over the target's top,
+    placing a horizontal run in the gap *above* the target's row.  Returns, per
+    ``(row-1, row)`` gap, the line count of the widest such wrap, so the gap can
+    reserve room for it to stack above any through bundle.
+    """
+    per_gap: dict[tuple[int, int], dict[str, set[str]]] = defaultdict(
+        lambda: defaultdict(set)
+    )
+    for edge in graph.edges:
+        port = graph.ports.get(edge.target)
+        if port is None or not port.is_entry:
+            continue
+        if port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        tgt_sec = graph.sections.get(port.section_id)
+        src = graph.stations.get(edge.source)
+        if tgt_sec is None or src is None:
+            continue
+        src_sec = resolve_section(graph, src)
+        if src_sec is None or src_sec.grid_row != tgt_sec.grid_row:
+            continue
+        src_left = _section_precedes(graph, src_sec, tgt_sec)
+        if port.side is PortSide.RIGHT and not src_left:
+            continue
+        if port.side is PortSide.LEFT and src_left:
+            continue
+        row = tgt_sec.grid_row
+        if row <= 0:
+            continue
+        per_gap[(row - 1, row)][edge.target].add(edge.line_id)
+    return {
+        gap: max(len(lines) for lines in ports.values())
+        for gap, ports in per_gap.items()
+    }
+
+
+def _section_precedes(graph: MetroGraph, a: Section, b: Section) -> bool:
+    """Whether section *a* sits to the left of *b* along the flow axis.
+
+    Grid column orders sections in different cells; two sections packed into one
+    cell (:attr:`MetroGraph.cell_packs`) share a column, so their directive order
+    (earlier = left) breaks the tie.
+    """
+    if a.grid_col != b.grid_col:
+        return a.grid_col < b.grid_col
+    members = graph.cell_packs.get((a.grid_col, a.grid_row))
+    if members and a.id in members and b.id in members:
+        return members.index(a.id) < members.index(b.id)
+    return False
 
 
 def _bundles_in_gap(

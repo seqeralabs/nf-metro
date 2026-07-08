@@ -13,6 +13,7 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
     EDGE_TO_BUNDLE_CLEARANCE,
+    INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MIN_CORRIDOR_Y_OVERLAP,
     NEXT_ROW_HEADER_BADGE_CLEARANCE,
@@ -655,6 +656,97 @@ def _stack_distinct_port_descents(
         for ch in by_line[lid]:
             if abs(ch.x - x) > COORD_TOLERANCE:
                 _set_vchannel_x(ch, x)
+
+
+def _nest_bypass_above_over_top_wrap(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Lift a cross-row inter-row bypass above a same-row over-top wrap it crosses.
+
+    A line reaching the RIGHT-side entry port of a same-row neighbour must loop
+    over that neighbour's top -- an over-top *wrap* whose peak is pinned deep in
+    the inter-row gap by the neighbour's header clearance.  A longer-haul bypass
+    crossing the same gap between two rows centres its channel lower (nearer the
+    row), so its horizontal traverse runs *below* the wrap's peak and the wrap's
+    riser crosses it.  The through bypass logically belongs further up the gap:
+    lift its traverse (and the risers feeding it) above the wrap's peak so the
+    local wrap nests beneath the through route rather than crossing it.
+
+    A wrap is an inter-section route with both endpoints below the gap (same
+    row) and a horizontal leg inside it; a through route crosses the gap (one
+    endpoint above, one below).  The whole crossing through-bundle is lifted by
+    one delta so its per-line stagger is preserved.
+    """
+    for _upper, gap_top, gap_bottom in iter_inter_row_gaps(ctx.graph):
+        wrap_peaks: list[tuple[float, float, float]] = []
+        through_legs: list[tuple[RoutedPath, int, float, float, float]] = []
+        for r in routes:
+            span = _route_gap_span(ctx.graph, r, gap_top, gap_bottom)
+            if span is None:
+                continue
+            is_wrap, is_through = span
+            for k in range(len(r.points) - 1):
+                (x1, y1), (x2, y2) = r.points[k], r.points[k + 1]
+                if abs(y1 - y2) > COORD_TOLERANCE:
+                    continue
+                if not gap_top - COORD_TOLERANCE <= y1 <= gap_bottom + COORD_TOLERANCE:
+                    continue
+                lo, hi = min(x1, x2), max(x1, x2)
+                if is_wrap:
+                    wrap_peaks.append((y1, lo, hi))
+                elif is_through:
+                    through_legs.append((r, k, y1, lo, hi))
+        if not wrap_peaks or not through_legs:
+            continue
+        crossing: list[tuple[RoutedPath, int, float]] = []
+        for r, k, y, lo, hi in through_legs:
+            if any(
+                wlo < hi and lo < whi and wy <= y + COORD_TOLERANCE
+                for wy, wlo, whi in wrap_peaks
+            ):
+                crossing.append((r, k, y))
+        if not crossing:
+            continue
+        # Lift the whole crossing bundle by one delta so its stagger survives:
+        # seat its deepest (largest-Y) leg the edge clearance below the upper
+        # row, the deepest lane clear of that row.  Placement reserves a gap
+        # wide enough (see ``_inter_row_routing_minimums``) that this lane sits
+        # above the wrap's peak, so the local wrap nests beneath the bundle.
+        target = gap_top + INTER_ROW_EDGE_CLEARANCE
+        max_leg_y = max(y for _r, _k, y in crossing)
+        delta = min(target - max_leg_y, 0.0)
+        if abs(delta) <= COORD_TOLERANCE:
+            continue
+        for r, k, _y in crossing:
+            r.points = [
+                (x, y + delta) if i in (k, k + 1) else (x, y)
+                for i, (x, y) in enumerate(r.points)
+            ]
+
+
+def _route_gap_span(
+    graph: MetroGraph, r: RoutedPath, gap_top: float, gap_bottom: float
+) -> tuple[bool, bool] | None:
+    """Classify *r* relative to an inter-row gap: ``(is_wrap, is_through)``.
+
+    A wrap has both port endpoints below the gap (a same-row over-top loop); a
+    through route has one endpoint above and one below (it crosses the gap).
+    Returns ``None`` for non-inter-section routes or ones that touch neither
+    side, so the caller skips them.
+    """
+    if not r.is_inter_section:
+        return None
+    src = graph.stations.get(r.edge.source)
+    tgt = graph.stations.get(r.edge.target)
+    if src is None or tgt is None:
+        return None
+    below = lambda y: y > gap_bottom - COORD_TOLERANCE  # noqa: E731
+    above = lambda y: y < gap_top + COORD_TOLERANCE  # noqa: E731
+    is_wrap = below(src.y) and below(tgt.y)
+    is_through = (above(src.y) and below(tgt.y)) or (below(src.y) and above(tgt.y))
+    if not (is_wrap or is_through):
+        return None
+    return is_wrap, is_through
 
 
 def _band_clusters(chans: list[_VChannel], band: float) -> list[list[_VChannel]]:

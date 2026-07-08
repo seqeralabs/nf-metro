@@ -1,7 +1,7 @@
 {
   "raised": [
     "PhaseInvariantError",
-    "after Stage 6.9: station 'bb0' marker bbox (x=1834.0, y=489.0..499.0, half_h=5.0) outside section 'branch_b' bbox (1472.0, 524.0, w=412.0, h=240.0)"
+    "after Stage 6.9: station 'bb0' marker bbox (x=1834.0, y=511.0..521.0, half_h=5.0) outside section 'branch_b' bbox (1472.0, 546.0, w=412.0, h=240.0)"
   ],
   "trace": [
     "_guard_no_same_row_backward_feed|None",

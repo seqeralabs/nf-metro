@@ -84,6 +84,7 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _inter_row_gap_band,
     _materialize_gap_slots,
     _materialize_trunk_slots,
+    _nest_bypass_above_over_top_wrap,
     _plan_trunk_band,
     _reconcile_port_peeloff_risers,
     _restack_channel,
@@ -217,6 +218,10 @@ def _route_edges(
     # Distinct-line counterpart: spread any two different lines whose final port
     # descents were forced onto one channel (a shared gap left of a wide target).
     _stagger_convergent_distinct_lines(routes, ctx)
+    # A same-row over-top wrap to a RIGHT entry is pinned deep in the inter-row
+    # gap by the target's header clearance; lift any longer-haul cross-row bypass
+    # sharing that gap above the wrap's peak so the local wrap nests beneath it.
+    _nest_bypass_above_over_top_wrap(routes, ctx)
     _clear_bypass_v_label_strikes(routes, ctx)
     # Same-line legs a coincidence pass fused onto one channel each kept their
     # handler's corner radius; unify every turn they share so the fused stroke
