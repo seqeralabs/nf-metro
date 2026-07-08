@@ -207,6 +207,7 @@
   "normalize.py::if len(slots) < 2 or len(slots) > _MAX_BAND_PERMUTE:::#1",
   "normalize.py::if len(trunks) < 2:::#1",
   "normalize.py::if len({id(t.route) for t in grp}) < 2:::#2",
+  "normalize.py::if min(ch.y_hi, bottom) - max(ch.y_lo, top) > COORD_TOLERANCE:::#1",
   "normalize.py::if not 0 <= far < len(pts):::#1",
   "normalize.py::if not any(not t.route.normalize_exempt for t in grp):::#2",
   "normalize.py::if not crossing:::#1",

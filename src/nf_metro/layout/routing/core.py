@@ -69,6 +69,7 @@ from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
 )
 from nf_metro.layout.routing.normalize import (  # noqa: F401
     _band_order_crossings,
+    _bundle_divergent_distinct_descents,
     _clamp_inter_row_band_top,
     _clear_channel_x_in_band,
     _coincide_same_line_tracks,
@@ -211,6 +212,10 @@ def _route_edges(
     # port-side track, the source-side track, the merge trunk's descent, and
     # the fan-out junction handoff tail), so a single line reads as one stroke.
     _coincide_same_line_tracks(routes, ctx)
+    # Distinct lines fanning out from one source leave the section as one bundle;
+    # keep their opening descents one step apart until each turns off, rather
+    # than on independent channels that read as separate strokes from the start.
+    _bundle_divergent_distinct_descents(routes, ctx)
     # A perpendicular branch dropped directly off a horizontal fan-out junction
     # trunk peels off at a hard 90; give its departure a lead-in so the corner
     # curves. Runs after coincidence settles the drop's port column.

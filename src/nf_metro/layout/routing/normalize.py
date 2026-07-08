@@ -905,6 +905,96 @@ def _divergent_source_groups(routes: list[RoutedPath]) -> list[_Coincidence]:
     return groups
 
 
+def _bundle_divergent_distinct_descents(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Bundle distinct-line opening descents leaving one source until they fork.
+
+    The distinct-line counterpart to the divergent group in
+    :func:`_coincide_same_line_tracks`: several lines fanning out from one
+    source leave the section together and read as one bundle, so they should
+    descend on adjacent tracks and split only where each turns off.  Handlers
+    route each branch independently, so distinct lines open on their own
+    channels several px apart -- reading as separate strokes from the junction.
+
+    Re-seat each such group one ``OFFSET_STEP`` apart on the corridor nearest
+    the source, ordered so a branch sits on the side it later turns toward (a
+    left-turning branch to the left, ordered outermost by the earliest turn), so
+    a branch peeling off never crosses a sibling still descending.  Only groups
+    already spread wider than a tight bundle move; same-line groups are handled
+    by the coincidence pass and skipped here.
+    """
+    by_source: dict[tuple[str, bool], list[_VChannel]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        ch = _initial_fanout_descent(rp)
+        if ch is not None:
+            by_source[(rp.edge.source, ch.down)].append(ch)
+
+    step = ctx.offset_step
+    for chans in by_source.values():
+        if len({c.route.line_id for c in chans}) < 2:
+            continue
+        xs = [c.x for c in chans]
+        if max(xs) - min(xs) <= step * (len(chans) - 1) + COORD_TOLERANCE:
+            continue
+
+        def _turn(ch: _VChannel) -> tuple[int, float]:
+            pts = ch.route.points
+            j = ch.idx + 1
+            dx = pts[j + 1][0] - pts[j][0] if j + 1 < len(pts) else 0.0
+            direction = (
+                -1 if dx < -COORD_TOLERANCE else (1 if dx > COORD_TOLERANCE else 0)
+            )
+            return direction, pts[j][1]
+
+        def _order_key(ch: _VChannel) -> tuple[int, float]:
+            direction, turn_y = _turn(ch)
+            # Left-turners (and straight drops) rank by turn-Y ascending so the
+            # earliest turn sits outermost-left; right-turners mirror it.
+            return (direction, turn_y if direction <= 0 else -turn_y)
+
+        base = min(xs)
+        moves = [
+            (ch, base + rank * step)
+            for rank, ch in enumerate(sorted(chans, key=_order_key))
+        ]
+        # Never re-seat a descent into a section it does not belong to; leave the
+        # whole group on its handler channels if any target column is obstructed.
+        if any(
+            _descent_crosses_section(ctx.graph, ch, target_x) for ch, target_x in moves
+        ):
+            continue
+        for ch, target_x in moves:
+            if abs(ch.x - target_x) > COORD_TOLERANCE:
+                _set_vchannel_x(ch, target_x)
+
+
+def _descent_crosses_section(graph: MetroGraph, ch: _VChannel, x: float) -> bool:
+    """Whether *ch*'s vertical span at *x* would cross a foreign section box.
+
+    Sections at either end of the channel's route are exempt (the descent
+    legitimately meets its own endpoints); any other section box the column *x*
+    pierces over the descent's Y span makes the seat unsafe.
+    """
+    own = {
+        graph.section_for_station(ep)
+        for ep in (ch.route.edge.source, ch.route.edge.target)
+    }
+    for sec in graph.sections.values():
+        if sec.id in own:
+            continue
+        if not (
+            sec.bbox_x - COORD_TOLERANCE < x < sec.bbox_x + sec.bbox_w + COORD_TOLERANCE
+        ):
+            continue
+        top, bottom = sec.bbox_y, sec.bbox_y + sec.bbox_h
+        if min(ch.y_hi, bottom) - max(ch.y_lo, top) > COORD_TOLERANCE:
+            return True
+    return False
+
+
 def _merge_feeder_groups(
     routes: list[RoutedPath], ctx: _RoutingCtx
 ) -> list[_Coincidence]:

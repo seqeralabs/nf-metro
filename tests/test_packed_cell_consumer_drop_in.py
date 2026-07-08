@@ -155,3 +155,26 @@ def test_intra_row_wrap_nests_under_inter_row_bypass() -> None:
         f"bypass top lane y={bypass_top:.1f} does not sit above the wrap peak "
         f"y={wrap_peak:.1f}"
     )
+
+
+def test_junction_feeds_descend_as_one_bundle() -> None:
+    """The two lines leaving the junction descend together, not on split channels.
+
+    ``main`` (to the packed member) and ``alt`` (to its cell-mate) fan out from
+    one junction; they leave the section as one bundle and should descend on
+    adjacent tracks, splitting only where ``alt`` turns off - not open on
+    independent channels several px apart.
+    """
+    from nf_metro.layout.constants import OFFSET_STEP
+
+    graph = _layout()
+    junction_feeds = [
+        rp
+        for rp in _routes(graph)
+        if rp.is_inter_section and rp.edge.source in graph.junctions
+    ]
+    descent_x = {rp.line_id: rp.points[1][0] for rp in junction_feeds}
+    assert {"main", "alt"} <= descent_x.keys(), "expected main and alt junction feeds"
+    assert abs(descent_x["main"] - descent_x["alt"]) <= OFFSET_STEP + TOL, (
+        f"junction feeds descend on split channels {descent_x}, not one bundle"
+    )
