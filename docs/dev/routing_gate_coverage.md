@@ -238,14 +238,14 @@ Gates with an un-exercised arm:
 | 3840 | `if gap_bottom <= gap_top:` | `->L3841` |  |
 | 3842 | `if not _inter_row_band_fits(gap_top, gap_bottom):` | `->L3843` |  |
 | 3852 | `if _v_segment_crosses_other_section(graph, vx, gy, tgt.y, exclude):` | `->L3853` |  |
-| 3939 | `if band0_bottom <= band0_top or not _inter_row_band_fits(band0_top, band0_bottom):` | `->L3940` |  |
-| 3941 | `if band1_bottom <= band1_top or not _inter_row_band_fits(band1_top, band1_bottom):` | `->L3942` |  |
-| 3943 | `if band1_top <= band0_bottom + COORD_TOLERANCE:` | `->L3944` |  |
-| 3955 | `if _v_segment_crosses_other_section(graph, corner_x, band0_y, band1_y, exclude):` | `->L3956` |  |
-| 3982 | `if geom is None:` | `->L3983` |  |
-| 3987 | `if _v_segment_crosses_other_section(graph, src.x, src.y, band0_y, exclude):` | `->L3988` |  |
-| 3989 | `if _h_segment_crosses_other_section(graph, src.x, corner_x, band0_y, exclude):` | `->L3990` |  |
-| 3991 | `if _h_segment_crosses_other_section(graph, corner_x, vx, band1_y, exclude):` | `->L3992` |  |
+| 3942 | `if band0_bottom <= band0_top or not _inter_row_band_fits(band0_top, band0_bottom):` | `->L3943` |  |
+| 3944 | `if band1_bottom <= band1_top or not _inter_row_band_fits(band1_top, band1_bottom):` | `->L3945` |  |
+| 3946 | `if band1_top <= band0_bottom + COORD_TOLERANCE:` | `->L3947` |  |
+| 3958 | `if _v_segment_crosses_other_section(graph, corner_x, band0_y, band1_y, exclude):` | `->L3959` |  |
+| 3988 | `if geom is None:` | `->L3989` |  |
+| 3993 | `if _v_segment_crosses_other_section(graph, src.x, src.y, band0_y, exclude):` | `->L3994` |  |
+| 3995 | `if _h_segment_crosses_other_section(graph, src.x, corner_x, band0_y, exclude):` | `->L3996` |  |
+| 3997 | `if _h_segment_crosses_other_section(graph, corner_x, vx, band1_y, exclude):` | `->L3998` |  |
 
 ## `intra_handlers.py`
 

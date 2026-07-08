@@ -751,12 +751,14 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
             # reserve room there so the band fits, else the feed falls to the
             # canvas-bottom dive for want of a channel.
             gap = (tgt_row - 1, tgt_row)
-            # A boxed-in fan-out junction can't descend at its own trapped
-            # column, so its divergent branch first hops the band just below the
-            # source row across to a clear column
+            # A fan-out junction boxed in by a packed cell-mate can't descend at
+            # its own trapped column, so its divergent branch first hops the band
+            # just below the source row across to a clear column
             # (``_route_left_entry_via_band_hop``); reserve that band too, sized
             # for the whole fan whose stagger the lone descender rides.
-            if graph.is_fanout_junction(edge.source):
+            if graph.is_fanout_junction(edge.source) and graph.is_packed_section(
+                src_sec.id
+            ):
                 fan_lines = {e.line_id for e in graph.edges_from(edge.source)}
                 per_gap[(src_row, src_row + 1)][edge.target].update(fan_lines)
         else:

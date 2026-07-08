@@ -3905,6 +3905,20 @@ def _route_left_entry_via_gap_above(
     return route
 
 
+def _source_is_boxed_fanout_junction(f: _InterFacts) -> bool:
+    """Whether the edge's source is a fan-out junction boxed by a packed cell-mate.
+
+    The band-hop only rescues a straddling fan-out whose exit-side cell-mate
+    traps it; a plain fan-out (no pack) reaches its clear column via the
+    gap-above path or the around-below dive.
+    """
+    graph = f.graph
+    if not graph.is_fanout_junction(f.edge.source):
+        return False
+    src_section = resolve_section(graph, f.src)
+    return src_section is not None and graph.is_packed_section(src_section.id)
+
+
 def _band_hop_geometry(
     f: _InterFacts,
 ) -> tuple[float, float, float, float, int, float] | None:
@@ -3961,13 +3975,14 @@ def _left_entry_band_hop_is_clear(f: _InterFacts) -> bool:
     gap, descends there into the band above the target row, then drops down the
     target's left side into the port.
 
-    Viable only when the source is a boxed-in fan-out junction (a plain
-    cross-row feed dives via around-below instead), :func:`_band_hop_geometry`
-    resolves, and none of the moving legs -- the source drop into band0, the
-    band0 traverse, the clear-column descent, the band1 traverse, the
-    target-side descent -- crosses a section.
+    Viable only when the source is a fan-out junction boxed in by a packed
+    cell-mate (a plain cross-row fan reaches its clear column via the gap-above
+    path or the around-below dive instead), :func:`_band_hop_geometry` resolves,
+    and none of the moving legs -- the source drop into band0, the band0
+    traverse, the clear-column descent, the band1 traverse, the target-side
+    descent -- crosses a section.
     """
-    if not f.graph.is_fanout_junction(f.edge.source):
+    if not _source_is_boxed_fanout_junction(f):
         return False
     geom = _band_hop_geometry(f)
     if geom is None:
