@@ -751,6 +751,14 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
             # reserve room there so the band fits, else the feed falls to the
             # canvas-bottom dive for want of a channel.
             gap = (tgt_row - 1, tgt_row)
+            # A boxed-in fan-out junction can't descend at its own trapped
+            # column, so its divergent branch first hops the band just below the
+            # source row across to a clear column
+            # (``_route_left_entry_via_band_hop``); reserve that band too, sized
+            # for the whole fan whose stagger the lone descender rides.
+            if _is_fanout_junction(graph, edge.source):
+                fan_lines = {e.line_id for e in graph.edges_from(edge.source)}
+                per_gap[(src_row, src_row + 1)][edge.target].update(fan_lines)
         else:
             # A multi-row crossing routed around below the stack
             # (``_route_around_section_below``) is sized by that path.
@@ -762,6 +770,13 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
         gap: inter_row_wrap_band(widest, offset_step)
         for gap, widest in _widest_lines_per_gap(per_gap).items()
     }
+
+
+def _is_fanout_junction(graph: MetroGraph, station_id: str) -> bool:
+    """Whether *station_id* is a junction that fans out to more than one target."""
+    if station_id not in graph.junctions:
+        return False
+    return len({e.target for e in graph.edges_from(station_id)}) > 1
 
 
 def _entry_wrap_edges(

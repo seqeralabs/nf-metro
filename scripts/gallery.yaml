@@ -1257,6 +1257,15 @@ gallery:
       section: the mirror of the RIGHT gap-above path. The feed runs its horizontal in the
       clear band abutting the target row and drops down the target's LEFT side into the port,
       rather than diving to the canvas bottom and running the full width back (#1394)."
+  - id: straddling_fanout_junction
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A fan-out junction boxed in by a packed cell-mate on its exit side, whose
+      targets straddle it (one adjacent, one far down-and-left). The divergent branch
+      peels off to the left, hops the band below the source row across to a clear
+      column, and drops through the inter-row gap into the far target, rather than the
+      junction trapping it into a canvas-bottom dive past the cell-mate (#1396)."
   - id: route_around_intervening
     source_dir: examples/topologies
     category: Inter-section Routing

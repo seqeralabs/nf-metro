@@ -424,6 +424,7 @@ def test_around_and_corridor_routes_built_from_centreline(fixture, handler):
         "around_section_below.mmd",
         "around_below_ep_col_gt0.mmd",
         "self_crossing_bridge.mmd",
+        "straddling_fanout_junction.mmd",
     ],
 )
 def test_left_entry_from_above_avoids_canvas_bottom_dive(fixture):

@@ -527,10 +527,6 @@
     "note": "Same-line dogleg move-up / give-up fallback, reached only when both L1296 and L1298 are false. The true arm (->1301, move up because the lower gap is too tight) needs down_ok False and the else arm (->1303, leave fused) needs both rooms below min_sep; the reachable regime's inter-row band is auto-widened so both rooms stay >= min_sep=6 (observed 14/26), so neither is reached by a valid topology.",
     "status": "defensive"
   },
-  "normalize.py::for _ in range(8):::#1": {
-    "note": "The 8-iteration exhaustion arm of _clear_channel_x_in_band requires 9+ sections chained across a single column band to shift the channel x eight times without resolving, which no constructible topology produces. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
-    "status": "defensive"
-  },
   "normalize.py::for grp in groups:::#3": {
     "note": "_suboptimal_trunk_bands diagnostic loop: validate-only, not reached by the render-path coverage sweep (see the len(trunks)<2 note).",
     "status": "defensive"

@@ -913,15 +913,17 @@ def _route_left_entry_family(f: _InterFacts) -> RoutedPath | None:
         # clear band abutting the target row -- a short left-approach mirroring
         # the RIGHT-entry gap-above path -- rather than diving to the canvas
         # bottom and running the full width back.
-        if (
-            f.src_row is not None
-            and f.tgt_row is not None
-            and f.src_row < f.tgt_row
-            and _left_entry_gap_above_is_clear(f)
-        ):
-            return _route_left_entry_via_gap_above(
-                edge, src, tgt, f.i, f.n, ctx, f.tgt_row
-            )
+        if f.src_row is not None and f.tgt_row is not None and f.src_row < f.tgt_row:
+            if _left_entry_gap_above_is_clear(f):
+                return _route_left_entry_via_gap_above(
+                    edge, src, tgt, f.i, f.n, ctx, f.tgt_row
+                )
+            # The source-adjacent band is blocked (a fan junction boxed in by a
+            # packed cell-mate).  Peel the branch off to the left through a clear
+            # descent column between the two bands rather than diving to the
+            # canvas bottom.
+            if _left_entry_band_hop_is_clear(f):
+                return _route_left_entry_via_band_hop(edge, src, tgt, f.i, f.n, ctx, f)
         return _route_around_section_below(edge, src, tgt, tgt, f.i, f.n, ctx)
     return _route_left_entry_wrap(edge, src, tgt, f.i, f.n, ctx)
 
@@ -3900,6 +3902,160 @@ def _route_left_entry_via_gap_above(
         entry_side=PortSide.LEFT,
     )
     _declare_channel(route, ctx, vx, vertical_direction(tgt.y - channel_y_base))
+    return route
+
+
+def _source_is_fanout_junction(f: _InterFacts) -> bool:
+    """Whether the edge's source is a junction that fans out to >1 target.
+
+    The band-hop only rescues the divergent branch of a straddling fan-out; a
+    plain cross-row feed (source is an exit port) keeps the around-below dive.
+    """
+    src_id = f.edge.source
+    if src_id not in f.graph.junctions:
+        return False
+    return len({e.target for e in f.graph.edges_from(src_id)}) > 1
+
+
+def _band_hop_geometry(
+    f: _InterFacts,
+) -> tuple[float, float, float, float] | None:
+    """Resolve a LEFT-entry band-hop's two channels and clear descent column.
+
+    Returns ``(band0_y, band1_y, corner_x, vx)`` -- the Y of the band just
+    below the source row, the Y of the band just above the target row, the X of
+    a descent column clear through every row between them, and the target-side
+    descent X -- or ``None`` when either band is missing/too narrow, the two
+    bands are not separated by an intervening row, or no clear descent column
+    exists left of the source within the trap.
+    """
+    graph, src, tgt, ctx = f.graph, f.src, f.tgt, f.ctx
+    assert f.src_row is not None and f.tgt_row is not None
+    band0_top, band0_bottom = _gap_above_target_y(graph, f.src_row + 1)
+    band1_top, band1_bottom = _gap_above_target_y(graph, f.tgt_row)
+    # Both bands must clear the edge above and the next row's header badge below:
+    # the band0 traverse runs above the intervening row, whose header can protrude
+    # up into the gap, and band1 is where the branch descends past the target.
+    if band0_bottom <= band0_top or not _inter_row_band_fits(band0_top, band0_bottom):
+        return None
+    if band1_bottom <= band1_top or not _inter_row_band_fits(band1_top, band1_bottom):
+        return None
+    if band1_top <= band0_bottom + COORD_TOLERANCE:
+        return None  # the hop needs a row between the two bands
+    band0_y = _center_inter_row_channel(band0_top, band0_bottom)
+    band1_y = _center_inter_row_channel(band1_top, band1_bottom)
+    exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
+    clearance = SECTION_ROUTE_CLEARANCE + ctx.curve_radius + EDGE_TO_BUNDLE_CLEARANCE
+    # The descent column is nudged clear of every section its full band0->band1
+    # span pierces, forced left of the source (bound_right) so the branch peels
+    # off toward its down-and-left target rather than escaping right.
+    corner_x = _clear_channel_x_in_band(
+        graph, src.x, band0_y, band1_y, clearance, exclude, bound_right=src.x
+    )
+    if _v_segment_crosses_other_section(graph, corner_x, band0_y, band1_y, exclude):
+        return None
+    _fan, pos_n, _delta, _cx = _wrap_fan_geometry(
+        ctx, f.edge, src, f.i, f.n, Direction.D
+    )
+    vx = _left_entry_descent_x(ctx, tgt.x, pos_n)
+    return band0_y, band1_y, corner_x, vx
+
+
+def _left_entry_band_hop_is_clear(f: _InterFacts) -> bool:
+    """Whether a LEFT-entry feed from a boxed-in fan junction can hop two bands.
+
+    Used when the source -- a straddling fan-out junction seated between its own
+    section and a packed cell-mate -- has its natural source-side descent column
+    blocked (so :func:`_left_entry_gap_above_is_clear` defers) and the
+    around-below loop would dive to the canvas bottom.  The branch instead drops
+    into the band just below the source row, traverses to a clear inter-column
+    gap, descends there into the band above the target row, then drops down the
+    target's left side into the port.
+
+    Viable only when the source is a boxed-in fan-out junction (a plain
+    cross-row feed dives via around-below instead), :func:`_band_hop_geometry`
+    resolves, and none of the moving legs -- the source drop into band0, the
+    band0 traverse, the clear-column descent, the band1 traverse, the
+    target-side descent -- crosses a section.
+    """
+    if not _source_is_fanout_junction(f):
+        return False
+    geom = _band_hop_geometry(f)
+    if geom is None:
+        return False
+    band0_y, band1_y, corner_x, vx = geom
+    graph, src, tgt = f.graph, f.src, f.tgt
+    exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
+    if _v_segment_crosses_other_section(graph, src.x, src.y, band0_y, exclude):
+        return False
+    if _h_segment_crosses_other_section(graph, src.x, corner_x, band0_y, exclude):
+        return False
+    if _h_segment_crosses_other_section(graph, corner_x, vx, band1_y, exclude):
+        return False
+    return not _v_segment_crosses_other_section(graph, vx, band1_y, tgt.y, exclude)
+
+
+def _route_left_entry_via_band_hop(
+    edge: Edge,
+    src: Station,
+    tgt: Station,
+    i: int,
+    n: int,
+    ctx: _RoutingCtx,
+    f: _InterFacts,
+) -> RoutedPath:
+    """Route a boxed-in fan branch to a LEFT entry by hopping two inter-row bands.
+
+    The divergent branch of a straddling fan-out cannot descend at the trapped
+    junction (every column there pierces the packed cell-mate or the row below).
+    It drops into the band below the source row, traverses LEFT to a clear
+    inter-column gap, descends that gap through the intervening rows into the
+    band above the target row, then drops down the target's LEFT (outward) side
+    into the port -- the "leave on the left" peel-off the around-below dive
+    (:func:`_route_around_section_below`) can't take::
+
+        (sx, sy)        ; V down into the band below the source row
+        (sx, b0)        -> H left to the clear descent column
+        (cx, b0)        ; V down through the intervening rows
+        (cx, b1)        -> H left past the target's left edge
+        (vx, b1)        ; V down to the entry Y
+        (vx, ey)        -> H right into the LEFT port
+        (ex, ey)
+
+    Both channels and the descent column are resolved by
+    :func:`_band_hop_geometry` (guaranteed non-None by
+    :func:`_left_entry_band_hop_is_clear` at the call site).
+    """
+    geom = _band_hop_geometry(f)
+    assert geom is not None
+    band0_y, band1_y, corner_x, vx = geom
+    _fan, pos_n, delta, _cx = _wrap_fan_geometry(ctx, edge, src, i, n, Direction.D)
+    src_off = _get_offset(ctx, edge.source, edge.line_id)
+    tgt_off = _get_offset(ctx, edge.target, edge.line_id)
+    ex, ey = tgt.x, tgt.y
+    entry_delta = delta  # a LEFT entry runs rightward in, like the target drop
+    # Start at the junction join point (Y-staggered, matching the upstream feed's
+    # end) then turn straight down its own column into the band below the source
+    # row, so the fan-out tail meets without an apex notch.
+    centerline = [
+        (src.x, src.y + src_off + delta),
+        (src.x, band0_y),
+        (corner_x, band0_y),
+        (corner_x, band1_y),
+        (vx, band1_y),
+        (vx, ey + tgt_off + entry_delta),
+        (ex, ey + tgt_off + entry_delta),
+    ]
+    route = route_along(
+        edge,
+        [(edge, edge.line_id, -delta)],
+        centerline,
+        base_radius=ctx.curve_radius,
+        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+    )
+    assert route is not None
+    _declare_channel(route, ctx, corner_x, Direction.D)
+    _declare_channel(route, ctx, vx, vertical_direction(ey - band1_y))
     return route
 
 

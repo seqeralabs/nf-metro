@@ -1,0 +1,62 @@
+%%metro title: Straddling fan-out junction
+%%metro style: nfcore
+%%metro line: main | Main | #e6007e
+%%metro line: side | Side | #2db572
+%%metro line: deep | Deep | #2b6cb0
+%%metro grid: pre | 0,0
+%%metro grid: feeder, leaf | 1,0
+%%metro grid: mid | 0,1
+%%metro grid: blocker | 1,1
+%%metro grid: far | 0,2
+
+graph LR
+    subgraph pre [Pre-processing]
+        %%metro exit: right | main, side
+        p_in[ ]
+        p_prep[Prep]
+
+        p_in -->|main,side| p_prep
+    end
+
+    subgraph feeder [Quantification]
+        %%metro entry: left | main, side
+        %%metro exit: right | main, side
+        f_a[Quant A]
+        f_b[Quant B]
+
+        f_a -->|main,side| f_b
+    end
+
+    subgraph leaf [Reporting]
+        %%metro entry: left | main
+        r_rep[Report]
+    end
+
+    subgraph mid [Novel transcripts]
+        m_a[Novel]
+        m_b[Assemble]
+
+        m_a -->|deep| m_b
+    end
+
+    subgraph blocker [ORF calling and P-site identification]
+        b_a[ORF calling]
+        b_b[P-site identification]
+        b_c[Quantify ORF P-sites]
+
+        b_a -->|deep| b_b
+        b_b -->|deep| b_c
+    end
+
+    subgraph far [TE]
+        %%metro entry: left | side
+        t_te[TE analysis]
+
+        t_te -->|side| t_out[Report TE]
+    end
+
+    %% Inter-section edges
+    p_prep -->|main,side| f_a
+    f_b -->|main| r_rep
+    f_b -->|side| t_te
+    m_b -->|deep| b_a
