@@ -101,9 +101,22 @@ def _split_corridors(chans: list[_VChannel]) -> list[list[_VChannel]]:
     return groups
 
 
-def _section_intrudes(graph: MetroGraph, x: float, y_lo: float, y_hi: float) -> bool:
-    """True if a re-stacked channel at ``x`` would land inside any section bbox."""
+def _section_intrudes(
+    graph: MetroGraph,
+    x: float,
+    y_lo: float,
+    y_hi: float,
+    *,
+    exclude: frozenset[str | None] = frozenset(),
+) -> bool:
+    """True if a channel at ``x`` over ``[y_lo, y_hi]`` lands inside a section bbox.
+
+    Sections in ``exclude`` are skipped, for a channel that legitimately meets
+    its own endpoints' sections.
+    """
     for s in graph.sections.values():
+        if s.id in exclude:
+            continue
         if s.bbox_w <= 0:
             continue
         sx_l = s.bbox_x
@@ -717,6 +730,9 @@ def _nest_bypass_above_over_top_wrap(
         delta = min(target - max_leg_y, 0.0)
         if abs(delta) <= COORD_TOLERANCE:
             continue
+        # Translating both endpoints of the horizontal leg by one delta keeps its
+        # flanking corners at 90 degrees, so their radii are unchanged -- no need
+        # for the corner re-derivation ``_set_vchannel_x`` does for an X move.
         for r, k, _y in crossing:
             r.points = [
                 (x, y + delta) if i in (k, k + 1) else (x, y)
@@ -740,10 +756,12 @@ def _route_gap_span(
     tgt = graph.stations.get(r.edge.target)
     if src is None or tgt is None:
         return None
-    below = lambda y: y > gap_bottom - COORD_TOLERANCE  # noqa: E731
-    above = lambda y: y < gap_top + COORD_TOLERANCE  # noqa: E731
-    is_wrap = below(src.y) and below(tgt.y)
-    is_through = (above(src.y) and below(tgt.y)) or (below(src.y) and above(tgt.y))
+    src_below = src.y > gap_bottom - COORD_TOLERANCE
+    tgt_below = tgt.y > gap_bottom - COORD_TOLERANCE
+    src_above = src.y < gap_top + COORD_TOLERANCE
+    tgt_above = tgt.y < gap_top + COORD_TOLERANCE
+    is_wrap = src_below and tgt_below
+    is_through = (src_above and tgt_below) or (src_below and tgt_above)
     if not (is_wrap or is_through):
         return None
     return is_wrap, is_through
@@ -905,6 +923,22 @@ def _divergent_source_groups(routes: list[RoutedPath]) -> list[_Coincidence]:
     return groups
 
 
+def _fanout_descent_order_key(ch: _VChannel) -> tuple[int, float]:
+    """Left-to-right seat order for a fan-out descent, by the side it turns to.
+
+    A branch is placed on the side it later turns toward so peeling off never
+    crosses a sibling still descending: left-turners (and straight drops) rank
+    by turn-Y ascending so the earliest turn sits outermost-left; right-turners
+    mirror it.  ``direction`` is the sign of the leg leaving the descent's foot.
+    """
+    pts = ch.route.points
+    j = ch.idx + 1
+    dx = pts[j + 1][0] - pts[j][0] if j + 1 < len(pts) else 0.0
+    direction = -1 if dx < -COORD_TOLERANCE else (1 if dx > COORD_TOLERANCE else 0)
+    turn_y = pts[j][1]
+    return (direction, turn_y if direction <= 0 else -turn_y)
+
+
 def _bundle_divergent_distinct_descents(
     routes: list[RoutedPath], ctx: _RoutingCtx
 ) -> None:
@@ -940,25 +974,10 @@ def _bundle_divergent_distinct_descents(
         if max(xs) - min(xs) <= step * (len(chans) - 1) + COORD_TOLERANCE:
             continue
 
-        def _turn(ch: _VChannel) -> tuple[int, float]:
-            pts = ch.route.points
-            j = ch.idx + 1
-            dx = pts[j + 1][0] - pts[j][0] if j + 1 < len(pts) else 0.0
-            direction = (
-                -1 if dx < -COORD_TOLERANCE else (1 if dx > COORD_TOLERANCE else 0)
-            )
-            return direction, pts[j][1]
-
-        def _order_key(ch: _VChannel) -> tuple[int, float]:
-            direction, turn_y = _turn(ch)
-            # Left-turners (and straight drops) rank by turn-Y ascending so the
-            # earliest turn sits outermost-left; right-turners mirror it.
-            return (direction, turn_y if direction <= 0 else -turn_y)
-
         base = min(xs)
         moves = [
             (ch, base + rank * step)
-            for rank, ch in enumerate(sorted(chans, key=_order_key))
+            for rank, ch in enumerate(sorted(chans, key=_fanout_descent_order_key))
         ]
         # Never re-seat a descent into a section it does not belong to; leave the
         # whole group on its handler channels if any target column is obstructed.
@@ -975,24 +994,13 @@ def _descent_crosses_section(graph: MetroGraph, ch: _VChannel, x: float) -> bool
     """Whether *ch*'s vertical span at *x* would cross a foreign section box.
 
     Sections at either end of the channel's route are exempt (the descent
-    legitimately meets its own endpoints); any other section box the column *x*
-    pierces over the descent's Y span makes the seat unsafe.
+    legitimately meets its own endpoints).
     """
-    own = {
+    own = frozenset(
         graph.section_for_station(ep)
         for ep in (ch.route.edge.source, ch.route.edge.target)
-    }
-    for sec in graph.sections.values():
-        if sec.id in own:
-            continue
-        if not (
-            sec.bbox_x - COORD_TOLERANCE < x < sec.bbox_x + sec.bbox_w + COORD_TOLERANCE
-        ):
-            continue
-        top, bottom = sec.bbox_y, sec.bbox_y + sec.bbox_h
-        if min(ch.y_hi, bottom) - max(ch.y_lo, top) > COORD_TOLERANCE:
-            return True
-    return False
+    )
+    return _section_intrudes(graph, x, ch.y_lo, ch.y_hi, exclude=own)
 
 
 def _merge_feeder_groups(

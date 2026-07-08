@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from nf_metro.layout.constants import OFFSET_STEP
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing.core import route_edges_centred
 from nf_metro.layout.routing.offsets import compute_station_offsets
@@ -165,8 +166,6 @@ def test_junction_feeds_descend_as_one_bundle() -> None:
     adjacent tracks, splitting only where ``alt`` turns off - not open on
     independent channels several px apart.
     """
-    from nf_metro.layout.constants import OFFSET_STEP
-
     graph = _layout()
     junction_feeds = [
         rp
