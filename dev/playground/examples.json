@@ -687,6 +687,10 @@
         "mmd": "%%metro title: Right Entry From Above (Far Drop)\n%%metro style: nfcore\n%%metro line: a | A | #e63946\n%%metro grid: src | 1,0\n%%metro grid: tgt | 0,2\n\ngraph LR\n    subgraph src [Source]\n        s1[Step 1]\n        s2[Step 2]\n        s1 -->|a| s2\n    end\n\n    subgraph tgt [Target]\n        %%metro entry: right | a\n        t1[Process]\n        t2[Output]\n        t1 -->|a| t2\n    end\n\n    s2 -->|a| t1\n"
       },
       {
+        "name": "left_entry_from_above_far",
+        "mmd": "%%metro title: Left Entry From Above (Far Drop)\n%%metro style: nfcore\n%%metro line: a | A | #e63946\n%%metro grid: src | 2,0\n%%metro grid: mid | 1,1\n%%metro grid: tgt | 0,2\n\ngraph LR\n    subgraph src [Source]\n        s1[Step 1]\n        s2[Step 2]\n        s1 -->|a| s2\n    end\n\n    subgraph mid [Middle Row]\n        m1[Process]\n        m2[Output]\n        m1 -->|a| m2\n    end\n\n    subgraph tgt [Target]\n        %%metro entry: left | a\n        t1[Process]\n        t2[Output]\n        t1 -->|a| t2\n    end\n\n    s2 -->|a| m1\n    s2 -->|a| t1\n"
+      },
+      {
         "name": "route_around_intervening",
         "mmd": "%%metro title: Route Around Intervening\n%%metro style: dark\n%%metro line: trunk | Trunk | #0570b0\n%%metro line: skip | Skip | #e63946\n\n%%metro grid: source | 0,0\n%%metro grid: middle | 1,0\n%%metro grid: target | 2,0\n\ngraph LR\n    subgraph source [Source]\n        s1[Input]\n        s2[Output]\n        s1 -->|trunk,skip| s2\n    end\n\n    subgraph middle [Middle]\n        m1[Process]\n        m2[Output]\n        m1 -->|trunk| m2\n    end\n\n    subgraph target [Target]\n        t1[Collect]\n        t2[Report]\n        t1 -->|trunk,skip| t2\n    end\n\n    s2 -->|trunk| m1\n    m2 -->|trunk| t1\n    s2 -->|skip| t1\n"
       },
