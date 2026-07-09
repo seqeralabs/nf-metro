@@ -377,6 +377,32 @@ class _InterFacts:
             and self.cross_row
         )
 
+    @property
+    def is_right_exit(self) -> bool:
+        """Source is a RIGHT-side exit port (not an entry)."""
+        return (
+            self.src_port is not None
+            and not self.src_port.is_entry
+            and self.src_port.side is PortSide.RIGHT
+        )
+
+    @property
+    def is_stacked_right_exit_right_entry(self) -> bool:
+        """RIGHT exit dropping into a RIGHT entry stacked in the same column.
+
+        Both ports pin to the column's shared right edge, so they land at the
+        same X.  The RIGHT-side reflection of
+        :attr:`is_serpentine_left_exit_left_entry`, routed through the
+        ``RIGHT entry wrap`` rule so the drop bows out past the port's outward
+        edge (see that rule and ``check_stacked_right_ports_bow_out``).
+        """
+        return (
+            self.is_right_exit
+            and self.entry_side is PortSide.RIGHT
+            and self.same_col
+            and self.cross_row
+        )
+
 
 def _packed_cell_mate_obstructs(
     graph: MetroGraph,
@@ -1148,13 +1174,19 @@ _INTER_SECTION_RULES: list[_Rule] = [
         lambda f: f.entry_side is PortSide.TOP,
         lambda f: _route_top_entry_l_shape(f.edge, f.src, f.tgt, f.n, f.ctx),
     ),
-    # Same X, but NOT a stacked LEFT-exit -> LEFT-entry: that pair shares the
-    # column's left-edge X, so a straight vertical drop would run down the
-    # source section's own edge and through its box; the serpentine rule below
-    # leads it out into a clear left-of-column channel instead.
+    # Same X, but NOT a stacked LEFT-exit -> LEFT-entry (shares the column's
+    # left-edge X: a straight drop would run down the source box; the serpentine
+    # rule below leads it out into a clear left-of-column channel) nor a stacked
+    # RIGHT-exit -> RIGHT-entry (shares the right-edge X: the RIGHT-entry wrap
+    # bows it out past the port's outward edge so both ports curve and a
+    # co-terminating feed shares the descent channel).
     _Rule(
         "same-X vertical drop",
-        lambda f: f.same_x and not f.is_serpentine_left_exit_left_entry,
+        lambda f: (
+            f.same_x
+            and not f.is_serpentine_left_exit_left_entry
+            and not f.is_stacked_right_exit_right_entry
+        ),
         _route_straight_connector,
     ),
     _Rule(
@@ -1181,7 +1213,10 @@ _INTER_SECTION_RULES: list[_Rule] = [
     # cut through the interior.
     _Rule(
         "RIGHT entry wrap",
-        lambda f: f.entry_side is PortSide.RIGHT and f.horizontal is Direction.R,
+        lambda f: (
+            (f.entry_side is PortSide.RIGHT and f.horizontal is Direction.R)
+            or f.is_stacked_right_exit_right_entry
+        ),
         lambda f: _route_right_entry_wrap(f.edge, f.src, f.tgt, f.i, f.n, f.ctx),
     ),
     _Rule(

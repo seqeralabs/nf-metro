@@ -1212,6 +1212,14 @@ gallery:
     description:
       A single line wrapping from an LR exit into a cross-row RL section's RIGHT
       entry, with no junction siblings (the solo `_route_right_entry_wrap` lead-in).
+  - id: stacked_right_ports_coincident
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      A RIGHT exit and its target's RIGHT entry stacked in one grid column pin to
+      the shared column-edge X; the feed bows out into the descent channel past the
+      port with outward corner curves, and a co-terminating feed shares that channel
+      rather than running a separate parallel vertical.
   - id: left_entry_up_wrap
     source_dir: examples/topologies
     category: Inter-section Routing

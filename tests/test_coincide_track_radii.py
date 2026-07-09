@@ -1,11 +1,13 @@
 """Tests for the coincide-pass corner-radius re-derivation.
 
-When :func:`_coincide_same_line_tracks` fuses several same-line vertical legs
-onto one shared reference X, :func:`_set_vchannel_x` moves each member's
-channel and re-derives its two flanking corner radii.  A fused track is a
-single stroke with no concentric nesting, so each corner is the zero-offset
-concentric radius for its *final* waypoints -- derived through the central
-:func:`concentric_corner_radius_at` helper, not hand-set to a fixed value.
+When a coincide pass moves a vertical leg onto a shared reference X,
+:func:`_set_vchannel_x` re-derives its two flanking corner radii through the
+central :func:`concentric_corner_radius_at` helper at the displacement it moved
+with, rather than hand-set to a fixed value.  Same-line fusion
+(:func:`_coincide_same_line_tracks`) moves at zero displacement, so each corner
+is the base radius; a distinct-line convergent cluster
+(:func:`_stack_distinct_port_descents`) moves each lane at its rank
+displacement, so the outer lanes nest concentrically wider.
 
 The bundle-corner concentricity guard (``check_concentric_bundle_corners``)
 covers every multi-line bundle corner on the final paths.  This coincide
@@ -90,15 +92,18 @@ def _touched_corner_mismatches(
 ) -> list[tuple[str, int, float, float]]:
     """Route *path*, recording every corner the coincide pass snaps via *impl*.
 
-    Returns, for each snapped corner, any disagreement between the stored
-    radius and the central zero-offset concentric derivation for the route's
-    final waypoints: ``(line_id, radius_index, stored, expected)``.
+    Returns, for each snapped corner, any disagreement between the stored radius
+    and the central concentric derivation for the route's final waypoints at the
+    displacement the pass moved it with: ``(line_id, radius_index, stored,
+    expected)``.  A same-line fusion moves at zero displacement (base radius); a
+    distinct-line convergent cluster moves each lane at its rank displacement so
+    the outer lanes nest wider.
     """
-    touched: list[tuple[RoutedPath, int]] = []
+    touched: list[tuple[RoutedPath, int, float]] = []
 
-    def spy(ch: _VChannel, new_x: float) -> None:
-        impl(ch, new_x)
-        touched.append((ch.route, ch.idx))
+    def spy(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
+        impl(ch, new_x, offset)
+        touched.append((ch.route, ch.idx, offset))
 
     monkeypatch.setattr(normalize, "_set_vchannel_x", spy)
     graph = parse_metro_mermaid(path.read_text())
@@ -108,7 +113,7 @@ def _touched_corner_mismatches(
     shared = shared_same_line_turn_vertices(routes)
 
     mismatches: list[tuple[str, int, float, float]] = []
-    for rp, k in touched:
+    for rp, k, offset in touched:
         radii = rp.curve_radii
         if radii is None:
             continue
@@ -120,7 +125,7 @@ def _touched_corner_mismatches(
             if (rp.line_id, round(vertex[0]), round(vertex[1])) in shared:
                 continue  # owned by the coincident-corner unification pass
             expected = concentric_corner_radius_at(
-                pts[radius_idx], pts[radius_idx + 1], pts[radius_idx + 2], 0.0
+                pts[radius_idx], pts[radius_idx + 1], pts[radius_idx + 2], offset
             )
             if abs(radii[radius_idx] - expected) > _RADIUS_TOLERANCE:
                 mismatches.append((rp.line_id, radius_idx, radii[radius_idx], expected))
@@ -183,8 +188,8 @@ def test_named_coincide_fixtures_snap_at_least_one_corner(
     """
     touched: list[object] = []
 
-    def spy(ch: _VChannel, new_x: float) -> None:
-        _PROD_SET_VCHANNEL_X(ch, new_x)
+    def spy(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
+        _PROD_SET_VCHANNEL_X(ch, new_x, offset)
         touched.append(ch)
 
     monkeypatch.setattr(normalize, "_set_vchannel_x", spy)
@@ -208,7 +213,7 @@ def test_reintroduced_hand_clobber_is_detected(
     with the central derivation.
     """
 
-    def clobber(ch: _VChannel, new_x: float) -> None:
+    def clobber(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
         rp = ch.route
         pts = rp.points
         k = ch.idx

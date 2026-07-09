@@ -664,11 +664,21 @@ def _stack_distinct_port_descents(
     step = ctx.offset_step
     left = port.side is PortSide.LEFT
     base = min(xs) if left else max(xs)
+    n = len(ordered)
+    # The innermost lane (rank n-1) is the concentric reference, anchored at the
+    # base radius; every other lane's corner is sized by its signed X offset from
+    # it, so the outer lanes take the wider radius and the convergent arcs hold a
+    # constant gap rather than pinching where equal-radius corners a step apart
+    # would.  The offset is signed by the seating direction (a LEFT entry seats
+    # outward in -X, a RIGHT entry in +X), which the corner helper needs to widen
+    # the outer side rather than tighten it.
+    x_inner = base + (n - 1) * step if left else base - (n - 1) * step
     for rank, lid in enumerate(ordered):
         x = base + rank * step if left else base - rank * step
+        offset = x - x_inner
         for ch in by_line[lid]:
-            if abs(ch.x - x) > COORD_TOLERANCE:
-                _set_vchannel_x(ch, x)
+            if abs(ch.x - x) > COORD_TOLERANCE or abs(offset) > COORD_TOLERANCE:
+                _set_vchannel_x(ch, x, offset)
 
 
 def _nest_bypass_above_over_top_wrap(
@@ -829,15 +839,20 @@ def _convergent_port_groups(
     return groups
 
 
-def _set_vchannel_x(ch: _VChannel, new_x: float) -> None:
+def _set_vchannel_x(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
     """Move a vertical channel to *new_x*, re-deriving its flanking corners.
 
-    Fusing same-line descents into one track makes them a single stroke with
-    no concentric nesting (zero displacement from itself), so each flanking
-    corner is re-derived from the route's *final* waypoints as a zero-offset
-    concentric corner via :func:`concentric_corner_radius_at` -- the same
-    central helper the routing handlers use -- rather than hand-set to a fixed
-    radius after the move.  A zero-offset corner resolves to the base radius.
+    Each flanking corner is re-derived from the route's *final* waypoints via
+    :func:`concentric_corner_radius_at` -- the same central helper the routing
+    handlers use -- rather than hand-set to a fixed radius after the move.
+
+    *offset* is the channel's signed displacement from the reference line the
+    bundle nests around (the innermost, anchored at the base radius).  Fusing
+    same-line descents onto one track leaves each a single stroke with no
+    nesting, so it passes zero and every corner resolves to the base radius;
+    re-seating a bundle of distinct lines converging on one port passes each
+    line's rank displacement so the outer lanes take the wider, concentric
+    radius and the arcs hold a constant gap through the turn.
     """
     rp = ch.route
     pts = rp.points
@@ -850,7 +865,7 @@ def _set_vchannel_x(ch: _VChannel, new_x: float) -> None:
         if 0 <= radius_idx < len(rp.curve_radii):
             prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
             rp.curve_radii[radius_idx] = concentric_corner_radius_at(
-                prev_pt, corner_pt, next_pt, 0.0
+                prev_pt, corner_pt, next_pt, offset
             )
 
 
