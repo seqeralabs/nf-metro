@@ -461,3 +461,69 @@ def test_left_entry_from_above_avoids_canvas_bottom_dive(fixture):
         )
         checked += 1
     assert checked, f"{fixture}: no LEFT-entry-from-above feed exercised"
+
+
+def _segment_crosses_bbox_interior(p0, p1, sec, margin=1.0):
+    """Whether the axis-aligned segment ``p0``-``p1`` enters *sec*'s interior.
+
+    The interior is the bbox shrunk by *margin* on every edge so a port sitting
+    ON the boundary (and its outward approach) does not count as a crossing.
+    """
+    left = sec.bbox_x + margin
+    right = sec.bbox_x + sec.bbox_w - margin
+    top = sec.bbox_y + margin
+    bottom = sec.bbox_y + sec.bbox_h - margin
+    (x0, y0), (x1, y1) = p0, p1
+    if abs(y0 - y1) < 1e-6:
+        return top < y0 < bottom and min(x0, x1) < right and max(x0, x1) > left
+    if abs(x0 - x1) < 1e-6:
+        return left < x0 < right and min(y0, y1) < bottom and max(y0, y1) > top
+    return False
+
+
+def test_samerow_far_left_entry_avoids_canvas_bottom_dive():
+    """A same-row feed into a far-side LEFT entry wraps the target's shorter side.
+
+    ``psite_id`` (grid row 1) exits LEFT toward ``te`` (same row, immediately to
+    its left) whose entry sits on ``te``'s far (left) edge.  The feed must reach
+    that port without ploughing ``te``'s interior (a straight run to the far-edge
+    port) and without diving below the target's own bottom edge and running the
+    full width back -- the same-row sibling of
+    :func:`test_left_entry_from_above_avoids_canvas_bottom_dive`.
+    """
+    from nf_metro.parser.model import PortSide
+
+    path = (
+        Path(__file__).parent.parent
+        / "examples"
+        / "topologies"
+        / "samerow_left_exit_far_left_entry.mmd"
+    )
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+    routes = route_edges(graph)
+
+    checked = 0
+    for r in routes:
+        port = graph.ports.get(r.edge.target)
+        if port is None or not port.is_entry or port.side is not PortSide.LEFT:
+            continue
+        src = graph.stations.get(r.edge.source)
+        tgt_sec = graph.sections.get(port.section_id)
+        if src is None or tgt_sec is None:
+            continue
+        bottom = tgt_sec.bbox_y + tgt_sec.bbox_h
+        max_y = max(p[1] for p in r.points)
+        assert max_y <= bottom + 1.0, (
+            f"feed {r.edge.source}->{r.edge.target} descends to y={max_y:.0f}, "
+            f"below target '{tgt_sec.id}' bottom {bottom:.0f} (canvas-bottom "
+            f"dive instead of the band-above approach)"
+        )
+        for p0, p1 in zip(r.points, r.points[1:]):
+            assert not _segment_crosses_bbox_interior(p0, p1, tgt_sec), (
+                f"feed {r.edge.source}->{r.edge.target} segment {p0}-{p1} "
+                f"ploughs target '{tgt_sec.id}' interior to reach its far-edge "
+                f"LEFT port"
+            )
+        checked += 1
+    assert checked, "no same-row far-LEFT-entry feed exercised"

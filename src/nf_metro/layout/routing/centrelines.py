@@ -173,20 +173,23 @@ def route_tapered(
     transition_leg: int,
     base_radius: float,
     min_radius: float | None = None,
+    normalize_exempt: bool = False,
 ) -> RoutedPath | None:
     """Fan a bundle and return the route for *edge*, tapering when it must.
 
     Each member carries a source and target offset.  When every line's two
     offsets match the bundle is rigid: it is routed through :func:`route_along`
-    and left ``normalize_exempt=False``, so the post-routing passes can bundle
-    it with any gap-mates (channels into different targets that share one
-    inter-column gap collapse into one concentric bundle there, not here).
+    and left un-exempt so the post-routing passes can bundle it with any
+    gap-mates (channels into different targets that share one inter-column gap
+    collapse into one concentric bundle there, not here) -- unless the caller
+    passes *normalize_exempt* to opt a wrap loop out, whose outward-side port
+    approach a normalize restack would misread as a backtrack.
 
     When the spreads differ the bundle tapers, and a single rigid offset cannot
     land each line on its true offset at both ends.  Then it is built with
     :func:`build_tapered_bundle` -- the offset switches at *transition_leg* --
-    and marked ``normalize_exempt``, since a normalize restack would re-size its
-    transition corner as if it were wholesale and pinch the bundle.
+    and always marked ``normalize_exempt``, since a normalize restack would
+    re-size its transition corner as if it were wholesale and pinch the bundle.
     """
     if all(abs(src - tgt) <= COORD_TOLERANCE for _e, _lid, src, tgt in members):
         return route_along(
@@ -195,7 +198,7 @@ def route_tapered(
             centerline,
             base_radius=base_radius,
             min_radius=min_radius,
-            normalize_exempt=False,
+            normalize_exempt=normalize_exempt,
         )
     routes = build_tapered_bundle(
         members,

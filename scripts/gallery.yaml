@@ -1257,6 +1257,16 @@ gallery:
       section: the mirror of the RIGHT gap-above path. The feed runs its horizontal in the
       clear band abutting the target row and drops down the target's LEFT side into the port,
       rather than diving to the canvas bottom and running the full width back (#1394)."
+  - id: samerow_left_exit_far_left_entry
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A same-row feed into a far-side LEFT entry: the source exits LEFT toward a
+      target immediately to its left whose entry sits on the target's far (left) edge.
+      The loop humps over the target's top through the clear band above its row and
+      drops down the target's LEFT side into the port, rather than diving below the
+      target box and running the full width back - the same-row sibling of the
+      from-above gap-above path (#1397)."
   - id: straddling_fanout_junction
     source_dir: examples/topologies
     category: Inter-section Routing
