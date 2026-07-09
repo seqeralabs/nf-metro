@@ -709,6 +709,19 @@ class MetroGraph:
         """
         return bool(self.edges_to(station_id)) and bool(self.edges_from(station_id))
 
+    def is_fanout_junction(self, station_id: str) -> bool:
+        """A junction that diverges to more than one downstream target."""
+        if station_id not in self.junction_ids:
+            return False
+        return len({e.target for e in self.edges_from(station_id)}) > 1
+
+    def is_packed_section(self, section_id: str) -> bool:
+        """A section sharing a grid cell with a cell-mate (a multi-member pack)."""
+        return any(
+            section_id in members and len(members) > 1
+            for members in self.cell_packs.values()
+        )
+
     def line_stations(self, line_id: str) -> list[str]:
         """Return station IDs on a line, in edge order."""
         stations = []
