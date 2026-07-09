@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="nf-metro-render-run" content="29017826658">
+<meta name="nf-metro-render-run" content="29020585033">
 <title>Render diff - PR #1401</title>
 <style>
   :root {
@@ -257,7 +257,7 @@
   <h1>Render diff - PR #1401</h1>
   <button id="scheme-toggle" class="scheme-btn">System</button>
 </div>
-<p class="summary">1 added out of 236 total renders. Generated 2026-07-09 12:21 UTC.</p>
+<p class="summary">1 changed, 1 added out of 236 total renders. Generated 2026-07-09 13:15 UTC.</p>
 <details class="intro">
 <summary>What is this page?</summary>
 <p>
@@ -288,7 +288,8 @@ switch between side-by-side, base-only, and PR-only views.
 <p class="caption">Advisory only &mdash; nothing gates on these. Lower is better; <span class="m-better">green</span> improved, <span class="m-worse">red</span> regressed.</p>
 <table>
 <tr><th>Render</th><th>Crossings</th><th>Near-horiz.</th><th>Lone diag.</th><th>Label strikes</th><th>Excess gaps</th><th>Wasted canvas</th></tr>
-<tr><td><a href="#stacked_right_ports_coincident">stacked_right_ports_coincident</a></td><td class="m-flat">&ndash;&rarr;1</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;52%</td></tr>
+<tr><td><a href="#stacked_right_ports_coincident">stacked_right_ports_coincident</a></td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;52%</td></tr>
+<tr><td><a href="#tb_exit_terminal_on_carrier">tb_exit_terminal_on_carrier</a></td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">1</td><td class="m-flat">33%</td></tr>
 </table>
 </div>
 <div class="toc">
@@ -297,6 +298,10 @@ switch between side-by-side, base-only, and PR-only views.
 <ul>
 <li><a href="#stacked_right_ports_coincident">stacked_right_ports_coincident</a><span class="badge badge-added">added</span></li>
 </ul>
+<h3><a href="#section-test-fixtures">Test Fixtures</a></h3>
+<ul>
+<li><a href="#tb_exit_terminal_on_carrier">tb_exit_terminal_on_carrier</a><span class="badge badge-changed">changed</span></li>
+</ul>
 </div>
 <h2 class="section-header" id="section-inter-section-routing">Inter-section Routing</h2>
 
@@ -304,7 +309,7 @@ switch between side-by-side, base-only, and PR-only views.
 <h3>Stacked Right Ports Coincident <span class="badge badge-added">added</span></h3>
 <div class="side-only"><h4>New in PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-     width="480" height="478" viewBox="0 0 480 478">
+     width="476" height="478" viewBox="0 0 476 478">
 <defs>
 </defs>
 <style>.nf-metro-bg { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
@@ -318,7 +323,7 @@ switch between side-by-side, base-only, and PR-only views.
 .nf-metro-legend-text { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
 .nf-metro-marker-stroke { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
 .nf-metro-label-halo { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
-<rect x="0" y="0" width="480" height="478" fill="#2b2b2b" class="nf-metro-bg" />
+<rect x="0" y="0" width="476" height="478" fill="#2b2b2b" class="nf-metro-bg" />
 <text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title">Stacked RIGHT Ports (coincident X)</text>
 <rect x="30.0" y="70.0" width="160.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="feeder" data-section-lines="a" />
 <circle cx="41.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="feeder" />
@@ -336,12 +341,12 @@ switch between side-by-side, base-only, and PR-only views.
 <path d="M350.0,306.0 L290.0,306.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-b" data-line-id="b" />
 <path d="M350.0,120.0 L400.0,120.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-b" data-line-id="b" />
 <path d="M400.0,306.0 L350.0,306.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-b" data-line-id="b" />
-<path d="M400.0,120.0 L406.0,120.0 Q416.0,120.0,416.0,130.0 L416.0,296.0 Q416.0,306.0,406.0,306.0 L400.0,306.0" stroke="#0570b0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-b" data-line-id="b" />
+<path d="M400.0,120.0 L402.0,120.0 Q416.0,120.0,416.0,134.0 L416.0,292.0 Q416.0,306.0,402.0,306.0 L400.0,306.0" stroke="#0570b0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-b" data-line-id="b" />
 <path d="M80.0,120.0 L140.0,120.0" stroke="#e63946" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
 <path d="M350.0,302.0 L290.0,302.0" stroke="#e63946" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
 <path d="M140.0,120.0 L190.0,120.0" stroke="#e63946" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
 <path d="M400.0,302.0 L350.0,302.0" stroke="#e63946" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
-<path d="M190.0,120.0 L196.0,120.0 Q210.0,120.0,210.0,134.0 L210.0,183.0 Q210.0,193.0,220.0,193.0 L406.0,193.0 Q420.0,193.0,420.0,207.0 L420.0,288.0 Q420.0,302.0,406.0,302.0 L400.0,302.0" stroke="#e63946" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a" data-line-id="a" />
+<path d="M190.0,120.0 L196.0,120.0 Q206.0,120.0,206.0,130.0 L206.0,185.0 Q206.0,195.0,216.0,195.0 L402.0,195.0 Q412.0,195.0,412.0,205.0 L412.0,292.0 Q412.0,302.0,402.0,302.0 L400.0,302.0" stroke="#e63946" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a" data-line-id="a" />
 <rect x="75.0" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="f1" data-station-lines="a" data-station-label="Input" data-section-id="feeder" data-section-name="Feeder" />
 <rect x="135.0" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="f2" data-station-lines="a" data-station-label="Output" data-section-id="feeder" data-section-name="Feeder" />
 <rect x="285.0" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="a1" data-station-lines="b" data-station-label="Proc" data-section-id="above" data-section-name="Above" />
@@ -360,10 +365,10 @@ switch between side-by-side, base-only, and PR-only views.
 <text x="290.0" y="288.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="b2" class="nf-metro-station-label">Out</text>
 <text x="350.0" y="106.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">Out</text>
 <text x="350.0" y="106.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="a2" class="nf-metro-station-label">Out</text>
-<circle cx="210.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
-<circle cx="210.0" cy="193.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
-<circle cx="420.0" cy="193.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
-<circle cx="420.0" cy="302.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="206.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="206.0" cy="195.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="412.0" cy="195.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="412.0" cy="302.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
 <circle cx="416.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
 <circle cx="416.0" cy="306.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
 <path d="M190.0,115.0 L195.0,120.0 L190.0,125.0 L185.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
@@ -387,8 +392,441 @@ switch between side-by-side, base-only, and PR-only views.
 <text x="78.0" y="406.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">A</text>
 <path d="M42.0,430.0 L66.0,430.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" />
 <text x="78.0" y="430.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">B</text>
-<text x="450.0" y="470.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v1.1.0+dev</text>
+<text x="446.0" y="470.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v1.1.0+dev</text>
 </svg></div></div>
+</div>
+
+<h2 class="section-header" id="section-test-fixtures">Test Fixtures</h2>
+
+<div class="diff-entry" id="tb_exit_terminal_on_carrier">
+<h3>Tb Exit Terminal On Carrier <span class="badge badge-changed">changed</span></h3>
+<div class="toggle-bar"><button class="active" data-mode="side-by-side">Side by side</button><button data-mode="base">Base only</button><button data-mode="pr">PR only</button></div>
+<div class="comparison">
+<div class="side side-base"><h4>Base (main)</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="1081" height="824" viewBox="0 0 1081 824">
+<defs>
+</defs>
+<style>.nf-metro-bg { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="1081" height="824" fill="#2b2b2b" class="nf-metro-bg" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title">riboseq (te + psite_id excerpt)</text>
+<rect x="71.5" y="70.0" width="143.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="alignment" data-section-lines="riboseq,rnaseq" />
+<circle cx="82.5" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="alignment" />
+<text x="82.5" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="alignment">1</text>
+<text x="98.5" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="alignment">Alignment</text>
+<rect x="264.5" y="70.0" width="278.5" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="orf_calling" data-section-lines="riboseq" />
+<circle cx="275.5" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="orf_calling" />
+<text x="275.5" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="orf_calling">2</text>
+<text x="291.5" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="orf_calling">Extended ORF discovery &amp; calling</text>
+<rect x="600.1" y="70.0" width="421.0" height="392.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="psite_id" data-section-lines="riboseq" />
+<circle cx="611.1" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="psite_id" />
+<text x="611.1" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="psite_id">5</text>
+<text x="627.1" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="psite_id">P-site identification</text>
+<rect x="420.0" y="245.0" width="123.0" height="108.39999999999998" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="quantification" data-section-lines="riboseq,rnaseq" />
+<circle cx="508.0" cy="230.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="quantification" />
+<text x="508.0" y="230.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="quantification">3</text>
+<text x="524.0" y="230.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="quantification">Quantification</text>
+<rect x="264.5" y="540.0" width="665.6" height="158.39977065525943" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="te" data-section-lines="riboseq,rnaseq" />
+<circle cx="275.5" cy="525.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="te" />
+<text x="275.5" y="525.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="te">4</text>
+<text x="291.5" y="525.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="te">Translational efficiency</text>
+<path d="M510.3,652.3997706552595 L564.5210566819758,652.3997706552595 Q574.5210566819758,652.3997706552595,579.0904064959461,643.5047696840641 L599.9517068680054,602.8947716264549 Q604.5210566819758,593.9997706552595,614.5210566819758,593.9997706552595 L656.3,593.9997706552595" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M510.3,652.3997706552595 L656.3,652.3997706552595" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M656.3,593.9997706552595 L789.1,593.9997706552595" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M656.3,652.3997706552595 L739.1,652.3997706552595 Q749.1,652.3997706552595,753.6693498139704,643.5047696840641 L774.5306501860297,602.8947716264549 Q779.1,593.9997706552595,789.1,593.9997706552595 L789.1,593.9997706552595" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M789.1,593.9997706552595 L872.1,593.9997706552595" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M143.0,124.0 L214.5,124.0" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M423.5,249.0 L479.0,249.0 Q489.0,249.0,489.0,259.0 L489.0,303.40000000000003" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M489.0,303.40000000000003 L489.0,313.4 Q489.0,323.4,499.0,323.4 L543.0,323.4" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M264.5,652.3997706552595 L510.3,652.3997706552595" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M214.5,124.0 L222.5,124.0" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M222.5,124.0 L227.5,124.0 Q237.5,124.0,237.5,134.0 L237.5,235.0 Q237.5,249.0,251.5,249.0 L423.5,249.0" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M543.0,323.4 L549.0,323.4 Q559.0,323.4,559.0,333.4 L559.0,423.7 Q559.0,433.7,549.0,433.7 L258.5,433.7 Q248.5,433.7,248.5,443.7 L248.5,642.3997706552595 Q248.5,652.3997706552595,258.5,652.3997706552595 L264.5,652.3997706552595" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M314.5,120.0 L397.5,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M397.5,120.0 L480.5,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M797.1,178.39999999999998 L797.1,236.79999999999998" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M880.1,178.39999999999998 L880.1,236.79999999999998" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M880.1,236.79999999999998 L880.1,412.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M364.3,589.9997706552595 L408.20000000000005,589.9997706552595 Q418.20000000000005,589.9997706552595,422.76934981397034,598.8947716264549 L443.63065018602975,639.5047696840641 Q448.20000000000005,648.3997706552595,458.20000000000005,648.3997706552595 L510.3,648.3997706552595" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M510.3,648.3997706552595 L562.0789433180241,648.3997706552595 Q572.0789433180241,648.3997706552595,576.6482931319945,639.5047696840641 L597.5095935040538,598.8947716264549 Q602.0789433180241,589.9997706552595,612.0789433180241,589.9997706552595 L656.3,589.9997706552595" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M510.3,648.3997706552595 L656.3,648.3997706552595" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M656.3,589.9997706552595 L789.1,589.9997706552595" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M656.3,648.3997706552595 L736.6578866360484,648.3997706552595 Q746.6578866360484,648.3997706552595,751.2272364500187,639.5047696840641 L772.088536822078,598.8947716264549 Q776.6578866360484,589.9997706552595,786.6578866360484,589.9997706552595 L789.1,589.9997706552595" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M789.1,589.9997706552595 L872.1,589.9997706552595" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M480.5,120.0 L543.0,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M600.1,120.0 L870.1,120.0 Q880.1,120.0,880.1,130.0 L880.1,412.0" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M143.0,120.0 L214.5,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M264.5,120.0 L314.5,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M600.1,120.0 L787.1,120.0 Q797.1,120.0,797.1,130.0 L797.1,178.39999999999998" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M600.1,120.0 L870.1,120.0 Q880.1,120.0,880.1,130.0 L880.1,178.39999999999998" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M423.5,245.0 L479.0,245.0 Q493.0,245.0,493.0,259.0 L493.0,303.40000000000003" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M880.1,236.79999999999998 L880.1,462.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M264.5,648.3997706552595 L270.4,648.3997706552595 Q280.4,648.3997706552595,284.96934981397027,639.5047696840641 L305.8306501860297,598.8947716264549 Q310.4,589.9997706552595,320.4,589.9997706552595 L364.3,589.9997706552595" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M543.0,120.0 L600.1,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M214.5,120.0 L224.5,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M224.5,120.0 L264.5,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M224.5,120.0 L227.5,120.0 Q241.5,120.0,241.5,134.0 L241.5,179.0 Q241.5,189.0,251.5,189.0 L561.55,189.0 Q571.55,189.0,571.55,179.0 L571.55,130.0 Q571.55,120.0,581.55,120.0 L600.1,120.0" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M222.5,120.0 L227.5,120.0 Q241.5,120.0,241.5,134.0 L241.5,235.0 Q241.5,245.0,251.5,245.0 L423.5,245.0" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M880.1,462.0 L880.1,478.0 Q880.1,488.0,870.1,488.0 L262.5,488.0 Q252.5,488.0,252.5,498.0 L252.5,638.3997706552595 Q252.5,648.3997706552595,262.5,648.3997706552595 L264.5,648.3997706552595" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<rect x="138.0" y="115.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="umi_dedup" data-station-lines="riboseq,rnaseq" data-station-label="UMI-tools Dedup" data-section-id="alignment" data-section-name="Alignment" />
+<rect x="309.5" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="ribotish" data-station-lines="riboseq" data-station-label="Ribo-TISH" data-section-id="orf_calling" data-section-name="Extended ORF discovery &amp; calling" />
+<rect x="392.5" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="orf_merge" data-station-lines="riboseq" data-station-label="Merge ORF catalogue" data-section-id="orf_calling" data-section-name="Extended ORF discovery &amp; calling" />
+<rect x="475.5" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="orf_catalogue" data-station-lines="riboseq" data-station-label="orf_catalogue" data-section-id="orf_calling" data-section-name="Extended ORF discovery &amp; calling" />
+<rect x="792.1" y="173.39999999999998" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="ribowaltz" data-station-lines="riboseq" data-station-label="riboWaltz" data-section-id="psite_id" data-section-name="P-site identification" />
+<rect x="875.1" y="173.39999999999998" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="plastid_psite" data-station-lines="riboseq" data-station-label="plastid P-site" data-section-id="psite_id" data-section-name="P-site identification" />
+<rect x="875.1" y="231.79999999999998" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="plastid_wiggle" data-station-lines="riboseq" data-station-label="plastid Wiggle" data-section-id="psite_id" data-section-name="P-site identification" />
+<rect x="875.1" y="407.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="quantify_orf_psite" data-station-lines="riboseq" data-station-label="Quantify ORF P-sites" data-section-id="psite_id" data-section-name="P-site identification" />
+<rect x="792.1" y="231.79999999999998" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="report_ribowaltz" data-station-lines="riboseq" data-station-label="report_ribowaltz" data-section-id="psite_id" data-section-name="P-site identification" />
+<g data-station-id="report_ribowaltz">
+<path d="M785.1,247.79999999999995 L803.1,247.79999999999995 L811.1,255.79999999999995 L811.1,277.79999999999995 Q811.1,279.79999999999995,809.1,279.79999999999995 L785.1,279.79999999999995 Q783.1,279.79999999999995,783.1,277.79999999999995 L783.1,249.79999999999995 Q783.1,247.79999999999995,785.1,247.79999999999995 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M803.1,247.79999999999995 L803.1,255.79999999999995 L811.1,255.79999999999995 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M803.1,247.79999999999995 L803.1,255.79999999999995 L811.1,255.79999999999995" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<text x="797.1" y="264.99999999999994" font-size="7.5" fill="#000000" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em">HTML</text>
+<text x="797.1" y="283.79999999999995" font-size="7.8" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging">riboWaltz</text>
+</g>
+<rect x="484.0" y="298.40000000000003" width="14.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="salmon_quant" data-station-lines="riboseq,rnaseq" data-station-label="Salmon" data-section-id="quantification" data-section-name="Quantification" />
+<rect x="359.3" y="584.9997706552595" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="psite_counts" data-station-lines="riboseq" data-station-label="Plastid P-site counts" data-section-id="te" data-section-name="Translational efficiency" />
+<rect x="505.3" y="643.3997706552595" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="te_counts_prep" data-station-lines="riboseq,rnaseq" data-station-label="Prep TE counts" data-section-id="te" data-section-name="Translational efficiency" />
+<rect x="651.3" y="584.9997706552595" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="anota2seq" data-station-lines="riboseq,rnaseq" data-station-label="anota2seq" data-section-id="te" data-section-name="Translational efficiency" />
+<rect x="651.3" y="643.3997706552595" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="deltate" data-station-lines="riboseq,rnaseq" data-station-label="DESeq2 deltaTE" data-section-id="te" data-section-name="Translational efficiency" />
+<rect x="867.1" y="584.9997706552595" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="report_te" data-station-lines="riboseq,rnaseq" data-station-label="report_te" data-section-id="te" data-section-name="Translational efficiency" />
+<g data-station-id="report_te">
+<path d="M885.1,575.9997706552595 L903.1,575.9997706552595 L911.1,583.9997706552595 L911.1,605.9997706552595 Q911.1,607.9997706552595,909.1,607.9997706552595 L885.1,607.9997706552595 Q883.1,607.9997706552595,883.1,605.9997706552595 L883.1,577.9997706552595 Q883.1,575.9997706552595,885.1,575.9997706552595 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M903.1,575.9997706552595 L903.1,583.9997706552595 L911.1,583.9997706552595 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M903.1,575.9997706552595 L903.1,583.9997706552595 L911.1,583.9997706552595" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<text x="897.1" y="593.1997706552595" font-size="7.5" fill="#000000" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em">HTML</text>
+<text x="897.1" y="611.9997706552595" font-size="7.8" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging">TE report</text>
+</g>
+<text x="786.1" y="178.39999999999998" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="end" dominant-baseline="central">riboWaltz</text>
+<text x="786.1" y="178.39999999999998" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="end" dominant-baseline="central" data-station-id="ribowaltz" class="nf-metro-station-label">riboWaltz</text>
+<text x="314.5" y="131.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Ribo-TISH</text>
+<text x="314.5" y="131.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="ribotish" class="nf-metro-station-label">Ribo-TISH</text>
+<text x="364.3" y="575.9997706552595" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">Plastid P-site counts</text>
+<text x="364.3" y="575.9997706552595" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="psite_counts" class="nf-metro-station-label">Plastid P-site counts</text>
+<text x="891.1" y="178.39999999999998" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="start" dominant-baseline="central">plastid P-site</text>
+<text x="891.1" y="178.39999999999998" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="start" dominant-baseline="central" data-station-id="plastid_psite" class="nf-metro-station-label">plastid P-site</text>
+<text x="143.0" y="135.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">UMI-tools Dedup</text>
+<text x="143.0" y="135.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="umi_dedup" class="nf-metro-station-label">UMI-tools Dedup</text>
+<text x="478.0" y="303.40000000000003" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="end" dominant-baseline="central">Salmon</text>
+<text x="478.0" y="303.40000000000003" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="end" dominant-baseline="central" data-station-id="salmon_quant" class="nf-metro-station-label">Salmon</text>
+<text x="397.5" y="106.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">Merge ORF catalogue</text>
+<text x="397.5" y="106.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="orf_merge" class="nf-metro-station-label">Merge ORF catalogue</text>
+<text x="891.1" y="236.79999999999998" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="start" dominant-baseline="central">plastid Wiggle</text>
+<text x="891.1" y="236.79999999999998" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="start" dominant-baseline="central" data-station-id="plastid_wiggle" class="nf-metro-station-label">plastid Wiggle</text>
+<text x="510.3" y="663.3997706552595" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Prep TE counts</text>
+<text x="510.3" y="663.3997706552595" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="te_counts_prep" class="nf-metro-station-label">Prep TE counts</text>
+<text x="480.5" y="131.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">orf_catalogue</text>
+<text x="480.5" y="131.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="orf_catalogue" class="nf-metro-station-label">orf_catalogue</text>
+<text x="656.3" y="575.9997706552595" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">anota2seq</text>
+<text x="656.3" y="575.9997706552595" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="anota2seq" class="nf-metro-station-label">anota2seq</text>
+<text x="869.1" y="412.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="end" dominant-baseline="central">Quantify ORF P-sites</text>
+<text x="869.1" y="412.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="end" dominant-baseline="central" data-station-id="quantify_orf_psite" class="nf-metro-station-label">Quantify ORF P-sites</text>
+<text x="656.3" y="634.3997706552595" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">DESeq2 deltaTE</text>
+<text x="656.3" y="634.3997706552595" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="deltate" class="nf-metro-station-label">DESeq2 deltaTE</text>
+<circle cx="418.20000000000005" cy="589.9997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="448.20000000000005" cy="648.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="572.0789433180241" cy="648.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="602.0789433180241" cy="589.9997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="574.5210566819758" cy="652.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="604.5210566819758" cy="593.9997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="746.6578866360484" cy="648.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="776.6578866360484" cy="589.9997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="749.1" cy="652.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="779.1" cy="593.9997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="880.1" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="797.1" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="880.1" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="493.0" cy="245.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="489.0" cy="249.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="280.4" cy="648.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="310.4" cy="589.9997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="489.0" cy="323.4" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="241.5" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="241.5" cy="189.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="571.55" cy="189.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="571.55" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="241.5" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="241.5" cy="245.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="237.5" cy="124.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="237.5" cy="249.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="880.1" cy="488.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="252.5" cy="488.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="252.5" cy="648.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="559.0" cy="323.4" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="559.0" cy="433.7" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="248.5" cy="433.7" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="248.5" cy="652.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M543.0,115.0 L548.0,120.0 L543.0,125.0 L538.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="543.0" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">orf_calling__exit_right_0 (right)</text>
+<path d="M214.5,115.0 L219.5,120.0 L214.5,125.0 L209.5,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="214.5" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">alignment__exit_right_1 (right)</text>
+<path d="M880.1,457.0 L885.1,462.0 L880.1,467.0 L875.1,462.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="880.1" y="454.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">psite_id__exit_bottom_2 (bottom)</text>
+<path d="M543.0,314.4 L548.0,319.4 L543.0,324.4 L538.0,319.4 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="543.0" y="311.4" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">quantification__exit_right_3 (right)</text>
+<path d="M600.1,115.0 L605.1,120.0 L600.1,125.0 L595.1,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="600.1" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">psite_id__entry_left_4 (left)</text>
+<path d="M264.5,115.0 L269.5,120.0 L264.5,125.0 L259.5,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="264.5" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">orf_calling__entry_left_5 (left)</text>
+<path d="M423.5,240.0 L428.5,245.0 L423.5,250.0 L418.5,245.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="423.5" y="237.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">quantification__entry_left_6 (left)</text>
+<path d="M264.5,643.3997706552595 L269.5,648.3997706552595 L264.5,653.3997706552595 L259.5,648.3997706552595 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="264.5" y="640.3997706552595" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">te__entry_left_7 (left)</text>
+<path d="M224.5,115.0 L229.5,120.0 L224.5,125.0 L219.5,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="224.5" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">__junction_8 (?)</text>
+<path d="M239.5,50.0 L239.5,718.3997706552594" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="239.5" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M571.55,50.0 L571.55,718.3997706552594" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="571.55" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 1|2</text>
+<path d="M51.5,207.5 L1041.1,207.5" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<path d="M51.5,446.7 L1041.1,446.7" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="47.5" y="207.5" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0|1</text>
+<text x="47.5" y="446.7" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 1|2</text>
+<path d="M61.5,120.0 L224.5,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="57.5" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M254.5,120.0 L553.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="250.5" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M590.1,178.4 L1031.1,178.4" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="586.1" y="178.4" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M590.1,236.8 L1031.1,236.8" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M590.1,412.0 L1031.1,412.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M410.0,303.4 L553.0,303.4" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="406.0" y="303.4" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 1 grid</text>
+<path d="M254.5,590.0 L940.1,590.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="250.5" y="590.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 2 grid</text>
+<path d="M254.5,648.4 L940.1,648.4" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<circle cx="789.1" cy="589.9997706552595" r="5" fill="none" stroke="rgba(180, 80, 255, 0.7)" stroke-width="1.5" stroke-dasharray="3,2" />
+<text x="789.1" y="581.9997706552595" font-size="7" fill="rgba(180, 80, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">__converge_report_te_1</text>
+<rect x="71.5" y="728.3997706552594" width="260.20000000000005" height="72.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg" />
+<path d="M83.5,752.3997706552594 L107.5,752.3997706552594" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" />
+<text x="119.5" y="752.3997706552594" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">Ribo-seq</text>
+<path d="M83.5,776.3997706552594 L107.5,776.3997706552594" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" />
+<text x="119.5" y="776.3997706552594" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">Matched RNA-seq (optional)</text>
+<text x="1051.0" y="816.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v1.1.0+dev</text>
+</svg></div></div>
+<div class="side side-pr"><h4>PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="1081" height="824" viewBox="0 0 1081 824">
+<defs>
+</defs>
+<style>.nf-metro-bg { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="1081" height="824" fill="#2b2b2b" class="nf-metro-bg" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title">riboseq (te + psite_id excerpt)</text>
+<rect x="71.5" y="70.0" width="143.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="alignment" data-section-lines="riboseq,rnaseq" />
+<circle cx="82.5" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="alignment" />
+<text x="82.5" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="alignment">1</text>
+<text x="98.5" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="alignment">Alignment</text>
+<rect x="264.5" y="70.0" width="278.5" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="orf_calling" data-section-lines="riboseq" />
+<circle cx="275.5" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="orf_calling" />
+<text x="275.5" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="orf_calling">2</text>
+<text x="291.5" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="orf_calling">Extended ORF discovery &amp; calling</text>
+<rect x="600.1" y="70.0" width="421.0" height="392.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="psite_id" data-section-lines="riboseq" />
+<circle cx="611.1" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="psite_id" />
+<text x="611.1" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="psite_id">5</text>
+<text x="627.1" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="psite_id">P-site identification</text>
+<rect x="420.0" y="245.0" width="123.0" height="108.39999999999998" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="quantification" data-section-lines="riboseq,rnaseq" />
+<circle cx="508.0" cy="230.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="quantification" />
+<text x="508.0" y="230.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="quantification">3</text>
+<text x="524.0" y="230.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="quantification">Quantification</text>
+<rect x="264.5" y="540.0" width="665.6" height="158.39977065525943" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="te" data-section-lines="riboseq,rnaseq" />
+<circle cx="275.5" cy="525.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="te" />
+<text x="275.5" y="525.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="te">4</text>
+<text x="291.5" y="525.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="te">Translational efficiency</text>
+<path d="M510.3,652.3997706552595 L564.5210566819758,652.3997706552595 Q574.5210566819758,652.3997706552595,579.0904064959461,643.5047696840641 L599.9517068680054,602.8947716264549 Q604.5210566819758,593.9997706552595,614.5210566819758,593.9997706552595 L656.3,593.9997706552595" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M510.3,652.3997706552595 L656.3,652.3997706552595" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M656.3,593.9997706552595 L789.1,593.9997706552595" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M656.3,652.3997706552595 L739.1,652.3997706552595 Q749.1,652.3997706552595,753.6693498139704,643.5047696840641 L774.5306501860297,602.8947716264549 Q779.1,593.9997706552595,789.1,593.9997706552595 L789.1,593.9997706552595" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M789.1,593.9997706552595 L872.1,593.9997706552595" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M143.0,124.0 L214.5,124.0" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M423.5,249.0 L479.0,249.0 Q489.0,249.0,489.0,259.0 L489.0,303.40000000000003" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M489.0,303.40000000000003 L489.0,313.4 Q489.0,323.4,499.0,323.4 L543.0,323.4" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M264.5,652.3997706552595 L510.3,652.3997706552595" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M214.5,124.0 L222.5,124.0" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M222.5,124.0 L227.5,124.0 Q237.5,124.0,237.5,134.0 L237.5,235.0 Q237.5,249.0,251.5,249.0 L423.5,249.0" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M543.0,323.4 L549.0,323.4 Q559.0,323.4,559.0,333.4 L559.0,423.7 Q559.0,433.7,549.0,433.7 L254.5,433.7 Q248.5,433.7,248.5,439.7 L248.5,646.3997706552595 Q248.5,652.3997706552595,254.5,652.3997706552595 L264.5,652.3997706552595" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-rnaseq" data-line-id="rnaseq" />
+<path d="M314.5,120.0 L397.5,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M397.5,120.0 L480.5,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M797.1,178.39999999999998 L797.1,236.79999999999998" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M880.1,178.39999999999998 L880.1,236.79999999999998" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M880.1,236.79999999999998 L880.1,412.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M364.3,589.9997706552595 L408.20000000000005,589.9997706552595 Q418.20000000000005,589.9997706552595,422.76934981397034,598.8947716264549 L443.63065018602975,639.5047696840641 Q448.20000000000005,648.3997706552595,458.20000000000005,648.3997706552595 L510.3,648.3997706552595" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M510.3,648.3997706552595 L562.0789433180241,648.3997706552595 Q572.0789433180241,648.3997706552595,576.6482931319945,639.5047696840641 L597.5095935040538,598.8947716264549 Q602.0789433180241,589.9997706552595,612.0789433180241,589.9997706552595 L656.3,589.9997706552595" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M510.3,648.3997706552595 L656.3,648.3997706552595" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M656.3,589.9997706552595 L789.1,589.9997706552595" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M656.3,648.3997706552595 L736.6578866360484,648.3997706552595 Q746.6578866360484,648.3997706552595,751.2272364500187,639.5047696840641 L772.088536822078,598.8947716264549 Q776.6578866360484,589.9997706552595,786.6578866360484,589.9997706552595 L789.1,589.9997706552595" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M789.1,589.9997706552595 L872.1,589.9997706552595" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M480.5,120.0 L543.0,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M600.1,120.0 L870.1,120.0 Q880.1,120.0,880.1,130.0 L880.1,412.0" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M143.0,120.0 L214.5,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M264.5,120.0 L314.5,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M600.1,120.0 L787.1,120.0 Q797.1,120.0,797.1,130.0 L797.1,178.39999999999998" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M600.1,120.0 L870.1,120.0 Q880.1,120.0,880.1,130.0 L880.1,178.39999999999998" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M423.5,245.0 L479.0,245.0 Q493.0,245.0,493.0,259.0 L493.0,303.40000000000003" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M880.1,236.79999999999998 L880.1,462.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M264.5,648.3997706552595 L270.4,648.3997706552595 Q280.4,648.3997706552595,284.96934981397027,639.5047696840641 L305.8306501860297,598.8947716264549 Q310.4,589.9997706552595,320.4,589.9997706552595 L364.3,589.9997706552595" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M543.0,120.0 L600.1,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M214.5,120.0 L224.5,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M224.5,120.0 L264.5,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M224.5,120.0 L227.5,120.0 Q241.5,120.0,241.5,134.0 L241.5,179.0 Q241.5,189.0,251.5,189.0 L561.55,189.0 Q571.55,189.0,571.55,179.0 L571.55,130.0 Q571.55,120.0,581.55,120.0 L600.1,120.0" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M222.5,120.0 L227.5,120.0 Q241.5,120.0,241.5,134.0 L241.5,235.0 Q241.5,245.0,251.5,245.0 L423.5,245.0" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<path d="M880.1,462.0 L880.1,478.0 Q880.1,488.0,870.1,488.0 L262.5,488.0 Q252.5,488.0,252.5,498.0 L252.5,638.3997706552595 Q252.5,648.3997706552595,262.5,648.3997706552595 L264.5,648.3997706552595" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-riboseq" data-line-id="riboseq" />
+<rect x="138.0" y="115.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="umi_dedup" data-station-lines="riboseq,rnaseq" data-station-label="UMI-tools Dedup" data-section-id="alignment" data-section-name="Alignment" />
+<rect x="309.5" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="ribotish" data-station-lines="riboseq" data-station-label="Ribo-TISH" data-section-id="orf_calling" data-section-name="Extended ORF discovery &amp; calling" />
+<rect x="392.5" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="orf_merge" data-station-lines="riboseq" data-station-label="Merge ORF catalogue" data-section-id="orf_calling" data-section-name="Extended ORF discovery &amp; calling" />
+<rect x="475.5" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="orf_catalogue" data-station-lines="riboseq" data-station-label="orf_catalogue" data-section-id="orf_calling" data-section-name="Extended ORF discovery &amp; calling" />
+<rect x="792.1" y="173.39999999999998" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="ribowaltz" data-station-lines="riboseq" data-station-label="riboWaltz" data-section-id="psite_id" data-section-name="P-site identification" />
+<rect x="875.1" y="173.39999999999998" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="plastid_psite" data-station-lines="riboseq" data-station-label="plastid P-site" data-section-id="psite_id" data-section-name="P-site identification" />
+<rect x="875.1" y="231.79999999999998" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="plastid_wiggle" data-station-lines="riboseq" data-station-label="plastid Wiggle" data-section-id="psite_id" data-section-name="P-site identification" />
+<rect x="875.1" y="407.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="quantify_orf_psite" data-station-lines="riboseq" data-station-label="Quantify ORF P-sites" data-section-id="psite_id" data-section-name="P-site identification" />
+<rect x="792.1" y="231.79999999999998" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="report_ribowaltz" data-station-lines="riboseq" data-station-label="report_ribowaltz" data-section-id="psite_id" data-section-name="P-site identification" />
+<g data-station-id="report_ribowaltz">
+<path d="M785.1,247.79999999999995 L803.1,247.79999999999995 L811.1,255.79999999999995 L811.1,277.79999999999995 Q811.1,279.79999999999995,809.1,279.79999999999995 L785.1,279.79999999999995 Q783.1,279.79999999999995,783.1,277.79999999999995 L783.1,249.79999999999995 Q783.1,247.79999999999995,785.1,247.79999999999995 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M803.1,247.79999999999995 L803.1,255.79999999999995 L811.1,255.79999999999995 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M803.1,247.79999999999995 L803.1,255.79999999999995 L811.1,255.79999999999995" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<text x="797.1" y="264.99999999999994" font-size="7.5" fill="#000000" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em">HTML</text>
+<text x="797.1" y="283.79999999999995" font-size="7.8" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging">riboWaltz</text>
+</g>
+<rect x="484.0" y="298.40000000000003" width="14.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="salmon_quant" data-station-lines="riboseq,rnaseq" data-station-label="Salmon" data-section-id="quantification" data-section-name="Quantification" />
+<rect x="359.3" y="584.9997706552595" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="psite_counts" data-station-lines="riboseq" data-station-label="Plastid P-site counts" data-section-id="te" data-section-name="Translational efficiency" />
+<rect x="505.3" y="643.3997706552595" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="te_counts_prep" data-station-lines="riboseq,rnaseq" data-station-label="Prep TE counts" data-section-id="te" data-section-name="Translational efficiency" />
+<rect x="651.3" y="584.9997706552595" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="anota2seq" data-station-lines="riboseq,rnaseq" data-station-label="anota2seq" data-section-id="te" data-section-name="Translational efficiency" />
+<rect x="651.3" y="643.3997706552595" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="deltate" data-station-lines="riboseq,rnaseq" data-station-label="DESeq2 deltaTE" data-section-id="te" data-section-name="Translational efficiency" />
+<rect x="867.1" y="584.9997706552595" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="report_te" data-station-lines="riboseq,rnaseq" data-station-label="report_te" data-section-id="te" data-section-name="Translational efficiency" />
+<g data-station-id="report_te">
+<path d="M885.1,575.9997706552595 L903.1,575.9997706552595 L911.1,583.9997706552595 L911.1,605.9997706552595 Q911.1,607.9997706552595,909.1,607.9997706552595 L885.1,607.9997706552595 Q883.1,607.9997706552595,883.1,605.9997706552595 L883.1,577.9997706552595 Q883.1,575.9997706552595,885.1,575.9997706552595 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M903.1,575.9997706552595 L903.1,583.9997706552595 L911.1,583.9997706552595 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M903.1,575.9997706552595 L903.1,583.9997706552595 L911.1,583.9997706552595" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<text x="897.1" y="593.1997706552595" font-size="7.5" fill="#000000" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em">HTML</text>
+<text x="897.1" y="611.9997706552595" font-size="7.8" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging">TE report</text>
+</g>
+<text x="786.1" y="178.39999999999998" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="end" dominant-baseline="central">riboWaltz</text>
+<text x="786.1" y="178.39999999999998" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="end" dominant-baseline="central" data-station-id="ribowaltz" class="nf-metro-station-label">riboWaltz</text>
+<text x="314.5" y="131.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Ribo-TISH</text>
+<text x="314.5" y="131.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="ribotish" class="nf-metro-station-label">Ribo-TISH</text>
+<text x="364.3" y="575.9997706552595" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">Plastid P-site counts</text>
+<text x="364.3" y="575.9997706552595" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="psite_counts" class="nf-metro-station-label">Plastid P-site counts</text>
+<text x="891.1" y="178.39999999999998" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="start" dominant-baseline="central">plastid P-site</text>
+<text x="891.1" y="178.39999999999998" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="start" dominant-baseline="central" data-station-id="plastid_psite" class="nf-metro-station-label">plastid P-site</text>
+<text x="143.0" y="135.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">UMI-tools Dedup</text>
+<text x="143.0" y="135.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="umi_dedup" class="nf-metro-station-label">UMI-tools Dedup</text>
+<text x="478.0" y="303.40000000000003" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="end" dominant-baseline="central">Salmon</text>
+<text x="478.0" y="303.40000000000003" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="end" dominant-baseline="central" data-station-id="salmon_quant" class="nf-metro-station-label">Salmon</text>
+<text x="397.5" y="106.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">Merge ORF catalogue</text>
+<text x="397.5" y="106.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="orf_merge" class="nf-metro-station-label">Merge ORF catalogue</text>
+<text x="891.1" y="236.79999999999998" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="start" dominant-baseline="central">plastid Wiggle</text>
+<text x="891.1" y="236.79999999999998" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="start" dominant-baseline="central" data-station-id="plastid_wiggle" class="nf-metro-station-label">plastid Wiggle</text>
+<text x="510.3" y="663.3997706552595" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Prep TE counts</text>
+<text x="510.3" y="663.3997706552595" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="te_counts_prep" class="nf-metro-station-label">Prep TE counts</text>
+<text x="480.5" y="131.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">orf_catalogue</text>
+<text x="480.5" y="131.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="orf_catalogue" class="nf-metro-station-label">orf_catalogue</text>
+<text x="656.3" y="575.9997706552595" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">anota2seq</text>
+<text x="656.3" y="575.9997706552595" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="anota2seq" class="nf-metro-station-label">anota2seq</text>
+<text x="869.1" y="412.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="end" dominant-baseline="central">Quantify ORF P-sites</text>
+<text x="869.1" y="412.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="end" dominant-baseline="central" data-station-id="quantify_orf_psite" class="nf-metro-station-label">Quantify ORF P-sites</text>
+<text x="656.3" y="634.3997706552595" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">DESeq2 deltaTE</text>
+<text x="656.3" y="634.3997706552595" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="deltate" class="nf-metro-station-label">DESeq2 deltaTE</text>
+<circle cx="418.20000000000005" cy="589.9997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="448.20000000000005" cy="648.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="572.0789433180241" cy="648.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="602.0789433180241" cy="589.9997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="574.5210566819758" cy="652.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="604.5210566819758" cy="593.9997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="746.6578866360484" cy="648.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="776.6578866360484" cy="589.9997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="749.1" cy="652.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="779.1" cy="593.9997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="880.1" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="797.1" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="880.1" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="493.0" cy="245.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="489.0" cy="249.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="280.4" cy="648.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="310.4" cy="589.9997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="489.0" cy="323.4" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="241.5" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="241.5" cy="189.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="571.55" cy="189.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="571.55" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="241.5" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="241.5" cy="245.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="237.5" cy="124.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="237.5" cy="249.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="880.1" cy="488.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="252.5" cy="488.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="252.5" cy="648.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="559.0" cy="323.4" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="559.0" cy="433.7" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="248.5" cy="433.7" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="248.5" cy="652.3997706552595" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M543.0,115.0 L548.0,120.0 L543.0,125.0 L538.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="543.0" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">orf_calling__exit_right_0 (right)</text>
+<path d="M214.5,115.0 L219.5,120.0 L214.5,125.0 L209.5,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="214.5" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">alignment__exit_right_1 (right)</text>
+<path d="M880.1,457.0 L885.1,462.0 L880.1,467.0 L875.1,462.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="880.1" y="454.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">psite_id__exit_bottom_2 (bottom)</text>
+<path d="M543.0,314.4 L548.0,319.4 L543.0,324.4 L538.0,319.4 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="543.0" y="311.4" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">quantification__exit_right_3 (right)</text>
+<path d="M600.1,115.0 L605.1,120.0 L600.1,125.0 L595.1,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="600.1" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">psite_id__entry_left_4 (left)</text>
+<path d="M264.5,115.0 L269.5,120.0 L264.5,125.0 L259.5,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="264.5" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">orf_calling__entry_left_5 (left)</text>
+<path d="M423.5,240.0 L428.5,245.0 L423.5,250.0 L418.5,245.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="423.5" y="237.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">quantification__entry_left_6 (left)</text>
+<path d="M264.5,643.3997706552595 L269.5,648.3997706552595 L264.5,653.3997706552595 L259.5,648.3997706552595 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="264.5" y="640.3997706552595" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">te__entry_left_7 (left)</text>
+<path d="M224.5,115.0 L229.5,120.0 L224.5,125.0 L219.5,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="224.5" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">__junction_8 (?)</text>
+<path d="M239.5,50.0 L239.5,718.3997706552594" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="239.5" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M571.55,50.0 L571.55,718.3997706552594" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="571.55" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 1|2</text>
+<path d="M51.5,207.5 L1041.1,207.5" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<path d="M51.5,446.7 L1041.1,446.7" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="47.5" y="207.5" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0|1</text>
+<text x="47.5" y="446.7" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 1|2</text>
+<path d="M61.5,120.0 L224.5,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="57.5" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M254.5,120.0 L553.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="250.5" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M590.1,178.4 L1031.1,178.4" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="586.1" y="178.4" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M590.1,236.8 L1031.1,236.8" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M590.1,412.0 L1031.1,412.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M410.0,303.4 L553.0,303.4" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="406.0" y="303.4" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 1 grid</text>
+<path d="M254.5,590.0 L940.1,590.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="250.5" y="590.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 2 grid</text>
+<path d="M254.5,648.4 L940.1,648.4" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<circle cx="789.1" cy="589.9997706552595" r="5" fill="none" stroke="rgba(180, 80, 255, 0.7)" stroke-width="1.5" stroke-dasharray="3,2" />
+<text x="789.1" y="581.9997706552595" font-size="7" fill="rgba(180, 80, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">__converge_report_te_1</text>
+<rect x="71.5" y="728.3997706552594" width="260.20000000000005" height="72.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg" />
+<path d="M83.5,752.3997706552594 L107.5,752.3997706552594" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" />
+<text x="119.5" y="752.3997706552594" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">Ribo-seq</text>
+<path d="M83.5,776.3997706552594 L107.5,776.3997706552594" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" />
+<text x="119.5" y="776.3997706552594" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">Matched RNA-seq (optional)</text>
+<text x="1051.0" y="816.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v1.1.0+dev</text>
+</svg></div></div>
+</div>
 </div>
 <script>
 (function() {
